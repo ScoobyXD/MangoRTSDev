@@ -10,17 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgconn"
 )
-
-type nodeAttachedEmailPayload struct {
-	BlockID           string `json:"block_id"`
-	EmailMessageID    string `json:"email_message_id"`
-	TextboxColor      string `json:"textbox_color"`
-	AttachedTimestamp string `json:"attached_timestamp"`
-	LinkScope         string `json:"link_scope"`
-}
 
 func nodeTextboxFromProjectionInformation(information string) (json.RawMessage, string, string, error) {
 	value := strings.TrimPrefix(strings.TrimSpace(information), editorTextBlockProjectionPrefix)
@@ -34,7 +24,7 @@ func nodeTextboxFromProjectionInformation(information string) (json.RawMessage, 
 	}
 	payload.Title = strings.TrimSpace(payload.Title)
 	payload.Color = strings.ToUpper(strings.TrimSpace(payload.Color))
-	if len(payload.Title) > 500 || (payload.Color != "" && !validNodeTextboxColor(payload.Color)) {
+	if len(payload.Title) > 500 || (payload.Color != "" && !validEmailTextboxColor(payload.Color)) {
 		return nil, "", "", ErrInvalid
 	}
 	document := payload.Document
@@ -217,7 +207,7 @@ order by relationship.created_timestamp,relationship.email_relationship_id`, com
 }
 
 func addPostgresNodeEmailRelationshipTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, relationshipID string) (domain.NodeProjection, error) {
-	var payload nodeAttachedEmailPayload
+	var payload emailTextboxRelationshipPayload
 	if json.Unmarshal([]byte(input.Information), &payload) != nil {
 		return domain.NodeProjection{}, ErrInvalid
 	}
@@ -237,7 +227,7 @@ func addPostgresNodeEmailRelationshipTx(ctx context.Context, tx *sql.Tx, input N
 	if (rawBlockID != "" && payload.BlockID == "") || actorUserID == "" ||
 		(payload.LinkScope != "message" && payload.LinkScope != "thread") ||
 		(payload.LinkScope == "thread" && payload.BlockID != "") ||
-		(payload.TextboxColor != "" && (payload.BlockID == "" || !validNodeTextboxColor(payload.TextboxColor))) {
+		(payload.TextboxColor != "" && (payload.BlockID == "" || !validEmailTextboxColor(payload.TextboxColor))) {
 		return domain.NodeProjection{}, ErrInvalid
 	}
 	if existing, found, err := postgresNodeFinalProjectionTx(ctx, tx, input.CompanyID, input.NodeID, relationshipID); err != nil {
@@ -276,21 +266,21 @@ for update`, input.CompanyID, input.NodeID, payload.BlockID).Scan(&existingTextb
 			return domain.NodeProjection{}, err
 		}
 		if err := tx.QueryRowContext(ctx, `select coalesce((
-  select message.email_thread_id::text
-  from email_messages message
-  where message.company_id=$1::uuid and message.email_message_id=$3::uuid
-    and exists (
-      select 1 from email_relationships relationship
-      where relationship.company_id=message.company_id
-        and relationship.email_thread_id=message.email_thread_id
-        and relationship.resource_type='node'
-        and relationship.resource_id=$2::uuid
-        and relationship.resource_textbox_id is null
-    )
-), '')`, input.CompanyID, input.NodeID, payload.EmailMessageID).Scan(&emailThreadID); err != nil {
+  select message.email_thread_id::text from email_messages message
+  where message.company_id=$1::uuid and message.email_message_id=$2::uuid
+), '')`, input.CompanyID, payload.EmailMessageID).Scan(&emailThreadID); err != nil {
 			return domain.NodeProjection{}, err
 		}
 		if emailThreadID == "" {
+			return domain.NodeProjection{}, ErrEmailMessageNotAttachedToNode
+		}
+		wideLocked, err := lockPostgresWideEmailOwnerThreadRelationshipTx(
+			ctx, tx, input.CompanyID, EntityTypeNode, input.NodeID, emailThreadID,
+		)
+		if err != nil {
+			return domain.NodeProjection{}, err
+		}
+		if !wideLocked {
 			return domain.NodeProjection{}, ErrEmailMessageNotAttachedToNode
 		}
 	} else {
@@ -402,12 +392,7 @@ where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and delet
 }
 
 func nodeEmailRelationshipMutationError(err error) error {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23503" &&
-		strings.TrimSpace(pgErr.Message) == "email relationship is required by an active Node chat" {
-		return ErrEmailRelationshipRequiredByChat
-	}
-	return err
+	return postgresEmailRelationshipMutationError(err, EntityTypeNode)
 }
 
 func postgresNodeMessageTextboxEmailProjectionTx(

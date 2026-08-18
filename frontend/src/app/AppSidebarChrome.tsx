@@ -65,7 +65,8 @@ import {
 } from "../modules/kanban/shared";
 import { subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor/UnifiedNodeShell";
-import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, INBOX_PRIORITIES, type HomeTriageConversionAppliedDetail } from "../pages/home/homeConstants";
+import { INBOX_PRIORITIES } from "../pages/home/homeConstants";
+import { dispatchTriageConversionApplied } from "../modules/triage/triageEvents";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
 import { HomeBuiltInViewSidebarRow, HomeSavedViewsSidebarSection, restoreSelectedHomeSavedView } from "../pages/home/HomeSavedViewsSidebar";
 import {
@@ -113,10 +114,6 @@ const SIDEBAR_SECTION_OPEN_KEY_PREFIX = "mangorts.app-sidebar-section-open.v2";
 const NODE_EDITOR_POPUP_MIN_WIDTH = 420;
 const NODE_EDITOR_POPUP_MIN_HEIGHT = 320;
 
-function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
-}
 const NODE_EDITOR_POPUP_VIEWPORT_WIDTH_INSET = 44;
 const NODE_EDITOR_POPUP_VIEWPORT_HEIGHT_INSET = NODE_EDITOR_STANDARD_VERTICAL_INSET_PX;
 
@@ -535,7 +532,7 @@ export function AppSidebar({
         setSharedError("This Explorer location cannot receive email.");
         return;
       }
-      dispatchHomeTriageConversionApplied({
+      dispatchTriageConversionApplied({
         companyID: cleanCompanyID,
         messageIDs: menu.messageIDs,
         sharedInboxID: menu.sharedInboxID,
@@ -551,7 +548,7 @@ export function AppSidebar({
         priority,
       });
       const convertedMessageIDs = conversion?.convertedMessageIDs.length ? conversion.convertedMessageIDs : menu.messageIDs;
-      dispatchHomeTriageConversionApplied({
+      dispatchTriageConversionApplied({
         companyID: cleanCompanyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID: menu.sharedInboxID,
@@ -617,7 +614,7 @@ export function AppSidebar({
       const target: CommunicationsTriageConversionTarget = menu.action.kind === "triage_to_logic_gate"
         ? { mode: "existing_logic_gate", logicGateID: menu.action.logicGateID }
         : { mode: "existing_node", nodeID: menu.action.nodeID };
-      dispatchHomeTriageConversionApplied({
+      dispatchTriageConversionApplied({
         companyID: cleanCompanyID,
         messageIDs: menu.action.messageIDs,
         sharedInboxID: menu.action.sharedInboxID,
@@ -633,7 +630,7 @@ export function AppSidebar({
         priority,
       });
       const convertedMessageIDs = conversion?.convertedMessageIDs.length ? conversion.convertedMessageIDs : menu.action.messageIDs;
-      dispatchHomeTriageConversionApplied({
+      dispatchTriageConversionApplied({
         companyID: cleanCompanyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID: menu.action.sharedInboxID,

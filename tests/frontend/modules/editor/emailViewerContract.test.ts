@@ -347,7 +347,7 @@ test("node email and linked text boxes use exact canonical message lists and tex
   assert.match(triageChat, /listEmailThreadChatGroups\(/);
   assert.doesNotMatch(triageChat, /listEditorTextBlockProjections|parseEditorAttachedEmails/);
   assert.doesNotMatch(triageChat, /existingMessageAccent|existingEmailAccents|emailAccent:/);
-  assert.match(triageChat, /color: nextNodeTextBlockColor\(\[\]\)/);
+  assert.match(triageChat, /color: nextEmailTextBoxColor\(\[\]\)/);
 });
 
 test("the Node header linker and email drop path commit exact stored identity before showing its preview", () => {
@@ -393,11 +393,11 @@ test("the Node-level highlighted-email destination is compact and hidden when al
 test("exact Node email headers link to text boxes without accepting whole-email provider drags", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
-  const relationships = source("frontend/src/modules/editor/nodeEmailTextBoxRelationships.ts");
+  const relationships = source("frontend/src/modules/editor/email/emailTextBoxRelationships.ts");
 
   assert.match(nodeSurface, /const linkEmailMessageToTextBlock = useCallback/);
   assert.match(nodeSurface, /if \(targetBlock\?\.pending\) await textBlockProjectionSaveController\.saveLatestContent\(cleanBlockID\)/);
-  assert.match(nodeSurface, /const textBoxColor = targetBlock\?\.color\?\.trim\(\)\.toUpperCase\(\)[\s\S]{0,180}nextNodeTextBlockColor/);
+  assert.match(nodeSurface, /const textBoxColor = targetBlock\?\.color\?\.trim\(\)\.toUpperCase\(\)[\s\S]{0,180}nextEmailTextBoxColor/);
   assert.match(nodeSurface, /type: EDITOR_ATTACHED_EMAIL_TYPE,[\s\S]{0,180}email_message_id: cleanMessageID,[\s\S]{0,100}textbox_color: textBoxColor,[\s\S]{0,100}link_scope: "message"/);
   const linkFunction = nodeSurface.slice(
     nodeSurface.indexOf("const linkEmailMessageToTextBlock = useCallback"),
@@ -415,7 +415,7 @@ test("exact Node email headers link to text boxes without accepting whole-email 
   assert.match(nodeSurface, /parseEmailMessageTextBoxLinkDrag\(event\.dataTransfer\)/);
   assert.doesNotMatch(nodeSurface, /buildEditorAttachedEmailPayload\(\{ \.\.\.dragged, blockID, linkWholeThread: false \}\)/);
 
-  assert.match(nodeParts, /const messageHeaderDraggable = Boolean\(editable && nodeID\.trim\(\) && internalThreadMessageID && !singleMessageOnly\)/);
+  assert.match(nodeParts, /const messageHeaderDraggable = Boolean\(editable && \(nodeID\.trim\(\) \|\| projectID\.trim\(\)\) && internalThreadMessageID && !singleMessageOnly\)/);
   assert.match(nodeParts, /onPointerDownCapture=\{prepareEmailMessageTextBoxLinkDrag\}/);
   assert.match(nodeParts, /data-email-message-drag-strip="true"[\s\S]{0,180}draggable=\{messageHeaderDraggable\}/);
   assert.match(nodeParts, /data-email-message-drag-region="true"/, "full message headers need a visible noninteractive drag region");
@@ -441,6 +441,8 @@ test("exact Node email headers link to text boxes without accepting whole-email 
     nodeParts.indexOf("{childMessages.map((message, index) =>"),
     nodeParts.indexOf("type LinkedEmailPreviewPaneProps"),
   );
+  assert.match(compactChildMessages, /draggable=\{Boolean\(editable && \(nodeID\.trim\(\) \|\| projectID\.trim\(\)\) && internalMessageID\)\}/);
+  assert.match(compactChildMessages, /cursor: editable && \(nodeID\.trim\(\) \|\| projectID\.trim\(\)\) && internalMessageID \? "grab" : undefined/);
   assert.match(compactChildMessages, /const selectMessage = \(\) => onSelect\(\)/);
   assert.doesNotMatch(compactChildMessages, /if \(internalMessageID\) onMessageActivate\?\.\(internalMessageID\)/, "opening a compact child message must not navigate implicitly");
   assert.match(compactChildMessages, /aria-label="Open linked text box for this email"[\s\S]{0,260}onMessageActivate\?\.\(internalMessageID\)/);
@@ -670,7 +672,10 @@ test("node list context menus permanently delete files and only unlink attached 
 
   assert.match(nodeParts, /aria-label="Attached email actions"/);
   assert.match(nodeParts, /aria-label="Attachment actions"/);
-  assert.ok((nodeParts.match(/Remove from node/g) ?? []).length >= 2);
+  assert.match(nodeParts, /const attachedEmailOwnerLabel = projectID\.trim\(\) \? "Project" : "node"/);
+  assert.match(nodeParts, /title=\{`Remove email from \$\{attachedEmailOwnerLabel\}`\}/);
+  assert.match(nodeParts, /Remove from \{attachedEmailOwnerLabel\}/);
+  assert.ok((nodeParts.match(/Remove from node/g) ?? []).length >= 1);
   assert.match(nodeParts, /Delete permanently/);
   assert.match(nodeSurface, /deleteMangoAttachmentPermanently/);
   assert.match(attachmentAPI, /method: "DELETE"/);

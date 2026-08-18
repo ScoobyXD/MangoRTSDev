@@ -47,15 +47,15 @@ func (r *MemoryRepo) ListCommunicationsEmailThreadChatGroups(input Communication
 		chatsByTextboxID := map[string][]domain.NodeProjection{}
 		linkedMessageIDsByTextboxID := map[string][]string{}
 		for _, projection := range projections {
-			if isNodeTextboxChatType(projection.Type) {
-				var payload nodeTextboxChatPayload
+			if isTextboxChatType(projection.Type) {
+				var payload textboxChatPayload
 				if json.Unmarshal([]byte(projection.Information), &payload) == nil && payload.BlockID != "" {
 					chatsByTextboxID[payload.BlockID] = append(chatsByTextboxID[payload.BlockID], projection)
 				}
 				continue
 			}
 			if strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
-				var payload nodeAttachedEmailPayload
+				var payload emailTextboxRelationshipPayload
 				if json.Unmarshal([]byte(projection.Information), &payload) != nil {
 					continue
 				}

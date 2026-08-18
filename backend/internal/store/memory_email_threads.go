@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
@@ -197,6 +196,29 @@ func (r *MemoryRepo) upsertCommunicationsEmailThreadLocked(input CommunicationsE
 	for index := range thread.Messages {
 		thread.Messages[index].MessageOrder = index
 		thread.Messages[index].Message.EmailMessageID = thread.Messages[index].EmailMessageID
+	}
+	projectDestinations := map[string]bool{}
+	for _, relationship := range r.projectEmailRelationships {
+		if relationship.CompanyID == input.CompanyID &&
+			relationship.EmailThreadID == threadID && relationship.ResourceTextboxID == "" {
+			projectDestinations[relationship.ProjectID] = true
+		}
+	}
+	for projectID := range projectDestinations {
+		for _, message := range thread.Messages {
+			if !message.Message.DownloadComplete {
+				continue
+			}
+			if _, exists := r.memoryProjectEmailRelationshipLocked(input.CompanyID, projectID, message.EmailMessageID, ""); exists {
+				continue
+			}
+			relationshipID := newUUIDv7String()
+			r.projectEmailRelationships[memoryProjectEmailRelationshipKey(input.CompanyID, relationshipID)] = memoryProjectEmailRelationship{
+				CompanyID: input.CompanyID, RelationshipID: relationshipID,
+				EmailThreadID: threadID, EmailMessageID: message.EmailMessageID,
+				ProjectID: projectID, CreatedTimestamp: now,
+			}
+		}
 	}
 	thread.HistoryComplete = thread.HistoryComplete || input.HistoryComplete
 	if input.HistoryComplete {
@@ -430,21 +452,29 @@ func (r *MemoryRepo) GetCommunicationsProjectEmailThread(companyID, projectID, e
 	if !ok {
 		return domain.CommunicationsProjectEmailThread{}, ErrNotFound
 	}
-	for _, projection := range r.projectText[key(companyID, projectID)] {
-		if projection.Type != "Attached email" {
+	relationships := make([]memoryProjectEmailRelationship, 0)
+	for _, relationship := range r.projectEmailRelationships {
+		if relationship.CompanyID != companyID || relationship.ProjectID != projectID || relationship.EmailThreadID != emailThreadID ||
+			relationship.ResourceTextboxID != "" {
 			continue
 		}
-		var payload projectAttachedEmailPayload
-		if json.Unmarshal([]byte(projection.Information), &payload) != nil || cleanUUIDText(payload.EmailThreadID) != emailThreadID {
-			continue
-		}
-		return domain.CommunicationsProjectEmailThread{
-			CompanyID: companyID, ProjectID: projectID, InformationID: projection.InformationID,
-			EmailThreadID: emailThreadID, SelectedMessageID: cleanUUIDText(payload.EmailMessageID),
-			CreatedTimestamp: projection.CreatedTimestamp, Thread: cloneCommunicationsEmailThread(thread),
-		}, nil
+		relationships = append(relationships, relationship)
 	}
-	return domain.CommunicationsProjectEmailThread{}, ErrNotFound
+	if len(relationships) == 0 {
+		return domain.CommunicationsProjectEmailThread{}, ErrNotFound
+	}
+	sort.Slice(relationships, func(i, j int) bool {
+		if !relationships[i].CreatedTimestamp.Equal(relationships[j].CreatedTimestamp) {
+			return relationships[i].CreatedTimestamp.Before(relationships[j].CreatedTimestamp)
+		}
+		return relationships[i].RelationshipID < relationships[j].RelationshipID
+	})
+	selected := relationships[0]
+	return domain.CommunicationsProjectEmailThread{
+		CompanyID: companyID, ProjectID: projectID, InformationID: selected.RelationshipID,
+		EmailThreadID: emailThreadID, SelectedMessageID: selected.EmailMessageID,
+		CreatedTimestamp: selected.CreatedTimestamp, Thread: cloneCommunicationsEmailThread(thread),
+	}, nil
 }
 
 func (r *MemoryRepo) GetCommunicationsProjectEmailMessage(companyID, projectID, emailThreadID, emailMessageID string) (domain.CommunicationsProjectEmailThread, error) {

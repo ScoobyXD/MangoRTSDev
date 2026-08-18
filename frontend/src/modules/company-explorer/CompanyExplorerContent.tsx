@@ -52,7 +52,7 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { createRequestJSON } from "../api/requestJSON";
 import { convertTriageMessagesToExplorerTarget, listCompanyUserGroups, listCompanyUsers, type CommunicationsTriageConversionTarget, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../communications/communicationsApi";
-import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants";
+import { dispatchTriageConversionApplied } from "../triage/triageEvents";
 import { createProject, type ProjectRecord } from "../project-management/projectManagementApi";
 import { listMyLogicGates, listRACIMatrixProjectionRows, type WorkItemLogicGateInboxItem } from "../work-items/workItemReadApi";
 import {
@@ -244,10 +244,6 @@ function companyExplorerTriageConversionTarget(target: CompanyExplorerTriageMess
   return logicGateID ? { mode: "existing_logic_gate", logicGateID } : null;
 }
 
-function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
-}
 
 function companyExplorerUserLabel(user: Pick<CompanyUser, "user_id" | "display_name" | "email"> | null | undefined, fallbackUserID: string): string {
   return user?.display_name?.trim() || user?.email?.trim() || fallbackUserID.trim() || "Unknown user";
@@ -3499,7 +3495,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     setInternalTriageDropBusy(true);
     setInternalTriageDropSuccess("");
     setError("");
-    dispatchHomeTriageConversionApplied({
+    dispatchTriageConversionApplied({
       companyID,
       messageIDs: menu.messageIDs,
       sharedInboxID: menu.sharedInboxID,
@@ -3521,7 +3517,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         result.board?.board_id ?? "",
         ...(result.cards ?? []).map((card) => card.board_id),
       ].map((id) => id.trim()).filter(Boolean)));
-      dispatchHomeTriageConversionApplied({
+      dispatchTriageConversionApplied({
         companyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID: menu.sharedInboxID,

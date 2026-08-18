@@ -33,7 +33,9 @@ func TestNodeTextboxEmailProjectionKeepsEveryExactMessageInTimestampOrder(t *tes
 }
 
 func TestNodeLinkedTextboxColorIsAssignedAndPreservedByCanonicalWrites(t *testing.T) {
-	relationshipSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_final_storage.go")), " ")
+	relationshipSource := strings.Join(strings.Fields(
+		readNodeFinalContractFile(t, "email_textbox_relationships.go")+readNodeFinalContractFile(t, "postgres_node_final_storage.go"),
+	), " ")
 	for _, required := range []string{
 		`textboxcolor string ` + "`json:\"textbox_color\"`",
 		"for update",
@@ -80,16 +82,27 @@ func TestNodeFirstEmailChatColorTimestampCannotPredateTextboxCreation(t *testing
 
 func TestNodeSiblingEmailTextboxLinksUseExistingThreadMembership(t *testing.T) {
 	chatSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_textbox_chats.go")), " ")
-	directSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_final_storage.go")), " ")
-	for label, source := range map[string]string{"first chat": chatSource, "direct link": directSource} {
-		for _, required := range []string{
-			"relationship.email_thread_id=message.email_thread_id",
-			"relationship.resource_type='node'",
-			"relationship.resource_textbox_id is null",
-		} {
-			if !strings.Contains(source, required) {
-				t.Errorf("%s sibling membership check missing %q", label, required)
-			}
+	directSource := strings.Join(strings.Fields(
+		readNodeFinalContractFile(t, "postgres_node_final_storage.go")+
+			readNodeFinalContractFile(t, "postgres_email_relationship_locks.go"),
+	), " ")
+	for _, required := range []string{
+		"relationship.email_thread_id=message.email_thread_id",
+		"relationship.resource_type='node'",
+		"relationship.resource_textbox_id is null",
+	} {
+		if !strings.Contains(chatSource, required) {
+			t.Errorf("first chat sibling membership check missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		"lockpostgreswideemailownerthreadrelationshiptx",
+		"email_thread_id=$4::uuid",
+		"resource_type=$2",
+		"resource_textbox_id is null",
+	} {
+		if !strings.Contains(directSource, required) {
+			t.Errorf("direct link sibling membership check missing %q", required)
 		}
 	}
 	if strings.Contains(chatSource, "linkpostgrescommunicationsemailthreadtonodetx") {

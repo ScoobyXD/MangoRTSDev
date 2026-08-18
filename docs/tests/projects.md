@@ -38,14 +38,14 @@ A user can create a textbox even when its metadata request reaches the backend b
 ↓
 The backend reads, creates, edits, replies to, and deletes textbox chats in `project_textbox_chats`; each chat keeps its stable former projection ID and belongs to one exact Project textbox
 ↓
-Attaching an email creates Project-wide `email_relationships` rows for the stored thread; a highlighted exact message may later receive one relationship to one Project textbox
+Attaching an email creates Project-wide `email_relationships` rows for the stored thread; a highlighted exact internal message may later receive one relationship to one eligible Project timeline textbox
 ↓
-Deleting one chat, email relationship, textbox, or Project removes only that owner's relationships; shared files and normalized email content survive under their other valid owners
+Deleting one chat, email relationship, textbox, or Project removes only that owner's relationships; a wide relationship or exact edge required by Project chat work is rejected, while shared files and normalized email content survive under their other valid owners
 ↓
 Project manual and changed-resource exit history continue in `project_textboxes_history`
 ↓
 No Project request reads or writes `project_information` or `project_projection_table`; those tables remain unchanged only for the separately gated retirement decision
-Last updated: 2026-08-14
+Last updated: 2026-08-18
 
 # Projects Tests
 
@@ -70,7 +70,7 @@ P12 - Empty critical-path resource cells use an Add node action, not a drag/drop
 P13 - Add node opens a Company Explorer node search picker that uses Company Explorer search results and visibility rules.
 P14 - Selecting a node search result creates or reuses the project node relationship and saves that relationship onto the critical-path step.
 P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, italic, text highlight/No highlight, left/center/right alignment, and table semantics must apply to project text boxes.
-P16 - Project text-box document bodies, title, email accent/reference metadata, display order, revisions, and timestamps live in `project_textboxes`. Attachment metadata is rebuilt from active final attachment relationships; Node documents opened inside Projects remain Node-owned.
+P16 - Project textbox document bodies, title, one server-owned nullable email `color`, display order, revisions, and timestamps live in `project_textboxes`. Exact linked-message membership is derived from `email_relationships`, attachment metadata is rebuilt from active final attachment relationships, and Node documents opened inside Projects remain Node-owned.
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
 P18 - The Project email count control expands or collapses the Project-wide email column. Email linking uses the shared Universal picker only; the Project timeline exposes no separate Attach email button or email-plus action and never exposes compose, send, draft-save, or mailbox-mutation behavior.
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
@@ -119,12 +119,12 @@ P68 - Direct existing Logic Gate association requires Edit access to the source 
 P69 - Re-adding the same existing Logic Gate to the same Project is idempotent and retains the stable relationship ID. Direct association returns no implicit Node relationship and never moves, copies, renames, or changes the Logic Gate's other Project relationships.
 P60 - Production PostgreSQL realtime audience resolution treats a Project as a supported exact editor resource. Each Project editor publication resolves only current effective Edit recipients for that Project, so authorized remote text-box changes stream promptly without refresh and revoked, missing, or cross-company targets receive nothing.
 
-P61 - The Project view and projection-list API keep their current public payload shape, but every textbox row is synthesized from `project_textboxes`, every chat row from `project_textbox_chats`, and every attached-email row from exact `email_relationships` joined to `email_messages` and `email_threads`.
-P62 - A Project owns its Project-wide email relationships; a Project textbox owns only its exact-message textbox relationship and chats. Deleting a textbox removes those textbox-owned rows without removing the Project-wide thread or normalized email content.
-P63 - New Project attached-email writes require the exact internal `email_message_id` and current mailbox access. A blank textbox ID with thread scope links every stored message in that thread to the Project; a textbox ID links only the exact message.
-P71 - One exact email message may link to at most one textbox in a Project. A highlighted unlinked message defaults to Create New Textbox; clicking an existing Project textbox highlights its frame, changes the destination to Existing Project · Existing Text Box, and the first send atomically creates the exact textbox relationship and chat.
+P61 - The Project view and projection-list API keep their current public payload shape, but every textbox row is synthesized from `project_textboxes`, every chat row from `project_textbox_chats`, every attached-email row from exact `email_relationships` joined to `email_messages` and `email_threads`, and each ordered `email_message_ids` list from those same canonical relationship rows.
+P62 - A Project owns its Project-wide email relationships; a Project textbox owns only its exact-message textbox relationships and chats. Deleting a textbox removes its chats before its exact edges while preserving the Project-wide thread and normalized email content. Removing a wide relationship is rejected with `email_removal_has_project_work` while that Project/thread has a textbox edge or email-selection chat, and an exact edge is rejected while its exact chat anchor survives.
+P63 - New Project attached-email writes require Mango's exact internal `email_message_id` and current mailbox access. A blank textbox ID with thread scope links every stored message in that thread to the Project. An exact textbox link requires an existing Project-wide relationship for that internal thread and never accepts a provider message or thread ID as relationship authority.
+P71 - One exact email message may link to at most one textbox in each Project, several messages may share one textbox, and the same message may independently link in another Node or Project. A highlighted unlinked message defaults to **Existing Project · New Text Box**; clicking an eligible Project timeline textbox moves the same unsent composer to **Existing Project · Existing Text Box**, and the first send atomically creates or reuses the exact relationship and chat.
 P72 - Every floating Node row and every Node row with a visible current Logic Gate in Logic Gates / Nodes is draggable. Dropping it on another visible Logic Gate in that Project assigns the floating Node or moves the assigned Node through the canonical Logic Gate assignment command; a Node whose current Logic Gate is hidden is not draggable, and no move changes the Node's Project, email, attachment, or other relationships.
-P64 - Project textbox titles and supported email display metadata are copied once into `project_textboxes` before backend deployment. Attachment arrays are not copied into another metadata column; they are rebuilt from active final relationships.
+P64 - Project textbox titles and the approved non-red server-owned email color are copied once into `project_textboxes` before backend deployment. Singular email-message metadata and attachment arrays are not copied into another authority; links and attachments are rebuilt from active final relationships.
 P65 - Project resource and chat deletion use the shared attachment unlink and last-owner cleanup lifecycle. A shared file survives while another active relationship exists.
 P66 - The deployment must refuse readiness when `project_textbox_chats` or the final Project textbox metadata columns are missing. No request performs DDL and no compatibility reader falls back to the legacy Project tables.
 P67 - The first Project textbox metadata save must idempotently create its empty `project_textboxes` row when the document-body request has not created it yet. A later document ensure/save reuses that same stable row and preserves its metadata; this ordering rule never recreates a deleted textbox or writes a legacy Project table.
@@ -132,6 +132,12 @@ P70 - Project exit history is action-triggered, not timer-triggered. After a his
 P73 - Each Project has one permanent rich-text document whose exact `project_textboxes.textbox_id` equals that Project's canonical `project_id`. First opening lazily creates or reuses that row through the existing Project editor metadata and document paths; the row is excluded from the timeline and uses the shared Project editor, formatting toolbar, history, attachment, recycle, and permission lifecycle without another storage or compatibility path.
 P74 - The permanent Project document may appear inline or in the shared fullscreen overlay, but presentation changes never create a second document or editor. Exactly one editor instance owns the current document, selection, formatting controller, save state, and recovery state, and restoring inline returns that same instance to the Project pane.
 P75 - Saved-version restore never deletes or remaps the permanent Project document. A snapshot without the document clears its body in place, a snapshot with the document restores its saved title and body to `textbox_id = project_id`, and a deleted canonical row fails restore instead of creating a replacement timeline textbox. Current attachment relationships remain independent of this document-body restore.
+P76 - The permanent Project document whose `textbox_id` equals `project_id` is never an email/textbox relationship or chat destination. Its header shows the complete **Project document** title and has no red X; the permanent-document control in the Project timeline row is its open/collapse control, while the existing expand/restore action remains available.
+P77 - A Project timeline textbox with one or more exact email relationships stores one approved non-red `color` shared by every linked message card. The first exact link assigns it, later links preserve it, removing one of several links preserves it, and removing the last exact link clears it. The client never hashes an email ID or saves `email_message_ids`, `email_message_id`, or `email_accent` as textbox authority.
+P78 - Deleting a Project timeline textbox sends only that textbox's editor-document DELETE. The backend atomically removes the textbox, its chats, and its exact email relationships; the client never sends parallel child deletes.
+P79 - A Project saved-version block contains only its ID, title, document, attachments, created timestamp, and updated timestamp. Exact email links, server-owned color, staged message state, and temporary chat state are never saved in that version payload.
+P80 - Project email-chat focus belongs to only the most recently activated textbox. Activating a chat message clears every other textbox's active chat message before focusing its exact email selection.
+P81 - A new Project email textbox uses a subject title only when the exact selected internal message is present. If that exact message is absent, its title is **Email text box** and never comes from another attached email.
 
 ## Scenarios
 
@@ -225,6 +231,8 @@ Business logic covered:
 - P73
 - P74
 - P75
+- P76
+- P77
 
 Given:
 - A user edits a project text box.
@@ -245,6 +253,8 @@ Expected:
 - The Universal picker Emails category allows attaching an exact existing personal-mailbox message where permitted.
 - The Emails category does not expose compose, reply, send, scheduled send, draft-save, or mailbox-mutation controls.
 - The permanent Project document stays outside the timeline and keeps the same editor instance when it enters or exits full screen.
+- The permanent Project document header shows its complete title without a red X, and its timeline document control remains the open/collapse action.
+- The permanent Project document is never offered as an email or chat destination.
 - Saved-version restore clears or updates the permanent document title/body at `textbox_id = project_id`, preserves its current final attachment relationships, and never deletes or remaps it.
 - Focusing the permanent Project document routes the shared Project formatting toolbar to that document.
 
@@ -498,6 +508,8 @@ Business logic covered:
 - P65
 - P66
 - P67
+- P71
+- P77
 
 Given:
 - The audited Project chat copy has 16 final chats, the exact six Project email relationships exist, and all 25 active Project textboxes have matching final rows.
@@ -511,6 +523,9 @@ Expected:
 - All Project runtime SQL uses only `project_textboxes`, `project_textbox_chats`, final email tables, and final attachment tables.
 - The metadata-first request creates one empty final textbox row, and the later body request reuses that row without losing its stable ID or title.
 - The chat remains bound to its exact textbox; the email relationship uses the exact internal email message identity.
+- Several messages may share one textbox and its stable server-owned color, while the same message cannot use a second textbox in that Project.
+- Project textbox projections derive ordered message IDs from `email_relationships` and never persist a singular or client-owned membership copy.
+- Wide or exact email relationship removal is rejected while the Project chat work that requires it remains.
 - Textbox deletion removes its chats, textbox-scoped email relationships, and attachment owner links while normalized email content survives.
 - Project deletion keeps a shared file under its remaining owner and marks a file for cleanup only after its final relationship disappears.
 - Startup refuses an incomplete schema instead of issuing request-time DDL or reading a legacy table.

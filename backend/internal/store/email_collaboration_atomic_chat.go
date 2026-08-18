@@ -311,7 +311,7 @@ func addPostgresEmailCollaborationChatParticipantsTx(ctx context.Context, tx *sq
 }
 
 func addEmailCollaborationNodeInformationTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeInformation, error) {
-	if isNodeTextboxChatType(input.Type) {
+	if isTextboxChatType(input.Type) {
 		chatID := cleanUUIDText(input.InformationID)
 		if chatID == "" {
 			chatID = newUUIDv7String()
@@ -341,7 +341,7 @@ func addEmailCollaborationNodeInformationTx(ctx context.Context, tx *sql.Tx, inp
 }
 
 func upsertEmailCollaborationNodeProjectionTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput) (domain.NodeProjection, bool, error) {
-	if isNodeTextboxChatType(input.Type) {
+	if isTextboxChatType(input.Type) {
 		_, previousFound, err := postgresNodeTextboxChatProjectionTx(ctx, tx, input.CompanyID, input.NodeID, input.InformationID)
 		if err != nil {
 			return domain.NodeProjection{}, false, err

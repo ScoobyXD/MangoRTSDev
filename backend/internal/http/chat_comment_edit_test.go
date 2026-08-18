@@ -95,8 +95,18 @@ func TestProjectChatCommentPatchRequiresAuthorAndUpdatesProjection(t *testing.T)
 	}
 	projectID := created.Project.ProjectID
 	informationID := store.NewUUIDv7String()
+	textboxID := store.NewUUIDv7String()
+	if _, err := repo.UpdateEditorJSONMetadata(store.EditorJSONMetadataInput{
+		Document: store.EditorDocumentRef{
+			CompanyID: companyID, ResourceType: store.EntityTypeProject,
+			ResourceID: projectID, DocumentID: textboxID,
+		},
+		Title: "Chat edit textbox",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	original, _ := json.Marshal(map[string]any{
-		"block_id": store.NewUUIDv7String(), "author_id": author.UserID, "author_name": "Author",
+		"block_id": textboxID, "author_id": author.UserID, "author_name": "Author",
 		"message": "Original", "created_timestamp": "2026-07-22T12:00:00Z", "attachments": []any{},
 	})
 	if _, err := repo.AddProjectInformation(store.ProjectInformationInput{

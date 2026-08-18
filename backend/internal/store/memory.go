@@ -93,6 +93,7 @@ type MemoryRepo struct {
 	emailNodeLinks                 map[string]communicationsEmailNodeLink
 	emailThreads                   map[string]domain.CommunicationsEmailThread
 	emailThreadScopeIDs            map[string]string
+	projectEmailRelationships      map[string]memoryProjectEmailRelationship
 	emailIngestionJobs             map[string]CommunicationsEmailIngestionJob
 	nodeEmailThreads               map[string]domain.CommunicationsNodeEmailThread
 	emailCollaborations            map[string]domain.CommunicationsEmailCollaboration
@@ -201,6 +202,7 @@ func NewMemoryRepo() *MemoryRepo {
 		emailNodeLinks:                 map[string]communicationsEmailNodeLink{},
 		emailThreads:                   map[string]domain.CommunicationsEmailThread{},
 		emailThreadScopeIDs:            map[string]string{},
+		projectEmailRelationships:      map[string]memoryProjectEmailRelationship{},
 		emailIngestionJobs:             map[string]CommunicationsEmailIngestionJob{},
 		nodeEmailThreads:               map[string]domain.CommunicationsNodeEmailThread{},
 		emailCollaborations:            map[string]domain.CommunicationsEmailCollaboration{},

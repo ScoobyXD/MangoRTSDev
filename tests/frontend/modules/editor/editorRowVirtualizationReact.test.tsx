@@ -361,6 +361,9 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   const scrolledIntoView: HTMLElement[] = [];
   Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value(this: HTMLElement) { scrolledIntoView.push(this); } });
   Object.defineProperty(dom.window.HTMLElement.prototype, "animate", { configurable: true, value() { return {}; } });
+  Object.defineProperty(dom.window.HTMLDialogElement.prototype, "show", { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); } });
+  Object.defineProperty(dom.window.HTMLDialogElement.prototype, "showModal", { configurable: true, value(this: HTMLDialogElement) { this.setAttribute("open", ""); } });
+  Object.defineProperty(dom.window.HTMLDialogElement.prototype, "close", { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute("open"); } });
   if (!dom.window.Range.prototype.getClientRects) dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
   if (!dom.window.Range.prototype.getBoundingClientRect) dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
   if (!dom.window.document.elementFromPoint) {
@@ -1584,6 +1587,25 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     await act(async () => { projectRoot?.render(renderProject()); });
     await flushWork(24);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+    await flushWork();
+
+    const projectDocumentToggle = projectContainer.querySelector<HTMLButtonElement>('[data-project-document-toggle="true"]');
+    assert.ok(projectDocumentToggle);
+    await act(async () => { projectDocumentToggle.click(); });
+    await flushWork();
+    const projectDocumentPane = projectContainer.querySelector<HTMLElement>('[data-project-document-pane="true"]');
+    assert.ok(projectDocumentPane, "the Project document icon should mount the permanent editor pane");
+    assert.equal(projectDocumentPane.querySelector('[aria-label="Close Project document"]'), null, "the permanent Project document must not add a red close-X action");
+    const projectDocumentTitle = projectDocumentPane.querySelector<HTMLElement>('[data-project-document-title="true"]');
+    assert.ok(projectDocumentTitle);
+    assert.equal(projectDocumentTitle.style.minWidth, "max-content", "the Project document title must remain fully visible");
+    assert.match(projectDocumentTitle.textContent ?? "", /Project document/);
+    const projectDocumentActions = projectDocumentPane.querySelector<HTMLElement>('[data-project-document-actions="true"]');
+    assert.ok(projectDocumentActions);
+    assert.equal(projectDocumentActions.style.overflow, "visible", "the Project document actions must not clip the pinned controls");
+    assert.ok(projectDocumentActions.querySelector('[aria-label="Add attachment to Project document"]'));
+    assert.ok(projectDocumentActions.querySelector('[aria-label="Open Project document full screen"]'));
+    await act(async () => { projectDocumentToggle.click(); });
     await flushWork();
 
     const initialProjectRows = assertBoundedRows(projectContainer, "project");

@@ -356,3 +356,35 @@ func TestWriteProjectMutationErrorReportsNodeAlreadyInAnotherProject(t *testing.
 		t.Fatalf("error = %q, want project_node_already_in_another_project", payload.Error)
 	}
 }
+
+func TestWriteProjectMutationErrorReportsEmailRelationshipConflicts(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{"message not attached", store.ErrEmailMessageNotAttachedToProject, http.StatusConflict, "email_message_not_attached_to_project"},
+		{"message already assigned", store.ErrEmailMessageTextboxConflict, http.StatusConflict, "email_message_already_linked_to_another_textbox"},
+		{"exact edge has chat", store.ErrEmailRelationshipRequiredByChat, http.StatusConflict, "email_relationship_required_by_chat"},
+		{"wide edge has Project work", store.ErrEmailRelationshipHasProjectWork, http.StatusConflict, "email_removal_has_project_work"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			(&Server{}).writeProjectMutationError(rr, test.err, "failed_to_save_project_relationship")
+			if rr.Code != test.wantStatus {
+				t.Fatalf("status = %d body=%s, want %d", rr.Code, rr.Body.String(), test.wantStatus)
+			}
+			var payload struct {
+				Error string `json:"error"`
+			}
+			if err := json.NewDecoder(rr.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode response: %v body=%s", err, rr.Body.String())
+			}
+			if payload.Error != test.wantCode {
+				t.Fatalf("error = %q, want %q", payload.Error, test.wantCode)
+			}
+		})
+	}
+}

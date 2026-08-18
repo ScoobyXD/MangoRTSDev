@@ -49,7 +49,6 @@ import {
   resizeEmailChatColumnAtPointer,
   resizeHomeColumns,
   resizeHomeInboxMatrixColumnsWithoutSidebar,
-  readTriageMessageDrag,
   setNodeDragData,
   sharedInboxCanLoadMail,
   sortEmailConversationMessagesNewestFirst,
@@ -68,7 +67,8 @@ import {
 } from "../../../../frontend/src/pages/home/homeStyles.js";
 import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME } from "../../../../frontend/src/modules/kanban/shared.js";
-import { RACI_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "../../../../frontend/src/pages/home/homeConstants.js";
+import { TRIAGE_MESSAGE_DRAG_MIME, readTriageMessageDrag } from "../../../../frontend/src/modules/triage/triageDragDrop.js";
+import { RACI_INBOX_SECTIONS } from "../../../../frontend/src/pages/home/homeConstants.js";
 
 function sharedInbox(id: string, name: string, position: number, parentID?: string): CommunicationsSharedInbox {
   return {

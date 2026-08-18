@@ -56,7 +56,7 @@ export function mergeEmailMessageIntoScopedMessageList(
 import { getNodeTitle, type NodeRecord } from "../../modules/nodes/types.js";
 import { attachStackedDragPreview, EXPLORER_ENTITY_DRAG_MIME, KANBAN_LOGIC_GATE_DONE_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_REVIEW_COLOR, serializeExplorerEntityDragPayload, type ExplorerEntityDragItem } from "../../modules/kanban/shared.js";
 import { editorEmailDisplayDocument } from "../../modules/editor/richTextEditing.js";
-import { HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, RACI_INBOX_SECTIONS, TRIAGE_MESSAGE_DRAG_MIME } from "./homeConstants.js";
+import { HOME_COLUMN_MAX_WIDTHS, HOME_COLUMN_MIN_WIDTHS, HOME_COLUMN_RESIZER_WIDTH, HOME_COLUMN_WIDTHS_STORAGE_KEY, HOME_INBOX_MATRIX_PANEL_MIN_WIDTH, INBOX_NO_LOGIC_GATE_ID, MAILBOX_OPTIONS, RACI_INBOX_SECTIONS } from "./homeConstants.js";
 import type { HomeColumnWidths, HomeViewID, InboxLogicGateNodeGroup, InboxPriority, MyLogicGateGroup, MyNodeGroup, RACIInboxRole, RACIInboxStatus } from "./homeTypes.js";
 export function readHomeColumnWidths(): HomeColumnWidths {
   try {
@@ -325,39 +325,6 @@ export function resizeEmailChatColumnAtPointer(containerLeft: number, containerW
     EMAIL_CHAT_COLUMN_MIN_WIDTH,
     maximumChatWidth,
   );
-}
-
-export type TriageMessageDragPayload = {
-  messageIDs: string[];
-  sharedInboxID?: string;
-  accountEmail?: string;
-  companyID?: string;
-};
-
-export function readTriageMessageDrag(dataTransfer: DataTransfer): TriageMessageDragPayload {
-  try {
-    const raw = dataTransfer.getData(TRIAGE_MESSAGE_DRAG_MIME);
-    if (!raw) return { messageIDs: [] };
-    const parsed = JSON.parse(raw) as { kind?: string; message_ids?: unknown; shared_inbox_id?: unknown; account_email?: unknown; company_id?: unknown };
-    if (parsed.kind !== "triage_messages" || !Array.isArray(parsed.message_ids)) return { messageIDs: [] };
-    const sharedInboxID = typeof parsed.shared_inbox_id === "string" ? parsed.shared_inbox_id.trim() || undefined : undefined;
-    return {
-      messageIDs: cleanIDList(parsed.message_ids.filter((value): value is string => typeof value === "string")),
-      sharedInboxID,
-      accountEmail: sharedInboxID ? undefined : typeof parsed.account_email === "string" ? parsed.account_email.trim().toLowerCase() || undefined : undefined,
-      companyID: typeof parsed.company_id === "string" ? parsed.company_id.trim() || undefined : undefined,
-    };
-  } catch {
-    return { messageIDs: [] };
-  }
-}
-
-export function readTriageMessageIDs(dataTransfer: DataTransfer): string[] {
-  return readTriageMessageDrag(dataTransfer).messageIDs;
-}
-
-export function hasTriageMessageDrag(dataTransfer: DataTransfer): boolean {
-  return Array.from(dataTransfer.types).includes(TRIAGE_MESSAGE_DRAG_MIME);
 }
 
 export function hasExplorerDrag(dataTransfer: DataTransfer): boolean {

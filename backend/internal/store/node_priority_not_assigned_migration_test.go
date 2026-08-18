@@ -82,7 +82,6 @@ func TestCorrectedPriorityAndSQSMigrationsShareTheFinalEmailRelationshipGuard(t 
 	}
 
 	for name, body := range map[string]string{
-		"canonical schema":   strings.ToLower(string(schemaRaw)),
 		"priority migration": strings.ToLower(string(migrationRaw)),
 	} {
 		for _, required := range []string{
@@ -108,6 +107,20 @@ func TestCorrectedPriorityAndSQSMigrationsShareTheFinalEmailRelationshipGuard(t 
 		}
 		if name == "canonical schema" && strings.Contains(body, "mangorts_enforce_one_node_per_email_thread") {
 			t.Errorf("%s retains obsolete one-Node enforcement function", name)
+		}
+	}
+	canonical := strings.ToLower(string(schemaRaw))
+	for _, required := range []string{
+		"idx_email_relationships_active_identity",
+		"idx_email_relationships_one_textbox_per_message_owner",
+		"mangorts_validate_node_email_chat_relationship",
+		"relationship.resource_id=new.node_id",
+		"relationship.resource_textbox_id=new.textbox_id::text",
+		"mangorts_protect_email_relationship_dependencies",
+		"update of company_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id",
+	} {
+		if !strings.Contains(canonical, required) {
+			t.Errorf("canonical schema is missing %q", required)
 		}
 	}
 	sqsMigration := strings.ToLower(string(sqsMigrationRaw))

@@ -224,6 +224,9 @@ order by deleted_timestamp asc, recycle_bin_item_id asc`, companyID, deletedByUs
 			return RecycleBinRestoreResult{}, err
 		}
 	}
+	if err := reconcileRestoredProjectTextboxColorsTx(ctx, tx, mergedPayload["project_textboxes"]); err != nil {
+		return RecycleBinRestoreResult{}, err
+	}
 	events, err := r.appendDomainEventsTx(ctx, tx, companyExplorerTargetWorkspaceEventInputs(companyID, targets, true))
 	if err != nil {
 		return RecycleBinRestoreResult{}, err
@@ -297,11 +300,12 @@ var recycleRestoreTableOrder = []string{
 	"huddle_node_kpi_relationships",
 	"node_textboxes",
 	"node_textboxes_history",
-	"node_textbox_chats",
 	"logic_gate_textboxes",
 	"logic_gate_textboxes_history",
 	"project_textboxes",
 	"project_textboxes_history",
+	"email_relationships",
+	"node_textbox_chats",
 	"project_textbox_chats",
 	"company_explorer_folders",
 	"huddle_explorer_folders",
@@ -311,7 +315,6 @@ var recycleRestoreTableOrder = []string{
 	"resource_gvic_assignments",
 	"resource_permissions",
 	"user_logic_gate_shortcuts",
-	"email_relationships",
 	"email_drafts",
 	"attachment_relationships",
 	"node_logic_gate_assignments",
@@ -324,6 +327,31 @@ var recycleRestoreTableOrder = []string{
 	"kanban_board_projection",
 	"company_explorer_items",
 	"huddle_explorer_items",
+}
+
+func reconcileRestoredProjectTextboxColorsTx(ctx context.Context, tx *sql.Tx, rows json.RawMessage) error {
+	if len(rows) == 0 || string(rows) == "null" || string(rows) == "[]" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+with restored as (
+  select company_id,project_id,textbox_id
+  from jsonb_populate_recordset(null::project_textboxes,coalesce($1::jsonb,'[]'::jsonb))
+)
+update project_textboxes textbox
+set color=case when exists (
+  select 1 from email_relationships relationship
+  where relationship.company_id=textbox.company_id
+    and relationship.resource_type='project'
+    and relationship.resource_id=textbox.project_id
+    and relationship.resource_textbox_id=textbox.textbox_id
+) then coalesce(textbox.color,'#0EA5E9') else null end,
+updated_timestamp=greatest(textbox.updated_timestamp,clock_timestamp())
+from restored
+where textbox.company_id=restored.company_id
+  and textbox.project_id=restored.project_id
+  and textbox.textbox_id=restored.textbox_id`, string(rows))
+	return err
 }
 
 func postgresRestoreRecycleTableTx(ctx context.Context, tx *sql.Tx, tableName string, rows json.RawMessage) error {
@@ -343,6 +371,42 @@ func postgresRestoreRecycleTableTx(ctx context.Context, tx *sql.Tx, tableName st
 		return nil
 	}
 	columnList := strings.Join(columns, ", ")
+	if tableName == "email_relationships" {
+		if _, err := tx.ExecContext(ctx, `
+with restored as (
+  select company_id,email_thread_id,email_message_id,resource_type,resource_id,
+         resource_textbox_id,created_timestamp
+  from jsonb_populate_recordset(null::email_relationships,coalesce($1::jsonb,'[]'::jsonb))
+)
+insert into email_relationships(
+  company_id,email_relationship_id,email_thread_id,email_message_id,
+  resource_type,resource_id,resource_textbox_id,created_timestamp
+)
+select exact.company_id,gen_random_uuid(),exact.email_thread_id,exact.email_message_id,
+       exact.resource_type,exact.resource_id,null,coalesce(exact.created_timestamp,clock_timestamp())
+from restored exact
+where exact.resource_type in ('node','project')
+  and exact.resource_textbox_id is not null
+  and not exists (
+    select 1 from restored wide
+    where wide.company_id=exact.company_id
+      and wide.email_thread_id=exact.email_thread_id
+      and wide.resource_type=exact.resource_type
+      and wide.resource_id=exact.resource_id
+      and wide.resource_textbox_id is null
+  )
+  and not exists (
+    select 1 from email_relationships wide
+    where wide.company_id=exact.company_id
+      and wide.email_thread_id=exact.email_thread_id
+      and wide.resource_type=exact.resource_type
+      and wide.resource_id=exact.resource_id
+      and wide.resource_textbox_id is null
+  )
+on conflict do nothing`, string(rows)); err != nil {
+			return err
+		}
+	}
 	if tableName == "attachment_relationships" {
 		if _, err := tx.ExecContext(ctx, `
 update attachment_relationships existing

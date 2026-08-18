@@ -80,9 +80,11 @@ import {
   AttachedEmailOrganizerPane,
   AttachmentCountDropdown,
   ChatPane,
+  LinkedEmailPreviewPane,
   NodeTextBlockEditor,
   TextBlockActionsMenu,
   TimelineCell,
+  type EmailChatHighlightsByMessageID,
 } from "../editor/NodeWorkspaceSurfaceParts.js";
 import {
   EDITOR_NEU_ACTIVE_SURFACE,
@@ -105,6 +107,15 @@ import {
   type TextBlockSelectionDraft,
 } from "../editor/NodeWorkspaceSurfaceShared.js";
 import { useEditorPreferences } from "../editor/useEditorPreferences.js";
+import {
+  EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME,
+  createEmailSelectionDocument,
+  linkedEmailMessageAccents,
+  moveEmailChatComposerEntry,
+  nextEmailTextBoxColor,
+  parseEmailMessageTextBoxLinkDrag,
+  textBoxHasLinkedEmailMessage,
+} from "../editor/email/emailTextBoxRelationships.js";
 import { useMangoEditorDataFormat } from "../editor/editorDataFormat.js";
 import {
   markEditorHistoryChanged,
@@ -123,8 +134,8 @@ import {
 } from "../attachments/attachmentApi.js";
 import { moveLogicGateAssignment } from "../kanban/kanbanApi.js";
 import type { NodeRecord } from "../nodes/types.js";
-import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants.js";
-import { cleanIDList, hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils.js";
+import { dispatchTriageConversionApplied } from "../triage/triageEvents.js";
+import { hasTriageMessageDrag, normalizeTriageMessageIDs, readTriageMessageDrag } from "../triage/triageDragDrop.js";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog.js";
 import {
   addProjectInformation,
@@ -204,6 +215,10 @@ type ProjectTextBlockDraft = {
   title: string;
   document: string;
   attachments: EditorChatAttachment[];
+  linkedEmailMessageIDs: string[];
+  stagedEmailMessageID?: string;
+  temporaryEmailChat?: boolean;
+  color?: string;
   createdTimestamp: string;
   updatedTimestamp: string;
 };
@@ -211,9 +226,18 @@ type ProjectTextBlockDraft = {
 const PROJECT_SAVED_VERSION_TYPE = "Saved version";
 const PROJECT_SAVED_VERSION_PREFIX = "MANGO_PROJECT_SAVE_V1:";
 
+type ProjectSavedVersionBlockDTO = {
+  id: string;
+  title: string;
+  document: string;
+  attachments: EditorChatAttachment[];
+  createdTimestamp: string;
+  updatedTimestamp: string;
+};
+
 type ProjectSavedVersionSnapshot = {
   name: string;
-  blocks: ProjectTextBlockDraft[];
+  blocks: ProjectSavedVersionBlockDTO[];
 };
 
 type ProjectSavedVersion = {
@@ -378,10 +402,6 @@ const PROJECT_CRITICAL_STEP_DRAG_MIME = "application/x-mangorts-project-critical
 const PROJECT_RELATIONSHIP_GROUPING_STORAGE_KEY = "mangorts-project-relationship-groupings-v1";
 const PROJECT_EMAIL_COLUMN_LAYOUT_ID = "project-email-column";
 const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Track"];
-function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
-}
 
 export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   projectID,
@@ -419,6 +439,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const projectTextBlockContentRevisionRef = useRef(0);
   const projectLoadRequestRef = useRef(0);
   const projectSaveScopeRef = useRef("");
+  const projectChatSubmissionsInProgressRef = useRef(new Set<string>());
   const handledProjectFocusRequestRef = useRef("");
   const { accounts } = useCompanyAccounts(companyID);
   const [project, setProject] = useState<ProjectRecord | null>(null);
@@ -465,13 +486,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [chatSelectionAnchors, setChatSelectionAnchors] = useState<Record<string, TextBlockSelectionDraft>>({});
   const [pendingProjectEmailChatSelection, setPendingProjectEmailChatSelection] = useState<TextBlockSelectionDraft | null>(null);
   const [projectEmailChatDestinationBlockID, setProjectEmailChatDestinationBlockID] = useState("");
-  const [projectEmailChatDefaultBlockID, setProjectEmailChatDefaultBlockID] = useState("");
   const [activeChatMessageIDs, setActiveChatMessageIDs] = useState<Record<string, string>>({});
   const [chatNavigationRequests, setChatNavigationRequests] = useState<Record<string, { anchorMessageID: string; requestID: number }>>({});
   const [chatMessageFocusRequests, setChatMessageFocusRequests] = useState<Record<string, { messageID: string; requestID: number }>>({});
   const [chatComposerFocusRequestIDs, setChatComposerFocusRequestIDs] = useState<Record<string, number>>({});
   const [selectedEmailIDsByBlock, setSelectedEmailIDsByBlock] = useState<Record<string, string>>({});
-  const [emailPicker, setEmailPicker] = useState<{ blockID: string; anchor: UniversalEntityPickerAnchor } | null>(null);
+  const [emailPicker, setEmailPicker] = useState<UniversalEntityPickerAnchor | null>(null);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [assignmentsOpen, setAssignmentsOpen] = useState(false);
   const [assignmentAccountIDs, setAssignmentAccountIDs] = useState<string[]>([]);
@@ -635,7 +655,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           setOpenChatBlockIDs(new Set(Array.from(chatBlockIDs).filter((id) => nextBlockIDs.has(id))));
         } else {
           setOpenEditorBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
-          setOpenEmailBlockIDs((current) => new Set(Array.from(current).filter((id) => id === PROJECT_EMAIL_COLUMN_LAYOUT_ID)));
+          setOpenEmailBlockIDs((current) => new Set(Array.from(current).filter((id) => id === PROJECT_EMAIL_COLUMN_LAYOUT_ID || nextBlockIDs.has(id))));
           setOpenChatBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
         }
       }
@@ -849,6 +869,53 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     () => blocks.filter((block) => block.id !== projectDocumentID),
     [blocks, projectDocumentID],
   );
+  const projectEmailMessageAccents = useMemo(() => linkedEmailMessageAccents(timelineBlocks), [timelineBlocks]);
+  const projectEmailChatHighlightsByMessageID = useMemo<EmailChatHighlightsByMessageID>(() => {
+    const highlights: Record<string, Array<{ id: string; quote: string; startOffset: number; endOffset: number }>> = {};
+    for (const chatMessage of chatMessages) {
+      const messageID = chatMessage.selectionSource === "email" ? chatMessage.selectionMessageID?.trim() ?? "" : "";
+      const quote = chatMessage.selectionQuote?.trim() ?? "";
+      const startOffset = chatMessage.selectionStart;
+      const endOffset = chatMessage.selectionEnd;
+      if (!messageID || !quote || typeof startOffset !== "number" || typeof endOffset !== "number" || endOffset <= startOffset) continue;
+      const group = highlights[messageID] ?? [];
+      group.push({ id: `chat:${chatMessage.id}`, quote, startOffset, endOffset });
+      highlights[messageID] = group;
+    }
+    return highlights;
+  }, [chatMessages]);
+  const activeProjectEmailChatMessage = useMemo(() => {
+    const activeEntry = Object.entries(activeChatMessageIDs).find(([, messageID]) => Boolean(messageID));
+    if (!activeEntry) return undefined;
+    const [blockID, messageID] = activeEntry;
+    return chatMessages.find((message) => message.blockID === blockID && message.id === messageID && message.selectionSource === "email");
+  }, [activeChatMessageIDs, chatMessages]);
+  const activeProjectChatBlockID = Object.entries(activeChatMessageIDs).find(([, messageID]) => Boolean(messageID))?.[0] ?? "";
+  const pendingProjectEmailAnchor = pendingProjectEmailChatSelection
+    ?? (activeProjectChatBlockID && chatSelectionAnchors[activeProjectChatBlockID]?.source === "email"
+      ? chatSelectionAnchors[activeProjectChatBlockID]
+      : undefined);
+  const activeProjectEmailSelection = pendingProjectEmailAnchor?.messageID
+    && pendingProjectEmailAnchor.quote
+    && Number.isFinite(pendingProjectEmailAnchor.startOffset)
+    && Number.isFinite(pendingProjectEmailAnchor.endOffset)
+    ? {
+      messageID: pendingProjectEmailAnchor.messageID,
+      quote: pendingProjectEmailAnchor.quote,
+      startOffset: pendingProjectEmailAnchor.startOffset,
+      endOffset: pendingProjectEmailAnchor.endOffset,
+    }
+    : activeProjectEmailChatMessage?.selectionMessageID
+      && activeProjectEmailChatMessage.selectionQuote
+      && Number.isFinite(activeProjectEmailChatMessage.selectionStart)
+      && Number.isFinite(activeProjectEmailChatMessage.selectionEnd)
+      ? {
+        messageID: activeProjectEmailChatMessage.selectionMessageID,
+        quote: activeProjectEmailChatMessage.selectionQuote,
+        startOffset: activeProjectEmailChatMessage.selectionStart ?? 0,
+        endOffset: activeProjectEmailChatMessage.selectionEnd ?? 0,
+      }
+      : null;
   const projectFileAttachments = useMemo(() => filterMangoResourceAttachments(projectResourceAttachments, {
     relationshipKind: "file_attachment",
   }), [projectResourceAttachments]);
@@ -954,7 +1021,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const attachedEmail = attachedEmails.find((email) => email.id === targetID || email.messageID === targetID || email.emailMessageID === targetID);
     if (chatMessage) {
       setOpenChatBlockIDs((current) => new Set(current).add(block.id));
-      setActiveChatMessageIDs((current) => ({ ...current, [block.id]: chatMessage.id }));
+      setActiveChatMessageIDs({ [block.id]: chatMessage.id });
       setChatMessageFocusRequests((current) => ({
         ...current,
         [block.id]: { messageID: chatMessage.id, requestID: (current[block.id]?.requestID ?? 0) + 1 },
@@ -1089,15 +1156,16 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const currentBlocks = blocksRef.current;
     await flushMangoTiptapResource({ companyID, resourceType: "project", resourceID: projectID });
     await projectTextBlockSaveController.flushChangedBlocks();
-    const snapshotBlocks = await Promise.all(currentBlocks.map(async (block) => {
+    const snapshotBlocks: ProjectSavedVersionBlockDTO[] = await Promise.all(currentBlocks.map(async (block) => {
       const latest = projectTextBlockContentRef.current.get(block.id);
       const path = `/v1/editor-json/project/${projectID}/documents/${block.id}?company_id=${encodeURIComponent(companyID)}`;
       const committed = await attachmentRequestJSON<{ document: unknown; updated_timestamp?: string }>(path);
       return {
-        ...block,
+        id: block.id,
         title: latest?.title ?? block.title,
         document: JSON.stringify(committed.document),
         attachments: latest?.attachments ?? block.attachments,
+        createdTimestamp: block.createdTimestamp,
         updatedTimestamp: committed.updated_timestamp ?? block.updatedTimestamp,
       };
     }));
@@ -1238,7 +1306,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [attachmentRequestJSON, blocks, companyID, editorDataFormat.gate?.editor_format, loadProject, projectDocumentID, projectID, projectVersionRestoring, refreshProjectAttachments]);
 
-  const addTextBlock = useCallback((title = "Project Summary", deferSave = false) => {
+  const addTextBlock = useCallback((title = "Project Summary", deferSave = false, documentValue = "") => {
     if (!editorDataFormat.gate) {
       setError("Editor data format is still loading.");
       return "";
@@ -1246,16 +1314,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const id = generateStableInformationID();
     const initialContent: EditorTextBlockContent = {
       title,
-      document: "",
+      document: documentValue,
       attachments: [],
     };
-    const nextBlock: ProjectTextBlockDraft = {
-      id,
-      ...initialContent,
-      attachments: initialContent.attachments ?? [],
-      createdTimestamp: new Date().toISOString(),
-      updatedTimestamp: new Date().toISOString(),
-    };
+      const nextBlock: ProjectTextBlockDraft = {
+        id,
+        ...initialContent,
+        attachments: initialContent.attachments ?? [],
+        linkedEmailMessageIDs: [],
+        createdTimestamp: new Date().toISOString(),
+        updatedTimestamp: new Date().toISOString(),
+      };
     projectTextBlockContentRef.current.set(id, initialContent);
     projectTextBlockContentRevisionRef.current += 1;
     if (!deferSave) projectTextBlockSaveController.markHasChanged(id, initialContent);
@@ -1299,6 +1368,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         id: projectDocumentID,
         ...initialContent,
         attachments: [],
+        linkedEmailMessageIDs: [],
         createdTimestamp: timestamp,
         updatedTimestamp: timestamp,
       };
@@ -1326,49 +1396,64 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setOpenEmailBlockIDs((current) => toggleSetValue(current, PROJECT_EMAIL_COLUMN_LAYOUT_ID));
   }, [closeProjectDocument]);
 
+  const stageProjectEmailSelectionChatTextBlock = useCallback((messageID: string) => {
+    const cleanMessageID = messageID.trim();
+    if (!cleanMessageID || !editorDataFormat.gate) return "";
+    const existingTemporary = blocks.find((block) => block.temporaryEmailChat && block.stagedEmailMessageID === cleanMessageID);
+    if (existingTemporary) return existingTemporary.id;
+    const blockID = generateStableInformationID();
+    const timestamp = new Date().toISOString();
+    const color = nextEmailTextBoxColor(timelineBlocks.map((block) => block.color ?? ""));
+    const temporaryBlock: ProjectTextBlockDraft = {
+      id: blockID,
+      title: "Email text box",
+      document: "",
+      attachments: [],
+      linkedEmailMessageIDs: [],
+      stagedEmailMessageID: cleanMessageID,
+      temporaryEmailChat: true,
+      color,
+      createdTimestamp: timestamp,
+      updatedTimestamp: timestamp,
+    };
+    projectTextBlockContentRef.current.set(blockID, { title: temporaryBlock.title, document: "", attachments: [] });
+    setBlocks((current) => [temporaryBlock, ...current.filter((block) => block.id !== blockID)]);
+    setOpenEditorBlockIDs((current) => new Set(current).add(blockID));
+    setActiveRowBlockID(blockID);
+    return blockID;
+  }, [blocks, editorDataFormat.gate, timelineBlocks]);
+
   const openProjectEmailSelectionChat = useCallback((messageID: string, selection: { quote: string; startOffset: number; endOffset: number; x: number; y: number }) => {
     const cleanMessageID = messageID.trim();
-    const linkedBlockID = attachedEmails.find((email) => (
-      Boolean(email.blockID?.trim())
-      && [email.emailMessageID, email.messageID].some((candidate) => candidate?.trim() === cleanMessageID)
-    ))?.blockID?.trim() ?? "";
-    if (linkedBlockID && timelineBlocks.some((block) => block.id === linkedBlockID)) {
-      const anchor: TextBlockSelectionDraft = {
-        blockID: linkedBlockID, source: "email", messageID: cleanMessageID, quote: selection.quote,
-        startOffset: selection.startOffset, endOffset: selection.endOffset,
-        x: selection.x, y: selection.y,
-      };
-      setPendingProjectEmailChatSelection(null);
-      setProjectEmailChatDestinationBlockID(linkedBlockID);
-      setProjectEmailChatDefaultBlockID("");
-      setChatSelectionAnchors((current) => ({ ...current, [linkedBlockID]: anchor }));
-      setOpenChatBlockIDs((current) => new Set(current).add(linkedBlockID));
-      setFocusedTextBlockID(linkedBlockID);
-      setChatComposerFocusRequestIDs((current) => ({ ...current, [linkedBlockID]: (current[linkedBlockID] ?? 0) + 1 }));
-      setError("");
+    if (!cleanMessageID) {
+      setError("email_message_id_missing");
       return;
     }
-    const blockID = addTextBlock("Email text box", true);
+    setChatSelectionAnchors((current) => Object.fromEntries(
+      Object.entries(current).filter(([, anchor]) => anchor.source !== "email"),
+    ));
+    const linkedBlock = timelineBlocks.find((block) => textBoxHasLinkedEmailMessage(block, cleanMessageID));
+    const blockID = linkedBlock?.id || stageProjectEmailSelectionChatTextBlock(cleanMessageID);
     if (!blockID) return;
     const anchor: TextBlockSelectionDraft = {
       blockID, source: "email", messageID: cleanMessageID, quote: selection.quote,
       startOffset: selection.startOffset, endOffset: selection.endOffset,
       x: selection.x, y: selection.y,
     };
-    setPendingProjectEmailChatSelection(anchor);
+    setPendingProjectEmailChatSelection(linkedBlock ? null : anchor);
     setProjectEmailChatDestinationBlockID(blockID);
-    setProjectEmailChatDefaultBlockID(blockID);
     setChatSelectionAnchors((current) => ({ ...current, [blockID]: anchor }));
     setOpenChatBlockIDs((current) => new Set(current).add(blockID));
+    setActiveRowBlockID(blockID);
     setFocusedTextBlockID(blockID);
     setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
     setError("");
-  }, [addTextBlock, attachedEmails, timelineBlocks]);
+  }, [stageProjectEmailSelectionChatTextBlock, timelineBlocks]);
 
   const clearProjectEmailSelectionChat = useCallback((blockID: string) => {
-    if (blockID === projectEmailChatDefaultBlockID) {
+    const isTemporary = blocks.some((block) => block.id === blockID && block.temporaryEmailChat);
+    if (isTemporary) {
       projectTextBlockContentRef.current.delete(blockID);
-      projectTextBlockContentRevisionRef.current += 1;
       projectTextBlockSaveController.removeBlock(blockID);
       setBlocks((current) => current.filter((block) => block.id !== blockID));
       setOpenEditorBlockIDs((current) => {
@@ -1384,56 +1469,103 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setChatDrafts((current) => omitRecordKey(current, blockID));
       setChatDraftEntityLinks((current) => omitRecordKey(current, blockID));
       setChatDraftAttachments((current) => omitRecordKey(current, blockID));
+      setChatReplyTargets((current) => omitRecordKey(current, blockID));
     }
     setChatSelectionAnchors((current) => omitRecordKey(current, blockID));
     setPendingProjectEmailChatSelection(null);
     setProjectEmailChatDestinationBlockID("");
-    setProjectEmailChatDefaultBlockID("");
-  }, [projectEmailChatDefaultBlockID, projectTextBlockSaveController]);
+  }, [blocks, projectTextBlockSaveController]);
 
   const chooseProjectEmailChatDestination = useCallback((blockID: string) => {
-    if (!pendingProjectEmailChatSelection || !timelineBlocks.some((block) => block.id === blockID)) return false;
-    const anchor = { ...pendingProjectEmailChatSelection, blockID };
+    if (!pendingProjectEmailChatSelection) return false;
+    const linkedBlock = timelineBlocks.find((block) => textBoxHasLinkedEmailMessage(block, pendingProjectEmailChatSelection.messageID ?? ""));
+    const requestedBlock = timelineBlocks.find((block) => block.id === blockID && !block.temporaryEmailChat);
+    const destinationBlock = linkedBlock ?? requestedBlock;
+    if (!destinationBlock) return false;
+    const anchor = { ...pendingProjectEmailChatSelection, blockID: destinationBlock.id };
     const previousBlockID = projectEmailChatDestinationBlockID;
-    if (projectEmailChatDefaultBlockID && projectEmailChatDefaultBlockID !== blockID) {
-      projectTextBlockContentRef.current.delete(projectEmailChatDefaultBlockID);
-      projectTextBlockContentRevisionRef.current += 1;
-      projectTextBlockSaveController.removeBlock(projectEmailChatDefaultBlockID);
-      setBlocks((current) => current.filter((block) => block.id !== projectEmailChatDefaultBlockID));
-      setOpenEditorBlockIDs((current) => {
-        const next = new Set(current);
-        next.delete(projectEmailChatDefaultBlockID);
-        return next;
-      });
-      setProjectEmailChatDefaultBlockID("");
+    if (previousBlockID === destinationBlock.id) return true;
+    const destinationHasDraft = Boolean(
+      chatDrafts[destinationBlock.id]
+      || chatDraftEntityLinks[destinationBlock.id]?.length
+      || chatDraftAttachments[destinationBlock.id]?.length
+    );
+    if (destinationHasDraft) {
+      setError("This text box already has an unsent chat draft. Send or clear it before choosing it as the destination.");
+      return false;
     }
-    const moveDraft = <T,>(current: Record<string, T>) => {
-      if (!previousBlockID || previousBlockID === blockID || !(previousBlockID in current)) return current;
-      const next = { ...current };
-      if (!(blockID in next)) next[blockID] = next[previousBlockID];
-      delete next[previousBlockID];
-      return next;
-    };
-    setChatDrafts(moveDraft);
-    setChatDraftEntityLinks(moveDraft);
-    setChatDraftAttachments(moveDraft);
+    setChatDrafts((current) => moveEmailChatComposerEntry(current, previousBlockID, destinationBlock.id));
+    setChatDraftEntityLinks((current) => moveEmailChatComposerEntry(current, previousBlockID, destinationBlock.id));
+    setChatDraftAttachments((current) => moveEmailChatComposerEntry(current, previousBlockID, destinationBlock.id));
+    if (blocks.some((block) => block.id === previousBlockID && block.temporaryEmailChat)) {
+      projectTextBlockContentRef.current.delete(previousBlockID);
+      projectTextBlockSaveController.removeBlock(previousBlockID);
+      setBlocks((current) => current.filter((block) => block.id !== previousBlockID));
+      setOpenEditorBlockIDs((current) => { const next = new Set(current); next.delete(previousBlockID); return next; });
+    }
     setChatSelectionAnchors((current) => {
       const next = { ...current };
-      delete next[projectEmailChatDestinationBlockID];
+      delete next[previousBlockID];
+      next[destinationBlock.id] = anchor;
+      return next;
+    });
+    setOpenChatBlockIDs((current) => {
+      const next = new Set(current);
+      next.delete(previousBlockID);
+      next.add(destinationBlock.id);
+      return next;
+    });
+    setPendingProjectEmailChatSelection(anchor);
+    setProjectEmailChatDestinationBlockID(destinationBlock.id);
+    setFocusedTextBlockID(destinationBlock.id);
+    setActiveRowBlockID(destinationBlock.id);
+    setChatComposerFocusRequestIDs((current) => ({ ...current, [destinationBlock.id]: (current[destinationBlock.id] ?? 0) + 1 }));
+    setError("");
+    return true;
+  }, [blocks, chatDraftAttachments, chatDraftEntityLinks, chatDrafts, pendingProjectEmailChatSelection, projectEmailChatDestinationBlockID, projectTextBlockSaveController, timelineBlocks]);
+
+  const chooseProjectEmailChatNewTextBoxDestination = useCallback(() => {
+    if (!pendingProjectEmailChatSelection) return;
+    const linkedBlock = timelineBlocks.find((block) => textBoxHasLinkedEmailMessage(block, pendingProjectEmailChatSelection.messageID ?? ""));
+    if (linkedBlock) {
+      chooseProjectEmailChatDestination(linkedBlock.id);
+      return;
+    }
+    const blockID = stageProjectEmailSelectionChatTextBlock(pendingProjectEmailChatSelection.messageID ?? "");
+    if (!blockID || blockID === projectEmailChatDestinationBlockID) return;
+    const previousBlockID = projectEmailChatDestinationBlockID;
+    setChatDrafts((current) => moveEmailChatComposerEntry(current, previousBlockID, blockID));
+    setChatDraftEntityLinks((current) => moveEmailChatComposerEntry(current, previousBlockID, blockID));
+    setChatDraftAttachments((current) => moveEmailChatComposerEntry(current, previousBlockID, blockID));
+    const anchor = { ...pendingProjectEmailChatSelection, blockID };
+    setChatSelectionAnchors((current) => {
+      const next = { ...current };
+      delete next[previousBlockID];
       next[blockID] = anchor;
       return next;
     });
     setOpenChatBlockIDs((current) => {
       const next = new Set(current);
-      next.delete(projectEmailChatDestinationBlockID);
+      next.delete(previousBlockID);
       next.add(blockID);
       return next;
     });
+    setPendingProjectEmailChatSelection(anchor);
     setProjectEmailChatDestinationBlockID(blockID);
     setFocusedTextBlockID(blockID);
+    setActiveRowBlockID(blockID);
     setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
-    return true;
-  }, [pendingProjectEmailChatSelection, projectEmailChatDefaultBlockID, projectEmailChatDestinationBlockID, projectTextBlockSaveController, timelineBlocks]);
+    setError("");
+  }, [chooseProjectEmailChatDestination, pendingProjectEmailChatSelection, projectEmailChatDestinationBlockID, stageProjectEmailSelectionChatTextBlock, timelineBlocks]);
+
+  useEffect(() => {
+    if (!pendingProjectEmailChatSelection) return undefined;
+    const cancelPendingDestination = (event: KeyboardEvent) => {
+      if (event.key === "Escape") clearProjectEmailSelectionChat(projectEmailChatDestinationBlockID);
+    };
+    window.addEventListener("keydown", cancelPendingDestination);
+    return () => window.removeEventListener("keydown", cancelPendingDestination);
+  }, [clearProjectEmailSelectionChat, pendingProjectEmailChatSelection, projectEmailChatDestinationBlockID]);
 
   const removeTextBlock = useCallback(async (blockID: string) => {
     if (blockID === projectDocumentID) return;
@@ -1457,10 +1589,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const previousBlock = blocks.find((block) => block.id === blockID);
     const removedChatMessages = chatMessages.filter((message) => message.blockID === blockID);
     const removedAttachedEmails = attachedEmails.filter((email) => email.blockID === blockID);
-    const relatedProjectionIDs = [
-      ...removedChatMessages.map((message) => message.id),
-      ...removedAttachedEmails.map((email) => email.id),
-    ];
     projectTextBlockContentRef.current.delete(blockID);
     projectTextBlockContentRevisionRef.current += 1;
     setBlocks((current) => current.filter((block) => block.id !== blockID));
@@ -1470,17 +1598,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     try {
       const editorPath = `/v1/editor-json/project/${projectID}/documents/${blockID}?company_id=${encodeURIComponent(companyID)}`;
       const baseRevision = (await attachmentRequestJSON<{ revision: number }>(editorPath)).revision;
-      await Promise.all([
-        attachmentRequestJSON(editorPath, {
-          method: "DELETE",
-          body: JSON.stringify({
-            operation_id: generateStableInformationID(),
-            client_id: `project-delete:${currentUserID || "browser"}`,
-            base_revision: baseRevision,
-          }),
+      // The document DELETE is the sole owner command; the backend removes textbox chats and exact email links atomically.
+      await attachmentRequestJSON(editorPath, {
+        method: "DELETE",
+        body: JSON.stringify({
+          operation_id: generateStableInformationID(),
+          client_id: `project-delete:${currentUserID || "browser"}`,
+          base_revision: baseRevision,
         }),
-        ...relatedProjectionIDs.map((informationID) => deleteProjectProjection({ companyID, projectID, informationID })),
-      ]);
+      });
       refreshProjectAttachments();
       markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
     } catch (deleteError) {
@@ -1548,14 +1674,24 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [attachmentRequestJSON, companyID, flushProjectTextBlockSave, projectID, projectSaveScope, refreshProjectAttachments]);
 
   const submitChatMessage = useCallback(async (blockID: string) => {
+    if (projectChatSubmissionsInProgressRef.current.has(blockID)) return;
     const { message, entityLinks } = trimEditorChatDraft(chatDrafts[blockID] ?? "", chatDraftEntityLinks[blockID] ?? []);
     const attachments = chatDraftAttachments[blockID] ?? [];
     if (!editorChatAttachmentsReadyForSubmit(attachments)) return;
     if (!message && attachments.length === 0) return;
     const id = generateStableInformationID();
     const timestamp = new Date().toISOString();
-    const selection = chatSelectionAnchors[blockID];
     const parentID = chatReplyTargets[blockID];
+    const selection = parentID ? undefined : chatSelectionAnchors[blockID];
+    const chatBlock = blocks.find((block) => block.id === blockID);
+    const createsEmailTextBoxOnSend = Boolean(chatBlock?.temporaryEmailChat);
+    const ensureEmailTextBoxLinkOnSend = selection?.source === "email"
+      && Boolean(selection.messageID?.trim())
+      && (!chatBlock || !textBoxHasLinkedEmailMessage(chatBlock, selection.messageID ?? ""));
+    if (createsEmailTextBoxOnSend && !ensureEmailTextBoxLinkOnSend) return;
+    const emailTextBoxColorOnSend = ensureEmailTextBoxLinkOnSend
+      ? chatBlock?.color?.trim() || nextEmailTextBoxColor(timelineBlocks.map((block) => block.color ?? ""))
+      : undefined;
     const nextMessage: EditorTextBlockChatMessage = {
       id,
       blockID,
@@ -1573,6 +1709,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       entityLinks,
     };
     setError("");
+    projectChatSubmissionsInProgressRef.current.add(blockID);
     try {
       await addProjectInformation({
         companyID,
@@ -1581,7 +1718,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         type: EDITOR_TEXT_BLOCK_CHAT_TYPE,
         information: buildEditorTextBlockChatPayload({
           blockID,
-          ensureEmailTextBoxLinkOnSend: selection?.source === "email" && blockID === projectEmailChatDefaultBlockID,
+          ensureEmailTextBoxLinkOnSend,
+          emailTextBoxColorOnSend,
           parentID,
           selectionSource: selection?.source,
           selectionBlockID: selection?.source === "email" ? blockID : undefined,
@@ -1604,19 +1742,26 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setChatReplyTargets((current) => omitRecordKey(current, blockID));
       setChatSelectionAnchors((current) => omitRecordKey(current, blockID));
       if (selection?.source === "email") {
-        if (blockID === projectEmailChatDefaultBlockID) {
-          const content = projectTextBlockContentRef.current.get(blockID);
-          if (content) await flushProjectTextBlockSave(blockID, content);
-        }
+        setBlocks((current) => current.map((block) => block.id === blockID ? {
+          ...block,
+          temporaryEmailChat: false,
+          stagedEmailMessageID: undefined,
+          color: block.color?.trim() || emailTextBoxColorOnSend,
+          linkedEmailMessageIDs: selection.messageID
+            ? Array.from(new Set([...block.linkedEmailMessageIDs, selection.messageID]))
+            : block.linkedEmailMessageIDs,
+        } : block));
         setPendingProjectEmailChatSelection(null);
         setProjectEmailChatDestinationBlockID("");
-        setProjectEmailChatDefaultBlockID("");
+        markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
         await loadProject({ showLoading: false });
       }
     } catch (chatError) {
       setError(chatError instanceof Error ? chatError.message : "Failed to add chat message");
+    } finally {
+      projectChatSubmissionsInProgressRef.current.delete(blockID);
     }
-  }, [chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, currentUserID, currentUserName, flushProjectTextBlockSave, loadProject, projectEmailChatDefaultBlockID, projectID]);
+  }, [blocks, chatDraftAttachments, chatDraftEntityLinks, chatDrafts, chatReplyTargets, chatSelectionAnchors, companyID, currentUserID, currentUserName, loadProject, projectID, timelineBlocks]);
 
   const deleteChatMessage = useCallback(async (messageID: string) => {
     setChatMessages((current) => current.filter((message) => message.id !== messageID));
@@ -1744,12 +1889,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [apiBase, attachmentRequestJSON, companyID, projectID]);
 
-  const attachEmailToBlock = useCallback(async (blockID: string, message: Parameters<typeof messageAttachmentPayload>[0], scope: { sharedInboxID?: string; accountEmail?: string } = {}) => {
+  const attachEmailToProject = useCallback(async (message: Parameters<typeof messageAttachmentPayload>[0], scope: { sharedInboxID?: string; accountEmail?: string } = {}) => {
     const payload = messageAttachmentPayload(message, scope.sharedInboxID, scope.accountEmail);
     const id = generateStableInformationID();
     const nextEmail: EditorAttachedEmail = {
       id,
-      blockID: blockID || undefined,
       messageID: payload.messageID,
       emailMessageID: payload.emailMessageID,
       emailThreadID: payload.emailThreadID,
@@ -1769,12 +1913,12 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         projectID,
         informationID: id,
         type: EDITOR_ATTACHED_EMAIL_TYPE,
-        information: buildEditorAttachedEmailPayload({ blockID, ...payload, linkWholeThread: !blockID }),
+        information: buildEditorAttachedEmailPayload({ ...payload, linkWholeThread: true }),
       });
-      setAttachedEmails((current) => [nextEmail, ...current.filter((email) => email.messageID !== nextEmail.messageID || email.blockID !== blockID)]);
-      if (!blockID) closeProjectDocument();
-      setOpenEmailBlockIDs((current) => new Set(current).add(blockID || PROJECT_EMAIL_COLUMN_LAYOUT_ID));
-      setSelectedEmailIDsByBlock((current) => ({ ...current, [blockID || PROJECT_EMAIL_COLUMN_LAYOUT_ID]: payload.messageID }));
+      setAttachedEmails((current) => [nextEmail, ...current.filter((email) => email.messageID !== nextEmail.messageID || email.blockID?.trim())]);
+      closeProjectDocument();
+      setOpenEmailBlockIDs((current) => new Set(current).add(PROJECT_EMAIL_COLUMN_LAYOUT_ID));
+      setSelectedEmailIDsByBlock((current) => ({ ...current, [PROJECT_EMAIL_COLUMN_LAYOUT_ID]: payload.messageID }));
       setEmailPicker(null);
     } catch (emailError) {
       const message = emailError instanceof Error ? emailError.message : "Failed to attach email";
@@ -1783,26 +1927,150 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [closeProjectDocument, companyID, projectID]);
 
-  const linkEmailFromEditor = useCallback(async (blockID: string, entity: EditorEntityLink) => {
+  const linkEmailToProject = useCallback(async (entity: EditorEntityLink) => {
     if (entity.entityType !== "email_message" || !entity.emailMessage) {
-      throw new Error("A Project text box can only link a selected Email.");
+      throw new Error("A Project can only link a selected Email.");
     }
-    await attachEmailToBlock(blockID, entity.emailMessage, {
+    await attachEmailToProject(entity.emailMessage, {
       sharedInboxID: entity.emailSharedInboxID,
       accountEmail: entity.emailAccountEmail,
     });
-  }, [attachEmailToBlock]);
+  }, [attachEmailToProject]);
+
+  const focusProjectEmailTextBlock = useCallback((blockID: string, color = "") => {
+    const cleanBlockID = blockID.trim();
+    if (!cleanBlockID || cleanBlockID === projectDocumentID) return;
+    setActiveRowBlockID(cleanBlockID);
+    setOpenEditorBlockIDs((current) => new Set(current).add(cleanBlockID));
+    setOpenEmailBlockIDs((current) => new Set(current).add(cleanBlockID));
+    setFocusedTextBlockID(cleanBlockID);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      const target = Array.from(textBlocksScrollRef.current?.querySelectorAll<HTMLElement>("[data-project-text-box-row]") ?? [])
+        .find((element) => element.dataset.projectTextBoxRow === cleanBlockID);
+      target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+      target?.animate([
+        { transform: "translateX(0)", boxShadow: "0 0 0 0 rgba(14,165,233,0)" },
+        { transform: "translateX(3px)", boxShadow: `0 0 0 4px ${color.trim() || accent}33` },
+        { transform: "translateX(0)", boxShadow: "0 0 0 0 rgba(14,165,233,0)" },
+      ], { duration: 860, easing: "ease-out" });
+    }));
+  }, [accent, projectDocumentID]);
+
+  const revealProjectEmailTextBlock = useCallback((messageID: string) => {
+    const cleanMessageID = messageID.trim();
+    const block = timelineBlocks.find((candidate) => textBoxHasLinkedEmailMessage(candidate, cleanMessageID));
+    if (block) focusProjectEmailTextBlock(block.id, block.color);
+  }, [focusProjectEmailTextBlock, timelineBlocks]);
+
+  const linkEmailMessageToProjectTextBlock = useCallback(async (messageID: string, blockID: string, preferredColor = "") => {
+    const cleanMessageID = messageID.trim();
+    const cleanBlockID = blockID.trim();
+    if (!cleanMessageID || !cleanBlockID || cleanBlockID === projectDocumentID) return;
+    const linkedBlock = timelineBlocks.find((block) => textBoxHasLinkedEmailMessage(block, cleanMessageID));
+    if (linkedBlock) {
+      if (linkedBlock.id === cleanBlockID) {
+        focusProjectEmailTextBlock(linkedBlock.id, linkedBlock.color);
+        return;
+      }
+      throw new Error("This email message is already linked to another text box in this Project.");
+    }
+    const targetBlock = timelineBlocks.find((block) => block.id === cleanBlockID);
+    if (!targetBlock && !projectTextBlockContentRef.current.has(cleanBlockID)) throw new Error("project_textbox_not_found");
+    const color = targetBlock?.color?.trim().toUpperCase()
+      || preferredColor.trim().toUpperCase()
+      || nextEmailTextBoxColor(timelineBlocks.map((block) => block.color ?? ""));
+    await projectTextBlockSaveController.saveLatestContent(cleanBlockID);
+    setBlocks((current) => current.map((block) => block.id === cleanBlockID
+      ? { ...block, stagedEmailMessageID: cleanMessageID }
+      : block));
+    try {
+      await addProjectInformation({
+        companyID,
+        projectID,
+        informationID: generateStableInformationID(),
+        type: EDITOR_ATTACHED_EMAIL_TYPE,
+        information: JSON.stringify({
+          block_id: cleanBlockID,
+          email_message_id: cleanMessageID,
+          textbox_color: color,
+          attached_timestamp: new Date().toISOString(),
+          link_scope: "message",
+        }),
+      });
+      setBlocks((current) => current.map((block) => block.id === cleanBlockID ? {
+        ...block,
+        stagedEmailMessageID: undefined,
+        color: block.color?.trim().toUpperCase() || color,
+        linkedEmailMessageIDs: Array.from(new Set([...block.linkedEmailMessageIDs, cleanMessageID])),
+      } : block));
+      setOpenEmailBlockIDs((current) => new Set(current).add(cleanBlockID));
+      markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
+      await loadProject({ showLoading: false });
+      focusProjectEmailTextBlock(cleanBlockID, color);
+    } catch (cause) {
+      setBlocks((current) => current.map((block) => block.id === cleanBlockID && block.stagedEmailMessageID === cleanMessageID
+        ? { ...block, stagedEmailMessageID: undefined }
+        : block));
+      throw cause;
+    }
+  }, [companyID, focusProjectEmailTextBlock, loadProject, projectDocumentID, projectID, projectTextBlockSaveController, timelineBlocks]);
+
+  const createProjectEmailTextBlock = useCallback(async (messageID: string, quote = "") => {
+    const cleanMessageID = messageID.trim();
+    if (!cleanMessageID) return "";
+    const existingBlock = timelineBlocks.find((block) => textBoxHasLinkedEmailMessage(block, cleanMessageID));
+    if (existingBlock) {
+      revealProjectEmailTextBlock(cleanMessageID);
+      return existingBlock.id;
+    }
+    const sourceEmail = attachedEmails.find((email) => email.emailMessageID === cleanMessageID);
+    const color = nextEmailTextBoxColor(timelineBlocks.map((block) => block.color ?? ""));
+    const documentValue = quote.trim() && typeof document !== "undefined"
+      ? createEmailSelectionDocument(document, quote.trim())
+      : "";
+    const blockID = addTextBlock(sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box", false, documentValue);
+    if (!blockID) return "";
+    setBlocks((current) => current.map((block) => block.id === blockID
+      ? { ...block, stagedEmailMessageID: cleanMessageID, color }
+      : block));
+    setActiveRowBlockID(blockID);
+    setFocusedTextBlockID(blockID);
+    setOpenEmailBlockIDs((current) => new Set(current).add(blockID));
+    try {
+      await linkEmailMessageToProjectTextBlock(cleanMessageID, blockID, color);
+      return blockID;
+    } catch (cause) {
+      setBlocks((current) => current.map((block) => block.id === blockID
+        ? { ...block, stagedEmailMessageID: undefined, color: undefined }
+        : block));
+      setError(cause instanceof Error ? cause.message : "failed_to_link_email_to_project_text_box");
+      return "";
+    }
+  }, [addTextBlock, attachedEmails, linkEmailMessageToProjectTextBlock, revealProjectEmailTextBlock, timelineBlocks]);
 
   const removeAttachedEmail = useCallback(async (emailID: string) => {
-    setAttachedEmails((current) => current.filter((email) => email.id !== emailID));
+    const target = attachedEmails.find((email) => email.id === emailID);
+    if (!target) return;
     setError("");
     try {
-      await deleteProjectProjection({ companyID, projectID, informationID: emailID });
+      await deleteProjectProjection({ companyID, projectID, informationID: target.id });
+      setAttachedEmails((current) => current.filter((email) => email.id !== target.id));
+      const blockID = target.blockID?.trim() ?? "";
+      if (blockID) {
+        setBlocks((current) => current.map((block) => {
+          if (block.id !== blockID) return block;
+          const linkedEmailMessageIDs = block.linkedEmailMessageIDs.filter((messageID) => messageID !== target.emailMessageID);
+          return { ...block, linkedEmailMessageIDs, color: linkedEmailMessageIDs.length > 0 ? block.color : undefined };
+        }));
+      }
+      setSelectedEmailIDsByBlock((current) => Object.fromEntries(
+        Object.entries(current).filter(([, messageID]) => messageID !== target.messageID),
+      ));
     } catch (emailError) {
       setError(emailError instanceof Error ? emailError.message : "Failed to remove email");
       await loadProject({ showLoading: false });
     }
-  }, [companyID, loadProject, projectID]);
+  }, [attachedEmails, companyID, loadProject, projectID]);
 
   const addRelationshipTargets = useCallback(async (targets: ProjectRelationshipDropTarget[]): Promise<ProjectRelationshipProjection[]> => {
     const existingByKey = new Map(relationships.map((item) => [`${item.resource_type}:${item.resource_id}`, item]));
@@ -1865,7 +2133,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     drag: ReturnType<typeof readTriageMessageDrag>,
     logicGateID = "",
   ) => {
-    const messageIDs = cleanIDList(drag.messageIDs);
+    const messageIDs = normalizeTriageMessageIDs(drag.messageIDs);
     if (messageIDs.length === 0) return;
     const dragCompanyID = drag.companyID?.trim() ?? "";
     if (dragCompanyID && dragCompanyID !== companyID) {
@@ -1884,7 +2152,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setError("");
     setRelationshipDropActive(false);
     selectRightPanelTab("relationships");
-    dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID, accountEmail });
+    dispatchTriageConversionApplied({ companyID, messageIDs, sharedInboxID, accountEmail });
     try {
       const position = relationships.length + 1;
       const target: CommunicationsTriageConversionTarget = {
@@ -1903,13 +2171,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       } else {
         await loadProject({ showLoading: false });
       }
-      const convertedMessageIDs = cleanIDList(result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs);
+      const convertedMessageIDs = normalizeTriageMessageIDs(result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs);
       const savedCards = result.cards ?? [];
       const boardIDs = Array.from(new Set([
         result.board?.board_id ?? "",
         ...savedCards.map((card) => card.board_id),
       ].map((id) => id.trim()).filter(Boolean)));
-      dispatchHomeTriageConversionApplied({
+      dispatchTriageConversionApplied({
         companyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID,
@@ -1918,7 +2186,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         nodeIDs: (result.nodes ?? []).map((node) => node.node_id),
         boardIDs,
         cardIDs: savedCards.map((card) => card.card_id),
-        unstarredMessageIDs: cleanIDList(result.unstarred_message_ids ?? []),
+        unstarredMessageIDs: normalizeTriageMessageIDs(result.unstarred_message_ids ?? []),
       });
       const createdNodeID = result.nodes?.[0]?.node_id?.trim() ?? "";
       if (createdNodeID) onNodeOpen?.(createdNodeID);
@@ -2680,11 +2948,11 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         {projectDocumentFullscreen ? projectEditorToolbar : null}
       </div>
       <header style={projectDocumentPaneHeaderStyle}>
-        <span style={projectDocumentPaneTitleStyle}>
+        <span data-project-document-title="true" style={projectDocumentPaneTitleStyle}>
           <ProjectDocumentIcon color={accent} />
           <strong>Project document</strong>
         </span>
-        <span style={projectDocumentPaneActionsStyle}>
+        <span data-project-document-actions="true" style={projectDocumentPaneActionsStyle}>
           <EditorSaveStatusIcon state={projectDocumentSaveFallback} storageKey={projectDocumentSaveStorageKey} compact />
           <EditorSavedTimestamp storageKey={projectDocumentSaveStorageKey} fallbackUpdatedTimestamp={projectDocumentBlock.updatedTimestamp} createdTimestamp={projectDocumentBlock.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />
           <label title="Add attachment" aria-label="Add attachment to Project document" style={projectTextBlockIconButtonStyle(accent, false)}>
@@ -2705,7 +2973,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           >
             <UnifiedNodeShellFullscreenIcon active={projectDocumentFullscreen} />
           </button>
-          <button type="button" title="Close Project document" aria-label="Close Project document" onClick={closeProjectDocument} style={projectDocumentCloseButtonStyle}>×</button>
         </span>
       </header>
       <div style={projectDocumentEditorWrapStyle}>
@@ -2972,16 +3239,16 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <div data-project-header-universal-linker="true" style={projectHeaderUniversalLinkerStyle}>
                 <UniversalLinkerControls
                   busy={relationshipActionBusy}
-                  pickerOpen={emailPicker?.blockID === ""}
+                  pickerOpen={Boolean(emailPicker)}
                   showCreateFloatingNode={false}
                   openPickerAriaLabel="Open universal picker to link this Project"
                   onTogglePicker={(event) => {
-                    if (emailPicker?.blockID === "") {
+                    if (emailPicker) {
                       setEmailPicker(null);
                       return;
                     }
                     const bounds = event.currentTarget.getBoundingClientRect();
-                    setEmailPicker({ blockID: "", anchor: { left: bounds.left, top: bounds.bottom + 7 } });
+                    setEmailPicker({ left: bounds.left, top: bounds.bottom + 7 });
                   }}
                 />
               </div>
@@ -3023,10 +3290,18 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   strokeColor={EDITOR_NEU_SOFT_BORDER}
                   ruleColor={PROJECT_SUMMARY_RULE}
                   selectedMessageID={selectedEmailIDsByBlock[PROJECT_EMAIL_COLUMN_LAYOUT_ID] ?? ""}
+                  focusMessageID={activeProjectEmailChatMessage?.selectionMessageID}
+                  focusBlockID={activeProjectEmailChatMessage?.blockID}
+                  activeEmailSelection={activeProjectEmailSelection}
+                  chatHighlightsByMessageID={projectEmailChatHighlightsByMessageID}
+                  messageAccents={projectEmailMessageAccents}
                   onSelectMessage={(messageID) => setSelectedEmailIDsByBlock((current) => ({ ...current, [PROJECT_EMAIL_COLUMN_LAYOUT_ID]: messageID }))}
                   onClearSelectedMessage={() => setSelectedEmailIDsByBlock((current) => omitRecordKey(current, PROJECT_EMAIL_COLUMN_LAYOUT_ID))}
                   onRemoveEmail={removeAttachedEmail}
                   onEmailSelectionChatRequest={openProjectEmailSelectionChat}
+                  onEmailSelectionTextBoxRequest={(messageID, quote) => { void createProjectEmailTextBlock(messageID, quote); }}
+                  onEmailMessageTextBoxRequest={(messageID) => { void createProjectEmailTextBlock(messageID); }}
+                  onEmailMessageActivate={revealProjectEmailTextBlock}
                   onReplyEditorFocus={() => {
                     setFocusedTextBlockID("");
                     setActiveRichTextBlockID("");
@@ -3038,6 +3313,19 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             ) : null}
             {!projectDocumentOpen && openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? <div role="separator" aria-label="Resize Project email column" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("email", event)} style={projectColumnResizeHandleStyle} /> : null}
             <div ref={textBlocksScrollRef} className="kanban-board-scroll" style={textBlocksScrollStyle}>
+            {pendingProjectEmailChatSelection && !blocks.some((block) => block.id === projectEmailChatDestinationBlockID && block.temporaryEmailChat) ? (
+              <button
+                type="button"
+                data-project-email-chat-parent-destination="true"
+                onClick={chooseProjectEmailChatNewTextBoxDestination}
+              >
+                <ExplorerRowIcon kind="project" />
+                <span>
+                  <strong>{project?.name || "This Project"}</strong>
+                  <small>Create a new text-box grouping for the highlighted message.</small>
+                </span>
+              </button>
+            ) : null}
             <div ref={projectRowVirtualizer.listRef} data-mango-bounded-editor-rows="project" data-mounted-row-count={projectRowVirtualizer.mountedRowCount} style={{ display: "grid", gap: 0, minWidth: 0 }}>
               {projectRowVirtualizer.entries.map((entry) => {
                 if (entry.kind === "spacer") return <div key={entry.key} aria-hidden="true" data-editor-row-spacer="true" style={{ height: entry.height, pointerEvents: "none" }} />;
@@ -3046,12 +3334,20 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 if (!block) return null;
                 const editorOpen = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
                 const chatOpen = openChatBlockIDs.has(block.id);
+                const displayedLinkedEmailMessageIDs = block.linkedEmailMessageIDs.length > 0
+                  ? block.linkedEmailMessageIDs
+                  : block.stagedEmailMessageID?.trim()
+                    ? [block.stagedEmailMessageID.trim()]
+                    : [];
+                const hasLinkedEmailMessages = displayedLinkedEmailMessageIDs.length > 0;
+                const linkedEmailOpen = hasLinkedEmailMessages && openEmailBlockIDs.has(block.id);
+                const contentOpen = editorOpen || linkedEmailOpen;
                 const bodyColumns = [
-                  editorOpen ? "minmax(360px, 1fr)" : "",
+                  contentOpen ? "minmax(360px, 1fr)" : "",
                   chatOpen ? "8px" : "",
                   chatOpen ? `${projectSidePaneWidths.chat}px` : "",
                 ].filter(Boolean).join(" ") || "minmax(0, 1fr)";
-                const minimumWidth = (editorOpen ? 360 : 0) + (chatOpen ? projectSidePaneWidths.chat + 8 : 0);
+                const minimumWidth = (contentOpen ? 360 : 0) + (chatOpen ? projectSidePaneWidths.chat + 8 : 0);
                 const blockSaveStorageKey = mangoTiptapPendingStorageKey({ companyID, resourceType: "project", resourceID: projectID, documentID: block.id });
                 const blockSaveFallback = savingID === block.id ? { status: "saving" as const } : { status: "saved" as const, updatedTimestamp: block.updatedTimestamp };
                 const blockSaveNeedsFailureAttention = Boolean(textBlockSaveFailures[block.id]);
@@ -3062,15 +3358,48 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`}
                       data-project-text-box-row={block.id}
                       data-email-chat-destination={projectEmailChatDestinationBlockID === block.id ? "true" : undefined}
-                      onClickCapture={pendingProjectEmailChatSelection && block.id !== projectEmailChatDefaultBlockID ? (event) => {
-                        const target = event.target;
-                        if (target instanceof Element && target.closest("button, a, input, textarea, select")) return;
-                        if (chooseProjectEmailChatDestination(block.id)) event.stopPropagation();
-                      } : undefined}
-                      style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id), height: TEXT_BLOCK_ROW_HEIGHT, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)", outline: projectEmailChatDestinationBlockID === block.id ? `3px solid ${accent}` : undefined, outlineOffset: -2 }}
+                      style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id, block.color), height: TEXT_BLOCK_ROW_HEIGHT, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)", outline: projectEmailChatDestinationBlockID === block.id ? `3px solid ${accent}` : undefined, outlineOffset: -2 }}
                     >
-                      <div className="mango-editor-header-scroll" style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`, background: "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}>
-                        <div style={{ minWidth: Math.max(448, minimumWidth), height: 37, display: "grid", gridTemplateColumns: `minmax(360px, 1fr) ${chatOpen ? projectSidePaneWidths.chat : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
+                      <div
+                        className="mango-editor-header-scroll"
+                        data-email-chat-destination-candidate={pendingProjectEmailChatSelection && !block.temporaryEmailChat ? "true" : undefined}
+                        onClickCapture={pendingProjectEmailChatSelection && !block.temporaryEmailChat ? (event) => {
+                          const target = event.target;
+                          if (target instanceof Element && target.closest("button, a, input, textarea, select, label, details, summary")) return;
+                          if (chooseProjectEmailChatDestination(block.id)) event.stopPropagation();
+                        } : undefined}
+                        onDragOver={(event) => {
+                          if (block.temporaryEmailChat || !event.dataTransfer.types.includes(EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME)) return;
+                          event.preventDefault();
+                          event.dataTransfer.dropEffect = "copy";
+                        }}
+                        onDrop={(event) => {
+                          if (block.temporaryEmailChat || !event.dataTransfer.types.includes(EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME)) return;
+                          event.preventDefault();
+                          const dragged = parseEmailMessageTextBoxLinkDrag(event.dataTransfer);
+                          if (!dragged || textBoxHasLinkedEmailMessage(block, dragged.emailMessageID)) return;
+                          void linkEmailMessageToProjectTextBlock(dragged.emailMessageID, block.id).catch((cause) => {
+                            setError(cause instanceof Error ? cause.message : "failed_to_link_email_to_project_text_box");
+                          });
+                        }}
+                        style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`, background: block.color ? `linear-gradient(90deg, ${block.color}30, ${block.color}0c 54%, rgba(255,255,255,0.88))` : "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}
+                      >
+                        <div style={{ minWidth: Math.max(448, minimumWidth), height: 37, display: "grid", gridTemplateColumns: `${hasLinkedEmailMessages ? 128 : 44}px minmax(360px, 1fr) ${chatOpen ? projectSidePaneWidths.chat : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
+                          <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
+                            {hasLinkedEmailMessages ? (
+                              <button
+                                type="button"
+                                aria-label={linkedEmailOpen ? "Hide linked email" : "Show linked email"}
+                                aria-expanded={linkedEmailOpen}
+                                title={linkedEmailOpen ? "Hide the linked email" : "Show the linked email"}
+                                onClick={() => setOpenEmailBlockIDs((current) => toggleSetValue(current, block.id))}
+                                style={{ minWidth: 0, minHeight: 26, display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${block.color || EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: linkedEmailOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: block.color || accent, cursor: "pointer", padding: "2px 7px", fontSize: 10, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}
+                              >
+                                <MailIcon color={block.color || accent} />
+                                <span>{linkedEmailOpen ? "Hide email" : "Show email"}</span>
+                              </button>
+                            ) : null}
+                          </div>
                           <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                             <button type="button" title={editorOpen ? "Hide text editor" : "Open text editor"} aria-label="Toggle text editor column" aria-pressed={editorOpen} onClick={() => {
                               if (editorOpen) {
@@ -3087,20 +3416,24 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                             }} style={projectTextBlockIconButtonStyle(accent, editorOpen)}>
                               <TextEditorIcon color={accent} />
                             </button>
-                            <EditorSaveStatusIcon state={blockSaveFallback} storageKey={blockSaveStorageKey} compact />
-                            <EditorSavedTimestamp storageKey={blockSaveStorageKey} fallbackUpdatedTimestamp={block.updatedTimestamp} createdTimestamp={block.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />
-                            <label title="Add attachment" aria-label="Add attachment" style={projectTextBlockIconButtonStyle(accent, false)}>
+                            {!block.temporaryEmailChat ? <EditorSaveStatusIcon state={blockSaveFallback} storageKey={blockSaveStorageKey} compact /> : null}
+                            {!block.temporaryEmailChat ? <EditorSavedTimestamp storageKey={blockSaveStorageKey} fallbackUpdatedTimestamp={block.updatedTimestamp} createdTimestamp={block.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} /> : null}
+                            {!block.temporaryEmailChat ? <label title="Add attachment" aria-label="Add attachment" style={projectTextBlockIconButtonStyle(accent, false)}>
                               <PaperclipIcon color={accent} />
                               <input type="file" multiple style={{ display: "none" }} onChange={(event) => {
                                 const files = event.currentTarget.files;
                                 if (files) void addTextBlockAttachments(block, files);
                                 event.currentTarget.value = "";
                               }} />
-                            </label>
-                            <TextBlockActionsMenu accent={accent} surfaceText={PROJECT_SUMMARY_SURFACE_TEXT} panelBackground={EDITOR_NEU_PANEL_BACKGROUND} strokeColor={EDITOR_NEU_SOFT_BORDER} onDelete={() => void removeTextBlock(block.id)} />
+                            </label> : null}
+                            {!block.temporaryEmailChat ? <TextBlockActionsMenu accent={accent} surfaceText={PROJECT_SUMMARY_SURFACE_TEXT} panelBackground={EDITOR_NEU_PANEL_BACKGROUND} strokeColor={EDITOR_NEU_SOFT_BORDER} onDelete={() => void removeTextBlock(block.id)} /> : null}
                           </div>
                           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                            <button type="button" title={chatOpen ? "Hide chat" : "Open chat"} aria-label="Toggle chat column" aria-pressed={chatOpen} onClick={() => {
+                            <button type="button" title={pendingProjectEmailChatSelection ? "Use this chat column for highlighted email text" : chatOpen ? "Hide chat" : "Open chat"} aria-label={pendingProjectEmailChatSelection ? "Use this chat column for highlighted email text" : "Toggle chat column"} aria-pressed={chatOpen} onClick={() => {
+                              if (pendingProjectEmailChatSelection) {
+                                chooseProjectEmailChatDestination(block.id);
+                                return;
+                              }
                               setOpenChatBlockIDs((current) => toggleSetValue(current, block.id));
                             }} style={projectTextBlockIconButtonStyle(accent, chatOpen)}>
                               <ChatIcon color={accent} />
@@ -3110,8 +3443,43 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                       </div>
                       <div style={{ minWidth: 0, minHeight: 0, overflowX: "auto", overflowY: "hidden" }}>
                         <div data-project-text-box-columns="email-editor-chat" style={{ minWidth: Math.max(1, minimumWidth), height: TEXT_BLOCK_MIN_HEIGHT, display: "grid", gridTemplateColumns: bodyColumns }}>
-                          {editorOpen && (
-                            <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, overflow: "hidden" }}>
+                          {contentOpen && (
+                            <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, display: "grid", gridTemplateRows: linkedEmailOpen && editorOpen ? "minmax(100px, 0.8fr) minmax(120px, 1fr)" : "minmax(0, 1fr)", overflow: "hidden" }}>
+                              {linkedEmailOpen ? (
+                                <div data-project-linked-email-content="true" style={{ minWidth: 0, minHeight: 0, overflow: "auto", borderBottom: editorOpen ? `1px solid ${EDITOR_NEU_SOFT_BORDER}` : undefined }}>
+                                  <LinkedEmailPreviewPane
+                                    messageIDs={displayedLinkedEmailMessageIDs}
+                                    textBoxID={block.id}
+                                    allowUnlinkedPreview={Boolean(block.stagedEmailMessageID)}
+                                    emails={attachedEmails}
+                                    projectID={projectID}
+                                    apiBase={apiBase}
+                                    companyID={companyID}
+                                    currentUserID={currentUserID}
+                                    companyUsers={companyUsers}
+                                    attachmentRequestJSON={attachmentRequestJSON}
+                                    attachmentResourceType="project"
+                                    attachmentResourceID={projectID}
+                                    attachmentInformationID={block.id}
+                                    attachmentEditorSurface="project_text_block_linked_email"
+                                    editable={!block.temporaryEmailChat}
+                                    accent={block.color || accent}
+                                    surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
+                                    strokeColor={EDITOR_NEU_SOFT_BORDER}
+                                    activeSelection={activeProjectEmailSelection}
+                                    chatHighlightsByMessageID={projectEmailChatHighlightsByMessageID}
+                                    onEmailSelectionChatRequest={openProjectEmailSelectionChat}
+                                    onEmailSelectionTextBoxRequest={(messageID, quote) => { void createProjectEmailTextBlock(messageID, quote); }}
+                                    onRemoveEmail={(emailID) => { void removeAttachedEmail(emailID); }}
+                                    onError={setError}
+                                  />
+                                </div>
+                              ) : null}
+                              {editorOpen ? (
+                                <div style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+                                {block.temporaryEmailChat ? (
+                                  <div data-project-pending-email-chat-text-box="true" aria-label="Pending email chat text box" style={{ height: "100%", background: "rgba(255,255,255,0.72)" }} />
+                                ) : (
                               <NodeTextBlockEditor
                                 key={`${block.id}:${projectDocumentRemountRevision}`}
                                 blockID={block.id}
@@ -3168,7 +3536,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                   setActiveRichTextBlockID("");
                                   projectFormattingControllerRef.current = null;
                                   setOpenChatBlockIDs((current) => new Set(current).add(block.id));
-                                  setActiveChatMessageIDs((current) => ({ ...current, [block.id]: messageID }));
+                                  setActiveChatMessageIDs({ [block.id]: messageID });
                                   setChatMessageFocusRequests((current) => ({ ...current, [block.id]: { messageID, requestID: (current[block.id]?.requestID ?? 0) + 1 } }));
                                 }}
                                 onSelectionChatRequest={(selection) => {
@@ -3181,6 +3549,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 onSelectionInlineFormatChange={setProjectInlineFormat}
                                 onSelectionHighlightColorChange={setProjectHighlightColor}
                               />
+                                )}
+                                </div>
+                              ) : null}
                             </div>
                           )}
                           {chatOpen && <div role="separator" aria-label="Resize chat column" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("chat", event)} style={projectColumnResizeHandleStyle} />}
@@ -3195,7 +3566,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 messages={chatMessagesByBlockID.get(block.id) ?? []}
                                 selectionAnchor={chatSelectionAnchors[block.id]}
                                 composerDestination={chatSelectionAnchors[block.id]?.source === "email" ? {
-                                  kind: block.id === projectEmailChatDefaultBlockID ? "existing_project_new_textbox" : "existing_project_existing_textbox",
+                                  kind: block.temporaryEmailChat ? "existing_project_new_textbox" : "existing_project_existing_textbox",
                                   nodeID: projectID,
                                   nodeName: project?.name || "Project",
                                 } : undefined}
@@ -3203,6 +3574,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 draftEntityLinks={chatDraftEntityLinks[block.id] ?? []}
                                 companyUsers={companyUsers}
                                 draftAttachments={chatDraftAttachments[block.id] ?? []}
+                                attachmentsEnabled={!block.temporaryEmailChat}
                                 replyTargetID={chatReplyTargets[block.id] ?? ""}
                                 heightStorageKey={`project-summary-chat-pane-height:${companyID}:${projectID}:${block.id}`}
                                 fixedHeight={TEXT_BLOCK_MIN_HEIGHT}
@@ -3224,7 +3596,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 }}
                                 onDraftChange={(draft) => setChatDrafts((current) => ({ ...current, [block.id]: draft }))}
                                 onDraftEntityLinksChange={(links) => setChatDraftEntityLinks((current) => ({ ...current, [block.id]: links }))}
-                                onActivateMessage={(messageID) => setActiveChatMessageIDs((current) => ({ ...current, [block.id]: current[block.id] === messageID ? "" : messageID }))}
+                                onActivateMessage={(messageID) => setActiveChatMessageIDs((current) => current[block.id] === messageID ? {} : { [block.id]: messageID })}
                                 onNavigateToMessage={(messageID) => setChatNavigationRequests((current) => ({ ...current, [block.id]: { anchorMessageID: messageID, requestID: Date.now() } }))}
                                 onReply={(messageID) => setChatReplyTargets((current) => ({ ...current, [block.id]: messageID }))}
                                 onEditMessage={editChatMessage}
@@ -3232,7 +3604,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 onClearReply={() => setChatReplyTargets((current) => omitRecordKey(current, block.id))}
                                 onClearSelectionAnchor={() => clearProjectEmailSelectionChat(block.id)}
                                 onClearComposerDestination={() => clearProjectEmailSelectionChat(block.id)}
-                                onAttachFiles={(files) => attachChatDraftFiles(block.id, files)}
+                                onAttachFiles={(files) => {
+                                  if (!block.temporaryEmailChat) void attachChatDraftFiles(block.id, files);
+                                }}
                                 onRemoveDraftAttachment={(attachmentID) => setChatDraftAttachments((current) => ({ ...current, [block.id]: (current[block.id] ?? []).filter((attachment) => attachment.id !== attachmentID) }))}
                                 onSubmit={() => void submitChatMessage(block.id)}
                               />
@@ -3439,15 +3813,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           companyID={companyID}
           requestJSON={attachmentRequestJSON}
           sourceType="project"
-          linkTargetTypes={emailPicker.blockID ? ["email_message"] : ["node", "email_message"]}
+          linkTargetTypes={["node", "email_message"]}
           initialMode="link"
           initialCategory="email_message"
-          lockMode={Boolean(emailPicker.blockID)}
-          anchor={emailPicker.anchor}
+          anchor={emailPicker}
           onCancel={() => setEmailPicker(null)}
           onChoose={async (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => {
-            if (mode === "link" && entity.entityType === "node" && !emailPicker.blockID) await addRelationshipFromPicker(entity);
-            else if (mode === "link") await linkEmailFromEditor(emailPicker.blockID, entity);
+            if (mode === "link" && entity.entityType === "node") await addRelationshipFromPicker(entity);
+            else if (mode === "link") await linkEmailToProject(entity);
             else openEditorEntityLink(entity);
             setEmailPicker(null);
           }}
@@ -3465,6 +3838,8 @@ function blockDraftsFromProjections(projections: ProjectProjection[]): ProjectTe
       title: content.title || "Project Summary",
       document: content.document,
       attachments: content.attachments ?? [],
+      linkedEmailMessageIDs: content.linkedEmailMessageIDs,
+      color: content.color,
       createdTimestamp: projection.created_timestamp ?? "",
       updatedTimestamp: projection.updated_timestamp ?? projection.created_timestamp ?? "",
     };
@@ -4410,7 +4785,7 @@ function eligibleProjectNodeRelationshipTargets(
     .filter((node) => (node.logic_gate_ids ?? []).some((logicGateID) => logicGateID.trim()))
     .map((node) => node.node_id.trim())
     .filter(Boolean));
-  return cleanIDList(nodeIDs)
+  return uniqueStringIDs(nodeIDs)
     .filter((nodeID) => eligibleNodeIDs.has(nodeID))
     .map((resourceID) => ({ resourceType: "node", resourceID }));
 }
@@ -5474,11 +5849,12 @@ const projectTimelineRowStyle: React.CSSProperties = {
   alignItems: "start",
 };
 
-const projectTextBlockCardStyle = (focused: boolean): React.CSSProperties => ({
+const projectTextBlockCardStyle = (focused: boolean, color = ""): React.CSSProperties => ({
   minWidth: 0,
-  border: focused ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  border: focused ? "1px solid transparent" : `1px solid ${color || EDITOR_NEU_SOFT_BORDER}`,
+  borderLeft: `${color ? 4 : 1}px solid ${color || (focused ? "transparent" : EDITOR_NEU_SOFT_BORDER)}`,
   borderRadius: 14,
-  background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${focused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`,
+  background: color ? "#ffffff" : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${focused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`,
   overflow: "hidden",
   boxShadow: focused
     ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)"
@@ -5488,6 +5864,7 @@ const projectTextBlockCardStyle = (focused: boolean): React.CSSProperties => ({
 const projectTextBlockIconButtonStyle = (accent: string, active: boolean): React.CSSProperties => ({
   width: 26,
   height: 24,
+  flex: "0 0 auto",
   borderRadius: 8,
   border: active ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
   background: active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
@@ -5546,9 +5923,9 @@ const projectDocumentPaneStyle = (fullscreen: boolean): React.CSSProperties => (
 
 const projectDocumentPaneHeaderStyle: React.CSSProperties = {
   minWidth: 0,
-  display: "flex",
+  display: "grid",
+  gridTemplateColumns: "max-content minmax(0, 1fr)",
   alignItems: "center",
-  justifyContent: "space-between",
   gap: 8,
   padding: "5px 7px 5px 10px",
   borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`,
@@ -5556,18 +5933,20 @@ const projectDocumentPaneHeaderStyle: React.CSSProperties = {
 };
 
 const projectDocumentPaneTitleStyle: React.CSSProperties = {
-  minWidth: 0,
+  minWidth: "max-content",
+  flex: "0 0 auto",
   display: "inline-flex",
   alignItems: "center",
   gap: 7,
   color: PROJECT_SUMMARY_SURFACE_TEXT,
   fontSize: 12,
-  overflow: "hidden",
   whiteSpace: "nowrap",
 };
 
 const projectDocumentPaneActionsStyle: React.CSSProperties = {
   minWidth: 0,
+  width: "100%",
+  overflow: "visible",
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "flex-end",
@@ -5579,22 +5958,6 @@ const projectDocumentEditorWrapStyle: React.CSSProperties = {
   minHeight: 0,
   height: "100%",
   overflow: "hidden",
-};
-
-const projectDocumentCloseButtonStyle: React.CSSProperties = {
-  width: 26,
-  height: 24,
-  display: "grid",
-  placeItems: "center",
-  border: "1px solid transparent",
-  borderRadius: 8,
-  background: "linear-gradient(135deg, #ff5a6b, #ef334e)",
-  color: "#ffffff",
-  cursor: "pointer",
-  padding: 0,
-  fontSize: 16,
-  lineHeight: 1,
-  boxShadow: "0 5px 12px rgba(239,51,78,0.22)",
 };
 
 const projectDocumentFullscreenToolbarStyle = (visible: boolean): React.CSSProperties => ({

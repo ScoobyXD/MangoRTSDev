@@ -78,7 +78,7 @@ for update`, input.Document.CompanyID, input.Document.ResourceID, input.Document
 		}
 		if linked {
 			storedColor := strings.ToUpper(strings.TrimSpace(currentColor.String))
-			if !currentColor.Valid || !validNodeTextboxColor(storedColor) {
+			if !currentColor.Valid || !validEmailTextboxColor(storedColor) {
 				return EditorJSONMetadataCommit{}, ErrInvalid
 			}
 			input.Color = storedColor
@@ -132,14 +132,14 @@ for update`, input.Document.CompanyID, input.Document.ResourceID, input.Document
 		}
 		err = tx.QueryRowContext(ctx, `
 			update project_textboxes
-			set title=$4,email_message_id=$5,email_accent=$6,
+			set title=$4,
 			    metadata_revision=metadata_revision+1,
 			    updated_timestamp=greatest(clock_timestamp(),created_timestamp)
 			where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3
 			  and deleted_timestamp is null
 			returning metadata_revision,updated_timestamp`,
 			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID,
-			input.Title, input.EmailMessageID, input.EmailAccent).Scan(&revision, &now)
+			input.Title).Scan(&revision, &now)
 	default:
 		return EditorJSONMetadataCommit{}, ErrInvalid
 	}

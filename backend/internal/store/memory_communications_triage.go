@@ -46,6 +46,7 @@ type memoryCommunicationsTriageConversionSnapshot struct {
 	emailThreads                   map[string]domain.CommunicationsEmailThread
 	emailThreadScopeIDs            map[string]string
 	nodeEmailThreads               map[string]domain.CommunicationsNodeEmailThread
+	projectEmailRelationships      map[string]memoryProjectEmailRelationship
 	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
 	entityPermissions              map[string]domain.EntityPermission
 	effectiveAccess                map[string]domain.EffectiveResourceAccess
@@ -82,6 +83,7 @@ func (r *MemoryRepo) snapshotCommunicationsTriageConversionStateLocked() memoryC
 		emailThreads:                   cloneCommunicationsEmailThreadsMap(r.emailThreads),
 		emailThreadScopeIDs:            cloneMemoryMap(r.emailThreadScopeIDs),
 		nodeEmailThreads:               cloneMemoryMap(r.nodeEmailThreads),
+		projectEmailRelationships:      cloneMemoryProjectEmailRelationships(r.projectEmailRelationships),
 		emailCollaborationParticipants: cloneMemoryMap(r.emailCollaborationParticipants),
 		entityPermissions:              cloneMemoryMap(r.entityPermissions),
 		effectiveAccess:                cloneMemoryMap(r.effectiveAccess),
@@ -118,6 +120,7 @@ func (r *MemoryRepo) restoreCommunicationsTriageConversionStateLocked(snapshot m
 	r.emailThreads = snapshot.emailThreads
 	r.emailThreadScopeIDs = snapshot.emailThreadScopeIDs
 	r.nodeEmailThreads = snapshot.nodeEmailThreads
+	r.projectEmailRelationships = snapshot.projectEmailRelationships
 	r.emailCollaborationParticipants = snapshot.emailCollaborationParticipants
 	r.entityPermissions = snapshot.entityPermissions
 	r.effectiveAccess = snapshot.effectiveAccess

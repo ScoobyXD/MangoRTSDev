@@ -10,29 +10,7 @@ import (
 	"time"
 )
 
-type nodeTextboxChatPayload struct {
-	BlockID                string          `json:"block_id"`
-	EnsureEmailTextboxLink bool            `json:"ensure_email_textbox_link_on_send"`
-	EmailTextboxColor      string          `json:"email_textbox_color_on_send"`
-	ParentID               string          `json:"parent_id"`
-	SelectionSource        string          `json:"selection_source"`
-	SelectionBlockID       string          `json:"selection_block_id"`
-	SelectionMessageID     string          `json:"selection_message_id"`
-	SelectionQuote         string          `json:"selection_quote"`
-	SelectionStart         *int            `json:"selection_start"`
-	SelectionEnd           *int            `json:"selection_end"`
-	AuthorID               string          `json:"author_id"`
-	AuthorName             string          `json:"author_name"`
-	Message                string          `json:"message"`
-	CreatedTimestamp       string          `json:"created_timestamp"`
-	EditedTimestamp        string          `json:"edited_timestamp"`
-	Attachments            json.RawMessage `json:"attachments"`
-	EntityLinks            json.RawMessage `json:"entity_links"`
-	MentionedUserIDs       json.RawMessage `json:"mentioned_user_ids"`
-	MentionedGroupIDs      json.RawMessage `json:"mentioned_group_ids"`
-}
-
-func ensurePostgresEmailSelectionTextboxLinkForFirstChatTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, payload nodeTextboxChatPayload) error {
+func ensurePostgresEmailSelectionTextboxLinkForFirstChatTx(ctx context.Context, tx *sql.Tx, input NodeInformationInput, payload textboxChatPayload) error {
 	if !payload.EnsureEmailTextboxLink {
 		return nil
 	}
@@ -45,7 +23,7 @@ func ensurePostgresEmailSelectionTextboxLinkForFirstChatTx(ctx context.Context, 
 	}
 	if textboxID == "" || selectionTextboxID != textboxID ||
 		strings.TrimSpace(payload.ParentID) != "" || strings.ToLower(strings.TrimSpace(payload.SelectionSource)) != "email" ||
-		strings.TrimSpace(payload.SelectionQuote) == "" || !validNodeTextboxColor(textboxColor) {
+		strings.TrimSpace(payload.SelectionQuote) == "" || !validEmailTextboxColor(textboxColor) {
 		return ErrInvalid
 	}
 	var textboxExists, nodeThreadExists bool
@@ -90,7 +68,7 @@ where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and delet
 		input.CompanyID, input.NodeID, textboxID, textboxColor); err != nil {
 		return err
 	}
-	attachedPayload, err := json.Marshal(nodeAttachedEmailPayload{
+	attachedPayload, err := json.Marshal(emailTextboxRelationshipPayload{
 		BlockID: textboxID, EmailMessageID: emailMessageID,
 		AttachedTimestamp: time.Now().UTC().Format(time.RFC3339Nano), LinkScope: "message",
 	})
@@ -105,27 +83,7 @@ where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and delet
 	return err
 }
 
-type normalizedNodeTextboxChat struct {
-	TextboxID               string
-	ParentChatID            string
-	SelectionSource         string
-	SelectionTextboxID      string
-	SelectionEmailMessageID string
-	SelectionQuote          string
-	SelectionStart          *int
-	SelectionEnd            *int
-	AuthorUserID            string
-	AuthorDisplayName       string
-	Message                 string
-	CreatedTimestamp        time.Time
-	EditedTimestamp         *time.Time
-	AttachmentIDsJSON       string
-	EntityLinksJSON         string
-	MentionedUserIDsJSON    string
-	MentionedGroupIDsJSON   string
-}
-
-func isNodeTextboxChatType(value string) bool {
+func isTextboxChatType(value string) bool {
 	return strings.EqualFold(strings.TrimSpace(value), CommunicationsEmailCollaborationChatInformationType)
 }
 
@@ -219,10 +177,10 @@ func parseChatTimestamp(value string, required bool) (time.Time, *time.Time, err
 	return parsed, &parsed, nil
 }
 
-func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID string, input NodeInformationInput) (normalizedNodeTextboxChat, error) {
-	var payload nodeTextboxChatPayload
+func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID string, input NodeInformationInput) (normalizedTextboxChat, error) {
+	var payload textboxChatPayload
 	if err := json.Unmarshal([]byte(input.Information), &payload); err != nil {
-		return normalizedNodeTextboxChat{}, ErrInvalid
+		return normalizedTextboxChat{}, ErrInvalid
 	}
 	rawParentID := strings.TrimSpace(payload.ParentID)
 	rawSelectionBlockID := strings.TrimSpace(payload.SelectionBlockID)
@@ -231,45 +189,44 @@ func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID 
 	payload.SelectionBlockID = cleanUUIDText(payload.SelectionBlockID)
 	payload.AuthorID = cleanUUIDText(payload.AuthorID)
 	if payload.BlockID == "" || payload.AuthorID == "" {
-		return normalizedNodeTextboxChat{}, ErrInvalid
+		return normalizedTextboxChat{}, ErrInvalid
 	}
 	if rawParentID != "" && payload.ParentID == "" {
-		return normalizedNodeTextboxChat{}, ErrInvalid
+		return normalizedTextboxChat{}, ErrInvalid
 	}
 	if rawSelectionBlockID != "" && payload.SelectionBlockID == "" {
-		return normalizedNodeTextboxChat{}, ErrInvalid
+		return normalizedTextboxChat{}, ErrInvalid
 	}
 	selectionSource := strings.ToLower(strings.TrimSpace(payload.SelectionSource))
 	if selectionSource == "" {
 		selectionSource = "text"
 	}
 	if selectionSource != "text" && selectionSource != "email" {
-		return normalizedNodeTextboxChat{}, ErrInvalid
+		return normalizedTextboxChat{}, ErrInvalid
 	}
 	selectionMessageID := strings.TrimSpace(payload.SelectionMessageID)
 	selectionEmailMessageID := ""
 	if selectionSource == "text" {
 		if selectionMessageID != "" {
-			return normalizedNodeTextboxChat{}, ErrInvalid
+			return normalizedTextboxChat{}, ErrInvalid
 		}
 	} else {
 		selectionEmailMessageID = cleanUUIDText(selectionMessageID)
 		if selectionEmailMessageID == "" {
-			return normalizedNodeTextboxChat{}, ErrEmailMessageIdentityInvalid
+			return normalizedTextboxChat{}, ErrEmailMessageIdentityInvalid
 		}
 		if cleanUUIDText(input.ActorUserID) == "" {
-			return normalizedNodeTextboxChat{}, ErrInvalid
+			return normalizedTextboxChat{}, ErrInvalid
 		}
-		var canSelect, linkedToAnotherTextbox bool
-		if err := tx.QueryRowContext(ctx, `select exists(
-  select 1
-  from email_relationships relationship
-  where relationship.company_id=$1::uuid
-    and relationship.email_message_id=$2::uuid
-    and relationship.resource_type='node'
-    and relationship.resource_id=$3::uuid
-    and relationship.resource_textbox_id=$4::text
-), exists(
+		canSelect, err := lockPostgresExactEmailTextboxRelationshipTx(
+			ctx, tx, companyID, EntityTypeNode, input.NodeID, payload.BlockID, selectionEmailMessageID,
+		)
+		if err != nil {
+			return normalizedTextboxChat{}, err
+		}
+		if !canSelect {
+			var linkedToAnotherTextbox bool
+			if err := tx.QueryRowContext(ctx, `select exists(
   select 1
   from email_relationships relationship
   where relationship.company_id=$1::uuid
@@ -278,49 +235,48 @@ func normalizeNodeTextboxChatPayload(ctx context.Context, tx *sql.Tx, companyID 
     and relationship.resource_id=$3::uuid
     and relationship.resource_textbox_id is not null
     and relationship.resource_textbox_id<>$4::text
-)`, companyID, selectionEmailMessageID, input.NodeID, payload.BlockID).Scan(&canSelect, &linkedToAnotherTextbox); err != nil {
-			return normalizedNodeTextboxChat{}, err
-		}
-		if !canSelect {
-			if linkedToAnotherTextbox {
-				return normalizedNodeTextboxChat{}, ErrEmailMessageTextboxConflict
+)`, companyID, selectionEmailMessageID, input.NodeID, payload.BlockID).Scan(&linkedToAnotherTextbox); err != nil {
+				return normalizedTextboxChat{}, err
 			}
-			return normalizedNodeTextboxChat{}, ErrEmailMessageNotAttachedToNode
+			if linkedToAnotherTextbox {
+				return normalizedTextboxChat{}, ErrEmailMessageTextboxConflict
+			}
+			return normalizedTextboxChat{}, ErrEmailMessageNotAttachedToNode
 		}
 	}
 	if (payload.SelectionStart == nil) != (payload.SelectionEnd == nil) ||
 		(payload.SelectionStart != nil && (*payload.SelectionStart < 0 || *payload.SelectionEnd < *payload.SelectionStart)) {
-		return normalizedNodeTextboxChat{}, ErrInvalid
+		return normalizedTextboxChat{}, ErrInvalid
 	}
 	attachmentIDsJSON, hasAttachments, err := normalizeChatAttachmentIDs(payload.Attachments)
 	if err != nil {
-		return normalizedNodeTextboxChat{}, err
+		return normalizedTextboxChat{}, err
 	}
 	entityLinksJSON, _, err := normalizeJSONArray(payload.EntityLinks)
 	if err != nil {
-		return normalizedNodeTextboxChat{}, err
+		return normalizedTextboxChat{}, err
 	}
 	mentionedUserIDsJSON, err := normalizeChatUUIDArray(payload.MentionedUserIDs)
 	if err != nil {
-		return normalizedNodeTextboxChat{}, err
+		return normalizedTextboxChat{}, err
 	}
 	mentionedGroupIDsJSON, err := normalizeChatUUIDArray(payload.MentionedGroupIDs)
 	if err != nil {
-		return normalizedNodeTextboxChat{}, err
+		return normalizedTextboxChat{}, err
 	}
 	message := strings.TrimSpace(payload.Message)
 	if message == "" && !hasAttachments {
-		return normalizedNodeTextboxChat{}, ErrInvalid
+		return normalizedTextboxChat{}, ErrInvalid
 	}
 	createdTimestamp, _, err := parseChatTimestamp(payload.CreatedTimestamp, true)
 	if err != nil {
-		return normalizedNodeTextboxChat{}, err
+		return normalizedTextboxChat{}, err
 	}
 	_, editedTimestamp, err := parseChatTimestamp(payload.EditedTimestamp, false)
 	if err != nil {
-		return normalizedNodeTextboxChat{}, err
+		return normalizedTextboxChat{}, err
 	}
-	return normalizedNodeTextboxChat{
+	return normalizedTextboxChat{
 		TextboxID: payload.BlockID, ParentChatID: payload.ParentID,
 		SelectionSource: selectionSource, SelectionTextboxID: payload.SelectionBlockID,
 		SelectionEmailMessageID: selectionEmailMessageID, SelectionQuote: strings.TrimSpace(payload.SelectionQuote),
@@ -421,7 +377,7 @@ order by chat.created_timestamp, chat.chat_id`, companyID, nodeID)
 	return items, rows.Err()
 }
 
-func syncPostgresNodeTextboxChatAttachmentsTx(ctx context.Context, tx *sql.Tx, companyID, chatID string, chat normalizedNodeTextboxChat) error {
+func syncPostgresNodeTextboxChatAttachmentsTx(ctx context.Context, tx *sql.Tx, companyID, chatID string, chat normalizedTextboxChat) error {
 	var wantedCount, foundCount int
 	if err := tx.QueryRowContext(ctx, `
 with wanted as (
@@ -472,7 +428,7 @@ func upsertPostgresNodeTextboxChatTx(ctx context.Context, tx *sql.Tx, input Node
 	if chatID == "" {
 		return domain.NodeProjection{}, false, ErrInvalid
 	}
-	var rawPayload nodeTextboxChatPayload
+	var rawPayload textboxChatPayload
 	if err := json.Unmarshal([]byte(input.Information), &rawPayload); err != nil {
 		return domain.NodeProjection{}, false, ErrInvalid
 	}

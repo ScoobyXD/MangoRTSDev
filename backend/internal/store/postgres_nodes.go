@@ -727,7 +727,7 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 	if !exists {
 		return domain.NodeInformation{}, ErrNotFound
 	}
-	if isNodeTextboxChatType(infoType) {
+	if isTextboxChatType(infoType) {
 		chatID := cleanUUIDText(informationID)
 		if chatID == "" {
 			chatID = newUUIDv7String()

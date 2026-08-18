@@ -409,8 +409,8 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 			rollback()
 		}
 	}()
-	if isNodeTextboxChatType(infoType) {
-		var payload nodeTextboxChatPayload
+	if isTextboxChatType(infoType) {
+		var payload textboxChatPayload
 		if json.Unmarshal([]byte(input.Information), &payload) == nil && payload.EnsureEmailTextboxLink {
 			snapshot := r.snapshotCommunicationsTriageConversionStateLocked()
 			rollback = func() { r.restoreCommunicationsTriageConversionStateLocked(snapshot) }
@@ -420,7 +420,7 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 		}
 	}
 	if strings.EqualFold(infoType, "Attached email") {
-		var payload nodeAttachedEmailPayload
+		var payload emailTextboxRelationshipPayload
 		if json.Unmarshal([]byte(input.Information), &payload) != nil {
 			return domain.NodeInformation{}, ErrInvalid
 		}
@@ -437,7 +437,7 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 			return domain.NodeInformation{}, ErrEmailMessageIdentityInvalid
 		}
 		if (rawBlockID != "" && payload.BlockID == "") ||
-			(payload.TextboxColor != "" && (payload.BlockID == "" || !validNodeTextboxColor(payload.TextboxColor))) ||
+			(payload.TextboxColor != "" && (payload.BlockID == "" || !validEmailTextboxColor(payload.TextboxColor))) ||
 			(payload.BlockID != "" && payload.LinkScope != "message") {
 			return domain.NodeInformation{}, ErrInvalid
 		}
@@ -540,7 +540,7 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 
 func (r *MemoryRepo) ensureMemoryEmailSelectionTextboxLinkForFirstChatLocked(
 	input NodeInformationInput,
-	payload nodeTextboxChatPayload,
+	payload textboxChatPayload,
 	companyID, nodeID string,
 ) error {
 	textboxID := cleanUUIDText(payload.BlockID)
@@ -556,7 +556,7 @@ func (r *MemoryRepo) ensureMemoryEmailSelectionTextboxLinkForFirstChatLocked(
 		strings.ToLower(strings.TrimSpace(payload.SelectionSource)) != "email" ||
 		strings.TrimSpace(payload.SelectionQuote) == "" ||
 		cleanUUIDText(input.ActorUserID) == "" || cleanUUIDText(payload.AuthorID) == "" ||
-		!validNodeTextboxColor(textboxColor) ||
+		!validEmailTextboxColor(textboxColor) ||
 		(payload.SelectionStart == nil) != (payload.SelectionEnd == nil) ||
 		(payload.SelectionStart != nil && (*payload.SelectionStart < 0 || *payload.SelectionEnd < *payload.SelectionStart)) {
 		return ErrInvalid
@@ -603,7 +603,7 @@ func (r *MemoryRepo) ensureMemoryEmailSelectionTextboxLinkForFirstChatLocked(
 		r.nodeText[projectionKey][textboxID] = textbox
 		r.nodeInfo[projectionKey] = append(r.nodeInfo[projectionKey], nodeProjectionAsInformation(textbox))
 	}
-	attachedPayload := nodeAttachedEmailPayload{
+	attachedPayload := emailTextboxRelationshipPayload{
 		BlockID: textboxID, EmailMessageID: emailMessageID, TextboxColor: textboxColor,
 		AttachedTimestamp: time.Now().UTC().Format(time.RFC3339Nano), LinkScope: "message",
 	}
@@ -613,7 +613,7 @@ func (r *MemoryRepo) ensureMemoryEmailSelectionTextboxLinkForFirstChatLocked(
 
 func (r *MemoryRepo) addMemoryNodeTextboxEmailRelationshipLocked(
 	input NodeInformationInput,
-	payload nodeAttachedEmailPayload,
+	payload emailTextboxRelationshipPayload,
 	companyID, nodeID, informationID string,
 ) (domain.NodeInformation, error) {
 	projectionKey := key(companyID, nodeID)
@@ -626,7 +626,7 @@ func (r *MemoryRepo) addMemoryNodeTextboxEmailRelationshipLocked(
 		if projection.IsDeleted || !strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
 			continue
 		}
-		var existing nodeAttachedEmailPayload
+		var existing emailTextboxRelationshipPayload
 		if json.Unmarshal([]byte(projection.Information), &existing) != nil ||
 			cleanUUIDText(existing.EmailMessageID) != payload.EmailMessageID {
 			continue
@@ -686,7 +686,7 @@ func (r *MemoryRepo) addMemoryNodeTextboxEmailRelationshipLocked(
 	}
 	existingColor, _ := textboxPayload["color"].(string)
 	existingColor = strings.ToUpper(strings.TrimSpace(existingColor))
-	if existingColor != "" && !validNodeTextboxColor(existingColor) {
+	if existingColor != "" && !validEmailTextboxColor(existingColor) {
 		return domain.NodeInformation{}, ErrInvalid
 	}
 	if existingColor == "" && payload.TextboxColor == "" {
@@ -889,7 +889,7 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 		}
 	}
 	if projectionExists && strings.EqualFold(strings.TrimSpace(existing.Type), "Attached email") {
-		var relationship nodeAttachedEmailPayload
+		var relationship emailTextboxRelationshipPayload
 		if json.Unmarshal([]byte(existing.Information), &relationship) == nil {
 			rawTextboxID := strings.TrimSpace(relationship.BlockID)
 			textboxID := cleanUUIDText(relationship.BlockID)
@@ -914,13 +914,13 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 						}
 						switch {
 						case strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email"):
-							var linked nodeAttachedEmailPayload
+							var linked emailTextboxRelationshipPayload
 							if json.Unmarshal([]byte(projection.Information), &linked) == nil &&
 								cleanUUIDText(linked.BlockID) != "" && messageIDs[cleanUUIDText(linked.EmailMessageID)] {
 								return ErrEmailRelationshipHasNodeWork
 							}
-						case isNodeTextboxChatType(projection.Type):
-							var chat nodeTextboxChatPayload
+						case isTextboxChatType(projection.Type):
+							var chat textboxChatPayload
 							if json.Unmarshal([]byte(projection.Information), &chat) == nil &&
 								strings.EqualFold(strings.TrimSpace(chat.SelectionSource), "email") &&
 								messageIDs[cleanUUIDText(chat.SelectionMessageID)] {
@@ -931,10 +931,10 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 				}
 			} else if textboxID != "" && emailMessageID != "" && textboxExists && isEditorTextBoxType(textbox.Type) {
 				for _, projection := range r.nodeText[k] {
-					if projection.IsDeleted || !isNodeTextboxChatType(projection.Type) {
+					if projection.IsDeleted || !isTextboxChatType(projection.Type) {
 						continue
 					}
-					var chat nodeTextboxChatPayload
+					var chat textboxChatPayload
 					if json.Unmarshal([]byte(projection.Information), &chat) == nil &&
 						strings.EqualFold(strings.TrimSpace(chat.SelectionSource), "email") &&
 						cleanUUIDText(chat.BlockID) == textboxID &&
@@ -948,7 +948,7 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 						!strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
 						continue
 					}
-					var other nodeAttachedEmailPayload
+					var other emailTextboxRelationshipPayload
 					if json.Unmarshal([]byte(projection.Information), &other) == nil &&
 						cleanUUIDText(other.BlockID) == textboxID {
 						hasOtherRelationship = true

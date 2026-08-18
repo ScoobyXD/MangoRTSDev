@@ -27,7 +27,7 @@ func (r *MemoryRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (Ed
 			if projection.IsDeleted || !strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
 				continue
 			}
-			var relationship nodeAttachedEmailPayload
+			var relationship emailTextboxRelationshipPayload
 			if json.Unmarshal([]byte(projection.Information), &relationship) == nil &&
 				cleanUUIDText(relationship.BlockID) == input.Document.DocumentID {
 				linked = true
@@ -44,17 +44,45 @@ func (r *MemoryRepo) UpdateEditorJSONMetadata(input EditorJSONMetadataInput) (Ed
 				return EditorJSONMetadataCommit{}, ErrInvalid
 			}
 			metadata.Color = strings.ToUpper(strings.TrimSpace(metadata.Color))
-			if !validNodeTextboxColor(metadata.Color) {
+			if !validEmailTextboxColor(metadata.Color) {
 				return EditorJSONMetadataCommit{}, ErrInvalid
 			}
 			input.Color = metadata.Color
 		} else {
 			input.Color = ""
 		}
+	} else if input.Document.ResourceType == EntityTypeProject {
+		input.Color = ""
+		for _, relationship := range r.projectEmailRelationships {
+			if relationship.CompanyID == input.Document.CompanyID && relationship.ProjectID == input.Document.ResourceID &&
+				relationship.ResourceTextboxID == input.Document.DocumentID {
+				color, colorErr := r.memoryProjectTextboxColorLocked(input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID)
+				if colorErr != nil {
+					return EditorJSONMetadataCommit{}, colorErr
+				}
+				if !validEmailTextboxColor(color) {
+					return EditorJSONMetadataCommit{}, ErrInvalid
+				}
+				input.Color = color
+				break
+			}
+		}
 	}
 	information, err := editorProjectionInformationWithJSONMetadata(input, "")
 	if err != nil {
 		return EditorJSONMetadataCommit{}, err
+	}
+	if input.Document.ResourceType == EntityTypeProject {
+		prefix, payload, parseErr := parseMemoryProjectTextboxInformation(information)
+		if parseErr != nil {
+			return EditorJSONMetadataCommit{}, parseErr
+		}
+		payload["color"] = input.Color
+		encoded, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			return EditorJSONMetadataCommit{}, marshalErr
+		}
+		information = prefix + string(encoded)
 	}
 	return r.updateEditorProjectionMetadataLocked(input, information)
 }
@@ -144,13 +172,13 @@ func (r *MemoryRepo) deleteEditorProjectionLocked(ref EditorDocumentRef) {
 			}
 			remove := false
 			switch {
-			case isNodeTextboxChatType(projection.Type):
-				var chat nodeTextboxChatPayload
+			case isTextboxChatType(projection.Type):
+				var chat textboxChatPayload
 				if textboxID != "" && json.Unmarshal([]byte(projection.Information), &chat) == nil && cleanUUIDText(chat.BlockID) == textboxID {
 					remove = true
 				}
 			case strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email"):
-				var relationship nodeAttachedEmailPayload
+				var relationship emailTextboxRelationshipPayload
 				if textboxID != "" && json.Unmarshal([]byte(projection.Information), &relationship) == nil && cleanUUIDText(relationship.BlockID) == textboxID {
 					remove = true
 				}
@@ -180,6 +208,22 @@ func (r *MemoryRepo) deleteEditorProjectionLocked(ref EditorDocumentRef) {
 			r.logicGateText[bucketKey][ref.DocumentID] = item
 		}
 	case EntityTypeProject:
+		textboxID := cleanUUIDText(ref.DocumentID)
+		for projectionID, projection := range r.projectText[bucketKey] {
+			if !isTextboxChatType(projection.Type) {
+				continue
+			}
+			var chat textboxChatPayload
+			if json.Unmarshal([]byte(projection.Information), &chat) == nil && cleanUUIDText(chat.BlockID) == textboxID {
+				delete(r.projectText[bucketKey], projectionID)
+			}
+		}
+		for relationshipKey, relationship := range r.projectEmailRelationships {
+			if relationship.CompanyID == ref.CompanyID && relationship.ProjectID == ref.ResourceID &&
+				relationship.ResourceTextboxID == textboxID {
+				delete(r.projectEmailRelationships, relationshipKey)
+			}
+		}
 		delete(r.projectText[bucketKey], ref.DocumentID)
 	}
 }

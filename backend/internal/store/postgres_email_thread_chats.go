@@ -140,7 +140,7 @@ order by chat.created_timestamp,chat.chat_id`, args...)
 		if err != nil {
 			return domain.CommunicationsEmailThreadChatView{}, err
 		}
-		var payload nodeTextboxChatPayload
+		var payload textboxChatPayload
 		if err := json.Unmarshal([]byte(chat.Information), &payload); err != nil {
 			return domain.CommunicationsEmailThreadChatView{}, err
 		}

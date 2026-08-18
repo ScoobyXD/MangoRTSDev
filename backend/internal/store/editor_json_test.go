@@ -275,3 +275,32 @@ func TestNodeTextboxMetadataAllowsNoColorAndRejectsUnapprovedStoredColors(t *tes
 		t.Fatalf("obsolete Node email accent error=%v, want ErrInvalid", err)
 	}
 }
+
+func TestProjectTextboxMetadataCannotWriteRelationshipOwnedFields(t *testing.T) {
+	document := EditorDocumentRef{
+		CompanyID: "11111111-1111-4111-8111-111111111111", ResourceType: EntityTypeProject,
+		ResourceID: "22222222-2222-4222-8222-222222222222", DocumentID: "33333333-3333-4333-8333-333333333333",
+	}
+	normalized, err := NormalizeEditorJSONMetadata(EditorJSONMetadataInput{Document: document, Title: " Project notes "})
+	if err != nil || normalized.Title != "Project notes" {
+		t.Fatalf("ordinary Project metadata=%+v err=%v", normalized, err)
+	}
+	for name, input := range map[string]EditorJSONMetadataInput{
+		"color":            {Document: document, Color: "#0EA5E9"},
+		"email_message_id": {Document: document, EmailMessageID: "44444444-4444-4444-8444-444444444444"},
+		"email_accent":     {Document: document, EmailAccent: "#0EA5E9"},
+	} {
+		if _, err := NormalizeEditorJSONMetadata(input); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Project %s metadata error=%v, want ErrInvalid", name, err)
+		}
+	}
+	projection, err := editorProjectionInformationWithJSONMetadata(normalized, `{"type":"doc"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, obsolete := range []string{`"color"`, `"email_message_id"`, `"email_accent"`} {
+		if strings.Contains(projection, obsolete) {
+			t.Errorf("Project metadata projection contains relationship-owned field %s: %s", obsolete, projection)
+		}
+	}
+}
