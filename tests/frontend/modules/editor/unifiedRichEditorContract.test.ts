@@ -1256,7 +1256,7 @@ test("draft and signature persistence reject inline file bytes before durable wr
   assert.match(behaviorTests, /http\.StatusBadRequest/);
 });
 
-test("the obsolete EmailPickerModal is removed and email attachment uses the universal picker", () => {
+test("obsolete email pickers and the Node attach shortcut are removed while email attachment uses the universal picker", () => {
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
@@ -1264,7 +1264,9 @@ test("the obsolete EmailPickerModal is removed and email attachment uses the uni
   const emailPane = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UniversalPickerEmailPane.tsx"), "utf8");
 
   assert.doesNotMatch(nodeWorkspaceParts, /EmailPickerModal/);
-  assert.match(nodeWorkspace, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
+  assert.match(nodeWorkspace, /data-node-header-universal-linker="true"/);
+  assert.match(nodeWorkspace, /linkTargetTypes=\{NODE_HEADER_LINK_TARGET_TYPES\}/);
+  assert.doesNotMatch(nodeWorkspace, /emailPickerAnchor|emailPickerLauncherRef|aria-label="Attach email"|initialCategory="email_message"/);
   assert.match(projectSummary, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
   assert.match(universalPicker, /ALL_ENTITY_TYPES[^\n]*\["node", "project", "logic_gate", "email_message"\]/);
   assert.match(universalPicker, /label: "Nodes"[\s\S]*label: "Projects"[\s\S]*label: "Logic Gates"[\s\S]*label: "Emails"/);

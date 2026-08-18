@@ -1121,9 +1121,11 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     await flushWork(24);
     assert.equal(nodeContainer.querySelectorAll('[data-email-chat-destination-candidate="true"]').length, 2, "the two existing text boxes should become pending destinations");
     assert.equal(nodeContainer.querySelectorAll('[data-node-text-box-row]').length, 3, "the pending selection should remain in one temporary local text box");
-    const pendingChatDraft = "Draft follows the selected email destination";
-    const temporaryDestinationRow = Array.from(nodeContainer.querySelectorAll<HTMLElement>('[data-node-text-box-row]'))
+    const stagedRows = Array.from(nodeContainer.querySelectorAll<HTMLElement>('[data-node-text-box-row]'));
+    const temporaryDestinationRow = stagedRows
       .find((row) => !["node-block-0", "node-block-1"].includes(row.dataset.nodeTextBoxRow ?? ""));
+    assert.equal(stagedRows[0], temporaryDestinationRow, "the staged newest text box should start at the top of the Node timeline");
+    const pendingChatDraft = "Draft follows the selected email destination";
     const temporaryComposer = temporaryDestinationRow?.querySelector<HTMLTextAreaElement>('[data-chat-composer-shell="true"] textarea');
     const setTextareaValue = Object.getOwnPropertyDescriptor(dom.window.HTMLTextAreaElement.prototype, "value")?.set;
     assert.ok(temporaryComposer);

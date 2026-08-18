@@ -50,13 +50,16 @@ test("compact timeline rows expose immutable relationship copy and recipient-onl
   assert.match(focusHelper, /"data-node-timeline-event-id"/);
 });
 
-test("node header uses compact email controls, typed links, and the double-hash linker", () => {
+test("node header uses compact email controls, typed links, and the sole double-hash attach linker", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
-  assert.match(nodeSurface, /data-node-header-email-controls="true"[\s\S]*<MailIcon[\s\S]*nodeAttachedEmails\.length[\s\S]*aria-label="Attach email"/);
+  assert.match(nodeSurface, /data-node-header-email-controls="true"[\s\S]*<MailIcon[\s\S]*nodeAttachedEmails\.length/);
   assert.match(nodeSurface, /data-node-header-link="logic_gate"[\s\S]*assignedLogicGateLabel/);
   assert.match(nodeSurface, /data-node-header-link="project"[\s\S]*primaryAssignedProjectLabel/);
   assert.match(nodeSurface, /data-node-header-universal-linker="true"[\s\S]*EDITOR_NEU_EDGE_FRAME[\s\S]*>##<\/strong>[\s\S]*Ready! Open universal linker[\s\S]*initialMode="link"/);
+  assert.match(nodeSurface, /const NODE_HEADER_LINK_TARGET_TYPES = \["logic_gate", "project", "email_message"\] as const/);
   assert.match(nodeSurface, /linkTargetTypes=\{NODE_HEADER_LINK_TARGET_TYPES\}/);
+  assert.match(nodeSurface, /entity\.entityType === "email_message"[\s\S]*await attachEmail\(/);
+  assert.doesNotMatch(nodeSurface, /emailPickerAnchor|emailPickerLauncherRef|aria-label="Attach email"|initialCategory="email_message"/);
   assert.doesNotMatch(nodeSurface, />\s*Email \(\{nodeAttachedEmails\.length\}\)\s*</);
   assert.doesNotMatch(nodeSurface, />\s*Attach email\s*</);
   assert.doesNotMatch(nodeSurface, /Assigned to Logic Gate|Assign to Project|Go to Logic Gate|Go to Project/);

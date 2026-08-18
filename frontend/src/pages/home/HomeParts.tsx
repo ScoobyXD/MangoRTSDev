@@ -28,6 +28,7 @@ import {
 import { downloadEmailAttachment, parseEmailAddressList, type CommunicationsSharedInbox, type CommunicationsSharedInboxRACIRole, type CommunicationsSharedInboxRACIPrincipalType, type CompanyUser, type EmailAddress, type EmailAttachment, type EmailMessage } from "../../modules/communications/communicationsApi";
 import { CalendarInviteCard } from "../../modules/communications/CalendarInviteCard";
 import { EmailQuotedHistory } from "../../modules/communications/EmailQuotedHistory";
+import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { emailAttachmentHasResolvableContent } from "../../modules/communications/emailAttachments";
 import { emailThreadMessageRenderKey, emailThreadMessageSourceLabel, normalizeEmailThreadMessages } from "../../modules/communications/emailThreadMessages";
 import { EditorTabBar } from "../../modules/editor/EditorTabBar";
@@ -5685,6 +5686,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
           {compose.scheduledAt && <span style={mutedSmallStyle}>Scheduled</span>}
           <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
+          {busy && !compose.sharedInboxID.trim() && <OutboundEmailUndoBanner />}
           <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : compose.scheduledAt ? "Schedule" : "Send"}</button>
         </div>
         {compose.attachments.length > 0 && (

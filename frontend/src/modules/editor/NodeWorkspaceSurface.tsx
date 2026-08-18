@@ -496,7 +496,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const paneLayoutScope = `${companyID}\u001f${nodeID}`;
   const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, requestJSON);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const emailPickerLauncherRef = useRef<HTMLButtonElement | null>(null);
   const timelineCreateMenuRef = useRef<HTMLDivElement | null>(null);
   const saveTimersRef = useRef(new Map<string, number>());
   const attachmentUploadScopeRef = useRef({ companyID, nodeID, canEdit, generation: 0 });
@@ -547,7 +546,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const [focusedTextBlockID, setFocusedTextBlockID] = useState<string | null>(null);
   const [activeRowBlockID, setActiveRowBlockID] = useState("");
   const [tiptapPinnedBlockIDs, setTiptapPinnedBlockIDs] = useState<Set<string>>(() => new Set());
-  const [emailPickerAnchor, setEmailPickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
   const [expandedLinkedEmailBlockIDs, setExpandedLinkedEmailBlockIDs] = useState<Set<string>>(() => new Set());
   const [nodeEmailFocusExpanded, setNodeEmailFocusExpanded] = useState(false);
   const [assignedLogicGateRecords, setAssignedLogicGateRecords] = useState<LogicGateRecord[]>([]);
@@ -889,7 +887,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   useEffect(() => {
     if (canEdit) return;
     setTimelineCreateMenuOpen(false);
-    setEmailPickerAnchor(null);
     setHeaderLinkPickerAnchor(null);
     setDropActive(false);
     setDeleteTextBlockConfirmation(null);
@@ -1416,7 +1413,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     };
     temporaryEmailChatBlocksRef.current.set(blockID, temporaryBlock);
     contentByBlockRef.current.set(blockID, initialContent);
-    setBlocks((current) => [...current.filter((block) => block.id !== blockID), temporaryBlock]);
+    setBlocks((current) => [temporaryBlock, ...current.filter((block) => block.id !== blockID)]);
     setClosedEditorBlockIDs((current) => {
       if (!current.has(blockID)) return current;
       const next = new Set(current);
@@ -2256,7 +2253,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (attachedEmails.some((item) => mailboxMatches(item) && (
       item.messageID === email.messageID || Boolean(email.threadID?.trim() && item.threadID?.trim() === email.threadID.trim())
     ))) {
-      setEmailPickerAnchor(null);
       return;
     }
     const id = generateStableInformationID();
@@ -2286,7 +2282,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       });
       const committed = { ...attached, id: created?.information_id?.trim() || id };
       setAttachedEmails((current) => [committed, ...current]);
-      setEmailPickerAnchor(null);
       setSelectedEmailIDsByBlock((current) => ({ ...current, [NODE_EMAIL_COLUMN_LAYOUT_ID]: email.messageID }));
       setClosedEmailBlockIDs((current) => {
         const next = new Set(current);
@@ -3011,22 +3006,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 <MailIcon color={accent} />
                 <span>{nodeAttachedEmails.length}</span>
               </button>
-              {canEdit && <span aria-hidden="true" style={{ width: 1, height: 17, background: EDITOR_NEU_SOFT_BORDER }} />}
-              {canEdit && (
-                <button
-                  ref={emailPickerLauncherRef}
-                  type="button"
-                  title="Attach email"
-                  aria-label="Attach email"
-                  onClick={() => {
-                    const bounds = emailPickerLauncherRef.current?.getBoundingClientRect();
-                    setEmailPickerAnchor({ left: bounds?.left ?? 24, top: (bounds?.bottom ?? 49) + 7 });
-                  }}
-                  style={{ width: 29, height: 28, border: 0, background: "transparent", color: accent, display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
-                >
-                  <PlusIcon color={accent} />
-                </button>
-              )}
             </div>
           )}
 			<AttachmentCountDropdown
@@ -3679,23 +3658,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
         />
       </div>
 
-      {canEdit && emailPickerAnchor && (
-        <UniversalEntityPicker
-          companyID={companyID}
-          requestJSON={requestJSON}
-          sourceType="node"
-          linkTargetTypes={["logic_gate", "project", "email_message"]}
-          initialMode="link"
-          initialCategory="email_message"
-          anchor={emailPickerAnchor}
-          onCancel={() => setEmailPickerAnchor(null)}
-          onChoose={async (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => {
-            if (mode === "link") await linkEntityFromEditor(entity);
-            else openEditorEntityLink(entity);
-            setEmailPickerAnchor(null);
-          }}
-        />
-      )}
       {canEdit && deleteTextBlockConfirmation && (
         <DeleteTextBlockConfirmationModal
           title={deleteTextBlockConfirmation.title}
