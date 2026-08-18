@@ -1,4 +1,4 @@
-Last updated: 2026-07-22
+Last updated: 2026-08-17
 
 # Entity Fields Tests
 
@@ -24,6 +24,7 @@ F13 - Older saved field-specific grouping values migrate to the generic Fields a
 F14 - The Fields page, Projects list, timeline, Project Summary, Logic Gates / Nodes, and Critical Path surfaces use the established elevated surfaces, color highlights, keyboard labels, and narrow-layout patterns.
 F15 - Project Field, Status, Health, Account, and Team dropdowns commit an option as soon as it is selected and immediately close; they never stage changes behind Apply or Cancel buttons.
 F16 - When the generic Project Field column is enabled for the active company, Project Summary mirrors it as a **Fields** metadata control immediately left of Status and edits the same assignments.
+F17 - The Project list Field filter matches a Project when any selected reusable Field is assigned, while Unassigned matches only Projects with no Field assignments; filtering never changes assignments.
 
 ## Scenarios
 
@@ -63,6 +64,7 @@ Given:
 Expected:
 - Choosing `Group by Fields` in the Projects view menu immediately groups projects by their assigned reusable labels.
 - The grouped view includes an FX group and an `Unassigned` group, with no specific-field selector.
+- Filtering by FX keeps Projects assigned FX, while filtering by Unassigned keeps only Projects with no Field assignments.
 - Grouping changes presentation only and does not mutate field assignments.
 
 ### Scenario F-S4: Delete A Field
@@ -80,6 +82,6 @@ Expected:
 
 - `backend/internal/store/entity_fields_test.go` covers validation, case-insensitive uniqueness, ordering, assignment replacement, project read models, assignment counts, deletion cleanup, and schema/migration markers.
 - `backend/internal/http/entity_field_handlers_test.go` covers create, list, Project assignment, and target edit-access enforcement.
-- `tests/frontend/modules/project-management/projectListView.test.ts` covers the generic Field column, immediate-close metadata selection, Project Summary field parity, generic Fields grouping, legacy preference normalization, and elevated responsive surface hooks.
+- `tests/frontend/modules/project-management/projectListView.test.ts` covers the generic Field column, immediate-close metadata selection, Project Summary field parity, generic Fields grouping and filtering, legacy preference normalization, and elevated responsive surface hooks.
 - `tests/frontend/app/preloadDashboardPlan.test.ts` covers isolated Fields route preloading.
 - `npm run build` type-checks the Fields surface, routing, navigation, Project column controls, assignment API, and grouping integration.

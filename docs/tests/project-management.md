@@ -1,10 +1,10 @@
-Last updated: 2026-07-22
+Last updated: 2026-08-17
 
 # Project Management Tests
 
 Coverage Status:
 - Business Logic Covered By Scenarios: 100%
-- Business Logic Covered By Automated Tests: Partial (`backend/internal/store/company_explorer_v2_test.go` covers project deletion preserving associated nodes and Logic Gates; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Project Logic Gates / Nodes universal grouping model and inline node expansion wiring; `tests/frontend/modules/project-management/projectManagementApi.test.ts` covers PM55 title reducers and picker labels; `tests/frontend/modules/editor/nodeTextBlockProjectionSaves.test.ts` covers serialized latest-content project text-block envelopes; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the shared Project relationship inline node shell, project attached-reply resource context, and formatting-owner invalidation; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers shared status precedence; `tests/frontend/app/deepLinkRoutes.test.ts` covers Project return/default-tab history state, browser-back detail clearing, and rename propagation; `tests/frontend/hooks/keyboardShortcutRouting.test.ts` covers the Backspace editing boundary; other rule IDs are not fully mapped to automated tests yet)
+- Business Logic Covered By Automated Tests: Partial (`backend/internal/store/company_explorer_v2_test.go` covers project deletion preserving associated nodes and Logic Gates; `tests/frontend/modules/project-management/projectRelationshipGrouping.test.ts` covers the Project Logic Gates / Nodes universal grouping model and inline node expansion wiring; `tests/frontend/modules/project-management/projectManagementApi.test.ts` covers PM55 title reducers and picker labels; `tests/frontend/modules/project-management/projectListView.test.ts` covers Project list grouping and filter matching; `tests/frontend/modules/editor/nodeTextBlockProjectionSaves.test.ts` covers serialized latest-content project text-block envelopes; `tests/frontend/modules/editor/unifiedRichEditorContract.test.ts` covers the shared Project relationship inline node shell, project attached-reply resource context, and formatting-owner invalidation; `tests/frontend/modules/grouping/universalStatusGrouping.test.ts` covers shared status precedence; `tests/frontend/app/deepLinkRoutes.test.ts` covers Project return/default-tab history state, browser-back detail clearing, and rename propagation; `tests/frontend/hooks/keyboardShortcutRouting.test.ts` covers the Backspace editing boundary; other rule IDs are not fully mapped to automated tests yet)
 
 ## Business Logic
 
@@ -72,6 +72,10 @@ PM60 - Project Logic Gates / Nodes exposes an Add control that opens an elevated
 PM61 - Project Field, Status, Health, Account, and Team dropdowns are one-click commit controls. Selecting an option immediately persists that selected or toggled value and closes the menu, with no staged Apply or Cancel footer. Multi-value controls preserve every other selected ID, while Not set clears the complete assignment.
 PM62 - Project Summary conditionally mirrors the company-local generic Field column as a **Fields** metadata control immediately left of Status. It shows and edits the same project field assignments through the canonical entity-field assignment endpoint.
 PM63 - Project Summary chat gives every current user's sent comment an author-only Edit action. A successful edit PATCHes the stable Project chat projection, preserves reply/source/attachment/creation metadata and ordering, updates the displayed text and mention IDs, and marks the comment Edited. Project Edit permission alone never permits editing or deleting another author's comment, and the generic Project information POST cannot overwrite an existing chat projection.
+PM64 - The Projects view menu exposes Project name, Account, Team, Status, Health, Field, Date created, and Date updated filters beneath the existing grouping controls.
+PM65 - Project list filters use OR between selected values in one category and AND between categories. Date range endpoints are inclusive, and Account, Team, and Field each offer an Unassigned value.
+PM66 - Project list filtering runs before grouping, group counts use only matching Projects, and the header reports the matching count when any filter is active.
+PM67 - Project list filters change presentation only, remain session state, and never mutate Project data or issue a filtered Project API request.
 
 ## Scenarios
 
@@ -87,6 +91,10 @@ Business logic covered:
 - PM7
 - PM8
 - PM9
+- PM64
+- PM65
+- PM66
+- PM67
 
 Given:
 - A company has projects with different access grants for the viewer.
@@ -100,6 +108,9 @@ Expected:
 - Updating metadata requires edit access.
 - Deleting a project requires edit access and removes it through the Company Explorer target deletion path.
 - Deleting the project removes its project-owned associations/data but leaves related nodes, Logic Gates, node-to-gate assignments, and Kanban boards active.
+- The Projects view menu filters the loaded list by Project name, Account, Team, Status, Health, Field, and inclusive created or updated date ranges before grouping it.
+- Choices within one filter category are alternatives, different filter categories must all match, and Account, Team, and Field can match Unassigned Projects.
+- Clearing or reloading the session removes the presentation-only filters without changing any Project.
 
 ### Scenario PM-S2: Project Information, Relationships, And Critical Path
 

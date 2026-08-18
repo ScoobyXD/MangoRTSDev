@@ -27,6 +27,7 @@ export type UniversalGroupingControlsProps<Field extends string> = {
   popoverAlign?: "start" | "end";
   triggerHidden?: boolean;
   openRequestEventName?: string;
+  additionalContent?: React.ReactNode;
 };
 
 type GroupingDropTarget = {
@@ -47,6 +48,7 @@ export function UniversalGroupingControls<Field extends string>({
   popoverAlign = "end",
   triggerHidden = false,
   openRequestEventName,
+  additionalContent,
 }: UniversalGroupingControlsProps<Field>) {
   const [open, setOpen] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -357,6 +359,7 @@ export function UniversalGroupingControls<Field extends string>({
               Clear all
             </button>
           </div>
+          {additionalContent}
         </div>
       )}
     </div>
@@ -461,6 +464,9 @@ function groupPopoverStyle(align: "start" | "end", externalPosition: { left: num
     zIndex: externalPosition ? 10020 : 60,
     width,
     maxWidth: "min(" + width + "px, calc(100vw - 24px))",
+    maxHeight: externalPosition ? `calc(100vh - ${Math.round(externalPosition.top) + 8}px)` : "calc(100vh - 24px)",
+    overflowY: "auto",
+    overscrollBehavior: "contain",
     display: "grid",
     gap: 9,
     border: "1px solid rgba(100, 116, 139, 0.28)",

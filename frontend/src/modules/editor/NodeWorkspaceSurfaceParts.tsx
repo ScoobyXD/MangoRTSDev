@@ -357,9 +357,9 @@ type NodeTextBlockEditorProps = {
   onRecoveryStorageError?: (message: string) => void;
   onRecoveryStorageRecovered?: () => void;
   onChatHighlightActivate?: (messageID: string) => void;
-  onSelectionChatRequest: (selection: TextBlockSelectionDraft) => void;
-  onImageChatRequest: (image: TextBlockImageDraft) => void;
-  onImageNodeRequest: (image: TextBlockImageDraft) => void;
+  onSelectionChatRequest?: (selection: TextBlockSelectionDraft) => void;
+  onImageChatRequest?: (image: TextBlockImageDraft) => void;
+  onImageNodeRequest?: (image: TextBlockImageDraft) => void;
   formattingControllerRef?: React.MutableRefObject<EditorDocumentFormattingController | null>;
   formattingControllerActive?: boolean;
   onSelectionFontSizeChange?: (fontSize: number) => void;
@@ -367,6 +367,7 @@ type NodeTextBlockEditorProps = {
   onSelectionHighlightColorChange?: (color: EditorHighlightColor | null) => void;
   onSelectionTextAlignmentChange?: (alignment: EditorTextAlignment) => void;
   documentScrollMemoryRef?: React.MutableRefObject<EditorScrollMemory>;
+  fillHeight?: boolean;
 };
 
 
@@ -524,15 +525,16 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
     return null;
   }, [props.chatNavigationRequest]);
 
+  const editorHeight = props.fillHeight ? "100%" : TEXT_BLOCK_MIN_HEIGHT;
   if (gate.loading) {
-    return <div aria-label="Preparing editor data format" style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT }} />;
+    return <div aria-label="Preparing editor data format" style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_MIN_HEIGHT, height: editorHeight }} />;
   }
   if (gate.error || !gate.gate) {
-    return <div role="alert" style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT, padding: 12, color: "#b91c1c" }}>Unable to verify this workspace's editor format.</div>;
+    return <div role="alert" style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_MIN_HEIGHT, height: editorHeight, padding: 12, color: "#b91c1c" }}>Unable to verify this workspace's editor format.</div>;
   }
 
   return (
-    <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT }} />}>
+    <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_MIN_HEIGHT, height: editorHeight }} />}>
       <MangoTiptapEditor
       key={`${props.companyID}:${props.surfaceKind}:${props.surfaceKind === "project" ? props.attachmentResourceID ?? props.nodeID : props.nodeID}:${props.blockID}`}
       value={props.documentValue}
@@ -543,7 +545,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
         "data-node-text-block-id": props.surfaceKind === "project" ? undefined : props.blockID,
         "data-project-text-block-id": props.surfaceKind === "project" ? props.blockID : undefined,
       }}
-      style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT, height: TEXT_BLOCK_MIN_HEIGHT, overflowY: "auto", color: props.surfaceText }}
+      style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_MIN_HEIGHT, height: editorHeight, overflowY: "auto", color: props.surfaceText }}
       companyID={props.companyID}
       resourceType={props.surfaceKind === "project" ? "project" : "node"}
       resourceID={props.surfaceKind === "project" ? props.attachmentResourceID ?? props.nodeID : props.nodeID}
@@ -576,15 +578,15 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       onAnnotationActivate={(annotation) => {
         if (annotation.kind === "chat") props.onChatHighlightActivate?.(annotation.id);
       }}
-      onSelectionChatRequest={(selection) => props.onSelectionChatRequest({
+      onSelectionChatRequest={props.onSelectionChatRequest ? (selection) => props.onSelectionChatRequest?.({
         blockID: props.blockID,
         quote: selection.quote,
         startOffset: selection.from,
         endOffset: selection.to,
         x: selection.x,
         y: selection.y,
-      })}
-      onImageChatRequest={(image) => props.onImageChatRequest({
+      }) : undefined}
+      onImageChatRequest={props.onImageChatRequest ? (image) => props.onImageChatRequest?.({
         blockID: props.blockID,
         dataURL: image.objectURL,
         attachmentID: image.attributes.attachmentId,
@@ -597,8 +599,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
         y: image.y,
         downloadX: image.x,
         downloadY: image.y,
-      })}
-      onImageNodeRequest={(image) => props.onImageNodeRequest({
+      }) : undefined}
+      onImageNodeRequest={props.onImageNodeRequest ? (image) => props.onImageNodeRequest?.({
         blockID: props.blockID,
         dataURL: image.objectURL,
         attachmentID: image.attributes.attachmentId,
@@ -611,7 +613,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
         y: image.y,
         downloadX: image.x,
         downloadY: image.y,
-      })}
+      }) : undefined}
       onSelectionFontSizeChange={props.onSelectionFontSizeChange}
       onSelectionInlineFormatChange={props.onSelectionInlineFormatChange}
       onSelectionHighlightColorChange={props.onSelectionHighlightColorChange}

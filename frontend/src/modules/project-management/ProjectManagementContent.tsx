@@ -66,7 +66,16 @@ import {
   type ProjectListGroupingField,
 } from "./ProjectListView.js";
 import { ProjectAssignmentsDialog, ProjectSummaryContent } from "./ProjectSummaryContent.js";
-import { normalizeProjectListFieldColumns, projectListGroupingFields } from "./projectListViewModel.js";
+import { PROJECT_STATUS_CHOICES, toggleProjectFieldValue, type ProjectFieldChoice } from "./ProjectFieldControl.js";
+import {
+  createEmptyProjectListFilters,
+  filterProjectsForList,
+  hasActiveProjectListFilters,
+  normalizeProjectListFieldColumns,
+  PROJECT_LIST_FILTER_UNASSIGNED,
+  projectListGroupingFields,
+  type ProjectListFilters,
+} from "./projectListViewModel.js";
 import { EVENT_PROJECT_VIEW_SETTINGS_REQUESTED } from "./projectViewEvents.js";
 
 type ProjectManagementContentProps = {
@@ -654,6 +663,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
   const [groupBy, setGroupBy] = useState<ProjectGroupingField>("");
   const [subgroupBy, setSubgroupBy] = useState<ProjectGroupingField>("");
   const [projectListGroupings, setProjectListGroupings] = useState(() => readProjectListGroupings(companyID));
+  const [projectListFilters, setProjectListFilters] = useState<ProjectListFilters>(createEmptyProjectListFilters);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [entityFields, setEntityFields] = useState<EntityField[]>([]);
   const [visibleProjectFieldIDs, setVisibleProjectFieldIDs] = useState(() => readProjectListFieldColumns(companyID));
@@ -866,6 +876,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 
   useEffect(() => {
     setProjectListGroupings(readProjectListGroupings(companyID));
+    setProjectListFilters(createEmptyProjectListFilters());
     setVisibleProjectFieldIDs(readProjectListFieldColumns(companyID));
   }, [companyID]);
 
@@ -1007,6 +1018,8 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
 
   const filteredLogicGates = useMemo(() => filterLogicGatesByPerspective(workspace.logicGates, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.logicGates]);
   const filteredNodes = useMemo(() => filterNodesByPerspective(workspace.nodes, explorerPerspective, groupMembers, currentUserID), [currentUserID, explorerPerspective, groupMembers, workspace.nodes]);
+  const filteredProjects = useMemo(() => filterProjectsForList(projects, projectListFilters), [projectListFilters, projects]);
+  const projectListFiltersActive = hasActiveProjectListFilters(projectListFilters);
   const workspaceNodeByID = useMemo(() => new Map(workspace.nodes.map((node) => [node.node_id, node])), [workspace.nodes]);
   const visibleTimelineRows = useMemo(() => {
     const weekRows = timelineRows.filter((row) => rowOverlapsWeek(row, weekDays[0]));
@@ -1374,7 +1387,11 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
         <div className="mango-project-management-header" style={surfaceHeaderStyle}>
           <div style={titleClusterStyle}>
             <h2 style={surfaceTitleStyle}>Projects</h2>
-            <div style={surfaceMetaStyle}>{viewMode === "timeline" ? `${shortDayLabel(weekDays[0])} - ${shortDayLabel(weekDays[WEEK_DAY_COUNT - 1])}` : `${projects.length} projects`}</div>
+            <div style={surfaceMetaStyle}>{viewMode === "timeline"
+              ? `${shortDayLabel(weekDays[0])} - ${shortDayLabel(weekDays[WEEK_DAY_COUNT - 1])}`
+              : projectListFiltersActive
+                ? `${filteredProjects.length} of ${projects.length} projects`
+                : `${projects.length} projects`}</div>
           </div>
           <div role="group" aria-label="Projects view" style={viewToggleStyle}>
             <span aria-hidden="true" style={viewToggleThumbStyle(viewMode)} />
@@ -1393,6 +1410,16 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
               openRequestEventName={EVENT_PROJECT_VIEW_SETTINGS_REQUESTED}
               emptyLabel="Projects are shown in a flat list"
               accent={accent}
+              additionalContent={(
+                <ProjectListFilterControls
+                  projects={projects}
+                  accounts={timelineAccounts.map((account) => ({ id: account.account_id, label: account.name || account.account_id }))}
+                  teams={groups.map((team) => ({ id: team.group_id, label: team.name || team.group_id }))}
+                  fields={entityFields.map((field) => ({ id: field.field_id, label: field.name || field.field_id }))}
+                  filters={projectListFilters}
+                  onChange={setProjectListFilters}
+                />
+              )}
             />
           ) : (
             <ProjectGroupingControls
@@ -1455,7 +1482,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
           />
         ) : (
           <ProjectListView
-            projects={projects}
+            projects={filteredProjects}
             loading={projectsLoading}
             groupings={projectListGroupings}
             accounts={timelineAccounts}
@@ -1634,6 +1661,187 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     </div>
   );
 };
+
+function ProjectListFilterControls({
+  projects,
+  accounts,
+  teams,
+  fields,
+  filters,
+  onChange,
+}: {
+  projects: ProjectRecord[];
+  accounts: ProjectFieldChoice[];
+  teams: ProjectFieldChoice[];
+  fields: ProjectFieldChoice[];
+  filters: ProjectListFilters;
+  onChange: (filters: ProjectListFilters) => void;
+}) {
+  const statusChoices = useMemo(() => {
+    const byID = new Map(PROJECT_STATUS_CHOICES.map((choice) => [choice.id, choice]));
+    projects.forEach((project) => {
+      const status = project.status.trim();
+      if (status && !byID.has(status)) byID.set(status, { id: status, label: status });
+    });
+    return [...byID.values()];
+  }, [projects]);
+  const healthChoices = PROJECT_HEALTH_OPTIONS.map((health) => ({ id: health, label: health }));
+  const unassignedChoice: ProjectFieldChoice = { id: PROJECT_LIST_FILTER_UNASSIGNED, label: "Unassigned" };
+
+  return (
+    <section aria-label="Project filters" style={projectListFiltersStyle}>
+      <div style={projectListFiltersHeaderStyle}>
+        <span style={projectListFiltersTitleStyle}>Filters</span>
+        <button
+          type="button"
+          disabled={!hasActiveProjectListFilters(filters)}
+          style={projectListFiltersClearStyle(!hasActiveProjectListFilters(filters))}
+          onClick={() => onChange(createEmptyProjectListFilters())}
+        >
+          Clear all
+        </button>
+      </div>
+      <label style={projectListNameFilterStyle}>
+        <span style={projectListFilterLabelStyle}>Project name</span>
+        <input
+          type="search"
+          value={filters.nameQuery}
+          aria-label="Filter projects by name"
+          placeholder="Contains text"
+          style={projectListFilterInputStyle}
+          onChange={(event) => onChange({ ...filters, nameQuery: event.currentTarget.value })}
+        />
+      </label>
+      <div style={projectListMultiFiltersStyle}>
+        <ProjectListMultiFilter
+          label="Account"
+          values={filters.accountIDs}
+          choices={[unassignedChoice, ...accounts]}
+          onChange={(accountIDs) => onChange({ ...filters, accountIDs })}
+        />
+        <ProjectListMultiFilter
+          label="Team"
+          values={filters.teamIDs}
+          choices={[unassignedChoice, ...teams]}
+          onChange={(teamIDs) => onChange({ ...filters, teamIDs })}
+        />
+        <ProjectListMultiFilter
+          label="Status"
+          values={filters.statuses}
+          choices={statusChoices}
+          onChange={(statuses) => onChange({ ...filters, statuses })}
+        />
+        <ProjectListMultiFilter
+          label="Health"
+          values={filters.healthValues}
+          choices={healthChoices}
+          onChange={(healthValues) => onChange({ ...filters, healthValues })}
+        />
+        <ProjectListMultiFilter
+          label="Field"
+          values={filters.fieldIDs}
+          choices={[unassignedChoice, ...fields]}
+          onChange={(fieldIDs) => onChange({ ...filters, fieldIDs })}
+        />
+      </div>
+      <ProjectListDateFilter
+        label="Date created"
+        from={filters.createdFrom}
+        to={filters.createdTo}
+        onFromChange={(createdFrom) => onChange({ ...filters, createdFrom })}
+        onToChange={(createdTo) => onChange({ ...filters, createdTo })}
+      />
+      <ProjectListDateFilter
+        label="Date updated"
+        from={filters.updatedFrom}
+        to={filters.updatedTo}
+        onFromChange={(updatedFrom) => onChange({ ...filters, updatedFrom })}
+        onToChange={(updatedTo) => onChange({ ...filters, updatedTo })}
+      />
+    </section>
+  );
+}
+
+function ProjectListMultiFilter({
+  label,
+  values,
+  choices,
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  choices: ReadonlyArray<ProjectFieldChoice>;
+  onChange: (values: string[]) => void;
+}) {
+  const selectedLabels = values.map((value) => choices.find((choice) => choice.id === value)?.label ?? value);
+  const summary = selectedLabels.length === 0
+    ? "Any"
+    : selectedLabels.length <= 2
+      ? selectedLabels.join(", ")
+      : `${selectedLabels.slice(0, 2).join(", ")} +${selectedLabels.length - 2}`;
+  return (
+    <details style={projectListMultiFilterStyle}>
+      <summary style={projectListMultiFilterSummaryStyle}>
+        <span>{label}</span>
+        <span title={selectedLabels.join(", ")} style={projectListMultiFilterValueStyle}>{summary}</span>
+      </summary>
+      <div role="group" aria-label={`Filter by ${label}`} style={projectListMultiFilterOptionsStyle}>
+        <button
+          type="button"
+          aria-pressed={values.length === 0}
+          style={projectListMultiFilterOptionStyle(values.length === 0)}
+          onClick={() => onChange([])}
+        >
+          <span aria-hidden="true">{values.length === 0 ? "\u2713" : ""}</span>
+          Any
+        </button>
+        {choices.map((choice) => {
+          const selected = values.includes(choice.id);
+          return (
+            <button
+              key={choice.id}
+              type="button"
+              aria-pressed={selected}
+              style={projectListMultiFilterOptionStyle(selected)}
+              onClick={() => onChange(toggleProjectFieldValue(values, choice.id))}
+            >
+              <span aria-hidden="true">{selected ? "\u2713" : ""}</span>
+              <span style={projectListMultiFilterOptionLabelStyle}>{choice.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </details>
+  );
+}
+
+function ProjectListDateFilter({
+  label,
+  from,
+  to,
+  onFromChange,
+  onToChange,
+}: {
+  label: string;
+  from: string;
+  to: string;
+  onFromChange: (value: string) => void;
+  onToChange: (value: string) => void;
+}) {
+  return (
+    <fieldset style={projectListDateFilterStyle}>
+      <legend style={projectListDateFilterLegendStyle}>{label}</legend>
+      <label style={projectListDateFieldStyle}>
+        <span>From</span>
+        <input type="date" value={from} aria-label={`${label} from`} style={projectListDateInputStyle} onChange={(event) => onFromChange(event.currentTarget.value)} />
+      </label>
+      <label style={projectListDateFieldStyle}>
+        <span>To</span>
+        <input type="date" value={to} aria-label={`${label} to`} style={projectListDateInputStyle} onChange={(event) => onToChange(event.currentTarget.value)} />
+      </label>
+    </fieldset>
+  );
+}
 
 function ProjectGroupingControls({
   groupBy,
@@ -2179,6 +2387,183 @@ const surfaceHeaderActionsStyle: React.CSSProperties = {
   justifyContent: "flex-end",
   gap: 8,
   flexWrap: "wrap",
+};
+
+const projectListFiltersStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 7,
+  borderTop: "1px solid rgba(148, 163, 184, 0.24)",
+  paddingTop: 9,
+};
+
+const projectListFiltersHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+};
+
+const projectListFiltersTitleStyle: React.CSSProperties = {
+  color: "#334155",
+  fontSize: 11,
+  fontWeight: 950,
+};
+
+const projectListFiltersClearStyle = (disabled: boolean): React.CSSProperties => ({
+  minHeight: 24,
+  border: "none",
+  borderRadius: 6,
+  background: "transparent",
+  color: disabled ? "#cbd5e1" : "#64748b",
+  font: "inherit",
+  fontSize: 10,
+  fontWeight: 850,
+  cursor: disabled ? "default" : "pointer",
+  padding: "0 5px",
+});
+
+const projectListNameFilterStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "82px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 7,
+};
+
+const projectListFilterLabelStyle: React.CSSProperties = {
+  color: "#475569",
+  fontSize: 10.5,
+  fontWeight: 850,
+};
+
+const projectListFilterInputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 29,
+  border: "1px solid rgba(148, 163, 184, 0.30)",
+  borderRadius: 6,
+  background: "#ffffff",
+  color: "#1e293b",
+  font: "inherit",
+  fontSize: 11,
+  padding: "0 7px",
+  boxSizing: "border-box",
+};
+
+const projectListMultiFiltersStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 5,
+};
+
+const projectListMultiFilterStyle: React.CSSProperties = {
+  minWidth: 0,
+  border: "1px solid rgba(148, 163, 184, 0.26)",
+  borderRadius: 7,
+  background: "rgba(255, 255, 255, 0.92)",
+  overflow: "hidden",
+};
+
+const projectListMultiFilterSummaryStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 29,
+  display: "grid",
+  gridTemplateColumns: "72px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 7,
+  color: "#475569",
+  cursor: "pointer",
+  fontSize: 10.5,
+  fontWeight: 900,
+  padding: "0 7px",
+  boxSizing: "border-box",
+};
+
+const projectListMultiFilterValueStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#1d4ed8",
+  textAlign: "right",
+};
+
+const projectListMultiFilterOptionsStyle: React.CSSProperties = {
+  maxHeight: 148,
+  display: "grid",
+  gap: 3,
+  overflowY: "auto",
+  borderTop: "1px solid rgba(226, 232, 240, 0.9)",
+  padding: 5,
+};
+
+const projectListMultiFilterOptionStyle = (selected: boolean): React.CSSProperties => ({
+  minWidth: 0,
+  minHeight: 28,
+  display: "grid",
+  gridTemplateColumns: "16px minmax(0, 1fr)",
+  alignItems: "center",
+  gap: 6,
+  border: selected ? "1px solid rgba(37, 99, 235, 0.22)" : "1px solid transparent",
+  borderRadius: 6,
+  background: selected ? "rgba(239, 246, 255, 0.92)" : "transparent",
+  color: selected ? "#1d4ed8" : "#334155",
+  cursor: "pointer",
+  font: "inherit",
+  fontSize: 10.5,
+  fontWeight: 800,
+  padding: "0 7px",
+  textAlign: "left",
+});
+
+const projectListMultiFilterOptionLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const projectListDateFilterStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+  gap: 6,
+  border: "1px solid rgba(148, 163, 184, 0.26)",
+  borderRadius: 7,
+  margin: 0,
+  padding: "5px 7px 7px",
+  boxSizing: "border-box",
+};
+
+const projectListDateFilterLegendStyle: React.CSSProperties = {
+  color: "#475569",
+  fontSize: 10.5,
+  fontWeight: 900,
+  padding: "0 4px",
+};
+
+const projectListDateFieldStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: 3,
+  color: "#64748b",
+  fontSize: 9.5,
+  fontWeight: 800,
+};
+
+const projectListDateInputStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 27,
+  border: "1px solid rgba(148, 163, 184, 0.30)",
+  borderRadius: 5,
+  background: "#ffffff",
+  color: "#1e293b",
+  font: "inherit",
+  fontSize: 9.5,
+  padding: "0 3px",
+  boxSizing: "border-box",
 };
 
 const projectGroupingControlsStyle: React.CSSProperties = {
