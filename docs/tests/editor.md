@@ -100,8 +100,10 @@ Last updated: 2026-08-08
 22. A new pasted image and an existing image with missing or `break` position must render as a full-row break-text image.
 23. Dropping an existing document image in the leftmost or rightmost 30 percent of the editor must move its Tiptap node to the drop anchor and wrap following text on that side; dropping it in the middle 40 percent must move it as a centered break-text image.
 24. Wrapped image placement must use only the optional `wrap` image position plus existing alignment in schema version 1, and the active and sleeping renderers must match without coordinates or data migration.
+25. A sleeping editor table must honor every stored column width before the editor is activated.
+26. Selecting an editor table must not show the detached top-right row, column, header, and delete command strip.
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 # Process Story: Editor policy status follows the draft automatically
 
@@ -213,7 +215,7 @@ Mango reveals the live document only after the caret is ready, without replacing
 ↓
 Automatic Numbering uses lowercase alphabetic markers, while Checkbox Enter creates one unchecked Checkbox row with the caret beside its box and no intervening ordinary row
 ↓
-A table starts at the size required by its equal cells instead of filling the editor width
+A loaded table first paints at its stored column widths, or equal 112-pixel base widths when no widths were stored, instead of changing size after activation
 ↓
 Right-clicking a cell opens the shared elevated menu above editor clipping, with grouped create actions and a red delete section
 ↓
@@ -521,9 +523,9 @@ Coverage Status:
 - Automatic Numbering uses the repeating four-depth cycle `1.`, `a.`, `1)`, `a)`. Alphabetic markers are lowercase at every repeated alphabetic depth.
 - The user-facing outline option is **Checkbox**. On an empty ordinary row, Enter converts that row to one unchecked Checkbox row and leaves the caret in its text area. On a nonempty ordinary row, the split and Checkbox conversion are one document transaction with no plain empty row between the surrounding content and the Checkbox row. Enter inside a Checkbox row creates the next adjacent unchecked Checkbox row, and Tab/Shift+Tab nest or unnest only that row without changing the checkbox symbol.
 - The active and sleeping Checkbox DOM structures must have matching label, input, and content wrappers so activating an editor cannot change row geometry.
-- A table occupies only the intrinsic width of its equal 112-pixel columns and equal 36-pixel rows. It does not expand to the full editor width merely because space is available.
+- A loaded table uses its stored column widths in both the sleeping and active renderers. A table without stored widths uses intrinsic equal 112-pixel columns and 36-pixel rows instead of filling the editor width.
 - The table-cell context menu uses the shared elevated right-click surface, is portaled to viewport coordinates outside editor overflow clipping, and follows the shared grouped pattern: column actions, a separator, row actions, a separator, then red delete actions at the bottom.
-- Selecting a table exposes one bottom-right growth handle. Pointer movement previews only whole nonnegative row and column additions using the table's equal cell geometry. Pointer cancel makes no change; pointer release commits all previewed additions in one ProseMirror transaction and clears stored column widths so every resulting column remains equal.
+- Selecting a table exposes one bottom-right growth handle and no detached top-right command strip. Pointer movement previews only whole nonnegative row and column additions using the table's equal cell geometry. Pointer cancel makes no change; pointer release commits all previewed additions in one ProseMirror transaction and clears stored column widths so every resulting column remains equal.
 - Table menu and growth mutations use the normal revisioned document save path. Neither interaction creates a separate table persistence path.
 
 ### 2026-08-06 Portable Tiptap Image Copy
@@ -701,7 +703,7 @@ ED120 - Copying a selected attachment image in an active Node, Project, or Logic
 ED121 - Editor activation is selection-only. The sleeping document remains painted until the live Tiptap DOM and requested caret are ready; the reveal must not blink, change scroll, save, create a block, or add an empty row. A canonical document that is structurally equal under the active ProseMirror schema updates canonical authority without a replacement transaction.
 ED122 - Automatic Numbering repeats `1.`, `a.`, `1)`, `a)` by nesting depth. The user-facing option is Checkbox. Empty-row Checkbox Enter produces one unchecked Checkbox row with its caret in that row; nonempty ordinary-row Enter performs the split and conversion atomically; existing Checkbox Enter produces the next adjacent unchecked item. Checkbox nesting changes depth without changing its symbol or inserting an ordinary row.
 ED123 - The table-cell context menu uses the shared portaled right-click surface at viewport coordinates, outside editor overflow clipping. Column actions and row actions are grouped by separators, and the bottom delete row, delete column, and delete table actions use destructive red text.
-ED124 - Tables begin at intrinsic content size with equal 112-pixel columns and equal 36-pixel rows instead of filling available editor width. A selected table exposes a bottom-right growth handle; its drag previews whole nonnegative row and column additions, cancel changes nothing, and release commits the preview once while preserving equal column widths and row heights.
+ED124 - A table without stored widths begins at intrinsic content size with equal 112-pixel columns and equal 36-pixel rows instead of filling available editor width. A loaded table paints its stored column widths identically before and after activation. A selected table exposes a bottom-right growth handle without a detached top-right command strip; its drag previews whole nonnegative row and column additions, cancel changes nothing, and release commits the preview once while preserving equal column widths and row heights.
 ED125 - Completing `->` or `<-` by typing in an ordinary Node, Project, or Logic Gate Tiptap text position replaces that pair with one durable Unicode `U+2192` or `U+2190` and keeps the caret after it. This shared input rule applies to paragraphs, headings, list items, Checkbox items, and table cells, but not code blocks. It does not rewrite loaded or pasted ASCII pairs, and no sanitizer, clipboard path, history path, recovery path, or realtime path may convert a stored Unicode arrow back into ASCII.
 ED126 - History snapshot creation is action-triggered, never timer-triggered. A changed Node, Logic Gate, or Project requests one history snapshot when its owning editor surface unmounts because the user closes its window, panel, Project/Updates preview, switches to another resource, changes Mango routes, or uses browser Back or Forward. The browser `pagehide` event makes the same best-effort request for refresh, external navigation, and tab/window close. No interval, background scan, inactive-resource loop, unload prompt, crash recovery, OS-kill handling, or discarded-tab service may create history snapshots.
 ED127 - A resource becomes changed for exit history only after a local editable history-visible mutation: a Tiptap document transaction; a user-created Node or Project textbox or successful deletion; Node or Project textbox title/attachment metadata change; or a confirmed saved-version restore. Loading canonical data, automatically ensuring an initial empty textbox, receiving a remote refresh, focusing, selecting, scrolling, opening tabs/panes, or closing an unchanged view does not mark the resource and must create no exit-history row.
