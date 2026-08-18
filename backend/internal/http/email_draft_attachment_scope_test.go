@@ -156,7 +156,7 @@ func TestCommunicationsEmailDraftSummaryDoesNotHydrateBodyOrAttachments(t *testi
 	}
 }
 
-func TestSharedEmailDraftAttachmentsUseSharedInboxEditPermissions(t *testing.T) {
+func TestSharedEmailDraftAttachmentsRequireCreatorAndSharedInboxPermission(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	const draftID = "shared-attachment-draft"
 	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
@@ -167,18 +167,23 @@ func TestSharedEmailDraftAttachmentsUseSharedInboxEditPermissions(t *testing.T) 
 	}
 	resourceID := draftID
 	path := "/v1/resources/email_draft/" + resourceID + "/attachments?company_id=" + url.QueryEscape(fixture.companyID)
-	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.viewer, domain.RoleCompanyUser, http.StatusOK)
+	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
+	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.viewer, domain.RoleCompanyUser, http.StatusNotFound)
 	fixture.expectStatus(t, http.MethodGet, path, nil, fixture.attacker, domain.RoleCompanyUser, http.StatusNotFound)
 
 	server := NewServer(fixture.repo)
+	ownerRequest := emailDraftAttachmentScopeRequest(fixture.owner, fixture.companyID, domain.RoleCompanyUser)
+	if recorder := httptest.NewRecorder(); !server.requireAttachmentResourceEdit(recorder, ownerRequest, fixture.companyID, "email_draft", resourceID) {
+		t.Fatalf("shared-draft creator denied status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
 	viewerRequest := emailDraftAttachmentScopeRequest(fixture.viewer, fixture.companyID, domain.RoleCompanyUser)
 	viewerRecorder := httptest.NewRecorder()
-	if !server.requireAttachmentResourceEdit(viewerRecorder, viewerRequest, fixture.companyID, "email_draft", resourceID) {
-		t.Fatalf("shared-inbox edit member denied status=%d body=%s", viewerRecorder.Code, viewerRecorder.Body.String())
+	if server.requireAttachmentResourceEdit(viewerRecorder, viewerRequest, fixture.companyID, "email_draft", resourceID) {
+		t.Fatal("shared-inbox member unexpectedly received another creator's draft attachment access")
 	}
 	editorRequest := emailDraftAttachmentScopeRequest(fixture.editor, fixture.companyID, domain.RoleCompanyUser)
-	if recorder := httptest.NewRecorder(); !server.requireAttachmentResourceEdit(recorder, editorRequest, fixture.companyID, "email_draft", resourceID) {
-		t.Fatalf("shared-inbox editor denied status=%d body=%s", recorder.Code, recorder.Body.String())
+	if recorder := httptest.NewRecorder(); server.requireAttachmentResourceEdit(recorder, editorRequest, fixture.companyID, "email_draft", resourceID) {
+		t.Fatal("shared-inbox editor unexpectedly received another creator's draft attachment access")
 	}
 }
 
@@ -196,9 +201,13 @@ func TestSharedEmailDraftAttachmentReadRechecksPermissionAndLiveDraft(t *testing
 	}
 	attachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, resourceID, "shared.txt", "text/plain", []byte("shared"))
 
+	owner := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, attachmentID)
+	if owner.Code != http.StatusOK {
+		t.Fatalf("shared creator active-draft status=%d body=%s", owner.Code, owner.Body.String())
+	}
 	viewer := serveEmailAttachmentScopeRequest(handler, fixture.viewer, fixture.companyID, domain.RoleCompanyUser, attachmentID)
-	if viewer.Code != http.StatusOK {
-		t.Fatalf("shared viewer active-draft status=%d body=%s", viewer.Code, viewer.Body.String())
+	if viewer.Code != http.StatusNotFound {
+		t.Fatalf("shared non-creator active-draft status=%d body=%s", viewer.Code, viewer.Body.String())
 	}
 	manager := serveEmailAttachmentScopeRequest(handler, fixture.manager, fixture.companyID, domain.RoleCompanyManager, attachmentID)
 	if manager.Code != http.StatusNotFound {
@@ -212,21 +221,21 @@ func TestSharedEmailDraftAttachmentReadRechecksPermissionAndLiveDraft(t *testing
 		CompanyID: fixture.companyID, EntityType: store.EntityTypeSharedInbox, EntityID: fixture.sharedA.FolderID,
 		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
 		Permissions: []store.EntityPermissionInput{
-			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: fixture.owner.UserID, AccessLevel: store.EntityPermissionEdit},
 			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: fixture.editor.UserID, AccessLevel: store.EntityPermissionEdit},
 		},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	revoked := serveEmailAttachmentScopeRequest(handler, fixture.viewer, fixture.companyID, domain.RoleCompanyUser, attachmentID)
+	revoked := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, attachmentID)
 	if revoked.Code != http.StatusNotFound {
-		t.Fatalf("revoked shared viewer status=%d body=%s", revoked.Code, revoked.Body.String())
+		t.Fatalf("revoked shared creator status=%d body=%s", revoked.Code, revoked.Body.String())
 	}
-	owner := serveEmailAttachmentScopeRequest(handler, fixture.owner, fixture.companyID, domain.RoleCompanyUser, attachmentID)
-	if owner.Code != http.StatusOK {
-		t.Fatalf("shared owner after viewer revocation status=%d body=%s", owner.Code, owner.Body.String())
+	if err := fixture.repo.SoftDeleteCommunicationsEmailDraft(store.CommunicationsEmailDraftDeleteInput{
+		CompanyID: fixture.companyID, DraftID: draftID, SharedInboxID: fixture.sharedA.FolderID,
+		ParticipantUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
 	}
-	fixture.expectStatus(t, http.MethodDelete, fixture.draftByIDPath(draftID, "", fixture.sharedA.FolderID), nil, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
 	for name, actor := range map[string]struct {
 		user domain.User
 		role string

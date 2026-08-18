@@ -4,8 +4,10 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"miraeopus/backend/internal/domain"
 )
 
@@ -61,6 +63,8 @@ func TestPostgresCommunicationsEmailDraftQueriesKeepExactImmutableScopePredicate
 
 	upsertBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) UpsertCommunicationsEmailDraft")
 	for _, required := range []string{
+		"email_drafts.kind=excluded.kind",
+		"email_drafts.source_email_message_id is not distinct from excluded.source_email_message_id",
 		"email_drafts.personal_user_id is not distinct from excluded.personal_user_id",
 		"email_drafts.personal_account_email is not distinct from excluded.personal_account_email",
 		"email_drafts.shared_inbox_id is not distinct from excluded.shared_inbox_id",
@@ -68,6 +72,23 @@ func TestPostgresCommunicationsEmailDraftQueriesKeepExactImmutableScopePredicate
 		if !strings.Contains(upsertBody, required) {
 			t.Fatalf("UpsertCommunicationsEmailDraft missing immutable scope guard %q", required)
 		}
+	}
+	existingOnlyBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) updateExistingCommunicationsEmailReplyDraft")
+	for _, required := range []string{
+		"source_email_message_id=$3::uuid",
+		"created_by_user_id=$4::uuid",
+		"kind='reply'",
+		"personal_user_id is not distinct from nullif($6,'')::uuid",
+		"personal_account_email is not distinct from nullif($7,'')",
+		"shared_inbox_id is not distinct from nullif($16,'')::uuid",
+	} {
+		if !strings.Contains(existingOnlyBody, required) {
+			t.Fatalf("existing-only Reply update missing immutable identity predicate %q", required)
+		}
+	}
+	ensureBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) EnsureCommunicationsEmailReplyDraft")
+	if !strings.Contains(ensureBody, "on conflict do nothing") || strings.Contains(ensureBody, "for {") {
+		t.Fatal("Reply ensure must converge through one conflict-safe insert without a retry loop")
 	}
 
 	deleteBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) SoftDeleteCommunicationsEmailDraft")
@@ -78,6 +99,43 @@ func TestPostgresCommunicationsEmailDraftQueriesKeepExactImmutableScopePredicate
 	} {
 		if !strings.Contains(deleteBody, required) {
 			t.Fatalf("SoftDeleteCommunicationsEmailDraft missing exact scope predicate %q", required)
+		}
+	}
+}
+
+func TestPostgresEmailDraftAttachmentAccessRequiresCreatorAndMailboxPermission(t *testing.T) {
+	raw, err := os.ReadFile("email_attachment_access.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := extractFunctionSourceForTest(t, strings.ReplaceAll(string(raw), "\r\n", "\n"), "func (r *PostgresRepo) GetEmailAttachmentResourceAccess")
+	for _, required := range []string{
+		"draft.created_by_user_id=$2::uuid",
+		"draft.personal_user_id=$2::uuid",
+		"mangorts_user_can_access_resource(",
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("email_draft attachment access missing %q", required)
+		}
+	}
+}
+
+func TestPostgresEmailDraftUpsertMapsOnlySemanticUniqueIndexes(t *testing.T) {
+	for _, constraint := range []string{
+		"idx_email_drafts_active_personal_message_personal_account",
+		"idx_email_drafts_active_personal_message_shared_inbox",
+	} {
+		err := communicationsEmailDraftUpsertError(&pgconn.PgError{Code: "23505", ConstraintName: constraint})
+		if !errors.Is(err, ErrEmailDraftIdentityConflict) {
+			t.Fatalf("constraint %q error=%v, want ErrEmailDraftIdentityConflict", constraint, err)
+		}
+	}
+	for _, pgErr := range []*pgconn.PgError{
+		{Code: "23505", ConstraintName: "email_drafts_pkey"},
+		{Code: "23503", ConstraintName: "idx_email_drafts_active_personal_message_personal_account"},
+	} {
+		if got := communicationsEmailDraftUpsertError(pgErr); got != pgErr {
+			t.Fatalf("unrelated PostgreSQL error was remapped: %#v", pgErr)
 		}
 	}
 }
@@ -173,6 +231,116 @@ func TestMemoryCommunicationsEmailReplyRequiresStoredSourceMessage(t *testing.T)
 	})
 	if !errors.Is(err, ErrEmailDraftSourceNotFound) {
 		t.Fatalf("reply with unknown source error = %v, want ErrEmailDraftSourceNotFound", err)
+	}
+}
+
+func TestMemoryCommunicationsEmailReplyEnsureConvergesAndExistingOnlyUpdates(t *testing.T) {
+	repo, companyID, owner, _, _, _ := newEmailDraftScopeStoreFixture(t)
+	thread, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		AccountEmail: "owner-a@example.com", Provider: "google", ProviderThreadID: "provider-thread-ensure",
+		SelectedMessageID: "provider-message-ensure",
+		Messages:          []domain.EmailMessageSnapshot{{ID: "provider-message-ensure", ThreadID: "provider-thread-ensure", Subject: "Ensure source"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceMessageID := thread.Messages[0].EmailMessageID
+	input := CommunicationsEmailDraftInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, SourceMessageID: sourceMessageID,
+		AccountEmail: "owner-a@example.com", Subject: "Initial", BodyEditorHTML: "<p>Initial</p>",
+	}
+
+	const callers = 8
+	start := make(chan struct{})
+	results := make([]domain.CommunicationsEmailDraft, callers)
+	created := make([]bool, callers)
+	errs := make([]error, callers)
+	var wait sync.WaitGroup
+	wait.Add(callers)
+	for index := 0; index < callers; index++ {
+		go func(index int) {
+			defer wait.Done()
+			<-start
+			results[index], created[index], errs[index] = repo.EnsureCommunicationsEmailReplyDraft(input)
+		}(index)
+	}
+	close(start)
+	wait.Wait()
+
+	createdCount := 0
+	for index := range results {
+		if errs[index] != nil {
+			t.Fatalf("ensure[%d]: %v", index, errs[index])
+		}
+		if results[index].DraftID != results[0].DraftID {
+			t.Fatalf("ensure[%d] draft=%q, want %q", index, results[index].DraftID, results[0].DraftID)
+		}
+		if created[index] {
+			createdCount++
+		}
+	}
+	if createdCount != 1 || !strings.HasPrefix(results[0].DraftID, "draft:reply:") {
+		t.Fatalf("created count=%d draft=%+v", createdCount, results[0])
+	}
+
+	filtered := mustListEmailDrafts(t, repo, CommunicationsEmailDraftListInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		ParticipantUserID: owner.UserID, Kind: "reply", SourceMessageIDs: []string{sourceMessageID},
+	})
+	assertDraftIDs(t, filtered, results[0].DraftID)
+
+	updated, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: results[0].DraftID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "reply", SourceMessageID: sourceMessageID,
+		AccountEmail: "owner-a@example.com", Subject: "Updated", BodyEditorHTML: "<p>Updated</p>", ExistingOnly: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Subject != "Updated" || updated.BodyEditorHTML != "<p>Updated</p>" || updated.SourceMessageID != sourceMessageID {
+		t.Fatalf("existing-only update=%+v", updated)
+	}
+	if _, err := repo.UpsertCommunicationsEmailDraft(CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: "draft:reply:missing", PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, Kind: "reply", SourceMessageID: sourceMessageID,
+		AccountEmail: "owner-a@example.com", ExistingOnly: true,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing existing-only update error=%v, want ErrNotFound", err)
+	}
+}
+
+func TestMemoryCommunicationsEmailForwardAfterReplyReturnsSourceKindConflict(t *testing.T) {
+	repo, companyID, owner, _, _, _ := newEmailDraftScopeStoreFixture(t)
+	thread, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		AccountEmail: "owner-a@example.com", Provider: "google", ProviderThreadID: "provider-thread-reverse-conflict",
+		SelectedMessageID: "provider-message-reverse-conflict",
+		Messages:          []domain.EmailMessageSnapshot{{ID: "provider-message-reverse-conflict", ThreadID: "provider-thread-reverse-conflict"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceMessageID := thread.Messages[0].EmailMessageID
+	reply, _, err := repo.EnsureCommunicationsEmailReplyDraft(CommunicationsEmailDraftInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, SourceMessageID: sourceMessageID, AccountEmail: "owner-a@example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forward := CommunicationsEmailDraftInput{
+		CompanyID: companyID, DraftID: "draft:forward:reverse-conflict", PersonalUserID: owner.UserID,
+		PersonalAccountEmail: "owner-a@example.com", CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID,
+		Kind: "forward", SourceMessageID: sourceMessageID, AccountEmail: "owner-a@example.com",
+	}
+	if _, err := repo.UpsertCommunicationsEmailDraft(forward); !errors.Is(err, ErrEmailDraftIdentityConflict) {
+		t.Fatalf("Forward after Reply error=%v, want ErrEmailDraftIdentityConflict", err)
+	}
+	forward.DraftID = reply.DraftID
+	if _, err := repo.UpsertCommunicationsEmailDraft(forward); !errors.Is(err, ErrAlreadyExists) {
+		t.Fatalf("same-draft kind collision error=%v, want ErrAlreadyExists", err)
 	}
 }
 

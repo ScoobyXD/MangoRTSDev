@@ -364,8 +364,8 @@ Expected:
 - Each distinct resolved mentioned user receives one system-managed direct edit binding and participant row in the chat transaction.
 - The mention group is snapshotted to users rather than retained as a dynamic group permission pointer.
 - Group changes and mention deletion do not change existing participants.
-- Generic permission mutation cannot remove/downgrade participant bindings, change the default, or add a nonparticipant to collaboration email/thread visibility. Normal effective Node access controls only that exact Node's stored-email view and never grants sender-mailbox authority; draftless Reply separately requires the exact source mailbox authorization.
-- Existing company-admin/dev-admin Node access remains intact and may open that Node's stored email/thread, but it does not create a draft, participant, triage card, notification, mailbox authority, send authority, or My Drafts row.
+- Generic permission mutation cannot remove/downgrade participant bindings, change the default, or add a nonparticipant to collaboration email/thread visibility. Normal effective Node access controls only that exact Node's stored-email view and never grants sender-mailbox authority; owner-draft Reply separately requires the exact source mailbox authorization.
+- Existing company-admin/dev-admin Node access remains intact and may open that Node's stored email/thread, but that access alone grants no participant, triage card, notification, mailbox authority, send authority, or draft ownership. When the same user separately has the required Node edit access and exact source mailbox authorization, clicking Reply may ensure only that user's owner-only mailbox draft and My Drafts row.
 
 ### Scenario P-S9: Comment Authorship Is A Mutation Boundary
 

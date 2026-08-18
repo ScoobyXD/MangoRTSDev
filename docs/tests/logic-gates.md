@@ -371,7 +371,7 @@ Given:
 Expected:
 - The personal attached-email projection retains `account_email`.
 - The shared attached-email projection retains both `shared_inbox_id` and `account_email`.
-- Reopening either message from the created Node uses the stored scope for lazy thread hydration, received attachments, calendar invitation responses, signature reads, and draftless Reply instead of falling back to another mailbox grant. The Node exposes no Reply All, Forward, durable draft, scheduling, or outgoing attachment action.
+- Reopening either message from the created Node uses the stored scope for lazy thread hydration, received attachments, calendar invitation responses, signature reads, and owner-draft Reply instead of falling back to another mailbox grant. The Node exposes no Reply All, Forward, or scheduling; explicit Reply ensures or reuses the same owner-only mailbox draft and `email_draft` outgoing attachment controls as Triage.
 
 ### Scenario LG-S10: Arena Work Load, Version, And Minimal Header
 

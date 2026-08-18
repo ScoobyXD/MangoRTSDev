@@ -32,6 +32,7 @@ var (
 	ErrEmailAccountUnavailable          = errors.New("email account unavailable")
 	ErrEmailReplySourceNotIngested      = errors.New("email reply source not ingested")
 	ErrEmailDraftSourceNotFound         = errors.New("email draft source not found")
+	ErrEmailDraftIdentityConflict       = errors.New("email draft identity conflict")
 	ErrEmailMessageIdentityInvalid      = errors.New("email message identity is invalid")
 	ErrEmailMessageNotAttachedToNode    = errors.New("email message is not attached to the node")
 	ErrEmailMessageNotAttachedToProject = errors.New("email message is not attached to the project")
@@ -204,6 +205,7 @@ type CommunicationsRepository interface {
 	UpsertEmailCollaborationNodeProjectionWithActor(input NodeInformationInput) (CommunicationsEmailCollaborationProjectionWriteResult, error)
 	ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error)
 	GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error)
+	EnsureCommunicationsEmailReplyDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, bool, error)
 	UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error)
 	SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error
 	GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error)
@@ -2482,7 +2484,11 @@ type CommunicationsEmailDraftListInput struct {
 	PersonalAccountEmail string
 	SharedInboxID        string
 	ParticipantUserID    string
+	Kind                 string
+	SourceMessageIDs     []string
 }
+
+const CommunicationsEmailDraftSourceFilterMax = 100
 
 type CommunicationsEmailDraftGetInput struct {
 	CompanyID            string
@@ -2511,6 +2517,7 @@ type CommunicationsEmailDraftInput struct {
 	BodyEditorHTML         string
 	ReplyToMessageJSON     string
 	ScheduledSendTimestamp *time.Time
+	ExistingOnly           bool
 }
 
 type CommunicationsEmailDraftDeleteInput struct {

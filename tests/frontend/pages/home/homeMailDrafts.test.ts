@@ -4,6 +4,7 @@ import {
   deleteHomeMailDraft,
   deleteHomeMailDraftRemote,
   ensureHomeMailDraftAttachmentTarget,
+  homeMailDraftFromRemote,
   homeMailDraftMatchesScope,
   homeMailDraftToCompose,
   loadHomeMailDraft,
@@ -11,7 +12,6 @@ import {
   mergeHomeMailDrafts,
   readHomeMailDraftsForScope,
   saveHomeMailDraftFromCompose,
-  supersededHomeMailDraftIDs,
   syncHomeMailDraftFromCompose,
   type HomeMailDraft,
 } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
@@ -40,15 +40,21 @@ function draft(overrides: Partial<HomeMailDraft>): HomeMailDraft {
   };
 }
 
-test("reply drafts are unique per mailbox and source message", () => {
+test("draft merging trusts server IDs instead of rebuilding reply identity in the browser", () => {
   const drafts = mergeHomeMailDrafts([
     draft({ id: "legacy-reply", replyToMessageID: "message-1", body: "old" }),
     draft({ id: "stable-reply", replyToMessageID: "message-1", body: "new", updatedAt: "2026-07-10T11:00:00.000Z" }),
   ], []);
 
-  assert.equal(drafts.length, 1);
-  assert.equal(drafts[0]?.id, "stable-reply");
-  assert.equal(drafts[0]?.body, "new");
+  assert.deepEqual(drafts.map((item) => item.id), ["stable-reply", "legacy-reply"]);
+});
+
+test("a draft ID prefix never decides its compose kind", async () => {
+  const raw = { ...draft({ id: "draft:reply:client-inference", accountEmail: "me@example.test" }), kind: undefined } as unknown as HomeMailDraft;
+  await withDraftBrowserState([raw], async () => {
+    const [loaded] = readHomeMailDraftsForScope("company-1", "user-1", "", "me@example.test");
+    assert.equal(loaded?.kind, "compose");
+  });
 });
 
 test("reply drafts remain separate across shared inbox scopes", () => {
@@ -82,7 +88,7 @@ test("active draft scope never mixes personal and shared inbox rows", () => {
   assert.equal(homeMailDraftMatchesScope(personal, "", ""), false);
 });
 
-test("reply draft identity stays stable when an exact read adds the provider message ID", () => {
+test("different server draft IDs are never reconciled by a client semantic key", () => {
   const drafts = mergeHomeMailDrafts([
     draft({ id: "summary", kind: "reply", sourceMessageID: "stored-message-1", replyToMessageID: "" }),
     draft({
@@ -94,36 +100,33 @@ test("reply draft identity stays stable when an exact read adds the provider mes
     }),
   ], []);
 
-  assert.deepEqual(drafts.map((item) => item.id), ["exact"]);
+  assert.deepEqual(drafts.map((item) => item.id), ["exact", "summary"]);
 });
 
-test("obsolete browser-local Node shared drafts are discarded instead of entering a mailbox", async () => {
-  const retained = draft({ id: "personal-retained", accountEmail: "me@example.test" });
-  const obsolete = {
-    ...retained,
-    id: "draft:reply:message:message-1:node:node-1",
-    originNodeID: "node-1",
-    emailThreadID: "thread-1",
-    sharedDraft: true,
-    revision: 3,
-  };
-  await withDraftBrowserState([obsolete, retained], async ({ storedDrafts }) => {
-    assert.deepEqual(
-      readHomeMailDraftsForScope("company-1", "user-1", "", "me@example.test").map((item) => item.id),
-      ["personal-retained"],
-    );
-    assert.deepEqual(storedDrafts().map((item) => item.id), ["personal-retained"]);
-  });
-});
+test("an exact reply draft keeps the source ID but rejects an identity-only message stub", () => {
+  const mapped = homeMailDraftFromRemote({
+    company_id: "company-1",
+    draft_id: "server-draft-1",
+    scope_type: "personal",
+    personal_account_email: "me@example.test",
+    kind: "reply",
+    source_message_id: "stored-message-1",
+    to_recipients: "sender@example.test",
+    cc_recipients: "",
+    bcc_recipients: "",
+    subject: "Re: Hello",
+    body_editor_html: "",
+    reply_to_message: {
+      id: "provider-message-1",
+      email_message_id: "stored-message-1",
+      thread_id: "provider-thread-1",
+    } as never,
+    created_timestamp: "2026-07-10T10:00:00.000Z",
+    updated_timestamp: "2026-07-10T10:00:00.000Z",
+  }, "company-1", "user-1");
 
-test("remote reconciliation identifies only older semantic reply drafts for deletion", () => {
-  const drafts = [
-    draft({ id: "legacy-reply", replyToMessageID: "message-1", updatedAt: "2026-07-10T10:00:00.000Z" }),
-    draft({ id: "stable-reply", replyToMessageID: "message-1", updatedAt: "2026-07-10T11:00:00.000Z" }),
-    draft({ id: "compose-draft", replyToMessageID: "" }),
-  ];
-
-  assert.deepEqual(supersededHomeMailDraftIDs(drafts), ["legacy-reply"]);
+  assert.equal(mapped?.replyToMessageID, "provider-message-1");
+  assert.equal(mapped?.replyToMessage, null);
 });
 
 test("an authorization failure purges only the denied draft scope from the local mirror", async () => {

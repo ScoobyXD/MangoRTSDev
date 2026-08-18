@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"miraeopus/backend/internal/domain"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"miraeopus/backend/internal/domain"
 )
 
 func (r *PostgresRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error) {
@@ -14,6 +16,11 @@ func (r *PostgresRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDr
 	if err != nil {
 		return nil, err
 	}
+	kind, sourceMessageIDs, err := normalizeCommunicationsEmailDraftListFilters(input.Kind, input.SourceMessageIDs)
+	if err != nil {
+		return nil, err
+	}
+	sourceMessageIDFilter := strings.Join(sourceMessageIDs, ",")
 
 	var rows *sql.Rows
 	if scope.scopeType == "shared" {
@@ -24,7 +31,9 @@ where company_id = $1::uuid
 	and deleted_timestamp is null
 	and shared_inbox_id = $2::uuid
 	and ($3='' or created_by_user_id = $3::uuid)
-order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID))
+	and ($4='' or kind = $4)
+	and ($5='' or source_email_message_id = any(string_to_array($5, ',')::uuid[]))
+order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID), kind, sourceMessageIDFilter)
 	} else {
 		rows, err = r.db.Query(`
 select `+communicationsEmailDraftSummarySelectColumns()+`
@@ -34,7 +43,9 @@ where company_id = $1::uuid
 	and personal_user_id = $2::uuid
 	and personal_account_email = $3
 	and ($4='' or created_by_user_id = $4::uuid)
-order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID))
+	and ($5='' or kind = $5)
+	and ($6='' or source_email_message_id = any(string_to_array($6, ',')::uuid[]))
+order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID), kind, sourceMessageIDFilter)
 	}
 	if err != nil {
 		return nil, err
@@ -96,43 +107,23 @@ func (r *PostgresRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailD
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
-	var sourceEmailMessageID string
-	if draft.SourceMessageID != "" {
-		rows, err := r.db.Query(`
-select distinct message.email_message_id::text
-from email_messages message
-join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
-join email_connections connection on connection.company_id=thread.company_id
- and connection.email_connection_id=thread.email_connection_id
-left join shared_inboxes inbox on inbox.company_id=thread.company_id
- and inbox.company_email_connection_id=thread.email_connection_id
-where message.company_id=$1::uuid and message.email_message_id=$2::uuid
- and (($3='personal' and connection.connection_type='personal'
-       and connection.personal_user_id=nullif($4,'')::uuid and connection.account_email=$5)
-   or ($3='shared' and connection.connection_type='shared' and inbox.shared_inbox_id=nullif($6,'')::uuid))
-limit 2`, draft.CompanyID, draft.SourceMessageID, draft.ScopeType,
-			draft.PersonalUserID, draft.PersonalAccountEmail, draft.SharedInboxID)
+	if input.ExistingOnly {
+		if draft.Kind != "reply" {
+			return domain.CommunicationsEmailDraft{}, ErrInvalid
+		}
+		source, err := r.requireCommunicationsEmailDraftSource(draft)
 		if err != nil {
 			return domain.CommunicationsEmailDraft{}, err
 		}
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return domain.CommunicationsEmailDraft{}, err
-			}
-			if sourceEmailMessageID != "" {
-				rows.Close()
-				return domain.CommunicationsEmailDraft{}, ErrInvalid
-			}
-			sourceEmailMessageID = id
-		}
-		if err := rows.Close(); err != nil {
+		updated, err := r.updateExistingCommunicationsEmailReplyDraft(draft)
+		if err != nil {
 			return domain.CommunicationsEmailDraft{}, err
 		}
-		if sourceEmailMessageID == "" {
-			return domain.CommunicationsEmailDraft{}, ErrEmailDraftSourceNotFound
-		}
+		return communicationsEmailDraftWithReplyTarget(updated, source)
+	}
+	source, err := r.requireCommunicationsEmailDraftSource(draft)
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, err
 	}
 	saved, err := scanCommunicationsEmailDraft(r.db.QueryRow(`
 insert into email_drafts (
@@ -145,8 +136,7 @@ insert into email_drafts (
  nullif($9,'')::uuid,nullif($10,'')::uuid,$11,$12,$13,$14,$15,$16,$17,now(),now(),null
 )
 on conflict(company_id,draft_id) do update set
- source_email_message_id=excluded.source_email_message_id,
- updated_by_user_id=excluded.updated_by_user_id,kind=excluded.kind,
+ updated_by_user_id=excluded.updated_by_user_id,
  sender_account_email=excluded.sender_account_email,to_recipients=excluded.to_recipients,
  cc_recipients=excluded.cc_recipients,bcc_recipients=excluded.bcc_recipients,
  subject=excluded.subject,body_editor_html=excluded.body_editor_html,
@@ -154,11 +144,13 @@ on conflict(company_id,draft_id) do update set
  updated_timestamp=now(),deleted_timestamp=null
 where email_drafts.created_by_user_id=excluded.created_by_user_id
  and email_drafts.email_account_type=excluded.email_account_type
+ and email_drafts.kind=excluded.kind
+ and email_drafts.source_email_message_id is not distinct from excluded.source_email_message_id
  and email_drafts.personal_user_id is not distinct from excluded.personal_user_id
  and email_drafts.personal_account_email is not distinct from excluded.personal_account_email
  and email_drafts.shared_inbox_id is not distinct from excluded.shared_inbox_id
 returning `+communicationsEmailDraftSelectColumns(),
-		draft.CompanyID, draft.DraftID, sourceEmailMessageID, draft.ScopeType,
+		draft.CompanyID, draft.DraftID, source.emailMessageID, draft.ScopeType,
 		draft.PersonalUserID, draft.PersonalAccountEmail, draft.SharedInboxID, draft.AccountEmail,
 		draft.CreatedByUserID, draft.UpdatedByUserID, draft.Kind, draft.ToRecipients,
 		draft.CcRecipients, draft.BccRecipients, draft.Subject, draft.BodyEditorHTML,
@@ -166,22 +158,188 @@ returning `+communicationsEmailDraftSelectColumns(),
 	if errors.Is(err, ErrNotFound) {
 		return domain.CommunicationsEmailDraft{}, ErrAlreadyExists
 	}
-	if err == nil {
-		if replyToMessageJSON := strings.TrimSpace(draft.ReplyToMessageJSON); replyToMessageJSON != "" && replyToMessageJSON != "{}" {
-			saved.ReplyToMessageJSON = draft.ReplyToMessageJSON
-		} else {
-			return r.hydrateCommunicationsEmailDraftReplyTarget(saved)
-		}
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, communicationsEmailDraftUpsertError(err)
 	}
-	return saved, err
+	if saved.Kind != "reply" {
+		saved.ReplyToMessageJSON = draft.ReplyToMessageJSON
+		return saved, nil
+	}
+	return communicationsEmailDraftWithReplyTarget(saved, source)
+}
+
+func communicationsEmailDraftUpsertError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		return err
+	}
+	switch strings.TrimSpace(pgErr.ConstraintName) {
+	case "idx_email_drafts_active_personal_message_personal_account",
+		"idx_email_drafts_active_personal_message_shared_inbox":
+		return ErrEmailDraftIdentityConflict
+	default:
+		return err
+	}
+}
+
+func (r *PostgresRepo) EnsureCommunicationsEmailReplyDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, bool, error) {
+	input.DraftID = "draft:reply:" + newUUIDv7String()
+	input.Kind = "reply"
+	input.ReplyToMessageJSON = "{}"
+	draft, err := normalizeCommunicationsEmailDraftInput(input)
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, false, err
+	}
+	if cleanUUIDText(draft.CreatedByUserID) == "" {
+		return domain.CommunicationsEmailDraft{}, false, ErrInvalid
+	}
+
+	existing, err := r.getCommunicationsEmailDraftBySemanticIdentity(draft)
+	if err == nil {
+		if existing.Kind != "reply" {
+			return domain.CommunicationsEmailDraft{}, false, ErrEmailDraftIdentityConflict
+		}
+		source, err := r.requireCommunicationsEmailDraftSource(existing)
+		if err != nil {
+			return domain.CommunicationsEmailDraft{}, false, err
+		}
+		existing, err = communicationsEmailDraftWithReplyTarget(existing, source)
+		return existing, false, err
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return domain.CommunicationsEmailDraft{}, false, err
+	}
+
+	source, err := r.requireCommunicationsEmailDraftSource(draft)
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, false, err
+	}
+	created, err := scanCommunicationsEmailDraft(r.db.QueryRow(`
+insert into email_drafts (
+ company_id,draft_id,source_email_message_id,email_account_type,
+ personal_user_id,personal_account_email,shared_inbox_id,sender_account_email,
+ created_by_user_id,updated_by_user_id,kind,to_recipients,cc_recipients,bcc_recipients,
+ subject,body_editor_html,scheduled_send_timestamp,created_timestamp,updated_timestamp,deleted_timestamp
+) values (
+ $1::uuid,$2,$3::uuid,case $4 when 'personal' then 'personal_email_account' else 'shared_email_account' end,nullif($5,'')::uuid,nullif($6,''),nullif($7,'')::uuid,$8,
+ $9::uuid,nullif($10,'')::uuid,'reply',$11,$12,$13,$14,$15,$16,now(),now(),null
+)
+on conflict do nothing
+returning `+communicationsEmailDraftSelectColumns(),
+		draft.CompanyID, draft.DraftID, source.emailMessageID, draft.ScopeType,
+		draft.PersonalUserID, draft.PersonalAccountEmail, draft.SharedInboxID, draft.AccountEmail,
+		draft.CreatedByUserID, draft.UpdatedByUserID, draft.ToRecipients, draft.CcRecipients,
+		draft.BccRecipients, draft.Subject, draft.BodyEditorHTML, draft.ScheduledSendTimestamp))
+	if err == nil {
+		created, err = communicationsEmailDraftWithReplyTarget(created, source)
+		return created, true, err
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return domain.CommunicationsEmailDraft{}, false, err
+	}
+
+	existing, err = r.getCommunicationsEmailDraftBySemanticIdentity(draft)
+	if err == nil {
+		if existing.Kind != "reply" {
+			return domain.CommunicationsEmailDraft{}, false, ErrEmailDraftIdentityConflict
+		}
+		source, err := r.requireCommunicationsEmailDraftSource(existing)
+		if err != nil {
+			return domain.CommunicationsEmailDraft{}, false, err
+		}
+		existing, err = communicationsEmailDraftWithReplyTarget(existing, source)
+		return existing, false, err
+	}
+	if errors.Is(err, ErrNotFound) {
+		return domain.CommunicationsEmailDraft{}, false, ErrConflict
+	}
+	return domain.CommunicationsEmailDraft{}, false, err
+}
+
+func (r *PostgresRepo) updateExistingCommunicationsEmailReplyDraft(draft domain.CommunicationsEmailDraft) (domain.CommunicationsEmailDraft, error) {
+	updated, err := scanCommunicationsEmailDraft(r.db.QueryRow(`
+update email_drafts
+set updated_by_user_id=nullif($8,'')::uuid,
+ sender_account_email=$9,to_recipients=$10,cc_recipients=$11,bcc_recipients=$12,
+ subject=$13,body_editor_html=$14,scheduled_send_timestamp=$15,updated_timestamp=now()
+where company_id=$1::uuid and draft_id=$2 and source_email_message_id=$3::uuid
+ and created_by_user_id=$4::uuid and kind='reply'
+ and email_account_type=case $5 when 'personal' then 'personal_email_account' else 'shared_email_account' end
+ and personal_user_id is not distinct from nullif($6,'')::uuid
+ and personal_account_email is not distinct from nullif($7,'')
+ and shared_inbox_id is not distinct from nullif($16,'')::uuid
+ and deleted_timestamp is null
+returning `+communicationsEmailDraftSelectColumns(),
+		draft.CompanyID, draft.DraftID, draft.SourceMessageID, draft.CreatedByUserID,
+		draft.ScopeType, draft.PersonalUserID, draft.PersonalAccountEmail, draft.UpdatedByUserID,
+		draft.AccountEmail, draft.ToRecipients, draft.CcRecipients, draft.BccRecipients,
+		draft.Subject, draft.BodyEditorHTML, draft.ScheduledSendTimestamp, draft.SharedInboxID))
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, err
+	}
+	return updated, nil
+}
+
+func (r *PostgresRepo) getCommunicationsEmailDraftBySemanticIdentity(draft domain.CommunicationsEmailDraft) (domain.CommunicationsEmailDraft, error) {
+	if draft.ScopeType == "shared" {
+		return scanCommunicationsEmailDraft(r.db.QueryRow(`
+select `+communicationsEmailDraftSelectColumns()+`
+from email_drafts
+where company_id=$1::uuid and created_by_user_id=$2::uuid
+ and source_email_message_id=$3::uuid and shared_inbox_id=$4::uuid
+ and email_account_type='shared_email_account' and deleted_timestamp is null`,
+			draft.CompanyID, draft.CreatedByUserID, draft.SourceMessageID, draft.SharedInboxID))
+	}
+	return scanCommunicationsEmailDraft(r.db.QueryRow(`
+select `+communicationsEmailDraftSelectColumns()+`
+from email_drafts
+where company_id=$1::uuid and created_by_user_id=$2::uuid
+ and source_email_message_id=$3::uuid and personal_user_id=$4::uuid
+ and personal_account_email=$5 and email_account_type='personal_email_account'
+ and deleted_timestamp is null`,
+		draft.CompanyID, draft.CreatedByUserID, draft.SourceMessageID, draft.PersonalUserID, draft.PersonalAccountEmail))
+}
+
+type communicationsEmailDraftSource struct {
+	emailMessageID    string
+	providerMessageID string
+	providerThreadID  string
+}
+
+func (r *PostgresRepo) requireCommunicationsEmailDraftSource(draft domain.CommunicationsEmailDraft) (communicationsEmailDraftSource, error) {
+	if draft.SourceMessageID == "" {
+		return communicationsEmailDraftSource{}, nil
+	}
+	var source communicationsEmailDraftSource
+	err := r.db.QueryRow(`
+select message.email_message_id::text,message.provider_message_id,thread.provider_thread_id
+from email_messages message
+join email_threads thread on thread.company_id=message.company_id and thread.email_thread_id=message.email_thread_id
+join email_connections connection on connection.company_id=thread.company_id
+ and connection.email_connection_id=thread.email_connection_id
+left join shared_inboxes inbox on inbox.company_id=thread.company_id
+ and inbox.company_email_connection_id=thread.email_connection_id
+where message.company_id=$1::uuid and message.email_message_id=$2::uuid
+ and (($3='personal' and connection.connection_type='personal'
+       and connection.personal_user_id=nullif($4,'')::uuid and connection.account_email=$5)
+   or ($3='shared' and connection.connection_type='shared' and inbox.shared_inbox_id=nullif($6,'')::uuid))
+limit 1`, draft.CompanyID, draft.SourceMessageID, draft.ScopeType,
+		draft.PersonalUserID, draft.PersonalAccountEmail, draft.SharedInboxID).
+		Scan(&source.emailMessageID, &source.providerMessageID, &source.providerThreadID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return communicationsEmailDraftSource{}, ErrEmailDraftSourceNotFound
+	}
+	if err != nil {
+		return communicationsEmailDraftSource{}, err
+	}
+	return source, nil
 }
 
 func (r *PostgresRepo) hydrateCommunicationsEmailDraftReplyTarget(draft domain.CommunicationsEmailDraft) (domain.CommunicationsEmailDraft, error) {
 	if draft.Kind != "reply" || strings.TrimSpace(draft.SourceMessageID) == "" {
 		return draft, nil
 	}
-	var providerMessageID string
-	var providerThreadID string
+	source := communicationsEmailDraftSource{emailMessageID: draft.SourceMessageID}
 	err := r.db.QueryRow(`
 select message.provider_message_id,thread.provider_thread_id
 from email_messages message
@@ -189,17 +347,24 @@ join email_threads thread
   on thread.company_id=message.company_id
  and thread.email_thread_id=message.email_thread_id
 where message.company_id=$1::uuid and message.email_message_id=$2::uuid`,
-		draft.CompanyID, draft.SourceMessageID).Scan(&providerMessageID, &providerThreadID)
+		draft.CompanyID, draft.SourceMessageID).Scan(&source.providerMessageID, &source.providerThreadID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CommunicationsEmailDraft{}, ErrEmailDraftSourceNotFound
 	}
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
+	return communicationsEmailDraftWithReplyTarget(draft, source)
+}
+
+func communicationsEmailDraftWithReplyTarget(draft domain.CommunicationsEmailDraft, source communicationsEmailDraftSource) (domain.CommunicationsEmailDraft, error) {
+	if draft.Kind != "reply" || source.emailMessageID == "" {
+		return draft, nil
+	}
 	payload, err := json.Marshal(map[string]string{
-		"id":               providerMessageID,
-		"email_message_id": draft.SourceMessageID,
-		"thread_id":        providerThreadID,
+		"id":               source.providerMessageID,
+		"email_message_id": source.emailMessageID,
+		"thread_id":        source.providerThreadID,
 	})
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
