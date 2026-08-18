@@ -20,11 +20,13 @@ import {
   getEmailMessage,
   getStoredEmailThread,
   getEmailCollaborationThread,
+  getNodeEmailMessage,
   getNodeEmailThread,
   getEmailSignature,
   invalidateCommunicationsCache,
   invalidateCommunicationsMailboxCache,
   invalidateEmailMessageCache,
+  invalidateNodeEmailThreadCache,
   listCompanyUsers,
   listCompanyUserGroups,
   listLogicGates,
@@ -539,6 +541,34 @@ test("shared inbox helpers use communications shared inbox endpoints", async () 
         body: undefined,
       },
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("shared inbox sender refresh bypasses only the shared inbox list cache", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  let reads = 0;
+  globalThis.fetch = async () => {
+    reads += 1;
+    return jsonResponse({
+      shared_inboxes: [sharedInbox("shared-1", {
+        shared_inbox_id: "shared-1",
+        entry_type: "shared_inbox",
+        account_email: reads === 1 ? "old@example.test" : "current@example.test",
+        company_email_connection_id: "connection-1",
+        effective_access_level: "edit",
+      })],
+    });
+  };
+  try {
+    assert.equal((await listCommunicationsSharedInboxes("company-1"))[0]?.account_email, "old@example.test");
+    assert.equal((await listCommunicationsSharedInboxes("company-1"))[0]?.account_email, "old@example.test");
+    assert.equal(reads, 1);
+    assert.equal((await listCommunicationsSharedInboxes("company-1", { refresh: true }))[0]?.account_email, "current@example.test");
+    assert.equal(reads, 2);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();
@@ -1208,6 +1238,7 @@ test("sendEmail scopes shared inbox sends through query params after the univers
       body: "Body",
       company_id: " company-1 ",
       shared_inbox_id: " shared-1 ",
+      expected_sender_account_email: "support@example.test",
     });
     assert.equal(calls.length, 0);
     t.mock.timers.tick(10_000);
@@ -1222,6 +1253,7 @@ test("sendEmail scopes shared inbox sends through query params after the univers
         to: [{ email: "customer@example.test" }],
         subject: "Hello",
         body: "Body",
+        expected_sender_account_email: "support@example.test",
       },
     }]);
   } finally {
@@ -1356,6 +1388,40 @@ test("duplicate draft and stored Node thread reads share one request while realt
 
     await getNodeEmailThread("company-1", "node-1", "email-thread-1", { refresh: true });
     assert.equal(calls.filter((path) => path.includes("/email-threads/email-thread-1?")).length, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("successful Node Reply can invalidate only its exact stored thread reads", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const calls: string[] = [];
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    calls.push(input.toString());
+    return jsonResponse({
+      email_thread_id: "email-thread-1",
+      thread_id: "provider-thread-1",
+      messages: [{ ...message("message-1"), email_message_id: "internal-message-1" }],
+      history_complete: true,
+    });
+  };
+  try {
+    await getNodeEmailThread("company-1", "node-1", "email-thread-1", { summary: true });
+    await getNodeEmailThread("company-1", "node-1", "email-thread-1");
+    await getNodeEmailMessage("company-1", "node-1", "email-thread-1", "internal-message-1");
+    await getNodeEmailThread("company-1", "node-1", "email-thread-1", { summary: true });
+    await getNodeEmailThread("company-1", "node-1", "email-thread-1");
+    await getNodeEmailMessage("company-1", "node-1", "email-thread-1", "internal-message-1");
+    assert.equal(calls.length, 3);
+
+    invalidateNodeEmailThreadCache("company-1", "node-1", "email-thread-1");
+
+    await getNodeEmailThread("company-1", "node-1", "email-thread-1", { summary: true });
+    await getNodeEmailThread("company-1", "node-1", "email-thread-1");
+    await getNodeEmailMessage("company-1", "node-1", "email-thread-1", "internal-message-1");
+    assert.equal(calls.length, 5, "the immutable exact source message stays cached");
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

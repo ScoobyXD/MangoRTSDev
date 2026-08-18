@@ -296,7 +296,7 @@ test("toolbar cancellation and passive format reads preserve keyboard focus", ()
   assert.doesNotMatch(readFormatState, /restoreFormattingSelection|\.focus\(/);
 });
 
-test("project attached-email replies keep focus isolation while Node email remains read-only", () => {
+test("Project and draftless Node attached-email replies keep focus isolation", () => {
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
@@ -304,8 +304,9 @@ test("project attached-email replies keep focus isolation while Node email remai
   assert.match(nodeWorkspaceParts, /onReplyEditorFocus\?: \(\) => void/);
   assert.match(nodeWorkspaceParts, /onReplyEditorFocus=\{onReplyEditorFocus\}/);
   assert.match(nodeWorkspaceParts, /onFocus=\{onReplyEditorFocus\}/);
-  assert.match(nodeWorkspace, /repliesEnabled=\{false\}/);
-  assert.doesNotMatch(nodeWorkspace, /onReplyEditorFocus|setEmailReplyBlockID|pendingEmailReply|onEmailReplyTextBoxRequest/);
+  assert.match(nodeWorkspace, /repliesEnabled=\{canEdit\}/);
+  assert.match(nodeWorkspace, /onReplyEditorFocus=\{\(\) => \{[\s\S]{0,220}setFocusedTextBlockID\(""\)[\s\S]{0,220}formattingControllerRef\.current = null/);
+  assert.doesNotMatch(nodeWorkspace, /setEmailReplyBlockID|pendingEmailReply|onEmailReplyTextBoxRequest/);
   assert.match(projectSummary, /emails=\{projectAttachedEmails\}\s*repliesEnabled\s*projectID=\{projectID\}/);
   assert.match(projectSummary, /onReplyEditorFocus=\{\(\) => \{\s*setFocusedTextBlockID\(""\);\s*setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
 });
@@ -1072,7 +1073,8 @@ test("project-attached replies load the exact mailbox signature and append it id
   assert.match(nodeWorkspaceParts, /const mailboxSignatureStateRef = useRef<ScopedEmailSignatureState>/);
   assert.match(nodeWorkspaceParts, /loadedEmailSignatureForScope\(mailboxSignatureStateRef\.current, mailboxSignatureScopeKey\)/);
   assert.match(nodeWorkspaceParts, /replySignatureSessionRef\.current = beginEmailSignatureApplicationSession/);
-  assert.ok((nodeWorkspaceParts.match(/ensureReplySignature\(target\.id\)/g) ?? []).length >= 2);
+  assert.equal((nodeWorkspaceParts.match(/ensureReplySignature\(target\.id\)/g) ?? []).length, 1);
+  assert.ok((nodeWorkspaceParts.match(/openReplyTarget\(target,/g) ?? []).length >= 2);
   assert.match(nodeWorkspaceParts, /const signature = await loadMailboxSignature\(\)/);
   assert.ok(nodeWorkspaceParts.indexOf("const signature = await loadMailboxSignature()") < nodeWorkspaceParts.indexOf("const sent = await sendEmail("));
   assert.match(nodeWorkspaceParts, /replySubmissionIdentityRef\.current/);

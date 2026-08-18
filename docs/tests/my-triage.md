@@ -7,8 +7,8 @@
 5. The thread chat rail is one scrollable view grouped only by exact Node and text box; messages sharing both remain in one group.
 6. Each chat group header shows a clickable Node icon and Node title.
 7. If the thread has several Nodes, the user chooses which Node receives a new chat; Mango never guesses.
-8. Reply and Reply All create or reopen only the current user's owner-only personal draft for the exact source and sending account.
-9. Reply and Reply All remain owner-only My Triage actions; My Triage exposes no command that creates or opens an email draft inside a Node.
+8. Reply and Reply All inside My Triage create or reopen only the current user's owner-only personal draft for the exact source and sending account.
+9. My Triage exposes no command that creates or opens an email draft inside a Node; Node Reply is a separate draftless surface and does not change My Triage behavior.
 10. An already-linked exact-message text box loads its existing messages and receives each later My Triage chat without creating another text box.
 11. Reconciling unchanged email metadata must not restart the chat-rail load, discard stored text-box chats, or repeat Node reads.
 12. A chat send reuses the exact mailbox-scoped stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
@@ -222,7 +222,7 @@ MT129 - When a canonical My Triage provider row matches a collaboration by immut
 MT130 - One chat toggle in the My Triage thread header opens and closes one rail grouped only by exact Node and text box. Selecting a row auto-opens it only when the stored thread already has accessible chats. Reading, selecting text, closing, and abandoning an empty composer create nothing. If no Node is associated, the first nonempty comment creates a floating Node with priority **Not Assigned**, no Logic Gate, and one exact linked text box. If several Nodes are associated, the user chooses the destination Node before send. Sending reuses the exact stored mailbox message or fetches only that missing exact provider message; it never calls triage conversion or queues remaining-thread ingestion. After backend acknowledgement, the saved chat appears immediately in that exact group without waiting for realtime or another Node read.
 MT131 - Selecting email body text shows a chat action and captures the exact message ID, trimmed quote, and text offsets without opening the rail or filling the composer. Clicking that action opens the rail, places the quote in the composer, and focuses it. Individual reply cards have no chat button or three-dot menu. Sending uses the chosen Node's exact-message text box, and each group header shows a clickable Node icon and title.
 MT132 - Reply and Reply All create or reopen the current user's owner-only personal draft for the exact source and account. My Triage exposes no Node-draft entry point.
-MT133 - My Triage sends and schedules only the current user's owner-only personal drafts. A Node email view is read-only and never enters this send path.
+MT133 - My Triage sends and schedules only the current user's owner-only personal drafts. Draftless Node Reply may reuse the exact authorized personal mailbox send endpoint after its existing ten-second gate without creating or changing a My Triage draft.
 MT134 - Unsynchronized personal fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation or definitive scope deletion purges the exact personal account; another personal account/shared inbox remains untouched.
 MT135 - Personal draft loads use exact-scope generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, or a different personal account; stale callers return the current exact-scope draft set and browser storage preserves every unrelated scope.
 MT136 - Personal compose creates the live exact-account draft before attachment upload/link. Draft-only attachment reads and mutations require that still-live owner/account draft; deleting it revokes draft-only list/content/send access, legacy accountless links remain owner-only read compatibility for a live draft, and independent sent-message attachment links remain valid.
@@ -781,7 +781,7 @@ Expected:
 - A failed ensure leaves no partial durable artifacts. The optimistic row appears before acknowledgement, then a creation/write failure removes that row, restores the complete composer context, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
 - The exact selected message supplies the anchored chat and owner-draft reply context. Reply and Reply All remain owner-only personal actions.
 - My Drafts keeps exact-account owner drafts isolated, and My Triage exposes no command that creates or opens a draft inside a Node.
-- Owner-only drafts retain the existing browser-driven scheduling and send path; the Node email view remains read-only.
+- Owner-only drafts retain the existing browser-driven scheduling and send path; draftless Node Reply remains outside My Triage draft storage and scheduling.
 - Mention participation alone cannot list an email row or another owner's draft; Node access authorizes only the exact Node surface, and guessed row or draft IDs remain denied.
 
 ### Scenario MT-S15: Personal Signature Image And Start-Action Reliability

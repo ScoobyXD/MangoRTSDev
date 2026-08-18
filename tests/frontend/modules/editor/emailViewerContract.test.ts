@@ -14,7 +14,7 @@ test("node email mailbox scopes normalize personal accounts and suppress them fo
   assert.deepEqual(resolveEditorEmailMailboxScope("", ""), {});
 });
 
-test("node-attached email viewer is read-only while retaining thread, relationship, attachment, and image behavior", () => {
+test("node-attached email viewer retains thread, relationship, attachment, image, and Reply behavior", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
@@ -29,7 +29,7 @@ test("node-attached email viewer is read-only while retaining thread, relationsh
   assert.match(nodeParts, /onMessageActivate\?\.\(internalThreadMessageID\)/);
   assert.match(nodeParts, /focusMessageRequestID/);
   assert.match(nodeParts, /aria-expanded=\{!collapsed\}/);
-  assert.match(nodeSurface, /repliesEnabled={false}/);
+  assert.match(nodeSurface, /repliesEnabled={canEdit}/);
   assert.doesNotMatch(nodeSurface, /onEmailReplyTextBoxRequest|pendingEmailReply|initialReplyTargetMessageID|initialReplyAll|initialReplyRequestID/);
   assert.doesNotMatch(nodeParts, /sendSharedEmailDraft|Shared draft|originNodeID|sharedDraft:/);
   assert.match(homeParts, /Reply all/);
@@ -78,6 +78,81 @@ test("node-attached email viewer is read-only while retaining thread, relationsh
   assert.match(universalPickerEmailPane, /if \(!active \|\| !accountEmail \|\| !nextPageToken\.trim\(\) \|\| loading \|\| loadingMore \|\| error\) return undefined/);
   assert.match(universalPickerEmailPane, /requestAnimationFrame\(\(\) => \{[\s\S]{0,220}list\.scrollHeight <= list\.clientHeight \+ 1[\s\S]{0,80}void loadMore\(\)/);
   assert.match(calendarInviteCard, /Calendar invitation/);
+});
+
+test("Node Reply is draftless and Reply-only while reusing the existing rich send surface", () => {
+  const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
+  const communicationsAPI = source("frontend/src/modules/communications/communicationsApi.ts");
+  const richEditor = source("frontend/src/modules/editor/UnifiedRichEditorSurface.tsx");
+
+  assert.match(nodeParts, /const nodeReplyMode = Boolean\(nodeID\.trim\(\)\)/);
+  assert.match(nodeParts, /const replyAllEnabled = repliesEnabled && !nodeReplyMode/);
+  assert.ok((nodeParts.match(/const exactMailboxScopeAvailable = Boolean\(/g) ?? []).length >= 2);
+  assert.ok((nodeParts.match(/const replyMailboxAvailable = !nodeReplyMode \|\| exactMailboxScopeAvailable/g) ?? []).length >= 2);
+  assert.match(nodeParts, /replyAvailable = repliesEnabled && replyMailboxAvailable && Boolean\(email\.emailMessageID\?\.trim\(\)\)/);
+  assert.match(nodeParts, /providerReplyAvailable = repliesEnabled && replyMailboxAvailable && providerMessageAvailable/);
+  assert.ok((nodeParts.match(/email_reply_mailbox_scope_missing/g) ?? []).length >= 2);
+  assert.ok((nodeParts.match(/\{replyAllEnabled && \(/g) ?? []).length >= 3);
+  assert.match(nodeParts, /replyAll: replyAll && !nodeID\.trim\(\)/);
+  assert.match(nodeParts, /const activeDraft = !nodeReplyMode && draftScope === "personal" \? personalDraft : null/);
+  assert.match(nodeParts, /replyEditingEnabled[\s\S]{0,180}nodeReplyMode/);
+  assert.match(nodeParts, /canSend[\s\S]{0,220}nodeReplyMode/);
+  assert.match(nodeParts, /if \(nodeReplyMode \|\| !activeDraft \|\| !replyTargetMessage \|\| sending\) return undefined/);
+  assert.match(nodeParts, /\{!nodeReplyMode && <div[\s\S]{0,1600}Create a personal reply draft/);
+  assert.match(nodeParts, /replyEditorImageAttachmentContext = !nodeReplyMode/);
+  assert.match(nodeParts, /attachments: nodeReplyMode \? \[\] : draftAttachments/);
+  assert.match(nodeParts, /\{!nodeReplyMode && draftAttachments\.length > 0 && \(/);
+  assert.match(nodeParts, /\{!nodeReplyMode && \(\s*<button[\s\S]{0,180}aria-label="Add attachment"/);
+  assert.match(nodeParts, /\{!nodeReplyMode && \(\s*<input[\s\S]{0,100}type="file"/);
+  assert.match(nodeParts, /listCommunicationsSharedInboxes\(companyID, \{ refresh: true \}\)/);
+  assert.match(nodeParts, /candidate\.effective_access_level === "edit"/);
+  assert.match(nodeParts, /candidate\.entry_type === "shared_inbox"[\s\S]{0,240}candidate\.shared_inbox_id\?\.trim\(\) \|\| candidate\.folder_id\.trim\(\)/);
+  assert.match(nodeParts, /!senderAccountEmail \|\| !sharedInbox\.company_email_connection_id\?\.trim\(\)/);
+  assert.match(nodeParts, /value=\{nodeReplyMode \? nodeReplySenderAccountEmail : senderAccountDraft\} readOnly/);
+  assert.match(nodeParts, /const nodeReplySendPendingRef = useRef\(false\)/);
+  assert.match(nodeParts, /if \(!message \|\| !replyTargetMessage \|\| !canSend \|\| \(nodeReplyMode && nodeReplySendPendingRef\.current\)\) return/);
+  assert.match(nodeParts, /const internalSourceMessageID = replyTargetMessage\.email_message_id\?\.trim\(\) \?\? ""/);
+  assert.match(nodeParts, /if \(!internalSourceMessageID\) \{\s*onError\("email_reply_source_not_ingested"\)/);
+  assert.match(nodeParts, /if \(nodeReplyMode\) nodeReplySendPendingRef\.current = true/);
+  assert.match(nodeParts, /finally \{\s*if \(nodeReplyMode\) nodeReplySendPendingRef\.current = false/);
+  assert.match(nodeParts, /<UnifiedRichEditorSurface[\s\S]{0,320}surfaceID="attached-email-reply"/);
+  assert.match(nodeParts, /<OutboundEmailUndoBanner \/>/);
+  assert.match(nodeParts, /const signature = await loadMailboxSignature\(\)/);
+  assert.match(nodeParts, /const sent = await sendEmail\(/);
+  assert.match(nodeParts, /expected_sender_account_email: expectedSenderAccountEmail \|\| undefined/);
+  assert.match(nodeParts, /errorCode === "email_sender_account_changed"[\s\S]{0,360}resolveNodeReplySenderAccount\(\)/);
+  const senderChangedRecoveryStart = nodeParts.indexOf('if (nodeReplyMode && (errorCode === "email_sender_account_changed"');
+  const senderChangedRecovery = nodeParts.slice(senderChangedRecoveryStart, senderChangedRecoveryStart + 520);
+  assert.ok(senderChangedRecoveryStart >= 0);
+  assert.ok(senderChangedRecovery.indexOf('setNodeReplySenderAccountEmail("")') < senderChangedRecovery.indexOf("resolveNodeReplySenderAccount()"));
+  assert.doesNotMatch(senderChangedRecovery, /set(?:To|Cc|Bcc|Subject|Body)Draft/);
+  assert.match(nodeParts, /if \(nodeReplyMode\) invalidateNodeEmailThreadCache\(companyID, nodeID, emailThreadID \?\? ""\)/);
+  assert.ok(
+    nodeParts.indexOf("const signature = await loadMailboxSignature()") < nodeParts.indexOf("const sent = await sendEmail("),
+    "Node Reply must finish the existing signature path before entering the shared send countdown",
+  );
+  assert.match(communicationsAPI, /return scheduleOutboundEmailDispatch\(async \(\) =>/);
+  assert.match(nodeParts, /editorImageHydrationContext=\{replyEditorImageHydrationContext\}/);
+  assert.match(nodeParts, /eagerEditorImageHydration=\{nodeReplyMode\}/);
+  assert.match(richEditor, /const imageHydrationContext = editorImageHydrationContext \?\? editorImageAttachmentContext/);
+  assert.match(richEditor, /useEditorDocumentSurfaceHandlers\(\{[\s\S]{0,1200}editorImageAttachmentContext,/);
+
+  const nodeEmailPaneStart = nodeSurface.indexOf("<AttachedEmailOrganizerPane");
+  const nodeEmailPaneEnd = nodeSurface.indexOf("/>", nodeEmailPaneStart);
+  assert.ok(nodeEmailPaneStart >= 0 && nodeEmailPaneEnd > nodeEmailPaneStart);
+  const nodeEmailPane = nodeSurface.slice(nodeEmailPaneStart, nodeEmailPaneEnd);
+  assert.match(nodeEmailPane, /repliesEnabled={canEdit}/);
+  assert.match(nodeEmailPane, /onReplyEditorFocus=/);
+  assert.doesNotMatch(nodeEmailPane, /attachmentRequestJSON|attachmentResourceType|attachmentResourceID|attachmentEditorSurface/);
+
+  const removeEmailStart = nodeSurface.indexOf("const removeAttachedEmail = useCallback");
+  const removeEmailEnd = nodeSurface.indexOf("const loadNodeTimelineEvents", removeEmailStart);
+  const removeEmail = nodeSurface.slice(removeEmailStart, removeEmailEnd);
+  assert.ok(removeEmail.indexOf("await requestJSON<unknown>") < removeEmail.indexOf("setAttachedEmails"));
+  assert.doesNotMatch(removeEmail.slice(removeEmail.indexOf("catch (cause)")), /setAttachedEmails/);
+  assert.match(removeEmail.slice(removeEmail.indexOf("catch (cause)")), /onProjectionMutation\(\)/);
+  assert.match(nodeParts, /if \(!nodeID\.trim\(\)\) \{\s*if \(activeSelectedMessageID === messageID\) clearSelectedMessage\(\);\s*setReplyComposer/);
 });
 
 test("the shared inline email reference host opens the exact stored thread on every editor route", () => {

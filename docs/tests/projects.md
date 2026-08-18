@@ -336,7 +336,7 @@ Given:
 
 Expected:
 - The personal attachment records the active account email and the shared conversion records both shared-inbox ID and account email.
-- Reopening either message uses the same stored-thread disclosure, recipient, received-attachment, and invitation-response contract as My Triage, Shared Triage, and Nodes. The retained Project surface may additionally expose Reply, Reply All, and owner drafts; the Node surface remains read-only.
+- Reopening either message uses the same stored-thread disclosure, recipient, received-attachment, and invitation-response contract as My Triage, Shared Triage, and Nodes. The retained Project surface may expose Reply, Reply All, and owner drafts; the Node surface exposes draftless Reply only.
 - Shared attachment reads and actions retain shared-inbox authorization and do not silently fall back to a personal grant.
 - The reply links files and inline images to the project resource with the originating project text-block information ID and the `project-attached-email-reply` editor surface.
 - Focusing the reply immediately clears the outer project text-block formatting controller, leaving the reply toolbar as the only formatting owner.

@@ -2303,16 +2303,15 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!cleanEmailID) return;
     const target = attachedEmails.find((email) => email.id === cleanEmailID || email.messageID === cleanEmailID);
     if (!target) return;
-    setAttachedEmails((current) => current.filter((email) => email.id !== target.id));
-    setSelectedEmailIDsByBlock((current) => {
-      const nextEntries = Object.entries(current).filter(([, messageID]) => messageID !== target.messageID);
-      return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
-    });
     try {
       await requestJSON<unknown>(`/v1/nodes/${nodeID}/projection/${encodeURIComponent(target.id)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+      setAttachedEmails((current) => current.filter((email) => email.id !== target.id));
+      setSelectedEmailIDsByBlock((current) => {
+        const nextEntries = Object.entries(current).filter(([, messageID]) => messageID !== target.messageID);
+        return nextEntries.length === Object.keys(current).length ? current : Object.fromEntries(nextEntries);
+      });
       onProjectionMutation();
     } catch (cause) {
-      setAttachedEmails((current) => current.some((email) => email.id === target.id) ? current : [target, ...current]);
       onError(cause instanceof Error ? cause.message : "failed_to_remove_email");
       onProjectionMutation();
     }
@@ -3116,7 +3115,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
               apiBase={apiBase}
 				companyID={companyID}
 				currentUserID={author.userID}
-              repliesEnabled={false}
+              companyUsers={companyUsers}
+              repliesEnabled={canEdit}
+              onReplyEditorFocus={() => {
+                setFocusedTextBlockID("");
+                if (formattingControllerRef) formattingControllerRef.current = null;
+              }}
               storageKey={`node-editor-attached-email-layout-v1:${companyID || "company"}:${nodeID || "node"}`}
               tabbed={false}
               editable={canEdit}

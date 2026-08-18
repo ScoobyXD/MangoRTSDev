@@ -33,6 +33,11 @@ export type UnifiedRichEditorFormattingController = EditorDocumentFormattingCont
   focus: () => void;
   flush: () => string;
 };
+type EditorImageHydrationContext = {
+  apiBase: string;
+  companyID: string;
+  cacheKey?: string;
+};
 type UnifiedRichEditorSurfaceProps = {
   value: string;
   editable?: boolean;
@@ -50,6 +55,7 @@ type UnifiedRichEditorSurfaceProps = {
   formattingControllerRef?: React.MutableRefObject<UnifiedRichEditorFormattingController | null>;
   entityLinkContext?: EditorEntityLinkContext;
   editorImageAttachmentContext?: EditorImageAttachmentContext;
+  editorImageHydrationContext?: EditorImageHydrationContext;
   eagerEditorImageHydration?: boolean;
   onEditorImageAttachmentError?: (message: string) => void;
   onChange: (nextValue: string) => void;
@@ -79,6 +85,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   formattingControllerRef,
   entityLinkContext,
   editorImageAttachmentContext,
+  editorImageHydrationContext,
   eagerEditorImageHydration = false,
   onEditorImageAttachmentError,
   onChange,
@@ -118,8 +125,16 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   );
   const documentIsEmpty = !editorBodyHasEmailContent(value);
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
-  const attachmentHydrationContextKey = editorImageAttachmentContext
-    ? [editorImageAttachmentContext.apiBase.trim(), editorImageAttachmentContext.companyID.trim(), editorImageAttachmentContext.resourceType, editorImageAttachmentContext.resourceID.trim(), eagerEditorImageHydration ? "eager" : "viewport"].join("\u0000")
+  const imageHydrationContext = editorImageHydrationContext ?? editorImageAttachmentContext;
+  const attachmentHydrationContextKey = imageHydrationContext
+    ? [
+      imageHydrationContext.apiBase.trim(),
+      imageHydrationContext.companyID.trim(),
+      editorImageAttachmentContext
+        ? `${editorImageAttachmentContext.resourceType}:${editorImageAttachmentContext.resourceID.trim()}`
+        : editorImageHydrationContext?.cacheKey?.trim() || "read-only",
+      eagerEditorImageHydration ? "eager" : "viewport",
+    ].join("\u0000")
     : "";
 
   useEffect(() => {
@@ -153,17 +168,17 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     if (!editor) return;
     if (lastAppliedValueRef.current === value
       && attachmentHydrationContextKeyRef.current === attachmentHydrationContextKey
-      && (!editorImageAttachmentContext || attachmentHydrationCleanupRef.current)) return;
+      && (!imageHydrationContext || attachmentHydrationCleanupRef.current)) return;
     restoreSelectionForHydrationRef.current?.(editor);
     const selectionOffsets = getEditorSelectionOffsets(editor);
     attachmentHydrationCleanupRef.current?.();
     attachmentHydrationCleanupRef.current = null;
     editor.innerHTML = deserializeEditorDocumentHTML(value);
-    if (editorImageAttachmentContext) {
+    if (imageHydrationContext) {
       attachmentHydrationCleanupRef.current = hydrateEditorAttachmentImageFrames(editor, (attachmentID, variant, options) => (
         loadMangoAttachmentObjectURL(
-          editorImageAttachmentContext.apiBase,
-          editorImageAttachmentContext.companyID,
+          imageHydrationContext.apiBase,
+          imageHydrationContext.companyID,
           attachmentID,
           variant,
           options,

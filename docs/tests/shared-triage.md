@@ -7,8 +7,8 @@
 5. The thread chat rail is one scrollable view grouped only by exact Node and text box; messages sharing both remain in one group.
 6. Each chat group header shows a clickable Node icon and Node title.
 7. If the thread has several Nodes, the user chooses which Node receives a new chat; Mango never guesses.
-8. Reply and Reply All create or reopen only the current user's owner-only draft for the exact shared-inbox source.
-9. Reply and Reply All remain owner-only Shared Triage actions; Shared Triage exposes no command that creates or opens an email draft inside a Node.
+8. Reply and Reply All inside Shared Triage create or reopen only the current user's owner-only draft for the exact shared-inbox source.
+9. Shared Triage exposes no command that creates or opens an email draft inside a Node; Node Reply is a separate draftless surface and does not change Shared Triage behavior.
 10. An already-linked exact-message text box loads its existing messages and receives each later Shared Triage chat without creating another text box.
 11. Reconciling unchanged email metadata must not restart the chat-rail load, discard stored text-box chats, or repeat Node reads.
 12. A chat send reuses the exact shared-mailbox stored message when present, otherwise fetches only that exact provider message, and never calls triage conversion or queues remaining-thread ingestion.
@@ -17,7 +17,7 @@
 15. Each provider mailbox row is enriched with its exact stored `email_message_id` and `email_thread_id` by exact company, email connection, and provider message ID; collaboration decoration cannot supply or replace those IDs. If a selected row has not been stored yet, Mango ingests that one exact mailbox message first. Selecting a conversation then passes only the durable thread ID into the same stored-thread read used by the Node email column and immediately shows every returned `email_messages` row once in `message_order`, even when stored history is incomplete; the left mailbox list remains one row for that thread.
 16. A quoted copy inside one message body is never a substitute for another stored message. Every `email_messages` row remains its own visible card, while reliably detected quoted history is collapsed by default behind **Show subthread**.
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 # Process Story: Shared Triage conversion queues exact-account completion
 
@@ -262,7 +262,7 @@ ST155 - When a canonical Shared Triage provider row matches a collaboration by e
 ST156 - One chat toggle in the Shared Triage thread header opens and closes one rail grouped only by exact Node and text box. Selecting a row auto-opens it only when the stored thread already has accessible chats. Reading, selecting text, closing, and abandoning an empty composer create nothing. If no Node is associated, the first nonempty comment creates a floating Node with priority **Not Assigned**, no Logic Gate, and one exact linked text box. If several Nodes are associated, the user chooses the destination Node before send. Sending reuses the exact stored shared-mailbox message or fetches only that missing exact provider message; it never calls triage conversion or queues remaining-thread ingestion. Exact shared-inbox authorization and acknowledged save precede clearing the draft, and the saved chat appears immediately in its exact group without waiting for realtime or another Node read.
 ST157 - Selecting email text shows a chat action and captures the exact message ID, quote, and offsets without opening the rail or filling the composer. Clicking that action opens the rail, places the quote in the composer, and focuses it. Individual reply cards have no chat button or three-dot menu. Sending resolves or creates the chosen Node's exact-message text box, and each group header shows a clickable Node icon and title.
 ST158 - Reply and Reply All create or reopen the current user's owner-only draft for the exact source and shared-inbox sending scope. Shared Triage exposes no Node-draft entry point.
-ST159 - Shared Triage schedules and sends only the current user's owner-only drafts. A Node email view is read-only and never enters this send path.
+ST159 - Shared Triage schedules and sends only the current user's owner-only drafts. Draftless Node Reply may reuse the exact authorized Shared Inbox send endpoint after its existing ten-second gate without creating or changing a Shared Triage draft.
 ST160 - Unsynchronized shared fallback drafts survive Mango `401`, unclassified `403`, provider reauthorization/disconnection `409`, `5xx`, and network failures. Only explicit access/company revocation, shared-inbox deletion, or conversion to a non-mail-bearing row purges that exact inbox; personal and other shared scopes remain intact.
 ST161 - Shared draft loads use exact-inbox generations plus local revisions. An older load cannot overwrite a newer load, save, delete, remote save completion, personal account, or another shared inbox; stale callers return current exact-scope state.
 ST162 - Shared compose persists the live exact-inbox draft before attachment upload/link. Draft attachment reads and mutations require current Edit access, but every operation also requires that exact draft to remain live. Deletion revokes draft-only access even for manager/admin bypass attempts; an independent sent-message link remains authorized by its own resource.
@@ -814,7 +814,7 @@ Expected:
 - Shared draft/send payloads store Mango attachment references, not raw base64 attachment content.
 - The draft API rejects embedded inline file bytes before durable storage.
 - Attachment references preserve the selected `shared_inbox_id` and company-owned shared mailbox scope.
-- Converting a shared message to a Node persists `shared_inbox_id` and `account_email` in the attached-email projection; later Node thread reads, received-file downloads, and calendar RSVP stay on that shared grant. The Node exposes no Reply or Reply All.
+- Converting a shared message to a Node persists `shared_inbox_id` and `account_email` in the attached-email projection; later Node thread reads, received-file downloads, calendar RSVP, signature reads, and draftless Reply stay on that exact shared grant. The Node exposes no Reply All.
 - Inline body images use the unified rich-editor image attachment path and durable owner-only shared-inbox drafts keep Mango attachment references.
 - At send time the backend deduplicates inline references, authorizes and reads the S3 bytes under the selected `shared_inbox_id`, creates matching inline provider/CID attachments, rewrites image sources to `cid:`, and sends through the company-owned shared grant.
 - The send response/cache fallback contains provider-ready CID HTML and metadata-only attachment references, never raw bytes; missing or unauthorized references reject the send visibly.
@@ -955,7 +955,7 @@ Expected:
 - A failed ensure leaves no partial durable artifacts; a creation/write failure preserves the chat composer context, never inserts a false saved row before backend acknowledgement, re-enables retry, and translates `failed_to_create_email_collaboration` or `email_collaboration_storage_not_ready` into actionable text.
 - Selection anchors target the exact shared message and immediately open the rail, but selection and an abandoned empty composer create no Node. The first nonempty unassociated comment creates a floating Node with `priority = null` and no Logic Gate.
 - Reply and Reply All use the exact source message and remain owner-only. Shared Triage exposes no command that creates or opens a draft inside a Node.
-- Owner-only drafts using the shared inbox retain their existing scheduling behavior; the Node email view is read-only.
+- Owner-only drafts using the shared inbox retain their existing scheduling behavior; draftless Node Reply remains outside Shared Triage draft storage and scheduling.
 - Another user's drafts and owner drafts from another account remain absent from Shared Triage Drafts; guessed draft IDs remain denied.
 
 ### Scenario ST-S20: Shared Signature Image And Start-Action Reliability
