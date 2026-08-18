@@ -1592,11 +1592,26 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const projectDocumentToggle = projectContainer.querySelector<HTMLButtonElement>('[data-project-document-toggle="true"]');
     assert.ok(projectDocumentToggle);
     assert.equal(projectDocumentToggle.getAttribute("aria-pressed"), "true", "a Project should open with its permanent document pane selected");
+    const projectHeadingGrid = projectContainer.querySelector<HTMLElement>('[data-project-timeline-heading-grid="true"]');
+    const projectControlRow = projectHeadingGrid?.querySelector<HTMLElement>('[data-project-timeline-control-row="true"]');
+    const projectToolbarRow = projectHeadingGrid?.querySelector<HTMLElement>('[data-project-timeline-toolbar="true"]');
+    assert.ok(projectHeadingGrid && projectControlRow && projectToolbarRow);
+    assert.equal(projectHeadingGrid.querySelector('[data-project-timeline-title]'), null, "the Project header must not render a Timeline title");
+    assert.equal(projectControlRow.style.gridRow, "1");
+    assert.equal(projectToolbarRow.style.gridRow, "1", "Project controls and the shared editor toolbar must occupy one row");
+    assert.ok(projectToolbarRow.querySelector('[data-mango-unified-editor-toolbar="true"]'));
     const projectEmailToggle = projectContainer.querySelector<HTMLButtonElement>('[data-project-email-count-toggle="true"]');
     assert.ok(projectEmailToggle);
     assert.equal(projectEmailToggle.getAttribute("aria-pressed"), "false", "the Project-wide email pane should be closed by default");
     let projectDocumentPane = projectContainer.querySelector<HTMLElement>('[data-project-document-pane="true"]');
     assert.ok(projectDocumentPane, "opening a Project should mount its permanent editor pane");
+    assert.equal(projectDocumentPane.style.gridTemplateRows, "38px minmax(0, 1fr)");
+    assert.equal(projectDocumentPane.children.length, 2, "the inline Project document grid must contain only its header and editor rows");
+    const projectDocumentEditor = projectDocumentPane.querySelector<HTMLElement>(`[data-project-text-block-id="${PROJECT_ID}"]`);
+    assert.ok(projectDocumentEditor, "the permanent Project document must mount the shared Project rich-text editor");
+    assert.equal(projectDocumentEditor.dataset.mangoEditorEditable, "true");
+    assert.equal(projectDocumentEditor.style.height, "100%", "the permanent editor must fill the document body row");
+    assert.equal(projectDocumentEditor.parentElement?.style.height, "100%", "the permanent editor wrapper must fill the document body row");
     assert.equal(projectDocumentPane.querySelector('[data-project-document-fullscreen-close="true"]'), null, "the red exit X must stay hidden while the Project document is inline");
     const projectDocumentTitle = projectDocumentPane.querySelector<HTMLElement>('[data-project-document-title="true"]');
     assert.ok(projectDocumentTitle);
@@ -1620,6 +1635,11 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(projectDocumentPane.querySelector('[data-project-document-fullscreen-close="true"]'), null);
     await act(async () => { projectDocumentToggle.click(); });
     await flushWork();
+    assert.equal(
+      projectHeadingGrid.style.gridTemplateColumns,
+      "minmax(0, 1fr) minmax(0, 2fr)",
+      "closing the document must leave shrinkable tracks for both the controls and toolbar",
+    );
 
     const initialProjectRows = assertBoundedRows(projectContainer, "project");
     for (const rowID of initialProjectRows) {
