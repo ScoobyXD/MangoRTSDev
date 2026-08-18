@@ -848,8 +848,10 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     const activeMovedImagePlacement = activeImageFrame.closest<HTMLElement>(".mango-tiptap-image-placement");
     assert.equal(activeMovedImagePlacement?.dataset.mangoImagePosition, "wrap");
     assert.equal(activeMovedImagePlacement?.dataset.mangoImageAlignment, "left");
-    assert.equal(activeImageFrame.closest(".node-mangoAttachmentImage")?.getAttribute("draggable"), "true", "the selected inline image remains movable through Tiptap drag and drop");
-    assert.equal(activeImageFrame.querySelector('[data-mango-tiptap-image-frame="true"]')?.getAttribute("draggable"), "true", "dragging the visible image frame starts the existing native Tiptap node move");
+    const currentImageNode = activeImageFrame.closest<HTMLElement>(".node-mangoAttachmentImage");
+    assert.ok(currentImageNode);
+    assert.equal(currentImageNode.getAttribute("draggable"), "true", "ProseMirror's image node must own the native drag source");
+    assert.equal(activeImageFrame.querySelector('[data-mango-tiptap-image-frame="true"]')?.getAttribute("draggable"), null, "the visible Tiptap drag handle must not create a second nested drag source");
     const currentImageDragHandle = activeImageFrame.querySelector<HTMLElement>('[data-mango-tiptap-image-frame="true"]');
     assert.ok(currentImageDragHandle);
     const imageDragData = new Map<string, string>();
@@ -877,7 +879,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     try {
       await act(async () => {
         currentImageDragHandle.dispatchEvent(imageMouseDown);
-        currentImageDragHandle.dispatchEvent(imageDragStart);
+        currentImageNode.dispatchEvent(imageDragStart);
         activeProseMirror.dispatchEvent(imageDrop);
       });
     } finally {
