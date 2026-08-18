@@ -1591,11 +1591,13 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
 
     const projectDocumentToggle = projectContainer.querySelector<HTMLButtonElement>('[data-project-document-toggle="true"]');
     assert.ok(projectDocumentToggle);
-    await act(async () => { projectDocumentToggle.click(); });
-    await flushWork();
-    const projectDocumentPane = projectContainer.querySelector<HTMLElement>('[data-project-document-pane="true"]');
-    assert.ok(projectDocumentPane, "the Project document icon should mount the permanent editor pane");
-    assert.equal(projectDocumentPane.querySelector('[aria-label="Close Project document"]'), null, "the permanent Project document must not add a red close-X action");
+    assert.equal(projectDocumentToggle.getAttribute("aria-pressed"), "true", "a Project should open with its permanent document pane selected");
+    const projectEmailToggle = projectContainer.querySelector<HTMLButtonElement>('[data-project-email-count-toggle="true"]');
+    assert.ok(projectEmailToggle);
+    assert.equal(projectEmailToggle.getAttribute("aria-pressed"), "false", "the Project-wide email pane should be closed by default");
+    let projectDocumentPane = projectContainer.querySelector<HTMLElement>('[data-project-document-pane="true"]');
+    assert.ok(projectDocumentPane, "opening a Project should mount its permanent editor pane");
+    assert.equal(projectDocumentPane.querySelector('[data-project-document-fullscreen-close="true"]'), null, "the red exit X must stay hidden while the Project document is inline");
     const projectDocumentTitle = projectDocumentPane.querySelector<HTMLElement>('[data-project-document-title="true"]');
     assert.ok(projectDocumentTitle);
     assert.equal(projectDocumentTitle.style.minWidth, "max-content", "the Project document title must remain fully visible");
@@ -1604,7 +1606,18 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.ok(projectDocumentActions);
     assert.equal(projectDocumentActions.style.overflow, "visible", "the Project document actions must not clip the pinned controls");
     assert.ok(projectDocumentActions.querySelector('[aria-label="Add attachment to Project document"]'));
-    assert.ok(projectDocumentActions.querySelector('[aria-label="Open Project document full screen"]'));
+    const projectDocumentFullscreenButton = projectDocumentPane.querySelector<HTMLButtonElement>('[aria-label="Open Project document full screen"]');
+    assert.ok(projectDocumentFullscreenButton);
+    await act(async () => { projectDocumentFullscreenButton.click(); });
+    await flushWork();
+    projectDocumentPane = projectContainer.querySelector<HTMLElement>('[data-project-document-pane="true"]');
+    const projectDocumentFullscreenClose = projectDocumentPane?.querySelector<HTMLButtonElement>('[data-project-document-fullscreen-close="true"]');
+    assert.ok(projectDocumentFullscreenClose, "full screen should replace the expand icon with the red exit X");
+    await act(async () => { projectDocumentFullscreenClose.click(); });
+    await flushWork();
+    projectDocumentPane = projectContainer.querySelector<HTMLElement>('[data-project-document-pane="true"]');
+    assert.ok(projectDocumentPane, "the fullscreen exit X should restore the same Project document inline");
+    assert.equal(projectDocumentPane.querySelector('[data-project-document-fullscreen-close="true"]'), null);
     await act(async () => { projectDocumentToggle.click(); });
     await flushWork();
 

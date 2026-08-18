@@ -68,7 +68,11 @@ import { generateStableInformationID } from "../editor/editorTypes.js";
 import { createEditorScrollMemory } from "../editor/editorScroll.js";
 import { scheduleTransientInformationFocus } from "../editor/transientInformationFocus.js";
 import { useBoundedEditorRowVirtualization } from "../editor/editorRowVirtualization.js";
-import { UnifiedNodeShell, UnifiedNodeShellFullscreenIcon } from "../editor/UnifiedNodeShell.js";
+import {
+  UnifiedNodeShell,
+  UnifiedNodeShellFullscreenIcon,
+  UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE,
+} from "../editor/UnifiedNodeShell.js";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
   NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
@@ -395,6 +399,7 @@ type ProjectRelationshipNodePanelSelection = {
 
 const PROJECT_SUMMARY_SURFACE_TEXT = "#172033";
 const PROJECT_SUMMARY_RULE = "rgba(91, 141, 239, 0.24)";
+const PROJECT_TEXTBOX_HEADER_BACKGROUND = "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))";
 const PROJECT_SUMMARY_SPLIT_MIN = 42;
 const PROJECT_SUMMARY_SPLIT_MAX = 74;
 const PROJECT_RELATIONSHIP_NODE_DRAG_MIME = "application/x-mangorts-project-relationship-node";
@@ -472,7 +477,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [openEditorBlockIDs, setOpenEditorBlockIDs] = useState<Set<string>>(() => new Set());
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set());
-  const [projectDocumentOpen, setProjectDocumentOpen] = useState(false);
+  const [projectDocumentOpen, setProjectDocumentOpen] = useState(true);
   const [projectDocumentFullscreen, setProjectDocumentFullscreen] = useState(false);
   const [projectSidePaneWidths, setProjectSidePaneWidths] = useState({ document: 420, email: 340, chat: 340 });
   const [projectResourceAttachments, setProjectResourceAttachments] = useState<MangoResourceAttachment[]>([]);
@@ -651,7 +656,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         if (paneProjectIDRef.current !== cleanProjectID) {
           paneProjectIDRef.current = cleanProjectID;
           setOpenEditorBlockIDs(new Set(nextBlockIDs));
-          setOpenEmailBlockIDs(new Set([PROJECT_EMAIL_COLUMN_LAYOUT_ID]));
+          setProjectDocumentOpen(true);
+          setOpenEmailBlockIDs(new Set());
           setOpenChatBlockIDs(new Set(Array.from(chatBlockIDs).filter((id) => nextBlockIDs.has(id))));
         } else {
           setOpenEditorBlockIDs((current) => new Set(Array.from(current).filter((id) => nextBlockIDs.has(id))));
@@ -682,7 +688,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [loadProject]);
 
   useEffect(() => {
-    setProjectDocumentOpen(false);
+    setProjectDocumentOpen(true);
     setProjectDocumentFullscreen(false);
     setActiveRightPanelTab(projectWorkPanelTabFromHistoryState(
       typeof window === "undefined" ? null : window.history.state,
@@ -1347,16 +1353,8 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     });
   }, [projectDocumentID]);
 
-  const toggleProjectDocument = useCallback(() => {
-    if (projectDocumentOpen) {
-      closeProjectDocument();
-      return;
-    }
-    if (!editorDataFormat.gate) {
-      setError("Editor data format is still loading.");
-      return;
-    }
-    if (!projectDocumentID) return;
+  const ensureProjectDocument = useCallback(() => {
+    if (!editorDataFormat.gate || !projectDocumentID) return false;
     if (!projectTextBlockContentRef.current.has(projectDocumentID)) {
       const timestamp = new Date().toISOString();
       const initialContent: EditorTextBlockContent = {
@@ -1379,7 +1377,17 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
       projectTextBlockSaveController.startLatestContentSave(projectDocumentID);
     }
+    return true;
+  }, [companyID, editorDataFormat.gate, projectDocumentID, projectID, projectTextBlockSaveController]);
+
+  const openProjectDocument = useCallback(() => {
+    if (!editorDataFormat.gate) {
+      setError("Editor data format is still loading.");
+      return;
+    }
+    if (!ensureProjectDocument()) return;
     setOpenEmailBlockIDs((current) => {
+      if (!current.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID)) return current;
       const next = new Set(current);
       next.delete(PROJECT_EMAIL_COLUMN_LAYOUT_ID);
       return next;
@@ -1389,7 +1397,25 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setActiveRichTextBlockID("");
     projectFormattingControllerRef.current = null;
     setError("");
-  }, [closeProjectDocument, companyID, editorDataFormat.gate, projectDocumentID, projectDocumentOpen, projectID, projectTextBlockSaveController]);
+  }, [editorDataFormat.gate, ensureProjectDocument]);
+
+  const toggleProjectDocument = useCallback(() => {
+    if (projectDocumentOpen) {
+      closeProjectDocument();
+      return;
+    }
+    openProjectDocument();
+  }, [closeProjectDocument, openProjectDocument, projectDocumentOpen]);
+
+  useEffect(() => {
+    if (
+      loading
+      || !projectDocumentOpen
+      || !editorDataFormat.gate
+      || project?.project_id.trim() !== projectDocumentID
+    ) return;
+    ensureProjectDocument();
+  }, [editorDataFormat.gate, ensureProjectDocument, loading, project?.project_id, projectDocumentID, projectDocumentOpen]);
 
   const toggleProjectEmailColumn = useCallback(() => {
     closeProjectDocument();
@@ -2930,6 +2956,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     ? { status: "saving" as const }
     : { status: "saved" as const, updatedTimestamp: projectDocumentBlock?.updatedTimestamp };
   const projectDocumentSaveFailed = Boolean(projectDocumentBlock && textBlockSaveFailures[projectDocumentBlock.id]);
+  const projectDocumentDocked = Boolean(projectDocumentOpen && projectDocumentBlock && !projectDocumentFullscreen);
   const projectDocumentPane = projectDocumentBlock ? (
     <dialog
       ref={projectDocumentPaneRef}
@@ -2947,33 +2974,54 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       <div style={projectDocumentFullscreenToolbarStyle(projectDocumentFullscreen)}>
         {projectDocumentFullscreen ? projectEditorToolbar : null}
       </div>
-      <header style={projectDocumentPaneHeaderStyle}>
-        <span data-project-document-title="true" style={projectDocumentPaneTitleStyle}>
-          <ProjectDocumentIcon color={accent} />
-          <strong>Project document</strong>
-        </span>
-        <span data-project-document-actions="true" style={projectDocumentPaneActionsStyle}>
-          <EditorSaveStatusIcon state={projectDocumentSaveFallback} storageKey={projectDocumentSaveStorageKey} compact />
-          <EditorSavedTimestamp storageKey={projectDocumentSaveStorageKey} fallbackUpdatedTimestamp={projectDocumentBlock.updatedTimestamp} createdTimestamp={projectDocumentBlock.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />
-          <label title="Add attachment" aria-label="Add attachment to Project document" style={projectTextBlockIconButtonStyle(accent, false)}>
-            <PaperclipIcon color={accent} />
-            <input type="file" multiple style={{ display: "none" }} onChange={(event) => {
-              const files = event.currentTarget.files;
-              if (files) void addTextBlockAttachments(projectDocumentBlock, files);
-              event.currentTarget.value = "";
-            }} />
-          </label>
-          <button
-            type="button"
-            title={projectDocumentFullscreen ? "Exit full screen" : "Open Project document full screen"}
-            aria-label={projectDocumentFullscreen ? "Exit Project document full screen" : "Open Project document full screen"}
-            aria-pressed={projectDocumentFullscreen}
-            onClick={() => setProjectDocumentFullscreen((current) => !current)}
-            style={projectTextBlockIconButtonStyle(accent, projectDocumentFullscreen)}
-          >
-            <UnifiedNodeShellFullscreenIcon active={projectDocumentFullscreen} />
-          </button>
-        </span>
+      <header
+        data-project-document-header="true"
+        className="mango-editor-header-scroll"
+        style={projectDocumentPaneHeaderStyle}
+      >
+        <div style={projectDocumentPaneHeaderContentStyle}>
+          <span data-project-document-title="true" style={projectDocumentPaneTitleStyle}>
+            <ProjectDocumentIcon color={accent} />
+            <strong>Project document</strong>
+          </span>
+          <span data-project-document-actions="true" style={projectDocumentPaneActionsStyle}>
+            <EditorSaveStatusIcon state={projectDocumentSaveFallback} storageKey={projectDocumentSaveStorageKey} compact />
+            <EditorSavedTimestamp storageKey={projectDocumentSaveStorageKey} fallbackUpdatedTimestamp={projectDocumentBlock.updatedTimestamp} createdTimestamp={projectDocumentBlock.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />
+            <label title="Add attachment" aria-label="Add attachment to Project document" style={projectTextBlockIconButtonStyle(accent, false)}>
+              <PaperclipIcon color={accent} />
+              <input type="file" multiple style={{ display: "none" }} onChange={(event) => {
+                const files = event.currentTarget.files;
+                if (files) void addTextBlockAttachments(projectDocumentBlock, files);
+                event.currentTarget.value = "";
+              }} />
+            </label>
+          </span>
+          <span style={projectDocumentPaneTrailingActionStyle}>
+            {projectDocumentFullscreen ? (
+              <button
+                type="button"
+                data-project-document-fullscreen-close="true"
+                title="Exit Project document full screen"
+                aria-label="Exit Project document full screen"
+                onClick={() => setProjectDocumentFullscreen(false)}
+                style={projectDocumentFullscreenCloseButtonStyle}
+              >
+                X
+              </button>
+            ) : (
+              <button
+                type="button"
+                title="Open Project document full screen"
+                aria-label="Open Project document full screen"
+                aria-pressed={false}
+                onClick={() => setProjectDocumentFullscreen(true)}
+                style={projectTextBlockIconButtonStyle(accent, false)}
+              >
+                <UnifiedNodeShellFullscreenIcon />
+              </button>
+            )}
+          </span>
+        </div>
       </header>
       <div style={projectDocumentEditorWrapStyle}>
         <NodeTextBlockEditor
@@ -3188,76 +3236,85 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       {error ? <div style={summaryErrorStyle}>{error}</div> : null}
       <div ref={bodyRef} className="mango-project-summary-body" style={summaryBodyStyle}>
         <section className="mango-project-summary-timeline" style={textColumnStyle(summarySplitPct)}>
-          <div data-project-timeline-control-row="true" style={projectTimelineControlRowStyle}>
-            <button
-              type="button"
-              data-project-add-text-box="true"
-              title="Add text box"
-              aria-label="Add text box"
-              style={projectTimelineControlButtonStyle(accent, false)}
-              onClick={() => void addTextBlock()}
+          <div
+            data-project-timeline-heading-grid="true"
+            style={projectTimelineHeadingGridStyle(projectDocumentDocked, projectSidePaneWidths.document)}
+          >
+            <div
+              data-project-timeline-control-row="true"
+              className="mango-editor-header-scroll"
+              style={projectTimelineControlRowStyle}
             >
-              <span aria-hidden="true" style={projectTimelinePlusStyle}>+</span>
-            </button>
-            <div style={projectTimelineControlsStyle}>
               <button
                 type="button"
-                data-project-document-toggle="true"
-                title={projectDocumentOpen ? "Close Project document" : "Open Project document"}
-                aria-label="Toggle Project document"
-                aria-pressed={projectDocumentOpen}
-                onClick={toggleProjectDocument}
-                style={projectTimelineControlButtonStyle(accent, projectDocumentOpen)}
+                data-project-add-text-box="true"
+                title="Add text box"
+                aria-label="Add text box"
+                style={projectTimelineControlButtonStyle(accent, false)}
+                onClick={() => void addTextBlock()}
               >
-                <ProjectDocumentIcon color={accent} />
+                <span aria-hidden="true" style={projectTimelinePlusStyle}>+</span>
               </button>
-              <button
-                type="button"
-                data-project-email-count-toggle="true"
-                title={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? "Hide Project email column" : "Show Project email column"}
-                aria-label="Toggle Project email column"
-                aria-pressed={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID)}
-                onClick={toggleProjectEmailColumn}
-                style={projectEmailCountButtonStyle(accent, openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID))}
-              >
-                <MailIcon color={accent} />
-                <span>{projectAttachedEmails.length}</span>
-              </button>
-              <AttachmentCountDropdown
-                items={projectAttachmentDropdownItems}
-                apiBase={apiBase}
-                companyID={companyID}
-                accent={accent}
-                surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
-                align="left"
-                compact
-                loading={projectAttachmentsLoading}
-                loadError={projectAttachmentsLoadError}
-                onRetry={refreshProjectAttachments}
-                onError={setError}
-              />
-              <div data-project-header-universal-linker="true" style={projectHeaderUniversalLinkerStyle}>
-                <UniversalLinkerControls
-                  busy={relationshipActionBusy}
-                  pickerOpen={Boolean(emailPicker)}
-                  showCreateFloatingNode={false}
-                  openPickerAriaLabel="Open universal picker to link this Project"
-                  onTogglePicker={(event) => {
-                    if (emailPicker) {
-                      setEmailPicker(null);
-                      return;
-                    }
-                    const bounds = event.currentTarget.getBoundingClientRect();
-                    setEmailPicker({ left: bounds.left, top: bounds.bottom + 7 });
-                  }}
+              <div style={projectTimelineControlsStyle}>
+                <button
+                  type="button"
+                  data-project-document-toggle="true"
+                  title={projectDocumentOpen ? "Close Project document" : "Open Project document"}
+                  aria-label="Toggle Project document"
+                  aria-pressed={projectDocumentOpen}
+                  onClick={toggleProjectDocument}
+                  style={projectTimelineControlButtonStyle(accent, projectDocumentOpen)}
+                >
+                  <ProjectDocumentIcon color={accent} />
+                </button>
+                <button
+                  type="button"
+                  data-project-email-count-toggle="true"
+                  title={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? "Hide Project email column" : "Show Project email column"}
+                  aria-label="Toggle Project email column"
+                  aria-pressed={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID)}
+                  onClick={toggleProjectEmailColumn}
+                  style={projectEmailCountButtonStyle(accent, openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID))}
+                >
+                  <MailIcon color={accent} />
+                  <span>{projectAttachedEmails.length}</span>
+                </button>
+                <AttachmentCountDropdown
+                  items={projectAttachmentDropdownItems}
+                  apiBase={apiBase}
+                  companyID={companyID}
+                  accent={accent}
+                  surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
+                  align="left"
+                  compact
+                  loading={projectAttachmentsLoading}
+                  loadError={projectAttachmentsLoadError}
+                  onRetry={refreshProjectAttachments}
+                  onError={setError}
                 />
+                <div data-project-header-universal-linker="true" style={projectHeaderUniversalLinkerStyle}>
+                  <UniversalLinkerControls
+                    busy={relationshipActionBusy}
+                    pickerOpen={Boolean(emailPicker)}
+                    showCreateFloatingNode={false}
+                    openPickerAriaLabel="Open universal picker to link this Project"
+                    onTogglePicker={(event) => {
+                      if (emailPicker) {
+                        setEmailPicker(null);
+                        return;
+                      }
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      setEmailPicker({ left: bounds.left, top: bounds.bottom + 7 });
+                    }}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-          <div style={columnToolbarStyle}>
-            <div style={columnTitleStyle}>Timeline</div>
-            <div style={toolbarActionsStyle}>
-              {!projectDocumentFullscreen ? projectEditorToolbar : null}
+            <div data-project-timeline-title="true" style={projectTimelineTitleStyle(projectDocumentDocked)}>Timeline</div>
+            <div data-project-timeline-toolbar="true" style={projectTimelineToolbarStyle(projectDocumentDocked)}>
+              <div style={toolbarActionsStyle}>
+                {!projectDocumentFullscreen ? projectEditorToolbar : null}
+              </div>
             </div>
           </div>
           <div style={{ minHeight: 0, flex: "1 1 auto", overflow: "hidden", display: "grid", gridTemplateColumns: projectDocumentOpen && projectDocumentPane
@@ -3382,7 +3439,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                             setError(cause instanceof Error ? cause.message : "failed_to_link_email_to_project_text_box");
                           });
                         }}
-                        style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`, background: block.color ? `linear-gradient(90deg, ${block.color}30, ${block.color}0c 54%, rgba(255,255,255,0.88))` : "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}
+                        style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`, background: block.color ? `linear-gradient(90deg, ${block.color}30, ${block.color}0c 54%, rgba(255,255,255,0.88))` : PROJECT_TEXTBOX_HEADER_BACKGROUND }}
                       >
                         <div style={{ minWidth: Math.max(448, minimumWidth), height: 37, display: "grid", gridTemplateColumns: `${hasLinkedEmailMessages ? 128 : 44}px minmax(360px, 1fr) ${chatOpen ? projectSidePaneWidths.chat : 44}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
                           <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
@@ -5787,14 +5844,45 @@ const textBlocksScrollStyle: React.CSSProperties = {
   paddingRight: 4,
 };
 
+const projectTimelineHeadingGridStyle = (documentDocked: boolean, documentWidth: number): React.CSSProperties => ({
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: documentDocked
+    ? `${documentWidth}px 8px 42px minmax(0, 1fr)`
+    : "minmax(0, 1fr) max-content",
+  gridTemplateRows: "auto auto",
+  flexShrink: 0,
+});
+
 const projectTimelineControlRowStyle: React.CSSProperties = {
   minWidth: 0,
   display: "grid",
   gridTemplateColumns: "42px minmax(0, 1fr)",
   alignItems: "center",
   padding: "0 0 8px",
-  flexShrink: 0,
+  overflowX: "auto",
+  overflowY: "hidden",
+  gridColumn: "1",
+  gridRow: "1",
 };
+
+const projectTimelineTitleStyle = (documentDocked: boolean): React.CSSProperties => ({
+  ...columnTitleStyle,
+  minWidth: 0,
+  alignSelf: "center",
+  justifySelf: "start",
+  gridColumn: documentDocked ? "4" : "2",
+  gridRow: "1",
+  padding: "0 2px 8px",
+});
+
+const projectTimelineToolbarStyle = (documentDocked: boolean): React.CSSProperties => ({
+  ...columnToolbarStyle,
+  minWidth: 0,
+  justifyContent: "flex-end",
+  gridColumn: documentDocked ? "4" : "1 / -1",
+  gridRow: "2",
+});
 
 const projectTimelineControlsStyle: React.CSSProperties = {
   minWidth: 0,
@@ -5901,7 +5989,7 @@ const projectDocumentPaneStyle = (fullscreen: boolean): React.CSSProperties => (
   margin: 0,
   padding: 0,
   display: "grid",
-  gridTemplateRows: fullscreen ? "auto 40px minmax(0, 1fr)" : "0 40px minmax(0, 1fr)",
+  gridTemplateRows: fullscreen ? "auto 38px minmax(0, 1fr)" : "0 38px minmax(0, 1fr)",
   border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
   borderRadius: fullscreen ? 18 : 10,
   background: EDITOR_NEU_SURFACE,
@@ -5923,18 +6011,28 @@ const projectDocumentPaneStyle = (fullscreen: boolean): React.CSSProperties => (
 
 const projectDocumentPaneHeaderStyle: React.CSSProperties = {
   minWidth: 0,
-  display: "grid",
-  gridTemplateColumns: "max-content minmax(0, 1fr)",
-  alignItems: "center",
-  gap: 8,
-  padding: "5px 7px 5px 10px",
+  height: 38,
+  overflowX: "auto",
+  overflowY: "hidden",
   borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`,
-  background: "linear-gradient(90deg, rgba(239,246,255,0.82), rgba(255,255,255,0.88))",
+  background: PROJECT_TEXTBOX_HEADER_BACKGROUND,
+  boxSizing: "border-box",
+};
+
+const projectDocumentPaneHeaderContentStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: 37,
+  display: "grid",
+  gridTemplateColumns: "max-content minmax(0, 1fr) 30px",
+  alignItems: "center",
+  gap: 4,
+  padding: "4px 6px",
+  boxSizing: "border-box",
 };
 
 const projectDocumentPaneTitleStyle: React.CSSProperties = {
   minWidth: "max-content",
-  flex: "0 0 auto",
   display: "inline-flex",
   alignItems: "center",
   gap: 7,
@@ -5951,6 +6049,18 @@ const projectDocumentPaneActionsStyle: React.CSSProperties = {
   alignItems: "center",
   justifyContent: "flex-end",
   gap: 5,
+};
+
+const projectDocumentPaneTrailingActionStyle: React.CSSProperties = {
+  width: 30,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+};
+
+const projectDocumentFullscreenCloseButtonStyle: React.CSSProperties = {
+  ...UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE,
+  flex: "0 0 auto",
 };
 
 const projectDocumentEditorWrapStyle: React.CSSProperties = {

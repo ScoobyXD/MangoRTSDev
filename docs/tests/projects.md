@@ -132,12 +132,15 @@ P70 - Project exit history is action-triggered, not timer-triggered. After a his
 P73 - Each Project has one permanent rich-text document whose exact `project_textboxes.textbox_id` equals that Project's canonical `project_id`. First opening lazily creates or reuses that row through the existing Project editor metadata and document paths; the row is excluded from the timeline and uses the shared Project editor, formatting toolbar, history, attachment, recycle, and permission lifecycle without another storage or compatibility path.
 P74 - The permanent Project document may appear inline or in the shared fullscreen overlay, but presentation changes never create a second document or editor. Exactly one editor instance owns the current document, selection, formatting controller, save state, and recovery state, and restoring inline returns that same instance to the Project pane.
 P75 - Saved-version restore never deletes or remaps the permanent Project document. A snapshot without the document clears its body in place, a snapshot with the document restores its saved title and body to `textbox_id = project_id`, and a deleted canonical row fails restore instead of creating a replacement timeline textbox. Current attachment relationships remain independent of this document-body restore.
-P76 - The permanent Project document whose `textbox_id` equals `project_id` is never an email/textbox relationship or chat destination. Its header shows the complete **Project document** title and has no red X; the permanent-document control in the Project timeline row is its open/collapse control, while the existing expand/restore action remains available.
+P76 - The permanent Project document whose `textbox_id` equals `project_id` is never an email/textbox relationship or chat destination.
 P77 - A Project timeline textbox with one or more exact email relationships stores one approved non-red `color` shared by every linked message card. The first exact link assigns it, later links preserve it, removing one of several links preserves it, and removing the last exact link clears it. The client never hashes an email ID or saves `email_message_ids`, `email_message_id`, or `email_accent` as textbox authority.
 P78 - Deleting a Project timeline textbox sends only that textbox's editor-document DELETE. The backend atomically removes the textbox, its chats, and its exact email relationships; the client never sends parallel child deletes.
 P79 - A Project saved-version block contains only its ID, title, document, attachments, created timestamp, and updated timestamp. Exact email links, server-owned color, staged message state, and temporary chat state are never saved in that version payload.
 P80 - Project email-chat focus belongs to only the most recently activated textbox. Activating a chat message clears every other textbox's active chat message before focusing its exact email selection.
 P81 - A new Project email textbox uses a subject title only when the exact selected internal message is present. If that exact message is absent, its title is **Email text box** and never comes from another attached email.
+P82 - The permanent Project document uses the same compact header band as Project timeline textboxes and keeps the complete **Project document** title, save state, updated/created timestamps, attachment action, and expand/restore action accessible without clipping.
+P83 - A red X appears only while the permanent Project document is full screen and returns that same document to its inline pane.
+P84 - Opening a Project defaults to the permanent Project document pane open and the Project-wide email pane closed.
 
 ## Scenarios
 
@@ -233,11 +236,15 @@ Business logic covered:
 - P75
 - P76
 - P77
+- P82
+- P83
+- P84
 
 Given:
+- A user opens a Project.
 - A user edits a project text box.
 - The user opens the header Universal picker from the compact Project timeline control row.
-- The user opens the permanent Project document and switches it to full screen.
+- The user switches the permanent Project document to full screen.
 
 Expected:
 - The project text box uses the same unified editor semantics as node, Logic Gate, and email compose/reply rich editor surfaces.
@@ -252,8 +259,10 @@ Expected:
 - Project text-box and permanent-document edits never write Node-owned editor storage.
 - The Universal picker Emails category allows attaching an exact existing personal-mailbox message where permitted.
 - The Emails category does not expose compose, reply, send, scheduled send, draft-save, or mailbox-mutation controls.
+- Opening the Project shows the permanent Project document and leaves the Project-wide email pane closed.
 - The permanent Project document stays outside the timeline and keeps the same editor instance when it enters or exits full screen.
-- The permanent Project document header shows its complete title without a red X, and its timeline document control remains the open/collapse action.
+- The permanent Project document uses the compact timeline-textbox header band and keeps its complete title, save state, timestamps, attachment action, and expand/restore action accessible without clipping.
+- The permanent Project document shows a red X only in full screen; that X restores the same document inline, while the timeline document control remains its open/collapse action.
 - The permanent Project document is never offered as an email or chat destination.
 - Saved-version restore clears or updates the permanent document title/body at `textbox_id = project_id`, preserves its current final attachment relationships, and never deletes or remaps it.
 - Focusing the permanent Project document routes the shared Project formatting toolbar to that document.
