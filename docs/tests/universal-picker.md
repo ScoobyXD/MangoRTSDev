@@ -38,7 +38,7 @@ Last updated: 2026-08-07
 
 # Process Story: The universal picker references or links an exact typed resource
 
-A user opens the shared universal picker from a Node, Logic Gate, or Project editor, the Project Logic Gates / Nodes relationship launcher, a Node or Project Attach email action, or a selected My Triage/Shared Triage message
+A user opens the shared universal picker from a Node, Logic Gate, or Project editor, the Node header linker, the Project Logic Gates / Nodes relationship launcher, the Project Attach email action, or a selected My Triage/Shared Triage message
 ↓
 The picker opens above a transparent dismiss layer, focuses one search field, and shows Nodes, Projects, Logic Gates, and Emails as typed categories
 ↓
@@ -58,11 +58,11 @@ Last updated: 2026-08-17
 
 # Universal Picker Business Logic Laws
 
-UP1 - Mango has one shared Universal picker implementation. Node, Logic Gate, and Project Tiptap editors, the selected-email placement toolbar, and Node/Project Attach email actions must not implement separate picker search, keyboard, category, or mode behavior.
+UP1 - Mango has one shared Universal picker implementation. Node, Logic Gate, and Project Tiptap editors, the Node header linker, the selected-email placement toolbar, and Project Attach email must not implement separate picker search, keyboard, category, or mode behavior.
 
 UP2 - Typing `#` with a collapsed caret in an active Node, Logic Gate, or Project Tiptap editor opens the picker at the trigger position and focuses the picker's single search input. The trigger remains owned by that exact document and selection until the picker selects, cancels, or becomes stale.
 
-UP3 - The selected My Triage or Shared Triage email launcher opens the picker in `##` link mode. The Node and Project Attach email actions also open in `##` link mode with Emails selected. Ordinary editor hashtag entry starts in `#` reference mode.
+UP3 - The selected My Triage or Shared Triage email launcher opens the picker in `##` link mode. Project Attach email opens in `##` link mode with Emails selected. The Node header linker opens the same picker in `##` link mode with all legal Node targets, including Emails; the Node header has no separate Attach email button or picker. Ordinary editor hashtag entry starts in `#` reference mode.
 
 UP4 - The picker has exactly two meanings. `#` is reference mode and may insert an inline entity chip or open a selected resource without changing any relationship. `##` is link mode and must complete the source host's documented business relationship before an editor inserts the same target as a reference chip.
 
@@ -104,7 +104,7 @@ UP22 - Inbox maps to the primary mailbox, Starred to starred, Sent to sent, All 
 
 UP23 - The same top search input searches the active mailbox. A nonblank email query waits 180 milliseconds; a blank mailbox load starts immediately. Each current request reads Mango's authorized stored messages first and paints them immediately, then always reconciles the same exact account/mailbox/query with Nylas because a nonempty local result does not prove provider coverage is complete. A category or mailbox/query change clears the old page, and a stale local or provider response cannot replace newer state.
 
-UP24 - Stored and provider email requests each ask for 12 messages on the initial page. Provider reconciliation adopts provider order and current metadata, preserves a known Mango `email_message_id`, appends stored-only matches, and deduplicates by exact provider message ID. Scrolling within two row heights requests the provider's next token; raw messages merge before thread condensation, and the provider's absence of another token ends pagination.
+UP24 - Stored and provider email requests each ask for 12 messages on the initial page. Provider reconciliation adopts provider order and current metadata, preserves a known Mango `email_message_id`, appends stored-only matches, and deduplicates by exact provider message ID. If thread condensation leaves no scroll range while a provider next token exists, Mango appends one page at a time until the list becomes scrollable or the provider is exhausted; scrolling within two row heights continues pagination. Raw messages merge before thread condensation, and the provider's absence of another token ends pagination.
 
 UP25 - Email results call the same mailbox-scoped thread-condensation helper as My Triage and Shared Triage. One row shows the representative message's unread state, sender, subject, snippet, date/time, and thread count when greater than one; unread/starred/count aggregation follows that shared helper. A missing sender is labeled Unknown sender and a missing subject is labeled `(no subject)`. Display fallback text never replaces stored identity.
 
@@ -122,7 +122,7 @@ UP31 - In editor `##` mode, the host relationship command completes before the p
 
 UP32 - Node-to-Logic-Gate uses the existing priority-valid assign-or-move command with Requested destination status. Node-to-Project uses the existing atomic typed Node/Project command. Logic-Gate-to-Project creates or reuses the existing Gate/Project row. A normal Logic Gate-to-Huddle-Logic-Gate choice creates or reuses the existing typed `huddle_logic_gate_relationships` row. The picker does not duplicate their authorization, cardinality, idempotency, event, projection, or timeline rules.
 
-UP33 - Linking an email to a Node or using a Node Attach email action uses the existing exact-message Node import/attachment command. Linking an email to a Project or using Project Attach email uses the existing Project exact-message attachment command. Before either typed command, the picker ensures the exact provider message is durably ingested when necessary and supplies its real Mango `email_message_id` plus account/mailbox scope rather than a surrogate picker identity.
+UP33 - Linking an email to a Node through the Node header linker uses the existing exact-message Node import/attachment command. Linking an email to a Project or using Project Attach email uses the existing Project exact-message attachment command. Before either typed command, the picker ensures the exact provider message is durably ingested when necessary and supplies its real Mango `email_message_id` plus account/mailbox scope rather than a surrogate picker identity.
 
 UP34 - From a selected email, choosing an existing Node adds or reuses that exact Node-wide thread destination even when the thread already has another Node destination. Choosing a Logic Gate immediately creates the email Node there with priority **Not Assigned**. Choosing a Project requires only a Logic Gate choice and then uses the established typed Project/Logic Gate commands.
 
@@ -136,7 +136,7 @@ UP38 - Loading, empty, disconnected-account, search failure, and load-more state
 
 UP39 - The Emails pane is a find-and-select surface only. It may switch folders, search, scroll, page, highlight, reference, and attach existing messages. It must not expose Compose, Reply, Reply All, Send, scheduled send, draft-save, Archive mutation, star mutation, spam mutation, delete, or message-body editing.
 
-UP40 - The obsolete node-specific email picker no longer exists. Node and Project email selection must use the Universal picker Emails category directly; no compatibility component, alternate modal, or fallback search path may be restored.
+UP40 - The obsolete node-specific email picker and dedicated Node header Attach email shortcut no longer exist. Node email selection uses the header Universal picker, and Project email selection uses the Universal picker Emails category directly; no compatibility component, alternate modal, shortcut picker, or fallback search path may be restored.
 
 UP41 - The picker never writes a generic edge, central resource registry, translated/surrogate resource identity, or untyped polymorphic relationship. Every `##` action retains the source and destination's unchanged canonical types/IDs and delegates to the established typed command described by `docs/tests/relationships.md`.
 
@@ -179,12 +179,12 @@ Business logic covered:
 
 Given:
 - A connected personal email account exists.
-- The user opens Emails from an editor or a Node/Project Attach email action.
+- The user opens Emails from an editor, the Node header linker, or Project Attach email.
 
 Expected:
 - The popup expands and replaces the resource list with Inbox, Starred, Sent, and the All/Spam control plus roughly six or seven visible message rows.
 - Stored search results paint first; provider reconciliation always follows, preserves durable Mango IDs, and failure leaves stored rows usable with a sync warning.
-- Results and appended pages group threads through the exact helper used by My Triage and Shared Triage.
+- Results and appended pages group threads through the exact helper used by My Triage and Shared Triage; a condensed short page automatically appends one page at a time until the list can scroll or has no next token.
 - E then Tab enters Emails; arrows highlight messages; Enter, Tab, or pointer click chooses the exact provider message and scope.
 - The pane contains no compose, send, draft, reply, or mailbox-mutation UI, and the retired node-specific picker is absent.
 

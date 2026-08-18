@@ -129,6 +129,7 @@ test("mail sends enforce the shared window and Triage exposes the neutral countd
   const api = readFileSync(resolve(process.cwd(), "frontend/src/modules/communications/communicationsApi.ts"), "utf8");
   const banner = readFileSync(resolve(process.cwd(), "frontend/src/modules/communications/OutboundEmailUndoBanner.tsx"), "utf8");
   const home = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
+  const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
 
   assert.match(api, /export async function sendEmail\(input: SendEmailInput\)/);
@@ -144,7 +145,8 @@ test("mail sends enforce the shared window and Triage exposes the neutral countd
   assert.match(banner, />\s*Send now\s*<\/button>/);
   assert.match(banner, />\s*Undo\s*<\/button>/);
   assert.doesNotMatch(banner, /#22c55e|#16a34a|#15803d/);
-  assert.match(home, /<OutboundEmailUndoBanner \/>/);
+  assert.match(home, /!\(compose\.open && busy === "send" && !compose\.sharedInboxID\.trim\(\)\) && <OutboundEmailUndoBanner \/>/);
+  assert.match(homeParts, /\{busy && !compose\.sharedInboxID\.trim\(\) && <OutboundEmailUndoBanner \/>\}\s*<button type="submit"/);
   assert.match(homePage, /await loadHomeMailDraft\(companyID, currentUserID, draft\)/);
   assert.match(homePage, /const unscheduledCompose = \{ \.\.\.homeMailDraftToCompose\(draftForSend\), scheduledAt: "" \}/);
   assert.match(homePage, /syncHomeMailDraftFromCompose\(companyID, currentUserID, unscheduledCompose, ""\)/);

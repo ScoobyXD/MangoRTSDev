@@ -2541,9 +2541,13 @@ export function HomePage({
     const storedEmailThreadID = selectedListMessage?.id === selectedMessageID
       ? selectedListMessage.email_thread_id?.trim() ?? ""
       : "";
+    const storedEmailMessageID = selectedListMessage?.id === selectedMessageID
+      ? selectedListMessage.email_message_id?.trim() ?? ""
+      : "";
+    const hasCompleteStoredEmailIdentity = Boolean(storedEmailThreadID && storedEmailMessageID);
     const providerMailAvailable = canLoadMailForView(activeViewID)
       && (!selectedListMessage || emailMessageUsesActiveProviderScope(selectedListMessage, activeViewID, currentUserID, activeMailAccountEmail));
-    if (!providerMailAvailable && !storedEmailThreadID) {
+    if (!providerMailAvailable && !hasCompleteStoredEmailIdentity) {
       setLoadingDetail(false);
       setSelectedThreadMessages([]);
       return;
@@ -2564,16 +2568,18 @@ export function HomePage({
       setSelectedThreadMessages([]);
       setError("");
       try {
-        const ingestedSelected = storedEmailThreadID ? null : await ensureEmailMessageIngested(selectedMessageID, {
+        const ingestedSelected = hasCompleteStoredEmailIdentity ? null : await ensureEmailMessageIngested(selectedMessageID, {
           companyID,
           sharedInboxID,
           accountEmail: sharedInboxID ? undefined : activeMailAccountEmail,
         });
         if (cancelled) return;
-        const durableEmailThreadID = storedEmailThreadID || ingestedSelected?.email_thread_id?.trim() || "";
-        const durableEmailMessageID = selectedListMessage?.email_message_id?.trim()
-          || ingestedSelected?.email_message_id?.trim()
-          || "";
+        const durableEmailThreadID = ingestedSelected
+          ? ingestedSelected.email_thread_id?.trim() ?? ""
+          : storedEmailThreadID;
+        const durableEmailMessageID = ingestedSelected
+          ? ingestedSelected.email_message_id?.trim() ?? ""
+          : storedEmailMessageID;
         if (!durableEmailThreadID || !durableEmailMessageID) throw new Error("stored_email_message_not_found");
         if (ingestedSelected) {
           const listMessageWithDurableIdentity: EmailMessage = {

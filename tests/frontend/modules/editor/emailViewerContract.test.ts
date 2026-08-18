@@ -75,6 +75,8 @@ test("node-attached email viewer is read-only while retaining thread, relationsh
   assert.match(universalPickerEmailPane, /requestJSON<MessagePage>\(providerPath, \{ signal: controller\.signal \}\)/);
   assert.match(universalPickerEmailPane, /controller\.abort\(\)/);
   assert.match(universalPickerEmailPane, /const page = await listEmailMessages\(\{/);
+  assert.match(universalPickerEmailPane, /if \(!active \|\| !accountEmail \|\| !nextPageToken\.trim\(\) \|\| loading \|\| loadingMore \|\| error\) return undefined/);
+  assert.match(universalPickerEmailPane, /requestAnimationFrame\(\(\) => \{[\s\S]{0,220}list\.scrollHeight <= list\.clientHeight \+ 1[\s\S]{0,80}void loadMore\(\)/);
   assert.match(calendarInviteCard, /Calendar invitation/);
 });
 
@@ -273,7 +275,7 @@ test("node email and linked text boxes use exact canonical message lists and tex
   assert.match(triageChat, /color: nextNodeTextBlockColor\(\[\]\)/);
 });
 
-test("both Node email picker entry points commit exact stored identity before showing its preview", () => {
+test("the Node header linker and email drop path commit exact stored identity before showing its preview", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeShared = source("frontend/src/modules/editor/NodeWorkspaceSurfaceShared.tsx");
   const editorProjection = source("frontend/src/modules/editor/editorProjection.ts");
@@ -290,8 +292,8 @@ test("both Node email picker entry points commit exact stored identity before sh
   assert.match(nodeSurface, /parseDraggedEmail\(event\.dataTransfer\)/);
   assert.match(nodeSurface, /messageAttachmentPayload\(entity\.emailMessage, entity\.emailSharedInboxID, entity\.emailAccountEmail\)/);
   assert.match(nodeSurface, /const chooseHeaderLinkedEntity[\s\S]{0,240}await linkEntityFromEditor\(entity\)/);
-  assert.match(nodeSurface, /initialCategory="email_message"[\s\S]{0,220}await linkEntityFromEditor\(entity\)/);
-  assert.match(nodeSurface, /initialCategory="email_message"/);
+  assert.match(nodeSurface, /linkTargetTypes=\{NODE_HEADER_LINK_TARGET_TYPES\}/);
+  assert.doesNotMatch(nodeSurface, /initialCategory="email_message"/);
   assert.match(nodeShared, /const emailThreadID = message\.email_thread_id\?\.trim\(\) \?\? ""/);
   assert.match(nodeShared, /if \(!emailThreadID\) throw new Error\("email_thread_id_missing"\)/);
   assert.match(nodeShared, /messageID: message\.id,[\s\S]{0,100}emailMessageID,[\s\S]{0,100}emailThreadID/);
@@ -470,8 +472,12 @@ test("triage email selection, history, and archive prefetch preserve the foregro
   assert.doesNotMatch(homePage, /mergeEmailThreadDetailMessages\(current, \[visiblePrimaryMessage\]\)|setSelectedThreadMessages\(\[visiblePrimaryMessage\]\)|setSelectedThreadMessages\(\[message\]\)|setSelectedThreadMessages\(nextSelection \? \[nextSelection\] : \[\]\)/);
   assert.match(homePage, /loadSelectedThreadMessageBody/);
   assert.match(homePage, /const storedEmailThreadID = selectedListMessage\?\.id === selectedMessageID/);
-  assert.match(homePage, /const ingestedSelected = storedEmailThreadID \? null : await ensureEmailMessageIngested\(selectedMessageID/);
-  assert.match(homePage, /const durableEmailThreadID = storedEmailThreadID \|\| ingestedSelected\?\.email_thread_id\?\.trim\(\) \|\| ""/);
+  assert.match(homePage, /const storedEmailMessageID = selectedListMessage\?\.id === selectedMessageID/);
+  assert.match(homePage, /const hasCompleteStoredEmailIdentity = Boolean\(storedEmailThreadID && storedEmailMessageID\)/);
+  assert.match(homePage, /const ingestedSelected = hasCompleteStoredEmailIdentity \? null : await ensureEmailMessageIngested\(selectedMessageID/);
+  assert.match(homePage, /const durableEmailThreadID = ingestedSelected[\s\S]{0,120}\? ingestedSelected\.email_thread_id\?\.trim\(\) \?\? ""[\s\S]{0,80}: storedEmailThreadID/);
+  assert.match(homePage, /const durableEmailMessageID = ingestedSelected[\s\S]{0,120}\? ingestedSelected\.email_message_id\?\.trim\(\) \?\? ""[\s\S]{0,80}: storedEmailMessageID/);
+  assert.doesNotMatch(homePage, /const ingestedSelected = storedEmailThreadID \? null/);
   assert.match(homePage, /await getStoredEmailThread\(durableEmailThreadID/);
   assert.match(homePage, /const exactSelectedRow = emailMessageRowKey\(message\) === selectedMessageRowKey/);
   assert.match(homePage, /email_message_id: durableEmailMessageID,[\s\S]{0,100}email_thread_id: durableEmailThreadID/);

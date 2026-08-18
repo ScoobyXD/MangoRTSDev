@@ -592,7 +592,7 @@ export function HomeMailWorkspace({
             </div>
           )}
           {visibleError && <div style={inlineErrorStyle}>{visibleError}</div>}
-          {!visibleError && <OutboundEmailUndoBanner />}
+          {!visibleError && !(compose.open && busy === "send" && !compose.sharedInboxID.trim()) && <OutboundEmailUndoBanner />}
           {notice && !visibleError && (
             <div style={{ ...inlineNoticeStyle, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
               <span style={{ minWidth: 0 }}>{notice}</span>

@@ -265,6 +265,16 @@ export const UniversalPickerEmailPane = forwardRef<UniversalPickerEmailPaneHandl
     }
   }, [accountEmail, active, companyID, loading, loadingMore, mailbox, nextPageToken, query]);
 
+  useEffect(() => {
+    if (!active || !accountEmail || !nextPageToken.trim() || loading || loadingMore || error) return undefined;
+    const frameID = window.requestAnimationFrame(() => {
+      const list = listRef.current;
+      if (!list) return;
+      if (list.scrollHeight <= list.clientHeight + 1) void loadMore();
+    });
+    return () => window.cancelAnimationFrame(frameID);
+  }, [accountEmail, active, error, loadMore, loading, loadingMore, messages.length, nextPageToken, visibleMessages.length]);
+
   const mailboxButtonStyle = useCallback((selected: boolean): React.CSSProperties => ({
     minWidth: 0,
     minHeight: 38,
