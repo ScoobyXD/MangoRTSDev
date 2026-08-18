@@ -357,6 +357,7 @@ export type AuthenticatedImageProps = {
   editable?: boolean;
   updateAttributes?: (attributes: Partial<MangoAttachmentImageAttributes>) => void;
   onSelect?: () => void;
+  onPointerEnter?: () => void;
   onImageChatRequest?: (image: MangoTiptapImageAction) => void;
   onImageNodeRequest?: (image: MangoTiptapImageAction) => void;
 };
@@ -399,6 +400,7 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
   editable = false,
   updateAttributes,
   onSelect,
+  onPointerEnter,
   onImageChatRequest,
   onImageNodeRequest,
 }) => {
@@ -620,6 +622,7 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
       ref={rootRef}
       data-mango-attachment-id={attributes.attachmentId}
       data-selected={selected || undefined}
+      onPointerEnter={onPointerEnter}
       onPointerDown={(event) => {
         if (event.button !== 0 || (event.target as HTMLElement).closest?.("button")) return;
         onSelect?.();
@@ -763,6 +766,16 @@ function attachmentNodeViewExtension(
       return ReactNodeViewRenderer(ImageNodeView, {
         className: "mango-tiptap-image-placement",
         attrs: ({ node }) => mangoTiptapImagePlacementDOMAttributes(node.attrs),
+        stopEvent: ({ event }) => {
+          const target = event.target instanceof Element ? event.target : null;
+          if (target?.closest("button")) return true;
+          return event.type !== "mousedown"
+            && event.type !== "copy"
+            && event.type !== "cut"
+            && event.type !== "paste"
+            && event.type !== "drop"
+            && !event.type.startsWith("drag");
+        },
       });
     },
   });
@@ -1927,8 +1940,12 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   }, []);
 
   const renderStaticAttachment = useCallback((attributes: MangoStaticAttachmentImageProps) => (
-    <MangoAuthenticatedImage attributes={attributes} attachmentContext={attachmentContext} />
-  ), [attachmentContext]);
+    <MangoAuthenticatedImage
+      attributes={attributes}
+      attachmentContext={attachmentContext}
+      onPointerEnter={editable ? activate : undefined}
+    />
+  ), [activate, attachmentContext, editable]);
   const tableHandleFrame = tableGrowthDrag?.frame ?? activeTableFrame;
   const tablePreviewWidth = tableHandleFrame
     ? tableHandleFrame.width + (tableGrowthDrag?.growth.columns ?? 0) * tableHandleFrame.columnWidth

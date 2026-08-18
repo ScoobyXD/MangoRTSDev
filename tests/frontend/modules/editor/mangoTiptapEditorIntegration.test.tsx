@@ -231,6 +231,7 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(presentationCSS, /padding:\s*12px 13px/);
   assert.match(presentationCSS, /min-height:\s*100%/);
   assert.match(presentationCSS, /display:\s*flow-root/, "the editor contains wrapped floats even at its narrowest mounted width");
+  assert.match(presentationCSS, /data-mango-image-position="wrap"[^}]+position:\s*relative;[^}]+z-index:\s*1/s, "wrapped text boxes must not cover the visible image's pointer target");
   assert.match(presentationCSS, /data-mango-image-position="wrap"[^}]+max-width:\s*min\(50%, 840px\)/s);
   assert.match(presentationCSS, /data-mango-image-alignment="left"[^}]+float:\s*left/s);
   assert.match(presentationCSS, /data-mango-image-alignment="right"[^}]+float:\s*right/s);
@@ -714,15 +715,18 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     );
 
     editorRoot.scrollTop = 287;
-    const activationEvent = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 8, clientY: 8 });
+    const sleepingImage = editorRoot.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
+    assert.ok(sleepingImage);
+    const activationEvent = new dom.window.MouseEvent("pointerover", { bubbles: true, cancelable: true, clientX: 8, clientY: 8 });
+    const preventScrollBeforeImageHover = preventScrollEditorFocuses;
     holdAnimationFrames = true;
     await act(async () => {
-      editorRoot.dispatchEvent(activationEvent);
+      sleepingImage.dispatchEvent(activationEvent);
     });
-    assert.ok(editorRoot.querySelector('[data-mango-tiptap-activation-cover="true"]'), "the sleeping document stays painted while the live editor attaches");
+    assert.ok(editorRoot.querySelector('[data-mango-tiptap-activation-cover="true"]'), "entering a sleeping image must start its live editor while the static document stays painted");
     assert.equal(editorRoot.querySelector<HTMLElement>('[data-mango-tiptap-live-surface="true"]')?.style.opacity, "0", "the unattached live surface must not replace the painted document");
-    assert.equal(activationEvent.defaultPrevented, true, "activation must suppress native focus on the static renderer that is about to be replaced");
-    await waitFor(() => controllerRef.current !== null, "a normal pointer click should activate a visible ProseMirror editor");
+    assert.equal(activationEvent.defaultPrevented, false, "image hover activation must not consume the pointer gesture");
+    await waitFor(() => controllerRef.current !== null, "entering a sleeping image should prepare its native ProseMirror drag source");
     holdAnimationFrames = false;
     const activationFrames = [...heldAnimationFrames.values()];
     heldAnimationFrames.clear();
@@ -731,8 +735,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     await flushAsyncWork(2);
-    assert.equal(editorRoot.scrollTop, 287, "activating a scrolled JSON document must keep its exact text-box scroll position");
-    assert.ok(preventScrollEditorFocuses >= 1, "pointer activation must focus without asking the browser to scroll");
+    assert.equal(editorRoot.scrollTop, 287, "hover-activating a scrolled image must keep its exact text-box scroll position");
+    assert.equal(preventScrollEditorFocuses, preventScrollBeforeImageHover, "hover-activating an image must not steal focus");
     const activeProseMirror = editorRoot.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
     assert.ok(activeProseMirror);
     assert.equal(editorRoot.dataset.mangoTiptapLiveReady, "true", "the live editor is exposed only after its DOM and caret are ready");
@@ -742,7 +746,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeProseMirror.querySelector('[data-mango-annotation-id="annotation-image"]'), null, "dormant changes must not decorate active surfaces");
     assert.equal(activeProseMirror.parentElement?.classList.contains("mango-tiptap-active-surface"), true, "the active EditorContent wrapper must fill the full text box");
     assert.equal(activeProseMirror.getAttribute("contenteditable"), "true", "the clicked JSON document should become a real editable surface");
-    assert.equal(dom.window.document.activeElement, activeProseMirror, "the first pointer activation must focus the attached editor without requiring a second click");
+    assert.notEqual(dom.window.document.activeElement, activeProseMirror, "preparing an image drag source must not move the user's caret");
     assert.equal(activeProseMirror.dataset.mangoLegacyLeadingDateHeading, "true");
     const activeInitialImagePlacement = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]')?.closest<HTMLElement>(".mango-tiptap-image-placement");
     assert.equal(activeInitialImagePlacement?.dataset.mangoImagePosition, sleepingImagePlacement?.dataset.mangoImagePosition, "active and sleeping renderers use the same image placement");
@@ -752,6 +756,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     holdAnimationFrames = true;
     const activeCaretEvent = new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: 20, clientY: 20 });
     await act(async () => {
+      activeProseMirror.focus({ preventScroll: true });
       activeProseMirror.dispatchEvent(activeCaretEvent);
     });
     assert.equal(activeCaretEvent.defaultPrevented, false, "an active-editor click keeps native caret placement");
@@ -850,6 +855,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeMovedImagePlacement?.dataset.mangoImageAlignment, "left");
     const currentImageNode = activeImageFrame.closest<HTMLElement>(".node-mangoAttachmentImage");
     assert.ok(currentImageNode);
+    const imageIndexBeforeDrag = Array.from(activeProseMirror.children).indexOf(currentImageNode);
+    assert.ok(imageIndexBeforeDrag > 1, "the drag regression must start from a different document row than its destination");
     assert.equal(currentImageNode.getAttribute("draggable"), "true", "ProseMirror's image node must own the native drag source");
     assert.equal(activeImageFrame.querySelector('[data-mango-tiptap-image-frame="true"]')?.getAttribute("draggable"), null, "the visible Tiptap drag handle must not create a second nested drag source");
     const currentImageDragHandle = activeImageFrame.querySelector<HTMLElement>('[data-mango-tiptap-image-frame="true"]');
@@ -866,12 +873,18 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     } as unknown as DataTransfer;
     const imageMouseDown = new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: 500, clientY: 500 });
     const imageDragStart = new dom.window.MouseEvent("dragstart", { bubbles: true, cancelable: true, button: 0, clientX: 500, clientY: 500 });
+    const imageDragEnter = new dom.window.MouseEvent("dragenter", { bubbles: true, cancelable: true, button: 0, clientX: 900, clientY: 10 });
+    const imageDragOver = new dom.window.MouseEvent("dragover", { bubbles: true, cancelable: true, button: 0, clientX: 900, clientY: 10 });
     const imageDrop = new dom.window.MouseEvent("drop", { bubbles: true, cancelable: true, button: 0, clientX: 900, clientY: 10 });
-    Object.defineProperty(imageDragStart, "dataTransfer", { configurable: true, value: imageDragTransfer });
-    Object.defineProperty(imageDrop, "dataTransfer", { configurable: true, value: imageDragTransfer });
+    for (const event of [imageDragStart, imageDragEnter, imageDragOver, imageDrop]) {
+      Object.defineProperty(event, "dataTransfer", { configurable: true, value: imageDragTransfer });
+    }
+    const imageDropTarget = activeProseMirror.children[0] as HTMLElement;
     const originalEditorBounds = activeProseMirror.getBoundingClientRect;
+    const originalEditorOffsetParent = Object.getOwnPropertyDescriptor(activeProseMirror, "offsetParent");
     const originalCaretPosition = Object.getOwnPropertyDescriptor(dom.window.document, "caretPositionFromPoint");
     Object.defineProperty(activeProseMirror, "getBoundingClientRect", { configurable: true, value: () => new dom.window.DOMRect(0, 0, 1_000, 1_000) });
+    Object.defineProperty(activeProseMirror, "offsetParent", { configurable: true, value: activeProseMirror.parentElement });
     Object.defineProperty(dom.window.document, "caretPositionFromPoint", {
       configurable: true,
       value: () => ({ offsetNode: activeProseMirror, offset: 1 }),
@@ -880,23 +893,35 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       await act(async () => {
         currentImageDragHandle.dispatchEvent(imageMouseDown);
         currentImageNode.dispatchEvent(imageDragStart);
-        activeProseMirror.dispatchEvent(imageDrop);
+        imageDropTarget.dispatchEvent(imageDragEnter);
+        imageDropTarget.dispatchEvent(imageDragOver);
+        imageDropTarget.dispatchEvent(imageDrop);
       });
     } finally {
       Object.defineProperty(activeProseMirror, "getBoundingClientRect", { configurable: true, value: originalEditorBounds });
+      if (originalEditorOffsetParent) Object.defineProperty(activeProseMirror, "offsetParent", originalEditorOffsetParent);
+      else delete (activeProseMirror as HTMLElement & { offsetParent?: Element | null }).offsetParent;
       if (originalCaretPosition) Object.defineProperty(dom.window.document, "caretPositionFromPoint", originalCaretPosition);
       else delete (dom.window.document as Document & { caretPositionFromPoint?: unknown }).caretPositionFromPoint;
     }
     assert.match(imageDragData.get("text/html") ?? "", /data-attachment-id="image-1"/, "native Tiptap dragstart must carry the selected image node");
+    assert.equal(imageDragStart.defaultPrevented, false, "the native image drag must not be canceled at its source");
+    assert.equal(imageDragOver.defaultPrevented, true, "the destination row must accept the native image drop");
     assert.equal(imageDrop.defaultPrevented, true, "the image drop must commit through the existing ProseMirror transaction");
-    await waitFor(() => activeProseMirror.children[1]?.classList.contains("node-mangoAttachmentImage") === true, "dropping after the first block must move the image to that document anchor");
+    await waitFor(() => {
+      const movedImageNode = activeProseMirror.querySelector('[data-mango-attachment-id="image-1"]')?.closest(".node-mangoAttachmentImage");
+      const movedIndex = movedImageNode ? Array.from(activeProseMirror.children).indexOf(movedImageNode) : -1;
+      return movedIndex >= 0 && movedIndex < imageIndexBeforeDrag;
+    }, "dropping on an earlier document row must move the image to an earlier document anchor");
     activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
     assert.ok(activeImageFrame);
+    const imageIndexAfterDrag = Array.from(activeProseMirror.children).indexOf(activeImageFrame.closest<HTMLElement>(".node-mangoAttachmentImage")!);
     assert.equal(activeImageFrame.closest<HTMLElement>(".mango-tiptap-image-placement")?.dataset.mangoImageAlignment, "right", "dropping in the right zone must snap and wrap the moved image on the right");
     await waitFor(() => postStarted, "the native image drop must use the normal durable document save");
-    assert.equal(postedDocument?.document.content?.[1]?.type, "mangoAttachmentImage", "the saved JSON must contain the moved image at its new anchor");
-    assert.equal(postedDocument?.document.content?.[1]?.attrs?.alignment, "right");
-    assert.equal(postedDocument?.document.content?.[1]?.attrs?.position, "wrap");
+    const savedImageIndex = postedDocument?.document.content?.findIndex((node) => node.type === "mangoAttachmentImage");
+    assert.equal(savedImageIndex, imageIndexAfterDrag, "the saved JSON must contain the moved image at its new anchor");
+    assert.equal(postedDocument?.document.content?.[savedImageIndex!]?.attrs?.alignment, "right");
+    assert.equal(postedDocument?.document.content?.[savedImageIndex!]?.attrs?.position, "wrap");
     releasePost?.();
     await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the moved image save must receive its backend acknowledgement");
     postStarted = false;
@@ -1150,6 +1175,26 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       () => subscriptions > subscriptionsBeforeReentry && canonicalReads > readsBeforeVisibleReentry,
       "visible re-entry should create one new exact scope and refresh after subscribing",
     );
+
+    remountedEditorRoot.scrollTop = 193;
+    const preventScrollBeforeReentryClick = preventScrollEditorFocuses;
+    const reentryPointerDown = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 12, clientY: 12 });
+    holdAnimationFrames = true;
+    await act(async () => { remountedEditorRoot.dispatchEvent(reentryPointerDown); });
+    assert.equal(reentryPointerDown.defaultPrevented, true, "ordinary sleeping-editor pointer activation must keep suppressing the replaced static target");
+    assert.ok(remountedEditorRoot.querySelector('[data-mango-tiptap-activation-cover="true"]'), "ordinary pointer activation must keep the sleeping document painted while the live editor attaches");
+    await waitFor(() => controllerRef.current !== null, "ordinary pointer activation must still attach the live editor");
+    holdAnimationFrames = false;
+    const reentryActivationFrames = [...heldAnimationFrames.values()];
+    heldAnimationFrames.clear();
+    await act(async () => { reentryActivationFrames.forEach((callback) => callback(Date.now())); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    await flushAsyncWork(2);
+    const reentryProseMirror = remountedEditorRoot.querySelector<HTMLElement>(".mango-tiptap-prosemirror");
+    assert.ok(reentryProseMirror);
+    assert.equal(remountedEditorRoot.scrollTop, 193, "ordinary pointer activation must keep the exact text-box scroll position");
+    assert.ok(preventScrollEditorFocuses > preventScrollBeforeReentryClick, "ordinary pointer activation must focus without asking the browser to scroll");
+    assert.equal(dom.window.document.activeElement, reentryProseMirror, "ordinary pointer activation must still focus the attached editor");
 
     const pageHostContainer = dom.window.document.createElement("div");
     dom.window.document.body.appendChild(pageHostContainer);
