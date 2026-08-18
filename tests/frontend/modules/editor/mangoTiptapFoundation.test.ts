@@ -2136,7 +2136,7 @@ test("Node, Project, and Logic Gate editors use revisioned JSON while email stay
   assert.match(editor, /data-mango-tiptap-live-ready=/);
   assert.match(editor, /data-mango-tiptap-activation-cover/);
   assert.match(editor, /activateFromPointer/);
-  assert.match(editor, /if \(event\.button !== 0\) return;\s*event\.preventDefault\(\);/);
+  assert.match(editor, /if \(event\.button !== 0\) return;\s*const target = [^;]+;\s*if \(target\?\.closest\('\[data-mango-entity-link="true"\]'\)\) return;\s*event\.preventDefault\(\);/);
   assert.match(editor, />Keep my version<\/button>/);
   assert.match(editor, />Use saved version<\/button>/);
   const editorCSS = read("frontend/src/modules/editor/tiptap/mangoTiptap.css");

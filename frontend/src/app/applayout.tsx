@@ -94,6 +94,7 @@ import {
   reconcileAppSidebarPinTitles,
   reconcileAppTimelineTitles,
 } from "./appCommittedTitleState";
+import { EmailReferencePreviewHost } from "../pages/home/EmailReferencePreviewHost";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -473,6 +474,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const huddleLogicGateID = deepLink?.kind === "huddle_logic_gate" ? deepLink.huddleLogicGateID : "";
   const isHuddleLogicGateView = Boolean(huddleLogicGateID);
   const isFullPageView = isHuddleLogicGateView || isLogicGateArenaView || isHomeView || isProjectManagementView || isAccountManagerView || isTeamsView || isFieldsView;
+  const homePageOwnsEmailReferencePreview = !overrideContent && !isHuddleLogicGateView && !isLogicGateArenaView && isHomeView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
   useEffect(() => {
@@ -2397,6 +2399,13 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
             <input type="color" value={tabTextColor} onChange={(e) => setTabTextColor(e.target.value)} />
           </label>
         </FrameRightClickMenu>
+      )}
+      {!homePageOwnsEmailReferencePreview && (
+        <EmailReferencePreviewHost
+          apiBase={apiBase}
+          companyID={activeCompanyID}
+          currentUserID={me?.user.user_id?.trim() ?? ""}
+        />
       )}
     </div>
   );

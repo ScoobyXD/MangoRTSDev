@@ -24,6 +24,12 @@ import { mangoTiptapPendingStorageKey, readExactMangoTiptapPending } from "../..
 
 type Restore = () => void;
 
+const EMAIL_THREAD_ID = "22222222-2222-4222-8222-222222222222";
+const REFERENCED_EMAIL_MESSAGE_ID = "33333333-3333-4333-8333-333333333333";
+const ABSENT_EMAIL_MESSAGE_ID = "77777777-7777-4777-8777-777777777777";
+const MISSING_EMAIL_THREAD_ID = "99999999-9999-4999-8999-999999999999";
+const MISSING_EMAIL_MESSAGE_ID = "88888888-8888-4888-8888-888888888888";
+
 function installGlobal(name: string, value: unknown, restores: Restore[]) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
   Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
@@ -59,6 +65,30 @@ function structuredDocument(): MangoTiptapDocument {
       { type: "paragraph", attrs: { blockId: "paragraph-1", indentLevel: 0 }, content: [
         { type: "text", text: "Alpha" },
         { type: "mangoEntityLink", attrs: { entityType: "project", entityId: "project-1", label: "Project One" } },
+        { type: "mangoEntityLink", attrs: {
+          entityType: "email_message",
+          entityId: REFERENCED_EMAIL_MESSAGE_ID,
+          label: "Persisted reference label",
+          emailMessageId: REFERENCED_EMAIL_MESSAGE_ID,
+          emailThreadId: EMAIL_THREAD_ID,
+          emailAccountEmail: "owner@example.test",
+        } },
+        { type: "mangoEntityLink", attrs: {
+          entityType: "email_message",
+          entityId: MISSING_EMAIL_MESSAGE_ID,
+          label: "Missing durable email",
+          emailMessageId: MISSING_EMAIL_MESSAGE_ID,
+          emailThreadId: MISSING_EMAIL_THREAD_ID,
+          emailAccountEmail: "owner@example.test",
+        } },
+        { type: "mangoEntityLink", attrs: {
+          entityType: "email_message",
+          entityId: ABSENT_EMAIL_MESSAGE_ID,
+          label: "Absent durable message",
+          emailMessageId: ABSENT_EMAIL_MESSAGE_ID,
+          emailThreadId: EMAIL_THREAD_ID,
+          emailAccountEmail: "owner@example.test",
+        } },
       ] },
       { type: "paragraph", attrs: { blockId: "empty-paragraph" } },
       { type: "bulletList", content: [{
@@ -282,9 +312,69 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     else delete (dom.window.navigator as Navigator & { clipboard?: Clipboard }).clipboard;
   });
   const imageFetchURLs: string[] = [];
+  const storedThreadRequests: string[] = [];
   const NativeResponse = globalThis.Response;
   installGlobal("fetch", async (input: RequestInfo | URL) => {
-    imageFetchURLs.push(String(input));
+    const url = String(input);
+    imageFetchURLs.push(url);
+    if (url.includes("/v1/communications/threads/")) {
+      storedThreadRequests.push(url);
+      if (url.includes(MISSING_EMAIL_THREAD_ID)) {
+        return new NativeResponse(JSON.stringify({ error: "stored_email_thread_not_found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new NativeResponse(JSON.stringify({
+        thread: {
+          email_thread_id: EMAIL_THREAD_ID,
+          thread_id: "provider-thread-is-not-reference-authority",
+          history_complete: true,
+          download_status: "complete",
+          messages: [
+            {
+              id: "provider-message-3",
+              email_message_id: "44444444-4444-4444-8444-444444444444",
+              email_thread_id: EMAIL_THREAD_ID,
+              message_order: 2,
+              thread_id: "provider-thread-is-not-reference-authority",
+              subject: "Last stored row",
+              body: "Last stored body",
+              date: 100,
+              unread: false,
+              starred: false,
+            },
+            {
+              id: "provider-message-1",
+              email_message_id: "11111111-1111-4111-8111-111111111111",
+              email_thread_id: EMAIL_THREAD_ID,
+              message_order: 0,
+              thread_id: "provider-thread-is-not-reference-authority",
+              subject: "First stored row",
+              body: "First stored body",
+              date: 300,
+              unread: false,
+              starred: false,
+            },
+            {
+              id: "provider-message-2",
+              email_message_id: REFERENCED_EMAIL_MESSAGE_ID,
+              email_thread_id: EMAIL_THREAD_ID,
+              message_order: 1,
+              thread_id: "provider-thread-is-not-reference-authority",
+              subject: "Durable selected row",
+              body: "Referenced stored body without reconstructed quoted history",
+              date: 200,
+              unread: false,
+              starred: false,
+            },
+          ],
+        },
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
     return new NativeResponse(new Blob(["image-bytes"], { type: "image/png" }), {
       status: 200,
       headers: { "Content-Type": "image/png" },
@@ -447,11 +537,12 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
   resetEditorRuntimeMetricsForTests();
   startEditorTraceForTests();
   try {
-    const [{ createRoot }, { MangoTiptapEditor }, { NodeTextBlockEditor }, { LogicGateTiptapEditorSurface }] = await Promise.all([
+    const [{ createRoot }, { MangoTiptapEditor }, { NodeTextBlockEditor }, { LogicGateTiptapEditorSurface }, { EmailReferencePreviewHost }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"),
       import("../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"),
       import("../../../../frontend/src/modules/editor/LogicGateTiptapEditorSurface.tsx"),
+      import("../../../../frontend/src/pages/home/EmailReferencePreviewHost.tsx"),
     ]);
     const container = dom.window.document.getElementById("root");
     assert.ok(container);
@@ -464,7 +555,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
       forceHostRerender = () => setRenderVersion((current) => current + 1);
       setHostVisible = setRowVisible;
       if (!rowVisible && !pinned) return <div data-virtual-row-placeholder="document-1" />;
-      return (
+      return <>
         <MangoTiptapEditor
           value={JSON.stringify(value)}
           editable
@@ -504,7 +595,12 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
             setPinned(snapshot.pinned);
           }}
         />
-      );
+        <EmailReferencePreviewHost
+          apiBase="http://localhost"
+          companyID="company-1"
+          currentUserID="user-1"
+        />
+      </>;
     }
     await act(async () => {
       root.render(<React.StrictMode><VirtualizedEditorHost /></React.StrictMode>);
@@ -522,6 +618,85 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     const sleepingImagePlacement = editorRoot.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]')?.closest<HTMLElement>(".mango-tiptap-image-placement");
     assert.equal(sleepingImagePlacement?.dataset.mangoImagePosition, "wrap");
     assert.equal(sleepingImagePlacement?.dataset.mangoImageAlignment, "right");
+
+    const referenceRequestStart = imageFetchURLs.length;
+    const referencedEmailLink = editorRoot.querySelector<HTMLElement>(`[data-mango-email-message-id="${REFERENCED_EMAIL_MESSAGE_ID}"]`);
+    assert.ok(referencedEmailLink);
+    const referencePointerDown = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 });
+    await act(async () => { referencedEmailLink.dispatchEvent(referencePointerDown); });
+    await flushAsyncWork(2);
+    assert.equal(referencePointerDown.defaultPrevented, false, "a sleeping entity chip must retain the ordinary click that follows pointerdown");
+    assert.equal(controllerRef.current, null, "clicking a sleeping entity chip must not replace it with the live editor before click");
+    assert.equal(editorRoot.dataset.mangoEditorState, "sleeping");
+    await act(async () => {
+      referencedEmailLink.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await waitFor(
+      () => Boolean(dom.window.document.querySelector('[data-email-reference-preview="true"][aria-label="Email thread: Durable selected row"]')),
+      "one ordinary sleeping-chip click should open the established email preview",
+    );
+    assert.equal(storedThreadRequests.length, 1, "the reference must make one canonical stored-thread read");
+    const storedThreadURL = new URL(storedThreadRequests[0]);
+    assert.equal(storedThreadURL.pathname, `/v1/communications/threads/${EMAIL_THREAD_ID}`);
+    assert.equal(storedThreadURL.searchParams.get("company_id"), "company-1");
+    assert.equal(storedThreadURL.searchParams.get("account_email"), "owner@example.test");
+    const storedRows = Array.from(dom.window.document.querySelectorAll<HTMLElement>('article[data-email-timeline-item="true"]'));
+    assert.deepEqual(storedRows.map((row) => row.dataset.emailMessageId), [
+      "provider-message-1",
+      "provider-message-2",
+      "provider-message-3",
+    ], "the existing viewer must render each stored row once in persisted message_order");
+    assert.equal(new Set(storedRows.map((row) => row.dataset.emailMessageId)).size, 3);
+    const closeStoredPreview = dom.window.document.querySelector<HTMLButtonElement>('[data-email-reference-preview-close="true"]');
+    assert.ok(closeStoredPreview);
+    await act(async () => { closeStoredPreview.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
+    await waitFor(() => !dom.window.document.querySelector('[data-email-reference-preview="true"]'), "the established preview should close");
+
+    const missingEmailLink = editorRoot.querySelector<HTMLElement>(`[data-mango-email-message-id="${MISSING_EMAIL_MESSAGE_ID}"]`);
+    assert.ok(missingEmailLink);
+    const missingPointerDown = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 });
+    await act(async () => { missingEmailLink.dispatchEvent(missingPointerDown); });
+    assert.equal(missingPointerDown.defaultPrevented, false);
+    await act(async () => {
+      missingEmailLink.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await waitFor(
+      () => dom.window.document.querySelector('[data-email-reference-preview="true"]')?.textContent?.includes("Email thread unavailable") === true,
+      "a genuinely missing durable thread should use the established unavailable state",
+    );
+    assert.equal(storedThreadRequests.length, 2, "a missing durable row must not start a fallback read");
+    assert.deepEqual(
+      imageFetchURLs.filter((url) => url.includes("/v1/communications/")),
+      storedThreadRequests,
+      "inline reference lookup must not call a Node relationship, collaboration, provider, or mailbox-page endpoint",
+    );
+    const closeMissingPreview = dom.window.document.querySelector<HTMLButtonElement>('[data-email-reference-preview-close="true"]');
+    assert.ok(closeMissingPreview);
+    await act(async () => { closeMissingPreview.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
+    await waitFor(() => !dom.window.document.querySelector('[data-email-reference-preview="true"]'), "the unavailable preview should close");
+
+    const absentMessageLink = editorRoot.querySelector<HTMLElement>(`[data-mango-email-message-id="${ABSENT_EMAIL_MESSAGE_ID}"]`);
+    assert.ok(absentMessageLink);
+    await act(async () => {
+      absentMessageLink.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await waitFor(
+      () => dom.window.document.querySelector('[data-email-reference-preview="true"]')?.textContent?.includes("Email thread unavailable") === true,
+      "an existing durable thread without the referenced durable message should use the established unavailable state",
+    );
+    assert.equal(storedThreadRequests.length, 3, "an absent durable message must not start a fallback read");
+    const closeAbsentMessagePreview = dom.window.document.querySelector<HTMLButtonElement>('[data-email-reference-preview-close="true"]');
+    assert.ok(closeAbsentMessagePreview);
+    await act(async () => { closeAbsentMessagePreview.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
+    await waitFor(() => !dom.window.document.querySelector('[data-email-reference-preview="true"]'), "the absent-message preview should close");
+    const referenceResourceRequests = imageFetchURLs.slice(referenceRequestStart).filter((url) => (
+      /\/v[12]\/(?:communications|nodes|projects|logic-gates|huddles|email-relationships)(?:\/|\?)/.test(url)
+    ));
+    assert.deepEqual(
+      referenceResourceRequests,
+      storedThreadRequests,
+      "inline reference lookup must not call a Node relationship, collaboration, provider, mailbox-page, or other resource endpoint",
+    );
 
     const exactObserver = observers.filter((observer) => observer.rootMargin === "0px" && observer.isObserving(editorRoot)).at(-1);
     assert.ok(exactObserver);
@@ -1109,6 +1284,38 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.deepEqual(linkedPickerEntities, []);
     await act(async () => { Simulate.keyDown(pickerInput, { key: "Escape" }); });
     await waitFor(() => !dom.window.document.querySelector('[data-mango-universal-picker="true"]'), "Escape should close the universal picker");
+
+    const activeEmailLink = remountedProseMirror.querySelector<HTMLElement>(`[data-mango-email-message-id="${REFERENCED_EMAIL_MESSAGE_ID}"]`);
+    assert.ok(activeEmailLink);
+    const activeReferenceRequestStart = imageFetchURLs.length;
+    const defaultElementFromPoint = dom.window.document.elementFromPoint;
+    Object.defineProperty(dom.window.document, "elementFromPoint", { configurable: true, value: () => activeEmailLink });
+    try {
+      await act(async () => {
+        activeEmailLink.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0 }));
+        activeEmailLink.dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0 }));
+        activeEmailLink.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+      });
+    } finally {
+      Object.defineProperty(dom.window.document, "elementFromPoint", { configurable: true, value: defaultElementFromPoint });
+    }
+    await waitFor(
+      () => Boolean(dom.window.document.querySelector('[data-email-reference-preview="true"][aria-label="Email thread: Durable selected row"]')),
+      "one ordinary active-editor chip click should use the same established preview",
+    );
+    assert.equal(storedThreadRequests.length, 4);
+    assert.deepEqual(
+      imageFetchURLs.slice(activeReferenceRequestStart).filter((url) => (
+        /\/v[12]\/(?:communications|nodes|projects|logic-gates|huddles|email-relationships)(?:\/|\?)/.test(url)
+      )),
+      [storedThreadRequests.at(-1)],
+      "the active shared path must make only the exact stored-thread request",
+    );
+    const closeActivePreview = dom.window.document.querySelector<HTMLButtonElement>('[data-email-reference-preview-close="true"]');
+    assert.ok(closeActivePreview);
+    await act(async () => { closeActivePreview.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, button: 0 })); });
+    await waitFor(() => !dom.window.document.querySelector('[data-email-reference-preview="true"]'), "the active-editor preview should close");
+
     await act(async () => root.unmount());
     mountedRoot = null;
     assert.equal(subscriptions, 2);

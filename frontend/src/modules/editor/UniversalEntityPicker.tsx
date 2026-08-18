@@ -301,17 +301,16 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
           if (controller.signal.aborted || emailSearchSequenceRef.current !== sequence) return;
           const seen = new Set<string>();
           setEmailSearchResults((page.messages ?? []).flatMap((message) => {
-            const entityID = message.id?.trim() ?? "";
-            if (!entityID || seen.has(entityID)) return [];
-            seen.add(entityID);
+            const providerMessageID = message.id?.trim() ?? "";
+            if (!providerMessageID || seen.has(providerMessageID)) return [];
+            seen.add(providerMessageID);
             return [{
               entityType: "email_message" as const,
-              entityID,
+              entityID: message.email_message_id?.trim() || providerMessageID,
               label: message.subject?.trim() || "(no subject)",
               emailMessageID: message.email_message_id?.trim() || undefined,
               emailThreadID: message.email_thread_id?.trim() || undefined,
               emailAccountEmail,
-              emailMailbox: "all" as const,
               emailMessage: message,
             }];
           }));
@@ -340,17 +339,31 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     setError("");
     try {
       let selectedEntity: UniversalEntityPickerEntity = entity;
-      if (entity.entityType === "email_message" && entity.emailMessage &&
-        (!entity.emailMessage.email_message_id?.trim() || !entity.emailMessage.email_thread_id?.trim())) {
-        const storedMessage = await ensureEmailMessageIngested(entity.entityID, {
-          companyID: props.companyID,
-          sharedInboxID: entity.emailSharedInboxID,
-          accountEmail: entity.emailAccountEmail,
-        });
+      if (entity.entityType === "email_message") {
+        if (!entity.emailMessage) throw new Error("The selected email is no longer available. Search for it again.");
+        let storedMessage = entity.emailMessage;
+        if (!storedMessage.email_message_id?.trim() || !storedMessage.email_thread_id?.trim()) {
+          storedMessage = await ensureEmailMessageIngested(storedMessage.id, {
+            companyID: props.companyID,
+            sharedInboxID: entity.emailSharedInboxID,
+            accountEmail: entity.emailAccountEmail,
+          });
+        }
+        const emailMessageID = storedMessage.email_message_id?.trim() ?? "";
+        const emailThreadID = storedMessage.email_thread_id?.trim() ?? "";
+        if (!emailMessageID || !emailThreadID) throw new Error("stored_email_reference_id_missing");
+        const sharedInboxID = entity.emailSharedInboxID?.trim() || undefined;
+        const accountEmail = sharedInboxID ? undefined : entity.emailAccountEmail?.trim().toLowerCase() || undefined;
+        if (!sharedInboxID && !accountEmail) throw new Error("stored_email_reference_scope_missing");
         selectedEntity = {
-          ...entity,
-          emailMessageID: storedMessage.email_message_id?.trim() || undefined,
-          emailThreadID: storedMessage.email_thread_id?.trim() || undefined,
+          entityType: "email_message",
+          entityID: emailMessageID,
+          label: entity.label,
+          emailMessageID,
+          emailThreadID,
+          ...(sharedInboxID
+            ? { emailSharedInboxID: sharedInboxID }
+            : { emailAccountEmail: accountEmail }),
           emailMessage: storedMessage,
         };
       }
@@ -362,15 +375,14 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     }
   };
   const chooseEmail = (selection: UniversalPickerEmailSelection) => {
-    const { message, mailbox, accountEmail } = selection;
+    const { message, accountEmail } = selection;
     void choose({
       entityType: "email_message",
-      entityID: message.id,
+      entityID: message.email_message_id?.trim() || message.id,
       label: message.subject?.trim() || "(no subject)",
       emailMessageID: message.email_message_id?.trim() || undefined,
       emailThreadID: message.email_thread_id?.trim() || undefined,
       emailAccountEmail: accountEmail,
-      emailMailbox: mailbox,
       emailMessage: message,
     });
   };

@@ -50,7 +50,7 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 18. When a highlighted-email chat's exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates the chat without creating another text box.
 19. The Node email view uses the same atomic rule when the user chooses an existing text-box chat column; a failed relationship or chat write leaves both absent.
 20. Removing obsolete Node-scoped draft rows retires only their typed `email_draft` attachment relationships and never changes a valid email, textbox, chat, My Triage draft, Shared Triage draft, or Project draft relationship.
-21. A stored-thread reader or inline email reference carries the exact internal `email_thread_id`; a provider message ID or provider thread ID never selects a durable Mango thread, and a missing durable ID fails instead of falling back to a provider or collaboration lookup.
+21. A stored-thread reader uses the exact internal `email_thread_id`; an inline email reference stores that thread ID, its exact internal `email_message_id`, and only its personal-account or shared-inbox authorization scope. The reference opens independently of every Node, Project, Logic Gate, Huddle, or other resource relationship, and a missing durable row fails instead of falling back to provider, collaboration, relationship, mailbox-page, subject, or quoted-history lookup.
 22. Completing a Mango-originated Sent message keeps its original exact `email_message` attachment links and retires only redundant imported links for that same internal message; an attachment with another live owner remains live.
 23. A Node textbox projection exposes its complete ordered `email_message_ids` only as a value derived from canonical `email_relationships`; a client never saves that list or a singular representative as textbox-owned relationship metadata, and it renders that backend order without scanning thread cards to infer or reorder membership.
 24. Dragging the noninteractive header of one exact Node email message onto a textbox may create only that exact textbox relationship without creating a chat; a drag never starts from message body content, selected text, a button, a link, or an input.
@@ -58,7 +58,7 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 26. A textbox's stored color may decorate every exact message card linked to it, but never its parent thread container; the textbox email control lists every linked exact message oldest-to-newest by stored message timestamp.
 27. Every email/textbox relationship and email-selection chat command uses Mango's exact internal `email_message_id`; provider message and thread IDs are display/provider context only and never relationship authority.
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 # Process Story: One email thread can appear in several Nodes and Projects while message work stays local
 
@@ -74,6 +74,8 @@ Completing a Mango-originated Sent message keeps its original exact attachment l
 ↓
 Opening a highlighted-email chat preview creates no relationship or resource
 ↓
+Opening an inline email reference reads its exact durable message and thread under its saved mailbox scope without consulting a surrounding resource relationship or fallback lookup
+↓
 An ordinary root chat or reply appends directly to an existing grouping without creating an email relationship; a highlighted-email chat links its exact message to the chosen grouping when required, and a failed atomic command creates none of its relationship or chat writes
 ↓
 A direct exact-message header drop may create the same typed textbox edge without a chat; the textbox projection then derives every linked message ID, and its email control renders those exact messages directly in backend stored-timestamp order without changing thread membership
@@ -88,7 +90,7 @@ Every endpoint keeps its literal typed identity; no registry, surrogate identity
 ↓
 Node email viewing remains read-only and creates no draft or send relationship
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
 A permission or RACI resolver receives one exact resource type and ID
@@ -177,7 +179,7 @@ Last updated: 2026-08-06
 
 A user opens the universal picker from a resource editor, the Node header's default `##` linker, the Project Logic Gates / Nodes launcher, or a selected My Triage/Shared Triage email
 ↓
-Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, Project, or email message without creating a relationship; an email reference carries its exact internal message and thread identities
+Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, Project, or email message without creating a relationship; an email reference carries its exact internal message and thread identities plus one mailbox authorization scope, then opens the stored thread independently of surrounding resource relationships and without fallback lookup
 ↓
 Double-hashtag link mode keeps the source and chosen result's unchanged canonical types and IDs and permits only the documented pair
 ↓
@@ -187,7 +189,7 @@ Node-to-Logic-Gate uses the Logic Gate work-assignment command, while Node-to-Pr
 ↓
 Authorization, cardinality, idempotency, timeline stamps, projections, and events remain owned by those commands; the picker creates no generic edge or resource registry, and an editor chip remains only a reference
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 # Process Story: Mango relates resources by their exact identities
 

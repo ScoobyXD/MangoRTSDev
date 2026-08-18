@@ -217,19 +217,16 @@ function mangoEntityLinkAttributes(entity: EditorEntityLink): Record<string, str
     emailThreadId: entity.emailThreadID ?? null,
     emailAccountEmail: entity.emailAccountEmail ?? null,
     emailSharedInboxId: entity.emailSharedInboxID ?? null,
-    emailMailbox: entity.emailMailbox ?? null,
   };
 }
 
-function emailEntityMetadataFromRecord(record: Record<string, unknown>): Pick<EditorEntityLink, "emailMessageID" | "emailThreadID" | "emailAccountEmail" | "emailSharedInboxID" | "emailMailbox"> {
+function emailEntityMetadataFromRecord(record: Record<string, unknown>): Pick<EditorEntityLink, "emailMessageID" | "emailThreadID" | "emailAccountEmail" | "emailSharedInboxID"> {
   const stringValue = (key: string) => typeof record[key] === "string" ? String(record[key]).trim() : "";
-  const mailbox = stringValue("emailMailbox");
   return {
     emailMessageID: stringValue("emailMessageId") || undefined,
     emailThreadID: stringValue("emailThreadId") || undefined,
     emailAccountEmail: stringValue("emailAccountEmail").toLowerCase() || undefined,
     emailSharedInboxID: stringValue("emailSharedInboxId") || undefined,
-    emailMailbox: (["primary", "drafts", "sent", "starred", "all", "archive", "spam"] as const).find((value) => value === mailbox),
   };
 }
 
@@ -1193,6 +1190,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
 
   const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-mango-entity-link="true"]')) return;
     event.preventDefault();
     pointerActivationPendingRef.current = true;
     setLiveSurfaceReady(false);
@@ -1490,7 +1489,6 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
                   emailThreadID: keyboardEntityElement.dataset.mangoEmailThreadId?.trim() || undefined,
                   emailAccountEmail: keyboardEntityElement.dataset.mangoEmailAccountEmail?.trim().toLowerCase() || undefined,
                   emailSharedInboxID: keyboardEntityElement.dataset.mangoEmailSharedInboxId?.trim() || undefined,
-                  emailMailbox: keyboardEntityElement.dataset.mangoEmailMailbox as EditorEntityLink["emailMailbox"],
                 } : {}),
               });
               return true;
