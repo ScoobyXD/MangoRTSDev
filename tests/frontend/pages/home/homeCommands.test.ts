@@ -829,8 +829,8 @@ test("Home triage conversion command owns cache, event, and graph side effects",
   assert.deepEqual(invalidatedBoardLists, ["company-1"]);
   assert.deepEqual(invalidatedBoardContents, ["logic-gate:gate-1"]);
   assert.deepEqual(invalidatedArenaViews, ["gate-1"]);
-  assert.deepEqual(boardEvents, [{ companyID: "company-1", board: board("logic-gate:gate-1", "gate-1") }]);
-  assert.deepEqual(boardContentEvents, [{ companyID: "company-1", boardID: "logic-gate:gate-1", logicGateID: "gate-1" }]);
+  assert.deepEqual([...boardEvents], [{ companyID: "company-1", board: board("logic-gate:gate-1", "gate-1") }]);
+  assert.deepEqual([...boardContentEvents], [{ companyID: "company-1", boardID: "logic-gate:gate-1", logicGateID: "gate-1" }]);
   assert.deepEqual(invalidatedNodes, ["node-1"]);
   assert.deepEqual(upsertedNodes, ["node-1"]);
 
