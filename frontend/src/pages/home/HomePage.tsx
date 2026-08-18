@@ -554,7 +554,6 @@ export function HomePage({
   const nodeRelationshipRequestSeqRef = useRef(0);
   const messageRequestKeyRef = useRef("");
   const pendingMessageReloadRef = useRef(false);
-  const pendingMessageRefreshRef = useRef(false);
   const queuedMessageReloadTimerRef = useRef<number | null>(null);
   const messageRequestSeqRef = useRef(0);
   const loadFoldersRef = useRef<((options?: { refresh?: boolean; owner?: HomeMailboxFolderOwner }) => Promise<boolean>) | null>(null);
@@ -735,7 +734,6 @@ export function HomePage({
     if (activeMailboxRequestKeyRef.current !== activeMailboxRequestKey) {
       messageRequestSeqRef.current += 1;
       pendingMessageReloadRef.current = false;
-      pendingMessageRefreshRef.current = false;
       if (queuedMessageReloadTimerRef.current !== null) {
         window.clearTimeout(queuedMessageReloadTimerRef.current);
         queuedMessageReloadTimerRef.current = null;
@@ -1620,7 +1618,6 @@ export function HomePage({
   const clearMailListState = useCallback(() => {
     messageRequestSeqRef.current += 1;
     pendingMessageReloadRef.current = false;
-    pendingMessageRefreshRef.current = false;
     if (queuedMessageReloadTimerRef.current !== null) {
       window.clearTimeout(queuedMessageReloadTimerRef.current);
       queuedMessageReloadTimerRef.current = null;
@@ -1634,10 +1631,7 @@ export function HomePage({
     clearPrefetchedMessagePage();
   }, [clearPrefetchedMessagePage, clearSelectedMessageState]);
   const loadMessages = useCallback(async (options: LoadMessagesOptions = {}) => {
-    if (queuedMessageReloadTimerRef.current !== null) {
-      window.clearTimeout(queuedMessageReloadTimerRef.current);
-      queuedMessageReloadTimerRef.current = null;
-    }
+    if (queuedMessageReloadTimerRef.current !== null) return;
     const sharedInboxID = sharedInboxIDForHomeView(activeViewID);
     if (sharedInboxID && !activeSharedInbox) {
       messageListFilterKeyRef.current = messageListFilterKey(companyID, activeViewID, mailbox, searchQuery, unreadOnly, activeEmailMailboxScopeKey, messageListOrder);
@@ -1676,12 +1670,12 @@ export function HomePage({
       return;
     }
     if (messageRequestKeyRef.current === requestKey) {
-      pendingMessageReloadRef.current = true;
-      pendingMessageRefreshRef.current = pendingMessageRefreshRef.current || options.refresh === true;
+      if (options.refresh === true) {
+        pendingMessageReloadRef.current = true;
+      }
       return;
     }
     messageRequestKeyRef.current = requestKey;
-    setLoadedMessageListKey("");
     clearPrefetchedMessagePage();
     const requestSeq = messageRequestSeqRef.current + 1;
     messageRequestSeqRef.current = requestSeq;
@@ -1753,14 +1747,12 @@ export function HomePage({
         setLoadingMessages(false);
         messageRequestKeyRef.current = "";
         if (pendingMessageReloadRef.current) {
-          const refresh = pendingMessageRefreshRef.current;
           const queuedRequestKey = requestKey;
           pendingMessageReloadRef.current = false;
-          pendingMessageRefreshRef.current = false;
           queuedMessageReloadTimerRef.current = window.setTimeout(() => {
             queuedMessageReloadTimerRef.current = null;
             if (currentMessageFilterKey() !== queuedRequestKey) return;
-            void loadMessagesRef.current?.({ refresh });
+            void loadMessagesRef.current?.({ refresh: true });
           }, 0);
         }
       }
@@ -2438,7 +2430,6 @@ export function HomePage({
       foldersRequestSeqRef.current += 1;
       messageRequestSeqRef.current += 1;
       pendingMessageReloadRef.current = false;
-      pendingMessageRefreshRef.current = false;
       if (queuedMessageReloadTimerRef.current !== null) {
         window.clearTimeout(queuedMessageReloadTimerRef.current);
         queuedMessageReloadTimerRef.current = null;
@@ -5388,30 +5379,6 @@ export function HomePage({
         : messages;
     return orderEmailConversationMessages(listMessages, messageListOrder);
   }, [activeViewID, isArchivableListView, mailbox, messageListIsCurrent, messageListOrder, messages]);
-  useEffect(() => {
-    if (!messageListIsCurrent || mailbox === "drafts" || isPrimaryTriageMailbox(activeViewID, mailbox)) return undefined;
-    if (!nextPageToken || loadingMessages || loadingMoreMessages) return undefined;
-    const owner = currentMailboxRequestOwner();
-    const frameID = window.requestAnimationFrame(() => {
-      if (!mailboxRequestOwnerIsCurrent(owner)) return;
-      const list = messageListRef.current;
-      if (!list) return;
-      if (messageListContentScrollHeight(list) <= list.clientHeight + 1) void loadMoreMessages();
-    });
-    return () => window.cancelAnimationFrame(frameID);
-  }, [
-    activeViewID,
-    currentMailboxRequestOwner,
-    loadMoreMessages,
-    loadingMessages,
-    loadingMoreMessages,
-    mailbox,
-    mailboxRequestOwnerIsCurrent,
-    messageListIsCurrent,
-    messages.length,
-    nextPageToken,
-    visibleMessages.length,
-  ]);
   const selectedProviderMutationAvailable = providerMutationAvailableForMessages(getSelectedMessagesForAction());
   const visibleUnreadMessageCount = visibleMessages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
   const visibleLoadingMessages = loadingMessages || (activeMailViewCanLoadMessages && !messageListIsCurrent);

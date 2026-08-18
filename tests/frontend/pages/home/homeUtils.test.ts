@@ -320,12 +320,22 @@ test("personal and shared-inbox owner drafts retain the browser scheduler", () =
   assert.match(homeParts, /<input\s+type="datetime-local"\s+aria-label="Schedule send"/s);
 });
 
-test("mailbox archive advance, non-scrollable fill, and provider-wide oldest ordering stay wired", () => {
+test("mailbox archive advance, user-driven pagination, and provider-wide oldest ordering stay wired", () => {
   const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+  const homeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
 
   assert.match(homePage, /nextEmailMessageAfterRemoval\(visibleMessages, selectedMessageRowKey\)/);
   assert.match(homePage, /archiveMessages\(\[selectedMessage\.id\], \[selectedMessage\], nextMessage\)/);
-  assert.match(homePage, /messageListContentScrollHeight\(list\) <= list\.clientHeight \+ 1\)[\s\S]{0,120}loadMoreMessages\(\)/);
+  assert.doesNotMatch(homePage, /messageListContentScrollHeight\(list\) <= list\.clientHeight \+ 1\)[\s\S]{0,120}loadMoreMessages\(\)/);
+  assert.match(homePage, /if \(queuedMessageReloadTimerRef\.current !== null\) return/);
+  assert.match(homePage, /if \(messageRequestKeyRef\.current === requestKey\) \{\s*if \(options\.refresh === true\) \{\s*pendingMessageReloadRef\.current = true;/s);
+  assert.doesNotMatch(homePage, /pendingMessageRefreshRef/);
+  assert.match(homePage, /if \(currentMessageFilterKey\(\) !== queuedRequestKey\) return;\s*void loadMessagesRef\.current\?\.\(\{ refresh: true \}\)/s);
+  assert.match(homePage, /messageRequestKeyRef\.current = requestKey;\s*clearPrefetchedMessagePage\(\)/s);
+  assert.match(homeWorkspace, /aria-busy=\{loadingMessages \|\| loadingMoreMessages\}/);
+  assert.match(homeWorkspace, /role="status" style=\{emptyStateStyle\}>Loading messages<\/div>/);
+  assert.match(homeWorkspace, /!triageAdvanceEnabled && hasNextMessagePage[\s\S]{0,300}disabled=\{loadingMessages \|\| loadingMoreMessages\}[\s\S]{0,180}\{loadingMoreMessages \? "Loading\.\.\." : "Load more"\}/);
+  assert.match(homeWorkspace, /if \(remaining < 160\) onLoadMoreMessages\(\)/);
   assert.match(homePage, /order: messageListOrder === "oldest" \? "oldest" : undefined/);
 });
 
