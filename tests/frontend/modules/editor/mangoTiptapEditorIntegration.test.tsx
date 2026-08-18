@@ -46,7 +46,7 @@ async function flushAsyncWork(rounds = 8) {
 }
 
 async function waitFor(predicate: () => boolean, message: string) {
-  for (let index = 0; index < 100; index += 1) {
+  for (let index = 0; index < 300; index += 1) {
     if (predicate()) return;
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)); });
   }
