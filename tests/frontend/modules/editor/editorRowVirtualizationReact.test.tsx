@@ -7,6 +7,7 @@ import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import type { NodeProjectionItem } from "../../../../frontend/src/modules/nodes/nodeRecordStore.ts";
 import { buildEditorAttachedEmailPayload, buildEditorTextBlockChatPayload } from "../../../../frontend/src/modules/editor/editorProjection.ts";
 import { applyEmailBodyHighlights } from "../../../../frontend/src/modules/editor/emailBodyHighlights.ts";
+import { EMAIL_DRAG_MIME, messageAttachmentPayload, parseDraggedEmail } from "../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceShared.tsx";
 import type { ProjectProjection, ProjectView } from "../../../../frontend/src/modules/project-management/projectManagementApi.ts";
 
 type Restore = () => void;
@@ -28,6 +29,45 @@ function tiptapDocument(text: string) {
   };
 }
 const TEXT_BLOCK_PREFIX = "<!-- mango-node-text-block-v1 -->";
+
+test("email attachment payloads retain exact Mango message and thread identities before rendering", () => {
+  const payload = messageAttachmentPayload({
+    id: "provider-message-1",
+    thread_id: "provider-thread-1",
+    email_message_id: "mango-message-1",
+    email_thread_id: "mango-thread-1",
+    subject: "Stored email",
+    unread: false,
+    starred: false,
+  });
+  assert.equal(payload.messageID, "provider-message-1");
+  assert.equal(payload.threadID, "provider-thread-1");
+  assert.equal(payload.emailMessageID, "mango-message-1");
+  assert.equal(payload.emailThreadID, "mango-thread-1");
+  assert.throws(() => messageAttachmentPayload({
+    id: "provider-message-2",
+    thread_id: "provider-thread-2",
+    email_message_id: "mango-message-2",
+    subject: "Incomplete stored email",
+    unread: false,
+    starred: false,
+  }), /email_thread_id_missing/);
+
+  const dragged = parseDraggedEmail({
+    getData: (type: string) => type === EMAIL_DRAG_MIME ? JSON.stringify(payload) : "",
+  } as DataTransfer);
+  assert.equal(dragged?.messageID, payload.messageID);
+  assert.equal(dragged?.emailMessageID, payload.emailMessageID);
+  assert.equal(dragged?.emailThreadID, payload.emailThreadID);
+  assert.equal(dragged?.threadID, payload.threadID);
+  const { emailThreadID: _missingThreadID, ...missingThreadPayload } = payload;
+  assert.equal(parseDraggedEmail({
+    getData: (type: string) => type === EMAIL_DRAG_MIME ? JSON.stringify(missingThreadPayload) : "",
+  } as DataTransfer), null);
+  assert.equal(parseDraggedEmail({
+    getData: (type: string) => type === EMAIL_DRAG_MIME ? JSON.stringify({ ...payload, emailThreadID: "  " }) : "",
+  } as DataTransfer), null);
+});
 
 test("rich email bodies paint stored and active chat selections without flattening markup", () => {
   const dom = new JSDOM("<!doctype html><html><body>Hello <strong>linked email</strong> body.</body></html>");

@@ -1567,6 +1567,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       blockID: blockID || undefined,
       messageID: payload.messageID,
       emailMessageID: payload.emailMessageID,
+      emailThreadID: payload.emailThreadID,
       threadID: payload.threadID,
       sharedInboxID: payload.sharedInboxID,
       accountEmail: payload.accountEmail,

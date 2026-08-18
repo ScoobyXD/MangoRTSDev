@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -10,6 +11,52 @@ import (
 
 	"miraeopus/backend/internal/domain"
 )
+
+func TestMemoryNodeAttachedEmailWriteKeepsCanonicalStoredThreadIdentity(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-111111111190"
+	userID := "22222222-2222-4222-8222-222222222290"
+	repo.EnsureCompany(companyID, "Stored email identity company")
+	node, err := repo.CreateNode(companyID, "Stored email identity Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: userID, PersonalAccountEmail: "owner@example.com",
+		AccountEmail: "owner@example.com", Provider: "google", ProviderThreadID: "provider-thread",
+		SelectedMessageID: "provider-message",
+		Messages:          []domain.EmailMessageSnapshot{{ID: "provider-message", ThreadID: "provider-thread", Subject: "Stored message"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	emailMessageID := thread.Messages[0].EmailMessageID
+	payload, _ := json.Marshal(map[string]any{
+		"email_message_id": emailMessageID,
+		"link_scope":       "message",
+	})
+	attached, err := repo.AddNodeInformationWithActor(NodeInformationInput{
+		CompanyID: companyID, NodeID: node.NodeID, InformationID: "33333333-3333-4333-8333-333333333390",
+		Type: "Attached email", Information: string(payload), ActorUserID: userID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var storedProjection map[string]any
+	if err := json.Unmarshal([]byte(attached.Information), &storedProjection); err != nil {
+		t.Fatal(err)
+	}
+	if storedProjection["email_thread_id"] != thread.EmailThreadID || storedProjection["email_message_id"] != emailMessageID {
+		t.Fatalf("stored attached email identity = %+v", storedProjection)
+	}
+	storedThread, err := repo.GetCommunicationsNodeEmailThread(companyID, node.NodeID, thread.EmailThreadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedThread.SelectedMessageID != emailMessageID || len(storedThread.Thread.Messages) != 1 {
+		t.Fatalf("stored Node thread placement = %+v", storedThread)
+	}
+}
 
 func TestMemoryCommunicationsEmailThreadPersistsRichOrderedMailboxScopedSnapshots(t *testing.T) {
 	repo := NewMemoryRepo()
