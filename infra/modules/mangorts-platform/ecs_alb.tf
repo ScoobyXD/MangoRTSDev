@@ -209,11 +209,12 @@ resource "aws_ecs_task_definition" "backend" {
 resource "aws_ecs_service" "backend" {
   count = local.backend_service_enabled ? 1 : 0
 
-  name            = "${local.name_prefix}-backend"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.backend[0].arn
-  desired_count   = var.backend_desired_count
-  launch_type     = "FARGATE"
+  name                  = "${local.name_prefix}-backend"
+  cluster               = aws_ecs_cluster.main.id
+  task_definition       = aws_ecs_task_definition.backend[0].arn
+  desired_count         = var.backend_desired_count
+  launch_type           = "FARGATE"
+  wait_for_steady_state = true
 
   network_configuration {
     subnets          = local.ecs_subnet_ids
