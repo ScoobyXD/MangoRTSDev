@@ -79,7 +79,7 @@ func ensurePostgresEmailSelectionTextboxLinkForFirstChatTx(ctx context.Context, 
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `update node_textboxes
-set color=coalesce(color,$4),updated_timestamp=case when color is null then now() else updated_timestamp end
+set color=coalesce(color,$4),updated_timestamp=case when color is null then clock_timestamp() else updated_timestamp end
 where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid and deleted_timestamp is null`,
 		input.CompanyID, input.NodeID, textboxID, textboxColor); err != nil {
 		return err

@@ -70,6 +70,14 @@ func TestNodeLinkedTextboxColorIsAssignedAndPreservedByCanonicalWrites(t *testin
 	}
 }
 
+func TestNodeFirstEmailChatColorTimestampCannotPredateTextboxCreation(t *testing.T) {
+	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_textbox_chats.go")), " ")
+	required := "set color=coalesce(color,$4),updated_timestamp=case when color is null then clock_timestamp() else updated_timestamp end"
+	if !strings.Contains(source, required) {
+		t.Fatalf("first email chat textbox color write missing %q", required)
+	}
+}
+
 func TestNodeTextboxDeleteRemovesOnlyItsTypedEmailRelationshipsAfterItsChats(t *testing.T) {
 	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_editor_textboxes.go")), " ")
 	deleteStart := strings.Index(source, "func deletepostgreseditortextboxdocument")

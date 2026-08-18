@@ -397,10 +397,12 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 	nodeID := strings.TrimSpace(input.NodeID)
 	infoType := strings.TrimSpace(input.Type)
 	informationID := strings.TrimSpace(input.InformationID)
+	now := time.Now().UTC()
 	if _, ok := r.nodes[key(companyID, nodeID)]; !ok {
 		return domain.NodeInformation{}, ErrNotFound
 	}
 	var rollback func()
+	var wideEmailThreadID, wideEmailMessageID string
 	committed := false
 	defer func() {
 		if rollback != nil && !committed {
@@ -442,9 +444,36 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 		if payload.BlockID != "" {
 			return r.addMemoryNodeTextboxEmailRelationshipLocked(input, payload, companyID, nodeID, informationID)
 		}
+		var selectedThread domain.CommunicationsEmailThread
+		var selectedMessage domain.CommunicationsEmailMessage
+		for _, thread := range r.emailThreads {
+			if thread.CompanyID != companyID {
+				continue
+			}
+			for _, message := range thread.Messages {
+				if message.EmailMessageID != payload.EmailMessageID {
+					continue
+				}
+				selectedThread, selectedMessage = thread, message
+				break
+			}
+			if selectedMessage.EmailMessageID != "" {
+				break
+			}
+		}
+		if selectedMessage.EmailMessageID == "" {
+			return domain.NodeInformation{}, ErrEmailMessageNotAttachedToNode
+		}
+		snapshot := selectedMessage.Message
+		snapshot.EmailMessageID = selectedMessage.EmailMessageID
+		input.Information = attachedEmailProjectionInformationWithThread(
+			snapshot, selectedThread.SharedInboxID, selectedThread.AccountEmail,
+			selectedThread.EmailThreadID, now, true,
+		)
+		wideEmailThreadID = selectedThread.EmailThreadID
+		wideEmailMessageID = selectedMessage.EmailMessageID
 	}
 
-	now := time.Now().UTC()
 	k := key(companyID, nodeID)
 	item := domain.NodeInformation{
 		CompanyID:        companyID,
@@ -496,6 +525,14 @@ func (r *MemoryRepo) addNodeInformation(input NodeInformationInput) (domain.Node
 		UpdatedTimestamp: item.UpdatedTimestamp,
 	}
 	r.nodeText[k][keyValue] = projection
+	if wideEmailThreadID != "" {
+		if _, err := r.linkCommunicationsEmailThreadToNodeLocked(
+			companyID, nodeID, keyValue, wideEmailThreadID, wideEmailMessageID,
+			input.ActorUserID, now,
+		); err != nil {
+			return domain.NodeInformation{}, err
+		}
+	}
 	r.bumpNodeViewVersionLocked(companyID, nodeID)
 	committed = true
 	return item, nil

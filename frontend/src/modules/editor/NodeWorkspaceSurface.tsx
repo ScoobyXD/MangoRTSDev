@@ -2264,6 +2264,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       id,
       messageID: email.messageID,
       emailMessageID: email.emailMessageID,
+      emailThreadID: email.emailThreadID,
       threadID: email.threadID,
       sharedInboxID: email.sharedInboxID,
       accountEmail: email.accountEmail,

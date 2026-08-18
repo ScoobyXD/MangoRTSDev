@@ -273,19 +273,30 @@ test("node email and linked text boxes use exact canonical message lists and tex
   assert.match(triageChat, /color: nextNodeTextBlockColor\(\[\]\)/);
 });
 
-test("node drag and Universal-picker email attachment retain exact provider mailbox identity", () => {
+test("both Node email picker entry points retain exact stored identity before the immediate preview", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+  const nodeShared = source("frontend/src/modules/editor/NodeWorkspaceSurfaceShared.tsx");
   const editorProjection = source("frontend/src/modules/editor/editorProjection.ts");
+  const projectSummary = source("frontend/src/modules/project-management/ProjectSummaryContent.tsx");
 
   assert.match(nodeSurface, /const attachEmail = useCallback/);
+  assert.match(nodeSurface, /emailThreadID: email\.emailThreadID/);
   assert.match(nodeSurface, /sharedInboxID: email\.sharedInboxID/);
   assert.match(nodeSurface, /accountEmail: email\.accountEmail/);
   assert.match(nodeSurface, /information: buildEditorAttachedEmailPayload\(email\)/);
   assert.match(nodeSurface, /parseDraggedEmail\(event\.dataTransfer\)/);
   assert.match(nodeSurface, /messageAttachmentPayload\(entity\.emailMessage, entity\.emailSharedInboxID, entity\.emailAccountEmail\)/);
+  assert.match(nodeSurface, /const chooseHeaderLinkedEntity[\s\S]{0,240}await linkEntityFromEditor\(entity\)/);
+  assert.match(nodeSurface, /initialCategory="email_message"[\s\S]{0,220}await linkEntityFromEditor\(entity\)/);
   assert.match(nodeSurface, /initialCategory="email_message"/);
+  assert.match(nodeShared, /const emailThreadID = message\.email_thread_id\?\.trim\(\) \?\? ""/);
+  assert.match(nodeShared, /if \(!emailThreadID\) throw new Error\("email_thread_id_missing"\)/);
+  assert.match(nodeShared, /messageID: message\.id,[\s\S]{0,100}emailMessageID,[\s\S]{0,100}emailThreadID/);
+  assert.match(nodeShared, /parsed\.messageID\?\.trim\(\) && parsed\.emailMessageID\?\.trim\(\) && parsed\.emailThreadID\?\.trim\(\)/);
   assert.match(editorProjection, /shared_inbox_id: input\.sharedInboxID\?\.trim\(\) \?\? ""/);
+  assert.match(editorProjection, /email_thread_id: input\.emailThreadID\?\.trim\(\) \?\? ""/);
   assert.match(editorProjection, /account_email: input\.accountEmail\?\.trim\(\) \?\? ""/);
+  assert.match(projectSummary, /emailThreadID: payload\.emailThreadID/);
   assert.doesNotMatch(editorProjection, /attachments: input\.attachments/);
 });
 
