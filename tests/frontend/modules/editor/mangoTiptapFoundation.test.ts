@@ -47,6 +47,7 @@ import {
 import {
   calculateMangoTiptapTableGrowth,
   growMangoTiptapTable,
+  handleMangoTiptapTableClipboardPaste,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapTable.js";
 import {
   captureMangoTiptapPointerBookmark,
@@ -622,6 +623,9 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     extensions: createMangoTiptapExtensions({ editable: true }),
     content: richDocument("format me").document,
     enableContentCheck: true,
+    editorProps: {
+      handlePaste: handleMangoTiptapTableClipboardPaste,
+    },
   });
   editor.registerPlugin(MangoTiptapAnnotations);
   try {
@@ -737,6 +741,126 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     const insertedBlockIDs = mangoBlockIDs(editor.getJSON());
     assert.equal(insertedBlockIDs[0], "kept-block", "the existing block keeps its identity");
     assert.equal(new Set(insertedBlockIDs).size, insertedBlockIDs.length, "inserted structured content cannot reuse an existing block ID");
+
+    const oneCellTable = {
+      type: "doc",
+      content: [{
+        type: "table",
+        content: [{
+          type: "tableRow",
+          content: [{ type: "tableCell", content: [{ type: "paragraph" }] }],
+        }],
+      }],
+    };
+    const selectFirstTableCell = () => {
+      let position: number | null = null;
+      editor.state.doc.descendants((node, nodePosition) => {
+        if (position === null && (node.type.name === "tableCell" || node.type.name === "tableHeader")) {
+          position = nodePosition + 2;
+        }
+      });
+      assert.notEqual(position, null);
+      editor.commands.setTextSelection(position!);
+    };
+    const pastedRowTables = [
+      "<table><tbody><tr><th>Field</th><th>Required Update</th></tr></tbody></table>",
+      '<table><tbody><tr><td>Customer / Division</td><td><a href="https://example.test/customer">Trader Joes</a></td></tr></tbody></table>',
+      "<table><tbody><tr><td>Decision Needed</td><td><ul><li>sourcing</li><li>formulation</li></ul></td></tr></tbody></table>",
+    ];
+    const pastedRowsHTML = pastedRowTables.join("");
+    const externalTablePasteEvent = (html = pastedRowsHTML, plainText = "wrong\tclipboard fallback") => {
+      const event = new domGlobals.Event("paste") as ClipboardEvent;
+      Object.defineProperty(event, "clipboardData", {
+        configurable: true,
+        value: {
+          getData: (type: string) => type === "text/html" ? html : type === "text/plain" ? plainText : "",
+        },
+      });
+      return event;
+    };
+
+    editor.commands.setContent(oneCellTable);
+    selectFirstTableCell();
+    let externalTablePasteTransactions = 0;
+    const countExternalTablePasteTransaction = () => { externalTablePasteTransactions += 1; };
+    editor.on("transaction", countExternalTablePasteTransaction);
+    assert.equal(editor.view.pasteHTML(pastedRowsHTML, externalTablePasteEvent()), true);
+    editor.off("transaction", countExternalTablePasteTransaction);
+    assert.equal(externalTablePasteTransactions, 1, "one external cell paste must dispatch one transaction");
+    let pastedTableCount = 0;
+    editor.state.doc.descendants((node) => {
+      if (node.type.name === "table") pastedTableCount += 1;
+    });
+    const pastedTable = (editor.getJSON() as MangoTiptapDocument["document"]).content?.find((node) => node.type === "table");
+    assert.equal(pastedTableCount, 1, "matching one-row HTML tables must fill one table instead of nesting more tables in a cell");
+    assert.equal(pastedTable?.content?.length, 3);
+    assert.deepEqual(pastedTable?.content?.map((row) => row.content?.length), [2, 2, 2]);
+    assert.deepEqual(pastedTable?.content?.[0]?.content?.map((cell) => cell.type), ["tableHeader", "tableHeader"]);
+    assert.equal(pastedTable?.content?.[1]?.content?.[1]?.content?.[0]?.content?.[0]?.marks?.[0]?.type, "link");
+    assert.equal(pastedTable?.content?.[2]?.content?.[1]?.content?.[0]?.type, "bulletList");
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(1);
+    assert.equal(editor.view.pasteHTML(pastedRowsHTML, externalTablePasteEvent()), true);
+    const outsideHTMLContent = (editor.getJSON() as MangoTiptapDocument["document"]).content;
+    assert.equal(outsideHTMLContent?.length, 1, "the same external rows pasted outside a table create only one node");
+    assert.equal(outsideHTMLContent?.[0]?.type, "table");
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(1);
+    const separatedTablesHTML = `${pastedRowTables[0]}<p></p>${pastedRowTables.slice(1).join("")}`;
+    assert.equal(editor.view.pasteHTML(separatedTablesHTML, externalTablePasteEvent(separatedTablesHTML)), true);
+    const separatedContent = (editor.getJSON() as MangoTiptapDocument["document"]).content ?? [];
+    assert.equal(separatedContent.filter((node) => node.type === "table").length, 3, "a paragraph separator prevents table merging");
+    assert.equal(separatedContent.some((node) => node.type === "paragraph"), true, "a separator between tables must not be deleted");
+
+    editor.commands.setContent(oneCellTable);
+    selectFirstTableCell();
+    const tsv = 'Field\tRequired Update\r\nProduct\t"Black Sesame\tRice"\r\nNotes\t"first line\r\nsecond line"\r\nDue Date\t';
+    const tsvPasteEvent = () => {
+      const event = new domGlobals.Event("paste") as ClipboardEvent;
+      Object.defineProperty(event, "clipboardData", {
+        configurable: true,
+        value: { getData: (type: string) => type === "text/plain" ? tsv : "" },
+      });
+      return event;
+    };
+    assert.equal(editor.view.pasteText(tsv, tsvPasteEvent()), true);
+    const pastedTSVTable = (editor.getJSON() as MangoTiptapDocument["document"]).content?.find((node) => node.type === "table");
+    assert.equal(pastedTSVTable?.content?.length, 4);
+    assert.deepEqual(pastedTSVTable?.content?.map((row) => row.content?.length), [2, 2, 2, 2]);
+    assert.equal(editor.state.doc.firstChild?.child(1).child(1).textContent, "Black Sesame\tRice");
+    assert.equal(editor.state.doc.firstChild?.child(2).child(1).childCount, 2, "a quoted TSV line break stays inside one cell");
+    assert.equal(editor.state.doc.firstChild?.child(3).child(1).textContent, "", "a trailing empty TSV cell must be retained");
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(1);
+    assert.equal(editor.view.pasteText(tsv, tsvPasteEvent()), true);
+    const outsideTSVTable = (editor.getJSON() as MangoTiptapDocument["document"]).content?.find((node) => node.type === "table");
+    assert.equal(outsideTSVTable?.content?.length, 4, "TSV pasted outside an existing table must create one table");
+    assert.equal((editor.getJSON() as MangoTiptapDocument["document"]).content?.length, 1, "the native plain-text fallback must not also be inserted");
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
+    editor.commands.setTextSelection(1);
+    const ordinaryText = "first line\nsecond line";
+    const ordinaryPasteEvent = new domGlobals.Event("paste") as ClipboardEvent;
+    Object.defineProperty(ordinaryPasteEvent, "clipboardData", {
+      configurable: true,
+      value: { getData: (type: string) => type === "text/plain" ? ordinaryText : "" },
+    });
+    assert.equal(editor.view.pasteText(ordinaryText, ordinaryPasteEvent), true);
+    assert.equal((editor.getJSON() as MangoTiptapDocument["document"]).content?.some((node) => node.type === "table"), false, "ordinary multiline text must not become a table");
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "codeBlock" }] });
+    editor.commands.setTextSelection(1);
+    const codeText = "left\tright";
+    const codePasteEvent = new domGlobals.Event("paste") as ClipboardEvent;
+    Object.defineProperty(codePasteEvent, "clipboardData", {
+      configurable: true,
+      value: { getData: (type: string) => type === "text/plain" ? codeText : "" },
+    });
+    assert.equal(editor.view.pasteText(codeText, codePasteEvent), true);
+    assert.equal(editor.state.doc.firstChild?.type.name, "codeBlock");
+    assert.equal(editor.state.doc.firstChild?.textContent, codeText, "tabbed code must remain plain code instead of becoming a table");
 
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] });
     editor.commands.setTextSelection(1);

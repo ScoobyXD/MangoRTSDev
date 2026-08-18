@@ -1,4 +1,8 @@
 import type { Editor } from "@tiptap/core";
+import { Fragment, Slice, type Node as ProseMirrorNode, type Schema } from "@tiptap/pm/model";
+import { handlePaste as handleProseMirrorTablePaste, TableMap } from "@tiptap/pm/tables";
+import type { EditorView } from "@tiptap/pm/view";
+import Papa from "papaparse";
 
 export const MANGO_TIPTAP_TABLE_DEFAULT_COLUMN_WIDTH_PX = 112;
 export const MANGO_TIPTAP_TABLE_DEFAULT_ROW_HEIGHT_PX = 36;
@@ -18,6 +22,72 @@ export type MangoTiptapTableGrowth = {
   rows: number;
   columns: number;
 };
+
+const TABLE_CLIPBOARD_MARKUP = /<(?:table|thead|tbody|tfoot|tr|td|th)\b/i;
+
+function normalizedOneRowTableSlice(slice: Slice): Slice {
+  const tables: ProseMirrorNode[] = [];
+  for (let index = 0; index < slice.content.childCount; index += 1) {
+    const node = slice.content.child(index);
+    if (node.type.spec.tableRole === "table" && node.childCount === 1) {
+      tables.push(node);
+    } else {
+      return slice;
+    }
+  }
+  if (tables.length < 2) return slice;
+  const columns = TableMap.get(tables[0]).width;
+  if (!tables.every((table) => TableMap.get(table).width === columns)) return slice;
+  const rows = tables.map((table) => table.child(0));
+  const table = tables[0].copy(Fragment.from(rows));
+  if (TableMap.get(table).problems) return slice;
+  return new Slice(Fragment.from(table), 0, 0);
+}
+
+function tsvTableSlice(schema: Schema, text: string, explicitTSV: boolean): Slice | null {
+  if (!explicitTSV && !text.includes("\t")) return null;
+  const parsed = Papa.parse<string[]>(text, { delimiter: "\t", skipEmptyLines: false });
+  if (parsed.errors.length > 0) return null;
+  const rows = parsed.data.map((row) => row.map((value) => String(value)));
+  const lastRow = rows[rows.length - 1];
+  if (text.endsWith("\n") && rows.length > 1 && lastRow?.length === 1 && lastRow[0] === "") rows.pop();
+  const columns = rows[0]?.length ?? 0;
+  if (columns < (explicitTSV ? 1 : 2) || rows.some((row) => row.length !== columns)) return null;
+  const tableType = schema.nodes.table;
+  const rowType = schema.nodes.tableRow;
+  const cellType = schema.nodes.tableCell;
+  const paragraphType = schema.nodes.paragraph;
+  if (!tableType || !rowType || !cellType || !paragraphType) return null;
+  const tableRows = rows.map((row) => rowType.create(null, row.map((value) => {
+    const paragraphs = value.replace(/\r\n?/g, "\n").split("\n").map((line) => (
+      paragraphType.create(null, line ? schema.text(line) : undefined)
+    ));
+    return cellType.create(null, paragraphs);
+  })));
+  return new Slice(Fragment.from(tableType.create(null, tableRows)), 0, 0);
+}
+
+function insertTableClipboardSlice(view: EditorView, event: ClipboardEvent, slice: Slice): boolean {
+  if (handleProseMirrorTablePaste(view, event, slice)) return true;
+  view.dispatch(view.state.tr
+    .replaceSelection(slice)
+    .scrollIntoView()
+    .setMeta("paste", true)
+    .setMeta("uiEvent", "paste"));
+  return true;
+}
+
+/** Normalizes external table-shaped clipboard data, then delegates cell placement to ProseMirror tables. */
+export function handleMangoTiptapTableClipboardPaste(view: EditorView, event: ClipboardEvent, slice: Slice): boolean {
+  const normalized = normalizedOneRowTableSlice(slice);
+  if (normalized !== slice) return insertTableClipboardSlice(view, event, normalized);
+  const clipboardData = event.clipboardData;
+  if (!clipboardData || TABLE_CLIPBOARD_MARKUP.test(clipboardData.getData("text/html"))) return false;
+  if (view.state.selection.$from.parent.type.spec.code) return false;
+  const explicitTSV = clipboardData.getData("text/tab-separated-values");
+  const table = tsvTableSlice(view.state.schema, explicitTSV || clipboardData.getData("text/plain"), Boolean(explicitTSV));
+  return table ? insertTableClipboardSlice(view, event, table) : false;
+}
 
 function directDOMElement(node: Node): Element | null {
   return node.nodeType === 1 ? node as Element : node.parentElement;
