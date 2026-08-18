@@ -2274,17 +2274,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       date: email.date,
       attachedTimestamp: email.attachedTimestamp,
     };
-    setAttachedEmails((current) => [attached, ...current]);
-    setEmailPickerAnchor(null);
-    setSelectedEmailIDsByBlock((current) => ({ ...current, [NODE_EMAIL_COLUMN_LAYOUT_ID]: email.messageID }));
-    setClosedEmailBlockIDs((current) => {
-      const next = new Set(current);
-      next.delete(NODE_EMAIL_COLUMN_LAYOUT_ID);
-      return next;
-    });
-    setOpenEmailBlockIDs((current) => new Set(current).add(NODE_EMAIL_COLUMN_LAYOUT_ID));
     try {
-      await requestJSON<unknown>(`/v1/nodes/${nodeID}/information`, {
+      const created = await requestJSON<{ information_id?: string }>(`/v1/nodes/${nodeID}/information`, {
         method: "POST",
         body: JSON.stringify({
           company_id: companyID,
@@ -2293,9 +2284,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           information_id: id,
         }),
       });
+      const committed = { ...attached, id: created?.information_id?.trim() || id };
+      setAttachedEmails((current) => [committed, ...current]);
+      setEmailPickerAnchor(null);
+      setSelectedEmailIDsByBlock((current) => ({ ...current, [NODE_EMAIL_COLUMN_LAYOUT_ID]: email.messageID }));
+      setClosedEmailBlockIDs((current) => {
+        const next = new Set(current);
+        next.delete(NODE_EMAIL_COLUMN_LAYOUT_ID);
+        return next;
+      });
+      setOpenEmailBlockIDs((current) => new Set(current).add(NODE_EMAIL_COLUMN_LAYOUT_ID));
       onProjectionMutation();
     } catch (cause) {
-      setAttachedEmails((current) => current.filter((item) => item.id !== id));
       const message = cause instanceof Error ? cause.message : "failed_to_attach_email";
       onError(message);
       throw cause instanceof Error ? cause : new Error(message);
@@ -3181,9 +3181,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           data-node-email-timeline-rail={nodeEmailFocusActive ? "true" : undefined}
           aria-hidden={nodeEmailFocusActive || undefined}
           {...(nodeEmailFocusActive ? { inert: "" } : {})}
-          style={{ gridColumn: "3", display: nodeEmailOnly ? "none" : "grid", gridTemplateColumns: nodeEmailFocusActive ? `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px 0px` : editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 0, minWidth: 0, overflow: nodeEmailFocusActive ? "hidden" : undefined }}
+          style={{ gridColumn: "3", display: nodeEmailOnly ? "none" : "grid", gridTemplateColumns: nodeEmailFocusActive ? `${TEXT_TIMELINE_COLUMN_WIDTH_PX}px 0px` : editorGridTemplateColumns, columnGap: TEXT_CHAT_GRID_COLUMN_GAP_PX, rowGap: 0, alignContent: "start", minWidth: 0, overflow: nodeEmailFocusActive ? "hidden" : undefined }}
         >
-        {pendingEmailChatSelection && (
+        {pendingEmailChatSelection && !temporaryEmailChatBlocksRef.current.has(pendingEmailChatSelection.blockID) && (
           <button
             type="button"
             data-node-email-chat-parent-destination="true"
@@ -3668,6 +3668,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 
         <div />
         <div
+          data-node-email-attach-drop-zone="true"
           onDragEnter={() => { if (canEdit) setDropActive(true); }}
           onDragOver={(event) => {
             if (canEdit && event.dataTransfer.types.includes(EMAIL_DRAG_MIME)) event.preventDefault();

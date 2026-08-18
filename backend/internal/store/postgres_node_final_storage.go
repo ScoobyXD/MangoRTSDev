@@ -276,13 +276,17 @@ for update`, input.CompanyID, input.NodeID, payload.BlockID).Scan(&existingTextb
 			return domain.NodeProjection{}, err
 		}
 		if err := tx.QueryRowContext(ctx, `select coalesce((
-  select relationship.email_thread_id::text
-  from email_relationships relationship
-  where relationship.company_id=$1::uuid and relationship.email_message_id=$3::uuid
-    and relationship.resource_type='node' and relationship.resource_id=$2::uuid
-    and relationship.resource_textbox_id is null
-  order by relationship.created_timestamp,relationship.email_relationship_id
-  limit 1
+  select message.email_thread_id::text
+  from email_messages message
+  where message.company_id=$1::uuid and message.email_message_id=$3::uuid
+    and exists (
+      select 1 from email_relationships relationship
+      where relationship.company_id=message.company_id
+        and relationship.email_thread_id=message.email_thread_id
+        and relationship.resource_type='node'
+        and relationship.resource_id=$2::uuid
+        and relationship.resource_textbox_id is null
+    )
 ), '')`, input.CompanyID, input.NodeID, payload.EmailMessageID).Scan(&emailThreadID); err != nil {
 			return domain.NodeProjection{}, err
 		}

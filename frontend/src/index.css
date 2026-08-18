@@ -1429,11 +1429,14 @@ button, input, textarea, select {
 [data-node-email-chat-parent-destination="true"] {
   grid-column: 1 / -1;
   min-width: 0;
-  margin: 5px 0 9px 41px;
+  max-width: calc(100% - 41px);
+  justify-self: start;
+  align-self: start;
+  margin: 5px 0 7px 41px;
   border: 1px solid transparent;
-  border-radius: 13px;
-  padding: 10px 12px;
-  display: flex;
+  border-radius: 10px;
+  padding: 6px 9px;
+  display: inline-flex;
   align-items: center;
   gap: 9px;
   text-align: left;
@@ -1448,8 +1451,9 @@ button, input, textarea, select {
 
 [data-node-email-chat-parent-destination="true"] > span {
   min-width: 0;
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
 }
 
 [data-node-email-chat-parent-destination="true"] strong {

@@ -48,21 +48,27 @@ func ensurePostgresEmailSelectionTextboxLinkForFirstChatTx(ctx context.Context, 
 		strings.TrimSpace(payload.SelectionQuote) == "" || !validNodeTextboxColor(textboxColor) {
 		return ErrInvalid
 	}
-	var textboxExists, nodeWideEmailExists bool
+	var textboxExists, nodeThreadExists bool
 	if err := tx.QueryRowContext(ctx, `select exists(
   select 1 from node_textboxes
   where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid
 ), exists(
-  select 1 from email_relationships
-  where company_id=$1::uuid
-    and email_message_id=$4::uuid
-    and resource_type='node'
-    and resource_id=$2::uuid
-    and resource_textbox_id is null
-)`, input.CompanyID, input.NodeID, textboxID, emailMessageID).Scan(&textboxExists, &nodeWideEmailExists); err != nil {
+  select 1 from email_messages message
+  where message.company_id=$1::uuid
+    and message.email_message_id=$4::uuid
+    and exists (
+      select 1 from email_relationships relationship
+      where relationship.company_id=message.company_id
+        and relationship.email_thread_id=message.email_thread_id
+        and relationship.resource_type='node'
+        and relationship.resource_id=$2::uuid
+        and relationship.resource_textbox_id is null
+    )
+)`, input.CompanyID, input.NodeID, textboxID, emailMessageID).
+		Scan(&textboxExists, &nodeThreadExists); err != nil {
 		return err
 	}
-	if !nodeWideEmailExists {
+	if !nodeThreadExists {
 		return ErrEmailMessageNotAttachedToNode
 	}
 	if !textboxExists {
