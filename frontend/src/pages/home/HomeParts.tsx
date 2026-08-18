@@ -5653,6 +5653,11 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
             />
           </section>
         )}
+        {busy && !compose.sharedInboxID.trim() && (
+          <div style={{ justifySelf: "start", maxWidth: "100%", minWidth: 0 }}>
+            <OutboundEmailUndoBanner />
+          </div>
+        )}
         <div style={mailComposeAttachmentRowStyle}>
           <input
             ref={fileInputRef}
@@ -5686,7 +5691,6 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
           {compose.scheduledAt && <span style={mutedSmallStyle}>Scheduled</span>}
           <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
-          {busy && !compose.sharedInboxID.trim() && <OutboundEmailUndoBanner />}
           <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : compose.scheduledAt ? "Schedule" : "Send"}</button>
         </div>
         {compose.attachments.length > 0 && (
