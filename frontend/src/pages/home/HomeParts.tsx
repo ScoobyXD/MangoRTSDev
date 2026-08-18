@@ -5653,12 +5653,7 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
             />
           </section>
         )}
-        {busy && !compose.sharedInboxID.trim() && (
-          <div style={{ justifySelf: "start", maxWidth: "100%", minWidth: 0 }}>
-            <OutboundEmailUndoBanner />
-          </div>
-        )}
-        <div style={mailComposeAttachmentRowStyle}>
+        <div style={{ ...mailComposeAttachmentRowStyle, flexWrap: "nowrap" }}>
           <input
             ref={fileInputRef}
             type="file"
@@ -5690,8 +5685,13 @@ export function ComposePanel({ compose, busy, replyMessage, emailSignature, emai
           {attachmentError && <span style={mutedSmallStyle}>{attachmentError}</span>}
           {compose.draftID && <span style={mutedSmallStyle}>Saved in My Drafts</span>}
           {compose.scheduledAt && <span style={mutedSmallStyle}>Scheduled</span>}
-          <span aria-hidden="true" style={{ flex: "1 1 160px" }} />
-          <button type="submit" style={mailComposeSendButtonStyle} disabled={busy}>{busy ? "Sending" : compose.scheduledAt ? "Schedule" : "Send"}</button>
+          <span aria-hidden="true" style={{ flex: "1 1 160px", minWidth: 0 }} />
+          {busy && !compose.sharedInboxID.trim() && (
+            <div style={{ flex: "0 1 auto", minWidth: 0 }}>
+              <OutboundEmailUndoBanner />
+            </div>
+          )}
+          <button type="submit" style={{ ...mailComposeSendButtonStyle, flex: "0 0 auto" }} disabled={busy}>{busy ? "Sending" : compose.scheduledAt ? "Schedule" : "Send"}</button>
         </div>
         {compose.attachments.length > 0 && (
           <div style={mailAttachmentGridStyle}>
