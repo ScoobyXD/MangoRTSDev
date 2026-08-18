@@ -818,10 +818,15 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     );
     let activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
     assert.ok(activeImageFrame);
+    const activeImageDragHandle = activeImageFrame.querySelector<HTMLElement>('[data-mango-tiptap-image-frame="true"]');
+    assert.ok(activeImageDragHandle);
+    assert.notEqual(activeImageFrame.dataset.selected, "true", "the drag regression must start from an unselected image");
+    const imagePointerDown = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 });
     await act(async () => {
-      activeImageFrame.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+      activeImageDragHandle.dispatchEvent(imagePointerDown);
     });
-    await waitFor(() => activeImageFrame.dataset.selected === "true", "clicking an inline image should create a visible Tiptap node selection");
+    await waitFor(() => activeImageFrame.dataset.selected === "true", "starting a drag on an unselected image must create its Tiptap node selection before dragstart");
+    assert.equal(imagePointerDown.defaultPrevented, false, "selecting the image must leave native Tiptap dragging enabled");
     assert.equal(controllerRef.current?.readFormatState().textAlignment, "right", "the selected wrapped image starts on its stored side");
     await act(async () => { assert.equal(controllerRef.current?.applyTextAlignment("left"), true); });
     assert.equal(controllerRef.current?.readFormatState().textAlignment, "left", "the selected image node attributes must receive the toolbar alignment");
@@ -844,7 +849,57 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     assert.equal(activeMovedImagePlacement?.dataset.mangoImagePosition, "wrap");
     assert.equal(activeMovedImagePlacement?.dataset.mangoImageAlignment, "left");
     assert.equal(activeImageFrame.closest(".node-mangoAttachmentImage")?.getAttribute("draggable"), "true", "the selected inline image remains movable through Tiptap drag and drop");
-    assert.equal(activeImageFrame.querySelector('[data-mango-tiptap-image-frame="true"]')?.getAttribute("draggable"), "true", "dragging the visible image frame starts a real node move");
+    assert.equal(activeImageFrame.querySelector('[data-mango-tiptap-image-frame="true"]')?.getAttribute("draggable"), "true", "dragging the visible image frame starts the existing native Tiptap node move");
+    const currentImageDragHandle = activeImageFrame.querySelector<HTMLElement>('[data-mango-tiptap-image-frame="true"]');
+    assert.ok(currentImageDragHandle);
+    const imageDragData = new Map<string, string>();
+    const imageDragTransfer = {
+      files: [],
+      effectAllowed: "none",
+      dropEffect: "move",
+      clearData(type?: string) { if (type) imageDragData.delete(type); else imageDragData.clear(); },
+      setData(type: string, data: string) { imageDragData.set(type, data); },
+      getData(type: string) { return imageDragData.get(type) ?? ""; },
+      setDragImage() { return undefined; },
+    } as unknown as DataTransfer;
+    const imageMouseDown = new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, clientX: 500, clientY: 500 });
+    const imageDragStart = new dom.window.MouseEvent("dragstart", { bubbles: true, cancelable: true, button: 0, clientX: 500, clientY: 500 });
+    const imageDrop = new dom.window.MouseEvent("drop", { bubbles: true, cancelable: true, button: 0, clientX: 900, clientY: 10 });
+    Object.defineProperty(imageDragStart, "dataTransfer", { configurable: true, value: imageDragTransfer });
+    Object.defineProperty(imageDrop, "dataTransfer", { configurable: true, value: imageDragTransfer });
+    const originalEditorBounds = activeProseMirror.getBoundingClientRect;
+    const originalCaretPosition = Object.getOwnPropertyDescriptor(dom.window.document, "caretPositionFromPoint");
+    Object.defineProperty(activeProseMirror, "getBoundingClientRect", { configurable: true, value: () => new dom.window.DOMRect(0, 0, 1_000, 1_000) });
+    Object.defineProperty(dom.window.document, "caretPositionFromPoint", {
+      configurable: true,
+      value: () => ({ offsetNode: activeProseMirror, offset: 1 }),
+    });
+    try {
+      await act(async () => {
+        currentImageDragHandle.dispatchEvent(imageMouseDown);
+        currentImageDragHandle.dispatchEvent(imageDragStart);
+        activeProseMirror.dispatchEvent(imageDrop);
+      });
+    } finally {
+      Object.defineProperty(activeProseMirror, "getBoundingClientRect", { configurable: true, value: originalEditorBounds });
+      if (originalCaretPosition) Object.defineProperty(dom.window.document, "caretPositionFromPoint", originalCaretPosition);
+      else delete (dom.window.document as Document & { caretPositionFromPoint?: unknown }).caretPositionFromPoint;
+    }
+    assert.match(imageDragData.get("text/html") ?? "", /data-attachment-id="image-1"/, "native Tiptap dragstart must carry the selected image node");
+    assert.equal(imageDrop.defaultPrevented, true, "the image drop must commit through the existing ProseMirror transaction");
+    await waitFor(() => activeProseMirror.children[1]?.classList.contains("node-mangoAttachmentImage") === true, "dropping after the first block must move the image to that document anchor");
+    activeImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
+    assert.ok(activeImageFrame);
+    assert.equal(activeImageFrame.closest<HTMLElement>(".mango-tiptap-image-placement")?.dataset.mangoImageAlignment, "right", "dropping in the right zone must snap and wrap the moved image on the right");
+    await waitFor(() => postStarted, "the native image drop must use the normal durable document save");
+    assert.equal(postedDocument?.document.content?.[1]?.type, "mangoAttachmentImage", "the saved JSON must contain the moved image at its new anchor");
+    assert.equal(postedDocument?.document.content?.[1]?.attrs?.alignment, "right");
+    assert.equal(postedDocument?.document.content?.[1]?.attrs?.position, "wrap");
+    releasePost?.();
+    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the moved image save must receive its backend acknowledgement");
+    postStarted = false;
+    postedDocument = null;
+    releasePost = undefined;
     const copiedEventData = new Map<string, string>();
     const copyClipboardData = {
       setData: (type: string, copiedValue: string) => { copiedEventData.set(type, copiedValue); },

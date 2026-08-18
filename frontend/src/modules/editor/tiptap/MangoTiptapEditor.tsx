@@ -620,8 +620,8 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
       ref={rootRef}
       data-mango-attachment-id={attributes.attachmentId}
       data-selected={selected || undefined}
-      onClick={(event) => {
-        if ((event.target as HTMLElement).closest?.("button")) return;
+      onPointerDown={(event) => {
+        if (event.button !== 0 || (event.target as HTMLElement).closest?.("button")) return;
         onSelect?.();
       }}
       style={{ position: "relative", display: "flex", justifyContent: attributes.alignment === "left" ? "flex-start" : attributes.alignment === "right" ? "flex-end" : "center", cursor: "pointer" }}
