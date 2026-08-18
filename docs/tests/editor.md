@@ -98,7 +98,7 @@ Last updated: 2026-08-08
 20. In Automatic Numbering, Enter at the end of a numbered row with nested rows inserts one empty peer immediately before those nested rows; Tab makes only that empty peer the first nested row, keeps every existing nested and following row at its prior depth and in its prior order, and restarts each affected ordered level at its canonical first marker.
 21. An `email_message` entity is valid durable editor JSON; activating it opens the existing Triage conversation viewer and never creates an email relationship.
 22. A new pasted image and an existing image with missing or `break` position must render as a full-row break-text image.
-23. Dropping an existing document image in the leftmost or rightmost 30 percent of the editor must move its Tiptap node to the drop anchor and wrap following text on that side; dropping it in the middle 40 percent must move it as a centered break-text image.
+23. A primary drag must select its existing image before native drag start; dropping it in the leftmost or rightmost 30 percent of the editor must move that Tiptap node to the drop anchor and wrap following text on that side, while dropping it in the middle 40 percent must move it as a centered break-text image.
 24. Wrapped image placement must use only the optional `wrap` image position plus existing alignment in schema version 1, and the active and sleeping renderers must match without coordinates or data migration.
 25. A sleeping editor table must honor every stored column width before the editor is activated.
 26. Selecting an editor table must not show the detached top-right row, column, header, and delete command strip.
