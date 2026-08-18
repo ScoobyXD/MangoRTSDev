@@ -125,12 +125,13 @@ test("multiple sends remain independently undoable", async () => {
   assert.equal(dispatchCount, 0);
 });
 
-test("mail sends enforce the shared window and Triage exposes the neutral countdown", () => {
+test("mail sends enforce the shared window and every send surface exposes the neutral countdown", () => {
   const api = readFileSync(resolve(process.cwd(), "frontend/src/modules/communications/communicationsApi.ts"), "utf8");
   const banner = readFileSync(resolve(process.cwd(), "frontend/src/modules/communications/OutboundEmailUndoBanner.tsx"), "utf8");
   const home = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeMailWorkspace.tsx"), "utf8");
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
   const homePage = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomePage.tsx"), "utf8");
+  const attachedEmailReply = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
 
   assert.match(api, /export async function sendEmail\(input: SendEmailInput\)/);
   assert.doesNotMatch(api, /sendSharedEmailDraft/);
@@ -151,4 +152,6 @@ test("mail sends enforce the shared window and Triage exposes the neutral countd
   assert.match(homePage, /await loadHomeMailDraft\(companyID, currentUserID, draft\)/);
   assert.match(homePage, /const unscheduledCompose = \{ \.\.\.homeMailDraftToCompose\(draftForSend\), scheduledAt: "" \}/);
   assert.match(homePage, /syncHomeMailDraftFromCompose\(companyID, currentUserID, unscheduledCompose, ""\)/);
+  assert.match(attachedEmailReply, /<OutboundEmailUndoBanner \/>/);
+  assert.match(attachedEmailReply, /const sent = await sendEmail\(/);
 });

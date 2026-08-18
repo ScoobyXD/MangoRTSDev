@@ -314,6 +314,7 @@ export type SendEmailInput = {
   company_id?: string;
   shared_inbox_id?: string;
   account_email?: string;
+  expected_sender_account_email?: string;
 };
 
 export type LocalEmailReplyScope = {
@@ -1232,6 +1233,15 @@ export async function getNodeEmailMessage(
   return cloneMessage({ ...message, detail_fetched: true });
 }
 
+export function invalidateNodeEmailThreadCache(companyID: string, nodeID: string, emailThreadID: string): void {
+  const cleanCompanyID = companyID.trim();
+  const cleanNodeID = nodeID.trim();
+  const cleanEmailThreadID = emailThreadID.trim();
+  if (!cleanCompanyID || !cleanNodeID || !cleanEmailThreadID) return;
+  invalidateCacheKey(`node-email-thread:summary:${cleanCompanyID}:${cleanNodeID}:${cleanEmailThreadID}`);
+  invalidateCacheKey(`node-email-thread:full:${cleanCompanyID}:${cleanNodeID}:${cleanEmailThreadID}`);
+}
+
 export async function getProjectEmailThread(
   companyID: string,
   projectID: string,
@@ -1383,9 +1393,11 @@ export async function saveEmailSignature(input: {
   return cloneCommunicationsEmailSignature(payload.signature);
 }
 
-export async function listCommunicationsSharedInboxes(companyID: string): Promise<CommunicationsSharedInbox[]> {
+export async function listCommunicationsSharedInboxes(companyID: string, options: { refresh?: boolean } = {}): Promise<CommunicationsSharedInbox[]> {
   const cleanCompanyID = companyID.trim();
-  return cachedRead(`shared-inboxes:${cleanCompanyID}`, SHARED_INBOX_CACHE_TTL_MS, async () => {
+  const cacheKey = `shared-inboxes:${cleanCompanyID}`;
+  if (options.refresh) invalidateCacheKey(cacheKey);
+  return cachedRead(cacheKey, SHARED_INBOX_CACHE_TTL_MS, async () => {
     const params = new URLSearchParams({
       company_id: cleanCompanyID,
     });

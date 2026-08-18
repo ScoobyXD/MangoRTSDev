@@ -998,7 +998,8 @@ func communicationsMutationErrorCode(err error) string {
 
 type communicationsSendMessageRequest struct {
 	NylasSendMessageRequest
-	CompanyID string `json:"company_id,omitempty"`
+	CompanyID                  string `json:"company_id,omitempty"`
+	ExpectedSenderAccountEmail string `json:"expected_sender_account_email,omitempty"`
 }
 
 func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection) {
@@ -1019,6 +1020,11 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	}
 	if cleanCompanyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	expectedSenderAccountEmail := normalizeEmailForCompare(req.ExpectedSenderAccountEmail)
+	if expectedSenderAccountEmail != "" && expectedSenderAccountEmail != normalizeEmailForCompare(connection.AccountEmail) {
+		writeError(w, http.StatusConflict, "email_sender_account_changed")
 		return
 	}
 	sendReq := req.NylasSendMessageRequest

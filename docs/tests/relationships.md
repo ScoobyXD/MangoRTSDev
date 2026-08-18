@@ -41,8 +41,8 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 9. Opening an email-selection chat preview may stage a new local textbox presentation but creates no email relationship or chat.
 10. Sending the first chat from an email-selection preview atomically links the chosen existing textbox or the staged new textbox, then creates the email-to-textbox relationship and chat, or creates neither relationship nor chat.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-12. A Node email or thread view is read-only and creates no personal draft, shared draft, reply relationship, draft-to-text-box relationship, sender grant, or draft participant row; My Triage, Shared Triage, and retained Project reply drafts remain mailbox-owned records and never become Node relationship authority merely because their source thread appears in a Node.
-13. Removing a Node-wide email relationship is allowed only when that Node and thread have no textbox relationship or email-selection chat; otherwise the command returns `email_removal_has_node_work` and changes nothing.
+12. Opening a Node exact-message Reply creates only in-memory composer state and no personal draft, shared draft, reply-specific relationship, draft-to-text-box relationship, sender grant, or draft participant row. A successful send still persists the normal sent message and applies the existing wide Node/Project destination inheritance rule; My Triage, Shared Triage, and retained Project reply drafts remain mailbox-owned records and never become Node relationship authority merely because their source thread appears in a Node.
+13. Removing a Node-wide email relationship is allowed only when that Node and thread have no textbox relationship or email-selection chat; otherwise the command returns `email_removal_has_node_work`, changes nothing, and the Node client keeps its selected email plus any open in-memory Reply intact.
 14. Removing one Node's textbox-specific email relationship removes only that exact edge and leaves the Node-wide relationship, every other Node, stored thread/message, local text box, and surviving attachment relationship unchanged; removal is rejected while that exact message anchors a chat in that textbox.
 15. Email-to-Node, email-to-textbox, and chat rules do not create a generic resource registry, surrogate identity, or untyped edge.
 16. An ordinary root chat or chat reply in an existing triage grouping uses only the normal Node text-box-chat insert and creates no email, relationship, permission, participant, or collaboration row.
@@ -68,7 +68,7 @@ Each newly completed message inherits every distinct Node-wide and Project-wide 
 ↓
 Inside each Node or Project, one exact message may link to one exact local textbox; the same message may link to a different textbox in another owner
 ↓
-Project Reply or Reply all remains an owner-only mailbox draft, while a Node email view stays read-only and exposes no reply, draft, signature, outgoing-attachment, scheduling, or send action
+Project Reply or Reply all remains an owner-only mailbox draft, while a Node exposes only draftless exact-message Reply with the existing mailbox signature and safe-send path and no Reply all, Forward, user-added outgoing attachment, scheduling, or draft/reply-specific relationship; successful sent-message persistence still follows the normal wide-destination inheritance rule
 ↓
 Completing a Mango-originated Sent message keeps its original exact attachment links and removes only redundant imported links for that same internal message
 ↓
@@ -88,7 +88,7 @@ An accidental Node email relationship with no Node-local work may be removed, wh
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
 ↓
-Node email viewing remains read-only and creates no draft or send relationship
+Node email viewing creates no draft or send-specific relationship; an explicit exact-message Reply remains in memory until the existing send path succeeds, after which normal sent-message persistence and wide-destination inheritance apply
 
 Last updated: 2026-08-17
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer

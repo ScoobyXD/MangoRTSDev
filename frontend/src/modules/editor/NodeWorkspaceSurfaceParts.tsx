@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget, useAppViewportAnchorRect } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { ExplorerEntityIcon } from "../../icons/index.js";
-import { deleteEmailDraft, downloadEmailAttachment, getEmailDraft, getEmailSignature, getNodeEmailMessage, getNodeEmailThread, getProjectEmailMessage, getProjectEmailThread, saveEmailDraft, sendEmail, type CommunicationsEmailDraft, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
+import { deleteEmailDraft, downloadEmailAttachment, getEmailDraft, getEmailSignature, getNodeEmailMessage, getNodeEmailThread, getProjectEmailMessage, getProjectEmailThread, invalidateNodeEmailThreadCache, listCommunicationsSharedInboxes, saveEmailDraft, sendEmail, type CommunicationsEmailDraft, type EmailAddress, type EmailAttachment, type EmailMessage } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
 import { EmailQuotedHistory } from "../communications/EmailQuotedHistory";
 import { OutboundEmailUndoBanner } from "../communications/OutboundEmailUndoBanner";
@@ -3821,8 +3821,12 @@ const AttachedEmailThreadCard: React.FC<{
     letterSpacing: 0,
     boxShadow: "1px 1px 4px rgba(174,174,192,0.14), -1px -1px 4px rgba(255,255,255,0.76)",
   });
+  const nodeReplyMode = Boolean(nodeID.trim());
+  const replyAllEnabled = repliesEnabled && !nodeReplyMode;
+  const exactMailboxScopeAvailable = Boolean(email.sharedInboxID?.trim() || email.accountEmail?.trim());
+  const replyMailboxAvailable = !nodeReplyMode || exactMailboxScopeAvailable;
   const replyComposerOpen = repliesEnabled && Boolean(replyTargetMessageID.trim());
-  const replyAvailable = repliesEnabled && Boolean(email.emailMessageID?.trim());
+  const replyAvailable = repliesEnabled && replyMailboxAvailable && Boolean(email.emailMessageID?.trim());
   const internalMessageIDForProvider = (providerMessageID: string): string => {
     const cleanProviderMessageID = providerMessageID.trim();
     return threadMessages.find((message) => message.id.trim() === cleanProviderMessageID)?.email_message_id?.trim()
@@ -3903,7 +3907,7 @@ const AttachedEmailThreadCard: React.FC<{
             padding: selected ? "9px 10px 6px" : "9px 10px",
           }}
         >
-          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${repliesEnabled ? " auto auto" : ""}${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
+          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${repliesEnabled ? (replyAllEnabled ? " auto auto" : " auto") : ""}${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
             <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
             {repliesEnabled && (
@@ -3922,19 +3926,21 @@ const AttachedEmailThreadCard: React.FC<{
                   <ChatIcon color={accent} />
                   Reply
                 </button>
-                <button
-                  type="button"
-                  disabled={!replyAvailable}
-                  title="Reply all"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (replyAvailable) onReply(email.messageID, true);
-                  }}
-                  style={replyButtonStyle(replyAvailable)}
-                >
-                  Reply all
-                </button>
+                {replyAllEnabled && (
+                  <button
+                    type="button"
+                    disabled={!replyAvailable}
+                    title="Reply all"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (replyAvailable) onReply(email.messageID, true);
+                    }}
+                    style={replyButtonStyle(replyAvailable)}
+                  >
+                    Reply all
+                  </button>
+                )}
               </>
             )}
             {hasThreadChildren && (
@@ -4121,31 +4127,33 @@ const AttachedEmailThreadCard: React.FC<{
                     <>
                       <button
                         type="button"
-                        disabled={!message.email_message_id?.trim()}
+                        disabled={!replyMailboxAvailable || !message.email_message_id?.trim()}
                         title="Reply"
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          if (message.email_message_id?.trim()) onReply(message.id, false);
+                          if (replyMailboxAvailable && message.email_message_id?.trim()) onReply(message.id, false);
                         }}
-                        style={replyButtonStyle(Boolean(message.email_message_id?.trim()))}
+                        style={replyButtonStyle(replyMailboxAvailable && Boolean(message.email_message_id?.trim()))}
                       >
                         <ChatIcon color={accent} />
                         Reply
                       </button>
-                      <button
-                        type="button"
-                        disabled={!message.email_message_id?.trim()}
-                        title="Reply all"
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          if (message.email_message_id?.trim()) onReply(message.id, true);
-                        }}
-                        style={replyButtonStyle(Boolean(message.email_message_id?.trim()))}
-                      >
-                        Reply all
-                      </button>
+                      {replyAllEnabled && (
+                        <button
+                          type="button"
+                          disabled={!replyMailboxAvailable || !message.email_message_id?.trim()}
+                          title="Reply all"
+                          onClick={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            if (replyMailboxAvailable && message.email_message_id?.trim()) onReply(message.id, true);
+                          }}
+                          style={replyButtonStyle(replyMailboxAvailable && Boolean(message.email_message_id?.trim()))}
+                        >
+                          Reply all
+                        </button>
+                      )}
                     </>
                   )}
                 </span>
@@ -4568,10 +4576,12 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     const email = emailByID.get(messageID);
     if (!email) return;
     closeEmailMenu();
-    if (activeSelectedMessageID === messageID) clearSelectedMessage();
-    setReplyComposer((current) => current?.rootMessageID === messageID ? null : current);
+    if (!nodeID.trim()) {
+      if (activeSelectedMessageID === messageID) clearSelectedMessage();
+      setReplyComposer((current) => current?.rootMessageID === messageID ? null : current);
+    }
     onRemoveEmail(email.id);
-  }, [activeSelectedMessageID, clearSelectedMessage, closeEmailMenu, editable, emailByID, onRemoveEmail]);
+  }, [activeSelectedMessageID, clearSelectedMessage, closeEmailMenu, editable, emailByID, nodeID, onRemoveEmail]);
 
   const toggleSelectedMessage = useCallback((messageID: string) => {
     const cleanMessageID = messageID.trim();
@@ -4626,7 +4636,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       onReply={(targetMessageID, replyAll) => {
         if (!repliesEnabled) return;
         selectMessage(email.messageID);
-        setReplyComposer({ rootMessageID: email.messageID, targetMessageID, replyAll });
+        setReplyComposer({ rootMessageID: email.messageID, targetMessageID, replyAll: replyAll && !nodeID.trim() });
       }}
       onReplyComplete={() => {
         setReplyComposer((current) => current?.rootMessageID === email.messageID ? null : current);
@@ -5854,10 +5864,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   onMessageActivate,
   messageAccents = {},
 }) => {
+  const nodeReplyMode = Boolean(nodeID.trim());
+  const replyAllEnabled = repliesEnabled && !nodeReplyMode;
   const mailboxScope = useMemo(
     () => resolveEditorEmailMailboxScope(sharedInboxID, accountEmail),
     [accountEmail, sharedInboxID],
   );
+  const exactMailboxScopeAvailable = Boolean(mailboxScope.sharedInboxID || mailboxScope.accountEmail);
+  const replyMailboxAvailable = !nodeReplyMode || exactMailboxScopeAvailable;
   const mailboxSignatureScopeKey = useMemo(() => (
     [companyID.trim(), mailboxScope.sharedInboxID ?? "", mailboxScope.accountEmail ?? ""].join("\u0000")
   ), [companyID, mailboxScope]);
@@ -5894,9 +5908,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const [draftScope, setDraftScope] = useState<"personal" | "">("");
   const [draftSaveStatus, setDraftSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [senderAccountDraft, setSenderAccountDraft] = useState(accountEmail?.trim() ?? "");
+  const [nodeReplySenderAccountEmail, setNodeReplySenderAccountEmail] = useState("");
   const lastDraftSavedFingerprintRef = useRef("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const replyEditorControllerRef = useRef<UnifiedRichEditorFormattingController | null>(null);
+  const nodeReplySendPendingRef = useRef(false);
+  const nodeReplyOpenRequestRef = useRef(0);
   const appliedInitialReplyTargetRef = useRef("");
   const mailboxSignatureStateRef = useRef<ScopedEmailSignatureState>(mailboxSignatureState);
   const mailboxSignatureLoadRef = useRef<{ scopeKey: string; promise: Promise<string> } | null>(null);
@@ -5930,6 +5947,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setDraftScope("");
     setDraftSaveStatus("idle");
   }, [messageID, nodeID]);
+
+  useEffect(() => {
+    if (!nodeReplyMode) return;
+    nodeReplyOpenRequestRef.current += 1;
+    setNodeReplySenderAccountEmail("");
+  }, [mailboxSignatureScopeKey, messageID, nodeReplyMode]);
 
   mailboxSignatureStateRef.current = mailboxSignatureState;
   replySubmissionIdentityRef.current = { messageID, replyTargetMessageID, scopeKey: mailboxSignatureScopeKey };
@@ -6115,11 +6138,12 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const ccRecipients = parseEmailAddressDraft(ccDraft);
   const bccRecipients = parseEmailAddressDraft(bccDraft);
   const providerMessageAvailable = Boolean(emailMessageID?.trim() || message?.email_message_id?.trim());
-  const providerReplyAvailable = repliesEnabled && providerMessageAvailable;
+  const providerReplyAvailable = repliesEnabled && replyMailboxAvailable && providerMessageAvailable;
   const replyActionEnabled = providerReplyAvailable && !sending;
-  const replyEditingEnabled = providerReplyAvailable && !sending && Boolean(draftScope);
-  const activeDraft = draftScope === "personal" ? personalDraft : null;
-  const canSend = replyEditingEnabled && Boolean(activeDraft) && draftSaveStatus !== "saving" && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
+  const activeDraft = !nodeReplyMode && draftScope === "personal" ? personalDraft : null;
+  const nodeReplySenderAvailable = !nodeReplyMode || Boolean(nodeReplySenderAccountEmail.trim());
+  const replyEditingEnabled = providerReplyAvailable && nodeReplySenderAvailable && !sending && (nodeReplyMode || Boolean(draftScope));
+  const canSend = replyEditingEnabled && (nodeReplyMode || Boolean(activeDraft)) && draftSaveStatus !== "saving" && Boolean(message) && Boolean(replyTargetMessageID) && (recipients.length + ccRecipients.length + bccRecipients.length) > 0 && subjectDraft.trim() && editorBodyHasEmailContent(bodyDraft);
   const replyEditorLineCount = useMemo(() => estimateEditorBodyLineCount(bodyDraft), [bodyDraft]);
   const replyEditorMinHeight = inlineExpansion ? 112 : 138;
   const replyEditorMaxHeight = inlineExpansion ? 272 : 340;
@@ -6130,7 +6154,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     || attachmentResourceID.trim()
     || messageID.trim()
   ), [activeDraft?.draft_id, attachmentResourceID, messageID]);
-  const replyEditorImageAttachmentContext = attachmentRequestJSON && apiBase.trim() && companyID.trim() && replyAttachmentResourceID
+  const replyEditorImageAttachmentContext = !nodeReplyMode && attachmentRequestJSON && apiBase.trim() && companyID.trim() && replyAttachmentResourceID
     ? {
       requestJSON: attachmentRequestJSON,
       apiBase,
@@ -6140,6 +6164,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       informationID: attachmentInformationID?.trim() || undefined,
       editorSurface: attachmentEditorSurface,
     }
+    : undefined;
+  const replyEditorImageHydrationContext = nodeReplyMode && replyTargetMessageID && apiBase.trim() && companyID.trim()
+    ? { apiBase, companyID, cacheKey: mailboxSignatureScopeKey }
     : undefined;
   const canUseEmailSelection = editable && Boolean(onSelectionChatRequest || onSelectionTextBoxRequest || onSelectionNodeRequest);
   useEffect(() => {
@@ -6325,6 +6352,71 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     });
   }, [mailboxSignatureScopeKey, mailboxSignatureState, replyTargetMessageID]);
 
+  const resolveNodeReplySenderAccount = useCallback(async (): Promise<string> => {
+    const personalAccountEmail = mailboxScope.accountEmail?.trim().toLowerCase() ?? "";
+    const cleanSharedInboxID = mailboxScope.sharedInboxID?.trim() ?? "";
+    if (!cleanSharedInboxID) {
+      if (!personalAccountEmail) throw new Error("email_reply_mailbox_scope_missing");
+      return personalAccountEmail;
+    }
+    const sharedInboxes = await listCommunicationsSharedInboxes(companyID, { refresh: true });
+    const sharedInbox = sharedInboxes.find((candidate) => (
+      candidate.entry_type === "shared_inbox"
+      && candidate.effective_access_level === "edit"
+      && (candidate.shared_inbox_id?.trim() || candidate.folder_id.trim()) === cleanSharedInboxID
+    ));
+    if (!sharedInbox) throw new Error("email_reply_shared_inbox_unavailable");
+    const senderAccountEmail = sharedInbox.account_email?.trim().toLowerCase() ?? "";
+    if (!senderAccountEmail || !sharedInbox.company_email_connection_id?.trim()) {
+      throw new Error("email_reply_sender_account_unavailable");
+    }
+    return senderAccountEmail;
+  }, [companyID, mailboxScope.accountEmail, mailboxScope.sharedInboxID]);
+
+  const applyReplyTarget = useCallback((target: EmailMessage, replyAll: boolean, senderAccountEmail: string) => {
+    if (nodeReplyMode) setNodeReplySenderAccountEmail(senderAccountEmail);
+    setReplyTargetMessageID(target.id);
+    setReplyAllMode(replyAll);
+    const replyDrafts = replyAddressDrafts(target, senderAccountEmail, replyAll);
+    setToDraft(replyDrafts.to);
+    setCcDraft(replyDrafts.cc);
+    setBccDraft("");
+    setSubjectDraft(replySubject(target.subject || message?.subject || ""));
+    ensureReplySignature(target.id);
+    setDraftScope("");
+    setDraftSaveStatus("idle");
+    window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
+  }, [ensureReplySignature, message?.subject, nodeReplyMode]);
+
+  const openReplyTarget = useCallback((target: EmailMessage, replyAll: boolean) => {
+    if (!nodeReplyMode) {
+      applyReplyTarget(target, replyAll, accountEmail.trim());
+      return;
+    }
+    const requestID = nodeReplyOpenRequestRef.current + 1;
+    nodeReplyOpenRequestRef.current = requestID;
+    setReplyTargetMessageID("");
+    setReplyAllMode(false);
+    setNodeReplySenderAccountEmail("");
+    setBodyDraft("");
+    setDraftAttachments([]);
+    setError("");
+    replySignatureSessionRef.current = null;
+    void loadMailboxSignature().catch(() => undefined);
+    void resolveNodeReplySenderAccount()
+      .then((senderAccountEmail) => {
+        if (nodeReplyOpenRequestRef.current !== requestID) return;
+        applyReplyTarget(target, false, senderAccountEmail);
+      })
+      .catch((cause) => {
+        if (nodeReplyOpenRequestRef.current !== requestID) return;
+        const nextError = cause instanceof Error ? cause.message : "email_reply_sender_account_unavailable";
+        setError(nextError);
+        onError(nextError);
+        onReplyComplete?.();
+      });
+  }, [accountEmail, applyReplyTarget, loadMailboxSignature, nodeReplyMode, onError, onReplyComplete, resolveNodeReplySenderAccount]);
+
   const openPersonalDraft = useCallback(async (target: EmailMessage, replyAll: boolean) => {
     const sourceMessageID = target.email_message_id?.trim() || "";
 		if (!sourceMessageID) throw new Error("email_reply_source_not_ingested");
@@ -6375,8 +6467,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       appliedInitialReplyTargetRef.current = "";
       return;
     }
-    const targetKey = `${messageID}:${targetID}:${initialReplyAll ? "all" : "reply"}:${initialReplyRequestID}`;
+    const safeInitialReplyAll = initialReplyAll && replyAllEnabled;
+    const targetKey = `${messageID}:${targetID}:${safeInitialReplyAll ? "all" : "reply"}:${initialReplyRequestID}:${mailboxSignatureScopeKey}`;
     if (!repliesEnabled || !editable || appliedInitialReplyTargetRef.current === targetKey) return;
+		if (nodeReplyMode && !exactMailboxScopeAvailable) {
+			appliedInitialReplyTargetRef.current = targetKey;
+			onError("email_reply_mailbox_scope_missing");
+			return;
+		}
 		const target = displayThreadMessages.find((item) => item.id === targetID);
 		if (!target) return;
 		if (!target.email_message_id?.trim()) {
@@ -6384,18 +6482,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
 			return;
     }
     appliedInitialReplyTargetRef.current = targetKey;
-    setReplyTargetMessageID(target.id);
-    setReplyAllMode(initialReplyAll);
-		const replyDrafts = replyAddressDrafts(target, accountEmail, initialReplyAll);
-		setToDraft(replyDrafts.to);
-		setCcDraft(replyDrafts.cc);
-    setBccDraft("");
-    setSubjectDraft(replySubject(target.subject || message?.subject || ""));
-    ensureReplySignature(target.id);
-    setDraftScope("");
-    setDraftSaveStatus("idle");
-    window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [accountEmail, displayThreadMessages, editable, ensureReplySignature, initialReplyAll, initialReplyRequestID, initialReplyTargetMessageID, message?.subject, messageID, onError, repliesEnabled]);
+    openReplyTarget(target, safeInitialReplyAll);
+  }, [displayThreadMessages, editable, exactMailboxScopeAvailable, initialReplyAll, initialReplyRequestID, initialReplyTargetMessageID, mailboxSignatureScopeKey, messageID, nodeReplyMode, onError, openReplyTarget, repliesEnabled, replyAllEnabled]);
 
   const readEmailSelectionDraft = useCallback((): EmailSelectionDraft | null => {
     if (!canUseEmailSelection) return null;
@@ -6531,32 +6619,42 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   }, [activeDraft, attachmentRequestJSON, companyID, onError]);
 
 	const selectReplyTarget = useCallback((target: EmailMessage, replyAll = false) => {
-		if (!repliesEnabled || !providerReplyAvailable || sending) return;
+		if (!repliesEnabled || sending) return;
+		if (nodeReplyMode && !exactMailboxScopeAvailable) {
+			onError("email_reply_mailbox_scope_missing");
+			return;
+		}
+		if (!providerReplyAvailable) return;
+		if (!target.id.trim()) {
+			onError("email_reply_target_missing");
+			return;
+		}
 		if (!target.email_message_id?.trim()) {
 			onError("email_reply_source_not_ingested");
 			return;
 		}
-    if (replyTargetMessageID === target.id && replyAllMode === replyAll) {
+    const safeReplyAll = replyAll && replyAllEnabled;
+    if (replyTargetMessageID === target.id && replyAllMode === safeReplyAll) {
+      if (nodeReplyMode) nodeReplyOpenRequestRef.current += 1;
       replySignatureSessionRef.current = null;
       setReplyTargetMessageID("");
       setReplyAllMode(false);
+      if (nodeReplyMode) {
+        setNodeReplySenderAccountEmail("");
+        setToDraft("");
+        setCcDraft("");
+        setBccDraft("");
+        setSubjectDraft("");
+        setBodyDraft("");
+        setDraftAttachments([]);
+      }
       return;
     }
-    setReplyTargetMessageID(target.id);
-    setReplyAllMode(replyAll);
-		const replyDrafts = replyAddressDrafts(target, accountEmail, replyAll);
-		setToDraft(replyDrafts.to);
-		setCcDraft(replyDrafts.cc);
-    setBccDraft("");
-    setSubjectDraft(replySubject(target.subject || message?.subject || ""));
-    ensureReplySignature(target.id);
-    setDraftScope("");
-    setDraftSaveStatus("idle");
-    window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
-  }, [accountEmail, ensureReplySignature, message?.subject, onError, providerReplyAvailable, repliesEnabled, replyAllMode, replyTargetMessageID, sending]);
+    openReplyTarget(target, safeReplyAll);
+  }, [exactMailboxScopeAvailable, nodeReplyMode, onError, openReplyTarget, providerReplyAvailable, repliesEnabled, replyAllEnabled, replyAllMode, replyTargetMessageID, sending]);
 
   useEffect(() => {
-    if (!activeDraft || !replyTargetMessage || sending) return undefined;
+    if (nodeReplyMode || !activeDraft || !replyTargetMessage || sending) return undefined;
     const fingerprint = emailDraftFingerprint({
       sender: senderAccountDraft, to: toDraft, cc: ccDraft, bcc: bccDraft, subject: subjectDraft, body: bodyDraft,
     });
@@ -6590,13 +6688,29 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       });
     }, 500);
     return () => window.clearTimeout(timer);
-	}, [accountEmail, activeDraft, bccDraft, bodyDraft, ccDraft, companyID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, onError, replyTargetMessage, senderAccountDraft, sending, subjectDraft, toDraft]);
+	}, [accountEmail, activeDraft, bccDraft, bodyDraft, ccDraft, companyID, mailboxScope.accountEmail, mailboxScope.sharedInboxID, nodeReplyMode, onError, replyTargetMessage, senderAccountDraft, sending, subjectDraft, toDraft]);
 
   const submitReply = () => {
-    if (!message || !replyTargetMessage || !canSend) return;
+    if (!message || !replyTargetMessage || !canSend || (nodeReplyMode && nodeReplySendPendingRef.current)) return;
+    const internalSourceMessageID = replyTargetMessage.email_message_id?.trim() ?? "";
+    const providerReplyTargetMessageID = replyTargetMessage.id.trim();
+    const expectedSenderAccountEmail = nodeReplyMode ? nodeReplySenderAccountEmail.trim().toLowerCase() : "";
+    if (!internalSourceMessageID) {
+      onError("email_reply_source_not_ingested");
+      return;
+    }
+    if (!providerReplyTargetMessageID) {
+      onError("email_reply_target_missing");
+      return;
+    }
+    if (nodeReplyMode && !expectedSenderAccountEmail) {
+      onError("email_reply_sender_account_unavailable");
+      return;
+    }
+    if (nodeReplyMode) nodeReplySendPendingRef.current = true;
     const submittedIdentity = {
       messageID: message.id,
-      replyTargetMessageID: replyTargetMessage.id,
+      replyTargetMessageID: providerReplyTargetMessageID,
       scopeKey: mailboxSignatureScopeKey,
     };
     const submittedBody = replyEditorControllerRef.current?.flush() ?? bodyDraft;
@@ -6605,7 +6719,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       cc: ccRecipients,
       bcc: bccRecipients,
       subject: subjectDraft.trim(),
-      attachments: draftAttachments,
+      attachments: nodeReplyMode ? [] : draftAttachments,
     };
     setSending(true);
     setError("");
@@ -6648,7 +6762,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           company_id: companyID,
           shared_inbox_id: mailboxScope.sharedInboxID,
           account_email: mailboxScope.accountEmail,
+          expected_sender_account_email: expectedSenderAccountEmail || undefined,
         });
+        if (nodeReplyMode) invalidateNodeEmailThreadCache(companyID, nodeID, emailThreadID ?? "");
         const sentWithTimestamp = sent.date ? sent : { ...sent, date: Math.floor(Date.now() / 1000) };
         const latestIdentity = replySubmissionIdentityRef.current;
         if (
@@ -6656,7 +6772,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
           || latestIdentity.replyTargetMessageID !== submittedIdentity.replyTargetMessageID
           || latestIdentity.scopeKey !== submittedIdentity.scopeKey
         ) return;
-        if (personalDraft) {
+        if (!nodeReplyMode && personalDraft) {
           void deleteEmailDraft(companyID, personalDraft.draft_id, mailboxScope).catch(() => undefined);
         }
         setSentReplies((current) => [...current, sentWithTimestamp]);
@@ -6664,6 +6780,10 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         setDraftScope("");
         setBodyDraft("");
         setDraftAttachments([]);
+        if (nodeReplyMode) {
+          nodeReplyOpenRequestRef.current += 1;
+          setNodeReplySenderAccountEmail("");
+        }
         replySignatureSessionRef.current = null;
         setReplyTargetMessageID("");
         setReplyAllMode(false);
@@ -6672,11 +6792,25 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
         if (isOutboundEmailUndoneError(cause)) {
           setError("");
         } else {
+          const errorCode = typeof cause === "object" && cause !== null && typeof (cause as { code?: unknown }).code === "string"
+            ? (cause as { code: string }).code.trim()
+            : "";
           const nextError = cause instanceof Error ? cause.message : "failed_to_send_email";
           setError(nextError);
           onError(nextError);
+          if (nodeReplyMode && (errorCode === "email_sender_account_changed" || nextError === "email_sender_account_changed")) {
+            setNodeReplySenderAccountEmail("");
+            void resolveNodeReplySenderAccount()
+              .then(setNodeReplySenderAccountEmail)
+              .catch((refreshCause) => {
+                const refreshError = refreshCause instanceof Error ? refreshCause.message : "email_reply_sender_account_unavailable";
+                setError(refreshError);
+                onError(refreshError);
+              });
+          }
         }
       } finally {
+        if (nodeReplyMode) nodeReplySendPendingRef.current = false;
         setSending(false);
       }
     })();
@@ -6862,7 +6996,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                         draggable={messageHeaderDraggable}
                         onPointerDownCapture={prepareEmailMessageTextBoxLinkDrag}
                         onDragStart={(event) => startEmailMessageTextBoxLinkDrag(event, internalThreadMessageID, onError)}
-                        style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr)${linkedTextBoxNavigationAvailable ? " auto" : ""}${onMessageTextBoxRequest ? " auto" : ""}${repliesEnabled ? " auto auto" : ""}`, alignItems: "start", gap: 8, cursor: messageHeaderDraggable ? "grab" : undefined }}
+                        style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr)${linkedTextBoxNavigationAvailable ? " auto" : ""}${onMessageTextBoxRequest ? " auto" : ""}${repliesEnabled ? (replyAllEnabled ? " auto auto" : " auto") : ""}`, alignItems: "start", gap: 8, cursor: messageHeaderDraggable ? "grab" : undefined }}
                       >
                         <div
                           data-email-message-drag-region="true"
@@ -6952,27 +7086,29 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                             >
                               Reply
                             </button>
-                            <button
-                              type="button"
-						      disabled={!threadMessageReplyEnabled}
-                              onClick={() => selectReplyTarget(threadMessage, true)}
-                              style={{
-                                minHeight: 22,
-                                border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-                                borderRadius: 7,
-                                background: EDITOR_NEU_SURFACE,
-                                color: accent,
-							    cursor: threadMessageReplyEnabled ? "pointer" : "default",
-							    opacity: threadMessageReplyEnabled ? 1 : 0.46,
-                                padding: "0 8px",
-                                fontSize: 10.5,
-                                fontWeight: 900,
-                                letterSpacing: 0,
-                                boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)",
-                              }}
-                            >
-                              Reply all
-                            </button>
+                            {replyAllEnabled && (
+                              <button
+                                type="button"
+						        disabled={!threadMessageReplyEnabled}
+                                onClick={() => selectReplyTarget(threadMessage, true)}
+                                style={{
+                                  minHeight: 22,
+                                  border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                                  borderRadius: 7,
+                                  background: EDITOR_NEU_SURFACE,
+                                  color: accent,
+							      cursor: threadMessageReplyEnabled ? "pointer" : "default",
+							      opacity: threadMessageReplyEnabled ? 1 : 0.46,
+                                  padding: "0 8px",
+                                  fontSize: 10.5,
+                                  fontWeight: 900,
+                                  letterSpacing: 0,
+                                  boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)",
+                                }}
+                              >
+                                Reply all
+                              </button>
+                            )}
                           </>
                         )}
                       </div>
@@ -7164,7 +7300,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             }}
           >
             <OutboundEmailUndoBanner />
-            <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+            {!nodeReplyMode && <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
               {draftScope ? (
                 <span style={{ minHeight: 28, display: "inline-flex", alignItems: "center", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: EDITOR_NEU_SURFACE, color: accent, padding: "0 9px", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
                   My draft
@@ -7180,7 +7316,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                   {draftSaveStatus === "saving" ? "Saving…" : draftSaveStatus === "saved" ? "Saved" : "Save failed"}
                 </span>
               )}
-            </div>
+            </div>}
             {!inlineExpansion && (
               <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 10.5, fontWeight: 800 }}>
                 {replyAllMode ? "Replying all" : "Replying"} to {formatAddressList(replyTargetMessage.from) || "Unknown sender"} - {formatTimestamp(replyTargetMessage.date)}{formatEmailRelativeTime(replyTargetMessage.date) ? ` (${formatEmailRelativeTime(replyTargetMessage.date)})` : ""}
@@ -7188,7 +7324,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             )}
             <div style={{ display: "grid", gridTemplateColumns: "42px minmax(0, 1fr)", gap: 6, alignItems: "center", color: surfaceText, fontSize: 10.5, fontWeight: 850 }}>
               <span>From:</span>
-              <input value={senderAccountDraft} readOnly aria-readonly="true" title="This draft uses one exact sending account" style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "rgba(248,250,252,0.94)", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
+              <input value={nodeReplyMode ? nodeReplySenderAccountEmail : senderAccountDraft} readOnly aria-readonly="true" title={nodeReplyMode ? "This reply uses one exact sending account" : "This draft uses one exact sending account"} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "rgba(248,250,252,0.94)", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>To:</span>
               <input value={toDraft} disabled={!replyEditingEnabled} onChange={(event) => setToDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
               <span>Cc:</span>
@@ -7198,7 +7334,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
               <span>Subject:</span>
               <input value={subjectDraft} disabled={!replyEditingEnabled} onChange={(event) => setSubjectDraft(event.currentTarget.value)} style={{ minWidth: 0, minHeight: 28, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 7, background: "#ffffff", color: surfaceText, outline: "none", padding: "0 8px", fontSize: 11.5, fontWeight: 700, boxShadow: "inset 1px 1px 4px rgba(174,174,192,0.12)" }} />
             </div>
-            {draftAttachments.length > 0 && (
+            {!nodeReplyMode && draftAttachments.length > 0 && (
               <DraftAttachmentList
                 attachments={draftAttachments}
                 apiBase={apiBase}
@@ -7209,17 +7345,19 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 onPreviewImage={setPreviewAttachment}
               />
             )}
-            <div style={{ position: "relative", display: "grid", gridTemplateColumns: "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
-            <button
-              type="button"
-              aria-label="Add attachment"
-              title="Add attachment"
-              disabled={!replyEditingEnabled}
-              onClick={() => fileInputRef.current?.click()}
-              style={{ width: 32, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: replyEditingEnabled ? "pointer" : "default", opacity: replyEditingEnabled ? 1 : 0.46, boxShadow: EDITOR_NEU_SHADOW }}
-            >
-              <PlusIcon color={accent} />
-            </button>
+            <div style={{ position: "relative", display: "grid", gridTemplateColumns: nodeReplyMode ? "minmax(0, 1fr) 32px" : "32px minmax(0, 1fr) 32px", alignItems: "end", gap: 6 }}>
+            {!nodeReplyMode && (
+              <button
+                type="button"
+                aria-label="Add attachment"
+                title="Add attachment"
+                disabled={!replyEditingEnabled}
+                onClick={() => fileInputRef.current?.click()}
+                style={{ width: 32, height: 32, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 9, background: EDITOR_NEU_SURFACE, color: accent, display: "grid", placeItems: "center", cursor: replyEditingEnabled ? "pointer" : "default", opacity: replyEditingEnabled ? 1 : 0.46, boxShadow: EDITOR_NEU_SHADOW }}
+              >
+                <PlusIcon color={accent} />
+              </button>
+            )}
             <div style={{ minWidth: 0, display: "grid", gap: 5 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
                 <EditorTabBar
@@ -7275,6 +7413,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 onSelectionTextAlignmentChange={setReplyTextAlignment}
                 entityLinkContext={attachmentRequestJSON ? { companyID, requestJSON: attachmentRequestJSON } : undefined}
                 editorImageAttachmentContext={replyEditorImageAttachmentContext}
+                editorImageHydrationContext={replyEditorImageHydrationContext}
+                eagerEditorImageHydration={nodeReplyMode}
                 onEditorImageAttachmentError={(message) => {
                   setError(message);
                   onError(message);
@@ -7293,18 +7433,20 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
             >
               <ArrowRightIcon color={accent} />
             </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              tabIndex={-1}
-              disabled={!replyEditingEnabled}
-              style={{ display: "none" }}
-              onChange={(event) => {
-                if (event.currentTarget.files) addEmailDraftAttachments(event.currentTarget.files);
-                event.currentTarget.value = "";
-              }}
-            />
+            {!nodeReplyMode && (
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                tabIndex={-1}
+                disabled={!replyEditingEnabled}
+                style={{ display: "none" }}
+                onChange={(event) => {
+                  if (event.currentTarget.files) addEmailDraftAttachments(event.currentTarget.files);
+                  event.currentTarget.value = "";
+                }}
+              />
+            )}
           </div>
         </div>
       )}

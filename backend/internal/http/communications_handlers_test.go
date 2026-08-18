@@ -758,6 +758,44 @@ func assertCommunicationsAttachmentReadShape(t *testing.T, repo *countingCommuni
 }
 
 func TestCommunicationsSendValidatesBeforeAttachmentWork(t *testing.T) {
+	t.Run("expected sender changed", func(t *testing.T) {
+		fixture := newCommunicationsSendTestFixture(t)
+		attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-sender-changed"), "note.txt", []byte("hello"))
+		rec := fixture.send(t, map[string]any{
+			"expected_sender_account_email": "other@example.com",
+			"to":                            []map[string]string{{"email": "friend@example.com"}},
+			"subject":                       "Sender changed",
+			"body":                          "Body",
+			"attachments": []map[string]any{{
+				"attachment_id": attachmentID,
+				"filename":      "note.txt",
+			}},
+		})
+		if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "email_sender_account_changed") {
+			t.Fatalf("status=%d body=%s, want email_sender_account_changed", rec.Code, rec.Body.String())
+		}
+		assertCommunicationsAttachmentReadShape(t, fixture.countingRepo, 0)
+		if len(fixture.storage.getKeys) != 0 || fixture.nylas.sendCalls != 0 {
+			t.Fatalf("sender fence storage reads=%v send calls=%d, want zero", fixture.storage.getKeys, fixture.nylas.sendCalls)
+		}
+	})
+
+	t.Run("expected sender is normalized", func(t *testing.T) {
+		fixture := newCommunicationsSendTestFixture(t)
+		rec := fixture.send(t, map[string]any{
+			"expected_sender_account_email": "  SENDER@EXAMPLE.COM  ",
+			"to":                            []map[string]string{{"email": "friend@example.com"}},
+			"subject":                       "Expected sender",
+			"body":                          "Body",
+		})
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("status=%d body=%s, want created", rec.Code, rec.Body.String())
+		}
+		if fixture.nylas.sendCalls != 1 {
+			t.Fatalf("send calls = %d, want one", fixture.nylas.sendCalls)
+		}
+	})
+
 	t.Run("missing recipients", func(t *testing.T) {
 		fixture := newCommunicationsSendTestFixture(t)
 		attachmentID := fixture.seedAttachment(t, personalEmailDraftResourceID(fixture.userID, fixture.accountEmail, "draft-no-recipients"), "note.txt", []byte("hello"))
