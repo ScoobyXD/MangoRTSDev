@@ -28,12 +28,17 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 			"sqs_accepted_timestamp",
 			"status in ('accepted','processing','completed','parked','exhausted')",
 			"idx_email_ingestion_jobs_stable_message",
-			"idx_email_relationships_one_node_textbox_per_message",
 		} {
 			if !strings.Contains(compact, strings.Join(strings.Fields(required), "")) {
 				t.Errorf("%s is missing %q", label, required)
 			}
 		}
+	}
+	if !strings.Contains(schema, "idx_email_relationships_one_textbox_per_message_owner") {
+		t.Fatal("canonical schema is missing the final Node/Project textbox cardinality index")
+	}
+	if !strings.Contains(migration, "idx_email_relationships_one_node_textbox_per_message") {
+		t.Fatal("historical SQS migration no longer contains its then-current Node cardinality index")
 	}
 	for _, required := range []string{
 		"communications_email_archive_job_items must be exact previously-applied 13 or exact final 11 columns",

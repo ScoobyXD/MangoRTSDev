@@ -1,16 +1,16 @@
-# Process Story: Email-linked textboxes remain exact to their own Node
+# Process Story: Email-linked textboxes remain exact to their own owner
 
-A person links one exact stored email message from Node A's email column to a textbox
+A person links one exact stored email message from Node or Project A's email column to a timeline textbox
 ↓
-Repeating that action focuses the existing Node A textbox instead of creating another relationship
+Repeating that action focuses the existing owner A textbox instead of creating another relationship
 ↓
 Another exact message may link to that same textbox, and Show email lists both messages oldest-to-newest
 ↓
-The same message may be linked to a different textbox in Node B, because Node B owns its own editor and chat surface
+The same message may be linked to a different textbox in Node or Project B, because B owns its own editor and chat surface
 ↓
-Deleting Node A's relationship leaves Node B's textbox, chat, relationship, and the shared durable email truth intact
+Deleting owner A's relationship leaves owner B's textbox, chat, relationship, and the shared durable email truth intact
 
-Last updated: 2026-08-16
+Last updated: 2026-08-18
 
 # Process Story: A downloading attached email wakes exactly one canonical read
 
@@ -76,19 +76,19 @@ Last updated: 2026-08-08
 
 # Current Editor Business Logic Laws
 
-1. A Node text box is the required owner of every Node chat.
-2. A Node text box may link to several exact email messages. A whole stored email thread never links to a text box.
+1. A Node or Project timeline textbox is the required owner of every chat on that editor surface; a Project's permanent document is not a chat destination.
+2. A Node or Project textbox may link to several exact email messages. A whole stored email thread never links to a textbox.
 3. Dropping only an exact email message's noninteractive header on a Node text box creates the exact typed message/textbox relationship, while the explicit remove control beside that message in Show email removes only that edge when no anchored chat requires it.
 4. Dropping an attached email thread on a Node text box is rejected.
-5. A text box already linked to one email message accepts another exact message unless that second message already belongs to another text box in the same Node.
+5. A textbox already linked to one email message accepts another exact message unless that second message already belongs to another textbox in the same Node or Project.
 6. A Node with priority **Not Assigned** may be assigned or moved to a Logic Gate without a priority prompt or error.
 7. Clicking the chat action for highlighted email text without a linked text box creates only a temporary interface preview and writes no text box, email relationship, or chat to the database.
 8. Clearing the temporary email quote or closing its chat rail cancels the temporary text box and draft without a database delete or cleanup write.
-9. Sending the first temporary email chat atomically creates the Node text box, exact email-message relationship, and chat before the interface becomes a normal saved text box.
-10. One exact email message may link to at most one text box in each Node and may link to a different text box in another Node.
-11. Every email chat remains local to its exact Node, exact text box, and exact linked email message.
-12. An ordinary Node text box stores no color and uses the normal thin neutral frame. Only a Node text box with an exact email relationship may store an approved non-red RGB `color`; every exact linked message card uses that literal value, the outer thread container stays neutral, and Node rendering never hashes an email ID. Red is reserved for failed-save feedback.
-13. The consolidated Node projection supplies text-box identity, order, metadata, links, and revision without copying the canonical editor document body.
+9. Sending the first temporary email chat atomically creates or reuses the Node or Project textbox, exact email-message relationship, and chat before the interface becomes a normal saved textbox.
+10. One exact email message may link to at most one textbox in each Node or Project and may link to a different textbox in another owner.
+11. Every email chat remains local to its exact Node or Project, exact textbox, and exact linked internal email message.
+12. An ordinary Node or Project textbox stores no color and uses the normal thin neutral frame. Only a textbox with an exact email relationship may store an approved non-red RGB `color`; every exact linked message card uses that literal value, the outer thread container stays neutral, and rendering never hashes an email ID. Red is reserved for failed-save feedback.
+13. The consolidated Node or Project projection supplies textbox identity, order, metadata, derived exact-message links, and revision without copying the canonical editor document body or storing another relationship authority.
 14. A visible editor completes its initial canonical read before subscribing for later realtime recovery, so socket acceptance cannot duplicate the initial document read.
 15. Every Node attached-email thread starts collapsed, loads no draft state, and loads an exact body only when that message is opened.
 16. The shared chat pane scrolls to the bottom only when a newly added message is authored by the current user.
@@ -104,7 +104,7 @@ Last updated: 2026-08-08
 26. Selecting an editor table must not show the detached top-right row, column, header, and delete command strip.
 27. Matching consecutive one-row image-free HTML tables or a tab-separated clipboard grid must fill the active Tiptap table from the selected cell, or create exactly one table in ordinary editor text.
 
-Last updated: 2026-08-17
+Last updated: 2026-08-18
 
 # Process Story: Editor policy status follows the draft automatically
 

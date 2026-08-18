@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -57,14 +58,19 @@ func TestPostgresProjectFinalTextboxChatAndEmailStorage(t *testing.T) {
 		t.Fatalf("metadata-first Project textbox title=%q body format=%q", storedTitle, bodyFormat)
 	}
 
-	emailThreadID := "00000000-0000-4000-8000-000000000302"
-	emailMessageID := "00000000-0000-4000-8000-000000000303"
+	emailConnectionID := "00000000-0000-4000-8000-000000000302"
+	emailThreadID := "00000000-0000-4000-8000-000000000303"
+	emailMessageID := "00000000-0000-4000-8000-000000000304"
+	if _, err := db.Exec(`insert into email_connections(
+  email_connection_id,company_id,connection_type,personal_user_id,provider,account_email,grant_id,connected_by_user_id
+) values($1::uuid,$2::uuid,'personal',$3::uuid,'google','project-final-storage@example.test',
+  'project-final-storage-test-grant',$3::uuid)`, emailConnectionID, company.CompanyID, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`insert into email_threads(
-  company_id,email_thread_id,email_account_type,personal_user_id,personal_account_email,
-  email_account_email,provider,provider_thread_key,provider_thread_id,root_provider_message_id
-) values($1::uuid,$2::uuid,'personal_email_account',$3::uuid,'project-final-storage@example.test',
-  'project-final-storage@example.test','google','thread-key','provider-thread','provider-message')`,
-		company.CompanyID, emailThreadID, actor.UserID); err != nil {
+	company_id,email_thread_id,email_connection_id,provider_thread_key,provider_thread_id,root_provider_message_id
+) values($1::uuid,$2::uuid,$3::uuid,'thread-key','provider-thread','provider-message')`,
+		company.CompanyID, emailThreadID, emailConnectionID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`insert into email_messages(
@@ -73,8 +79,30 @@ func TestPostgresProjectFinalTextboxChatAndEmailStorage(t *testing.T) {
   '[{"name":"Sender","email":"sender@example.test"}]'::jsonb)`, company.CompanyID, emailMessageID, emailThreadID); err != nil {
 		t.Fatal(err)
 	}
+	missingWidePayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "email_message_id": emailMessageID, "textbox_color": "#0EA5E9",
+	})
+	if _, err := repo.AddProjectInformation(ProjectInformationInput{
+		CompanyID: company.CompanyID, ProjectID: projectID,
+		InformationID: "00000000-0000-4000-8000-000000000305",
+		Type:          "Attached email", Information: string(missingWidePayload), ActorUserID: actor.UserID,
+	}); !errors.Is(err, ErrEmailMessageNotAttachedToProject) {
+		t.Fatalf("exact Project link without wide relationship err=%v", err)
+	}
+	var exactBeforeWide int
+	var colorBeforeWide sql.NullString
+	if err := db.QueryRow(`select
+  (select count(*) from email_relationships where company_id=$1::uuid and resource_type='project'
+    and resource_id=$2::uuid and resource_textbox_id=$3),
+  (select color from project_textboxes where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3)`,
+		company.CompanyID, projectID, textboxID).Scan(&exactBeforeWide, &colorBeforeWide); err != nil {
+		t.Fatal(err)
+	}
+	if exactBeforeWide != 0 || colorBeforeWide.Valid {
+		t.Fatalf("failed exact link wrote relationships=%d color=%v", exactBeforeWide, colorBeforeWide)
+	}
 
-	attachmentID := "00000000-0000-4000-8000-000000000306"
+	attachmentID := "00000000-0000-4000-8000-000000000307"
 	if _, err := db.Exec(`insert into attachments(
   attachment_id,company_id,uploaded_by_user_id,original_filename,mime_type,byte_size,sha256,
   storage_bucket,storage_key,source_kind
@@ -88,30 +116,158 @@ func TestPostgresProjectFinalTextboxChatAndEmailStorage(t *testing.T) {
   attachment_relationship_id,company_id,resource_type,resource_id,attachment_id,information_id,
   message_id,editor_surface,relationship_kind,created_by_user_id
 ) values
-  ('00000000-0000-4000-8000-000000000307',$1::uuid,'project',$2,$3::uuid,$4::uuid,
+  ('00000000-0000-4000-8000-000000000308',$1::uuid,'project',$2,$3::uuid,$4::uuid,
    '','project_textbox','file_attachment',$5::uuid),
-  ('00000000-0000-4000-8000-000000000308',$1::uuid,'email_message',$6,$3::uuid,null,
+  ('00000000-0000-4000-8000-000000000309',$1::uuid,'email_message',$6,$3::uuid,null,
    '','email_message','email_attachment',$5::uuid)`,
 		company.CompanyID, projectID, attachmentID, textboxID, actor.UserID, emailMessageID); err != nil {
 		t.Fatal(err)
 	}
-	emailRelationshipID := "00000000-0000-4000-8000-000000000304"
-	emailPayload, _ := json.Marshal(map[string]any{
-		"block_id": textboxID, "email_message_id": emailMessageID,
+	wideEmailRelationshipID := "00000000-0000-4000-8000-000000000310"
+	wideEmailPayload, _ := json.Marshal(map[string]any{
+		"email_message_id": emailMessageID, "link_scope": "message",
 		"attached_timestamp": time.Now().UTC().Format(time.RFC3339Nano),
 	})
 	if _, err := repo.AddProjectInformation(ProjectInformationInput{
-		CompanyID: company.CompanyID, ProjectID: projectID, InformationID: emailRelationshipID,
-		Type: "Attached email", Information: string(emailPayload), ActorUserID: actor.UserID,
+		CompanyID: company.CompanyID, ProjectID: projectID, InformationID: wideEmailRelationshipID,
+		Type: "Attached email", Information: string(wideEmailPayload), ActorUserID: actor.UserID,
 	}); err != nil {
 		t.Fatal(err)
 	}
+	wideDeleteTx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := wideDeleteTx.Exec(`delete from email_relationships
+where company_id=$1::uuid and email_relationship_id=$2::uuid`, company.CompanyID, wideEmailRelationshipID); err != nil {
+		_ = wideDeleteTx.Rollback()
+		t.Fatal(err)
+	}
+	exactRaceResult := make(chan error, 1)
+	go func() {
+		_, addErr := repo.AddProjectInformation(ProjectInformationInput{
+			CompanyID: company.CompanyID, ProjectID: projectID,
+			InformationID: "00000000-0000-4000-8000-000000000315",
+			Type:          "Attached email", Information: string(missingWidePayload), ActorUserID: actor.UserID,
+		})
+		exactRaceResult <- addErr
+	}()
+	select {
+	case addErr := <-exactRaceResult:
+		_ = wideDeleteTx.Rollback()
+		t.Fatalf("exact Project link did not wait for concurrent wide deletion: %v", addErr)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := wideDeleteTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case addErr := <-exactRaceResult:
+		if !errors.Is(addErr, ErrEmailMessageNotAttachedToProject) {
+			t.Fatalf("exact Project link after concurrent wide deletion err=%v", addErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("exact Project link remained blocked after concurrent wide deletion committed")
+	}
+	if _, err := repo.AddProjectInformation(ProjectInformationInput{
+		CompanyID: company.CompanyID, ProjectID: projectID, InformationID: wideEmailRelationshipID,
+		Type: "Attached email", Information: string(wideEmailPayload), ActorUserID: actor.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	exactRaceRelationshipID := "00000000-0000-4000-8000-000000000316"
+	if _, err := repo.AddProjectInformation(ProjectInformationInput{
+		CompanyID: company.CompanyID, ProjectID: projectID, InformationID: exactRaceRelationshipID,
+		Type: "Attached email", Information: string(missingWidePayload), ActorUserID: actor.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	exactDeleteTx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := exactDeleteTx.Exec(`delete from email_relationships
+where company_id=$1::uuid and email_relationship_id=$2::uuid`, company.CompanyID, exactRaceRelationshipID); err != nil {
+		_ = exactDeleteTx.Rollback()
+		t.Fatal(err)
+	}
+	chatRaceID := "00000000-0000-4000-8000-000000000317"
+	chatRacePayload, _ := json.Marshal(map[string]any{
+		"block_id": textboxID, "selection_source": "email", "selection_block_id": textboxID,
+		"selection_message_id": emailMessageID, "selection_quote": "Concurrent exact selection",
+		"author_id": actor.UserID, "author_name": "Project Final Storage", "message": "Must not outlive its exact link",
+		"attachments": []any{}, "entity_links": []any{}, "mentioned_user_ids": []string{}, "mentioned_group_ids": []string{},
+	})
+	chatRaceResult := make(chan error, 1)
+	go func() {
+		_, addErr := repo.AddProjectInformation(ProjectInformationInput{
+			CompanyID: company.CompanyID, ProjectID: projectID, InformationID: chatRaceID,
+			Type: CommunicationsEmailCollaborationChatInformationType, Information: string(chatRacePayload), ActorUserID: actor.UserID,
+		})
+		chatRaceResult <- addErr
+	}()
+	select {
+	case addErr := <-chatRaceResult:
+		_ = exactDeleteTx.Rollback()
+		t.Fatalf("Project email chat did not wait for concurrent exact-link deletion: %v", addErr)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := exactDeleteTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case addErr := <-chatRaceResult:
+		if !errors.Is(addErr, ErrEmailMessageNotAttachedToProject) {
+			t.Fatalf("Project email chat after concurrent exact-link deletion err=%v", addErr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Project email chat remained blocked after concurrent exact-link deletion committed")
+	}
+	var racedChatCount int
+	if err := db.QueryRow(`select count(*) from project_textbox_chats
+where company_id=$1::uuid and project_id=$2::uuid and chat_id=$3::uuid`, company.CompanyID, projectID, chatRaceID).
+		Scan(&racedChatCount); err != nil {
+		t.Fatal(err)
+	}
+	if racedChatCount != 0 {
+		t.Fatalf("concurrent exact-link deletion left %d Project email chats", racedChatCount)
+	}
+	rolledBackTextboxID := "00000000-0000-4000-8000-000000000311"
+	invalidFirstChatPayload, _ := json.Marshal(map[string]any{
+		"block_id": rolledBackTextboxID, "ensure_email_textbox_link_on_send": true,
+		"email_textbox_color_on_send": "#0EA5E9", "selection_source": "email",
+		"selection_block_id": rolledBackTextboxID, "selection_message_id": emailMessageID,
+		"selection_quote": "Exact selection", "author_id": actor.UserID,
+		"author_name": "Project Final Storage", "message": "", "attachments": []any{},
+		"entity_links": []any{}, "mentioned_user_ids": []string{}, "mentioned_group_ids": []string{},
+	})
+	if _, err := repo.AddProjectInformation(ProjectInformationInput{
+		CompanyID: company.CompanyID, ProjectID: projectID,
+		InformationID: "00000000-0000-4000-8000-000000000312",
+		Type:          CommunicationsEmailCollaborationChatInformationType, Information: string(invalidFirstChatPayload), ActorUserID: actor.UserID,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid first Project email chat err=%v, want ErrInvalid", err)
+	}
+	var rolledBackTextboxCount, rolledBackRelationshipCount int
+	if err := db.QueryRow(`select
+  (select count(*) from project_textboxes where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3),
+  (select count(*) from email_relationships where company_id=$1::uuid and resource_type='project'
+    and resource_id=$2::uuid and resource_textbox_id=$3)`, company.CompanyID, projectID, rolledBackTextboxID).
+		Scan(&rolledBackTextboxCount, &rolledBackRelationshipCount); err != nil {
+		t.Fatal(err)
+	}
+	if rolledBackTextboxCount != 0 || rolledBackRelationshipCount != 0 {
+		t.Fatalf("invalid first chat left textbox=%d exact relationships=%d", rolledBackTextboxCount, rolledBackRelationshipCount)
+	}
 
-	chatID := "00000000-0000-4000-8000-000000000305"
+	chatID := "00000000-0000-4000-8000-000000000313"
 	created := time.Now().UTC().Add(-time.Minute)
 	chatPayload, _ := json.Marshal(map[string]any{
-		"block_id": textboxID, "selection_source": "email", "selection_message_id": emailMessageID,
-		"author_id": actor.UserID, "author_name": "Project Final Storage", "message": "Exact selection",
+		"block_id": textboxID, "ensure_email_textbox_link_on_send": true,
+		"email_textbox_color_on_send": "#0EA5E9", "selection_source": "email",
+		"selection_block_id": textboxID, "selection_message_id": emailMessageID,
+		"selection_quote": "Exact selection",
+		"author_id":       actor.UserID, "author_name": "Project Final Storage", "message": "Exact selection",
 		"created_timestamp": created.Format(time.RFC3339Nano), "attachments": []any{map[string]any{"attachment_id": attachmentID}},
 		"entity_links": []any{}, "mentioned_user_ids": []string{}, "mentioned_group_ids": []string{},
 	})
@@ -119,6 +275,13 @@ func TestPostgresProjectFinalTextboxChatAndEmailStorage(t *testing.T) {
 		CompanyID: company.CompanyID, ProjectID: projectID, InformationID: chatID,
 		Type: CommunicationsEmailCollaborationChatInformationType, Information: string(chatPayload), ActorUserID: actor.UserID,
 	}); err != nil {
+		t.Fatal(err)
+	}
+	var emailRelationshipID string
+	if err := db.QueryRow(`select email_relationship_id::text from email_relationships
+where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid
+  and resource_textbox_id=$3 and email_message_id=$4::uuid`,
+		company.CompanyID, projectID, textboxID, emailMessageID).Scan(&emailRelationshipID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -155,7 +318,7 @@ func TestPostgresProjectFinalTextboxChatAndEmailStorage(t *testing.T) {
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("other-author Project chat edit err=%v, want ErrInvalid", err)
 	}
-	replyID := "00000000-0000-4000-8000-000000000309"
+	replyID := "00000000-0000-4000-8000-000000000314"
 	replyPayload, _ := json.Marshal(map[string]any{
 		"block_id": textboxID, "parent_id": chatID, "selection_source": "text",
 		"author_id": actor.UserID, "author_name": "Project Final Storage", "message": "Final reply",
@@ -175,7 +338,10 @@ func TestPostgresProjectFinalTextboxChatAndEmailStorage(t *testing.T) {
 	found := map[string]bool{}
 	for _, projection := range projections {
 		found[projection.InformationID] = true
-		if projection.InformationID == textboxID && (!strings.Contains(projection.Information, "Final Project Notes") || !strings.Contains(projection.Information, attachmentID)) {
+		if projection.InformationID == textboxID && (!strings.Contains(projection.Information, "Final Project Notes") ||
+			!strings.Contains(projection.Information, attachmentID) ||
+			!strings.Contains(projection.Information, `"color": "#0EA5E9"`) ||
+			!strings.Contains(projection.Information, emailMessageID)) {
 			t.Fatalf("textbox projection lost final metadata: %s", projection.Information)
 		}
 		if projection.InformationID == emailRelationshipID && !strings.Contains(projection.Information, emailMessageID) {
@@ -194,6 +360,16 @@ func TestPostgresProjectFinalTextboxChatAndEmailStorage(t *testing.T) {
 		}
 	}
 	if err := repo.DeleteProjectProjection(ProjectProjectionDeleteInput{
+		CompanyID: company.CompanyID, ProjectID: projectID, InformationID: emailRelationshipID, ActorUserID: actor.UserID,
+	}); !errors.Is(err, ErrEmailRelationshipRequiredByChat) {
+		t.Fatalf("delete exact Project relationship with chat err=%v", err)
+	}
+	if err := repo.DeleteProjectProjection(ProjectProjectionDeleteInput{
+		CompanyID: company.CompanyID, ProjectID: projectID, InformationID: wideEmailRelationshipID, ActorUserID: actor.UserID,
+	}); !errors.Is(err, ErrEmailRelationshipHasProjectWork) {
+		t.Fatalf("delete Project-wide relationship with textbox work err=%v", err)
+	}
+	if err := repo.DeleteProjectProjection(ProjectProjectionDeleteInput{
 		CompanyID: company.CompanyID, ProjectID: projectID, InformationID: replyID, ActorUserID: actor.UserID,
 	}); err != nil {
 		t.Fatal(err)
@@ -207,12 +383,12 @@ where company_id=$1::uuid and project_id=$2::uuid and chat_id=$3::uuid`, company
 		t.Fatalf("deleted Project reply rows=%d, want 0", remainingReply)
 	}
 	for _, table := range []string{"project_information", "project_projection_table"} {
-		var count int
-		if err := db.QueryRow("select count(*) from "+table+" where company_id=$1::uuid", company.CompanyID).Scan(&count); err != nil {
+		var relationName sql.NullString
+		if err := db.QueryRow("select to_regclass($1)::text", "public."+table).Scan(&relationName); err != nil {
 			t.Fatal(err)
 		}
-		if count != 0 {
-			t.Fatalf("legacy table %s received %d Project rows", table, count)
+		if relationName.Valid {
+			t.Fatalf("retired Project table %s still exists", table)
 		}
 	}
 
@@ -223,8 +399,8 @@ where company_id=$1::uuid and project_id=$2::uuid and chat_id=$3::uuid`, company
 		t.Fatal(err)
 	}
 	for table, query := range map[string]string{
-		"project_textbox_chats": "select count(*) from project_textbox_chats where company_id=$1::uuid and project_id=$2::uuid",
-		"email_relationships":   "select count(*) from email_relationships where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid",
+		"project_textbox_chats":     "select count(*) from project_textbox_chats where company_id=$1::uuid and project_id=$2::uuid",
+		"exact email_relationships": "select count(*) from email_relationships where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid and resource_textbox_id is not null",
 	} {
 		var count int
 		if err := db.QueryRow(query, company.CompanyID, projectID).Scan(&count); err != nil {
@@ -233,6 +409,15 @@ where company_id=$1::uuid and project_id=$2::uuid and chat_id=$3::uuid`, company
 		if count != 0 {
 			t.Fatalf("%s rows after textbox delete=%d, want 0", table, count)
 		}
+	}
+	var remainingWideRelationships int
+	if err := db.QueryRow(`select count(*) from email_relationships
+where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid
+  and resource_textbox_id is null`, company.CompanyID, projectID).Scan(&remainingWideRelationships); err != nil {
+		t.Fatal(err)
+	}
+	if remainingWideRelationships != 1 {
+		t.Fatalf("wide Project email rows after textbox delete=%d, want 1", remainingWideRelationships)
 	}
 	var activeEmailLinks, activeProjectLinks, activeChatLinks int
 	if err := db.QueryRow(`select

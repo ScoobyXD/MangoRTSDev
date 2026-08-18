@@ -563,10 +563,10 @@ func (r *PostgresRepo) AddProjectInformation(input ProjectInformationInput) (dom
 		projection, err = addPostgresProjectEmailRelationshipTx(ctx, tx, input)
 	}
 	if err != nil {
-		return domain.ProjectInformation{}, err
+		return domain.ProjectInformation{}, postgresEmailRelationshipMutationError(err, EntityTypeProject)
 	}
 	if err := tx.Commit(); err != nil {
-		return domain.ProjectInformation{}, err
+		return domain.ProjectInformation{}, postgresEmailRelationshipMutationError(err, EntityTypeProject)
 	}
 	return projectProjectionAsInformation(projection), nil
 }
@@ -595,16 +595,77 @@ func (r *PostgresRepo) DeleteProjectProjection(input ProjectProjectionDeleteInpu
 		return err
 	}
 	defer tx.Rollback()
-	deletedRelationship, err := tx.ExecContext(ctx, `delete from email_relationships
+	var emailThreadID string
+	var relationshipTextboxID sql.NullString
+	err = tx.QueryRowContext(ctx, `select email_thread_id::text,resource_textbox_id
+from email_relationships
 where company_id=$1::uuid and email_relationship_id=$3::uuid
-  and resource_type='project' and resource_id=$2::uuid`, input.CompanyID, input.ProjectID, input.InformationID)
-	if err != nil {
+  and resource_type='project' and resource_id=$2::uuid
+for update`, input.CompanyID, input.ProjectID, input.InformationID).Scan(&emailThreadID, &relationshipTextboxID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if affected, err := deletedRelationship.RowsAffected(); err != nil {
-		return err
-	} else if affected > 0 {
-		return tx.Commit()
+	if err == nil {
+		textboxID := ""
+		if relationshipTextboxID.Valid {
+			textboxID = cleanUUIDText(relationshipTextboxID.String)
+			if textboxID == "" || textboxID == input.ProjectID {
+				return ErrInvalid
+			}
+			if err := tx.QueryRowContext(ctx, `select textbox_id
+from project_textboxes
+where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3
+for update`, input.CompanyID, input.ProjectID, textboxID).Scan(&textboxID); err != nil {
+				return err
+			}
+		} else {
+			var hasProjectWork bool
+			if err := tx.QueryRowContext(ctx, `select
+  exists (
+    select 1 from email_relationships relationship
+    where relationship.company_id=$1::uuid and relationship.email_thread_id=$3::uuid
+      and relationship.resource_type='project' and relationship.resource_id=$2::uuid
+      and relationship.resource_textbox_id is not null
+  ) or exists (
+    select 1 from project_textbox_chats chat
+    join email_messages message on message.company_id=chat.company_id
+      and message.email_message_id=chat.selection_email_message_id
+    where chat.company_id=$1::uuid and chat.project_id=$2::uuid
+      and chat.selection_source='email' and chat.deleted_timestamp is null
+      and message.email_thread_id=$3::uuid
+  )`, input.CompanyID, input.ProjectID, emailThreadID).Scan(&hasProjectWork); err != nil {
+				return err
+			}
+			if hasProjectWork {
+				return ErrEmailRelationshipHasProjectWork
+			}
+		}
+		var deletedTextboxID sql.NullString
+		if err := tx.QueryRowContext(ctx, `delete from email_relationships
+where company_id=$1::uuid and email_relationship_id=$3::uuid
+  and resource_type='project' and resource_id=$2::uuid
+returning resource_textbox_id`, input.CompanyID, input.ProjectID, input.InformationID).Scan(&deletedTextboxID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return postgresEmailRelationshipMutationError(err, EntityTypeProject)
+		}
+		if deletedTextboxID.Valid {
+			if _, err := tx.ExecContext(ctx, `update project_textboxes textbox
+set color=null,updated_timestamp=clock_timestamp()
+where textbox.company_id=$1::uuid and textbox.project_id=$2::uuid and textbox.textbox_id=$3
+  and textbox.deleted_timestamp is null
+  and not exists (
+    select 1 from email_relationships relationship
+    where relationship.company_id=textbox.company_id
+      and relationship.resource_type='project'
+      and relationship.resource_id=textbox.project_id
+      and relationship.resource_textbox_id=textbox.textbox_id
+  )`, input.CompanyID, input.ProjectID, textboxID); err != nil {
+				return err
+			}
+		}
+		return postgresEmailRelationshipMutationError(tx.Commit(), EntityTypeProject)
 	}
 	if err := retireProjectTextboxChatTreeRelationshipsTx(ctx, tx, input.CompanyID, input.ProjectID, input.InformationID); err != nil {
 		return err
@@ -613,7 +674,7 @@ where company_id=$1::uuid and email_relationship_id=$3::uuid
 where company_id=$1::uuid and project_id=$2::uuid and chat_id=$3::uuid`, input.CompanyID, input.ProjectID, input.InformationID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return postgresEmailRelationshipMutationError(tx.Commit(), EntityTypeProject)
 }
 
 func scanProjectCriticalPathStep(row interface{ Scan(dest ...any) error }) (domain.ProjectCriticalPathStep, error) {
@@ -1209,6 +1270,10 @@ func postgresDeleteProjectTx(ctx context.Context, tx *sql.Tx, companyID, project
 		return err
 	}
 	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeProject, projectID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `delete from project_textbox_chats
+where company_id=$1::uuid and project_id=$2::uuid`, companyID, projectID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `delete from email_relationships

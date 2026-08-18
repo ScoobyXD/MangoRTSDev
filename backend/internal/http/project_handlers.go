@@ -741,6 +741,16 @@ func (s *Server) writeProjectMutationError(w http.ResponseWriter, err error, fal
 		writeError(w, http.StatusBadRequest, "project_node_logic_gate_required")
 	case errors.Is(err, store.ErrProjectNodeInAnotherProject):
 		writeError(w, http.StatusConflict, "project_node_already_in_another_project")
+	case errors.Is(err, store.ErrEmailMessageIdentityInvalid):
+		writeError(w, http.StatusBadRequest, "invalid_email_message_identity")
+	case errors.Is(err, store.ErrEmailMessageNotAttachedToProject):
+		writeError(w, http.StatusConflict, "email_message_not_attached_to_project")
+	case errors.Is(err, store.ErrEmailMessageTextboxConflict):
+		writeError(w, http.StatusConflict, "email_message_already_linked_to_another_textbox")
+	case errors.Is(err, store.ErrEmailRelationshipRequiredByChat):
+		writeError(w, http.StatusConflict, "email_relationship_required_by_chat")
+	case errors.Is(err, store.ErrEmailRelationshipHasProjectWork):
+		writeError(w, http.StatusConflict, "email_removal_has_project_work")
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_project")
 	case errors.Is(err, store.ErrAlreadyExists):

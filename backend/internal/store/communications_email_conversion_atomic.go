@@ -123,7 +123,7 @@ func communicationsEmailInitialChatTextboxID(initialChat *NodeInformationInput) 
 	if initialChat == nil {
 		return "", ErrInvalid
 	}
-	var payload nodeTextboxChatPayload
+	var payload textboxChatPayload
 	if err := json.Unmarshal([]byte(strings.TrimSpace(initialChat.Information)), &payload); err != nil {
 		return "", ErrInvalid
 	}
@@ -150,7 +150,7 @@ func (r *MemoryRepo) linkCommunicationsEmailMessageToTextboxLocked(input communi
 		if !strings.EqualFold(strings.TrimSpace(projection.Type), "Attached email") {
 			continue
 		}
-		var payload nodeAttachedEmailPayload
+		var payload emailTextboxRelationshipPayload
 		if json.Unmarshal([]byte(projection.Information), &payload) != nil || cleanUUIDText(payload.EmailMessageID) != emailMessageID {
 			continue
 		}

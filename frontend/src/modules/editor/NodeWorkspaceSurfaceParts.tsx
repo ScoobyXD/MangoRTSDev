@@ -114,7 +114,7 @@ import {
   type TextBlockSelectionDraft,
   userAccentForName,
 } from "./NodeWorkspaceSurfaceShared";
-import { writeEmailMessageTextBoxLinkDrag } from "./nodeEmailTextBoxRelationships.js";
+import { writeEmailMessageTextBoxLinkDrag } from "./email/emailTextBoxRelationships.js";
 
 function emailDraftFingerprint(input: {
   sender: string; to: string; cc: string; bcc: string; subject: string; body: string;
@@ -1451,7 +1451,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                       </span>
                     ) : (
                       <span data-chat-destination-node-entity="true" style={{ minWidth: 0, maxWidth: "52%", flex: "0 1 auto", display: "inline-flex", alignItems: "center", gap: 5, border: "1px solid rgba(148,163,184,0.34)", borderRadius: 7, background: "rgba(248,250,252,0.92)", padding: "3px 6px", boxShadow: "1px 1px 3px rgba(15,23,42,0.06)" }}>
-                        <ExplorerEntityIcon kind="node" />
+                        <ExplorerEntityIcon kind={composerDestination.kind.startsWith("existing_project") ? "project" : "node"} />
                         <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 900 }}>{composerDestination.nodeName || "Selected Node"}</span>
                       </span>
                     )}
@@ -4082,10 +4082,10 @@ const AttachedEmailThreadCard: React.FC<{
               >
                 <span
                   data-email-message-header="true"
-                  draggable={Boolean(editable && nodeID.trim() && internalMessageID)}
+                  draggable={Boolean(editable && (nodeID.trim() || projectID.trim()) && internalMessageID)}
                   onPointerDownCapture={prepareEmailMessageTextBoxLinkDrag}
                   onDragStart={(event) => startEmailMessageTextBoxLinkDrag(event, internalMessageID, onError)}
-                  style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${linkedTextBoxNavigationAvailable ? " auto" : ""}${onMessageTextBoxRequest ? " auto" : ""}${repliesEnabled ? " auto auto" : ""}`, gap: 7, alignItems: "center", cursor: editable && nodeID.trim() && internalMessageID ? "grab" : undefined }}
+                  style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${linkedTextBoxNavigationAvailable ? " auto" : ""}${onMessageTextBoxRequest ? " auto" : ""}${repliesEnabled ? " auto auto" : ""}`, gap: 7, alignItems: "center", cursor: editable && (nodeID.trim() || projectID.trim()) && internalMessageID ? "grab" : undefined }}
                 >
                   <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 10.8, fontWeight: 900 }}>{formatAddressList(message.from) || "Unknown sender"}</span>
                   <span style={{ color: "rgba(100,116,139,0.76)", fontSize: 9.3, fontWeight: 760, whiteSpace: "nowrap" }}>{formatTimestamp(message.date)}{relative ? ` (${relative})` : ""}</span>
@@ -4174,6 +4174,7 @@ type LinkedEmailPreviewPaneProps = {
   allowUnlinkedPreview?: boolean;
   emails: EditorAttachedEmail[];
   nodeID?: string;
+  projectID?: string;
   apiBase?: string;
   companyID: string;
   currentUserID?: string;
@@ -4234,6 +4235,7 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
   allowUnlinkedPreview = false,
   emails,
   nodeID = "",
+  projectID = "",
   apiBase = "",
   companyID,
   currentUserID = "",
@@ -4294,6 +4296,7 @@ export const LinkedEmailPreviewPane: React.FC<LinkedEmailPreviewPaneProps> = ({
             emailMessageID={resolvedPreview.email.emailMessageID}
             collaborationID={resolvedPreview.email.collaborationID}
             nodeID={nodeID}
+            projectID={projectID}
             emailThreadID={resolvedPreview.email.emailThreadID}
             apiBase={apiBase}
             companyID={companyID}
@@ -4346,6 +4349,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   const normalizedLayout = useMemo(() => normalizeAttachedEmailPaneLayout(layout, uniqueEmails), [layout, uniqueEmails]);
   const emailByID = useMemo(() => new Map(uniqueEmails.map((email) => [email.messageID, email])), [uniqueEmails]);
   const orderedEmails = useMemo(() => normalizedLayout.emailOrder.map((id) => emailByID.get(id)).filter((email): email is EditorAttachedEmail => Boolean(email)), [emailByID, normalizedLayout.emailOrder]);
+  const attachedEmailOwnerLabel = projectID.trim() ? "Project" : "node";
   const activeSelectedMessageID = selectedMessageID?.trim() || localSelectedMessageID;
   const childFoldersByParentID = useMemo(() => {
     const groups = new Map<string, AttachedEmailFolderLayout[]>();
@@ -4571,7 +4575,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     onClearSelectedMessage?.();
   }, [onClearSelectedMessage]);
 
-  const removeEmailFromNode = useCallback((messageID: string) => {
+  const removeEmailFromOwner = useCallback((messageID: string) => {
     if (!editable || !onRemoveEmail) return;
     const email = emailByID.get(messageID);
     if (!email) return;
@@ -4837,7 +4841,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
                   {email.subject || "(no subject)"}
                 </button>
                 {editable && onRemoveEmail && (
-                  <button type="button" title="Remove email from node" onClick={() => removeEmailFromNode(email.messageID)} style={{ width: 24, height: 24, border: 0, background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 15, lineHeight: 1 }}>×</button>
+                  <button type="button" title={`Remove email from ${attachedEmailOwnerLabel}`} onClick={() => removeEmailFromOwner(email.messageID)} style={{ width: 24, height: 24, border: 0, background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 15, lineHeight: 1 }}>×</button>
                 )}
               </div>
             );
@@ -4946,10 +4950,10 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
           <button
             type="button"
             role="menuitem"
-            onClick={() => removeEmailFromNode(emailMenu.messageID)}
+            onClick={() => removeEmailFromOwner(emailMenu.messageID)}
             style={{ minHeight: 28, border: "1px solid transparent", borderRadius: 8, background: "transparent", color: "#dc2626", cursor: "pointer", padding: "4px 8px", textAlign: "left", font: "inherit", fontSize: 11, fontWeight: 850 }}
           >
-            Remove from node
+            Remove from {attachedEmailOwnerLabel}
           </button>
         </div>
       )}
@@ -6913,7 +6917,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                 && onMessageActivate
                 && Object.prototype.hasOwnProperty.call(messageAccents, internalThreadMessageID),
               );
-              const messageHeaderDraggable = Boolean(editable && nodeID.trim() && internalThreadMessageID && !singleMessageOnly);
+              const messageHeaderDraggable = Boolean(editable && (nodeID.trim() || projectID.trim()) && internalThreadMessageID && !singleMessageOnly);
               const isSelectedMessage = threadMessage.id === message.id;
               const hideInlineMessageChrome = singleMessageOnly;
               const isExpanded = singleMessageOnly || expandedThreadMessageID === threadMessageID;

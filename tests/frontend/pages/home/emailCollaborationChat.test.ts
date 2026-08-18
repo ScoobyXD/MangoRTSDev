@@ -213,6 +213,7 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   const destinationSearch = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/EmailNodeDestinationSearch.tsx"), "utf8");
   const universalLinkerControls = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UniversalLinkerControls.tsx"), "utf8");
   const sharedChat = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
+  const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const styles = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
 
   assert.match(workspace, /const commentOnEmailSelection = React\.useCallback[\s\S]*setEmailSelection\(selection\);[\s\S]*setEmailChatSession\(\{ key: emailChatKey, visible: true \}\)/);
@@ -347,8 +348,9 @@ test("My and Shared Triage use one thread chat rail backed by Node text boxes", 
   assert.match(sharedChat, /data-chat-section-action="true"/);
   assert.match(sharedChat, /data-chat-section-selected=\{sectionSelected \? "true" : undefined\}/);
   assert.match(sharedChat, /data-chat-composer-highlight="true"[\s\S]*Highlighted text[\s\S]*data-chat-composer-destination="true"[\s\S]*Destination/);
-  assert.match(sharedChat, /New Node · New Text Box[\s\S]*Existing Node · New Text Box[\s\S]*Existing Node · Existing Text Box/);
-  assert.match(sharedChat, /data-chat-destination-node-entity="true"[\s\S]*<ExplorerEntityIcon kind="node" \/>[\s\S]*composerDestination\.nodeName/);
+  assert.match(sharedChat, /New Node · New Text Box[\s\S]*Existing Node · New Text Box[\s\S]*Existing Node · Existing Text Box[\s\S]*Existing Project · New Text Box[\s\S]*Existing Project · Existing Text Box/);
+  assert.match(sharedChat, /data-chat-destination-node-entity="true"[\s\S]*<ExplorerEntityIcon kind=\{composerDestination\.kind\.startsWith\("existing_project"\) \? "project" : "node"\} \/>[\s\S]*composerDestination\.nodeName/);
+  assert.match(projectSummary, /composerDestination=\{chatSelectionAnchors\[block\.id\]\?\.source === "email" \? \{[\s\S]*kind: block\.temporaryEmailChat \? "existing_project_new_textbox" : "existing_project_existing_textbox"/);
   assert.match(sharedChat, /composerDestinationError \|\| "Select a Node or text-box grouping"/);
   assert.match(sharedChat, /aria-label="Cancel chat destination"/);
   assert.match(sharedChat, /reserveScrollbarGutter\?: boolean/);

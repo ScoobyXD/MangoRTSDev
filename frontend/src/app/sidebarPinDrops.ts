@@ -1,8 +1,7 @@
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop.js";
 import { getExplorerDropPayloadItems, type ExplorerDropPayload } from "../modules/company-explorer/treePresentation.js";
 import { EXPLORER_ENTITY_DRAG_MIME, KANBAN_CARD_DRAG_MIME, KANBAN_COLUMN_DRAG_MIME, parseExplorerEntityDragItems } from "../modules/kanban/shared.js";
-import { TRIAGE_MESSAGE_DRAG_MIME } from "../pages/home/homeConstants.js";
-import { readTriageMessageDrag } from "../pages/home/homeUtils.js";
+import { TRIAGE_MESSAGE_DRAG_MIME, readTriageMessageDrag } from "../modules/triage/triageDragDrop.js";
 import { sidebarPinFallbackName, type SidebarPin, type SidebarPinDraft, type SidebarPinKind } from "./sidebarPins.js";
 
 export const APP_SIDEBAR_PIN_DRAG_MIME = "application/x-mangorts-sidebar-pin";

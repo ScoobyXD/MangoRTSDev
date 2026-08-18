@@ -58,7 +58,6 @@ An implementing agent must read these files before designing or changing relatio
 - `docs/tests/relationships.md`
 - `docs/tests/email.md`
 - `docs/tests/email drafts&shared.md`
-- `docs/tests/node.md`
 - `docs/tests/nodes.md`
 - `docs/tests/my-triage.md`
 - `docs/tests/shared-triage.md`

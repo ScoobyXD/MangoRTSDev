@@ -121,16 +121,18 @@ import {
 import { prepareTextBlockImageFile } from "./nodeTextBlockImageFiles";
 import {
   EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME,
+  createEmailSelectionDocument,
   linkedEmailMessageAccents,
+  moveEmailChatComposerEntry,
+  nextEmailTextBoxColor,
   parseEmailMessageTextBoxLinkDrag,
   textBoxHasLinkedEmailMessage,
   textBoxMatchesEmailSelection,
-} from "./nodeEmailTextBoxRelationships.js";
+} from "./email/emailTextBoxRelationships.js";
 import {
   createEmailLinkedNodeTextBlockContent,
   createOrdinaryNodeTextBlockContent,
   defaultOpenTextBlockChatIDs,
-  nextNodeTextBlockColor,
 } from "./nodeTextBlockCreation";
 import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUser } from "./editorMentions";
 
@@ -155,13 +157,6 @@ const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v4";
 const LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIXES = ["node-editor-pane-layout-v3", "node-editor-pane-layout-v2"] as const;
 const EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH = 80;
 
-function moveChatComposerEntry<T>(entries: Record<string, T>, sourceBlockID: string, destinationBlockID: string): Record<string, T> {
-  if (!Object.prototype.hasOwnProperty.call(entries, sourceBlockID)) return entries;
-  const next = { ...entries, [destinationBlockID]: entries[sourceBlockID] as T };
-  delete next[sourceBlockID];
-  return next;
-}
-
 function mentionedUserIDsFromChatDraft(draft: string, users: MentionableCompanyUser[]): string[] {
   const aliasCounts = new Map<string, number>();
   for (const user of users) {
@@ -180,17 +175,6 @@ function buildEmailSelectionNodeTitle(quote: string, fallback: string): string {
   const base = compactQuote || fallback.trim() || "Email selection";
   if (base.length <= EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH) return base;
   return `${base.slice(0, EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH - 3).trimEnd()}...`;
-}
-
-function createEmailSelectionDocument(ownerDocument: Document, quote: string): string {
-  const container = ownerDocument.createElement("div");
-  const paragraph = ownerDocument.createElement("div");
-  quote.split(/\r\n|\r|\n/).forEach((line, index) => {
-    if (index > 0) paragraph.appendChild(ownerDocument.createElement("br"));
-    paragraph.appendChild(ownerDocument.createTextNode(line));
-  });
-  container.appendChild(paragraph);
-  return serializeEditorDocumentHTML(container);
 }
 
 type TextSidePaneKind = "email" | "chat";
@@ -1253,7 +1237,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const targetBlock = blocks.find((block) => block.id === cleanBlockID);
     const textBoxColor = targetBlock?.color?.trim().toUpperCase()
       || preferredColor.trim().toUpperCase()
-      || nextNodeTextBlockColor(blocks.map((block) => block.color ?? ""));
+      || nextEmailTextBoxColor(blocks.map((block) => block.color ?? ""));
     if (targetBlock?.pending) await textBlockProjectionSaveController.saveLatestContent(cleanBlockID);
     setBlocks((current) => current.map((block) => block.id === cleanBlockID
       ? { ...block, stagedEmailMessageID: cleanMessageID }
@@ -1313,7 +1297,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const sourceEmail = attachedEmails.find((email) => email.emailMessageID === cleanMessageID);
-    const color = nextNodeTextBlockColor(blocks.map((block) => block.color ?? ""));
+    const color = nextEmailTextBoxColor(blocks.map((block) => block.color ?? ""));
     const cleanQuote = quote.trim();
     const initialContent = createEmailLinkedNodeTextBlockContent({
       title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
@@ -1393,7 +1377,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const now = new Date().toISOString();
     const blockID = generateStableInformationID();
     const sourceEmail = attachedEmails.find((email) => email.emailMessageID === cleanMessageID);
-    const color = nextNodeTextBlockColor(blocks.map((block) => block.color ?? ""));
+    const color = nextEmailTextBoxColor(blocks.map((block) => block.color ?? ""));
     const initialContent = createEmailLinkedNodeTextBlockContent({
       title: sourceEmail?.subject.trim() ? `Email: ${sourceEmail.subject.trim()}` : "Email text box",
       color,
@@ -1844,7 +1828,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       ? pendingEmailChatSelection
       : null;
     const emailTextBoxColorOnSend = ensureEmailTextBoxLinkOnSend
-      ? chatBlock?.color?.trim() || nextNodeTextBlockColor(blocks.map((block) => block.color ?? ""))
+      ? chatBlock?.color?.trim() || nextEmailTextBoxColor(blocks.map((block) => block.color ?? ""))
       : undefined;
     const mentionedUserIDs = mentionedUserIDsFromChatDraft(message, companyUsers);
     const nextMessage: EditorTextBlockChatMessage = {
@@ -2788,9 +2772,9 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       onError("This text box already has an unsent chat draft. Send or clear it before choosing it as the destination.");
       return false;
     }
-    setChatDrafts((current) => moveChatComposerEntry(current, sourceID, destinationID));
-    setChatDraftEntityLinks((current) => moveChatComposerEntry(current, sourceID, destinationID));
-    setChatDraftAttachments((current) => moveChatComposerEntry(current, sourceID, destinationID));
+    setChatDrafts((current) => moveEmailChatComposerEntry(current, sourceID, destinationID));
+    setChatDraftEntityLinks((current) => moveEmailChatComposerEntry(current, sourceID, destinationID));
+    setChatDraftAttachments((current) => moveEmailChatComposerEntry(current, sourceID, destinationID));
     return true;
   };
   const choosePendingEmailChatDestination = (blockID: string): boolean => {

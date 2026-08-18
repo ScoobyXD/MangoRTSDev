@@ -93,7 +93,7 @@ func TestAttachmentOwnerDeletionPathsUseSharedRetirement(t *testing.T) {
 		"postgres_node_textbox_chats.go":       {"retireNodeTextboxChatTreeRelationshipsTx", "retireAttachmentRelationshipsTx"},
 		"postgres_editor_textboxes.go":         {"retireNodeTextboxAttachmentRelationshipsTx", "retireProjectTextboxAttachmentRelationshipsTx"},
 		"attachment_relationship_cleanup.go":   {"project_textbox_chats", "project_chat_message", "retireProjectTextboxChatTreeRelationshipsTx"},
-		"postgres_project_final_storage.go":    {"project_chat_message", "attachment_relationships"},
+		"postgres_project_textbox_chats.go":    {"project_chat_message", "attachment_relationships"},
 		"postgres_email_drafts.go":             {"retireAttachmentOwnerRelationshipsTx", "email_draft"},
 		"postgres_shared_inbox_folders.go":     {"shared_inbox_folder", "shared_inbox", "retireAttachmentOwnerRelationshipsTx"},
 	}

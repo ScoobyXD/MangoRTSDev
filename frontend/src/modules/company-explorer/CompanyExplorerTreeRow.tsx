@@ -7,7 +7,7 @@ import {
   type ExplorerEntityDragItem,
 } from "../kanban/shared";
 import type { SelectionIntent } from "../selectionCoordinator";
-import { hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils";
+import { hasTriageMessageDrag, readTriageMessageDrag } from "../triage/triageDragDrop";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import {
   EXPLORER_DRAG_MIME,

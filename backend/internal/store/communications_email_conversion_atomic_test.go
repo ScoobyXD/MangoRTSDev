@@ -212,7 +212,7 @@ func TestMemoryDirectEmailTextboxRelationshipsAssignAndPreservePermanentColor(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	withoutColor, _ := json.Marshal(nodeAttachedEmailPayload{
+	withoutColor, _ := json.Marshal(emailTextboxRelationshipPayload{
 		BlockID: textboxID, EmailMessageID: wideA.EmailMessageIDs[0], LinkScope: "message",
 	})
 	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
@@ -227,7 +227,7 @@ func TestMemoryDirectEmailTextboxRelationshipsAssignAndPreservePermanentColor(t 
 	}
 
 	linkAID := "55555555-5555-4555-8555-555555555597"
-	linkA, _ := json.Marshal(nodeAttachedEmailPayload{
+	linkA, _ := json.Marshal(emailTextboxRelationshipPayload{
 		BlockID: textboxID, EmailMessageID: wideA.EmailMessageIDs[0], TextboxColor: "#0EA5E9", LinkScope: "message",
 	})
 	createdA, err := repo.AddNodeInformationWithActor(NodeInformationInput{
@@ -242,7 +242,7 @@ func TestMemoryDirectEmailTextboxRelationshipsAssignAndPreservePermanentColor(t 
 		t.Fatalf("successful direct attach did not bump Node view version before=%+v after=%+v", versionBefore, versionAfterA)
 	}
 
-	idempotentA, _ := json.Marshal(nodeAttachedEmailPayload{
+	idempotentA, _ := json.Marshal(emailTextboxRelationshipPayload{
 		BlockID: textboxID, EmailMessageID: wideA.EmailMessageIDs[0], TextboxColor: "#F59E0B", LinkScope: "message",
 	})
 	converged, err := repo.AddNodeInformationWithActor(NodeInformationInput{
@@ -257,7 +257,7 @@ func TestMemoryDirectEmailTextboxRelationshipsAssignAndPreservePermanentColor(t 
 		t.Fatalf("idempotent attach changed Node view version before=%+v after=%+v", versionAfterA, versionAfterIdempotent)
 	}
 
-	linkB, _ := json.Marshal(nodeAttachedEmailPayload{
+	linkB, _ := json.Marshal(emailTextboxRelationshipPayload{
 		BlockID: textboxID, EmailMessageID: wideB.EmailMessageIDs[0], TextboxColor: "#14B8A6", LinkScope: "message",
 	})
 	linkBID := "55555555-5555-4555-8555-555555555599"
@@ -267,7 +267,7 @@ func TestMemoryDirectEmailTextboxRelationshipsAssignAndPreservePermanentColor(t 
 	}); err != nil {
 		t.Fatalf("direct link B to shared textbox: %v", err)
 	}
-	conflict, _ := json.Marshal(nodeAttachedEmailPayload{
+	conflict, _ := json.Marshal(emailTextboxRelationshipPayload{
 		BlockID: conflictTextboxID, EmailMessageID: wideA.EmailMessageIDs[0], TextboxColor: "#8B5CF6", LinkScope: "message",
 	})
 	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
@@ -442,7 +442,7 @@ func TestMemoryFirstEmailChatAtomicallyLinksAnotherExactMessageToExistingTextbox
 		if !strings.EqualFold(projection.Type, "Attached email") {
 			continue
 		}
-		var relationship nodeAttachedEmailPayload
+		var relationship emailTextboxRelationshipPayload
 		if json.Unmarshal([]byte(projection.Information), &relationship) == nil &&
 			cleanUUIDText(relationship.BlockID) == textboxID &&
 			cleanUUIDText(relationship.EmailMessageID) == wideB.EmailMessageIDs[0] {
@@ -519,7 +519,7 @@ func TestMemoryFirstEmailChatAtomicallyLinksAnotherExactMessageToExistingTextbox
 			}
 			linkedIDs = payload.EmailMessageIDs
 		case projection.InformationID == chatAID || projection.InformationID == chatBID:
-			var payload nodeTextboxChatPayload
+			var payload textboxChatPayload
 			if json.Unmarshal([]byte(projection.Information), &payload) != nil {
 				t.Fatalf("parse first-chat projection %s", projection.InformationID)
 			}
@@ -556,7 +556,7 @@ func TestMemoryEmailTextboxRelationshipRemovalMatchesTheCanonicalChatGuard(t *te
 			if !strings.EqualFold(projection.Type, "Attached email") {
 				continue
 			}
-			var payload nodeAttachedEmailPayload
+			var payload emailTextboxRelationshipPayload
 			if json.Unmarshal([]byte(projection.Information), &payload) == nil && cleanUUIDText(payload.BlockID) == textBlockID {
 				return informationID
 			}
@@ -656,7 +656,7 @@ func TestMemoryEditorNodeTextboxDeleteReleasesItsMessageAndPreservesTheWideRelat
 		if !strings.EqualFold(projection.Type, "Attached email") {
 			continue
 		}
-		var relationship nodeAttachedEmailPayload
+		var relationship emailTextboxRelationshipPayload
 		if json.Unmarshal([]byte(projection.Information), &relationship) == nil && cleanUUIDText(relationship.BlockID) == firstTextboxID {
 			textboxRelationshipID = informationID
 			break

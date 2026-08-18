@@ -588,13 +588,13 @@ where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid and 
 		if err := retireProjectTextboxAttachmentRelationshipsTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID); err != nil {
 			return EditorJSONCommit{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `delete from email_relationships
-where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid and resource_textbox_id=$3`,
+		if _, err := tx.ExecContext(ctx, `delete from project_textbox_chats
+where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3`,
 			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID); err != nil {
 			return EditorJSONCommit{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `delete from project_textbox_chats
-where company_id=$1::uuid and project_id=$2::uuid and textbox_id=$3`,
+		if _, err := tx.ExecContext(ctx, `delete from email_relationships
+where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid and resource_textbox_id=$3`,
 			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID); err != nil {
 			return EditorJSONCommit{}, err
 		}

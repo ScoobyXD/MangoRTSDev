@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { EXPLORER_DRAG_MIME } from "../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../../../frontend/src/modules/kanban/shared.js";
-import { TRIAGE_MESSAGE_DRAG_MIME } from "../../../frontend/src/pages/home/homeConstants.js";
+import { TRIAGE_MESSAGE_DRAG_MIME } from "../../../frontend/src/modules/triage/triageDragDrop.js";
 import {
   APP_SIDEBAR_PIN_DRAG_MIME,
   hasSidebarPinDrag,

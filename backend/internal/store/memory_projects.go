@@ -235,16 +235,7 @@ func (r *MemoryRepo) GetProjectView(companyID, projectID, viewerUserID string) (
 	if viewerUserID != "" && !r.userHasEffectiveAccessLocked(companyID, viewerUserID, EntityTypeProject, projectID, EntityPermissionEdit) {
 		return domain.ProjectView{}, ErrNotFound
 	}
-	projections := make([]domain.ProjectProjection, 0, len(r.projectText[key(companyID, projectID)]))
-	for _, projection := range r.projectText[key(companyID, projectID)] {
-		projections = append(projections, projection)
-	}
-	sort.Slice(projections, func(i, j int) bool {
-		if !projections[i].CreatedTimestamp.Equal(projections[j].CreatedTimestamp) {
-			return projections[i].CreatedTimestamp.After(projections[j].CreatedTimestamp)
-		}
-		return projections[i].InformationID < projections[j].InformationID
-	})
+	projections := r.listMemoryProjectProjectionsLocked(companyID, projectID)
 	relationships := r.projectRelationshipProjectionsForViewerLocked(companyID, projectID, viewerUserID)
 	criticalPath := r.projectCriticalPathStepsForViewerLocked(companyID, projectID, viewerUserID)
 	project = r.withProjectReadModelLocked(project)
@@ -277,6 +268,20 @@ func (r *MemoryRepo) AddProjectInformation(input ProjectInformationInput) (domai
 	defer r.mu.Unlock()
 	if _, ok := r.projects[key(input.CompanyID, input.ProjectID)]; !ok {
 		return domain.ProjectInformation{}, ErrNotFound
+	}
+	if strings.EqualFold(input.Type, "Attached email") {
+		projection, err := r.addMemoryProjectEmailRelationshipLocked(input)
+		if err != nil {
+			return domain.ProjectInformation{}, err
+		}
+		return memoryProjectProjectionAsInformation(projection), nil
+	}
+	if isTextboxChatType(input.Type) {
+		projection, err := r.addMemoryProjectTextboxChatLocked(input)
+		if err != nil {
+			return domain.ProjectInformation{}, err
+		}
+		return memoryProjectProjectionAsInformation(projection), nil
 	}
 	now := time.Now().UTC()
 	item := domain.ProjectInformation{
@@ -321,17 +326,7 @@ func (r *MemoryRepo) ListProjectProjections(companyID, projectID string) ([]doma
 	if _, ok := r.projects[key(companyID, projectID)]; !ok {
 		return nil, ErrNotFound
 	}
-	items := make([]domain.ProjectProjection, 0, len(r.projectText[key(companyID, projectID)]))
-	for _, item := range r.projectText[key(companyID, projectID)] {
-		items = append(items, item)
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
-			return items[i].CreatedTimestamp.After(items[j].CreatedTimestamp)
-		}
-		return items[i].InformationID < items[j].InformationID
-	})
-	return items, nil
+	return r.listMemoryProjectProjectionsLocked(companyID, projectID), nil
 }
 
 func (r *MemoryRepo) DeleteProjectProjection(input ProjectProjectionDeleteInput) error {
@@ -345,6 +340,10 @@ func (r *MemoryRepo) DeleteProjectProjection(input ProjectProjectionDeleteInput)
 		return ErrNotFound
 	}
 	k := key(input.CompanyID, input.ProjectID)
+	if relationship, ok := r.projectEmailRelationships[memoryProjectEmailRelationshipKey(input.CompanyID, input.InformationID)]; ok &&
+		relationship.ProjectID == input.ProjectID {
+		return r.deleteMemoryProjectEmailRelationshipLocked(input, relationship)
+	}
 	if _, ok := r.projectText[k][input.InformationID]; ok {
 		delete(r.projectText[k], input.InformationID)
 	}
@@ -924,6 +923,11 @@ func (r *MemoryRepo) deleteProjectLocked(companyID, projectID string) error {
 	r.deleteEntityFieldAssignmentsForResourceLocked(companyID, EntityTypeProject, projectID)
 	delete(r.projectInfo, k)
 	delete(r.projectText, k)
+	for relationshipKey, relationship := range r.projectEmailRelationships {
+		if relationship.CompanyID == companyID && relationship.ProjectID == projectID {
+			delete(r.projectEmailRelationships, relationshipKey)
+		}
+	}
 	for relationshipKey, relationship := range r.projectRelationships {
 		if relationship.CompanyID == companyID && relationship.ProjectID == projectID {
 			delete(r.projectRelationships, relationshipKey)

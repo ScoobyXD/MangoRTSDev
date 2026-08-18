@@ -32,7 +32,7 @@ import {
   type TextBlockSelectionAnchor,
 } from "../../modules/editor/NodeWorkspaceSurfaceShared";
 import { generateStableInformationID } from "../../modules/editor/editorTypes";
-import { nextNodeTextBlockColor } from "../../modules/editor/nodeTextBlockCreation";
+import { nextEmailTextBoxColor } from "../../modules/editor/email/emailTextBoxRelationships";
 import { invalidateNodeRecordStoreCaches } from "../../modules/nodes/nodeRecordStore";
 import type { NodeRecord } from "../../modules/nodes/types";
 import { assignNodeToLogicGateStatus } from "../../modules/kanban/kanbanApi";
@@ -705,7 +705,7 @@ export function EmailCollaborationChatSurface({
       const shouldAttachEmail = !existingTextboxLink && emailNodeImportRequired(cleanNodeID, currentNodeCollaboration?.node_id ?? "", emailMessageID);
       const subject = message.subject?.trim() || "Email";
       let attachedEmailInformationID = collaboration?.attached_email_information_id?.trim() ?? "";
-      const color = nextNodeTextBlockColor([]);
+      const color = nextEmailTextBoxColor([]);
       const textBlockID = existingGroup?.textbox_id ?? existingTextboxLink?.textbox_id ?? generateStableInformationID();
       if (!emailMessageID && !existingGroup && !existingTextboxLink) {
         ensuredCollaboration = await ensureEmailCollaboration({
@@ -828,7 +828,7 @@ export function EmailCollaborationChatSurface({
       emailMessageID = ingested.root_message_id?.trim() || ingested.message?.email_message_id?.trim() || "";
     }
     if (!emailMessageID) throw new Error("email_message_id_missing");
-    const color = nextNodeTextBlockColor([]);
+    const color = nextEmailTextBoxColor([]);
     const linkedTextBlock = {
       type: EDITOR_TEXT_BLOCK_TYPE,
       informationID: textBlockID,
@@ -1026,7 +1026,7 @@ export function EmailCollaborationChatSurface({
             title: "Email: " + (message.subject?.trim() || "Email"),
             document: "",
             attachments: [],
-            color: nextNodeTextBlockColor([]),
+            color: nextEmailTextBoxColor([]),
           }),
         },
         initialChat: pending.write,

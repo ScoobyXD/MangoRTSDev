@@ -63,7 +63,7 @@ func (r *PostgresRepo) UpsertNodeProjectionWithActor(input NodeInformationInput)
 	if isEditorTextBoxType(infoType) {
 		return upsertPostgresNodeTextProjection(ctx, tx, input, companyID, nodeID, informationID, infoType)
 	}
-	if isNodeTextboxChatType(infoType) {
+	if isTextboxChatType(infoType) {
 		_, previousFound, err := postgresNodeTextboxChatProjectionTx(ctx, tx, companyID, nodeID, informationID)
 		if err != nil {
 			return domain.NodeProjection{}, err

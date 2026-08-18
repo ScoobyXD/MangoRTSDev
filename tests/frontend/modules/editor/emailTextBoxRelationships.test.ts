@@ -4,11 +4,13 @@ import test from "node:test";
 import {
   EMAIL_MESSAGE_TEXT_BOX_LINK_DRAG_MIME,
   linkedEmailMessageAccents,
+  moveEmailChatComposerEntry,
+  nextEmailTextBoxColor,
   parseEmailMessageTextBoxLinkDrag,
   textBoxHasLinkedEmailMessage,
   textBoxMatchesEmailSelection,
   writeEmailMessageTextBoxLinkDrag,
-} from "../../../../frontend/src/modules/editor/nodeEmailTextBoxRelationships.js";
+} from "../../../../frontend/src/modules/editor/email/emailTextBoxRelationships.js";
 
 class TestDataTransfer {
   effectAllowed = "none";
@@ -56,6 +58,21 @@ test("every exact linked message receives its textbox color and unrelated thread
 
   assert.deepEqual(accents, { "message-a": "#0EA5E9", "message-b": "#0EA5E9", "message-c": "" });
   assert.equal(Object.prototype.hasOwnProperty.call(accents, "message-c"), true, "canonical membership must survive an empty color");
+});
+
+test("Node and Project text boxes share one explicit non-red palette without hashing", () => {
+  assert.equal(nextEmailTextBoxColor([]), "#0EA5E9");
+  assert.equal(nextEmailTextBoxColor(["#0ea5e9"]), "#14B8A6");
+  assert.equal(nextEmailTextBoxColor(["#0EA5E9", "#14B8A6"]), "#8B5CF6");
+  assert.notEqual(nextEmailTextBoxColor([]), "#EF4444");
+});
+
+test("moving a highlighted-email composer preserves its complete entry and leaves other drafts alone", () => {
+  const entry = { message: "draft", attachments: ["attachment-1"], quote: "selected text" };
+  assert.deepEqual(moveEmailChatComposerEntry({ source: entry, other: { message: "other" } }, "source", "target"), {
+    target: entry,
+    other: { message: "other" },
+  });
 });
 
 test("exact message-link drag carries only internal relationship identity", () => {

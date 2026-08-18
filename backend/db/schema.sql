@@ -3248,8 +3248,7 @@ create table if not exists project_textboxes (
   revision bigint not null default 0,
   display_order bigint not null default 0,
   title text not null default '',
-  email_message_id text not null default '',
-  email_accent text not null default '',
+  color text,
   metadata_revision bigint not null default 1,
   created_timestamp timestamptz not null default now(),
   updated_timestamp timestamptz not null default now(),
@@ -3260,9 +3259,10 @@ create table if not exists project_textboxes (
   constraint project_textboxes_revision_chk check (revision >= 0),
   constraint project_textboxes_metadata_revision_chk check (metadata_revision > 0),
   constraint project_textboxes_title_chk check (length(title) <= 500),
-  constraint project_textboxes_email_accent_chk check (
-    email_accent='' or email_accent ~ '^#[0-9A-Fa-f]{6}$'
-  ),
+  constraint project_textboxes_color_chk check (color is null or color in (
+    '#0EA5E9', '#14B8A6', '#8B5CF6', '#F59E0B', '#22C55E', '#6366F1',
+    '#06B6D4', '#84CC16', '#A855F7', '#10B981', '#EAB308', '#3B82F6'
+  )),
   constraint project_textboxes_body_json_chk check (
     body_json->>'format' = 'mango-tiptap-json'
     and body_json->>'schema_version' = '1'
@@ -3278,6 +3278,9 @@ create table if not exists project_textboxes (
 create index if not exists idx_project_textboxes_order
   on project_textboxes(company_id, project_id, display_order, textbox_id)
   where deleted_timestamp is null;
+
+comment on column project_textboxes.color is
+  'Optional non-red RGB color used only when this exact Project textbox has an email relationship.';
 
 create table if not exists project_textbox_chats (
   company_id uuid not null,
@@ -3483,13 +3486,9 @@ create unique index if not exists idx_email_relationships_active_identity
     coalesce(resource_textbox_id, '')
   );
 
-create unique index if not exists idx_email_relationships_one_node_textbox_per_message
-  on email_relationships(company_id, email_message_id, resource_id)
-  where resource_type='node' and resource_textbox_id is not null;
-
-create unique index if not exists idx_email_relationships_one_project_textbox_per_message
-  on email_relationships(company_id, email_message_id, resource_id)
-  where resource_type='project' and resource_textbox_id is not null;
+create unique index if not exists idx_email_relationships_one_textbox_per_message_owner
+  on email_relationships(company_id, email_message_id, resource_type, resource_id)
+  where resource_type in ('node','project') and resource_textbox_id is not null;
 
 create table if not exists node_textboxes_history (
   company_id uuid not null,
@@ -3691,6 +3690,10 @@ begin
     ) then
       raise exception 'email relationship Project textbox does not belong to resource' using errcode='23503';
     end if;
+    if new.resource_textbox_id is not null and new.resource_textbox_id=new.resource_id::text then
+      raise exception 'permanent Project document cannot own an email textbox relationship'
+        using errcode='23514', constraint='email_relationship_project_document_forbidden';
+    end if;
   elsif new.resource_type = 'logic_gate' then
     if not exists (select 1 from logic_gates where company_id=new.company_id and logic_gate_id=new.resource_id) then
       raise exception 'email relationship Logic Gate does not exist' using errcode='23503';
@@ -3715,19 +3718,52 @@ after insert or update of company_id,resource_type,resource_id,resource_textbox_
 on email_relationships deferrable initially immediate
 for each row execute function mangorts_validate_email_relationship_resource();
 
+create or replace function mangorts_validate_email_textbox_relationship_has_wide_owner()
+returns trigger language plpgsql as $$
+begin
+  if new.resource_type in ('node','project') and new.resource_textbox_id is not null then
+    perform 1
+    from email_relationships wide
+    where wide.company_id=new.company_id
+      and wide.email_thread_id=new.email_thread_id
+      and wide.resource_type=new.resource_type
+      and wide.resource_id=new.resource_id
+      and wide.resource_textbox_id is null
+    order by wide.created_timestamp,wide.email_relationship_id
+    limit 1
+    for share;
+    if not found then
+      raise exception 'email textbox relationship requires a wide owner relationship'
+        using errcode='23503', constraint='email_textbox_relationship_requires_wide';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_validate_email_textbox_relationship_has_wide_owner on email_relationships;
+create constraint trigger trg_validate_email_textbox_relationship_has_wide_owner
+after insert or update of company_id,email_thread_id,resource_type,resource_id,resource_textbox_id
+on email_relationships deferrable initially immediate
+for each row execute function mangorts_validate_email_textbox_relationship_has_wide_owner();
+
 create or replace function mangorts_validate_node_email_chat_relationship()
 returns trigger language plpgsql as $$
 begin
-  if new.selection_source='email' and new.deleted_timestamp is null and not exists (
-    select 1
+  if new.selection_source='email' and new.deleted_timestamp is null then
+    perform 1
     from email_relationships relationship
     where relationship.company_id=new.company_id
       and relationship.resource_type='node'
       and relationship.resource_id=new.node_id
       and relationship.resource_textbox_id=new.textbox_id::text
       and relationship.email_message_id=new.selection_email_message_id
-  ) then
-    raise exception 'email chat requires exact Node message textbox relationship' using errcode='23503';
+    limit 1
+    for share;
+    if not found then
+      raise exception 'email chat requires exact Node message textbox relationship'
+        using errcode='23503', constraint='email_chat_requires_exact_textbox_relationship';
+    end if;
   end if;
   return new;
 end;
@@ -3739,39 +3775,116 @@ after insert or update of company_id,node_id,textbox_id,selection_source,selecti
 on node_textbox_chats deferrable initially immediate
 for each row execute function mangorts_validate_node_email_chat_relationship();
 
-create or replace function mangorts_protect_node_email_chat_relationship()
+create or replace function mangorts_validate_project_email_chat_relationship()
 returns trigger language plpgsql as $$
 begin
-  if old.resource_type='node' and old.resource_textbox_id is not null and exists (
-    select 1
-    from node_textbox_chats chat
-    where chat.company_id=old.company_id
-      and chat.node_id=old.resource_id
-      and chat.textbox_id::text=old.resource_textbox_id
-      and chat.selection_source='email'
-      and chat.selection_email_message_id=old.email_message_id
-      and chat.deleted_timestamp is null
-  ) and not exists (
-    select 1
+  if new.textbox_id=new.project_id::text then
+    raise exception 'permanent Project document cannot own a chat'
+      using errcode='23514', constraint='project_document_chat_forbidden';
+  end if;
+  if new.selection_source='email' and new.deleted_timestamp is null then
+    perform 1
     from email_relationships relationship
-    where relationship.company_id=old.company_id
-      and relationship.email_relationship_id<>old.email_relationship_id
-      and relationship.resource_type='node'
-      and relationship.resource_id=old.resource_id
-      and relationship.resource_textbox_id=old.resource_textbox_id
-      and relationship.email_message_id=old.email_message_id
+    where relationship.company_id=new.company_id
+      and relationship.resource_type='project'
+      and relationship.resource_id=new.project_id
+      and relationship.resource_textbox_id=new.textbox_id
+      and relationship.email_message_id=new.selection_email_message_id
+    limit 1
+    for share;
+    if not found then
+      raise exception 'email chat requires exact Project message textbox relationship'
+        using errcode='23503', constraint='email_chat_requires_exact_textbox_relationship';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_validate_project_email_chat_relationship on project_textbox_chats;
+create constraint trigger trg_validate_project_email_chat_relationship
+after insert or update of company_id,project_id,textbox_id,selection_source,selection_email_message_id,deleted_timestamp
+on project_textbox_chats deferrable initially immediate
+for each row execute function mangorts_validate_project_email_chat_relationship();
+
+create or replace function mangorts_protect_email_relationship_dependencies()
+returns trigger language plpgsql as $$
+begin
+  if old.resource_type not in ('node','project') then
+    return old;
+  end if;
+  if old.resource_textbox_id is not null
+     and not exists (
+       select 1 from email_relationships relationship
+       where relationship.company_id=old.company_id
+         and relationship.email_relationship_id<>old.email_relationship_id
+         and relationship.resource_type=old.resource_type
+         and relationship.resource_id=old.resource_id
+         and relationship.resource_textbox_id=old.resource_textbox_id
+         and relationship.email_message_id=old.email_message_id
+     )
+     and (
+       (old.resource_type='node' and exists (
+         select 1 from node_textbox_chats chat
+         where chat.company_id=old.company_id and chat.node_id=old.resource_id
+           and chat.textbox_id::text=old.resource_textbox_id
+           and chat.selection_source='email'
+           and chat.selection_email_message_id=old.email_message_id
+           and chat.deleted_timestamp is null
+       ))
+       or (old.resource_type='project' and exists (
+         select 1 from project_textbox_chats chat
+         where chat.company_id=old.company_id and chat.project_id=old.resource_id
+           and chat.textbox_id=old.resource_textbox_id
+           and chat.selection_source='email'
+           and chat.selection_email_message_id=old.email_message_id
+           and chat.deleted_timestamp is null
+       ))
+     ) then
+    raise exception 'email relationship is required by an active chat'
+      using errcode='23503', constraint='email_relationship_required_by_chat';
+  end if;
+  if old.resource_textbox_id is null and (
+    exists (
+      select 1 from email_relationships relationship
+      where relationship.company_id=old.company_id
+        and relationship.email_thread_id=old.email_thread_id
+        and relationship.resource_type=old.resource_type
+        and relationship.resource_id=old.resource_id
+        and relationship.resource_textbox_id is not null
+    )
+    or (old.resource_type='node' and exists (
+      select 1 from node_textbox_chats chat
+      join email_messages message
+        on message.company_id=chat.company_id
+       and message.email_message_id=chat.selection_email_message_id
+      where chat.company_id=old.company_id and chat.node_id=old.resource_id
+        and chat.selection_source='email' and chat.deleted_timestamp is null
+        and message.email_thread_id=old.email_thread_id
+    ))
+    or (old.resource_type='project' and exists (
+      select 1 from project_textbox_chats chat
+      join email_messages message
+        on message.company_id=chat.company_id
+       and message.email_message_id=chat.selection_email_message_id
+      where chat.company_id=old.company_id and chat.project_id=old.resource_id
+        and chat.selection_source='email' and chat.deleted_timestamp is null
+        and message.email_thread_id=old.email_thread_id
+    ))
   ) then
-    raise exception 'email relationship is required by an active Node chat' using errcode='23503';
+    raise exception 'wide email relationship is required by owner textbox work'
+      using errcode='23503', constraint='email_wide_relationship_required_by_textbox_work';
   end if;
   return old;
 end;
 $$;
 
 drop trigger if exists trg_protect_node_email_chat_relationship on email_relationships;
-create constraint trigger trg_protect_node_email_chat_relationship
-after delete or update of company_id,email_message_id,resource_type,resource_id,resource_textbox_id
+drop trigger if exists trg_protect_email_relationship_dependencies on email_relationships;
+create constraint trigger trg_protect_email_relationship_dependencies
+after delete or update of company_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id
 on email_relationships deferrable initially deferred
-for each row execute function mangorts_protect_node_email_chat_relationship();
+for each row execute function mangorts_protect_email_relationship_dependencies();
 
 create table if not exists email_drafts (
   company_id uuid not null,

@@ -10,8 +10,8 @@ import { entityMatchesAccountFilter, setNodeAccountAssignments } from "../accoun
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
 import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import { listCompanyUsers, transferEmailNodeCardToNode } from "../communications/communicationsApi";
-import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants";
-import { cleanIDList, hasTriageMessageDrag, readTriageMessageDrag } from "../../pages/home/homeUtils";
+import { dispatchTriageConversionApplied } from "../triage/triageEvents";
+import { hasTriageMessageDrag, normalizeTriageMessageIDs, readTriageMessageDrag } from "../triage/triageDragDrop";
 import { getNodeTitle, type NodeRecord } from "../nodes/types";
 import { getNodeRelationshipGraphSnapshot, removeNodeRelationshipGraphNode, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode } from "../nodes/nodeRelationshipGraph";
 import { invalidateNodeRecordStoreCaches } from "../nodes/nodeRecordStore";
@@ -170,10 +170,6 @@ function sortSavedViewsForKanban(savedViews: SavedView[]): SavedView[] {
   ));
 }
 
-function dispatchHomeTriageConversionApplied(detail: HomeTriageConversionAppliedDetail): void {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new CustomEvent<HomeTriageConversionAppliedDetail>(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, { detail }));
-}
 
 function normalizeKanbanDateAddedSortDirection(value: unknown): KanbanDateAddedSortDirection {
   return value === "desc" ? "desc" : "asc";
@@ -2141,7 +2137,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setDragOverCard(null);
     setDragOverColumnID("");
     setError("");
-    const messageIDs = cleanIDList(drag.messageIDs);
+    const messageIDs = normalizeTriageMessageIDs(drag.messageIDs);
     if (messageIDs.length === 0) return;
     const dragCompanyID = drag.companyID?.trim() ?? "";
     if (dragCompanyID && dragCompanyID !== companyID) {
@@ -2157,7 +2153,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
 
     const sharedInboxID = drag.sharedInboxID?.trim() || undefined;
     const accountEmail = sharedInboxID ? undefined : drag.accountEmail?.trim().toLowerCase() || undefined;
-    dispatchHomeTriageConversionApplied({ companyID, messageIDs, sharedInboxID, accountEmail });
+    dispatchTriageConversionApplied({ companyID, messageIDs, sharedInboxID, accountEmail });
     const mutationBoardID = boardID;
     const endMutation = beginLocalBoardMutation(mutationBoardID, logicGateID);
     let shouldRefresh = false;
@@ -2191,12 +2187,12 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, {
         detail: { companyID, boardID: resultBoardID, logicGateID: resultLogicGateID },
       }));
-      const convertedMessageIDs = cleanIDList(result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs);
+      const convertedMessageIDs = normalizeTriageMessageIDs(result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs);
       const boardIDs = Array.from(new Set([
         resultBoardID,
         ...savedCards.map((card) => card.board_id),
       ].map((id) => id.trim()).filter(Boolean)));
-      dispatchHomeTriageConversionApplied({
+      dispatchTriageConversionApplied({
         companyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID,
@@ -2205,7 +2201,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         nodeIDs: result.nodes.map((node) => node.node_id),
         boardIDs,
         cardIDs: savedCards.map((card) => card.card_id),
-        unstarredMessageIDs: cleanIDList(result.unstarred_message_ids ?? []),
+        unstarredMessageIDs: normalizeTriageMessageIDs(result.unstarred_message_ids ?? []),
       });
       const createdNode = result.nodes?.[0];
       const createdCard = savedCards[0];

@@ -1426,7 +1426,8 @@ button, input, textarea, select {
   }
 }
 
-[data-node-email-chat-parent-destination="true"] {
+[data-node-email-chat-parent-destination="true"],
+[data-project-email-chat-parent-destination="true"] {
   grid-column: 1 / -1;
   min-width: 0;
   max-width: calc(100% - 41px);
@@ -1449,19 +1450,22 @@ button, input, textarea, select {
   transition: transform 150ms ease, box-shadow 150ms ease;
 }
 
-[data-node-email-chat-parent-destination="true"] > span {
+[data-node-email-chat-parent-destination="true"] > span,
+[data-project-email-chat-parent-destination="true"] > span {
   min-width: 0;
   display: flex;
   align-items: baseline;
   gap: 6px;
 }
 
-[data-node-email-chat-parent-destination="true"] strong {
+[data-node-email-chat-parent-destination="true"] strong,
+[data-project-email-chat-parent-destination="true"] strong {
   font-size: 11px;
   font-weight: 900;
 }
 
-[data-node-email-chat-parent-destination="true"] small {
+[data-node-email-chat-parent-destination="true"] small,
+[data-project-email-chat-parent-destination="true"] small {
   color: #64748b;
   font-size: 9.5px;
   line-height: 1.35;
@@ -1469,6 +1473,8 @@ button, input, textarea, select {
 
 [data-node-email-chat-parent-destination="true"]:hover,
 [data-node-email-chat-parent-destination="true"]:focus-visible,
+[data-project-email-chat-parent-destination="true"]:hover,
+[data-project-email-chat-parent-destination="true"]:focus-visible,
 [data-email-chat-destination-candidate="true"]:hover,
 [data-email-chat-destination-candidate="true"]:focus-within {
   transform: translateY(-2px);
@@ -1494,6 +1500,7 @@ dialog.mango-project-document-pane::backdrop {
 
 @media (prefers-reduced-motion: reduce) {
   [data-node-email-chat-parent-destination="true"],
+  [data-project-email-chat-parent-destination="true"],
   [data-email-chat-destination-candidate="true"] {
     transition: none;
   }

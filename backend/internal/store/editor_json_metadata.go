@@ -57,7 +57,11 @@ func NormalizeEditorJSONMetadata(input EditorJSONMetadataInput) (EditorJSONMetad
 		return EditorJSONMetadataInput{}, ErrInvalid
 	}
 	if input.Document.ResourceType == EntityTypeNode {
-		if (input.Color != "" && !validNodeTextboxColor(input.Color)) || input.EmailAccent != "" {
+		if (input.Color != "" && !validEmailTextboxColor(input.Color)) || input.EmailAccent != "" {
+			return EditorJSONMetadataInput{}, ErrInvalid
+		}
+	} else if input.Document.ResourceType == EntityTypeProject {
+		if input.Color != "" || input.EmailMessageID != "" || input.EmailAccent != "" {
 			return EditorJSONMetadataInput{}, ErrInvalid
 		}
 	} else if input.Color != "" || (input.EmailAccent != "" && !validEditorEmailAccent(input.EmailAccent)) {
@@ -118,21 +122,12 @@ func validEditorEmailAccent(value string) bool {
 	return true
 }
 
-func validNodeTextboxColor(value string) bool {
-	switch value {
-	case "#0EA5E9", "#14B8A6", "#8B5CF6", "#F59E0B", "#22C55E", "#6366F1",
-		"#06B6D4", "#84CC16", "#A855F7", "#10B981", "#EAB308", "#3B82F6":
-		return true
-	default:
-		return false
-	}
-}
-
 func editorProjectionInformationWithJSONMetadata(input EditorJSONMetadataInput, document string) (string, error) {
-	payload := map[string]any{"title": input.Title, "document": document, "attachments": input.Attachments, "email_message_id": input.EmailMessageID}
+	payload := map[string]any{"title": input.Title, "document": document, "attachments": input.Attachments}
 	if input.Document.ResourceType == EntityTypeNode {
 		payload["color"] = input.Color
-	} else {
+	} else if input.Document.ResourceType == EntityTypeLogicGate {
+		payload["email_message_id"] = input.EmailMessageID
 		payload["email_accent"] = input.EmailAccent
 	}
 	encoded, err := json.Marshal(payload)
