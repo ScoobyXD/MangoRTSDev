@@ -146,7 +146,8 @@ test("mail sends enforce the shared window and Triage exposes the neutral countd
   assert.match(banner, />\s*Undo\s*<\/button>/);
   assert.doesNotMatch(banner, /#22c55e|#16a34a|#15803d/);
   assert.match(home, /!\(compose\.open && busy === "send" && !compose\.sharedInboxID\.trim\(\)\) && <OutboundEmailUndoBanner \/>/);
-  assert.match(homeParts, /\{busy && !compose\.sharedInboxID\.trim\(\) && <OutboundEmailUndoBanner \/>\}\s*<button type="submit"/);
+  assert.match(homeParts, /\{busy && !compose\.sharedInboxID\.trim\(\) && \(\s*<div style=\{\{ justifySelf: "start", maxWidth: "100%", minWidth: 0 \}\}>\s*<OutboundEmailUndoBanner \/>\s*<\/div>\s*\)\}\s*<div style=\{mailComposeAttachmentRowStyle\}>/);
+  assert.match(homeParts, /<span aria-hidden="true" style=\{\{ flex: "1 1 160px" \}\} \/>\s*<button type="submit"/);
   assert.match(homePage, /await loadHomeMailDraft\(companyID, currentUserID, draft\)/);
   assert.match(homePage, /const unscheduledCompose = \{ \.\.\.homeMailDraftToCompose\(draftForSend\), scheduledAt: "" \}/);
   assert.match(homePage, /syncHomeMailDraftFromCompose\(companyID, currentUserID, unscheduledCompose, ""\)/);
