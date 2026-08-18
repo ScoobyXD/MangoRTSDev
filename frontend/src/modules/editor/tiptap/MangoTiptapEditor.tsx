@@ -111,6 +111,7 @@ import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
 import {
   calculateMangoTiptapTableGrowth,
   growMangoTiptapTable,
+  handleMangoTiptapTableClipboardPaste,
   readActiveMangoTiptapTableFrame,
   type MangoTiptapTableFrame,
   type MangoTiptapTableGrowth,
@@ -1440,12 +1441,15 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           "data-mango-legacy-leading-date-heading": needsMangoTiptapLegacyDateHeadingBreak(currentDocumentRef.current) ? "true" : "false",
           class: "mango-tiptap-prosemirror",
         },
-        handlePaste: (_view, event) => {
+        handlePaste: (view, event, slice) => {
           const editor = editorRef.current;
           const clipboardData = event.clipboardData;
-          if (!editor || !clipboardData || !handleRichClipboardPaste(editor, clipboardData)) return false;
-          event.preventDefault();
-          return true;
+          if (!editor || !clipboardData) return false;
+          if (handleRichClipboardPaste(editor, clipboardData) || handleMangoTiptapTableClipboardPaste(view, event, slice)) {
+            event.preventDefault();
+            return true;
+          }
+          return false;
         },
         handleDrop: (view, event, slice, moved) => handleMangoTiptapImageDrop(
           view,

@@ -102,6 +102,7 @@ Last updated: 2026-08-08
 24. Wrapped image placement must use only the optional `wrap` image position plus existing alignment in schema version 1, and the active and sleeping renderers must match without coordinates or data migration.
 25. A sleeping editor table must honor every stored column width before the editor is activated.
 26. Selecting an editor table must not show the detached top-right row, column, header, and delete command strip.
+27. Matching consecutive one-row image-free HTML tables or a tab-separated clipboard grid must fill the active Tiptap table from the selected cell, or create exactly one table in ordinary editor text.
 
 Last updated: 2026-08-17
 
