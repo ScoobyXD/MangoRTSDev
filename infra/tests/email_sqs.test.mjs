@@ -120,7 +120,7 @@ test("Terraform blocks every nonzero SQS-enabled API until migration is complete
 test("DEV workflow is one normal input-free deployment", () => {
 	assert.match(devWorkflow, /workflow_dispatch:\s*\n\s*\npermissions:/);
 	assert.doesNotMatch(devWorkflow, /inputs\.|reviewed_plan_run_id|infrastructure-api|worker-only|schedule-only/);
-	assert.match(devWorkflow, /API_DESIRED_COUNT: "2"/);
+	assert.match(devWorkflow, /API_DESIRED_COUNT: "1"/);
 	assert.match(devWorkflow, /EMAIL_SCHEMA_MIGRATED: "true"/);
 	assert.match(devWorkflow, /EMAIL_WORKER_ENABLED: "true"/);
 	assert.match(devWorkflow, /EMAIL_SCHEDULE_ENABLED: "false"/);

@@ -189,7 +189,7 @@ variable "backend_memory" {
 variable "backend_desired_count" {
   description = "Number of backend tasks for dev."
   type        = number
-  default     = 2
+  default     = 1
 
   validation {
     condition     = var.backend_desired_count >= 0 && floor(var.backend_desired_count) == var.backend_desired_count

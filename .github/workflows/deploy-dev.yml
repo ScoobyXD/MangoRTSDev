@@ -14,7 +14,7 @@ concurrency:
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'us-west-1' }}
   TF_DIR: infra/aws-dev
-  API_DESIRED_COUNT: "2"
+  API_DESIRED_COUNT: "1"
   EMAIL_SCHEMA_MIGRATED: "true"
   EMAIL_WORKER_ENABLED: "true"
   EMAIL_SCHEDULE_ENABLED: "false"
