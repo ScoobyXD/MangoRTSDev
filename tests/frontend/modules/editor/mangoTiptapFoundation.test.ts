@@ -2406,7 +2406,7 @@ test("editor trace follows quiet-period scheduling through IndexedDB and save ac
     resourceID: "node-trace",
     documentID: "document-trace",
     traceContext,
-    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown; editorTraceContext?: typeof traceContext }) => {
+    requestJSON: async <T>(_path: string, init?: RequestInit & { json?: unknown; editorTraceContext?: typeof traceContext | null }) => {
       assert.equal(init?.editorTraceContext, traceContext);
       if (init?.method === "POST") {
         postCount += 1;
