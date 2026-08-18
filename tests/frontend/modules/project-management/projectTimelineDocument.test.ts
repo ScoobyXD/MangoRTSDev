@@ -64,12 +64,76 @@ test("Project permanent document reuses its exact Project textbox outside the ti
     "timeline and permanent-document paths must each declare one editor, without separate inline/fullscreen copies",
   );
 
-  assert.match(projectSummary, /data-project-document-title="true" style=\{projectDocumentPaneTitleStyle\}/);
-  assert.match(projectSummary, /const projectDocumentPaneTitleStyle[\s\S]{0,180}minWidth: "max-content"[\s\S]{0,100}flex: "0 0 auto"/);
-  assert.match(projectSummary, /const projectDocumentPaneHeaderStyle[\s\S]{0,180}gridTemplateColumns: "max-content minmax\(0, 1fr\)"/);
-  assert.match(projectSummary, /const projectDocumentPaneActionsStyle[\s\S]{0,180}width: "100%"[\s\S]{0,100}overflow: "visible"/);
-  assert.match(projectSummary, /const projectTextBlockIconButtonStyle[\s\S]{0,120}flex: "0 0 auto"/);
-  assert.doesNotMatch(projectSummary, /projectDocumentCloseButtonStyle|aria-label="Close Project document"/);
+  const headerStart = projectSummary.indexOf('data-project-document-header="true"');
+  const headerEnd = projectSummary.indexOf("<NodeTextBlockEditor", headerStart);
+  assert.ok(headerStart >= 0 && headerEnd > headerStart, "Project document must have one bounded header before its editor");
+  const headerSource = projectSummary.slice(headerStart, headerEnd);
+  assert.match(headerSource, /className="mango-editor-header-scroll"/);
+
+  const orderedHeaderMarkers = [
+    'data-project-document-title="true"',
+    "<EditorSaveStatusIcon",
+    "<EditorSavedTimestamp",
+    'aria-label="Add attachment to Project document"',
+  ];
+  let previousHeaderIndex = -1;
+  for (const marker of orderedHeaderMarkers) {
+    const markerIndex = headerSource.indexOf(marker, previousHeaderIndex + 1);
+    assert.ok(markerIndex > previousHeaderIndex, `${marker} must follow the previous Project document header control`);
+    previousHeaderIndex = markerIndex;
+  }
+  assert.match(headerSource, /aria-label="Open Project document full screen"/);
+  assert.match(headerSource, /data-project-document-fullscreen-close="true"/);
+
+  const fullscreenCloseMarker = projectSummary.indexOf('data-project-document-fullscreen-close="true"', headerStart);
+  const fullscreenCloseCondition = projectSummary.lastIndexOf("{projectDocumentFullscreen ?", fullscreenCloseMarker);
+  const fullscreenCloseEnd = projectSummary.indexOf("</button>", fullscreenCloseMarker);
+  assert.ok(
+    fullscreenCloseCondition >= headerStart && fullscreenCloseEnd > fullscreenCloseMarker,
+    "the Project document close control must be bounded by its fullscreen-only condition",
+  );
+  const fullscreenCloseSource = projectSummary.slice(fullscreenCloseCondition, fullscreenCloseEnd);
+  assert.match(fullscreenCloseSource, /aria-label="Exit Project document full screen"/);
+  assert.match(fullscreenCloseSource, /onClick=\{\(\) => setProjectDocumentFullscreen\(false\)\}/);
+  assert.match(fullscreenCloseSource, /style=\{projectDocumentFullscreenCloseButtonStyle\}/);
+  assert.doesNotMatch(fullscreenCloseSource, /closeProjectDocument/);
+  assert.match(projectSummary, /const projectDocumentFullscreenCloseButtonStyle[\s\S]{0,200}UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
+});
+
+test("Project document and timeline headings share the docked textbox columns", () => {
+  assert.match(projectSummary, /const projectDocumentDocked = Boolean\(projectDocumentOpen && projectDocumentBlock && !projectDocumentFullscreen\)/);
+  const headingStart = projectSummary.indexOf('data-project-timeline-heading-grid="true"');
+  const bodyGridStart = projectSummary.indexOf("gridTemplateColumns: projectDocumentOpen && projectDocumentPane", headingStart);
+  assert.ok(headingStart >= 0 && bodyGridStart > headingStart, "the heading grid must be bounded before the document/timeline body grid");
+  const headingSource = projectSummary.slice(headingStart, bodyGridStart);
+  const controlsIndex = headingSource.indexOf('data-project-timeline-control-row="true"');
+  const titleIndex = headingSource.indexOf('data-project-timeline-title="true"');
+  const toolbarIndex = headingSource.indexOf('data-project-timeline-toolbar="true"');
+  assert.ok(controlsIndex >= 0 && titleIndex > controlsIndex && toolbarIndex > titleIndex, "controls, Timeline title, and editor toolbar must keep their two-row order");
+  assert.match(projectSummary, /const projectTimelineHeadingGridStyle[\s\S]{0,320}`\$\{documentWidth\}px 8px 42px minmax\(0, 1fr\)`/);
+  assert.match(projectSummary, /const projectTimelineControlRowStyle[\s\S]{0,240}overflowX: "auto"/);
+  assert.match(projectSummary, /const projectTimelineTitleStyle[\s\S]{0,320}gridColumn: documentDocked \? "4" : "2"/);
+  assert.match(projectSummary, /const projectTimelineToolbarStyle[\s\S]{0,320}gridColumn: documentDocked \? "4" : "1 \/ -1"/);
+  assert.match(projectSummary, /const projectDocumentPaneHeaderContentStyle[\s\S]{0,220}width: "100%"[\s\S]{0,120}minWidth: 0[\s\S]{0,160}gridTemplateColumns: "max-content minmax\(0, 1fr\) 30px"/);
+  assert.match(projectSummary, /const projectDocumentPaneHeaderStyle[\s\S]{0,260}background: PROJECT_TEXTBOX_HEADER_BACKGROUND/);
+});
+
+test("Project opens its permanent document instead of its email column by default", () => {
+  const projectChangeStart = projectSummary.indexOf("if (paneProjectIDRef.current !== cleanProjectID)");
+  const projectChangeEnd = projectSummary.indexOf("} else {", projectChangeStart);
+  assert.ok(projectChangeStart >= 0 && projectChangeEnd > projectChangeStart, "new-Project pane defaults must have a bounded branch");
+  const projectChangeSource = projectSummary.slice(projectChangeStart, projectChangeEnd);
+  assert.match(projectChangeSource, /setProjectDocumentOpen\(true\)/);
+  assert.match(projectChangeSource, /setOpenEmailBlockIDs\(new Set\(\)\)/);
+  assert.doesNotMatch(projectChangeSource, /new Set\(\[PROJECT_EMAIL_COLUMN_LAYOUT_ID\]\)/);
+  assert.match(projectSummary, /const ensureProjectDocument = useCallback/);
+  assert.match(projectSummary, /!projectDocumentOpen[\s\S]{0,180}ensureProjectDocument\(\)/);
+
+  const emailToggleStart = projectSummary.indexOf("const toggleProjectEmailColumn = useCallback");
+  const emailToggleEnd = projectSummary.indexOf("const stageProjectEmailSelectionChatTextBlock", emailToggleStart);
+  const emailToggleSource = projectSummary.slice(emailToggleStart, emailToggleEnd);
+  assert.match(emailToggleSource, /closeProjectDocument\(\)/);
+  assert.match(emailToggleSource, /toggleSetValue\(current, PROJECT_EMAIL_COLUMN_LAYOUT_ID\)/);
 });
 
 test("Project text boxes load exact server relationships but ordinary document saves never write server-owned colors", () => {
