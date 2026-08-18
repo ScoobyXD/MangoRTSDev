@@ -29,6 +29,7 @@ test("DEV email work queue and work DLQ are encrypted FIFO with fixed SQS delive
 
 test("worker is one private task with independent health and bounded concurrency", () => {
   assert.match(sqs, /resource "aws_ecs_service" "email_worker"[\s\S]*?desired_count\s*=\s*1/);
+  assert.match(sqs, /resource "aws_ecs_service" "email_worker"[\s\S]*?wait_for_steady_state\s*=\s*true/);
   assert.match(sqs, /assign_public_ip\s*=\s*false/);
   assert.doesNotMatch(sqs, /load_balancer\s*\{/);
   assert.match(sqs, /MANGORTS_RUNTIME_ROLE", value = "email-worker"/);
@@ -115,6 +116,10 @@ test("Terraform blocks every nonzero SQS-enabled API until migration is complete
 	assert.match(task, /var\.email_sqs_enabled[\s\S]*?var\.backend_desired_count > 0[\s\S]*?var\.email_sqs_database_migration_complete/);
 	assert.match(task, /A nonzero SQS-enabled API desired count requires email_sqs_database_migration_complete=true/);
 	assert.doesNotMatch(task, /requires at least one email alarm action ARN/);
+});
+
+test("Terraform waits for the DEV backend rollout to become steady", () => {
+	assert.match(task, /resource "aws_ecs_service" "backend"[\s\S]*?wait_for_steady_state\s*=\s*true/);
 });
 
 test("DEV workflow is one normal input-free deployment", () => {

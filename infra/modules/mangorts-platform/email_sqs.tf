@@ -302,11 +302,12 @@ resource "aws_ecs_task_definition" "email_worker" {
 resource "aws_ecs_service" "email_worker" {
   count = local.email_worker_service_enabled ? 1 : 0
 
-  name            = "${local.name_prefix}-email-worker"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.email_worker[0].arn
-  desired_count   = 1
-  launch_type     = "FARGATE"
+  name                  = "${local.name_prefix}-email-worker"
+  cluster               = aws_ecs_cluster.main.id
+  task_definition       = aws_ecs_task_definition.email_worker[0].arn
+  desired_count         = 1
+  launch_type           = "FARGATE"
+  wait_for_steady_state = true
 
   network_configuration {
     subnets          = local.ecs_subnet_ids
