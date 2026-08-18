@@ -165,19 +165,19 @@ variable "container_port" {
 variable "backend_cpu" {
   description = "Fargate task CPU units."
   type        = number
-  default     = 1024
+  default     = 256
 }
 
 variable "backend_memory" {
   description = "Fargate task memory MiB."
   type        = number
-  default     = 2048
+  default     = 512
 }
 
 variable "backend_desired_count" {
   description = "Number of backend tasks for prod."
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "attachment_s3_bucket" {
