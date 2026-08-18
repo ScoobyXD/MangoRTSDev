@@ -273,7 +273,7 @@ test("node email and linked text boxes use exact canonical message lists and tex
   assert.match(triageChat, /color: nextNodeTextBlockColor\(\[\]\)/);
 });
 
-test("both Node email picker entry points retain exact stored identity before the immediate preview", () => {
+test("both Node email picker entry points commit exact stored identity before showing its preview", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
   const nodeShared = source("frontend/src/modules/editor/NodeWorkspaceSurfaceShared.tsx");
   const editorProjection = source("frontend/src/modules/editor/editorProjection.ts");
@@ -284,6 +284,9 @@ test("both Node email picker entry points retain exact stored identity before th
   assert.match(nodeSurface, /sharedInboxID: email\.sharedInboxID/);
   assert.match(nodeSurface, /accountEmail: email\.accountEmail/);
   assert.match(nodeSurface, /information: buildEditorAttachedEmailPayload\(email\)/);
+  assert.match(nodeSurface, /await requestJSON<[\s\S]{0,900}setAttachedEmails/);
+  assert.doesNotMatch(nodeSurface, /setAttachedEmails\(\(current\) => \[attached, \.\.\.current\]\);[\s\S]{0,500}await requestJSON/);
+  assert.match(nodeSurface, /setAttachedEmails\(\(current\) => \[committed, \.\.\.current\]\)/);
   assert.match(nodeSurface, /parseDraggedEmail\(event\.dataTransfer\)/);
   assert.match(nodeSurface, /messageAttachmentPayload\(entity\.emailMessage, entity\.emailSharedInboxID, entity\.emailAccountEmail\)/);
   assert.match(nodeSurface, /const chooseHeaderLinkedEntity[\s\S]{0,240}await linkEntityFromEditor\(entity\)/);
@@ -298,6 +301,16 @@ test("both Node email picker entry points retain exact stored identity before th
   assert.match(editorProjection, /account_email: input\.accountEmail\?\.trim\(\) \?\? ""/);
   assert.match(projectSummary, /emailThreadID: payload\.emailThreadID/);
   assert.doesNotMatch(editorProjection, /attachments: input\.attachments/);
+});
+
+test("the Node-level highlighted-email destination is compact and hidden when already selected", () => {
+  const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
+  const indexCSS = source("frontend/src/index.css");
+
+  assert.match(nodeSurface, /alignContent: "start"/);
+  assert.match(nodeSurface, /pendingEmailChatSelection && !temporaryEmailChatBlocksRef\.current\.has\(pendingEmailChatSelection\.blockID\)/);
+  assert.match(indexCSS, /\[data-node-email-chat-parent-destination="true"\][\s\S]{0,360}justify-self: start;[\s\S]{0,120}align-self: start;/);
+  assert.match(indexCSS, /\[data-node-email-chat-parent-destination="true"\][\s\S]{0,520}display: inline-flex;/);
 });
 
 test("exact Node email headers link to text boxes without accepting whole-email provider drags", () => {

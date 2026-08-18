@@ -414,6 +414,9 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   const nodeMutationRequests: Array<{ path: string; method: string }> = [];
   let failNextRelationshipInformationWrite = false;
   let failNextRelationshipDelete = false;
+  let deferNextNodeEmailAttach = false;
+  let releaseNodeEmailAttach: (() => void) | null = null;
+  let nodeEmailThreadPreviewReads = 0;
   for (const projection of [...nodeTextBlockProjectionItems, ...projectProjectionItems]) {
     const payload = JSON.parse(projection.information.slice(TEXT_BLOCK_PREFIX.length)) as { document: string };
     serverDocuments.set(projection.information_id, { document: JSON.parse(payload.document) as ReturnType<typeof tiptapDocument>, revision: 0 });
@@ -490,6 +493,7 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   const fetchImplementation = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), dom.window.location.href);
     if (url.pathname === `/v1/nodes/${NODE_ID}/email-threads/durable-thread-node-block-0`) {
+      nodeEmailThreadPreviewReads += 1;
       const requestedMessageID = url.searchParams.get("message_id")?.trim() ?? "";
       return jsonResponse({
         email_thread_id: "durable-thread-node-block-0",
@@ -659,7 +663,13 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
           message?: string;
           selection_message_id?: string;
           textbox_color?: string;
+          link_scope?: string;
         };
+        if (command.type === "Attached email" && !relationship.block_id?.trim() && deferNextNodeEmailAttach) {
+          deferNextNodeEmailAttach = false;
+          await new Promise<void>((resolve) => { releaseNodeEmailAttach = resolve; });
+          releaseNodeEmailAttach = null;
+        }
         if (command.type === "Text block chat") {
           chatInformationWrites.push(relationship as Record<string, unknown>);
           const blockID = relationship.block_id?.trim() ?? "";
@@ -932,6 +942,36 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(nodeScrollElement.scrollTop, 0, "a handled deep target should not replay after the user scrolls away");
     assertBoundedRows(nodeContainer, "node", 8);
 
+    const nodeEmailAttachDropZone = nodeContainer.querySelector<HTMLElement>('[data-node-email-attach-drop-zone="true"]');
+    assert.ok(nodeEmailAttachDropZone);
+    const nodeEmailPayload = messageAttachmentPayload({
+      ...storedThreadMessages[0],
+      email_thread_id: "durable-thread-node-block-0",
+      unread: false,
+      starred: false,
+    });
+    const nodeEmailTransfer = {
+      getData(type: string) { return type === EMAIL_DRAG_MIME ? JSON.stringify(nodeEmailPayload) : ""; },
+    };
+    const attachRequestsBefore = nodeMutationRequests.length;
+    const relationshipWritesBefore = relationshipInformationWrites.length;
+    deferNextNodeEmailAttach = true;
+    const pendingNodeEmailDrop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperty(pendingNodeEmailDrop, "dataTransfer", { value: nodeEmailTransfer });
+    await act(async () => { nodeEmailAttachDropZone.dispatchEvent(pendingNodeEmailDrop); });
+    await flushWork();
+    assert.equal(nodeMutationRequests.length, attachRequestsBefore + 1, "the Node email attach command should begin immediately");
+    assert.ok(releaseNodeEmailAttach, "the Node email attachment should still be waiting for its server commit");
+    assert.equal(nodeContainer.querySelector('[data-node-email-column="true"]'), null, "an uncommitted Node email must not publish a preview card");
+    assert.equal(nodeEmailThreadPreviewReads, 0, "an uncommitted Node email must not request its stored thread");
+    await act(async () => { releaseNodeEmailAttach?.(); });
+    await flushWork(24);
+    const committedNodeEmailColumn = nodeContainer.querySelector<HTMLElement>('[data-node-email-column="true"]');
+    assert.ok(committedNodeEmailColumn, "the Node email should render after its relationship commits");
+    assert.equal(relationshipInformationWrites.length, relationshipWritesBefore + 1);
+    assert.equal(relationshipInformationWrites.at(-1)?.link_scope, "message", "the Node attachment should preserve the exact selected-message command");
+    assert.ok(committedNodeEmailColumn.querySelector('[data-node-email-thread-list="true"] [role="button"]'), "the committed relationship may now publish its email card");
+
     await act(async () => { nodeRoot?.unmount(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
     nodeRoot = null;
@@ -1097,6 +1137,8 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
       .filter((composer) => composer.value === pendingChatDraft)
       .map((composer) => composer.closest<HTMLElement>('[data-node-text-box-row]')?.dataset.nodeTextBoxRow ?? "");
     assert.deepEqual(draftOwnerIDs(), [temporaryDestinationRow?.dataset.nodeTextBoxRow], "the pending draft should start in only the temporary composer");
+    const activeSelectionOwner = () => nodeContainer.querySelector<HTMLElement>('[data-chat-composer-highlight="true"]')?.closest<HTMLElement>('[data-node-text-box-row]')?.dataset.nodeTextBoxRow;
+    assert.equal(nodeContainer.querySelector('[data-node-email-chat-parent-destination="true"]'), null, "the Node switch-back action is redundant while the staged new textbox is already selected");
     const pendingDestinationHeader = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-1"] [data-node-text-box-header="true"]');
     assert.ok(pendingDestinationHeader);
     await act(async () => { pendingDestinationHeader.click(); });
@@ -1106,9 +1148,25 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.equal(nodeContainer.querySelectorAll('[data-email-chat-destination-candidate="true"]').length, 2, "destination mode should remain available until Enter or cancel");
     assert.equal(nodeContainer.querySelectorAll('[data-node-text-box-row]').length, 2, "choosing a destination should remove the temporary local text box");
     assert.deepEqual(draftOwnerIDs(), ["node-block-1"], "temporary-to-saved routing must move the draft without loss or duplication");
-    const activeSelectionOwner = () => nodeContainer.querySelector<HTMLElement>('[data-chat-composer-highlight="true"]')?.closest<HTMLElement>('[data-node-text-box-row]')?.dataset.nodeTextBoxRow;
     assert.equal(nodeContainer.querySelectorAll('[data-chat-composer-highlight="true"]').length, 1);
     assert.equal(activeSelectionOwner(), "node-block-1");
+    const nodeDestinationAction = nodeContainer.querySelector<HTMLButtonElement>('[data-node-email-chat-parent-destination="true"]');
+    assert.ok(nodeDestinationAction, "an existing-textbox destination should expose the compact switch-back action");
+    await act(async () => { nodeDestinationAction.click(); });
+    await flushWork(24);
+    const returnedTemporaryDestinationRow = Array.from(nodeContainer.querySelectorAll<HTMLElement>('[data-node-text-box-row]'))
+      .find((row) => !["node-block-0", "node-block-1"].includes(row.dataset.nodeTextBoxRow ?? ""));
+    assert.ok(returnedTemporaryDestinationRow, "the compact Node action should return the composer to one staged new textbox");
+    assert.equal(nodeContainer.querySelector('[data-node-email-chat-parent-destination="true"]'), null, "the switch-back action should hide again after selecting the staged new textbox");
+    assert.deepEqual(draftOwnerIDs(), [returnedTemporaryDestinationRow.dataset.nodeTextBoxRow ?? ""], "switching back to a staged textbox must preserve the one pending draft");
+    assert.equal(activeSelectionOwner(), returnedTemporaryDestinationRow.dataset.nodeTextBoxRow);
+    const repeatedPendingDestinationHeader = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-1"] [data-node-text-box-header="true"]');
+    assert.ok(repeatedPendingDestinationHeader);
+    await act(async () => { repeatedPendingDestinationHeader.click(); });
+    await flushWork(24);
+    assert.equal(nodeContainer.querySelectorAll('[data-node-text-box-row]').length, 2);
+    assert.deepEqual(draftOwnerIDs(), ["node-block-1"], "returning to the existing textbox must move the same draft once");
+    assert.ok(nodeContainer.querySelector('[data-node-email-chat-parent-destination="true"]'));
     const firstDestinationHeader = nodeContainer.querySelector<HTMLElement>('[data-node-text-box-row="node-block-0"] [data-node-text-box-header="true"]');
     assert.ok(firstDestinationHeader);
     await act(async () => { firstDestinationHeader.click(); });

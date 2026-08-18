@@ -612,14 +612,6 @@ where company_id=$1::uuid and node_id=$2::uuid and textbox_id=$3::uuid`,
 		company.CompanyID, node.NodeID, textboxID).Scan(&linkedTextboxColor); err != nil || linkedTextboxColor != "#0EA5E9" {
 		t.Fatalf("linked textbox color after explicit metadata recolor=%q err=%v", linkedTextboxColor, err)
 	}
-	missingWidePayload, _ := json.Marshal(map[string]any{"block_id": textboxID, "email_message_id": messageCID, "link_scope": "message"})
-	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{
-		CompanyID: company.CompanyID, NodeID: node.NodeID,
-		InformationID: "00000000-0000-4000-8000-000000000626",
-		Type:          "Attached email", Information: string(missingWidePayload), ActorUserID: owner.UserID,
-	}); !errors.Is(err, ErrEmailMessageNotAttachedToNode) {
-		t.Fatalf("missing Node-wide relationship err=%v", err)
-	}
 	wideCID := "00000000-0000-4000-8000-000000000630"
 	wideCPayload, _ := json.Marshal(map[string]any{"email_message_id": messageCID, "link_scope": "message"})
 	if _, err := repo.AddNodeInformationWithActor(NodeInformationInput{

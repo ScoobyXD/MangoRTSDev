@@ -78,6 +78,25 @@ func TestNodeFirstEmailChatColorTimestampCannotPredateTextboxCreation(t *testing
 	}
 }
 
+func TestNodeSiblingEmailTextboxLinksUseExistingThreadMembership(t *testing.T) {
+	chatSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_textbox_chats.go")), " ")
+	directSource := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_node_final_storage.go")), " ")
+	for label, source := range map[string]string{"first chat": chatSource, "direct link": directSource} {
+		for _, required := range []string{
+			"relationship.email_thread_id=message.email_thread_id",
+			"relationship.resource_type='node'",
+			"relationship.resource_textbox_id is null",
+		} {
+			if !strings.Contains(source, required) {
+				t.Errorf("%s sibling membership check missing %q", label, required)
+			}
+		}
+	}
+	if strings.Contains(chatSource, "linkpostgrescommunicationsemailthreadtonodetx") {
+		t.Fatal("first chat must not create extra Node-wide thread relationships")
+	}
+}
+
 func TestNodeTextboxDeleteRemovesOnlyItsTypedEmailRelationshipsAfterItsChats(t *testing.T) {
 	source := strings.Join(strings.Fields(readNodeFinalContractFile(t, "postgres_editor_textboxes.go")), " ")
 	deleteStart := strings.Index(source, "func deletepostgreseditortextboxdocument")
