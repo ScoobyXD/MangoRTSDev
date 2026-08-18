@@ -630,7 +630,6 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
         ref={frameRef}
         data-mango-tiptap-image-frame="true"
         data-drag-handle={editable ? "true" : undefined}
-        draggable={editable}
         style={{ position: "relative", display: "inline-block", maxWidth: attributes.layout === "wide" ? "100%" : "min(100%, 840px)", lineHeight: 0, cursor: "pointer" }}
       >
         {objectURL ? (
