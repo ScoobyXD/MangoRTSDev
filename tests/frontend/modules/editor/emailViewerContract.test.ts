@@ -467,7 +467,10 @@ test("triage email selection, history, and archive prefetch preserve the foregro
   assert.match(homePage, /consumePrefetchedMessagePage\(filterKey, pageToken\)/);
   assert.match(homePage, /await matchingPrefetch;[\s\S]{0,200}consumePrefetchedMessagePage\(filterKey, pageToken\)/);
   assert.match(homePage, /EMAIL_DETAIL_FOREGROUND_GRACE_MS/);
-  assert.match(homePage, /useEffect\(\(\) => \{ void loadMessages\(\); \}, \[loadMessages\]\)/);
+  assert.match(homePage, /useEffect\(\(\) => \{\s*void loadMessagesRef\.current\?\.\(\);\s*\}, \[activeMailboxRequestKey, activeMailViewHasEmailConnection, activeSharedInboxBlocksEmail, activeSharedInboxNeedsEmail\]\)/);
+  assert.match(homePage, /function applyLocalReadOverlay[\s\S]{0,500}message\.client_source_scope_key\?\.trim\(\)[\s\S]{0,160}\{ \.\.\.message, client_source_scope_key: mailboxScopeKey \}/);
+  assert.match(homePage, /const withLocalReadOverlay = \(message: EmailMessage\): EmailMessage => \(\s*applyLocalReadOverlay\(message, locallyReadMessageKeysRef\.current, activeEmailMailboxScopeKey\)\s*\)/);
+  assert.doesNotMatch(homePage, /client_source_scope_key: selectedListMessage\?\.client_source_scope_key\?\.trim\(\) \|\| activeEmailMailboxScopeKey/);
   assert.match(homePage, /setSelectedThreadMessages\(\(current\) => preserveCurrentThread[\s\S]{0,100}\? current[\s\S]{0,50}: \[\]\)/);
   assert.doesNotMatch(homePage, /mergeEmailThreadDetailMessages\(current, \[visiblePrimaryMessage\]\)|setSelectedThreadMessages\(\[visiblePrimaryMessage\]\)|setSelectedThreadMessages\(\[message\]\)|setSelectedThreadMessages\(nextSelection \? \[nextSelection\] : \[\]\)/);
   assert.match(homePage, /loadSelectedThreadMessageBody/);
@@ -488,6 +491,8 @@ test("triage email selection, history, and archive prefetch preserve the foregro
   assert.match(homePage, /setSelectedThreadMessages\(mergeEmailThreadDetailMessages\([\s\S]{0,120}completeThreadMessages/);
   assert.match(homePage, /setLoadingDetail\(true\);\s*setSelectedThreadMessages\(\[\]\)/);
   assert.match(homePage, /finally \{\s*if \(!cancelled\) setLoadingDetail\(false\);/);
+  assert.match(homePage, /sentMessage = applyLocalReadOverlay\([\s\S]{0,160}composeMailboxScopeKey/);
+  assert.match(homePage, /const sentMessage = applyLocalReadOverlay\([\s\S]{0,160}scheduledMailboxScopeKey/);
   assert.match(homePage, /catch \(detailError\) \{[\s\S]{0,100}setSelectedThreadMessages\(\[\]\)/);
   assert.doesNotMatch(homePage, /storedThreadMessages\.length > 0 \? storedThreadMessages : \[selectedWithLocalReplies\]/);
   assert.doesNotMatch(homePage, /getEmailMessageWithStoredThread|getEmailCollaborationThread|collaborationFallback/);
@@ -503,9 +508,16 @@ test("mailbox realtime and non-primary tabs keep bounded request budgets", () =>
   assert.doesNotMatch(homePage, /EVENT_NOTIFICATIONS_UPDATED/);
   assert.doesNotMatch(homePage, /SELF_SEND_DELIVERY_REFRESH_DELAY_MS/);
   assert.doesNotMatch(homePage, /plan\.messageList/);
+  assert.doesNotMatch(homePage, /plan\.messages/);
   assert.doesNotMatch(homePage, /messageListContentScrollHeight\(list\) <= list\.clientHeight \+ 120/);
   assert.match(homePage, /isLocalMutationEcho: \(signal\) => consumeHomeMailboxLocalMutationEcho/);
-  assert.match(realtime, /accepted\(\) \{[\s\S]{0,100}options\.invalidate\(\);[\s\S]{0,100}\}/);
+  const acceptedStart = realtime.indexOf("accepted() {");
+  const acceptedEnd = realtime.indexOf("changed(signal", acceptedStart);
+  assert.ok(acceptedStart >= 0 && acceptedEnd > acceptedStart);
+  const acceptedSource = realtime.slice(acceptedStart, acceptedEnd);
+  assert.match(acceptedSource, /options\.invalidate\(\)/);
+  assert.doesNotMatch(acceptedSource, /schedule\(/);
+  assert.doesNotMatch(realtime, /\bmessages: isMessageChange\b/);
 });
 
 test("personal and shared mail rows expose unread, selected, thread, and keyboard semantics", () => {

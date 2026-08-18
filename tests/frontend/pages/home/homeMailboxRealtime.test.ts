@@ -141,7 +141,7 @@ test("equivalent mailbox metadata replacements keep one subscription lifetime", 
   assert.equal(subscriptionCount, 2, "navigating to a different exact mailbox does resubscribe");
 });
 
-test("subscription acceptance closes the initial-list race with one canonical folder and message reload", () => {
+test("subscription acceptance invalidates reusable cache state without starting provider reads", () => {
   const timers = fakeTimers();
   let invalidations = 0;
   let providerReads = 0;
@@ -158,13 +158,12 @@ test("subscription acceptance closes the initial-list race with one canonical fo
 
   coordinator.accepted();
   assert.equal(invalidations, 1, "acceptance invalidates reads that may have raced the subscription");
-  assert.equal(timers.size, 1);
+  assert.equal(timers.size, 0);
   assert.equal(providerReads, 0);
   coordinator.accepted();
   assert.equal(invalidations, 2, "reconnect also invalidates cached reads");
-  assert.equal(timers.size, 1, "repeat acceptance coalesces with the pending canonical reload");
-  timers.runNext();
-  assert.equal(providerReads, 1);
+  assert.equal(timers.size, 0, "repeat acceptance still starts no provider read");
+  assert.equal(providerReads, 0);
   coordinator.dispose();
 });
 
@@ -252,7 +251,7 @@ test("an account B hint cannot invalidate or read the active account A mailbox",
   assert.equal(timers.runNext(), true);
   await Promise.resolve();
   assert.equal(invalidations, 1);
-  assert.equal(providerReads, 1, "the exact active account still reconciles normally");
+  assert.equal(providerReads, 1, "the exact active account still reconciles folder metadata");
   coordinator.dispose();
 });
 
@@ -314,24 +313,24 @@ test("the exact active Shared Triage inbox reconciles while a different shared i
   coordinator.accepted();
   assert.equal(invalidations, 1, "acceptance invalidates only the active shared mailbox cache");
   assert.equal(providerReads, 0);
-  timers.runNext();
+  assert.equal(timers.size, 0);
   await Promise.resolve();
-  assert.equal(providerReads, 1, "acceptance reloads the visible shared-inbox list and folders once");
+  assert.equal(providerReads, 0, "acceptance starts no visible-list or folder read");
 
   coordinator.changed({ scope: inactive.scope, trigger: "message.created", message_id: "off-view" });
   assert.equal(timers.size, 0);
   assert.equal(invalidations, 1);
-  assert.equal(providerReads, 1, "an off-view shared inbox never starts another provider read");
+  assert.equal(providerReads, 0, "an off-view shared inbox never starts a provider read");
 
   coordinator.changed({ scope: active.scope, trigger: "message.updated", message_id: "active-message" });
   timers.runNext();
   await Promise.resolve();
   assert.equal(invalidations, 2);
-  assert.equal(providerReads, 2, "an external active-inbox hint reconciles the visible list and folder metadata");
+  assert.equal(providerReads, 1, "an external active-inbox hint reconciles folder metadata without replacing the list");
   coordinator.dispose();
 });
 
-test("external bursts coalesce visible-list, folder, and selected-detail work", async () => {
+test("external bursts coalesce folder and selected-detail work without list reads", async () => {
   const timers = fakeTimers();
   const resolvers: Array<() => void> = [];
   const plans: HomeMailboxRealtimeRefreshPlan[] = [];
@@ -397,7 +396,7 @@ test("presentation navigation drops stale list work but preserves exact-scope fo
   coordinator.changed({ scope: personalTarget().scope, trigger: "message.created", message_id: "new-1" });
   requestKey = "account-A:starred:q=urgent";
   assert.equal(timers.runNext(), true);
-  assert.deepEqual(plans, [{ folders: true, messages: false, selectedDetail: false }]);
+  assert.deepEqual(plans, [{ folders: true, selectedDetail: false }]);
 
   coordinator.changed({ scope: personalTarget().scope, trigger: "message.created", message_id: "new-2" });
   coordinator.dispose();
@@ -660,51 +659,51 @@ test("compose completion closes only the submitted draft in its exact mailbox", 
   assert.equal(homeMailboxComposeSubmissionIsCurrent({ ...unsaved }, unsaved), false, "a no-id completion cannot close a newer clone");
 });
 
-test("provider event mapping reloads the visible list for message changes and scopes detail refreshes", () => {
+test("provider event mapping keeps the visible list stable and scopes metadata and detail refreshes", () => {
   const selected = { messageID: "selected", threadID: "thread-selected" };
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     scope: personalTarget().scope,
     trigger: "message.created",
     message_id: "unrelated",
     thread_id: "unrelated-thread",
-  }, selected), { folders: true, messages: true, selectedDetail: false });
+  }, selected), { folders: true, selectedDetail: false });
   for (const trigger of ["message.updated", "message.deleted"]) {
     assert.deepEqual(homeMailboxRealtimeRefreshPlan({
       scope: personalTarget().scope,
       trigger,
       message_id: "selected",
-    }, selected), { folders: true, messages: true, selectedDetail: true });
+    }, selected), { folders: true, selectedDetail: true });
   }
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     // Nylas represents a folder move as a message.updated notification.
     scope: "mailbox:personal:account:user-1:me@example.test",
     trigger: "message.updated",
     message_id: "moved-message",
-  }, selected), { folders: true, messages: true, selectedDetail: false });
+  }, selected), { folders: true, selectedDetail: false });
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     scope: personalTarget().scope,
     trigger: "message.created",
     message_id: "new-thread-message",
     thread_id: "thread-selected",
-  }, selected), { folders: true, messages: true, selectedDetail: true });
+  }, selected), { folders: true, selectedDetail: true });
   for (const trigger of ["folder.created", "folder.updated", "folder.deleted"]) {
     assert.deepEqual(homeMailboxRealtimeRefreshPlan({
       scope: personalTarget().scope,
       trigger,
-    }, selected), { folders: true, messages: false, selectedDetail: false });
+    }, selected), { folders: true, selectedDetail: false });
   }
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     scope: personalTarget().scope,
     trigger: "message.opened",
     message_id: "selected",
     thread_id: "thread-selected",
-  }, selected), { folders: false, messages: false, selectedDetail: true });
+  }, selected), { folders: false, selectedDetail: true });
   assert.deepEqual(homeMailboxRealtimeRefreshPlan({
     scope: personalTarget().scope,
     trigger: "message.opened",
     message_id: "unrelated",
     thread_id: "unrelated-thread",
-  }, selected), { folders: false, messages: false, selectedDetail: false });
+  }, selected), { folders: false, selectedDetail: false });
 });
 
 test("read-receipt hints refresh only a directly affected selected detail", () => {
@@ -730,7 +729,7 @@ test("read-receipt hints refresh only a directly affected selected detail", () =
   assert.equal(invalidations, 1);
   assert.equal(timers.size, 1);
   timers.runNext();
-  assert.deepEqual(plans, [{ folders: false, messages: false, selectedDetail: true }]);
+  assert.deepEqual(plans, [{ folders: false, selectedDetail: true }]);
   coordinator.changed({
     scope: personalTarget().scope,
     trigger: "message.opened",

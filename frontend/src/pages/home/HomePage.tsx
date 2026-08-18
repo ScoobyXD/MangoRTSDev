@@ -153,9 +153,12 @@ function mergeEmailThreadDetailMessages(current: EmailMessage[], incoming: Email
 }
 
 function applyLocalReadOverlay(message: EmailMessage, locallyReadMessageKeys: Set<string>, mailboxScopeKey: string): EmailMessage {
-  return locallyReadMessageKeys.has(emailMailboxMessageKey(mailboxScopeKey, message.id)) && message.unread
-    ? { ...message, unread: false }
-    : message;
+  const scopedMessage = message.client_source_scope_key?.trim()
+    ? message
+    : { ...message, client_source_scope_key: mailboxScopeKey };
+  return locallyReadMessageKeys.has(emailMailboxMessageKey(mailboxScopeKey, message.id)) && scopedMessage.unread
+    ? { ...scopedMessage, unread: false }
+    : scopedMessage;
 }
 
 
@@ -2033,22 +2036,16 @@ export function HomePage({
         }
       },
       reconcile: async (plan) => {
-        const reads: Array<Promise<unknown>> = [];
-        if (plan.messages) {
-          const messageRead = loadMessagesRef.current?.({ refresh: true });
-          if (messageRead) reads.push(messageRead);
-        }
-        if (plan.folders) {
-          const folderRead = loadFoldersRef.current?.({
+        const folderRead = plan.folders
+          ? loadFoldersRef.current?.({
             owner: { mailboxScopeKey: subscribedMailboxScopeKey },
             refresh: true,
-          });
-          if (folderRead) reads.push(folderRead);
-        }
+          })
+          : null;
         if (plan.selectedDetail) {
           setSelectedMailDetailRealtimeRevision((revision) => revision + 1);
         }
-        await Promise.all(reads);
+        if (folderRead) await folderRead;
       },
     });
 		const archiveCoordinator = createHomeArchiveStatusCoordinator({
@@ -2506,7 +2503,9 @@ export function HomePage({
     window.addEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
     return () => window.removeEventListener(EVENT_HOME_TRIAGE_CONVERSION_APPLIED, onTriageConversionApplied);
   }, [activeMailAccountEmail, companyID, patchConvertedMessageLogicGatePlacement, reconcileConvertedMessageUnstars]);
-  useEffect(() => { void loadMessages(); }, [loadMessages]);
+  useEffect(() => {
+    void loadMessagesRef.current?.();
+  }, [activeMailboxRequestKey, activeMailViewHasEmailConnection, activeSharedInboxBlocksEmail, activeSharedInboxNeedsEmail]);
   useEffect(() => {
     setNodeEditorOverlay(null);
   }, [companyID]);
@@ -2559,10 +2558,9 @@ export function HomePage({
     }
     let cancelled = false;
     const sharedInboxID = sharedInboxIDForHomeView(activeViewID);
-    const withLocalReadOverlay = (message: EmailMessage): EmailMessage => ({
-      ...applyLocalReadOverlay(message, locallyReadMessageKeysRef.current, activeEmailMailboxScopeKey),
-      client_source_scope_key: selectedListMessage?.client_source_scope_key?.trim() || activeEmailMailboxScopeKey,
-    });
+    const withLocalReadOverlay = (message: EmailMessage): EmailMessage => (
+      applyLocalReadOverlay(message, locallyReadMessageKeysRef.current, activeEmailMailboxScopeKey)
+    );
     const loadDetail = async () => {
       setLoadingDetail(true);
       setSelectedThreadMessages([]);
@@ -2688,10 +2686,11 @@ export function HomePage({
         ||
         sharedInboxIDForHomeView(activeViewIDRef.current) !== requestSharedInboxID
       ) return null;
-      const overlaid = {
-        ...applyLocalReadOverlay(message, locallyReadMessageKeysRef.current, owner.mailboxScopeKey),
-        client_source_scope_key: selectedSourceMessage?.client_source_scope_key?.trim() || owner.mailboxScopeKey,
-      };
+      const overlaid = applyLocalReadOverlay(
+        message,
+        locallyReadMessageKeysRef.current,
+        owner.mailboxScopeKey,
+      );
       setSelectedThreadMessages((current) => {
         if (!current.some((candidate) => candidate.id === cleanMessageID)) return current;
         return mergeEmailThreadDetailMessages(current, [overlaid]);
@@ -3539,6 +3538,11 @@ export function HomePage({
       sentMessage = !sentMessage.thread_id?.trim() && replyThreadID
         ? { ...sentMessage, thread_id: replyThreadID }
         : sentMessage;
+      sentMessage = applyLocalReadOverlay(
+        sentMessage,
+        locallyReadMessageKeysRef.current,
+        composeMailboxScopeKey,
+      );
       const sendRealtimeScope = targetSharedInboxID
         ? realtimeSharedMailboxScope(targetSharedInboxID)
         : realtimePersonalMailboxScope(currentUserID, connectedAccountEmail);
@@ -3607,9 +3611,20 @@ export function HomePage({
             if (cancelled || !sendResult) return;
             const { result, scheduledCompose } = sendResult;
             const replyThreadID = scheduledCompose.replyToMessage?.thread_id?.trim() ?? "";
-            const sentMessage = !result.sentMessage.thread_id?.trim() && replyThreadID
+            const scheduledMailboxScopeKey = emailMailboxScopeKey(
+              companyID,
+              currentUserID,
+              draftForSend.accountEmail,
+              draftForSend.sharedInboxID,
+            );
+            const sentMessageWithThread = !result.sentMessage.thread_id?.trim() && replyThreadID
               ? { ...result.sentMessage, thread_id: replyThreadID }
               : result.sentMessage;
+            const sentMessage = applyLocalReadOverlay(
+              sentMessageWithThread,
+              locallyReadMessageKeysRef.current,
+              scheduledMailboxScopeKey,
+            );
             const deleting = deleteHomeMailDraftRemote(companyID, currentUserID, draftForSend.id);
             setMailDraftsForScopeIfActive(
               readHomeMailDraftsForScope(companyID, currentUserID, draftForSend.sharedInboxID, draftForSend.accountEmail),
@@ -3619,12 +3634,7 @@ export function HomePage({
             void deleting.then((drafts) => {
               if (!cancelled) setMailDraftsForScopeIfActive(drafts, draftForSend.sharedInboxID, draftForSend.accountEmail);
             });
-            const scheduledMailboxStillActive = activeEmailMailboxScopeKeyRef.current === emailMailboxScopeKey(
-              companyID,
-              currentUserID,
-              draftForSend.accountEmail,
-              draftForSend.sharedInboxID,
-            );
+            const scheduledMailboxStillActive = activeEmailMailboxScopeKeyRef.current === scheduledMailboxScopeKey;
             if (scheduledMailboxStillActive) {
               setNotice("Scheduled message sent.");
               const replyToMessageID = scheduledCompose.replyToMessageID.trim();

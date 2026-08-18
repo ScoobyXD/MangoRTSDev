@@ -23,7 +23,6 @@ export type HomeMailboxRealtimeSignal = {
 
 export type HomeMailboxRealtimeRefreshPlan = {
   folders: boolean;
-  messages: boolean;
   selectedDetail: boolean;
 };
 
@@ -97,7 +96,6 @@ type HomeMailboxFolderLoadState = {
 
 const EMPTY_PLAN: HomeMailboxRealtimeRefreshPlan = {
   folders: false,
-  messages: false,
   selectedDetail: false,
 };
 
@@ -396,7 +394,6 @@ export function homeMailboxRealtimeRefreshPlan(
   );
   return {
     folders: isMessageChange || isFolderChange,
-    messages: isMessageChange,
     selectedDetail,
   };
 }
@@ -419,7 +416,6 @@ export function createHomeMailboxRealtimeCoordinator(options: HomeMailboxRealtim
         plan: {
           ...next.plan,
           folders: current.plan.folders || next.plan.folders,
-          messages: current.plan.messages || next.plan.messages,
         },
       };
     }
@@ -439,7 +435,6 @@ export function createHomeMailboxRealtimeCoordinator(options: HomeMailboxRealtim
     const requestIsCurrent = options.isRequestCurrent(scheduled.requestKey);
     const plan = {
       folders: scheduled.plan.folders,
-      messages: scheduled.plan.messages && requestIsCurrent,
       selectedDetail: scheduled.plan.selectedDetail
         && requestIsCurrent
         && selectionMatches(scheduled.detailOwner, options.getSelection()),
@@ -484,7 +479,6 @@ export function createHomeMailboxRealtimeCoordinator(options: HomeMailboxRealtim
     accepted() {
       if (disposed) return;
       options.invalidate();
-      schedule({ folders: true, messages: true, selectedDetail: false });
     },
     changed(signal: HomeMailboxRealtimeSignal) {
       if (disposed || signal.scope.trim() !== options.target.scope) return;
@@ -607,11 +601,10 @@ function mergePlans(
 ): HomeMailboxRealtimeRefreshPlan {
   return {
     folders: left.folders || right.folders,
-    messages: left.messages || right.messages,
     selectedDetail: left.selectedDetail || right.selectedDetail,
   };
 }
 
 function hasRefreshWork(plan: HomeMailboxRealtimeRefreshPlan): boolean {
-  return plan.folders || plan.messages || plan.selectedDetail;
+  return plan.folders || plan.selectedDetail;
 }
