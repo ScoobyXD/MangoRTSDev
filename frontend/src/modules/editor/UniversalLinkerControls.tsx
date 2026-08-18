@@ -11,10 +11,11 @@ import {
 type UniversalLinkerControlsProps = {
   busy: boolean;
   pickerOpen: boolean;
-  createFloatingNodeAriaLabel: string;
+  showCreateFloatingNode?: boolean;
+  createFloatingNodeAriaLabel?: string;
   openPickerAriaLabel: string;
   pickerLauncherRef?: React.Ref<HTMLButtonElement>;
-  onCreateFloatingNode: () => void;
+  onCreateFloatingNode?: () => void;
   onTogglePicker: (event: React.MouseEvent<HTMLButtonElement>) => void;
 };
 
@@ -27,9 +28,18 @@ function FloatingNodeIcon() {
   );
 }
 
+const universalLinkerControlsStyle: React.CSSProperties = {
+  width: "clamp(205px, 28vw, 300px)",
+  minWidth: 184,
+  display: "grid",
+  gridTemplateColumns: "34px minmax(0, 1fr)",
+  gap: 6,
+};
+
 export function UniversalLinkerControls({
   busy,
   pickerOpen,
+  showCreateFloatingNode = true,
   createFloatingNodeAriaLabel,
   openPickerAriaLabel,
   pickerLauncherRef,
@@ -39,19 +49,19 @@ export function UniversalLinkerControls({
   return (
     <div
       data-universal-linker-controls="true"
-      style={{ width: "clamp(205px, 28vw, 300px)", minWidth: 184, display: "grid", gridTemplateColumns: "34px minmax(0, 1fr)", gap: 6 }}
+      style={{ ...universalLinkerControlsStyle, gridTemplateColumns: showCreateFloatingNode ? universalLinkerControlsStyle.gridTemplateColumns : "minmax(0, 1fr)" }}
     >
-      <button
+      {showCreateFloatingNode ? <button
         type="button"
         data-universal-linker-floating-node-button="true"
-        aria-label={createFloatingNodeAriaLabel}
+        aria-label={createFloatingNodeAriaLabel ?? "Create floating node"}
         title="Create floating node"
         disabled={busy}
         onClick={onCreateFloatingNode}
         style={{ width: 34, height: 32, display: "grid", placeItems: "center", border: "1px solid " + EDITOR_NEU_SOFT_BORDER, borderRadius: 10, background: EDITOR_NEU_SURFACE, color: "#4f46e5", cursor: busy ? "wait" : "pointer", boxShadow: EDITOR_NEU_SHADOW }}
       >
         <FloatingNodeIcon />
-      </button>
+      </button> : null}
       <button
         ref={pickerLauncherRef}
         type="button"

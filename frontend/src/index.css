@@ -1488,6 +1488,10 @@ button, input, textarea, select {
   animation: email-chat-destination-flash 1s ease-out;
 }
 
+dialog.mango-project-document-pane::backdrop {
+  background: rgba(15, 23, 42, 0.52);
+}
+
 @media (prefers-reduced-motion: reduce) {
   [data-node-email-chat-parent-destination="true"],
   [data-email-chat-destination-candidate="true"] {

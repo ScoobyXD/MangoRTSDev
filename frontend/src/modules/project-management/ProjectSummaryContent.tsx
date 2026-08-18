@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { AppModalPortal } from "../../app/AppModalPortal.js";
 import { requestAppDockTab } from "../../app/appDockTabs.js";
@@ -68,7 +68,7 @@ import { generateStableInformationID } from "../editor/editorTypes.js";
 import { createEditorScrollMemory } from "../editor/editorScroll.js";
 import { scheduleTransientInformationFocus } from "../editor/transientInformationFocus.js";
 import { useBoundedEditorRowVirtualization } from "../editor/editorRowVirtualization.js";
-import { UnifiedNodeShell } from "../editor/UnifiedNodeShell.js";
+import { UnifiedNodeShell, UnifiedNodeShellFullscreenIcon } from "../editor/UnifiedNodeShell.js";
 import {
   NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
   NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
@@ -78,6 +78,7 @@ import type { EditorHighlightColor } from "../editor/richTextEditing.js";
 import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState, EditorTextAlignment } from "../editor/useEditorDocumentSurfaceHandlers.js";
 import {
   AttachedEmailOrganizerPane,
+  AttachmentCountDropdown,
   ChatPane,
   NodeTextBlockEditor,
   TextBlockActionsMenu,
@@ -114,6 +115,12 @@ import {
 import { flushMangoTiptapDocument, flushMangoTiptapResource } from "../editor/tiptap/mangoTiptapFlushRegistry.js";
 import { setEntityFieldAssignments, type EntityField } from "../fields/entityFieldsApi.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
+import {
+  filterMangoResourceAttachments,
+  invalidateMangoResourceAttachmentsCache,
+  listMangoResourceAttachments,
+  type MangoResourceAttachment,
+} from "../attachments/attachmentApi.js";
 import { moveLogicGateAssignment } from "../kanban/kanbanApi.js";
 import type { NodeRecord } from "../nodes/types.js";
 import { EVENT_HOME_TRIAGE_CONVERSION_APPLIED, type HomeTriageConversionAppliedDetail } from "../../pages/home/homeConstants.js";
@@ -399,7 +406,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const editorDataFormat = useMangoEditorDataFormat(apiBase, companyID, attachmentRequestJSON);
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const textBlocksScrollRef = useRef<HTMLDivElement | null>(null);
+  const projectDocumentPaneRef = useRef<HTMLDialogElement | null>(null);
   const projectDocumentScrollMemoryRef = useRef(createEditorScrollMemory());
+  const projectInformationScrollMemoryRef = useRef(createEditorScrollMemory());
   const paneProjectIDRef = useRef("");
   const refreshTokenRef = useRef(refreshToken);
   const relationshipGroupIDsRef = useRef<Set<string>>(new Set());
@@ -442,7 +451,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [openEditorBlockIDs, setOpenEditorBlockIDs] = useState<Set<string>>(() => new Set());
   const [openChatBlockIDs, setOpenChatBlockIDs] = useState<Set<string>>(() => new Set());
   const [openEmailBlockIDs, setOpenEmailBlockIDs] = useState<Set<string>>(() => new Set());
-  const [projectSidePaneWidths, setProjectSidePaneWidths] = useState({ email: 340, chat: 340 });
+  const [projectDocumentOpen, setProjectDocumentOpen] = useState(false);
+  const [projectDocumentFullscreen, setProjectDocumentFullscreen] = useState(false);
+  const [projectSidePaneWidths, setProjectSidePaneWidths] = useState({ document: 420, email: 340, chat: 340 });
+  const [projectResourceAttachments, setProjectResourceAttachments] = useState<MangoResourceAttachment[]>([]);
+  const [projectAttachmentsLoading, setProjectAttachmentsLoading] = useState(false);
+  const [projectAttachmentsLoadError, setProjectAttachmentsLoadError] = useState("");
+  const [projectAttachmentsRefreshKey, setProjectAttachmentsRefreshKey] = useState(0);
   const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
   const [chatDraftEntityLinks, setChatDraftEntityLinks] = useState<Record<string, EditorChatEntityLink[]>>({});
   const [chatDraftAttachments, setChatDraftAttachments] = useState<Record<string, EditorChatAttachment[]>>({});
@@ -647,11 +662,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [loadProject]);
 
   useEffect(() => {
+    setProjectDocumentOpen(false);
+    setProjectDocumentFullscreen(false);
     setActiveRightPanelTab(projectWorkPanelTabFromHistoryState(
       typeof window === "undefined" ? null : window.history.state,
       projectID,
     ));
   }, [projectID]);
+
+  useEffect(() => setNodeEditorFullscreenChromeActive(projectDocumentFullscreen), [projectDocumentFullscreen]);
 
   useEffect(() => {
     if (!companyID || !currentUserID) return;
@@ -810,6 +829,69 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
     return Array.from(byThread.values());
   }, [attachedEmails]);
+  const projectDocumentID = projectID.trim();
+  const projectDocumentBlock = useMemo(
+    () => blocks.find((block) => block.id === projectDocumentID) ?? null,
+    [blocks, projectDocumentID],
+  );
+  useLayoutEffect(() => {
+    if (loading || !projectDocumentOpen || !projectDocumentBlock) return undefined;
+    const pane = projectDocumentPaneRef.current;
+    if (!pane) return undefined;
+    if (pane.open) pane.close();
+    if (projectDocumentFullscreen) pane.showModal();
+    else pane.show();
+    return () => {
+      if (pane.open) pane.close();
+    };
+  }, [loading, projectDocumentBlock?.id, projectDocumentFullscreen, projectDocumentOpen]);
+  const timelineBlocks = useMemo(
+    () => blocks.filter((block) => block.id !== projectDocumentID),
+    [blocks, projectDocumentID],
+  );
+  const projectFileAttachments = useMemo(() => filterMangoResourceAttachments(projectResourceAttachments, {
+    relationshipKind: "file_attachment",
+  }), [projectResourceAttachments]);
+  const projectAttachmentDropdownItems = useMemo(() => projectFileAttachments.map((resourceAttachment) => ({
+    resourceAttachment,
+  })), [projectFileAttachments]);
+  const refreshProjectAttachments = useCallback(() => {
+    invalidateMangoResourceAttachmentsCache(attachmentRequestJSON, {
+      apiBase,
+      companyID,
+      resourceType: "project",
+      resourceID: projectDocumentID,
+    });
+    setProjectAttachmentsRefreshKey((key) => key + 1);
+  }, [apiBase, attachmentRequestJSON, companyID, projectDocumentID]);
+
+  useEffect(() => {
+    if (!companyID.trim() || !projectDocumentID) {
+      setProjectResourceAttachments([]);
+      setProjectAttachmentsLoading(false);
+      setProjectAttachmentsLoadError("");
+      return undefined;
+    }
+    let cancelled = false;
+    setProjectAttachmentsLoading(true);
+    setProjectAttachmentsLoadError("");
+    void listMangoResourceAttachments(attachmentRequestJSON, {
+      apiBase,
+      companyID,
+      resourceType: "project",
+      resourceID: projectDocumentID,
+    }).then((payload) => {
+      if (!cancelled) setProjectResourceAttachments(payload.attachments ?? []);
+    }).catch((cause) => {
+      if (cancelled) return;
+      setProjectResourceAttachments([]);
+      setProjectAttachmentsLoadError(cause instanceof Error ? cause.message : "Failed to load Project attachments");
+    }).finally(() => {
+      if (!cancelled) setProjectAttachmentsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [apiBase, attachmentRequestJSON, companyID, projectAttachmentsRefreshKey, projectDocumentID]);
+
   const focusTargetBlockID = useMemo(() => {
     const targetID = focusInformationID?.trim() ?? "";
     if (!targetID) return "";
@@ -820,24 +902,24 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     return attachedEmail?.blockID?.trim() ?? "";
   }, [attachedEmails, blocks, chatMessages, focusInformationID]);
   const focusTargetIndex = useMemo(
-    () => focusTargetBlockID ? blocks.findIndex((block) => block.id === focusTargetBlockID) : -1,
-    [blocks, focusTargetBlockID],
+    () => focusTargetBlockID ? timelineBlocks.findIndex((block) => block.id === focusTargetBlockID) : -1,
+    [focusTargetBlockID, timelineBlocks],
   );
   const pinnedProjectRowIndices = useMemo(() => {
     const indices = new Set<number>();
     for (const blockID of [focusedTextBlockID, activeRichTextBlockID, activeRowBlockID]) {
       if (!blockID) continue;
-      const index = blocks.findIndex((block) => block.id === blockID);
+      const index = timelineBlocks.findIndex((block) => block.id === blockID);
       if (index >= 0) indices.add(index);
     }
     for (const blockID of tiptapPinnedBlockIDs) {
-      const index = blocks.findIndex((block) => block.id === blockID);
+      const index = timelineBlocks.findIndex((block) => block.id === blockID);
       if (index >= 0) indices.add(index);
     }
     return Array.from(indices);
-  }, [activeRichTextBlockID, activeRowBlockID, blocks, focusedTextBlockID, tiptapPinnedBlockIDs]);
+  }, [activeRichTextBlockID, activeRowBlockID, focusedTextBlockID, timelineBlocks, tiptapPinnedBlockIDs]);
   const projectRowVirtualizer = useBoundedEditorRowVirtualization({
-    itemCount: blocks.length,
+    itemCount: timelineBlocks.length,
     rowHeight: TEXT_BLOCK_ROW_HEIGHT,
     rowGap: TEXT_BLOCK_ROW_GAP,
     scrollElementRef: textBlocksScrollRef,
@@ -848,11 +930,25 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
 
   useEffect(() => {
     const targetID = focusInformationID?.trim() ?? "";
-    if (!targetID || focusTargetIndex < 0) return;
+    if (!targetID) return;
     const requestKey = `${projectID}:${targetID}:${focusRequestID ?? 0}`;
     if (handledProjectFocusRequestRef.current === requestKey) return;
+    if (targetID === projectDocumentID && projectDocumentBlock) {
+      handledProjectFocusRequestRef.current = requestKey;
+      setOpenEmailBlockIDs((current) => {
+        const next = new Set(current);
+        next.delete(PROJECT_EMAIL_COLUMN_LAYOUT_ID);
+        return next;
+      });
+      setProjectDocumentOpen(true);
+      setFocusedTextBlockID("");
+      setActiveRichTextBlockID("");
+      projectFormattingControllerRef.current = null;
+      return;
+    }
+    if (focusTargetIndex < 0) return;
     handledProjectFocusRequestRef.current = requestKey;
-    const block = blocks[focusTargetIndex];
+    const block = timelineBlocks[focusTargetIndex];
     if (!block) return;
     const chatMessage = chatMessages.find((message) => message.id === targetID);
     const attachedEmail = attachedEmails.find((email) => email.id === targetID || email.messageID === targetID || email.emailMessageID === targetID);
@@ -873,9 +969,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setActiveRichTextBlockID(block.id);
     }
     return scheduleTransientInformationFocus({ root: () => textBlocksScrollRef.current, informationID: targetID, mentionUserID: focusMentionUserID });
-  }, [attachedEmails, blocks, chatMessages, focusInformationID, focusMentionUserID, focusRequestID, focusTargetIndex, projectID]);
+  }, [attachedEmails, chatMessages, focusInformationID, focusMentionUserID, focusRequestID, focusTargetIndex, projectDocumentBlock, projectDocumentID, projectID, timelineBlocks]);
 
-  const beginProjectColumnResize = useCallback((pane: "email" | "chat", event: React.PointerEvent<HTMLDivElement>) => {
+  const beginProjectColumnResize = useCallback((pane: "document" | "email" | "chat", event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
     const startX = event.clientX;
@@ -885,7 +981,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     ownerDocument.body.style.cursor = "col-resize";
     const onPointerMove = (pointerEvent: PointerEvent) => {
       pointerEvent.preventDefault();
-      const delta = pane === "email" ? pointerEvent.clientX - startX : startX - pointerEvent.clientX;
+      const delta = pane === "chat" ? startX - pointerEvent.clientX : pointerEvent.clientX - startX;
       const width = Math.max(260, Math.min(560, Math.round(startWidth + delta)));
       setProjectSidePaneWidths((current) => ({ ...current, [pane]: width }));
     };
@@ -1058,9 +1154,34 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         documentID: block.id,
       })));
       const desiredIDs = new Set(version.snapshot.blocks.map((block) => block.id));
+      const emptyDocumentEnvelope = {
+        format: "mango-tiptap-json",
+        schema_version: 1,
+        document: { type: "doc", content: [{ type: "paragraph" }] },
+      };
       for (const current of blocks) {
         if (desiredIDs.has(current.id)) continue;
         const path = `/v1/editor-json/project/${projectID}/documents/${current.id}?company_id=${encodeURIComponent(companyID)}`;
+        if (current.id === projectDocumentID) {
+          await attachmentRequestJSON(path, {
+            method: "PATCH",
+            body: JSON.stringify({ title: "Project document" }),
+          });
+          const currentSnapshot = await attachmentRequestJSON<{ revision: number; deleted?: boolean }>(path);
+          if (currentSnapshot.deleted) throw new Error("The permanent Project document cannot be restored after deletion.");
+          await attachmentRequestJSON(path, {
+            method: "POST",
+            body: JSON.stringify({
+              operation_id: generateStableInformationID(),
+              client_id: "project-save-version-restore",
+              base_revision: currentSnapshot.revision,
+              schema_version: 1,
+              document: emptyDocumentEnvelope,
+              annotations: [],
+            }),
+          });
+          continue;
+        }
         const currentSnapshot = await attachmentRequestJSON<{ revision: number }>(path);
         await attachmentRequestJSON(path, {
           method: "DELETE",
@@ -1080,6 +1201,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         });
         let currentSnapshot = await attachmentRequestJSON<{ revision: number; deleted?: boolean; annotations?: unknown[] }>(path);
         if (currentSnapshot.deleted) {
+          if (documentID === projectDocumentID) throw new Error("The permanent Project document cannot be restored after deletion.");
           documentID = generateStableInformationID();
           path = `/v1/editor-json/project/${projectID}/documents/${documentID}?company_id=${encodeURIComponent(companyID)}`;
           await attachmentRequestJSON(path, {
@@ -1090,7 +1212,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         }
         const envelope = saved.document.trim()
           ? JSON.parse(saved.document)
-          : { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph" }] } };
+          : emptyDocumentEnvelope;
         await attachmentRequestJSON(path, {
           method: "POST",
           body: JSON.stringify({
@@ -1107,13 +1229,14 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setProjectSavedVersionsOpen(false);
       setProjectDocumentRemountRevision((current) => current + 1);
       await loadProject({ showLoading: false });
+      refreshProjectAttachments();
       markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
     } catch (restoreError) {
       setError(restoreError instanceof Error ? restoreError.message : "Failed to restore project version");
     } finally {
       setProjectVersionRestoring(false);
     }
-  }, [attachmentRequestJSON, blocks, companyID, editorDataFormat.gate?.editor_format, loadProject, projectID, projectVersionRestoring]);
+  }, [attachmentRequestJSON, blocks, companyID, editorDataFormat.gate?.editor_format, loadProject, projectDocumentID, projectID, projectVersionRestoring, refreshProjectAttachments]);
 
   const addTextBlock = useCallback((title = "Project Summary", deferSave = false) => {
     if (!editorDataFormat.gate) {
@@ -1144,13 +1267,72 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     return id;
   }, [companyID, editorDataFormat.gate, projectID, projectTextBlockSaveController]);
 
+  const closeProjectDocument = useCallback(() => {
+    setProjectDocumentFullscreen(false);
+    setProjectDocumentOpen(false);
+    setFocusedTextBlockID((current) => current === projectDocumentID ? "" : current);
+    setActiveRichTextBlockID((current) => {
+      if (current !== projectDocumentID) return current;
+      projectFormattingControllerRef.current = null;
+      return "";
+    });
+  }, [projectDocumentID]);
+
+  const toggleProjectDocument = useCallback(() => {
+    if (projectDocumentOpen) {
+      closeProjectDocument();
+      return;
+    }
+    if (!editorDataFormat.gate) {
+      setError("Editor data format is still loading.");
+      return;
+    }
+    if (!projectDocumentID) return;
+    if (!projectTextBlockContentRef.current.has(projectDocumentID)) {
+      const timestamp = new Date().toISOString();
+      const initialContent: EditorTextBlockContent = {
+        title: "Project document",
+        document: "",
+        attachments: [],
+      };
+      const nextBlock: ProjectTextBlockDraft = {
+        id: projectDocumentID,
+        ...initialContent,
+        attachments: [],
+        createdTimestamp: timestamp,
+        updatedTimestamp: timestamp,
+      };
+      projectTextBlockContentRef.current.set(projectDocumentID, initialContent);
+      projectTextBlockContentRevisionRef.current += 1;
+      projectTextBlockSaveController.markHasChanged(projectDocumentID, initialContent);
+      setBlocks((current) => current.some((block) => block.id === projectDocumentID) ? current : [nextBlock, ...current]);
+      markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
+      projectTextBlockSaveController.startLatestContentSave(projectDocumentID);
+    }
+    setOpenEmailBlockIDs((current) => {
+      const next = new Set(current);
+      next.delete(PROJECT_EMAIL_COLUMN_LAYOUT_ID);
+      return next;
+    });
+    setProjectDocumentOpen(true);
+    setFocusedTextBlockID("");
+    setActiveRichTextBlockID("");
+    projectFormattingControllerRef.current = null;
+    setError("");
+  }, [closeProjectDocument, companyID, editorDataFormat.gate, projectDocumentID, projectDocumentOpen, projectID, projectTextBlockSaveController]);
+
+  const toggleProjectEmailColumn = useCallback(() => {
+    closeProjectDocument();
+    setOpenEmailBlockIDs((current) => toggleSetValue(current, PROJECT_EMAIL_COLUMN_LAYOUT_ID));
+  }, [closeProjectDocument]);
+
   const openProjectEmailSelectionChat = useCallback((messageID: string, selection: { quote: string; startOffset: number; endOffset: number; x: number; y: number }) => {
     const cleanMessageID = messageID.trim();
     const linkedBlockID = attachedEmails.find((email) => (
       Boolean(email.blockID?.trim())
       && [email.emailMessageID, email.messageID].some((candidate) => candidate?.trim() === cleanMessageID)
     ))?.blockID?.trim() ?? "";
-    if (linkedBlockID && blocks.some((block) => block.id === linkedBlockID)) {
+    if (linkedBlockID && timelineBlocks.some((block) => block.id === linkedBlockID)) {
       const anchor: TextBlockSelectionDraft = {
         blockID: linkedBlockID, source: "email", messageID: cleanMessageID, quote: selection.quote,
         startOffset: selection.startOffset, endOffset: selection.endOffset,
@@ -1181,7 +1363,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setFocusedTextBlockID(blockID);
     setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
     setError("");
-  }, [addTextBlock, attachedEmails, blocks]);
+  }, [addTextBlock, attachedEmails, timelineBlocks]);
 
   const clearProjectEmailSelectionChat = useCallback((blockID: string) => {
     if (blockID === projectEmailChatDefaultBlockID) {
@@ -1210,7 +1392,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   }, [projectEmailChatDefaultBlockID, projectTextBlockSaveController]);
 
   const chooseProjectEmailChatDestination = useCallback((blockID: string) => {
-    if (!pendingProjectEmailChatSelection || !blocks.some((block) => block.id === blockID)) return false;
+    if (!pendingProjectEmailChatSelection || !timelineBlocks.some((block) => block.id === blockID)) return false;
     const anchor = { ...pendingProjectEmailChatSelection, blockID };
     const previousBlockID = projectEmailChatDestinationBlockID;
     if (projectEmailChatDefaultBlockID && projectEmailChatDefaultBlockID !== blockID) {
@@ -1251,9 +1433,10 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setFocusedTextBlockID(blockID);
     setChatComposerFocusRequestIDs((current) => ({ ...current, [blockID]: (current[blockID] ?? 0) + 1 }));
     return true;
-  }, [blocks, pendingProjectEmailChatSelection, projectEmailChatDefaultBlockID, projectEmailChatDestinationBlockID, projectTextBlockSaveController]);
+  }, [pendingProjectEmailChatSelection, projectEmailChatDefaultBlockID, projectEmailChatDestinationBlockID, projectTextBlockSaveController, timelineBlocks]);
 
   const removeTextBlock = useCallback(async (blockID: string) => {
+    if (blockID === projectDocumentID) return;
     if (!editorDataFormat.gate) {
       setError("Editor data format is still loading.");
       return;
@@ -1298,6 +1481,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         }),
         ...relatedProjectionIDs.map((informationID) => deleteProjectProjection({ companyID, projectID, informationID })),
       ]);
+      refreshProjectAttachments();
       markEditorHistoryChanged({ companyID, resourceType: "project", resourceID: projectID });
     } catch (deleteError) {
       if (previousBlock && latestContent) {
@@ -1323,7 +1507,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       });
       setError(deleteError instanceof Error ? deleteError.message : "Failed to delete project text");
     }
-  }, [attachedEmails, attachmentRequestJSON, blocks, chatMessages, companyID, currentUserID, editorDataFormat.gate?.editor_format, projectID, projectTextBlockSaveController]);
+  }, [attachedEmails, attachmentRequestJSON, blocks, chatMessages, companyID, currentUserID, editorDataFormat.gate?.editor_format, projectDocumentID, projectID, projectTextBlockSaveController, refreshProjectAttachments]);
 
   const addTextBlockAttachments = useCallback(async (block: ProjectTextBlockDraft, files: FileList | File[]) => {
     const incomingFiles = Array.from(files);
@@ -1351,6 +1535,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       const nextAttachments = [...(latest.attachments ?? []), ...attachments];
       try {
         await flushProjectTextBlockSave(block.id, { attachments: nextAttachments });
+        refreshProjectAttachments();
       } catch (attachmentError) {
         setError(attachmentError instanceof Error ? attachmentError.message : "Failed to save attachment references");
       }
@@ -1360,7 +1545,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       const first = failures[0]?.reason;
       setError(first instanceof Error ? first.message : "Failed to add attachment");
     }
-  }, [attachmentRequestJSON, companyID, flushProjectTextBlockSave, projectID, projectSaveScope]);
+  }, [attachmentRequestJSON, companyID, flushProjectTextBlockSave, projectID, projectSaveScope, refreshProjectAttachments]);
 
   const submitChatMessage = useCallback(async (blockID: string) => {
     const { message, entityLinks } = trimEditorChatDraft(chatDrafts[blockID] ?? "", chatDraftEntityLinks[blockID] ?? []);
@@ -1587,6 +1772,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         information: buildEditorAttachedEmailPayload({ blockID, ...payload, linkWholeThread: !blockID }),
       });
       setAttachedEmails((current) => [nextEmail, ...current.filter((email) => email.messageID !== nextEmail.messageID || email.blockID !== blockID)]);
+      if (!blockID) closeProjectDocument();
       setOpenEmailBlockIDs((current) => new Set(current).add(blockID || PROJECT_EMAIL_COLUMN_LAYOUT_ID));
       setSelectedEmailIDsByBlock((current) => ({ ...current, [blockID || PROJECT_EMAIL_COLUMN_LAYOUT_ID]: payload.messageID }));
       setEmailPicker(null);
@@ -1595,7 +1781,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setError(message);
       throw emailError instanceof Error ? emailError : new Error(message);
     }
-  }, [companyID, projectID]);
+  }, [closeProjectDocument, companyID, projectID]);
 
   const linkEmailFromEditor = useCallback(async (blockID: string, entity: EditorEntityLink) => {
     if (entity.entityType !== "email_message" || !entity.emailMessage) {
@@ -2416,6 +2602,166 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     </div>
   );
 
+  const projectEditorToolbar = (
+    <EditorTabBar
+      activeTab={permissionsOpen ? "permissions" : "editor"}
+      outlineStyle={outlineStyle}
+      accent={accent}
+      outlineMenuAccent={accent}
+      strokeColor={EDITOR_NEU_SOFT_BORDER}
+      surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
+      tabBackground={EDITOR_NEU_SURFACE}
+      tabSelectedBackground={EDITOR_NEU_ACTIVE_SURFACE}
+      onSelectTab={(tabID) => {
+        if (tabID === "permissions") setPermissionsOpen(true);
+      }}
+      onAdjustSelectionFontSize={(delta) => runProjectFormatCommand((controller) => controller.adjustFontSize(delta))}
+      documentFontSize={projectSelectionFontSize}
+      onSetSelectionFontSize={(fontSize) => runProjectFormatCommand((controller) => controller.applyFontSizeValue(fontSize))}
+      boldActive={projectInlineFormat.bold}
+      underlineActive={projectInlineFormat.underline}
+      italicActive={projectInlineFormat.italic}
+      strikethroughActive={projectInlineFormat.strikethrough}
+      highlightColor={projectHighlightColor}
+      textAlignment={projectTextAlignment}
+      onToggleBold={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("bold"))}
+      onToggleUnderline={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("underline"))}
+      onToggleItalic={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("italic"))}
+      onToggleStrikethrough={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("strikethrough"))}
+      onSetSelectionHighlightColor={(color) => runProjectFormatCommand((controller) => controller.applyHighlightColor(color))}
+      onSetTextAlignment={(alignment) => runProjectFormatCommand((controller) => controller.applyTextAlignment(alignment))}
+      onOutlineStyleFocus={refreshProjectSelectionFormat}
+      onOutlineStyleChange={setOutlineStyle}
+      onInsertTable={() => runProjectFormatCommand((controller) => controller.insertTable())}
+      onSaveCurrentVersion={() => { void saveProjectVersion(); }}
+      saveCurrentVersionBusy={projectVersionSaving}
+      saveCurrentVersionDisabled={projectVersionRestoring}
+      reserveHeaderOffset={false}
+      visibleTabIDs={EDITOR_PRIMARY_HEADER_TAB_IDS}
+      secondaryActions={[
+        { id: "saved-versions", label: "Saved versions", onSelect: () => setProjectSavedVersionsOpen(true) },
+        { id: "assignments", label: "Assignments", onSelect: () => setAssignmentsOpen(true) },
+        ...(onOpenInNewTab
+          ? [{ id: "open-project-tab", label: "Open project in new tab", onSelect: () => onOpenInNewTab() }]
+          : []),
+        ...(onCollapseToTab
+          ? [{
+              id: "minimize-project",
+              label: "Minimize project",
+              onSelect: () => onCollapseToTab({ projectID, label: project?.name || projectID }),
+            }]
+          : []),
+      ]}
+      formattingDisabled={!activeRichTextBlockID || !blocks.some((block) => block.id === activeRichTextBlockID)}
+    />
+  );
+  const projectDocumentSaveStorageKey = projectDocumentBlock
+    ? mangoTiptapPendingStorageKey({ companyID, resourceType: "project", resourceID: projectID, documentID: projectDocumentBlock.id })
+    : "";
+  const projectDocumentSaveFallback = projectDocumentBlock && savingID === projectDocumentBlock.id
+    ? { status: "saving" as const }
+    : { status: "saved" as const, updatedTimestamp: projectDocumentBlock?.updatedTimestamp };
+  const projectDocumentSaveFailed = Boolean(projectDocumentBlock && textBlockSaveFailures[projectDocumentBlock.id]);
+  const projectDocumentPane = projectDocumentBlock ? (
+    <dialog
+      ref={projectDocumentPaneRef}
+      data-project-document-pane="true"
+      data-project-document-fullscreen={projectDocumentFullscreen ? "true" : undefined}
+      className={`mango-project-document-pane${projectDocumentSaveFailed ? " mango-editor-save-failed-frame" : ""}`}
+      aria-modal={projectDocumentFullscreen || undefined}
+      aria-label="Project document"
+      onCancel={(event) => {
+        event.preventDefault();
+        setProjectDocumentFullscreen(false);
+      }}
+      style={projectDocumentPaneStyle(projectDocumentFullscreen)}
+    >
+      <div style={projectDocumentFullscreenToolbarStyle(projectDocumentFullscreen)}>
+        {projectDocumentFullscreen ? projectEditorToolbar : null}
+      </div>
+      <header style={projectDocumentPaneHeaderStyle}>
+        <span style={projectDocumentPaneTitleStyle}>
+          <ProjectDocumentIcon color={accent} />
+          <strong>Project document</strong>
+        </span>
+        <span style={projectDocumentPaneActionsStyle}>
+          <EditorSaveStatusIcon state={projectDocumentSaveFallback} storageKey={projectDocumentSaveStorageKey} compact />
+          <EditorSavedTimestamp storageKey={projectDocumentSaveStorageKey} fallbackUpdatedTimestamp={projectDocumentBlock.updatedTimestamp} createdTimestamp={projectDocumentBlock.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />
+          <label title="Add attachment" aria-label="Add attachment to Project document" style={projectTextBlockIconButtonStyle(accent, false)}>
+            <PaperclipIcon color={accent} />
+            <input type="file" multiple style={{ display: "none" }} onChange={(event) => {
+              const files = event.currentTarget.files;
+              if (files) void addTextBlockAttachments(projectDocumentBlock, files);
+              event.currentTarget.value = "";
+            }} />
+          </label>
+          <button
+            type="button"
+            title={projectDocumentFullscreen ? "Exit full screen" : "Open Project document full screen"}
+            aria-label={projectDocumentFullscreen ? "Exit Project document full screen" : "Open Project document full screen"}
+            aria-pressed={projectDocumentFullscreen}
+            onClick={() => setProjectDocumentFullscreen((current) => !current)}
+            style={projectTextBlockIconButtonStyle(accent, projectDocumentFullscreen)}
+          >
+            <UnifiedNodeShellFullscreenIcon active={projectDocumentFullscreen} />
+          </button>
+          <button type="button" title="Close Project document" aria-label="Close Project document" onClick={closeProjectDocument} style={projectDocumentCloseButtonStyle}>×</button>
+        </span>
+      </header>
+      <div style={projectDocumentEditorWrapStyle}>
+        <NodeTextBlockEditor
+          key={`${projectDocumentBlock.id}:${projectDocumentRemountRevision}`}
+          blockID={projectDocumentBlock.id}
+          surfaceKind="project"
+          editable
+          fillHeight
+          nodeID={`project:${projectID}`}
+          apiBase={apiBase}
+          companyID={companyID}
+          attachmentResourceType="project"
+          attachmentResourceID={projectID}
+          attachmentRequestJSON={attachmentRequestJSON}
+          attachmentEditorSurface="project_text_block"
+          currentUserID={currentUserID || "local-user"}
+          companyUsers={companyUsers}
+          documentValue={projectDocumentBlock.document}
+          documentScrollMemoryRef={projectInformationScrollMemoryRef}
+          chatMessages={[]}
+          activeChatAnchorMessageID=""
+          chatNavigationRequest={null}
+          surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
+          accent={accent}
+          outlineStyle={outlineStyle}
+          indentGuideColor={PROJECT_SUMMARY_RULE}
+          scrollbarTrack="rgba(15, 23, 42, 0.08)"
+          formattingControllerRef={projectFormattingControllerRef}
+          formattingControllerActive={activeRichTextBlockID === projectDocumentBlock.id}
+          onFocus={() => {
+            setActiveRowBlockID(projectDocumentBlock.id);
+            setFocusedTextBlockID(projectDocumentBlock.id);
+            setActiveRichTextBlockID(projectDocumentBlock.id);
+            window.setTimeout(refreshProjectSelectionFormat, 0);
+          }}
+          onBlur={() => undefined}
+          onDocumentChange={(document) => applyProjectSyncedDocument(projectDocumentBlock.id, document)}
+          onDocumentFlush={(document) => applyProjectSyncedDocument(projectDocumentBlock.id, document)}
+          onDocumentConflict={() => setError("Mango is recovering the Project document from its committed snapshot.")}
+          onDocumentError={setError}
+          onSaveStateChange={(state) => {
+            const failed = editorSaveNeedsFailureAttention(state);
+            setTextBlockSaveFailures((current) => current[projectDocumentBlock.id] === failed ? current : { ...current, [projectDocumentBlock.id]: failed });
+          }}
+          onRecoveryStorageError={setError}
+          onRecoveryStorageRecovered={() => setError("")}
+          onSelectionFontSizeChange={setProjectSelectionFontSize}
+          onSelectionInlineFormatChange={setProjectInlineFormat}
+          onSelectionHighlightColorChange={setProjectHighlightColor}
+          onSelectionTextAlignmentChange={setProjectTextAlignment}
+        />
+      </div>
+    </dialog>
+  ) : null;
+
   if (loading) {
     return <div style={summaryLoadingStyle}>Loading</div>;
   }
@@ -2575,82 +2921,88 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       {error ? <div style={summaryErrorStyle}>{error}</div> : null}
       <div ref={bodyRef} className="mango-project-summary-body" style={summaryBodyStyle}>
         <section className="mango-project-summary-timeline" style={textColumnStyle(summarySplitPct)}>
-          <div style={columnToolbarStyle}>
-            <div style={columnTitleStyle}>Timeline</div>
-            <div style={toolbarActionsStyle}>
+          <div data-project-timeline-control-row="true" style={projectTimelineControlRowStyle}>
+            <button
+              type="button"
+              data-project-add-text-box="true"
+              title="Add text box"
+              aria-label="Add text box"
+              style={projectTimelineControlButtonStyle(accent, false)}
+              onClick={() => void addTextBlock()}
+            >
+              <span aria-hidden="true" style={projectTimelinePlusStyle}>+</span>
+            </button>
+            <div style={projectTimelineControlsStyle}>
               <button
                 type="button"
-                title={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? "Hide Project email column" : "Show Project email column"}
-                aria-label="Toggle Project email column"
-                aria-pressed={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID)}
-                onClick={() => setOpenEmailBlockIDs((current) => toggleSetValue(current, PROJECT_EMAIL_COLUMN_LAYOUT_ID))}
-                style={projectTextBlockIconButtonStyle(accent, openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID))}
+                data-project-document-toggle="true"
+                title={projectDocumentOpen ? "Close Project document" : "Open Project document"}
+                aria-label="Toggle Project document"
+                aria-pressed={projectDocumentOpen}
+                onClick={toggleProjectDocument}
+                style={projectTimelineControlButtonStyle(accent, projectDocumentOpen)}
               >
-                <MailIcon color={accent} />
+                <ProjectDocumentIcon color={accent} />
               </button>
               <button
                 type="button"
-                style={projectEmailAttachButtonStyle}
-                onClick={(event) => {
-                  const bounds = event.currentTarget.getBoundingClientRect();
-                  setEmailPicker({ blockID: "", anchor: { left: bounds.left, top: bounds.bottom + 7 } });
-                }}
-              >Attach email</button>
-              <EditorTabBar
-                activeTab={permissionsOpen ? "permissions" : "editor"}
-                outlineStyle={outlineStyle}
+                data-project-email-count-toggle="true"
+                title={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? "Hide Project email column" : "Show Project email column"}
+                aria-label="Toggle Project email column"
+                aria-pressed={openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID)}
+                onClick={toggleProjectEmailColumn}
+                style={projectEmailCountButtonStyle(accent, openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID))}
+              >
+                <MailIcon color={accent} />
+                <span>{projectAttachedEmails.length}</span>
+              </button>
+              <AttachmentCountDropdown
+                items={projectAttachmentDropdownItems}
+                apiBase={apiBase}
+                companyID={companyID}
                 accent={accent}
-                outlineMenuAccent={accent}
-                strokeColor={EDITOR_NEU_SOFT_BORDER}
                 surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
-                tabBackground={EDITOR_NEU_SURFACE}
-                tabSelectedBackground={EDITOR_NEU_ACTIVE_SURFACE}
-                onSelectTab={(tabID) => {
-                  if (tabID === "permissions") setPermissionsOpen(true);
-                }}
-                onAdjustSelectionFontSize={(delta) => runProjectFormatCommand((controller) => controller.adjustFontSize(delta))}
-                documentFontSize={projectSelectionFontSize}
-                onSetSelectionFontSize={(fontSize) => runProjectFormatCommand((controller) => controller.applyFontSizeValue(fontSize))}
-                boldActive={projectInlineFormat.bold}
-                underlineActive={projectInlineFormat.underline}
-                italicActive={projectInlineFormat.italic}
-                strikethroughActive={projectInlineFormat.strikethrough}
-                highlightColor={projectHighlightColor}
-                textAlignment={projectTextAlignment}
-                onToggleBold={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("bold"))}
-                onToggleUnderline={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("underline"))}
-                onToggleItalic={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("italic"))}
-                onToggleStrikethrough={() => runProjectFormatCommand((controller) => controller.toggleInlineFormat("strikethrough"))}
-                onSetSelectionHighlightColor={(color) => runProjectFormatCommand((controller) => controller.applyHighlightColor(color))}
-                onSetTextAlignment={(alignment) => runProjectFormatCommand((controller) => controller.applyTextAlignment(alignment))}
-                onOutlineStyleFocus={refreshProjectSelectionFormat}
-                onOutlineStyleChange={setOutlineStyle}
-                onInsertTable={() => runProjectFormatCommand((controller) => controller.insertTable())}
-                onSaveCurrentVersion={() => { void saveProjectVersion(); }}
-                saveCurrentVersionBusy={projectVersionSaving}
-                saveCurrentVersionDisabled={projectVersionRestoring}
-                reserveHeaderOffset={false}
-                visibleTabIDs={EDITOR_PRIMARY_HEADER_TAB_IDS}
-                secondaryActions={[
-                  { id: "saved-versions", label: "Saved versions", onSelect: () => setProjectSavedVersionsOpen(true) },
-                  { id: "assignments", label: "Assignments", onSelect: () => setAssignmentsOpen(true) },
-                  ...(onOpenInNewTab
-                    ? [{ id: "open-project-tab", label: "Open project in new tab", onSelect: () => onOpenInNewTab() }]
-                    : []),
-                  ...(onCollapseToTab
-                    ? [{
-                        id: "minimize-project",
-                        label: "Minimize project",
-                        onSelect: () => onCollapseToTab({ projectID, label: project?.name || projectID }),
-                      }]
-                    : []),
-                ]}
-                formattingDisabled={!activeRichTextBlockID || !blocks.some((block) => block.id === activeRichTextBlockID)}
+                align="left"
+                compact
+                loading={projectAttachmentsLoading}
+                loadError={projectAttachmentsLoadError}
+                onRetry={refreshProjectAttachments}
+                onError={setError}
               />
+              <div data-project-header-universal-linker="true" style={projectHeaderUniversalLinkerStyle}>
+                <UniversalLinkerControls
+                  busy={relationshipActionBusy}
+                  pickerOpen={emailPicker?.blockID === ""}
+                  showCreateFloatingNode={false}
+                  openPickerAriaLabel="Open universal picker to link this Project"
+                  onTogglePicker={(event) => {
+                    if (emailPicker?.blockID === "") {
+                      setEmailPicker(null);
+                      return;
+                    }
+                    const bounds = event.currentTarget.getBoundingClientRect();
+                    setEmailPicker({ blockID: "", anchor: { left: bounds.left, top: bounds.bottom + 7 } });
+                  }}
+                />
+              </div>
             </div>
           </div>
-          <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? `${projectSidePaneWidths.email}px 8px minmax(0, 1fr)` : "minmax(0, 1fr)" }}>
-            {openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? (
+          <div style={columnToolbarStyle}>
+            <div style={columnTitleStyle}>Timeline</div>
+            <div style={toolbarActionsStyle}>
+              {!projectDocumentFullscreen ? projectEditorToolbar : null}
+            </div>
+          </div>
+          <div style={{ minHeight: 0, flex: "1 1 auto", overflow: "hidden", display: "grid", gridTemplateColumns: projectDocumentOpen && projectDocumentPane
+            ? projectDocumentFullscreen
+              ? "minmax(0, 1fr)"
+              : `${projectSidePaneWidths.document}px 8px minmax(0, 1fr)`
+            : openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID)
+              ? `${projectSidePaneWidths.email}px 8px minmax(0, 1fr)`
+              : "minmax(0, 1fr)" }}>
+            {projectDocumentOpen && projectDocumentPane ? projectDocumentPane : null}
+            {projectDocumentOpen && projectDocumentPane && !projectDocumentFullscreen ? <div role="separator" aria-label="Resize Project document" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("document", event)} style={projectColumnResizeHandleStyle} /> : null}
+            {!projectDocumentOpen && openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? (
               <div style={{ ...projectEmailPaneWrapStyle, minHeight: 0, overflow: "hidden", borderRight: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
                 <AttachedEmailOrganizerPane
                   emails={projectAttachedEmails}
@@ -2684,22 +3036,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 />
               </div>
             ) : null}
-            {openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? <div role="separator" aria-label="Resize Project email column" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("email", event)} style={projectColumnResizeHandleStyle} /> : null}
+            {!projectDocumentOpen && openEmailBlockIDs.has(PROJECT_EMAIL_COLUMN_LAYOUT_ID) ? <div role="separator" aria-label="Resize Project email column" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("email", event)} style={projectColumnResizeHandleStyle} /> : null}
             <div ref={textBlocksScrollRef} className="kanban-board-scroll" style={textBlocksScrollStyle}>
-            <button
-              type="button"
-              title="Add text box"
-              aria-label="Add text box"
-              style={projectTimelineAddButtonStyle(accent)}
-              onClick={() => void addTextBlock()}
-            >
-              +
-            </button>
             <div ref={projectRowVirtualizer.listRef} data-mango-bounded-editor-rows="project" data-mounted-row-count={projectRowVirtualizer.mountedRowCount} style={{ display: "grid", gap: 0, minWidth: 0 }}>
               {projectRowVirtualizer.entries.map((entry) => {
                 if (entry.kind === "spacer") return <div key={entry.key} aria-hidden="true" data-editor-row-spacer="true" style={{ height: entry.height, pointerEvents: "none" }} />;
                 const index = entry.index;
-                const block = blocks[index];
+                const block = timelineBlocks[index];
                 if (!block) return null;
                 const editorOpen = openEditorBlockIDs.has(block.id) || tiptapPinnedBlockIDs.has(block.id);
                 const chatOpen = openChatBlockIDs.has(block.id);
@@ -2714,7 +3057,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 const blockSaveNeedsFailureAttention = Boolean(textBlockSaveFailures[block.id]);
                 return (
                   <div key={block.id} style={{ ...projectTimelineRowStyle, height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
-                    <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
+                    <TimelineCell accent={accent} muted={false} isLast={index === timelineBlocks.length - 1} />
                     <div
                       className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`}
                       data-project-text-box-row={block.id}
@@ -3096,13 +3439,15 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           companyID={companyID}
           requestJSON={attachmentRequestJSON}
           sourceType="project"
-          linkTargetTypes={["email_message"]}
+          linkTargetTypes={emailPicker.blockID ? ["email_message"] : ["node", "email_message"]}
           initialMode="link"
           initialCategory="email_message"
+          lockMode={Boolean(emailPicker.blockID)}
           anchor={emailPicker.anchor}
           onCancel={() => setEmailPicker(null)}
           onChoose={async (entity: EditorEntityLink, mode: UniversalEntityPickerMode) => {
-            if (mode === "link") await linkEmailFromEditor(emailPicker.blockID, entity);
+            if (mode === "link" && entity.entityType === "node" && !emailPicker.blockID) await addRelationshipFromPicker(entity);
+            else if (mode === "link") await linkEmailFromEditor(emailPicker.blockID, entity);
             else openEditorEntityLink(entity);
             setEmailPicker(null);
           }}
@@ -3124,6 +3469,15 @@ function blockDraftsFromProjections(projections: ProjectProjection[]): ProjectTe
       updatedTimestamp: projection.updated_timestamp ?? projection.created_timestamp ?? "",
     };
   });
+}
+
+function ProjectDocumentIcon({ color = "currentColor" }: { color?: string }) {
+  return (
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 18 18" style={{ display: "block" }}>
+      <path d="M4 1.8h6.2L14 5.6v10.6H4z" fill="rgba(255,255,255,0.76)" stroke={color} strokeWidth="1.35" strokeLinejoin="round" />
+      <path d="M10.2 1.8v3.8H14M6.4 8h5.2M6.4 10.5h5.2M6.4 13h3.7" fill="none" stroke={color} strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function CriticalPathTable({
@@ -5058,27 +5412,59 @@ const textBlocksScrollStyle: React.CSSProperties = {
   paddingRight: 4,
 };
 
-const projectTimelineAddButtonStyle = (accent: string): React.CSSProperties => ({
-  position: "absolute",
-  top: 4,
-  left: 3,
-  zIndex: 8,
+const projectTimelineControlRowStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gridTemplateColumns: "42px minmax(0, 1fr)",
+  alignItems: "center",
+  padding: "0 0 8px",
+  flexShrink: 0,
+};
+
+const projectTimelineControlsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+};
+
+const projectTimelineControlButtonStyle = (accent: string, active: boolean): React.CSSProperties => ({
   width: 30,
   height: 30,
   display: "grid",
   placeItems: "center",
-  border: "1px solid rgba(91, 141, 239, 0.34)",
-  borderRadius: 999,
-  background: "#ffffff",
+  border: active ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+  borderRadius: 9,
+  background: active ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
   color: accent,
   cursor: "pointer",
   fontFamily: "inherit",
+  padding: 0,
+  boxShadow: EDITOR_NEU_SHADOW,
+});
+
+const projectTimelinePlusStyle: React.CSSProperties = {
   fontSize: 22,
   fontWeight: 850,
   lineHeight: 1,
-  padding: "0 0 2px",
-  boxShadow: "4px 4px 10px rgba(174,174,192,0.22), -4px -4px 10px rgba(255,255,255,0.90)",
+  transform: "translateY(-1px)",
+};
+
+const projectEmailCountButtonStyle = (accent: string, active: boolean): React.CSSProperties => ({
+  ...projectTimelineControlButtonStyle(accent, active),
+  width: "auto",
+  minWidth: 48,
+  gridTemplateColumns: "auto auto",
+  gap: 5,
+  padding: "0 8px",
+  fontSize: 11,
+  fontWeight: 900,
 });
+
+const projectHeaderUniversalLinkerStyle: React.CSSProperties = {
+  minWidth: 184,
+  flex: "1 1 220px",
+};
 
 const projectTimelineRowStyle: React.CSSProperties = {
   minWidth: 0,
@@ -5128,18 +5514,97 @@ const projectEmailPaneWrapStyle: React.CSSProperties = {
   gridTemplateRows: "minmax(0, 1fr)",
 };
 
-const projectEmailAttachButtonStyle: React.CSSProperties = {
-  minHeight: 26,
+const projectDocumentPaneStyle = (fullscreen: boolean): React.CSSProperties => ({
+  minWidth: 0,
+  minHeight: 0,
+  width: fullscreen ? "auto" : "100%",
+  height: fullscreen ? "auto" : "100%",
+  maxWidth: "none",
+  maxHeight: "none",
+  margin: 0,
+  padding: 0,
+  display: "grid",
+  gridTemplateRows: fullscreen ? "auto 40px minmax(0, 1fr)" : "0 40px minmax(0, 1fr)",
   border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-  borderRadius: 8,
+  borderRadius: fullscreen ? 18 : 10,
   background: EDITOR_NEU_SURFACE,
-  color: PROJECT_SUMMARY_SURFACE_TEXT,
-  fontSize: 11,
-  fontWeight: 900,
-  cursor: "pointer",
-  padding: "0 9px",
-  boxShadow: "2px 2px 7px rgba(174,174,192,0.14), -2px -2px 7px rgba(255,255,255,0.78)",
+  overflow: "hidden",
+  boxShadow: fullscreen ? "0 28px 80px rgba(15,23,42,0.34)" : EDITOR_NEU_SHADOW,
+  boxSizing: "border-box",
+  ...(fullscreen ? {
+    position: "fixed",
+    top: NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
+    right: NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+    bottom: NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
+    left: NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+    zIndex: 1901,
+  } : {
+    position: "relative",
+    inset: "auto",
+  }),
+});
+
+const projectDocumentPaneHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 8,
+  padding: "5px 7px 5px 10px",
+  borderBottom: `1px solid ${PROJECT_SUMMARY_RULE}`,
+  background: "linear-gradient(90deg, rgba(239,246,255,0.82), rgba(255,255,255,0.88))",
 };
+
+const projectDocumentPaneTitleStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 7,
+  color: PROJECT_SUMMARY_SURFACE_TEXT,
+  fontSize: 12,
+  overflow: "hidden",
+  whiteSpace: "nowrap",
+};
+
+const projectDocumentPaneActionsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 5,
+};
+
+const projectDocumentEditorWrapStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  height: "100%",
+  overflow: "hidden",
+};
+
+const projectDocumentCloseButtonStyle: React.CSSProperties = {
+  width: 26,
+  height: 24,
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid transparent",
+  borderRadius: 8,
+  background: "linear-gradient(135deg, #ff5a6b, #ef334e)",
+  color: "#ffffff",
+  cursor: "pointer",
+  padding: 0,
+  fontSize: 16,
+  lineHeight: 1,
+  boxShadow: "0 5px 12px rgba(239,51,78,0.22)",
+};
+
+const projectDocumentFullscreenToolbarStyle = (visible: boolean): React.CSSProperties => ({
+  minWidth: 0,
+  display: visible ? "flex" : "none",
+  justifyContent: "flex-end",
+  overflowX: "auto",
+  padding: visible ? "6px 8px" : 0,
+  borderBottom: visible ? `1px solid ${PROJECT_SUMMARY_RULE}` : undefined,
+});
 
 
 const relationshipScrollStyle = (dropActive: boolean): React.CSSProperties => ({

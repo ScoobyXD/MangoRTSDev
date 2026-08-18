@@ -72,7 +72,7 @@ P14 - Selecting a node search result creates or reuses the project node relation
 P15 - Project text boxes participate in the unified editor contract: changes to indent/outdent, paste cleanup, Delete/Backspace, copy/cut/paste, lists, checklist, hyperlink, font-size, bold, underline, italic, text highlight/No highlight, left/center/right alignment, and table semantics must apply to project text boxes.
 P16 - Project text-box document bodies, title, email accent/reference metadata, display order, revisions, and timestamps live in `project_textboxes`. Attachment metadata is rebuilt from active final attachment relationships; Node documents opened inside Projects remain Node-owned.
 P17 - Project critical-path inline node windows use the unified node shell and unified node text-box editor semantics, while mutations inside that inline node window remain node editor mutations instead of project critical-path data mutations.
-P18 - Project Attach email opens the shared Universal picker directly in `##` link mode with Emails selected and attaches the chosen stored thread to the Project-wide email column. It must not expose compose, send, draft-save, or mailbox-mutation behavior.
+P18 - The Project email count control expands or collapses the Project-wide email column. Email linking uses the shared Universal picker only; the Project timeline exposes no separate Attach email button or email-plus action and never exposes compose, send, draft-save, or mailbox-mutation behavior.
 P19 - Project critical-path inline node windows mount `UnifiedNodeShell`; the inline window may keep project row selection/close state in Project Management, but shell actions and body metadata come from the shared node-shell source.
 P20 - Project text-box inline images and files follow `docs/tests/attachments.md`: `attachments` plus `attachment_relationships` are the durable file authority, and the existing Project projection-shaped API response is rebuilt without storing file bytes or a legacy Project projection row.
 P21 - Project chat attachments use Mango attachment references, and project critical-path inline node windows inherit node attachment behavior while preserving node-owned persistence for node edits.
@@ -83,7 +83,7 @@ P25 - Dropping a My Triage or mailbox-capable Shared Triage email onto a Logic G
 P26 - Project relationship node rows created from email expose `created_from_email = true` and show an email-origin icon.
 P27 - Successful project email drops dispatch the same Home triage conversion reconciliation event as Kanban and Company Explorer drops, including `shared_inbox_id` and `unstarred_message_ids` when present.
 P28 - Successful project email drops open the created node in the normal node popup.
-P29 - Project text-box creation and formatting controls must match the shared node text-box editor pattern: users add a new text box from a compact plus control in the left timeline gutter, and the toolbar exposes shared font-size, Bold, Underline, Italic, Highlight, left/center/right alignment, table insertion, Automatic Numbering, bullet, checklist, and outline-style controls instead of project-only `Indent`, `A1`, text-labeled `New Text Box`, or per-text-box table controls.
+P29 - The Project timeline has one compact control row in this exact left-to-right order: new-textbox plus, permanent-document toggle, email count toggle, attachment count, and Universal picker. It has no Node-only Logic Gate control, email-plus control, text-labeled `New Text Box`, project-only `Indent` or `A1` action, or per-textbox table control.
 P30 - Project text-box toolbar controls must use the shared compact editor toolbar inventory and formatting controller path. Font-size minus/value/plus, Bold, Underline, Italic, Highlight with **No highlight**, left/center/right alignment, table insertion, and the outline-style dropdown must match node, Logic Gate, and mail editor surfaces in selected-range and collapsed-caret behavior. Hover/focus/active styling applies only to the individual control.
 P31 - A project permissions view opened from Project Management, Company Explorer, or another project entry point always displays an explicit `Save` button when permission settings are editable. Save commits the current permission selection without closing the view; denied states remain dismissible without attempting a write.
 P32 - Project attached-email projections preserve mailbox provenance. Personal picker attachments and email-drop conversion requests carry the active normalized `account_email`; shared-inbox conversion requests carry `shared_inbox_id` and suppress personal identity while the projection retains both the shared inbox and canonical company account email. The project reader uses that exact scope for threads, recipients, attachments, drafts, replies, and the shared calendar event card/details/RSVP operations.
@@ -129,6 +129,10 @@ P65 - Project resource and chat deletion use the shared attachment unlink and la
 P66 - The deployment must refuse readiness when `project_textbox_chats` or the final Project textbox metadata columns are missing. No request performs DDL and no compatibility reader falls back to the legacy Project tables.
 P67 - The first Project textbox metadata save must idempotently create its empty `project_textboxes` row when the document-body request has not created it yet. A later document ensure/save reuses that same stable row and preserves its metadata; this ordering rule never recreates a deleted textbox or writes a legacy Project table.
 P70 - Project exit history is action-triggered, not timer-triggered. After a history-visible textbox body, title, attachment, creation, deletion, or restore change, closing or switching the Project, changing routes, using Back/Forward, or browser `pagehide` flushes that exact Project's bodies and metadata and requests the same final history batch as manual Save. An unchanged Project creates no exit batch, repeated close signals share one in-flight save, no Project scan runs, and refresh/external navigation/tab close remain best effort.
+P73 - Each Project has one permanent rich-text document whose exact `project_textboxes.textbox_id` equals that Project's canonical `project_id`. First opening lazily creates or reuses that row through the existing Project editor metadata and document paths; the row is excluded from the timeline and uses the shared Project editor, formatting toolbar, history, attachment, recycle, and permission lifecycle without another storage or compatibility path.
+P74 - The permanent Project document may appear inline or in the shared fullscreen overlay, but presentation changes never create a second document or editor. Exactly one editor instance owns the current document, selection, formatting controller, save state, and recovery state, and restoring inline returns that same instance to the Project pane.
+P75 - Saved-version restore never deletes or remaps the permanent Project document. A snapshot without the document clears its body in place, a snapshot with the document restores its saved title and body to `textbox_id = project_id`, and a deleted canonical row fails restore instead of creating a replacement timeline textbox. Current attachment relationships remain independent of this document-body restore.
+
 ## Scenarios
 
 ### Scenario P-S1: Inline Critical-Path Node Window
@@ -209,7 +213,7 @@ Expected:
 - Selecting a result creates or reuses the project relationship for that node and saves the relationship on the critical-path step.
 - The empty cell no longer advertises dropping a node or logic gate.
 
-### Scenario P-S5: Project Text Boxes And Email Picker Boundary
+### Scenario P-S5: Project Editors And Email Picker Boundary
 
 Business logic covered:
 - P15
@@ -218,10 +222,14 @@ Business logic covered:
 - P29
 - P30
 - P45
+- P73
+- P74
+- P75
 
 Given:
 - A user edits a project text box.
-- The user opens Project Attach email in the Universal picker.
+- The user opens the header Universal picker from the compact Project timeline control row.
+- The user opens the permanent Project document and switches it to full screen.
 
 Expected:
 - The project text box uses the same unified editor semantics as node, Logic Gate, and email compose/reply rich editor surfaces.
@@ -230,12 +238,15 @@ Expected:
 - Applying a highlight color changes selected text or the active collapsed-caret typing style. **No highlight** removes selected highlighting or clears the pending highlight typing style.
 - Highlighting one line/list item does not mark the following sibling, while intentional multi-line selections remain supported.
 - Alignment operates on the active paragraph/selected block or active-table context, and table insertion uses the preserved caret/selection.
-- Creating a project text box uses the compact plus control in the left timeline gutter; project-only `Indent`, `A1`, text-labeled `New Text Box`, and duplicate text-box table controls are not part of the target UI.
+- Creating a project text box uses the compact plus control in the top timeline control row; project-only `Indent`, `A1`, text-labeled `New Text Box`, and duplicate text-box table controls are not part of the target UI.
 - The primary header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering visible; Assignments and available open/minimize actions remain in **More editor actions**.
-- Project text-box edits save to project information/projection state.
-- Project text-box edits do not write node information/projection state.
+- Project text-box and permanent-document edits save through the Project editor path to `project_textboxes`; Project projections are rebuilt from that final storage.
+- Project text-box and permanent-document edits never write Node-owned editor storage.
 - The Universal picker Emails category allows attaching an exact existing personal-mailbox message where permitted.
 - The Emails category does not expose compose, reply, send, scheduled send, draft-save, or mailbox-mutation controls.
+- The permanent Project document stays outside the timeline and keeps the same editor instance when it enters or exits full screen.
+- Saved-version restore clears or updates the permanent document title/body at `textbox_id = project_id`, preserves its current final attachment relationships, and never deletes or remaps it.
+- Focusing the permanent Project document routes the shared Project formatting toolbar to that document.
 
 ### Scenario P-S6: Project Attachments Use Global Attachment Storage
 
