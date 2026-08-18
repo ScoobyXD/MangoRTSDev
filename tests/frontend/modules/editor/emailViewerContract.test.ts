@@ -503,13 +503,17 @@ test("triage email selection, history, and archive prefetch preserve the foregro
 
 test("mailbox realtime and non-primary tabs keep bounded request budgets", () => {
   const homePage = source("frontend/src/pages/home/HomePage.tsx");
+  const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
   const realtime = source("frontend/src/pages/home/homeMailboxRealtime.ts");
 
   assert.doesNotMatch(homePage, /EVENT_NOTIFICATIONS_UPDATED/);
   assert.doesNotMatch(homePage, /SELF_SEND_DELIVERY_REFRESH_DELAY_MS/);
   assert.doesNotMatch(homePage, /plan\.messageList/);
   assert.doesNotMatch(homePage, /plan\.messages/);
-  assert.doesNotMatch(homePage, /messageListContentScrollHeight\(list\) <= list\.clientHeight \+ 120/);
+  assert.doesNotMatch(homePage, /messageListContentScrollHeight\(list\) <= list\.clientHeight \+ 1\)/);
+  assert.match(homeWorkspace, /!triageAdvanceEnabled && hasNextMessagePage/);
+  assert.equal((homeWorkspace.match(/onClick=\{onLoadMoreMessages\}/g) ?? []).length, 1);
+  assert.match(homeWorkspace, /if \(remaining < 160\) onLoadMoreMessages\(\)/);
   assert.match(homePage, /isLocalMutationEcho: \(signal\) => consumeHomeMailboxLocalMutationEcho/);
   const acceptedStart = realtime.indexOf("accepted() {");
   const acceptedEnd = realtime.indexOf("changed(signal", acceptedStart);

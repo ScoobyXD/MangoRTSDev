@@ -786,6 +786,7 @@ export function HomeMailWorkspace({
             className="mango-home-scroll"
             ref={messageListRef}
             style={messageListStyle}
+            aria-busy={loadingMessages || loadingMoreMessages}
             onScroll={(event) => {
               if (triageAdvanceEnabled) return;
               const target = event.currentTarget;
@@ -795,8 +796,10 @@ export function HomeMailWorkspace({
               if (remaining < 160) onLoadMoreMessages();
             }}
           >
-            {messages.length === 0 && !loadingMessages ? (
-              <div style={emptyStateStyle}>{mailbox === "drafts" ? "No saved drafts" : isArchiveMailbox ? "No archived messages" : "No messages"}</div>
+            {messages.length === 0 ? (
+              loadingMessages || loadingMoreMessages
+                ? <div role="status" style={emptyStateStyle}>Loading messages</div>
+                : <div style={emptyStateStyle}>{mailbox === "drafts" ? "No saved drafts" : isArchiveMailbox ? "No archived messages" : "No messages"}</div>
             ) : messages.map((message) => {
               const rowKey = emailMessageRowKey(message);
               const active = selectedMessageIDs.has(rowKey) || selectedMessageRowKey === rowKey;
@@ -950,7 +953,19 @@ export function HomeMailWorkspace({
                 </div>
               );
             })}
-            {loadingMoreMessages && <div style={loadingMoreStyle}>Loading</div>}
+            {!triageAdvanceEnabled && hasNextMessagePage && (
+              <div style={loadingMoreStyle}>
+                <button
+                  className="mango-elevated-action"
+                  type="button"
+                  style={mailPanelSmallButtonStyle}
+                  disabled={loadingMessages || loadingMoreMessages}
+                  onClick={onLoadMoreMessages}
+                >
+                  {loadingMoreMessages ? "Loading..." : "Load more"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>
