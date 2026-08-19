@@ -618,6 +618,7 @@ type CommunicationsEmailDraft struct {
 	UpdatedByUserID        string     `json:"updated_by_user_id,omitempty"`
 	Kind                   string     `json:"kind"`
 	SourceMessageID        string     `json:"source_message_id,omitempty"`
+	SourceThreadID         string     `json:"source_thread_id,omitempty"`
 	AccountEmail           string     `json:"account_email,omitempty"`
 	ToRecipients           string     `json:"to_recipients"`
 	CcRecipients           string     `json:"cc_recipients"`

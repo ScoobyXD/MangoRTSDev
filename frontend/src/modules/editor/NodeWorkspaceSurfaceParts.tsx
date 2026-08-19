@@ -119,21 +119,12 @@ function emailDraftFingerprint(input: {
   return JSON.stringify([input.sender.trim().toLowerCase(), input.to, input.cc, input.bcc, input.subject, input.body]);
 }
 
-type EmailReplyDraftIDBySourceMessageID = Record<string, string>;
+type EmailReplyDraftIndicator = {
+  draftID: string;
+  sourceThreadID: string;
+};
 
-async function loadEmailReplyDraftIndicators(
-  companyID: string,
-  scope: CommunicationsEmailDraftScope,
-  sourceMessageIDs: string[],
-): Promise<EmailReplyDraftIDBySourceMessageID> {
-  const drafts = await listEmailReplyDraftsBySource(companyID, scope, sourceMessageIDs, { refresh: true })
-    .catch(() => []);
-  return Object.fromEntries(drafts.flatMap((draft) => {
-    const sourceMessageID = draft.source_message_id?.trim() ?? "";
-    const draftID = draft.draft_id?.trim() ?? "";
-    return sourceMessageID && draftID ? [[sourceMessageID, draftID]] : [];
-  }));
-}
+type EmailReplyDraftIndicatorBySourceMessageID = Record<string, EmailReplyDraftIndicator | null>;
 
 const MangoTiptapEditor = React.lazy(async () => {
   const module = await import("./tiptap/MangoTiptapEditor.js");
@@ -3706,7 +3697,8 @@ const AttachedEmailThreadCard: React.FC<{
   collapsed: boolean;
   draggable: boolean;
   replyTargetMessageID?: string;
-  replyDraftIDBySourceMessageID?: EmailReplyDraftIDBySourceMessageID;
+  replyDraftIndicatorBySourceMessageID?: EmailReplyDraftIndicatorBySourceMessageID;
+  replyDraftCount?: number;
   activeSelection?: EmailActiveSelection | null;
   initialFocusMessageID?: string;
   initialFocusMessageRequestID?: number;
@@ -3717,7 +3709,7 @@ const AttachedEmailThreadCard: React.FC<{
   onFocusMessageFound?: (rootMessageID: string) => void;
   onMessageActivate?: (messageID: string) => void;
   onReply: (messageID: string) => void;
-  onReplyDraftIndicatorsChange: (sourceMessageIDs: string[], drafts: EmailReplyDraftIDBySourceMessageID) => void;
+  onReplyDraftIndicatorChange: (sourceMessageID: string, sourceThreadID: string, draftID: string) => void;
   onReplyComplete: () => void;
   onReplySwitchBlockedChange?: (blocked: boolean) => void;
   onReplyEditorFocus?: () => void;
@@ -3732,7 +3724,7 @@ const AttachedEmailThreadCard: React.FC<{
   onMessageTextBoxRequest?: (messageID: string) => void;
   messageAccents?: Record<string, string>;
   companyUsers?: MentionableCompanyUser[];
-}> = ({ email, repliesEnabled, nodeID = "", projectID = "", apiBase = "", companyID, currentUserID = "", companyUsers = [], attachmentRequestJSON, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyDraftIDBySourceMessageID = {}, activeSelection = null, initialFocusMessageID, initialFocusMessageRequestID = 0, highlightRemovalRequest = null, chatHighlightsByMessageID = {}, onToggleCollapsed, onSelect, onFocusMessageFound, onMessageActivate, onReply, onReplyDraftIndicatorsChange, onReplyComplete, onReplySwitchBlockedChange, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionTextBoxRequest, onSelectionNodeRequest, onMessageTextBoxRequest, messageAccents = {} }) => {
+}> = ({ email, repliesEnabled, nodeID = "", projectID = "", apiBase = "", companyID, currentUserID = "", companyUsers = [], attachmentRequestJSON, editable, accent, surfaceText, strokeColor, ruleColor, selected, collapsed, draggable, replyTargetMessageID = "", replyDraftIndicatorBySourceMessageID = {}, replyDraftCount = 0, activeSelection = null, initialFocusMessageID, initialFocusMessageRequestID = 0, highlightRemovalRequest = null, chatHighlightsByMessageID = {}, onToggleCollapsed, onSelect, onFocusMessageFound, onMessageActivate, onReply, onReplyDraftIndicatorChange, onReplyComplete, onReplySwitchBlockedChange, onReplyEditorFocus, onError, onContextMenu, onDragStart, onDragEnd, onDropOnEmail, onSelectionChatRequest, onSelectionTextBoxRequest, onSelectionNodeRequest, onMessageTextBoxRequest, messageAccents = {} }) => {
   const [threadMessages, setThreadMessages] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState("");
@@ -3838,20 +3830,7 @@ const AttachedEmailThreadCard: React.FC<{
   const exactMailboxScopeAvailable = Boolean(mailboxScope.sharedInboxID || mailboxScope.accountEmail);
   const replyComposerOpen = repliesEnabled && Boolean(replyTargetMessageID.trim());
   const replyAvailable = repliesEnabled && exactMailboxScopeAvailable && Boolean(email.emailMessageID?.trim());
-  const rootReplyDraftID = replyDraftIDBySourceMessageID[email.emailMessageID?.trim() ?? ""] ?? "";
-  useEffect(() => {
-    if (selected || collapsed || !repliesEnabled || !exactMailboxScopeAvailable) return undefined;
-    const sourceMessageIDs = Array.from(new Set(threadMessages
-      .map((threadMessage) => threadMessage.email_message_id?.trim() ?? "")
-      .filter(Boolean)));
-    if (sourceMessageIDs.length === 0) return undefined;
-    let cancelled = false;
-    void loadEmailReplyDraftIndicators(companyID, mailboxScope, sourceMessageIDs)
-      .then((drafts) => {
-        if (!cancelled) onReplyDraftIndicatorsChange(sourceMessageIDs, drafts);
-      });
-    return () => { cancelled = true; };
-  }, [collapsed, companyID, exactMailboxScopeAvailable, mailboxScope, onReplyDraftIndicatorsChange, repliesEnabled, selected, threadMessages]);
+  const rootReplyDraft = replyDraftIndicatorBySourceMessageID[email.emailMessageID?.trim() ?? ""];
   const internalMessageIDForProvider = (providerMessageID: string): string => {
     const cleanProviderMessageID = providerMessageID.trim();
     return threadMessages.find((message) => message.id.trim() === cleanProviderMessageID)?.email_message_id?.trim()
@@ -3932,7 +3911,7 @@ const AttachedEmailThreadCard: React.FC<{
             padding: selected ? "9px 10px 6px" : "9px 10px",
           }}
         >
-          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${repliesEnabled ? " auto" : ""}${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
+          <div style={{ minWidth: 0, display: "grid", gridTemplateColumns: `minmax(0, 1fr) auto${repliesEnabled ? " auto" : ""}${replyDraftCount > 0 ? " auto" : ""}${hasThreadChildren ? " 22px" : ""}`, alignItems: "center", gap: 7 }}>
             <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 900 }}>{email.subject}</span>
             <span style={{ fontSize: 9.5, fontWeight: 800, color: accent, whiteSpace: "nowrap" }}>{formatTimestamp(email.date)}</span>
             {repliesEnabled && (
@@ -3940,7 +3919,7 @@ const AttachedEmailThreadCard: React.FC<{
                 <button
                   type="button"
                   disabled={!replyAvailable}
-                  title={rootReplyDraftID ? "My Draft" : "Reply"}
+                  title={rootReplyDraft ? "My Draft" : "Reply"}
                   onClick={(event) => {
                     event.preventDefault();
                     event.stopPropagation();
@@ -3949,9 +3928,19 @@ const AttachedEmailThreadCard: React.FC<{
                   style={replyButtonStyle(replyAvailable)}
                 >
                   <ChatIcon color={accent} />
-                  {rootReplyDraftID ? "My Draft" : "Reply"}
+                  {rootReplyDraft ? "My Draft" : "Reply"}
+                  {rootReplyDraft && <span data-email-message-draft-count="true">1</span>}
                 </button>
               </>
+            )}
+            {replyDraftCount > 0 && (
+              <span
+                data-email-thread-draft-count="true"
+                aria-label={`${replyDraftCount} personal ${replyDraftCount === 1 ? "draft" : "drafts"} in this thread`}
+                style={{ color: accent, whiteSpace: "nowrap", fontSize: 9.5, fontWeight: 900 }}
+              >
+                {replyDraftCount} {replyDraftCount === 1 ? "draft" : "drafts"}
+              </span>
             )}
             {hasThreadChildren && (
               <button
@@ -4028,8 +4017,8 @@ const AttachedEmailThreadCard: React.FC<{
               highlightRemovalRequest={highlightRemovalRequest}
               chatHighlightsByMessageID={chatHighlightsByMessageID}
               initialReplyTargetMessageID={replyTargetMessageID}
-              replyDraftIDBySourceMessageID={replyDraftIDBySourceMessageID}
-              onReplyDraftIndicatorsChange={onReplyDraftIndicatorsChange}
+              replyDraftIndicatorBySourceMessageID={replyDraftIndicatorBySourceMessageID}
+              onReplyDraftIndicatorChange={onReplyDraftIndicatorChange}
               onReplySwitchBlockedChange={onReplySwitchBlockedChange}
               inlineExpansion
               onReplyComplete={onReplyComplete}
@@ -4135,7 +4124,7 @@ const AttachedEmailThreadCard: React.FC<{
                     <button
                       type="button"
                       disabled={!exactMailboxScopeAvailable || !message.email_message_id?.trim()}
-                      title={replyDraftIDBySourceMessageID[internalMessageID] ? "My Draft" : "Reply"}
+                      title={replyDraftIndicatorBySourceMessageID[internalMessageID] ? "My Draft" : "Reply"}
                       onClick={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -4144,7 +4133,8 @@ const AttachedEmailThreadCard: React.FC<{
                       style={replyButtonStyle(exactMailboxScopeAvailable && Boolean(internalMessageID))}
                     >
                       <ChatIcon color={accent} />
-                      {replyDraftIDBySourceMessageID[internalMessageID] ? "My Draft" : "Reply"}
+                      {replyDraftIndicatorBySourceMessageID[internalMessageID] ? "My Draft" : "Reply"}
+                      {replyDraftIndicatorBySourceMessageID[internalMessageID] && <span data-email-message-draft-count="true">1</span>}
                     </button>
                   )}
                 </span>
@@ -4319,7 +4309,8 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   const [activeTabbedMessageID, setActiveTabbedMessageID] = useState("");
   const [replyComposer, setReplyComposer] = useState<{ rootMessageID: string; targetMessageID: string } | null>(null);
   const [replySwitchBlocked, setReplySwitchBlocked] = useState(false);
-  const [replyDraftIDBySourceMessageID, setReplyDraftIDBySourceMessageID] = useState<EmailReplyDraftIDBySourceMessageID>({});
+  const [replyDraftIndicatorBySourceMessageID, setReplyDraftIndicatorBySourceMessageID] = useState<EmailReplyDraftIndicatorBySourceMessageID>({});
+  const replyDraftIndicatorMutationGenerationRef = useRef(0);
   const [folderMenu, setFolderMenu] = useState<{ folderID: string; x: number; y: number } | null>(null);
   const [emailMenu, setEmailMenu] = useState<{ messageID: string; x: number; y: number } | null>(null);
   const [editingFolder, setEditingFolder] = useState<{ folderID: string; draft: string; isNew: boolean } | null>(null);
@@ -4330,6 +4321,14 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   const normalizedLayout = useMemo(() => normalizeAttachedEmailPaneLayout(layout, uniqueEmails), [layout, uniqueEmails]);
   const emailByID = useMemo(() => new Map(uniqueEmails.map((email) => [email.messageID, email])), [uniqueEmails]);
   const orderedEmails = useMemo(() => normalizedLayout.emailOrder.map((id) => emailByID.get(id)).filter((email): email is EditorAttachedEmail => Boolean(email)), [emailByID, normalizedLayout.emailOrder]);
+  const replyDraftCountBySourceThreadID = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const indicator of Object.values(replyDraftIndicatorBySourceMessageID)) {
+      if (!indicator?.sourceThreadID) continue;
+      counts[indicator.sourceThreadID] = (counts[indicator.sourceThreadID] ?? 0) + 1;
+    }
+    return counts;
+  }, [replyDraftIndicatorBySourceMessageID]);
   const attachedEmailOwnerLabel = projectID.trim() ? "Project" : "node";
   const activeSelectedMessageID = selectedMessageID?.trim() || localSelectedMessageID;
   const childFoldersByParentID = useMemo(() => {
@@ -4360,47 +4359,74 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
   useEffect(() => {
     setLayout(readStoredAttachedEmailPaneLayout(storageKey));
     setExpandedThreadIDs(new Set());
-    setReplyDraftIDBySourceMessageID({});
+    replyDraftIndicatorMutationGenerationRef.current += 1;
+    setReplyDraftIndicatorBySourceMessageID({});
     setReplySwitchBlocked(false);
   }, [storageKey]);
 
-  const updateReplyDraftIndicators = useCallback((
-    sourceMessageIDs: string[],
-    drafts: EmailReplyDraftIDBySourceMessageID,
-  ) => {
-    setReplyDraftIDBySourceMessageID((current) => {
+  const updateReplyDraftIndicator = useCallback((sourceMessageID: string, sourceThreadID: string, draftID: string) => {
+    const cleanSourceMessageID = sourceMessageID.trim();
+    const cleanSourceThreadID = sourceThreadID.trim();
+    const cleanDraftID = draftID.trim();
+    if (!cleanSourceMessageID) return;
+    replyDraftIndicatorMutationGenerationRef.current += 1;
+    setReplyDraftIndicatorBySourceMessageID((current) => {
       const next = { ...current };
-      for (const sourceMessageID of sourceMessageIDs) delete next[sourceMessageID];
-      for (const [sourceMessageID, draftID] of Object.entries(drafts)) {
-        if (sourceMessageID && draftID) next[sourceMessageID] = draftID;
-      }
+      if (cleanDraftID) next[cleanSourceMessageID] = {
+        draftID: cleanDraftID,
+        sourceThreadID: cleanSourceThreadID || current[cleanSourceMessageID]?.sourceThreadID || "",
+      };
+      else next[cleanSourceMessageID] = null;
       return next;
     });
   }, []);
 
   useEffect(() => {
-    if (!repliesEnabled || !companyID.trim()) return undefined;
-    const groups = new Map<string, { scope: CommunicationsEmailDraftScope; sourceMessageIDs: string[] }>();
+    if (!repliesEnabled || !companyID.trim()) {
+      setReplyDraftIndicatorBySourceMessageID({});
+      return undefined;
+    }
+    const groups = new Map<string, { scope: CommunicationsEmailDraftScope; sourceMessageIDs: string[]; sourceThreadIDs: string[] }>();
     for (const email of uniqueEmails) {
+      const sourceThreadID = email.emailThreadID?.trim() ?? "";
       const sourceMessageID = email.emailMessageID?.trim() ?? "";
       const scope = resolveEditorEmailMailboxScope(email.sharedInboxID, email.accountEmail);
-      if (!sourceMessageID || (!scope.sharedInboxID && !scope.accountEmail)) continue;
+      if ((!sourceThreadID && !sourceMessageID) || (!scope.sharedInboxID && !scope.accountEmail)) continue;
       const key = scope.sharedInboxID ? `shared:${scope.sharedInboxID}` : `personal:${scope.accountEmail}`;
-      const group: { scope: CommunicationsEmailDraftScope; sourceMessageIDs: string[] } = groups.get(key) ?? { scope, sourceMessageIDs: [] };
-      group.sourceMessageIDs.push(sourceMessageID);
+      const group: { scope: CommunicationsEmailDraftScope; sourceMessageIDs: string[]; sourceThreadIDs: string[] } = groups.get(key) ?? { scope, sourceMessageIDs: [], sourceThreadIDs: [] };
+      if (sourceThreadID) group.sourceThreadIDs.push(sourceThreadID);
+      else group.sourceMessageIDs.push(sourceMessageID);
       groups.set(key, group);
     }
-    if (groups.size === 0) return undefined;
+    if (groups.size === 0) {
+      setReplyDraftIndicatorBySourceMessageID({});
+      return undefined;
+    }
     let cancelled = false;
-    void Promise.all(Array.from(groups.values(), async ({ scope, sourceMessageIDs }) => ({
-      sourceMessageIDs,
-      drafts: await loadEmailReplyDraftIndicators(companyID, scope, sourceMessageIDs),
-    }))).then((results) => {
+    const mutationGeneration = replyDraftIndicatorMutationGenerationRef.current;
+    void Promise.all(Array.from(groups.values(), ({ scope, sourceMessageIDs, sourceThreadIDs }) => (
+      listEmailReplyDraftsBySource(companyID, scope, sourceMessageIDs, { refresh: true, sourceThreadIDs })
+        .catch(() => [])
+    ))).then((results) => {
       if (cancelled) return;
-      for (const result of results) updateReplyDraftIndicators(result.sourceMessageIDs, result.drafts);
+      const next: EmailReplyDraftIndicatorBySourceMessageID = {};
+      for (const draft of results.flat()) {
+        const sourceMessageID = draft.source_message_id?.trim() ?? "";
+        const draftID = draft.draft_id?.trim() ?? "";
+        if (!sourceMessageID || !draftID) continue;
+        next[sourceMessageID] = {
+          draftID,
+          sourceThreadID: draft.source_thread_id?.trim() ?? "",
+        };
+      }
+      setReplyDraftIndicatorBySourceMessageID((current) => (
+        mutationGeneration === replyDraftIndicatorMutationGenerationRef.current
+          ? next
+          : { ...next, ...current }
+      ));
     });
     return () => { cancelled = true; };
-  }, [companyID, repliesEnabled, uniqueEmails, updateReplyDraftIndicators]);
+  }, [companyID, repliesEnabled, storageKey, uniqueEmails]);
 
   useEffect(() => {
     setExpandedThreadIDs((current) => new Set(Array.from(current).filter((messageID) => emailByID.has(messageID))));
@@ -4643,7 +4669,8 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
       collapsed={!expandedThreadIDs.has(email.messageID)}
       draggable={editable && !tabbed}
       replyTargetMessageID={repliesEnabled && replyComposer?.rootMessageID === email.messageID ? replyComposer.targetMessageID : ""}
-      replyDraftIDBySourceMessageID={replyDraftIDBySourceMessageID}
+      replyDraftIndicatorBySourceMessageID={replyDraftIndicatorBySourceMessageID}
+      replyDraftCount={replyDraftCountBySourceThreadID[email.emailThreadID?.trim() ?? ""] ?? 0}
       activeSelection={activeEmailSelection}
       initialFocusMessageID={focusMessageID}
       initialFocusMessageRequestID={focusMessageRequestID}
@@ -4667,7 +4694,7 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
         selectMessage(email.messageID);
         setReplyComposer({ rootMessageID: email.messageID, targetMessageID });
       }}
-      onReplyDraftIndicatorsChange={updateReplyDraftIndicators}
+      onReplyDraftIndicatorChange={updateReplyDraftIndicator}
       onReplySwitchBlockedChange={setReplySwitchBlocked}
       onReplyComplete={() => {
         setReplySwitchBlocked(false);
@@ -5028,14 +5055,14 @@ type EmailConversationPaneProps = {
   highlightRemovalRequest?: EmailHighlightRemovalRequest | null;
   chatHighlightsByMessageID?: EmailChatHighlightsByMessageID;
   initialReplyTargetMessageID?: string;
-  replyDraftIDBySourceMessageID?: EmailReplyDraftIDBySourceMessageID;
+  replyDraftIndicatorBySourceMessageID?: EmailReplyDraftIndicatorBySourceMessageID;
   initialFocusMessageID?: string;
   initialFocusMessageRequestID?: number;
   initialReplyRequestID?: number;
   inlineExpansion?: boolean;
   singleMessageOnly?: boolean;
   onReplyComplete?: () => void;
-  onReplyDraftIndicatorsChange?: (sourceMessageIDs: string[], drafts: EmailReplyDraftIDBySourceMessageID) => void;
+  onReplyDraftIndicatorChange?: (sourceMessageID: string, sourceThreadID: string, draftID: string) => void;
   onReplySwitchBlockedChange?: (blocked: boolean) => void;
   onReplyEditorFocus?: () => void;
   onError: (message: string) => void;
@@ -5865,14 +5892,14 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   highlightRemovalRequest,
   chatHighlightsByMessageID = {},
   initialReplyTargetMessageID,
-  replyDraftIDBySourceMessageID = {},
+  replyDraftIndicatorBySourceMessageID = {},
   initialFocusMessageID,
   initialFocusMessageRequestID = 0,
   initialReplyRequestID = 0,
   inlineExpansion = false,
   singleMessageOnly = false,
   onReplyComplete,
-  onReplyDraftIndicatorsChange,
+  onReplyDraftIndicatorChange,
   onReplySwitchBlockedChange,
   onReplyEditorFocus,
   onError,
@@ -6264,19 +6291,6 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     return exactMessage ? [exactMessage] : [];
   }, [message, messageID, sentReplies, singleMessageOnly, threadMessages]);
   useEffect(() => {
-    if (!repliesEnabled || !exactMailboxScopeAvailable || !onReplyDraftIndicatorsChange) return undefined;
-    const sourceMessageIDs = Array.from(new Set(displayThreadMessages
-      .map((threadMessage) => threadMessage.email_message_id?.trim() ?? "")
-      .filter(Boolean)));
-    if (sourceMessageIDs.length === 0) return undefined;
-    let cancelled = false;
-    void loadEmailReplyDraftIndicators(companyID, mailboxScope, sourceMessageIDs)
-      .then((drafts) => {
-        if (!cancelled) onReplyDraftIndicatorsChange(sourceMessageIDs, drafts);
-      });
-    return () => { cancelled = true; };
-  }, [companyID, displayThreadMessages, exactMailboxScopeAvailable, mailboxScope, onReplyDraftIndicatorsChange, repliesEnabled]);
-  useEffect(() => {
     if (singleMessageOnly || !expandedThreadMessageID || !nodeID.trim() || !emailThreadID?.trim()) return undefined;
     const expandedMessage = displayThreadMessages.find((candidate) => candidate.id === expandedThreadMessageID);
     const internalMessageID = expandedMessage?.email_message_id?.trim() ?? "";
@@ -6419,7 +6433,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     setDraftAttachments([]);
     setDraftSaveStatus("saving");
     setError("");
-    const indicatedDraftID = replyDraftIDBySourceMessageID[sourceMessageID]?.trim() ?? "";
+    const indicatedDraftID = replyDraftIndicatorBySourceMessageID[sourceMessageID]?.draftID.trim() ?? "";
     const cachedSignature = indicatedDraftID
       ? ""
       : loadedEmailSignatureForScope(mailboxSignatureStateRef.current, mailboxSignatureScopeKey) ?? "";
@@ -6431,7 +6445,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     const draftRequest = indicatedDraftID
       ? getEmailDraft(companyID, indicatedDraftID, mailboxScope).then((draft) => {
         if (!draft) {
-          onReplyDraftIndicatorsChange?.([sourceMessageID], {});
+          onReplyDraftIndicatorChange?.(sourceMessageID, emailThreadID?.trim() ?? "", "");
           throw new Error("email_draft_not_found");
         }
         return { draft, created: false };
@@ -6449,7 +6463,11 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     void draftRequest.then(({ draft, created }) => {
       if (replyOpenRequestRef.current !== requestID) return;
       applyPersonalDraft(draft);
-      onReplyDraftIndicatorsChange?.([sourceMessageID], { [sourceMessageID]: draft.draft_id });
+      onReplyDraftIndicatorChange?.(
+        sourceMessageID,
+        draft.source_thread_id?.trim() || emailThreadID?.trim() || "",
+        draft.draft_id,
+      );
       setDraftSaveStatus("saved");
       window.requestAnimationFrame(() => replyEditorControllerRef.current?.focus());
       if (created && !cachedSignature) {
@@ -6471,7 +6489,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
       onError(nextError);
       onReplyComplete?.();
     });
-  }, [accountEmail, applyPersonalDraft, companyID, exactMailboxScopeAvailable, loadMailboxSignature, mailboxScope, message?.subject, onError, onReplyComplete, onReplyDraftIndicatorsChange, replyDraftIDBySourceMessageID]);
+  }, [accountEmail, applyPersonalDraft, companyID, emailThreadID, exactMailboxScopeAvailable, loadMailboxSignature, mailboxScope, message?.subject, onError, onReplyComplete, onReplyDraftIndicatorChange, replyDraftIndicatorBySourceMessageID]);
 
   useEffect(() => {
     const targetID = initialReplyTargetMessageID?.trim() ?? "";
@@ -6725,7 +6743,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
   const closeReplyAfterDraftCleanup = useCallback((draftID: string, sourceMessageID: string) => {
     if (!replyPaneMountedRef.current) return;
     if (personalDraftRef.current?.draft_id !== draftID) return;
-    onReplyDraftIndicatorsChange?.([sourceMessageID], {});
+    onReplyDraftIndicatorChange?.(sourceMessageID, emailThreadID?.trim() ?? "", "");
     personalDraftRef.current = null;
     setPersonalDraft(null);
     setSentCleanupFailed(false);
@@ -6735,7 +6753,7 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     replyOpenRequestRef.current += 1;
     setReplyTargetMessageID("");
     onReplyComplete?.();
-  }, [onReplyComplete, onReplyDraftIndicatorsChange]);
+  }, [emailThreadID, onReplyComplete, onReplyDraftIndicatorChange]);
 
   const submitReply = () => {
     if (!message || !replyTargetMessage || !personalDraft || !canSend) return;
@@ -7125,7 +7143,8 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
                               boxShadow: "2px 2px 6px rgba(174,174,192,0.14), -2px -2px 6px rgba(255,255,255,0.78)",
                             }}
                           >
-                            {replyDraftIDBySourceMessageID[internalThreadMessageID] ? "My Draft" : "Reply"}
+                            {replyDraftIndicatorBySourceMessageID[internalThreadMessageID] ? "My Draft" : "Reply"}
+                            {replyDraftIndicatorBySourceMessageID[internalThreadMessageID] && <span data-email-message-draft-count="true" style={{ marginLeft: 5 }}>1</span>}
                           </button>
                         )}
                       </div>

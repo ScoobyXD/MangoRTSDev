@@ -16,36 +16,47 @@ func (r *PostgresRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDr
 	if err != nil {
 		return nil, err
 	}
-	kind, sourceMessageIDs, err := normalizeCommunicationsEmailDraftListFilters(input.Kind, input.SourceMessageIDs)
+	kind, sourceMessageIDs, sourceThreadIDs, err := normalizeCommunicationsEmailDraftListFilters(input.Kind, input.SourceMessageIDs, input.SourceThreadIDs)
 	if err != nil {
 		return nil, err
 	}
 	sourceMessageIDFilter := strings.Join(sourceMessageIDs, ",")
+	sourceThreadIDFilter := strings.Join(sourceThreadIDs, ",")
 
 	var rows *sql.Rows
 	if scope.scopeType == "shared" {
 		rows, err = r.db.Query(`
 select `+communicationsEmailDraftSummarySelectColumns()+`
-from email_drafts
-where company_id = $1::uuid
-	and deleted_timestamp is null
-	and shared_inbox_id = $2::uuid
-	and ($3='' or created_by_user_id = $3::uuid)
-	and ($4='' or kind = $4)
-	and ($5='' or source_email_message_id = any(string_to_array($5, ',')::uuid[]))
-order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID), kind, sourceMessageIDFilter)
+from email_drafts draft
+left join email_messages source_message
+  on source_message.company_id=draft.company_id
+ and source_message.email_message_id=draft.source_email_message_id
+where draft.company_id = $1::uuid
+	and draft.deleted_timestamp is null
+	and draft.shared_inbox_id = $2::uuid
+	and ($3='' or draft.created_by_user_id = $3::uuid)
+	and ($4='' or draft.kind = $4)
+	and (($5='' and $6='')
+		or draft.source_email_message_id = any(string_to_array($5, ',')::uuid[])
+		or source_message.email_thread_id = any(string_to_array($6, ',')::uuid[]))
+order by draft.updated_timestamp desc, draft.draft_id asc`, scope.companyID, scope.sharedInboxID, cleanUUIDText(input.ParticipantUserID), kind, sourceMessageIDFilter, sourceThreadIDFilter)
 	} else {
 		rows, err = r.db.Query(`
 select `+communicationsEmailDraftSummarySelectColumns()+`
-from email_drafts
-where company_id = $1::uuid
-	and deleted_timestamp is null
-	and personal_user_id = $2::uuid
-	and personal_account_email = $3
-	and ($4='' or created_by_user_id = $4::uuid)
-	and ($5='' or kind = $5)
-	and ($6='' or source_email_message_id = any(string_to_array($6, ',')::uuid[]))
-order by updated_timestamp desc, draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID), kind, sourceMessageIDFilter)
+from email_drafts draft
+left join email_messages source_message
+  on source_message.company_id=draft.company_id
+ and source_message.email_message_id=draft.source_email_message_id
+where draft.company_id = $1::uuid
+	and draft.deleted_timestamp is null
+	and draft.personal_user_id = $2::uuid
+	and draft.personal_account_email = $3
+	and ($4='' or draft.created_by_user_id = $4::uuid)
+	and ($5='' or draft.kind = $5)
+	and (($6='' and $7='')
+		or draft.source_email_message_id = any(string_to_array($6, ',')::uuid[])
+		or source_message.email_thread_id = any(string_to_array($7, ',')::uuid[]))
+order by draft.updated_timestamp desc, draft.draft_id asc`, scope.companyID, scope.personalUserID, scope.personalAccountEmail, cleanUUIDText(input.ParticipantUserID), kind, sourceMessageIDFilter, sourceThreadIDFilter)
 	}
 	if err != nil {
 		return nil, err
@@ -516,6 +527,7 @@ coalesce(created_by_user_id::text, ''),
 coalesce(updated_by_user_id::text, ''),
 kind,
 coalesce(source_email_message_id::text, ''),
+'',
 sender_account_email,
 to_recipients,
 cc_recipients,
@@ -531,27 +543,28 @@ deleted_timestamp`
 
 func communicationsEmailDraftSummarySelectColumns() string {
 	return `
-company_id::text,
-draft_id,
-case email_account_type when 'personal_email_account' then 'personal' else 'shared' end,
-coalesce(personal_user_id::text, ''),
-coalesce(personal_account_email, ''),
-coalesce(shared_inbox_id::text, ''),
-coalesce(created_by_user_id::text, ''),
-coalesce(updated_by_user_id::text, ''),
-kind,
-coalesce(source_email_message_id::text, ''),
-sender_account_email,
-to_recipients,
-cc_recipients,
-bcc_recipients,
-subject,
+draft.company_id::text,
+draft.draft_id,
+case draft.email_account_type when 'personal_email_account' then 'personal' else 'shared' end,
+coalesce(draft.personal_user_id::text, ''),
+coalesce(draft.personal_account_email, ''),
+coalesce(draft.shared_inbox_id::text, ''),
+coalesce(draft.created_by_user_id::text, ''),
+coalesce(draft.updated_by_user_id::text, ''),
+draft.kind,
+coalesce(draft.source_email_message_id::text, ''),
+coalesce(source_message.email_thread_id::text, ''),
+draft.sender_account_email,
+draft.to_recipients,
+draft.cc_recipients,
+draft.bcc_recipients,
+draft.subject,
 '',
 '{}',
-scheduled_send_timestamp,
-created_timestamp,
-updated_timestamp,
-deleted_timestamp`
+draft.scheduled_send_timestamp,
+draft.created_timestamp,
+draft.updated_timestamp,
+draft.deleted_timestamp`
 }
 
 func communicationsEmailSignatureSelectColumns() string {
@@ -586,6 +599,7 @@ func scanCommunicationsEmailDraft(row interface{ Scan(dest ...any) error }) (dom
 		&draft.UpdatedByUserID,
 		&draft.Kind,
 		&draft.SourceMessageID,
+		&draft.SourceThreadID,
 		&draft.AccountEmail,
 		&draft.ToRecipients,
 		&draft.CcRecipients,

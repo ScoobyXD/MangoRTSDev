@@ -1378,6 +1378,7 @@ test("reply drafts use server identity and bounded source indicator reads", asyn
     account_email: "me@example.test",
     kind: "reply",
     source_message_id: "stored-message-1",
+    source_thread_id: "stored-thread-1",
     to_recipients: "sender@example.test",
     cc_recipients: "",
     bcc_recipients: "",
@@ -1449,20 +1450,25 @@ test("reply drafts use server identity and bounded source indicator reads", asyn
     assert.equal((forwardCall?.body?.reply_to_message as EmailMessage | undefined)?.id, forwardSource.id);
 
     const sourceMessageIDs = Array.from({ length: 205 }, (_, index) => `stored-message-${index + 1}`);
+    const sourceThreadIDs = Array.from({ length: 205 }, (_, index) => `stored-thread-${index + 1}`);
     await listEmailReplyDraftsBySource("company-1", { accountEmail: "me@example.test" }, [
       ...sourceMessageIDs,
       sourceMessageIDs[0] ?? "",
       " ",
-    ], { refresh: true });
+    ], { refresh: true, sourceThreadIDs: [...sourceThreadIDs, sourceThreadIDs[0] ?? "", " "] });
     const indicatorCalls = calls.filter((call) => call.method === "GET");
     assert.equal(indicatorCalls.length, 3);
     assert.deepEqual(indicatorCalls.map((call) => {
       const query = new URL(call.path, "http://mango.local").searchParams;
-      return [query.get("kind"), query.getAll("source_message_id").length];
-    }), [["reply", 100], ["reply", 100], ["reply", 5]]);
+      return [query.get("kind"), query.getAll("source_message_id").length, query.getAll("source_thread_id").length];
+    }), [["reply", 100, 100], ["reply", 100, 100], ["reply", 5, 5]]);
     await assert.rejects(
       () => listEmailDrafts("company-1", { accountEmail: "me@example.test" }, { sourceMessageIDs }),
       /email_draft_source_message_limit_exceeded/,
+    );
+    await assert.rejects(
+      () => listEmailDrafts("company-1", { accountEmail: "me@example.test" }, { sourceThreadIDs }),
+      /email_draft_source_thread_filter_limit_exceeded/,
     );
   } finally {
     globalThis.fetch = originalFetch;

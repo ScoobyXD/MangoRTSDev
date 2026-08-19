@@ -14,7 +14,7 @@ import (
 
 func TestCommunicationsEmailReplyDraftEnsureUpdateAndFilteredSummary(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
-	sourceMessageID := seedCommunicationsEmailDraftReplySource(t, fixture.repo, fixture.companyID, fixture.owner.UserID, "owner-a@example.com", "", "reply-one")
+	sourceMessageID, sourceThreadID := seedCommunicationsEmailDraftReplySourceWithThread(t, fixture.repo, fixture.companyID, fixture.owner.UserID, "owner-a@example.com", "", "reply-one")
 	otherSourceMessageID := seedCommunicationsEmailDraftReplySource(t, fixture.repo, fixture.companyID, fixture.owner.UserID, "owner-a@example.com", "", "reply-two")
 
 	first := fixture.request(t, http.MethodPost, "/v1/communications/drafts", map[string]any{
@@ -82,11 +82,20 @@ func TestCommunicationsEmailReplyDraftEnsureUpdateAndFilteredSummary(t *testing.
 	if len(listEnvelope.Drafts) != 1 || listEnvelope.Drafts[0].DraftID != createdDraft.DraftID || listEnvelope.Drafts[0].BodyEditorHTML != "" || len(listEnvelope.Drafts[0].ReplyToMessage) != 0 || len(listEnvelope.Drafts[0].Attachments) != 0 {
 		t.Fatalf("filtered summary=%+v", listEnvelope.Drafts)
 	}
+	if listEnvelope.Drafts[0].SourceThreadID != sourceThreadID {
+		t.Fatalf("filtered summary source_thread_id=%q, want %q", listEnvelope.Drafts[0].SourceThreadID, sourceThreadID)
+	}
+
+	unionValues := url.Values{"company_id": {fixture.companyID}, "account_email": {"owner-a@example.com"}, "kind": {"reply"}}
+	unionValues.Add("source_message_id", otherSourceMessageID)
+	unionValues.Add("source_thread_id", sourceThreadID)
+	unionList := fixture.request(t, http.MethodGet, "/v1/communications/drafts?"+unionValues.Encode(), nil, fixture.owner, domain.RoleCompanyUser)
+	assertHTTPDraftIDs(t, unionList, createdDraft.DraftID)
 }
 
 func TestCommunicationsEmailReplyDraftRejectsClientIdentityAndSourceKindConflict(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
-	sourceMessageID := seedCommunicationsEmailDraftReplySource(t, fixture.repo, fixture.companyID, fixture.owner.UserID, "owner-a@example.com", "", "reply-conflict")
+	sourceMessageID, sourceThreadID := seedCommunicationsEmailDraftReplySourceWithThread(t, fixture.repo, fixture.companyID, fixture.owner.UserID, "owner-a@example.com", "", "reply-conflict")
 
 	clientReplyTarget := fixture.request(t, http.MethodPost, "/v1/communications/drafts", map[string]any{
 		"company_id": fixture.companyID, "account_email": "owner-a@example.com", "kind": "reply",
@@ -130,6 +139,14 @@ func TestCommunicationsEmailReplyDraftRejectsClientIdentityAndSourceKindConflict
 	}
 	limit := fixture.request(t, http.MethodGet, "/v1/communications/drafts?"+tooMany.Encode(), nil, fixture.owner, domain.RoleCompanyUser)
 	assertHTTPDraftError(t, limit, http.StatusBadRequest, "email_draft_source_filter_limit_exceeded")
+	invalidThread := fixture.request(t, http.MethodGet, fixture.draftListPath("owner-a@example.com", "")+"&kind=reply&source_thread_id=provider-id", nil, fixture.owner, domain.RoleCompanyUser)
+	assertHTTPDraftError(t, invalidThread, http.StatusBadRequest, "invalid_email_draft_source_thread_id")
+	tooManyThreads := url.Values{"company_id": {fixture.companyID}, "account_email": {"owner-a@example.com"}, "kind": {"reply"}}
+	for index := 0; index <= store.CommunicationsEmailDraftSourceFilterMax; index++ {
+		tooManyThreads.Add("source_thread_id", sourceThreadID)
+	}
+	threadLimit := fixture.request(t, http.MethodGet, "/v1/communications/drafts?"+tooManyThreads.Encode(), nil, fixture.owner, domain.RoleCompanyUser)
+	assertHTTPDraftError(t, threadLimit, http.StatusBadRequest, "email_draft_source_thread_filter_limit_exceeded")
 }
 
 func TestCommunicationsEmailForwardAfterReplyReturnsSourceKindConflict(t *testing.T) {
@@ -220,7 +237,7 @@ func TestCommunicationsGenericDraftStillDefaultsToComposeWithoutKind(t *testing.
 
 func TestCommunicationsSharedInboxReplyDraftIdentityIsPerCreator(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
-	sourceMessageID := seedCommunicationsEmailDraftReplySource(t, fixture.repo, fixture.companyID, "", "shared-a@example.com", fixture.sharedA.FolderID, "shared-reply")
+	sourceMessageID, sourceThreadID := seedCommunicationsEmailDraftReplySourceWithThread(t, fixture.repo, fixture.companyID, "", "shared-a@example.com", fixture.sharedA.FolderID, "shared-reply")
 	body := map[string]any{
 		"company_id": fixture.companyID, "shared_inbox_id": fixture.sharedA.FolderID,
 		"kind": "reply", "source_message_id": sourceMessageID, "subject": "Shared mailbox, private owner",
@@ -237,9 +254,17 @@ func TestCommunicationsSharedInboxReplyDraftIdentityIsPerCreator(t *testing.T) {
 	if created || repeatedOwner.DraftID != ownerDraft.DraftID {
 		t.Fatalf("owner repeat crossed creator identity: created=%v draft=%+v", created, repeatedOwner)
 	}
+	values := url.Values{"company_id": {fixture.companyID}, "shared_inbox_id": {fixture.sharedA.FolderID}, "kind": {"reply"}, "source_thread_id": {sourceThreadID}}
+	assertHTTPDraftIDs(t, fixture.request(t, http.MethodGet, "/v1/communications/drafts?"+values.Encode(), nil, fixture.owner, domain.RoleCompanyUser), ownerDraft.DraftID)
+	assertHTTPDraftIDs(t, fixture.request(t, http.MethodGet, "/v1/communications/drafts?"+values.Encode(), nil, fixture.editor, domain.RoleCompanyUser), editorDraft.DraftID)
 }
 
 func seedCommunicationsEmailDraftReplySource(t *testing.T, repo *store.MemoryRepo, companyID, personalUserID, accountEmail, sharedInboxID, suffix string) string {
+	messageID, _ := seedCommunicationsEmailDraftReplySourceWithThread(t, repo, companyID, personalUserID, accountEmail, sharedInboxID, suffix)
+	return messageID
+}
+
+func seedCommunicationsEmailDraftReplySourceWithThread(t *testing.T, repo *store.MemoryRepo, companyID, personalUserID, accountEmail, sharedInboxID, suffix string) (string, string) {
 	t.Helper()
 	input := store.CommunicationsEmailThreadUpsertInput{
 		CompanyID: companyID, PersonalUserID: personalUserID, PersonalAccountEmail: accountEmail,
@@ -259,7 +284,7 @@ func seedCommunicationsEmailDraftReplySource(t *testing.T, repo *store.MemoryRep
 	if len(thread.Messages) != 1 || thread.Messages[0].EmailMessageID == "" {
 		t.Fatalf("stored source thread=%+v", thread)
 	}
-	return thread.Messages[0].EmailMessageID
+	return thread.Messages[0].EmailMessageID, thread.EmailThreadID
 }
 
 func decodeHTTPReplyDraftEnsure(t *testing.T, recorder interface {
