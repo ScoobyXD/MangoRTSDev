@@ -1419,12 +1419,10 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
           {passwordMessage && <div style={successMessageStyle}>{passwordMessage}</div>}
         </section>
       </div>
-      {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
-
-        <section style={{ ...sectionStyle, marginTop:14, marginBottom: 14 }}>
+      {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop:14, marginBottom: 14 }}>
           <SimpleMangoImporter />
-        </section>
-
+      </section>}
+      {canManageSelectedCompany && <section style={{ ...sectionStyle, marginTop: 14 }}>
         <div style={settingsSectionHeaderRowStyle}>
           <h2 style={sectionTitleStyle}>Onboarding</h2>
           <span style={settingsSectionScopeStyle}>{activeCompanyLabel}</span>
