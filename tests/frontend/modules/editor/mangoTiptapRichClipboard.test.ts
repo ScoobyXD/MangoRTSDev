@@ -16,7 +16,12 @@ import {
   readMangoTiptapClipboardPaste,
   readMangoTiptapInsertionAlignment,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapRichClipboard.js";
-import { validateMangoTiptapDocument } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapDocument.js";
+import { handleMangoTiptapTableClipboardPaste } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapTable.js";
+import { sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
+import {
+  validateMangoTiptapDocument,
+  type MangoTiptapDocument,
+} from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapDocument.js";
 
 type Restore = () => void;
 
@@ -163,6 +168,77 @@ test("plain clipboard text and a file-backed image become one durable paste", as
     const content = parseMangoTiptapRichClipboardContent(editor, dom.window.document, result.html);
     assert.equal(editor.commands.insertContent(content), true);
     assert.match(JSON.stringify(editor.getJSON()), /"attachmentId":"file-image"/);
+  } finally {
+    editor?.destroy();
+    restore();
+    dom.window.close();
+  }
+});
+
+test("Excel clipboard alternatives paste only the complete native table", () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=editor></div></body></html>", { url: "https://mango.test/" });
+  const restore = installDOM(dom);
+  let editor: MangoTiptapEditorEngine | undefined;
+  try {
+    const headers = ["Company", "Order", "Their PO", "Due", "Collection", "Past Due", "Age", "Invoiced", "Balance", "SHIP-TO"];
+    const values = ["TJX TJ Maxx A/P", "2026-19230-00", "70005795", "8/8/2026", "10", "10", "70", "10513.80", "10513.80", "TJ Maxx DC #897"];
+    const html = [
+      '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head>',
+      '<style><!--table {mso-displayed-decimal-separator:"\\.";mso-displayed-thousand-separator:"\\,";}td {font-family:Calibri;mso-number-format:General;}--></style>',
+      "</head><body><!--StartFragment--><table><tbody>",
+      `<tr>${headers.map((value) => `<th>${value}</th>`).join("")}</tr>`,
+      `<tr>${values.map((value) => `<td>${value}</td>`).join("")}</tr>`,
+      "</tbody></table><!--EndFragment--></body></html>",
+    ].join("");
+    const tsv = `${headers.join("\t")}\r\n${values.join("\t")}`;
+    const preview = { name: "Microsoft Excel.png", type: "image/png", size: 4 } as File;
+    const clipboardData = {
+      files: [preview] as unknown as FileList,
+      getData: (type: string) => type === "text/html"
+        ? html
+        : type === "text/tab-separated-values" || type === "text/plain"
+          ? tsv
+          : "",
+    };
+
+    assert.equal(
+      readMangoTiptapClipboardPaste(dom.window.document, clipboardData),
+      null,
+      "an unreferenced Excel bitmap is an alternative preview, not editor content",
+    );
+    assert.equal(
+      readMangoTiptapClipboardPaste(dom.window.document, {
+        ...clipboardData,
+        getData: (type: string) => type === "text/tab-separated-values" || type === "text/plain" ? tsv : "",
+      }),
+      null,
+      "an explicit Excel TSV grid also wins when HTML is unavailable",
+    );
+    const sanitizedFallback = sanitizeEditorDocumentHTML(html);
+    assert.doesNotMatch(sanitizedFallback, /mso-displayed|mso-number-format|Calibri|&lt;!--table/);
+    assert.match(sanitizedFallback, /Company/);
+
+    editor = new MangoTiptapEditorEngine({
+      element: dom.window.document.querySelector<HTMLElement>("#editor"),
+      extensions: createMangoTiptapExtensions({ editable: true }),
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+      enableContentCheck: true,
+      editorProps: { handlePaste: handleMangoTiptapTableClipboardPaste },
+    });
+    editor.commands.setTextSelection(1);
+    const domGlobals = dom.window as unknown as typeof globalThis;
+    const pasteEvent = new domGlobals.Event("paste") as ClipboardEvent;
+    Object.defineProperty(pasteEvent, "clipboardData", { configurable: true, value: clipboardData });
+    assert.equal(editor.view.pasteHTML(html, pasteEvent), true, "the native table parser owns the Excel HTML");
+
+    const document = editor.getJSON() as MangoTiptapDocument["document"];
+    const table = document.content?.find((node) => node.type === "table");
+    assert.equal(table?.content?.length, 2);
+    assert.deepEqual(table?.content?.map((row) => row.content?.length), [10, 10], "all Excel columns must survive");
+    assert.deepEqual(table?.content?.[0]?.content?.map((cell) => cell.content?.[0]?.content?.[0]?.text), headers);
+    assert.deepEqual(table?.content?.[1]?.content?.map((cell) => cell.content?.[0]?.content?.[0]?.text), values);
+    assert.doesNotMatch(editor.state.doc.textContent, /mso-displayed|mso-number-format|Calibri|StartFragment/);
+    assert.equal(JSON.stringify(document).includes("mangoAttachmentImage"), false, "the saved JSON contains only the table, not Excel's preview image");
   } finally {
     editor?.destroy();
     restore();
