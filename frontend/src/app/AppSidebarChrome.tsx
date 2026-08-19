@@ -256,7 +256,7 @@ function isSharedInboxEmailConnectionError(error: unknown): boolean {
 function formatSidebarSharedInboxError(error: unknown, fallback: string): string {
   const message = error instanceof Error ? error.message.trim() : "";
   if (message.includes("shared_inbox_storage_unavailable")) {
-    return `${fallback}: Shared Triage storage is not ready. Run the pending database migrations, then try again.`;
+    return `${fallback}: Shared Emails storage is not ready. Run the pending database migrations, then try again.`;
   }
   if (message.includes("failed_to_list_shared_inboxes")) {
     return `${fallback}: the shared inbox list could not be loaded.`;
@@ -690,7 +690,7 @@ export function AppSidebar({
       })
       .catch((error) => {
         if (!cancelled) {
-          setSharedError(formatSidebarSharedInboxError(error, "Failed to load Shared Triage folders"));
+          setSharedError(formatSidebarSharedInboxError(error, "Failed to load Shared Emails folders"));
           console.error("Failed to load shared triage folders", error);
         }
       })
@@ -728,7 +728,7 @@ export function AppSidebar({
           setSharedInboxes(folders);
         })
         .catch((error) => {
-          setSharedError(formatSidebarSharedInboxError(error, "Failed to refresh Shared Triage folders"));
+          setSharedError(formatSidebarSharedInboxError(error, "Failed to refresh Shared Emails folders"));
           console.error("Failed to refresh shared triage folders", error);
         })
         .finally(() => setLoadingSharedInboxes(false));
@@ -853,7 +853,7 @@ export function AppSidebar({
       onHomeViewSelect(`shared:${folder.folder_id}`);
     } catch (error) {
       if (requestSharedInboxEmailConnection(error, accountEmail, { companyID, parentFolderID, name })) return;
-      setSharedError(formatSidebarSharedInboxError(error, "Failed to create Shared Triage folder"));
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to create Shared Emails folder"));
       console.error("Failed to create shared triage folder", error);
     } finally {
       setSharedBusy(false);
@@ -904,7 +904,7 @@ export function AppSidebar({
       replaceSharedFolder(updated);
     } catch (error) {
       if (requestSharedInboxEmailConnection(error, accountEmail, { companyID, folderID })) return;
-      setSharedError(formatSidebarSharedInboxError(error, "Failed to update Shared Triage email"));
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to update Shared Emails account"));
       console.error("Failed to update shared triage email account", error);
     } finally {
       setSharedBusy(false);
@@ -950,7 +950,7 @@ export function AppSidebar({
       const updated = await updateCommunicationsSharedInbox({ companyID, folderID, name });
       replaceSharedFolder(updated);
     } catch (error) {
-      setSharedError(formatSidebarSharedInboxError(error, "Failed to rename Shared Triage folder"));
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to rename Shared Emails folder"));
       console.error("Failed to rename shared triage folder", error);
     } finally {
       setSharedBusy(false);
@@ -987,7 +987,7 @@ export function AppSidebar({
       const updated = await updateCommunicationsSharedInbox({ companyID, folderID: sourceFolderID, parentFolderID, position });
       replaceSharedFolder(updated);
     } catch (error) {
-      setSharedError(formatSidebarSharedInboxError(error, "Failed to move Shared Triage folder"));
+      setSharedError(formatSidebarSharedInboxError(error, "Failed to move Shared Emails folder"));
       console.error("Failed to move shared triage folder", error);
     } finally {
       setSharedBusy(false);
@@ -1003,8 +1003,8 @@ export function AppSidebar({
       setSharedDeleteDialog({
         folder,
         action: "remove",
-        title: "Remove from Shared Triage",
-        detail: "this Shared Triage inbox while keeping the company email connection",
+        title: "Remove from Shared Emails",
+        detail: "this Shared Emails inbox while keeping the company email connection",
         label,
         confirmLabel: "Remove",
         subtreeIDs,
@@ -1024,7 +1024,7 @@ export function AppSidebar({
         folder,
         action: "delete",
         title: "Delete email connection",
-        detail: "this Shared Triage inbox and its company email connection",
+        detail: "this Shared Emails inbox and its company email connection",
         label,
         confirmLabel: "Delete email",
         subtreeIDs,
@@ -1053,7 +1053,7 @@ export function AppSidebar({
       const activeFolderID = activeHomeView.startsWith("shared:") ? activeHomeView.slice("shared:".length) : "";
       if (activeFolderID && dialog.subtreeIDs.has(activeFolderID)) onHomeViewSelect("shared-root");
     } catch (error) {
-      setSharedError(formatSidebarSharedInboxError(error, dialog.action === "remove" ? "Failed to remove Shared Triage inbox" : "Failed to delete Shared Triage folder"));
+      setSharedError(formatSidebarSharedInboxError(error, dialog.action === "remove" ? "Failed to remove Shared Emails inbox" : "Failed to delete Shared Emails folder"));
       console.error("Failed to delete shared triage folder", error);
     } finally {
       setSharedBusy(false);
@@ -1248,7 +1248,7 @@ export function AppSidebar({
       <section style={appSidebarNavSectionStyle} aria-label="Live Feed">
         <AppSidebarSectionHeader label="Live Feed" />
         <AppSidebarButton
-          label="My Triage"
+          label="My Emails"
           active={homeActive && activeHomeView === "my-triage"}
           icon={<HeaderTriageIcon color="#0ea5e9" />}
           elevated
@@ -1256,7 +1256,7 @@ export function AppSidebar({
             key: "my-triage",
             count: myTriageNotificationCount,
             tone: "mail",
-            title: "Open My Triage unread mail",
+            title: "Open My Emails unread mail",
             onClick: () => openMailBadgeView("my-triage"),
           }]} />}
           onClick={() => onHomeViewSelect("my-triage")}
@@ -1290,22 +1290,22 @@ export function AppSidebar({
               }}
             >
               <span style={appSidebarSharedIconStyle}><HeaderSharedTriageIcon color="#8b5cf6" /></span>
-              <span style={appSidebarTextStyle}>Shared Triage</span>
+              <span style={appSidebarTextStyle}>Shared Emails</span>
               <span style={appSidebarTrailingStyle}>
                 {loadingSharedInboxes && <span style={appSidebarSharedMetaStyle}>Loading</span>}
                 <SidebarNotificationBadges badges={[{
                   key: "shared-triage",
                   count: sharedTriageNotificationCount,
                   tone: "mail",
-                  title: "Open Shared Triage unread mail",
+                  title: "Open Shared Emails unread mail",
                   onClick: () => openMailBadgeView("shared-root"),
                 }]} />
               </span>
             </button>
             <button
               type="button"
-              title={sharedTriageOpen ? "Collapse Shared Triage folders" : "Expand Shared Triage folders"}
-              aria-label={sharedTriageOpen ? "Collapse Shared Triage folders" : "Expand Shared Triage folders"}
+              title={sharedTriageOpen ? "Collapse Shared Emails folders" : "Expand Shared Emails folders"}
+              aria-label={sharedTriageOpen ? "Collapse Shared Emails folders" : "Expand Shared Emails folders"}
               style={appSidebarSharedDisclosureStyle}
               onClick={(event) => {
                 event.stopPropagation();
@@ -1543,7 +1543,7 @@ export function AppSidebar({
                       disabled={sharedBusy}
                       onClick={(event) => void requestRemoveSharedFolder(contextFolder, confirmMenuPositionFromElement(event.currentTarget))}
                     >
-                      Remove from Shared Triage
+                      Remove from Shared Emails
                     </button>
                   </>
                 )}
@@ -1967,7 +1967,7 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
         className="mango-shared-inbox-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label={isSharedInbox ? "Create shared inbox" : "Create Shared Triage folder"}
+        aria-label={isSharedInbox ? "Create shared inbox" : "Create Shared Emails folder"}
         style={sharedInboxEmailModalStyle}
         onPointerDown={(event) => event.stopPropagation()}
         onSubmit={(event) => {
@@ -1977,7 +1977,7 @@ function SharedInboxCreateDialog({ nameInputRef, parentName, mode, name, account
       >
         <div aria-hidden="true" style={sharedInboxEmailModalAccentStyle} />
         <div style={sharedInboxEmailModalTitleStyle}>{isSharedInbox ? "Create shared inbox" : "Create folder"}</div>
-        <div style={sharedInboxEmailModalDetailStyle}>{parentLabel ? `Inside ${parentLabel}` : "Shared Triage"}</div>
+        <div style={sharedInboxEmailModalDetailStyle}>{parentLabel ? `Inside ${parentLabel}` : "Shared Emails"}</div>
         <label style={sharedInboxEmailModalLabelStyle}>
           <span>Name</span>
           <input

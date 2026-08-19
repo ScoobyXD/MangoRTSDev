@@ -515,13 +515,13 @@ function friendlyApiError(code: string): string {
     case "project_node_already_in_another_project":
       return "This Node is already in another Project. A Node can belong to only one Project. Remove it from its current Project before adding it here.";
     case "failed_to_list_shared_inboxes":
-      return "Shared Triage folders could not be loaded.";
+      return "Shared Emails folders could not be loaded.";
     case "failed_to_create_shared_inbox":
-      return "Shared Triage folder could not be created.";
+      return "Shared Emails folder could not be created.";
     case "failed_to_update_shared_inbox_access":
-      return "Shared Triage access could not be updated.";
+      return "Shared Emails access could not be updated.";
     case "shared_inbox_storage_unavailable":
-      return "Shared Triage storage is not ready. Run pending database migrations, then try again.";
+      return "Shared Emails storage is not ready. Run pending database migrations, then try again.";
     case "failed_to_delete_cognito_user":
       return "The user could not be deleted in Cognito. Try again shortly.";
     case "failed_to_delete_company_user":

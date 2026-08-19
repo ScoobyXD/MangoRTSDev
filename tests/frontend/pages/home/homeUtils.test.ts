@@ -175,9 +175,9 @@ function emailMessage(id: string, threadID: string, date: number, overrides: Par
 test("Home view helpers map labels and mailboxes without changing backend mailbox names", () => {
   const shared = [sharedInbox("shared-a", "Team Triage", 1000)];
 
-  assert.equal(getHomeViewLabel("my-triage", shared), "My Triage");
+  assert.equal(getHomeViewLabel("my-triage", shared), "My Emails");
   assert.equal(getHomeViewLabel("shared:shared-a", shared), "Team Triage");
-  assert.equal(getHomeViewLabel("shared:missing", shared), "Shared Triage");
+  assert.equal(getHomeViewLabel("shared:missing", shared), "Shared Emails");
   assert.equal(getHomeViewLabel("a-inbox", shared), "Accountable Nodes");
   assert.equal(getHomeViewLabel("r-inbox", shared), "Responsible Nodes");
   assert.equal(getHomeViewLabel("a-inbox", shared), "Accountable Nodes");

@@ -938,15 +938,15 @@ export function getSharedInboxSiblingPosition(
 
 export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: CommunicationsSharedInbox[]): string {
   if (viewID === "primary") return "Primary";
-  if (viewID === "my-triage") return "My Triage";
-  if (viewID === "shared-root") return "Shared Triage";
+  if (viewID === "my-triage") return "My Emails";
+  if (viewID === "shared-root") return "Shared Emails";
   const RACISection = gvicInboxSectionForView(viewID);
   if (RACISection) return RACISection.title;
   if (viewID === "updates") return "Updates";
   if (viewID === "my-nodes") return "My Nodes";
   if (viewID === "my-logic-gates") return "My Logic Gates";
   const folderID = viewID.startsWith("shared:") ? viewID.slice("shared:".length) : "";
-  return sharedInboxes.find((folder) => folder.folder_id === folderID)?.name ?? "Shared Triage";
+  return sharedInboxes.find((folder) => folder.folder_id === folderID)?.name ?? "Shared Emails";
 }
 
 export function mailboxLabel(mailbox: EmailMailbox): string {

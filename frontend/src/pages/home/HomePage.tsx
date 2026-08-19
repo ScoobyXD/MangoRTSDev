@@ -1424,7 +1424,7 @@ export function HomePage({
       setSharedInboxesLoaded(true);
       return true;
     } catch (sharedInboxError) {
-      setError(formatError(sharedInboxError, "Failed to load Shared Triage"));
+      setError(formatError(sharedInboxError, "Failed to load Shared Emails"));
       return false;
     } finally {
       sharedInboxesRequestInFlightRef.current = false;
@@ -3167,16 +3167,16 @@ export function HomePage({
   }, [advanceComposeOpenGeneration, saveCurrentComposeDraft, selectMailbox]);
   const currentMailComposeError = (targetSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current)) => {
     const cleanSharedInboxID = targetSharedInboxID.trim();
-    if (activeViewID === "shared-root" && !cleanSharedInboxID) return "Select a Shared Triage inbox before composing.";
+    if (activeViewID === "shared-root" && !cleanSharedInboxID) return "Select a Shared Emails inbox before composing.";
     if (cleanSharedInboxID) {
       const targetSharedInbox = sharedInboxes.find((folder) => folder.folder_id === cleanSharedInboxID) ?? null;
-      if (!targetSharedInbox) return "Shared Triage inbox is unavailable.";
+      if (!targetSharedInbox) return "Shared Emails inbox is unavailable.";
       const targetIsParent = sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === targetSharedInbox.folder_id);
       if (targetIsParent) return "Parent folders cannot have emails assigned.";
       if (!sharedInboxTreeUserCanManageMail(sharedInboxes, cleanSharedInboxID, currentUserID, currentUserHasFullSharedInboxAccess)) {
         return "You need edit access to compose from this inbox.";
       }
-      if (!(targetSharedInbox.account_email ?? "").trim()) return "Assign an email to this Shared Triage inbox before composing.";
+      if (!(targetSharedInbox.account_email ?? "").trim()) return "Assign an email to this Shared Emails inbox before composing.";
       return "";
     }
     if (!canMutateCurrentMailView) return "You need edit access to compose from this inbox.";
@@ -3728,7 +3728,7 @@ export function HomePage({
   }, [currentUserCanManageSharedInboxStructure, sharedInboxEmailConnectionDialog]);
   const setSharedInboxAccountEmail = useCallback(async (folderID: string, accountEmail: string): Promise<void> => {
     if (!currentUserCanManageSharedInboxStructure) {
-      setError("Only managers and admins can assign Shared Triage emails.");
+      setError("Only managers and admins can assign email accounts to Shared Emails.");
       return;
     }
     if (accountEmail.trim() && sharedInboxes.some((folder) => (folder.parent_folder_id ?? "").trim() === folderID.trim())) {
@@ -3750,7 +3750,7 @@ export function HomePage({
       }
     } catch (sharedInboxError) {
       if (requestSharedInboxEmailConnection(sharedInboxError, accountEmail, { companyID, folderID })) return;
-      setError(formatError(sharedInboxError, "Failed to update Shared Triage email"));
+      setError(formatError(sharedInboxError, "Failed to update Shared Emails account"));
     } finally {
       setBusy("");
     }
@@ -3759,7 +3759,7 @@ export function HomePage({
   const assignActiveSharedInboxEmail = useCallback(() => {
     if (!activeSharedInbox) return;
     if (!currentUserCanManageSharedInboxStructure) {
-      setError("Only managers and admins can assign Shared Triage emails.");
+      setError("Only managers and admins can assign email accounts to Shared Emails.");
       return;
     }
     if (activeSharedInboxIsParent) {
@@ -3814,7 +3814,7 @@ export function HomePage({
       )));
       await loadSharedInboxes();
     } catch (RACIError) {
-      setError(formatError(RACIError, "Failed to update Shared Triage RACI"));
+      setError(formatError(RACIError, "Failed to update Shared Emails RACI"));
     } finally {
       setBusy("");
     }
@@ -6010,7 +6010,7 @@ function SharedInboxEmailAssignmentDialog({ folderName, draft, error, busy, onDr
         }}
       >
         <div style={homeDialogTitleStyle}>Assign shared inbox email</div>
-        <div style={homeDialogDetailStyle}>{folderName.trim() || "Shared Triage"}</div>
+        <div style={homeDialogDetailStyle}>{folderName.trim() || "Shared Emails"}</div>
         <input
           autoFocus
           type="email"
