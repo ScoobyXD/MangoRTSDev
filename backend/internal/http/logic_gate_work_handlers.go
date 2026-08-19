@@ -206,7 +206,6 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_assign_logic_gate_work_node") {
 		return
 	}
-	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusCreated, logicGateWorkAssignmentResultPayload(result))
@@ -290,7 +289,6 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 		if !writeLogicGateWorkMutationError(w, err, "failed_to_update_logic_gate_work_node_state") {
 			return
 		}
-		s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 		s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 		s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	}

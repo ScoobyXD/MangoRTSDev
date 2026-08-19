@@ -233,7 +233,7 @@ func buildWorkspaceEntityBatchInput(
 
 func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBatchResult, timings *requestTimingRecorder) {
 	inputs := make([]store.DomainEventInput, 0,
-		len(result.FolderItems)+len(result.Nodes)+len(result.LogicGates)+len(result.Relationships)+len(result.LogicGateRelationships)+2,
+		len(result.FolderItems)+len(result.Nodes)+len(result.LogicGates)+len(result.Relationships)+len(result.LogicGateRelationships),
 	)
 	appendEvent := func(eventType string, payload map[string]any) {
 		inputs = append(inputs, store.DomainEventInput{
@@ -253,15 +253,6 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 	}
 	for _, item := range result.LogicGates {
 		appendEvent("logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
-	}
-	deferredTasks := make([]store.WorkspaceDerivedProjectionTask, 0,
-		len(result.DeferredFolderItems),
-	)
-	for _, item := range result.DeferredFolderItems {
-		deferredTasks = append(deferredTasks, store.DeferredCompanyExplorerFolderItemAssignTask(item.FolderID, item.SystemFolderKey, item.ItemType, item.ItemID, item.Position))
-	}
-	if len(deferredTasks) > 0 {
-		inputs = append(inputs, store.WorkspaceDerivedProjectionRequestedEventInput(result.CompanyID, deferredTasks, ""))
 	}
 	for _, item := range result.Relationships {
 		appendEvent("relationship_created", map[string]any{
@@ -289,6 +280,5 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 		log.Printf("failed to append workspace entity batch domain events company_id=%s count=%d: %v", result.CompanyID, len(inputs), err)
 		return
 	}
-	s.projectCommittedWorkspaceDerivedEventsWithTiming(events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(events, timings)
 }

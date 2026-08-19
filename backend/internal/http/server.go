@@ -76,9 +76,6 @@ type Server struct {
 	realtimeSpineRecoveryRetryGeneration   uint64
 	notifications                          *notifications.Service
 	kanban                                 *kanban.Service
-	workspaceDerivedCatchupCancel          context.CancelFunc
-	workspaceDerivedCatchupInterval        time.Duration
-	workspaceDerivedCatchupLimit           int
 	notificationCleanupCancel              context.CancelFunc
 	notificationCleanupInterval            time.Duration
 	notificationRetentionDuration          time.Duration
@@ -114,36 +111,34 @@ type Server struct {
 }
 
 type ServerOptions struct {
-	DisableAttachmentUploadCleanup  bool
-	AuthValidator                   AuthTokenValidator
-	TestAuthHeaderEnabled           bool
-	AuthMembershipCacheTTL          time.Duration
-	AuthMembershipCacheMaxEntries   int
-	CognitoAdmin                    CognitoAdminClient
-	EmailSender                     AuthEmailSender
-	EmailQueue                      emailqueue.Sender
-	EmailWorkerOnly                 bool
-	EmailWorkerExternalRealtime     bool
-	AppBaseURL                      string
-	BootstrapDevAdmin               BootstrapDevAdminConfig
-	NylasClient                     NylasClient
-	NylasConfig                     NylasConfig
-	AttachmentStorage               AttachmentObjectStorage
-	AttachmentVariantEnsurer        AttachmentImageVariantEnsurer
-	RealtimeTicketSecret            string
-	RealtimeBackplane               realtime.Backplane
-	RealtimeSpineSafetyInterval     time.Duration
-	RealtimeSpineStorageTimeout     time.Duration
-	RealtimeSpineClaimLease         time.Duration
-	DisableRealtimeSpine            bool
-	MaxRequestBodyBytes             int64
-	WorkspaceDerivedCatchupInterval time.Duration
-	WorkspaceDerivedCatchupLimit    int
-	NotificationCleanupInterval     time.Duration
-	NotificationRetentionDuration   time.Duration
-	NotificationCleanupLimit        int
-	DisableNotificationCleanup      bool
-	Metrics                         MetricsRecorder
+	DisableAttachmentUploadCleanup bool
+	AuthValidator                  AuthTokenValidator
+	TestAuthHeaderEnabled          bool
+	AuthMembershipCacheTTL         time.Duration
+	AuthMembershipCacheMaxEntries  int
+	CognitoAdmin                   CognitoAdminClient
+	EmailSender                    AuthEmailSender
+	EmailQueue                     emailqueue.Sender
+	EmailWorkerOnly                bool
+	EmailWorkerExternalRealtime    bool
+	AppBaseURL                     string
+	BootstrapDevAdmin              BootstrapDevAdminConfig
+	NylasClient                    NylasClient
+	NylasConfig                    NylasConfig
+	AttachmentStorage              AttachmentObjectStorage
+	AttachmentVariantEnsurer       AttachmentImageVariantEnsurer
+	RealtimeTicketSecret           string
+	RealtimeBackplane              realtime.Backplane
+	RealtimeSpineSafetyInterval    time.Duration
+	RealtimeSpineStorageTimeout    time.Duration
+	RealtimeSpineClaimLease        time.Duration
+	DisableRealtimeSpine           bool
+	MaxRequestBodyBytes            int64
+	NotificationCleanupInterval    time.Duration
+	NotificationRetentionDuration  time.Duration
+	NotificationCleanupLimit       int
+	DisableNotificationCleanup     bool
+	Metrics                        MetricsRecorder
 }
 
 func NewServer(repo store.Repository) *Server {
@@ -182,14 +177,6 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	}
 	notificationRetentionDuration := store.NormalizeNotificationRetentionDuration(options.NotificationRetentionDuration)
 	notificationCleanupLimit := store.NormalizeNotificationCleanupLimit(options.NotificationCleanupLimit)
-	workspaceDerivedCatchupInterval := options.WorkspaceDerivedCatchupInterval
-	if workspaceDerivedCatchupInterval <= 0 {
-		workspaceDerivedCatchupInterval = workspaceDerivedDomainEventCatchupInterval
-	}
-	workspaceDerivedCatchupLimit := options.WorkspaceDerivedCatchupLimit
-	if workspaceDerivedCatchupLimit <= 0 {
-		workspaceDerivedCatchupLimit = workspaceDerivedDomainEventCatchupLimit
-	}
 	metrics := options.Metrics
 	if metrics == nil {
 		metrics = NewInMemoryMetricsRecorder()
@@ -217,8 +204,6 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		realtimeSpineInitialBackplaneReady: make(chan struct{}),
 		notifications:                      notifications.NewService(repo),
 		kanban:                             kanban.NewService(repo),
-		workspaceDerivedCatchupInterval:    workspaceDerivedCatchupInterval,
-		workspaceDerivedCatchupLimit:       workspaceDerivedCatchupLimit,
 		notificationCleanupInterval:        notificationCleanupInterval,
 		notificationRetentionDuration:      notificationRetentionDuration,
 		notificationCleanupLimit:           notificationCleanupLimit,
@@ -250,10 +235,8 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		server.attachmentVariantEnsurer = repositoryAttachmentImageVariantEnsurer{repo: repo, storage: server.attachmentStorage}
 	}
 	if !options.EmailWorkerOnly {
-		server.initializeWorkspaceDerivedDomainEventCheckpoints(context.Background())
 		server.startAttachmentUploadCleanup()
 		server.startAttachmentDeletionCleanup()
-		server.startWorkspaceDerivedDomainEventCatchup()
 		server.startNotificationCleanup()
 	}
 	server.startRealtimeSpine()
@@ -284,9 +267,6 @@ func (s *Server) Close() {
 	}
 	if s.attachmentDeletionCleanupCancel != nil {
 		s.attachmentDeletionCleanupCancel()
-	}
-	if s.workspaceDerivedCatchupCancel != nil {
-		s.workspaceDerivedCatchupCancel()
 	}
 	if s.notificationCleanupCancel != nil {
 		s.notificationCleanupCancel()

@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"miraeopus/backend/internal/domain"
 	"sort"
 	"strings"
-	"time"
 )
 
 const domainEventSelectColumns = `
@@ -403,65 +401,6 @@ limit $5`, query.CompanyID, query.StreamType, query.StreamID, query.AfterSequenc
 	return items, rows.Err()
 }
 
-func (r *PostgresRepo) ListDomainEventsForNotificationProjection(query DomainEventNotificationProjectionQuery) ([]domain.DomainEvent, error) {
-	ctx := context.Background()
-	query.CompanyID = strings.TrimSpace(query.CompanyID)
-	query.AfterEventID = strings.TrimSpace(query.AfterEventID)
-	query.Limit = NormalizeDomainEventListLimit(query.Limit)
-	if query.CompanyID == "" {
-		return nil, ErrInvalid
-	}
-	afterTimestamp := query.AfterCreatedTimestamp
-	if afterTimestamp.IsZero() {
-		afterTimestamp = time.Unix(0, 0).UTC()
-	}
-
-	rows, err := r.db.QueryContext(ctx, `
-select `+domainEventSelectColumns+`
-from domain_events
-where company_id=$1::uuid
-  and (
-    created_timestamp > $2
-    or (created_timestamp = $2 and event_id::text > $3)
-  )
-order by created_timestamp asc, event_id asc
-limit $4`, query.CompanyID, afterTimestamp, query.AfterEventID, query.Limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]domain.DomainEvent, 0)
-	for rows.Next() {
-		item, err := scanDomainEvent(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (r *PostgresRepo) LatestDomainEventForNotificationProjection(companyID string) (NotificationDomainEventCheckpoint, bool, error) {
-	companyID = strings.TrimSpace(companyID)
-	if companyID == "" {
-		return NotificationDomainEventCheckpoint{}, false, ErrInvalid
-	}
-	var checkpoint NotificationDomainEventCheckpoint
-	err := r.db.QueryRowContext(context.Background(), `
-select company_id::text, created_timestamp, event_id::text
-from domain_events
-where company_id=$1::uuid
-order by created_timestamp desc, event_id desc
-limit 1`, companyID).Scan(&checkpoint.CompanyID, &checkpoint.CreatedTimestamp, &checkpoint.EventID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return NotificationDomainEventCheckpoint{}, false, nil
-	}
-	if err != nil {
-		return NotificationDomainEventCheckpoint{}, false, err
-	}
-	return checkpoint, true, nil
-}
 func (r *PostgresRepo) CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error) {
 	query, err := normalizeDomainEventStreamQuery(query)
 	if err != nil {

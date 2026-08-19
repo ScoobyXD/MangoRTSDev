@@ -189,37 +189,6 @@ func TestMemoryWorkspaceReadVersionsTrackScopedEventSemantics(t *testing.T) {
 	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:full", "", 2, true)
 }
 
-func TestMemoryWorkspaceReadVersionsIgnoreInternalDerivedProjectionRequests(t *testing.T) {
-	repo := NewMemoryRepo()
-	companyID := "11111111-1111-4111-8111-222222222223"
-	for _, eventType := range []string{WorkspaceDerivedProjectionRequestedEventType, WorkspaceDeferredFolderItemAssignEventType} {
-		if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: eventType}); err != nil {
-			t.Fatalf("AppendDomainEvent %s: %v", eventType, err)
-		}
-	}
-	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:full", "", 0, true)
-	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 0, true)
-	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:company_explorer", "", 0, true)
-}
-
-func TestWorkspaceDerivedProjectionRequestedEventInputUsesTaskPayload(t *testing.T) {
-	input := WorkspaceDerivedProjectionRequestedEventInput(
-		"company-1",
-		[]WorkspaceDerivedProjectionTask{DeferredCompanyExplorerFolderItemAssignTask("", "active_logic_gates", "logic_gate", "logic-gate-1", 0)},
-		"user-1",
-	)
-	if input.Type != WorkspaceDerivedProjectionRequestedEventType {
-		t.Fatalf("event type = %q, want %q", input.Type, WorkspaceDerivedProjectionRequestedEventType)
-	}
-	tasks, ok := input.Payload["tasks"].([]map[string]any)
-	if !ok {
-		t.Fatalf("tasks payload type = %T, want []map[string]any", input.Payload["tasks"])
-	}
-	if len(tasks) != 1 || tasks[0]["kind"] != WorkspaceDerivedTaskCompanyExplorerFolderItemAssign {
-		t.Fatalf("tasks = %+v", tasks)
-	}
-}
-
 func TestMemoryWorkspaceReadVersionsTrackBoardResources(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-333333333333"

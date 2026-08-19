@@ -111,9 +111,6 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 		}
 	}
 	eventType := strings.TrimSpace(event.Type)
-	if isWorkspaceDerivedProjectionRequestEventType(eventType) {
-		return nil
-	}
 	boardID := workspaceEventPayloadString(event.Payload, "board_id")
 	add("workspace-snapshot:full", "")
 	if stringInList(eventType, NodeListWorkspaceEventTypes) {
@@ -167,15 +164,6 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 func isWorkspaceStreamDomainEvent(event domain.DomainEvent) bool {
 	companyID := strings.TrimSpace(event.CompanyID)
 	return companyID != "" && strings.TrimSpace(event.StreamType) == workspaceDomainStreamType && strings.TrimSpace(event.StreamID) == companyID
-}
-
-func isWorkspaceDerivedProjectionRequestEventType(eventType string) bool {
-	switch strings.TrimSpace(eventType) {
-	case WorkspaceDerivedProjectionRequestedEventType, WorkspaceDeferredFolderItemAssignEventType:
-		return true
-	default:
-		return false
-	}
 }
 
 func workspaceEventPayloadString(payload map[string]any, key string) string {
