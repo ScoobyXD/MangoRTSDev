@@ -3,12 +3,12 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
-	"miraeopus/backend/internal/domain"
-	"miraeopus/backend/internal/store"
 	"net/http"
-
 	"strings"
 	"time"
+
+	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/store"
 )
 
 type communicationsEmailDraftRequest struct {
@@ -16,10 +16,8 @@ type communicationsEmailDraftRequest struct {
 	DraftID                string          `json:"draft_id"`
 	SharedInboxID          string          `json:"shared_inbox_id"`
 	AccountEmail           string          `json:"account_email"`
-	SenderAccountEmail     string          `json:"sender_account_email"`
 	Kind                   string          `json:"kind"`
 	SourceMessageID        string          `json:"source_message_id"`
-	ReplyToMessageID       string          `json:"reply_to_message_id"`
 	ToRecipients           string          `json:"to_recipients"`
 	CcRecipients           string          `json:"cc_recipients"`
 	BccRecipients          string          `json:"bcc_recipients"`
@@ -111,8 +109,27 @@ func (s *Server) handleCommunicationsEmailDraftList(w http.ResponseWriter, r *ht
 	if !ok {
 		return
 	}
+	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("kind")))
+	if kind != "" && kind != "reply" {
+		writeError(w, http.StatusBadRequest, "invalid_email_draft_kind")
+		return
+	}
+	sourceMessageIDs := r.URL.Query()["source_message_id"]
+	if len(sourceMessageIDs) > store.CommunicationsEmailDraftSourceFilterMax {
+		writeError(w, http.StatusBadRequest, "email_draft_source_filter_limit_exceeded")
+		return
+	}
+	for index := range sourceMessageIDs {
+		sourceMessageIDs[index] = strings.TrimSpace(sourceMessageIDs[index])
+		if !validAttachmentUUIDText(sourceMessageIDs[index]) {
+			writeError(w, http.StatusBadRequest, "invalid_email_draft_source_message_id")
+			return
+		}
+	}
 	listInput := scope.draftListInput(companyID)
 	listInput.ParticipantUserID = actor.User.UserID
+	listInput.Kind = kind
+	listInput.SourceMessageIDs = sourceMessageIDs
 	drafts, err := s.repo.ListCommunicationsEmailDrafts(listInput)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_email_draft_scope")
@@ -188,13 +205,8 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		return
 	}
 	companyID := strings.TrimSpace(req.CompanyID)
-	draftID := strings.TrimSpace(firstNonBlank(pathDraftID, req.DraftID))
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
-		return
-	}
-	if draftID == "" {
-		writeError(w, http.StatusBadRequest, "draft_id_required")
 		return
 	}
 	scope, ok := s.resolveCommunicationsEmailDraftScope(w, actor, companyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
@@ -205,8 +217,13 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 	if !ok {
 		return
 	}
+	requestedKind := strings.ToLower(strings.TrimSpace(req.Kind))
 	replyToJSON := "{}"
 	if len(req.ReplyToMessage) > 0 && string(req.ReplyToMessage) != "null" {
+		if requestedKind == "reply" {
+			writeError(w, http.StatusBadRequest, "email_reply_target_not_allowed")
+			return
+		}
 		if !json.Valid(req.ReplyToMessage) {
 			writeError(w, http.StatusBadRequest, "invalid_reply_to_message")
 			return
@@ -214,17 +231,16 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		replyToJSON = string(req.ReplyToMessage)
 	}
 	sourceMessageID := strings.TrimSpace(req.SourceMessageID)
-	draft, err := s.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
+	input := store.CommunicationsEmailDraftInput{
 		CompanyID:              companyID,
-		DraftID:                draftID,
 		PersonalUserID:         scope.personalUserID,
 		PersonalAccountEmail:   scope.personalAccountEmail,
 		SharedInboxID:          scope.sharedInboxID,
 		CreatedByUserID:        actor.User.UserID,
 		UpdatedByUserID:        actor.User.UserID,
-		Kind:                   firstNonBlank(req.Kind, communicationsEmailDraftKindFromID(draftID)),
+		Kind:                   requestedKind,
 		SourceMessageID:        sourceMessageID,
-		AccountEmail:           firstNonBlank(req.SenderAccountEmail, scope.accountEmail),
+		AccountEmail:           scope.accountEmail,
 		ToRecipients:           req.ToRecipients,
 		CcRecipients:           req.CcRecipients,
 		BccRecipients:          req.BccRecipients,
@@ -232,13 +248,63 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		BodyEditorHTML:         req.BodyEditorHTML,
 		ReplyToMessageJSON:     replyToJSON,
 		ScheduledSendTimestamp: scheduledAt,
-	})
+	}
+	if strings.TrimSpace(pathDraftID) == "" && requestedKind == "reply" {
+		if strings.TrimSpace(req.DraftID) != "" {
+			writeError(w, http.StatusBadRequest, "email_reply_draft_id_not_allowed")
+			return
+		}
+		draft, created, err := s.repo.EnsureCommunicationsEmailReplyDraft(input)
+		if errors.Is(err, store.ErrEmailReplySourceNotIngested) {
+			writeError(w, http.StatusConflict, "email_reply_source_not_ingested")
+			return
+		}
+		if errors.Is(err, store.ErrEmailDraftSourceNotFound) {
+			writeError(w, http.StatusConflict, "email_draft_source_not_found")
+			return
+		}
+		if errors.Is(err, store.ErrEmailDraftIdentityConflict) {
+			writeError(w, http.StatusConflict, "email_draft_source_kind_conflict")
+			return
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_email_reply_draft")
+			return
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusConflict, "email_draft_connection_not_available")
+			return
+		}
+		if errors.Is(err, store.ErrConflict) {
+			writeError(w, http.StatusConflict, "email_reply_draft_creation_conflict")
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_ensure_email_reply_draft")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"draft": s.communicationsEmailDraftResponse(draft), "created": created})
+		return
+	}
+
+	draftID := strings.TrimSpace(firstNonBlank(pathDraftID, req.DraftID))
+	if draftID == "" {
+		writeError(w, http.StatusBadRequest, "draft_id_required")
+		return
+	}
+	input.DraftID = draftID
+	input.ExistingOnly = strings.TrimSpace(pathDraftID) != "" && requestedKind == "reply"
+	draft, err := s.repo.UpsertCommunicationsEmailDraft(input)
 	if errors.Is(err, store.ErrEmailReplySourceNotIngested) {
 		writeError(w, http.StatusConflict, "email_reply_source_not_ingested")
 		return
 	}
 	if errors.Is(err, store.ErrEmailDraftSourceNotFound) {
 		writeError(w, http.StatusConflict, "email_draft_source_not_found")
+		return
+	}
+	if errors.Is(err, store.ErrEmailDraftIdentityConflict) {
+		writeError(w, http.StatusConflict, "email_draft_source_kind_conflict")
 		return
 	}
 	if errors.Is(err, store.ErrInvalid) {
@@ -558,15 +624,6 @@ func communicationsEmailDraftSummaryResponse(draft domain.CommunicationsEmailDra
 
 func communicationsEmailDraftResourceID(draft domain.CommunicationsEmailDraft) string {
 	return strings.TrimSpace(draft.DraftID)
-}
-func communicationsEmailDraftKindFromID(draftID string) string {
-	if strings.HasPrefix(strings.TrimSpace(draftID), "draft:reply:") {
-		return "reply"
-	}
-	if strings.HasPrefix(strings.TrimSpace(draftID), "draft:forward:") {
-		return "forward"
-	}
-	return "compose"
 }
 
 func parseCommunicationsOptionalTimestamp(w http.ResponseWriter, value string) (*time.Time, bool) {

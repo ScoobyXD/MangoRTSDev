@@ -14,6 +14,7 @@ import {
   emailMessageMatchesListFilters,
   ensureEmailMessageIngested,
   ensureEmailCollaboration,
+  ensureEmailReplyDraft,
   fetchCommunicationsStatus,
   getCalendarInviteEvent,
   getCommunicationsArchiveJob,
@@ -32,6 +33,7 @@ import {
   listLogicGates,
   listCommunicationsSharedInboxes,
   listEmailDrafts,
+  listEmailReplyDraftsBySource,
   listEmailFolders,
   listEmailMessages,
   listStoredEmailMessages,
@@ -1340,6 +1342,7 @@ test("durable draft API preserves exact mailbox scopes and rejects company-only 
       companyID: "company-1",
       draftID: "draft-1",
       sharedInboxID: "shared-1",
+      kind: "compose",
       to: "",
       cc: "",
       bcc: "",
@@ -1356,6 +1359,111 @@ test("durable draft API preserves exact mailbox scopes and rejects company-only 
     ]);
     assert.equal(calls[2]?.body?.shared_inbox_id, "shared-1");
     assert.equal(calls[2]?.body?.company_id, "company-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("reply drafts use server identity and bounded source indicator reads", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
+  const draft = {
+    company_id: "company-1",
+    draft_id: "draft:reply:server-1",
+    scope_type: "personal",
+    personal_user_id: "user-1",
+    personal_account_email: "me@example.test",
+    account_email: "me@example.test",
+    kind: "reply",
+    source_message_id: "stored-message-1",
+    to_recipients: "sender@example.test",
+    cc_recipients: "",
+    bcc_recipients: "",
+    subject: "Re: Hello",
+    body_editor_html: "",
+    created_timestamp: "2026-07-13T12:00:00Z",
+    updated_timestamp: "2026-07-13T12:00:00Z",
+  };
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = input.toString();
+    calls.push({
+      path,
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined,
+    });
+    if (init?.method === "POST") return jsonResponse({ draft, created: true });
+    if (init?.method === "PUT") return jsonResponse({ draft: { ...draft, draft_id: "draft:forward:server-1", kind: "forward" } });
+    return jsonResponse({ drafts: [] });
+  };
+  try {
+    const ensured = await ensureEmailReplyDraft({
+      companyID: " company-1 ",
+      accountEmail: " Me@Example.Test ",
+      sourceMessageID: " stored-message-1 ",
+      to: "sender@example.test",
+      cc: "",
+      bcc: "",
+      subject: "Re: Hello",
+      bodyEditorHTML: "",
+    });
+    assert.equal(ensured.created, true);
+    assert.equal(ensured.draft.draft_id, "draft:reply:server-1");
+    assert.deepEqual(calls[0], {
+      path: "/v1/communications/drafts",
+      method: "POST",
+      body: {
+        company_id: "company-1",
+        account_email: "me@example.test",
+        kind: "reply",
+        source_message_id: "stored-message-1",
+        to_recipients: "sender@example.test",
+        cc_recipients: "",
+        bcc_recipients: "",
+        subject: "Re: Hello",
+        body_editor_html: "",
+      },
+    });
+    assert.equal("draft_id" in (calls[0]?.body ?? {}), false);
+    assert.equal("sender_account_email" in (calls[0]?.body ?? {}), false);
+    assert.equal("reply_to_message_id" in (calls[0]?.body ?? {}), false);
+    assert.equal("reply_to_message" in (calls[0]?.body ?? {}), false);
+
+    const forwardSource = message("provider-source-1");
+    await saveEmailDraft({
+      companyID: "company-1",
+      draftID: "draft:forward:server-1",
+      accountEmail: "me@example.test",
+      kind: "forward",
+      sourceMessageID: "stored-message-1",
+      replyToMessage: forwardSource,
+      to: "recipient@example.test",
+      cc: "",
+      bcc: "",
+      subject: "Fwd: Hello",
+      bodyEditorHTML: "Forwarded body",
+    });
+    const forwardCall = calls.find((call) => call.method === "PUT");
+    assert.equal(forwardCall?.body?.kind, "forward");
+    assert.equal((forwardCall?.body?.reply_to_message as EmailMessage | undefined)?.id, forwardSource.id);
+
+    const sourceMessageIDs = Array.from({ length: 205 }, (_, index) => `stored-message-${index + 1}`);
+    await listEmailReplyDraftsBySource("company-1", { accountEmail: "me@example.test" }, [
+      ...sourceMessageIDs,
+      sourceMessageIDs[0] ?? "",
+      " ",
+    ], { refresh: true });
+    const indicatorCalls = calls.filter((call) => call.method === "GET");
+    assert.equal(indicatorCalls.length, 3);
+    assert.deepEqual(indicatorCalls.map((call) => {
+      const query = new URL(call.path, "http://mango.local").searchParams;
+      return [query.get("kind"), query.getAll("source_message_id").length];
+    }), [["reply", 100], ["reply", 100], ["reply", 5]]);
+    await assert.rejects(
+      () => listEmailDrafts("company-1", { accountEmail: "me@example.test" }, { sourceMessageIDs }),
+      /email_draft_source_message_limit_exceeded/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

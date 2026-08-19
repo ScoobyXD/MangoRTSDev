@@ -245,9 +245,10 @@ test("shared editor surfaces retain semantic identity, placeholders, and urgent 
   assert.match(projectSummary, /const \[activeRichTextBlockID, setActiveRichTextBlockID\] = useState\(""\)/);
   assert.match(projectSummary, /formattingDisabled=\{!activeRichTextBlockID \|\| !blocks\.some\(\(block\) => block\.id === activeRichTextBlockID\)\}/);
   assert.match(projectSummary, /setActiveRichTextBlockID\(""\);\s*projectFormattingControllerRef\.current = null/);
-  assert.match(projectSummary, /<AttachedEmailOrganizerPane[\s\S]*projectID=\{projectID\}[\s\S]*attachmentResourceType="project"[\s\S]*attachmentResourceID=\{projectID\}/);
-  assert.match(nodeWorkspaceParts, /const replyAttachmentResourceType: MangoAttachmentResourceType = activeDraft \? "email_draft" : attachmentResourceType/);
-  assert.match(nodeWorkspaceParts, /resourceType: replyAttachmentResourceType/);
+  assert.match(projectSummary, /<AttachedEmailOrganizerPane[\s\S]{0,400}projectID=\{projectID\}[\s\S]{0,400}attachmentRequestJSON=\{attachmentRequestJSON\}/);
+  assert.doesNotMatch(projectSummary, /<AttachedEmailOrganizerPane[\s\S]{0,800}attachmentResourceType=/);
+  assert.doesNotMatch(nodeWorkspaceParts, /replyAttachmentResourceType/);
+  assert.match(nodeWorkspaceParts, /resourceType: "email_draft"/);
   assert.match(nodeWorkspaceParts, /resourceID: replyAttachmentResourceID/);
   assert.match(richTextEditing, /element\.getAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE\)/);
   assert.match(richTextEditing, /span\.setAttribute\(EDITOR_MENTION_KIND_ATTRIBUTE, mentionKind\)/);
@@ -296,7 +297,7 @@ test("toolbar cancellation and passive format reads preserve keyboard focus", ()
   assert.doesNotMatch(readFormatState, /restoreFormattingSelection|\.focus\(/);
 });
 
-test("Project and draftless Node attached-email replies keep focus isolation", () => {
+test("Node and Project attached-email replies keep focus isolation", () => {
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
@@ -1060,7 +1061,7 @@ test("mail signatures are mailbox scoped unified rich editors and late hydration
   assert.match(homeMailDrafts, /body_editor_html/);
 });
 
-test("project-attached replies load the exact mailbox signature and append it idempotently", () => {
+test("project-attached replies create immediately and apply the exact mailbox signature once", () => {
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const projectSummary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const signatureBody = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/emailSignatureBody.ts"), "utf8");
@@ -1072,15 +1073,14 @@ test("project-attached replies load the exact mailbox signature and append it id
   );
   assert.match(nodeWorkspaceParts, /const mailboxSignatureStateRef = useRef<ScopedEmailSignatureState>/);
   assert.match(nodeWorkspaceParts, /loadedEmailSignatureForScope\(mailboxSignatureStateRef\.current, mailboxSignatureScopeKey\)/);
-  assert.match(nodeWorkspaceParts, /replySignatureSessionRef\.current = beginEmailSignatureApplicationSession/);
-  assert.equal((nodeWorkspaceParts.match(/ensureReplySignature\(target\.id\)/g) ?? []).length, 1);
-  assert.ok((nodeWorkspaceParts.match(/openReplyTarget\(target,/g) ?? []).length >= 2);
-  assert.match(nodeWorkspaceParts, /const signature = await loadMailboxSignature\(\)/);
-  assert.ok(nodeWorkspaceParts.indexOf("const signature = await loadMailboxSignature()") < nodeWorkspaceParts.indexOf("const sent = await sendEmail("));
+  assert.match(nodeWorkspaceParts, /const signatureRequest = indicatedDraftID[\s\S]{0,240}loadMailboxSignature\(\)\.catch\(\(\) => ""\)/);
+  assert.match(nodeWorkspaceParts, /: ensureEmailReplyDraft\(\{/);
+  assert.match(nodeWorkspaceParts, /if \(created && !cachedSignature\)[\s\S]{0,260}applyEmailSignature\(current, signature\)/);
+  assert.ok((nodeWorkspaceParts.match(/openReplyTarget\(target\)/g) ?? []).length >= 2);
   assert.match(nodeWorkspaceParts, /replySubmissionIdentityRef\.current/);
   assert.match(nodeWorkspaceParts, /latestIdentity\.messageID !== submittedIdentity\.messageID/);
-  assert.match(nodeWorkspaceParts, /applyEmailSignatureOnceForSession/);
-  assert.doesNotMatch(nodeWorkspaceParts, /setBodyDraft\(mailboxSignature/);
+  assert.doesNotMatch(nodeWorkspaceParts, /replySignatureSessionRef|applyEmailSignatureOnceForSession|beginEmailSignatureApplicationSession/);
+  assert.match(nodeWorkspaceParts, /window\.setTimeout\(\(\) => \{[\s\S]{0,160}saveEmailDraft\(\{/);
   assert.match(signatureBody, /if \(!cleanSignature \|\| emailBodyHasSignature\(body, cleanSignature\)\) return body/);
 });
 

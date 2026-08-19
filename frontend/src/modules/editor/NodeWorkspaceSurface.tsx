@@ -3100,6 +3100,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
 				companyID={companyID}
 				currentUserID={author.userID}
               companyUsers={companyUsers}
+              attachmentRequestJSON={requestJSON}
               repliesEnabled={canEdit}
               onReplyEditorFocus={() => {
                 setFocusedTextBlockID("");
@@ -3476,10 +3477,6 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                                 currentUserID={author.userID}
                                 companyUsers={companyUsers}
                                 attachmentRequestJSON={requestJSON}
-                                attachmentResourceType="node"
-                                attachmentResourceID={nodeID}
-                                attachmentInformationID={block.id}
-                                attachmentEditorSurface="node_text_block_linked_email"
                                 editable={canEdit}
                                 accent={blockColor || accent}
                                 surfaceText={surfaceText}

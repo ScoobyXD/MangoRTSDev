@@ -98,7 +98,7 @@ P40 - Status grouping is shared by Updates and Project Logic Gates / Nodes. Asce
 P41 - Every Project text box has an independent exact collaboration scope, revision stream, snapshot, and durable operation queue. Normal document typing sends HTML-patch micro-batches only; title/attachment changes use the metadata PATCH and cannot overwrite the collaboration body.
 P42 - Project reload/reconnect subscribes first, buffers committed events, validates the canonical snapshot/ETag, applies above-snapshot revisions in order, and reapplies durable pending operations. Tombstone is terminal and a late operation cannot recreate the text box.
 P43 - Remote Project text-box operations apply live to the exact mounted document without echo-saving or a focus-time whole-document conflict. Selection is preserved by the shared hydration boundary; duplicates are ignored and gaps recover automatically through a full snapshot.
-P44 - Replies from the Project-wide email column use the Project as attachment resource owner and identify the editor as `project-attached-email-reply`. Focusing that reply clears the outer Project textbox formatting controller.
+P44 - The Project-wide email column exposes Reply only when the user has Project Edit plus exact personal-account ownership or current Shared Inbox Edit for an exact ingested source. It opens the same owner-only mailbox draft used by Triage and Node; files and inline images use that draft's `email_draft` attachment scope, and focusing the reply clears the outer Project textbox formatting controller.
 P45 - The Project editor header keeps Editor, Permissions, the shared formatting toolbar, and Outline Styles/Automatic Numbering in its primary area. Assignments, Open project in new tab, and Minimize project move into one keyboard-operable **More editor actions** menu when those actions are available, without changing their permission, disabled, or navigation behavior.
 P46 - Project dialogs and previews mount through the shared body-level overlay portal above Key Views, Explorer, Search Explorer, and feature-local stacking contexts and trap/restore focus when blocking. The Logic Gates / Nodes editor remains in normal document flow beneath its selected row except while its explicit fullscreen action temporarily mounts it in that shared modal layer.
 P47 - Expanding a node in Logic Gates / Nodes removes the row-depth indentation from the editor surface so the editor spans the full relationship-panel width while the collapsed relationship row keeps its normal grouping indentation.
@@ -369,9 +369,9 @@ Given:
 
 Expected:
 - The personal attachment records the active account email and the shared conversion records both shared-inbox ID and account email.
-- Reopening either message uses the same stored-thread disclosure, recipient, received-attachment, and invitation-response contract as My Triage, Shared Triage, and Nodes. The retained Project surface may expose Reply, Reply All, and owner drafts; the Node surface exposes draftless Reply only.
+- Reopening either message uses the same stored-thread disclosure, recipient, received-attachment, and invitation-response contract as My Triage, Shared Triage, and Nodes. Project and Node expose Reply or **My Draft** only; My Triage and Shared Triage retain Reply All and Forward.
 - Shared attachment reads and actions retain shared-inbox authorization and do not silently fall back to a personal grant.
-- The reply links files and inline images to the project resource with the originating project text-block information ID and the `project-attached-email-reply` editor surface.
+- The reply links files and inline images only to the exact owner mailbox draft through resource type `email_draft`; no Project relationship or information ID owns outgoing mail attachments.
 - Focusing the reply immediately clears the outer project text-block formatting controller, leaving the reply toolbar as the only formatting owner.
 
 ### Scenario P-S11: Universal Grouped Project Relationships

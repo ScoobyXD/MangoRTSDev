@@ -18,6 +18,7 @@ import {
   downloadEmailAttachment,
   emailMessageWithLogicGatePlacement,
   emailMessageMatchesListFilters,
+  ensureEmailReplyDraft,
   ensureEmailMessageIngested,
   EVENT_COMMUNICATIONS_SHARED_INBOXES_UPDATED,
   fetchCommunicationsAuthURL,
@@ -97,7 +98,7 @@ import { EmailReferencePreviewHost } from "./EmailReferencePreviewHost";
 import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
-import { applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, createHomeMailReplyDraftID, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, ensureHomeMailDraftAttachmentTarget, homeMailDraftMatchesScope, homeMailDraftToCompose, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailDraft, loadHomeMailDrafts, loadHomeMailSignature, mergeHomeMailDrafts, readHomeMailDrafts, readHomeMailDraftsForScope, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
+import { applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, ensureHomeMailDraftAttachmentTarget, homeMailDraftFromRemote, homeMailDraftMatchesScope, homeMailDraftToCompose, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailDraft, loadHomeMailDrafts, loadHomeMailSignature, mergeHomeMailDrafts, readHomeMailDrafts, readHomeMailDraftsForScope, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
 import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, consumeHomeMailboxLocalMutationEcho, createHomeArchiveStatusCoordinator, createHomeMailboxFolderLoadCoordinator, createHomeMailboxRealtimeCoordinator, forgetHomeMailboxLocalMutationEchoes, homeMailboxComposeSubmissionIsCurrent, homeMailboxCountKey, homeMailboxFolderOwnerIsCurrent, homeMailboxPendingMessageIDs, homeMailboxPendingMessageKey, homeMailboxRealtimeTargetKey, homeMailboxRequestOwnerIsCurrent, rememberHomeMailboxLocalMutationEchoes, selectHomeMailboxRealtimeTarget, type HomeMailboxCountOverrideKey, type HomeMailboxCountOverrides, type HomeMailboxFolderOwner, type HomeMailboxLocalMutationEchoRegistry, type HomeMailboxRequestOwner } from "./homeMailboxRealtime";
 import { ARCHIVE_QUEUE_MAX_EMAILS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS } from "./homeConstants";
 import { TRIAGE_MESSAGE_DRAG_MIME } from "../../modules/triage/triageDragDrop";
@@ -589,6 +590,7 @@ export function HomePage({
   const pendingStarredMessageIDsRef = useRef<Set<string>>(new Set());
   const scheduledMailDraftsInFlightRef = useRef<Set<string>>(new Set());
   const pendingAutoSignatureRef = useRef<{ draftID: string; scopeKey: string } | null>(null);
+  const composeOpenGenerationRef = useRef(0);
   const emailSignatureEditRevisionRef = useRef(0);
   const folderReloadTimerRef = useRef<number | null>(null);
   const messageListRefreshTimerRef = useRef<number | null>(null);
@@ -3076,10 +3078,12 @@ export function HomePage({
   const composeDraftID = useCallback((value: ComposeState): string => {
     const currentDraftID = value.draftID.trim();
     if (currentDraftID) return currentDraftID;
-    const replyToMessageID = value.replyToMessageID.trim();
-    if (replyToMessageID) return createHomeMailReplyDraftID(value.sharedInboxID, replyToMessageID, value.accountEmail, currentUserID);
     return createHomeMailDraftID();
-  }, [currentUserID]);
+  }, []);
+  const advanceComposeOpenGeneration = useCallback((): number => {
+    composeOpenGenerationRef.current += 1;
+    return composeOpenGenerationRef.current;
+  }, []);
   const setMailDraftsForScopeIfActive = useCallback((
     drafts: HomeMailDraft[],
     sharedInboxID: string,
@@ -3114,41 +3118,53 @@ export function HomePage({
         setError(formatError(draftError, "Failed to save draft"));
       });
     if (options?.keepOpen && composeForSave.draftID !== composeAtSave.draftID) {
+      composeRef.current = composeForSave;
       setCompose(composeForSave);
     }
     if (shouldSave && !options?.quiet) setNotice("Draft saved.");
     return shouldSave;
   }, [companyID, composeDraftID, composeScopeEmailSignature, currentUserID, setMailDraftsForScopeIfActive]);
   const openPendingMailbox = useCallback(() => {
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("primary");
-  }, [saveCurrentComposeDraft, selectMailbox]);
+  }, [advanceComposeOpenGeneration, saveCurrentComposeDraft, selectMailbox]);
   const openStarredMailbox = useCallback(() => {
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("starred");
-  }, [saveCurrentComposeDraft, selectMailbox]);
+  }, [advanceComposeOpenGeneration, saveCurrentComposeDraft, selectMailbox]);
   const openDraftsMailbox = useCallback(() => {
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("drafts");
-  }, [saveCurrentComposeDraft, selectMailbox]);
+    const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
+    const accountEmail = sharedInboxID ? "" : activeMailAccountEmailRef.current;
+    void loadHomeMailDrafts(companyID, currentUserID, sharedInboxID, accountEmail)
+      .then((drafts) => setMailDraftsForScopeIfActive(drafts, sharedInboxID, accountEmail))
+      .catch((cause) => setError(formatError(cause, "Failed to load email drafts")));
+  }, [advanceComposeOpenGeneration, companyID, currentUserID, saveCurrentComposeDraft, selectMailbox, setMailDraftsForScopeIfActive]);
   const openSentMailbox = useCallback(() => {
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("sent");
-  }, [saveCurrentComposeDraft, selectMailbox]);
+  }, [advanceComposeOpenGeneration, saveCurrentComposeDraft, selectMailbox]);
   const openAllMailbox = useCallback(() => {
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("all");
-  }, [saveCurrentComposeDraft, selectMailbox]);
+  }, [advanceComposeOpenGeneration, saveCurrentComposeDraft, selectMailbox]);
   const openSpamMailbox = useCallback(() => {
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
     selectMailbox("spam");
-  }, [saveCurrentComposeDraft, selectMailbox]);
+  }, [advanceComposeOpenGeneration, saveCurrentComposeDraft, selectMailbox]);
   const currentMailComposeError = (targetSharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current)) => {
     const cleanSharedInboxID = targetSharedInboxID.trim();
     if (activeViewID === "shared-root" && !cleanSharedInboxID) return "Select a Shared Triage inbox before composing.";
@@ -3172,6 +3188,7 @@ export function HomePage({
       setError(composeError);
       return;
     }
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
     const draftID = createHomeMailDraftID();
     pendingAutoSignatureRef.current = activeScopeEmailSignature.trim()
@@ -3201,61 +3218,60 @@ export function HomePage({
       setError(composeError);
       return;
     }
-    saveCurrentComposeDraft({ quiet: true });
+    saveCurrentComposeDraft({ quiet: true, keepOpen: true });
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     const accountEmail = (activeMailAccountEmail ?? "").trim();
+    const requestID = advanceComposeOpenGeneration();
+    const requestMailboxScopeKey = activeEmailMailboxScopeKeyRef.current;
+    const requestViewID = activeViewIDRef.current;
+    const requestMailbox = mailboxRef.current;
+    const requestSelectionGeneration = messageSelectionGenerationRef.current;
+    const requestStillCurrent = () => (
+      composeOpenGenerationRef.current === requestID
+      && activeEmailMailboxScopeKeyRef.current === requestMailboxScopeKey
+      && activeViewIDRef.current === requestViewID
+      && mailboxRef.current === requestMailbox
+      && messageSelectionGenerationRef.current === requestSelectionGeneration
+    );
     const focusRequestID = composeRef.current.focusRequestID + 1;
-    const existingDraftID = createHomeMailReplyDraftID(sharedInboxID, sourceMessageID, accountEmail, currentUserID);
-    const existingDraft = activeMailDrafts.find((draft) => draft.id === existingDraftID);
-    if (existingDraft) {
-      pendingAutoSignatureRef.current = null;
+    const recipients = mode === "reply-all" ? replyAllRecipients(sourceMessage, accountEmail) : replyRecipients(sourceMessage, accountEmail);
+    void ensureEmailReplyDraft({
+      companyID,
+      sharedInboxID: sharedInboxID || undefined,
+      accountEmail: sharedInboxID ? undefined : accountEmail,
+      sourceMessageID,
+      to: recipients.to,
+      cc: recipients.cc,
+      bcc: "",
+      subject: replySubject(sourceMessage.subject || ""),
+      bodyEditorHTML: composeBodyWithSignature(activeScopeEmailSignature),
+    }).then(({ draft, created }) => {
+      if (!requestStillCurrent()) return;
+      const ensuredDraft = homeMailDraftFromRemote(draft, companyID, currentUserID);
+      if (!ensuredDraft) throw new Error("email_draft_not_found");
       const requiredReplyAllRecipients = mode === "reply-all" ? replyAllRecipients(sourceMessage, accountEmail) : null;
       const to = requiredReplyAllRecipients
-        ? mergeEmailAddressDrafts([existingDraft.to, requiredReplyAllRecipients.to])
-        : existingDraft.to;
+        ? mergeEmailAddressDrafts([ensuredDraft.to, requiredReplyAllRecipients.to])
+        : ensuredDraft.to;
       const cc = requiredReplyAllRecipients
-        ? mergeEmailAddressDrafts([existingDraft.cc, requiredReplyAllRecipients.cc], [to])
-        : existingDraft.cc;
-      const nextCompose = {
-			...homeMailDraftToCompose(existingDraft),
-        replyToMessage: existingDraft.replyToMessage ?? sourceMessage,
+        ? mergeEmailAddressDrafts([ensuredDraft.cc, requiredReplyAllRecipients.cc], [to])
+        : ensuredDraft.cc;
+      const nextCompose: ComposeState = {
+        ...homeMailDraftToCompose(ensuredDraft),
+        replyToMessage: sourceMessage,
         focusRequestID,
         to,
         cc,
       };
-		composeRef.current = nextCompose;
-		setCompose(nextCompose);
-		void loadHomeMailDraft(companyID, currentUserID, existingDraft).then((hydrated) => {
-			if (!hydrated) return;
-			setMailDrafts((current) => mergeHomeMailDrafts([hydrated], current));
-			setCompose((current) => current.draftID === hydrated.id ? {
-				...homeMailDraftToCompose(hydrated),
-				focusRequestID: current.focusRequestID,
-			} : current);
-		}).catch((cause) => setError(formatError(cause, "Failed to load email draft")));
-		return;
-    }
-		const recipients = mode === "reply-all" ? replyAllRecipients(sourceMessage, accountEmail) : replyRecipients(sourceMessage, accountEmail);
-    pendingAutoSignatureRef.current = activeScopeEmailSignature.trim()
-      ? null
-      : { draftID: existingDraftID, scopeKey: activeSignatureScopeKey };
-    const nextCompose: ComposeState = {
-      ...emptyCompose,
-      kind: "reply",
-      open: true,
-      draftID: existingDraftID,
-      sharedInboxID,
-      accountEmail,
-      replyToMessageID: sourceMessage.id,
-      replyToMessage: sourceMessage,
-      focusRequestID,
-      to: recipients.to,
-      cc: recipients.cc,
-      subject: replySubject(sourceMessage.subject || ""),
-      body: composeBodyWithSignature(activeScopeEmailSignature),
-    };
-    composeRef.current = nextCompose;
-    setCompose(nextCompose);
+      pendingAutoSignatureRef.current = created && !activeScopeEmailSignature.trim()
+        ? { draftID: ensuredDraft.id, scopeKey: activeSignatureScopeKey }
+        : null;
+      setMailDrafts((current) => mergeHomeMailDrafts([ensuredDraft], current));
+      composeRef.current = nextCompose;
+      setCompose(nextCompose);
+    }).catch((cause) => {
+      if (requestStillCurrent()) setError(formatError(cause, "Failed to open email draft"));
+    });
   };
   const applyEmailCollaborationChange = useCallback((collaboration: CommunicationsEmailCollaboration) => {
     setEmailCollaborations((current) => [
@@ -3299,6 +3315,7 @@ export function HomePage({
       setError(composeError);
       return;
     }
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     const accountEmail = (activeMailAccountEmail ?? "").trim();
@@ -3417,6 +3434,7 @@ export function HomePage({
     const visibleOwner = currentMailboxRequestOwner();
     const closeSubmittedCompose = (submitted: ComposeState): boolean => {
       if (!homeMailboxComposeSubmissionIsCurrent(composeRef.current, submitted)) return false;
+      advanceComposeOpenGeneration();
       composeRef.current = emptyCompose;
       setCompose(emptyCompose);
       return true;
@@ -4165,8 +4183,10 @@ export function HomePage({
   }, [activeMailAccountEmail, companyID, currentMessageFilterKey, currentUserID, forgetLocalMailboxMutationEchoes, handleEmailAccessExpired, rememberLocalMailboxMutationEchoes, scheduleMessageListRefresh, showSharedInboxEmailConnectionIssue]);
   const selectMessageRow = useCallback((message: EmailMessage, modifiers: MessageSelectionModifiers) => {
     activeDeleteSelectionKindRef.current = "message";
+    const composeOpenGeneration = advanceComposeOpenGeneration();
     if (compose.open) {
       saveCurrentComposeDraft({ quiet: true });
+      composeRef.current = emptyCompose;
       setCompose(emptyCompose);
     }
     const clickedRowKey = emailMessageRowKey(message);
@@ -4189,6 +4209,7 @@ export function HomePage({
       ? mergeEmailDetailMessage(previousPrimaryMessage, primaryMessage)
       : primaryMessage;
     messageSelectionGenerationRef.current += 1;
+    const selectionGeneration = messageSelectionGenerationRef.current;
     selectedMessageIDRef.current = primaryID;
     selectedMessageRowKeyRef.current = primaryRowKey;
     selectedMessageRef.current = visiblePrimaryMessage;
@@ -4206,29 +4227,45 @@ export function HomePage({
     setMessageContextMenu(null);
     if (mailboxRef.current === "drafts" || homeMessageIsDraft(visiblePrimaryMessage)) {
       const draft = activeMailDrafts.find((item) => item.id === primaryID);
-		if (draft) {
-			setCompose(homeMailDraftToCompose(draft));
-			void loadHomeMailDraft(companyID, currentUserID, draft).then((hydrated) => {
-				if (!hydrated) return;
-				setMailDrafts((current) => mergeHomeMailDrafts([hydrated], current));
-				setCompose((current) => current.draftID === hydrated.id ? homeMailDraftToCompose(hydrated) : current);
-			}).catch((cause) => setError(formatError(cause, "Failed to load email draft")));
-			const replyToMessageID = draft.replyToMessageID.trim();
-        if (replyToMessageID && !draft.replyToMessage) {
-          void getEmailMessage(replyToMessageID, companyID, draft.sharedInboxID || undefined, {
-            userID: currentUserID,
-            accountEmail: draft.accountEmail,
-          })
-            .then((message) => {
-              setCompose((current) => current.draftID === draft.id ? { ...current, replyToMessage: message } : current);
+      if (draft) {
+        const draftID = draft.id;
+        void loadHomeMailDraft(companyID, currentUserID, draft).then((hydrated) => {
+          if (
+            !hydrated
+            || hydrated.id !== draftID
+            || composeOpenGenerationRef.current !== composeOpenGeneration
+            || messageSelectionGenerationRef.current !== selectionGeneration
+            || selectedMessageIDRef.current !== draftID
+          ) return;
+          setMailDrafts((current) => mergeHomeMailDrafts([hydrated], current));
+          setCompose(homeMailDraftToCompose(hydrated));
+          const replyToMessageID = hydrated.replyToMessageID.trim();
+          if (replyToMessageID && !hydrated.replyToMessage) {
+            void getEmailMessage(replyToMessageID, companyID, hydrated.sharedInboxID || undefined, {
+              userID: currentUserID,
+              accountEmail: hydrated.accountEmail,
             })
-            .catch(() => {});
-        }
+              .then((sourceMessage) => {
+                if (
+                  messageSelectionGenerationRef.current !== selectionGeneration
+                  || selectedMessageIDRef.current !== draftID
+                ) return;
+                setCompose((current) => current.draftID === draftID ? { ...current, replyToMessage: sourceMessage } : current);
+              })
+              .catch(() => {});
+          }
+        }).catch((cause) => {
+          if (
+            composeOpenGenerationRef.current === composeOpenGeneration
+            && messageSelectionGenerationRef.current === selectionGeneration
+            && selectedMessageIDRef.current === draftID
+          ) setError(formatError(cause, "Failed to load email draft"));
+        });
       }
       return;
     }
     markMessageReadFromListSelection(visiblePrimaryMessage);
-  }, [activeMailDrafts, companyID, compose.open, markMessageReadFromListSelection, messages, saveCurrentComposeDraft, selectedMessageIDs, selectionAnchorMessageID]);
+  }, [activeMailDrafts, advanceComposeOpenGeneration, companyID, compose.open, markMessageReadFromListSelection, messages, saveCurrentComposeDraft, selectedMessageIDs, selectionAnchorMessageID]);
   const openMessageContextMenu = useCallback((message: EmailMessage, event: React.MouseEvent) => {
     event.preventDefault();
     activeDeleteSelectionKindRef.current = "message";
@@ -4307,7 +4344,11 @@ export function HomePage({
       .then((drafts) => {
         setMailDraftsForScopeIfActive(drafts, sharedInboxID, accountEmail);
         removeMessagesFromVisibleMailList(ids);
-        if (compose.open && compose.draftID.trim() && ids.includes(compose.draftID.trim())) setCompose(emptyCompose);
+        if (compose.open && compose.draftID.trim() && ids.includes(compose.draftID.trim())) {
+          advanceComposeOpenGeneration();
+          composeRef.current = emptyCompose;
+          setCompose(emptyCompose);
+        }
         setSelectedMessageIDs(new Set());
         setSelectionAnchorMessageID("");
         setMessageContextMenu(null);
@@ -4317,7 +4358,7 @@ export function HomePage({
         setError(formatError(deleteError, "Failed to delete draft"));
       })
       .finally(() => setBusy(""));
-  }, [activeMailAccountEmail, activeSharedInboxFolderID, companyID, compose.draftID, compose.open, currentUserID, removeMessagesFromVisibleMailList, setMailDraftsForScopeIfActive]);
+  }, [activeMailAccountEmail, activeSharedInboxFolderID, advanceComposeOpenGeneration, companyID, compose.draftID, compose.open, currentUserID, removeMessagesFromVisibleMailList, setMailDraftsForScopeIfActive]);
   const requestDeleteSelection = useCallback(() => {
     requestDeleteMessages(getSelectedMessageIDsForAction());
   }, [getSelectedMessageIDsForAction, requestDeleteMessages]);
@@ -5284,14 +5325,17 @@ export function HomePage({
   const mailboxActionBusy = busy === "archive" || busy === "unarchive";
   const unreadMessageCount = messages.reduce((count, message) => count + (message.unread ? 1 : 0), 0);
   const closeCompose = useCallback(() => {
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft();
     composeRef.current = emptyCompose;
     setCompose(emptyCompose);
-  }, [saveCurrentComposeDraft]);
+  }, [advanceComposeOpenGeneration, saveCurrentComposeDraft]);
   const saveComposeAndStayOpen = useCallback((composeAtSave: ComposeState) => {
+    advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ keepOpen: true }, composeAtSave);
-  }, [saveCurrentComposeDraft]);
+  }, [advanceComposeOpenGeneration, saveCurrentComposeDraft]);
   const ensureComposeDraft = useCallback(async (composeAtEnsure: ComposeState): Promise<ComposeState> => {
+    advanceComposeOpenGeneration();
     const current = composeRef.current;
     if (
       !current.open
@@ -5320,7 +5364,7 @@ export function HomePage({
     ) throw new Error("email_draft_target_changed");
     setMailDraftsForScopeIfActive(drafts, composeForEnsure.sharedInboxID, composeForEnsure.accountEmail);
     return composeForEnsure;
-  }, [companyID, composeDraftID, composeScopeEmailSignature, currentUserID, setMailDraftsForScopeIfActive]);
+  }, [advanceComposeOpenGeneration, companyID, composeDraftID, composeScopeEmailSignature, currentUserID, setMailDraftsForScopeIfActive]);
   const discardEmptyComposeDraft = useCallback((preparedCompose: ComposeState) => {
     const current = composeRef.current;
     const draftID = preparedCompose.draftID.trim();
@@ -5349,12 +5393,13 @@ export function HomePage({
     });
   }, [companyID, composeScopeEmailSignature, currentUserID, setMailDraftsForScopeIfActive]);
   const handleComposeChange = useCallback((next: React.SetStateAction<ComposeState>) => {
+    advanceComposeOpenGeneration();
     const resolved = typeof next === "function"
       ? (next as (current: ComposeState) => ComposeState)(composeRef.current)
       : next;
     composeRef.current = resolved;
     setCompose(resolved);
-  }, []);
+  }, [advanceComposeOpenGeneration]);
   const handleEmailSignatureChange = useCallback((value: string) => {
     emailSignatureEditRevisionRef.current += 1;
     setEmailSignature(value);
