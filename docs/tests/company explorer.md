@@ -133,6 +133,7 @@ E71 - Company creation initializes Unfiled, Projects, and Logic Gates. Project a
 E72 - Home, My Triage, RACI views, My Work, Project Management, and relationship graphs use their exact domain endpoints. They never preload a complete Explorer folder tree, call the retired Node-folder or Logic-Gate-folder categories, or fetch the retired full workspace browser snapshot.
 E73 - Simultaneous requests for the same Explorer root or exact parent share one in-flight HTTP request. Different parent IDs remain independent.
 E74 - Dropping an Explorer folder onto a Home or Project target loads only that selected folder branch through child reads. It never preloads the complete Explorer tree.
+E75 - Mango runs no workspace-derived projector, catch-up timer, or request-event producer. Historical projector request events and checkpoint rows are not runtime work queues.
 
 
 ## Bug History

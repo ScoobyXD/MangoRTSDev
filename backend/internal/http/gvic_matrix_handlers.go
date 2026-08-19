@@ -141,7 +141,6 @@ func (s *Server) handleRACIMatrixNodesV2(w http.ResponseWriter, r *http.Request)
 	if !writeRACIMatrixNodeCreateError(w, err) {
 		return
 	}
-	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusCreated, result)
@@ -249,7 +248,6 @@ func (s *Server) handleRACIMatrixNodeMoveV2(w http.ResponseWriter, r *http.Reque
 	if !writeLogicGateWorkMutationError(w, err, "failed_to_move_gvic_matrix_node") {
 		return
 	}
-	s.projectCommittedWorkspaceDerivedEventsWithTiming(result.Events, timings)
 	s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
 	s.projectCommittedNotificationEventsWithTiming(result.Events, timings)
 	writeJSON(w, http.StatusOK, logicGateWorkAssignmentResultPayload(result))

@@ -1134,8 +1134,6 @@ type DomainEventRepository interface {
 	AppendDomainEvent(input DomainEventInput) (domain.DomainEvent, error)
 	AppendDomainEvents(inputs []DomainEventInput) ([]domain.DomainEvent, error)
 	ListDomainEventsAfter(query DomainEventReplayQuery) ([]domain.DomainEvent, error)
-	ListDomainEventsForNotificationProjection(query DomainEventNotificationProjectionQuery) ([]domain.DomainEvent, error)
-	LatestDomainEventForNotificationProjection(companyID string) (NotificationDomainEventCheckpoint, bool, error)
 	CurrentDomainEventSequence(query DomainEventStreamQuery) (int64, error)
 	DomainEventExistsByIdempotencyKey(companyID, idempotencyKey string) (bool, error)
 	CurrentWorkspaceReadVersion(query WorkspaceReadVersionQuery) (int64, bool, error)
@@ -1758,24 +1756,15 @@ type WorkspaceEntityBatchEntityMapping struct {
 	EntityID string `json:"entity_id"`
 }
 
-type DeferredCompanyExplorerFolderItemAssignment struct {
-	FolderID        string
-	SystemFolderKey string
-	ItemType        string
-	ItemID          string
-	Position        int
-}
-
 type WorkspaceEntityBatchResult struct {
-	CompanyID              string                                        `json:"company_id"`
-	EntityKind             string                                        `json:"entity_kind"`
-	EntityMappings         []WorkspaceEntityBatchEntityMapping           `json:"entity_mappings"`
-	Nodes                  []domain.Node                                 `json:"nodes,omitempty"`
-	LogicGates             []domain.LogicGate                            `json:"logic_gates,omitempty"`
-	Relationships          []domain.NodeRelationship                     `json:"relationships,omitempty"`
-	LogicGateRelationships []domain.LogicGateRelationship                `json:"logic_gate_relationships,omitempty"`
-	FolderItems            []domain.CompanyExplorerFolderItem            `json:"folder_items,omitempty"`
-	DeferredFolderItems    []DeferredCompanyExplorerFolderItemAssignment `json:"-"`
+	CompanyID              string                              `json:"company_id"`
+	EntityKind             string                              `json:"entity_kind"`
+	EntityMappings         []WorkspaceEntityBatchEntityMapping `json:"entity_mappings"`
+	Nodes                  []domain.Node                       `json:"nodes,omitempty"`
+	LogicGates             []domain.LogicGate                  `json:"logic_gates,omitempty"`
+	Relationships          []domain.NodeRelationship           `json:"relationships,omitempty"`
+	LogicGateRelationships []domain.LogicGateRelationship      `json:"logic_gate_relationships,omitempty"`
+	FolderItems            []domain.CompanyExplorerFolderItem  `json:"folder_items,omitempty"`
 }
 
 type RACIMatrixNodeCreateInput struct {
@@ -2268,19 +2257,6 @@ type NotificationDeleteInput struct {
 type NotificationSummaryInput struct {
 	UserID    string
 	CompanyID string
-}
-
-type NotificationDomainEventCheckpoint struct {
-	CompanyID        string
-	CreatedTimestamp time.Time
-	EventID          string
-}
-
-type DomainEventNotificationProjectionQuery struct {
-	CompanyID             string
-	AfterCreatedTimestamp time.Time
-	AfterEventID          string
-	Limit                 int
 }
 
 func NormalizeNotificationListLimit(limit int) int {
