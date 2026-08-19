@@ -264,9 +264,11 @@ export function readMangoTiptapClipboardPaste(
   let imageCount = countMangoTiptapRichClipboardImages(ownerDocument, html);
 
   if (imageCount === 0 && imageFiles.length > 0) {
+    if (!html.trim() && clipboardData.getData("text/tab-separated-values").trim()) return null;
     const template = ownerDocument.createElement("template");
     if (html.trim()) {
       template.innerHTML = html;
+      if (template.content.querySelector("table td, table th")) return null;
     } else {
       for (const line of clipboardData.getData("text/plain").split(/\r?\n/)) {
         const paragraph = ownerDocument.createElement("p");

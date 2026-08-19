@@ -827,6 +827,7 @@ function appendSanitizedNode(source: Node, target: Node, ownerDocument: Document
 
   const element = source as HTMLElement;
   const tagName = element.tagName.toLowerCase();
+  if (tagName === "style" || tagName === "script") return;
   if (
     element.getAttribute(EDITOR_TABLE_ALIGNMENT_CONTROL_ATTRIBUTE) === "true"
     || element.hasAttribute(EDITOR_TABLE_ALIGNMENT_ACTION_ATTRIBUTE)
