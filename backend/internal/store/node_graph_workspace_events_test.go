@@ -2,7 +2,9 @@ package store
 
 import (
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"testing"
+	"time"
 )
 
 func TestMemoryNodeGraphWorkspaceEventsAreDurableAndReplayable(t *testing.T) {
@@ -118,6 +120,20 @@ func TestMemoryNodeGraphWorkspaceEventAppendFailureRollsBackState(t *testing.T) 
 		if err != nil {
 			t.Fatalf("CreateNode setup: %v", err)
 		}
+		now := time.Now().UTC()
+		draftID, attachmentID, relationshipID := "shared-draft", newUUIDv7String(), newUUIDv7String()
+		repo.mu.Lock()
+		repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)] = domain.CommunicationsEmailDraft{
+			CompanyID: companyID, DraftID: draftID, SharedNodeID: node.NodeID, Revision: 1, Kind: "reply",
+		}
+		repo.attachments[attachmentKey(companyID, attachmentID)] = domain.Attachment{
+			CompanyID: companyID, AttachmentID: attachmentID, OriginalFilename: "keep.txt", CreatedTimestamp: now,
+		}
+		repo.resourceAttachments[relationshipID] = domain.ResourceAttachment{
+			CompanyID: companyID, ResourceAttachmentID: relationshipID, ResourceType: "email_draft",
+			ResourceID: draftID, AttachmentID: attachmentID, CreatedTimestamp: now,
+		}
+		repo.mu.Unlock()
 		repo.domainEventAppendErr = errAppend
 		_, err = repo.DeleteNodeAndWorkspaceEvent(companyID, node.NodeID)
 		if !errors.Is(err, errAppend) {
@@ -125,6 +141,14 @@ func TestMemoryNodeGraphWorkspaceEventAppendFailureRollsBackState(t *testing.T) 
 		}
 		if _, err := repo.GetNode(companyID, node.NodeID); err != nil {
 			t.Fatalf("GetNode after failed delete: %v", err)
+		}
+		repo.mu.RLock()
+		_, draftExists := repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)]
+		attachment := repo.attachments[attachmentKey(companyID, attachmentID)]
+		link := repo.resourceAttachments[relationshipID]
+		repo.mu.RUnlock()
+		if !draftExists || attachment.DeletedTimestamp != nil || link.DeletedTimestamp != nil {
+			t.Fatalf("shared draft graph was not rolled back: draft=%v attachment=%+v link=%+v", draftExists, attachment, link)
 		}
 		assertNoWorkspaceEvents(t, repo, companyID)
 	})

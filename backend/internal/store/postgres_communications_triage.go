@@ -895,6 +895,9 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node'
 }
 
 func deletePostgresCommunicationsEmailSourceNodeTx(ctx context.Context, tx *sql.Tx, companyID string, link communicationsEmailNodeLink) error {
+	if err := retireResourceSharedEmailDraftAttachmentsTx(ctx, tx, companyID, EntityTypeNode, link.NodeID); err != nil {
+		return err
+	}
 	if err := retireNodeChatAttachmentRelationshipsTx(ctx, tx, companyID, link.NodeID); err != nil {
 		return err
 	}
@@ -915,9 +918,30 @@ func deletePostgresCommunicationsEmailSourceNodeTx(ctx context.Context, tx *sql.
 }
 
 func loadPostgresCommunicationsEmailNodeLinkForCardTx(ctx context.Context, tx *sql.Tx, companyID, userID, boardID, cardID string) (communicationsEmailNodeLink, error) {
+	var nodeID string
+	err := tx.QueryRowContext(ctx, `
+select relationship.resource_id::text
+from email_relationships relationship
+join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
+ and assignment.node_id=relationship.resource_id
+where relationship.company_id=$1::uuid and relationship.resource_type='node'
+ and relationship.resource_textbox_id is null
+ and assignment.compatibility_board_id=$3 and assignment.compatibility_card_id=$4::uuid
+ and ($2='' or mangorts_user_can_access_resource(relationship.company_id,'node',
+     relationship.resource_id,$2::uuid,'edit'))
+order by relationship.created_timestamp limit 1`, companyID, userID, boardID, cardID).Scan(&nodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return communicationsEmailNodeLink{}, ErrNotFound
+	}
+	if err != nil {
+		return communicationsEmailNodeLink{}, err
+	}
+	if err := lockResourceSharedEmailDraftOwnerTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
+		return communicationsEmailNodeLink{}, err
+	}
 	var link communicationsEmailNodeLink
 	var raw []byte
-	err := tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 select relationship.company_id::text,$2::text,message.provider_message_id,
        relationship.resource_id::text,assignment.compatibility_board_id,
        assignment.compatibility_card_id::text,assignment.logic_gate_id::text,
@@ -941,10 +965,11 @@ join node_logic_gate_assignments assignment on assignment.company_id=relationshi
 where relationship.company_id=$1::uuid and relationship.resource_type='node'
  and relationship.resource_textbox_id is null
  and assignment.compatibility_board_id=$3 and assignment.compatibility_card_id=$4::uuid
+ and relationship.resource_id=$5::uuid
  and ($2='' or mangorts_user_can_access_resource(relationship.company_id,'node',
      relationship.resource_id,$2::uuid,'edit'))
 order by relationship.created_timestamp limit 1
-for update of relationship`, companyID, userID, boardID, cardID).Scan(
+for update of relationship`, companyID, userID, boardID, cardID, nodeID).Scan(
 		&link.CompanyID, &link.UserID, &link.MessageID, &link.NodeID, &link.BoardID, &link.CardID,
 		&link.LogicGateID, &raw, &link.CreatedTimestamp, &link.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {

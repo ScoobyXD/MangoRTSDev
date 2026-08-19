@@ -595,10 +595,12 @@ func (r *PostgresRepo) DeleteProjectProjection(input ProjectProjectionDeleteInpu
 		return err
 	}
 	defer tx.Rollback()
+	if err := lockResourceSharedEmailDraftOwnerTx(ctx, tx, input.CompanyID, EntityTypeProject, input.ProjectID); err != nil {
+		return err
+	}
 	var emailThreadID string
 	var relationshipTextboxID sql.NullString
-	err = tx.QueryRowContext(ctx, `select email_thread_id::text,resource_textbox_id
-from email_relationships
+	err = tx.QueryRowContext(ctx, `select email_thread_id::text,resource_textbox_id from email_relationships
 where company_id=$1::uuid and email_relationship_id=$3::uuid
   and resource_type='project' and resource_id=$2::uuid
 for update`, input.CompanyID, input.ProjectID, input.InformationID).Scan(&emailThreadID, &relationshipTextboxID)
@@ -626,18 +628,26 @@ for update`, input.CompanyID, input.ProjectID, textboxID).Scan(&textboxID); err 
     where relationship.company_id=$1::uuid and relationship.email_thread_id=$3::uuid
       and relationship.resource_type='project' and relationship.resource_id=$2::uuid
       and relationship.resource_textbox_id is not null
-  ) or exists (
+	  ) or exists (
     select 1 from project_textbox_chats chat
     join email_messages message on message.company_id=chat.company_id
       and message.email_message_id=chat.selection_email_message_id
     where chat.company_id=$1::uuid and chat.project_id=$2::uuid
       and chat.selection_source='email' and chat.deleted_timestamp is null
       and message.email_thread_id=$3::uuid
-  )`, input.CompanyID, input.ProjectID, emailThreadID).Scan(&hasProjectWork); err != nil {
+	  )`, input.CompanyID, input.ProjectID, emailThreadID).Scan(&hasProjectWork); err != nil {
 				return err
 			}
 			if hasProjectWork {
 				return ErrEmailRelationshipHasProjectWork
+			}
+			var emailMessageID string
+			if err := tx.QueryRowContext(ctx, `select email_message_id::text from email_relationships
+where company_id=$1::uuid and email_relationship_id=$2::uuid`, input.CompanyID, input.InformationID).Scan(&emailMessageID); err != nil {
+				return err
+			}
+			if err := retireExactResourceSharedEmailDraftTx(ctx, tx, input.CompanyID, EntityTypeProject, input.ProjectID, emailMessageID); err != nil {
+				return err
 			}
 		}
 		var deletedTextboxID sql.NullString
@@ -1266,6 +1276,9 @@ func syncProjectRelationshipProjectionTx(ctx context.Context, tx *sql.Tx, compan
 }
 
 func postgresDeleteProjectTx(ctx context.Context, tx *sql.Tx, companyID, projectID string) error {
+	if err := retireResourceSharedEmailDraftAttachmentsTx(ctx, tx, companyID, EntityTypeProject, projectID); err != nil {
+		return err
+	}
 	if err := retireProjectChatAttachmentRelationshipsTx(ctx, tx, companyID, projectID); err != nil {
 		return err
 	}

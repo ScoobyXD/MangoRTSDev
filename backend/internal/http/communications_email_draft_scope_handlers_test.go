@@ -13,6 +13,103 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
+func TestResourceSharedEmailDraftHTTPCombinesIndicatorsAndRejectsStaleEditors(t *testing.T) {
+	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
+	node, err := fixture.repo.CreateNode(fixture.companyID, "Shared draft Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: fixture.companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: fixture.owner.UserID, AccessLevel: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: fixture.editor.UserID, AccessLevel: store.EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := fixture.repo.ImportCommunicationsEmailIntoNode(store.CommunicationsNodeEmailImportInput{
+		CompanyID: fixture.companyID, NodeID: node.NodeID, CreatedByUserID: fixture.owner.UserID,
+		Thread: store.CommunicationsEmailThreadUpsertInput{
+			CompanyID: fixture.companyID, PersonalUserID: fixture.owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+			AccountEmail: "owner-a@example.com", Provider: "google", ProviderThreadID: "shared-http-thread",
+			SelectedMessageID: "shared-http-message",
+			Messages:          []domain.EmailMessageSnapshot{{ID: "shared-http-message", ThreadID: "shared-http-thread", Subject: "Source"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceMessageID := imported.EmailThread.Messages[0].EmailMessageID
+	fixture.expectStatus(t, http.MethodPost, "/v1/communications/drafts", map[string]any{
+		"company_id": fixture.companyID, "account_email": "owner-a@example.com", "kind": "reply", "source_message_id": sourceMessageID,
+	}, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
+	created := fixture.request(t, http.MethodPost, "/v1/communications/drafts", map[string]any{
+		"company_id": fixture.companyID, "shared_node_id": node.NodeID, "kind": "reply",
+		"source_message_id": sourceMessageID, "body_editor_html": "<p>one</p>",
+	}, fixture.owner, domain.RoleCompanyUser)
+	if created.Code != http.StatusOK {
+		t.Fatalf("shared create status=%d body=%s", created.Code, created.Body.String())
+	}
+	var createPayload struct {
+		Draft communicationsEmailDraftResponse `json:"draft"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createPayload); err != nil {
+		t.Fatal(err)
+	}
+	if createPayload.Draft.Revision != 1 || !createPayload.Draft.CanSend || createPayload.Draft.SharedNodeID != node.NodeID {
+		t.Fatalf("shared create payload=%+v", createPayload.Draft)
+	}
+	listPath := "/v1/communications/drafts?" + url.Values{
+		"company_id": {fixture.companyID}, "shared_node_id": {node.NodeID}, "kind": {"reply"}, "source_message_id": {sourceMessageID},
+	}.Encode()
+	grouped := fixture.request(t, http.MethodGet, listPath, nil, fixture.owner, domain.RoleCompanyUser)
+	if grouped.Code != http.StatusOK {
+		t.Fatalf("grouped list status=%d body=%s", grouped.Code, grouped.Body.String())
+	}
+	var groupedPayload struct {
+		Drafts []communicationsEmailDraftResponse `json:"drafts"`
+	}
+	if err := json.Unmarshal(grouped.Body.Bytes(), &groupedPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(groupedPayload.Drafts) != 2 {
+		t.Fatalf("grouped drafts=%+v, want personal plus shared", groupedPayload.Drafts)
+	}
+	for _, draft := range groupedPayload.Drafts {
+		if draft.BodyEditorHTML != "" || len(draft.Attachments) != 0 {
+			t.Fatalf("grouped summary hydrated body or attachments: %+v", draft)
+		}
+	}
+	updated := fixture.request(t, http.MethodPut, "/v1/communications/drafts/"+url.PathEscape(createPayload.Draft.DraftID), map[string]any{
+		"company_id": fixture.companyID, "shared_node_id": node.NodeID, "kind": "reply",
+		"expected_revision": 1, "body_editor_html": "<p>two</p>",
+	}, fixture.editor, domain.RoleCompanyUser)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("collaborator update status=%d body=%s", updated.Code, updated.Body.String())
+	}
+	var updatePayload struct {
+		Draft communicationsEmailDraftResponse `json:"draft"`
+	}
+	if err := json.Unmarshal(updated.Body.Bytes(), &updatePayload); err != nil {
+		t.Fatal(err)
+	}
+	if updatePayload.Draft.Revision != 2 || updatePayload.Draft.CanSend || len(updatePayload.Draft.Attachments) != 0 {
+		t.Fatalf("collaborator update payload=%+v", updatePayload.Draft)
+	}
+	stale := fixture.request(t, http.MethodPut, "/v1/communications/drafts/"+url.PathEscape(createPayload.Draft.DraftID), map[string]any{
+		"company_id": fixture.companyID, "shared_node_id": node.NodeID, "kind": "reply", "expected_revision": 1,
+	}, fixture.owner, domain.RoleCompanyUser)
+	if stale.Code != http.StatusConflict || !bytes.Contains(stale.Body.Bytes(), []byte("email_draft_revision_conflict")) {
+		t.Fatalf("stale update status=%d body=%s", stale.Code, stale.Body.String())
+	}
+	denied := fixture.request(t, http.MethodGet, listPath, nil, fixture.attacker, domain.RoleCompanyUser)
+	if denied.Code == http.StatusOK {
+		t.Fatalf("unauthorized resource list status=%d body=%s", denied.Code, denied.Body.String())
+	}
+}
+
 func TestCommunicationsEmailDraftPersonalScopePreventsIDORAcrossUsersAndAccounts(t *testing.T) {
 	fixture := newCommunicationsEmailDraftScopeHTTPFixture(t)
 	const ownerDraftA = "personal-owner-a"

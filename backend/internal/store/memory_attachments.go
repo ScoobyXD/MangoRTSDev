@@ -35,6 +35,14 @@ func (r *MemoryRepo) CreateAttachmentWithResourceLinkContext(ctx context.Context
 			return domain.Attachment{}, domain.ResourceAttachment{}, ErrAlreadyExists
 		}
 	}
+	if link.ResourceType == "email_draft" {
+		link.ResourceRevision, err = r.advanceSharedEmailDraftAttachmentRevisionLocked(
+			link.CompanyID, link.ResourceID, link.CreatedByUserID, input.ResourceLink.ExpectedRevision,
+		)
+		if err != nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, err
+		}
+	}
 	r.attachments[attachmentKey(attachment.CompanyID, attachment.AttachmentID)] = attachment
 
 	link.AttachmentID = attachment.AttachmentID
@@ -327,6 +335,14 @@ func (r *MemoryRepo) LinkResourceAttachmentContext(ctx context.Context, input Re
 	if attachment, ok := r.attachments[attachmentKey(link.CompanyID, link.AttachmentID)]; !ok || attachment.DeletedTimestamp != nil {
 		return domain.ResourceAttachment{}, ErrNotFound
 	}
+	if link.ResourceType == "email_draft" {
+		link.ResourceRevision, err = r.advanceSharedEmailDraftAttachmentRevisionLocked(
+			link.CompanyID, link.ResourceID, link.CreatedByUserID, input.ExpectedRevision,
+		)
+		if err != nil {
+			return domain.ResourceAttachment{}, err
+		}
+	}
 	storedLink, err := r.upsertResourceAttachmentLocked(link)
 	if err != nil {
 		return domain.ResourceAttachment{}, err
@@ -438,18 +454,31 @@ func (r *MemoryRepo) SoftDeleteResourceAttachment(input ResourceAttachmentDelete
 	if companyID == "" || resourceType == "" || resourceID == "" || attachmentID == "" {
 		return ErrInvalid
 	}
-	now := time.Now().UTC()
 	changed := false
+	for _, link := range r.resourceAttachments {
+		if link.CompanyID == companyID && link.ResourceType == resourceType && link.ResourceID == resourceID &&
+			link.AttachmentID == attachmentID && link.DeletedTimestamp == nil {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return ErrNotFound
+	}
+	if resourceType == "email_draft" {
+		if _, err := r.advanceSharedEmailDraftAttachmentRevisionLocked(
+			companyID, resourceID, input.ActorUserID, input.ExpectedRevision,
+		); err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC()
 	for id, link := range r.resourceAttachments {
 		if link.CompanyID != companyID || link.ResourceType != resourceType || link.ResourceID != resourceID || link.AttachmentID != attachmentID || link.DeletedTimestamp != nil {
 			continue
 		}
 		link.DeletedTimestamp = &now
 		r.resourceAttachments[id] = link
-		changed = true
-	}
-	if !changed {
-		return ErrNotFound
 	}
 	stillOwned := false
 	for _, link := range r.resourceAttachments {

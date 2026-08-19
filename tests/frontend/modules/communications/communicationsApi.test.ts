@@ -18,6 +18,7 @@ import {
   fetchCommunicationsStatus,
   getCalendarInviteEvent,
   getCommunicationsArchiveJob,
+  getEmailDraft,
   getEmailMessage,
   getStoredEmailThread,
   getEmailCollaborationThread,
@@ -28,12 +29,14 @@ import {
   invalidateCommunicationsMailboxCache,
   invalidateEmailMessageCache,
   invalidateNodeEmailThreadCache,
+  isEmailDraftRevisionConflict,
   listCompanyUsers,
   listCompanyUserGroups,
   listLogicGates,
   listCommunicationsSharedInboxes,
   listEmailDrafts,
   listEmailReplyDraftsBySource,
+  listSharedEmailDraftSummaries,
   listEmailFolders,
   listEmailMessages,
   listStoredEmailMessages,
@@ -58,6 +61,7 @@ import {
   updateCommunicationsSharedInboxRACIAssignments,
   type EmailMessage,
 } from "../../../../frontend/src/modules/communications/communicationsApi.js";
+import { APIHTTPError } from "../../../../frontend/src/modules/api/requestJSON.js";
 import { logout } from "../../../../frontend/src/auth/cognitoAuth.js";
 
 function deferred<T>() {
@@ -1264,6 +1268,30 @@ test("sendEmail scopes shared inbox sends through query params after the univers
   }
 });
 
+test("shared draft send keeps sender authority in the exact revision query", async (t: any) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ path: string; body: Record<string, unknown> }> = [];
+  globalThis.fetch = async (input, init) => {
+    calls.push({ path: input.toString(), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+    return jsonResponse({ message: message("sent-shared") });
+  };
+  try {
+    const pending = sendEmail({
+      to: [{ email: "customer@example.test" }], subject: "Shared", body: "Body",
+      company_id: "company-1", shared_draft_id: "draft-shared-1", expected_draft_revision: 7,
+    });
+    t.mock.timers.tick(10_000);
+    await pending;
+    assert.equal(calls[0]?.path, "/v1/communications/messages/send?company_id=company-1&shared_draft_id=draft-shared-1&expected_draft_revision=7");
+    assert.equal("shared_draft_id" in (calls[0]?.body ?? {}), false);
+    assert.equal("shared_inbox_id" in (calls[0]?.body ?? {}), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
 test("sendEmail leaves reply-history persistence to the caller", async (t: any) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   invalidateCommunicationsCache();
@@ -1457,11 +1485,11 @@ test("reply drafts use server identity and bounded source indicator reads", asyn
       " ",
     ], { refresh: true, sourceThreadIDs: [...sourceThreadIDs, sourceThreadIDs[0] ?? "", " "] });
     const indicatorCalls = calls.filter((call) => call.method === "GET");
-    assert.equal(indicatorCalls.length, 3);
+    assert.equal(indicatorCalls.length, 1);
     assert.deepEqual(indicatorCalls.map((call) => {
       const query = new URL(call.path, "http://mango.local").searchParams;
       return [query.get("kind"), query.getAll("source_message_id").length, query.getAll("source_thread_id").length];
-    }), [["reply", 100, 100], ["reply", 100, 100], ["reply", 5, 5]]);
+    }), [["reply", 100, 100]]);
     await assert.rejects(
       () => listEmailDrafts("company-1", { accountEmail: "me@example.test" }, { sourceMessageIDs }),
       /email_draft_source_message_limit_exceeded/,
@@ -1470,6 +1498,61 @@ test("reply drafts use server identity and bounded source indicator reads", asyn
       () => listEmailDrafts("company-1", { accountEmail: "me@example.test" }, { sourceThreadIDs }),
       /email_draft_source_thread_filter_limit_exceeded/,
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateCommunicationsCache();
+  }
+});
+
+test("resource shared drafts use one literal Node or Project scope with optimistic revisions", async () => {
+  invalidateCommunicationsCache();
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ path: string; method: string; body?: Record<string, unknown> }> = [];
+  const sharedDraft = {
+    company_id: "company-1", draft_id: "shared-draft-1", scope_type: "resource_shared",
+    shared_node_id: "node-1", revision: 4, can_send: false, kind: "reply",
+    source_message_id: "message-1", source_thread_id: "thread-1", account_email: "owner@example.test",
+    to_recipients: "sender@example.test", cc_recipients: "", bcc_recipients: "",
+    subject: "Re: Shared", body_editor_html: "", created_timestamp: "2026-08-19T10:00:00Z", updated_timestamp: "2026-08-19T10:00:00Z",
+  };
+  globalThis.fetch = async (input, init) => {
+    const path = input.toString();
+    calls.push({ path, method: init?.method ?? "GET", body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined });
+    if (init?.method === "POST") return jsonResponse({ draft: sharedDraft, created: true });
+    if (init?.method === "PUT") return jsonResponse({ draft: { ...sharedDraft, revision: 5 } });
+    if (init?.method === "DELETE") return jsonResponse({ status: "deleted" });
+    if (path.includes("/shared-draft-1?")) return jsonResponse({ draft: sharedDraft });
+    return jsonResponse({ drafts: [sharedDraft] });
+  };
+  try {
+    await listEmailReplyDraftsBySource("company-1", { sharedNodeID: "node-1" }, ["message-1"], { sourceThreadIDs: ["thread-1"] });
+    await listEmailReplyDraftsBySource("company-1", { sharedProjectID: "project-1" }, ["message-1"]);
+    await listSharedEmailDraftSummaries("company-1", { accountEmail: "owner@example.test" });
+    await ensureEmailReplyDraft({
+      companyID: "company-1", sharedInboxID: "shared-1", sharedNodeID: "node-1", sourceMessageID: "message-1",
+      to: "sender@example.test", cc: "", bcc: "", subject: "Re: Shared", bodyEditorHTML: "",
+    });
+    await getEmailDraft("company-1", "shared-draft-1", { sharedNodeID: "node-1" });
+    await saveEmailDraft({
+      companyID: "company-1", draftID: "shared-draft-1", sharedNodeID: "node-1", expectedRevision: 4,
+      kind: "reply", sourceMessageID: "message-1", to: "sender@example.test", cc: "", bcc: "", subject: "Re: Shared", bodyEditorHTML: "new",
+    });
+    await deleteEmailDraft("company-1", "shared-draft-1", { sharedNodeID: "node-1" }, 5);
+
+    const [nodeList, projectList, homeList] = calls.slice(0, 3).map((entry) => new URL(entry.path, "http://mango.local").searchParams);
+    assert.equal(nodeList?.get("shared_node_id"), "node-1");
+    assert.equal(nodeList?.get("shared_project_id"), null);
+    assert.deepEqual(nodeList?.getAll("source_message_id"), ["message-1"]);
+    assert.equal(projectList?.get("shared_project_id"), "project-1");
+    assert.equal(projectList?.get("shared_node_id"), null);
+    assert.equal(homeList?.get("resource_shared"), "true");
+    assert.equal(homeList?.get("account_email"), "owner@example.test");
+    assert.equal(calls[3]?.body?.shared_node_id, "node-1");
+    assert.equal(calls[3]?.body?.shared_inbox_id, "shared-1");
+    assert.equal(calls[3]?.body?.account_email, undefined);
+    assert.equal(calls[5]?.body?.expected_revision, 4);
+    assert.match(calls[6]?.path ?? "", /shared_node_id=node-1&expected_revision=5/);
+    assert.equal(isEmailDraftRevisionConflict(new APIHTTPError(409, "Conflict", '{"error":"email_draft_revision_conflict"}')), true);
   } finally {
     globalThis.fetch = originalFetch;
     invalidateCommunicationsCache();

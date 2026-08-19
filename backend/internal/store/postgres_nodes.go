@@ -835,21 +835,13 @@ func (r *PostgresRepo) deleteNodeProjection(input NodeProjectionDeleteInput) err
 	if informationID == "" {
 		return ErrInvalid
 	}
-	var exists bool
-	if err := tx.QueryRowContext(ctx,
-		`select exists(select 1 from nodes where company_id=$1 and node_id=$2)`,
-		companyID, nodeID,
-	).Scan(&exists); err != nil {
+	if err := lockResourceSharedEmailDraftOwnerTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
 		return err
-	}
-	if !exists {
-		return ErrNotFound
 	}
 
 	var emailThreadID string
 	var relationshipTextboxID sql.NullString
-	err = tx.QueryRowContext(ctx, `select email_thread_id::text,resource_textbox_id
-from email_relationships
+	err = tx.QueryRowContext(ctx, `select email_thread_id::text,resource_textbox_id from email_relationships
 where company_id=$1::uuid and email_relationship_id=$3::uuid
   and resource_type='node' and resource_id=$2::uuid
 for update`, companyID, nodeID, informationID).Scan(&emailThreadID, &relationshipTextboxID)
@@ -879,18 +871,26 @@ for update`, companyID, nodeID, textboxID).Scan(&lockedTextboxID); err != nil {
       and relationship.resource_type='node' and relationship.resource_id=$2::uuid
       and relationship.resource_textbox_id is not null
   )
-  or exists (
+	  or exists (
     select 1 from node_textbox_chats chat
     join email_messages message on message.company_id=chat.company_id
       and message.email_message_id=chat.selection_email_message_id
     where chat.company_id=$1::uuid and chat.node_id=$2::uuid
       and chat.selection_source='email' and chat.deleted_timestamp is null
       and message.email_thread_id=$3::uuid
-  )`, companyID, nodeID, emailThreadID).Scan(&hasNodeWork); err != nil {
+	  )`, companyID, nodeID, emailThreadID).Scan(&hasNodeWork); err != nil {
 				return err
 			}
 			if hasNodeWork {
 				return ErrEmailRelationshipHasNodeWork
+			}
+			var emailMessageID string
+			if err := tx.QueryRowContext(ctx, `select email_message_id::text from email_relationships
+where company_id=$1::uuid and email_relationship_id=$2::uuid`, companyID, informationID).Scan(&emailMessageID); err != nil {
+				return err
+			}
+			if err := retireExactResourceSharedEmailDraftTx(ctx, tx, companyID, EntityTypeNode, nodeID, emailMessageID); err != nil {
+				return err
 			}
 		}
 		var deletedTextboxID sql.NullString

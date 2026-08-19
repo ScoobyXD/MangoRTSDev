@@ -429,6 +429,8 @@ create table if not exists attachment_upload_jobs (
   storage_checksum_type text not null default '',
   resource_type text not null,
   resource_id text not null,
+  resource_expected_revision bigint not null default 0,
+  resource_revision bigint not null default 0,
   information_id uuid,
   message_id text not null default '',
   editor_surface text not null default '',
@@ -463,6 +465,7 @@ create table if not exists attachment_upload_jobs (
     and ((storage_checksum_algorithm = '') = (storage_checksum_type = ''))
   ),
   constraint attachment_upload_jobs_resource_nonblank_chk check (btrim(resource_type) <> '' and btrim(resource_id) <> ''),
+  constraint attachment_upload_jobs_resource_revision_chk check (resource_expected_revision >= 0 and resource_revision >= 0),
   constraint attachment_upload_jobs_resource_type_chk check (resource_type in (
     'node', 'logic_gate', 'project', 'node_chat_message', 'logic_gate_chat_message', 'project_chat_message',
     'email_message', 'email_draft', 'email_signature', 'attached_email', 'shared_inbox',
@@ -3894,6 +3897,9 @@ create table if not exists email_drafts (
   personal_user_id uuid,
   personal_account_email text,
   shared_inbox_id uuid,
+  shared_node_id uuid,
+  shared_project_id uuid,
+  revision bigint not null default 1,
   sender_account_email text not null default '',
   created_by_user_id uuid,
   updated_by_user_id uuid,
@@ -3910,6 +3916,10 @@ create table if not exists email_drafts (
   primary key (company_id,draft_id),
   foreign key (company_id,source_email_message_id)
     references email_messages(company_id,email_message_id) on delete restrict,
+  constraint email_drafts_shared_node_fkey foreign key (company_id,shared_node_id)
+    references nodes(company_id,node_id) on delete cascade,
+  constraint email_drafts_shared_project_fkey foreign key (company_id,shared_project_id)
+    references projects(company_id,project_id) on delete cascade,
   foreign key (created_by_user_id) references users(user_id) on delete set null,
   foreign key (updated_by_user_id) references users(user_id) on delete set null,
   constraint email_drafts_draft_id_chk check (btrim(draft_id) <> ''),
@@ -3930,7 +3940,17 @@ create table if not exists email_drafts (
   constraint email_drafts_sender_account_email_chk check (
     sender_account_email='' or sender_account_email=lower(btrim(sender_account_email))
   ),
-  constraint email_drafts_kind_chk check (kind in ('compose','reply','forward'))
+  constraint email_drafts_kind_chk check (kind in ('compose','reply','forward')),
+  constraint email_drafts_revision_chk check (revision > 0),
+  constraint email_drafts_shared_owner_chk check (
+    (shared_node_id is null and shared_project_id is null)
+    or (shared_node_id is not null and shared_project_id is null)
+    or (shared_node_id is null and shared_project_id is not null)
+  ),
+  constraint email_drafts_shared_reply_chk check (
+    (shared_node_id is null and shared_project_id is null)
+    or (kind='reply' and source_email_message_id is not null and scheduled_send_timestamp is null)
+  )
 );
 
 create index if not exists idx_email_drafts_personal_updated
@@ -3942,11 +3962,22 @@ create index if not exists idx_email_drafts_shared_updated
 create unique index if not exists idx_email_drafts_active_personal_message_personal_account
   on email_drafts(company_id,created_by_user_id,source_email_message_id,personal_user_id,personal_account_email)
   where deleted_timestamp is null and source_email_message_id is not null
-    and email_account_type='personal_email_account';
+    and email_account_type='personal_email_account'
+    and shared_node_id is null and shared_project_id is null;
 create unique index if not exists idx_email_drafts_active_personal_message_shared_inbox
   on email_drafts(company_id,created_by_user_id,source_email_message_id,shared_inbox_id)
   where deleted_timestamp is null and source_email_message_id is not null
-    and email_account_type='shared_email_account';
+    and email_account_type='shared_email_account'
+    and shared_node_id is null and shared_project_id is null;
+create unique index if not exists idx_email_drafts_active_shared_node_message
+  on email_drafts(company_id,shared_node_id,source_email_message_id)
+  where deleted_timestamp is null and shared_node_id is not null;
+create unique index if not exists idx_email_drafts_active_shared_project_message
+  on email_drafts(company_id,shared_project_id,source_email_message_id)
+  where deleted_timestamp is null and shared_project_id is not null;
+create index if not exists idx_email_drafts_resource_shared_mailbox_updated
+  on email_drafts(company_id,email_account_type,personal_user_id,personal_account_email,shared_inbox_id,updated_timestamp desc)
+  where deleted_timestamp is null and (shared_node_id is not null or shared_project_id is not null);
 
 create table if not exists email_signatures (
   company_id uuid not null,
@@ -4091,6 +4122,29 @@ begin
 end;
 $$;
 
+
+create or replace function mangorts_lock_live_email_draft_attachment_owner()
+returns trigger language plpgsql as $$
+begin
+  if new.deleted_timestamp is not null or new.resource_type<>'email_draft' then
+    return new;
+  end if;
+  perform 1 from email_drafts
+  where company_id=new.company_id and draft_id=new.resource_id
+    and deleted_timestamp is null
+  for share;
+  if not found then
+    raise exception 'attachment email draft owner does not exist' using errcode='23503';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_attachment_relationships_lock_email_draft_owner on attachment_relationships;
+create trigger trg_attachment_relationships_lock_email_draft_owner
+before insert or update of company_id,resource_type,resource_id,deleted_timestamp
+on attachment_relationships for each row
+execute function mangorts_lock_live_email_draft_attachment_owner();
 
 -- Final relationships additionally prove that each active owner exists. Legacy
 -- structured email identifiers are normalized before they reach this table.

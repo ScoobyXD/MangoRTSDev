@@ -23,12 +23,11 @@ test("single upload sends JSON metadata to Mango and raw File bytes with exact s
   const calls: Array<{ path: string; init: Parameters<AttachmentRequestJSON>[1] }> = [];
   const xhrCaptures: XHRCapture[] = [];
   const progressStates: string[] = [];
+  const resourceRevisions: number[] = [];
   const request: AttachmentRequestJSON = async <T>(path: string, init?: Parameters<AttachmentRequestJSON>[1]): Promise<T> => {
     calls.push({ path, init });
     if (path === "/v1/attachments/upload-policy") return standardPolicy() as unknown as T;
-    if (path === "/v1/attachments/upload-intents") {
-      return singleIntent("https://s3.example.test/object?signature=secret") as T;
-    }
+    if (path === "/v1/attachments/upload-intents") return singleIntent("https://s3.example.test/object?signature=secret") as T;
     if (path.endsWith("/complete")) return uploadResponse(file) as unknown as T;
     throw new Error(`unexpected_request:${path}`);
   };
@@ -36,6 +35,8 @@ test("single upload sends JSON metadata to Mango and raw File bytes with exact s
   const result = await uploadBrowserAttachment(request, {
     ...baseInput(file),
     onProgress: (progress) => progressStates.push(progress.state),
+    expectedRevision: 4,
+    onResourceRevision: (revision) => resourceRevisions.push(revision),
   }, {
     hashFile: async (_file, options) => {
       options?.onProgress?.(file.size, file.size);
@@ -65,6 +66,7 @@ test("single upload sends JSON metadata to Mango and raw File bytes with exact s
   assert.equal(intentJSON.sha256, RAW_SHA256);
   assert.equal(intentJSON.resourceType, "node");
   assert.equal(intentJSON.resourceId, "node-1");
+  assert.equal(intentJSON.expectedRevision, 4);
   assert.equal("companyID" in intentJSON, false);
   assert.equal("company_id" in intentJSON, false);
   assert.equal("file" in intentJSON, false);
@@ -82,6 +84,7 @@ test("single upload sends JSON metadata to Mango and raw File bytes with exact s
   assert.equal("cookie" in (xhrCaptures[0]?.headers ?? {}), false);
   assert.equal("x-mango-company-id" in (xhrCaptures[0]?.headers ?? {}), false);
   assert.deepEqual(progressStates, ["preparing", "preparing", "uploading", "uploading", "uploading", "completing", "complete"]);
+  assert.deepEqual(resourceRevisions, [], "an upload intent must not advance the durable resource revision");
   assert.equal(storage.values().length, 0);
 });
 
@@ -231,6 +234,7 @@ test("multipart resume reconciles backend state and never uploads an accepted pa
     sourceProvider: "",
     originalWidth: null,
     originalHeight: null,
+    expectedRevision: null,
   }));
   const signedPartNumbers: number[] = [];
   const xhrCaptures: XHRCapture[] = [];
@@ -271,9 +275,9 @@ test("multipart resume reconciles backend state and never uploads an accepted pa
   assert.equal(storage.values().length, 0);
 });
 
-test("does not reuse stale resume metadata when an upload identity field differs", async () => {
+test("does not reuse stale resume metadata when the resource revision changes", async () => {
   const file = testFile(7, "stale.txt", "text/plain", 88);
-  const input = baseInput(file);
+  const input = { ...baseInput(file), expectedRevision: 8 };
   const storage = new MemoryStorage();
   const key = attachmentUploadResumeStorageKey(input);
   storage.setItem(
@@ -296,11 +300,12 @@ test("does not reuse stale resume metadata when an upload identity field differs
       informationId: "block-1",
       messageId: "",
       editorSurface: "node_text_block",
-      relationshipKind: "inline_image",
+      relationshipKind: "file_attachment",
       sourceKind: "user_upload",
       sourceProvider: "",
       originalWidth: null,
       originalHeight: null,
+      expectedRevision: 7,
     }),
   );
 
@@ -315,6 +320,7 @@ test("does not reuse stale resume metadata when an upload identity field differs
         (init.json as { clientRequestId?: string } | undefined)?.clientRequestId,
         "client-new",
       );
+      assert.equal((init.json as { expectedRevision?: number }).expectedRevision, 8);
       return singleIntent("https://s3.example.test/stale") as T;
     }
     if (path.endsWith("/complete") && init.method === "POST") {

@@ -1080,6 +1080,9 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 }
 
 func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string, deleteProjectionRows bool) error {
+	if err := retireResourceSharedEmailDraftAttachmentsTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
+		return err
+	}
 	if err := retireNodeChatAttachmentRelationshipsTx(ctx, tx, companyID, nodeID); err != nil {
 		return err
 	}

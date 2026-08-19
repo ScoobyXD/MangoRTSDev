@@ -60,12 +60,17 @@ where message.company_id=$1::uuid and message.email_message_id=$3::uuid`,
 	case "email_draft":
 		err = r.db.QueryRowContext(ctx, `
 select (
-  draft.created_by_user_id=$2::uuid
-  and (
-    draft.personal_user_id=$2::uuid
-    or (draft.shared_inbox_id is not null and mangorts_user_can_access_resource(
-      draft.company_id,'shared_inbox',draft.shared_inbox_id,$2::uuid,$4::text))
-  )
+  case
+    when draft.shared_node_id is not null then mangorts_user_can_access_resource(
+      draft.company_id,'node',draft.shared_node_id,$2::uuid,'edit')
+    when draft.shared_project_id is not null then mangorts_user_can_access_resource(
+      draft.company_id,'project',draft.shared_project_id,$2::uuid,'edit')
+    else draft.created_by_user_id=$2::uuid and (
+      draft.personal_user_id=$2::uuid
+      or (draft.shared_inbox_id is not null and mangorts_user_can_access_resource(
+        draft.company_id,'shared_inbox',draft.shared_inbox_id,$2::uuid,$4::text))
+    )
+  end
 )
 from email_drafts draft
 where draft.company_id=$1::uuid and draft.draft_id=$3 and draft.deleted_timestamp is null`,
@@ -133,9 +138,16 @@ func (r *MemoryRepo) GetEmailAttachmentResourceAccess(input EmailAttachmentResou
 		if !ok || draft.DeletedTimestamp != nil {
 			return EmailAttachmentResourceAccess{}, ErrNotFound
 		}
-		allowed := draft.CreatedByUserID == input.UserID &&
-			(draft.PersonalUserID == input.UserID ||
-				(draft.SharedInboxID != "" && r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeSharedInbox, draft.SharedInboxID, input.AccessLevel)))
+		allowed := false
+		if draft.SharedNodeID != "" {
+			allowed = r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeNode, draft.SharedNodeID, EntityPermissionEdit)
+		} else if draft.SharedProjectID != "" {
+			allowed = r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeProject, draft.SharedProjectID, EntityPermissionEdit)
+		} else {
+			allowed = draft.CreatedByUserID == input.UserID &&
+				(draft.PersonalUserID == input.UserID ||
+					(draft.SharedInboxID != "" && r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeSharedInbox, draft.SharedInboxID, input.AccessLevel)))
+		}
 		return EmailAttachmentResourceAccess{Allowed: allowed}, nil
 	case "email_signature":
 		signature, ok := r.emailSignatures[communicationsEmailSignatureKey(input.CompanyID, input.ResourceID)]

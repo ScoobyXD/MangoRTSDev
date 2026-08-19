@@ -124,6 +124,10 @@ const componentTests = [
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorRowVirtualizationReact.test.js"),
   },
   {
+    source: resolve(repoRoot, "tests/frontend/modules/editor/sharedEmailDraftsReact.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/sharedEmailDraftsReact.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTextBlockEditorHydration.test.js"),
   },

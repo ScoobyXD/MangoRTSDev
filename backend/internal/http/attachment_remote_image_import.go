@@ -59,6 +59,7 @@ type attachmentRemoteImageImportRequest struct {
 	OriginalFilename string `json:"original_filename"`
 	InformationID    string `json:"information_id"`
 	EditorSurface    string `json:"editor_surface"`
+	ExpectedRevision int64  `json:"expected_revision"`
 }
 
 type attachmentRemoteImageDownload struct {
@@ -336,7 +337,7 @@ func (s *Server) handleAttachmentRemoteImageImport(w http.ResponseWriter, r *htt
 			CompanyID: req.CompanyID, ResourceType: req.ResourceType, ResourceID: req.ResourceID,
 			InformationID: req.InformationID, EditorSurface: req.EditorSurface,
 			RelationshipKind: store.AttachmentRelationshipInlineImage, CreatedByUserID: strings.TrimSpace(actor.User.UserID),
-			CreatedTimestamp: now,
+			CreatedTimestamp: now, ExpectedRevision: req.ExpectedRevision,
 		},
 	})
 	if err != nil {
@@ -351,6 +352,8 @@ func (s *Server) handleAttachmentRemoteImageImport(w http.ResponseWriter, r *htt
 			writeError(w, http.StatusBadRequest, "invalid_attachment_import")
 		} else if errors.Is(err, store.ErrNotFound) {
 			writeAccessResourceNotFound(w)
+		} else if errors.Is(err, store.ErrConflict) {
+			writeError(w, http.StatusConflict, "email_draft_revision_conflict")
 		} else {
 			writeError(w, http.StatusInternalServerError, "failed_to_import_attachment")
 		}

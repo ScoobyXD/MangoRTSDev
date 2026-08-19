@@ -500,6 +500,65 @@ func TestAttachmentDirectUploadSingleCompletionIsVerifiedAndIdempotent(t *testin
 	}
 }
 
+func TestAttachmentDirectUploadSharedDraftStaleCompletionBecomesFailed(t *testing.T) {
+	fixture := newAttachmentDirectUploadTestFixture(t)
+	if _, err := fixture.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: fixture.allowed.UserID, Provider: "google", AccountEmail: fixture.allowed.Email,
+		GrantID: "grant-shared-draft-upload", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := fixture.repo.ImportCommunicationsEmailIntoNode(store.CommunicationsNodeEmailImportInput{
+		CompanyID: fixture.companyID, NodeID: fixture.node.NodeID, CreatedByUserID: fixture.allowed.UserID,
+		Thread: store.CommunicationsEmailThreadUpsertInput{
+			CompanyID: fixture.companyID, PersonalUserID: fixture.allowed.UserID, PersonalAccountEmail: fixture.allowed.Email,
+			AccountEmail: fixture.allowed.Email, Provider: "google", ProviderThreadID: "upload-source-thread",
+			SelectedMessageID: "upload-source-message",
+			Messages:          []domain.EmailMessageSnapshot{{ID: "upload-source-message", ThreadID: "upload-source-thread", Subject: "Source"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, created, err := fixture.repo.EnsureCommunicationsEmailReplyDraft(store.CommunicationsEmailDraftInput{
+		CompanyID: fixture.companyID, SharedNodeID: fixture.node.NodeID, CreatedByUserID: fixture.allowed.UserID,
+		SourceMessageID: imported.EmailThread.Messages[0].EmailMessageID,
+	})
+	if err != nil || !created || draft.Revision != 1 {
+		t.Fatalf("ensure shared upload draft=%+v created=%v err=%v", draft, created, err)
+	}
+	shaHex := directUploadTestSHA256Hex("shared-stale-upload")
+	payload := attachmentDirectUploadIntentPayload(fixture.node.NodeID, "shared-stale-upload", 19, shaHex)
+	payload["resourceType"], payload["resourceId"] = "email_draft", draft.DraftID
+	payload["relationshipKind"], payload["sourceKind"], payload["expectedRevision"] = "email_attachment", "email_outgoing", 1
+	upload := createAttachmentDirectUploadIntent(t, fixture, payload)
+	intent, err := fixture.repo.GetAttachmentUploadIntent(fixture.companyID, fixture.allowed.UserID, upload.UploadIntentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.storage.setHead(intent.StorageKey, AttachmentHeadObjectOutput{
+		ContentLength: 19, ChecksumAlgorithm: "SHA256", ChecksumValue: rawSHA256Base64(shaHex),
+		ChecksumType: "FULL_OBJECT", ServerSideEncryption: attachmentSSEValue(),
+	})
+	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
+		CompanyID: fixture.companyID, DraftID: draft.DraftID, SharedNodeID: fixture.node.NodeID,
+		UpdatedByUserID: fixture.allowed.UserID, Kind: "reply", ExpectedRevision: 1, BodyEditorHTML: "<p>other edit</p>",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	completed := performAttachmentDirectUploadRequest(t, fixture, http.MethodPost, "/v1/attachments/upload-intents/"+upload.UploadIntentID+"/complete", nil, &fixture.allowed)
+	if completed.Code != http.StatusConflict || !strings.Contains(completed.Body.String(), "email_draft_revision_conflict") {
+		t.Fatalf("stale completion status=%d body=%s", completed.Code, completed.Body.String())
+	}
+	intent, err = fixture.repo.GetAttachmentUploadIntent(fixture.companyID, fixture.allowed.UserID, upload.UploadIntentID)
+	if err != nil || intent.Status != domain.AttachmentUploadStatusFailed || intent.FailureCode != "revision_conflict" {
+		t.Fatalf("stale completion intent=%+v err=%v", intent, err)
+	}
+	if _, err := fixture.repo.GetAttachment(fixture.companyID, upload.AttachmentID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("stale completion attachment error=%v, want not found", err)
+	}
+}
+
 func TestAttachmentDirectUploadMultipartSigningAndAuthoritativeCompletion(t *testing.T) {
 	fixture := newAttachmentDirectUploadTestFixture(t)
 	sizeBytes := attachmentSinglePutMaxBytes + 1

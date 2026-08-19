@@ -205,6 +205,7 @@ type CommunicationsRepository interface {
 	UpsertEmailCollaborationNodeProjectionWithActor(input NodeInformationInput) (CommunicationsEmailCollaborationProjectionWriteResult, error)
 	ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error)
 	GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error)
+	GetCommunicationsSharedEmailDraftForSend(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error)
 	EnsureCommunicationsEmailReplyDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, bool, error)
 	UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error)
 	SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error
@@ -332,6 +333,7 @@ type AttachmentUploadIntentCreateInput struct {
 	PartCount         int
 	ExpiresTimestamp  time.Time
 	CreatedTimestamp  time.Time
+	ExpectedRevision  int64
 }
 
 type AttachmentUploadPartsInput struct {
@@ -425,13 +427,16 @@ type ResourceAttachmentInput struct {
 	RelationshipKind     string
 	CreatedByUserID      string
 	CreatedTimestamp     time.Time
+	ExpectedRevision     int64
 }
 
 type ResourceAttachmentDeleteInput struct {
-	CompanyID    string
-	ResourceType string
-	ResourceID   string
-	AttachmentID string
+	CompanyID        string
+	ResourceType     string
+	ResourceID       string
+	AttachmentID     string
+	ActorUserID      string
+	ExpectedRevision int64
 }
 
 func NormalizeAttachmentSourceKind(sourceKind string) string {
@@ -2483,6 +2488,9 @@ type CommunicationsEmailDraftListInput struct {
 	PersonalUserID       string
 	PersonalAccountEmail string
 	SharedInboxID        string
+	SharedNodeID         string
+	SharedProjectID      string
+	ResourceSharedOnly   bool
 	ParticipantUserID    string
 	Kind                 string
 	SourceMessageIDs     []string
@@ -2497,7 +2505,10 @@ type CommunicationsEmailDraftGetInput struct {
 	PersonalUserID       string
 	PersonalAccountEmail string
 	SharedInboxID        string
+	SharedNodeID         string
+	SharedProjectID      string
 	ParticipantUserID    string
+	ExpectedRevision     int64
 }
 
 type CommunicationsEmailDraftInput struct {
@@ -2506,6 +2517,8 @@ type CommunicationsEmailDraftInput struct {
 	PersonalUserID         string
 	PersonalAccountEmail   string
 	SharedInboxID          string
+	SharedNodeID           string
+	SharedProjectID        string
 	CreatedByUserID        string
 	UpdatedByUserID        string
 	Kind                   string
@@ -2519,6 +2532,7 @@ type CommunicationsEmailDraftInput struct {
 	ReplyToMessageJSON     string
 	ScheduledSendTimestamp *time.Time
 	ExistingOnly           bool
+	ExpectedRevision       int64
 }
 
 type CommunicationsEmailDraftDeleteInput struct {
@@ -2527,8 +2541,11 @@ type CommunicationsEmailDraftDeleteInput struct {
 	PersonalUserID       string
 	PersonalAccountEmail string
 	SharedInboxID        string
+	SharedNodeID         string
+	SharedProjectID      string
 	UpdatedByUserID      string
 	ParticipantUserID    string
+	ExpectedRevision     int64
 }
 
 type CommunicationsEmailSignatureScopeInput struct {

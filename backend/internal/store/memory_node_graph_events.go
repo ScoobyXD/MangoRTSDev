@@ -13,6 +13,8 @@ type memoryNodeGraphEventSnapshot struct {
 	kanbanCards                    map[string][]domain.KanbanCard
 	emailNodeLinks                 map[string]communicationsEmailNodeLink
 	emailDrafts                    map[string]domain.CommunicationsEmailDraft
+	attachments                    map[string]domain.Attachment
+	resourceAttachments            map[string]domain.ResourceAttachment
 	nodeEmailThreads               map[string]domain.CommunicationsNodeEmailThread
 	emailCollaborations            map[string]domain.CommunicationsEmailCollaboration
 	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
@@ -56,6 +58,8 @@ func (r *MemoryRepo) snapshotNodeGraphEventStateLocked() memoryNodeGraphEventSna
 		kanbanCards:                    cloneMemorySliceMap(r.kanbanCards),
 		emailNodeLinks:                 cloneMemoryMap(r.emailNodeLinks),
 		emailDrafts:                    cloneMemoryMap(r.emailDrafts),
+		attachments:                    cloneMemoryMap(r.attachments),
+		resourceAttachments:            cloneMemoryMap(r.resourceAttachments),
 		nodeEmailThreads:               cloneMemoryMap(r.nodeEmailThreads),
 		emailCollaborations:            cloneMemoryMap(r.emailCollaborations),
 		emailCollaborationParticipants: cloneMemoryMap(r.emailCollaborationParticipants),
@@ -75,6 +79,8 @@ func (r *MemoryRepo) restoreNodeGraphEventStateLocked(snapshot memoryNodeGraphEv
 	r.kanbanCards = snapshot.kanbanCards
 	r.emailNodeLinks = snapshot.emailNodeLinks
 	r.emailDrafts = snapshot.emailDrafts
+	r.attachments = snapshot.attachments
+	r.resourceAttachments = snapshot.resourceAttachments
 	r.nodeEmailThreads = snapshot.nodeEmailThreads
 	r.emailCollaborations = snapshot.emailCollaborations
 	r.emailCollaborationParticipants = snapshot.emailCollaborationParticipants

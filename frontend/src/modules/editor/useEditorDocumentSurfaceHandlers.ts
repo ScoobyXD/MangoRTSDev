@@ -231,6 +231,7 @@ export type EditorImageAttachmentContext = {
   prepareResource?: () => Promise<void>;
   onError?: (message: string) => void;
   mutationLifecycle?: EditorAttachmentMutationLifecycle;
+  expectedResourceRevision?: () => number | undefined; onResourceRevision?: (revision: number) => void;
 };
 
 export type EditorInlineStyleCommand = "bold" | "underline" | "italic" | "strikethrough";
@@ -1215,6 +1216,8 @@ async function attachUploadedEditorImageData(
     relationshipKind: "inline_image",
     informationID: context.informationID,
     editorSurface: context.editorSurface,
+    expectedRevision: context.expectedResourceRevision?.(),
+    onResourceRevision: context.onResourceRevision,
   }), context.mutationLifecycle);
   const attachment = uploaded.attachment;
   if (options.loadDisplay === false) {
@@ -1299,7 +1302,8 @@ async function prepareEditorClipboardImageData(
       relationshipKind: "inline_image",
       informationID: editorImageAttachmentContext.informationID,
       editorSurface: editorImageAttachmentContext.editorSurface,
-    }), editorImageAttachmentContext.mutationLifecycle);
+      expectedRevision: editorImageAttachmentContext.expectedResourceRevision?.(),
+    }).then((result) => { if ((result.resource_revision ?? 0) > 0) editorImageAttachmentContext.onResourceRevision?.(result.resource_revision!); return result; }), editorImageAttachmentContext.mutationLifecycle);
     let displaySrc = editorAttachmentImageSource(clipboardData.attachmentID);
     if (options.loadDisplay !== false) {
       displaySrc = clipboardData.src;
@@ -1436,7 +1440,8 @@ async function resolveEditorRichClipboardImage(
       originalFilename: request.filename,
       informationID: editorImageAttachmentContext.informationID,
       editorSurface: editorImageAttachmentContext.editorSurface,
-    }),
+      expectedRevision: editorImageAttachmentContext.expectedResourceRevision?.(),
+    }).then((result) => { if ((result.resource_attachment.resource_revision ?? 0) > 0) editorImageAttachmentContext.onResourceRevision?.(result.resource_attachment.resource_revision!); return result; }),
     editorImageAttachmentContext.mutationLifecycle,
   );
   const attachment = imported.attachment;

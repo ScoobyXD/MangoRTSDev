@@ -74,6 +74,14 @@ func (r *PostgresRepo) CreateAttachmentWithResourceLinkContext(ctx context.Conte
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
 	defer tx.Rollback()
+	if link.ResourceType == "email_draft" {
+		link.ResourceRevision, err = advanceSharedEmailDraftAttachmentRevisionTx(
+			ctx, tx, link.CompanyID, link.ResourceID, link.CreatedByUserID, input.ResourceLink.ExpectedRevision,
+		)
+		if err != nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, err
+		}
+	}
 
 	attachment, err = scanAttachment(tx.QueryRowContext(ctx, `
 with inserted as (
@@ -636,6 +644,14 @@ func (r *PostgresRepo) LinkResourceAttachmentContext(ctx context.Context, input 
 		return domain.ResourceAttachment{}, err
 	}
 	defer tx.Rollback()
+	if link.ResourceType == "email_draft" {
+		link.ResourceRevision, err = advanceSharedEmailDraftAttachmentRevisionTx(
+			ctx, tx, link.CompanyID, link.ResourceID, link.CreatedByUserID, input.ExpectedRevision,
+		)
+		if err != nil {
+			return domain.ResourceAttachment{}, err
+		}
+	}
 
 	var exists bool
 	if err := tx.QueryRowContext(ctx, `
@@ -692,6 +708,13 @@ func (r *PostgresRepo) SoftDeleteResourceAttachment(input ResourceAttachmentDele
 		return err
 	}
 	defer tx.Rollback()
+	if resourceType == "email_draft" {
+		if _, err := advanceSharedEmailDraftAttachmentRevisionTx(
+			ctx, tx, companyID, resourceID, input.ActorUserID, input.ExpectedRevision,
+		); err != nil {
+			return err
+		}
+	}
 	retired, err := retireAttachmentRelationshipsTx(ctx, tx, companyID, resourceType, resourceID, attachmentID, "", "[]")
 	if err != nil {
 		return err

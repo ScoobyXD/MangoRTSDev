@@ -308,6 +308,7 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
 	}
+	r.deleteMemoryResourceSharedEmailDraftsLocked(companyID, EntityTypeNode, nodeID)
 	r.deleteRACIMatrixProjectionForNodeLocked(companyID, nodeID)
 	for itemKey, item := range r.projectTimelineItems {
 		if item.CompanyID == companyID && item.EntityType == EntityTypeNode && item.EntityID == nodeID {
@@ -929,6 +930,7 @@ func (r *MemoryRepo) deleteNodeProjection(input NodeProjectionDeleteInput) error
 						}
 					}
 				}
+				r.retireMemoryExactResourceSharedEmailDraftLocked(companyID, EntityTypeNode, nodeID, emailMessageID)
 			} else if textboxID != "" && emailMessageID != "" && textboxExists && isEditorTextBoxType(textbox.Type) {
 				for _, projection := range r.nodeText[k] {
 					if projection.IsDeleted || !isTextboxChatType(projection.Type) {

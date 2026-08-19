@@ -88,6 +88,7 @@ test("editor attachment lifecycle spans preparation and the complete mutation", 
       finish: (succeeded) => { events.push(`lease:finish:${succeeded}`); },
     },
   );
+  await Promise.resolve();
   assert.deepEqual(events, ["lease:begin", "prepare:start"]);
 
   releasePreparation();
@@ -1076,7 +1077,8 @@ test("project-attached replies create immediately and apply the exact mailbox si
   assert.match(nodeWorkspaceParts, /const signatureRequest = indicatedDraftID[\s\S]{0,240}loadMailboxSignature\(\)\.catch\(\(\) => ""\)/);
   assert.match(nodeWorkspaceParts, /: ensureEmailReplyDraft\(\{/);
   assert.match(nodeWorkspaceParts, /if \(created && !cachedSignature\)[\s\S]{0,260}applyEmailSignature\(current, signature\)/);
-  assert.ok((nodeWorkspaceParts.match(/openReplyTarget\(target\)/g) ?? []).length >= 2);
+  assert.match(nodeWorkspaceParts, /openReplyTarget\(target, mode\)/);
+  assert.match(nodeWorkspaceParts, /openReplyTarget\(target, initialReplyMode\)/);
   assert.match(nodeWorkspaceParts, /replySubmissionIdentityRef\.current/);
   assert.match(nodeWorkspaceParts, /latestIdentity\.messageID !== submittedIdentity\.messageID/);
   assert.doesNotMatch(nodeWorkspaceParts, /replySignatureSessionRef|applyEmailSignatureOnceForSession|beginEmailSignatureApplicationSession/);

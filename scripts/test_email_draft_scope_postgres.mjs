@@ -9,6 +9,7 @@ const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const scopeMigration = join(repoRoot, "backend", "db", "migrations", "20260811_zzz_email_draft_scope.sql");
 const identityMigration = join(repoRoot, "backend", "db", "migrations", "20260813_email_draft_identity.sql");
 const cleanupMigration = join(repoRoot, "backend", "db", "migrations", "20260816_remove_node_email_drafts.sql");
+const sharedDraftMigration = join(repoRoot, "backend", "db", "migrations", "20260819_shared_email_drafts.sql");
 
 function postgresBinary(name) {
   const suffix = process.platform === "win32" ? ".exe" : "";
@@ -96,6 +97,11 @@ try {
       node_id uuid not null,
       primary key(company_id,node_id)
     );
+    create table projects (
+      company_id uuid not null,
+      project_id uuid not null,
+      primary key(company_id,project_id)
+    );
     create table email_drafts (
       company_id uuid not null,
       draft_id text not null,
@@ -136,6 +142,8 @@ try {
 
     insert into nodes values
       ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001');
+    insert into projects values
+      ('10000000-0000-4000-8000-000000000001','21000000-0000-4000-8000-000000000001');
     insert into email_drafts(
       company_id,draft_id,email_thread_id,origin_node_id,source_email_message_id,email_account_type,
       personal_user_id,personal_account_email,shared_inbox_id,created_by_user_id
@@ -205,12 +213,58 @@ try {
   expectScalar("select count(*) from attachment_relationships where deleted_timestamp is not null", "5", "discarded and Node draft attachment links retired");
   expectScalar("select count(*) from attachments where deleted_timestamp is not null", "1", "only the now-unowned Node draft attachment marked deleted");
   expectScalar("select count(*) from attachments attachment where attachment.deleted_timestamp is null and exists (select 1 from attachment_relationships relationship where relationship.company_id=attachment.company_id and relationship.attachment_id=attachment.attachment_id and relationship.resource_type='email_message' and relationship.deleted_timestamp is null)", "1", "attachment with a surviving owner preserved");
-  expectScalar("select count(*) from pg_attribute where attrelid='email_drafts'::regclass and attname in ('email_thread_id','origin_node_id','is_shared','revision','send_state','send_claim_token','send_idempotency_key','sent_email_message_id') and attnum>0 and not attisdropped", "0", "Node draft columns removed");
-  expectScalar("select count(*) from pg_attribute where attrelid='email_drafts'::regclass and attname='collaboration_id' and attnum>0 and not attisdropped", "0", "obsolete collaboration identity removed");
-
   runFile(cleanupMigration);
   expectScalar("select count(*) from email_drafts", "3", "cleanup rerun is idempotent");
   expectScalar("select count(*) from attachment_relationships where deleted_timestamp is not null", "5", "cleanup rerun preserves retired links");
+
+  sql(`alter table email_drafts
+    add column kind text not null default 'reply',
+    add column scheduled_send_timestamp timestamptz;`);
+  runFile(sharedDraftMigration);
+  sql(`
+    insert into email_drafts(
+      company_id,draft_id,source_email_message_id,email_account_type,personal_user_id,
+      personal_account_email,created_by_user_id,shared_node_id,kind
+    ) values (
+      '10000000-0000-4000-8000-000000000001','shared-node','60000000-0000-4000-8000-000000000005',
+      'personal_email_account','30000000-0000-4000-8000-000000000001','owner@example.com',
+      '30000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000001','reply'
+    );
+    insert into email_drafts(
+      company_id,draft_id,source_email_message_id,email_account_type,personal_user_id,
+      personal_account_email,created_by_user_id,shared_project_id,kind
+    ) values (
+      '10000000-0000-4000-8000-000000000001','shared-project','60000000-0000-4000-8000-000000000005',
+      'personal_email_account','30000000-0000-4000-8000-000000000001','owner@example.com',
+      '30000000-0000-4000-8000-000000000003','21000000-0000-4000-8000-000000000001','reply'
+    );
+    do $$ begin
+      begin
+        insert into email_drafts(
+          company_id,draft_id,source_email_message_id,email_account_type,personal_user_id,
+          personal_account_email,created_by_user_id,shared_node_id,kind
+        ) values (
+          '10000000-0000-4000-8000-000000000001','duplicate-shared-node','60000000-0000-4000-8000-000000000005',
+          'personal_email_account','30000000-0000-4000-8000-000000000001','owner@example.com',
+          '30000000-0000-4000-8000-000000000004','20000000-0000-4000-8000-000000000001','reply'
+        );
+        raise exception 'duplicate shared Node identity was accepted';
+      exception when unique_violation then null;
+      end;
+    end $$;
+    do $$ begin
+      begin
+        update email_drafts set revision=0 where draft_id='shared-project';
+        raise exception 'zero shared draft revision was accepted';
+      exception when check_violation then null;
+      end;
+    end $$;
+  `);
+  expectScalar("select count(*) from email_drafts where source_email_message_id='60000000-0000-4000-8000-000000000005' and deleted_timestamp is null", "3", "personal, Node-shared, and Project-shared drafts coexist");
+  expectScalar("with changed as (update email_drafts set revision=revision+1 where draft_id='shared-node' and revision=1 returning revision) select revision from changed", "2", "fresh revision compare-and-swap succeeds");
+  expectScalar("with stale as (update email_drafts set revision=revision+1 where draft_id='shared-node' and revision=1 returning 1) select count(*) from stale", "0", "stale revision compare-and-swap changes nothing");
+  expectScalar("select count(*) from pg_attribute where attrelid='email_drafts'::regclass and attname in ('email_thread_id','origin_node_id','is_shared','send_state','send_claim_token','send_idempotency_key','sent_email_message_id') and attnum>0 and not attisdropped", "0", "obsolete Node draft columns removed");
+  expectScalar("select count(*) from pg_attribute where attrelid='email_drafts'::regclass and attname='collaboration_id' and attnum>0 and not attisdropped", "0", "obsolete collaboration identity removed");
   console.log(`Email draft scope disposable PostgreSQL contract passed on server_version_num=${version}`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", data, "-m", "fast", "-w", "stop"], { encoding: "utf8" });

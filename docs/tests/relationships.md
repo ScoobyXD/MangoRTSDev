@@ -41,7 +41,7 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 9. Opening an email-selection chat preview may stage a new local textbox presentation but creates no email relationship or chat.
 10. Sending the first chat from an email-selection preview atomically links the chosen existing textbox or the staged new textbox, then creates the email-to-textbox relationship and chat, or creates neither relationship nor chat.
 11. Cancelling an unsent email-selection chat preview requires no relationship deletion because no relationship has been written.
-12. Opening an exact-message Reply in My Triage, Shared Triage, a Node, or a Project ensures the same owner-only mailbox draft identified by its creator, exact mailbox scope, and internal source message. That draft creates no Node/Project relationship, draft-to-text-box relationship, sender grant, collaboration participant, or resource permission; successful send still applies normal wide Node/Project destination inheritance.
+12. An exact-message personal Reply keeps its owner and mailbox identity. A resource-shared Reply instead belongs to one literal Node or Project and is identified by company, that exact typed owner, and the internal source message; its creator is audit metadata, and both drafts may coexist. Neither draft creates an `email_relationships` edge, draft-to-text-box edge, sender grant, collaboration participant, generic registry entry, or permission row; successful send still applies normal wide Node/Project destination inheritance.
 13. Removing a Node-wide or Project-wide email relationship is allowed only when that exact owner and thread have no textbox relationship or email-selection chat; otherwise the command returns `email_removal_has_node_work` or `email_removal_has_project_work` and changes nothing.
 14. Removing one owner's textbox-specific email relationship removes only that exact edge and leaves its wide relationship, every other owner, stored thread/message, local textbox, and surviving attachment relationship unchanged; removal is rejected while that exact message anchors a chat in that textbox.
 15. Email-to-Node, email-to-textbox, and chat rules do not create a generic resource registry, surrogate identity, or untyped edge.
@@ -49,7 +49,7 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 17. A triage command that creates a new email grouping or stores a highlighted-email selection reuses the exact mailbox-scoped stored message when present, fetches only that exact provider message when absent, and never queues thread ingestion or links a thread to a text box.
 18. When a highlighted-email chat's exact message has no text-box relationship in the chosen Node, selecting an existing chat grouping atomically links that message to the grouping's exact existing text box and creates the chat without creating another text box.
 19. The Node email view uses the same atomic rule when the user chooses an existing text-box chat column; a failed relationship or chat write leaves both absent.
-20. A mailbox draft is not owned by the Node or Project where its source appears. Removing that resource's email relationship or deleting that resource never deletes the draft, while the existing textbox/chat dependency guard still controls whether the email relationship itself may be removed.
+20. A personal mailbox draft is not owned by a Node or Project and survives removal or deletion of that resource. A resource-shared draft is owned by its one exact Node or Project, so an allowed wide email unlink or owner deletion retires that draft and its `email_draft` attachment relationships; attachments with another live owner survive, and the existing textbox/chat dependency guard still controls whether unlink is allowed.
 21. A stored-thread reader uses the exact internal `email_thread_id`; an inline email reference stores that thread ID, its exact internal `email_message_id`, and only its personal-account or shared-inbox authorization scope. The reference opens independently of every Node, Project, Logic Gate, Huddle, or other resource relationship, and a missing durable row fails instead of falling back to provider, collaboration, relationship, mailbox-page, subject, or quoted-history lookup.
 22. Completing a Mango-originated Sent message keeps its original exact `email_message` attachment links and retires only redundant imported links for that same internal message; an attachment with another live owner remains live.
 23. A Node or Project textbox projection exposes its complete ordered `email_message_ids` only as a value derived from canonical `email_relationships`; a client never saves that list or a singular representative as textbox-owned relationship metadata, and it renders that backend order without scanning thread cards to infer or reorder membership.
@@ -61,7 +61,7 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 29. A Node or Project textbox stores one approved non-red `color` while it has exact email relationships; all linked message cards share that color, and no relationship row or client hash owns another color.
 30. Reading a Node- or Project-attached stored thread or exact message requires View access to that exact owner and its durable email relationship. Saved mailbox provenance grants no viewing authority or mailbox access: a missing, disconnected, or different personal account may restrict mailbox-only actions but never blocks or replaces the stored resource view.
 
-Last updated: 2026-08-18
+Last updated: 2026-08-19
 
 # Process Story: One email thread can appear in several Nodes and Projects while message work stays local
 
@@ -73,7 +73,7 @@ Opening an attached stored message requires View access to that exact Node or Pr
 ↓
 Inside each Node or Project, one exact message may link to one exact local textbox; the same message may link to a different textbox in another owner
 ↓
-My Triage, Shared Triage, Node, and Project exact-message Reply reuse one owner-only mailbox draft with no draft/reply-specific resource relationship; Node and Project remain Reply-only, while successful sent-message persistence still follows the normal wide-destination inheritance rule
+My Triage and Shared Triage keep personal owner-only drafts; a Node or Project exact message may also own one resource-shared Reply, and both use literal existing identities while successful sent-message persistence follows the normal wide-destination inheritance rule
 ↓
 Completing a Mango-originated Sent message keeps its original exact attachment links and removes only redundant imported links for that same internal message
 ↓
@@ -93,9 +93,9 @@ An accidental Node or Project email relationship with no work in that exact owne
 ↓
 Every endpoint keeps its literal typed identity; no registry, surrogate identity, or generic untyped edge is introduced
 ↓
-Node email viewing creates no draft or send-specific relationship; an explicit exact-message Reply ensures the owner-only mailbox draft, after which the existing send path and normal sent-message persistence and wide-destination inheritance apply
+Node email viewing creates no draft or send-specific relationship; an explicit **My Draft** or **Shared Draft** action opens the exact personal or resource-shared Reply, after which authorized send uses the existing persistence path and wide-destination inheritance
 
-Last updated: 2026-08-18
+Last updated: 2026-08-19
 # Process Story: Policy inheritance follows typed parents without moving permissions into Explorer
 
 A permission or RACI resolver receives one exact resource type and ID
@@ -463,13 +463,15 @@ Inherited resolution may follow those live typed parent edges, but it MUST NOT c
 
 ### Law 31 — Email threads may span Nodes and Projects, while textbox links remain exact and owner-local
 
-One `email_thread_id` and its exact stored messages MAY have wide `email_relationships` in more than one Node or Project. A wide relationship has canonical `resource_type`, the exact owner ID, and a null `resource_textbox_id`; it exposes the thread in that exact resource but does not make that resource the email owner.
+One `email_thread_id` and its exact stored messages MAY have wide `email_relationships` in more than one Node or Project. A wide relationship has canonical `resource_type`, the exact owner ID, and a null `resource_textbox_id`; it exposes the thread in that exact resource but does not make that resource the stored email owner.
 
 A textbox-specific relationship MUST name one exact `email_message_id`, one exact Node or Project, and one exact textbox in that resource. The same message may be linked to at most one textbox inside each owner, while several exact messages may link to one textbox. Repeating the same owner/message/textbox command converges, a different textbox in that owner is rejected, and a textbox in a different owner is allowed.
 
 Removing a Node-wide or Project-wide email relationship is permitted only when that exact owner and thread have no textbox-specific relationship or email-selection chat. A blocked command MUST change nothing and return the owner-specific `email_removal_has_node_work` or `email_removal_has_project_work` error.
 
-Removing one textbox-specific email relationship deletes only that exact edge and is rejected only while its exact message anchors a chat in that textbox. Deleting a Node or Project textbox atomically removes that textbox's owned chats and textbox-specific email relationships while preserving its owner-wide email relationships. A permitted removal MUST NOT delete or rewrite another owner's relationship, the stored thread or message, another owner's textbox or chat, any owner-only mailbox draft, an email chat quote, or any surviving attachment relationship.
+A resource-shared Reply is identified by company, exact Node or Project, and exact source message; creator is audit metadata, and no generic registry or `email_relationships` draft edge is created. An allowed wide unlink or owner deletion MUST retire only that exact resource-shared draft and its draft attachment links. Every personal draft, another owner's shared draft, stored message, and attachment with another live owner MUST survive.
+
+Removing one textbox-specific email relationship deletes only that exact edge and is rejected only while its exact message anchors a chat in that textbox. Deleting a Node or Project textbox atomically removes that textbox's owned chats and textbox-specific email relationships while preserving its owner-wide email relationships and drafts. It MUST NOT delete or rewrite another owner's relationship, the stored thread or message, another owner's textbox or chat, a personal draft, an email chat quote, or any surviving attachment relationship.
 
 ### Law 32 — Huddle ownership and placement use exact Huddle identities
 

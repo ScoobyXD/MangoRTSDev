@@ -51,6 +51,9 @@ type memoryRecycleBinSnapshot struct {
 	permissionV2Settings          map[string]memoryV2PolicySetting
 	effectiveAccess               map[string]domain.EffectiveResourceAccess
 	emailNodeLinks                map[string]communicationsEmailNodeLink
+	emailDrafts                   map[string]domain.CommunicationsEmailDraft
+	attachments                   map[string]domain.Attachment
+	resourceAttachments           map[string]domain.ResourceAttachment
 	logicGateShortcuts            map[string]domain.UserLogicGateShortcut
 
 	huddleLogicGateRelationships     map[string]domain.HuddleLogicGateRelationship
@@ -254,6 +257,9 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		permissionV2Settings:          cloneMap(r.permissionV2Settings),
 		effectiveAccess:               cloneMap(r.effectiveAccess),
 		emailNodeLinks:                cloneMap(r.emailNodeLinks),
+		emailDrafts:                   cloneMap(r.emailDrafts),
+		attachments:                   cloneMap(r.attachments),
+		resourceAttachments:           cloneMap(r.resourceAttachments),
 		logicGateShortcuts:            cloneMap(r.logicGateShortcuts),
 
 		huddleLogicGateRelationships:     cloneMap(r.huddleLogicGateRelationships),
@@ -303,6 +309,9 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.permissionV2Settings = cloneMap(snapshot.permissionV2Settings)
 	r.effectiveAccess = cloneMap(snapshot.effectiveAccess)
 	r.emailNodeLinks = cloneMap(snapshot.emailNodeLinks)
+	r.emailDrafts = cloneMap(snapshot.emailDrafts)
+	r.attachments = cloneMap(snapshot.attachments)
+	r.resourceAttachments = cloneMap(snapshot.resourceAttachments)
 	r.logicGateShortcuts = cloneMap(snapshot.logicGateShortcuts)
 }
 

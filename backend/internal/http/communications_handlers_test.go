@@ -607,6 +607,8 @@ type countingCommunicationsAttachmentRepo struct {
 	getAttachmentCalls              int
 	getAttachmentVariantCalls       int
 	listAttachmentResourceLinkCalls int
+	sharedDraftSendReads            int
+	beforeSharedDraftSendRead       func(int)
 	sizeOverrides                   map[string]int64
 }
 
@@ -662,6 +664,18 @@ func (r *countingCommunicationsAttachmentRepo) ListAttachmentResourceLinks(compa
 	return r.Repository.ListAttachmentResourceLinks(companyID, attachmentID)
 }
 
+func (r *countingCommunicationsAttachmentRepo) GetCommunicationsSharedEmailDraftForSend(input store.CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error) {
+	r.mu.Lock()
+	r.sharedDraftSendReads++
+	read := r.sharedDraftSendReads
+	before := r.beforeSharedDraftSendRead
+	r.mu.Unlock()
+	if before != nil {
+		before(read)
+	}
+	return r.Repository.GetCommunicationsSharedEmailDraftForSend(input)
+}
+
 func (r *countingCommunicationsAttachmentRepo) attachmentReadCounts() (readContent, getAttachment, getVariant, listLinks int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -676,6 +690,7 @@ type communicationsSendTestFixture struct {
 	storage      *fakeAttachmentObjectStorage
 	nylas        *fakeNylasClient
 	token        string
+	tokenFor     func(*testing.T, string, string) string
 	companyID    string
 	userID       string
 	accountEmail string
@@ -724,6 +739,9 @@ func newCommunicationsSendTestFixture(t *testing.T) *communicationsSendTestFixtu
 		storage:      storage,
 		nylas:        nylas,
 		token:        "Bearer " + testJWT(t, key, "kid", subject, user.Email),
+		tokenFor: func(t *testing.T, subject, email string) string {
+			return "Bearer " + testJWT(t, key, "kid", subject, email)
+		},
 		companyID:    companyID,
 		userID:       user.UserID,
 		accountEmail: user.Email,
@@ -747,6 +765,173 @@ func (f *communicationsSendTestFixture) send(t *testing.T, payload any) *httptes
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestCommunicationsSharedDraftSendUsesPersistedRevisionAndRechecksSender(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	collaborator, err := fixture.repo.UpsertAuthUser("shared-draft-collaborator", "collaborator@example.com", "Collaborator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.repo.AddCompanyMembership(collaborator.CognitoSubject, fixture.companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+		CompanyID: fixture.companyID, Provider: "google", AccountEmail: "support@example.com",
+		GrantID: "grant-shared-draft-send", Status: "connected", ConnectedByUserID: fixture.userID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	inbox, err := fixture.repo.CreateCommunicationsSharedInboxFolder(fixture.companyID, "", "Support", "support@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: fixture.companyID, EntityType: store.EntityTypeSharedInbox, EntityID: inbox.FolderID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser, SubjectID: fixture.userID, AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	node, err := fixture.repo.CreateNode(fixture.companyID, "Shared draft send")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: fixture.companyID, EntityType: store.EntityTypeNode, EntityID: node.NodeID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: fixture.userID, AccessLevel: store.EntityPermissionEdit},
+			{SubjectType: store.EntityPermissionSubjectUser, SubjectID: collaborator.UserID, AccessLevel: store.EntityPermissionEdit},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	imported, err := fixture.repo.ImportCommunicationsEmailIntoNode(store.CommunicationsNodeEmailImportInput{
+		CompanyID: fixture.companyID, NodeID: node.NodeID, CreatedByUserID: fixture.userID,
+		Thread: store.CommunicationsEmailThreadUpsertInput{
+			CompanyID: fixture.companyID, SharedInboxID: inbox.FolderID, AccountEmail: "support@example.com", Provider: "google",
+			ProviderThreadID: "provider-source-thread", SelectedMessageID: "provider-source-message",
+			Messages: []domain.EmailMessageSnapshot{{ID: "provider-source-message", ThreadID: "provider-source-thread", Subject: "Source"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	draft, created, err := fixture.repo.EnsureCommunicationsEmailReplyDraft(store.CommunicationsEmailDraftInput{
+		CompanyID: fixture.companyID, SharedNodeID: node.NodeID, SharedInboxID: inbox.FolderID,
+		CreatedByUserID: fixture.userID, SourceMessageID: imported.EmailThread.Messages[0].EmailMessageID,
+		ToRecipients: "Canonical <saved@example.com>", Subject: "Saved subject", BodyEditorHTML: "<p>Saved body</p>",
+	})
+	if err != nil || !created || !draft.CanSend || draft.Revision != 1 {
+		t.Fatalf("ensure shared draft=%+v created=%v err=%v", draft, created, err)
+	}
+	content := []byte("saved attachment bytes")
+	attachmentID := store.NewUUIDv7String()
+	storageKey := attachmentOriginalObjectKey(fixture.companyID, attachmentID)
+	fixture.storage.objects[storageKey] = fakeAttachmentObject{contentType: "text/plain", body: content}
+	sum := sha256.Sum256(content)
+	_, link, err := fixture.repo.CreateAttachmentWithResourceLink(store.AttachmentCreateInput{
+		CompanyID: fixture.companyID, AttachmentID: attachmentID, UploadedByUserID: fixture.userID,
+		OriginalFilename: "saved.txt", MimeType: "text/plain", ByteSize: int64(len(content)),
+		SHA256: fmt.Sprintf("%x", sum[:]), SHA256VerificationMethod: "server_stream",
+		StorageBucket: fixture.storage.bucket, StorageKey: storageKey, SourceKind: store.AttachmentSourceEmailOutgoing,
+		ResourceLink: store.ResourceAttachmentInput{
+			CompanyID: fixture.companyID, ResourceType: "email_draft", ResourceID: draft.DraftID,
+			RelationshipKind: store.AttachmentRelationshipEmailAttachment, CreatedByUserID: fixture.userID,
+			ExpectedRevision: draft.Revision,
+		},
+	})
+	if err != nil || link.ResourceRevision != 2 {
+		t.Fatalf("attach shared draft link=%+v err=%v", link, err)
+	}
+	send := func(token string) *httptest.ResponseRecorder {
+		raw := `{"expected_sender_account_email":"attacker@example.com","to":[{"email":"evil@example.com"}],"subject":"Browser subject","body":"Browser body","reply_to_message_id":"browser-message","attachments":[{"attachment_id":"browser-attachment","filename":"browser.txt"}]}`
+		path := "/v1/communications/messages/send?" + url.Values{
+			"company_id": {fixture.companyID}, "shared_draft_id": {draft.DraftID}, "expected_draft_revision": {"2"},
+		}.Encode()
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(raw))
+		req.Header.Set("Authorization", token)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		fixture.handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := send(fixture.token); rec.Code != http.StatusCreated {
+		t.Fatalf("canonical shared send status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if fixture.nylas.lastSendGrantID != "grant-shared-draft-send" || len(fixture.nylas.sent.To) != 1 ||
+		fixture.nylas.sent.To[0].Email != "saved@example.com" || fixture.nylas.sent.Subject != "Saved subject" ||
+		fixture.nylas.sent.Body != "<p>Saved body</p>" || fixture.nylas.sent.ReplyToMessageID != "provider-source-message" ||
+		len(fixture.nylas.sent.Attachments) != 1 || fixture.nylas.sent.Attachments[0].AttachmentID != attachmentID ||
+		len(fixture.nylas.sentAttachmentBodies) != 1 || !bytes.Equal(fixture.nylas.sentAttachmentBodies[0], content) {
+		t.Fatalf("shared send grant=%q payload=%+v bodies=%q", fixture.nylas.lastSendGrantID, fixture.nylas.sent, fixture.nylas.sentAttachmentBodies)
+	}
+	providerCalls := fixture.nylas.sendCalls
+	collaboratorToken := fixture.tokenFor(t, collaborator.CognitoSubject, collaborator.Email)
+	if rec := send(collaboratorToken); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "email_draft_send_denied") {
+		t.Fatalf("collaborator send status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if fixture.nylas.sendCalls != providerCalls {
+		t.Fatalf("collaborator provider sends=%d, want %d", fixture.nylas.sendCalls, providerCalls)
+	}
+
+	var revokeErr error
+	fixture.countingRepo.mu.Lock()
+	fixture.countingRepo.sharedDraftSendReads = 0
+	fixture.countingRepo.beforeSharedDraftSendRead = func(read int) {
+		if read != 2 {
+			return
+		}
+		_, revokeErr = fixture.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+			CompanyID: fixture.companyID, EntityType: store.EntityTypeSharedInbox, EntityID: inbox.FolderID,
+			DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		})
+	}
+	fixture.countingRepo.mu.Unlock()
+	if rec := send(fixture.token); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "email_draft_send_denied") {
+		t.Fatalf("revoked-at-send status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if revokeErr != nil {
+		t.Fatal(revokeErr)
+	}
+	if fixture.nylas.sendCalls != providerCalls {
+		t.Fatalf("revoked-at-send provider sends=%d, want %d", fixture.nylas.sendCalls, providerCalls)
+	}
+	if _, err := fixture.repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: fixture.companyID, EntityType: store.EntityTypeSharedInbox, EntityID: inbox.FolderID,
+		DefaultAccess: store.ResourceDefaultAccessNoAccess, DefaultAccessSet: true,
+		Permissions: []store.EntityPermissionInput{{
+			SubjectType: store.EntityPermissionSubjectUser, SubjectID: fixture.userID, AccessLevel: store.EntityPermissionEdit,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var disconnectErr error
+	fixture.countingRepo.mu.Lock()
+	fixture.countingRepo.sharedDraftSendReads = 0
+	fixture.countingRepo.beforeSharedDraftSendRead = func(read int) {
+		if read != 2 {
+			return
+		}
+		_, disconnectErr = fixture.repo.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
+			CompanyID: fixture.companyID, Provider: "google", AccountEmail: "support@example.com",
+			GrantID: "grant-shared-draft-send", Status: "disconnected", ConnectedByUserID: fixture.userID,
+		})
+	}
+	fixture.countingRepo.mu.Unlock()
+	if rec := send(fixture.token); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "nylas_not_connected") {
+		t.Fatalf("disconnected-at-send status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if disconnectErr != nil {
+		t.Fatal(disconnectErr)
+	}
+	if fixture.nylas.sendCalls != providerCalls {
+		t.Fatalf("disconnected-at-send provider sends=%d, want %d", fixture.nylas.sendCalls, providerCalls)
+	}
 }
 
 func assertCommunicationsAttachmentReadShape(t *testing.T, repo *countingCommunicationsAttachmentRepo, wantReadContent int) {
@@ -1402,7 +1587,22 @@ func TestCommunicationsSendPersonalSignatureImageUsesHealthyOriginalAndPromotesS
 
 func TestCommunicationsSendUnauthorizedAttachmentDoesNotOpenStorage(t *testing.T) {
 	fixture := newCommunicationsSendTestFixture(t)
-	attachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, fixture.storage, fixture.userID, fixture.companyID, personalEmailDraftResourceID("another-user", fixture.accountEmail, "draft-private"), "private.txt", "application/octet-stream", []byte("private"))
+	other, err := fixture.repo.UpsertAuthUser("private-attachment-owner", "private@example.com", "Private Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.repo.UpsertUserEmailConnection(store.UserEmailConnectionInput{
+		UserID: other.UserID, Provider: "google", AccountEmail: other.Email, GrantID: "grant-private", Status: "connected",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
+		CompanyID: fixture.companyID, DraftID: "draft-private", PersonalUserID: other.UserID,
+		PersonalAccountEmail: other.Email, AccountEmail: other.Email, CreatedByUserID: other.UserID, UpdatedByUserID: other.UserID, Kind: "compose",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	attachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, fixture.storage, other.UserID, fixture.companyID, "draft-private", "private.txt", "application/octet-stream", []byte("private"))
 	rec := fixture.send(t, map[string]any{
 		"to":      []map[string]string{{"email": "friend@example.com"}},
 		"subject": "Unauthorized attachment",

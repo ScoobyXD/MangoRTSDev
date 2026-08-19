@@ -60,6 +60,7 @@ export type MangoResourceAttachment = {
   created_timestamp: string;
   deleted_timestamp?: string;
   attachment?: MangoAttachment;
+  resource_revision?: number;
 };
 
 export type MangoAttachmentUploadResponse = {
@@ -91,6 +92,7 @@ export type UploadMangoAttachmentInput = {
   originalHeight?: number;
   signal?: AbortSignal;
   onProgress?: (progress: MangoAttachmentUploadProgress) => void;
+  expectedRevision?: number; onResourceRevision?: (revision: number) => void;
 };
 
 export type ImportRemoteMangoImageAttachmentInput = {
@@ -101,6 +103,7 @@ export type ImportRemoteMangoImageAttachmentInput = {
   originalFilename?: string;
   informationID?: string;
   editorSurface?: string;
+  expectedRevision?: number;
 };
 
 export type ListMangoResourceAttachmentsInput = {
@@ -113,6 +116,7 @@ export type ListMangoResourceAttachmentsInput = {
 
 export type UnlinkMangoResourceAttachmentInput = ListMangoResourceAttachmentsInput & {
   attachmentID: string;
+  expectedRevision?: number;
 };
 
 export type DeleteMangoAttachmentInput = UnlinkMangoResourceAttachmentInput;
@@ -267,17 +271,19 @@ export async function listMangoResourceAttachments(
 export async function deleteMangoAttachmentPermanently(
   request: AttachmentRequestJSON,
   input: DeleteMangoAttachmentInput,
-): Promise<void> {
+): Promise<number | undefined> {
   const companyID = input.companyID.trim();
   const resourceID = input.resourceID.trim();
   const attachmentID = input.attachmentID.trim();
   if (!companyID || !resourceID || !attachmentID) throw new Error("attachment_resource_context_required");
   const query = new URLSearchParams({ company_id: companyID });
-  await request<{ status: string }>(
+  if (input.expectedRevision && input.expectedRevision > 0) query.set("expected_revision", String(input.expectedRevision));
+  const response = await request<{ status: string; resource_revision?: number }>(
     `/v1/resources/${encodeURIComponent(input.resourceType)}/${encodeURIComponent(resourceID)}/attachments/${encodeURIComponent(attachmentID)}?${query.toString()}`,
     { method: "DELETE" },
   );
   invalidateMangoResourceAttachmentsCache(request, input);
+  return response.resource_revision;
 }
 
 export async function linkMangoResourceAttachment(
@@ -300,6 +306,7 @@ export async function linkMangoResourceAttachment(
         information_id: input.informationID?.trim() || undefined,
         message_id: input.messageID?.trim() || undefined,
         editor_surface: input.editorSurface?.trim() || undefined,
+        ...(input.expectedRevision && input.expectedRevision > 0 ? { expected_revision: input.expectedRevision } : {}),
       },
     },
   );
@@ -339,6 +346,8 @@ export async function uploadMangoAttachment(
   input: UploadMangoAttachmentInput,
 ): Promise<MangoAttachmentUploadResponse> {
   const response = await uploadBrowserAttachment(request, input);
+  const revision = response.resource_attachment.resource_revision;
+  if (Number.isInteger(revision) && revision! > 0) try { input.onResourceRevision?.(revision!); } catch { /* UI revision state cannot corrupt a durable upload. */ }
   invalidateMangoResourceAttachmentsCache(request, input);
   return response;
 }
@@ -363,6 +372,7 @@ export async function importRemoteMangoImageAttachment(
         original_filename: input.originalFilename?.trim() || undefined,
         information_id: input.informationID?.trim() || undefined,
         editor_surface: input.editorSurface?.trim() || undefined,
+        ...(input.expectedRevision && input.expectedRevision > 0 ? { expected_revision: input.expectedRevision } : {}),
       },
     },
   );

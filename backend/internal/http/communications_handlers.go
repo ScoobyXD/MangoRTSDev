@@ -322,11 +322,11 @@ func (s *Server) handleCommunicationsMessages(w http.ResponseWriter, r *http.Req
 		page = filterGooglePrimaryMessagePage(connection, query, page)
 		writeJSONMaybeNotModified(w, r, http.StatusOK, page)
 	case http.MethodPost:
-		connection, ok := s.requireCommunicationsSendConnection(w, r)
+		sendContext, ok := s.requireCommunicationsSendConnection(w, r)
 		if !ok {
 			return
 		}
-		s.sendCommunicationsMessage(w, r, connection)
+		s.sendCommunicationsMessage(w, r, sendContext)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
@@ -637,11 +637,11 @@ func (s *Server) handleCommunicationsMessageByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 			return
 		}
-		connection, ok := s.requireCommunicationsSendConnection(w, r)
+		sendContext, ok := s.requireCommunicationsSendConnection(w, r)
 		if !ok {
 			return
 		}
-		s.sendCommunicationsMessage(w, r, connection)
+		s.sendCommunicationsMessage(w, r, sendContext)
 		return
 	}
 	actor, ok := authenticatedActor(r)
@@ -1002,11 +1002,41 @@ type communicationsSendMessageRequest struct {
 	ExpectedSenderAccountEmail string `json:"expected_sender_account_email,omitempty"`
 }
 
-func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Request, connection domain.UserEmailConnection) {
+type communicationsSendContext struct {
+	connection      domain.UserEmailConnection
+	companyID       string
+	sharedInboxID   string
+	actorUserID     string
+	draft           domain.CommunicationsEmailDraft
+	fromSharedDraft bool
+}
+
+func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Request, sendContext communicationsSendContext) {
+	connection := sendContext.connection
 	var req communicationsSendMessageRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
+	}
+	if sendContext.fromSharedDraft {
+		links, err := s.repo.ListResourceAttachments(sendContext.companyID, "email_draft", sendContext.draft.DraftID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_load_email_draft_attachments")
+			return
+		}
+		var replyTarget struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal([]byte(sendContext.draft.ReplyToMessageJSON), &replyTarget) != nil || strings.TrimSpace(replyTarget.ID) == "" {
+			writeError(w, http.StatusConflict, "invalid_shared_email_draft")
+			return
+		}
+		req.NylasSendMessageRequest = NylasSendMessageRequest{
+			To: communicationsDraftAddresses(sendContext.draft.ToRecipients), Cc: communicationsDraftAddresses(sendContext.draft.CcRecipients),
+			Bcc: communicationsDraftAddresses(sendContext.draft.BccRecipients), Subject: sendContext.draft.Subject,
+			Body: sendContext.draft.BodyEditorHTML, ReplyToMessageID: replyTarget.ID, Attachments: communicationsDraftAttachments(links),
+		}
+		req.ExpectedSenderAccountEmail = ""
 	}
 	req.Subject = strings.TrimSpace(req.Subject)
 	req.Body = strings.TrimSpace(req.Body)
@@ -1015,6 +1045,9 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	req.Cc = cleanEmailAddresses(req.Cc)
 	req.Bcc = cleanEmailAddresses(req.Bcc)
 	cleanCompanyID := strings.TrimSpace(req.CompanyID)
+	if sendContext.fromSharedDraft {
+		cleanCompanyID = sendContext.companyID
+	}
 	if cleanCompanyID == "" {
 		cleanCompanyID = strings.TrimSpace(r.URL.Query().Get("company_id"))
 	}
@@ -1044,6 +1077,29 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 	if !attachmentsOK {
 		return
 	}
+	if sendContext.fromSharedDraft {
+		freshDraft, err := s.repo.GetCommunicationsSharedEmailDraftForSend(store.CommunicationsEmailDraftGetInput{
+			CompanyID: cleanCompanyID, DraftID: sendContext.draft.DraftID,
+			ParticipantUserID: sendContext.actorUserID, ExpectedRevision: sendContext.draft.Revision,
+		})
+		if errors.Is(err, store.ErrVersionConflict) {
+			writeError(w, http.StatusConflict, "email_draft_revision_conflict")
+			return
+		}
+		if err != nil || !freshDraft.CanSend {
+			writeError(w, http.StatusForbidden, "email_draft_send_denied")
+			return
+		}
+		actor, ok := authenticatedActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		connection, ok = s.requireCommunicationsSharedDraftSendConnection(w, r, actor, cleanCompanyID, freshDraft)
+		if !ok {
+			return
+		}
+	}
 	sendReq.Attachments = attachments
 	sendReq.OutboundAttachments = outboundAttachments
 	sendReq.TrackingOptions = defaultCommunicationsTrackingOptions()
@@ -1062,7 +1118,11 @@ func (s *Server) sendCommunicationsMessage(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	message = communicationsSendResponseWithLocalContent(message, sendReq)
-	sentThread, internalMessageID, err := s.persistCommunicationsSentMessage(r.Context(), cleanCompanyID, strings.TrimSpace(r.URL.Query().Get("shared_inbox_id")), connection, message)
+	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
+	if sendContext.fromSharedDraft {
+		sharedInboxID = sendContext.sharedInboxID
+	}
+	sentThread, internalMessageID, err := s.persistCommunicationsSentMessage(r.Context(), cleanCompanyID, sharedInboxID, connection, message)
 	if err != nil {
 		log.Printf("communications sent message persistence failed user_id=%s message_id=%s err=%v", connection.UserID, message.ID, err)
 		writeError(w, http.StatusInternalServerError, "failed_to_store_sent_email")
@@ -1522,19 +1582,99 @@ func (s *Server) requireConnectedEmail(w http.ResponseWriter, r *http.Request) (
 	return connection, true
 }
 
-func (s *Server) requireCommunicationsSendConnection(w http.ResponseWriter, r *http.Request) (domain.UserEmailConnection, bool) {
+func (s *Server) requireCommunicationsSendConnection(w http.ResponseWriter, r *http.Request) (communicationsSendContext, bool) {
 	if !s.nylasConfig.IsConfigured() || s.nylasClient == nil {
 		writeError(w, http.StatusServiceUnavailable, "nylas_not_configured")
-		return domain.UserEmailConnection{}, false
+		return communicationsSendContext{}, false
 	}
 	actor, ok := authenticatedActor(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return domain.UserEmailConnection{}, false
+		return communicationsSendContext{}, false
 	}
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	sharedDraftID := strings.TrimSpace(r.URL.Query().Get("shared_draft_id"))
+	if sharedDraftID != "" {
+		revision, err := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("expected_draft_revision")), 10, 64)
+		if companyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return communicationsSendContext{}, false
+		}
+		if err != nil || revision < 1 {
+			writeError(w, http.StatusBadRequest, "expected_draft_revision_required")
+			return communicationsSendContext{}, false
+		}
+		draft, err := s.repo.GetCommunicationsSharedEmailDraftForSend(store.CommunicationsEmailDraftGetInput{
+			CompanyID: companyID, DraftID: sharedDraftID, ParticipantUserID: actor.User.UserID, ExpectedRevision: revision,
+		})
+		if errors.Is(err, store.ErrVersionConflict) {
+			writeError(w, http.StatusConflict, "email_draft_revision_conflict")
+			return communicationsSendContext{}, false
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "email_draft_not_found")
+			return communicationsSendContext{}, false
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_shared_email_draft")
+			return communicationsSendContext{}, false
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_authorize_email_draft_send")
+			return communicationsSendContext{}, false
+		}
+		if !draft.CanSend {
+			writeError(w, http.StatusForbidden, "email_draft_send_denied")
+			return communicationsSendContext{}, false
+		}
+		connection, connected := s.requireCommunicationsSharedDraftSendConnection(w, r, actor, companyID, draft)
+		return communicationsSendContext{connection: connection, companyID: companyID, sharedInboxID: draft.SharedInboxID, actorUserID: actor.User.UserID, draft: draft, fromSharedDraft: true}, connected
+	}
 	sharedInboxID := strings.TrimSpace(r.URL.Query().Get("shared_inbox_id"))
-	return s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionEdit)
+	connection, connected := s.requireCommunicationsConnection(w, r, actor, companyID, sharedInboxID, store.EntityPermissionEdit)
+	return communicationsSendContext{connection: connection, companyID: companyID, sharedInboxID: sharedInboxID}, connected
+}
+
+func (s *Server) requireCommunicationsSharedDraftSendConnection(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID string, draft domain.CommunicationsEmailDraft) (domain.UserEmailConnection, bool) {
+	if draft.ScopeType != "personal" {
+		return s.requireCommunicationsConnection(w, r, actor, companyID, draft.SharedInboxID, store.EntityPermissionEdit)
+	}
+	if draft.PersonalUserID != actor.User.UserID {
+		writeError(w, http.StatusForbidden, "email_draft_send_denied")
+		return domain.UserEmailConnection{}, false
+	}
+	connection, found := s.resolveActorPersonalEmailConnection(w, actor.User.UserID, draft.PersonalAccountEmail)
+	if !found {
+		return domain.UserEmailConnection{}, false
+	}
+	return requireConnectedEmailStatus(w, connection)
+}
+
+func communicationsDraftAddresses(raw string) []NylasEmailAddress {
+	items := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' })
+	addresses := make([]NylasEmailAddress, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		address := NylasEmailAddress{Email: item}
+		if open := strings.LastIndex(item, "<"); open >= 0 && strings.HasSuffix(item, ">") {
+			address.Name = strings.Trim(strings.TrimSpace(item[:open]), `"`)
+			address.Email = strings.TrimSpace(item[open+1 : len(item)-1])
+		}
+		addresses = append(addresses, address)
+	}
+	return cleanEmailAddresses(addresses)
+}
+
+func communicationsDraftAttachments(links []domain.ResourceAttachment) []NylasAttachment {
+	items := make([]NylasAttachment, 0, len(links))
+	for _, link := range links {
+		if link.Attachment == nil {
+			continue
+		}
+		items = append(items, NylasAttachment{ID: link.AttachmentID, AttachmentID: link.AttachmentID,
+			Filename: link.Attachment.OriginalFilename, ContentType: link.Attachment.MimeType, Size: link.Attachment.ByteSize})
+	}
+	return items
 }
 
 func (s *Server) requireCommunicationsConnection(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID, sharedInboxID, sharedInboxAccessLevel string) (domain.UserEmailConnection, bool) {

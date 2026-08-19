@@ -138,7 +138,15 @@ func TestCommunicationsEmailDraftResponseUsesOnlyExactDraftAttachmentLinks(t *te
 	}
 	storage := newFakeAttachmentObjectStorage()
 	exactAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, draft.DraftID, "exact.txt", "text/plain", []byte("exact"))
-	obsoleteAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, "personal:"+fixture.owner.UserID+":"+draft.DraftID, "obsolete.txt", "text/plain", []byte("obsolete"))
+	obsoleteDraftID := "personal:" + fixture.owner.UserID + ":" + draft.DraftID
+	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
+		CompanyID: fixture.companyID, DraftID: obsoleteDraftID, PersonalUserID: fixture.owner.UserID,
+		PersonalAccountEmail: "owner-a@example.com", AccountEmail: "owner-a@example.com",
+		CreatedByUserID: fixture.owner.UserID, UpdatedByUserID: fixture.owner.UserID, Kind: "compose",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	obsoleteAttachmentID := seedEmailAttachmentForCommunicationsTest(t, fixture.repo, storage, fixture.owner.UserID, fixture.companyID, obsoleteDraftID, "obsolete.txt", "text/plain", []byte("obsolete"))
 
 	response := NewServer(fixture.repo).communicationsEmailDraftResponse(draft)
 	if len(response.Attachments) != 1 || response.Attachments[0].AttachmentID != exactAttachmentID {

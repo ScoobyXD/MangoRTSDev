@@ -776,6 +776,7 @@ func (r *MemoryRepo) TransferCommunicationsEmailNode(input CommunicationsEmailNo
 }
 
 func (r *MemoryRepo) deleteCommunicationsEmailSourceNodeLocked(companyID, directLinkKey string, link communicationsEmailNodeLink) {
+	r.deleteMemoryResourceSharedEmailDraftsLocked(companyID, EntityTypeNode, link.NodeID)
 	boardCards := r.kanbanCards[boardKey(companyID, link.BoardID)]
 	nextCards := boardCards[:0]
 	for _, card := range boardCards {

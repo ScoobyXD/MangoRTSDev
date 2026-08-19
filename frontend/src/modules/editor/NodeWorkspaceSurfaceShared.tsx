@@ -237,6 +237,7 @@ export type UploadEditorAttachmentOptions = {
   editorSurface?: string;
   signal?: AbortSignal;
   onProgress?: (progress: MangoAttachmentUploadProgress) => void;
+  expectedRevision?: number; onResourceRevision?: (revision: number) => void;
 };
 
 export async function uploadEditorAttachment(file: File, options: UploadEditorAttachmentOptions): Promise<EditorChatAttachment> {
@@ -252,6 +253,8 @@ export async function uploadEditorAttachment(file: File, options: UploadEditorAt
     editorSurface: options.editorSurface,
     signal: options.signal,
     onProgress: options.onProgress,
+    expectedRevision: options.expectedRevision,
+    onResourceRevision: options.onResourceRevision,
   });
   return editorChatAttachmentFromUpload(uploaded);
 }
