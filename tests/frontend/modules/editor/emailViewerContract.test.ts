@@ -153,6 +153,20 @@ test("Node and Project Reply share one server-owned personal draft path", () => 
   assert.match(nodeParts, /if \(!nodeID\.trim\(\)\) \{\s*if \(activeSelectedMessageID === messageID\) clearSelectedMessage\(\);\s*setReplyComposer/);
 });
 
+test("optional Reply-draft indicators never turn a mailbox mismatch into a Project email-viewing error", () => {
+  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
+  const loaderStart = nodeParts.indexOf("async function loadEmailReplyDraftIndicators");
+  const loaderEnd = nodeParts.indexOf("const MangoTiptapEditor", loaderStart);
+  const indicatorLoader = nodeParts.slice(loaderStart, loaderEnd);
+
+  assert.ok(loaderStart >= 0 && loaderEnd > loaderStart);
+  assert.match(indicatorLoader, /listEmailReplyDraftsBySource\(companyID, scope, sourceMessageIDs, \{ refresh: true \}\)[\s\S]{0,80}\.catch\(\(\) => \[\]\)/);
+  assert.equal((nodeParts.match(/loadEmailReplyDraftIndicators\(/g) ?? []).length, 4);
+  assert.doesNotMatch(nodeParts, /failed_to_load_email_drafts/);
+  assert.match(nodeParts, /if \(selected \|\| collapsed \|\| !repliesEnabled \|\| !exactMailboxScopeAvailable\) return undefined/);
+  assert.match(nodeParts, /<EmailConversationPane[\s\S]{0,220}repliesEnabled=\{false\}[\s\S]{0,320}projectID=\{projectID\}/);
+});
+
 test("attached Reply flushes one exact final save and makes save or sent-cleanup failures recoverable", () => {
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const finalSaveStart = nodeParts.indexOf("const finalReplyDraftSaveRef");

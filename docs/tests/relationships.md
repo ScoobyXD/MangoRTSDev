@@ -59,6 +59,7 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 27. Every email/textbox relationship and email-selection chat command uses Mango's exact internal `email_message_id`; provider message and thread IDs are display/provider context only and never relationship authority.
 28. A Project's permanent document, whose `textbox_id` equals its `project_id`, is never an email/textbox relationship or chat destination.
 29. A Node or Project textbox stores one approved non-red `color` while it has exact email relationships; all linked message cards share that color, and no relationship row or client hash owns another color.
+30. Reading a Node- or Project-attached stored thread or exact message requires View access to that exact owner and its durable email relationship. Saved mailbox provenance grants no viewing authority or mailbox access: a missing, disconnected, or different personal account may restrict mailbox-only actions but never blocks or replaces the stored resource view.
 
 Last updated: 2026-08-18
 
@@ -67,6 +68,8 @@ Last updated: 2026-08-18
 A stored email thread may have exact wide `email_relationships` in several Nodes and Projects
 ↓
 Each newly completed message inherits every distinct Node-wide and Project-wide destination already used by that thread, but never inherits a textbox destination
+↓
+Opening an attached stored message requires View access to that exact Node or Project and its durable email relationship; saved mailbox provenance neither blocks that resource view nor grants mailbox or draft access
 ↓
 Inside each Node or Project, one exact message may link to one exact local textbox; the same message may link to a different textbox in another owner
 ↓

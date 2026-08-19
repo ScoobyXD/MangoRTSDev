@@ -126,7 +126,8 @@ async function loadEmailReplyDraftIndicators(
   scope: CommunicationsEmailDraftScope,
   sourceMessageIDs: string[],
 ): Promise<EmailReplyDraftIDBySourceMessageID> {
-  const drafts = await listEmailReplyDraftsBySource(companyID, scope, sourceMessageIDs, { refresh: true });
+  const drafts = await listEmailReplyDraftsBySource(companyID, scope, sourceMessageIDs, { refresh: true })
+    .catch(() => []);
   return Object.fromEntries(drafts.flatMap((draft) => {
     const sourceMessageID = draft.source_message_id?.trim() ?? "";
     const draftID = draft.draft_id?.trim() ?? "";
@@ -3839,7 +3840,7 @@ const AttachedEmailThreadCard: React.FC<{
   const replyAvailable = repliesEnabled && exactMailboxScopeAvailable && Boolean(email.emailMessageID?.trim());
   const rootReplyDraftID = replyDraftIDBySourceMessageID[email.emailMessageID?.trim() ?? ""] ?? "";
   useEffect(() => {
-    if (selected || collapsed || !exactMailboxScopeAvailable) return undefined;
+    if (selected || collapsed || !repliesEnabled || !exactMailboxScopeAvailable) return undefined;
     const sourceMessageIDs = Array.from(new Set(threadMessages
       .map((threadMessage) => threadMessage.email_message_id?.trim() ?? "")
       .filter(Boolean)));
@@ -3848,12 +3849,9 @@ const AttachedEmailThreadCard: React.FC<{
     void loadEmailReplyDraftIndicators(companyID, mailboxScope, sourceMessageIDs)
       .then((drafts) => {
         if (!cancelled) onReplyDraftIndicatorsChange(sourceMessageIDs, drafts);
-      })
-      .catch((cause) => {
-        if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_email_drafts");
       });
     return () => { cancelled = true; };
-  }, [collapsed, companyID, exactMailboxScopeAvailable, mailboxScope, onError, onReplyDraftIndicatorsChange, selected, threadMessages]);
+  }, [collapsed, companyID, exactMailboxScopeAvailable, mailboxScope, onReplyDraftIndicatorsChange, repliesEnabled, selected, threadMessages]);
   const internalMessageIDForProvider = (providerMessageID: string): string => {
     const cleanProviderMessageID = providerMessageID.trim();
     return threadMessages.find((message) => message.id.trim() === cleanProviderMessageID)?.email_message_id?.trim()
@@ -4400,11 +4398,9 @@ export const AttachedEmailOrganizerPane: React.FC<AttachedEmailOrganizerPaneProp
     }))).then((results) => {
       if (cancelled) return;
       for (const result of results) updateReplyDraftIndicators(result.sourceMessageIDs, result.drafts);
-    }).catch((cause) => {
-      if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_email_drafts");
     });
     return () => { cancelled = true; };
-  }, [companyID, onError, repliesEnabled, uniqueEmails, updateReplyDraftIndicators]);
+  }, [companyID, repliesEnabled, uniqueEmails, updateReplyDraftIndicators]);
 
   useEffect(() => {
     setExpandedThreadIDs((current) => new Set(Array.from(current).filter((messageID) => emailByID.has(messageID))));
@@ -6277,12 +6273,9 @@ export const EmailConversationPane: React.FC<EmailConversationPaneProps> = ({
     void loadEmailReplyDraftIndicators(companyID, mailboxScope, sourceMessageIDs)
       .then((drafts) => {
         if (!cancelled) onReplyDraftIndicatorsChange(sourceMessageIDs, drafts);
-      })
-      .catch((cause) => {
-        if (!cancelled) onError(cause instanceof Error ? cause.message : "failed_to_load_email_drafts");
       });
     return () => { cancelled = true; };
-  }, [companyID, displayThreadMessages, exactMailboxScopeAvailable, mailboxScope, onError, onReplyDraftIndicatorsChange, repliesEnabled]);
+  }, [companyID, displayThreadMessages, exactMailboxScopeAvailable, mailboxScope, onReplyDraftIndicatorsChange, repliesEnabled]);
   useEffect(() => {
     if (singleMessageOnly || !expandedThreadMessageID || !nodeID.trim() || !emailThreadID?.trim()) return undefined;
     const expandedMessage = displayThreadMessages.find((candidate) => candidate.id === expandedThreadMessageID);
