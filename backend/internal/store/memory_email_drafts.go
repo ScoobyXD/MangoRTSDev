@@ -14,13 +14,17 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 	if err != nil {
 		return nil, ErrInvalid
 	}
-	kind, sourceMessageIDs, err := normalizeCommunicationsEmailDraftListFilters(input.Kind, input.SourceMessageIDs)
+	kind, sourceMessageIDs, sourceThreadIDs, err := normalizeCommunicationsEmailDraftListFilters(input.Kind, input.SourceMessageIDs, input.SourceThreadIDs)
 	if err != nil {
 		return nil, err
 	}
 	sourceMessageIDSet := make(map[string]struct{}, len(sourceMessageIDs))
 	for _, sourceMessageID := range sourceMessageIDs {
 		sourceMessageIDSet[sourceMessageID] = struct{}{}
+	}
+	sourceThreadIDSet := make(map[string]struct{}, len(sourceThreadIDs))
+	for _, sourceThreadID := range sourceThreadIDs {
+		sourceThreadIDSet[sourceThreadID] = struct{}{}
 	}
 	companyID := scope.companyID
 
@@ -29,6 +33,15 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 
 	if _, ok := r.companies[companyID]; !ok {
 		return nil, ErrNotFound
+	}
+	sourceThreadIDByMessageID := make(map[string]string)
+	for _, thread := range r.emailThreads {
+		if thread.CompanyID != companyID {
+			continue
+		}
+		for _, message := range thread.Messages {
+			sourceThreadIDByMessageID[message.EmailMessageID] = thread.EmailThreadID
+		}
 	}
 	drafts := make([]domain.CommunicationsEmailDraft, 0)
 	for _, draft := range r.emailDrafts {
@@ -42,11 +55,19 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 		if kind != "" {
 			include = include && draft.Kind == kind
 		}
-		if len(sourceMessageIDSet) > 0 {
+		sourceThreadID := ""
+		if draft.SourceMessageID != "" {
+			sourceThreadID = sourceThreadIDByMessageID[draft.SourceMessageID]
+		}
+		if len(sourceMessageIDSet) > 0 || len(sourceThreadIDSet) > 0 {
 			_, sourceMatches := sourceMessageIDSet[draft.SourceMessageID]
-			include = include && sourceMatches
+			_, threadMatches := sourceThreadIDSet[sourceThreadID]
+			include = include && (sourceMatches || threadMatches)
 		}
 		if include {
+			draft.SourceThreadID = sourceThreadID
+			draft.BodyEditorHTML = ""
+			draft.ReplyToMessageJSON = "{}"
 			drafts = append(drafts, draft)
 		}
 	}
@@ -381,31 +402,42 @@ func normalizeCommunicationsEmailDraftInput(input CommunicationsEmailDraftInput)
 	}, nil
 }
 
-func normalizeCommunicationsEmailDraftListFilters(kindInput string, sourceMessageIDInputs []string) (string, []string, error) {
+func normalizeCommunicationsEmailDraftListFilters(kindInput string, sourceMessageIDInputs, sourceThreadIDInputs []string) (string, []string, []string, error) {
 	kind := strings.ToLower(strings.TrimSpace(kindInput))
 	if kind != "" {
 		kind = normalizeCommunicationsEmailDraftKind(kind)
 		if kind == "" {
-			return "", nil, ErrInvalid
+			return "", nil, nil, ErrInvalid
 		}
 	}
-	if len(sourceMessageIDInputs) > CommunicationsEmailDraftSourceFilterMax {
-		return "", nil, ErrInvalid
+	if len(sourceMessageIDInputs) > CommunicationsEmailDraftSourceFilterMax || len(sourceThreadIDInputs) > CommunicationsEmailDraftSourceFilterMax {
+		return "", nil, nil, ErrInvalid
 	}
-	sourceMessageIDs := make([]string, 0, len(sourceMessageIDInputs))
-	seen := make(map[string]struct{}, len(sourceMessageIDInputs))
-	for _, sourceMessageIDInput := range sourceMessageIDInputs {
-		sourceMessageID := cleanUUIDText(sourceMessageIDInput)
-		if sourceMessageID == "" {
-			return "", nil, ErrInvalid
+	normalizeIDs := func(inputs []string) ([]string, error) {
+		ids := make([]string, 0, len(inputs))
+		seen := make(map[string]struct{}, len(inputs))
+		for _, input := range inputs {
+			id := cleanUUIDText(input)
+			if id == "" {
+				return nil, ErrInvalid
+			}
+			if _, exists := seen[id]; exists {
+				continue
+			}
+			seen[id] = struct{}{}
+			ids = append(ids, id)
 		}
-		if _, exists := seen[sourceMessageID]; exists {
-			continue
-		}
-		seen[sourceMessageID] = struct{}{}
-		sourceMessageIDs = append(sourceMessageIDs, sourceMessageID)
+		return ids, nil
 	}
-	return kind, sourceMessageIDs, nil
+	sourceMessageIDs, err := normalizeIDs(sourceMessageIDInputs)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	sourceThreadIDs, err := normalizeIDs(sourceThreadIDInputs)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return kind, sourceMessageIDs, sourceThreadIDs, nil
 }
 
 func normalizeCommunicationsEmailSignatureInput(input CommunicationsEmailSignatureInput) (domain.CommunicationsEmailSignature, error) {

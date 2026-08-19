@@ -96,7 +96,7 @@ test("Node and Project Reply share one server-owned personal draft path", () => 
   assert.match(nodeParts, /ensureEmailReplyDraft\(\{/);
   assert.match(nodeParts, /getEmailDraft\(companyID, indicatedDraftID, mailboxScope\)/);
   assert.match(nodeParts, /listEmailReplyDraftsBySource\(companyID, scope, sourceMessageIDs/);
-  assert.match(nodeParts, /\{replyDraftIDBySourceMessageID\[internalThreadMessageID\] \? "My Draft" : "Reply"\}/);
+  assert.match(nodeParts, /\{replyDraftIndicatorBySourceMessageID\[internalThreadMessageID\] \? "My Draft" : "Reply"\}/);
   assert.match(nodeParts, /if \(!activeDraft \|\| !replyTargetMessage \|\| sending \|\| sentCleanupFailed \|\| draftSaveStatus === "saving"\) return undefined/);
   assert.match(nodeParts, /draftSaveStatus === "failed" && fingerprint === lastDraftFailedFingerprintRef\.current/);
   assert.match(nodeParts, /window\.setTimeout\(\(\) => \{\s*setDraftSaveStatus\("saving"\);\s*let saving: Promise<void>;\s*saving = saveEmailDraft/);
@@ -155,16 +155,40 @@ test("Node and Project Reply share one server-owned personal draft path", () => 
 
 test("optional Reply-draft indicators never turn a mailbox mismatch into a Project email-viewing error", () => {
   const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
-  const loaderStart = nodeParts.indexOf("async function loadEmailReplyDraftIndicators");
-  const loaderEnd = nodeParts.indexOf("const MangoTiptapEditor", loaderStart);
-  const indicatorLoader = nodeParts.slice(loaderStart, loaderEnd);
+  const organizerStart = nodeParts.indexOf("export const AttachedEmailOrganizerPane");
+  const organizerEnd = nodeParts.indexOf("type EmailConversationPaneProps", organizerStart);
+  const organizer = nodeParts.slice(organizerStart, organizerEnd);
 
-  assert.ok(loaderStart >= 0 && loaderEnd > loaderStart);
-  assert.match(indicatorLoader, /listEmailReplyDraftsBySource\(companyID, scope, sourceMessageIDs, \{ refresh: true \}\)[\s\S]{0,80}\.catch\(\(\) => \[\]\)/);
-  assert.equal((nodeParts.match(/loadEmailReplyDraftIndicators\(/g) ?? []).length, 4);
+  assert.ok(organizerStart >= 0 && organizerEnd > organizerStart);
+  assert.match(organizer, /listEmailReplyDraftsBySource\(companyID, scope, sourceMessageIDs, \{ refresh: true, sourceThreadIDs \}\)[\s\S]{0,80}\.catch\(\(\) => \[\]\)/);
+  assert.equal((nodeParts.match(/listEmailReplyDraftsBySource\(/g) ?? []).length, 1);
   assert.doesNotMatch(nodeParts, /failed_to_load_email_drafts/);
-  assert.match(nodeParts, /if \(selected \|\| collapsed \|\| !repliesEnabled \|\| !exactMailboxScopeAvailable\) return undefined/);
   assert.match(nodeParts, /<EmailConversationPane[\s\S]{0,220}repliesEnabled=\{false\}[\s\S]{0,320}projectID=\{projectID\}/);
+});
+
+test("Node and Project personal draft counts use one bounded visible-thread indicator path", () => {
+  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
+  const communicationsAPI = source("frontend/src/modules/communications/communicationsApi.ts");
+  const organizerStart = nodeParts.indexOf("export const AttachedEmailOrganizerPane");
+  const organizerEnd = nodeParts.indexOf("type EmailConversationPaneProps", organizerStart);
+  assert.ok(organizerStart >= 0 && organizerEnd > organizerStart);
+  const organizer = nodeParts.slice(organizerStart, organizerEnd);
+
+  assert.equal((nodeParts.match(/listEmailReplyDraftsBySource\(/g) ?? []).length, 1, "opened thread panes must not repeat the organizer indicator read");
+  assert.doesNotMatch(nodeParts, /loadEmailReplyDraftIndicators/);
+  assert.match(organizer, /const sourceThreadID = email\.emailThreadID\?\.trim\(\) \?\? ""/);
+  assert.match(organizer, /if \(sourceThreadID\) group\.sourceThreadIDs\.push\(sourceThreadID\);\s*else group\.sourceMessageIDs\.push\(sourceMessageID\)/);
+  assert.match(organizer, /listEmailReplyDraftsBySource\(companyID, scope, sourceMessageIDs, \{ refresh: true, sourceThreadIDs \}\)/);
+  assert.match(organizer, /sourceThreadID: draft\.source_thread_id\?\.trim\(\) \?\? ""/);
+  assert.match(organizer, /replyDraftCountBySourceThreadID\[email\.emailThreadID\?\.trim\(\) \?\? ""\] \?\? 0/);
+  assert.match(nodeParts, /data-email-thread-draft-count="true"/);
+  assert.ok((nodeParts.match(/data-email-message-draft-count="true"/g) ?? []).length >= 3);
+  assert.match(nodeParts, /onReplyDraftIndicatorChange\?\.\(\s*sourceMessageID,\s*draft\.source_thread_id\?\.trim\(\) \|\| emailThreadID\?\.trim\(\) \|\| "",\s*draft\.draft_id/);
+  assert.match(nodeParts, /onReplyDraftIndicatorChange\?\.\(sourceMessageID, emailThreadID\?\.trim\(\) \?\? "", ""\)/);
+  assert.match(organizer, /mutationGeneration === replyDraftIndicatorMutationGenerationRef\.current\s*\? next\s*: \{ \.\.\.next, \.\.\.current \}/);
+  assert.match(communicationsAPI, /source_thread_id\?: string/);
+  assert.match(communicationsAPI, /query\.append\("source_thread_id", sourceThreadID\)/);
+  assert.match(communicationsAPI, /sourceThreadIDs: boundedSourceThreadIDs\.slice\(index \* 100, \(index \+ 1\) \* 100\)/);
 });
 
 test("attached Reply flushes one exact final save and makes save or sent-cleanup failures recoverable", () => {

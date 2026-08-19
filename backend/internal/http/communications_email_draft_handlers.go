@@ -45,6 +45,7 @@ type communicationsEmailDraftResponse struct {
 	SharedInboxID          string                      `json:"shared_inbox_id,omitempty"`
 	Kind                   string                      `json:"kind"`
 	SourceMessageID        string                      `json:"source_message_id,omitempty"`
+	SourceThreadID         string                      `json:"source_thread_id,omitempty"`
 	CreatedByUserID        string                      `json:"created_by_user_id,omitempty"`
 	UpdatedByUserID        string                      `json:"updated_by_user_id,omitempty"`
 	AccountEmail           string                      `json:"account_email,omitempty"`
@@ -126,10 +127,23 @@ func (s *Server) handleCommunicationsEmailDraftList(w http.ResponseWriter, r *ht
 			return
 		}
 	}
+	sourceThreadIDs := r.URL.Query()["source_thread_id"]
+	if len(sourceThreadIDs) > store.CommunicationsEmailDraftSourceFilterMax {
+		writeError(w, http.StatusBadRequest, "email_draft_source_thread_filter_limit_exceeded")
+		return
+	}
+	for index := range sourceThreadIDs {
+		sourceThreadIDs[index] = strings.TrimSpace(sourceThreadIDs[index])
+		if !validAttachmentUUIDText(sourceThreadIDs[index]) {
+			writeError(w, http.StatusBadRequest, "invalid_email_draft_source_thread_id")
+			return
+		}
+	}
 	listInput := scope.draftListInput(companyID)
 	listInput.ParticipantUserID = actor.User.UserID
 	listInput.Kind = kind
 	listInput.SourceMessageIDs = sourceMessageIDs
+	listInput.SourceThreadIDs = sourceThreadIDs
 	drafts, err := s.repo.ListCommunicationsEmailDrafts(listInput)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_email_draft_scope")
@@ -593,6 +607,7 @@ func (s *Server) communicationsEmailDraftResponse(draft domain.CommunicationsEma
 		UpdatedByUserID:        draft.UpdatedByUserID,
 		Kind:                   draft.Kind,
 		SourceMessageID:        draft.SourceMessageID,
+		SourceThreadID:         draft.SourceThreadID,
 		AccountEmail:           draft.AccountEmail,
 		ToRecipients:           draft.ToRecipients,
 		CcRecipients:           draft.CcRecipients,
@@ -613,7 +628,8 @@ func communicationsEmailDraftSummaryResponse(draft domain.CommunicationsEmailDra
 		PersonalUserID: draft.PersonalUserID, PersonalAccountEmail: draft.PersonalAccountEmail,
 		SharedInboxID: draft.SharedInboxID, CreatedByUserID: draft.CreatedByUserID,
 		UpdatedByUserID: draft.UpdatedByUserID, Kind: draft.Kind,
-		SourceMessageID: draft.SourceMessageID, AccountEmail: draft.AccountEmail,
+		SourceMessageID: draft.SourceMessageID, SourceThreadID: draft.SourceThreadID,
+		AccountEmail: draft.AccountEmail,
 		ToRecipients: draft.ToRecipients, CcRecipients: draft.CcRecipients,
 		BccRecipients: draft.BccRecipients, Subject: draft.Subject,
 		ScheduledSendTimestamp: draft.ScheduledSendTimestamp,

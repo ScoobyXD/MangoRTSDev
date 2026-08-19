@@ -33,12 +33,24 @@ func TestPostgresCommunicationsEmailDraftQueriesKeepExactImmutableScopePredicate
 	if !strings.Contains(listBody, "communicationsEmailDraftSummarySelectColumns()") {
 		t.Fatal("ListCommunicationsEmailDrafts must use the body-free summary projection")
 	}
+	for _, required := range []string{
+		"left join email_messages source_message",
+		"or draft.source_email_message_id = any",
+		"or source_message.email_thread_id = any",
+	} {
+		if !strings.Contains(listBody, required) {
+			t.Fatalf("ListCommunicationsEmailDrafts missing one-pass source-thread summary/filter clause %q", required)
+		}
+	}
 	summaryProjection := extractFunctionSourceForTest(t, source, "func communicationsEmailDraftSummarySelectColumns")
 	if strings.Contains(summaryProjection, "body_editor_html") {
 		t.Fatal("draft list summary projection reads full draft bodies")
 	}
 	if !strings.Contains(summaryProjection, "scheduled_send_timestamp") {
 		t.Fatal("draft list summary projection must include the scheduler timestamp")
+	}
+	if !strings.Contains(summaryProjection, "source_message.email_thread_id") {
+		t.Fatal("draft list summary projection must expose the source internal thread ID")
 	}
 
 	getBody := extractFunctionSourceForTest(t, source, "func (r *PostgresRepo) GetCommunicationsEmailDraft")
@@ -308,6 +320,86 @@ func TestMemoryCommunicationsEmailReplyEnsureConvergesAndExistingOnlyUpdates(t *
 		AccountEmail: "owner-a@example.com", ExistingOnly: true,
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing existing-only update error=%v, want ErrNotFound", err)
+	}
+}
+
+func TestMemoryCommunicationsEmailReplyDraftListFiltersSourceThreadsAsOneOwnerOnlySummaryRead(t *testing.T) {
+	repo, companyID, owner, attacker, _, _ := newEmailDraftScopeStoreFixture(t)
+	thread, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		AccountEmail: "owner-a@example.com", Provider: "google", ProviderThreadID: "provider-thread-summary",
+		SelectedMessageID: "provider-message-summary-one",
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "provider-message-summary-one", ThreadID: "provider-thread-summary", Subject: "First"},
+			{ID: "provider-message-summary-two", ThreadID: "provider-thread-summary", Subject: "Second"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherThread, err := repo.UpsertCommunicationsEmailThread(CommunicationsEmailThreadUpsertInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		AccountEmail: "owner-a@example.com", Provider: "google", ProviderThreadID: "provider-thread-summary-other",
+		SelectedMessageID: "provider-message-summary-other",
+		Messages: []domain.EmailMessageSnapshot{
+			{ID: "provider-message-summary-other", ThreadID: "provider-thread-summary-other", Subject: "Other"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, sourceMessageID := range []string{
+		thread.Messages[0].EmailMessageID,
+		thread.Messages[1].EmailMessageID,
+		otherThread.Messages[0].EmailMessageID,
+	} {
+		if _, _, err := repo.EnsureCommunicationsEmailReplyDraft(CommunicationsEmailDraftInput{
+			CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+			CreatedByUserID: owner.UserID, UpdatedByUserID: owner.UserID, SourceMessageID: sourceMessageID,
+			AccountEmail: "owner-a@example.com", Subject: "Draft", BodyEditorHTML: "<p>private body</p>",
+		}); err != nil {
+			t.Fatalf("ensure draft %d: %v", index, err)
+		}
+	}
+
+	threadDrafts := mustListEmailDrafts(t, repo, CommunicationsEmailDraftListInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		ParticipantUserID: owner.UserID, Kind: "reply", SourceThreadIDs: []string{thread.EmailThreadID},
+	})
+	if len(threadDrafts) != 2 {
+		t.Fatalf("thread draft count=%d, want 2: %+v", len(threadDrafts), threadDrafts)
+	}
+	for _, draft := range threadDrafts {
+		if draft.SourceThreadID != thread.EmailThreadID || draft.BodyEditorHTML != "" || draft.ReplyToMessageJSON != "{}" {
+			t.Fatalf("thread summary loaded body/target or wrong thread: %+v", draft)
+		}
+	}
+
+	unionDrafts := mustListEmailDrafts(t, repo, CommunicationsEmailDraftListInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		ParticipantUserID: owner.UserID, Kind: "reply",
+		SourceMessageIDs: []string{otherThread.Messages[0].EmailMessageID}, SourceThreadIDs: []string{thread.EmailThreadID},
+	})
+	if len(unionDrafts) != 3 {
+		t.Fatalf("message/thread union count=%d, want 3: %+v", len(unionDrafts), unionDrafts)
+	}
+	attackerDrafts := mustListEmailDrafts(t, repo, CommunicationsEmailDraftListInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		ParticipantUserID: attacker.UserID, Kind: "reply", SourceThreadIDs: []string{thread.EmailThreadID},
+	})
+	if len(attackerDrafts) != 0 {
+		t.Fatalf("another user listed owner drafts: %+v", attackerDrafts)
+	}
+
+	tooManyThreadIDs := make([]string, CommunicationsEmailDraftSourceFilterMax+1)
+	for index := range tooManyThreadIDs {
+		tooManyThreadIDs[index] = thread.EmailThreadID
+	}
+	if _, err := repo.ListCommunicationsEmailDrafts(CommunicationsEmailDraftListInput{
+		CompanyID: companyID, PersonalUserID: owner.UserID, PersonalAccountEmail: "owner-a@example.com",
+		SourceThreadIDs: tooManyThreadIDs,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("thread filter limit error=%v, want ErrInvalid", err)
 	}
 }
 

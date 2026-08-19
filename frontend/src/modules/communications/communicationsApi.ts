@@ -393,6 +393,7 @@ export type CommunicationsEmailDraft = {
   shared_inbox_id?: string;
   kind: "compose" | "reply" | "forward" | string;
   source_message_id?: string;
+  source_thread_id?: string;
   account_email?: string;
   to_recipients: string;
   cc_recipients: string;
@@ -463,6 +464,7 @@ export type ListCommunicationsEmailDraftOptions = {
   refresh?: boolean;
   kind?: "reply";
   sourceMessageIDs?: string[];
+  sourceThreadIDs?: string[];
 };
 
 export type CommunicationsEmailCollaborationParticipant = {
@@ -1107,6 +1109,11 @@ export async function listEmailDrafts(
     .filter(Boolean)));
   if (sourceMessageIDs.length > 100) throw new Error("email_draft_source_message_limit_exceeded");
   for (const sourceMessageID of sourceMessageIDs) query.append("source_message_id", sourceMessageID);
+  const sourceThreadIDs = Array.from(new Set((options.sourceThreadIDs ?? [])
+    .map((sourceThreadID) => sourceThreadID.trim())
+    .filter(Boolean)));
+  if (sourceThreadIDs.length > 100) throw new Error("email_draft_source_thread_filter_limit_exceeded");
+  for (const sourceThreadID of sourceThreadIDs) query.append("source_thread_id", sourceThreadID);
   const cacheKey = `email-drafts:${cleanCompanyID}:${query.toString()}`;
   if (options.refresh) invalidateCacheKey(cacheKey);
   return cachedRead(cacheKey, EMAIL_DRAFT_LIST_CACHE_TTL_MS, async () => {
@@ -1119,20 +1126,24 @@ export async function listEmailReplyDraftsBySource(
   companyID: string,
   scope: CommunicationsEmailDraftScope,
   sourceMessageIDs: string[],
-  options: { refresh?: boolean } = {},
+  options: { refresh?: boolean; sourceThreadIDs?: string[] } = {},
 ): Promise<CommunicationsEmailDraft[]> {
   const boundedSourceMessageIDs = Array.from(new Set(sourceMessageIDs
     .map((sourceMessageID) => sourceMessageID.trim())
     .filter(Boolean)));
-  if (boundedSourceMessageIDs.length === 0) return [];
-  const batches: string[][] = [];
-  for (let index = 0; index < boundedSourceMessageIDs.length; index += 100) {
-    batches.push(boundedSourceMessageIDs.slice(index, index + 100));
-  }
-  const results = await Promise.all(batches.map((batch) => listEmailDrafts(companyID, scope, {
+  const boundedSourceThreadIDs = Array.from(new Set((options.sourceThreadIDs ?? [])
+    .map((sourceThreadID) => sourceThreadID.trim())
+    .filter(Boolean)));
+  const batchCount = Math.max(
+    Math.ceil(boundedSourceMessageIDs.length / 100),
+    Math.ceil(boundedSourceThreadIDs.length / 100),
+  );
+  if (batchCount === 0) return [];
+  const results = await Promise.all(Array.from({ length: batchCount }, (_, index) => listEmailDrafts(companyID, scope, {
     refresh: options.refresh,
     kind: "reply",
-    sourceMessageIDs: batch,
+    sourceMessageIDs: boundedSourceMessageIDs.slice(index * 100, (index + 1) * 100),
+    sourceThreadIDs: boundedSourceThreadIDs.slice(index * 100, (index + 1) * 100),
   })));
   const byDraftID = new Map<string, CommunicationsEmailDraft>();
   for (const draft of results.flat()) byDraftID.set(draft.draft_id, draft);

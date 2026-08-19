@@ -2486,6 +2486,7 @@ type CommunicationsEmailDraftListInput struct {
 	ParticipantUserID    string
 	Kind                 string
 	SourceMessageIDs     []string
+	SourceThreadIDs      []string
 }
 
 const CommunicationsEmailDraftSourceFilterMax = 100
