@@ -1,6 +1,6 @@
 // importerConfig.ts
 // 
-// - Stores the main configruation options for the Mango Importer.
+// - Stores the main configuration options for the Mango Importer.
 
 // Pieces to continue working on:
 // - Analyze usage of ref.current.
@@ -17,6 +17,11 @@ import { ISpecializedParser } from "./importerLogic";
 import { createFolder, setupSpecializedParserAndDisplayProgressCall, wrappedCSVParse } from "./importerLogic";
 import { DEFAULT_CSV_PARSE_CONFIG } from "./importerLogic";
 
+// Imported Images
+import clickupMarkURL from "./importerUIResources/vectors/clickupMark.svg?url"
+import linearMarkURL from "./importerUIResources/vectors/linearMark.svg?url"
+
+
 // 
 // Importer Configuration Constants
 //
@@ -32,8 +37,8 @@ export function createMangoImporterProps(ref: RefObject<ImportToMangoHandle>): I
 
   // TODO: Consider assigning specialized parsers here as well.
   const sources: Record<string, MangoSource> = {
-    "Linear": { label: "Linear", mark: createElement(InlineSvg, {src:"./importerUIResources/vectors/linearMark.svg", as: "span"})},
-    "ClickUp": { label: "ClickUp", mark: createElement(InlineSvg, {src:"./importerUIResources/vectors/clickupMark.svg", as: "span"})},
+    "Linear": { label: "Linear", mark: createElement(InlineSvg, {src:linearMarkURL, as: "span"})},
+    "ClickUp": { label: "ClickUp", mark: createElement(InlineSvg, {src:clickupMarkURL, as: "span"})},
   }
 
   // TODO: Unify tracking of state across different types of imports.
@@ -44,7 +49,7 @@ export function createMangoImporterProps(ref: RefObject<ImportToMangoHandle>): I
   let csv: File;
 
 
-  // This factory retuns a big list of options and callback functions to be called on certain UI events.
+  // This factory returns a big list of options and callback functions to be called on certain UI events.
   // to pass information back, use the ref, a RefObject<ImportToMangoHandle>.
   // You may refer to the types of the importerUI to see what methods are present
   // under such an object.
@@ -80,7 +85,7 @@ export function createMangoImporterProps(ref: RefObject<ImportToMangoHandle>): I
 
       // TODO: Verify the file type and format is valid.
 
-      // Identify the formart of the CSV.
+      // Identify the format of the CSV.
       const csvHeaders = await locateCSVHeaders(file);
       const csvTyping = determineCSVType(csvHeaders);
 
@@ -131,7 +136,7 @@ export function createMangoImporterProps(ref: RefObject<ImportToMangoHandle>): I
           step: setupSpecializedParserAndDisplayProgressCall(selectedCSVParser, importFolderID, csvLineCount, (itemName: string) => { ref.current?.item(itemName); }, () => {ref.current?.finish()}),
 
           // TODO: A cleaner adapter may be required to work with both promises and Papaparse.
-          // Disable workers to allow pausing of the parser for compatability with a promise-based step-function.
+          // Disable workers to allow pausing of the parser for compatibility with a promise-based step-function.
           worker: false,
 
       };
@@ -142,7 +147,7 @@ export function createMangoImporterProps(ref: RefObject<ImportToMangoHandle>): I
       }
 
       // TODO: At the moment, the parse may not have fully finished when this promise resolves, as the step function used for Papaparse
-      //       needs some reshaping to accomadate async processing. Completion code 
+      //       needs some reshaping to accommodate async processing. Completion code 
       await wrappedCSVParse(csv, fullCSVParseConfig);
       
 

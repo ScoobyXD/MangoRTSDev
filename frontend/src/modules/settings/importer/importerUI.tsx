@@ -16,7 +16,6 @@ import {
 import "./importerUIResources/importToMango.css";
 import "./importerUIResources/dotCursor.css";
 import { InlineSvg } from "./importerUIResources/inlineSVG";
-import growthTreeURL from "./importerUIResources/vectors/growthTree.svg?url"
 import { useImportSequencer, createImportCommands } from "./importerUIResources/importerUIAPI";
 import type { ImportToMangoHandle, ImportToMangoProps, MangoSettings } from "./importerUIResources/types";
 
@@ -26,6 +25,9 @@ export type {
   MangoSource, MangoTextOption, MangoToggleOption, MangoOption, MangoSettings,
   BrowseItem, MangoError, ImportToMangoHandle, ImportToMangoProps,
 } from "./importerUIResources/types";
+
+import growthTreeURL from "./importerUIResources/vectors/growthTree.svg?url";
+import gearIconURL from "./importerUIResources/vectors/geatIcon.svg?url";
 
 
 // TODO: Verify usage and refactor into a more React-like pattern.
@@ -385,7 +387,7 @@ export const ImportToMango = forwardRef<ImportToMangoHandle, ImportToMangoProps>
                 <input className="uml-state uml-desk uml-desk--cfg" type="radio" name="uml-desk" id="uml-desk-cfg" checked={deskOpen} onChange={() => setDeskOpen(true)} />
                 <label className="uml-cog dot-cursor" htmlFor="uml-desk-cfg">
                   <span className="uml-sr">Import configuration</span>
-                  <InlineSvg src={growthTreeURL} className="uml-cog__svg" />
+                  <InlineSvg src={gearIconURL} className="uml-cog__svg" />
                 </label>
 
                 <div className="uml-scene" aria-hidden="true">

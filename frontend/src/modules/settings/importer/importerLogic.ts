@@ -11,19 +11,8 @@
 //██ Pieces to Work On ██
 //███████████████████████
 
-// TODO: Improve error handling.
-// TODO: Create a custom editor surface and image source for imports.
+
 // TODO: Determine if the document upload cap can be increased.
-// TODO: Identify duplicate imports requested on the same day.
-// TODO: Add concurrency for uploading items.
-// TODO: Consider rate limits for uploading items.
-// TODO: Consider retries for uploading failed items.
-// TODO: Handle upload cancellation.
-// TODO: Consider implementation of an interface to support custom format extractors.
-// TODO: Analyze workChain/method chaining & settled pattern for CSV parsing.
-// TODO: Handle other image formats include data:image/ or Base64 Strings.
-
-
 
 
 //█████████████
@@ -163,7 +152,7 @@ export interface ISpecializedParser {
 
 // Data Fetching Functions
 // These functions attempt to centralize data retrieval from other places in the codebase so that if those
-// methods change (as we are working without standardized retrieval methods) they can be changed more eaisly.
+// methods change (as we are working without standardized retrieval methods) they can be changed more easily.
 // TODO: Eventually, these methods should be retired in favor of a frontend-wide data access ~API.
 function fetchCurrentCompanyID(): string{
     return getActiveCompanyID().trim();
@@ -189,7 +178,7 @@ async function fetchFileThroughProxy(fileUrl: string, proxyPath: string): Promis
     // Extract the provided image filename.
     const contentDisposition = response.headers.get("content-disposition");
 
-    // TODO: Imporve Error Handling.
+    // TODO: Improve Error Handling.
     if(!contentDisposition){
         throw new Error("We couldn't find the metadata we were expecting when we were attempting to download your picture!");
         
@@ -311,7 +300,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
     const mangoTiptapExtensionOptions = {
         editable: false,
 
-        // Seems to hande editor drag-and-drop.
+        // Seems to handle editor drag-and-drop.
         // onImageFiles: ,
 
         attachmentImageExtension: markdownAwareMangoAttachmentImageNode,
@@ -358,7 +347,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
         // nested items to the queue.
 
         // Image nodes need to be "hoisted" to the root level of the document content, as not all nodes are allowed as children.
-        // Here, we keep track of all top-level nodes and children "mangoAttachmenImage" nodes in the order encountered.
+        // Here, we keep track of all top-level nodes and children "mangoAttachmentImage" nodes in the order encountered.
         let topLevelNodesInOrderOfEncounter = [];
 
         type depthTrackedNode = {
@@ -424,7 +413,7 @@ async function convertMarkdownToMangoTiptap(markdownString: string, targetResour
 }
 
 // Wraps Tiptap documents in a Mango wrapper and assigns Mango block IDs
-// for Tiptap-Mango compatability.
+// for Tiptap-Mango compatibility.
 function convertTiptapToMangoTiptap(document: JSONContent): MangoTiptapDocument {
 
     let convertedDocument = createEmptyMangoTiptapDocument();
@@ -628,7 +617,7 @@ export function setupSpecializedParserAndDisplayProgressCall(specializedParser: 
         const documentContent = standardizedOutput.documentContent;
         const folderHierarchy = standardizedOutput.folderHierarchy;
 
-        // TODO: Cleanup this code handling to be clearer and more concise. Different additions have accumulated to accomadate more cases.
+        // TODO: Cleanup this code handling to be clearer and more concise. Different additions have accumulated to accommodate more cases.
         // Work through the folder hierarchy from top down, creating higher-level folders before lower-level folders.
         // Already created folders are cached.
         let mostRecentFolderID = null;
