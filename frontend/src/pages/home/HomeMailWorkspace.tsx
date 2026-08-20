@@ -1023,7 +1023,8 @@ export function HomeMailWorkspace({
             key={selectedSharedDraft.draft_id}
             messageID={selectedMessage?.id ?? selectedSharedDraft.draft_id} repliesEnabled
             emailMessageID={selectedSharedDraft.source_message_id} emailThreadID={selectedSharedDraft.source_thread_id}
-            nodeID={selectedSharedDraft.shared_node_id} projectID={selectedSharedDraft.shared_project_id}
+            nodeID={selectedSharedDraft.shared_resource_type === "node" ? selectedSharedDraft.shared_resource_id : undefined}
+            projectID={selectedSharedDraft.shared_resource_type === "project" ? selectedSharedDraft.shared_resource_id : undefined}
             apiBase={apiBase} companyID={companyID} currentUserID={currentUserID} companyUsers={companyUsers}
             sharedInboxID={selectedSharedDraft.shared_inbox_id}
             accountEmail={selectedSharedDraft.account_email || selectedSharedDraft.personal_account_email || accountEmail}

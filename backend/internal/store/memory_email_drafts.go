@@ -10,7 +10,7 @@ import (
 )
 
 func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error) {
-	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedNodeID, input.SharedProjectID)
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 }
 
 func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error) {
-	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedNodeID, input.SharedProjectID)
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
@@ -130,7 +130,7 @@ func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftG
 }
 
 func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error) {
-	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedNodeID, input.SharedProjectID)
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
 	}
@@ -194,12 +194,15 @@ func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDra
 }
 
 func (r *MemoryRepo) EnsureCommunicationsEmailReplyDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, bool, error) {
-	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedNodeID, input.SharedProjectID)
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, false, err
 	}
 	if owner.resourceID != "" {
 		return r.ensureCommunicationsResourceEmailReplyDraft(input, owner)
+	}
+	if strings.TrimSpace(input.SeedFromPersonalDraftID) != "" {
+		return domain.CommunicationsEmailDraft{}, false, ErrInvalid
 	}
 	input.DraftID = "draft:reply:" + newUUIDv7String()
 	input.Kind = "reply"
@@ -297,7 +300,7 @@ func communicationsEmailDraftSemanticIdentityMatches(left, right domain.Communic
 }
 
 func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error {
-	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedNodeID, input.SharedProjectID)
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
 	if err != nil {
 		return err
 	}
@@ -331,6 +334,7 @@ func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmai
 	draft.UpdatedTimestamp = now
 	draft.DeletedTimestamp = &now
 	r.emailDrafts[key] = draft
+	r.retireMemoryEmailDraftAttachmentsLocked(companyID, draft.DraftID, now)
 	return nil
 }
 
@@ -356,47 +360,30 @@ func (r *MemoryRepo) GetCommunicationsSharedEmailDraftForSend(input Communicatio
 type communicationsSharedDraftOwner struct {
 	resourceType string
 	resourceID   string
-	nodeID       string
-	projectID    string
 }
 
-func normalizeCommunicationsSharedDraftOwner(nodeID, projectID string) (communicationsSharedDraftOwner, error) {
-	nodeID, projectID = cleanUUIDText(nodeID), cleanUUIDText(projectID)
-	if nodeID != "" && projectID != "" {
+func normalizeCommunicationsSharedDraftOwner(resourceType, resourceID string) (communicationsSharedDraftOwner, error) {
+	resourceType, resourceID = strings.ToLower(strings.TrimSpace(resourceType)), cleanUUIDText(resourceID)
+	if (resourceType == "") != (resourceID == "") || (resourceType != "" && resourceType != EntityTypeNode && resourceType != EntityTypeProject) {
 		return communicationsSharedDraftOwner{}, ErrInvalid
 	}
-	if nodeID != "" {
-		return communicationsSharedDraftOwner{resourceType: EntityTypeNode, resourceID: nodeID, nodeID: nodeID}, nil
-	}
-	if projectID != "" {
-		return communicationsSharedDraftOwner{resourceType: EntityTypeProject, resourceID: projectID, projectID: projectID}, nil
-	}
-	return communicationsSharedDraftOwner{}, nil
+	return communicationsSharedDraftOwner{resourceType: resourceType, resourceID: resourceID}, nil
 }
 
 func isCommunicationsResourceSharedDraft(draft domain.CommunicationsEmailDraft) bool {
-	return draft.SharedNodeID != "" || draft.SharedProjectID != ""
+	return draft.SharedResourceType != "" && draft.SharedResourceID != ""
 }
 
 func draftSharedResourceType(draft domain.CommunicationsEmailDraft) string {
-	if draft.SharedNodeID != "" {
-		return EntityTypeNode
-	}
-	if draft.SharedProjectID != "" {
-		return EntityTypeProject
-	}
-	return ""
+	return draft.SharedResourceType
 }
 
 func draftSharedResourceID(draft domain.CommunicationsEmailDraft) string {
-	if draft.SharedNodeID != "" {
-		return draft.SharedNodeID
-	}
-	return draft.SharedProjectID
+	return draft.SharedResourceID
 }
 
 func communicationsSharedDraftOwnerMatches(draft domain.CommunicationsEmailDraft, owner communicationsSharedDraftOwner) bool {
-	return draft.SharedNodeID == owner.nodeID && draft.SharedProjectID == owner.projectID
+	return draft.SharedResourceType == owner.resourceType && draft.SharedResourceID == owner.resourceID
 }
 
 func communicationsResourceDraftCanSendLocked(r *MemoryRepo, draft domain.CommunicationsEmailDraft, actorUserID string) bool {
@@ -513,11 +500,27 @@ func (r *MemoryRepo) ensureCommunicationsResourceEmailReplyDraft(input Communica
 			return domain.CommunicationsEmailDraft{}, false, ErrEmailDraftSourceNotFound
 		}
 	}
+	seedDraftID := strings.TrimSpace(input.SeedFromPersonalDraftID)
+	if seedDraftID != "" {
+		seed, found := r.emailDrafts[communicationsEmailDraftKey(companyID, seedDraftID)]
+		exactMailbox := seed.ScopeType == thread.ScopeType
+		if thread.ScopeType == "personal" {
+			exactMailbox = exactMailbox && seed.PersonalUserID == thread.PersonalUserID && strings.EqualFold(seed.PersonalAccountEmail, thread.PersonalAccountEmail)
+		} else {
+			exactMailbox = exactMailbox && seed.SharedInboxID == sharedInboxID
+		}
+		if !found || seed.DeletedTimestamp != nil || seed.CreatedByUserID != actorUserID || seed.Kind != "reply" ||
+			seed.SourceMessageID != sourceMessageID || seed.SharedResourceType != "" || seed.SharedResourceID != "" || !exactMailbox {
+			return domain.CommunicationsEmailDraft{}, false, ErrInvalid
+		}
+		input.ToRecipients, input.CcRecipients, input.BccRecipients = seed.ToRecipients, seed.CcRecipients, seed.BccRecipients
+		input.Subject, input.BodyEditorHTML = seed.Subject, seed.BodyEditorHTML
+	}
 	now := time.Now().UTC()
 	draft := domain.CommunicationsEmailDraft{
 		CompanyID: companyID, DraftID: "draft:reply:" + newUUIDv7String(), ScopeType: thread.ScopeType,
 		PersonalUserID: thread.PersonalUserID, PersonalAccountEmail: thread.PersonalAccountEmail,
-		SharedInboxID: sharedInboxID, SharedNodeID: owner.nodeID, SharedProjectID: owner.projectID,
+		SharedInboxID: sharedInboxID, SharedResourceType: owner.resourceType, SharedResourceID: owner.resourceID,
 		Revision: 1, CreatedByUserID: actorUserID, UpdatedByUserID: actorUserID, Kind: "reply",
 		SourceMessageID: sourceMessageID, SourceThreadID: thread.EmailThreadID, AccountEmail: thread.AccountEmail,
 		ToRecipients: input.ToRecipients, CcRecipients: input.CcRecipients, BccRecipients: input.BccRecipients,
@@ -530,6 +533,17 @@ func (r *MemoryRepo) ensureCommunicationsResourceEmailReplyDraft(input Communica
 	draft.ReplyToMessageJSON = string(payload)
 	draft.CanSend = communicationsResourceDraftCanSendLocked(r, draft, actorUserID)
 	r.emailDrafts[communicationsEmailDraftKey(companyID, draft.DraftID)] = draft
+	if seedDraftID != "" {
+		for _, sourceLink := range r.resourceAttachments {
+			if sourceLink.CompanyID != companyID || sourceLink.ResourceType != "email_draft" || sourceLink.ResourceID != seedDraftID || sourceLink.DeletedTimestamp != nil {
+				continue
+			}
+			link := sourceLink
+			link.ResourceAttachmentID, link.ResourceID = newUUIDv7String(), draft.DraftID
+			link.CreatedByUserID, link.CreatedTimestamp, link.ResourceRevision = actorUserID, now, draft.Revision
+			r.resourceAttachments[link.ResourceAttachmentID] = link
+		}
+	}
 	return draft, true, nil
 }
 
@@ -613,8 +627,7 @@ func (r *MemoryRepo) retireMemoryEmailDraftAttachmentsLocked(companyID, draftID 
 func (r *MemoryRepo) deleteMemoryResourceSharedEmailDraftsLocked(companyID, resourceType, resourceID string) {
 	now := time.Now().UTC()
 	for draftKey, draft := range r.emailDrafts {
-		matches := resourceType == EntityTypeNode && draft.SharedNodeID == resourceID ||
-			resourceType == EntityTypeProject && draft.SharedProjectID == resourceID
+		matches := draft.SharedResourceType == resourceType && draft.SharedResourceID == resourceID
 		if draft.CompanyID != companyID || !matches {
 			continue
 		}
@@ -626,8 +639,7 @@ func (r *MemoryRepo) deleteMemoryResourceSharedEmailDraftsLocked(companyID, reso
 func (r *MemoryRepo) retireMemoryExactResourceSharedEmailDraftLocked(companyID, resourceType, resourceID, sourceMessageID string) {
 	now := time.Now().UTC()
 	for draftKey, draft := range r.emailDrafts {
-		matches := resourceType == EntityTypeNode && draft.SharedNodeID == resourceID ||
-			resourceType == EntityTypeProject && draft.SharedProjectID == resourceID
+		matches := draft.SharedResourceType == resourceType && draft.SharedResourceID == resourceID
 		if draft.CompanyID != companyID || !matches || draft.SourceMessageID != sourceMessageID || draft.DeletedTimestamp != nil {
 			continue
 		}
@@ -644,16 +656,16 @@ func (r *MemoryRepo) memoryResourceHasExactEmailRelationshipLocked(owner communi
 
 func (r *MemoryRepo) memoryResourceEmailSourceLocked(owner communicationsSharedDraftOwner, companyID, sourceMessageID string) (domain.CommunicationsEmailThread, domain.CommunicationsEmailMessage, bool) {
 	threadID := ""
-	if owner.nodeID != "" {
+	if owner.resourceType == EntityTypeNode {
 		for _, relationship := range r.nodeEmailThreads {
-			if relationship.CompanyID == companyID && relationship.NodeID == owner.nodeID && relationship.SelectedMessageID == sourceMessageID {
+			if relationship.CompanyID == companyID && relationship.NodeID == owner.resourceID && relationship.SelectedMessageID == sourceMessageID {
 				threadID = relationship.EmailThreadID
 				break
 			}
 		}
 	} else {
 		for _, relationship := range r.projectEmailRelationships {
-			if relationship.CompanyID == companyID && relationship.ProjectID == owner.projectID && relationship.EmailMessageID == sourceMessageID && relationship.ResourceTextboxID == "" {
+			if relationship.CompanyID == companyID && relationship.ProjectID == owner.resourceID && relationship.EmailMessageID == sourceMessageID && relationship.ResourceTextboxID == "" {
 				threadID = relationship.EmailThreadID
 				break
 			}

@@ -728,6 +728,9 @@ func (r *MemoryRepo) ListWork(ctx context.Context, companyID string, limit int) 
 		if attachment.CompanyID != strings.TrimSpace(companyID) || attachment.DeletedTimestamp == nil {
 			continue
 		}
+		if r.attachmentRestorableFromSharedDraftRecycleLocked(attachment.CompanyID, attachment.AttachmentID) {
+			continue
+		}
 		item := attachmentcleanup.WorkItem{
 			Kind: attachmentcleanup.WorkOrphanAttachment, CompanyID: attachment.CompanyID, AttachmentID: attachment.AttachmentID,
 			Objects: []attachmentcleanup.ObjectRef{{Bucket: attachment.StorageBucket, Key: attachment.StorageKey}},
@@ -764,6 +767,9 @@ func (r *MemoryRepo) Eligible(ctx context.Context, item attachmentcleanup.WorkIt
 		if link.CompanyID == item.CompanyID && link.AttachmentID == item.AttachmentID && link.DeletedTimestamp == nil {
 			return false, nil
 		}
+	}
+	if r.attachmentRestorableFromSharedDraftRecycleLocked(item.CompanyID, item.AttachmentID) {
+		return false, nil
 	}
 	return true, nil
 }
@@ -820,6 +826,9 @@ func (r *MemoryRepo) Finalize(ctx context.Context, item attachmentcleanup.WorkIt
 			return attachmentcleanup.ErrStillOwned
 		}
 	}
+	if r.attachmentRestorableFromSharedDraftRecycleLocked(item.CompanyID, item.AttachmentID) {
+		return attachmentcleanup.ErrStillOwned
+	}
 	delete(r.attachments, key)
 	for previewKey, preview := range r.attachmentVariants {
 		if preview.AttachmentID == item.AttachmentID {
@@ -832,4 +841,30 @@ func (r *MemoryRepo) Finalize(ctx context.Context, item attachmentcleanup.WorkIt
 		}
 	}
 	return nil
+}
+
+func (r *MemoryRepo) attachmentRestorableFromSharedDraftRecycleLocked(companyID, attachmentID string) bool {
+	for _, record := range r.recycleBin {
+		if record.Item.CompanyID != companyID {
+			continue
+		}
+		owners := map[string]bool{}
+		for _, target := range record.Targets {
+			if target.Kind == EntityTypeNode || target.Kind == EntityTypeProject {
+				owners[target.Kind+":"+target.ID] = true
+			}
+		}
+		draftIDs := map[string]bool{}
+		for _, draft := range record.Snapshot.emailDrafts {
+			if draft.CompanyID == companyID && draft.DeletedTimestamp == nil && owners[draft.SharedResourceType+":"+draft.SharedResourceID] {
+				draftIDs[draft.DraftID] = true
+			}
+		}
+		for _, link := range record.Snapshot.resourceAttachments {
+			if link.CompanyID == companyID && link.DeletedTimestamp == nil && link.ResourceType == "email_draft" && draftIDs[link.ResourceID] && link.AttachmentID == attachmentID {
+				return true
+			}
+		}
+	}
+	return false
 }

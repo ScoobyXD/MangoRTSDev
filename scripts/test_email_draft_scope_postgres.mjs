@@ -92,15 +92,34 @@ try {
   if (version < 170000 || version >= 190000) throw new Error(`unsupported disposable PostgreSQL version ${version}`);
 
   sql(`
+    create table companies (
+      company_id uuid primary key
+    );
     create table nodes (
       company_id uuid not null,
       node_id uuid not null,
-      primary key(company_id,node_id)
+      primary key(company_id,node_id),
+      foreign key(company_id) references companies(company_id) on delete cascade
     );
     create table projects (
       company_id uuid not null,
       project_id uuid not null,
-      primary key(company_id,project_id)
+      primary key(company_id,project_id),
+      foreign key(company_id) references companies(company_id) on delete cascade
+    );
+    create table email_relationships (
+      company_id uuid not null,
+      email_message_id uuid not null,
+      resource_type text not null,
+      resource_id uuid not null,
+      resource_textbox_id uuid
+    );
+    create table attachment_upload_jobs (
+      attachment_upload_job_id uuid primary key
+    );
+    create table recycle_bin_items (
+      company_id uuid not null,
+      restore_payload jsonb not null
     );
     create table email_drafts (
       company_id uuid not null,
@@ -118,6 +137,7 @@ try {
       updated_timestamp timestamptz not null default now(),
       deleted_timestamp timestamptz,
       primary key(company_id,draft_id),
+      foreign key(company_id) references companies(company_id) on delete cascade,
       constraint email_drafts_origin_node_fkey foreign key(company_id,origin_node_id)
         references nodes(company_id,node_id) on delete set null
     );
@@ -140,6 +160,7 @@ try {
       primary key(company_id,attachment_id)
     );
 
+    insert into companies values ('10000000-0000-4000-8000-000000000001');
     insert into nodes values
       ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001');
     insert into projects values
@@ -220,33 +241,36 @@ try {
   sql(`alter table email_drafts
     add column kind text not null default 'reply',
     add column scheduled_send_timestamp timestamptz;`);
+  sql(`insert into email_relationships(company_id,email_message_id,resource_type,resource_id) values
+    ('10000000-0000-4000-8000-000000000001','60000000-0000-4000-8000-000000000005','node','20000000-0000-4000-8000-000000000001'),
+    ('10000000-0000-4000-8000-000000000001','60000000-0000-4000-8000-000000000005','project','21000000-0000-4000-8000-000000000001');`);
   runFile(sharedDraftMigration);
   sql(`
     insert into email_drafts(
       company_id,draft_id,source_email_message_id,email_account_type,personal_user_id,
-      personal_account_email,created_by_user_id,shared_node_id,kind
+      personal_account_email,created_by_user_id,shared_resource_type,shared_resource_id,kind
     ) values (
       '10000000-0000-4000-8000-000000000001','shared-node','60000000-0000-4000-8000-000000000005',
       'personal_email_account','30000000-0000-4000-8000-000000000001','owner@example.com',
-      '30000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000001','reply'
+      '30000000-0000-4000-8000-000000000002','node','20000000-0000-4000-8000-000000000001','reply'
     );
     insert into email_drafts(
       company_id,draft_id,source_email_message_id,email_account_type,personal_user_id,
-      personal_account_email,created_by_user_id,shared_project_id,kind
+      personal_account_email,created_by_user_id,shared_resource_type,shared_resource_id,kind
     ) values (
       '10000000-0000-4000-8000-000000000001','shared-project','60000000-0000-4000-8000-000000000005',
       'personal_email_account','30000000-0000-4000-8000-000000000001','owner@example.com',
-      '30000000-0000-4000-8000-000000000003','21000000-0000-4000-8000-000000000001','reply'
+      '30000000-0000-4000-8000-000000000003','project','21000000-0000-4000-8000-000000000001','reply'
     );
     do $$ begin
       begin
         insert into email_drafts(
           company_id,draft_id,source_email_message_id,email_account_type,personal_user_id,
-          personal_account_email,created_by_user_id,shared_node_id,kind
+          personal_account_email,created_by_user_id,shared_resource_type,shared_resource_id,kind
         ) values (
           '10000000-0000-4000-8000-000000000001','duplicate-shared-node','60000000-0000-4000-8000-000000000005',
           'personal_email_account','30000000-0000-4000-8000-000000000001','owner@example.com',
-          '30000000-0000-4000-8000-000000000004','20000000-0000-4000-8000-000000000001','reply'
+          '30000000-0000-4000-8000-000000000004','node','20000000-0000-4000-8000-000000000001','reply'
         );
         raise exception 'duplicate shared Node identity was accepted';
       exception when unique_violation then null;
@@ -259,12 +283,103 @@ try {
       exception when check_violation then null;
       end;
     end $$;
+    do $$ begin
+      begin
+        insert into email_drafts(
+          company_id,draft_id,source_email_message_id,email_account_type,personal_user_id,
+          personal_account_email,created_by_user_id,shared_resource_id,kind
+        ) values (
+          '10000000-0000-4000-8000-000000000001','half-shared-owner','60000000-0000-4000-8000-000000000005',
+          'personal_email_account','30000000-0000-4000-8000-000000000001','owner@example.com',
+          '30000000-0000-4000-8000-000000000004','20000000-0000-4000-8000-000000000001','reply'
+        );
+        raise exception 'half-populated shared owner was accepted';
+      exception when check_violation then null;
+      end;
+    end $$;
+    do $$ begin
+      begin
+        insert into email_drafts(
+          company_id,draft_id,source_email_message_id,email_account_type,personal_user_id,
+          personal_account_email,created_by_user_id,shared_resource_type,shared_resource_id,kind
+        ) values (
+          '10000000-0000-4000-8000-000000000001','bad-owner-type','60000000-0000-4000-8000-000000000005',
+          'personal_email_account','30000000-0000-4000-8000-000000000001','owner@example.com',
+          '30000000-0000-4000-8000-000000000004','logic_gate','20000000-0000-4000-8000-000000000001','reply'
+        );
+        raise exception 'invalid shared resource type was accepted';
+      exception when check_violation then null;
+      end;
+    end $$;
+    do $$ begin
+      begin
+        insert into email_drafts(
+          company_id,draft_id,source_email_message_id,email_account_type,personal_user_id,
+          personal_account_email,created_by_user_id,shared_resource_type,shared_resource_id,kind
+        ) values (
+          '10000000-0000-4000-8000-000000000001','missing-owner','60000000-0000-4000-8000-000000000005',
+          'personal_email_account','30000000-0000-4000-8000-000000000001','owner@example.com',
+          '30000000-0000-4000-8000-000000000004','node','20000000-0000-4000-8000-000000000099','reply'
+        );
+        raise exception 'missing same-company shared owner was accepted';
+      exception when foreign_key_violation then null;
+      end;
+    end $$;
+    do $$ begin
+      begin
+        delete from nodes where company_id='10000000-0000-4000-8000-000000000001'
+          and node_id='20000000-0000-4000-8000-000000000001';
+        raise exception 'active shared draft did not protect its Node owner';
+      exception when foreign_key_violation then null;
+      end;
+    end $$;
+    do $$ begin
+      begin
+        delete from email_relationships
+        where company_id='10000000-0000-4000-8000-000000000001'
+          and resource_type='node' and resource_id='20000000-0000-4000-8000-000000000001';
+        set constraints all immediate;
+        raise exception 'active shared draft did not protect its source relationship';
+      exception when foreign_key_violation then null;
+      end;
+    end $$;
   `);
   expectScalar("select count(*) from email_drafts where source_email_message_id='60000000-0000-4000-8000-000000000005' and deleted_timestamp is null", "3", "personal, Node-shared, and Project-shared drafts coexist");
   expectScalar("with changed as (update email_drafts set revision=revision+1 where draft_id='shared-node' and revision=1 returning revision) select revision from changed", "2", "fresh revision compare-and-swap succeeds");
   expectScalar("with stale as (update email_drafts set revision=revision+1 where draft_id='shared-node' and revision=1 returning 1) select count(*) from stale", "0", "stale revision compare-and-swap changes nothing");
+  sql(`begin;
+    select coalesce(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)
+    from (select * from email_drafts where shared_resource_type='node' order by draft_id for update) row_data;
+    rollback;`);
+  sql(`
+    insert into recycle_bin_items(company_id,restore_payload) values (
+      '10000000-0000-4000-8000-000000000001',
+      '{"attachments":[{"attachment_id":"79999999-0000-4000-8000-000000000001"}]}'::jsonb
+    );
+    prepare recyclable_attachment_owned(uuid,uuid) as
+    select exists(
+      select 1 from attachment_relationships
+      where company_id=$1 and attachment_id=$2 and deleted_timestamp is null
+      union all
+      select 1 from recycle_bin_items recycle,
+        lateral jsonb_array_elements(coalesce(recycle.restore_payload->'attachments','[]'::jsonb)) restored
+      where recycle.company_id=$1 and restored->>'attachment_id'=$2::text
+    );
+    execute recyclable_attachment_owned(
+      '10000000-0000-4000-8000-000000000001','79999999-0000-4000-8000-000000000001'
+    );
+    deallocate recyclable_attachment_owned;
+  `);
+  sql(`begin;
+    select * from recycle_bin_items
+    where company_id='10000000-0000-4000-8000-000000000001'
+    order by company_id for update;
+    rollback;`);
   expectScalar("select count(*) from pg_attribute where attrelid='email_drafts'::regclass and attname in ('email_thread_id','origin_node_id','is_shared','send_state','send_claim_token','send_idempotency_key','sent_email_message_id') and attnum>0 and not attisdropped", "0", "obsolete Node draft columns removed");
   expectScalar("select count(*) from pg_attribute where attrelid='email_drafts'::regclass and attname='collaboration_id' and attnum>0 and not attisdropped", "0", "obsolete collaboration identity removed");
+  sql("delete from companies where company_id='10000000-0000-4000-8000-000000000001'");
+  expectScalar("select count(*) from nodes", "0", "company cascade removes Node despite shared draft guard");
+  expectScalar("select count(*) from email_drafts", "0", "company cascade removes shared drafts");
   console.log(`Email draft scope disposable PostgreSQL contract passed on server_version_num=${version}`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", data, "-m", "fast", "-w", "stop"], { encoding: "utf8" });

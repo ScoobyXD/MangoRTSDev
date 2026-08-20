@@ -465,6 +465,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [groups, setGroups] = useState<CompanyUserGroup[]>([]);
   const [currentUserID, setCurrentUserID] = useState("");
+  const [canEditProject, setCanEditProject] = useState(false);
   const [loading, setLoading] = useState(true);
   const [savingID, setSavingID] = useState("");
   const [error, setError] = useState("");
@@ -542,6 +543,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   blocksRef.current = blocks;
   projectRef.current = project;
   const projectSaveScope = `${companyID}:${projectID.trim()}`;
+  useEffect(() => setCanEditProject(false), [projectSaveScope]);
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
     setRelationships((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
     setCriticalPath((current) => reconcileProjectResourceDisplayTitles(current, update, companyID));
@@ -616,6 +618,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       ]);
       if (projectLoadRequestRef.current !== requestID || projectSaveScopeRef.current !== requestScope) return;
       setProject(view.project);
+      setCanEditProject(view.can_edit === true);
       setProjectTitleDraft(view.project.name || "");
       setProjectSavedVersions((view.information ?? [])
         .map(parseProjectSavedVersion)
@@ -3331,7 +3334,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               <div style={{ ...projectEmailPaneWrapStyle, minHeight: 0, overflow: "hidden", borderRight: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
                 <AttachedEmailOrganizerPane
                   emails={projectAttachedEmails}
-                  repliesEnabled
+                  repliesEnabled={canEditProject}
                   projectID={projectID}
                   apiBase={apiBase}
                   companyID={companyID}
@@ -3339,7 +3342,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                   companyUsers={companyUsers}
                   attachmentRequestJSON={attachmentRequestJSON}
                   storageKey={`project-summary-email-pane:${companyID}:${projectID}`}
-                  editable
+                  editable={canEditProject}
                   accent={accent}
                   surfaceText={PROJECT_SUMMARY_SURFACE_TEXT}
                   strokeColor={EDITOR_NEU_SOFT_BORDER}

@@ -124,7 +124,7 @@ func TestMemoryNodeGraphWorkspaceEventAppendFailureRollsBackState(t *testing.T) 
 		draftID, attachmentID, relationshipID := "shared-draft", newUUIDv7String(), newUUIDv7String()
 		repo.mu.Lock()
 		repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)] = domain.CommunicationsEmailDraft{
-			CompanyID: companyID, DraftID: draftID, SharedNodeID: node.NodeID, Revision: 1, Kind: "reply",
+			CompanyID: companyID, DraftID: draftID, SharedResourceType: EntityTypeNode, SharedResourceID: node.NodeID, Revision: 1, Kind: "reply",
 		}
 		repo.attachments[attachmentKey(companyID, attachmentID)] = domain.Attachment{
 			CompanyID: companyID, AttachmentID: attachmentID, OriginalFilename: "keep.txt", CreatedTimestamp: now,

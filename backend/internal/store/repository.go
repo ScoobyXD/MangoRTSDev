@@ -2488,8 +2488,8 @@ type CommunicationsEmailDraftListInput struct {
 	PersonalUserID       string
 	PersonalAccountEmail string
 	SharedInboxID        string
-	SharedNodeID         string
-	SharedProjectID      string
+	SharedResourceType   string
+	SharedResourceID     string
 	ResourceSharedOnly   bool
 	ParticipantUserID    string
 	Kind                 string
@@ -2505,34 +2505,35 @@ type CommunicationsEmailDraftGetInput struct {
 	PersonalUserID       string
 	PersonalAccountEmail string
 	SharedInboxID        string
-	SharedNodeID         string
-	SharedProjectID      string
+	SharedResourceType   string
+	SharedResourceID     string
 	ParticipantUserID    string
 	ExpectedRevision     int64
 }
 
 type CommunicationsEmailDraftInput struct {
-	CompanyID              string
-	DraftID                string
-	PersonalUserID         string
-	PersonalAccountEmail   string
-	SharedInboxID          string
-	SharedNodeID           string
-	SharedProjectID        string
-	CreatedByUserID        string
-	UpdatedByUserID        string
-	Kind                   string
-	SourceMessageID        string
-	AccountEmail           string
-	ToRecipients           string
-	CcRecipients           string
-	BccRecipients          string
-	Subject                string
-	BodyEditorHTML         string
-	ReplyToMessageJSON     string
-	ScheduledSendTimestamp *time.Time
-	ExistingOnly           bool
-	ExpectedRevision       int64
+	CompanyID               string
+	DraftID                 string
+	PersonalUserID          string
+	PersonalAccountEmail    string
+	SharedInboxID           string
+	SharedResourceType      string
+	SharedResourceID        string
+	SeedFromPersonalDraftID string
+	CreatedByUserID         string
+	UpdatedByUserID         string
+	Kind                    string
+	SourceMessageID         string
+	AccountEmail            string
+	ToRecipients            string
+	CcRecipients            string
+	BccRecipients           string
+	Subject                 string
+	BodyEditorHTML          string
+	ReplyToMessageJSON      string
+	ScheduledSendTimestamp  *time.Time
+	ExistingOnly            bool
+	ExpectedRevision        int64
 }
 
 type CommunicationsEmailDraftDeleteInput struct {
@@ -2541,8 +2542,8 @@ type CommunicationsEmailDraftDeleteInput struct {
 	PersonalUserID       string
 	PersonalAccountEmail string
 	SharedInboxID        string
-	SharedNodeID         string
-	SharedProjectID      string
+	SharedResourceType   string
+	SharedResourceID     string
 	UpdatedByUserID      string
 	ParticipantUserID    string
 	ExpectedRevision     int64

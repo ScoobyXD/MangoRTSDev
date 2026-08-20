@@ -738,7 +738,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 		return CompanyExplorerDeleteResult{}, err
 	}
 	result.Events = events
-	r.createRecycleBinItemsLocked(companyID, deletedByUserID, result.Targets, recycleSnapshot)
+	recycleItemIDs := r.createRecycleBinItemsLocked(companyID, deletedByUserID, result.Targets, recycleSnapshot)
 
 	for logicGateID := range logicGateIDs {
 		if err := r.deleteLogicGateLocked(companyID, logicGateID); err != nil {
@@ -792,6 +792,13 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 		if share.CompanyID == companyID && folderIDs[share.FolderID] {
 			delete(r.folderShares, shareKey)
 		}
+	}
+	recycleDelta := memoryRecycleSnapshotDelta(recycleSnapshot, r.snapshotRecycleStateLocked())
+	for _, itemID := range recycleItemIDs {
+		record := r.recycleBin[key(companyID, itemID)]
+		record.Delta = recycleDelta
+		record.UseDelta = true
+		r.recycleBin[key(companyID, itemID)] = record
 	}
 	committed = true
 	return result, nil

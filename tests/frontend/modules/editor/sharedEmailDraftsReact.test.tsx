@@ -27,8 +27,8 @@ test("message actions and thread summaries keep exact personal and resource-shar
   const summaries = summarizeEmailReplyDrafts([
     draft({ draft_id: "wrong-mailbox", shared_inbox_id: "inbox-a" }),
     draft({ draft_id: "my-exact", shared_inbox_id: "inbox-b" }),
-    draft({ draft_id: "node-shared", scope_type: "resource_shared", shared_node_id: "node-1" }),
-    draft({ draft_id: "project-shared", scope_type: "resource_shared", shared_project_id: "project-1", source_message_id: "source-2", source_thread_id: "stored-thread-2" }),
+    draft({ draft_id: "node-shared", scope_type: "resource_shared", shared_resource_type: "node", shared_resource_id: "node-1" }),
+    draft({ draft_id: "project-shared", scope_type: "resource_shared", shared_resource_type: "project", shared_resource_id: "project-1", source_message_id: "source-2", source_thread_id: "stored-thread-2" }),
   ], {
     "source-1": { sharedInboxID: "inbox-b" },
     "source-2": { accountEmail: "owner@example.test" },
@@ -51,7 +51,7 @@ test("message actions and thread summaries keep exact personal and resource-shar
 
 test("Home renders four equal mailbox actions and shared summaries never hydrate body or attachments", () => {
   const summary = draft({
-    draft_id: "shared-summary", scope_type: "resource_shared", shared_node_id: "node-1",
+    draft_id: "shared-summary", scope_type: "resource_shared", shared_resource_type: "node", shared_resource_id: "node-1",
     body_editor_html: "secret body", attachments: [{
       resource_attachment_id: "link-1", attachment_id: "attachment-1",
       attachment: { attachment_id: "attachment-1", original_filename: "secret.txt", mime_type: "text/plain", byte_size: 6 },
@@ -143,6 +143,13 @@ async function withSharedReplyPane(
   put: (body: Record<string, unknown>, call: number) => Promise<Response> | Response,
   run: (context: { container: HTMLElement; root: { unmount(): void }; putBodies: Record<string, unknown>[] }) => Promise<void>,
   attachmentRequestJSON?: AttachmentRequestJSON,
+  options: {
+    initialMode?: "personal" | "shared";
+    accountEmail?: string;
+    personalDraftID?: string;
+    sharedDraftID?: string;
+    fetch?: (url: string, init?: RequestInit) => Promise<Response | undefined> | Response | undefined;
+  } = {},
 ) {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
   const restores: Restore[] = [];
@@ -176,12 +183,14 @@ async function withSharedReplyPane(
   const putBodies: Record<string, unknown>[] = [];
   installGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = input.toString();
+    const handled = await options.fetch?.(url, init);
+    if (handled) return handled;
     if (url.includes("/v1/nodes/node-1/email-threads/stored-thread-1")) return response({
       thread_id: "provider-thread-1", email_thread_id: "stored-thread-1", download_status: "complete", history_complete: true, messages: [sourceMessage()],
     });
     if (url.includes("/v1/communications/drafts/shared-draft-1") && (init?.method ?? "GET") === "GET") return response({
       draft: draft({
-        draft_id: "shared-draft-1", scope_type: "resource_shared", shared_node_id: "node-1", revision: 1, can_send: false,
+        draft_id: "shared-draft-1", scope_type: "resource_shared", shared_resource_type: "node", shared_resource_id: "node-1", revision: 1, can_send: false,
         attachments: attachmentRequestJSON ? ["one", "two"].map((name) => ({
           resource_attachment_id: `link-${name}`, attachment_id: `attachment-${name}`,
           attachment: { attachment_id: `attachment-${name}`, original_filename: `${name}.txt`, mime_type: "text/plain", byte_size: 3 },
@@ -202,9 +211,11 @@ async function withSharedReplyPane(
     await act(async () => root.render(<EmailConversationPane
       messageID="provider-message-1" repliesEnabled emailMessageID="source-1" emailThreadID="stored-thread-1" nodeID="node-1"
       companyID="company-1" currentUserID="user-1" editable accent="#7c3aed" surfaceText="#172033" strokeColor="#cbd5e1" ruleColor="#e2e8f0"
+      accountEmail={options.accountEmail}
       attachmentRequestJSON={attachmentRequestJSON}
-      initialReplySourceMessageID="source-1" initialReplyMode="shared" initialReplyRequestID={1} singleMessageOnly
-      sharedReplyDraftIndicatorBySourceMessageID={{ "source-1": { draftID: "shared-draft-1", sourceThreadID: "stored-thread-1" } }} onError={() => undefined}
+      initialReplySourceMessageID="source-1" initialReplyMode={options.initialMode ?? "shared"} initialReplyRequestID={1} singleMessageOnly
+      replyDraftIndicatorBySourceMessageID={options.personalDraftID ? { "source-1": { draftID: options.personalDraftID, sourceThreadID: "stored-thread-1" } } : {}}
+      sharedReplyDraftIndicatorBySourceMessageID={(options.sharedDraftID ?? "shared-draft-1") ? { "source-1": { draftID: options.sharedDraftID ?? "shared-draft-1", sourceThreadID: "stored-thread-1" } } : {}} onError={() => undefined}
     />));
     await waitFor(() => Boolean(container.querySelector('[aria-label="Reply body"]')), "shared reply editor");
     await run({ container, root, putBodies });
@@ -214,6 +225,82 @@ async function withSharedReplyPane(
     dom.window.close();
   }
 }
+
+test("Shared Draft checkbox saves personal typing, seeds one shared draft, and unchecks without deletion", { timeout: 10_000 }, async () => {
+  const calls: Array<{ method: string; body: Record<string, unknown> }> = [];
+  let personalBody = "";
+  const handleFetch = async (url: string, init?: RequestInit): Promise<Response | undefined> => {
+    const method = init?.method ?? "GET";
+    if (url.includes("/v1/communications/signature")) return response({ signature: null });
+    if (!url.includes("/v1/communications/drafts")) return undefined;
+    const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+    calls.push({ method, body });
+    if (method === "PUT") {
+      personalBody = String(body.body_editor_html ?? "");
+      return response({ draft: draft({ ...body, draft_id: "personal-draft-1", account_email: "owner@example.test", body_editor_html: personalBody }) });
+    }
+    if (method === "POST" && body.shared_resource_type === "node") {
+      return response({ created: true, draft: draft({
+        draft_id: "shared-draft-1", scope_type: "resource_shared", shared_resource_type: "node", shared_resource_id: "node-1",
+        account_email: "owner@example.test", body_editor_html: personalBody, revision: 1, can_send: false,
+      }) });
+    }
+    personalBody ||= String(body.body_editor_html ?? "");
+    return response({ created: calls.filter((call) => call.method === "POST" && !call.body.shared_resource_type).length === 1, draft: draft({
+      draft_id: "personal-draft-1", account_email: "owner@example.test", body_editor_html: personalBody,
+    }) });
+  };
+  await withSharedReplyPane(() => response({}), async ({ container }) => {
+    const editor = container.querySelector<HTMLElement>('[aria-label="Reply body"]');
+    assert.ok(editor);
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    assert.ok(checkbox);
+    assert.equal(checkbox.parentElement?.textContent?.trim(), "Shared Draft");
+    assert.equal(checkbox.checked, false, "ordinary Reply opens and persists My Draft first");
+    assert.equal(calls.filter((call) => call.method === "POST").length, 1);
+
+    await act(async () => { editor.innerHTML = "<p>personal final typing</p>"; Simulate.input(editor); });
+    await act(async () => { checkbox.click(); });
+    await waitFor(() => container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked === true, "shared checkbox transition");
+    const sharedCreate = calls.find((call) => call.method === "POST" && call.body.shared_resource_type === "node");
+    assert.ok(sharedCreate);
+    assert.equal(sharedCreate.body.shared_resource_id, "node-1");
+    assert.equal(sharedCreate.body.seed_from_personal_draft_id, "personal-draft-1");
+    assert.match(personalBody, /personal final typing/);
+
+    const checked = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    assert.ok(checked);
+    await act(async () => { checked.click(); });
+    await waitFor(() => container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked === false, "return to personal draft");
+    assert.equal(calls.some((call) => call.method === "DELETE"), false);
+    assert.equal(calls.filter((call) => call.method === "POST" && call.body.shared_resource_type === "node").length, 1);
+  }, undefined, { initialMode: "personal", accountEmail: "owner@example.test", sharedDraftID: "", fetch: handleFetch });
+});
+
+test("a missing Shared Draft shortcut creates personal first and opens the seeded shared draft checked", { timeout: 10_000 }, async () => {
+  const posts: Record<string, unknown>[] = [];
+  await withSharedReplyPane(() => response({}), async ({ container }) => {
+    await waitFor(() => container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked === true, "checked shared shortcut");
+    assert.equal(posts.length, 2);
+    assert.equal(posts[0]?.shared_resource_type, undefined);
+    assert.equal(posts[1]?.shared_resource_type, "node");
+    assert.equal(posts[1]?.shared_resource_id, "node-1");
+    assert.equal(posts[1]?.seed_from_personal_draft_id, "personal-draft-1");
+  }, undefined, {
+    initialMode: "shared", accountEmail: "owner@example.test", sharedDraftID: "",
+    fetch: async (url, init) => {
+      if (url.includes("/v1/communications/signature")) return response({ signature: null });
+      if (!url.endsWith("/v1/communications/drafts") || init?.method !== "POST") return undefined;
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      posts.push(body);
+      if (!body.shared_resource_type) return response({ created: true, draft: draft({ draft_id: "personal-draft-1", account_email: "owner@example.test" }) });
+      return response({ created: true, draft: draft({
+        draft_id: "shared-draft-1", scope_type: "resource_shared", shared_resource_type: "node", shared_resource_id: "node-1",
+        account_email: "owner@example.test", revision: 1, can_send: false,
+      }) });
+    },
+  });
+});
 
 test("a shared 409 shows one conflict and never starts an automatic retry loop", { timeout: 10_000 }, async () => {
   await withSharedReplyPane(() => response({ error: "email_draft_revision_conflict" }, 409), async ({ container, putBodies }) => {
@@ -231,7 +318,7 @@ test("pending shared save advances its live revision before unmount flush preser
   let releaseFirst!: (value: Response) => void;
   const first = new Promise<Response>((resolve) => { releaseFirst = resolve; });
   await withSharedReplyPane((body, call) => call === 1 ? first : response({
-    draft: draft({ ...body, draft_id: "shared-draft-1", scope_type: "resource_shared", shared_node_id: "node-1", revision: 3, can_send: false }),
+    draft: draft({ ...body, draft_id: "shared-draft-1", scope_type: "resource_shared", shared_resource_type: "node", shared_resource_id: "node-1", revision: 3, can_send: false }),
   }), async ({ container, root, putBodies }) => {
     const editor = container.querySelector<HTMLElement>('[aria-label="Reply body"]');
     assert.ok(editor);
@@ -242,7 +329,7 @@ test("pending shared save advances its live revision before unmount flush preser
       Simulate.input(editor);
       root.unmount();
     });
-    releaseFirst(response({ draft: draft({ ...putBodies[0], draft_id: "shared-draft-1", scope_type: "resource_shared", shared_node_id: "node-1", revision: 2, can_send: false }) }));
+    releaseFirst(response({ draft: draft({ ...putBodies[0], draft_id: "shared-draft-1", scope_type: "resource_shared", shared_resource_type: "node", shared_resource_id: "node-1", revision: 2, can_send: false }) }));
     await waitFor(() => putBodies.length === 2, "final unmount save");
     assert.equal(putBodies[0]?.expected_revision, 1);
     assert.equal(putBodies[1]?.expected_revision, 2);
@@ -259,7 +346,7 @@ test("shared attachment deletes serialize revisions and unmount waits before sav
     return (deletePaths.length === 1 ? firstDelete : { status: "deleted", resource_revision: 3 }) as Promise<T> | T;
   }) as AttachmentRequestJSON;
   await withSharedReplyPane((body) => response({
-    draft: draft({ ...body, draft_id: "shared-draft-1", scope_type: "resource_shared", shared_node_id: "node-1", revision: 4, can_send: false }),
+    draft: draft({ ...body, draft_id: "shared-draft-1", scope_type: "resource_shared", shared_resource_type: "node", shared_resource_id: "node-1", revision: 4, can_send: false }),
   }), async ({ container, root, putBodies }) => {
     const removeButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Remove "]'));
     assert.equal(removeButtons.length, 2);

@@ -15,9 +15,8 @@ func validateSharedEmailDraftAttachmentRevisionTx(ctx context.Context, tx *sql.T
 	var shared, allowed bool
 	var revision int64
 	err := tx.QueryRowContext(ctx, `
-select shared_node_id is not null or shared_project_id is not null,revision,
-  case when shared_node_id is not null then mangorts_user_can_access_resource(company_id,'node',shared_node_id,$3::uuid,'edit')
-       when shared_project_id is not null then mangorts_user_can_access_resource(company_id,'project',shared_project_id,$3::uuid,'edit')
+select shared_resource_type is not null,revision,
+  case when shared_resource_type is not null then mangorts_user_can_access_resource(company_id,shared_resource_type,shared_resource_id,$3::uuid,'edit')
        else true end
 from email_drafts
 where company_id=$1::uuid and draft_id=$2 and deleted_timestamp is null
@@ -55,7 +54,7 @@ func advanceSharedEmailDraftAttachmentRevisionTx(
 
 	var shared bool
 	if err := tx.QueryRowContext(ctx, `
-select shared_node_id is not null or shared_project_id is not null
+select shared_resource_type is not null
 from email_drafts
 where company_id=$1::uuid and draft_id=$2 and deleted_timestamp is null
 for update`, companyID, draftID).Scan(&shared); errors.Is(err, sql.ErrNoRows) {
@@ -80,13 +79,9 @@ where draft.company_id=$1::uuid
   and draft.draft_id=$2
   and draft.deleted_timestamp is null
   and draft.revision=$4
-  and (
-    (draft.shared_node_id is not null and mangorts_user_can_access_resource(
-      draft.company_id,'node',draft.shared_node_id,$3::uuid,'edit'))
-    or
-    (draft.shared_project_id is not null and mangorts_user_can_access_resource(
-      draft.company_id,'project',draft.shared_project_id,$3::uuid,'edit'))
-  )
+	and draft.shared_resource_type is not null
+	and mangorts_user_can_access_resource(
+	  draft.company_id,draft.shared_resource_type,draft.shared_resource_id,$3::uuid,'edit')
 returning draft.revision`, companyID, draftID, actorUserID, expectedRevision).Scan(&revision)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrConflict

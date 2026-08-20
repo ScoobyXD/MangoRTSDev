@@ -821,7 +821,7 @@ func TestCommunicationsSharedDraftSendUsesPersistedRevisionAndRechecksSender(t *
 		t.Fatal(err)
 	}
 	draft, created, err := fixture.repo.EnsureCommunicationsEmailReplyDraft(store.CommunicationsEmailDraftInput{
-		CompanyID: fixture.companyID, SharedNodeID: node.NodeID, SharedInboxID: inbox.FolderID,
+		CompanyID: fixture.companyID, SharedResourceType: store.EntityTypeNode, SharedResourceID: node.NodeID, SharedInboxID: inbox.FolderID,
 		CreatedByUserID: fixture.userID, SourceMessageID: imported.EmailThread.Messages[0].EmailMessageID,
 		ToRecipients: "Canonical <saved@example.com>", Subject: "Saved subject", BodyEditorHTML: "<p>Saved body</p>",
 	})

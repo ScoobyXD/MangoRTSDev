@@ -521,7 +521,7 @@ func TestAttachmentDirectUploadSharedDraftStaleCompletionBecomesFailed(t *testin
 		t.Fatal(err)
 	}
 	draft, created, err := fixture.repo.EnsureCommunicationsEmailReplyDraft(store.CommunicationsEmailDraftInput{
-		CompanyID: fixture.companyID, SharedNodeID: fixture.node.NodeID, CreatedByUserID: fixture.allowed.UserID,
+		CompanyID: fixture.companyID, SharedResourceType: store.EntityTypeNode, SharedResourceID: fixture.node.NodeID, CreatedByUserID: fixture.allowed.UserID,
 		SourceMessageID: imported.EmailThread.Messages[0].EmailMessageID,
 	})
 	if err != nil || !created || draft.Revision != 1 {
@@ -541,7 +541,7 @@ func TestAttachmentDirectUploadSharedDraftStaleCompletionBecomesFailed(t *testin
 		ChecksumType: "FULL_OBJECT", ServerSideEncryption: attachmentSSEValue(),
 	})
 	if _, err := fixture.repo.UpsertCommunicationsEmailDraft(store.CommunicationsEmailDraftInput{
-		CompanyID: fixture.companyID, DraftID: draft.DraftID, SharedNodeID: fixture.node.NodeID,
+		CompanyID: fixture.companyID, DraftID: draft.DraftID, SharedResourceType: store.EntityTypeNode, SharedResourceID: fixture.node.NodeID,
 		UpdatedByUserID: fixture.allowed.UserID, Kind: "reply", ExpectedRevision: 1, BodyEditorHTML: "<p>other edit</p>",
 	}); err != nil {
 		t.Fatal(err)

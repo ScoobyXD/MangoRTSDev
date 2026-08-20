@@ -5,7 +5,7 @@ export const homeSharedMailDraftMessageID = (draftID: string): string => `shared
 export function homeSharedMailDraftToMessage(draft: CommunicationsEmailDraft): EmailMessage {
   return {
     id: homeSharedMailDraftMessageID(draft.draft_id), email_message_id: draft.source_message_id, email_thread_id: draft.source_thread_id,
-    subject: draft.subject || "(no subject)", snippet: draft.shared_project_id ? "Project shared reply draft" : "Node shared reply draft",
+    subject: draft.subject || "(no subject)", snippet: draft.shared_resource_type === "project" ? "Project shared reply draft" : "Node shared reply draft",
     date: Math.floor((Date.parse(draft.updated_timestamp || draft.created_timestamp) || 0) / 1000),
     unread: false, starred: false, folders: ["drafts"],
     to: parseDraftAddresses(draft.to_recipients), cc: parseDraftAddresses(draft.cc_recipients), bcc: parseDraftAddresses(draft.bcc_recipients),

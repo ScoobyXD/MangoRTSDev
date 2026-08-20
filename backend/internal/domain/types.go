@@ -617,8 +617,8 @@ type CommunicationsEmailDraft struct {
 	PersonalUserID         string     `json:"personal_user_id,omitempty"`
 	PersonalAccountEmail   string     `json:"personal_account_email,omitempty"`
 	SharedInboxID          string     `json:"shared_inbox_id,omitempty"`
-	SharedNodeID           string     `json:"shared_node_id,omitempty"`
-	SharedProjectID        string     `json:"shared_project_id,omitempty"`
+	SharedResourceType     string     `json:"shared_resource_type,omitempty"`
+	SharedResourceID       string     `json:"shared_resource_id,omitempty"`
 	Revision               int64      `json:"revision"`
 	CanSend                bool       `json:"can_send"`
 	CreatedByUserID        string     `json:"created_by_user_id,omitempty"`

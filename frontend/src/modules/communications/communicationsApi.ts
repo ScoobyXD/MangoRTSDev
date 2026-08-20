@@ -392,7 +392,7 @@ export type CommunicationsEmailDraft = {
   personal_user_id?: string;
   personal_account_email?: string;
   shared_inbox_id?: string;
-  shared_node_id?: string; shared_project_id?: string; revision?: number; can_send?: boolean;
+  shared_resource_type?: "node" | "project"; shared_resource_id?: string; revision?: number; can_send?: boolean;
   kind: "compose" | "reply" | "forward" | string;
   source_message_id?: string;
   source_thread_id?: string;
@@ -413,7 +413,7 @@ export type CommunicationsEmailDraft = {
 export type CommunicationsEmailDraftScope = {
   sharedInboxID?: string;
   accountEmail?: string;
-  sharedNodeID?: string; sharedProjectID?: string;
+  sharedResourceType?: "node" | "project"; sharedResourceID?: string;
 };
 
 export type CommunicationsEmailSignature = {
@@ -435,7 +435,7 @@ export type SaveCommunicationsEmailDraftInput = {
   draftID: string;
   sharedInboxID?: string;
   accountEmail?: string;
-  sharedNodeID?: string; sharedProjectID?: string; expectedRevision?: number;
+  sharedResourceType?: "node" | "project"; sharedResourceID?: string; expectedRevision?: number;
   kind: "compose" | "reply" | "forward";
   sourceMessageID?: string;
   replyToMessage?: EmailMessage | null;
@@ -451,7 +451,8 @@ export type EnsureCommunicationsEmailReplyDraftInput = {
   companyID: string;
   sharedInboxID?: string;
   accountEmail?: string;
-  sharedNodeID?: string; sharedProjectID?: string;
+  sharedResourceType?: "node" | "project"; sharedResourceID?: string;
+  seedFromPersonalDraftID?: string;
   sourceMessageID: string;
   to: string;
   cc: string;
@@ -1173,7 +1174,8 @@ export async function ensureEmailReplyDraft(
       company_id: cleanCompanyID,
       shared_inbox_id: cleanSharedInboxID || undefined,
       account_email: resourceScope || cleanSharedInboxID ? undefined : cleanAccountEmail,
-      ...(resourceScope ? { [resourceScope.field]: resourceScope.value } : {}),
+      ...(resourceScope ? { shared_resource_type: resourceScope.type, shared_resource_id: resourceScope.id } : {}),
+      seed_from_personal_draft_id: resourceScope ? input.seedFromPersonalDraftID?.trim() || undefined : undefined,
       kind: "reply",
       source_message_id: cleanSourceMessageID,
       to_recipients: input.to,
@@ -1432,7 +1434,7 @@ export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): 
       draft_id: cleanDraftID,
       shared_inbox_id: resourceScope ? undefined : cleanSharedInboxID || undefined,
       account_email: resourceScope || cleanSharedInboxID ? undefined : cleanAccountEmail || undefined,
-      ...(resourceScope ? { [resourceScope.field]: resourceScope.value, expected_revision: input.expectedRevision } : {}),
+      ...(resourceScope ? { shared_resource_type: resourceScope.type, shared_resource_id: resourceScope.id, expected_revision: input.expectedRevision } : {}),
       kind: input.kind,
       source_message_id: input.sourceMessageID?.trim() || undefined,
       to_recipients: input.to,
@@ -2841,7 +2843,8 @@ function createEmailDraftScopeQuery(companyID: string, scope: CommunicationsEmai
   const query = new URLSearchParams({ company_id: companyID.trim() });
   const resourceScope = emailDraftResourceScope(scope);
   if (resourceScope) {
-    query.set(resourceScope.field, resourceScope.value);
+    query.set("shared_resource_type", resourceScope.type);
+    query.set("shared_resource_id", resourceScope.id);
     return query;
   }
   const sharedInboxID = scope.sharedInboxID?.trim() ?? "";
@@ -2851,11 +2854,12 @@ function createEmailDraftScopeQuery(companyID: string, scope: CommunicationsEmai
   return query;
 }
 
-function emailDraftResourceScope(scope: { sharedNodeID?: string; sharedProjectID?: string }): { field: "shared_node_id" | "shared_project_id"; value: string } | null {
-  const sharedNodeID = scope.sharedNodeID?.trim() ?? "";
-  const sharedProjectID = scope.sharedProjectID?.trim() ?? "";
-  if (sharedNodeID && sharedProjectID) throw new Error("email_draft_resource_scope_invalid");
-  return sharedNodeID ? { field: "shared_node_id", value: sharedNodeID } : sharedProjectID ? { field: "shared_project_id", value: sharedProjectID } : null;
+function emailDraftResourceScope(scope: { sharedResourceType?: "node" | "project"; sharedResourceID?: string }): { type: "node" | "project"; id: string } | null {
+  const type = scope.sharedResourceType;
+  const id = scope.sharedResourceID?.trim() ?? "";
+  if (!type && !id) return null;
+  if ((type !== "node" && type !== "project") || !id) throw new Error("email_draft_resource_scope_invalid");
+  return { type, id };
 }
 
 const emailDraftScopeAvailable = (scope: CommunicationsEmailDraftScope): boolean => Boolean(emailDraftResourceScope(scope) || scope.sharedInboxID?.trim() || scope.accountEmail?.trim());

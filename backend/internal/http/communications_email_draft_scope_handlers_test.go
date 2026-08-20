@@ -46,7 +46,7 @@ func TestResourceSharedEmailDraftHTTPCombinesIndicatorsAndRejectsStaleEditors(t 
 		"company_id": fixture.companyID, "account_email": "owner-a@example.com", "kind": "reply", "source_message_id": sourceMessageID,
 	}, fixture.owner, domain.RoleCompanyUser, http.StatusOK)
 	created := fixture.request(t, http.MethodPost, "/v1/communications/drafts", map[string]any{
-		"company_id": fixture.companyID, "shared_node_id": node.NodeID, "kind": "reply",
+		"company_id": fixture.companyID, "shared_resource_type": "node", "shared_resource_id": node.NodeID, "kind": "reply",
 		"source_message_id": sourceMessageID, "body_editor_html": "<p>one</p>",
 	}, fixture.owner, domain.RoleCompanyUser)
 	if created.Code != http.StatusOK {
@@ -58,11 +58,11 @@ func TestResourceSharedEmailDraftHTTPCombinesIndicatorsAndRejectsStaleEditors(t 
 	if err := json.Unmarshal(created.Body.Bytes(), &createPayload); err != nil {
 		t.Fatal(err)
 	}
-	if createPayload.Draft.Revision != 1 || !createPayload.Draft.CanSend || createPayload.Draft.SharedNodeID != node.NodeID {
+	if createPayload.Draft.Revision != 1 || !createPayload.Draft.CanSend || createPayload.Draft.SharedResourceType != "node" || createPayload.Draft.SharedResourceID != node.NodeID {
 		t.Fatalf("shared create payload=%+v", createPayload.Draft)
 	}
 	listPath := "/v1/communications/drafts?" + url.Values{
-		"company_id": {fixture.companyID}, "shared_node_id": {node.NodeID}, "kind": {"reply"}, "source_message_id": {sourceMessageID},
+		"company_id": {fixture.companyID}, "shared_resource_type": {"node"}, "shared_resource_id": {node.NodeID}, "kind": {"reply"}, "source_message_id": {sourceMessageID},
 	}.Encode()
 	grouped := fixture.request(t, http.MethodGet, listPath, nil, fixture.owner, domain.RoleCompanyUser)
 	if grouped.Code != http.StatusOK {
@@ -83,7 +83,7 @@ func TestResourceSharedEmailDraftHTTPCombinesIndicatorsAndRejectsStaleEditors(t 
 		}
 	}
 	updated := fixture.request(t, http.MethodPut, "/v1/communications/drafts/"+url.PathEscape(createPayload.Draft.DraftID), map[string]any{
-		"company_id": fixture.companyID, "shared_node_id": node.NodeID, "kind": "reply",
+		"company_id": fixture.companyID, "shared_resource_type": "node", "shared_resource_id": node.NodeID, "kind": "reply",
 		"expected_revision": 1, "body_editor_html": "<p>two</p>",
 	}, fixture.editor, domain.RoleCompanyUser)
 	if updated.Code != http.StatusOK {
@@ -99,7 +99,7 @@ func TestResourceSharedEmailDraftHTTPCombinesIndicatorsAndRejectsStaleEditors(t 
 		t.Fatalf("collaborator update payload=%+v", updatePayload.Draft)
 	}
 	stale := fixture.request(t, http.MethodPut, "/v1/communications/drafts/"+url.PathEscape(createPayload.Draft.DraftID), map[string]any{
-		"company_id": fixture.companyID, "shared_node_id": node.NodeID, "kind": "reply", "expected_revision": 1,
+		"company_id": fixture.companyID, "shared_resource_type": "node", "shared_resource_id": node.NodeID, "kind": "reply", "expected_revision": 1,
 	}, fixture.owner, domain.RoleCompanyUser)
 	if stale.Code != http.StatusConflict || !bytes.Contains(stale.Body.Bytes(), []byte("email_draft_revision_conflict")) {
 		t.Fatalf("stale update status=%d body=%s", stale.Code, stale.Body.String())

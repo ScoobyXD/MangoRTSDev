@@ -61,10 +61,8 @@ where message.company_id=$1::uuid and message.email_message_id=$3::uuid`,
 		err = r.db.QueryRowContext(ctx, `
 select (
   case
-    when draft.shared_node_id is not null then mangorts_user_can_access_resource(
-      draft.company_id,'node',draft.shared_node_id,$2::uuid,'edit')
-    when draft.shared_project_id is not null then mangorts_user_can_access_resource(
-      draft.company_id,'project',draft.shared_project_id,$2::uuid,'edit')
+	when draft.shared_resource_type is not null then mangorts_user_can_access_resource(
+	  draft.company_id,draft.shared_resource_type,draft.shared_resource_id,$2::uuid,'edit')
     else draft.created_by_user_id=$2::uuid and (
       draft.personal_user_id=$2::uuid
       or (draft.shared_inbox_id is not null and mangorts_user_can_access_resource(
@@ -139,10 +137,8 @@ func (r *MemoryRepo) GetEmailAttachmentResourceAccess(input EmailAttachmentResou
 			return EmailAttachmentResourceAccess{}, ErrNotFound
 		}
 		allowed := false
-		if draft.SharedNodeID != "" {
-			allowed = r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeNode, draft.SharedNodeID, EntityPermissionEdit)
-		} else if draft.SharedProjectID != "" {
-			allowed = r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, EntityTypeProject, draft.SharedProjectID, EntityPermissionEdit)
+		if isCommunicationsResourceSharedDraft(draft) {
+			allowed = r.userHasEffectiveAccessLocked(input.CompanyID, input.UserID, draft.SharedResourceType, draft.SharedResourceID, EntityPermissionEdit)
 		} else {
 			allowed = draft.CreatedByUserID == input.UserID &&
 				(draft.PersonalUserID == input.UserID ||

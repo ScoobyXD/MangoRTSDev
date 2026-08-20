@@ -29,7 +29,7 @@ func TestSharedEmailDraftAttachmentMutationsUseOneRevision(t *testing.T) {
 		CompanyID: companyID, UserID: viewerID, Role: domain.RoleCompanyUser,
 	}
 	repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)] = domain.CommunicationsEmailDraft{
-		CompanyID: companyID, DraftID: draftID, SharedNodeID: nodeID, Revision: 1, Kind: "reply",
+		CompanyID: companyID, DraftID: draftID, SharedResourceType: EntityTypeNode, SharedResourceID: nodeID, Revision: 1, Kind: "reply",
 	}
 	repo.attachments[attachmentKey(companyID, attachmentID)] = domain.Attachment{
 		CompanyID: companyID, AttachmentID: attachmentID, OriginalFilename: "shared.txt",
@@ -89,7 +89,7 @@ func TestSharedEmailDraftDirectUploadCASRunsAtFinalize(t *testing.T) {
 	repo.nodes[key(companyID, nodeID)] = domain.Node{CompanyID: companyID, NodeID: nodeID, Title: "Node", DefaultAccess: ResourceDefaultAccessEdit}
 	repo.memberships[membershipKey(companyID, editorID)] = domain.CompanyMembership{CompanyID: companyID, UserID: editorID, Role: domain.RoleCompanyAdmin}
 	repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)] = domain.CommunicationsEmailDraft{
-		CompanyID: companyID, DraftID: draftID, SharedNodeID: nodeID, Revision: 1, Kind: "reply",
+		CompanyID: companyID, DraftID: draftID, SharedResourceType: EntityTypeNode, SharedResourceID: nodeID, Revision: 1, Kind: "reply",
 	}
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	input := testAttachmentUploadIntentInput(companyID, now, domain.AttachmentUploadStrategySingle)
