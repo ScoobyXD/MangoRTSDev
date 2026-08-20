@@ -39,6 +39,7 @@ export type MangoTiptapImageAttachmentContext = {
   prepareResource?: () => Promise<void>;
   onError?: (message: string) => void;
   mutationLifecycle?: EditorAttachmentMutationLifecycle;
+  expectedResourceRevision?: () => number | undefined; onResourceRevision?: (revision: number) => void;
 };
 
 type EditorTextAlignment = "left" | "center" | "right";
@@ -98,6 +99,8 @@ async function uploadClipboardImageFile(
     relationshipKind: "inline_image",
     informationID: context.informationID,
     editorSurface: context.editorSurface,
+    expectedRevision: context.expectedResourceRevision?.(),
+    onResourceRevision: context.onResourceRevision,
   }), context.mutationLifecycle);
   return resolvedAttachmentImageData(uploaded.attachment, request, file);
 }
@@ -120,7 +123,8 @@ export async function resolveMangoTiptapRichClipboardImage(
       relationshipKind: "inline_image",
       informationID: context.informationID,
       editorSurface: context.editorSurface,
-    }), context.mutationLifecycle);
+      expectedRevision: context.expectedResourceRevision?.(),
+    }).then((result) => { if ((result.resource_revision ?? 0) > 0) context.onResourceRevision?.(result.resource_revision!); return result; }), context.mutationLifecycle);
     return {
       src: editorAttachmentImageSource(attachmentID),
       attachmentID,
@@ -155,7 +159,8 @@ export async function resolveMangoTiptapRichClipboardImage(
     originalFilename: request.filename,
     informationID: context.informationID,
     editorSurface: context.editorSurface,
-  }), context.mutationLifecycle);
+    expectedRevision: context.expectedResourceRevision?.(),
+  }).then((result) => { if ((result.resource_attachment.resource_revision ?? 0) > 0) context.onResourceRevision?.(result.resource_attachment.resource_revision!); return result; }), context.mutationLifecycle);
   return resolvedAttachmentImageData(imported.attachment, request);
 }
 

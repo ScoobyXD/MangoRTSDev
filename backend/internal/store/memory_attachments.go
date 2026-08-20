@@ -35,6 +35,14 @@ func (r *MemoryRepo) CreateAttachmentWithResourceLinkContext(ctx context.Context
 			return domain.Attachment{}, domain.ResourceAttachment{}, ErrAlreadyExists
 		}
 	}
+	if link.ResourceType == "email_draft" {
+		link.ResourceRevision, err = r.advanceSharedEmailDraftAttachmentRevisionLocked(
+			link.CompanyID, link.ResourceID, link.CreatedByUserID, input.ResourceLink.ExpectedRevision,
+		)
+		if err != nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, err
+		}
+	}
 	r.attachments[attachmentKey(attachment.CompanyID, attachment.AttachmentID)] = attachment
 
 	link.AttachmentID = attachment.AttachmentID
@@ -327,6 +335,14 @@ func (r *MemoryRepo) LinkResourceAttachmentContext(ctx context.Context, input Re
 	if attachment, ok := r.attachments[attachmentKey(link.CompanyID, link.AttachmentID)]; !ok || attachment.DeletedTimestamp != nil {
 		return domain.ResourceAttachment{}, ErrNotFound
 	}
+	if link.ResourceType == "email_draft" {
+		link.ResourceRevision, err = r.advanceSharedEmailDraftAttachmentRevisionLocked(
+			link.CompanyID, link.ResourceID, link.CreatedByUserID, input.ExpectedRevision,
+		)
+		if err != nil {
+			return domain.ResourceAttachment{}, err
+		}
+	}
 	storedLink, err := r.upsertResourceAttachmentLocked(link)
 	if err != nil {
 		return domain.ResourceAttachment{}, err
@@ -438,18 +454,31 @@ func (r *MemoryRepo) SoftDeleteResourceAttachment(input ResourceAttachmentDelete
 	if companyID == "" || resourceType == "" || resourceID == "" || attachmentID == "" {
 		return ErrInvalid
 	}
-	now := time.Now().UTC()
 	changed := false
+	for _, link := range r.resourceAttachments {
+		if link.CompanyID == companyID && link.ResourceType == resourceType && link.ResourceID == resourceID &&
+			link.AttachmentID == attachmentID && link.DeletedTimestamp == nil {
+			changed = true
+			break
+		}
+	}
+	if !changed {
+		return ErrNotFound
+	}
+	if resourceType == "email_draft" {
+		if _, err := r.advanceSharedEmailDraftAttachmentRevisionLocked(
+			companyID, resourceID, input.ActorUserID, input.ExpectedRevision,
+		); err != nil {
+			return err
+		}
+	}
+	now := time.Now().UTC()
 	for id, link := range r.resourceAttachments {
 		if link.CompanyID != companyID || link.ResourceType != resourceType || link.ResourceID != resourceID || link.AttachmentID != attachmentID || link.DeletedTimestamp != nil {
 			continue
 		}
 		link.DeletedTimestamp = &now
 		r.resourceAttachments[id] = link
-		changed = true
-	}
-	if !changed {
-		return ErrNotFound
 	}
 	stillOwned := false
 	for _, link := range r.resourceAttachments {
@@ -699,6 +728,9 @@ func (r *MemoryRepo) ListWork(ctx context.Context, companyID string, limit int) 
 		if attachment.CompanyID != strings.TrimSpace(companyID) || attachment.DeletedTimestamp == nil {
 			continue
 		}
+		if r.attachmentRestorableFromSharedDraftRecycleLocked(attachment.CompanyID, attachment.AttachmentID) {
+			continue
+		}
 		item := attachmentcleanup.WorkItem{
 			Kind: attachmentcleanup.WorkOrphanAttachment, CompanyID: attachment.CompanyID, AttachmentID: attachment.AttachmentID,
 			Objects: []attachmentcleanup.ObjectRef{{Bucket: attachment.StorageBucket, Key: attachment.StorageKey}},
@@ -735,6 +767,9 @@ func (r *MemoryRepo) Eligible(ctx context.Context, item attachmentcleanup.WorkIt
 		if link.CompanyID == item.CompanyID && link.AttachmentID == item.AttachmentID && link.DeletedTimestamp == nil {
 			return false, nil
 		}
+	}
+	if r.attachmentRestorableFromSharedDraftRecycleLocked(item.CompanyID, item.AttachmentID) {
+		return false, nil
 	}
 	return true, nil
 }
@@ -791,6 +826,9 @@ func (r *MemoryRepo) Finalize(ctx context.Context, item attachmentcleanup.WorkIt
 			return attachmentcleanup.ErrStillOwned
 		}
 	}
+	if r.attachmentRestorableFromSharedDraftRecycleLocked(item.CompanyID, item.AttachmentID) {
+		return attachmentcleanup.ErrStillOwned
+	}
 	delete(r.attachments, key)
 	for previewKey, preview := range r.attachmentVariants {
 		if preview.AttachmentID == item.AttachmentID {
@@ -803,4 +841,30 @@ func (r *MemoryRepo) Finalize(ctx context.Context, item attachmentcleanup.WorkIt
 		}
 	}
 	return nil
+}
+
+func (r *MemoryRepo) attachmentRestorableFromSharedDraftRecycleLocked(companyID, attachmentID string) bool {
+	for _, record := range r.recycleBin {
+		if record.Item.CompanyID != companyID {
+			continue
+		}
+		owners := map[string]bool{}
+		for _, target := range record.Targets {
+			if target.Kind == EntityTypeNode || target.Kind == EntityTypeProject {
+				owners[target.Kind+":"+target.ID] = true
+			}
+		}
+		draftIDs := map[string]bool{}
+		for _, draft := range record.Snapshot.emailDrafts {
+			if draft.CompanyID == companyID && draft.DeletedTimestamp == nil && owners[draft.SharedResourceType+":"+draft.SharedResourceID] {
+				draftIDs[draft.DraftID] = true
+			}
+		}
+		for _, link := range record.Snapshot.resourceAttachments {
+			if link.CompanyID == companyID && link.DeletedTimestamp == nil && link.ResourceType == "email_draft" && draftIDs[link.ResourceID] && link.AttachmentID == attachmentID {
+				return true
+			}
+		}
+	}
+	return false
 }

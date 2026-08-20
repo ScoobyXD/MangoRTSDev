@@ -1,6 +1,8 @@
 import React from "react";
 import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
-import type { CommunicationsEmailCollaboration, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage, EmailProvider } from "../../modules/communications/communicationsApi";
+import type { CommunicationsEmailCollaboration, CommunicationsEmailDraft, CompanyUser, CompanyUserGroup, CompanyUserGroupMember, EmailMailbox, EmailMessage, EmailProvider } from "../../modules/communications/communicationsApi";
+import type { AttachmentRequestJSON } from "../../modules/attachments/attachmentApi";
+import { EmailConversationPane } from "../../modules/editor/NodeWorkspaceSurfaceParts";
 import type { EditorEntityLink, EditorEntityLinkRequest } from "../../modules/editor/editorEntityLinks.js";
 import type { NodeRecord } from "../../modules/nodes/types";
 import type { LogicGateRecord } from "../../modules/logic-gates/types";
@@ -215,15 +217,19 @@ export type HomeMailNoticeAction = {
 
 export function HomeMailWorkspace({
   activeViewID,
+  apiBase,
   accountEmail,
   archiveAvailable,
   archiveLabel,
   busy,
   companyID,
   entityRequestJSON,
+  attachmentRequestJSON,
   currentUserID,
   compose,
   draftCount,
+  draftListKind,
+  sharedDraftCount,
   emailSignature,
   emailSignatureID,
   emailSignatureAccountEmail,
@@ -252,6 +258,7 @@ export function HomeMailWorkspace({
   pendingStarredMessageIDs,
   searchDraft,
   selectedMessage,
+  selectedSharedDraft,
   selectedMessageRowKey,
   selectedMessageIDs,
   selectedThreadMessages,
@@ -276,6 +283,7 @@ export function HomeMailWorkspace({
   onOpenContextMenu,
   onOpenNewCompose,
   onOpenDraftsMailbox,
+  onOpenSharedDraftsMailbox,
   onOpenPendingMailbox,
   onOpenReply,
   onOpenReplyAll,
@@ -284,6 +292,7 @@ export function HomeMailWorkspace({
   onOpenStarredMailbox,
   onToggleMessageListOrder,
   onOpenForward,
+  onSharedDraftComplete,
   onEmailSignatureChange,
   onSaveEmailSignature,
   onSaveComposeDraft,
@@ -304,16 +313,20 @@ export function HomeMailWorkspace({
   onOpenCollaborationNode,
 }: {
   activeViewID: HomeViewID;
+  apiBase: string;
   accountEmail?: string;
   archiveAvailable: boolean;
   archiveLabel: string;
   busy: string;
   companyID: string;
   entityRequestJSON: EditorEntityLinkRequest;
+  attachmentRequestJSON: AttachmentRequestJSON;
   messageListOrder: EmailConversationOrder;
   currentUserID: string;
   compose: ComposeState;
   draftCount: number;
+  draftListKind: "personal" | "shared";
+  sharedDraftCount: number;
   emailSignature: string;
   emailSignatureID: string;
   emailSignatureAccountEmail: string;
@@ -341,6 +354,7 @@ export function HomeMailWorkspace({
   pendingStarredMessageIDs: Set<string>;
   searchDraft: string;
   selectedMessage: EmailMessage | null;
+  selectedSharedDraft: CommunicationsEmailDraft | null;
   selectedMessageRowKey: string;
   selectedMessageIDs: Set<string>;
   selectedThreadMessages: EmailMessage[];
@@ -365,6 +379,7 @@ export function HomeMailWorkspace({
   onOpenContextMenu: (message: EmailMessage, event: React.MouseEvent) => void;
   onOpenNewCompose: () => void;
   onOpenDraftsMailbox: () => void;
+  onOpenSharedDraftsMailbox: () => void;
   onOpenPendingMailbox: () => void;
   onOpenReply: (message?: EmailMessage) => void;
   onOpenReplyAll: (message?: EmailMessage) => void;
@@ -372,6 +387,7 @@ export function HomeMailWorkspace({
   onOpenSpamMailbox: () => void;
   onOpenStarredMailbox: () => void;
   onOpenForward: (message?: EmailMessage) => void;
+  onSharedDraftComplete: () => void;
   onToggleMessageListOrder: () => void;
   onEmailSignatureChange: (value: string) => void;
   onSaveEmailSignature: (signature: string) => void;
@@ -706,13 +722,21 @@ export function HomeMailWorkspace({
                 className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-drafts"
                 type="button"
                 style={mailVibrantActionButtonStyle}
-                aria-pressed={!compose.open && mailbox === "drafts"}
+                aria-pressed={!compose.open && mailbox === "drafts" && draftListKind === "personal"}
                 title={draftCount === 0 ? "My Drafts" : `My Drafts (${formatMailboxCount(draftCount)})`}
                 onClick={() => {
-                  if (mailbox !== "drafts") onOpenDraftsMailbox();
+                  if (mailbox !== "drafts" || draftListKind !== "personal") onOpenDraftsMailbox();
                 }}
               >
                 <MailboxActionContent label="My Drafts" count={draftCount} />
+              </button>
+              <button
+                className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-shared-drafts" type="button" style={mailVibrantActionButtonStyle}
+                aria-pressed={!compose.open && mailbox === "drafts" && draftListKind === "shared"}
+                title={sharedDraftCount === 0 ? "Shared Drafts" : `Shared Drafts (${formatMailboxCount(sharedDraftCount)})`}
+                onClick={() => { if (mailbox !== "drafts" || draftListKind !== "shared") onOpenSharedDraftsMailbox(); }}
+              >
+                <MailboxActionContent label="Shared Drafts" count={sharedDraftCount} />
               </button>
               <button
                 className="mango-elevated-action mango-mail-vibrant-action mango-mail-vibrant-advance"
@@ -724,7 +748,7 @@ export function HomeMailWorkspace({
                   : hasNextMessagePage ? "Archive this page and go to the next page" : "Archive this page"}
                 onClick={onAdvanceTriagePage}
               >
-                {busy === "advance-archive" ? "Archiving..." : hasNextMessagePage ? "Archive & next →" : "Archive page →"}
+                {busy === "advance-archive" ? "Archiving..." : "Archive & next →"}
               </button>
             </div>
           )}
@@ -799,7 +823,7 @@ export function HomeMailWorkspace({
             {messages.length === 0 ? (
               loadingMessages || loadingMoreMessages
                 ? <div role="status" style={emptyStateStyle}>Loading messages</div>
-                : <div style={emptyStateStyle}>{mailbox === "drafts" ? "No saved drafts" : isArchiveMailbox ? "No archived messages" : "No messages"}</div>
+                : <div style={emptyStateStyle}>{mailbox === "drafts" ? draftListKind === "shared" ? "No shared drafts" : "No saved drafts" : isArchiveMailbox ? "No archived messages" : "No messages"}</div>
             ) : messages.map((message) => {
               const rowKey = emailMessageRowKey(message);
               const active = selectedMessageIDs.has(rowKey) || selectedMessageRowKey === rowKey;
@@ -993,6 +1017,22 @@ export function HomeMailWorkspace({
             onSaveDraft={onSaveComposeDraft}
             onEnsureDraft={onEnsureComposeDraft}
             onDiscardEmptyDraft={onDiscardEmptyComposeDraft}
+          />
+        ) : selectedSharedDraft ? (
+          <EmailConversationPane
+            key={selectedSharedDraft.draft_id}
+            messageID={selectedMessage?.id ?? selectedSharedDraft.draft_id} repliesEnabled
+            emailMessageID={selectedSharedDraft.source_message_id} emailThreadID={selectedSharedDraft.source_thread_id}
+            nodeID={selectedSharedDraft.shared_resource_type === "node" ? selectedSharedDraft.shared_resource_id : undefined}
+            projectID={selectedSharedDraft.shared_resource_type === "project" ? selectedSharedDraft.shared_resource_id : undefined}
+            apiBase={apiBase} companyID={companyID} currentUserID={currentUserID} companyUsers={companyUsers}
+            sharedInboxID={selectedSharedDraft.shared_inbox_id}
+            accountEmail={selectedSharedDraft.account_email || selectedSharedDraft.personal_account_email || accountEmail}
+            attachmentRequestJSON={attachmentRequestJSON} editable
+            accent="#7c3aed" surfaceText="#172033" strokeColor="rgba(148,163,184,0.3)" ruleColor="rgba(148,163,184,0.24)"
+            initialReplySourceMessageID={selectedSharedDraft.source_message_id} initialReplyMode="shared" initialReplyRequestID={selectedSharedDraft.revision ?? 1}
+            sharedReplyDraftIndicatorBySourceMessageID={{ [selectedSharedDraft.source_message_id ?? ""]: { draftID: selectedSharedDraft.draft_id, sourceThreadID: selectedSharedDraft.source_thread_id ?? "" } }}
+            inlineExpansion onReplyComplete={onSharedDraftComplete} onError={setEmailCollaborationError}
           />
         ) : selectedMessage ? (
           <div

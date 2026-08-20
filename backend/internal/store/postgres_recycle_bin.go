@@ -175,7 +175,8 @@ from recycle_bin_items
 where company_id=$1::uuid
   and deleted_by_user_id=$2::uuid
   and recycle_bin_item_id = any(string_to_array($3, ',')::uuid[])
-order by deleted_timestamp asc, recycle_bin_item_id asc`, companyID, deletedByUserID, strings.Join(itemIDs, ","))
+order by deleted_timestamp asc, recycle_bin_item_id asc
+for update`, companyID, deletedByUserID, strings.Join(itemIDs, ","))
 	if isPostgresUndefinedTable(err, "recycle_bin_items") {
 		return RecycleBinRestoreResult{}, ErrNotFound
 	}
@@ -285,6 +286,7 @@ var recycleSnapshotTables = map[string]bool{
 	"company_explorer_items":                 true,
 	"email_relationships":                    true,
 	"email_drafts":                           true,
+	"attachments":                            true,
 	"attachment_relationships":               true,
 }
 
@@ -316,6 +318,7 @@ var recycleRestoreTableOrder = []string{
 	"resource_permissions",
 	"user_logic_gate_shortcuts",
 	"email_drafts",
+	"attachments",
 	"attachment_relationships",
 	"node_logic_gate_assignments",
 	"node_relationships",
@@ -407,6 +410,17 @@ on conflict do nothing`, string(rows)); err != nil {
 			return err
 		}
 	}
+	if tableName == "attachments" {
+		if _, err := tx.ExecContext(ctx, `
+update attachments existing
+set deleted_timestamp=restored.deleted_timestamp,
+    updated_timestamp=greatest(existing.updated_timestamp,clock_timestamp())
+from jsonb_populate_recordset(null::attachments,coalesce($1::jsonb,'[]'::jsonb)) restored
+where existing.company_id=restored.company_id
+  and existing.attachment_id=restored.attachment_id`, string(rows)); err != nil {
+			return err
+		}
+	}
 	if tableName == "attachment_relationships" {
 		if _, err := tx.ExecContext(ctx, `
 update attachment_relationships existing
@@ -417,11 +431,26 @@ where existing.company_id=restored.company_id
 			return err
 		}
 	}
+	selectColumns := columnList
+	if tableName == "email_drafts" {
+		selected := make([]string, len(columns))
+		for index, column := range columns {
+			switch column {
+			case `"revision"`:
+				selected[index] = `greatest(restored_row."revision" + 1, 2)`
+			case `"updated_timestamp"`:
+				selected[index] = `clock_timestamp()`
+			default:
+				selected[index] = "restored_row." + column
+			}
+		}
+		selectColumns = strings.Join(selected, ", ")
+	}
 	query := fmt.Sprintf(`
 insert into %s (%s) overriding system value
 select %s
 from jsonb_populate_recordset(null::%s, coalesce($1::jsonb, '[]'::jsonb)) restored_row
-on conflict do nothing`, tableName, columnList, columnList, tableName)
+on conflict do nothing`, tableName, columnList, selectColumns, tableName)
 	if _, err := tx.ExecContext(ctx, query, string(rows)); err != nil {
 		return err
 	}
@@ -602,14 +631,33 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 			}
 		}
 	}
-	if len(nodeIDs) > 0 {
-		if err := addTable("attachment_relationships", `company_id=$1::uuid and (
-  (resource_type='node' and resource_id = any(string_to_array($2, ',')::text[]))
-  or (resource_type='node_chat_message' and resource_id in (
-    select chat_id::text from node_textbox_chats
-    where company_id=$1::uuid and node_id = any(string_to_array($2, ',')::uuid[])
-  ))
-)`, companyID, nodeIDCSV); err != nil {
+	if len(nodeIDs) > 0 || len(projectIDs) > 0 {
+		draftWhere, draftArgs := recycleTypedResourceWhere(companyID, nodeIDs, nil, projectIDs, "shared_resource_type", "shared_resource_id")
+		draftWhere += " and deleted_timestamp is null"
+		if err := addTable("email_drafts", draftWhere, draftArgs...); err != nil {
+			return nil, err
+		}
+		attachmentRelationshipWhere := `company_id=$1::uuid and (
+  ($2<>'' and ((resource_type='node' and resource_id=any(string_to_array($2,',')::text[]))
+    or (resource_type='node_chat_message' and resource_id in (
+      select chat_id::text from node_textbox_chats where company_id=$1::uuid
+        and node_id=any(string_to_array($2,',')::uuid[])))))
+  or ($3<>'' and ((resource_type='project' and resource_id=any(string_to_array($3,',')::text[]))
+    or (resource_type='project_chat_message' and resource_id in (
+      select chat_id::text from project_textbox_chats where company_id=$1::uuid
+        and project_id=any(string_to_array($3,',')::uuid[])))))
+  or (resource_type='email_draft' and resource_id in (
+    select draft_id from email_drafts where company_id=$1::uuid and deleted_timestamp is null
+      and (($2<>'' and shared_resource_type='node' and shared_resource_id=any(string_to_array($2,',')::uuid[]))
+        or ($3<>'' and shared_resource_type='project' and shared_resource_id=any(string_to_array($3,',')::uuid[])))))
+)`
+		attachmentArgs := []any{companyID, nodeIDCSV, projectIDCSV}
+		if err := addTable("attachment_relationships", attachmentRelationshipWhere, attachmentArgs...); err != nil {
+			return nil, err
+		}
+		if err := addTable("attachments", `company_id=$1::uuid and attachment_id in (
+  select attachment_id from attachment_relationships where `+attachmentRelationshipWhere+`
+)`, attachmentArgs...); err != nil {
 			return nil, err
 		}
 	}
@@ -719,13 +767,17 @@ func postgresSnapshotRowsWithCacheTx(ctx context.Context, tx *sql.Tx, cache *rec
 }
 
 func postgresSnapshotRowsQueryTx(ctx context.Context, tx *sql.Tx, tableName, whereClause string, args ...any) (json.RawMessage, error) {
+	lockClause := ""
+	if tableName == "email_drafts" {
+		lockClause = " order by draft_id for update"
+	}
 	query := fmt.Sprintf(`
 select coalesce(jsonb_agg(to_jsonb(row_data)), '[]'::jsonb)
 from (
   select *
   from %s
-  where %s
-) row_data`, tableName, whereClause)
+  where %s%s
+) row_data`, tableName, whereClause, lockClause)
 	var raw []byte
 	if err := tx.QueryRowContext(ctx, query, args...).Scan(&raw); err != nil {
 		return nil, err

@@ -26,6 +26,8 @@ ui.storage_checksum_value,
 ui.storage_checksum_type,
 ui.resource_type,
 ui.resource_id,
+ui.resource_expected_revision,
+ui.resource_revision,
 coalesce(ui.information_id::text, ''),
 ui.message_id,
 ui.editor_surface,
@@ -99,14 +101,14 @@ with inserted as (
     resource_type, resource_id, information_id, message_id, editor_surface,
     relationship_kind, source_kind, source_provider, original_width, original_height,
     storage_bucket, storage_key, multipart_upload_id, strategy, part_size_bytes, part_count,
-    status, version, created_timestamp, updated_timestamp, expires_timestamp
+    status, version, created_timestamp, updated_timestamp, expires_timestamp, resource_expected_revision
   ) values (
     $1::uuid, $2::uuid, $3::uuid, $4, $5::uuid,
     $6, $7, $8, $9, $10,
     $11, $12, nullif($13, '')::uuid, $14, $15,
     $16, $17, $18, $19, $20,
     $21, $22, $23, $24, $25, $26,
-    $27, $28, $29, $29, $30
+    $27, $28, $29, $29, $30, $31
   )
   on conflict (company_id, actor_user_id, client_request_id) do nothing
   returning *
@@ -117,8 +119,21 @@ select `+attachmentUploadJobSelectColumns+` from inserted ui`,
 		intent.ResourceType, intent.ResourceID, intent.InformationID, intent.MessageID, intent.EditorSurface,
 		intent.RelationshipKind, intent.SourceKind, intent.SourceProvider, nullableInt(intent.OriginalWidth), nullableInt(intent.OriginalHeight),
 		intent.StorageBucket, intent.StorageKey, intent.MultipartUploadID, intent.Strategy, intent.PartSizeBytes, intent.PartCount,
-		intent.Status, intent.Version, intent.CreatedTimestamp, intent.ExpiresTimestamp))
+		intent.Status, intent.Version, intent.CreatedTimestamp, intent.ExpiresTimestamp, intent.ResourceExpectedRevision))
 	created := err == nil
+	if created && intent.ResourceType == "email_draft" {
+		expectedRevision, revisionErr := validateSharedEmailDraftAttachmentRevisionTx(
+			ctx, tx, intent.CompanyID, intent.ResourceID, intent.ActorUserID, input.ExpectedRevision,
+		)
+		if revisionErr != nil {
+			return domain.AttachmentUploadIntent{}, false, revisionErr
+		}
+		createdIntent.ResourceExpectedRevision = expectedRevision
+		if _, err = tx.ExecContext(ctx, `update attachment_upload_jobs set resource_expected_revision=$2 where upload_job_id=$1::uuid`,
+			createdIntent.UploadIntentID, expectedRevision); err != nil {
+			return domain.AttachmentUploadIntent{}, false, err
+		}
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		createdIntent, err = scanAttachmentUploadIntent(tx.QueryRowContext(ctx, `
 select `+attachmentUploadJobSelectColumns+` from attachment_upload_jobs ui
@@ -353,6 +368,7 @@ limit 1`, intent.CompanyID, intent.AttachmentID, intent.ResourceType, intent.Res
 		if err != nil {
 			return domain.Attachment{}, domain.ResourceAttachment{}, err
 		}
+		link.ResourceRevision = intent.ResourceRevision
 		return attachment, link, tx.Commit()
 	}
 	if intent.Status != domain.AttachmentUploadStatusCompleting {
@@ -394,16 +410,26 @@ limit 1`, attachment.CompanyID, attachment.AttachmentID, attachment.UploadedByUs
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
 	link.AttachmentID = attachment.AttachmentID
+	if intent.ResourceType == "email_draft" {
+		link.ResourceRevision, err = advanceSharedEmailDraftAttachmentRevisionTx(
+			ctx, tx, intent.CompanyID, intent.ResourceID, intent.ActorUserID, intent.ResourceExpectedRevision,
+		)
+		if err != nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, err
+		}
+	}
+	resourceRevision := link.ResourceRevision
 	link, err = insertOrReviveResourceAttachmentTx(ctx, tx, link)
 	if err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
+	link.ResourceRevision = resourceRevision
 	if _, err := tx.ExecContext(ctx, `update attachment_upload_jobs
 set status='completed', failure_code='', attachment_relationship_id=$2::uuid, sha256_verification_method=$3,
  storage_checksum_algorithm=$4, storage_checksum_value=$5, storage_checksum_type=$6,
- completed_timestamp=$7, updated_timestamp=$7, version=version+1
+ completed_timestamp=$7, updated_timestamp=$7, resource_revision=$8, version=version+1
 where upload_job_id=$1::uuid`, intent.UploadIntentID, link.ResourceAttachmentID, strings.TrimSpace(input.SHA256VerificationMethod),
-		strings.TrimSpace(input.StorageChecksumAlgorithm), strings.TrimSpace(input.StorageChecksumValue), strings.TrimSpace(input.StorageChecksumType), now); err != nil {
+		strings.TrimSpace(input.StorageChecksumAlgorithm), strings.TrimSpace(input.StorageChecksumValue), strings.TrimSpace(input.StorageChecksumType), now, resourceRevision); err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -537,7 +563,8 @@ func scanAttachmentUploadIntent(row interface{ Scan(dest ...any) error }) (domai
 	err := row.Scan(&item.UploadIntentID, &item.CompanyID, &item.ActorUserID, &item.ClientRequestID,
 		&item.AttachmentID, &item.ResourceAttachmentID, &item.OriginalFilename, &item.MimeType, &item.SizeBytes, &item.SHA256,
 		&item.SHA256VerificationMethod, &item.StorageChecksumAlgorithm, &item.StorageChecksumValue, &item.StorageChecksumType,
-		&item.ResourceType, &item.ResourceID, &item.InformationID, &item.MessageID, &item.EditorSurface,
+		&item.ResourceType, &item.ResourceID, &item.ResourceExpectedRevision, &item.ResourceRevision,
+		&item.InformationID, &item.MessageID, &item.EditorSurface,
 		&item.RelationshipKind, &item.SourceKind, &item.SourceProvider, &width, &height, &item.StorageBucket,
 		&item.StorageKey, &item.MultipartUploadID, &item.Strategy, &item.PartSizeBytes, &item.PartCount,
 		&item.Status, &item.FailureCode, &item.Version, &item.CreatedTimestamp, &item.UpdatedTimestamp,

@@ -36,6 +36,7 @@ import {
   listCompanyUserGroups,
   listEmailFolders,
   listEmailMessages,
+  listSharedEmailDraftSummaries,
   listCommunicationsSharedInboxes,
   mergeEmailMessageIntoMessageList,
   parseEmailAddressList,
@@ -49,6 +50,7 @@ import {
   type CompanyUserGroup,
   type CompanyUserGroupMember,
 	type CommunicationsEmailCollaboration,
+  type CommunicationsEmailDraft,
   type CommunicationsSharedInbox,
   type CommunicationsSharedInboxCreateIntent,
   type CommunicationsSharedInboxRACIRole,
@@ -99,6 +101,7 @@ import { UpdatesView } from "./UpdatesView";
 import { HomeMailOverlays, HomeMailWorkspace, type HomeMailNoticeAction } from "./HomeMailWorkspace";
 import { OutboundEmailUndoBanner } from "../../modules/communications/OutboundEmailUndoBanner";
 import { applyHomeMailSignature, composeHasDraftContent, createHomeMailDraftID, createHomeMailForwardDraftID, deleteHomeMailDraftRemote, deleteHomeMailDraftsRemote, ensureHomeMailDraftAttachmentTarget, homeMailDraftFromRemote, homeMailDraftMatchesScope, homeMailDraftToCompose, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailDraft, loadHomeMailDrafts, loadHomeMailSignature, mergeHomeMailDrafts, readHomeMailDrafts, readHomeMailDraftsForScope, readHomeMailSignature, saveHomeMailDraftFromCompose, saveHomeMailSignatureRemote, syncHomeMailDraftFromCompose, type HomeMailDraft } from "./homeMailDrafts";
+import { homeSharedMailDraftMatchesSearch, homeSharedMailDraftMessageID, homeSharedMailDraftToMessage } from "./homeSharedMailDrafts";
 import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, consumeHomeMailboxLocalMutationEcho, createHomeArchiveStatusCoordinator, createHomeMailboxFolderLoadCoordinator, createHomeMailboxRealtimeCoordinator, forgetHomeMailboxLocalMutationEchoes, homeMailboxComposeSubmissionIsCurrent, homeMailboxCountKey, homeMailboxFolderOwnerIsCurrent, homeMailboxPendingMessageIDs, homeMailboxPendingMessageKey, homeMailboxRealtimeTargetKey, homeMailboxRequestOwnerIsCurrent, rememberHomeMailboxLocalMutationEchoes, selectHomeMailboxRealtimeTarget, type HomeMailboxCountOverrideKey, type HomeMailboxCountOverrides, type HomeMailboxFolderOwner, type HomeMailboxLocalMutationEchoRegistry, type HomeMailboxRequestOwner } from "./homeMailboxRealtime";
 import { ARCHIVE_QUEUE_MAX_EMAILS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS } from "./homeConstants";
 import { TRIAGE_MESSAGE_DRAG_MIME } from "../../modules/triage/triageDragDrop";
@@ -489,6 +492,8 @@ export function HomePage({
   const [loadedMessageListKey, setLoadedMessageListKey] = useState("");
   const [compose, setCompose] = useState<ComposeState>(emptyCompose);
   const [mailDrafts, setMailDrafts] = useState<HomeMailDraft[]>([]);
+  const [sharedMailDrafts, setSharedMailDrafts] = useState<CommunicationsEmailDraft[]>([]);
+  const [draftListKind, setDraftListKind] = useState<"personal" | "shared">("personal");
   const [emailSignature, setEmailSignature] = useState("");
   const [emailSignatureScopeKey, setEmailSignatureScopeKey] = useState("");
   const [emailSignatureID, setEmailSignatureID] = useState("");
@@ -811,19 +816,39 @@ export function HomePage({
       cancelled = true;
     };
   }, [activeMailAccountEmail, activeMailDraftScopeAuthorized, activeSharedInboxFolderID, companyID, currentUserID]);
+  const loadSharedMailDrafts = useCallback((refresh = false) => {
+    const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
+    const accountEmail = sharedInboxID ? "" : activeMailAccountEmailRef.current;
+    const scopeKey = activeEmailMailboxScopeKeyRef.current;
+    return listSharedEmailDraftSummaries(companyID, { sharedInboxID: sharedInboxID || undefined, accountEmail: sharedInboxID ? undefined : accountEmail }, { refresh })
+      .then((drafts) => { if (activeEmailMailboxScopeKeyRef.current === scopeKey) setSharedMailDrafts(drafts); })
+      .catch((cause) => { if (activeEmailMailboxScopeKeyRef.current === scopeKey) throw cause; });
+  }, [companyID]);
+  useEffect(() => {
+    if (!companyID.trim() || !activeMailDraftScopeAuthorized) return void setSharedMailDrafts([]);
+    setSharedMailDrafts([]);
+    void loadSharedMailDrafts().catch(() => setSharedMailDrafts([]));
+  }, [activeMailAccountEmail, activeMailDraftScopeAuthorized, activeSharedInboxFolderID, companyID, loadSharedMailDrafts]);
   const draftMessages = useMemo(() => (
     unreadOnly
       ? []
-      : activeMailDrafts
-        .filter((draft) => homeMailDraftMatchesSearch(draft, searchQuery))
-        .map(homeMailDraftToMessage)
-  ), [activeMailDrafts, searchQuery, unreadOnly]);
+      : draftListKind === "shared"
+        ? sharedMailDrafts
+          .filter((draft) => homeSharedMailDraftMatchesSearch(draft, searchQuery))
+          .map(homeSharedMailDraftToMessage)
+        : activeMailDrafts
+          .filter((draft) => homeMailDraftMatchesSearch(draft, searchQuery))
+          .map(homeMailDraftToMessage)
+  ), [activeMailDrafts, draftListKind, searchQuery, sharedMailDrafts, unreadOnly]);
   useEffect(() => {
 	draftMessagesRef.current = draftMessages;
 	if (mailboxRef.current !== "drafts") return;
 	setMessages(draftMessages);
 	setNextPageToken("");
 	}, [draftMessages]);
+  const selectedSharedMailDraft = draftListKind === "shared" && selectedMessage
+    ? sharedMailDrafts.find((draft) => homeSharedMailDraftMessageID(draft.draft_id) === selectedMessage.id) ?? null
+    : null;
   const activeSignatureScopeKey = homeMailSignatureScopeKey(
     companyID,
     currentUserID,
@@ -3140,6 +3165,7 @@ export function HomePage({
     advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
     setCompose(emptyCompose);
+    setDraftListKind("personal");
     selectMailbox("drafts");
     const sharedInboxID = sharedInboxIDForHomeView(activeViewIDRef.current);
     const accountEmail = sharedInboxID ? "" : activeMailAccountEmailRef.current;
@@ -3147,6 +3173,18 @@ export function HomePage({
       .then((drafts) => setMailDraftsForScopeIfActive(drafts, sharedInboxID, accountEmail))
       .catch((cause) => setError(formatError(cause, "Failed to load email drafts")));
   }, [advanceComposeOpenGeneration, companyID, currentUserID, saveCurrentComposeDraft, selectMailbox, setMailDraftsForScopeIfActive]);
+  const openSharedDraftsMailbox = useCallback(() => {
+    advanceComposeOpenGeneration();
+    saveCurrentComposeDraft({ quiet: true });
+    setCompose(emptyCompose);
+    setDraftListKind("shared");
+    selectMailbox("drafts");
+    void loadSharedMailDrafts(true).catch((cause) => setError(formatError(cause, "Failed to load shared email drafts")));
+  }, [advanceComposeOpenGeneration, loadSharedMailDrafts, saveCurrentComposeDraft, selectMailbox]);
+  const handleSharedDraftComplete = useCallback(() => {
+    clearSelectedMessageState();
+    void loadSharedMailDrafts(true).catch((cause) => setError(formatError(cause, "Failed to refresh shared email drafts")));
+  }, [clearSelectedMessageState, loadSharedMailDrafts]);
   const openSentMailbox = useCallback(() => {
     advanceComposeOpenGeneration();
     saveCurrentComposeDraft({ quiet: true });
@@ -5696,15 +5734,19 @@ export function HomePage({
           {!appSidebarOwnsNavigation && !isNarrow && <HomeColumnResizeHandle dividerIndex={0} onPointerDown={startColumnResize} />}
           <HomeMailWorkspace
             activeViewID={activeViewID}
+            apiBase={apiBase}
             accountEmail={activeMailAccountEmail}
             archiveAvailable={canMutateCurrentMailView && selectedProviderMutationAvailable}
             archiveLabel={isArchiveMailbox ? "Unarchive" : "Archive"}
             busy={busy}
             companyID={companyID}
             entityRequestJSON={permissionsRequestJSON}
+            attachmentRequestJSON={attachmentRequestJSON}
             currentUserID={currentUserID}
             compose={compose}
             draftCount={activeMailDrafts.length}
+            draftListKind={draftListKind}
+            sharedDraftCount={sharedMailDrafts.length}
             emailSignature={composeScopeEmailSignature}
             emailSignatureID={composeScopeEmailSignatureID}
             emailSignatureAccountEmail={composeSignatureAccountEmail}
@@ -5735,6 +5777,7 @@ export function HomePage({
             pendingStarredMessageIDs={pendingStarredMessageIDs}
             searchDraft={searchDraft}
             selectedMessage={selectedMessage}
+            selectedSharedDraft={selectedSharedMailDraft}
             selectedMessageRowKey={selectedMessageRowKey}
             selectedMessageIDs={selectedMessageIDs}
             selectedThreadMessages={selectedThreadMessages}
@@ -5780,6 +5823,7 @@ export function HomePage({
             onOpenContextMenu={openMessageContextMenu}
             onOpenNewCompose={openNewCompose}
             onOpenDraftsMailbox={openDraftsMailbox}
+            onOpenSharedDraftsMailbox={openSharedDraftsMailbox}
             onOpenPendingMailbox={openPendingMailbox}
             onOpenReply={(message) => openReply("reply", message ?? selectedMessage)}
             onOpenReplyAll={openReplyAll}
@@ -5787,6 +5831,7 @@ export function HomePage({
             onOpenSpamMailbox={openSpamMailbox}
             onOpenStarredMailbox={openStarredMailbox}
             onOpenForward={openForward}
+            onSharedDraftComplete={handleSharedDraftComplete}
             onEmailSignatureChange={handleEmailSignatureChange}
             onSaveEmailSignature={handleSaveEmailSignature}
             onSaveComposeDraft={saveComposeAndStayOpen}

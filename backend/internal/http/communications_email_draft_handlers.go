@@ -12,19 +12,23 @@ import (
 )
 
 type communicationsEmailDraftRequest struct {
-	CompanyID              string          `json:"company_id"`
-	DraftID                string          `json:"draft_id"`
-	SharedInboxID          string          `json:"shared_inbox_id"`
-	AccountEmail           string          `json:"account_email"`
-	Kind                   string          `json:"kind"`
-	SourceMessageID        string          `json:"source_message_id"`
-	ToRecipients           string          `json:"to_recipients"`
-	CcRecipients           string          `json:"cc_recipients"`
-	BccRecipients          string          `json:"bcc_recipients"`
-	Subject                string          `json:"subject"`
-	BodyEditorHTML         string          `json:"body_editor_html"`
-	ReplyToMessage         json.RawMessage `json:"reply_to_message"`
-	ScheduledSendTimestamp string          `json:"scheduled_send_timestamp"`
+	CompanyID               string          `json:"company_id"`
+	DraftID                 string          `json:"draft_id"`
+	SharedInboxID           string          `json:"shared_inbox_id"`
+	SharedResourceType      string          `json:"shared_resource_type"`
+	SharedResourceID        string          `json:"shared_resource_id"`
+	SeedFromPersonalDraftID string          `json:"seed_from_personal_draft_id"`
+	AccountEmail            string          `json:"account_email"`
+	Kind                    string          `json:"kind"`
+	SourceMessageID         string          `json:"source_message_id"`
+	ToRecipients            string          `json:"to_recipients"`
+	CcRecipients            string          `json:"cc_recipients"`
+	BccRecipients           string          `json:"bcc_recipients"`
+	Subject                 string          `json:"subject"`
+	BodyEditorHTML          string          `json:"body_editor_html"`
+	ReplyToMessage          json.RawMessage `json:"reply_to_message"`
+	ScheduledSendTimestamp  string          `json:"scheduled_send_timestamp"`
+	ExpectedRevision        int64           `json:"expected_revision"`
 }
 
 type communicationsEmailSignatureRequest struct {
@@ -43,6 +47,10 @@ type communicationsEmailDraftResponse struct {
 	PersonalUserID         string                      `json:"personal_user_id,omitempty"`
 	PersonalAccountEmail   string                      `json:"personal_account_email,omitempty"`
 	SharedInboxID          string                      `json:"shared_inbox_id,omitempty"`
+	SharedResourceType     string                      `json:"shared_resource_type,omitempty"`
+	SharedResourceID       string                      `json:"shared_resource_id,omitempty"`
+	Revision               int64                       `json:"revision"`
+	CanSend                bool                        `json:"can_send"`
 	Kind                   string                      `json:"kind"`
 	SourceMessageID        string                      `json:"source_message_id,omitempty"`
 	SourceThreadID         string                      `json:"source_thread_id,omitempty"`
@@ -59,6 +67,21 @@ type communicationsEmailDraftResponse struct {
 	CreatedTimestamp       time.Time                   `json:"created_timestamp"`
 	UpdatedTimestamp       time.Time                   `json:"updated_timestamp"`
 	Attachments            []domain.ResourceAttachment `json:"attachments"`
+}
+
+type communicationsSharedDraftOwnerRequest struct {
+	resourceType string
+	resourceID   string
+}
+
+func parseCommunicationsSharedDraftOwner(w http.ResponseWriter, resourceType, resourceID string) (communicationsSharedDraftOwnerRequest, bool) {
+	resourceType, resourceID = strings.ToLower(strings.TrimSpace(resourceType)), strings.TrimSpace(resourceID)
+	if (resourceType == "") != (resourceID == "") || (resourceType != "" && resourceType != store.EntityTypeNode && resourceType != store.EntityTypeProject) ||
+		(resourceID != "" && !validAttachmentUUIDText(resourceID)) {
+		writeError(w, http.StatusBadRequest, "invalid_shared_email_draft_owner")
+		return communicationsSharedDraftOwnerRequest{}, false
+	}
+	return communicationsSharedDraftOwnerRequest{resourceType: resourceType, resourceID: resourceID}, true
 }
 
 func (s *Server) handleCommunicationsEmailDrafts(w http.ResponseWriter, r *http.Request) {
@@ -104,10 +127,13 @@ func (s *Server) handleCommunicationsEmailDraftList(w http.ResponseWriter, r *ht
 	if !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	sharedInboxID := r.URL.Query().Get("shared_inbox_id")
-	accountEmail := r.URL.Query().Get("account_email")
-	scope, ok := s.resolveCommunicationsEmailDraftScope(w, actor, companyID, sharedInboxID, accountEmail, store.EntityPermissionEdit)
+	owner, ok := parseCommunicationsSharedDraftOwner(w, r.URL.Query().Get("shared_resource_type"), r.URL.Query().Get("shared_resource_id"))
 	if !ok {
+		return
+	}
+	resourceSharedOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("resource_shared")), "true")
+	if resourceSharedOnly && owner.resourceID != "" {
+		writeError(w, http.StatusBadRequest, "invalid_email_draft_scope")
 		return
 	}
 	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("kind")))
@@ -139,7 +165,17 @@ func (s *Server) handleCommunicationsEmailDraftList(w http.ResponseWriter, r *ht
 			return
 		}
 	}
-	listInput := scope.draftListInput(companyID)
+	var listInput store.CommunicationsEmailDraftListInput
+	if owner.resourceID != "" {
+		listInput = store.CommunicationsEmailDraftListInput{CompanyID: companyID, SharedResourceType: owner.resourceType, SharedResourceID: owner.resourceID}
+	} else {
+		scope, resolved := s.resolveCommunicationsEmailDraftScope(w, actor, companyID, r.URL.Query().Get("shared_inbox_id"), r.URL.Query().Get("account_email"), store.EntityPermissionEdit)
+		if !resolved {
+			return
+		}
+		listInput = scope.draftListInput(companyID)
+		listInput.ResourceSharedOnly = resourceSharedOnly
+	}
 	listInput.ParticipantUserID = actor.User.UserID
 	listInput.Kind = kind
 	listInput.SourceMessageIDs = sourceMessageIDs
@@ -178,13 +214,20 @@ func (s *Server) handleCommunicationsEmailDraftGet(w http.ResponseWriter, r *htt
 	if !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	sharedInboxID := r.URL.Query().Get("shared_inbox_id")
-	accountEmail := r.URL.Query().Get("account_email")
-	scope, ok := s.resolveCommunicationsEmailDraftScope(w, actor, companyID, sharedInboxID, accountEmail, store.EntityPermissionEdit)
+	owner, ok := parseCommunicationsSharedDraftOwner(w, r.URL.Query().Get("shared_resource_type"), r.URL.Query().Get("shared_resource_id"))
 	if !ok {
 		return
 	}
-	getInput := scope.draftGetInput(companyID, draftID)
+	var getInput store.CommunicationsEmailDraftGetInput
+	if owner.resourceID != "" {
+		getInput = store.CommunicationsEmailDraftGetInput{CompanyID: companyID, DraftID: draftID, SharedResourceType: owner.resourceType, SharedResourceID: owner.resourceID}
+	} else {
+		scope, resolved := s.resolveCommunicationsEmailDraftScope(w, actor, companyID, r.URL.Query().Get("shared_inbox_id"), r.URL.Query().Get("account_email"), store.EntityPermissionEdit)
+		if !resolved {
+			return
+		}
+		getInput = scope.draftGetInput(companyID, draftID)
+	}
 	getInput.ParticipantUserID = actor.User.UserID
 	draft, err := s.repo.GetCommunicationsEmailDraft(getInput)
 	if errors.Is(err, store.ErrInvalid) {
@@ -223,15 +266,32 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	scope, ok := s.resolveCommunicationsEmailDraftScope(w, actor, companyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
+	owner, ok := parseCommunicationsSharedDraftOwner(w, req.SharedResourceType, req.SharedResourceID)
 	if !ok {
 		return
+	}
+	var scope resolvedCommunicationsEmailScope
+	if owner.resourceID == "" {
+		var resolved bool
+		scope, resolved = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, req.SharedInboxID, req.AccountEmail, store.EntityPermissionEdit)
+		if !resolved {
+			return
+		}
 	}
 	scheduledAt, ok := parseCommunicationsOptionalTimestamp(w, req.ScheduledSendTimestamp)
 	if !ok {
 		return
 	}
 	requestedKind := strings.ToLower(strings.TrimSpace(req.Kind))
+	if owner.resourceID != "" && (requestedKind != "reply" || scheduledAt != nil) {
+		writeError(w, http.StatusBadRequest, "invalid_shared_email_draft")
+		return
+	}
+	seedFromPersonalDraftID := strings.TrimSpace(req.SeedFromPersonalDraftID)
+	if seedFromPersonalDraftID != "" && (owner.resourceID == "" || strings.TrimSpace(pathDraftID) != "" || requestedKind != "reply") {
+		writeError(w, http.StatusBadRequest, "invalid_shared_email_draft_seed")
+		return
+	}
 	replyToJSON := "{}"
 	if len(req.ReplyToMessage) > 0 && string(req.ReplyToMessage) != "null" {
 		if requestedKind == "reply" {
@@ -246,22 +306,26 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 	}
 	sourceMessageID := strings.TrimSpace(req.SourceMessageID)
 	input := store.CommunicationsEmailDraftInput{
-		CompanyID:              companyID,
-		PersonalUserID:         scope.personalUserID,
-		PersonalAccountEmail:   scope.personalAccountEmail,
-		SharedInboxID:          scope.sharedInboxID,
-		CreatedByUserID:        actor.User.UserID,
-		UpdatedByUserID:        actor.User.UserID,
-		Kind:                   requestedKind,
-		SourceMessageID:        sourceMessageID,
-		AccountEmail:           scope.accountEmail,
-		ToRecipients:           req.ToRecipients,
-		CcRecipients:           req.CcRecipients,
-		BccRecipients:          req.BccRecipients,
-		Subject:                req.Subject,
-		BodyEditorHTML:         req.BodyEditorHTML,
-		ReplyToMessageJSON:     replyToJSON,
-		ScheduledSendTimestamp: scheduledAt,
+		CompanyID:               companyID,
+		PersonalUserID:          scope.personalUserID,
+		PersonalAccountEmail:    scope.personalAccountEmail,
+		SharedInboxID:           firstNonBlank(scope.sharedInboxID, strings.TrimSpace(req.SharedInboxID)),
+		SharedResourceType:      owner.resourceType,
+		SharedResourceID:        owner.resourceID,
+		SeedFromPersonalDraftID: seedFromPersonalDraftID,
+		CreatedByUserID:         actor.User.UserID,
+		UpdatedByUserID:         actor.User.UserID,
+		Kind:                    requestedKind,
+		SourceMessageID:         sourceMessageID,
+		AccountEmail:            scope.accountEmail,
+		ToRecipients:            req.ToRecipients,
+		CcRecipients:            req.CcRecipients,
+		BccRecipients:           req.BccRecipients,
+		Subject:                 req.Subject,
+		BodyEditorHTML:          req.BodyEditorHTML,
+		ReplyToMessageJSON:      replyToJSON,
+		ScheduledSendTimestamp:  scheduledAt,
+		ExpectedRevision:        req.ExpectedRevision,
 	}
 	if strings.TrimSpace(pathDraftID) == "" && requestedKind == "reply" {
 		if strings.TrimSpace(req.DraftID) != "" {
@@ -297,7 +361,7 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 			writeError(w, http.StatusInternalServerError, "failed_to_ensure_email_reply_draft")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"draft": s.communicationsEmailDraftResponse(draft), "created": created})
+		writeJSON(w, http.StatusOK, map[string]any{"draft": s.communicationsEmailDraftResponseWithAttachments(draft, owner.resourceID == "" || !created || seedFromPersonalDraftID != ""), "created": created})
 		return
 	}
 
@@ -308,7 +372,15 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 	}
 	input.DraftID = draftID
 	input.ExistingOnly = strings.TrimSpace(pathDraftID) != "" && requestedKind == "reply"
+	if owner.resourceID != "" && (strings.TrimSpace(pathDraftID) == "" || req.ExpectedRevision < 1) {
+		writeError(w, http.StatusBadRequest, "expected_revision_required")
+		return
+	}
 	draft, err := s.repo.UpsertCommunicationsEmailDraft(input)
+	if errors.Is(err, store.ErrVersionConflict) {
+		writeError(w, http.StatusConflict, "email_draft_revision_conflict")
+		return
+	}
 	if errors.Is(err, store.ErrEmailReplySourceNotIngested) {
 		writeError(w, http.StatusConflict, "email_reply_source_not_ingested")
 		return
@@ -337,7 +409,7 @@ func (s *Server) handleCommunicationsEmailDraftUpsert(w http.ResponseWriter, r *
 		writeError(w, http.StatusInternalServerError, "failed_to_save_email_draft")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"draft": s.communicationsEmailDraftResponse(draft)})
+	writeJSON(w, http.StatusOK, map[string]any{"draft": s.communicationsEmailDraftResponseWithAttachments(draft, owner.resourceID == "")})
 }
 
 func (s *Server) handleCommunicationsEmailDraftDelete(w http.ResponseWriter, r *http.Request, draftID string) {
@@ -354,11 +426,25 @@ func (s *Server) handleCommunicationsEmailDraftDelete(w http.ResponseWriter, r *
 	if !requireCompanyAccess(w, r, companyID) {
 		return
 	}
-	sharedInboxID := r.URL.Query().Get("shared_inbox_id")
-	accountEmail := r.URL.Query().Get("account_email")
-	scope, ok := s.resolveCommunicationsEmailDraftScope(w, actor, companyID, sharedInboxID, accountEmail, store.EntityPermissionEdit)
+	owner, ok := parseCommunicationsSharedDraftOwner(w, r.URL.Query().Get("shared_resource_type"), r.URL.Query().Get("shared_resource_id"))
 	if !ok {
 		return
+	}
+	var scope resolvedCommunicationsEmailScope
+	expectedRevision := int64(0)
+	if owner.resourceID != "" {
+		parsed, err := parseOptionalExpectedRevision(r)
+		if err != nil || parsed == nil || *parsed < 1 {
+			writeError(w, http.StatusBadRequest, "expected_revision_required")
+			return
+		}
+		expectedRevision = *parsed
+	} else {
+		var resolved bool
+		scope, resolved = s.resolveCommunicationsEmailDraftScope(w, actor, companyID, r.URL.Query().Get("shared_inbox_id"), r.URL.Query().Get("account_email"), store.EntityPermissionEdit)
+		if !resolved {
+			return
+		}
 	}
 	deleteInput := store.CommunicationsEmailDraftDeleteInput{
 		CompanyID:            companyID,
@@ -368,8 +454,14 @@ func (s *Server) handleCommunicationsEmailDraftDelete(w http.ResponseWriter, r *
 		PersonalUserID:       scope.personalUserID,
 		PersonalAccountEmail: scope.personalAccountEmail,
 		SharedInboxID:        scope.sharedInboxID,
+		SharedResourceType:   owner.resourceType,
+		SharedResourceID:     owner.resourceID,
+		ExpectedRevision:     expectedRevision,
 	}
-	if err := s.repo.SoftDeleteCommunicationsEmailDraft(deleteInput); errors.Is(err, store.ErrNotFound) {
+	if err := s.repo.SoftDeleteCommunicationsEmailDraft(deleteInput); errors.Is(err, store.ErrVersionConflict) {
+		writeError(w, http.StatusConflict, "email_draft_revision_conflict")
+		return
+	} else if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "email_draft_not_found")
 		return
 	} else if errors.Is(err, store.ErrInvalid) {
@@ -588,9 +680,16 @@ func (s *Server) resolveActorPersonalEmailConnection(w http.ResponseWriter, user
 }
 
 func (s *Server) communicationsEmailDraftResponse(draft domain.CommunicationsEmailDraft) communicationsEmailDraftResponse {
-	attachments, err := s.repo.ListResourceAttachments(draft.CompanyID, "email_draft", communicationsEmailDraftResourceID(draft))
-	if err != nil {
-		attachments = []domain.ResourceAttachment{}
+	return s.communicationsEmailDraftResponseWithAttachments(draft, true)
+}
+
+func (s *Server) communicationsEmailDraftResponseWithAttachments(draft domain.CommunicationsEmailDraft, includeAttachments bool) communicationsEmailDraftResponse {
+	attachments := []domain.ResourceAttachment{}
+	if includeAttachments {
+		loaded, err := s.repo.ListResourceAttachments(draft.CompanyID, "email_draft", communicationsEmailDraftResourceID(draft))
+		if err == nil {
+			attachments = loaded
+		}
 	}
 	replyToMessage := json.RawMessage(draft.ReplyToMessageJSON)
 	if len(replyToMessage) == 0 || !json.Valid(replyToMessage) || string(replyToMessage) == "{}" {
@@ -603,6 +702,10 @@ func (s *Server) communicationsEmailDraftResponse(draft domain.CommunicationsEma
 		PersonalUserID:         draft.PersonalUserID,
 		PersonalAccountEmail:   draft.PersonalAccountEmail,
 		SharedInboxID:          draft.SharedInboxID,
+		SharedResourceType:     draft.SharedResourceType,
+		SharedResourceID:       draft.SharedResourceID,
+		Revision:               draft.Revision,
+		CanSend:                draft.CanSend || !isResourceSharedEmailDraft(draft),
 		CreatedByUserID:        draft.CreatedByUserID,
 		UpdatedByUserID:        draft.UpdatedByUserID,
 		Kind:                   draft.Kind,
@@ -627,6 +730,8 @@ func communicationsEmailDraftSummaryResponse(draft domain.CommunicationsEmailDra
 		CompanyID: draft.CompanyID, DraftID: draft.DraftID, ScopeType: draft.ScopeType,
 		PersonalUserID: draft.PersonalUserID, PersonalAccountEmail: draft.PersonalAccountEmail,
 		SharedInboxID: draft.SharedInboxID, CreatedByUserID: draft.CreatedByUserID,
+		SharedResourceType: draft.SharedResourceType, SharedResourceID: draft.SharedResourceID,
+		Revision: draft.Revision, CanSend: draft.CanSend || !isResourceSharedEmailDraft(draft),
 		UpdatedByUserID: draft.UpdatedByUserID, Kind: draft.Kind,
 		SourceMessageID: draft.SourceMessageID, SourceThreadID: draft.SourceThreadID,
 		AccountEmail: draft.AccountEmail,
@@ -636,6 +741,10 @@ func communicationsEmailDraftSummaryResponse(draft domain.CommunicationsEmailDra
 		CreatedTimestamp:       draft.CreatedTimestamp, UpdatedTimestamp: draft.UpdatedTimestamp,
 		Attachments: []domain.ResourceAttachment{},
 	}
+}
+
+func isResourceSharedEmailDraft(draft domain.CommunicationsEmailDraft) bool {
+	return strings.TrimSpace(draft.SharedResourceType) != "" && strings.TrimSpace(draft.SharedResourceID) != ""
 }
 
 func communicationsEmailDraftResourceID(draft domain.CommunicationsEmailDraft) string {

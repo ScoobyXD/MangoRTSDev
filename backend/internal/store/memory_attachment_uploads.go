@@ -44,6 +44,14 @@ func (r *MemoryRepo) CreateAttachmentUploadIntent(input AttachmentUploadIntentCr
 	if _, ok := r.attachmentUploadIntents[intent.UploadIntentID]; ok {
 		return domain.AttachmentUploadIntent{}, false, ErrAlreadyExists
 	}
+	if intent.ResourceType == "email_draft" {
+		intent.ResourceExpectedRevision, err = r.validateSharedEmailDraftAttachmentRevisionLocked(
+			intent.CompanyID, intent.ResourceID, intent.ActorUserID, input.ExpectedRevision,
+		)
+		if err != nil {
+			return domain.AttachmentUploadIntent{}, false, err
+		}
+	}
 	r.attachmentUploadIntents[intent.UploadIntentID] = intent
 	r.attachmentUploadRequestIDs[requestKey] = intent.UploadIntentID
 	r.attachmentUploadParts[intent.UploadIntentID] = map[int]domain.AttachmentUploadPart{}
@@ -252,6 +260,7 @@ func (r *MemoryRepo) FinalizeAttachmentUpload(input AttachmentUploadFinalizeInpu
 		if attachment.AttachmentID == "" || primaryLink.ResourceAttachmentID == "" {
 			return domain.Attachment{}, domain.ResourceAttachment{}, ErrUploadStateConflict
 		}
+		primaryLink.ResourceRevision = intent.ResourceRevision
 		return cloneAttachment(attachment), cloneResourceAttachment(primaryLink), nil
 	}
 	if intent.Status != domain.AttachmentUploadStatusCompleting {
@@ -274,6 +283,14 @@ func (r *MemoryRepo) FinalizeAttachmentUpload(input AttachmentUploadFinalizeInpu
 	if err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
+	if intent.ResourceType == "email_draft" {
+		link.ResourceRevision, err = r.advanceSharedEmailDraftAttachmentRevisionLocked(
+			intent.CompanyID, intent.ResourceID, intent.ActorUserID, intent.ResourceExpectedRevision,
+		)
+		if err != nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, err
+		}
+	}
 	if existing, ok := r.attachments[attachmentKey(intent.CompanyID, intent.AttachmentID)]; ok {
 		attachment = existing
 	} else {
@@ -284,8 +301,10 @@ func (r *MemoryRepo) FinalizeAttachmentUpload(input AttachmentUploadFinalizeInpu
 	if err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
+	storedLink.ResourceRevision = link.ResourceRevision
 	intent.Status = domain.AttachmentUploadStatusCompleted
 	intent.ResourceAttachmentID = storedLink.ResourceAttachmentID
+	intent.ResourceRevision = storedLink.ResourceRevision
 	intent.SHA256VerificationMethod = strings.TrimSpace(input.SHA256VerificationMethod)
 	intent.StorageChecksumAlgorithm = strings.TrimSpace(input.StorageChecksumAlgorithm)
 	intent.StorageChecksumValue = strings.TrimSpace(input.StorageChecksumValue)
@@ -364,7 +383,8 @@ func normalizeAttachmentUploadIntentCreateInput(input AttachmentUploadIntentCrea
 		AttachmentID: cleanUUIDText(input.AttachmentID), OriginalFilename: attachmentFilenameForStore(input.OriginalFilename),
 		MimeType: strings.TrimSpace(input.MimeType), SizeBytes: input.SizeBytes, SHA256: strings.ToLower(strings.TrimSpace(input.SHA256)),
 		SHA256VerificationMethod: "client_reported", ResourceType: NormalizeAttachmentResourceType(input.ResourceType),
-		ResourceID: strings.TrimSpace(input.ResourceID), InformationID: cleanUUIDText(input.InformationID), MessageID: strings.TrimSpace(input.MessageID),
+		ResourceID: strings.TrimSpace(input.ResourceID), ResourceExpectedRevision: input.ExpectedRevision,
+		InformationID: cleanUUIDText(input.InformationID), MessageID: strings.TrimSpace(input.MessageID),
 		EditorSurface: strings.TrimSpace(input.EditorSurface), RelationshipKind: NormalizeAttachmentRelationshipKind(input.RelationshipKind),
 		SourceKind: NormalizeAttachmentSourceKind(input.SourceKind), SourceProvider: strings.TrimSpace(input.SourceProvider),
 		OriginalWidth: cloneAttachmentIntPointer(input.OriginalWidth), OriginalHeight: cloneAttachmentIntPointer(input.OriginalHeight),
@@ -429,6 +449,7 @@ func (r *MemoryRepo) mutableUploadIntentLocked(companyID, actorUserID, uploadInt
 func sameAttachmentUploadPayload(a, b domain.AttachmentUploadIntent) bool {
 	return a.OriginalFilename == b.OriginalFilename && a.MimeType == b.MimeType && a.SizeBytes == b.SizeBytes &&
 		a.SHA256 == b.SHA256 && a.ResourceType == b.ResourceType && a.ResourceID == b.ResourceID &&
+		a.ResourceExpectedRevision == b.ResourceExpectedRevision &&
 		a.InformationID == b.InformationID && a.MessageID == b.MessageID && a.EditorSurface == b.EditorSurface &&
 		a.RelationshipKind == b.RelationshipKind && a.SourceKind == b.SourceKind && a.SourceProvider == b.SourceProvider &&
 		sameOptionalAttachmentInt(a.OriginalWidth, b.OriginalWidth) && sameOptionalAttachmentInt(a.OriginalHeight, b.OriginalHeight)

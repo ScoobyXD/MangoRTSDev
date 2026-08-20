@@ -10,6 +10,13 @@ import (
 )
 
 func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraftListInput) ([]domain.CommunicationsEmailDraft, error) {
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
+	if err != nil {
+		return nil, err
+	}
+	if owner.resourceID != "" {
+		return r.listCommunicationsResourceEmailDrafts(input, owner)
+	}
 	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return nil, ErrInvalid
@@ -49,7 +56,13 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 			continue
 		}
 		include := scope.matchesDraft(draft)
-		if strings.TrimSpace(input.ParticipantUserID) != "" {
+		if input.ResourceSharedOnly {
+			include = include && isCommunicationsResourceSharedDraft(draft) &&
+				r.userHasEffectiveAccessLocked(companyID, input.ParticipantUserID, draftSharedResourceType(draft), draftSharedResourceID(draft), EntityPermissionEdit)
+		} else {
+			include = include && !isCommunicationsResourceSharedDraft(draft)
+		}
+		if !input.ResourceSharedOnly && strings.TrimSpace(input.ParticipantUserID) != "" {
 			include = include && draft.CreatedByUserID == strings.TrimSpace(input.ParticipantUserID)
 		}
 		if kind != "" {
@@ -65,6 +78,7 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 			include = include && (sourceMatches || threadMatches)
 		}
 		if include {
+			draft.CanSend = communicationsResourceDraftCanSendLocked(r, draft, input.ParticipantUserID)
 			draft.SourceThreadID = sourceThreadID
 			draft.BodyEditorHTML = ""
 			draft.ReplyToMessageJSON = "{}"
@@ -77,10 +91,20 @@ func (r *MemoryRepo) ListCommunicationsEmailDrafts(input CommunicationsEmailDraf
 		}
 		return drafts[i].UpdatedTimestamp.After(drafts[j].UpdatedTimestamp)
 	})
+	if input.ResourceSharedOnly && len(drafts) > 100 {
+		drafts = drafts[:100]
+	}
 	return drafts, nil
 }
 
 func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error) {
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, err
+	}
+	if owner.resourceID != "" {
+		return r.getCommunicationsResourceEmailDraft(input, owner)
+	}
 	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
@@ -106,6 +130,13 @@ func (r *MemoryRepo) GetCommunicationsEmailDraft(input CommunicationsEmailDraftG
 }
 
 func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, error) {
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, err
+	}
+	if owner.resourceID != "" {
+		return r.updateCommunicationsResourceEmailDraft(input, owner)
+	}
 	draft, err := normalizeCommunicationsEmailDraftInput(input)
 	if err != nil {
 		return domain.CommunicationsEmailDraft{}, err
@@ -163,6 +194,16 @@ func (r *MemoryRepo) UpsertCommunicationsEmailDraft(input CommunicationsEmailDra
 }
 
 func (r *MemoryRepo) EnsureCommunicationsEmailReplyDraft(input CommunicationsEmailDraftInput) (domain.CommunicationsEmailDraft, bool, error) {
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, false, err
+	}
+	if owner.resourceID != "" {
+		return r.ensureCommunicationsResourceEmailReplyDraft(input, owner)
+	}
+	if strings.TrimSpace(input.SeedFromPersonalDraftID) != "" {
+		return domain.CommunicationsEmailDraft{}, false, ErrInvalid
+	}
 	input.DraftID = "draft:reply:" + newUUIDv7String()
 	input.Kind = "reply"
 	input.ReplyToMessageJSON = "{}"
@@ -259,6 +300,13 @@ func communicationsEmailDraftSemanticIdentityMatches(left, right domain.Communic
 }
 
 func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error {
+	owner, err := normalizeCommunicationsSharedDraftOwner(input.SharedResourceType, input.SharedResourceID)
+	if err != nil {
+		return err
+	}
+	if owner.resourceID != "" {
+		return r.deleteCommunicationsResourceEmailDraft(input, owner)
+	}
 	scope, err := normalizeCommunicationsEmailScope(input.CompanyID, input.PersonalUserID, input.PersonalAccountEmail, input.SharedInboxID)
 	if err != nil {
 		return err
@@ -286,7 +334,367 @@ func (r *MemoryRepo) SoftDeleteCommunicationsEmailDraft(input CommunicationsEmai
 	draft.UpdatedTimestamp = now
 	draft.DeletedTimestamp = &now
 	r.emailDrafts[key] = draft
+	r.retireMemoryEmailDraftAttachmentsLocked(companyID, draft.DraftID, now)
 	return nil
+}
+
+func (r *MemoryRepo) GetCommunicationsSharedEmailDraftForSend(input CommunicationsEmailDraftGetInput) (domain.CommunicationsEmailDraft, error) {
+	companyID, actorUserID, draftID := cleanUUIDText(input.CompanyID), cleanUUIDText(input.ParticipantUserID), strings.TrimSpace(input.DraftID)
+	if companyID == "" || actorUserID == "" || draftID == "" || input.ExpectedRevision < 1 {
+		return domain.CommunicationsEmailDraft{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	draft, ok := r.emailDrafts[communicationsEmailDraftKey(companyID, draftID)]
+	if !ok || draft.DeletedTimestamp != nil || !isCommunicationsResourceSharedDraft(draft) ||
+		!r.userHasEffectiveAccessLocked(companyID, actorUserID, draftSharedResourceType(draft), draftSharedResourceID(draft), EntityPermissionEdit) {
+		return domain.CommunicationsEmailDraft{}, ErrNotFound
+	}
+	if draft.Revision != input.ExpectedRevision {
+		return domain.CommunicationsEmailDraft{}, ErrVersionConflict
+	}
+	draft.CanSend = communicationsResourceDraftCanSendLocked(r, draft, actorUserID)
+	return draft, nil
+}
+
+type communicationsSharedDraftOwner struct {
+	resourceType string
+	resourceID   string
+}
+
+func normalizeCommunicationsSharedDraftOwner(resourceType, resourceID string) (communicationsSharedDraftOwner, error) {
+	resourceType, resourceID = strings.ToLower(strings.TrimSpace(resourceType)), cleanUUIDText(resourceID)
+	if (resourceType == "") != (resourceID == "") || (resourceType != "" && resourceType != EntityTypeNode && resourceType != EntityTypeProject) {
+		return communicationsSharedDraftOwner{}, ErrInvalid
+	}
+	return communicationsSharedDraftOwner{resourceType: resourceType, resourceID: resourceID}, nil
+}
+
+func isCommunicationsResourceSharedDraft(draft domain.CommunicationsEmailDraft) bool {
+	return draft.SharedResourceType != "" && draft.SharedResourceID != ""
+}
+
+func draftSharedResourceType(draft domain.CommunicationsEmailDraft) string {
+	return draft.SharedResourceType
+}
+
+func draftSharedResourceID(draft domain.CommunicationsEmailDraft) string {
+	return draft.SharedResourceID
+}
+
+func communicationsSharedDraftOwnerMatches(draft domain.CommunicationsEmailDraft, owner communicationsSharedDraftOwner) bool {
+	return draft.SharedResourceType == owner.resourceType && draft.SharedResourceID == owner.resourceID
+}
+
+func communicationsResourceDraftCanSendLocked(r *MemoryRepo, draft domain.CommunicationsEmailDraft, actorUserID string) bool {
+	actorUserID = strings.TrimSpace(actorUserID)
+	if draft.ScopeType == "personal" {
+		return actorUserID != "" && actorUserID == draft.PersonalUserID
+	}
+	return actorUserID != "" && draft.SharedInboxID != "" &&
+		r.userHasEffectiveAccessLocked(draft.CompanyID, actorUserID, EntityTypeSharedInbox, draft.SharedInboxID, EntityPermissionEdit)
+}
+
+func (r *MemoryRepo) listCommunicationsResourceEmailDrafts(input CommunicationsEmailDraftListInput, owner communicationsSharedDraftOwner) ([]domain.CommunicationsEmailDraft, error) {
+	companyID, actorUserID := cleanUUIDText(input.CompanyID), cleanUUIDText(input.ParticipantUserID)
+	if companyID == "" || actorUserID == "" {
+		return nil, ErrInvalid
+	}
+	kind, sourceMessageIDs, sourceThreadIDs, err := normalizeCommunicationsEmailDraftListFilters(input.Kind, input.SourceMessageIDs, input.SourceThreadIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(sourceMessageIDs) == 0 && len(sourceThreadIDs) == 0 {
+		return nil, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.userHasEffectiveAccessLocked(companyID, actorUserID, owner.resourceType, owner.resourceID, EntityPermissionEdit) {
+		return nil, ErrNotFound
+	}
+	sourceIDs, threadIDs := stringSet(sourceMessageIDs), stringSet(sourceThreadIDs)
+	drafts := make([]domain.CommunicationsEmailDraft, 0)
+	for _, draft := range r.emailDrafts {
+		if draft.CompanyID != companyID || draft.DeletedTimestamp != nil || (kind != "" && draft.Kind != kind) {
+			continue
+		}
+		isShared := communicationsSharedDraftOwnerMatches(draft, owner)
+		isPersonal := !isCommunicationsResourceSharedDraft(draft) && draft.CreatedByUserID == actorUserID &&
+			communicationsResourceDraftCanSendLocked(r, draft, actorUserID)
+		if (!isShared && !isPersonal) || !r.memoryResourceHasExactEmailRelationshipLocked(owner, companyID, draft.SourceMessageID) {
+			continue
+		}
+		threadID := r.memoryEmailThreadIDForMessageLocked(companyID, draft.SourceMessageID)
+		if (len(sourceIDs) > 0 || len(threadIDs) > 0) && !sourceIDs[draft.SourceMessageID] && !threadIDs[threadID] {
+			continue
+		}
+		draft.SourceThreadID = threadID
+		draft.BodyEditorHTML = ""
+		draft.ReplyToMessageJSON = "{}"
+		draft.CanSend = isPersonal || communicationsResourceDraftCanSendLocked(r, draft, actorUserID)
+		drafts = append(drafts, draft)
+	}
+	sort.SliceStable(drafts, func(i, j int) bool {
+		if drafts[i].UpdatedTimestamp.Equal(drafts[j].UpdatedTimestamp) {
+			return drafts[i].DraftID < drafts[j].DraftID
+		}
+		return drafts[i].UpdatedTimestamp.After(drafts[j].UpdatedTimestamp)
+	})
+	return drafts, nil
+}
+
+func stringSet(values []string) map[string]bool {
+	result := make(map[string]bool, len(values))
+	for _, value := range values {
+		result[value] = true
+	}
+	return result
+}
+
+func (r *MemoryRepo) getCommunicationsResourceEmailDraft(input CommunicationsEmailDraftGetInput, owner communicationsSharedDraftOwner) (domain.CommunicationsEmailDraft, error) {
+	companyID, actorUserID := cleanUUIDText(input.CompanyID), cleanUUIDText(input.ParticipantUserID)
+	if companyID == "" || actorUserID == "" || strings.TrimSpace(input.DraftID) == "" {
+		return domain.CommunicationsEmailDraft{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	draft, ok := r.emailDrafts[communicationsEmailDraftKey(companyID, input.DraftID)]
+	if !ok || draft.DeletedTimestamp != nil || !communicationsSharedDraftOwnerMatches(draft, owner) ||
+		!r.userHasEffectiveAccessLocked(companyID, actorUserID, owner.resourceType, owner.resourceID, EntityPermissionEdit) {
+		return domain.CommunicationsEmailDraft{}, ErrNotFound
+	}
+	if input.ExpectedRevision > 0 && draft.Revision != input.ExpectedRevision {
+		return domain.CommunicationsEmailDraft{}, ErrVersionConflict
+	}
+	draft.CanSend = communicationsResourceDraftCanSendLocked(r, draft, actorUserID)
+	return draft, nil
+}
+
+func (r *MemoryRepo) ensureCommunicationsResourceEmailReplyDraft(input CommunicationsEmailDraftInput, owner communicationsSharedDraftOwner) (domain.CommunicationsEmailDraft, bool, error) {
+	companyID, actorUserID, sourceMessageID := cleanUUIDText(input.CompanyID), cleanUUIDText(input.CreatedByUserID), cleanUUIDText(input.SourceMessageID)
+	if companyID == "" || actorUserID == "" || sourceMessageID == "" || input.ScheduledSendTimestamp != nil {
+		return domain.CommunicationsEmailDraft{}, false, ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.userHasEffectiveAccessLocked(companyID, actorUserID, owner.resourceType, owner.resourceID, EntityPermissionEdit) {
+		return domain.CommunicationsEmailDraft{}, false, ErrNotFound
+	}
+	for _, existing := range r.emailDrafts {
+		if existing.CompanyID == companyID && existing.DeletedTimestamp == nil && existing.SourceMessageID == sourceMessageID && communicationsSharedDraftOwnerMatches(existing, owner) {
+			existing.CanSend = communicationsResourceDraftCanSendLocked(r, existing, actorUserID)
+			return existing, false, nil
+		}
+	}
+	thread, message, ok := r.memoryResourceEmailSourceLocked(owner, companyID, sourceMessageID)
+	if !ok {
+		return domain.CommunicationsEmailDraft{}, false, ErrEmailDraftSourceNotFound
+	}
+	sharedInboxID := ""
+	if thread.ScopeType == "shared" {
+		sharedInboxID = cleanUUIDText(input.SharedInboxID)
+		folder, found := r.folders[key(companyID, sharedInboxID)]
+		connection, connected := r.companyEmailConnections[companyEmailConnectionKey(companyID, folder.CompanyEmailConnectionID)]
+		if !found || !connected || normalizeMemorySharedInboxFolder(folder).EntryType != CommunicationsSharedInboxEntryTypeSharedInbox ||
+			connection.EmailConnectionID != thread.EmailConnectionID {
+			return domain.CommunicationsEmailDraft{}, false, ErrEmailDraftSourceNotFound
+		}
+	}
+	seedDraftID := strings.TrimSpace(input.SeedFromPersonalDraftID)
+	if seedDraftID != "" {
+		seed, found := r.emailDrafts[communicationsEmailDraftKey(companyID, seedDraftID)]
+		exactMailbox := seed.ScopeType == thread.ScopeType
+		if thread.ScopeType == "personal" {
+			exactMailbox = exactMailbox && seed.PersonalUserID == thread.PersonalUserID && strings.EqualFold(seed.PersonalAccountEmail, thread.PersonalAccountEmail)
+		} else {
+			exactMailbox = exactMailbox && seed.SharedInboxID == sharedInboxID
+		}
+		if !found || seed.DeletedTimestamp != nil || seed.CreatedByUserID != actorUserID || seed.Kind != "reply" ||
+			seed.SourceMessageID != sourceMessageID || seed.SharedResourceType != "" || seed.SharedResourceID != "" || !exactMailbox {
+			return domain.CommunicationsEmailDraft{}, false, ErrInvalid
+		}
+		input.ToRecipients, input.CcRecipients, input.BccRecipients = seed.ToRecipients, seed.CcRecipients, seed.BccRecipients
+		input.Subject, input.BodyEditorHTML = seed.Subject, seed.BodyEditorHTML
+	}
+	now := time.Now().UTC()
+	draft := domain.CommunicationsEmailDraft{
+		CompanyID: companyID, DraftID: "draft:reply:" + newUUIDv7String(), ScopeType: thread.ScopeType,
+		PersonalUserID: thread.PersonalUserID, PersonalAccountEmail: thread.PersonalAccountEmail,
+		SharedInboxID: sharedInboxID, SharedResourceType: owner.resourceType, SharedResourceID: owner.resourceID,
+		Revision: 1, CreatedByUserID: actorUserID, UpdatedByUserID: actorUserID, Kind: "reply",
+		SourceMessageID: sourceMessageID, SourceThreadID: thread.EmailThreadID, AccountEmail: thread.AccountEmail,
+		ToRecipients: input.ToRecipients, CcRecipients: input.CcRecipients, BccRecipients: input.BccRecipients,
+		Subject: input.Subject, BodyEditorHTML: input.BodyEditorHTML, CreatedTimestamp: now, UpdatedTimestamp: now,
+	}
+	payload, err := json.Marshal(map[string]string{"id": message.ProviderMessageID, "email_message_id": sourceMessageID, "thread_id": thread.ProviderThreadID})
+	if err != nil {
+		return domain.CommunicationsEmailDraft{}, false, err
+	}
+	draft.ReplyToMessageJSON = string(payload)
+	draft.CanSend = communicationsResourceDraftCanSendLocked(r, draft, actorUserID)
+	r.emailDrafts[communicationsEmailDraftKey(companyID, draft.DraftID)] = draft
+	if seedDraftID != "" {
+		for _, sourceLink := range r.resourceAttachments {
+			if sourceLink.CompanyID != companyID || sourceLink.ResourceType != "email_draft" || sourceLink.ResourceID != seedDraftID || sourceLink.DeletedTimestamp != nil {
+				continue
+			}
+			link := sourceLink
+			link.ResourceAttachmentID, link.ResourceID = newUUIDv7String(), draft.DraftID
+			link.CreatedByUserID, link.CreatedTimestamp, link.ResourceRevision = actorUserID, now, draft.Revision
+			r.resourceAttachments[link.ResourceAttachmentID] = link
+		}
+	}
+	return draft, true, nil
+}
+
+func (r *MemoryRepo) updateCommunicationsResourceEmailDraft(input CommunicationsEmailDraftInput, owner communicationsSharedDraftOwner) (domain.CommunicationsEmailDraft, error) {
+	companyID, actorUserID := cleanUUIDText(input.CompanyID), cleanUUIDText(input.UpdatedByUserID)
+	if companyID == "" || actorUserID == "" || strings.TrimSpace(input.DraftID) == "" || input.ExpectedRevision < 1 ||
+		(input.Kind != "" && normalizeCommunicationsEmailDraftKind(input.Kind) != "reply") || input.ScheduledSendTimestamp != nil {
+		return domain.CommunicationsEmailDraft{}, ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := communicationsEmailDraftKey(companyID, input.DraftID)
+	draft, ok := r.emailDrafts[key]
+	if !ok || draft.DeletedTimestamp != nil || !communicationsSharedDraftOwnerMatches(draft, owner) ||
+		!r.userHasEffectiveAccessLocked(companyID, actorUserID, owner.resourceType, owner.resourceID, EntityPermissionEdit) {
+		return domain.CommunicationsEmailDraft{}, ErrNotFound
+	}
+	if draft.Revision != input.ExpectedRevision {
+		return domain.CommunicationsEmailDraft{}, ErrVersionConflict
+	}
+	draft.UpdatedByUserID = actorUserID
+	draft.ToRecipients, draft.CcRecipients, draft.BccRecipients = input.ToRecipients, input.CcRecipients, input.BccRecipients
+	draft.Subject, draft.BodyEditorHTML = input.Subject, input.BodyEditorHTML
+	draft.Revision++
+	draft.UpdatedTimestamp = time.Now().UTC()
+	draft.CanSend = communicationsResourceDraftCanSendLocked(r, draft, actorUserID)
+	r.emailDrafts[key] = draft
+	return draft, nil
+}
+
+func (r *MemoryRepo) deleteCommunicationsResourceEmailDraft(input CommunicationsEmailDraftDeleteInput, owner communicationsSharedDraftOwner) error {
+	companyID, actorUserID := cleanUUIDText(input.CompanyID), cleanUUIDText(input.UpdatedByUserID)
+	if companyID == "" || actorUserID == "" || strings.TrimSpace(input.DraftID) == "" || input.ExpectedRevision < 1 {
+		return ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := communicationsEmailDraftKey(companyID, input.DraftID)
+	draft, ok := r.emailDrafts[key]
+	if !ok || draft.DeletedTimestamp != nil || !communicationsSharedDraftOwnerMatches(draft, owner) ||
+		!r.userHasEffectiveAccessLocked(companyID, actorUserID, owner.resourceType, owner.resourceID, EntityPermissionEdit) {
+		return ErrNotFound
+	}
+	if draft.Revision != input.ExpectedRevision {
+		return ErrVersionConflict
+	}
+	now := time.Now().UTC()
+	draft.UpdatedByUserID, draft.UpdatedTimestamp, draft.DeletedTimestamp = actorUserID, now, &now
+	draft.Revision++
+	r.emailDrafts[key] = draft
+	r.retireMemoryEmailDraftAttachmentsLocked(companyID, draft.DraftID, now)
+	return nil
+}
+
+func (r *MemoryRepo) retireMemoryEmailDraftAttachmentsLocked(companyID, draftID string, now time.Time) {
+	retiredAttachmentIDs := map[string]bool{}
+	for id, link := range r.resourceAttachments {
+		if link.CompanyID == companyID && link.ResourceType == "email_draft" && link.ResourceID == draftID && link.DeletedTimestamp == nil {
+			link.DeletedTimestamp = &now
+			r.resourceAttachments[id] = link
+			retiredAttachmentIDs[link.AttachmentID] = true
+		}
+	}
+	for attachmentID := range retiredAttachmentIDs {
+		stillOwned := false
+		for _, link := range r.resourceAttachments {
+			if link.CompanyID == companyID && link.AttachmentID == attachmentID && link.DeletedTimestamp == nil {
+				stillOwned = true
+				break
+			}
+		}
+		if !stillOwned {
+			storedKey := attachmentKey(companyID, attachmentID)
+			attachment := r.attachments[storedKey]
+			attachment.DeletedTimestamp = &now
+			r.attachments[storedKey] = attachment
+		}
+	}
+}
+
+func (r *MemoryRepo) deleteMemoryResourceSharedEmailDraftsLocked(companyID, resourceType, resourceID string) {
+	now := time.Now().UTC()
+	for draftKey, draft := range r.emailDrafts {
+		matches := draft.SharedResourceType == resourceType && draft.SharedResourceID == resourceID
+		if draft.CompanyID != companyID || !matches {
+			continue
+		}
+		r.retireMemoryEmailDraftAttachmentsLocked(companyID, draft.DraftID, now)
+		delete(r.emailDrafts, draftKey)
+	}
+}
+
+func (r *MemoryRepo) retireMemoryExactResourceSharedEmailDraftLocked(companyID, resourceType, resourceID, sourceMessageID string) {
+	now := time.Now().UTC()
+	for draftKey, draft := range r.emailDrafts {
+		matches := draft.SharedResourceType == resourceType && draft.SharedResourceID == resourceID
+		if draft.CompanyID != companyID || !matches || draft.SourceMessageID != sourceMessageID || draft.DeletedTimestamp != nil {
+			continue
+		}
+		draft.DeletedTimestamp, draft.UpdatedTimestamp, draft.Revision = &now, now, draft.Revision+1
+		r.emailDrafts[draftKey] = draft
+		r.retireMemoryEmailDraftAttachmentsLocked(companyID, draft.DraftID, now)
+	}
+}
+
+func (r *MemoryRepo) memoryResourceHasExactEmailRelationshipLocked(owner communicationsSharedDraftOwner, companyID, sourceMessageID string) bool {
+	_, _, ok := r.memoryResourceEmailSourceLocked(owner, companyID, sourceMessageID)
+	return ok
+}
+
+func (r *MemoryRepo) memoryResourceEmailSourceLocked(owner communicationsSharedDraftOwner, companyID, sourceMessageID string) (domain.CommunicationsEmailThread, domain.CommunicationsEmailMessage, bool) {
+	threadID := ""
+	if owner.resourceType == EntityTypeNode {
+		for _, relationship := range r.nodeEmailThreads {
+			if relationship.CompanyID == companyID && relationship.NodeID == owner.resourceID && relationship.SelectedMessageID == sourceMessageID {
+				threadID = relationship.EmailThreadID
+				break
+			}
+		}
+	} else {
+		for _, relationship := range r.projectEmailRelationships {
+			if relationship.CompanyID == companyID && relationship.ProjectID == owner.resourceID && relationship.EmailMessageID == sourceMessageID && relationship.ResourceTextboxID == "" {
+				threadID = relationship.EmailThreadID
+				break
+			}
+		}
+	}
+	thread, ok := r.emailThreads[key(companyID, threadID)]
+	if !ok {
+		return domain.CommunicationsEmailThread{}, domain.CommunicationsEmailMessage{}, false
+	}
+	for _, message := range thread.Messages {
+		if message.EmailMessageID == sourceMessageID {
+			return thread, message, true
+		}
+	}
+	return domain.CommunicationsEmailThread{}, domain.CommunicationsEmailMessage{}, false
+}
+
+func (r *MemoryRepo) memoryEmailThreadIDForMessageLocked(companyID, sourceMessageID string) string {
+	for _, thread := range r.emailThreads {
+		if thread.CompanyID != companyID {
+			continue
+		}
+		for _, message := range thread.Messages {
+			if message.EmailMessageID == sourceMessageID {
+				return thread.EmailThreadID
+			}
+		}
+	}
+	return ""
 }
 
 func (r *MemoryRepo) GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error) {

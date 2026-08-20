@@ -17,6 +17,7 @@ import { createEditorImageClipboardHTML, writeEditorImageToSystemClipboard, writ
 import { EditorImagePreviewModal } from "../EditorImagePreviewModal.js";
 import { EditorSelectionNodeIcon } from "../../../icons/index.js";
 import { ChatIcon } from "../NodeWorkspaceSurfaceShared.js";
+import { withPreparedEditorAttachmentResource } from "../editorAttachmentPreparation.js";
 import {
   createNodeEntityFromSelection,
   normalizeEditorSelectionNodeTitle,
@@ -1268,24 +1269,25 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     if (!context) return;
     const editor = editorRef.current;
     const alignment = editor ? readMangoTiptapInsertionAlignment(editor, position) : "left";
-    void (async () => {
-      await context.prepareResource?.();
+    void withPreparedEditorAttachmentResource(context.prepareResource, async () => {
       for (const file of files) {
         const uploaded = await uploadMangoAttachment(context.requestJSON, {
-          companyID: context.companyID,
-          resourceType: context.resourceType,
-          resourceID: context.resourceID,
-          file,
-          sourceKind: "editor_paste",
-          relationshipKind: "inline_image",
-          informationID: context.informationID,
-          editorSurface: context.editorSurface,
+            companyID: context.companyID,
+            resourceType: context.resourceType,
+            resourceID: context.resourceID,
+            file,
+            sourceKind: "editor_paste",
+            relationshipKind: "inline_image",
+            informationID: context.informationID,
+            editorSurface: context.editorSurface,
+            expectedRevision: context.expectedResourceRevision?.(),
+            onResourceRevision: context.onResourceRevision,
         });
         const content = createMangoTiptapAttachmentContent(uploaded.attachment, alignment);
         if (position === null) editorRef.current?.chain().focus().insertContent(content).run();
         else editorRef.current?.chain().focus().insertContentAt(position, content).run();
       }
-    })().catch((cause) => {
+    }, context.mutationLifecycle).catch((cause) => {
       const message = cause instanceof Error ? cause.message : "Unable to attach image";
       context.onError?.(message);
       syncRef.current?.reportFailure(message);

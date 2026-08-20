@@ -925,6 +925,16 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 		recycleCandidates = append(recycleCandidates, recycleRoots[index])
 	}
 	if len(recycleCandidates) > 0 {
+		for _, nodeID := range sortedMapKeys(nodeIDs) {
+			if err := lockResourceSharedEmailDraftOwnerTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
+		}
+		for _, projectID := range sortedMapKeys(projectIDs) {
+			if err := lockResourceSharedEmailDraftOwnerTx(ctx, tx, companyID, EntityTypeProject, projectID); err != nil {
+				return CompanyExplorerDeleteResult{}, err
+			}
+		}
 		stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.recycle_bin_write")
 		if err := postgresCreateRecycleBinItemsTx(ctx, tx, companyID, deletedByUserID, recycleCandidates); err != nil {
 			stop()
@@ -1080,6 +1090,9 @@ func postgresDeleteNodeTx(ctx context.Context, tx *sql.Tx, companyID, nodeID str
 }
 
 func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID string, deleteProjectionRows bool) error {
+	if err := retireResourceSharedEmailDraftAttachmentsTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
+		return err
+	}
 	if err := retireNodeChatAttachmentRelationshipsTx(ctx, tx, companyID, nodeID); err != nil {
 		return err
 	}

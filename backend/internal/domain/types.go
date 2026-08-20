@@ -360,6 +360,8 @@ type AttachmentUploadIntent struct {
 	StorageChecksumType      string     `json:"-"`
 	ResourceType             string     `json:"-"`
 	ResourceID               string     `json:"-"`
+	ResourceExpectedRevision int64      `json:"-"`
+	ResourceRevision         int64      `json:"resourceRevision,omitempty"`
 	InformationID            string     `json:"-"`
 	MessageID                string     `json:"-"`
 	EditorSurface            string     `json:"-"`
@@ -430,6 +432,7 @@ type ResourceAttachment struct {
 	CreatedTimestamp     time.Time   `json:"created_timestamp"`
 	DeletedTimestamp     *time.Time  `json:"deleted_timestamp,omitempty"`
 	Attachment           *Attachment `json:"attachment,omitempty"`
+	ResourceRevision     int64       `json:"resource_revision,omitempty"`
 }
 
 type Invitation struct {
@@ -614,6 +617,10 @@ type CommunicationsEmailDraft struct {
 	PersonalUserID         string     `json:"personal_user_id,omitempty"`
 	PersonalAccountEmail   string     `json:"personal_account_email,omitempty"`
 	SharedInboxID          string     `json:"shared_inbox_id,omitempty"`
+	SharedResourceType     string     `json:"shared_resource_type,omitempty"`
+	SharedResourceID       string     `json:"shared_resource_id,omitempty"`
+	Revision               int64      `json:"revision"`
+	CanSend                bool       `json:"can_send"`
 	CreatedByUserID        string     `json:"created_by_user_id,omitempty"`
 	UpdatedByUserID        string     `json:"updated_by_user_id,omitempty"`
 	Kind                   string     `json:"kind"`

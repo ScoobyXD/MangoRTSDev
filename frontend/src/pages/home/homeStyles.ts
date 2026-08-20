@@ -1774,7 +1774,7 @@ export const mailArchiveActionsStyle: React.CSSProperties = {
 
 export const mailComposeSentTriageActionsStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(104px, 1fr))",
   gap: 6,
   alignItems: "center",
 };

@@ -481,7 +481,8 @@ button, input, textarea, select {
   color: #3730a3 !important;
 }
 
-.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-drafts {
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-drafts,
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-shared-drafts {
   border-color: rgba(168, 85, 247, 0.22) !important;
   background: linear-gradient(135deg, rgba(237, 233, 254, 0.93), rgba(250, 232, 255, 0.94) 52%, rgba(252, 231, 243, 0.92)) !important;
   color: #86198f !important;
@@ -501,7 +502,8 @@ button, input, textarea, select {
   box-shadow: 7px 7px 16px rgba(174, 174, 192, 0.30), -6px -6px 14px rgba(255, 255, 255, 0.90), 0 9px 22px rgba(79, 70, 229, 0.28), inset 1px 1px 0 rgba(255, 255, 255, 0.34) !important;
 }
 
-.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-drafts[aria-pressed="true"] {
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-drafts[aria-pressed="true"],
+.mango-elevated-action.mango-mail-vibrant-action.mango-mail-vibrant-shared-drafts[aria-pressed="true"] {
   border-color: rgba(255, 255, 255, 0.52) !important;
   background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #ec4899 100%) !important;
   color: #ffffff !important;

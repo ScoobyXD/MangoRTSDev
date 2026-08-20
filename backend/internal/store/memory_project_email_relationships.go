@@ -502,6 +502,7 @@ func (r *MemoryRepo) deleteMemoryProjectEmailRelationshipLocked(input ProjectPro
 				return ErrEmailRelationshipHasProjectWork
 			}
 		}
+		r.retireMemoryExactResourceSharedEmailDraftLocked(input.CompanyID, EntityTypeProject, input.ProjectID, relationship.EmailMessageID)
 		delete(r.projectEmailRelationships, memoryProjectEmailRelationshipKey(input.CompanyID, relationship.RelationshipID))
 		return nil
 	}

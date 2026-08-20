@@ -28,6 +28,7 @@ type attachmentResourceLinkRequest struct {
 	MessageID        string `json:"message_id"`
 	EditorSurface    string `json:"editor_surface"`
 	RelationshipKind string `json:"relationship_kind"`
+	ExpectedRevision int64  `json:"expected_revision"`
 }
 
 func (s *Server) handleAttachments(w http.ResponseWriter, r *http.Request) {
@@ -308,6 +309,7 @@ func (s *Server) handleResourceAttachmentLink(w http.ResponseWriter, r *http.Req
 		EditorSurface:    req.EditorSurface,
 		RelationshipKind: req.RelationshipKind,
 		CreatedByUserID:  actorUserID,
+		ExpectedRevision: req.ExpectedRevision,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_attachment_link")
@@ -315,6 +317,10 @@ func (s *Server) handleResourceAttachmentLink(w http.ResponseWriter, r *http.Req
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "attachment_not_found")
+		return
+	}
+	if errors.Is(err, store.ErrConflict) {
+		writeError(w, http.StatusConflict, "email_draft_revision_conflict")
 		return
 	}
 	if err != nil {
@@ -334,8 +340,14 @@ func (s *Server) handleResourceAttachmentDelete(w http.ResponseWriter, r *http.R
 		return
 	}
 	if store.NormalizeAttachmentResourceType(resourceType) != store.EntityTypeNode {
+		actorUserID := ""
+		if actor, ok := authenticatedActor(r); ok {
+			actorUserID = strings.TrimSpace(actor.User.UserID)
+		}
+		expectedRevision, _ := strconv.ParseInt(strings.TrimSpace(r.URL.Query().Get("expected_revision")), 10, 64)
 		err := s.repo.SoftDeleteResourceAttachment(store.ResourceAttachmentDeleteInput{
 			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, AttachmentID: attachmentID,
+			ActorUserID: actorUserID, ExpectedRevision: expectedRevision,
 		})
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_attachment_link")
@@ -345,12 +357,20 @@ func (s *Server) handleResourceAttachmentDelete(w http.ResponseWriter, r *http.R
 			writeError(w, http.StatusNotFound, "attachment_link_not_found")
 			return
 		}
+		if errors.Is(err, store.ErrConflict) {
+			writeError(w, http.StatusConflict, "email_draft_revision_conflict")
+			return
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed_to_unlink_attachment")
 			return
 		}
 		s.wakeAttachmentDeletionCleanup()
-		writeJSON(w, http.StatusOK, map[string]any{"status": "unlinked"})
+		response := map[string]any{"status": "unlinked"}
+		if expectedRevision > 0 {
+			response["resource_revision"] = expectedRevision + 1
+		}
+		writeJSON(w, http.StatusOK, response)
 		return
 	}
 	deletionStorage, ok := s.attachmentStorage.(attachmentDeletionObjectStorage)

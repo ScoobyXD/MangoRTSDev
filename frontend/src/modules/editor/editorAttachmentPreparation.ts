@@ -6,7 +6,7 @@ export function durableEditorAttachmentInformationID(value: string | undefined):
 }
 
 export type EditorAttachmentMutationLifecycle = {
-  begin: () => void;
+  begin: () => void | Promise<void>;
   finish: (succeeded: boolean) => void;
 };
 
@@ -53,7 +53,7 @@ export async function withPreparedEditorAttachmentResource<T>(
   mutation: () => Promise<T>,
   lifecycle?: EditorAttachmentMutationLifecycle,
 ): Promise<T> {
-  lifecycle?.begin();
+  await lifecycle?.begin();
   let succeeded = false;
   try {
     await prepareResource?.();

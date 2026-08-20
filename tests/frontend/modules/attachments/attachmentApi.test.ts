@@ -132,6 +132,41 @@ test("links an existing attachment to the destination editor resource", async ()
   assert.equal(result, expected);
 });
 
+test("shared draft attachment mutations carry and return one optimistic revision", async () => {
+  const linked = resourceAttachment("attachment-shared", {
+    resource_type: "email_draft",
+    resource_id: "draft-shared",
+    resource_revision: 8,
+  });
+  const calls: Array<{ path: string; init?: Parameters<AttachmentRequestJSON>[1] }> = [];
+  const request: AttachmentRequestJSON = async <T>(path: string, init?: Parameters<AttachmentRequestJSON>[1]): Promise<T> => {
+    calls.push({ path, init });
+    if (init?.method === "DELETE") return { status: "unlinked", resource_revision: 9 } as T;
+    return { resource_attachment: linked } as T;
+  };
+
+  const result = await linkMangoResourceAttachment(request, {
+    companyID: "company-1",
+    resourceType: "email_draft",
+    resourceID: "draft-shared",
+    attachmentID: "attachment-shared",
+    relationshipKind: "inline_image",
+    expectedRevision: 7,
+  });
+  assert.equal((calls[0]?.init?.json as Record<string, unknown>).expected_revision, 7);
+  assert.equal(result.resource_revision, 8);
+
+  const revision = await deleteMangoAttachmentPermanently(request, {
+    companyID: "company-1",
+    resourceType: "email_draft",
+    resourceID: "draft-shared",
+    attachmentID: "attachment-shared",
+    expectedRevision: 8,
+  });
+  assert.match(calls[1]?.path ?? "", /expected_revision=8/);
+  assert.equal(revision, 9);
+});
+
 test("imports a remote rich-document image into the exact editor attachment resource", async () => {
   const expectedLink = resourceAttachment("attachment-imported", {
     resource_type: "project",

@@ -39,6 +39,7 @@ type attachmentUploadIntentRequest struct {
 	SourceProvider   string `json:"sourceProvider"`
 	OriginalWidth    *int   `json:"originalWidth"`
 	OriginalHeight   *int   `json:"originalHeight"`
+	ExpectedRevision int64  `json:"expectedRevision"`
 }
 
 type attachmentUploadPartSignRequest struct {
@@ -60,10 +61,11 @@ type attachmentUploadDescriptor struct {
 }
 
 type attachmentUploadIntentResponse struct {
-	UploadIntentID string                     `json:"uploadIntentId"`
-	AttachmentID   string                     `json:"attachmentId"`
-	ExpiresAt      time.Time                  `json:"expiresAt"`
-	Upload         attachmentUploadDescriptor `json:"upload"`
+	UploadIntentID   string                     `json:"uploadIntentId"`
+	AttachmentID     string                     `json:"attachmentId"`
+	ExpiresAt        time.Time                  `json:"expiresAt"`
+	Upload           attachmentUploadDescriptor `json:"upload"`
+	ResourceRevision int64                      `json:"resourceRevision,omitempty"`
 }
 
 type attachmentAcceptedPartResponse struct {
@@ -254,6 +256,7 @@ func (s *Server) handleAttachmentUploadIntentCreate(w http.ResponseWriter, r *ht
 		OriginalHeight: req.OriginalHeight, StorageBucket: storage.Bucket(), StorageKey: storageKey,
 		MultipartUploadID: multipartUploadID, Strategy: strategy, PartSizeBytes: partSize, PartCount: partCount,
 		ExpiresTimestamp: now.Add(config.IntentLifetime), CreatedTimestamp: now,
+		ExpectedRevision: req.ExpectedRevision,
 	})
 	if strategy == domain.AttachmentUploadStrategyMultipart && (!created || err != nil) {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -262,6 +265,10 @@ func (s *Server) handleAttachmentUploadIntentCreate(w http.ResponseWriter, r *ht
 	}
 	if errors.Is(err, store.ErrUploadPayloadConflict) {
 		writeError(w, http.StatusConflict, "attachment_upload_state_conflict")
+		return
+	}
+	if errors.Is(err, store.ErrConflict) {
+		writeError(w, http.StatusConflict, "email_draft_revision_conflict")
 		return
 	}
 	if err != nil {
@@ -292,7 +299,8 @@ func (s *Server) writeAttachmentUploadIntentCreated(w http.ResponseWriter, r *ht
 		descriptor.ExpiresAt = &request.ExpiresAt
 	}
 	writeJSON(w, http.StatusCreated, attachmentUploadIntentResponse{UploadIntentID: intent.UploadIntentID,
-		AttachmentID: intent.AttachmentID, ExpiresAt: intent.ExpiresTimestamp, Upload: descriptor})
+		AttachmentID: intent.AttachmentID, ExpiresAt: intent.ExpiresTimestamp, Upload: descriptor,
+		ResourceRevision: intent.ResourceRevision})
 }
 
 func (s *Server) handleAttachmentUploadPartSign(w http.ResponseWriter, r *http.Request, uploadIntentID string) {
@@ -560,6 +568,14 @@ func (s *Server) writeCompletedAttachmentIntent(ctx context.Context, w http.Resp
 		StorageChecksumAlgorithm: strings.TrimSpace(head.ChecksumAlgorithm), StorageChecksumValue: strings.TrimSpace(head.ChecksumValue),
 		StorageChecksumType: storageType, Now: time.Now().UTC()})
 	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			_, failErr := s.repo.FailAttachmentUploadIntent(store.AttachmentUploadTransitionInput{
+				CompanyID: intent.CompanyID, ActorUserID: actorUserID, UploadIntentID: intent.UploadIntentID, Now: time.Now().UTC(),
+			}, "revision_conflict")
+			if failErr != nil {
+				log.Printf("attachment_direct_upload_job status=mark_revision_conflict_failed upload_job_id=%s", intent.UploadIntentID)
+			}
+		}
 		writeAttachmentUploadStoreError(w, err)
 		return
 	}
@@ -989,6 +1005,7 @@ func attachmentIntentMatchesRequest(intent domain.AttachmentUploadIntent, req at
 	return intent.ClientRequestID == strings.TrimSpace(req.ClientRequestID) && intent.OriginalFilename == strings.TrimSpace(req.Filename) &&
 		intent.SizeBytes == req.SizeBytes && intent.SHA256 == strings.TrimSpace(req.SHA256) && intent.MimeType == strings.TrimSpace(req.ContentType) &&
 		intent.ResourceType == store.NormalizeAttachmentResourceType(req.ResourceType) && intent.ResourceID == strings.TrimSpace(req.ResourceID) &&
+		intent.ResourceExpectedRevision == req.ExpectedRevision &&
 		intent.RelationshipKind == store.NormalizeAttachmentRelationshipKind(req.RelationshipKind) && intent.SourceKind == store.NormalizeAttachmentSourceKind(req.SourceKind) &&
 		intent.InformationID == strings.TrimSpace(req.InformationID) && intent.MessageID == strings.TrimSpace(req.MessageID) &&
 		intent.EditorSurface == strings.TrimSpace(req.EditorSurface) && intent.SourceProvider == strings.TrimSpace(req.SourceProvider) &&
@@ -1056,6 +1073,8 @@ func writeAttachmentCompletionError(w http.ResponseWriter, err error) {
 
 func writeAttachmentUploadStoreError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, store.ErrConflict):
+		writeError(w, http.StatusConflict, "email_draft_revision_conflict")
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "attachment_upload_intent_not_found")
 	case errors.Is(err, store.ErrUploadIntentExpired):

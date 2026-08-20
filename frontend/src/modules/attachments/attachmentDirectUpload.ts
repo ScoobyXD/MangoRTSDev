@@ -107,6 +107,7 @@ type UploadIntentRequest = {
   sourceProvider?: string;
   originalWidth?: number;
   originalHeight?: number;
+  expectedRevision?: number;
 };
 
 type ResumeRecord = {
@@ -134,6 +135,7 @@ type ResumeRecord = {
   sourceProvider: string;
   originalWidth: number | null;
   originalHeight: number | null;
+  expectedRevision: number | null;
 };
 
 type BrowserStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -672,6 +674,8 @@ function buildUploadIntentRequest(
   const originalHeight = positiveOptionalInteger(input.originalHeight);
   if (originalWidth !== undefined) result.originalWidth = originalWidth;
   if (originalHeight !== undefined) result.originalHeight = originalHeight;
+  const expectedRevision = positiveOptionalInteger(input.expectedRevision);
+  if (expectedRevision !== undefined) result.expectedRevision = expectedRevision;
   return result;
 }
 
@@ -778,6 +782,7 @@ function resumeRecordFromIntent(
     sourceProvider: input.sourceProvider?.trim() ?? "",
     originalWidth: positiveOptionalInteger(input.originalWidth) ?? null,
     originalHeight: positiveOptionalInteger(input.originalHeight) ?? null,
+    expectedRevision: positiveOptionalInteger(input.expectedRevision) ?? null,
   };
   if (intent.upload.strategy === "multipart") {
     record.partSizeBytes = intent.upload.partSizeBytes;
@@ -803,7 +808,8 @@ function resumeRecordMatches(record: ResumeRecord, input: UploadMangoAttachmentI
     && record.sourceKind === input.sourceKind
     && record.sourceProvider === (input.sourceProvider?.trim() ?? "")
     && record.originalWidth === (positiveOptionalInteger(input.originalWidth) ?? null)
-    && record.originalHeight === (positiveOptionalInteger(input.originalHeight) ?? null);
+    && record.originalHeight === (positiveOptionalInteger(input.originalHeight) ?? null)
+    && record.expectedRevision === (positiveOptionalInteger(input.expectedRevision) ?? null);
 }
 
 export function attachmentUploadResumeStorageKey(input: UploadMangoAttachmentInput): string {

@@ -16,6 +16,12 @@ where attachment.deleted_timestamp is not null
       and relationship.attachment_id=attachment.attachment_id
       and relationship.deleted_timestamp is null
   )
+  and not exists (
+    select 1 from recycle_bin_items recycle,
+      lateral jsonb_array_elements(coalesce(recycle.restore_payload->'attachments','[]'::jsonb)) restored
+    where recycle.company_id=attachment.company_id
+      and restored->>'attachment_id'=attachment.attachment_id::text
+  )
 order by attachment.company_id::text`)
 	if err != nil {
 		return nil, err

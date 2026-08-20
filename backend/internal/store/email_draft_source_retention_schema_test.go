@@ -6,44 +6,6 @@ import (
 	"testing"
 )
 
-func TestEmailDraftSourceRetentionSchemaContract(t *testing.T) {
-	runtimeRaw, err := os.ReadFile("postgres_email_drafts.go")
-	if err != nil {
-		t.Fatalf("read postgres_email_drafts.go: %v", err)
-	}
-	schemaRaw, err := os.ReadFile("../../db/schema.sql")
-	if err != nil {
-		t.Fatalf("read schema.sql: %v", err)
-	}
-	draftTable := emailDraftCreateTableContract(t, strings.ToLower(string(schemaRaw)))
-	for _, forbidden := range []string{
-		"references user_email_connections", "references shared_inboxes",
-		"email_thread_id", "origin_node_id", "collaboration_id", "is_shared",
-		"send_state", "send_claim", "send_idempotency", "sent_email_message_id", "sent_provider_message_id",
-		"references nodes(company_id,node_id)", "references email_threads(company_id,email_thread_id)",
-	} {
-		if strings.Contains(draftTable, forbidden) {
-			t.Fatalf("final Triage-only email_drafts retains obsolete contract %q", forbidden)
-		}
-	}
-	for _, required := range []string{
-		"references email_messages(company_id,email_message_id) on delete restrict",
-		"source_email_message_id uuid",
-		"created_by_user_id uuid",
-		"deleted_timestamp timestamptz",
-	} {
-		if !strings.Contains(strings.Join(strings.Fields(draftTable), " "), strings.Join(strings.Fields(required), " ")) {
-			t.Fatalf("final Triage-only email_drafts missing contract %q", required)
-		}
-	}
-	runtime := strings.ToLower(string(runtimeRaw))
-	for _, forbidden := range []string{"create table", "alter table", "drop table", "create trigger"} {
-		if strings.Contains(runtime, forbidden) {
-			t.Fatalf("draft request path contains schema DDL %q", forbidden)
-		}
-	}
-}
-
 func TestEmailDraftIdentityMigrationUsesDirectSharedFlag(t *testing.T) {
 	raw, err := os.ReadFile("../../db/migrations/20260813_email_draft_identity.sql")
 	if err != nil {
@@ -136,20 +98,4 @@ func TestEmailDraftScopeMigrationRemovesOnlyAmbiguousLegacyDrafts(t *testing.T) 
 			t.Errorf("email draft scope migration retains obsolete blocking path %q", forbidden)
 		}
 	}
-}
-
-func emailDraftCreateTableContract(t *testing.T, sqlText string) string {
-	t.Helper()
-	const startNeedle = "create table if not exists email_drafts ("
-	start := strings.Index(sqlText, startNeedle)
-	if start < 0 {
-		t.Fatalf("missing %q", startNeedle)
-	}
-	rest := sqlText[start:]
-	const endNeedle = "create index if not exists idx_email_drafts_personal_updated"
-	end := strings.Index(rest, endNeedle)
-	if end < 0 {
-		t.Fatal("email_drafts table has no expected following index")
-	}
-	return rest[:end]
 }

@@ -907,6 +907,7 @@ func (r *MemoryRepo) deleteProjectLocked(companyID, projectID string) error {
 	if _, ok := r.projects[k]; !ok {
 		return ErrNotFound
 	}
+	r.deleteMemoryResourceSharedEmailDraftsLocked(companyID, EntityTypeProject, projectID)
 	delete(r.projects, k)
 	for assignmentKey := range r.projectAccountAssignments {
 		kCompanyID, kProjectID, _, ok := splitProjectAssignmentKey(assignmentKey)

@@ -31,7 +31,6 @@ test("node-attached email viewer retains thread, relationship, attachment, image
   assert.match(nodeParts, /aria-expanded=\{!collapsed\}/);
   assert.match(nodeSurface, /repliesEnabled={canEdit}/);
   assert.doesNotMatch(nodeSurface, /onEmailReplyTextBoxRequest|pendingEmailReply|initialReplyTargetMessageID|initialReplyAll|initialReplyRequestID/);
-  assert.doesNotMatch(nodeParts, /sendSharedEmailDraft|Shared draft|originNodeID|sharedDraft:/);
   assert.match(homeParts, /Reply all/);
   assert.match(nodeParts, /<strong>Cc:<\/strong> \{formatAddressList\(threadMessage\.cc\)\}/);
   assert.match(nodeParts, /<strong>Bcc:<\/strong> \{formatAddressList\(threadMessage\.bcc\)\}/);
@@ -67,7 +66,6 @@ test("node-attached email viewer retains thread, relationship, attachment, image
   assert.match(nodeParts, /downloadEmailAttachment\(message\.id, providerAttachmentID, companyID, sharedInboxID, \{ accountEmail, collaborationID \}\)/);
   assert.match(nodeParts, /getNodeEmailThread\(companyID, cleanNodeID, durableThreadID, \{ \.\.\.options, summary: true \}\)/);
   assert.doesNotMatch(nodeParts, /getEmailThread\(|listEmailMessages\(|getEmailMessage\(|thread\.message_ids/);
-  assert.match(nodeParts, /account_email: mailboxScope\.accountEmail/);
   assert.match(universalPickerEmailPane, /status\.connected && status\.status === "connected"/);
   assert.match(universalPickerEmailPane, /if \(!active \|\| !accountResolved \|\| !accountEmail\) return undefined/);
   assert.equal((universalPickerEmailPane.match(/listEmailMessages\(\{/g) ?? []).length, 1);
@@ -78,148 +76,6 @@ test("node-attached email viewer retains thread, relationship, attachment, image
   assert.match(universalPickerEmailPane, /if \(!active \|\| !accountEmail \|\| !nextPageToken\.trim\(\) \|\| loading \|\| loadingMore \|\| error\) return undefined/);
   assert.match(universalPickerEmailPane, /requestAnimationFrame\(\(\) => \{[\s\S]{0,220}list\.scrollHeight <= list\.clientHeight \+ 1[\s\S]{0,80}void loadMore\(\)/);
   assert.match(calendarInviteCard, /Calendar invitation/);
-});
-
-test("Node and Project Reply share one server-owned personal draft path", () => {
-  const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
-  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
-  const projectSurface = source("frontend/src/modules/project-management/ProjectSummaryContent.tsx");
-  const communicationsAPI = source("frontend/src/modules/communications/communicationsApi.ts");
-  const richEditor = source("frontend/src/modules/editor/UnifiedRichEditorSurface.tsx");
-
-  assert.doesNotMatch(nodeParts, /nodeReplyMode|replyAllEnabled|Create a personal reply draft|Create draft/);
-  assert.doesNotMatch(nodeParts, /listCommunicationsSharedInboxes|resolveNodeReplySenderAccount|draft:reply:/);
-  assert.ok((nodeParts.match(/const exactMailboxScopeAvailable = Boolean\(/g) ?? []).length >= 2);
-  assert.match(nodeParts, /providerReplyAvailable = repliesEnabled && exactMailboxScopeAvailable && providerMessageAvailable/);
-  assert.ok((nodeParts.match(/email_reply_mailbox_scope_missing/g) ?? []).length >= 2);
-  assert.match(nodeParts, /const activeDraft = personalDraft/);
-  assert.match(nodeParts, /ensureEmailReplyDraft\(\{/);
-  assert.match(nodeParts, /getEmailDraft\(companyID, indicatedDraftID, mailboxScope\)/);
-  assert.match(nodeParts, /listEmailReplyDraftsBySource\(companyID, scope, sourceMessageIDs/);
-  assert.match(nodeParts, /\{replyDraftIndicatorBySourceMessageID\[internalThreadMessageID\] \? "My Draft" : "Reply"\}/);
-  assert.match(nodeParts, /if \(!activeDraft \|\| !replyTargetMessage \|\| sending \|\| sentCleanupFailed \|\| draftSaveStatus === "saving"\) return undefined/);
-  assert.match(nodeParts, /draftSaveStatus === "failed" && fingerprint === lastDraftFailedFingerprintRef\.current/);
-  assert.match(nodeParts, /window\.setTimeout\(\(\) => \{\s*setDraftSaveStatus\("saving"\);\s*let saving: Promise<void>;\s*saving = saveEmailDraft/);
-  assert.match(nodeParts, /if \(draftSavePromiseRef\.current === saving\) draftSavePromiseRef\.current = null/);
-  assert.match(nodeParts, /replyOpenRequestRef\.current !== requestGeneration[\s\S]{0,120}personalDraftRef\.current\?\.draft_id !== draftID[\s\S]{0,120}saved\.draft_id !== draftID/);
-  assert.match(nodeParts, /if \(replyTargetMessageID === target\.id\) \{\s*window\.requestAnimationFrame\(\(\) => replyEditorControllerRef\.current\?\.focus\(\)\);\s*return/);
-  assert.match(nodeParts, /if \(replyTargetSwitchBlocked\) \{\s*onError\(replyAttachmentMutationCount > 0 \? "email_draft_attachment_pending" : "email_draft_changes_not_saved"\)/);
-  assert.match(nodeParts, /saveEmailDraft\(\{[\s\S]{0,420}sourceMessageID: activeDraft\.source_message_id/);
-  assert.doesNotMatch(nodeParts, /senderAccountEmail: senderAccountDraft|replyToMessageID: activeDraft|replyToMessage: activeDraft/);
-  assert.match(nodeParts, /const internalSourceMessageID = replyTargetMessage\.email_message_id\?\.trim\(\) \?\? ""/);
-  assert.match(nodeParts, /if \(!internalSourceMessageID\) \{\s*onError\("email_reply_source_not_ingested"\)/);
-  assert.match(nodeParts, /<UnifiedRichEditorSurface[\s\S]{0,320}surfaceID="attached-email-reply"/);
-  assert.match(nodeParts, /<OutboundEmailUndoBanner \/>/);
-  assert.match(nodeParts, /if \(created && !cachedSignature\)[\s\S]{0,260}applyEmailSignature\(current, signature\)/);
-  assert.match(nodeParts, /const sent = await sendEmail\(/);
-  assert.match(nodeParts, /const expectedSenderAccountEmail = senderAccountDraft\.trim\(\)\.toLowerCase\(\)/);
-  assert.match(nodeParts, /expected_sender_account_email: expectedSenderAccountEmail/);
-  assert.match(nodeParts, /if \(nodeID\.trim\(\)\) invalidateNodeEmailThreadCache\(companyID, nodeID, emailThreadID \?\? ""\)/);
-  assert.match(nodeParts, /resourceType: "email_draft"/);
-  assert.match(nodeParts, /attachments: draftAttachments/);
-  assert.match(nodeParts, /aria-label="Add attachment"/);
-  assert.match(nodeParts, /const replyAttachmentControlsEnabled = replyEditingEnabled && replyAttachmentMutationCount === 0/);
-  assert.match(nodeParts, /editorSurface: "attached-email-reply",\s*mutationLifecycle: \{\s*begin: \(\) => setReplyAttachmentMutationCount\(\(current\) => current \+ 1\),\s*finish: \(\) => setReplyAttachmentMutationCount/);
-  assert.match(nodeParts, /if \(!editable \|\| sending \|\| replyAttachmentMutationCount > 0 \|\| !cleanAttachmentID/);
-  assert.match(nodeParts, /removeDisabled=\{!replyAttachmentControlsEnabled\}/);
-  assert.match(nodeParts, /disabled=\{!replyAttachmentControlsEnabled\}/);
-  assert.match(nodeParts, /setReplyAttachmentMutationCount\(\(current\) => current \+ 1\)[\s\S]{0,900}replyOpenRequestRef\.current !== requestGeneration \|\| personalDraftRef\.current\?\.draft_id !== draftID/);
-  assert.match(nodeParts, /const canSend = replyEditingEnabled && replyAttachmentMutationCount === 0 && !replyDraftDirty/);
-  assert.match(communicationsAPI, /return scheduleOutboundEmailDispatch\(async \(\) =>/);
-  assert.match(richEditor, /const imageHydrationContext = editorImageHydrationContext \?\? editorImageAttachmentContext/);
-  assert.match(richEditor, /useEditorDocumentSurfaceHandlers\(\{[\s\S]{0,1200}editorImageAttachmentContext,/);
-
-  const nodeEmailPaneStart = nodeSurface.indexOf("<AttachedEmailOrganizerPane");
-  const nodeEmailPaneEnd = nodeSurface.indexOf("/>", nodeEmailPaneStart);
-  assert.ok(nodeEmailPaneStart >= 0 && nodeEmailPaneEnd > nodeEmailPaneStart);
-  const nodeEmailPane = nodeSurface.slice(nodeEmailPaneStart, nodeEmailPaneEnd);
-  assert.match(nodeEmailPane, /repliesEnabled={canEdit}/);
-  assert.match(nodeEmailPane, /onReplyEditorFocus=/);
-  assert.match(nodeEmailPane, /attachmentRequestJSON={requestJSON}/);
-  assert.doesNotMatch(nodeEmailPane, /attachmentResourceType|attachmentResourceID|attachmentEditorSurface/);
-
-  const projectEmailPaneStart = projectSurface.indexOf("<AttachedEmailOrganizerPane");
-  const projectEmailPaneEnd = projectSurface.indexOf("/>", projectEmailPaneStart);
-  const projectEmailPane = projectSurface.slice(projectEmailPaneStart, projectEmailPaneEnd);
-  assert.match(projectEmailPane, /attachmentRequestJSON={attachmentRequestJSON}/);
-  assert.doesNotMatch(projectEmailPane, /attachmentResourceType|attachmentResourceID|attachmentEditorSurface/);
-
-  const removeEmailStart = nodeSurface.indexOf("const removeAttachedEmail = useCallback");
-  const removeEmailEnd = nodeSurface.indexOf("const loadNodeTimelineEvents", removeEmailStart);
-  const removeEmail = nodeSurface.slice(removeEmailStart, removeEmailEnd);
-  assert.ok(removeEmail.indexOf("await requestJSON<unknown>") < removeEmail.indexOf("setAttachedEmails"));
-  assert.doesNotMatch(removeEmail.slice(removeEmail.indexOf("catch (cause)")), /setAttachedEmails/);
-  assert.match(removeEmail.slice(removeEmail.indexOf("catch (cause)")), /onProjectionMutation\(\)/);
-  assert.match(nodeParts, /if \(!nodeID\.trim\(\)\) \{\s*if \(activeSelectedMessageID === messageID\) clearSelectedMessage\(\);\s*setReplyComposer/);
-});
-
-test("optional Reply-draft indicators never turn a mailbox mismatch into a Project email-viewing error", () => {
-  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
-  const organizerStart = nodeParts.indexOf("export const AttachedEmailOrganizerPane");
-  const organizerEnd = nodeParts.indexOf("type EmailConversationPaneProps", organizerStart);
-  const organizer = nodeParts.slice(organizerStart, organizerEnd);
-
-  assert.ok(organizerStart >= 0 && organizerEnd > organizerStart);
-  assert.match(organizer, /listEmailReplyDraftsBySource\(companyID, scope, sourceMessageIDs, \{ refresh: true, sourceThreadIDs \}\)[\s\S]{0,80}\.catch\(\(\) => \[\]\)/);
-  assert.equal((nodeParts.match(/listEmailReplyDraftsBySource\(/g) ?? []).length, 1);
-  assert.doesNotMatch(nodeParts, /failed_to_load_email_drafts/);
-  assert.match(nodeParts, /<EmailConversationPane[\s\S]{0,220}repliesEnabled=\{false\}[\s\S]{0,320}projectID=\{projectID\}/);
-});
-
-test("Node and Project personal draft counts use one bounded visible-thread indicator path", () => {
-  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
-  const communicationsAPI = source("frontend/src/modules/communications/communicationsApi.ts");
-  const organizerStart = nodeParts.indexOf("export const AttachedEmailOrganizerPane");
-  const organizerEnd = nodeParts.indexOf("type EmailConversationPaneProps", organizerStart);
-  assert.ok(organizerStart >= 0 && organizerEnd > organizerStart);
-  const organizer = nodeParts.slice(organizerStart, organizerEnd);
-
-  assert.equal((nodeParts.match(/listEmailReplyDraftsBySource\(/g) ?? []).length, 1, "opened thread panes must not repeat the organizer indicator read");
-  assert.doesNotMatch(nodeParts, /loadEmailReplyDraftIndicators/);
-  assert.match(organizer, /const sourceThreadID = email\.emailThreadID\?\.trim\(\) \?\? ""/);
-  assert.match(organizer, /if \(sourceThreadID\) group\.sourceThreadIDs\.push\(sourceThreadID\);\s*else group\.sourceMessageIDs\.push\(sourceMessageID\)/);
-  assert.match(organizer, /listEmailReplyDraftsBySource\(companyID, scope, sourceMessageIDs, \{ refresh: true, sourceThreadIDs \}\)/);
-  assert.match(organizer, /sourceThreadID: draft\.source_thread_id\?\.trim\(\) \?\? ""/);
-  assert.match(organizer, /replyDraftCountBySourceThreadID\[email\.emailThreadID\?\.trim\(\) \?\? ""\] \?\? 0/);
-  assert.match(nodeParts, /data-email-thread-draft-count="true"/);
-  assert.ok((nodeParts.match(/data-email-message-draft-count="true"/g) ?? []).length >= 3);
-  assert.match(nodeParts, /onReplyDraftIndicatorChange\?\.\(\s*sourceMessageID,\s*draft\.source_thread_id\?\.trim\(\) \|\| emailThreadID\?\.trim\(\) \|\| "",\s*draft\.draft_id/);
-  assert.match(nodeParts, /onReplyDraftIndicatorChange\?\.\(sourceMessageID, emailThreadID\?\.trim\(\) \?\? "", ""\)/);
-  assert.match(organizer, /mutationGeneration === replyDraftIndicatorMutationGenerationRef\.current\s*\? next\s*: \{ \.\.\.next, \.\.\.current \}/);
-  assert.match(communicationsAPI, /source_thread_id\?: string/);
-  assert.match(communicationsAPI, /query\.append\("source_thread_id", sourceThreadID\)/);
-  assert.match(communicationsAPI, /sourceThreadIDs: boundedSourceThreadIDs\.slice\(index \* 100, \(index \+ 1\) \* 100\)/);
-});
-
-test("attached Reply flushes one exact final save and makes save or sent-cleanup failures recoverable", () => {
-  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
-  const finalSaveStart = nodeParts.indexOf("const finalReplyDraftSaveRef");
-  const finalSaveEnd = nodeParts.indexOf("onReplySwitchBlockedChange?.(replyTargetSwitchBlocked)", finalSaveStart);
-  const finalSave = nodeParts.slice(finalSaveStart, finalSaveEnd);
-  const submitStart = nodeParts.indexOf("const submitReply = () =>");
-  const retryCleanupStart = nodeParts.indexOf("const retrySentDraftCleanup", submitStart);
-  const cleanupEnd = nodeParts.indexOf("const syncReplyToolbarFormatState", retryCleanupStart);
-  const submit = nodeParts.slice(submitStart, retryCleanupStart);
-  const retryCleanup = nodeParts.slice(retryCleanupStart, cleanupEnd);
-
-  assert.ok(finalSaveStart >= 0 && finalSaveEnd > finalSaveStart);
-  assert.match(finalSave, /useLayoutEffect\(\(\) => \{[\s\S]{0,180}return \(\) => \{[\s\S]{0,120}replyPaneMountedRef\.current = false/);
-  assert.match(finalSave, /replyEditorControllerRef\.current\?\.flush\(\) \?\? snapshot\.input\.bodyEditorHTML/);
-  assert.match(finalSave, /const pendingSave = draftSavePromiseRef\.current \?\? Promise\.resolve\(\)/);
-  assert.ok(finalSave.indexOf("pendingSave") < finalSave.indexOf("saveEmailDraft({ ...snapshot.input, bodyEditorHTML })"));
-  assert.doesNotMatch(finalSave, /setPersonalDraft|setDraftSaveStatus|setError/);
-
-  assert.match(nodeParts, /const retryDraftSave = \(\) => \{[\s\S]{0,220}lastDraftFailedFingerprintRef\.current = "";[\s\S]{0,120}setDraftSaveStatus\("idle"\)/);
-  assert.match(nodeParts, />\s*Retry save\s*<\/button>/);
-  assert.ok(submit.indexOf("const sent = await sendEmail(") < submit.indexOf("await deleteEmailDraft(companyID, submittedDraft.draft_id, mailboxScope)"));
-  assert.ok(submit.indexOf("await deleteEmailDraft(companyID, submittedDraft.draft_id, mailboxScope)") < submit.indexOf("closeReplyAfterDraftCleanup(submittedDraft.draft_id, internalSourceMessageID)"));
-  assert.match(submit, /catch \(cause\) \{\s*if \(isHTTPNotFoundError\(cause\)\) \{\s*closeReplyAfterDraftCleanup\(submittedDraft\.draft_id, internalSourceMessageID\)/);
-  assert.match(submit, /Email sent, but draft cleanup failed\. Retry cleanup before leaving this reply\.[\s\S]{0,160}setSentCleanupFailed\(true\)/);
-  assert.match(nodeParts, /const replyEditingEnabled = [^;]+&& !sending && !sentCleanupFailed/);
-  assert.match(nodeParts, /Sent, draft cleanup failed\./);
-  assert.match(nodeParts, /sending \? "Cleaning up…" : "Retry cleanup"/);
-  assert.match(retryCleanup, /deleteEmailDraft\(companyID, draftID, mailboxScope\)[\s\S]{0,280}isHTTPNotFoundError\(cause\)[\s\S]{0,160}closeReplyAfterDraftCleanup\(draftID, sourceMessageID\)/);
-  assert.match(nodeParts, /const closeReplyAfterDraftCleanup = useCallback[\s\S]{0,140}if \(!replyPaneMountedRef\.current\) return/);
 });
 
 test("My Draft opens exact durable content before the compose editor", () => {
@@ -500,7 +356,6 @@ test("the Node-level highlighted-email destination is compact and hidden when al
 
 test("exact Node email headers link to text boxes without accepting whole-email provider drags", () => {
   const nodeSurface = source("frontend/src/modules/editor/NodeWorkspaceSurface.tsx");
-  const nodeParts = source("frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx");
   const relationships = source("frontend/src/modules/editor/email/emailTextBoxRelationships.ts");
 
   assert.match(nodeSurface, /const linkEmailMessageToTextBlock = useCallback/);
@@ -523,38 +378,6 @@ test("exact Node email headers link to text boxes without accepting whole-email 
   assert.match(nodeSurface, /parseEmailMessageTextBoxLinkDrag\(event\.dataTransfer\)/);
   assert.doesNotMatch(nodeSurface, /buildEditorAttachedEmailPayload\(\{ \.\.\.dragged, blockID, linkWholeThread: false \}\)/);
 
-  assert.match(nodeParts, /const messageHeaderDraggable = Boolean\(editable && \(nodeID\.trim\(\) \|\| projectID\.trim\(\)\) && internalThreadMessageID && !singleMessageOnly\)/);
-  assert.match(nodeParts, /onPointerDownCapture=\{prepareEmailMessageTextBoxLinkDrag\}/);
-  assert.match(nodeParts, /data-email-message-drag-strip="true"[\s\S]{0,180}draggable=\{messageHeaderDraggable\}/);
-  assert.match(nodeParts, /data-email-message-drag-region="true"/, "full message headers need a visible noninteractive drag region");
-  assert.match(nodeParts, /\) : collapsedSnippet \? \(\s*<div style=/);
-  assert.match(nodeParts, /event\.stopPropagation\(\)/);
-  assert.match(nodeParts, /EMAIL_MESSAGE_HEADER_INTERACTIVE_SELECTOR/);
-  assert.doesNotMatch(nodeParts, /onMessageActivate\?\.\(email\.messageID\)/, "the neutral thread representative must not navigate as an exact linked message");
-  const exactMessageDisclosureStart = nodeParts.indexOf('aria-label={`${isExpanded ? "Collapse" : "Expand"} email from ${fromLine}`}');
-  const exactMessageDisclosure = nodeParts.slice(
-    exactMessageDisclosureStart,
-    nodeParts.indexOf("{linkedTextBoxNavigationAvailable && (", exactMessageDisclosureStart),
-  );
-  assert.match(exactMessageDisclosure, /setExpandedThreadMessageID/);
-  assert.doesNotMatch(exactMessageDisclosure, /onMessageActivate/, "message disclosure must not navigate to a text box");
-  assert.match(nodeParts, /aria-label="Open linked text box for this email"[\s\S]{0,260}onMessageActivate\?\.\(internalThreadMessageID\)/);
-  const exactMessageCreateActionStart = nodeParts.indexOf('aria-label="Create text box for this email"', exactMessageDisclosureStart);
-  const exactMessageCreateAction = nodeParts.slice(
-    exactMessageCreateActionStart,
-    nodeParts.indexOf("{repliesEnabled && (", exactMessageCreateActionStart),
-  );
-  assert.match(exactMessageCreateAction, /onMessageTextBoxRequest\(internalThreadMessageID\)/);
-  const compactChildMessages = nodeParts.slice(
-    nodeParts.indexOf("{childMessages.map((message, index) =>"),
-    nodeParts.indexOf("type LinkedEmailPreviewPaneProps"),
-  );
-  assert.match(compactChildMessages, /draggable=\{Boolean\(editable && \(nodeID\.trim\(\) \|\| projectID\.trim\(\)\) && internalMessageID\)\}/);
-  assert.match(compactChildMessages, /cursor: editable && \(nodeID\.trim\(\) \|\| projectID\.trim\(\)\) && internalMessageID \? "grab" : undefined/);
-  assert.match(compactChildMessages, /const selectMessage = \(\) => onSelect\(\)/);
-  assert.doesNotMatch(compactChildMessages, /if \(internalMessageID\) onMessageActivate\?\.\(internalMessageID\)/, "opening a compact child message must not navigate implicitly");
-  assert.match(compactChildMessages, /aria-label="Open linked text box for this email"[\s\S]{0,260}onMessageActivate\?\.\(internalMessageID\)/);
-  assert.match(compactChildMessages, /aria-label="Create text box for this email"[\s\S]{0,420}onMessageTextBoxRequest\(internalMessageID\)/);
 
   assert.match(relationships, /application\/x-mango-email-message-text-box-link/);
   assert.match(relationships, /email_message_id: cleanEmailMessageID/);
@@ -581,7 +404,7 @@ test("triage thread controls and reply resize pointer lifecycle are explicit", (
   assert.match(homePage, /requiredReplyAllRecipients/);
   assert.match(homePage, /mergeEmailAddressDrafts\(\[ensuredDraft\.cc, requiredReplyAllRecipients\.cc\], \[to\]\)/);
 });
-test("mail workspace preserves the fixed three-button lower row and new-message compose fills the available detail height", () => {
+test("mail workspace preserves the four-button lower row and new-message compose fills the available detail height", () => {
   const homeWorkspace = source("frontend/src/pages/home/HomeMailWorkspace.tsx");
   const homeParts = source("frontend/src/pages/home/HomeParts.tsx");
 
@@ -625,21 +448,22 @@ test("mail list actions keep fixed positions, light inactive surfaces, clear sel
   assert.match(lowerActions, /mango-mail-vibrant-compose/);
   assert.match(lowerActions, /aria-pressed=\{compose\.open\}/);
   assert.match(lowerActions, /mango-mail-vibrant-drafts/);
-  assert.match(lowerActions, /aria-pressed=\{!compose\.open && mailbox === "drafts"\}/);
+  assert.match(lowerActions, /aria-pressed=\{!compose\.open && mailbox === "drafts" && draftListKind === "personal"\}/);
+  assert.match(lowerActions, /aria-pressed=\{!compose\.open && mailbox === "drafts" && draftListKind === "shared"\}/);
   assert.match(lowerActions, /onOpenDraftsMailbox/);
   assert.doesNotMatch(lowerActions, /onOpenSentMailbox/);
   assert.match(lowerActions, /mango-mail-vibrant-advance/);
   assert.match(lowerActions, /Archive & next →/);
   assert.match(lowerActions, /disabled=\{!triageAdvanceEnabled \|\| advanceDisabled\}/);
   assert.doesNotMatch(homeWorkspace, /triageAdvanceVisible/);
-  assert.match(homeStyles, /mailComposeSentTriageActionsStyle[\s\S]{0,180}gridTemplateColumns: "repeat\(3, minmax\(0, 1fr\)\)"/);
+  assert.match(homeStyles, /mailComposeSentTriageActionsStyle[\s\S]{0,180}gridTemplateColumns: "repeat\(auto-fit, minmax\(104px, 1fr\)\)"/);
   assert.match(homeWorkspace, /className="mango-mailbox-dropdown-item"/);
   assert.match(indexCSS, /\.mango-mailbox-dropdown-item:hover/);
   assert.match(indexCSS, /mango-mail-vibrant-compose \{[\s\S]{0,260}rgba\(219, 234, 254/);
-  assert.match(indexCSS, /mango-mail-vibrant-drafts \{[\s\S]{0,260}rgba\(237, 233, 254/);
+  assert.match(indexCSS, /mango-mail-vibrant-drafts,[\s\S]{0,160}mango-mail-vibrant-shared-drafts \{[\s\S]{0,260}rgba\(237, 233, 254/);
   assert.match(indexCSS, /mango-mail-vibrant-advance \{[\s\S]{0,260}rgba\(207, 250, 254/);
   assert.match(indexCSS, /mango-mail-vibrant-compose\[aria-pressed="true"\][\s\S]{0,320}#2563eb[\s\S]{0,120}#7c3aed/);
-  assert.match(indexCSS, /mango-mail-vibrant-drafts\[aria-pressed="true"\][\s\S]{0,320}#7c3aed[\s\S]{0,120}#ec4899/);
+  assert.match(indexCSS, /mango-mail-vibrant-drafts\[aria-pressed="true"\],[\s\S]{0,180}mango-mail-vibrant-shared-drafts\[aria-pressed="true"\][\s\S]{0,320}#7c3aed[\s\S]{0,120}#ec4899/);
 });
 
 

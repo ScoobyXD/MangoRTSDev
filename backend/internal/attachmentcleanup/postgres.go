@@ -25,6 +25,12 @@ where company_id=$1::uuid and deleted_timestamp is not null
       and relationship.attachment_id=attachments.attachment_id
       and relationship.deleted_timestamp is null
   )
+  and not exists (
+    select 1 from recycle_bin_items recycle,
+      lateral jsonb_array_elements(coalesce(recycle.restore_payload->'attachments','[]'::jsonb)) restored
+    where recycle.company_id=attachments.company_id
+      and restored->>'attachment_id'=attachments.attachment_id::text
+  )
 order by attachment_id
 limit $2`, companyID, limit)
 	if err != nil {
@@ -103,6 +109,12 @@ select exists(
         and relationship.attachment_id=attachment.attachment_id
         and relationship.deleted_timestamp is null
     )
+    and not exists (
+      select 1 from recycle_bin_items recycle,
+        lateral jsonb_array_elements(coalesce(recycle.restore_payload->'attachments','[]'::jsonb)) restored
+      where recycle.company_id=attachment.company_id
+        and restored->>'attachment_id'=attachment.attachment_id::text
+    )
 )`, item.CompanyID, item.AttachmentID).Scan(&eligible)
 	return eligible, err
 }
@@ -165,6 +177,10 @@ select exists(
   select 1 from attachment_relationships
   where company_id=$1::uuid and attachment_id=$2::uuid
     and deleted_timestamp is null
+  union all
+  select 1 from recycle_bin_items recycle,
+    lateral jsonb_array_elements(coalesce(recycle.restore_payload->'attachments','[]'::jsonb)) restored
+  where recycle.company_id=$1::uuid and restored->>'attachment_id'=$2::text
 )`, item.CompanyID, item.AttachmentID).Scan(&owned); err != nil {
 		return err
 	}
