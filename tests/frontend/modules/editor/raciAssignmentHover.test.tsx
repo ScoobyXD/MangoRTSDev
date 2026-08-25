@@ -54,6 +54,7 @@ test("RACI cards resolve directory names, place two assignments per row, and pre
     const noop = () => undefined;
     const editingTitleRef = React.createRef<HTMLSpanElement>();
     const editingTitleDraftRef = { current: "" };
+    let titleEditRequests = 0;
     const informedNames = ["Jonathan Kim", "Christina Phan", "Maya Patel", "Andre Silva", "Rina Cho"];
     const informedUserIDs = [
       "019e090c-e62f-781b-b123-000000000001",
@@ -70,6 +71,7 @@ test("RACI cards resolve directory names, place two assignments per row, and pre
         linkedNodeInfoPreview={[]}
         linkedNodeMetadataRows={[]}
         linkedNodeHistoryRows={[]}
+        hierarchyBreadcrumb={<nav data-test-hierarchy-breadcrumb="true"><button type="button">Workspace</button></nav>}
         canEdit
         canEditRACI
         nodePresetFields={null}
@@ -98,7 +100,7 @@ test("RACI cards resolve directory names, place two assignments per row, and pre
         titleTextColor="#111827"
         panelBackground="#ffffff"
         ruleColor="#cbd5e1"
-        onSetIsEditingTitle={noop}
+        onSetIsEditingTitle={() => { titleEditRequests += 1; }}
         onUpdateTitle={async () => undefined}
         onCommitNodeStatus={noop}
         onSetNodePriorityDraft={noop}
@@ -110,6 +112,15 @@ test("RACI cards resolve directory names, place two assignments per row, and pre
         onRemoveRACIPrincipal={noop}
       />,
     ));
+
+    const titleContainer = container.querySelector<HTMLElement>('[data-editor-entity-title-container="true"]');
+    const breadcrumb = container.querySelector<HTMLElement>('[data-test-hierarchy-breadcrumb="true"]');
+    const title = container.querySelector<HTMLElement>('[aria-label="Process title"]');
+    assert.ok(titleContainer && breadcrumb && title);
+    assert.equal(titleContainer.contains(breadcrumb), true, "the breadcrumb shares the rounded Process title container");
+    assert.equal(breadcrumb.nextElementSibling?.contains(title), true, "the icon and editable title row sits directly below the breadcrumb");
+    await act(async () => Simulate.mouseDown(breadcrumb.querySelector("button")!));
+    assert.equal(titleEditRequests, 0, "using a breadcrumb does not start title editing");
 
     const assignmentButton = container.querySelector<HTMLButtonElement>('button[aria-label="Informed people and groups"]');
     assert.ok(assignmentButton);
