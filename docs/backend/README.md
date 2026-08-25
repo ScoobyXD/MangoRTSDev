@@ -142,15 +142,21 @@ psql "host=$DB_HOST port=${DB_PORT:-5432} user=$DB_USER dbname=$DB_NAME sslmode=
   -f db/schema.sql
 ```
 
-For existing databases that were created before relationship guard constraints were added, run the generic migration runner:
+For existing databases that were created before Node relationship guard constraints or Process Map storage were added, run the generic migration runner:
 
 ```bash
 ./scripts/apply_db_migrations.sh
 ```
 
-These guards enforce:
+The Node relationship guards enforce:
 - only Parent<->Child or Peer<->Peer relationship position pairs
 - no self-relationships (`node_id_a <> node_id_b`)
+
+`20260824_process_map.sql` creates the three Process Map authorities:
+`process_map_placements`, `resource_operational_relationships`, and
+`process_map_traces`. It migrates valid legacy Logic Gate relationship IDs and
+timestamps, then removes the old table and endpoint-position type. There is no
+dual read or dual write path.
 
 The 2026-05 blank-information and Logic Gate projection migrations are historical.
 Do not run those individual scripts to create new legacy storage. The canonical
@@ -216,9 +222,13 @@ Communications invitation response:
 - `DELETE /v1/logic-gates/{logic_gate_id}?company_id={uuid}`
 - `POST /v1/logic-gates/{logic_gate_id}/information`
 - `GET /v1/logic-gates/{logic_gate_id}/projection?company_id={uuid}`
-- `GET /v1/logic-gate-relationships?company_id={uuid}`
-- `POST /v1/logic-gate-relationships`
-- `DELETE /v1/logic-gate-relationships/{logic_gate_relationship_id}?company_id={uuid}`
+- `GET /v1/process-map/layer?company_id={uuid}&folder_id={uuid}` (`folder_id` omitted for root)
+- `PUT /v1/process-map/placements/{resource_type}/{resource_id}?company_id={uuid}`
+- `DELETE /v1/process-map/placements/{resource_type}/{resource_id}?company_id={uuid}`
+- `GET /v1/process-map/operational-relationships?company_id={uuid}&resource_type={resource_type}&resource_id={uuid}&direction={incoming|outgoing|both}`
+- `POST /v1/process-map/operational-relationships`
+- `PUT /v1/process-map/operational-relationships/{relationship_id}/trace?company_id={uuid}`
+- `DELETE /v1/process-map/operational-relationships/{relationship_id}?company_id={uuid}`
 - `GET /v1/company-explorer/folders?company_id={uuid}&folder_kind=node|logic_gate|communications`
 - `POST /v1/company-explorer/folders`
 - `PUT /v1/company-explorer/folders/{folder_id}` (rename with `name`, move with `parent_folder_id`, reorder with `position`, or combine those fields)
@@ -226,7 +236,7 @@ Communications invitation response:
 - `GET /v1/company-explorer/folder-items?company_id={uuid}&folder_id={uuid}&item_type=node|logic_gate`
 - `POST /v1/company-explorer/folder-items` (assign/move item; moving to a different folder level deletes relationships touching that node or logic gate)
 - `DELETE /v1/company-explorer/folder-items?company_id={uuid}&item_type=node|logic_gate&item_id={uuid}`
-- `POST /v1/workspace/entity-batches` (create Nodes or Logic Gates with optional relationships, Explorer placement, RACI assignment, and client/entity mappings)
+- `POST /v1/workspace/entity-batches` (create Nodes or Logic Gates; relationships are Node-only, with optional Explorer placement, RACI assignment, and client/entity mappings)
 - `GET /v1/kanban/boards?company_id={uuid}&after_position=0&limit=100`
 - `POST /v1/kanban/boards`
 - `PUT /v1/kanban/boards/{board_id}`
@@ -260,12 +270,12 @@ curl -X POST http://localhost:8080/v1/logic-gates \
   -d '{"company_id":"11111111-1111-1111-1111-111111111111","header":"Validate intake"}'
 ```
 
-Create logic gate relationship:
+Create a directed Process-to-Process operational relationship and its trace atomically:
 
 ```bash
-curl -X POST http://localhost:8080/v1/logic-gate-relationships \
+curl -X POST http://localhost:8080/v1/process-map/operational-relationships \
   -H 'content-type: application/json' \
-  -d '{"company_id":"11111111-1111-1111-1111-111111111111","logic_gate_id_a":"<source_gate_id>","logic_gate_id_b":"<target_gate_id>","a_position":"Input","b_position":"Output"}'
+  -d '{"company_id":"11111111-1111-1111-1111-111111111111","source":{"resource_type":"logic_gate","resource_id":"<source_gate_id>"},"target":{"resource_type":"logic_gate","resource_id":"<target_gate_id>"},"trace":{"route_points":[{"x":4,"y":6},{"x":8,"y":6}]}}'
 ```
 
 Add node information:

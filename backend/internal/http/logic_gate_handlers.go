@@ -155,6 +155,7 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeHuddleError(w, err)
 			return
 		}
+		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, item)
 		return
 	}
@@ -298,16 +299,6 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate")
 			return
 		}
-		relationshipLogicGateIDs := make([]string, 0, len(details.Relationships)*2)
-		for _, relationship := range details.Relationships {
-			relationshipLogicGateIDs = append(relationshipLogicGateIDs, relationship.LogicGateIDA, relationship.LogicGateIDB)
-		}
-		visibleRelationshipLogicGateIDs, err := s.visibleEntityIDSet(r, companyID, store.EntityTypeLogicGate, relationshipLogicGateIDs)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_filter_logic_gates")
-			return
-		}
-		details.Relationships = filterLogicGateRelationshipsByVisibleGates(details.Relationships, visibleRelationshipLogicGateIDs)
 		writeJSONMaybeNotModified(w, r, http.StatusOK, details)
 		return
 	}

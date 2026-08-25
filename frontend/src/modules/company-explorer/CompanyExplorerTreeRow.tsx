@@ -263,7 +263,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
         if (!selectedTreeIDs.has(row.id)) onSelectTreeRow(row, undefined, { selectionIntent: "navigate" });
         onSetDraggingTreeID(row.id);
         onSetDragPayload(rowDragPayload);
-        event.dataTransfer.effectAllowed = row.kind === "folder" ? "move" : "copyMove";
+        event.dataTransfer.effectAllowed = "copyMove";
         const serialized = JSON.stringify(rowDragPayload);
         event.dataTransfer.setData(EXPLORER_DRAG_MIME, serialized);
         if (kanbanDragItems.length > 0) {

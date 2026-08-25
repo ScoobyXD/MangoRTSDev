@@ -46,6 +46,9 @@ var (
 	ErrAttachmentShared                 = errors.New("attachment is linked to another resource")
 	ErrProjectionRevisionRequired       = errors.New("projection revision required")
 	ErrNoVerificationRecipients         = errors.New("no verification recipients")
+	ErrProcessMapRootProcess            = errors.New("processes cannot be placed on the process map root")
+	ErrProcessMapCycle                  = errors.New("process map folder cycle")
+	ErrProcessMapLayerMismatch          = errors.New("process map endpoints must be placed on the same layer")
 )
 
 type ProjectionRevisionConflictError struct {
@@ -64,6 +67,7 @@ type Repository interface {
 	AttachmentRepository
 	WorkGraphRepository
 	LogicGateRepository
+	ProcessMapRepository
 	ProjectRepository
 	RACIRepository
 	EntityPermissionRepository
@@ -571,9 +575,6 @@ type LogicGateRepository interface {
 	SetLogicGateRACIAssignments(input LogicGateRACIAssignmentUpdateInput) ([]domain.LogicGateRACIAssignment, error)
 	AddLogicGateRACIAssignments(input LogicGateRACIAssignmentCommandInput) (LogicGateRACIAssignmentCommandResult, error)
 	RemoveLogicGateRACIAssignments(input LogicGateRACIAssignmentCommandInput) (LogicGateRACIAssignmentCommandResult, error)
-	ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error)
-	ListLogicGateRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateRelationship, error)
-	DeleteLogicGateRelationship(companyID, relationshipID string) error
 	GetLogicGate(companyID, logicGateID string) (domain.LogicGate, error)
 	DeleteLogicGate(companyID, logicGateID string) error
 	GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error)
@@ -584,7 +585,16 @@ type LogicGateRepository interface {
 	CreateLogicGateEditorSaveVersion(input EditorSaveVersionInput) (domain.EditorSaveVersion, error)
 	ListLogicGateEditorSaveVersions(companyID, logicGateID string) ([]domain.EditorSaveVersion, error)
 	RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error)
-	CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error)
+}
+
+type ProcessMapRepository interface {
+	GetProcessMapLayer(input ProcessMapLayerQuery) (domain.ProcessMapLayerView, error)
+	ListResourceOperationalRelationshipsForResource(input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error)
+	PutProcessMapPlacement(input ProcessMapPlacementPutInput) (ProcessMapPlacementMutationResult, error)
+	DeleteProcessMapPlacement(input ProcessMapPlacementDeleteInput) (ProcessMapPlacementDeleteResult, error)
+	CreateResourceOperationalRelationship(input ResourceOperationalRelationshipCreateInput) (ResourceOperationalRelationshipMutationResult, error)
+	PutProcessMapTrace(input ProcessMapTracePutInput) (ProcessMapTraceMutationResult, error)
+	DeleteResourceOperationalRelationship(input ResourceOperationalRelationshipDeleteInput) (ResourceOperationalRelationshipDeleteResult, error)
 }
 
 type ProjectRepository interface {
@@ -865,11 +875,10 @@ type CompanyExplorerRepository interface {
 	GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID string) (CompanyExplorerV2Row, error)
 	GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID string) (string, error)
 	CreateCompanyExplorerV2Folder(input CompanyExplorerV2FolderInput) (CompanyExplorerV2Row, error)
-	UpdateCompanyExplorerV2Folder(input CompanyExplorerV2FolderUpdateInput) (CompanyExplorerV2Row, error)
 	UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2Row, error)
 	MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeInput) (CompanyExplorerV2Row, error)
-	DeleteCompanyExplorerV2Edge(companyID, edgeID string) error
-	DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string) error
+	DeleteCompanyExplorerV2Edge(companyID, edgeID, actorUserID, permissionUserID string) error
+	DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string, actorUserID, permissionUserID string) error
 	DeleteCompanyExplorerV2Folder(companyID, entityID string) error
 	UpsertCompanyExplorerV2Subscription(input CompanyExplorerV2SubscriptionInput) (CompanyExplorerV2Subscription, error)
 	DeleteCompanyExplorerV2Subscription(companyID, subscriptionID, actorUserID string) error
@@ -878,10 +887,9 @@ type CompanyExplorerRepository interface {
 	ListCompanyExplorerLogicGateChildRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)
 	ListCompanyExplorerFolderSubtree(companyID, folderID, folderKind string) ([]domain.CompanyExplorerFolder, error)
 	ListVisibleCompanyExplorerFolderSubtree(companyID, folderID, folderKind, userID string) ([]domain.CompanyExplorerFolder, error)
-	MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error)
+	MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int, actorUserID, permissionUserID string) (domain.CompanyExplorerFolder, error)
 	SetCompanyExplorerFolderScope(companyID, folderID, scopeType, scopeID string) (domain.CompanyExplorerFolder, error)
-	RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error)
-	DeleteCompanyExplorerFolder(companyID, folderID string) error
+	RenameCompanyExplorerFolder(companyID, folderID, name, actorUserID, permissionUserID string) (domain.CompanyExplorerFolder, error)
 	DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput, deletedByUserID string) (CompanyExplorerDeleteResult, error)
 	CreateCommunicationsSharedInboxFolder(companyID, parentFolderID, name, accountEmail string) (domain.CompanyExplorerFolder, error)
 	ListCommunicationsSharedInboxFolders(companyID string) ([]domain.CompanyExplorerFolder, error)
@@ -1019,14 +1027,6 @@ type CompanyExplorerV2FolderInput struct {
 	Name             string
 	Position         int
 	DefaultAccess    string
-	ActorUserID      string
-	PermissionUserID string
-}
-
-type CompanyExplorerV2FolderUpdateInput struct {
-	CompanyID        string
-	EntityID         string
-	Name             string
 	ActorUserID      string
 	PermissionUserID string
 }
@@ -1762,14 +1762,13 @@ type WorkspaceEntityBatchEntityMapping struct {
 }
 
 type WorkspaceEntityBatchResult struct {
-	CompanyID              string                              `json:"company_id"`
-	EntityKind             string                              `json:"entity_kind"`
-	EntityMappings         []WorkspaceEntityBatchEntityMapping `json:"entity_mappings"`
-	Nodes                  []domain.Node                       `json:"nodes,omitempty"`
-	LogicGates             []domain.LogicGate                  `json:"logic_gates,omitempty"`
-	Relationships          []domain.NodeRelationship           `json:"relationships,omitempty"`
-	LogicGateRelationships []domain.LogicGateRelationship      `json:"logic_gate_relationships,omitempty"`
-	FolderItems            []domain.CompanyExplorerFolderItem  `json:"folder_items,omitempty"`
+	CompanyID      string                              `json:"company_id"`
+	EntityKind     string                              `json:"entity_kind"`
+	EntityMappings []WorkspaceEntityBatchEntityMapping `json:"entity_mappings"`
+	Nodes          []domain.Node                       `json:"nodes,omitempty"`
+	LogicGates     []domain.LogicGate                  `json:"logic_gates,omitempty"`
+	Relationships  []domain.NodeRelationship           `json:"relationships,omitempty"`
+	FolderItems    []domain.CompanyExplorerFolderItem  `json:"folder_items,omitempty"`
 }
 
 type RACIMatrixNodeCreateInput struct {

@@ -9,6 +9,54 @@ import (
 	"strings"
 )
 
+func lockPostgresPolicyGroupMembershipVersionTx(ctx context.Context, tx *sql.Tx, companyID string, exclusive bool) error {
+	companyID = cleanUUIDText(companyID)
+	if companyID == "" {
+		return ErrInvalid
+	}
+	if _, err := tx.ExecContext(ctx, `
+insert into workspace_read_versions(company_id,scope,resource_key,version,updated_timestamp)
+values($1::uuid,'policy-group-membership','',0,now())
+on conflict(company_id,scope,resource_key) do nothing`, companyID); err != nil {
+		return err
+	}
+	lockClause := " for share"
+	if exclusive {
+		lockClause = " for update"
+	}
+	var one int
+	return tx.QueryRowContext(ctx, `
+select 1
+from workspace_read_versions
+where company_id=$1::uuid and scope='policy-group-membership' and resource_key=''`+lockClause, companyID).Scan(&one)
+}
+
+func advancePostgresPolicyGroupMembershipVersionsTx(ctx context.Context, tx *sql.Tx, companyIDs []string) error {
+	unique := map[string]bool{}
+	for _, companyID := range companyIDs {
+		companyID = cleanUUIDText(companyID)
+		if companyID == "" {
+			return ErrInvalid
+		}
+		unique[companyID] = true
+	}
+	sortedCompanyIDs := make([]string, 0, len(unique))
+	for companyID := range unique {
+		sortedCompanyIDs = append(sortedCompanyIDs, companyID)
+	}
+	sort.Strings(sortedCompanyIDs)
+	for _, companyID := range sortedCompanyIDs {
+		if _, err := tx.ExecContext(ctx, `
+insert into workspace_read_versions(company_id,scope,resource_key,version,updated_timestamp)
+values($1::uuid,'policy-group-membership','',1,now())
+on conflict(company_id,scope,resource_key) do update
+set version=workspace_read_versions.version+1,updated_timestamp=now()`, companyID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func cleanPolicyRevision(value string) string {
 	value = strings.TrimSpace(value)
 	value = strings.TrimPrefix(value, "W/")
@@ -517,6 +565,9 @@ func (r *PostgresRepo) PutResourcePermissionPolicy(input ResourcePermissionPolic
 			policy, err := r.GetResourcePermissionPolicy(companyID, resourceType, resourceID)
 			return policy, []domain.DomainEvent{}, err
 		}
+	}
+	if err := lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, true); err != nil {
+		return ResourcePermissionPolicy{}, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `select 1 from resource_permission_settings where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid for update`, companyID, resourceType, resourceID); err != nil {
 		return ResourcePermissionPolicy{}, nil, err

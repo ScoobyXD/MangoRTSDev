@@ -58,7 +58,7 @@
 56. Every operational relationship MUST be directed, same-company, and non-self-referential.
 57. Repeating creation for the same exact typed source and target MUST return or reuse the one existing operational relationship and MUST NOT create a duplicate row.
 58. An operational relationship MUST NOT grant access, RACI, ownership, Company Explorer parentage, or Process Map parentage to either endpoint.
-59. `resource_operational_relationships` MUST replace the same Process-to-Process business meaning currently stored by `logic_gate_relationships` through one forward-only cutover with no dual writes, compatibility reads, fallback reads, or second live authority.
+59. `resource_operational_relationships` MUST replace the same Process-to-Process business meaning formerly stored by `logic_gate_relationships` through one forward-only cutover with no dual writes, compatibility reads, fallback reads, or second live authority.
 60. The source and target of an existing operational relationship MUST be immutable, and changing either endpoint or reversing direction MUST delete the old relationship and trace before creating a new relationship and trace.
 61. A visible Process Map trace MUST represent one explicit `resource_operational_relationships` row and MUST NOT be decorative or inferred.
 62. Finishing a newly drawn trace MUST atomically create or reuse its operational relationship and save its trace, or save neither.
@@ -82,7 +82,7 @@
 80. A failed trace write MUST change neither its route, revision, nor timestamps.
 81. Deleting a selected trace in the Process Map UI MUST atomically delete its operational relationship and dependent saved trace while preserving both endpoint resources and their placements.
 82. The first version MUST NOT expose a user command that deletes only saved trace geometry while preserving that trace's operational relationship.
-83. Removing a placement MUST remove traces on that placement's former layer that touch it and MUST preserve the underlying operational relationships.
+83. Removing a placement or changing its map parent MUST remove every incident trace that is no longer valid on the former layer and MUST preserve the underlying operational relationships.
 84. A trace MUST render only when both exact endpoints have placements on the current layer and both endpoints are visible to the current user.
 85. Every Process Map read, direct layer navigation, and mutation MUST enforce the normal Mango permission system.
 86. Adding, moving, or removing a placement MUST require Edit access to the placed resource.
@@ -103,5 +103,13 @@
 101. The first Process Map version MUST NOT include a minimap.
 102. The first Process Map version MUST omit decorative infographic ribbons, ornamental paths, and visuals that do not represent map data.
 103. The new Process Map MUST NOT restore, depend on, or add compatibility behavior for the removed Node Map or Logic Gate Map implementations.
+104. One trace route-point array MUST contain at most 256 points, and every point MUST be an object with exactly the signed integer fields `x` and `y`.
+105. Repeating a trace save with the same exact ordered route points MUST return the existing trace without advancing its revision or timestamps.
+106. The first Process Map version MAY allow placement cards to overlap and MUST NOT add automatic collision repair or automatic layout.
+107. The first Process Map manual-add entry point MUST be dragging one exact supported resource from Company Explorer onto the current layer, and MUST NOT add a separate candidate-search API.
+108. The Process Map editor SHOULD use orthogonal circuit-style trace routing where practical while preserving the one bounded integer route-point array as the only saved geometry.
+109. Every restricted placeholder MUST occupy the same fixed four-by-three smallest-grid-square rectangle used by an accessible Process, regardless of its hidden resource type.
+110. The fixed input anchor MUST be centered on the left side and the fixed output anchor MUST be centered on the right side of every accessible card.
+111. The Process Map frontend MAY use `@xyflow/react` for interaction and rendering, but Mango-owned placements, relationships, and traces MUST remain the only persisted map state; React Flow's graph JSON and viewport MUST NOT be persisted.
 
 Last updated: 2026-08-24

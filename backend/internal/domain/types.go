@@ -1013,16 +1013,6 @@ type LogicGateRACIAssignment struct {
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
-type LogicGateRelationship struct {
-	CompanyID               string    `json:"company_id"`
-	LogicGateRelationshipID string    `json:"logic_gate_relationship_id"`
-	LogicGateIDA            string    `json:"logic_gate_id_a"`
-	LogicGateIDB            string    `json:"logic_gate_id_b"`
-	APosition               string    `json:"a_position"`
-	BPosition               string    `json:"b_position"`
-	CreatedTimestamp        time.Time `json:"created_timestamp"`
-}
-
 type LogicGateInformation struct {
 	CompanyID           string    `json:"company_id"`
 	InformationID       string    `json:"information_id"`
@@ -1051,9 +1041,8 @@ type LogicGateProjection struct {
 }
 
 type LogicGateDetails struct {
-	LogicGate     LogicGate               `json:"logic_gate"`
-	Information   []LogicGateInformation  `json:"information"`
-	Relationships []LogicGateRelationship `json:"relationships"`
+	LogicGate   LogicGate              `json:"logic_gate"`
+	Information []LogicGateInformation `json:"information"`
 }
 
 type EditorSaveVersionItem struct {
@@ -1086,12 +1075,10 @@ type LogicGateView struct {
 	Information         []LogicGateInformation    `json:"information"`
 	Projections         []LogicGateProjection     `json:"projections"`
 	RACIAssignments     []LogicGateRACIAssignment `json:"gvic_assignments"`
-	Relationships       []LogicGateRelationship   `json:"relationships"`
 	Work                LogicGateWorkView         `json:"work"`
 	InformationCount    int                       `json:"information_count"`
 	ProjectionCount     int                       `json:"projection_count"`
 	RACIAssignmentCount int                       `json:"gvic_assignment_count"`
-	RelationshipsCount  int                       `json:"relationships_count"`
 	AssignmentCount     int                       `json:"assignment_count"`
 	NodeCount           int                       `json:"node_count"`
 	EffectiveAccessFlags

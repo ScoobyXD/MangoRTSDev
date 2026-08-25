@@ -255,6 +255,9 @@ returning company_id::text, group_id::text, parent_group_id::text, name, positio
 	if err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
+	if _, err := r.appendDomainEventTx(ctx, tx, workspaceDomainEventInput(companyID, "company_user_group_updated", map[string]any{"group_id": groupID})); err != nil {
+		return domain.CompanyUserGroup{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
@@ -338,6 +341,9 @@ where company_id=$1::uuid and group_id=$2::uuid`, companyID, groupID)
 	}
 	if affected == 0 {
 		return ErrNotFound
+	}
+	if _, err := r.appendDomainEventTx(ctx, tx, workspaceDomainEventInput(companyID, "company_user_group_deleted", map[string]any{"group_id": groupID})); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -446,19 +452,44 @@ set updated_timestamp=now()`, companyID, groupID, cleanUserIDs); err != nil {
 			return nil, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-
-	allMembers, err := r.ListCompanyUserGroupMembers(companyID)
+	rows, err := tx.QueryContext(ctx, `
+select member.company_id::text,
+       member.group_id::text,
+       member.user_id::text,
+       nullif(app_user.display_name, ''),
+       nullif(app_user.email, ''),
+       member.created_timestamp,
+       member.updated_timestamp
+from company_user_group_members member
+join users app_user on app_user.user_id=member.user_id
+where member.company_id=$1::uuid
+  and member.group_id=$2::uuid
+order by lower(coalesce(nullif(app_user.display_name, ''), nullif(app_user.email, ''), member.user_id::text)) asc,
+         member.user_id::text asc`, companyID, groupID)
 	if err != nil {
 		return nil, err
 	}
 	items := make([]domain.CompanyUserGroupMember, 0, len(cleanUserIDs))
-	for _, member := range allMembers {
-		if member.GroupID == groupID {
-			items = append(items, member)
+	for rows.Next() {
+		item, err := scanCompanyUserGroupMember(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
 		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if _, err := r.appendDomainEventTx(ctx, tx, workspaceDomainEventInput(companyID, "company_user_group_members_updated", map[string]any{"group_id": groupID})); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
 	}
 	return items, nil
 }

@@ -68,6 +68,10 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 					restore()
 					return domain.DomainEvent{}, err
 				}
+				if err := r.enqueueProcessMapRealtimeForDomainEventsLocked([]domain.DomainEvent{existing}); err != nil {
+					restore()
+					return domain.DomainEvent{}, err
+				}
 				return cloneDomainEvent(existing), nil
 			}
 		}
@@ -104,6 +108,10 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 		restore()
 		return domain.DomainEvent{}, err
 	}
+	if err := r.enqueueProcessMapRealtimeForDomainEventsLocked([]domain.DomainEvent{item}); err != nil {
+		restore()
+		return domain.DomainEvent{}, err
+	}
 	return cloneDomainEvent(item), nil
 }
 
@@ -137,6 +145,10 @@ func (r *MemoryRepo) appendDomainEventsLocked(inputs []DomainEventInput) ([]doma
 		return nil, err
 	}
 	if err := r.enqueueRACITabsRealtimeForDomainEventsLocked(events); err != nil {
+		restore()
+		return nil, err
+	}
+	if err := r.enqueueProcessMapRealtimeForDomainEventsLocked(events); err != nil {
 		restore()
 		return nil, err
 	}

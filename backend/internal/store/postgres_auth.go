@@ -10,6 +10,34 @@ import (
 	"time"
 )
 
+func lockPostgresCompanyMembershipCompanySetTx(ctx context.Context, tx *sql.Tx) error {
+	_, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended('company-membership-company-set',0))`)
+	return err
+}
+
+func postgresMembershipAffectedCompanyIDsTx(ctx context.Context, tx *sql.Tx, fallbackCompanyIDs []string, globalAccessChanged bool) ([]string, error) {
+	if !globalAccessChanged {
+		return append([]string(nil), fallbackCompanyIDs...), nil
+	}
+	if err := lockPostgresCompanyMembershipCompanySetTx(ctx, tx); err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `select company_id::text from companies order by company_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	companyIDs := []string{}
+	for rows.Next() {
+		var companyID string
+		if err := rows.Scan(&companyID); err != nil {
+			return nil, err
+		}
+		companyIDs = append(companyIDs, companyID)
+	}
+	return companyIDs, rows.Err()
+}
+
 func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
@@ -166,32 +194,94 @@ func (r *PostgresRepo) AddCompanyMembership(cognitoSubject, companyID, role stri
 	}
 	defer tx.Rollback()
 
-	var membership domain.CompanyMembership
-	err = tx.QueryRowContext(ctx,
-		`with target_user as (
-		   select user_id
-		   from users
-		   where cognito_subject = $1
-		 ), upserted as (
-		   insert into company_memberships (company_id, user_id, role, created_timestamp, updated_timestamp)
-		   select $2::uuid, user_id, $3, now(), now()
-		   from target_user
-		   on conflict (company_id, user_id) do update set
-		     role = excluded.role,
-		     updated_timestamp = now()
-		   returning company_id, user_id, role, created_timestamp, updated_timestamp
-		 )
-		 select upserted.company_id, companies.name, upserted.user_id, upserted.role, upserted.created_timestamp, upserted.updated_timestamp
-		 from upserted
-		 join companies on companies.company_id = upserted.company_id`,
-		cognitoSubject,
-		companyID,
-		normalizedRole,
-	).Scan(&membership.CompanyID, &membership.CompanyName, &membership.UserID, &membership.Role, &membership.CreatedTimestamp, &membership.UpdatedTimestamp)
+	var userID string
+	err = tx.QueryRowContext(ctx, `
+select user_id::text
+from users
+where cognito_subject=$1
+for update`, cognitoSubject).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CompanyMembership{}, ErrNotFound
 	}
 	if err != nil {
+		return domain.CompanyMembership{}, err
+	}
+	var existingRole string
+	var hadGlobalAccess, hasOtherGlobalAccess bool
+	err = tx.QueryRowContext(ctx, `
+select coalesce((
+         select target_membership.role
+         from company_memberships target_membership
+         where target_membership.user_id=$1::uuid
+           and target_membership.company_id=$2::uuid
+       ), ''),
+       exists (
+         select 1
+         from company_memberships dev_membership
+         where dev_membership.user_id=$1::uuid
+           and dev_membership.role='dev_admin'
+       ),
+       exists (
+         select 1
+         from company_memberships dev_membership
+         where dev_membership.user_id=$1::uuid
+           and dev_membership.company_id<>$2::uuid
+           and dev_membership.role='dev_admin'
+       )`, userID, companyID).Scan(&existingRole, &hadGlobalAccess, &hasOtherGlobalAccess)
+	if err != nil {
+		return domain.CompanyMembership{}, err
+	}
+	if existingRole == normalizedRole {
+		var membership domain.CompanyMembership
+		err = tx.QueryRowContext(ctx, `
+select membership.company_id::text, company.name, membership.user_id::text, membership.role,
+       membership.created_timestamp, membership.updated_timestamp
+from company_memberships membership
+join companies company on company.company_id=membership.company_id
+where membership.company_id=$1::uuid
+  and membership.user_id=$2::uuid`, companyID, userID).Scan(
+			&membership.CompanyID, &membership.CompanyName, &membership.UserID, &membership.Role,
+			&membership.CreatedTimestamp, &membership.UpdatedTimestamp,
+		)
+		if err != nil {
+			return domain.CompanyMembership{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.CompanyMembership{}, err
+		}
+		return membership, nil
+	}
+	hasGlobalAccess := normalizedRole == domain.RoleDevAdmin || hasOtherGlobalAccess
+	affectedCompanyIDs, err := postgresMembershipAffectedCompanyIDsTx(ctx, tx, []string{companyID}, hadGlobalAccess != hasGlobalAccess)
+	if err != nil {
+		return domain.CompanyMembership{}, err
+	}
+	if err := advancePostgresPolicyGroupMembershipVersionsTx(ctx, tx, affectedCompanyIDs); err != nil {
+		return domain.CompanyMembership{}, err
+	}
+
+	var membership domain.CompanyMembership
+	err = tx.QueryRowContext(ctx, `
+with upserted as (
+	insert into company_memberships (company_id, user_id, role, created_timestamp, updated_timestamp)
+	values ($1::uuid, $2::uuid, $3, now(), now())
+	on conflict (company_id, user_id) do update set
+	  role=excluded.role,
+	  updated_timestamp=now()
+	returning company_id, user_id, role, created_timestamp, updated_timestamp
+)
+select upserted.company_id::text, companies.name, upserted.user_id::text, upserted.role,
+       upserted.created_timestamp, upserted.updated_timestamp
+from upserted
+join companies on companies.company_id=upserted.company_id`,
+		companyID,
+		userID,
+		normalizedRole,
+	).Scan(&membership.CompanyID, &membership.CompanyName, &membership.UserID, &membership.Role, &membership.CreatedTimestamp, &membership.UpdatedTimestamp)
+	if err != nil {
+		return domain.CompanyMembership{}, err
+	}
+	if _, err := r.appendDomainEventsTx(ctx, tx, companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, userID)); err != nil {
 		return domain.CompanyMembership{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -212,6 +302,9 @@ func (r *PostgresRepo) CreateCompany(name string) (domain.Company, error) {
 		return domain.Company{}, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyMembershipCompanySetTx(ctx, tx); err != nil {
+		return domain.Company{}, err
+	}
 
 	var company domain.Company
 	err = tx.QueryRowContext(ctx,
@@ -648,14 +741,21 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		)
 	}
 
+	var lockedUserID string
+	err = tx.QueryRow(`select user_id::text from users where user_id=$1::uuid for update`, userID).Scan(&lockedUserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeleteCompanyUserResult{}, ErrNotFound
+	}
+	if err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("lock company user: %w", err)
+	}
 	var item domain.CompanyUser
 	err = tx.QueryRow(
 		`select cm.company_id, u.user_id, u.cognito_subject, u.email, u.display_name, cm.role, cm.created_timestamp, cm.updated_timestamp
 		 from company_memberships cm
 		 join users u on u.user_id = cm.user_id
 		 where cm.company_id = $1::uuid
-		   and u.user_id = $2::uuid
-		 for update of cm, u`,
+		   and u.user_id = $2::uuid`,
 		companyID,
 		userID,
 	).Scan(&item.CompanyID, &item.UserID, &item.CognitoSubject, &item.Email, &item.DisplayName, &item.Role, &item.CreatedTimestamp, &item.UpdatedTimestamp)
@@ -664,6 +764,61 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	}
 	if err != nil {
 		return DeleteCompanyUserResult{}, fmt.Errorf("load company user: %w", err)
+	}
+	originalMembershipCompanyIDs := []string{}
+	hadGlobalAccess := false
+	hasOtherGlobalAccess := false
+	membershipRows, err := tx.Query(`
+select company_id::text, role
+from company_memberships
+where user_id=$1::uuid
+order by company_id`, userID)
+	if err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("list user memberships before deletion: %w", err)
+	}
+	for membershipRows.Next() {
+		var membershipCompanyID string
+		var membershipRole string
+		if err := membershipRows.Scan(&membershipCompanyID, &membershipRole); err != nil {
+			membershipRows.Close()
+			return DeleteCompanyUserResult{}, fmt.Errorf("scan user membership before deletion: %w", err)
+		}
+		originalMembershipCompanyIDs = append(originalMembershipCompanyIDs, membershipCompanyID)
+		if membershipRole == domain.RoleDevAdmin {
+			hadGlobalAccess = true
+			if membershipCompanyID != companyID {
+				hasOtherGlobalAccess = true
+			}
+		}
+	}
+	if err := membershipRows.Err(); err != nil {
+		membershipRows.Close()
+		return DeleteCompanyUserResult{}, fmt.Errorf("iterate user memberships before deletion: %w", err)
+	}
+	membershipRows.Close()
+	deleteAllMemberships := deleteIdentity || len(originalMembershipCompanyIDs) == 1
+	globalAccessChanged := hadGlobalAccess
+	fallbackCompanyIDs := originalMembershipCompanyIDs
+	if !deleteAllMemberships {
+		globalAccessChanged = hadGlobalAccess != hasOtherGlobalAccess
+		fallbackCompanyIDs = []string{companyID}
+	}
+	membershipAffectedCompanyIDs, err := postgresMembershipAffectedCompanyIDsTx(context.Background(), tx, fallbackCompanyIDs, globalAccessChanged)
+	if err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("list membership deletion companies: %w", err)
+	}
+	if err := advancePostgresPolicyGroupMembershipVersionsTx(context.Background(), tx, membershipAffectedCompanyIDs); err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("lock membership permission versions: %w", err)
+	}
+	var lockedMembership int
+	if err := tx.QueryRow(`
+select 1
+from company_memberships
+where company_id=$1::uuid and user_id=$2::uuid
+for update`, companyID, userID).Scan(&lockedMembership); errors.Is(err, sql.ErrNoRows) {
+		return DeleteCompanyUserResult{}, ErrNotFound
+	} else if err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("lock company membership: %w", err)
 	}
 
 	gvicRows, err := tx.Query(`select distinct company_id::text, resource_type, resource_id::text from resource_gvic_assignments where company_id = $1::uuid and principal_type = 'user' and principal_id = $2::uuid`, companyID, userID)
@@ -699,10 +854,14 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	}
 
 	var hasRemainingMembership bool
-	if err = tx.QueryRow(`select exists(select 1 from company_memberships where user_id = $1::uuid)`, userID).Scan(&hasRemainingMembership); err != nil {
+	if err = tx.QueryRow(`
+select exists(select 1 from company_memberships where user_id=$1::uuid)`, userID).Scan(&hasRemainingMembership); err != nil {
 		return DeleteCompanyUserResult{}, fmt.Errorf("check remaining memberships: %w", err)
 	}
 	if hasRemainingMembership && !deleteIdentity {
+		if _, err := r.appendDomainEventsTx(context.Background(), tx, companyMembershipEventInputs(membershipAffectedCompanyIDs, CompanyMembershipDeletedEventType, userID)); err != nil {
+			return DeleteCompanyUserResult{}, fmt.Errorf("append company membership deletion event: %w", err)
+		}
 		if err = tx.Commit(); err != nil {
 			return DeleteCompanyUserResult{}, fmt.Errorf("commit company membership deletion: %w", err)
 		}
@@ -768,6 +927,9 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 	}
 	if _, err = tx.Exec(`delete from users where user_id = $1::uuid`, userID); err != nil {
 		return DeleteCompanyUserResult{}, fmt.Errorf("delete user row: %w", err)
+	}
+	if _, err := r.appendDomainEventsTx(context.Background(), tx, companyMembershipEventInputs(membershipAffectedCompanyIDs, CompanyMembershipDeletedEventType, userID)); err != nil {
+		return DeleteCompanyUserResult{}, fmt.Errorf("append full company membership deletion events: %w", err)
 	}
 	if err = tx.Commit(); err != nil {
 		return DeleteCompanyUserResult{}, fmt.Errorf("commit user deletion: %w", err)
@@ -1165,6 +1327,26 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		return domain.Invitation{}, err
 	}
 
+	var hadGlobalAccess, hasOtherGlobalAccess bool
+	if err = tx.QueryRow(`
+select exists(
+         select 1 from company_memberships
+         where user_id=$1::uuid and role='dev_admin'
+       ),
+       exists(
+         select 1 from company_memberships
+         where user_id=$1::uuid and company_id<>$2::uuid and role='dev_admin'
+       )`, user.UserID, invitation.CompanyID).Scan(&hadGlobalAccess, &hasOtherGlobalAccess); err != nil {
+		return domain.Invitation{}, err
+	}
+	hasGlobalAccess := invitation.Role == domain.RoleDevAdmin || hasOtherGlobalAccess
+	affectedCompanyIDs, err := postgresMembershipAffectedCompanyIDsTx(context.Background(), tx, []string{invitation.CompanyID}, hadGlobalAccess != hasGlobalAccess)
+	if err != nil {
+		return domain.Invitation{}, err
+	}
+	if err = advancePostgresPolicyGroupMembershipVersionsTx(context.Background(), tx, affectedCompanyIDs); err != nil {
+		return domain.Invitation{}, err
+	}
 	_, err = tx.Exec(
 		`insert into company_memberships (company_id, user_id, role, created_timestamp, updated_timestamp)
 		 values ($1, $2, $3, now(), now())
@@ -1198,6 +1380,9 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 	}
 	if acceptedAt.Valid {
 		invitation.AcceptedTimestamp = &acceptedAt.Time
+	}
+	if _, err = r.appendDomainEventsTx(context.Background(), tx, companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, user.UserID)); err != nil {
+		return domain.Invitation{}, err
 	}
 	if err = tx.Commit(); err != nil {
 		return domain.Invitation{}, err

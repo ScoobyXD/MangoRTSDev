@@ -12,7 +12,7 @@ Other managers may still gain or lose access, while company admins and dev admin
 ↓
 Descendant actions are labeled Apply to non-customized descendants and Apply to every descendant; only the second crosses customized boundaries and requires confirmation
 
-Last updated: 2026-08-07
+Last updated: 2026-08-24
 
 # Process Story: A manager controls peer permissions without an arbitrary row cap
 
@@ -77,7 +77,7 @@ P19 - Kanban board and card access derives from the access level of the owning l
 P20 - Regular users cannot load or update permission settings even when they have resource edit access; company manager/admin authority is a separate settings-management gate.
 P21 - Malformed or unknown resource IDs do not crash visibility checks.
 P22 - Effective access is resolved from canonical settings, rules, live hierarchy, and live nested groups at read time; no derived effective-access table is policy authority.
-P23 - Permission writes update one complete policy or one descendant-reset sequence and relevant read versions atomically. They never rewrite every descendant or publish a generic permission/workspace event.
+P23 - Permission writes update one complete policy or one descendant-reset sequence and relevant read versions atomically. They never rewrite every descendant or publish a generic permission/workspace event; a permission change that can alter Process Map visibility may publish only the narrow company Process Map invalidation defined by P74.
 P24 - Company managers do not bypass resource permissions.
 P25 - Company managers with effective Edit access can update user and group exceptions, including exceptions for other company managers; they cannot edit company-admin or dev-admin identities.
 P26 - Default access has only two states, edit and no access; `resource_permissions` stores explicit user/group source rows with their own access level.
@@ -90,7 +90,7 @@ P32 - Customizing copies the current effective policy once, applies one complete
 P33 - Returning to inherited deletes direct rule rows and the customized sequence, then immediately exposes the current effective ancestor policy.
 P34 - Editing a parent changes only that parent. Existing inherited descendants see it live; customized descendants keep their active complete policies.
 P35 - A same-parent reorder leaves the parent-link sequence and current policy unchanged. A real move allocates a new parent-link sequence for permissions and RACI.
-P36 - Moving an inherited resource changes its effective parent immediately; moving a customized resource preserves its policy. Detaching an inherited Node materializes its current effective permission policy as customized.
+P36 - Moving an inherited resource changes its effective parent immediately; moving a customized resource preserves its policy. Detaching an inherited Node or moving an inherited Company Explorer child to the company root materializes its current effective permission policy as customized.
 P37 - Company Explorer folders parent contained folders, projects, and Logic Gates; Logic Gates parent assigned Nodes; Shared Triage folders parent folders and shared inboxes. Project relationships, KPI ownership, Huddle Node ownership, and Huddle Explorer placement do not create policy parentage.
 P38 - Kanban board/card visibility follows the owning Logic Gate access, but opening a Kanban node detail/editor must perform a fresh node-level access check.
 P39 - Permission settings denial copy explains that only managers and admins with resource edit access can manage permissions.
@@ -113,6 +113,9 @@ P70 - The frontend may compare against the loaded parent snapshot for immediate 
 
 P71 - Descendant controls appear only when the resource currently has descendants. The exact labels are `Apply to non-customized descendants` and `Apply to every descendant`; only the latter is separately confirmed.
 P72 - Huddle Logic Gates and Huddle Nodes use direct policies under the exact resource types `huddle_logic_gate` and `huddle_node`. Their permission surfaces do not expose either descendant action.
+P73 - As the deliberate Process Map exception to P17 and P18, a placement whose exact resource is inaccessible may be returned only as a uniform restricted placeholder containing existence and saved integer position. That response must omit canonical identity, stored type, name, revision, timestamps, anchors, neighboring endpoint information, and every incident relationship and trace; direct access to an inaccessible Folder layer remains denied.
+P74 - A permission, group, or membership change that can alter a Process Map projection must advance its viewer-safe validation state and enqueue one compact company Process Map invalidation in the committing transaction. Permission-dependent Process Map and Company Explorer mutations hold the shared policy/group/membership validation fence from capability evaluation through commit; direct policy writes, real Explorer parent changes, and membership changes conflict with that fence, while group and group-member writes update it. A global dev-admin grant or loss serializes its all-company fan-out with company creation, including when accepting a pending invitation replaces an existing dev-admin membership. That hint must contain no hidden resource identity, endpoint, placement, relationship, trace, or geometry. A removed member receives only that compact invalidation so an already-rendered map clears; every Process Map HTTP read, WebSocket reconnect, and subscribe command rechecks current company membership, and later hints exclude the removed member.
+P75 - Company Explorer Folder rename/move and Process/Project placement, move, or detach require current company membership, Edit access to the exact source resource, and Edit access to the exact destination Folder for a reparent. Moving to the company root requires current membership but no invented root permission. The mutation transaction must lock and revalidate the exact source, stored edge, destination, company, and permission-validation fence; denial, revocation, or a cross-company ID changes nothing.
 P52 - Permission audit/explainability identifies direct/default/group resolution, the effective customized source, eligible reset, parent-link boundary, and overwritten customization; it never reports RACI as an authorization grant.
 P53 - Permission fingerprints include effective source and sequence, eligible reset, parent-link boundary, group-membership version, actor identity, and actor-specific Edit result where exposed.
 P54 - Soft delete for nodes and Company Explorer delete targets requires edit access to the deleted resource or container; no access and RACI assignments never authorize the delete.
@@ -187,6 +190,7 @@ Business logic covered:
 - P27
 - P39
 - P54
+- P75
 
 Given:
 - One user has no access to a resource.
@@ -194,6 +198,7 @@ Given:
 - One regular user lacks company manager/admin authority.
 - One company manager has edit access to the resource.
 - One company manager is also listed on the resource.
+- One Explorer move targets an editable Folder, the company root, an inaccessible Folder, and a Folder in another company.
 
 Expected:
 - The no-access user receives a hidden/not-found style denial for read checks.
@@ -208,6 +213,7 @@ Expected:
 - A non-manager/non-admin opening the permissions tab sees a manager/admin permission message instead of a generic permissions failure.
 - Company managers can change regular-user, group, and other company-manager exceptions, but cannot change company-admin or dev-admin identities.
 - When a manager flips the default, manager effective access is preserved and regular company user access follows the new default plus exceptions.
+- Explorer rename, move, placement, and detach commit only when the current member can Edit the exact source and any Folder destination; root moves need membership, and denied or cross-company requests change nothing.
 
 ### Scenario P-S3: Visibility Filtering And Live V2 Resolution
 
@@ -220,6 +226,8 @@ Business logic covered:
 - P23
 - P38
 - P62
+- P73
+- P74
 
 Given:
 - A viewer can access some nodes, logic gates, projects, Explorer rows, and Kanban boards, but not others.
@@ -238,6 +246,8 @@ Expected:
 - Canonical effective-access rows, affected projections, and read versions are current for the edited resource and descendants changed by an apply-to-descendants command.
 - The initiating client patches concrete mounted state from the committed response when applicable; other clients reconcile on a later canonical read, with no generic permission or workspace browser event.
 - If a later chat, board, or shared-mailbox event commits, publication rechecks current exact access and excludes the revoked subscriber without broadcasting a broad permission event.
+- A mapped inaccessible Process Map item remains only as a uniform restricted position placeholder, and every incident relationship and trace is absent.
+- A Process Map visibility change advances viewer-safe validation state and publishes only the compact company Process Map invalidation without hidden resource details.
 
 ### Scenario P-S4: Parent Template Permission Snapshots And Descendant Apply
 
@@ -277,7 +287,7 @@ Expected:
 - Customizing a child copies its current effective policy once and then applies one complete replacement.
 - Reordering under the same parent leaves its parent-link sequence and policy unchanged.
 - Moving to a different folder or Logic Gate advances the parent-link sequence; inherited policy follows the new parent and customized policy is preserved.
-- Detaching an inherited Node materializes its current effective policy as customized in the same transaction.
+- Detaching an inherited Node or moving an inherited Company Explorer child to the company root materializes its current effective policy as customized in the same transaction.
 - Project permission changes do not cascade into related Logic Gates or nodes.
 - Apply to non-customized descendants adds no descendant state because inherited branches already resolve live.
 - Apply to every descendant changes one reset sequence and can make eligible older customized policies inactive without deleting their dormant rows.

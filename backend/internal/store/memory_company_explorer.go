@@ -424,12 +424,22 @@ func (r *MemoryRepo) ListVisibleCompanyExplorerFolderSubtree(companyID, folderID
 	sortCompanyExplorerFolders(items)
 	return items, nil
 }
-func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
+func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int, actorUserID, permissionUserID string) (domain.CompanyExplorerFolder, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	actorUserID = strings.TrimSpace(actorUserID)
+	permissionUserID = strings.TrimSpace(permissionUserID)
+	if companyID == "" || folderID == "" || (actorUserID == "") != (permissionUserID == "") || (actorUserID != "" && actorUserID != permissionUserID) {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	item, ok := r.folders[key(companyID, folderID)]
 	if !ok || item.FolderKind == "communications" {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	if permissionUserID != "" && (!r.userHasCompanyMembershipLocked(companyID, permissionUserID) || !r.userHasEffectiveAccessLocked(companyID, permissionUserID, EntityTypeCompanyExplorerFolder, folderID, EntityPermissionEdit)) {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
 	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
@@ -449,6 +459,9 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	if parentFolderID != nil && targetParentID != "" {
 		parentFolder, ok := r.folders[key(companyID, targetParentID)]
 		if !ok || parentFolder.FolderKind == "communications" {
+			return domain.CompanyExplorerFolder{}, ErrNotFound
+		}
+		if permissionUserID != "" && !r.userHasEffectiveAccessLocked(companyID, permissionUserID, EntityTypeCompanyExplorerFolder, targetParentID, EntityPermissionEdit) {
 			return domain.CompanyExplorerFolder{}, ErrNotFound
 		}
 		// A folder cannot be moved under one of its descendants; that would
@@ -486,16 +499,34 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	item.ParentFolderID = parent
 	item.Position = position
 	item.UpdatedTimestamp = time.Now().UTC()
+	eventInput := workspaceDomainEventInput(companyID, "company_explorer_folder_updated", map[string]any{
+		"folder_id": folderID, "parent_entity_id": targetParentID,
+	})
+	eventInput.ActorUserID = strings.TrimSpace(actorUserID)
+	if _, err := r.appendDomainEventLocked(eventInput); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	r.folders[key(companyID, item.FolderID)] = item
 	return item, nil
 }
 
-func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
+func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name, actorUserID, permissionUserID string) (domain.CompanyExplorerFolder, error) {
+	companyID = strings.TrimSpace(companyID)
+	folderID = strings.TrimSpace(folderID)
+	name = strings.TrimSpace(name)
+	actorUserID = strings.TrimSpace(actorUserID)
+	permissionUserID = strings.TrimSpace(permissionUserID)
+	if companyID == "" || folderID == "" || name == "" || (actorUserID == "") != (permissionUserID == "") || (actorUserID != "" && actorUserID != permissionUserID) {
+		return domain.CompanyExplorerFolder{}, ErrInvalid
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	item, ok := r.folders[key(companyID, folderID)]
 	if !ok || item.FolderKind == "communications" {
+		return domain.CompanyExplorerFolder{}, ErrNotFound
+	}
+	if permissionUserID != "" && (!r.userHasCompanyMembershipLocked(companyID, permissionUserID) || !r.userHasEffectiveAccessLocked(companyID, permissionUserID, EntityTypeCompanyExplorerFolder, folderID, EntityPermissionEdit)) {
 		return domain.CompanyExplorerFolder{}, ErrNotFound
 	}
 	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
@@ -504,9 +535,18 @@ func (r *MemoryRepo) RenameCompanyExplorerFolder(companyID, folderID, name strin
 	if item.SystemKey != nil {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
+	beforeMutation := r.snapshotProcessMapMutationLocked()
+	previous := item
 	item.Name = name
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
+	eventInput := workspaceDomainEventInput(companyID, "company_explorer_folder_updated", map[string]any{"folder_id": folderID})
+	eventInput.ActorUserID = actorUserID
+	if _, err := r.appendDomainEventsLocked([]DomainEventInput{eventInput}); err != nil {
+		r.folders[key(companyID, item.FolderID)] = previous
+		r.restoreProcessMapMutationLocked(beforeMutation)
+		return domain.CompanyExplorerFolder{}, err
+	}
 	return item, nil
 }
 
@@ -565,11 +605,6 @@ func (r *MemoryRepo) SetCommunicationsSharedInboxAccountEmail(companyID, folderI
 	return r.withSharedInboxRACILocked(item), nil
 }
 
-func (r *MemoryRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
-	_, err := r.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folderID}}, "")
-	return err
-}
-
 func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []CompanyExplorerDeleteTargetInput, deletedByUserID string) (CompanyExplorerDeleteResult, error) {
 	companyID = strings.TrimSpace(companyID)
 	deletedByUserID = strings.TrimSpace(deletedByUserID)
@@ -606,14 +641,17 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 		}
 	}()
 
-	folderIDs := map[string]bool{}
-	folderKinds := map[string]string{}
-	nodeIDs := map[string]bool{}
-	logicGateIDs := map[string]bool{}
-	projectIDs := map[string]bool{}
-	kanbanBoardIDs := map[string]bool{}
+	deleteScope := newCompanyExplorerRecycleScope()
+	folderIDs := deleteScope.FolderIDs
+	folderKinds := deleteScope.FolderKinds
+	nodeIDs := deleteScope.NodeIDs
+	logicGateIDs := deleteScope.LogicGateIDs
+	projectIDs := deleteScope.ProjectIDs
+	kanbanBoardIDs := deleteScope.KanbanBoardIDs
+	recycleRoots := make([]companyExplorerRecycleRootScope, 0, len(targets))
 
 	for _, target := range targets {
+		targetScope := newCompanyExplorerRecycleScope()
 		switch target.Kind {
 		case "folder":
 			folder, ok := r.folders[key(companyID, target.ID)]
@@ -637,7 +675,6 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 					}
 				}
 			}
-			folderKinds[target.ID] = folder.FolderKind
 			for id := range toDelete {
 				if err := protectCompanyExplorerDefaultFolderMutation(companyID, id); err != nil {
 					return CompanyExplorerDeleteResult{}, err
@@ -649,57 +686,39 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 				if item.FolderKind == "communications" {
 					return CompanyExplorerDeleteResult{}, ErrInvalid
 				}
-				folderIDs[id] = true
-				folderKinds[id] = item.FolderKind
+				targetScope.FolderIDs[id] = true
+				targetScope.FolderKinds[id] = item.FolderKind
 			}
 		case "node":
 			if _, ok := r.nodes[key(companyID, target.ID)]; !ok {
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
-			nodeIDs[target.ID] = true
+			targetScope.NodeIDs[target.ID] = true
 		case "logic_gate":
 			if _, ok := r.logicGates[key(companyID, target.ID)]; !ok {
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
-			logicGateIDs[target.ID] = true
+			targetScope.LogicGateIDs[target.ID] = true
 		case "project":
 			if _, ok := r.projects[key(companyID, target.ID)]; !ok {
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
-			projectIDs[target.ID] = true
+			targetScope.ProjectIDs[target.ID] = true
 		case "kanban":
 			if _, ok := r.kanbanBoards[boardKey(companyID, target.ID)]; !ok {
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
-			kanbanBoardIDs[target.ID] = true
+			targetScope.KanbanBoardIDs[target.ID] = true
 		}
-	}
-
-	for _, item := range r.folderItems {
-		if item.CompanyID != companyID || !folderIDs[item.FolderID] {
-			continue
-		}
-		switch item.ItemType {
-		case "logic_gate":
-			if _, ok := r.logicGates[key(companyID, item.ItemID)]; ok {
-				logicGateIDs[item.ItemID] = true
-			}
-		case "project":
-			if _, ok := r.projects[key(companyID, item.ItemID)]; ok {
-				projectIDs[item.ItemID] = true
+		r.expandCompanyExplorerDeleteScopeLocked(companyID, targetScope.FolderIDs, targetScope.NodeIDs, targetScope.LogicGateIDs, targetScope.ProjectIDs)
+		for _, board := range r.kanbanBoards {
+			if board.CompanyID == companyID && board.LogicGateID != nil && targetScope.LogicGateIDs[*board.LogicGateID] {
+				targetScope.KanbanBoardIDs[board.BoardID] = true
 			}
 		}
-	}
-	r.expandCompanyExplorerDeleteScopeLocked(companyID, folderIDs, nodeIDs, logicGateIDs, projectIDs)
-
-	for _, board := range r.kanbanBoards {
-		if board.CompanyID != companyID || board.LogicGateID == nil || !logicGateIDs[*board.LogicGateID] {
-			continue
-		}
-		kanbanBoardIDs[board.BoardID] = true
-	}
-	for logicGateID := range logicGateIDs {
-		kanbanBoardIDs[LogicGateKanbanBoardID(logicGateID)] = true
+		targetScope.addLogicGateBoards()
+		targetScope.mergeInto(&deleteScope)
+		recycleRoots = append(recycleRoots, companyExplorerRecycleRootScope{Target: target, Scope: targetScope})
 	}
 	for boardID := range kanbanBoardIDs {
 		board, ok := r.kanbanBoards[boardKey(companyID, boardID)]
@@ -733,72 +752,22 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
-	events, err := r.appendDomainEventsLocked(companyExplorerTargetWorkspaceEventInputs(companyID, result.Targets, false))
+	eventInputs := companyExplorerTargetWorkspaceEventInputs(companyID, result.Targets, false)
+	for index := range eventInputs {
+		eventInputs[index].ActorUserID = deletedByUserID
+	}
+	events, err := r.appendDomainEventsLocked(eventInputs)
 	if err != nil {
 		return CompanyExplorerDeleteResult{}, err
 	}
 	result.Events = events
-	recycleItemIDs := r.createRecycleBinItemsLocked(companyID, deletedByUserID, result.Targets, recycleSnapshot)
-
-	for logicGateID := range logicGateIDs {
-		if err := r.deleteLogicGateLocked(companyID, logicGateID); err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
+	if err := r.deleteCompanyExplorerRecycleScopeLocked(companyID, deleteScope); err != nil {
+		return CompanyExplorerDeleteResult{}, err
 	}
-	for boardID := range kanbanBoardIDs {
-		if _, exists := r.kanbanBoards[boardKey(companyID, boardID)]; !exists {
-			continue
-		}
-		if err := r.deleteKanbanBoardLocked(companyID, boardID); err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
-	}
-	for projectID := range projectIDs {
-		if err := r.deleteProjectLocked(companyID, projectID); err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
-	}
-	for nodeID := range nodeIDs {
-		if err := r.deleteNodeLocked(companyID, nodeID); err != nil {
-			return CompanyExplorerDeleteResult{}, err
-		}
-	}
-	for logicGateID := range logicGateIDs {
-		r.deleteCompanyExplorerV2NativeEntityProjectionLocked(companyID, CompanyExplorerV2EntityLogicGate, logicGateID)
-	}
-	for projectID := range projectIDs {
-		r.deleteCompanyExplorerV2NativeEntityProjectionLocked(companyID, CompanyExplorerV2EntityProject, projectID)
-	}
-	for nodeID := range nodeIDs {
-		r.deleteCompanyExplorerV2NativeEntityProjectionLocked(companyID, CompanyExplorerV2EntityNode, nodeID)
-	}
-	for folderID := range folderIDs {
-		delete(r.folders, key(companyID, folderID))
-		delete(r.sharedInboxRACI, sharedInboxRACIKey(companyID, folderID))
-	}
-	for permissionKey, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID &&
-			(permission.EntityType == EntityTypeSharedInboxFolder || permission.EntityType == EntityTypeSharedInbox || permission.EntityType == EntityTypeCompanyExplorerFolder) &&
-			folderIDs[permission.EntityID] {
-			delete(r.entityPermissions, permissionKey)
-		}
-	}
-	for itemKey, item := range r.folderItems {
-		if item.CompanyID == companyID && folderIDs[item.FolderID] {
-			delete(r.folderItems, itemKey)
-		}
-	}
-	for shareKey, share := range r.folderShares {
-		if share.CompanyID == companyID && folderIDs[share.FolderID] {
-			delete(r.folderShares, shareKey)
-		}
-	}
-	recycleDelta := memoryRecycleSnapshotDelta(recycleSnapshot, r.snapshotRecycleStateLocked())
-	for _, itemID := range recycleItemIDs {
-		record := r.recycleBin[key(companyID, itemID)]
-		record.Delta = recycleDelta
-		record.UseDelta = true
-		r.recycleBin[key(companyID, itemID)] = record
+	deletedSnapshot := memoryRecycleSnapshotDelta(recycleSnapshot, r.snapshotRecycleStateLocked())
+	recycleContext := memoryRecycleSnapshotWithProcessMapTraceContext(recycleSnapshot, deletedSnapshot)
+	if err := r.createRecycleBinItemsLocked(companyID, deletedByUserID, recycleRoots, recycleSnapshot, recycleContext); err != nil {
+		return CompanyExplorerDeleteResult{}, err
 	}
 	committed = true
 	return result, nil
@@ -903,10 +872,8 @@ func (r *MemoryRepo) assignCompanyExplorerFolderItemLocked(companyID, folderID, 
 	now := time.Now().UTC()
 	k := folderItemKey(companyID, itemType, itemID)
 	created := now
-	previousFolderID := ""
 	if existing, ok := r.folderItems[k]; ok {
 		created = existing.CreatedTimestamp
-		previousFolderID = existing.FolderID
 		if position <= 0 && existing.FolderID == folderID {
 			position = existing.Position
 		}
@@ -925,23 +892,7 @@ func (r *MemoryRepo) assignCompanyExplorerFolderItemLocked(companyID, folderID, 
 	}
 	r.folderItems[k] = item
 
-	deletedRelationshipIDs := make([]string, 0)
-	if previousFolderID != folderID {
-		// Moving an entity to another Explorer folder level gives it a new local
-		// graph context. Existing edges are no longer valid in that context.
-		if itemType == "logic_gate" {
-			next := r.logicGateRels[companyID][:0]
-			for _, rel := range r.logicGateRels[companyID] {
-				if rel.LogicGateIDA == itemID || rel.LogicGateIDB == itemID {
-					deletedRelationshipIDs = append(deletedRelationshipIDs, rel.LogicGateRelationshipID)
-					continue
-				}
-				next = append(next, rel)
-			}
-			r.logicGateRels[companyID] = next
-		}
-	}
-	return item, deletedRelationshipIDs, nil
+	return item, []string{}, nil
 }
 
 func (r *MemoryRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {

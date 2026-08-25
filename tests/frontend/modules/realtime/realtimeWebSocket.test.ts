@@ -23,6 +23,7 @@ import {
   type RealtimeMailboxFolderChangedMessage,
   type RealtimeMailboxMessageChangedMessage,
   type RealtimeNotificationCreatedMessage,
+  type RealtimeProcessMapChangedMessage,
   type RealtimeRACITabsChangedMessage,
 } from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
 
@@ -86,6 +87,15 @@ test("parses retained product and scoped mailbox message families", () => {
   assert.equal(board.board_id, "logic-gate:gate-1");
   assert.equal(board.change_type, "card.moved");
 
+  const processMap = parseRealtimeMessage(JSON.stringify({
+    type: "process_map.changed",
+    company_id: "company-1",
+    scope: "process-map:company",
+    ts: "2026-08-24T12:00:00Z",
+  })) as RealtimeProcessMapChangedMessage;
+  assert.equal(processMap.company_id, "company-1");
+  assert.equal(processMap.scope, "process-map:company");
+
   const raciTabs = parseRealtimeMessage(JSON.stringify({
     type: "raci_tabs.changed",
     company_id: "company-1",
@@ -146,6 +156,8 @@ test("allows only exact notification, mailbox, node-chat, board, and editor scop
   assert.equal(isSupportedRealtimeScope("chat:node:node-1"), true);
   assert.equal(isSupportedRealtimeScope("board:logic-gate:gate-1"), true);
   assert.equal(isSupportedRealtimeScope("raci-tabs:company"), true);
+  assert.equal(isSupportedRealtimeScope("process-map:company"), true);
+  assert.equal(isSupportedRealtimeScope("process-map:user:user-1"), false);
   assert.equal(isSupportedRealtimeScope("raci-tabs:user:user-1"), false);
   assert.equal(isSupportedRealtimeScope("mailbox:personal:account:user-1:owner@example.com"), true);
   assert.equal(isSupportedRealtimeScope("mailbox:shared:shared-1"), true);
@@ -646,7 +658,7 @@ test("frontend source inventory contains only retained narrow scope families", (
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-	assert.equal(subscriptionSources.length, 10);
+	assert.equal(subscriptionSources.length, 11);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/AppSidebarChrome.tsx",
     "app/AppSidebarRACITabsSection.tsx",
@@ -655,6 +667,7 @@ test("frontend source inventory contains only retained narrow scope families", (
 		"modules/editor/NodeWorkspaceSurfaceParts.tsx",
     "modules/editor/tiptap/MangoTiptapEditor.tsx",
     "modules/kanban/KanbanContent.tsx",
+    "modules/process-map/ProcessMapSurface.tsx",
     "pages/home/EmailCollaborationChatSurface.tsx",
     "pages/home/EmailReferencePreviewHost.tsx",
     "pages/home/HomePage.tsx",

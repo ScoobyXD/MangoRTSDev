@@ -185,6 +185,9 @@ func (r *PostgresRepo) appendDomainEventTx(ctx context.Context, tx *sql.Tx, inpu
 	if err := r.enqueueRACITabsRealtimeForDomainEventsTx(ctx, tx, []domain.DomainEvent{item}); err != nil {
 		return domain.DomainEvent{}, err
 	}
+	if err := r.enqueueProcessMapRealtimeForDomainEventsTx(ctx, tx, []domain.DomainEvent{item}); err != nil {
+		return domain.DomainEvent{}, err
+	}
 	return item, nil
 }
 
@@ -212,6 +215,9 @@ func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inp
 			return nil, err
 		}
 		if err := r.enqueueRACITabsRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
+			return nil, err
+		}
+		if err := r.enqueueProcessMapRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
 			return nil, err
 		}
 		return events, nil
@@ -249,6 +255,9 @@ func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inp
 		return nil, err
 	}
 	if err := r.enqueueRACITabsRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
+		return nil, err
+	}
+	if err := r.enqueueProcessMapRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
 		return nil, err
 	}
 	return events, nil
@@ -357,12 +366,6 @@ order by sequence asc, event_id asc`, args...)
 	}
 	if len(events) != len(items) {
 		return nil, fmt.Errorf("append domain events batch inserted %d events, want %d", len(events), len(items))
-	}
-	if err := r.enqueueKanbanRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
-		return nil, err
-	}
-	if err := r.enqueueRACITabsRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
-		return nil, err
 	}
 	return events, nil
 }

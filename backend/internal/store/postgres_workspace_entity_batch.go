@@ -9,6 +9,9 @@ import (
 )
 
 func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error) {
+	if input.EntityKind == EntityTypeLogicGate && len(input.Relationships) > 0 {
+		return WorkspaceEntityBatchResult{}, ErrInvalid
+	}
 	ctx := ContextWithTimingRecorder(context.Background(), input.TimingRecorder)
 	defer observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.transaction")()
 	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
@@ -199,63 +202,33 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 		}
 	}
 	for _, relationship := range input.Relationships {
+		if input.EntityKind != EntityTypeNode {
+			return WorkspaceEntityBatchResult{}, ErrInvalid
+		}
 		entityIDA, entityIDB, err := resolveWorkspaceEntityBatchRelationshipIDs(tx, ctx, input, clientToEntityID, relationship)
 		if err != nil {
 			return WorkspaceEntityBatchResult{}, err
 		}
-		if input.EntityKind == "node" {
-			item := domain.NodeRelationship{
-				CompanyID:          input.CompanyID,
-				NodeRelationshipID: newUUIDv7String(),
-				NodeIDA:            entityIDA,
-				NodeIDB:            entityIDB,
-				APosition:          relationship.APosition,
-				BPosition:          relationship.BPosition,
-			}
-			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.relationship_writes")
-			if err := tx.QueryRowContext(ctx,
-				`insert into node_relationships
-				 (company_id, node_relationship_id, node_id_a, node_id_b, a_position, b_position, created_timestamp)
-				 values ($1, $2, $3, $4, $5::node_relationship_position, $6::node_relationship_position, now())
-				 returning company_id, node_relationship_id, node_id_a, node_id_b, a_position::text, b_position::text, created_timestamp`,
-				item.CompanyID, item.NodeRelationshipID, item.NodeIDA, item.NodeIDB, item.APosition, item.BPosition,
-			).Scan(
-				&item.CompanyID,
-				&item.NodeRelationshipID,
-				&item.NodeIDA,
-				&item.NodeIDB,
-				&item.APosition,
-				&item.BPosition,
-				&item.CreatedTimestamp,
-			); err != nil {
-				stop()
-				return WorkspaceEntityBatchResult{}, err
-			}
-			stop()
-			result.Relationships = append(result.Relationships, item)
-			continue
-		}
-
-		item := domain.LogicGateRelationship{
-			CompanyID:               input.CompanyID,
-			LogicGateRelationshipID: newUUIDv7String(),
-			LogicGateIDA:            entityIDA,
-			LogicGateIDB:            entityIDB,
-			APosition:               relationship.APosition,
-			BPosition:               relationship.BPosition,
+		item := domain.NodeRelationship{
+			CompanyID:          input.CompanyID,
+			NodeRelationshipID: newUUIDv7String(),
+			NodeIDA:            entityIDA,
+			NodeIDB:            entityIDB,
+			APosition:          relationship.APosition,
+			BPosition:          relationship.BPosition,
 		}
 		stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.relationship_writes")
 		if err := tx.QueryRowContext(ctx,
-			`insert into logic_gate_relationships
-			 (company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position, created_timestamp)
-			 values ($1, $2, $3, $4, $5::logic_gate_relationship_position, $6::logic_gate_relationship_position, now())
-			 returning company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position::text, b_position::text, created_timestamp`,
-			item.CompanyID, item.LogicGateRelationshipID, item.LogicGateIDA, item.LogicGateIDB, item.APosition, item.BPosition,
+			`insert into node_relationships
+				 (company_id, node_relationship_id, node_id_a, node_id_b, a_position, b_position, created_timestamp)
+				 values ($1, $2, $3, $4, $5::node_relationship_position, $6::node_relationship_position, now())
+				 returning company_id, node_relationship_id, node_id_a, node_id_b, a_position::text, b_position::text, created_timestamp`,
+			item.CompanyID, item.NodeRelationshipID, item.NodeIDA, item.NodeIDB, item.APosition, item.BPosition,
 		).Scan(
 			&item.CompanyID,
-			&item.LogicGateRelationshipID,
-			&item.LogicGateIDA,
-			&item.LogicGateIDB,
+			&item.NodeRelationshipID,
+			&item.NodeIDA,
+			&item.NodeIDB,
 			&item.APosition,
 			&item.BPosition,
 			&item.CreatedTimestamp,
@@ -264,7 +237,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			return WorkspaceEntityBatchResult{}, err
 		}
 		stop()
-		result.LogicGateRelationships = append(result.LogicGateRelationships, item)
+		result.Relationships = append(result.Relationships, item)
 	}
 
 	stopCommit := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.commit")

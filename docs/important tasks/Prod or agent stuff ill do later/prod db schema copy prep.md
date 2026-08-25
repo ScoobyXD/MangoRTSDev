@@ -67,7 +67,9 @@ All other tables are excluded from dev-to-prod row copying by default:
 - `resource_gvic_assignments`
 - `resource_gvic_effective_assignments`
 - `resource_permissions`
-- `logic_gate_relationships`
+- `process_map_placements`
+- `resource_operational_relationships`
+- `process_map_traces`
 - `logic_gate_information`
 - `logic_gate_projection_table`
 - `user_logic_gate_shortcuts`

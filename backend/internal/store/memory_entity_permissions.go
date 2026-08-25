@@ -7,6 +7,47 @@ import (
 	"time"
 )
 
+type memoryCompanyUserGroupMutationSnapshot struct {
+	recycleState           memoryRecycleBinSnapshot
+	userGroups             map[string]domain.CompanyUserGroup
+	userGroupMembers       map[string]domain.CompanyUserGroupMember
+	raciTabItems           map[string]domain.RACITabItem
+	gvicV2Sequence         int64
+	permissionV2Sequence   int64
+	domainEvents           map[string]domain.DomainEvent
+	workspaceReadVersions  map[string]int64
+	realtimeOutbox         map[string]RealtimeOutboxEvent
+	realtimeOutboxSequence int64
+}
+
+func (r *MemoryRepo) snapshotCompanyUserGroupMutationLocked() memoryCompanyUserGroupMutationSnapshot {
+	return memoryCompanyUserGroupMutationSnapshot{
+		recycleState:           r.snapshotRecycleStateLocked(),
+		userGroups:             cloneMap(r.userGroups),
+		userGroupMembers:       cloneMap(r.userGroupMembers),
+		raciTabItems:           cloneMap(r.raciTabItems),
+		gvicV2Sequence:         r.gvicV2Sequence,
+		permissionV2Sequence:   r.permissionV2Sequence,
+		domainEvents:           cloneMap(r.domainEvents),
+		workspaceReadVersions:  cloneMap(r.workspaceReadVersions),
+		realtimeOutbox:         cloneMap(r.realtimeOutbox),
+		realtimeOutboxSequence: r.realtimeOutboxSequence,
+	}
+}
+
+func (r *MemoryRepo) restoreCompanyUserGroupMutationLocked(snapshot memoryCompanyUserGroupMutationSnapshot) {
+	r.restoreRecycleSnapshotLocked(snapshot.recycleState)
+	r.userGroups = cloneMap(snapshot.userGroups)
+	r.userGroupMembers = cloneMap(snapshot.userGroupMembers)
+	r.raciTabItems = cloneMap(snapshot.raciTabItems)
+	r.gvicV2Sequence = snapshot.gvicV2Sequence
+	r.permissionV2Sequence = snapshot.permissionV2Sequence
+	r.domainEvents = cloneMap(snapshot.domainEvents)
+	r.workspaceReadVersions = cloneMap(snapshot.workspaceReadVersions)
+	r.realtimeOutbox = cloneMap(snapshot.realtimeOutbox)
+	r.realtimeOutboxSequence = snapshot.realtimeOutboxSequence
+}
+
 func (r *MemoryRepo) ListCompanyUserGroups(companyID string) ([]domain.CompanyUserGroup, error) {
 	companyID = strings.TrimSpace(companyID)
 	if companyID == "" {
@@ -112,6 +153,7 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 	if parentChanged {
 		oldAffectedGroupIDs = companyUserGroupAncestorIDsLocked(r.userGroups, companyID, []string{groupID})
 	}
+	before := r.snapshotCompanyUserGroupMutationLocked()
 	group.UpdatedTimestamp = time.Now().UTC()
 	r.userGroups[userGroupKey(companyID, group.GroupID)] = group
 	if parentChanged {
@@ -121,6 +163,10 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 		}
 		r.syncRACIGroupDependentResourcesForGroupSetLocked(companyID, oldAffectedGroupIDs)
 		r.reconcileMemoryRACITabsCompanyLocked(companyID)
+	}
+	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_user_group_updated", map[string]any{"group_id": groupID})); err != nil {
+		r.restoreCompanyUserGroupMutationLocked(before)
+		return domain.CompanyUserGroup{}, err
 	}
 	return cloneCompanyUserGroup(group), nil
 }
@@ -138,6 +184,7 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 	if _, ok := r.userGroups[userGroupKey(companyID, groupID)]; !ok {
 		return ErrNotFound
 	}
+	before := r.snapshotCompanyUserGroupMutationLocked()
 	groupIDs := companyUserGroupSubtreeIDsLocked(r.userGroups, companyID, groupID)
 	affectedGroupIDs := companyUserGroupAncestorIDsLocked(r.userGroups, companyID, mapKeys(groupIDs))
 	affectedRACIKeys := r.gvicResourceKeysForGroupSetLocked(companyID, affectedGroupIDs)
@@ -215,6 +262,10 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 	}
 	r.syncRACIResourceKeysLocked(companyID, affectedRACIKeys)
 	r.reconcileMemoryRACITabsCompanyLocked(companyID)
+	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_user_group_deleted", map[string]any{"group_id": groupID})); err != nil {
+		r.restoreCompanyUserGroupMutationLocked(before)
+		return err
+	}
 	return nil
 }
 
@@ -265,6 +316,7 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 		seen[userID] = true
 		cleanUserIDs = append(cleanUserIDs, userID)
 	}
+	before := r.snapshotCompanyUserGroupMutationLocked()
 	for memberKey, member := range r.userGroupMembers {
 		if member.CompanyID == companyID && member.GroupID == groupID {
 			delete(r.userGroupMembers, memberKey)
@@ -285,6 +337,10 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 	}
 	sortCompanyUserGroupMembers(items)
 	r.reconcileMemoryRACITabsCompanyLocked(companyID)
+	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_user_group_members_updated", map[string]any{"group_id": groupID})); err != nil {
+		r.restoreCompanyUserGroupMutationLocked(before)
+		return nil, err
+	}
 	return items, nil
 }
 

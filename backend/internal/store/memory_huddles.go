@@ -8,7 +8,7 @@ import (
 )
 
 func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID string) (domain.HuddleLogicGate, error) {
-	companyID, logicGateID = strings.TrimSpace(companyID), strings.TrimSpace(logicGateID)
+	companyID, logicGateID, actorID = strings.TrimSpace(companyID), strings.TrimSpace(logicGateID), strings.TrimSpace(actorID)
 	if companyID == "" || logicGateID == "" {
 		return domain.HuddleLogicGate{}, ErrInvalid
 	}
@@ -37,6 +37,15 @@ func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID st
 	if blockers.Any() {
 		return domain.HuddleLogicGate{}, &LogicGateConversionBlockedError{Blockers: blockers}
 	}
+	beforeEvent := r.snapshotProcessMapMutationLocked()
+	eventInput := workspaceDomainEventInput(companyID, "logic_gate_deleted", map[string]any{
+		"logic_gate_id": logicGateID, "realtime_change_type": "resource_deleted", "realtime_audience_snapshot": true,
+	})
+	eventInput.ActorUserID = actorID
+	if _, err := r.appendDomainEventsLocked([]DomainEventInput{eventInput}); err != nil {
+		r.restoreProcessMapMutationLocked(beforeEvent)
+		return domain.HuddleLogicGate{}, err
+	}
 	r.ensureV2PolicySettingsLocked(companyID, EntityTypeLogicGate, logicGateID)
 	gvicSource := r.resolveV2PolicyLocked(companyID, EntityTypeLogicGate, logicGateID, true)
 	permissionSource := r.resolveV2PolicyLocked(companyID, EntityTypeLogicGate, logicGateID, false)
@@ -55,10 +64,10 @@ func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID st
 	r.replaceMemoryPermissionEdgesLocked(companyID, EntityTypeHuddleLogicGate, logicGateID, permissionAssignments)
 	item := domain.HuddleExplorerItem{CompanyID: companyID, ItemID: newUUIDv7String(), ResourceType: EntityTypeHuddleLogicGate, ResourceID: logicGateID, Name: gate.Header, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.huddleExplorerItems[key(companyID, item.ItemID)] = item
+	r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeProcess, logicGateID)
 	delete(r.logicGates, key(companyID, logicGateID))
 	delete(r.logicGateInfo, key(companyID, logicGateID))
 	delete(r.logicGateText, key(companyID, logicGateID))
-	delete(r.logicGateRels, key(companyID, logicGateID))
 	delete(r.logicGateRACI, key(companyID, logicGateID))
 	r.deleteMemoryHuddleRelationshipsForLogicGateLocked(companyID, logicGateID)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeLogicGate, logicGateID)

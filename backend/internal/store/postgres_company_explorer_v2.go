@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"miraeopus/backend/internal/domain"
 	"strings"
 )
 
@@ -596,54 +597,25 @@ insert into company_explorer_folders (
 	return r.GetCompanyExplorerV2EntityWithParent(input.CompanyID, folderID, parentEntityID, "", input.PermissionUserID)
 }
 
-func (r *PostgresRepo) UpdateCompanyExplorerV2Folder(input CompanyExplorerV2FolderUpdateInput) (CompanyExplorerV2Row, error) {
-	input, err := normalizeCompanyExplorerV2FolderUpdateInput(input)
-	if err != nil {
-		return CompanyExplorerV2Row{}, err
-	}
-	if err := protectCompanyExplorerDefaultFolderMutation(input.CompanyID, input.EntityID); err != nil {
-		return CompanyExplorerV2Row{}, err
-	}
-	ctx := context.Background()
-	result, err := r.db.ExecContext(ctx, `
-update company_explorer_folders
-set name=$3,
-    updated_timestamp=now()
-where company_id=$1::uuid
-  and folder_id=$2::uuid`, input.CompanyID, input.EntityID, input.Name)
-	if err != nil {
-		return CompanyExplorerV2Row{}, err
-	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return CompanyExplorerV2Row{}, err
-	} else if affected == 0 {
-		return CompanyExplorerV2Row{}, ErrNotFound
-	}
-	return r.GetCompanyExplorerV2Entity(input.CompanyID, input.EntityID, input.PermissionUserID)
-}
-
 func (r *PostgresRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2Row, error) {
 	input, err := normalizeCompanyExplorerV2EdgeInput(input)
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
-	ctx := context.Background()
-	parentFolderID, parentEntityID, err := r.companyExplorerFinalContainerTarget(ctx, input.CompanyID, input.ParentEntityID, input.PermissionUserID)
-	if err != nil {
-		return CompanyExplorerV2Row{}, err
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.ParentEntityID = cleanUUIDText(input.ParentEntityID)
+	input.ChildEntityID = cleanUUIDText(input.ChildEntityID)
+	input.ChildResourceID = cleanUUIDText(input.ChildResourceID)
+	input.ActorUserID = cleanUUIDText(input.ActorUserID)
+	input.PermissionUserID = cleanUUIDText(input.PermissionUserID)
+	if input.CompanyID == "" || input.ParentEntityID == "" || (input.ActorUserID == "") != (input.PermissionUserID == "") || (input.ActorUserID != "" && input.ActorUserID != input.PermissionUserID) {
+		return CompanyExplorerV2Row{}, ErrInvalid
 	}
+	ctx := context.Background()
 	targetType := input.ChildEntityType
 	targetID := input.ChildResourceID
 	if input.ChildEntityID != "" && targetID == "" {
-		child, err := r.GetCompanyExplorerV2Entity(input.CompanyID, input.ChildEntityID, input.PermissionUserID)
-		if err != nil {
-			return CompanyExplorerV2Row{}, err
-		}
-		targetType = child.EntityType
-		targetID = child.ResourceID
-	}
-	if targetType != EntityTypeProject && targetType != EntityTypeLogicGate {
-		return CompanyExplorerV2Row{}, ErrInvalid
+		targetID = input.ChildEntityID
 	}
 	if targetID == "" {
 		return CompanyExplorerV2Row{}, ErrInvalid
@@ -653,6 +625,48 @@ func (r *PostgresRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeIn
 		return CompanyExplorerV2Row{}, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, input.CompanyID, input.PermissionUserID, true); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	if targetType == "" {
+		err := tx.QueryRowContext(ctx, `
+select entity_type from (
+  select 'logic_gate'::text as entity_type from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid
+  union all
+  select 'project'::text from projects where company_id=$1::uuid and project_id=$2::uuid
+) candidate limit 1`, input.CompanyID, targetID).Scan(&targetType)
+		if errors.Is(err, sql.ErrNoRows) {
+			return CompanyExplorerV2Row{}, ErrNotFound
+		}
+		if err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
+	if targetType != EntityTypeProject && targetType != EntityTypeLogicGate {
+		return CompanyExplorerV2Row{}, ErrInvalid
+	}
+	if err := lockPostgresCompanyExplorerResourceEditTx(ctx, tx, input.CompanyID, input.PermissionUserID, targetType, targetID); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	parentFolderID, parentEntityID, err := r.companyExplorerFinalContainerTarget(ctx, tx, input.CompanyID, input.ParentEntityID, input.PermissionUserID)
+	if err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	targetParentID := ""
+	if parentEntityID != input.CompanyID {
+		targetParentID = parentEntityID
+	}
+	var previousParentID sql.NullString
+	hadPreviousEdge := true
+	if err := tx.QueryRowContext(ctx, `
+select parent_folder_id::text
+from company_explorer_items
+where company_id=$1::uuid and target_type=$2 and target_id=$3::uuid
+for update`, input.CompanyID, targetType, targetID).Scan(&previousParentID); errors.Is(err, sql.ErrNoRows) {
+		hadPreviousEdge = false
+	} else if err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
 	position := input.Position
 	if position <= 0 {
 		position, err = nextCompanyExplorerFinalPositionSQL(ctx, tx, input.CompanyID, parentFolderID)
@@ -686,6 +700,16 @@ returning item_id::text, created_timestamp, updated_timestamp`,
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
+	if !hadPreviousEdge || previousParentID.Valid != (targetParentID != "") || previousParentID.String != targetParentID {
+		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
+			"item_id": itemID, "parent_entity_id": parentEntityID,
+			"target_type": targetType, "target_id": targetID,
+		})
+		eventInput.ActorUserID = input.ActorUserID
+		if _, err := r.appendDomainEventTx(ctx, tx, eventInput); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
@@ -699,34 +723,50 @@ func (r *PostgresRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdge
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
-	ctx := context.Background()
-	parentFolderID, parentEntityID, err := r.companyExplorerFinalContainerTarget(ctx, input.CompanyID, input.ParentEntityID, input.PermissionUserID)
-	if err != nil {
-		return CompanyExplorerV2Row{}, err
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.EdgeID = cleanUUIDText(input.EdgeID)
+	input.ParentEntityID = cleanUUIDText(input.ParentEntityID)
+	input.ActorUserID = cleanUUIDText(input.ActorUserID)
+	input.PermissionUserID = cleanUUIDText(input.PermissionUserID)
+	if input.CompanyID == "" || input.EdgeID == "" || input.ParentEntityID == "" || (input.ActorUserID == "") != (input.PermissionUserID == "") || (input.ActorUserID != "" && input.ActorUserID != input.PermissionUserID) {
+		return CompanyExplorerV2Row{}, ErrInvalid
 	}
+	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, input.CompanyID, input.PermissionUserID, true); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	var targetType, targetID string
+	var previousParentID sql.NullString
+	err = tx.QueryRowContext(ctx, `
+select target_type, target_id::text, parent_folder_id::text
+from company_explorer_items
+where company_id=$1::uuid
+  and item_id=$2::uuid
+for update`, input.CompanyID, input.EdgeID).Scan(&targetType, &targetID, &previousParentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CompanyExplorerV2Row{}, ErrNotFound
+	}
+	if err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	if err := lockPostgresCompanyExplorerResourceEditTx(ctx, tx, input.CompanyID, input.PermissionUserID, targetType, targetID); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	parentFolderID, parentEntityID, err := r.companyExplorerFinalContainerTarget(ctx, tx, input.CompanyID, input.ParentEntityID, input.PermissionUserID)
+	if err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
 	position := input.Position
 	if position <= 0 {
 		position, err = nextCompanyExplorerFinalPositionSQL(ctx, tx, input.CompanyID, parentFolderID)
 		if err != nil {
 			return CompanyExplorerV2Row{}, err
 		}
-	}
-	var targetType, targetID string
-	err = tx.QueryRowContext(ctx, `
-select target_type, target_id::text
-from company_explorer_items
-where company_id=$1::uuid
-  and item_id=$2::uuid`, input.CompanyID, input.EdgeID).Scan(&targetType, &targetID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return CompanyExplorerV2Row{}, ErrNotFound
-	}
-	if err != nil {
-		return CompanyExplorerV2Row{}, err
 	}
 
 	err = tx.QueryRowContext(ctx, `
@@ -743,6 +783,20 @@ returning target_type, target_id::text`, input.CompanyID, input.EdgeID, parentFo
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
+	targetParentID := ""
+	if parentEntityID != input.CompanyID {
+		targetParentID = parentEntityID
+	}
+	if previousParentID.Valid != (targetParentID != "") || previousParentID.String != targetParentID {
+		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
+			"item_id": input.EdgeID, "parent_entity_id": parentEntityID,
+			"target_type": targetType, "target_id": targetID,
+		})
+		eventInput.ActorUserID = input.ActorUserID
+		if _, err := r.appendDomainEventTx(ctx, tx, eventInput); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
@@ -750,19 +804,23 @@ returning target_type, target_id::text`, input.CompanyID, input.EdgeID, parentFo
 	return r.GetCompanyExplorerV2EntityWithParent(input.CompanyID, targetID, parentEntityID, input.EdgeID, input.PermissionUserID)
 }
 
-func (r *PostgresRepo) DeleteCompanyExplorerV2Edge(companyID, edgeID string) error {
+func (r *PostgresRepo) DeleteCompanyExplorerV2Edge(companyID, edgeID, actorUserID, permissionUserID string) error {
 	companyID = cleanUUIDText(companyID)
 	edgeID = cleanUUIDText(edgeID)
-	if companyID == "" || edgeID == "" {
+	actorUserID = cleanUUIDText(actorUserID)
+	permissionUserID = cleanUUIDText(permissionUserID)
+	if companyID == "" || edgeID == "" || (actorUserID == "") != (permissionUserID == "") || (actorUserID != "" && actorUserID != permissionUserID) {
 		return ErrInvalid
 	}
-	return r.DeleteCompanyExplorerV2Edges(companyID, []string{edgeID})
+	return r.DeleteCompanyExplorerV2Edges(companyID, []string{edgeID}, actorUserID, permissionUserID)
 }
 
-func (r *PostgresRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string) error {
+func (r *PostgresRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string, actorUserID, permissionUserID string) error {
 	companyID = cleanUUIDText(companyID)
+	actorUserID = cleanUUIDText(actorUserID)
+	permissionUserID = cleanUUIDText(permissionUserID)
 	edgeIDs = normalizeCompanyExplorerV2EdgeIDs(edgeIDs)
-	if companyID == "" || len(edgeIDs) == 0 {
+	if companyID == "" || len(edgeIDs) == 0 || (actorUserID == "") != (permissionUserID == "") || (actorUserID != "" && actorUserID != permissionUserID) {
 		return ErrInvalid
 	}
 	cleanEdgeIDs := make([]string, 0, len(edgeIDs))
@@ -779,16 +837,48 @@ func (r *PostgresRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []
 		return err
 	}
 	defer tx.Rollback()
-	var existingCount int
-	if err := tx.QueryRowContext(ctx, `
-select count(*)
-from company_explorer_items item
-where item.company_id=$1::uuid
-  and item.item_id = any(string_to_array($2, ',')::uuid[])`, companyID, strings.Join(cleanEdgeIDs, ",")).Scan(&existingCount); err != nil {
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, permissionUserID, true); err != nil {
 		return err
 	}
-	if existingCount != len(cleanEdgeIDs) {
+	rows, err := tx.QueryContext(ctx, `
+select item_id::text,target_type,target_id::text,coalesce(parent_folder_id::text,'')
+from company_explorer_items item
+where item.company_id=$1::uuid
+	  and item.item_id = any(string_to_array($2, ',')::uuid[])
+order by item_id
+for update`, companyID, strings.Join(cleanEdgeIDs, ","))
+	if err != nil {
+		return err
+	}
+	eventInputs := make([]DomainEventInput, 0, len(cleanEdgeIDs))
+	resources := make([]struct{ resourceType, resourceID string }, 0, len(cleanEdgeIDs))
+	for rows.Next() {
+		var itemID, targetType, targetID, parentID string
+		if err := rows.Scan(&itemID, &targetType, &targetID, &parentID); err != nil {
+			rows.Close()
+			return err
+		}
+		eventInput := workspaceDomainEventInput(companyID, "company_explorer_item_removed", map[string]any{
+			"item_id": itemID, "parent_entity_id": parentID, "target_type": targetType, "target_id": targetID,
+		})
+		eventInput.ActorUserID = actorUserID
+		eventInputs = append(eventInputs, eventInput)
+		resources = append(resources, struct{ resourceType, resourceID string }{resourceType: targetType, resourceID: targetID})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(eventInputs) != len(cleanEdgeIDs) {
 		return ErrNotFound
+	}
+	for _, resource := range resources {
+		if err := lockPostgresCompanyExplorerResourceEditTx(ctx, tx, companyID, permissionUserID, resource.resourceType, resource.resourceID); err != nil {
+			return err
+		}
 	}
 
 	result, err := tx.ExecContext(ctx, `
@@ -802,6 +892,9 @@ where company_id=$1::uuid
 		return err
 	} else if affected != int64(len(cleanEdgeIDs)) {
 		return ErrNotFound
+	}
+	if _, err := r.appendDomainEventsTx(ctx, tx, eventInputs); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -821,6 +914,9 @@ func (r *PostgresRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string)
 		return err
 	}
 	defer tx.Rollback()
+	if err := postgresDeleteProcessMapResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, entityID); err != nil {
+		return err
+	}
 	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "company_explorer_folder", entityID); err != nil {
 		return err
 	}
@@ -869,18 +965,71 @@ where company_id=$1::uuid
 	return row, nil
 }
 
-func (r *PostgresRepo) companyExplorerFinalContainerTarget(ctx context.Context, companyID, parentEntityID, permissionUserID string) (any, string, error) {
+func lockPostgresCompanyExplorerMutationTx(ctx context.Context, tx *sql.Tx, companyID, permissionUserID string, changesPermissionParent bool) error {
+	if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended('company-explorer-mutation:' || $1,0))`, companyID); err != nil {
+		return err
+	}
+	if err := lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, changesPermissionParent); err != nil {
+		return err
+	}
+	if permissionUserID == "" {
+		return nil
+	}
+	var one int
+	err := tx.QueryRowContext(ctx, `
+select 1
+from company_memberships
+where user_id=$2::uuid and (company_id=$1::uuid or role='dev_admin')
+order by case when company_id=$1::uuid then 0 else 1 end
+limit 1`, companyID, permissionUserID).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func lockPostgresCompanyExplorerResourceEditTx(ctx context.Context, tx *sql.Tx, companyID, permissionUserID, resourceType, resourceID string) error {
+	query := ""
+	switch resourceType {
+	case EntityTypeCompanyExplorerFolder:
+		query = `select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid`
+		if permissionUserID != "" {
+			query += ` and mangorts_user_can_access_resource(company_id,'company_explorer_folder',folder_id,$3::uuid,'edit')`
+		}
+	case EntityTypeLogicGate:
+		query = `select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid`
+		if permissionUserID != "" {
+			query += ` and mangorts_user_can_access_resource(company_id,'logic_gate',logic_gate_id,$3::uuid,'edit')`
+		}
+	case EntityTypeProject:
+		query = `select 1 from projects where company_id=$1::uuid and project_id=$2::uuid`
+		if permissionUserID != "" {
+			query += ` and mangorts_user_can_access_resource(company_id,'project',project_id,$3::uuid,'edit')`
+		}
+	default:
+		return ErrInvalid
+	}
+	query += ` for update`
+	var one int
+	args := []any{companyID, resourceID}
+	if permissionUserID != "" {
+		args = append(args, permissionUserID)
+	}
+	err := tx.QueryRowContext(ctx, query, args...).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func (r *PostgresRepo) companyExplorerFinalContainerTarget(ctx context.Context, tx *sql.Tx, companyID, parentEntityID, permissionUserID string) (any, string, error) {
 	if parentEntityID == companyID {
 		return nil, companyID, nil
 	}
-	parent, err := r.GetCompanyExplorerV2Entity(companyID, parentEntityID, permissionUserID)
-	if err != nil {
+	if err := lockPostgresCompanyExplorerResourceEditTx(ctx, tx, companyID, permissionUserID, EntityTypeCompanyExplorerFolder, parentEntityID); err != nil {
 		return nil, "", err
 	}
-	if parent.EntityType != CompanyExplorerV2EntityFolder {
-		return nil, "", ErrInvalid
-	}
-	return parent.EntityID, parent.EntityID, nil
+	return parentEntityID, parentEntityID, nil
 }
 
 func nextCompanyExplorerFinalPositionSQL(ctx context.Context, tx *sql.Tx, companyID string, parentFolderID any) (int, error) {

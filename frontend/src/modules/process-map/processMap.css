@@ -1,0 +1,283 @@
+.process-map-page {
+  position: absolute;
+  inset: 0;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 50px minmax(0, 1fr);
+  color: #1e293b;
+  background: #ffffff;
+}
+
+.process-map-page__header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 14px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.process-map-page__root {
+  border: 0;
+  background: transparent;
+  color: #334155;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 760;
+}
+
+.process-map-page__root[aria-current="page"] {
+  cursor: default;
+}
+
+.process-map-page__separator,
+.process-map-page__layer-name {
+  min-width: 0;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 680;
+}
+
+.process-map-page__layer-name {
+  overflow: hidden;
+  color: #475569;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-map-page__canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.process-map-surface {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  outline: none;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0) 36%),
+    linear-gradient(145deg, #ffffff 0%, #fbfcfe 58%, #f8fafc 100%);
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.96),
+    inset -1px -1px 0 rgba(148, 163, 184, 0.1),
+    0 16px 34px rgba(15, 23, 42, 0.1);
+}
+
+.process-map-surface .react-flow {
+  position: absolute;
+  inset: 0;
+  background: transparent;
+}
+
+.process-map-surface .react-flow__renderer {
+  z-index: 1;
+}
+
+.process-map-surface .react-flow__node {
+  z-index: 2 !important;
+}
+
+.process-map-toolbar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
+  min-height: 34px;
+  max-width: min(620px, calc(100% - 24px));
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 7px 9px 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 650;
+  box-shadow: 7px 7px 18px rgba(148, 163, 184, 0.2), -5px -5px 14px rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(12px);
+}
+
+.process-map-toolbar button {
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid rgba(225, 29, 72, 0.22);
+  border-radius: 8px;
+  background: #ffffff;
+  color: #9f1239;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 720;
+  box-shadow: 3px 3px 8px rgba(148, 163, 184, 0.16), -3px -3px 8px rgba(255, 255, 255, 0.92);
+}
+
+.process-map-message,
+.process-map-loading {
+  position: absolute;
+  left: 50%;
+  z-index: 11;
+  transform: translateX(-50%);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #475569;
+  padding: 8px 11px;
+  font-size: 11px;
+  font-weight: 680;
+  box-shadow: 0 9px 24px rgba(15, 23, 42, 0.12);
+  pointer-events: none;
+}
+
+.process-map-message {
+  bottom: 14px;
+}
+
+.process-map-message.is-error {
+  border-color: rgba(225, 29, 72, 0.24);
+  color: #9f1239;
+  background: rgba(255, 241, 242, 0.96);
+}
+
+.process-map-loading {
+  top: 55px;
+}
+
+.process-map-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #1e293b;
+  cursor: grab;
+  filter: drop-shadow(8px 10px 13px rgba(100, 116, 139, 0.18));
+}
+
+.process-map-card:active {
+  cursor: grabbing;
+}
+
+.process-map-card__body {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 15px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  background: linear-gradient(145deg, #ffffff 0%, #fbfcfd 62%, #f1f5f9 100%);
+  box-shadow:
+    inset 2px 2px 0 rgba(255, 255, 255, 0.98),
+    inset -3px -3px 8px rgba(148, 163, 184, 0.09);
+}
+
+.process-map-card--folder .process-map-card__body {
+  clip-path: polygon(50% 0, 96% 25%, 96% 75%, 50% 100%, 4% 75%, 4% 25%);
+  padding-inline: 28px;
+}
+
+.process-map-card--process .process-map-card__body,
+.process-map-card--restricted {
+  border-radius: 12px;
+}
+
+.process-map-card.is-selected .process-map-card__body {
+  border-color: rgba(14, 165, 233, 0.7);
+  background: linear-gradient(145deg, #ffffff 0%, #f0f9ff 58%, #f5f3ff 100%);
+  box-shadow:
+    inset 1px 1px 0 rgba(255, 255, 255, 0.96),
+    0 0 0 2px rgba(56, 189, 248, 0.18),
+    0 0 24px rgba(139, 92, 246, 0.15);
+}
+
+.process-map-card__kind {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 780;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.process-map-card__label {
+  max-width: 100%;
+  overflow: hidden;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.25;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-map-card--restricted {
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  color: #64748b;
+  cursor: default;
+  font-size: 30px;
+  font-weight: 560;
+  box-shadow:
+    inset 2px 2px 0 rgba(255, 255, 255, 0.96),
+    inset -3px -3px 8px rgba(148, 163, 184, 0.08);
+  filter: drop-shadow(7px 9px 12px rgba(100, 116, 139, 0.14));
+}
+
+.process-map-handle {
+  width: 12px !important;
+  height: 12px !important;
+  border: 2px solid #ffffff !important;
+  background: #64748b !important;
+  box-shadow: 0 2px 7px rgba(15, 23, 42, 0.24);
+  z-index: 4;
+}
+
+.process-map-handle--input {
+  left: 0 !important;
+}
+
+.process-map-handle--output {
+  right: 0 !important;
+}
+
+.process-map-trace {
+  fill: none;
+  stroke: rgba(71, 85, 105, 0.76);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.process-map-trace.is-selected {
+  stroke: #0284c7;
+  stroke-width: 2.6;
+  filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.34));
+}
+
+.process-map-waypoint {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #0284c7;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.28);
+  cursor: move;
+  pointer-events: all;
+}

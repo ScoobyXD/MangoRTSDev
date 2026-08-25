@@ -64,7 +64,7 @@ func (r *PostgresRepo) EnqueueRealtimeOutbox(ctx context.Context, input Realtime
 			coalesce(claim_token::text, ''), claim_expires_at, published_timestamp,
 			created_timestamp, coalesce(last_error_category, '')`,
 		input.EventID, input.CompanyID, input.Scope, input.EventType, input.ResourceType,
-		input.ResourceID, input.Permission, input.ResourceRevision, []byte(input.Payload), allowed, input.AudienceRestricted,
+		input.ResourceID, input.Permission, input.ResourceRevision, string(input.Payload), string(allowed), input.AudienceRestricted,
 	)
 	return scanRealtimeOutboxEvent(row)
 }
@@ -96,7 +96,7 @@ func (r *PostgresRepo) enqueueRealtimeOutboxTx(ctx context.Context, tx *sql.Tx, 
 			coalesce(claim_token::text, ''), claim_expires_at, published_timestamp,
 			created_timestamp, coalesce(last_error_category, '')`,
 		input.EventID, input.CompanyID, input.Scope, input.EventType, input.ResourceType,
-		input.ResourceID, input.Permission, input.ResourceRevision, []byte(input.Payload), allowed, input.AudienceRestricted,
+		input.ResourceID, input.Permission, input.ResourceRevision, string(input.Payload), string(allowed), input.AudienceRestricted,
 	)
 	return scanRealtimeOutboxEvent(row)
 }

@@ -680,170 +680,17 @@ func (r *PostgresRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	}
 	defer tx.Rollback()
 
+	eventInput := workspaceDomainEventInput(companyID, "logic_gate_deleted", map[string]any{
+		"logic_gate_id": logicGateID, "realtime_change_type": "resource_deleted", "realtime_audience_snapshot": true,
+	})
+	if _, err := r.appendDomainEventTx(ctx, tx, eventInput); err != nil {
+		return err
+	}
 	err = postgresDeleteLogicGateWithDependentProjectionsTx(ctx, tx, companyID, logicGateID)
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
-}
-
-func (r *PostgresRepo) ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error) {
-	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx,
-		`select company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position::text, b_position::text, created_timestamp
-		 from logic_gate_relationships
-		 where company_id=$1
-		 order by created_timestamp asc`,
-		companyID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]domain.LogicGateRelationship, 0)
-	for rows.Next() {
-		var item domain.LogicGateRelationship
-		if err := rows.Scan(
-			&item.CompanyID,
-			&item.LogicGateRelationshipID,
-			&item.LogicGateIDA,
-			&item.LogicGateIDB,
-			&item.APosition,
-			&item.BPosition,
-			&item.CreatedTimestamp,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (r *PostgresRepo) ListLogicGateRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateRelationship, error) {
-	folderID = strings.TrimSpace(folderID)
-	if folderID == "" {
-		return r.ListLogicGateRelationships(companyID)
-	}
-	ctx := context.Background()
-	rows, err := r.db.QueryContext(ctx,
-		`with recursive folder_scope as (
-		   select company_id, folder_id
-		   from company_explorer_folders
-		   where company_id=$1 and folder_id=$2::uuid
-		   union all
-		   select child.company_id, child.folder_id
-		   from company_explorer_folders child
-		   join folder_scope parent
-		     on child.company_id=parent.company_id
-		    and child.parent_folder_id=parent.folder_id
-		 ), visible_gates as (
-		   select item.target_id as logic_gate_id
-		   from company_explorer_items item
-		   join folder_scope folder on folder.folder_id=item.parent_folder_id
-		   where item.company_id=$1::uuid and item.target_type='logic_gate'
-		 )
-		 select rel.company_id, rel.logic_gate_relationship_id, rel.logic_gate_id_a, rel.logic_gate_id_b, rel.a_position::text, rel.b_position::text, rel.created_timestamp
-		 from logic_gate_relationships rel
-		 join visible_gates a on a.logic_gate_id=rel.logic_gate_id_a
-		 join visible_gates b on b.logic_gate_id=rel.logic_gate_id_b
-		 where rel.company_id=$1
-		 order by rel.created_timestamp asc`,
-		companyID, folderID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := make([]domain.LogicGateRelationship, 0)
-	for rows.Next() {
-		var item domain.LogicGateRelationship
-		if err := rows.Scan(
-			&item.CompanyID,
-			&item.LogicGateRelationshipID,
-			&item.LogicGateIDA,
-			&item.LogicGateIDB,
-			&item.APosition,
-			&item.BPosition,
-			&item.CreatedTimestamp,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-func (r *PostgresRepo) CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error) {
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return domain.LogicGateRelationship{}, err
-	}
-	defer tx.Rollback()
-
-	for _, candidate := range []string{logicGateIDA, logicGateIDB} {
-		var exists bool
-		if err := tx.QueryRowContext(ctx,
-			`select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`,
-			companyID, candidate,
-		).Scan(&exists); err != nil {
-			return domain.LogicGateRelationship{}, err
-		}
-		if !exists {
-			return domain.LogicGateRelationship{}, ErrNotFound
-		}
-	}
-
-	item := domain.LogicGateRelationship{
-		CompanyID:               companyID,
-		LogicGateRelationshipID: newUUIDv7String(),
-		LogicGateIDA:            logicGateIDA,
-		LogicGateIDB:            logicGateIDB,
-		APosition:               aPosition,
-		BPosition:               bPosition,
-	}
-	if err := tx.QueryRowContext(ctx,
-		`insert into logic_gate_relationships
-		 (company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position, b_position, created_timestamp)
-		 values ($1, $2, $3, $4, $5::logic_gate_relationship_position, $6::logic_gate_relationship_position, now())
-		 returning company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position::text, b_position::text, created_timestamp`,
-		item.CompanyID, item.LogicGateRelationshipID, item.LogicGateIDA, item.LogicGateIDB, item.APosition, item.BPosition,
-	).Scan(
-		&item.CompanyID,
-		&item.LogicGateRelationshipID,
-		&item.LogicGateIDA,
-		&item.LogicGateIDB,
-		&item.APosition,
-		&item.BPosition,
-		&item.CreatedTimestamp,
-	); err != nil {
-		return domain.LogicGateRelationship{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return domain.LogicGateRelationship{}, err
-	}
-	return item, nil
-}
-
-func (r *PostgresRepo) DeleteLogicGateRelationship(companyID, relationshipID string) error {
-	ctx := context.Background()
-	deleted, err := r.db.ExecContext(ctx,
-		`delete from logic_gate_relationships
-		 where company_id=$1 and logic_gate_relationship_id=$2`,
-		companyID, relationshipID,
-	)
-	if err != nil {
-		return err
-	}
-	affected, err := deleted.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
 }
 
 func (r *PostgresRepo) AddLogicGateInformation(companyID, logicGateID, infoType, information, informationID string) (domain.LogicGateInformation, error) {
@@ -916,42 +763,9 @@ func (r *PostgresRepo) GetLogicGateDetails(companyID, logicGateID string) (domai
 		information = append(information, logicGateProjectionAsInformation(projection))
 	}
 
-	relRows, err := r.db.QueryContext(ctx,
-		`select company_id, logic_gate_relationship_id, logic_gate_id_a, logic_gate_id_b, a_position::text, b_position::text, created_timestamp
-		 from logic_gate_relationships
-		 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)
-		 order by created_timestamp asc`,
-		companyID, logicGateID,
-	)
-	if err != nil {
-		return domain.LogicGateDetails{}, err
-	}
-	defer relRows.Close()
-
-	relationships := make([]domain.LogicGateRelationship, 0)
-	for relRows.Next() {
-		var item domain.LogicGateRelationship
-		if err := relRows.Scan(
-			&item.CompanyID,
-			&item.LogicGateRelationshipID,
-			&item.LogicGateIDA,
-			&item.LogicGateIDB,
-			&item.APosition,
-			&item.BPosition,
-			&item.CreatedTimestamp,
-		); err != nil {
-			return domain.LogicGateDetails{}, err
-		}
-		relationships = append(relationships, item)
-	}
-	if err := relRows.Err(); err != nil {
-		return domain.LogicGateDetails{}, err
-	}
-
 	return domain.LogicGateDetails{
-		LogicGate:     logicGate,
-		Information:   information,
-		Relationships: relationships,
+		LogicGate:   logicGate,
+		Information: information,
 	}, nil
 }
 

@@ -22,6 +22,11 @@ export type HuddleLogicGateDeepLinkRoute = {
   huddleLogicGateID: string;
 };
 
+export type ProcessMapDeepLinkRoute = {
+  kind: "process_map";
+  folderID?: string;
+};
+
 export type GvicDeepLinkRoute = {
   kind: "gvic";
   role: RACIInboxRole;
@@ -29,7 +34,7 @@ export type GvicDeepLinkRoute = {
   nodeID?: string;
 };
 
-export type DeepLinkRoute = LogicGateDeepLinkRoute | NodeDeepLinkRoute | ProjectDeepLinkRoute | HuddleLogicGateDeepLinkRoute | GvicDeepLinkRoute;
+export type DeepLinkRoute = LogicGateDeepLinkRoute | NodeDeepLinkRoute | ProjectDeepLinkRoute | HuddleLogicGateDeepLinkRoute | ProcessMapDeepLinkRoute | GvicDeepLinkRoute;
 
 function cleanSegment(value: string): string {
   try {
@@ -65,6 +70,13 @@ export function gvicViewIDForRole(role: string): RACIInboxViewID | null {
 
 export function parseDeepLinkRoute(pathname: string): DeepLinkRoute | null {
   const segments = normalizeAppPath(pathname).split("/").filter(Boolean);
+  if (segments.length === 1 && segments[0] === "process-map") {
+    return { kind: "process_map" };
+  }
+  if (segments.length === 3 && segments[0] === "process-map" && segments[1] === "folders") {
+    const folderID = cleanSegment(segments[2]);
+    return folderID ? { kind: "process_map", folderID } : null;
+  }
   if (segments.length === 2 && segments[0] === "logic-gates") {
     const logicGateID = cleanSegment(segments[1]);
     return logicGateID ? { kind: "logic_gate", logicGateID } : null;
@@ -118,6 +130,11 @@ export function buildProjectRoute(projectID: string): string {
 
 export function buildHuddleLogicGateRoute(huddleLogicGateID: string): string {
   return `/huddle-logic-gates/${encodeSegment(huddleLogicGateID)}`;
+}
+
+export function buildProcessMapRoute(folderID?: string): string {
+  const cleanFolderID = folderID?.trim() ? encodeSegment(folderID) : "";
+  return cleanFolderID ? `/process-map/folders/${cleanFolderID}` : "/process-map";
 }
 
 export type ProjectLogicGateNavigationPlan = {

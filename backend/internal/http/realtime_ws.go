@@ -45,6 +45,8 @@ const (
 	realtimeEditorJSONScopePrefix      = "editor-json:"
 	realtimeRACITabsScope              = "raci-tabs:company"
 	realtimeRACITabsScopePrefix        = "raci-tabs:"
+	realtimeProcessMapScope            = "process-map:company"
+	realtimeProcessMapScopePrefix      = "process-map:"
 )
 
 const (
@@ -64,6 +66,7 @@ const (
 	realtimeMessageMailboxFolderChanged  = "mailbox.folder.changed"
 	realtimeMessageEditorDeltaCommitted  = "editor.delta.committed"
 	realtimeMessageEditorDocumentDeleted = "editor.document.deleted"
+	realtimeMessageProcessMapChanged     = "process_map.changed"
 	realtimeMessageHeartbeatChallenge    = "heartbeat.challenge"
 	realtimeMessageHeartbeatResponse     = "heartbeat.response"
 	realtimeMessageHeartbeatConfirmed    = "heartbeat.confirmed"
@@ -155,7 +158,12 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	if actorRoleForCompany(actor, companyID) == "" {
+	currentRole, err := s.currentActorRoleForCompany(actor, companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_check_company_access")
+		return
+	}
+	if currentRole == "" {
 		writeError(w, http.StatusForbidden, "company_access_denied")
 		return
 	}
@@ -373,6 +381,8 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 		return
 	}
 	if !authorized {
+		s.realtimeRegistry.unsubscribe(conn.id, conn.companyID, scope)
+		s.recordRealtimeActiveSubscriptions()
 		log.Printf("realtime_subscription_rejected company_id=%s user_id=%s connection_id=%s scope_type=%s scope=%s error=%s", conn.companyID, conn.userID, conn.id, realtimeScopeType(scope), scope, rejectCode)
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Scope: scope, Error: rejectCode})
 		return
@@ -387,6 +397,16 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 }
 
 func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, scope string) (bool, string, error) {
+	if strings.TrimSpace(scope) == realtimeProcessMapScope {
+		role, err := s.currentActorRoleForCompany(actor, companyID)
+		if err != nil {
+			return false, "", err
+		}
+		if role == "" {
+			return false, "company_access_denied", nil
+		}
+		return true, "", nil
+	}
 	if actorRoleForCompany(actor, companyID) == "" {
 		return false, "company_access_denied", nil
 	}
@@ -660,6 +680,7 @@ func realtimeKnownScopePrefix(scope string) bool {
 		realtimeEditorScopePrefix,
 		realtimeEditorJSONScopePrefix,
 		realtimeRACITabsScopePrefix,
+		realtimeProcessMapScopePrefix,
 	} {
 		if strings.HasPrefix(strings.TrimSpace(scope), prefix) {
 			return true
@@ -674,6 +695,9 @@ func realtimeScopeType(scope string) string {
 	}
 	if strings.TrimSpace(scope) == realtimeRACITabsScope {
 		return "raci-tabs"
+	}
+	if strings.TrimSpace(scope) == realtimeProcessMapScope {
+		return "process-map"
 	}
 	personalUserID, _ := realtimePersonalMailboxIdentityFromScope(scope)
 	if personalUserID != "" || realtimeSharedMailboxIDFromScope(scope) != "" {
@@ -706,7 +730,7 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"notifications", "mailbox", "chat", "board", "editor", "raci-tabs"} {
+	for _, scopeType := range []string{"notifications", "mailbox", "chat", "board", "editor", "raci-tabs", "process-map"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
 }

@@ -305,13 +305,35 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 		}
 		var row store.CompanyExplorerV2Row
 		changed := false
+		actorUserID := ""
+		permissionUserID := ""
+		if actor, ok := authenticatedActor(r); ok {
+			actorUserID = strings.TrimSpace(actor.User.UserID)
+			if actorUserID == "" {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			permissionUserID = actorUserID
+			if !requireCompanyAccess(w, r, req.CompanyID) {
+				return
+			}
+			if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeCompanyExplorerFolder, folderID, "company_explorer_folder_not_found") {
+				return
+			}
+			if req.ParentFolderID != nil {
+				parentFolderID := strings.TrimSpace(*req.ParentFolderID)
+				if parentFolderID != "" && !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeCompanyExplorerFolder, parentFolderID, "company_explorer_folder_not_found") {
+					return
+				}
+			}
+		}
 		if req.ParentFolderID != nil || req.Position > 0 {
 			var parentFolderID *string
 			if req.ParentFolderID != nil {
 				parent := strings.TrimSpace(*req.ParentFolderID)
 				parentFolderID = &parent
 			}
-			folder, moveErr := s.repo.MoveCompanyExplorerFolder(req.CompanyID, folderID, parentFolderID, req.Position)
+			folder, moveErr := s.repo.MoveCompanyExplorerFolder(req.CompanyID, folderID, parentFolderID, req.Position, actorUserID, permissionUserID)
 			if errors.Is(moveErr, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 				return
@@ -336,7 +358,7 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			changed = true
 		}
 		if req.Name != "" {
-			folder, renameErr := s.repo.RenameCompanyExplorerFolder(req.CompanyID, folderID, req.Name)
+			folder, renameErr := s.repo.RenameCompanyExplorerFolder(req.CompanyID, folderID, req.Name, actorUserID, permissionUserID)
 			if errors.Is(renameErr, store.ErrNotFound) {
 				writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
 				return
@@ -364,30 +386,8 @@ func (s *Server) handleCompanyExplorerFolderByID(w http.ResponseWriter, r *http.
 			writeError(w, http.StatusBadRequest, "company_explorer_folder_update_required")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_folder_updated", map[string]any{"folder_id": row.EntityID, "parent_entity_id": row.ParentEntityID, "entity": row})
+		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, row)
-		return
-	}
-
-	if r.Method == http.MethodDelete {
-		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		if companyID == "" {
-			writeError(w, http.StatusBadRequest, "company_id_required")
-			return
-		}
-		err := s.repo.DeleteCompanyExplorerFolder(companyID, folderID)
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "company_explorer_folder_not_found")
-			return
-		} else if errors.Is(err, store.ErrInvalid) {
-			writeError(w, http.StatusConflict, "protected_company_explorer_folder_cannot_be_deleted")
-			return
-		} else if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed_to_delete_company_explorer_folder")
-			return
-		}
-		s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": folderID})
-		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	}
 
@@ -420,9 +420,19 @@ func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	req.CompanyID = strings.TrimSpace(req.CompanyID)
-	actor, _ := authenticatedActor(r)
-	actorUserID := strings.TrimSpace(actor.User.UserID)
-	permissionUserID := s.entityPermissionActorUserID(r, req.CompanyID)
+	actorUserID := ""
+	permissionUserID := ""
+	if actor, ok := authenticatedActor(r); ok {
+		actorUserID = strings.TrimSpace(actor.User.UserID)
+		if actorUserID == "" {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		permissionUserID = actorUserID
+		if !requireCompanyAccess(w, r, req.CompanyID) {
+			return
+		}
+	}
 	if len(req.Items) > 0 {
 		if req.CompanyID == "" {
 			writeError(w, http.StatusBadRequest, "company_id_required")
@@ -444,6 +454,19 @@ func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Reque
 				parentEntityID = req.CompanyID
 			}
 			edgeID := strings.TrimSpace(item.EdgeID)
+			if actorUserID != "" && parentEntityID != req.CompanyID && !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeCompanyExplorerFolder, parentEntityID, "company_explorer_folder_not_found") {
+				return
+			}
+			if actorUserID != "" && edgeID == "" {
+				resourceType, ok := store.NormalizeEntityType(item.TargetType)
+				if !ok || (resourceType != store.EntityTypeLogicGate && resourceType != store.EntityTypeProject) {
+					writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")
+					return
+				}
+				if !s.requireEntityEdit(w, r, req.CompanyID, resourceType, strings.TrimSpace(item.TargetID), "company_explorer_item_not_found") {
+					return
+				}
+			}
 			var row store.CompanyExplorerV2Row
 			var err error
 			if edgeID != "" {
@@ -479,7 +502,7 @@ func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Reque
 				return
 			}
 			rows = append(rows, row)
-			s.publishWorkspaceEvent(req.CompanyID, "company_explorer_item_placed", map[string]any{"item_id": row.EdgeID, "parent_entity_id": row.ParentEntityID, "target_type": row.EntityType, "target_id": row.ResourceID, "entity": row})
+			s.wakeRealtimeSpine()
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"rows": rows})
 		return
@@ -494,6 +517,19 @@ func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Reque
 	if req.CompanyID == "" || parentEntityID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_and_parent_required")
 		return
+	}
+	if actorUserID != "" {
+		if parentEntityID != req.CompanyID && !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeCompanyExplorerFolder, parentEntityID, "company_explorer_folder_not_found") {
+			return
+		}
+		resourceType, ok := store.NormalizeEntityType(req.TargetType)
+		if !ok || (resourceType != store.EntityTypeLogicGate && resourceType != store.EntityTypeProject) {
+			writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")
+			return
+		}
+		if !s.requireEntityEdit(w, r, req.CompanyID, resourceType, strings.TrimSpace(req.TargetID), "company_explorer_item_not_found") {
+			return
+		}
 	}
 	row, err := s.repo.UpsertCompanyExplorerV2Edge(store.CompanyExplorerV2EdgeInput{
 		CompanyID:        req.CompanyID,
@@ -516,7 +552,7 @@ func (s *Server) handleCompanyExplorerItems(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "failed_to_place_company_explorer_item")
 		return
 	}
-	s.publishWorkspaceEvent(req.CompanyID, "company_explorer_item_placed", map[string]any{"item_id": row.EdgeID, "parent_entity_id": row.ParentEntityID, "target_type": row.EntityType, "target_id": row.ResourceID, "entity": row})
+	s.wakeRealtimeSpine()
 	writeJSON(w, http.StatusCreated, row)
 }
 
@@ -547,14 +583,29 @@ func (s *Server) handleCompanyExplorerItemByID(w http.ResponseWriter, r *http.Re
 		if parentEntityID == "" {
 			parentEntityID = req.CompanyID
 		}
-		actor, _ := authenticatedActor(r)
+		actorUserID := ""
+		permissionUserID := ""
+		if actor, ok := authenticatedActor(r); ok {
+			actorUserID = strings.TrimSpace(actor.User.UserID)
+			if actorUserID == "" {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			permissionUserID = actorUserID
+			if !requireCompanyAccess(w, r, req.CompanyID) {
+				return
+			}
+			if parentEntityID != req.CompanyID && !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeCompanyExplorerFolder, parentEntityID, "company_explorer_folder_not_found") {
+				return
+			}
+		}
 		row, err := s.repo.MoveCompanyExplorerV2Edge(store.CompanyExplorerV2MoveEdgeInput{
 			CompanyID:        req.CompanyID,
 			EdgeID:           itemID,
 			ParentEntityID:   parentEntityID,
 			Position:         req.Position,
-			ActorUserID:      strings.TrimSpace(actor.User.UserID),
-			PermissionUserID: s.entityPermissionActorUserID(r, req.CompanyID),
+			ActorUserID:      actorUserID,
+			PermissionUserID: permissionUserID,
 		})
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_company_explorer_item_move")
@@ -568,7 +619,7 @@ func (s *Server) handleCompanyExplorerItemByID(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "failed_to_move_company_explorer_item")
 			return
 		}
-		s.publishWorkspaceEvent(req.CompanyID, "company_explorer_item_placed", map[string]any{"item_id": row.EdgeID, "parent_entity_id": row.ParentEntityID, "target_type": row.EntityType, "target_id": row.ResourceID, "entity": row})
+		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, row)
 	case http.MethodDelete:
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
@@ -576,7 +627,20 @@ func (s *Server) handleCompanyExplorerItemByID(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusBadRequest, "company_id_required")
 			return
 		}
-		if err := s.repo.DeleteCompanyExplorerV2Edge(companyID, itemID); errors.Is(err, store.ErrInvalid) {
+		actorUserID := ""
+		permissionUserID := ""
+		if actor, ok := authenticatedActor(r); ok {
+			actorUserID = strings.TrimSpace(actor.User.UserID)
+			if actorUserID == "" {
+				writeError(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+			permissionUserID = actorUserID
+			if !requireCompanyAccess(w, r, companyID) {
+				return
+			}
+		}
+		if err := s.repo.DeleteCompanyExplorerV2Edge(companyID, itemID, actorUserID, permissionUserID); errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_company_explorer_item")
 			return
 		} else if errors.Is(err, store.ErrNotFound) {
@@ -586,7 +650,7 @@ func (s *Server) handleCompanyExplorerItemByID(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "failed_to_remove_company_explorer_item")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "company_explorer_item_removed", map[string]any{"item_id": itemID})
+		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

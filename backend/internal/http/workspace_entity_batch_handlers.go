@@ -160,6 +160,9 @@ func buildWorkspaceEntityBatchInput(
 	if len(items) == 0 || len(items) > store.WorkspaceEntityBatchMaxItems || len(relationships) > store.WorkspaceEntityBatchMaxRelationships {
 		return store.WorkspaceEntityBatchInput{}, false
 	}
+	if input.EntityKind == store.EntityTypeLogicGate && len(relationships) > 0 {
+		return store.WorkspaceEntityBatchInput{}, false
+	}
 
 	clientIDs := make(map[string]struct{}, len(items))
 	for _, item := range items {
@@ -218,11 +221,7 @@ func buildWorkspaceEntityBatchInput(
 		if item.ClientIDA != "" && item.ClientIDA == item.ClientIDB {
 			return store.WorkspaceEntityBatchInput{}, false
 		}
-		if input.EntityKind == "node" {
-			if !isLegalNodeRelationshipPositionPair(item.APosition, item.BPosition) {
-				return store.WorkspaceEntityBatchInput{}, false
-			}
-		} else if !isLegalLogicGateRelationshipPositionPair(item.APosition, item.BPosition) {
+		if !isLegalNodeRelationshipPositionPair(item.APosition, item.BPosition) {
 			return store.WorkspaceEntityBatchInput{}, false
 		}
 		input.Relationships = append(input.Relationships, item)
@@ -233,7 +232,7 @@ func buildWorkspaceEntityBatchInput(
 
 func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBatchResult, timings *requestTimingRecorder) {
 	inputs := make([]store.DomainEventInput, 0,
-		len(result.FolderItems)+len(result.Nodes)+len(result.LogicGates)+len(result.Relationships)+len(result.LogicGateRelationships),
+		len(result.FolderItems)+len(result.Nodes)+len(result.LogicGates)+len(result.Relationships),
 	)
 	appendEvent := func(eventType string, payload map[string]any) {
 		inputs = append(inputs, store.DomainEventInput{
@@ -260,14 +259,6 @@ func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBa
 			"node_id_a":            item.NodeIDA,
 			"node_id_b":            item.NodeIDB,
 			"relationship":         item,
-		})
-	}
-	for _, item := range result.LogicGateRelationships {
-		appendEvent("logic_gate_relationship_created", map[string]any{
-			"logic_gate_relationship_id": item.LogicGateRelationshipID,
-			"logic_gate_id_a":            item.LogicGateIDA,
-			"logic_gate_id_b":            item.LogicGateIDB,
-			"logic_gate_relationship":    item,
 		})
 	}
 	if len(inputs) == 0 {

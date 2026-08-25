@@ -247,6 +247,9 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if input.PermissionUserID != "" && !r.userHasCompanyMembershipLocked(input.CompanyID, input.PermissionUserID) {
+		return CompanyExplorerV2Row{}, ErrNotFound
+	}
 	r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
 	parent, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.ParentEntityID)]
 	if !ok {
@@ -292,44 +295,6 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, entity, &edge), nil
 }
 
-func (r *MemoryRepo) UpdateCompanyExplorerV2Folder(input CompanyExplorerV2FolderUpdateInput) (CompanyExplorerV2Row, error) {
-	input, err := normalizeCompanyExplorerV2FolderUpdateInput(input)
-	if err != nil {
-		return CompanyExplorerV2Row{}, err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
-	entity, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.EntityID)]
-	if !ok || entity.EntityType != CompanyExplorerV2EntityFolder {
-		return CompanyExplorerV2Row{}, ErrNotFound
-	}
-	if err := protectCompanyExplorerDefaultFolderMutation(input.CompanyID, input.EntityID); err != nil {
-		return CompanyExplorerV2Row{}, err
-	}
-	if input.PermissionUserID != "" && !r.companyExplorerV2EntityCanEditLocked(input.CompanyID, input.PermissionUserID, entity) {
-		return CompanyExplorerV2Row{}, ErrNotFound
-	}
-	entity.Name = input.Name
-	entity.UpdatedTimestamp = time.Now().UTC()
-	r.companyExplorerV2Entities[key(input.CompanyID, input.EntityID)] = entity
-	if folder, ok := r.folders[key(input.CompanyID, input.EntityID)]; ok {
-		folder.Name = input.Name
-		folder.UpdatedTimestamp = entity.UpdatedTimestamp
-		r.folders[key(input.CompanyID, input.EntityID)] = folder
-	}
-	var edge *memoryCompanyExplorerV2Edge
-	for _, item := range r.companyExplorerV2Edges {
-		if item.CompanyID == input.CompanyID && item.ChildEntityID == input.EntityID {
-			copy := item
-			edge = &copy
-			break
-		}
-	}
-	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, entity, edge), nil
-}
-
 func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2Row, error) {
 	input, err := normalizeCompanyExplorerV2EdgeInput(input)
 	if err != nil {
@@ -338,6 +303,9 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if input.PermissionUserID != "" && !r.userHasCompanyMembershipLocked(input.CompanyID, input.PermissionUserID) {
+		return CompanyExplorerV2Row{}, ErrNotFound
+	}
 	r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
 	parent, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.ParentEntityID)]
 	if !ok {
@@ -353,7 +321,7 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 	if !ok {
 		child, ok = r.companyExplorerV2EntityForNativeLocked(input.CompanyID, input.ChildEntityType, input.ChildResourceID)
 	}
-	if !ok || !r.companyExplorerV2EntityVisibleLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child) {
+	if !ok || (input.PermissionUserID != "" && !r.companyExplorerV2EntityCanEditLocked(input.CompanyID, input.PermissionUserID, child)) {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
 	if child.EntityType != CompanyExplorerV2EntityProject && child.EntityType != CompanyExplorerV2EntityLogicGate {
@@ -378,7 +346,7 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 	}
 	previousParentEntityID := ""
 	hadPreviousEdge := false
-	for edgeKey, existing := range r.companyExplorerV2Edges {
+	for _, existing := range r.companyExplorerV2Edges {
 		if existing.CompanyID != input.CompanyID || existing.ChildEntityID != child.EntityID {
 			continue
 		}
@@ -387,16 +355,28 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 		if edge.CreatedTimestamp.Equal(now) {
 			edge.CreatedTimestamp = existing.CreatedTimestamp
 		}
-		delete(r.companyExplorerV2Edges, edgeKey)
 	}
-	r.companyExplorerV2Edges[key(edge.CompanyID, edge.EdgeID)] = edge
-	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
-	if parent.EntityType == CompanyExplorerV2EntityFolder && (!hadPreviousEdge || previousParentEntityID != parent.EntityID) {
+	if !hadPreviousEdge || previousParentEntityID != input.ParentEntityID {
 		childResourceID := child.ResourceID
 		if childResourceID == "" {
 			childResourceID = child.EntityID
 		}
+		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
+			"item_id": edge.EdgeID, "parent_entity_id": input.ParentEntityID,
+			"target_type": child.EntityType, "target_id": childResourceID,
+		})
+		eventInput.ActorUserID = input.ActorUserID
+		if _, err := r.appendDomainEventLocked(eventInput); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
 	}
+	for edgeKey, existing := range r.companyExplorerV2Edges {
+		if existing.CompanyID == input.CompanyID && existing.ChildEntityID == child.EntityID {
+			delete(r.companyExplorerV2Edges, edgeKey)
+		}
+	}
+	r.companyExplorerV2Edges[key(edge.CompanyID, edge.EdgeID)] = edge
+	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
 	r.reconcileMemoryRACITabsCompanyLocked(input.CompanyID)
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
 }
@@ -409,6 +389,9 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if input.PermissionUserID != "" && !r.userHasCompanyMembershipLocked(input.CompanyID, input.PermissionUserID) {
+		return CompanyExplorerV2Row{}, ErrNotFound
+	}
 	r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
 	edge, ok := r.companyExplorerV2Edges[key(input.CompanyID, input.EdgeID)]
 	if !ok {
@@ -416,6 +399,9 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	}
 	child, ok := r.companyExplorerV2Entities[key(input.CompanyID, edge.ChildEntityID)]
 	if !ok {
+		return CompanyExplorerV2Row{}, ErrNotFound
+	}
+	if input.PermissionUserID != "" && !r.companyExplorerV2EntityCanEditLocked(input.CompanyID, input.PermissionUserID, child) {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
 	parent, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.ParentEntityID)]
@@ -436,40 +422,79 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	edge.ParentEntityID = input.ParentEntityID
 	edge.EdgeID = companyExplorerV2EdgeID(input.CompanyID, input.ParentEntityID, child.EntityID)
 	edge.UpdatedTimestamp = time.Now().UTC()
-	delete(r.companyExplorerV2Edges, oldEdgeKey)
-	r.companyExplorerV2Edges[key(input.CompanyID, edge.EdgeID)] = edge
-	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
-	if parent.EntityType == CompanyExplorerV2EntityFolder && previousParentEntityID != parent.EntityID {
+	if previousParentEntityID != input.ParentEntityID {
 		childResourceID := child.ResourceID
 		if childResourceID == "" {
 			childResourceID = child.EntityID
 		}
+		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
+			"item_id": edge.EdgeID, "parent_entity_id": input.ParentEntityID,
+			"target_type": child.EntityType, "target_id": childResourceID,
+		})
+		eventInput.ActorUserID = input.ActorUserID
+		if _, err := r.appendDomainEventLocked(eventInput); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
 	}
+	delete(r.companyExplorerV2Edges, oldEdgeKey)
+	r.companyExplorerV2Edges[key(input.CompanyID, edge.EdgeID)] = edge
+	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
 	r.reconcileMemoryRACITabsCompanyLocked(input.CompanyID)
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
 }
 
-func (r *MemoryRepo) DeleteCompanyExplorerV2Edge(companyID, edgeID string) error {
+func (r *MemoryRepo) DeleteCompanyExplorerV2Edge(companyID, edgeID, actorUserID, permissionUserID string) error {
 	companyID = strings.TrimSpace(companyID)
 	edgeID = strings.TrimSpace(edgeID)
-	if companyID == "" || edgeID == "" {
+	actorUserID = strings.TrimSpace(actorUserID)
+	permissionUserID = strings.TrimSpace(permissionUserID)
+	if companyID == "" || edgeID == "" || (actorUserID == "") != (permissionUserID == "") || (actorUserID != "" && actorUserID != permissionUserID) {
 		return ErrInvalid
 	}
-	return r.DeleteCompanyExplorerV2Edges(companyID, []string{edgeID})
+	return r.DeleteCompanyExplorerV2Edges(companyID, []string{edgeID}, actorUserID, permissionUserID)
 }
 
-func (r *MemoryRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string) error {
+func (r *MemoryRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string, actorUserID, permissionUserID string) error {
 	companyID = strings.TrimSpace(companyID)
+	actorUserID = strings.TrimSpace(actorUserID)
+	permissionUserID = strings.TrimSpace(permissionUserID)
 	edgeIDs = normalizeCompanyExplorerV2EdgeIDs(edgeIDs)
-	if companyID == "" || len(edgeIDs) == 0 {
+	if companyID == "" || len(edgeIDs) == 0 || (actorUserID == "") != (permissionUserID == "") || (actorUserID != "" && actorUserID != permissionUserID) {
 		return ErrInvalid
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if permissionUserID != "" && !r.userHasCompanyMembershipLocked(companyID, permissionUserID) {
+		return ErrNotFound
+	}
 	for _, edgeID := range edgeIDs {
-		if _, ok := r.companyExplorerV2Edges[key(companyID, edgeID)]; !ok {
+		edge, ok := r.companyExplorerV2Edges[key(companyID, edgeID)]
+		if !ok {
 			return ErrNotFound
 		}
+		child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]
+		if !ok || (permissionUserID != "" && !r.companyExplorerV2EntityCanEditLocked(companyID, permissionUserID, child)) {
+			return ErrNotFound
+		}
+	}
+	eventInputs := make([]DomainEventInput, 0, len(edgeIDs))
+	for _, edgeID := range edgeIDs {
+		edge := r.companyExplorerV2Edges[key(companyID, edgeID)]
+		payload := map[string]any{"item_id": edgeID, "parent_entity_id": edge.ParentEntityID}
+		if child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]; ok {
+			resourceID := child.ResourceID
+			if resourceID == "" {
+				resourceID = child.EntityID
+			}
+			payload["target_type"] = child.EntityType
+			payload["target_id"] = resourceID
+		}
+		eventInput := workspaceDomainEventInput(companyID, "company_explorer_item_removed", payload)
+		eventInput.ActorUserID = strings.TrimSpace(actorUserID)
+		eventInputs = append(eventInputs, eventInput)
+	}
+	if _, err := r.appendDomainEventsLocked(eventInputs); err != nil {
+		return err
 	}
 	for _, edgeID := range edgeIDs {
 		edge := r.companyExplorerV2Edges[key(companyID, edgeID)]
@@ -625,6 +650,7 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) e
 		}
 	}
 	for id := range folderIDs {
+		r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeFolder, id)
 		delete(r.companyExplorerV2Entities, key(companyID, id))
 
 		delete(r.folders, key(companyID, id))

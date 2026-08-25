@@ -60,6 +60,14 @@ begin
      or to_regclass('public.logic_gate_map_positions') is null then
     raise exception 'STOP: target map position table set drifted or was already retired';
   end if;
+  if to_regclass('public.logic_gate_relationships') is not null then
+    raise exception 'STOP: retired logic_gate_relationships authority is still present';
+  end if;
+  if to_regclass('public.process_map_placements') is null
+     or to_regclass('public.resource_operational_relationships') is null
+     or to_regclass('public.process_map_traces') is null then
+    raise exception 'STOP: a canonical Process Map authority is missing';
+  end if;
 end
 $$;
 
@@ -181,7 +189,8 @@ begin
   if exists (
     select 1
     from (values
-      ('node_relationships'),('logic_gate_relationships'),
+      ('node_relationships'),
+      ('process_map_placements'),('resource_operational_relationships'),('process_map_traces'),
       ('node_textboxes_history'),('logic_gate_textboxes_history'),
       ('node_view_user_versions')
     ) protected(name)
@@ -206,5 +215,8 @@ select current_setting('server_version') as server_version,
        to_regclass('public.node_map_positions') is null as node_position_table_dropped,
        to_regclass('public.logic_gate_map_positions') is null as logic_gate_position_table_dropped,
        to_regclass('public.node_relationships') is not null as node_relationships_preserved,
-       to_regclass('public.logic_gate_relationships') is not null as logic_gate_relationships_preserved,
+       to_regclass('public.logic_gate_relationships') is null as logic_gate_relationships_retired,
+       to_regclass('public.process_map_placements') is not null as process_map_placements_preserved,
+       to_regclass('public.resource_operational_relationships') is not null as operational_relationships_preserved,
+       to_regclass('public.process_map_traces') is not null as process_map_traces_preserved,
        to_regclass('public.node_view_user_versions') is not null as node_view_user_versions_preserved;

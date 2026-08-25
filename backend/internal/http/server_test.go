@@ -79,34 +79,6 @@ func TestIsLegalNodeRelationshipPositionPair(t *testing.T) {
 	}
 }
 
-func TestIsLegalLogicGateRelationshipPositionPair(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		a    string
-		b    string
-		want bool
-	}{
-		{name: "input_output", a: "Input", b: "Output", want: true},
-		{name: "output_input", a: "Output", b: "Input", want: true},
-		{name: "input_input", a: "Input", b: "Input", want: false},
-		{name: "output_output", a: "Output", b: "Output", want: false},
-		{name: "input_peer", a: "Input", b: "Peer", want: false},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := isLegalLogicGateRelationshipPositionPair(tc.a, tc.b)
-			if got != tc.want {
-				t.Fatalf("isLegalLogicGateRelationshipPositionPair(%q, %q) = %t, want %t", tc.a, tc.b, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 	t.Parallel()
 
@@ -138,37 +110,6 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 	}
 
 	firstID := createGate("new logic gate")
-	secondID := createGate("second logic gate")
-
-	relationshipBody, _ := json.Marshal(map[string]string{
-		"company_id":      companyID,
-		"logic_gate_id_a": firstID,
-		"logic_gate_id_b": secondID,
-		"a_position":      "Output",
-		"b_position":      "Input",
-	})
-	relationshipReq := httptest.NewRequest(http.MethodPost, "/v1/logic-gate-relationships", bytes.NewReader(relationshipBody))
-	relationshipReq.Header.Set("Content-Type", "application/json")
-	relationshipRec := httptest.NewRecorder()
-	handler.ServeHTTP(relationshipRec, relationshipReq)
-	if relationshipRec.Code != http.StatusCreated {
-		t.Fatalf("POST logic-gate-relationships status = %d, want %d body=%s", relationshipRec.Code, http.StatusCreated, relationshipRec.Body.String())
-	}
-
-	invalidRelationshipBody, _ := json.Marshal(map[string]string{
-		"company_id":      companyID,
-		"logic_gate_id_a": firstID,
-		"logic_gate_id_b": secondID,
-		"a_position":      "Input",
-		"b_position":      "Input",
-	})
-	invalidRelationshipReq := httptest.NewRequest(http.MethodPost, "/v1/logic-gate-relationships", bytes.NewReader(invalidRelationshipBody))
-	invalidRelationshipReq.Header.Set("Content-Type", "application/json")
-	invalidRelationshipRec := httptest.NewRecorder()
-	handler.ServeHTTP(invalidRelationshipRec, invalidRelationshipReq)
-	if invalidRelationshipRec.Code != http.StatusBadRequest {
-		t.Fatalf("invalid relationship status = %d, want %d", invalidRelationshipRec.Code, http.StatusBadRequest)
-	}
 
 	infoBody, _ := json.Marshal(map[string]string{
 		"company_id":     companyID,
@@ -191,14 +132,13 @@ func TestLogicGateCRUDRelationshipAndInformationAPI(t *testing.T) {
 		t.Fatalf("GET logic gate details status = %d, want %d body=%s", getRec.Code, http.StatusOK, getRec.Body.String())
 	}
 	var details struct {
-		Information   []any `json:"information"`
-		Relationships []any `json:"relationships"`
+		Information []any `json:"information"`
 	}
 	if err := json.NewDecoder(getRec.Body).Decode(&details); err != nil {
 		t.Fatalf("decode details: %v", err)
 	}
-	if len(details.Information) != 0 || len(details.Relationships) != 1 {
-		t.Fatalf("details counts = information:%d relationships:%d, want 0/1", len(details.Information), len(details.Relationships))
+	if len(details.Information) != 0 {
+		t.Fatalf("details information count = %d, want 0", len(details.Information))
 	}
 }
 
@@ -1193,7 +1133,7 @@ func TestWorkspaceSnapshotDefaultUsesLightweightCompanyExplorerReadModel(t *test
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw snapshot: %v", err)
 	}
-	for _, key := range []string{"relationships", "logic_gate_relationships", "kanban_boards"} {
+	for _, key := range []string{"relationships", "kanban_boards"} {
 		if _, ok := raw[key]; ok {
 			t.Fatalf("company_explorer snapshot unexpectedly included %q", key)
 		}
@@ -1255,13 +1195,6 @@ func httpLogicGateIDs(items []domain.LogicGate) []string {
 	return ids
 }
 
-func httpLogicGateRelationshipIDs(items []domain.LogicGateRelationship) []string {
-	ids := make([]string, 0, len(items))
-	for _, item := range items {
-		ids = append(ids, item.LogicGateRelationshipID)
-	}
-	return ids
-}
 func TestWorkspaceSnapshotCompanyExplorerScopeUsesFolderSubtree(t *testing.T) {
 	t.Parallel()
 
@@ -1601,7 +1534,7 @@ func TestWorkspaceEntityBatchAssignsCreatedNodesToCreator(t *testing.T) {
 	}
 }
 
-func TestWorkspaceEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t *testing.T) {
+func TestWorkspaceEntityBatchCreatesLogicGateWithFolder(t *testing.T) {
 	t.Parallel()
 
 	repo := store.NewMemoryRepo()
@@ -1611,17 +1544,11 @@ func TestWorkspaceEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder failed: %v", err)
 	}
-	source, err := repo.CreateLogicGate(companyID, "Existing source")
-	if err != nil {
-		t.Fatalf("CreateLogicGate failed: %v", err)
-	}
-
 	body := []byte(`{
 		"company_id":"` + companyID + `",
 		"entity_kind":"logic_gate",
 		"folder_id":"` + folder.FolderID + `",
-		"items":[{"client_id":"new-gate","title":"New gate","position":4242}],
-		"relationships":[{"entity_id_a":"` + source.LogicGateID + `","client_id_b":"new-gate","a_position":"Input","b_position":"Output"}]
+		"items":[{"client_id":"new-gate","title":"New gate","position":4242}]
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/workspace/entity-batches", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
@@ -1635,10 +1562,6 @@ func TestWorkspaceEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t
 			LogicGateID string `json:"logic_gate_id"`
 			Header      string `json:"header"`
 		} `json:"logic_gates"`
-		LogicGateRelationships []struct {
-			LogicGateIDA string `json:"logic_gate_id_a"`
-			LogicGateIDB string `json:"logic_gate_id_b"`
-		} `json:"logic_gate_relationships"`
 		FolderItems []struct {
 			FolderID string `json:"folder_id"`
 			ItemType string `json:"item_type"`
@@ -1649,13 +1572,10 @@ func TestWorkspaceEntityBatchCreatesLogicGateWithFolderAndExistingRelationship(t
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode workspace entity batch response: %v", err)
 	}
-	if len(payload.LogicGates) != 1 || len(payload.LogicGateRelationships) != 1 || len(payload.FolderItems) != 1 {
-		t.Fatalf("unexpected logic batch response counts: gates=%d relationships=%d folder_items=%d", len(payload.LogicGates), len(payload.LogicGateRelationships), len(payload.FolderItems))
+	if len(payload.LogicGates) != 1 || len(payload.FolderItems) != 1 {
+		t.Fatalf("unexpected logic batch response counts: gates=%d folder_items=%d", len(payload.LogicGates), len(payload.FolderItems))
 	}
 	createdID := payload.LogicGates[0].LogicGateID
-	if payload.LogicGateRelationships[0].LogicGateIDA != source.LogicGateID || payload.LogicGateRelationships[0].LogicGateIDB != createdID {
-		t.Fatalf("relationship did not connect existing source to created gate: %+v created=%s", payload.LogicGateRelationships[0], createdID)
-	}
 	if payload.FolderItems[0].FolderID != folder.FolderID || payload.FolderItems[0].ItemType != "logic_gate" || payload.FolderItems[0].ItemID != createdID {
 		t.Fatalf("folder item did not place created gate: %+v created=%s", payload.FolderItems[0], createdID)
 	}

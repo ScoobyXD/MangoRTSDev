@@ -18,8 +18,16 @@ var (
 		"logic_gate_created", "logic_gate_updated", "logic_gate_deleted",
 		"logic_gate_gvic_updated", "logic_gate_permissions_updated",
 	}
-	LogicGateRelationshipWorkspaceEventTypes = []string{"logic_gate_relationship_created", "logic_gate_relationship_deleted", "logic_gate_deleted"}
-	ProjectListWorkspaceEventTypes           = []string{
+	ProcessMapWorkspaceEventTypes = []string{
+		"process_map_placement_saved", "process_map_placement_deleted",
+		"resource_operational_relationship_created", "resource_operational_relationship_deleted",
+		"process_map_trace_saved", "logic_gate_updated", "logic_gate_deleted", "logic_gate_permissions_updated",
+		"company_explorer_folder_updated", "company_explorer_folder_deleted", "company_explorer_folder_permissions_updated",
+		"company_explorer_item_placed", "company_explorer_item_removed",
+		"company_user_group_updated", "company_user_group_deleted", "company_user_group_members_updated",
+		CompanyMembershipSavedEventType, CompanyMembershipDeletedEventType,
+	}
+	ProjectListWorkspaceEventTypes = []string{
 		"project_created", "project_updated", "project_deleted", "project_information_created",
 		"project_information_deleted", "project_relationship_upserted", "project_relationship_deleted",
 		"project_permissions_updated",
@@ -88,7 +96,7 @@ func WorkspaceReadVersionStaticRows(companyID string) []WorkspaceReadVersionQuer
 		{CompanyID: companyID, Scope: "projects"},
 		{CompanyID: companyID, Scope: "node-relationships"},
 		{CompanyID: companyID, Scope: "logic-gates"},
-		{CompanyID: companyID, Scope: "logic-gate-relationships"},
+		{CompanyID: companyID, Scope: "process-map"},
 		{CompanyID: companyID, Scope: "kanban-boards"},
 	}
 }
@@ -130,8 +138,10 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 	if eventType == "logic_gate_deleted" || eventType == "logic_gate_permissions_updated" {
 		addCompanyExplorer("")
 	}
-	if stringInList(eventType, LogicGateRelationshipWorkspaceEventTypes) {
-		add("logic-gate-relationships", "")
+	if stringInList(eventType, ProcessMapWorkspaceEventTypes) ||
+		((eventType == "logic_gate_created" || eventType == "company_explorer_folder_created") &&
+			workspaceEventPayloadString(event.Payload, "realtime_change_type") == "resource_restored") {
+		add("process-map", "")
 	}
 	if stringInList(eventType, ProjectListWorkspaceEventTypes) {
 		add("projects", "")

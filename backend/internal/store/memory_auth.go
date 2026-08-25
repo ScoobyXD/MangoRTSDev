@@ -240,6 +240,17 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 	}
 	membershipKeyValue := membershipKey(companyID, user.UserID)
 	existingMembership, hadExistingMembership := r.memberships[membershipKeyValue]
+	if hadExistingMembership && existingMembership.Role == role {
+		return existingMembership, nil
+	}
+	beforeMemberships := cloneMemoryMap(r.memberships)
+	beforeRACITabFolders := cloneMemoryMap(r.raciTabFolders)
+	beforeRACITabItems := cloneMemoryMap(r.raciTabItems)
+	beforeDomainEvents := cloneMemoryMap(r.domainEvents)
+	beforeWorkspaceReadVersions := cloneMemoryMap(r.workspaceReadVersions)
+	beforeRealtimeOutbox := cloneMemoryMap(r.realtimeOutbox)
+	beforeRealtimeOutboxSequence := r.realtimeOutboxSequence
+	hadGlobalAccess := memoryUserHasDevAdminMembershipLocked(r.memberships, user.UserID)
 	now := time.Now().UTC()
 	membership := domain.CompanyMembership{
 		CompanyID:        companyID,
@@ -253,6 +264,19 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 	}
 	r.memberships[membershipKeyValue] = membership
 	r.reconcileMemoryRACITabsCompanyLocked(companyID)
+	hasGlobalAccess := memoryUserHasDevAdminMembershipLocked(r.memberships, user.UserID)
+	affectedCompanyIDs := memoryMembershipAffectedCompanyIDsLocked(r.companies, companyID, hadGlobalAccess != hasGlobalAccess)
+	r.advancePolicyGroupMembershipVersionsLocked(affectedCompanyIDs)
+	if _, err := r.appendDomainEventsLocked(companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, user.UserID)); err != nil {
+		r.memberships = beforeMemberships
+		r.raciTabFolders = beforeRACITabFolders
+		r.raciTabItems = beforeRACITabItems
+		r.domainEvents = beforeDomainEvents
+		r.workspaceReadVersions = beforeWorkspaceReadVersions
+		r.realtimeOutbox = beforeRealtimeOutbox
+		r.realtimeOutboxSequence = beforeRealtimeOutboxSequence
+		return domain.CompanyMembership{}, err
+	}
 	return membership, nil
 }
 
@@ -534,6 +558,13 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	if user.UserID == "" {
 		return DeleteCompanyUserResult{}, ErrNotFound
 	}
+	originalMembershipCompanyIDs := make([]string, 0)
+	for _, existingMembership := range r.memberships {
+		if existingMembership.UserID == userID {
+			originalMembershipCompanyIDs = append(originalMembershipCompanyIDs, existingMembership.CompanyID)
+		}
+	}
+	hadGlobalAccess := memoryUserHasDevAdminMembershipLocked(r.memberships, userID)
 	membershipsSnapshot := cloneMemoryMap(r.memberships)
 	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
 	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
@@ -548,6 +579,11 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
 	raciTabFoldersSnapshot := cloneMemoryMap(r.raciTabFolders)
 	raciTabItemsSnapshot := cloneMemoryMap(r.raciTabItems)
+	raciMatrixProjectionRowsSnapshot := cloneMemoryMap(r.RACIMatrixProjectionRows)
+	domainEventsSnapshot := cloneMemoryMap(r.domainEvents)
+	workspaceReadVersionsSnapshot := cloneMemoryMap(r.workspaceReadVersions)
+	realtimeOutboxSnapshot := cloneMemoryMap(r.realtimeOutbox)
+	realtimeOutboxSequenceSnapshot := r.realtimeOutboxSequence
 	restore := func() {
 		r.memberships = membershipsSnapshot
 		r.userGroupMembers = userGroupMembersSnapshot
@@ -563,6 +599,11 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		r.effectiveAccess = effectiveAccessSnapshot
 		r.raciTabFolders = raciTabFoldersSnapshot
 		r.raciTabItems = raciTabItemsSnapshot
+		r.RACIMatrixProjectionRows = raciMatrixProjectionRowsSnapshot
+		r.domainEvents = domainEventsSnapshot
+		r.workspaceReadVersions = workspaceReadVersionsSnapshot
+		r.realtimeOutbox = realtimeOutboxSnapshot
+		r.realtimeOutboxSequence = realtimeOutboxSequenceSnapshot
 	}
 	deleted := domain.CompanyUser{
 		CompanyID:        membership.CompanyID,
@@ -650,6 +691,16 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		}
 	}
 	if hasRemainingMembership && !deleteIdentity {
+		affectedCompanyIDs := memoryMembershipAffectedCompanyIDsLocked(
+			r.companies,
+			companyID,
+			hadGlobalAccess != memoryUserHasDevAdminMembershipLocked(r.memberships, userID),
+		)
+		r.advancePolicyGroupMembershipVersionsLocked(affectedCompanyIDs)
+		if _, err := r.appendDomainEventsLocked(companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipDeletedEventType, userID)); err != nil {
+			restore()
+			return DeleteCompanyUserResult{}, err
+		}
 		return DeleteCompanyUserResult{User: deleted, DeleteExternalIdentity: false}, nil
 	}
 
@@ -744,6 +795,15 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		}
 	}
 	delete(r.users, user.CognitoSubject)
+	affectedCompanyIDs := originalMembershipCompanyIDs
+	if hadGlobalAccess != memoryUserHasDevAdminMembershipLocked(r.memberships, userID) {
+		affectedCompanyIDs = memoryMembershipAffectedCompanyIDsLocked(r.companies, companyID, true)
+	}
+	r.advancePolicyGroupMembershipVersionsLocked(affectedCompanyIDs)
+	if _, err := r.appendDomainEventsLocked(companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipDeletedEventType, userID)); err != nil {
+		restore()
+		return DeleteCompanyUserResult{}, err
+	}
 	return DeleteCompanyUserResult{User: deleted, DeleteExternalIdentity: true}, nil
 }
 
@@ -911,6 +971,26 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 	if company, ok := r.companies[invitation.CompanyID]; ok {
 		invitation.CompanyName = company.Name
 	}
+	beforeUsers := cloneMemoryMap(r.users)
+	beforeMemberships := cloneMemoryMap(r.memberships)
+	beforeInvitations := cloneMemoryMap(r.invitations)
+	beforeRACITabFolders := cloneMemoryMap(r.raciTabFolders)
+	beforeRACITabItems := cloneMemoryMap(r.raciTabItems)
+	beforeDomainEvents := cloneMemoryMap(r.domainEvents)
+	beforeWorkspaceReadVersions := cloneMemoryMap(r.workspaceReadVersions)
+	beforeRealtimeOutbox := cloneMemoryMap(r.realtimeOutbox)
+	beforeRealtimeOutboxSequence := r.realtimeOutboxSequence
+	restore := func() {
+		r.users = beforeUsers
+		r.memberships = beforeMemberships
+		r.invitations = beforeInvitations
+		r.raciTabFolders = beforeRACITabFolders
+		r.raciTabItems = beforeRACITabItems
+		r.domainEvents = beforeDomainEvents
+		r.workspaceReadVersions = beforeWorkspaceReadVersions
+		r.realtimeOutbox = beforeRealtimeOutbox
+		r.realtimeOutboxSequence = beforeRealtimeOutboxSequence
+	}
 	user, ok := r.users[cognitoSubject]
 	if !ok {
 		now := time.Now().UTC()
@@ -929,6 +1009,7 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 		user.UpdatedTimestamp = time.Now().UTC()
 		r.users[cognitoSubject] = user
 	}
+	hadGlobalAccess := memoryUserHasDevAdminMembershipLocked(r.memberships, user.UserID)
 	now := time.Now().UTC()
 	r.memberships[membershipKey(invitation.CompanyID, user.UserID)] = domain.CompanyMembership{
 		CompanyID:        invitation.CompanyID,
@@ -944,6 +1025,13 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 	invitation.UpdatedTimestamp = now
 	invitation.Token = ""
 	r.invitations[tokenHash] = invitation
+	hasGlobalAccess := memoryUserHasDevAdminMembershipLocked(r.memberships, user.UserID)
+	affectedCompanyIDs := memoryMembershipAffectedCompanyIDsLocked(r.companies, invitation.CompanyID, hadGlobalAccess != hasGlobalAccess)
+	r.advancePolicyGroupMembershipVersionsLocked(affectedCompanyIDs)
+	if _, err := r.appendDomainEventsLocked(companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, user.UserID)); err != nil {
+		restore()
+		return domain.Invitation{}, err
+	}
 	return invitation, nil
 }
 

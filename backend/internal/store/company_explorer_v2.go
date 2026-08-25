@@ -64,18 +64,6 @@ func normalizeCompanyExplorerV2FolderInput(input CompanyExplorerV2FolderInput) (
 	return input, nil
 }
 
-func normalizeCompanyExplorerV2FolderUpdateInput(input CompanyExplorerV2FolderUpdateInput) (CompanyExplorerV2FolderUpdateInput, error) {
-	input.CompanyID = strings.TrimSpace(input.CompanyID)
-	input.EntityID = strings.TrimSpace(input.EntityID)
-	input.Name = strings.TrimSpace(input.Name)
-	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
-	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
-	if input.CompanyID == "" || input.EntityID == "" || input.Name == "" {
-		return CompanyExplorerV2FolderUpdateInput{}, ErrInvalid
-	}
-	return input, nil
-}
-
 func normalizeCompanyExplorerV2EdgeInput(input CompanyExplorerV2EdgeInput) (CompanyExplorerV2EdgeInput, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.ParentEntityID = strings.TrimSpace(input.ParentEntityID)
@@ -83,6 +71,9 @@ func normalizeCompanyExplorerV2EdgeInput(input CompanyExplorerV2EdgeInput) (Comp
 	input.ChildResourceID = strings.TrimSpace(input.ChildResourceID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
+	if (input.ActorUserID == "") != (input.PermissionUserID == "") || (input.ActorUserID != "" && input.ActorUserID != input.PermissionUserID) {
+		return CompanyExplorerV2EdgeInput{}, ErrInvalid
+	}
 	entityType, ok := normalizeCompanyExplorerV2EntityType(input.ChildEntityType)
 	if input.ChildEntityID == "" && (!ok || input.ChildResourceID == "") {
 		return CompanyExplorerV2EdgeInput{}, ErrInvalid
@@ -100,6 +91,9 @@ func normalizeCompanyExplorerV2MoveEdgeInput(input CompanyExplorerV2MoveEdgeInpu
 	input.ParentEntityID = strings.TrimSpace(input.ParentEntityID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
+	if (input.ActorUserID == "") != (input.PermissionUserID == "") || (input.ActorUserID != "" && input.ActorUserID != input.PermissionUserID) {
+		return CompanyExplorerV2MoveEdgeInput{}, ErrInvalid
+	}
 	if input.CompanyID == "" || input.EdgeID == "" || input.ParentEntityID == "" {
 		return CompanyExplorerV2MoveEdgeInput{}, ErrInvalid
 	}

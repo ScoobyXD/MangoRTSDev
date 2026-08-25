@@ -337,7 +337,7 @@ func TestRealtimeWebSocketTicketHandshakeSendsReady(t *testing.T) {
 	}
 }
 
-func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardScopes(t *testing.T) {
+func TestRealtimeWebSocketOnlyAllowsAuthorizedNarrowScopes(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "22222222-2222-4222-8222-222222222222"
 	repo.EnsureCompany(companyID, "Realtime scope test")
@@ -399,6 +399,7 @@ func TestRealtimeWebSocketOnlyAllowsAuthorizedNotificationMailboxChatAndBoardSco
 		realtimeSharedMailboxScope(sharedInbox.FolderID),
 		realtimeChatScope(node.NodeID),
 		realtimeBoardScope(store.LogicGateKanbanBoardID(gate.LogicGateID)),
+		realtimeProcessMapScope,
 	}
 	for _, scope := range allowed {
 		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
@@ -559,6 +560,7 @@ func TestRealtimeSubscriptionScopeShapeAndLengthValidation(t *testing.T) {
 		"board:logic-gate:not-a-uuid",
 		"mailbox:shared:not-a-uuid",
 		"mailbox:personal:account:" + user.UserID + ":not-an-email",
+		"process-map:folder",
 	}
 	for _, scope := range invalid {
 		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
@@ -570,6 +572,78 @@ func TestRealtimeSubscriptionScopeShapeAndLengthValidation(t *testing.T) {
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": tooLong})
 	if rejected := client.readJSON(t); rejected["type"] != realtimeMessageSubscriptionRejected || rejected["error"] != "scope_too_long" {
 		t.Fatalf("overlong scope response = %+v, want scope_too_long", rejected)
+	}
+}
+
+func TestRealtimeProcessMapMembershipRevocationClearsAndRejectsStaleActor(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "30303030-3030-4030-8030-303030303039"
+	token := "process-map-membership-revocation-token"
+	repo.EnsureCompany(companyID, "Process Map Membership Revocation")
+	user := mustRealtimeAuthUser(t, repo, companyID, "process-map-membership-revocation", domain.RoleCompanyUser)
+
+	// Finish fixture membership outbox work before the socket subscribes so the
+	// only compact hint observed below is the revocation transaction.
+	claimed, err := repo.ClaimRealtimeOutbox(context.Background(), store.RealtimeOutboxClaimQuery{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range claimed {
+		if err := repo.MarkRealtimeOutboxPublished(context.Background(), event.EventID, event.ClaimToken); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	server := newRealtimeAuthServerForTest(repo, token, user)
+	defer server.Close()
+	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
+	defer client.close()
+	client.readJSON(t)
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": realtimeProcessMapScope})
+	if accepted := client.readJSON(t); accepted["type"] != realtimeMessageSubscriptionAccepted {
+		t.Fatalf("initial Process Map subscription = %+v", accepted)
+	}
+
+	if _, err := repo.DeleteCompanyUser(companyID, user.UserID, false); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err = repo.ClaimRealtimeOutbox(context.Background(), store.RealtimeOutboxClaimQuery{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("membership revocation outbox rows = %d, want 1", len(claimed))
+	}
+	if outcome := server.deliverRealtimeOutboxEvent(context.Background(), claimed[0]); outcome.Delivered != 1 || outcome.Disposition != realtimeDeliveryTerminal {
+		t.Fatalf("membership revocation delivery = %+v", outcome)
+	}
+	if message := client.readJSON(t); message["type"] != realtimeMessageProcessMapChanged || message["scope"] != realtimeProcessMapScope {
+		t.Fatalf("membership revocation message = %+v", message)
+	}
+
+	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": realtimeProcessMapScope})
+	if rejected := client.readJSON(t); rejected["type"] != realtimeMessageSubscriptionRejected || rejected["error"] != "company_access_denied" {
+		t.Fatalf("stale actor Process Map resubscription = %+v", rejected)
+	}
+	if count := server.realtimeRegistry.scopeSubscriptionCount(companyID, realtimeProcessMapScope); count != 0 {
+		t.Fatalf("revoked Process Map subscription count = %d, want 0", count)
+	}
+	if status := realtimeHandshakeStatusForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token); status != http.StatusForbidden {
+		t.Fatalf("revoked membership reconnect status = %d, want %d", status, http.StatusForbidden)
+	}
+}
+
+func TestRealtimeProcessMapSubscriptionUsesCurrentMembershipForStaleActorSnapshot(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "30303030-3030-4030-8030-303030303038"
+	repo.EnsureCompany(companyID, "Process Map Membership Grant")
+	user := mustRealtimeAuthUser(t, repo, companyID, "process-map-membership-grant", domain.RoleCompanyUser)
+	server := newRealtimeAuthServerForTest(repo, "process-map-membership-grant-token", user)
+	defer server.Close()
+
+	authorized, rejectCode, err := server.authorizeRealtimeSubscription(ActorContext{User: user}, companyID, realtimeProcessMapScope)
+	if err != nil || !authorized || rejectCode != "" {
+		t.Fatalf("freshly granted member with stale actor snapshot authorization = authorized %v reject %q err %v", authorized, rejectCode, err)
 	}
 }
 
