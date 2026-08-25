@@ -13,8 +13,8 @@ export type ProcessMapFootprint = {
   height: number;
 };
 
-export const PROCESS_MAP_FOLDER_FOOTPRINT: ProcessMapFootprint = { width: 7, height: 7 };
 export const PROCESS_MAP_PROCESS_FOOTPRINT: ProcessMapFootprint = { width: 7, height: 5 };
+export const PROCESS_MAP_FOLDER_FOOTPRINT: ProcessMapFootprint = PROCESS_MAP_PROCESS_FOOTPRINT;
 export const PROCESS_MAP_RESTRICTED_FOOTPRINT: ProcessMapFootprint = { width: 4, height: 3 };
 
 export function processMapFootprint(resourceType?: ProcessMapResourceType, restricted = false): ProcessMapFootprint {

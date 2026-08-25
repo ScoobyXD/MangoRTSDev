@@ -37,7 +37,7 @@ function assertOrthogonalTracePath(path: string): void {
 
 test("Process Map geometry keeps fixed footprints and snaps signed grid coordinates", () => {
   assert.equal(PROCESS_MAP_GRID_PX, 28);
-  assert.deepEqual(PROCESS_MAP_FOLDER_FOOTPRINT, { width: 7, height: 7 });
+  assert.deepEqual(PROCESS_MAP_FOLDER_FOOTPRINT, { width: 7, height: 5 });
   assert.deepEqual(PROCESS_MAP_PROCESS_FOOTPRINT, { width: 7, height: 5 });
   assert.deepEqual(PROCESS_MAP_RESTRICTED_FOOTPRINT, { width: 4, height: 3 });
   assert.notEqual(PROCESS_MAP_RESTRICTED_FOOTPRINT, PROCESS_MAP_PROCESS_FOOTPRINT);
@@ -50,8 +50,8 @@ test("Process Map geometry keeps fixed footprints and snaps signed grid coordina
 });
 
 test("Process Map derives one centered left input and right output from placement and type", () => {
-  assert.deepEqual(processMapInputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 4, y: 11.5 });
-  assert.deepEqual(processMapOutputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 11, y: 11.5 });
+  assert.deepEqual(processMapInputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 4, y: 10.5 });
+  assert.deepEqual(processMapOutputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 11, y: 10.5 });
   assert.deepEqual(processMapInputAnchor({ x: 12, y: 3 }, "logic_gate"), { x: 12, y: 5.5 });
   assert.deepEqual(processMapOutputAnchor({ x: 12, y: 3 }, "logic_gate"), { x: 19, y: 5.5 });
 });

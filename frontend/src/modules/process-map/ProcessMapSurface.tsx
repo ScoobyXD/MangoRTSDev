@@ -10,6 +10,7 @@ import {
   ReactFlowProvider,
   applyEdgeChanges,
   applyNodeChanges,
+  useConnection,
   useReactFlow,
   type Connection,
   type Edge,
@@ -185,6 +186,7 @@ function processMapNodeFromPlacement(placement: ProcessMapPlacement, index: numb
 }
 
 function ProcessMapCard({ data, selected, isConnectable }: NodeProps<ProcessMapNode>) {
+  const connectionInProgress = useConnection((connection) => connection.inProgress);
   if (data.restricted) {
     return (
       <div className="process-map-card process-map-card--restricted" aria-label="?">
@@ -195,7 +197,7 @@ function ProcessMapCard({ data, selected, isConnectable }: NodeProps<ProcessMapN
   const isFolder = data.resourceType === "company_explorer_folder";
   return (
     <div
-      className={`process-map-card process-map-card--${isFolder ? "folder" : "process"}${selected ? " is-selected" : ""}`}
+      className={`process-map-card process-map-card--${isFolder ? "folder" : "process"}${selected ? " is-selected" : ""}${connectionInProgress ? " is-connecting" : ""}`}
       aria-label={`${isFolder ? "Folder" : "Process"}: ${data.label}`}
     >
       <Handle
@@ -1040,14 +1042,11 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
             });
           }}
         >
-          <span className="process-map-placement-tray__disclosure" aria-hidden="true">
-            <ExplorerDisclosureIcon open={!trayCollapsed} color="#475569" />
-          </span>
           <span className="process-map-placement-tray__heading">
             {folderID ? "Inside this Folder" : "Root Folders"}
           </span>
-          <span className="process-map-placement-tray__collapse-action">
-            {trayCollapsed ? "Expand" : "Collapse"}
+          <span className="process-map-placement-tray__disclosure" aria-hidden="true">
+            <ExplorerDisclosureIcon open={false} color="#475569" />
           </span>
         </button>
         <div id={trayListID} className="process-map-placement-tray__body" hidden={trayCollapsed}>
@@ -1150,7 +1149,12 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
           setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
         }}
         onConnect={handleConnect}
+        onConnectEnd={() => {
+          setSelection((current) => current?.kind === "placement" ? null : current);
+          setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node));
+        }}
         isValidConnection={isValidProcessMapConnection}
+        connectOnClick={false}
         snapToGrid
         snapGrid={[PROCESS_MAP_GRID_PX, PROCESS_MAP_GRID_PX]}
         zoomOnDoubleClick={false}

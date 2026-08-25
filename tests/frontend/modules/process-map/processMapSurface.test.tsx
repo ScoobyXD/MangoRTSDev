@@ -59,6 +59,11 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
   };
   dom.window.HTMLElement.prototype.getBoundingClientRect = () => surfaceRect;
   dom.window.SVGElement.prototype.getBoundingClientRect = () => surfaceRect;
+  const originalElementFromPoint = dom.window.document.elementFromPoint;
+  Object.defineProperty(dom.window.document, "elementFromPoint", {
+    configurable: true,
+    value: () => null,
+  });
   for (const [name, value] of [["clientWidth", 900], ["clientHeight", 600], ["offsetWidth", 900], ["offsetHeight", 600]] as const) {
     const descriptor = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, name);
     Object.defineProperty(dom.window.HTMLElement.prototype, name, { configurable: true, get: () => value });
@@ -70,6 +75,10 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
   restores.push(() => {
     dom.window.HTMLElement.prototype.getBoundingClientRect = originalHTMLElementRect;
     dom.window.SVGElement.prototype.getBoundingClientRect = originalSVGRect;
+    Object.defineProperty(dom.window.document, "elementFromPoint", {
+      configurable: true,
+      value: originalElementFromPoint,
+    });
   });
 
   class ImmediateResizeObserver {
@@ -507,13 +516,17 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
 
     const tray = container.querySelector<HTMLElement>('[aria-label="Process Map placement tray"]');
     const trayToggle = tray?.querySelector<HTMLButtonElement>('.process-map-placement-tray__toggle');
+    const trayHeading = trayToggle?.querySelector<HTMLElement>('.process-map-placement-tray__heading');
+    const trayDisclosure = trayToggle?.querySelector<HTMLElement>('.process-map-placement-tray__disclosure');
     const trayCandidate = tray?.querySelector<HTMLElement>('[aria-label="Drag Process: Added process"]');
     assert.ok(tray);
     assert.ok(trayToggle);
+    assert.ok(trayHeading);
+    assert.ok(trayDisclosure);
     assert.equal(trayToggle.getAttribute("aria-expanded"), "true", "the tray starts expanded when no preference exists");
     assert.equal(trayToggle.getAttribute("aria-label"), "Collapse placement tray");
-    assert.equal(trayToggle.querySelector(":scope > :first-child")?.classList.contains("process-map-placement-tray__disclosure"), true);
-    assert.equal(trayToggle.querySelector(".process-map-placement-tray__collapse-action")?.textContent?.trim(), "Collapse");
+    assert.equal(trayToggle.querySelector(":scope > :last-child")?.classList.contains("process-map-placement-tray__disclosure"), true);
+    assert.equal(trayToggle.querySelector(".process-map-placement-tray__collapse-action"), null);
     assert.equal(trayToggle.textContent?.includes("Drag to place"), false, "the ambiguous tray hint is removed");
     assert.ok(trayCandidate, "only an immediate unplaced supported resource is available");
     assert.equal(tray.querySelector('[aria-label="Drag Folder: Child"]'), null);
@@ -538,15 +551,15 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
     });
     assert.equal(trayDataTransfer.effectAllowed, "copy");
     await act(async () => {
-      trayToggle.click();
+      trayHeading.click();
       await flushUI();
     });
     assert.equal(trayToggle.getAttribute("aria-expanded"), "false");
     assert.equal(trayToggle.getAttribute("aria-label"), "Expand placement tray");
-    assert.equal(trayToggle.querySelector(".process-map-placement-tray__collapse-action")?.textContent?.trim(), "Expand");
+    assert.equal(trayToggle.querySelector(".process-map-placement-tray__disclosure"), trayToggle.lastElementChild);
     assert.equal(dom.window.localStorage.getItem("mangorts.process-map.placement-tray-collapsed.v1"), "true");
     await act(async () => {
-      trayToggle.click();
+      trayDisclosure.click();
       await flushUI();
       await flushUI();
     });
@@ -634,6 +647,10 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
     assert.ok(folderCard);
     assert.ok(processCard);
     assert.ok(restrictedCard);
+    assert.equal(folderCard.querySelectorAll(".process-map-handle").length, 2);
+    assert.equal(processCard.querySelectorAll(".process-map-handle").length, 2);
+    assert.equal(folderCard.classList.contains("is-selected"), false, "unselected placements do not reveal handles");
+    assert.equal(folderCard.classList.contains("is-connecting"), false, "idle placements are not in connection mode");
     assert.equal(restrictedCard.textContent, "?");
     assert.equal(restrictedCard.querySelectorAll(".react-flow__handle").length, 0);
     assert.equal(restrictedCard.closest(".react-flow__node")?.classList.contains("selectable"), false);
@@ -809,7 +826,45 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       await flushUI();
     });
     assert.equal(openedFolders.length, 0, "single click selects without navigation");
+    assert.equal(refreshedFolderCard.classList.contains("is-selected"), true, "selection reveals only the selected placement's handles");
+    assert.equal(refreshedProcessCard.classList.contains("is-selected"), false);
     assert.equal(container.querySelector(".process-map-toolbar button")?.textContent, "Remove Child");
+
+    const outputHandle = refreshedFolderCard.querySelector<HTMLElement>('.process-map-handle--output');
+    assert.ok(outputHandle);
+    await act(async () => {
+      outputHandle.dispatchEvent(new dom.window.MouseEvent("mousedown", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        buttons: 1,
+        clientX: 196,
+        clientY: 70,
+      }));
+      dom.window.document.dispatchEvent(new dom.window.MouseEvent("mousemove", {
+        bubbles: true,
+        cancelable: true,
+        buttons: 1,
+        clientX: 224,
+        clientY: 98,
+      }));
+      await flushUI();
+    });
+    assert.equal(refreshedFolderCard.classList.contains("is-connecting"), true);
+    assert.equal(refreshedProcessCard.classList.contains("is-connecting"), true, "a connection drag reveals every accessible placement anchor");
+    await act(async () => {
+      dom.window.document.dispatchEvent(new dom.window.MouseEvent("mouseup", {
+        bubbles: true,
+        cancelable: true,
+        button: 0,
+        clientX: 224,
+        clientY: 98,
+      }));
+      await flushUI();
+    });
+    assert.equal(refreshedFolderCard.classList.contains("is-connecting"), false);
+    assert.equal(refreshedProcessCard.classList.contains("is-connecting"), false);
+    assert.equal(refreshedFolderCard.classList.contains("is-selected"), false, "finishing or canceling a connection hides every handle");
 
     await act(async () => {
       refreshedFolderCard.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true }));
