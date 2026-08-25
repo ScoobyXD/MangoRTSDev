@@ -1,0 +1,445 @@
+name: Deploy MangoRTS QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Register bootstrap images or deploy the verified application
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - bootstrap-images
+          - deploy
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: mangorts-qa-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'us-west-1' }}
+  TF_DIR: infra/aws-qa
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: qa
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.15.7
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_QA_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Backend tests
+        working-directory: backend
+        run: go test ./...
+
+      - name: Write Terraform backend config
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_STATE_REGION: ${{ vars.TF_STATE_REGION || vars.AWS_REGION || 'us-west-1' }}
+        run: |
+          set -euo pipefail
+          : "${TF_STATE_BUCKET:?Set QA GitHub variable TF_STATE_BUCKET}"
+          cat > backend.hcl <<EOF
+          bucket  = "${TF_STATE_BUCKET}"
+          key     = "mangorts/qa/terraform.tfstate"
+          region  = "${TF_STATE_REGION}"
+          encrypt = true
+          use_lockfile = true
+          EOF
+
+      - name: Write Terraform input vars
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          QA_STAGE: ${{ inputs.stage }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_VPC_ID: ${{ vars.TF_VPC_ID }}
+          TF_PUBLIC_SUBNET_IDS: ${{ vars.TF_PUBLIC_SUBNET_IDS }}
+          TF_PRIVATE_SUBNET_IDS: ${{ vars.TF_PRIVATE_SUBNET_IDS }}
+          TF_DATABASE_ENGINE_VERSION: ${{ vars.TF_DATABASE_ENGINE_VERSION || '17.7' }}
+          TF_DATABASE_INSTANCE_CLASS: ${{ vars.TF_DATABASE_INSTANCE_CLASS || 'db.t4g.micro' }}
+          TF_DATABASE_ALLOCATED_STORAGE_GB: ${{ vars.TF_DATABASE_ALLOCATED_STORAGE_GB || '20' }}
+          TF_DATABASE_MAX_ALLOCATED_STORAGE_GB: ${{ vars.TF_DATABASE_MAX_ALLOCATED_STORAGE_GB || '0' }}
+          TF_DATABASE_BACKUP_RETENTION_DAYS: ${{ vars.TF_DATABASE_BACKUP_RETENTION_DAYS || '1' }}
+          TF_DATABASE_DELETION_PROTECTION: ${{ vars.TF_DATABASE_DELETION_PROTECTION || 'true' }}
+          TF_QA_COMPANY_ID: ${{ vars.TF_QA_COMPANY_ID }}
+          TF_EMAIL_SCHEMA_MIGRATED: ${{ vars.TF_EMAIL_SCHEMA_MIGRATED || 'false' }}
+          TF_EMAIL_WORKER_ENABLED: ${{ vars.TF_EMAIL_WORKER_ENABLED || 'true' }}
+          TF_EMAIL_SCHEDULE_ENABLED: ${{ vars.TF_EMAIL_SCHEDULE_ENABLED || 'false' }}
+          TF_REALTIME_VALKEY_ENABLED: ${{ vars.TF_REALTIME_VALKEY_ENABLED || 'true' }}
+          TF_EMAIL_FROM_ADDRESS: ${{ vars.TF_EMAIL_FROM_ADDRESS || '' }}
+          TF_BOOTSTRAP_ADMIN_EMAILS: ${{ vars.TF_BOOTSTRAP_ADMIN_EMAILS || '' }}
+          TF_BOOTSTRAP_COMPANY_NAME: ${{ vars.TF_BOOTSTRAP_COMPANY_NAME || 'Mango QA' }}
+          TF_NYLAS_CLIENT_ID: ${{ vars.TF_NYLAS_CLIENT_ID || '' }}
+          TF_NYLAS_API_BASE_URL: ${{ vars.TF_NYLAS_API_BASE_URL || 'https://api.us.nylas.com' }}
+          TF_NYLAS_API_KEY_SECRET_ARN: ${{ vars.TF_NYLAS_API_KEY_SECRET_ARN || '' }}
+          TF_NYLAS_STATE_SECRET_ARN: ${{ vars.TF_NYLAS_STATE_SECRET_ARN || '' }}
+          TF_NYLAS_WEBHOOK_SECRET_ARN: ${{ vars.TF_NYLAS_WEBHOOK_SECRET_ARN || '' }}
+          TF_NYLAS_GOOGLE_SCOPES: ${{ vars.TF_NYLAS_GOOGLE_SCOPES || 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels' }}
+          TF_NYLAS_MICROSOFT_SCOPES: ${{ vars.TF_NYLAS_MICROSOFT_SCOPES || 'offline_access User.Read Mail.ReadWrite Mail.Send' }}
+          TF_ORIGIN_VERIFY_SECRET: ${{ secrets.ORIGIN_VERIFY_SECRET }}
+          TF_GITHUB_OWNER: ${{ vars.TF_GITHUB_OWNER || github.repository_owner }}
+          TF_GITHUB_REPOSITORY: ${{ vars.TF_GITHUB_REPOSITORY || github.event.repository.name }}
+          TF_GITHUB_OIDC_PROVIDER_ARN: ${{ vars.TF_GITHUB_OIDC_PROVIDER_ARN }}
+          TF_CLOUDWATCH_LOG_RETENTION_DAYS: ${{ vars.TF_CLOUDWATCH_LOG_RETENTION_DAYS || '7' }}
+          TF_ECS_CONTAINER_INSIGHTS_ENABLED: ${{ vars.TF_ECS_CONTAINER_INSIGHTS_ENABLED || 'true' }}
+          TF_CLOUDWATCH_ALARMS_ENABLED: ${{ vars.TF_CLOUDWATCH_ALARMS_ENABLED || 'true' }}
+          TF_WAF_ENABLED: ${{ vars.TF_WAF_ENABLED || 'true' }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${TF_STATE_BUCKET:?Set QA GitHub variable TF_STATE_BUCKET}"
+          : "${TF_VPC_ID:?Set QA GitHub variable TF_VPC_ID}"
+          : "${TF_PUBLIC_SUBNET_IDS:?Set QA GitHub variable TF_PUBLIC_SUBNET_IDS as a JSON array}"
+          : "${TF_PRIVATE_SUBNET_IDS:?Set QA GitHub variable TF_PRIVATE_SUBNET_IDS as a JSON array}"
+          : "${TF_QA_COMPANY_ID:?Set QA GitHub variable TF_QA_COMPANY_ID}"
+          : "${TF_ORIGIN_VERIFY_SECRET:?Set QA GitHub secret ORIGIN_VERIFY_SECRET}"
+          : "${TF_GITHUB_OIDC_PROVIDER_ARN:?Set QA GitHub variable TF_GITHUB_OIDC_PROVIDER_ARN to the existing account provider}"
+
+          case "$QA_STAGE" in
+            bootstrap-images)
+              if [[ "$TF_EMAIL_SCHEMA_MIGRATED" != "false" ]]; then
+                echo "Set TF_EMAIL_SCHEMA_MIGRATED=false before registering bootstrap images." >&2
+                exit 1
+              fi
+              EFFECTIVE_BACKEND_DESIRED_COUNT=0
+              EFFECTIVE_EMAIL_SCHEMA_MIGRATED=false
+              EFFECTIVE_EMAIL_WORKER_ENABLED=false
+              EFFECTIVE_EMAIL_SCHEDULE_ENABLED=false
+              ;;
+            deploy)
+              if [[ "$TF_EMAIL_SCHEMA_MIGRATED" != "true" ]]; then
+                echo "QA application deployment requires TF_EMAIL_SCHEMA_MIGRATED=true after human schema initialization and verification." >&2
+                exit 1
+              fi
+              EFFECTIVE_BACKEND_DESIRED_COUNT=1
+              EFFECTIVE_EMAIL_SCHEMA_MIGRATED=true
+              EFFECTIVE_EMAIL_WORKER_ENABLED="$TF_EMAIL_WORKER_ENABLED"
+              EFFECTIVE_EMAIL_SCHEDULE_ENABLED="$TF_EMAIL_SCHEDULE_ENABLED"
+              ;;
+            *)
+              echo "Unknown QA workflow stage: $QA_STAGE" >&2
+              exit 1
+              ;;
+          esac
+
+          if [[ ! "$TF_DATABASE_ENGINE_VERSION" =~ ^17([.][0-9]+)?$ ]]; then
+            echo "TF_DATABASE_ENGINE_VERSION must remain on PostgreSQL 17.x." >&2
+            exit 1
+          fi
+
+          for value in \
+            "$TF_DATABASE_DELETION_PROTECTION" \
+            "$TF_EMAIL_SCHEMA_MIGRATED" \
+            "$TF_EMAIL_WORKER_ENABLED" \
+            "$TF_EMAIL_SCHEDULE_ENABLED" \
+            "$TF_REALTIME_VALKEY_ENABLED" \
+            "$TF_ECS_CONTAINER_INSIGHTS_ENABLED" \
+            "$TF_CLOUDWATCH_ALARMS_ENABLED" \
+            "$TF_WAF_ENABLED"; do
+            if [[ "$value" != "true" && "$value" != "false" ]]; then
+              echo "Terraform boolean inputs must be true or false." >&2
+              exit 1
+            fi
+          done
+
+          NYLAS_CONFIGURED_COUNT=0
+          [[ -n "$TF_NYLAS_CLIENT_ID" ]] && NYLAS_CONFIGURED_COUNT=$((NYLAS_CONFIGURED_COUNT + 1))
+          [[ -n "$TF_NYLAS_API_KEY_SECRET_ARN" ]] && NYLAS_CONFIGURED_COUNT=$((NYLAS_CONFIGURED_COUNT + 1))
+          [[ -n "$TF_NYLAS_STATE_SECRET_ARN" ]] && NYLAS_CONFIGURED_COUNT=$((NYLAS_CONFIGURED_COUNT + 1))
+          if [[ "$NYLAS_CONFIGURED_COUNT" != "0" && "$NYLAS_CONFIGURED_COUNT" != "3" ]]; then
+            echo "Set all or none of the QA Nylas client ID, API-key secret ARN, and state-secret ARN." >&2
+            exit 1
+          fi
+          if [[ -n "$TF_NYLAS_WEBHOOK_SECRET_ARN" && "$NYLAS_CONFIGURED_COUNT" != "3" ]]; then
+            echo "TF_NYLAS_WEBHOOK_SECRET_ARN requires the complete QA Nylas configuration." >&2
+            exit 1
+          fi
+          if [[ "$EFFECTIVE_EMAIL_WORKER_ENABLED" == "true" && "$NYLAS_CONFIGURED_COUNT" != "3" ]]; then
+            echo "The QA email worker requires the complete QA Nylas configuration." >&2
+            exit 1
+          fi
+          if [[ "$EFFECTIVE_EMAIL_WORKER_ENABLED" == "true" && "$TF_REALTIME_VALKEY_ENABLED" != "true" ]]; then
+            echo "The QA email worker requires TF_REALTIME_VALKEY_ENABLED=true." >&2
+            exit 1
+          fi
+          if [[ "$TF_CLOUDWATCH_ALARMS_ENABLED" == "true" && "$TF_ECS_CONTAINER_INSIGHTS_ENABLED" != "true" ]]; then
+            echo "The full QA alarm set requires TF_ECS_CONTAINER_INSIGHTS_ENABLED=true." >&2
+            exit 1
+          fi
+          if [[ "$TF_NYLAS_API_BASE_URL" != "https://api.us.nylas.com" && "$TF_NYLAS_API_BASE_URL" != "https://api.eu.nylas.com" ]]; then
+            echo "TF_NYLAS_API_BASE_URL must be the Nylas US or EU API URL." >&2
+            exit 1
+          fi
+
+          normalize_json_string_array() {
+            jq -c 'map(gsub("^[[:space:]]+|[[:space:]]+$"; ""))' <<< "$1"
+          }
+          TF_PUBLIC_SUBNET_IDS_NORMALIZED="$(normalize_json_string_array "$TF_PUBLIC_SUBNET_IDS")"
+          TF_PRIVATE_SUBNET_IDS_NORMALIZED="$(normalize_json_string_array "$TF_PRIVATE_SUBNET_IDS")"
+          jq -e 'type == "array" and (unique | length) >= 2 and all(.[]; type == "string" and length > 0)' <<< "$TF_PUBLIC_SUBNET_IDS_NORMALIZED" >/dev/null
+          jq -e 'type == "array" and (unique | length) >= 2 and all(.[]; type == "string" and length > 0)' <<< "$TF_PRIVATE_SUBNET_IDS_NORMALIZED" >/dev/null
+
+          json_string() {
+            jq -Rn --arg value "$1" '$value'
+          }
+
+          cat > ci.auto.tfvars <<EOF
+          aws_region = $(json_string "$AWS_REGION")
+          terraform_state_bucket_name = $(json_string "$TF_STATE_BUCKET")
+          vpc_id = $(json_string "$TF_VPC_ID")
+          public_subnet_ids = $TF_PUBLIC_SUBNET_IDS_NORMALIZED
+          private_subnet_ids = $TF_PRIVATE_SUBNET_IDS_NORMALIZED
+          database_engine_version = $(json_string "$TF_DATABASE_ENGINE_VERSION")
+          database_instance_class = $(json_string "$TF_DATABASE_INSTANCE_CLASS")
+          database_allocated_storage_gb = $TF_DATABASE_ALLOCATED_STORAGE_GB
+          database_max_allocated_storage_gb = $TF_DATABASE_MAX_ALLOCATED_STORAGE_GB
+          database_backup_retention_days = $TF_DATABASE_BACKUP_RETENTION_DAYS
+          database_deletion_protection = $TF_DATABASE_DELETION_PROTECTION
+          backend_image_uri = ""
+          migration_image_uri = ""
+          deploy_revision = $(json_string "$GITHUB_SHA")
+          backend_desired_count = $EFFECTIVE_BACKEND_DESIRED_COUNT
+          email_sqs_database_migration_complete = $EFFECTIVE_EMAIL_SCHEMA_MIGRATED
+          email_worker_enabled = $EFFECTIVE_EMAIL_WORKER_ENABLED
+          email_reconciliation_schedule_enabled = $EFFECTIVE_EMAIL_SCHEDULE_ENABLED
+          realtime_valkey_enabled = $TF_REALTIME_VALKEY_ENABLED
+          default_company_id = $(json_string "$TF_QA_COMPANY_ID")
+          email_from_address = $(json_string "$TF_EMAIL_FROM_ADDRESS")
+          bootstrap_admin_emails = $(json_string "$TF_BOOTSTRAP_ADMIN_EMAILS")
+          bootstrap_company_name = $(json_string "$TF_BOOTSTRAP_COMPANY_NAME")
+          nylas_client_id = $(json_string "$TF_NYLAS_CLIENT_ID")
+          nylas_api_base_url = $(json_string "$TF_NYLAS_API_BASE_URL")
+          nylas_api_key_secret_arn = $(json_string "$TF_NYLAS_API_KEY_SECRET_ARN")
+          nylas_state_secret_arn = $(json_string "$TF_NYLAS_STATE_SECRET_ARN")
+          nylas_webhook_secret_arn = $(json_string "$TF_NYLAS_WEBHOOK_SECRET_ARN")
+          nylas_google_scopes = $(json_string "$TF_NYLAS_GOOGLE_SCOPES")
+          nylas_microsoft_scopes = $(json_string "$TF_NYLAS_MICROSOFT_SCOPES")
+          origin_verify_secret = $(json_string "$TF_ORIGIN_VERIFY_SECRET")
+          cloudwatch_log_retention_days = $TF_CLOUDWATCH_LOG_RETENTION_DAYS
+          ecs_container_insights_enabled = $TF_ECS_CONTAINER_INSIGHTS_ENABLED
+          cloudwatch_alarms_enabled = $TF_CLOUDWATCH_ALARMS_ENABLED
+          waf_enabled = $TF_WAF_ENABLED
+          github_owner = $(json_string "$TF_GITHUB_OWNER")
+          github_repository = $(json_string "$TF_GITHUB_REPOSITORY")
+          github_oidc_provider_arn = $(json_string "$TF_GITHUB_OIDC_PROVIDER_ARN")
+          EOF
+
+          for subnet_id in $(jq -r '.[]' <<< "$TF_PUBLIC_SUBNET_IDS_NORMALIZED"); do
+            aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "$subnet_id" --filters "Name=vpc-id,Values=$TF_VPC_ID" >/dev/null
+          done
+          for subnet_id in $(jq -r '.[]' <<< "$TF_PRIVATE_SUBNET_IDS_NORMALIZED"); do
+            aws ec2 describe-subnets --region "$AWS_REGION" --subnet-ids "$subnet_id" --filters "Name=vpc-id,Values=$TF_VPC_ID" >/dev/null
+          done
+          PRIVATE_AZ_COUNT="$(aws ec2 describe-subnets \
+            --region "$AWS_REGION" \
+            --subnet-ids $(jq -r '.[]' <<< "$TF_PRIVATE_SUBNET_IDS_NORMALIZED") \
+            --query 'Subnets[].AvailabilityZone' \
+            --output text | tr '\t' '\n' | sort -u | wc -l)"
+          if [[ "$PRIVATE_AZ_COUNT" -lt 2 ]]; then
+            echo "QA RDS requires private subnets in at least two Availability Zones." >&2
+            exit 1
+          fi
+
+      - name: Terraform init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init -backend-config=backend.hcl
+
+      - name: Terraform validate
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform validate
+
+      - name: Read image repository output
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -euo pipefail
+          ECR_REPOSITORY_URL="$(terraform output -raw backend_ecr_repository_url 2>/dev/null || true)"
+          if [[ -z "$ECR_REPOSITORY_URL" ]]; then
+            echo "The reviewed QA foundation must exist before either image workflow stage runs." >&2
+            exit 1
+          fi
+          echo "ECR_REPOSITORY_URL=$ECR_REPOSITORY_URL" >> "$GITHUB_ENV"
+
+      - name: Login to ECR
+        run: aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "${ECR_REPOSITORY_URL%/*}"
+
+      - name: Build and push immutable QA images
+        run: |
+          set -euo pipefail
+          REPOSITORY_NAME="${ECR_REPOSITORY_URL#*/}"
+
+          push_if_missing() {
+            local dockerfile="$1"
+            local tag="$2"
+            local image_uri="${ECR_REPOSITORY_URL}:${tag}"
+            if aws ecr describe-images --repository-name "$REPOSITORY_NAME" --image-ids "imageTag=${tag}" >/dev/null 2>&1; then
+              echo "Image already exists: ${image_uri}"
+            else
+              docker build -t "$image_uri" -f "$dockerfile" backend
+              docker push "$image_uri"
+            fi
+          }
+
+          push_if_missing backend/Dockerfile "$GITHUB_SHA"
+          push_if_missing backend/Dockerfile.migrations "${GITHUB_SHA}-migrations"
+          {
+            echo "IMAGE_URI=${ECR_REPOSITORY_URL}:${GITHUB_SHA}"
+            echo "MIGRATION_IMAGE_URI=${ECR_REPOSITORY_URL}:${GITHUB_SHA}-migrations"
+          } >> "$GITHUB_ENV"
+
+      - name: Terraform plan
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          set -euo pipefail
+          umask 077
+          terraform plan -refresh=false -out=tfplan \
+            -var "backend_image_uri=${IMAGE_URI}" \
+            -var "migration_image_uri=${MIGRATION_IMAGE_URI}"
+
+      - name: Apply Terraform plan
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply tfplan
+
+      - name: Read Terraform outputs
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          {
+            echo "APP_URL=$(terraform output -raw app_url)"
+            echo "API_URL=$(terraform output -raw api_url)"
+            echo "NYLAS_CALLBACK_URL=$(terraform output -raw nylas_callback_url)"
+            echo "NYLAS_WEBHOOK_URL=$(terraform output -raw nylas_webhook_url)"
+            echo "COGNITO_REGION=$(terraform output -raw cognito_region)"
+            echo "COGNITO_USER_POOL_ID=$(terraform output -raw cognito_user_pool_id)"
+            echo "COGNITO_CLIENT_ID=$(terraform output -raw cognito_spa_client_id)"
+            echo "QA_COMPANY_ID=$(terraform output -raw default_company_id)"
+            echo "FRONTEND_BUCKET=$(terraform output -raw frontend_bucket)"
+            echo "CLOUDFRONT_DISTRIBUTION_ID=$(terraform output -raw cloudfront_distribution_id)"
+            echo "MIGRATION_TASK_DEFINITION_ARN=$(terraform output -raw database_migration_task_definition_arn)"
+          } >> "$GITHUB_ENV"
+
+      - name: Build frontend
+        if: inputs.stage == 'deploy'
+        working-directory: frontend
+        env:
+          VITE_API_BASE_URL: ${{ env.APP_URL }}
+          VITE_AUTH_MODE: cognito
+          VITE_COGNITO_REGION: ${{ env.COGNITO_REGION }}
+          VITE_COGNITO_USER_POOL_ID: ${{ env.COGNITO_USER_POOL_ID }}
+          VITE_COGNITO_CLIENT_ID: ${{ env.COGNITO_CLIENT_ID }}
+          VITE_COMPANY_ID: ${{ env.QA_COMPANY_ID }}
+        run: |
+          npm ci
+          npm run build
+          jq -n \
+            --arg revision "$GITHUB_SHA" \
+            --arg app_url "$APP_URL" \
+            --arg api_base_url "$APP_URL" \
+            --arg auth_mode "cognito" \
+            --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{revision: $revision, app_url: $app_url, api_base_url: $api_base_url, auth_mode: $auth_mode, built_at: $built_at}' \
+            > dist/deploy-info.json
+          if grep -R -l --fixed-strings "$API_URL" dist/assets dist/index.html >/tmp/mangorts-qa-api-host-matches.txt; then
+            echo "QA frontend bundle references split API origin ${API_URL}; it must use ${APP_URL}." >&2
+            cat /tmp/mangorts-qa-api-host-matches.txt >&2
+            exit 1
+          fi
+
+      - name: Publish frontend
+        if: inputs.stage == 'deploy'
+        run: |
+          aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}" --delete
+          INVALIDATION_ID="$(aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*" --query 'Invalidation.Id' --output text)"
+          aws cloudfront wait invalidation-completed --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --id "$INVALIDATION_ID"
+
+      - name: Post-deploy smoke tests
+        if: inputs.stage == 'deploy'
+        run: |
+          set -euo pipefail
+          tmp_body="$(mktemp)"
+
+          require_status() {
+            local name="$1"
+            local want="$2"
+            local status="$3"
+            if [[ "$status" != "$want" ]]; then
+              echo "${name} returned HTTP ${status}, want ${want}" >&2
+              cat "$tmp_body" >&2 || true
+              exit 1
+            fi
+          }
+
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/deploy-info.json")"
+          require_status "frontend deploy-info" "200" "$status"
+          jq -e --arg revision "$GITHUB_SHA" --arg app_url "$APP_URL" '.revision == $revision and .api_base_url == $app_url' "$tmp_body" >/dev/null
+
+          for attempt in {1..18}; do
+            status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/healthz" || true)"
+            if [[ "$status" == "200" ]] && jq -e --arg revision "$GITHUB_SHA" '.ok == true and .deploy_revision == $revision' "$tmp_body" >/dev/null 2>&1; then
+              break
+            fi
+            if [[ "$attempt" == "18" ]]; then
+              echo "QA backend health did not report deployed revision ${GITHUB_SHA}." >&2
+              cat "$tmp_body" >&2 || true
+              exit 1
+            fi
+            sleep 10
+          done
+
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/v1/me")"
+          require_status "unauthorized API route" "401" "$status"
+          jq -e '.error == "unauthorized"' "$tmp_body" >/dev/null
+
+          status="$(curl --silent --show-error --output "$tmp_body" --write-out "%{http_code}" "${APP_URL}/nylas/webhook?challenge=qa-deploy-smoke")"
+          require_status "Nylas webhook challenge" "200" "$status"
+          [[ "$(cat "$tmp_body")" == "qa-deploy-smoke" ]]
+
+      - name: Deployment summary
+        if: inputs.stage == 'deploy'
+        run: |
+          {
+            echo "## MangoRTS QA deploy"
+            echo ""
+            echo "- App: ${APP_URL}"
+            echo "- API: ${API_URL}"
+            echo "- Nylas callback: ${NYLAS_CALLBACK_URL}"
+            echo "- Nylas webhook: ${NYLAS_WEBHOOK_URL}"
+            echo "- One-off migration task (never auto-run): ${MIGRATION_TASK_DEFINITION_ARN}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bootstrap image summary
+        if: inputs.stage == 'bootstrap-images'
+        run: |
+          {
+            echo "## MangoRTS QA bootstrap images registered"
+            echo ""
+            echo "- API desired count: 0"
+            echo "- Email worker: disabled"
+            echo "- Database schema confirmation: false"
+            echo "- One-off migration task (never auto-run): ${MIGRATION_TASK_DEFINITION_ARN}"
+            echo "- Next step: a human runs the guarded database audit/bootstrap/audit sequence"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove runner-local Terraform secret material
+        if: always()
+        run: |
+          rm -f \
+            "$TF_DIR/backend.hcl" \
+            "$TF_DIR/ci.auto.tfvars" \
+            "$TF_DIR/tfplan"

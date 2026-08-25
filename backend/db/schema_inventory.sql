@@ -74,7 +74,6 @@ column_objects as (
       'schema', namespace.nspname,
       'relation', class.relname,
       'column', attribute.attname,
-      'ordinal_position', attribute.attnum,
       'data_type', format_type(attribute.atttypid, attribute.atttypmod),
       'not_null', attribute.attnotnull,
       'default', pg_get_expr(attrdef.adbin, attrdef.adrelid, false),

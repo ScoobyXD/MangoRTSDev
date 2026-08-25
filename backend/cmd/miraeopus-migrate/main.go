@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/url"
@@ -22,6 +26,7 @@ import (
 
 const (
 	defaultSchemaPath    = "db/schema.sql"
+	defaultInventoryPath = "db/schema_inventory.sql"
 	defaultMigrationsDir = "db/migrations"
 	defaultMode          = "migrate"
 
@@ -35,10 +40,12 @@ const (
 
 type commandConfig struct {
 	SchemaPath         string
+	InventoryPath      string
 	MigrationsDir      string
 	Mode               string
 	DryRun             bool
 	BaselineMigrations bool
+	RequireEmptyDB     bool
 	StartAt            string
 	StartAfter         string
 }
@@ -130,10 +137,12 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 
 	cfg := commandConfig{}
 	flags.StringVar(&cfg.SchemaPath, "schema", defaultSchemaPath, "path to schema.sql")
+	flags.StringVar(&cfg.InventoryPath, "inventory", defaultInventoryPath, "path to schema_inventory.sql")
 	flags.StringVar(&cfg.MigrationsDir, "migrations", defaultMigrationsDir, "directory containing .sql migration files")
 	flags.StringVar(&cfg.Mode, "mode", defaultMode, "audit, schema, migrate, or all")
 	flags.BoolVar(&cfg.DryRun, "dry-run", false, "print planned work without applying changes")
 	flags.BoolVar(&cfg.BaselineMigrations, "baseline-migrations", false, "with -mode schema, record current migration filenames after applying the schema snapshot")
+	flags.BoolVar(&cfg.RequireEmptyDB, "require-empty-database", false, "with -mode schema, atomically refuse bootstrap when application schema objects already exist")
 	flags.StringVar(&cfg.StartAt, "start-at", strings.TrimSpace(getenv("DB_MIGRATION_START_AT")), "first migration filename to consider")
 	flags.StringVar(&cfg.StartAfter, "start-after", strings.TrimSpace(getenv("DB_MIGRATION_START_AFTER")), "start after this migration filename")
 
@@ -145,6 +154,7 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 	}
 
 	cfg.SchemaPath = strings.TrimSpace(cfg.SchemaPath)
+	cfg.InventoryPath = strings.TrimSpace(cfg.InventoryPath)
 	cfg.MigrationsDir = strings.TrimSpace(cfg.MigrationsDir)
 	cfg.Mode = strings.ToLower(strings.TrimSpace(cfg.Mode))
 	cfg.StartAt = strings.TrimSpace(cfg.StartAt)
@@ -152,6 +162,9 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 
 	if cfg.SchemaPath == "" {
 		return commandConfig{}, errors.New("-schema is required")
+	}
+	if cfg.InventoryPath == "" {
+		return commandConfig{}, errors.New("-inventory is required")
 	}
 	if cfg.MigrationsDir == "" {
 		return commandConfig{}, errors.New("-migrations is required")
@@ -166,6 +179,9 @@ func parseCommandConfig(args []string, getenv envLookup) (commandConfig, error) 
 		}
 		if cfg.Mode == "audit" && (cfg.StartAt != "" || cfg.StartAfter != "") {
 			return commandConfig{}, errors.New("-start-at and -start-after are not valid with -mode audit")
+		}
+		if cfg.RequireEmptyDB && cfg.Mode != "schema" {
+			return commandConfig{}, errors.New("-require-empty-database requires -mode schema")
 		}
 		return cfg, nil
 	default:
@@ -265,6 +281,17 @@ type migrationLedgerAudit struct {
 	UnknownToRepo     []string
 }
 
+type schemaInventoryItem struct {
+	ObjectKind     string `json:"object_kind"`
+	ObjectIdentity string `json:"object_identity"`
+	Definition     any    `json:"definition"`
+}
+
+type repositorySchemaFile struct {
+	Label string
+	Path  string
+}
+
 func classifyMigrationLedger(files []migrationFile, applied map[string]bool) migrationLedgerAudit {
 	repository := make(map[string]bool, len(files))
 	audit := migrationLedgerAudit{}
@@ -284,10 +311,162 @@ func classifyMigrationLedger(files []migrationFile, applied map[string]bool) mig
 	return audit
 }
 
+func decodeSchemaInventory(raw []byte) ([]schemaInventoryItem, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var items []schemaInventoryItem
+	if err := decoder.Decode(&items); err != nil {
+		return nil, fmt.Errorf("decode schema inventory: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, errors.New("decode schema inventory: unexpected trailing JSON value")
+		}
+		return nil, fmt.Errorf("decode schema inventory trailing data: %w", err)
+	}
+	for index, item := range items {
+		item.ObjectKind = strings.TrimSpace(item.ObjectKind)
+		item.ObjectIdentity = strings.TrimSpace(item.ObjectIdentity)
+		if item.ObjectKind == "" || item.ObjectIdentity == "" {
+			return nil, fmt.Errorf("schema inventory row %d has an empty object kind or identity", index)
+		}
+		items[index] = item
+	}
+	return items, nil
+}
+
+func schemaInventoryDigest(raw []byte) (int, string, error) {
+	items, err := decodeSchemaInventory(raw)
+	if err != nil {
+		return 0, "", err
+	}
+	filtered := make([]schemaInventoryItem, 0, len(items))
+	for _, item := range items {
+		if item.ObjectKind == "grant" || strings.Contains(item.ObjectIdentity, "schema_migrations") {
+			continue
+		}
+		if item.ObjectKind == "column" {
+			if definition, ok := item.Definition.(map[string]any); ok {
+				delete(definition, "ordinal_position")
+			}
+		}
+		filtered = append(filtered, item)
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].ObjectKind != filtered[j].ObjectKind {
+			return filtered[i].ObjectKind < filtered[j].ObjectKind
+		}
+		return filtered[i].ObjectIdentity < filtered[j].ObjectIdentity
+	})
+	for index := 1; index < len(filtered); index++ {
+		if filtered[index-1].ObjectKind == filtered[index].ObjectKind && filtered[index-1].ObjectIdentity == filtered[index].ObjectIdentity {
+			return 0, "", fmt.Errorf("schema inventory has duplicate object key %s:%s", filtered[index].ObjectKind, filtered[index].ObjectIdentity)
+		}
+	}
+
+	canonical := make([]map[string]any, 0, len(filtered))
+	for _, item := range filtered {
+		canonical = append(canonical, map[string]any{
+			"definition":      item.Definition,
+			"object_identity": item.ObjectIdentity,
+			"object_kind":     item.ObjectKind,
+		})
+	}
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(canonical); err != nil {
+		return 0, "", fmt.Errorf("encode normalized schema inventory: %w", err)
+	}
+	digest := sha256.Sum256(bytes.TrimSuffix(encoded.Bytes(), []byte("\n")))
+	return len(filtered), fmt.Sprintf("%x", digest), nil
+}
+
+func existingApplicationSchemaObjects(items []schemaInventoryItem) []string {
+	existing := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.ObjectKind == "grant" {
+			continue
+		}
+		if item.ObjectKind == "schema" && item.ObjectIdentity == "public" {
+			continue
+		}
+		if item.ObjectKind == "extension" && item.ObjectIdentity == "plpgsql" {
+			continue
+		}
+		existing = append(existing, item.ObjectKind+":"+item.ObjectIdentity)
+	}
+	sort.Strings(existing)
+	return existing
+}
+
+func requireEmptyDatabase(ctx context.Context, tx *sql.Tx, inventorySQL []byte) error {
+	var inventoryJSON string
+	if err := tx.QueryRowContext(ctx, string(inventorySQL)).Scan(&inventoryJSON); err != nil {
+		return fmt.Errorf("inspect database before fresh schema bootstrap: %w", err)
+	}
+	items, err := decodeSchemaInventory([]byte(inventoryJSON))
+	if err != nil {
+		return err
+	}
+	existing := existingApplicationSchemaObjects(items)
+	if len(existing) == 0 {
+		log.Printf("empty database guard passed inside schema transaction")
+		return nil
+	}
+	shown := existing
+	if len(shown) > 10 {
+		shown = shown[:10]
+	}
+	return fmt.Errorf("refusing fresh schema bootstrap: database contains %d application schema objects (first %d: %s)", len(existing), len(shown), strings.Join(shown, ", "))
+}
+
+func repositorySchemaFingerprint(schemaPath, inventoryPath, migrationsDir string) (string, error) {
+	migrations, err := listMigrationFiles(migrationsDir)
+	if err != nil {
+		return "", err
+	}
+	files := []repositorySchemaFile{
+		{Label: "schema.sql", Path: schemaPath},
+		{Label: "schema_inventory.sql", Path: inventoryPath},
+	}
+	for _, migration := range migrations {
+		files = append(files, repositorySchemaFile{
+			Label: "migrations/" + migration.Name,
+			Path:  migration.Path,
+		})
+	}
+
+	digest := sha256.New()
+	for _, file := range files {
+		raw, readErr := os.ReadFile(file.Path)
+		if readErr != nil {
+			return "", fmt.Errorf("read repository schema file %s: %w", file.Path, readErr)
+		}
+		raw = bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf})
+		raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
+		raw = bytes.ReplaceAll(raw, []byte("\r"), []byte("\n"))
+		fileDigest := sha256.Sum256(raw)
+		if _, writeErr := fmt.Fprintf(digest, "%s\x00%x\n", file.Label, fileDigest); writeErr != nil {
+			return "", writeErr
+		}
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil)), nil
+}
+
 func runAuditMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) error {
 	files, err := listMigrationFiles(cfg.MigrationsDir)
 	if err != nil {
 		return err
+	}
+	repositoryDigest, err := repositorySchemaFingerprint(cfg.SchemaPath, cfg.InventoryPath, cfg.MigrationsDir)
+	if err != nil {
+		return err
+	}
+	inventorySQL, err := os.ReadFile(cfg.InventoryPath)
+	if err != nil {
+		return fmt.Errorf("read schema inventory query %s: %w", cfg.InventoryPath, err)
 	}
 	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
 	if err != nil {
@@ -296,14 +475,24 @@ func runAuditMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) error 
 	defer tx.Rollback()
 
 	var currentUser string
+	var serverVersion string
+	var serverVersionNum int
 	var readOnly bool
 	var ledgerExists bool
 	var applicationTables int
-	if err := tx.QueryRowContext(ctx, `select current_user,current_setting('transaction_read_only')::boolean,to_regclass('public.schema_migrations') is not null,(select count(*)::integer from pg_catalog.pg_tables where schemaname='public')`).Scan(&currentUser, &readOnly, &ledgerExists, &applicationTables); err != nil {
+	if err := tx.QueryRowContext(ctx, `select current_user,current_setting('server_version'),current_setting('server_version_num')::integer,current_setting('transaction_read_only')::boolean,to_regclass('public.schema_migrations') is not null,(select count(*)::integer from pg_catalog.pg_tables where schemaname='public')`).Scan(&currentUser, &serverVersion, &serverVersionNum, &readOnly, &ledgerExists, &applicationTables); err != nil {
 		return fmt.Errorf("read migration audit identity: %w", err)
 	}
 	if !readOnly {
 		return errors.New("migration audit refused a non-read-only transaction")
+	}
+	var inventoryJSON string
+	if err := tx.QueryRowContext(ctx, string(inventorySQL)).Scan(&inventoryJSON); err != nil {
+		return fmt.Errorf("export schema inventory in audit: %w", err)
+	}
+	inventoryCount, inventoryDigest, err := schemaInventoryDigest([]byte(inventoryJSON))
+	if err != nil {
+		return err
 	}
 	applied := map[string]bool{}
 	if ledgerExists {
@@ -326,7 +515,7 @@ func runAuditMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) error 
 		}
 	}
 	audit := classifyMigrationLedger(files, applied)
-	log.Printf("read-only migration audit user=%s transaction_read_only=%t public_tables=%d repository_migrations=%d ledger_exists=%t ledger_rows=%d missing_from_ledger=%d unknown_to_repository=%d", currentUser, readOnly, applicationTables, len(files), ledgerExists, len(applied), len(audit.MissingFromLedger), len(audit.UnknownToRepo))
+	log.Printf("read-only migration audit user=%s server_version=%q server_version_num=%d transaction_read_only=%t public_tables=%d repository_migrations=%d ledger_exists=%t ledger_rows=%d missing_from_ledger=%d unknown_to_repository=%d schema_inventory_objects=%d schema_inventory_sha256=%s repository_schema_sha256=%s", currentUser, serverVersion, serverVersionNum, readOnly, applicationTables, len(files), ledgerExists, len(applied), len(audit.MissingFromLedger), len(audit.UnknownToRepo), inventoryCount, inventoryDigest, repositoryDigest)
 	for _, version := range audit.MissingFromLedger {
 		log.Printf("missing_from_ledger %s", version)
 	}
@@ -348,13 +537,26 @@ func runSchemaMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) error
 	}
 	if cfg.DryRun {
 		log.Printf("dry run: would apply schema %s", cfg.SchemaPath)
+		if cfg.RequireEmptyDB {
+			log.Printf("dry run: would require an empty database inside the schema transaction")
+		}
 		if cfg.BaselineMigrations {
 			log.Printf("dry run: would baseline %d migration files from %s", len(baselineFiles), cfg.MigrationsDir)
 		}
 		return nil
 	}
+	var beforeSchema func(*sql.Tx) error
+	if cfg.RequireEmptyDB {
+		inventorySQL, err := os.ReadFile(cfg.InventoryPath)
+		if err != nil {
+			return fmt.Errorf("read schema inventory query %s: %w", cfg.InventoryPath, err)
+		}
+		beforeSchema = func(tx *sql.Tx) error {
+			return requireEmptyDatabase(ctx, tx, inventorySQL)
+		}
+	}
 	log.Printf("applying schema %s", cfg.SchemaPath)
-	if err := execSQLFileInTransaction(ctx, conn, cfg.SchemaPath, func(tx *sql.Tx) error {
+	if err := execSQLFileInTransaction(ctx, conn, cfg.SchemaPath, beforeSchema, func(tx *sql.Tx) error {
 		if _, err := tx.ExecContext(ctx, schemaMigrationsTableSQL); err != nil {
 			return err
 		}
@@ -421,7 +623,7 @@ func runMigrateMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) erro
 
 	for _, migration := range pending {
 		log.Printf("applying %s", migration.Name)
-		if err := execSQLFileInTransaction(ctx, conn, migration.Path, func(tx *sql.Tx) error {
+		if err := execSQLFileInTransaction(ctx, conn, migration.Path, nil, func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, `insert into schema_migrations(version) values ($1) on conflict (version) do nothing`, migration.Name)
 			return err
 		}); err != nil {
@@ -432,7 +634,7 @@ func runMigrateMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) erro
 	return nil
 }
 
-func execSQLFileInTransaction(ctx context.Context, conn *sql.Conn, path string, beforeCommit func(*sql.Tx) error) error {
+func execSQLFileInTransaction(ctx context.Context, conn *sql.Conn, path string, beforeExec, beforeCommit func(*sql.Tx) error) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -443,6 +645,11 @@ func execSQLFileInTransaction(ctx context.Context, conn *sql.Conn, path string, 
 	}
 	defer tx.Rollback()
 
+	if beforeExec != nil {
+		if err := beforeExec(tx); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, string(raw)); err != nil {
 		return err
 	}

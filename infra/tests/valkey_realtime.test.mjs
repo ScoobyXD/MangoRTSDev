@@ -7,6 +7,7 @@ const read = (path) => readFileSync(resolve(process.cwd(), path), "utf8");
 const valkey = read("infra/modules/mangorts-platform/realtime_valkey.tf");
 const task = read("infra/modules/mangorts-platform/ecs_alb.tf");
 const iam = read("infra/modules/mangorts-platform/iam.tf");
+const moduleLocals = read("infra/modules/mangorts-platform/locals.tf");
 const devMain = read("infra/aws-dev/main.tf");
 const devVariables = read("infra/aws-dev/variables.tf");
 
@@ -18,7 +19,8 @@ test("dev realtime backplane is private TLS Valkey with IAM auth and bounded cap
   assert.match(valkey, /ingress\s*\{[\s\S]*?from_port\s*=\s*6379[\s\S]*?to_port\s*=\s*6380[\s\S]*?protocol\s*=\s*"tcp"[\s\S]*?security_groups\s*=\s*\[aws_security_group\.ecs\.id\]/);
   assert.doesNotMatch(valkey, /cidr_blocks\s*=|0\.0\.0\.0\/0/);
   assert.match(valkey, /authentication_mode\s*\{\s*type\s*=\s*"iam"/s);
-  assert.match(valkey, /condition\s*=\s*var\.environment\s*==\s*"dev"/);
+  assert.match(valkey, /condition\s*=\s*local\.nonproduction_services_environment/);
+  assert.match(moduleLocals, /nonproduction_services_environment\s*=\s*contains\(\["dev", "qa"\], var\.environment\)/);
   assert.match(valkey, /cache_usage_limits\s*\{[\s\S]*data_storage[\s\S]*ecpu_per_second/);
 });
 
@@ -78,7 +80,7 @@ test("serverless alarms use the required clusterId dimension", () => {
   }
   assert.match(
     valkey,
-    /resource "aws_cloudwatch_metric_alarm" "realtime_valkey_command_authorization_failures"\s*\{[\s\S]*?count\s*=\s*var\.realtime_valkey_enabled \? 1 : 0[\s\S]*?metric_name\s*=\s*"CommandAuthorizationFailures"[\s\S]*?alarm_actions\s*=\s*var\.realtime_valkey_alarm_action_arns[\s\S]*?clusterId\s*=\s*aws_elasticache_serverless_cache\.realtime\[0\]\.name[\s\S]*?\n\}/,
+    /resource "aws_cloudwatch_metric_alarm" "realtime_valkey_command_authorization_failures"\s*\{[\s\S]*?count\s*=\s*var\.realtime_valkey_enabled && var\.cloudwatch_alarms_enabled \? 1 : 0[\s\S]*?metric_name\s*=\s*"CommandAuthorizationFailures"[\s\S]*?alarm_actions\s*=\s*var\.realtime_valkey_alarm_action_arns[\s\S]*?clusterId\s*=\s*aws_elasticache_serverless_cache\.realtime\[0\]\.name[\s\S]*?\n\}/,
   );
   assert.equal((valkey.match(/clusterId\s*=\s*aws_elasticache_serverless_cache\.realtime\[0\]\.name/g) ?? []).length, 6);
 });

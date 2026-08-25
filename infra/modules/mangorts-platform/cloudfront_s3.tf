@@ -69,7 +69,7 @@ resource "aws_cloudfront_distribution" "app" {
   default_root_object = "index.html"
   aliases             = [local.app_domain, local.api_domain]
   price_class         = "PriceClass_100"
-  web_acl_id          = aws_wafv2_web_acl.cloudfront.arn
+  web_acl_id          = var.waf_enabled ? aws_wafv2_web_acl.cloudfront[0].arn : null
 
   origin {
     origin_id                = "frontend-s3"
@@ -103,7 +103,7 @@ resource "aws_cloudfront_distribution" "app" {
     viewer_protocol_policy = "redirect-to-https"
     allowed_methods        = ["GET", "HEAD", "OPTIONS"]
     cached_methods         = ["GET", "HEAD"]
-    cache_policy_id        = data.aws_cloudfront_cache_policy.caching_optimized.id
+    cache_policy_id        = local.cloudfront_caching_optimized_policy_id
     compress               = true
 
     function_association {
@@ -118,8 +118,8 @@ resource "aws_cloudfront_distribution" "app" {
     viewer_protocol_policy   = "redirect-to-https"
     allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods           = ["GET", "HEAD", "OPTIONS"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    cache_policy_id          = local.cloudfront_caching_disabled_policy_id
+    origin_request_policy_id = local.cloudfront_all_viewer_except_host_policy_id
     compress                 = true
 
   }
@@ -130,8 +130,8 @@ resource "aws_cloudfront_distribution" "app" {
     viewer_protocol_policy   = "redirect-to-https"
     allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods           = ["GET", "HEAD", "OPTIONS"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    cache_policy_id          = local.cloudfront_caching_disabled_policy_id
+    origin_request_policy_id = local.cloudfront_all_viewer_except_host_policy_id
     compress                 = true
 
   }
@@ -142,8 +142,8 @@ resource "aws_cloudfront_distribution" "app" {
     viewer_protocol_policy   = "redirect-to-https"
     allowed_methods          = ["GET", "HEAD", "OPTIONS"]
     cached_methods           = ["GET", "HEAD", "OPTIONS"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    cache_policy_id          = local.cloudfront_caching_disabled_policy_id
+    origin_request_policy_id = local.cloudfront_all_viewer_except_host_policy_id
     compress                 = true
   }
 
@@ -153,8 +153,8 @@ resource "aws_cloudfront_distribution" "app" {
     viewer_protocol_policy   = "redirect-to-https"
     allowed_methods          = ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT"]
     cached_methods           = ["GET", "HEAD", "OPTIONS"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    cache_policy_id          = local.cloudfront_caching_disabled_policy_id
+    origin_request_policy_id = local.cloudfront_all_viewer_except_host_policy_id
     compress                 = true
   }
 
@@ -164,8 +164,8 @@ resource "aws_cloudfront_distribution" "app" {
     viewer_protocol_policy   = "redirect-to-https"
     allowed_methods          = ["GET", "HEAD", "OPTIONS"]
     cached_methods           = ["GET", "HEAD"]
-    cache_policy_id          = data.aws_cloudfront_cache_policy.caching_disabled.id
-    origin_request_policy_id = data.aws_cloudfront_origin_request_policy.all_viewer_except_host.id
+    cache_policy_id          = local.cloudfront_caching_disabled_policy_id
+    origin_request_policy_id = local.cloudfront_all_viewer_except_host_policy_id
     compress                 = true
 
   }

@@ -47,7 +47,12 @@ run("Node email relationship disposable PostgreSQL contract", "node scripts/test
 run("Email draft scope disposable PostgreSQL contract", "node scripts/test_email_draft_scope_postgres.mjs", repoRoot);
 run("RACI Tabs disposable PostgreSQL contract", "node scripts/test_raci_tabs_postgres.mjs", repoRoot);
 run("Huddle Explorer disposable PostgreSQL contract", "node scripts/test_huddle_explorer_postgres.mjs", repoRoot);
+run(
+  "Schema inventory comparator tests",
+  `${process.platform === "win32" ? "python" : "python3"} -m unittest tests.scripts.test_compare_schema_inventory`,
+  repoRoot,
+);
 runBackendGoTests();
-run("Infrastructure contract tests", "node --test infra/tests/attachment_direct_upload.test.mjs infra/tests/ci_workflow.test.mjs infra/tests/email_sqs.test.mjs infra/tests/valkey_realtime.test.mjs", repoRoot);
+run("Infrastructure contract tests", "node --test infra/tests/attachment_direct_upload.test.mjs infra/tests/ci_workflow.test.mjs infra/tests/email_sqs.test.mjs infra/tests/qa_environment.test.mjs infra/tests/valkey_realtime.test.mjs", repoRoot);
 
 console.log("\nAll test suites passed.");

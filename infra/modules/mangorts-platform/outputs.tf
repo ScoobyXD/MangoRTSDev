@@ -48,33 +48,48 @@ output "ecs_service_name" {
   value       = try(aws_ecs_service.backend[0].name, "")
 }
 
+output "ecs_task_execution_role_arn" {
+  description = "ECS task execution role ARN for environment-owned one-off tasks."
+  value       = aws_iam_role.ecs_task_execution.arn
+}
+
+output "ecs_task_role_arn" {
+  description = "ECS application task role ARN for environment-owned one-off tasks."
+  value       = aws_iam_role.ecs_task.arn
+}
+
+output "ecs_security_group_id" {
+  description = "Private ECS task security group ID."
+  value       = aws_security_group.ecs.id
+}
+
 output "email_work_queue_url" {
-  description = "Development FIFO email work queue URL."
+  description = "Non-production FIFO email work queue URL."
   value       = try(aws_sqs_queue.email_work[0].url, "")
 }
 
 output "email_work_dlq_url" {
-  description = "Development FIFO email work DLQ URL for deliberate operator review."
+  description = "Non-production FIFO email work DLQ URL for deliberate operator review."
   value       = try(aws_sqs_queue.email_work_dlq[0].url, "")
 }
 
 output "email_scheduler_dlq_url" {
-  description = "Development Standard Scheduler delivery DLQ URL."
+  description = "Non-production Standard Scheduler delivery DLQ URL."
   value       = try(aws_sqs_queue.email_scheduler_dlq[0].url, "")
 }
 
 output "email_worker_service_name" {
-  description = "Private development email worker ECS service name when enabled."
+  description = "Private non-production email worker ECS service name when enabled."
   value       = try(aws_ecs_service.email_worker[0].name, "")
 }
 
 output "realtime_valkey_cache_name" {
-  description = "Development ElastiCache Serverless Valkey cache name."
+  description = "Non-production ElastiCache Serverless Valkey cache name."
   value       = try(aws_elasticache_serverless_cache.realtime[0].name, "")
 }
 
 output "realtime_valkey_endpoint" {
-  description = "Private TLS Valkey endpoint used by the development ECS tasks."
+  description = "Private TLS Valkey endpoint used by the environment ECS tasks."
   value       = try("${aws_elasticache_serverless_cache.realtime[0].endpoint[0].address}:${aws_elasticache_serverless_cache.realtime[0].endpoint[0].port}", "")
 }
 
@@ -121,4 +136,9 @@ output "default_company_id" {
 output "github_deploy_role_arn" {
   description = "IAM role ARN for GitHub Actions OIDC deploys."
   value       = aws_iam_role.github_deploy.arn
+}
+
+output "github_deploy_role_name" {
+  description = "IAM role name for environment-owned deploy-policy attachments."
+  value       = aws_iam_role.github_deploy.name
 }

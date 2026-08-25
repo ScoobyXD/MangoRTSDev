@@ -77,9 +77,9 @@ test("normal DEV deploy runs the queues and one worker while reconciliation stay
   assert.match(sqs, /data "aws_iam_policy_document" "github_deploy_email_sqs"[\s\S]*?var\.environment == "dev" && var\.email_sqs_enabled/);
 	assert.doesNotMatch(sqs + iam, /"scheduler:\*"|"sqs:\*"/);
 	const deployPolicy = sqs.match(/data "aws_iam_policy_document" "github_deploy_email_sqs"[\s\S]*?\n\}/)?.[0] ?? "";
-	assert.match(deployPolicy, /ManageExactDevEmailQueues[\s\S]*?local\.email_work_queue_arn[\s\S]*?local\.email_work_dlq_arn[\s\S]*?local\.email_scheduler_dlq_arn/);
-	assert.match(deployPolicy, /ManageExactDevEmailSchedule[\s\S]*?resources = \[local\.email_schedule_arn\]/);
-	assert.match(deployPolicy, /ManageExactDevEmailScheduleGroup[\s\S]*?resources = \[local\.email_schedule_group_arn\]/);
+	assert.match(deployPolicy, /ManageExactEnvironmentEmailQueues[\s\S]*?local\.email_work_queue_arn[\s\S]*?local\.email_work_dlq_arn[\s\S]*?local\.email_scheduler_dlq_arn/);
+	assert.match(deployPolicy, /ManageExactEnvironmentEmailSchedule[\s\S]*?resources = \[local\.email_schedule_arn\]/);
+	assert.match(deployPolicy, /ManageExactEnvironmentEmailScheduleGroup[\s\S]*?resources = \[local\.email_schedule_group_arn\]/);
 	assert.equal([...deployPolicy.matchAll(/resources = \["\*"\]/g)].length, 2, "only read-only collection actions may use wildcard resources");
 	assert.match(deployPolicy, /ReadQueueNames[\s\S]*?sqs:ListQueues/);
 	assert.match(deployPolicy, /ReadSchedulerCollections[\s\S]*?scheduler:ListScheduleGroups[\s\S]*?scheduler:ListSchedules/);

@@ -94,8 +94,8 @@ resource "aws_iam_role" "email_worker" {
 
   lifecycle {
     precondition {
-      condition     = var.environment == "dev"
-      error_message = "The SQS email worker is development-only and cannot be enabled outside dev."
+      condition     = local.nonproduction_services_environment
+      error_message = "The SQS email worker can be enabled only in dev or qa."
     }
   }
 }
@@ -207,55 +207,297 @@ resource "aws_iam_role" "github_deploy" {
 }
 
 data "aws_iam_policy_document" "github_deploy" {
-  statement {
-    actions = [
-      "acm:*",
-      "cloudfront:*",
-      "cognito-idp:*",
-      "ec2:AuthorizeSecurityGroupIngress",
-      "ec2:CreateSecurityGroup",
-      "ec2:CreateTags",
-      "ec2:CreateVpcEndpoint",
-      "ec2:DeleteSecurityGroup",
-      "ec2:DeleteTags",
-      "ec2:DeleteVpcEndpoints",
-      "ec2:Describe*",
-      "ec2:GetManagedPrefixListEntries",
-      "ec2:RevokeSecurityGroupEgress",
-      "ec2:RevokeSecurityGroupIngress",
-      "ec2:UpdateSecurityGroupRuleDescriptionsIngress",
-      "ecr:*",
-      "ecs:*",
-      "elasticache:AddTagsToResource",
-      "elasticache:CreateServerlessCache",
-      "elasticache:CreateUser",
-      "elasticache:CreateUserGroup",
-      "elasticache:DeleteServerlessCache",
-      "elasticache:DeleteUser",
-      "elasticache:DeleteUserGroup",
-      "elasticache:DescribeServerlessCaches",
-      "elasticache:DescribeUsers",
-      "elasticache:DescribeUserGroups",
-      "elasticache:ListTagsForResource",
-      "elasticache:ModifyServerlessCache",
-      "elasticache:ModifyUser",
-      "elasticache:ModifyUserGroup",
-      "elasticache:RemoveTagsFromResource",
-      "elasticloadbalancing:*",
-      "iam:*",
-      "logs:*",
-      "cloudwatch:DeleteAlarms",
-      "cloudwatch:DescribeAlarms",
-      "cloudwatch:ListTagsForResource",
-      "cloudwatch:PutMetricAlarm",
-      "cloudwatch:TagResource",
-      "cloudwatch:UntagResource",
-      "route53:*",
-      "s3:*",
-      "secretsmanager:GetSecretValue",
-      "wafv2:*"
-    ]
-    resources = ["*"]
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [] : [1]
+
+    content {
+      actions = [
+        "acm:*",
+        "cloudfront:*",
+        "cognito-idp:*",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:CreateSecurityGroup",
+        "ec2:CreateTags",
+        "ec2:CreateVpcEndpoint",
+        "ec2:DeleteSecurityGroup",
+        "ec2:DeleteTags",
+        "ec2:DeleteVpcEndpoints",
+        "ec2:Describe*",
+        "ec2:GetManagedPrefixListEntries",
+        "ec2:RevokeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:UpdateSecurityGroupRuleDescriptionsIngress",
+        "ecr:*",
+        "ecs:*",
+        "elasticache:AddTagsToResource",
+        "elasticache:CreateServerlessCache",
+        "elasticache:CreateUser",
+        "elasticache:CreateUserGroup",
+        "elasticache:DeleteServerlessCache",
+        "elasticache:DeleteUser",
+        "elasticache:DeleteUserGroup",
+        "elasticache:DescribeServerlessCaches",
+        "elasticache:DescribeUsers",
+        "elasticache:DescribeUserGroups",
+        "elasticache:ListTagsForResource",
+        "elasticache:ModifyServerlessCache",
+        "elasticache:ModifyUser",
+        "elasticache:ModifyUserGroup",
+        "elasticache:RemoveTagsFromResource",
+        "elasticloadbalancing:*",
+        "iam:*",
+        "logs:*",
+        "cloudwatch:DeleteAlarms",
+        "cloudwatch:DescribeAlarms",
+        "cloudwatch:ListTagsForResource",
+        "cloudwatch:PutMetricAlarm",
+        "cloudwatch:TagResource",
+        "cloudwatch:UntagResource",
+        "route53:*",
+        "s3:*",
+        "wafv2:*"
+      ]
+      resources = ["*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid = "ReadRequiredQAAccountMetadata"
+      actions = [
+        "ecr:GetAuthorizationToken",
+        "sts:GetCallerIdentity"
+      ]
+      resources = ["*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid = "ReadExactQAResources"
+      actions = [
+        "acm:DescribeCertificate",
+        "acm:ListTagsForCertificate",
+        "cloudfront:DescribeFunction",
+        "cloudfront:GetDistribution",
+        "cloudfront:GetDistributionConfig",
+        "cloudfront:GetFunction",
+        "cloudfront:GetInvalidation",
+        "cloudfront:GetOriginAccessControl",
+        "cloudfront:GetOriginAccessControlConfig",
+        "cloudfront:ListTagsForResource",
+        "cloudwatch:ListTagsForResource",
+        "cognito-idp:DescribeResourceServer",
+        "cognito-idp:DescribeUserPool",
+        "cognito-idp:DescribeUserPoolClient",
+        "cognito-idp:ListTagsForResource",
+        "ecs:DescribeClusters",
+        "ecs:DescribeServices",
+        "ecs:DescribeTaskDefinition",
+        "ecs:ListTagsForResource",
+        "elasticache:ListTagsForResource",
+        "logs:ListTagsForResource",
+        "wafv2:GetWebACL",
+        "wafv2:ListTagsForResource"
+      ]
+      resources = [
+        aws_acm_certificate.cloudfront.arn,
+        aws_acm_certificate.alb.arn,
+        aws_cloudfront_distribution.app.arn,
+        aws_cloudfront_function.basic_auth.arn,
+        "arn:${data.aws_partition.current.partition}:cloudfront::${data.aws_caller_identity.current.account_id}:origin-access-control/${aws_cloudfront_origin_access_control.frontend.id}",
+        "arn:${data.aws_partition.current.partition}:cloudwatch:${var.aws_region}:${data.aws_caller_identity.current.account_id}:alarm:${local.name_prefix}-*",
+        aws_cognito_user_pool.main.arn,
+        aws_ecs_cluster.main.arn,
+        "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.name_prefix}-cluster/${local.name_prefix}-*",
+        "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name_prefix}-*:*",
+        "arn:${data.aws_partition.current.partition}:elasticache:${var.aws_region}:${data.aws_caller_identity.current.account_id}:serverlesscache:${local.name_prefix}-*",
+        "arn:${data.aws_partition.current.partition}:elasticache:${var.aws_region}:${data.aws_caller_identity.current.account_id}:user:${local.name_prefix}-*",
+        "arn:${data.aws_partition.current.partition}:elasticache:${var.aws_region}:${data.aws_caller_identity.current.account_id}:usergroup:${local.name_prefix}-*",
+        "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/*",
+        "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/*:*",
+        "arn:${data.aws_partition.current.partition}:wafv2:us-east-1:${data.aws_caller_identity.current.account_id}:global/webacl/${local.name_prefix}-cloudfront/*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid = "ReadExactQAIAMResources"
+      actions = [
+        "iam:GetPolicy",
+        "iam:GetPolicyVersion",
+        "iam:GetRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListPolicyTags",
+        "iam:ListPolicyVersions",
+        "iam:ListRolePolicies",
+        "iam:ListRoleTags"
+      ]
+      resources = [
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/${local.name_prefix}-*",
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid     = "PassExactQAECSRoles"
+      actions = ["iam:PassRole"]
+      resources = [
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-ecs-task-execution",
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-ecs-task",
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-email-worker-execution",
+        "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.name_prefix}-email-worker"
+      ]
+
+      condition {
+        test     = "StringEquals"
+        variable = "iam:PassedToService"
+        values   = ["ecs-tasks.amazonaws.com"]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid = "ManageExactQABackendRepository"
+      actions = [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:CompleteLayerUpload",
+        "ecr:Describe*",
+        "ecr:Get*",
+        "ecr:InitiateLayerUpload",
+        "ecr:ListImages",
+        "ecr:ListTagsForResource",
+        "ecr:PutImage",
+        "ecr:UploadLayerPart"
+      ]
+      resources = [aws_ecr_repository.backend.arn]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid = "DeployQAECSTasks"
+      actions = [
+        "ecs:CreateService",
+        "ecs:DeleteService",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+        "ecs:UpdateService"
+      ]
+      resources = [
+        "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:service/${local.name_prefix}-cluster/${local.name_prefix}-*",
+        "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name_prefix}-*:*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid = "RegisterQAECSTaskDefinitions"
+      actions = [
+        "ecs:RegisterTaskDefinition"
+      ]
+      resources = [
+        "arn:${data.aws_partition.current.partition}:ecs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:task-definition/${local.name_prefix}-*:*"
+      ]
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/environment"
+        values   = ["qa"]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/project"
+        values   = ["mangorts"]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid = "ManageQADeploymentLogs"
+      actions = [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:PutRetentionPolicy",
+        "logs:TagResource",
+        "logs:UntagResource"
+      ]
+      resources = [
+        "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/*",
+        "arn:${data.aws_partition.current.partition}:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name_prefix}/*:*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid = "ReadQABuckets"
+      actions = [
+        "s3:Get*",
+        "s3:ListBucket"
+      ]
+      resources = [
+        aws_s3_bucket.frontend.arn,
+        "${aws_s3_bucket.frontend.arn}/*",
+        "arn:${data.aws_partition.current.partition}:s3:::${trimspace(var.attachment_s3_bucket)}",
+        "arn:${data.aws_partition.current.partition}:s3:::${trimspace(var.attachment_s3_bucket)}/*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid = "PublishQAFrontend"
+      actions = [
+        "s3:DeleteObject",
+        "s3:GetBucketLocation",
+        "s3:GetObject",
+        "s3:ListBucket",
+        "s3:PutObject"
+      ]
+      resources = [
+        aws_s3_bucket.frontend.arn,
+        "${aws_s3_bucket.frontend.arn}/*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.environment == "qa" ? [1] : []
+
+    content {
+      sid       = "InvalidateQACloudFront"
+      actions   = ["cloudfront:CreateInvalidation"]
+      resources = [aws_cloudfront_distribution.app.arn]
+    }
   }
 }
 

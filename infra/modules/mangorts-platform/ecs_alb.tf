@@ -1,6 +1,6 @@
 resource "aws_cloudwatch_log_group" "backend" {
   name              = "/ecs/${local.name_prefix}/backend"
-  retention_in_days = 14
+  retention_in_days = var.cloudwatch_log_retention_days
 }
 
 resource "aws_lb" "api" {
@@ -67,7 +67,7 @@ resource "aws_ecs_cluster" "main" {
 
   setting {
     name  = "containerInsights"
-    value = "enabled"
+    value = var.ecs_container_insights_enabled ? "enabled" : "disabled"
   }
 
   lifecycle {
@@ -85,7 +85,7 @@ resource "aws_ecs_cluster" "main" {
         local.backend_service_enabled &&
         local.email_worker_dependencies_configured
       )
-      error_message = "DEV email worker enablement requires SQS, an immutable backend image, the final migrated schema, and complete DB/Nylas/Valkey configuration."
+      error_message = "Email worker enablement requires SQS, an immutable backend image, the final migrated schema, and complete DB/Nylas/Valkey configuration."
     }
 
     precondition {
@@ -95,7 +95,7 @@ resource "aws_ecs_cluster" "main" {
         local.backend_service_enabled &&
         local.email_worker_dependencies_configured
       )
-      error_message = "DEV email reconciliation enablement requires the fully configured worker stage and an immutable backend image."
+      error_message = "Email reconciliation enablement requires the fully configured worker stage and an immutable backend image."
     }
   }
 }
@@ -110,6 +110,8 @@ resource "aws_ecs_task_definition" "backend" {
   memory                   = var.backend_memory
   execution_role_arn       = aws_iam_role.ecs_task_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
+  tags                     = local.tags
+  skip_destroy             = true
 
   container_definitions = jsonencode([
     {
@@ -179,7 +181,7 @@ resource "aws_ecs_task_definition" "backend" {
       )
       secrets = concat(
         [
-          { name = "DB_PASSWORD", valueFrom = local.db_password_secret_arn }
+          { name = "DB_PASSWORD", valueFrom = local.db_password_secret_value_from }
         ],
         local.nylas_enabled ? [
           { name = "NYLAS_API_KEY", valueFrom = var.nylas_api_key_secret_arn },

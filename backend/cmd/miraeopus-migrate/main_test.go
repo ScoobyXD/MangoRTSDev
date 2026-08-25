@@ -75,6 +75,9 @@ func TestParseCommandConfigDefaultsAndAnchors(t *testing.T) {
 	if cfg.SchemaPath != defaultSchemaPath || cfg.MigrationsDir != defaultMigrationsDir || cfg.Mode != defaultMode || cfg.BaselineMigrations {
 		t.Fatalf("defaults not applied: %+v", cfg)
 	}
+	if cfg.InventoryPath != defaultInventoryPath {
+		t.Fatalf("InventoryPath = %q, want %q", cfg.InventoryPath, defaultInventoryPath)
+	}
 	if cfg.StartAfter != "20260701_previous.sql" {
 		t.Fatalf("StartAfter = %q", cfg.StartAfter)
 	}
@@ -85,6 +88,14 @@ func TestParseCommandConfigDefaultsAndAnchors(t *testing.T) {
 	}
 	if !cfg.BaselineMigrations || cfg.Mode != "schema" {
 		t.Fatalf("baseline config not applied: %+v", cfg)
+	}
+
+	cfg, err = parseCommandConfig([]string{"-mode", "schema", "-require-empty-database"}, testEnv(nil))
+	if err != nil || !cfg.RequireEmptyDB {
+		t.Fatalf("require-empty config=%+v err=%v", cfg, err)
+	}
+	if _, err := parseCommandConfig([]string{"-mode", "migrate", "-require-empty-database"}, testEnv(nil)); err == nil || !strings.Contains(err.Error(), "requires -mode schema") {
+		t.Fatalf("expected require-empty mode error, got %v", err)
 	}
 
 	_, err = parseCommandConfig([]string{"-baseline-migrations"}, testEnv(nil))
@@ -166,6 +177,156 @@ func TestClassifyMigrationLedger(t *testing.T) {
 	}
 	if !reflect.DeepEqual(audit.UnknownToRepo, []string{"orphan.sql"}) {
 		t.Fatalf("unknown=%v", audit.UnknownToRepo)
+	}
+}
+
+func TestSchemaInventoryDigestIgnoresObjectOrderAndDefaultExclusions(t *testing.T) {
+	expected := []byte(`[
+  {"object_kind":"column","object_identity":"public.widgets.alpha","definition":{"column":"alpha","data_type":"text","not_null":true,"ordinal_position":1}},
+  {"object_kind":"column","object_identity":"public.widgets.beta","definition":{"column":"beta","data_type":"integer","not_null":false,"ordinal_position":2}},
+  {"object_kind":"grant","object_identity":"relation:public.widgets:PUBLIC:SELECT","definition":{"privilege_type":"SELECT"}},
+  {"object_kind":"table","object_identity":"public.schema_migrations","definition":{"name":"schema_migrations"}}
+]`)
+	reordered := []byte(`[
+  {"definition":{"not_null":false,"data_type":"integer","column":"beta","ordinal_position":1},"object_identity":"public.widgets.beta","object_kind":"column"},
+  {"definition":{"not_null":true,"column":"alpha","data_type":"text","ordinal_position":2},"object_identity":"public.widgets.alpha","object_kind":"column"}
+]`)
+
+	expectedCount, expectedDigest, err := schemaInventoryDigest(expected)
+	if err != nil {
+		t.Fatalf("schemaInventoryDigest expected: %v", err)
+	}
+	reorderedCount, reorderedDigest, err := schemaInventoryDigest(reordered)
+	if err != nil {
+		t.Fatalf("schemaInventoryDigest reordered: %v", err)
+	}
+	if expectedCount != 2 || reorderedCount != 2 {
+		t.Fatalf("compared counts = %d and %d, want 2 and 2", expectedCount, reorderedCount)
+	}
+	if expectedDigest != reorderedDigest {
+		t.Fatalf("reordered inventory digest = %s, want %s", reorderedDigest, expectedDigest)
+	}
+	if expectedDigest != "8e204427be93f462587cec286a2d73c0e21bece1957fdec2a6960e824185c5c2" {
+		t.Fatalf("inventory digest = %s, does not match the shared Python/Go contract", expectedDigest)
+	}
+}
+
+func TestSchemaInventoryDigestRejectsMissingAndExtraColumns(t *testing.T) {
+	base := []byte(`[
+  {"object_kind":"column","object_identity":"public.widgets.alpha","definition":{"column":"alpha","data_type":"text"}},
+  {"object_kind":"column","object_identity":"public.widgets.beta","definition":{"column":"beta","data_type":"integer"}}
+]`)
+	missing := []byte(`[
+  {"object_kind":"column","object_identity":"public.widgets.alpha","definition":{"column":"alpha","data_type":"text"}}
+]`)
+	extra := []byte(`[
+  {"object_kind":"column","object_identity":"public.widgets.alpha","definition":{"column":"alpha","data_type":"text"}},
+  {"object_kind":"column","object_identity":"public.widgets.beta","definition":{"column":"beta","data_type":"integer"}},
+  {"object_kind":"column","object_identity":"public.widgets.gamma","definition":{"column":"gamma","data_type":"boolean"}}
+]`)
+
+	baseCount, baseDigest, err := schemaInventoryDigest(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingCount, missingDigest, err := schemaInventoryDigest(missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extraCount, extraDigest, err := schemaInventoryDigest(extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if baseCount != 2 || missingCount != 1 || extraCount != 3 {
+		t.Fatalf("counts = base:%d missing:%d extra:%d", baseCount, missingCount, extraCount)
+	}
+	if baseDigest == missingDigest || baseDigest == extraDigest {
+		t.Fatalf("missing or extra column did not change digest: base=%s missing=%s extra=%s", baseDigest, missingDigest, extraDigest)
+	}
+}
+
+func TestExistingApplicationSchemaObjectsAllowsOnlyFreshDatabaseDefaults(t *testing.T) {
+	defaults := []schemaInventoryItem{
+		{ObjectKind: "schema", ObjectIdentity: "public"},
+		{ObjectKind: "extension", ObjectIdentity: "plpgsql"},
+		{ObjectKind: "grant", ObjectIdentity: "schema:public:PUBLIC:USAGE"},
+	}
+	if got := existingApplicationSchemaObjects(defaults); len(got) != 0 {
+		t.Fatalf("fresh database defaults counted as application objects: %v", got)
+	}
+
+	existing := append(defaults,
+		schemaInventoryItem{ObjectKind: "table", ObjectIdentity: "public.business_records"},
+		schemaInventoryItem{ObjectKind: "table", ObjectIdentity: "public.schema_migrations"},
+		schemaInventoryItem{ObjectKind: "schema", ObjectIdentity: "private_app"},
+	)
+	want := []string{
+		"schema:private_app",
+		"table:public.business_records",
+		"table:public.schema_migrations",
+	}
+	if got := existingApplicationSchemaObjects(existing); !reflect.DeepEqual(got, want) {
+		t.Fatalf("existing objects = %v, want %v", got, want)
+	}
+}
+
+func TestSchemaInventoryQueryDoesNotIncludePhysicalColumnOrder(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "db", "schema_inventory.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(raw)), "ordinal_position") {
+		t.Fatal("schema inventory must not include physical column order")
+	}
+}
+
+func TestRepositorySchemaFingerprintIsDeterministicAcrossLineEndings(t *testing.T) {
+	root := t.TempDir()
+	schemaPath := filepath.Join(root, "schema.sql")
+	inventoryPath := filepath.Join(root, "schema_inventory.sql")
+	migrationsDir := filepath.Join(root, "migrations")
+	if err := os.Mkdir(migrationsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(schemaPath, []byte("create table widgets(id uuid);\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inventoryPath, []byte("select 'inventory';\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(migrationsDir, "20260801_widgets.sql"), []byte("alter table widgets add column name text;\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := repositorySchemaFingerprint(schemaPath, inventoryPath, migrationsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(schemaPath, []byte("create table widgets(id uuid);\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(inventoryPath, []byte("select 'inventory';\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(migrationsDir, "20260801_widgets.sql"), []byte("alter table widgets add column name text;\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := repositorySchemaFingerprint(schemaPath, inventoryPath, migrationsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second {
+		t.Fatalf("line-ending-only change altered fingerprint: %s != %s", first, second)
+	}
+	if err := os.WriteFile(schemaPath, []byte("create table widgets(id uuid, active boolean);\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := repositorySchemaFingerprint(schemaPath, inventoryPath, migrationsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed == first {
+		t.Fatal("schema content change did not alter repository fingerprint")
 	}
 }
 

@@ -121,6 +121,12 @@ variable "existing_db_password_secret_arn" {
   default     = ""
 }
 
+variable "existing_db_password_secret_json_key" {
+  description = "Optional JSON property containing the existing database password inside its Secrets Manager secret."
+  type        = string
+  default     = ""
+}
+
 variable "existing_db_security_group_id" {
   description = "Security group attached to the existing database. Terraform will allow ECS ingress from this stack."
   type        = string
@@ -153,6 +159,12 @@ variable "managed_db_user" {
 
 variable "managed_db_password_secret_arn" {
   description = "Secrets Manager ARN containing the managed database password. Reserved for future managed DB work or an externally managed DB module."
+  type        = string
+  default     = ""
+}
+
+variable "managed_db_password_secret_json_key" {
+  description = "Optional JSON property containing the managed database password inside its Secrets Manager secret."
   type        = string
   default     = ""
 }
@@ -204,32 +216,61 @@ variable "backend_desired_count" {
   }
 }
 
+variable "cloudwatch_log_retention_days" {
+  description = "CloudWatch log retention for API and email-worker task logs."
+  type        = number
+  default     = 14
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, 545, 731, 1096, 1827, 2192, 2557, 2922, 3288, 3653], var.cloudwatch_log_retention_days)
+    error_message = "cloudwatch_log_retention_days must be a CloudWatch Logs supported retention value."
+  }
+}
+
+variable "ecs_container_insights_enabled" {
+  description = "Enable ECS Container Insights for this environment."
+  type        = bool
+  default     = true
+}
+
+variable "cloudwatch_alarms_enabled" {
+  description = "Create the email and Valkey CloudWatch metric alarms for this environment."
+  type        = bool
+  default     = true
+}
+
+variable "waf_enabled" {
+  description = "Attach the module's AWS WAF web ACL to CloudFront."
+  type        = bool
+  default     = true
+}
+
 variable "email_sqs_enabled" {
-  description = "Create the development email work queue, work DLQ, Scheduler DLQ, and queue IAM policies."
+  description = "Create the non-production email work queue, work DLQ, Scheduler DLQ, and queue IAM policies."
   type        = bool
   default     = false
 }
 
 variable "email_worker_enabled" {
-  description = "Run one private development email worker service."
+  description = "Run one private non-production email worker service."
   type        = bool
   default     = false
 }
 
 variable "email_sqs_database_migration_complete" {
-  description = "Explicit reviewed confirmation that the DEV database has the final email SQS schema."
+  description = "Explicit reviewed confirmation that the environment database has the final email SQS schema."
   type        = bool
   default     = false
 }
 
 variable "email_reconciliation_schedule_enabled" {
-  description = "Enable the rare development email reconciliation schedule."
+  description = "Enable the rare non-production email reconciliation schedule."
   type        = bool
   default     = false
 }
 
 variable "email_worker_concurrency" {
-  description = "Small bounded concurrency inside the single development email worker task."
+  description = "Small bounded concurrency inside the single non-production email worker task."
   type        = number
   default     = 3
 
@@ -240,19 +281,19 @@ variable "email_worker_concurrency" {
 }
 
 variable "email_worker_cpu" {
-  description = "Fargate CPU units for the private development email worker."
+  description = "Fargate CPU units for the private non-production email worker."
   type        = number
   default     = 1024
 }
 
 variable "email_worker_memory" {
-  description = "Fargate memory MiB for the private development email worker."
+  description = "Fargate memory MiB for the private non-production email worker."
   type        = number
   default     = 2048
 }
 
 variable "email_worker_alarm_action_arns" {
-  description = "Optional alarm action ARNs for DEV email queue, worker, and Scheduler alerts."
+  description = "Optional alarm action ARNs for non-production email queue, worker, and Scheduler alerts."
   type        = list(string)
   default     = []
 
@@ -263,7 +304,7 @@ variable "email_worker_alarm_action_arns" {
 }
 
 variable "realtime_valkey_enabled" {
-  description = "Create the development-only ElastiCache Serverless Valkey realtime backplane."
+  description = "Create the dev/QA ElastiCache Serverless Valkey realtime backplane."
   type        = bool
   default     = false
 }
@@ -280,7 +321,7 @@ variable "realtime_valkey_channel" {
 }
 
 variable "realtime_valkey_major_engine_version" {
-  description = "Development Valkey major engine version. IAM authentication requires Valkey 7.2 or newer."
+  description = "Non-production Valkey major engine version. IAM authentication requires Valkey 7.2 or newer."
   type        = string
   default     = "7"
 }
