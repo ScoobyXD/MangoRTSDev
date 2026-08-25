@@ -30,6 +30,8 @@ import { buildCompanyExplorerSearchTreeRows } from "../company-explorer/companyE
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
 import { getExplorerDropPayloadItems, getExplorerDropPayloadItemType, type ExplorerDropPayload } from "../company-explorer/treePresentation.js";
 import { createRequestJSON } from "../api/requestJSON.js";
+import { HierarchyBreadcrumb } from "../hierarchy/HierarchyBreadcrumb.js";
+import { emitExplorerContextUpdated } from "../dashboardEvents.js";
 import { openEditorEntityLink, type EditorEntityLink } from "../editor/editorEntityLinks.js";
 import { UniversalEntityPicker, type UniversalEntityPickerAnchor, type UniversalEntityPickerMode } from "../editor/UniversalEntityPicker.js";
 import { UniversalLinkerControls } from "../editor/UniversalLinkerControls.js";
@@ -2487,6 +2489,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     try {
       if (isLogicGate) {
         await deleteProjectManagementLogicGate(companyID, resourceIDs[0], confirmationDisplayName);
+        emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
       } else {
         await Promise.all(resourceIDs.map((nodeID) => deleteProjectManagementNode(companyID, nodeID, confirmationDisplayName)));
       }
@@ -2521,6 +2524,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setProjectTitleDraft(renamedProject.name || nextName);
       onProjectUpdated?.(renamedProject);
       setProjectTitleEditing(false);
+      emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
     } catch (renameError) {
       setError(renameError instanceof Error ? renameError.message : "Failed to rename project");
       setProjectTitleDraft(project.name || "");
@@ -3090,45 +3094,56 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     <div className="mango-project-summary-shell" style={summaryShellStyle}>
       <div className="mango-project-summary-header" style={summaryHeaderStyle}>
         <div style={summaryTitleClusterStyle}>
-          <div style={summaryEyebrowStyle}>Project Summary</div>
-          {projectTitleEditing ? (
-            <input
-              autoFocus
-              value={projectTitleDraft}
-              style={summaryTitleInputStyle}
-              onChange={(event) => setProjectTitleDraft(event.currentTarget.value)}
-              onBlur={() => void saveProjectTitle()}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void saveProjectTitle();
-                }
-                if (event.key === "Escape") {
+          <HierarchyBreadcrumb
+            apiBase={apiBase}
+            companyID={companyID}
+            kind="company_explorer"
+            resourceType="project"
+            resourceID={projectID}
+          />
+          <div style={summaryTitleRowStyle}>
+            <span aria-label="Project" title="Project" style={summaryTitleIconStyle}><ExplorerRowIcon kind="project" /></span>
+            {projectTitleEditing ? (
+              <input
+                autoFocus
+                aria-label="Project title"
+                value={projectTitleDraft}
+                style={summaryTitleInputStyle}
+                onChange={(event) => setProjectTitleDraft(event.currentTarget.value)}
+                onBlur={() => void saveProjectTitle()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void saveProjectTitle();
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setProjectTitleDraft(project?.name || "");
+                    setProjectTitleEditing(false);
+                  }
+                }}
+              />
+            ) : (
+              <h2
+                tabIndex={0}
+                aria-label={`Project title: ${project?.name || projectID}`}
+                title="Rename project"
+                style={summaryTitleStyle}
+                onClick={() => {
+                  setProjectTitleDraft(project?.name || "");
+                  setProjectTitleEditing(true);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
                   event.preventDefault();
                   setProjectTitleDraft(project?.name || "");
-                  setProjectTitleEditing(false);
-                }
-              }}
-            />
-          ) : (
-            <h2
-              tabIndex={0}
-              title="Rename project"
-              style={summaryTitleStyle}
-              onClick={() => {
-                setProjectTitleDraft(project?.name || "");
-                setProjectTitleEditing(true);
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== "Enter" && event.key !== " ") return;
-                event.preventDefault();
-                setProjectTitleDraft(project?.name || "");
-                setProjectTitleEditing(true);
-              }}
-            >
-              {project?.name || projectID}
-            </h2>
-          )}
+                  setProjectTitleEditing(true);
+                }}
+              >
+                {project?.name || projectID}
+              </h2>
+            )}
+          </div>
         </div>
         <div className="mango-project-summary-meta" style={summaryMetaPillsStyle}>
           {showFieldMetadata ? (
@@ -4448,6 +4463,7 @@ function ProjectRelationshipNodePanel({
         forcedLabel={selection.title}
         forcedEmptyMessage="Select a project node."
         compactLinkedDocumentHeader
+        onBeforeHierarchyNavigate={fullscreen ? () => setFullscreen(false) : undefined}
       />
     </UnifiedNodeShell>
   );
@@ -4883,15 +4899,12 @@ const summaryHeaderStyle: React.CSSProperties = {
 const summaryTitleClusterStyle: React.CSSProperties = {
   minWidth: 0,
   flex: "1 1 auto",
+  display: "grid",
+  gap: 4,
 };
 
-const summaryEyebrowStyle: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 950,
-  textTransform: "uppercase",
-  color: "#6366f1",
-  letterSpacing: ".12em",
-};
+const summaryTitleRowStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", gap: 8 };
+const summaryTitleIconStyle: React.CSSProperties = { flex: "0 0 auto", display: "inline-flex", alignItems: "center" };
 
 const summaryTitleStyle: React.CSSProperties = {
   margin: 0,
@@ -4909,6 +4922,7 @@ const summaryTitleStyle: React.CSSProperties = {
 const summaryTitleInputStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
+  flex: "1 1 auto",
   height: 30,
   border: "1px solid rgba(91, 141, 239, 0.34)",
   borderRadius: 7,

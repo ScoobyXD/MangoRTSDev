@@ -18,6 +18,7 @@ import {
   subscribeCommittedEntityTitleUpdates,
 } from "../realtime/committedEntityTitleUpdates.js";
 import type { ExplorerTreeNode } from "../company-explorer/companyExplorerTypes.js";
+import { emitExplorerContextUpdated } from "../dashboardEvents.js";
 import { listEntityFields, setEntityFieldAssignments, type EntityField } from "../fields/entityFieldsApi.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import type { LogicGateRecord } from "../logic-gates/types.js";
@@ -1170,6 +1171,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
     setProjects((current) => current.filter((item) => item.project_id !== projectID));
     try {
       await deleteProject(companyID, projectID, confirmationDisplayName);
+      emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
       scheduleProjectListReload();
       scheduleWorkspaceResourceReload();
     } catch (deleteError) {
@@ -1202,6 +1204,7 @@ export const ProjectManagementContent: React.FC<ProjectManagementContentProps> =
       setProjects((current) => current.map((item) => item.project_id === project.project_id ? renamed : item));
       setProjectRenameTarget(null);
       setProjectRenameDraft("");
+      emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
       scheduleProjectListReload();
     } catch (renameError) {
       setError(renameError instanceof Error ? renameError.message : "Failed to rename project");

@@ -142,6 +142,7 @@ P82 - The permanent Project document uses the same compact header band as Projec
 P83 - A red X appears only while the permanent Project document is full screen and returns that same document to its inline pane.
 P84 - Opening a Project defaults to the permanent Project document pane open and the Project-wide email pane closed.
 P85 - Every point below the permanent Project document header belongs to its normal editable rich-text surface, so clicking the blank document body focuses the editor and permits typing.
+P86 - Project Summary shows the existing Project icon and a separate live-derived clickable Company hierarchy breadcrumb before the independently editable Project title. The breadcrumb excludes the current Project title and never changes the Project title field or its storage.
 
 ## Scenarios
 

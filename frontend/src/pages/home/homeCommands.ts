@@ -14,6 +14,7 @@ import {
   updateNode as defaultUpdateNode,
 } from "../../modules/communications/communicationsApi.js";
 import { requestJSON as defaultRequestJSON, type RequestJSONInit } from "../../modules/api/requestJSON.js";
+import { emitExplorerContextUpdated } from "../../modules/dashboardEvents.js";
 import type { LogicGateRACIRole, LogicGateRecord } from "../../modules/logic-gates/types.js";
 import type {
   CompanyUser,
@@ -526,6 +527,9 @@ export async function deleteHomeEntitiesCommand(args: {
     if (target.kind === "logic_gate") {
       dispatchKanbanBoardsUpdated({ companyID: args.companyID, deletedBoardID: logicGateKanbanBoardID(target.id) });
     }
+  }
+  if (targets.some((target) => target.kind === "logic_gate")) {
+    emitExplorerContextUpdated({ companyID: args.companyID, kind: "company_explorer" });
   }
   return { status: "ok", targets };
 }

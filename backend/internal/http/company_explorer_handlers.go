@@ -148,6 +148,50 @@ func (s *Server) handleCompanyExplorerSearch(w http.ResponseWriter, r *http.Requ
 	}
 	writeJSONMaybeNotModified(w, r, http.StatusOK, results)
 }
+
+func (s *Server) handleCompanyExplorerLocationPath(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	resourceType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("resource_type")))
+	resourceID := strings.TrimSpace(r.URL.Query().Get("resource_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if resourceID == "" {
+		writeError(w, http.StatusBadRequest, "resource_id_required")
+		return
+	}
+	if resourceType != store.EntityTypeNode && resourceType != store.EntityTypeLogicGate && resourceType != store.EntityTypeProject {
+		writeError(w, http.StatusBadRequest, "invalid_resource_type")
+		return
+	}
+	path, err := s.repo.GetCompanyExplorerHierarchyPath(store.CompanyExplorerHierarchyPathQuery{
+		Context:          r.Context(),
+		CompanyID:        companyID,
+		ResourceType:     resourceType,
+		ResourceID:       resourceID,
+		PermissionUserID: s.entityPermissionActorUserID(r, companyID),
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_company_explorer_location_path_query")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return
+	}
+	if err != nil {
+		log.Printf("company explorer location path: failed company_id=%s resource_type=%s resource_id=%s: %v", companyID, resourceType, resourceID, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_get_company_explorer_location_path")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, path)
+}
+
 func (s *Server) companyExplorerLazyRowsQuery(w http.ResponseWriter, r *http.Request) (store.CompanyExplorerLazyRowsQuery, bool) {
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 	if companyID == "" {

@@ -19,6 +19,8 @@ import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordSt
 import type { LogicGateRACIAssignment, LogicGateRACIPrincipalType, LogicGateRACIRole } from "../logic-gates/types";
 import { canEditResourceAccess } from "../nodes/types";
 import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog";
+import { HierarchyBreadcrumb } from "../hierarchy/HierarchyBreadcrumb.js";
+import { emitExplorerContextUpdated } from "../dashboardEvents.js";
 import {
   BareMangoEditorDocument,
   BareMangoEditorToolbar,
@@ -133,6 +135,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       const committed = isGate ? (item as HuddleGate).header : (item as HuddleNode).name;
       setName(committed);
       setSavedName(committed);
+      if (isGate) emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
     } catch (cause) {
       setName(savedName);
       setError(cause instanceof Error ? cause.message : "Could not rename Huddle");
@@ -262,6 +265,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
     if (!window.confirm(`Move “${name}” to the Recycle Bin?`)) return;
     try {
       await requestJSON(`${isGate ? "/v1/huddle-logic-gates/" : "/v1/huddle-nodes/"}${encodeURIComponent(resource.resourceID)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+      if (isGate) emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
       onDeleted?.();
       onClose();
     } catch (cause) {
@@ -350,15 +354,26 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       </header>
 
       <div style={identityHeaderStyle}>
-        <strong style={identityLabelStyle}>{isGate ? "Huddle Process:" : "Huddle Node:"}</strong>
-        <input
-          aria-label={isGate ? "Huddle Process title" : "Huddle Node title"}
-          value={name}
-          onChange={(event) => setName(event.target.value)}
-          onBlur={() => void saveName()}
-          onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-          style={titleInputStyle}
+        <HierarchyBreadcrumb
+          apiBase={apiBase}
+          companyID={companyID}
+          kind="huddle_explorer"
+          resourceType={resource.resourceType}
+          resourceID={resource.resourceID}
         />
+        <div style={identityTitleRowStyle}>
+          <strong aria-label={isGate ? "Huddle Process" : "Huddle Node"} title={isGate ? "Huddle Process" : "Huddle Node"} style={identityLabelStyle}>
+            <HuddleResourceIcon type={resource.resourceType} />
+          </strong>
+          <input
+            aria-label={isGate ? "Huddle Process title" : "Huddle Node title"}
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            onBlur={() => void saveName()}
+            onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+            style={titleInputStyle}
+          />
+        </div>
       </div>
 
       <div style={raciFrameStyle}>
@@ -552,13 +567,14 @@ const FullscreenIcon: React.FC<{ active: boolean }> = ({ active }) => (
   </svg>
 );
 
-const surfaceStyle: React.CSSProperties = { width: "100%", height: "100%", minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px 54px auto auto minmax(0,1fr)", overflow: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: EDITOR_NEU_PANEL_BACKGROUND, color: "#111827", boxShadow: EDITOR_NEU_PANEL_SHADOW };
+const surfaceStyle: React.CSSProperties = { width: "100%", height: "100%", minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px auto auto auto minmax(0,1fr)", overflow: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: EDITOR_NEU_PANEL_BACKGROUND, color: "#111827", boxShadow: EDITOR_NEU_PANEL_SHADOW };
 const toolbarHeaderStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: 8, padding: "6px 8px 4px 10px", borderBottom: "1px solid rgba(148,163,184,.16)", background: "linear-gradient(180deg,rgba(255,255,255,.8),rgba(248,250,252,.54))" };
 const actionGroupStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6 };
 const iconButtonStyle: React.CSSProperties = { width: 26, height: 26, display: "grid", placeItems: "center", border: "1px solid rgba(100,116,139,.25)", borderRadius: 7, background: EDITOR_NEU_SURFACE, color: "#334155", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(148,163,184,.2), -2px -2px 6px rgba(255,255,255,.86)" };
 const closeButtonStyle: React.CSSProperties = { ...iconButtonStyle, border: "1px solid transparent", background: "linear-gradient(135deg,#ff5a6b,#ef334e)", color: "#fff", fontSize: 15, fontWeight: 800, boxShadow: "0 8px 18px rgba(239,51,78,.26), inset 1px 1px 0 rgba(255,255,255,.38)" };
-const identityHeaderStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", gap: 7, margin: "5px 12px 2px", padding: "8px 12px", border: "1px solid rgba(255,255,255,.82)", borderRadius: 11, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };
-const identityLabelStyle: React.CSSProperties = { flex: "0 0 auto", fontSize: 18, fontWeight: 850, color: "#111827" };
+const identityHeaderStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 4, margin: "5px 12px 2px", padding: "7px 12px 8px", border: "1px solid rgba(255,255,255,.82)", borderRadius: 11, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };
+const identityTitleRowStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", gap: 7 };
+const identityLabelStyle: React.CSSProperties = { flex: "0 0 auto", display: "inline-flex", alignItems: "center", color: "#111827" };
 const titleInputStyle: React.CSSProperties = { minWidth: 0, flex: 1, border: 0, outline: 0, background: "transparent", color: "#111827", font: "inherit", fontSize: 18, fontWeight: 650, padding: 0 };
 const raciFrameStyle: React.CSSProperties = { minWidth: 0, padding: "5px 12px 8px", overflowX: "auto", overflowY: "visible" };
 const errorStyle: React.CSSProperties = { margin: "0 12px 5px", padding: "6px 9px", borderRadius: 7, background: "rgba(254,226,226,.82)", color: "#b91c1c", fontSize: 11, fontWeight: 750 };

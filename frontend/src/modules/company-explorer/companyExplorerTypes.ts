@@ -55,6 +55,8 @@ export type CompanyExplorerFindRequestDetail = {
   companyID?: string;
   sourceFrameID?: string;
   targetFrameIDs?: string[];
+  selectRoot?: boolean;
+  folderPathIDs?: string[];
   entities?: Array<{ kind?: string; id?: string }>;
   changedAt?: number;
 };

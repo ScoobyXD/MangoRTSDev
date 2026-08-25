@@ -1,5 +1,6 @@
 import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import { requestJSON } from "../api/requestJSON.js";
+import { emitExplorerContextUpdated } from "../dashboardEvents.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { LogicGateRACIRole, LogicGateRecord } from "../logic-gates/types.js";
@@ -323,6 +324,7 @@ export async function assignNodeToLogicGateStatus(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
   dispatchLogicGateWorkUpdated(args.companyID, args.logicGateID);
+  emitExplorerContextUpdated({ companyID: args.companyID, kind: "company_explorer" });
   return normalizeLogicGateAssignmentCommandResult(payload);
 }
 
@@ -375,6 +377,7 @@ export async function moveLogicGateAssignment(args: {
     fromLogicGateID,
     nodeID: args.nodeID,
   });
+  emitExplorerContextUpdated({ companyID: args.companyID, kind: "company_explorer" });
   return normalizeLogicGateAssignmentCommandResult(payload);
 }
 
@@ -396,6 +399,7 @@ export async function removeLogicGateAssignment(args: {
     });
     invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, logicGateID);
     dispatchLogicGateWorkUpdated(args.companyID, logicGateID);
+    emitExplorerContextUpdated({ companyID: args.companyID, kind: "company_explorer" });
     return normalizeLogicGateAssignmentCommandResult(payload);
   }
   const payload = await requestJSON<LogicGateAssignmentCommandPayload>(args.apiBase, "/v1/work-items/logic-gate-assignments/remove", {
@@ -409,6 +413,7 @@ export async function removeLogicGateAssignment(args: {
   });
   invalidateLogicGateArenaViewCache(args.apiBase, args.companyID, args.logicGateID);
   dispatchLogicGateWorkUpdated(args.companyID, args.logicGateID ?? "");
+  emitExplorerContextUpdated({ companyID: args.companyID, kind: "company_explorer" });
   return normalizeLogicGateAssignmentCommandResult(payload);
 }
 

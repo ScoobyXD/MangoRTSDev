@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { createRequestJSON } from "../api/requestJSON";
+import { emitExplorerContextUpdated, EVENT_HUDDLE_EXPLORER_FIND_REQUESTED } from "../dashboardEvents.js";
 import { HuddleNodePopup, type HuddleOpenResource } from "./HuddleResourceSurface";
 import { HuddlePeopleIcon, HuddleResourceIcon } from "./HuddleResourceIcon";
 
@@ -10,8 +11,11 @@ type Tree = { folders?: Folder[]; items?: Item[] };
 
 export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: string; currentUserID: string }> = ({ apiBase, companyID, currentUserID }) => {
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
+  const sectionRef = useRef<HTMLElement | null>(null);
   const [tree, setTree] = useState<Tree>({ folders: [], items: [] });
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [selectedRowID, setSelectedRowID] = useState("");
+  const [pendingRevealRowID, setPendingRevealRowID] = useState<string | null>(null);
   const [raisedRowID, setRaisedRowID] = useState("");
   const [openNode, setOpenNode] = useState<HuddleOpenResource | null>(null);
   const load = useCallback(async () => {
@@ -23,16 +27,60 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
   useEffect(() => {
     const listener = (event: Event) => {
       const detail = (event as CustomEvent<HuddleOpenResource>).detail;
-      if (detail?.resourceType !== "huddle_node" || !detail.resourceID) return;
+      if (!detail?.resourceID) return;
+      if (detail.resourceType === "huddle_logic_gate") {
+        setOpenNode(null);
+        return;
+      }
+      if (detail.resourceType !== "huddle_node") return;
       setOpenNode(detail);
       void load();
     };
     window.addEventListener("mangorts:huddle-open", listener);
     return () => window.removeEventListener("mangorts:huddle-open", listener);
   }, [load]);
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<{ companyID?: string; selectRoot?: boolean; folderPathIDs?: string[] }>).detail;
+      if (!detail || detail.companyID?.trim() !== companyID.trim()) return;
+      setOpenNode(null);
+      const folderPathIDs = Array.from(new Set((detail.folderPathIDs ?? []).map((id) => id.trim()).filter(Boolean)));
+      if (detail.selectRoot || folderPathIDs.length === 0) {
+        setSelectedRowID("");
+        setPendingRevealRowID("root");
+        return;
+      }
+      const folderID = folderPathIDs[folderPathIDs.length - 1];
+      setExpanded((current) => new Set([...current, ...folderPathIDs]));
+      setSelectedRowID(`folder:${folderID}`);
+      setPendingRevealRowID(`folder:${folderID}`);
+    };
+    window.addEventListener(EVENT_HUDDLE_EXPLORER_FIND_REQUESTED, listener);
+    return () => window.removeEventListener(EVENT_HUDDLE_EXPLORER_FIND_REQUESTED, listener);
+  }, [companyID]);
 
   const folders = tree.folders ?? [];
   const items = tree.items ?? [];
+  useEffect(() => {
+    if (pendingRevealRowID === null) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      if (pendingRevealRowID === "root") {
+        sectionRef.current?.focus({ preventScroll: true });
+        sectionRef.current?.scrollIntoView({ block: "nearest" });
+        setPendingRevealRowID(null);
+        return;
+      }
+      if (!pendingRevealRowID.startsWith("folder:")) return;
+      const folderID = pendingRevealRowID.slice("folder:".length);
+      const target = Array.from(sectionRef.current?.querySelectorAll<HTMLElement>("[data-huddle-folder-id]") ?? [])
+        .find((element) => element.dataset.huddleFolderId === folderID);
+      if (!target) return;
+      target?.focus({ preventScroll: true });
+      target?.scrollIntoView({ block: "nearest" });
+      setPendingRevealRowID(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [expanded, pendingRevealRowID, tree]);
   const createFolder = async (parentFolderID = "") => {
     const name = window.prompt("Folder name", "New Folder")?.trim();
     if (!name) return;
@@ -43,6 +91,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
     const name = window.prompt("Folder name", folder.name)?.trim();
     if (!name || name === folder.name) return;
     await requestJSON(`/v1/huddle-explorer/folders/${encodeURIComponent(folder.folder_id)}`, { method: "PUT", json: { company_id: companyID, name } });
+    emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
     await load();
   };
   const deleteFolder = async (folder: Folder) => {
@@ -52,15 +101,18 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
   };
   const moveFolder = async (folder: Folder, parentFolderID: string) => {
     await requestJSON(`/v1/huddle-explorer/folders/${encodeURIComponent(folder.folder_id)}`, { method: "PUT", json: { company_id: companyID, parent_folder_id: parentFolderID } });
+    emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
     await load();
   };
   const moveItem = async (item: Item, parentFolderID: string) => {
     await requestJSON(`/v1/huddle-explorer/items/${encodeURIComponent(item.item_id)}`, { method: "PUT", json: { company_id: companyID, parent_folder_id: parentFolderID } });
+    emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
     await load();
   };
   const removePlacement = async (item: Item) => {
     if (!window.confirm(`Remove “${item.name}” from the Huddles explorer?`)) return;
     await requestJSON(`/v1/huddle-explorer/items/${encodeURIComponent(item.item_id)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
+    emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
     await load();
   };
   const toggleFolder = (folderID: string) => setExpanded((current) => {
@@ -70,6 +122,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
     return next;
   });
   const openItem = (item: Item) => {
+    setSelectedRowID(`item:${item.item_id}`);
     const detail: HuddleOpenResource = { resourceType: item.resource_type, resourceID: item.resource_id, name: item.name };
     window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail }));
   };
@@ -86,10 +139,10 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
               data-huddle-row-raised={raisedRowID === rowID ? "true" : undefined}
               onMouseEnter={() => setRaisedRowID(rowID)}
               onMouseLeave={() => setRaisedRowID((current) => current === rowID ? "" : current)}
-              style={{ ...rowStyle(raisedRowID === rowID), paddingLeft: 3 + depth * 12 }}
+              style={{ ...rowStyle(raisedRowID === rowID || selectedRowID === rowID), paddingLeft: 3 + depth * 12 }}
             >
               <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${folder.name}`} onClick={() => toggleFolder(folder.folder_id)} style={disclosureButtonStyle}><ExplorerDisclosureIcon open={open} color="#475569" /></button>
-              <button type="button" title="Click to expand or collapse" onClick={() => toggleFolder(folder.folder_id)} style={folderNameButtonStyle}><ExplorerRowIcon kind="folder" /><span style={rowTextStyle}>{folder.name}</span></button>
+              <button type="button" data-huddle-folder-id={folder.folder_id} aria-current={selectedRowID === rowID ? "location" : undefined} title="Click to expand or collapse" onClick={() => { setSelectedRowID(rowID); toggleFolder(folder.folder_id); }} style={folderNameButtonStyle}><ExplorerRowIcon kind="folder" /><span style={rowTextStyle}>{folder.name}</span></button>
               <select aria-label={`Move ${folder.name}`} value={folder.parent_folder_id ?? ""} onChange={(event) => void moveFolder(folder, event.target.value)} style={selectStyle}><option value="">Root</option>{folders.filter((candidate) => candidate.folder_id !== folder.folder_id).map((candidate) => <option key={candidate.folder_id} value={candidate.folder_id}>{candidate.name}</option>)}</select>
               <button type="button" aria-label={`Create folder in ${folder.name}`} title="Create folder inside" onClick={() => void createFolder(folder.folder_id)} style={smallActionStyle}>+</button>
               <button type="button" aria-label={`Rename ${folder.name}`} title="Rename folder" onClick={() => void renameFolder(folder)} style={smallActionStyle}>✎</button>
@@ -108,7 +161,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
             data-huddle-row-raised={raisedRowID === rowID ? "true" : undefined}
             onMouseEnter={() => setRaisedRowID(rowID)}
             onMouseLeave={() => setRaisedRowID((current) => current === rowID ? "" : current)}
-            style={{ ...itemRowStyle(raisedRowID === rowID), paddingLeft: 18 + depth * 12 }}
+            style={{ ...itemRowStyle(raisedRowID === rowID || selectedRowID === rowID), paddingLeft: 18 + depth * 12 }}
           >
             <button type="button" title="Click to open" onClick={() => openItem(item)} style={itemNameButtonStyle}>
               <HuddleResourceIcon type={item.resource_type} />
@@ -123,7 +176,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
   );
 
   return (
-    <section aria-label="Huddles" data-sidebar-huddles-surface="elevated" style={sectionStyle}>
+    <section ref={sectionRef} tabIndex={-1} aria-label="Huddles" data-sidebar-huddles-surface="elevated" style={sectionStyle}>
       <div style={headerStyle}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><HuddlePeopleIcon color="#334155" size={15} /><span>Huddles</span></span>
         <span style={headerLineStyle} />

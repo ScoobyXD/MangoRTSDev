@@ -46,6 +46,7 @@ type UseCompanyExplorerSelectionBridgeInput = {
   setSelectedLogicGateID: React.Dispatch<React.SetStateAction<string>>;
   setSelectedKanbanBoardID: React.Dispatch<React.SetStateAction<string>>;
   expandTreeIDs: (treeIDs: string[]) => void;
+  applyExplorerPathSelection: (folderPathIDs: string[], selectRoot: boolean) => void;
   applyExplorerFindSelection: (entities: ExplorerFindEntity[]) => void;
 };
 
@@ -78,6 +79,7 @@ export function useCompanyExplorerSelectionBridge({
   setSelectedLogicGateID,
   setSelectedKanbanBoardID,
   expandTreeIDs,
+  applyExplorerPathSelection,
   applyExplorerFindSelection,
 }: UseCompanyExplorerSelectionBridgeInput) {
   useEffect(() => {
@@ -157,14 +159,19 @@ export function useCompanyExplorerSelectionBridge({
       if (!detail || (detail.companyID && detail.companyID !== companyID) || detail.sourceFrameID === scope) return;
       const targetFrameIDs = Array.isArray(detail.targetFrameIDs) ? detail.targetFrameIDs : [];
       if (targetFrameIDs.length > 0 && !targetFrameIDs.includes(scope)) return;
+      const requestedFolders = (detail.folderPathIDs ?? []).map((id) => id.trim()).filter(Boolean);
+      if (detail.selectRoot || requestedFolders.length > 0) {
+        applyExplorerPathSelection(requestedFolders, detail.selectRoot === true);
+        return;
+      }
       const entities = (detail.entities ?? []).filter((entity): entity is ExplorerFindEntity => (
-        (entity.kind === "node" || entity.kind === "logic_gate") && Boolean(entity.id)
+        (entity.kind === "node" || entity.kind === "logic_gate" || entity.kind === "project") && Boolean(entity.id)
       ));
       if (entities.length > 0) applyExplorerFindSelection(entities);
     };
     window.addEventListener(EVENT_COMPANY_EXPLORER_FIND_REQUESTED, onFindRequested);
     return () => window.removeEventListener(EVENT_COMPANY_EXPLORER_FIND_REQUESTED, onFindRequested);
-  }, [applyExplorerFindSelection, companyID, scope]);
+  }, [applyExplorerFindSelection, applyExplorerPathSelection, companyID, scope]);
 
   useEffect(() => {
     const nextSelection: ExplorerSelectionState = {

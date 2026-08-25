@@ -83,6 +83,7 @@ type UpdatesEditorContentComponent = React.FC<{
   focusMentionUserID?: string;
   focusRequestID?: number;
   focusInformationMode?: "focus" | "scroll";
+  onBeforeHierarchyNavigate?: () => void;
 }>;
 
 const LazyUpdatesEditorContent = React.lazy(async () => {
@@ -1703,6 +1704,7 @@ function UpdatesNodePanel({
             focusMentionUserID={panel.focusMentionUserID}
             focusRequestID={panel.focusRequestID}
             focusInformationMode="scroll"
+            onBeforeHierarchyNavigate={fullscreen ? () => setFullscreen(false) : undefined}
           />
         </React.Suspense>
       </UnifiedNodeShell>

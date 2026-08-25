@@ -2,6 +2,7 @@ import { editorChatEntityLinkPayloads, type EditorChatEntityLink } from "../edit
 import { apiFetchJSON, getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import type { Account } from "../accounts/accountsApi.js";
 import type { EntityField } from "../fields/entityFieldsApi.js";
+import { emitExplorerContextUpdated } from "../dashboardEvents.js";
 
 export type ProjectManagementEntityType = "node" | "logic_gate";
 export type ProjectHealth = "On Track" | "AT RISK" | "Off Track";
@@ -434,6 +435,7 @@ export async function upsertProjectRelationship(input: {
     }),
   });
   invalidateProjectRelationshipsForResource(input);
+  emitExplorerContextUpdated({ companyID: input.companyID, kind: "company_explorer" });
   return response;
 }
 
@@ -467,6 +469,7 @@ export async function deleteProjectRelationship(input: {
     method: "DELETE",
   });
   invalidateProjectRelationshipsForResource({ companyID: input.companyID });
+  emitExplorerContextUpdated({ companyID: input.companyID, kind: "company_explorer" });
   return response;
 }
 

@@ -6,6 +6,7 @@ import { normalizeNodeDueDateDraft } from "./editorDates";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
 import { createOneShotBlurSuppression } from "../realtime/committedEntityTitleUpdates";
+import { ExplorerEntityIcon } from "../../icons/index.js";
 import type { LogicGateRACIAssignment, LogicGateRACIRole, LogicGateRACIPrincipalType } from "../logic-gates/types";
 import {
   LOGIC_GATE_RACI_ROLE_PRESENTATIONS,
@@ -41,6 +42,7 @@ type EditorLinkedDocumentPanelsProps = {
   linkedNodeInfoPreview: string[];
   linkedNodeMetadataRows: Array<{ label: string; value: string }>;
   linkedNodeHistoryRows: string[];
+  hierarchyBreadcrumb?: React.ReactNode;
   canEdit: boolean;
   canEditRACI?: boolean;
   compactHeader?: boolean;
@@ -321,6 +323,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   linkedNodeInfoPreview,
   linkedNodeMetadataRows,
   linkedNodeHistoryRows,
+  hierarchyBreadcrumb,
   canEdit,
   canEditRACI = canEdit,
   compactHeader = false,
@@ -449,7 +452,8 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               justifyItems: "start",
             }}
           >
-          <div
+            {hierarchyBreadcrumb}
+            <div
             onMouseDown={(event) => {
               if (!canEdit) return;
               if (editingTitleRef.current?.contains(event.target as Node)) return;
@@ -478,9 +482,16 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               wordBreak: "break-word",
             }}
           >
-            <span style={{ flex: "0 0 auto" }}>{linkedEntityKind === "logic_gate" ? "Process:" : "Node:"}</span>
+            <span
+              aria-label={linkedEntityKind === "logic_gate" ? "Process" : "Node"}
+              title={linkedEntityKind === "logic_gate" ? "Process" : "Node"}
+              style={{ flex: "0 0 auto", alignSelf: "center", display: "inline-flex" }}
+            >
+              <ExplorerEntityIcon kind={linkedEntityKind === "logic_gate" ? "logic_gate" : "node"} />
+            </span>
             <span
               ref={editingTitleRef}
+              aria-label={linkedEntityKind === "logic_gate" ? "Process title" : "Node title"}
               data-floating-selection-actions="disabled"
               contentEditable={canEdit}
               suppressContentEditableWarning

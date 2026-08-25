@@ -16,7 +16,7 @@
 14. Conversion does not call the normal Logic Gate deletion command and does not create a Recycle Bin item.
 15. Conversion is irreversible; the product provides no command to turn a Huddle Logic Gate back into a normal Logic Gate.
 16. A Huddle Logic Gate opens on its own `/huddle-logic-gates/{huddle_logic_gate_id}` page while the application left sidebar remains visible.
-17. The page title starts with **Huddle Logic Gate:** and keeps the editable Huddle header beside that fixed label.
+17. The page header shows the existing Huddle Logic Gate icon and a separate live-derived clickable Huddle hierarchy breadcrumb instead of a fixed **Huddle Logic Gate:** label. The current editable `huddle_logic_gates.header` stays separate from the breadcrumb and keeps its existing save behavior.
 18. The page reuses the normal Node and Logic Gate RACI role cards, people-and-group picker, Editor tab, Permissions tab, and shared Mango editor toolbar in its top header area.
 19. The shared editor toolbar includes the existing font size, bold, underline, italic, strikethrough, highlight, alignment, alphabetical list, numerical list, dense bullet list, checklist, and table controls.
 20. Pin, fullscreen, delete, and close are compact icon actions in the top-right header instead of text buttons.
@@ -42,7 +42,7 @@
 40. Every Huddle Logic Gate card on a normal Logic Gate shows the shared Huddle Logic Gate icon and current header, and opening or removing that card never copies or deletes either endpoint.
 41. KPI cards shown inside Huddle Logic Gate and Huddle Node cards use the shared orange, red, and yellow KPI chart icon.
 
-Last updated: 2026-08-12
+Last updated: 2026-08-25
 
 # Process Story: Link current Logic Gates and capture a Huddle Node
 
