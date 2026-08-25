@@ -84,16 +84,16 @@ jobs:
           TF_EMAIL_WORKER_ENABLED: ${{ vars.TF_EMAIL_WORKER_ENABLED || 'true' }}
           TF_EMAIL_SCHEDULE_ENABLED: ${{ vars.TF_EMAIL_SCHEDULE_ENABLED || 'false' }}
           TF_REALTIME_VALKEY_ENABLED: ${{ vars.TF_REALTIME_VALKEY_ENABLED || 'true' }}
-          TF_EMAIL_FROM_ADDRESS: ${{ vars.TF_EMAIL_FROM_ADDRESS || '' }}
+          TF_EMAIL_FROM_ADDRESS: ${{ vars.TF_QA_EMAIL_FROM_ADDRESS || '' }}
           TF_BOOTSTRAP_ADMIN_EMAILS: ${{ vars.TF_BOOTSTRAP_ADMIN_EMAILS || '' }}
           TF_BOOTSTRAP_COMPANY_NAME: ${{ vars.TF_BOOTSTRAP_COMPANY_NAME || 'Mango QA' }}
-          TF_NYLAS_CLIENT_ID: ${{ vars.TF_NYLAS_CLIENT_ID || '' }}
-          TF_NYLAS_API_BASE_URL: ${{ vars.TF_NYLAS_API_BASE_URL || 'https://api.us.nylas.com' }}
-          TF_NYLAS_API_KEY_SECRET_ARN: ${{ vars.TF_NYLAS_API_KEY_SECRET_ARN || '' }}
-          TF_NYLAS_STATE_SECRET_ARN: ${{ vars.TF_NYLAS_STATE_SECRET_ARN || '' }}
-          TF_NYLAS_WEBHOOK_SECRET_ARN: ${{ vars.TF_NYLAS_WEBHOOK_SECRET_ARN || '' }}
-          TF_NYLAS_GOOGLE_SCOPES: ${{ vars.TF_NYLAS_GOOGLE_SCOPES || 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels' }}
-          TF_NYLAS_MICROSOFT_SCOPES: ${{ vars.TF_NYLAS_MICROSOFT_SCOPES || 'offline_access User.Read Mail.ReadWrite Mail.Send' }}
+          TF_NYLAS_CLIENT_ID: ${{ vars.TF_QA_NYLAS_CLIENT_ID || '' }}
+          TF_NYLAS_API_BASE_URL: ${{ vars.TF_QA_NYLAS_API_BASE_URL || 'https://api.us.nylas.com' }}
+          TF_NYLAS_API_KEY_SECRET_ARN: ${{ vars.TF_QA_NYLAS_API_KEY_SECRET_ARN || '' }}
+          TF_NYLAS_STATE_SECRET_ARN: ${{ vars.TF_QA_NYLAS_STATE_SECRET_ARN || '' }}
+          TF_NYLAS_WEBHOOK_SECRET_ARN: ${{ vars.TF_QA_NYLAS_WEBHOOK_SECRET_ARN || '' }}
+          TF_NYLAS_GOOGLE_SCOPES: ${{ vars.TF_QA_NYLAS_GOOGLE_SCOPES || 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.labels' }}
+          TF_NYLAS_MICROSOFT_SCOPES: ${{ vars.TF_QA_NYLAS_MICROSOFT_SCOPES || 'offline_access User.Read Mail.ReadWrite Mail.Send' }}
           TF_ORIGIN_VERIFY_SECRET: ${{ secrets.ORIGIN_VERIFY_SECRET }}
           TF_GITHUB_OWNER: ${{ vars.TF_GITHUB_OWNER || github.repository_owner }}
           TF_GITHUB_REPOSITORY: ${{ vars.TF_GITHUB_REPOSITORY || github.event.repository.name }}

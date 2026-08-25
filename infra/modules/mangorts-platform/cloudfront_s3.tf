@@ -75,10 +75,6 @@ resource "aws_cloudfront_distribution" "app" {
     origin_id                = "frontend-s3"
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
-
-    s3_origin_config {
-      origin_access_identity = ""
-    }
   }
 
   origin {

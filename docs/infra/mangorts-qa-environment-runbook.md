@@ -347,7 +347,7 @@ Do this only after the base app and company work.
 2. Store its API key directly in a QA Secrets Manager secret.
 3. Generate a new QA OAuth state secret and store it directly in a separate QA Secrets Manager secret.
 4. Configure the callback URL as `https://api.qa.mangorts.com/nylas/oauth/callback`.
-5. Set `TF_EMAIL_WORKER_ENABLED=true` and keep `TF_REALTIME_VALKEY_ENABLED=true`. Deploy the Nylas client ID, API base URL, API-key secret ARN, state-secret ARN, callback, and frontend redirect. Leave the webhook secret unset. The workflow rejects this worker stage unless the immutable image, reviewed schema, complete Nylas core, and Valkey are all present.
+5. Set `TF_EMAIL_WORKER_ENABLED=true` and keep `TF_REALTIME_VALKEY_ENABLED=true`. Deploy the Nylas client ID, API base URL, API-key secret ARN, state-secret ARN, callback, and frontend redirect through the QA-only `TF_QA_NYLAS_*` GitHub Environment variables. Leave the webhook secret unset. The QA workflow deliberately ignores repository-level `TF_NYLAS_*` values so dev credentials cannot enter QA. The workflow rejects this worker stage unless the immutable image, reviewed schema, complete Nylas core, and Valkey are all present.
 6. Verify that this challenge returns HTTP 200 with the exact raw body `qa-smoke`:
 
 ```powershell

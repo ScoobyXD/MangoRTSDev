@@ -27,6 +27,7 @@ const moduleACM = read("infra/modules/mangorts-platform/acm.tf");
 const moduleData = read("infra/modules/mangorts-platform/data.tf");
 const moduleECS = read("infra/modules/mangorts-platform/ecs_alb.tf");
 const moduleEmail = read("infra/modules/mangorts-platform/email_sqs.tf");
+const moduleCloudFront = read("infra/modules/mangorts-platform/cloudfront_s3.tf");
 const moduleLocals = read("infra/modules/mangorts-platform/locals.tf");
 const moduleRoute53 = read("infra/modules/mangorts-platform/route53.tf");
 const moduleVariables = read("infra/modules/mangorts-platform/variables.tf");
@@ -151,6 +152,22 @@ test("QA project, environment, and DNS names cannot be changed by GitHub variabl
   assert.match(qaPreflight, /\[string\]\$CompanyName = "Mango QA"/);
 });
 
+test("QA cannot inherit repository-level dev Nylas or sender variables", () => {
+  for (const name of [
+    "EMAIL_FROM_ADDRESS",
+    "NYLAS_CLIENT_ID",
+    "NYLAS_API_BASE_URL",
+    "NYLAS_API_KEY_SECRET_ARN",
+    "NYLAS_STATE_SECRET_ARN",
+    "NYLAS_WEBHOOK_SECRET_ARN",
+    "NYLAS_GOOGLE_SCOPES",
+    "NYLAS_MICROSOFT_SCOPES",
+  ]) {
+    assert.match(qaWorkflow, new RegExp(`vars\\.TF_QA_${name}`));
+    assert.doesNotMatch(qaWorkflow, new RegExp(`vars\\.TF_${name}(?![A-Z_])`));
+  }
+});
+
 test("QA owns a delegated public subdomain without giving automation production DNS access", () => {
   assert.match(qaDNS, /resource "aws_route53_zone" "qa"/);
   assert.match(qaDNS, /name\s*=\s*"\$\{local\.app_subdomain\}\.\$\{local\.root_domain_name\}"/);
@@ -196,6 +213,8 @@ test("the shared edge uses the exact AWS-managed CloudFront policy IDs", () => {
   assert.match(moduleLocals, /cloudfront_caching_disabled_policy_id\s*=\s*"4135ea2d-6df8-44a3-9df3-4b5a84be39ad"/);
   assert.match(moduleLocals, /cloudfront_all_viewer_except_host_policy_id\s*=\s*"b689b0a8-53d0-40ab-baf2-68738e2966ac"/);
   assert.doesNotMatch(moduleLocals, /413f1609-33d4-4f8c-8d(?:d|f)f-bd6df8fac40f/);
+  assert.match(moduleCloudFront, /origin_access_control_id\s*=\s*aws_cloudfront_origin_access_control\.frontend\.id/);
+  assert.doesNotMatch(moduleCloudFront, /s3_origin_config\s*\{/);
 });
 
 test("QA registers immutable migration images before schema bootstrap without starting the app", () => {

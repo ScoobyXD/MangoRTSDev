@@ -31,7 +31,7 @@ test("runtime access is exact cache/user connect plus an exact Pub/Sub channel",
   assert.match(valkey, /variable\s*=\s*"aws:SourceVpc"/);
   assert.match(
     valkey,
-    /access_string\s*=\s*"on ~\* &\$\{var\.realtime_valkey_channel\} \+@connection \+cluster\|slots \+cluster\|shards \+@pubsub"/,
+    /access_string\s*=\s*"on ~\* resetchannels &\$\{var\.realtime_valkey_channel\} -@all \+@connection \+cluster\|slots \+cluster\|shards \+@pubsub"/,
   );
   assert.doesNotMatch(valkey, /\+@all\b/);
   assert.doesNotMatch(valkey, /\+(?:publish|subscribe|unsubscribe)\b/);
