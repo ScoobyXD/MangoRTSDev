@@ -35,7 +35,7 @@
 33. Every successful placement save MUST increment that placement's revision.
 34. Placement saves MUST use last-committed-save-wins behavior and MUST NOT reject a save merely because the client read an older revision.
 35. Every placement MUST record database-generated creation and update timestamps.
-36. Every accessible Folder MUST be a fixed point-up hexagon occupying exactly seven by seven smallest grid squares.
+36. Every accessible Folder MUST be a fixed rounded rectangle occupying exactly seven by five smallest grid squares.
 37. Every accessible Process MUST be a fixed rectangle occupying exactly seven by five smallest grid squares.
 38. Folder and Process dimensions MUST NOT be user-adjustable or stored as placement data in the first version.
 39. Every accessible Folder and Process MUST keep a neutral elevated surface with one thin type outline matching Company Explorer: orange for a Folder and green for a Process; selection MUST preserve that type outline, and the first version MUST NOT add filled semantic item colors.
@@ -118,8 +118,9 @@
 116. The root placement tray MUST list only authorized immediate Company Explorer root Folders, and a Folder-layer tray MUST list only authorized immediate child Folders and Processes from that exact Folder branch; neither tray may include descendants, Projects, Nodes, or other resource types, and an expanded tray MUST reconcile its exact branch on accepted Process Map realtime invalidations.
 117. A placement tray item already present as an accessible placement on the current map layer MUST be omitted; a dragged item MUST remain in the tray until its placement save commits, then disappear locally, and MUST become available again when that current-layer placement is removed.
 118. The placement tray MUST reuse the existing bounded Company Explorer root or exact-parent child read and existing drag/drop placement path; it MUST NOT load the complete Explorer tree, search for candidates, poll, automatically place items, or automatically lay them out.
-119. The placement tray MUST remain fixed to the left side of the Process Map UI while the map pans or zooms; its one toggle MUST visibly say `Collapse` or `Expand`, its browser-local collapsed preference MUST default to expanded when unset, persist across Process Map layer navigation, and prevent hidden Explorer branch reads while collapsed.
+119. The placement tray MUST remain fixed to the left side of the Process Map UI while the map pans or zooms; its whole header MUST be the one toggle, its disclosure MUST stay at the header's top-right and point right while collapsed and left while expanded, and its browser-local collapsed preference MUST default to expanded when unset, persist across Process Map layer navigation, and prevent hidden Explorer branch reads while collapsed.
 120. Every visible saved or pending trace MUST show one soft moving center pattern over its canonical source-to-target trace with the same direction and cadence; reduced-motion preference MUST stop the animation without hiding or changing the underlying trace or saved map state.
 121. A Folder-layer Process Map header MUST expose the shared Universal picker locked to authorized Processes only; its rows MUST be drag-only, MUST emit the existing exact Logic Gate Explorer payload, MUST let that active drag reach only the existing map canvas drop path, and MUST NOT create a placement, reference, or operational relationship from click, Enter, or Tab. The root layer MUST NOT expose this Process-only launcher.
+122. Accessible placement anchors MUST be invisible and noninteractive by default; selecting one placement MUST reveal only that placement's input and output anchors, starting a connection gesture MUST reveal every accessible placement anchor, and finishing or canceling the gesture MUST hide every anchor and clear the source placement selection.
 
 Last updated: 2026-08-25
