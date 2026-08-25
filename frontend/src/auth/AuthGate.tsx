@@ -1254,7 +1254,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
         <h1 style={settingsPageTitleStyle}>Settings</h1>
         {!embedded && <div style={settingsNavStyle}>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/")}>MangoRTS</button>
-          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>Logic Gate Arena</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/logic-gate-arena")} {...logicGateArenaPrefetch}>Process Arena</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/project-management")} {...projectManagementPrefetch}>Projects</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/account-manager")} {...accountManagerPrefetch}>Accounts</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/teams")} {...teamsPrefetch}>Teams</button>

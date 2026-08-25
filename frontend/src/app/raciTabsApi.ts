@@ -66,7 +66,7 @@ function rowFromRecord(record: RowRecord): RACITabRow | null {
         role: item.role as RACITabRole,
         logicGateID,
         folderID: item.folder_id?.trim() ?? "",
-        name: item.name?.trim() || "Logic Gate",
+        name: item.name?.trim() || "Process",
         position: Number.isFinite(item.position) ? item.position as number : 0,
         createdTimestamp: item.created_timestamp ?? "",
         updatedTimestamp: item.updated_timestamp ?? "",

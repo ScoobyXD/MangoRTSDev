@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   APP_TIMELINE_DEFAULT_DURATION_MINUTES,
   alignTimelineMinute,
+  coerceAppTimelineState,
   createDefaultAppTimelineState,
   rollTimelineStateToDate,
   setTimelineRange,
@@ -10,6 +11,7 @@ import {
   updateTimelineItemTiming,
   upsertTimelineDropsAt,
 } from "../../../frontend/src/app/timelineState.js";
+import { readAppDockTabs } from "../../../frontend/src/app/appDockTabs.js";
 import {
   isCommittedTitleUpdateForCompany,
   reconcileAppDockTabTitles,
@@ -95,6 +97,46 @@ test("timeline completion persists on items and daily rollover archives current 
   assert.equal(rolled.items.length, 0);
   assert.equal(rolled.history[0]?.date, "2026-05-20");
   assert.equal(rolled.history[0]?.items[0]?.completed, true);
+});
+
+test("saved Process UI labels normalize only legacy Logic Gate defaults", () => {
+  const timeline = coerceAppTimelineState({
+    currentDate: "2026-05-21",
+    items: [
+      { kind: "logic_gate", entityID: "gate-legacy", label: "Logic Gate", startMinute: 8 * 60, endMinute: 9 * 60 },
+      { kind: "logic_gate", entityID: "gate-custom", label: "Logic Gate review", startMinute: 9 * 60, endMinute: 10 * 60 },
+      { kind: "node", entityID: "node-custom", label: "Logic Gate", startMinute: 10 * 60, endMinute: 11 * 60 },
+    ],
+    history: [],
+  }, "2026-05-21");
+  assert.deepEqual(timeline.items.map((item) => item.label), ["Process", "Logic Gate review", "Logic Gate"]);
+
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const scope = "legacy-process-copy";
+  const values = new Map<string, string>([[
+    `mangorts.app-taskbar.tabs.v1:${scope}`,
+    JSON.stringify([
+      { kind: "logic_gate_arena", entityID: "gate-legacy", label: "Logic Gate" },
+      { kind: "logic_gate_arena", entityID: "arena-legacy", label: "Logic Gate Arena" },
+      { kind: "logic_gate_arena", entityID: "gate-custom", label: "Logic Gate review" },
+      { kind: "node", entityID: "node-custom", label: "Logic Gate" },
+    ]),
+  ]]);
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: { getItem: (key: string) => values.get(key) ?? null },
+  });
+  try {
+    assert.deepEqual(readAppDockTabs(scope).map((tab) => tab.label), [
+      "Process",
+      "Process Arena",
+      "Logic Gate review",
+      "Logic Gate",
+    ]);
+  } finally {
+    if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
 });
 
 test("committed titles reconcile taskbar storage and popup parent labels", () => {

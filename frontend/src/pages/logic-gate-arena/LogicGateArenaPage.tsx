@@ -128,7 +128,7 @@ function reconcileArenaLogicGateSelection(
   if (current.id !== next.id) return next;
   const reconciled = {
     ...next,
-    label: preferResolvedEntityLabel(current.label, next.label, "Logic Gate"),
+    label: preferResolvedEntityLabel(current.label, next.label, "Process"),
   };
   return sameArenaLogicGateSelection(current, reconciled) ? current : reconciled;
 }
@@ -260,13 +260,13 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
       setSelectedLogicGate((current) => reconcileArenaLogicGateSelection(current, {
         id: logicGateID,
         label: logicGateID ? humanLabelOrFallback(selection.label, "") : "",
-        emptyMessage: logicGateID ? "" : "Sorry, this editor can only display Logic Gates.",
+        emptyMessage: logicGateID ? "" : "Sorry, this editor can only display Processes.",
       }));
       return;
     }
     if (selection.entityKind === "node" && selection.sourceModule === "company-explorer") {
       lastArenaSelectionChangedAtRef.current = selection.changedAt || Date.now();
-      setSelectedLogicGate({ id: "", label: "", emptyMessage: "Sorry, this editor can only display Logic Gates." });
+      setSelectedLogicGate({ id: "", label: "", emptyMessage: "Sorry, this editor can only display Processes." });
       return;
     }
   }, [companyID]);
@@ -338,25 +338,25 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
   const collapseArenaToTab = useCallback(() => {
     onCollapseToTab?.({
       logicGateID: selectedLogicGate.id,
-      label: selectedLogicGate.label || "Logic Gate Arena",
+      label: selectedLogicGate.label || "Process Arena",
       nodeID: selectedLogicGate.nodeID,
     });
   }, [onCollapseToTab, selectedLogicGate.id, selectedLogicGate.label, selectedLogicGate.nodeID]);
 
   const openKanbanNode = useCallback((nodeID: string) => {
     if (!selectedLogicGate.id) return;
-    onNodeOpen?.({ logicGateID: selectedLogicGate.id, label: selectedLogicGate.label || "Logic Gate", nodeID });
+    onNodeOpen?.({ logicGateID: selectedLogicGate.id, label: selectedLogicGate.label || "Process", nodeID });
   }, [onNodeOpen, selectedLogicGate.id, selectedLogicGate.label]);
 
   const closeKanbanNode = useCallback(() => {
     if (!selectedLogicGate.id) return;
-    onNodeClose?.({ logicGateID: selectedLogicGate.id, label: selectedLogicGate.label || "Logic Gate" });
+    onNodeClose?.({ logicGateID: selectedLogicGate.id, label: selectedLogicGate.label || "Process" });
   }, [onNodeClose, selectedLogicGate.id, selectedLogicGate.label]);
 
   if (!editorFrame || !kanbanFrame) {
     return (
       <div style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", background: "#ffffff", color: "#111111", fontFamily: "var(--mango-font-family)", fontSize: 12 }}>
-        Logic Gate Arena requires Editor and Kanban frames.
+        Process Arena requires Editor and Kanban frames.
       </div>
     );
   }

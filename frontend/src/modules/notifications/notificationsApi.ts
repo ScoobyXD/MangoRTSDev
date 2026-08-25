@@ -332,17 +332,41 @@ function normalizeNotifications(items: NotificationItem[]): NotificationItem[] {
   return items.map(normalizeNotification);
 }
 
+function normalizeLegacyNotificationTitle(type: string, entityType: string, value: string): string {
+  if (type === "logic_gate.gvic_updated" && value === "Logic Gate assigned to you") return "Process assigned to you";
+  if (type === "work_item.logic_gate_assignment_removed" && value === "Node removed from Logic Gate work") return "Node removed from Process work";
+  if ((type === NOTIFICATION_TYPE_MENTION || type === NOTIFICATION_TYPE_URGENT_MENTION)
+    && entityType === "logic_gate"
+    && value.endsWith(" mentioned you in a logic gate")) {
+    return value.replace(/ mentioned you in a logic gate$/, " mentioned you in a process");
+  }
+  return value;
+}
+
+function normalizeLegacyNotificationBody(type: string, value: string): string {
+  if (type === "logic_gate.gvic_updated" && value === "You were assigned to a Logic Gate.") return "You were assigned to a Process.";
+  if (type === "work_item.logic_gate_assignment_saved" && value.endsWith(" was added to Logic Gate work.")) {
+    return value.replace(/ was added to Logic Gate work\.$/, " was added to Process work.");
+  }
+  if (type === "work_item.logic_gate_assignment_removed" && value.endsWith(" was removed from Logic Gate work.")) {
+    return value.replace(/ was removed from Logic Gate work\.$/, " was removed from Process work.");
+  }
+  return value;
+}
+
 function normalizeUpdateGroups(items: UpdateGroup[]): UpdateGroup[] {
   return Array.isArray(items) ? items.map(normalizeUpdateGroup).filter((item) => item.id) : [];
 }
 
 function normalizeUpdateGroup(item: UpdateGroup): UpdateGroup {
+  const resourceType = item.resource_type?.trim() as UpdateGroup["resource_type"];
+  const label = item.label?.trim() || "Updates";
   return {
     id: item.id?.trim() ?? "",
     key: item.key?.trim() ?? "",
     field: item.field?.trim() ?? "update",
-    label: item.label?.trim() || "Updates",
-    resource_type: item.resource_type?.trim() as UpdateGroup["resource_type"],
+    label: resourceType === "logic_gate" && label === "Logic Gate" ? "Process" : label,
+    resource_type: resourceType,
     resource_id: item.resource_id?.trim() || undefined,
     depth: Number.isFinite(Number(item.depth)) ? Number(item.depth) : 0,
     groups: normalizeUpdateGroups(item.groups ?? []),
@@ -351,18 +375,22 @@ function normalizeUpdateGroup(item: UpdateGroup): UpdateGroup {
 }
 
 function normalizeNotification(item: NotificationItem): NotificationItem {
+  const type = item.type?.trim() ?? "";
+  const entityType = item.entity_type?.trim() ?? "";
+  const title = item.title?.trim() ?? "Update";
+  const bodyPreview = item.body_preview?.trim() ?? "";
   return {
     ...item,
     notification_id: item.notification_id?.trim() ?? "",
     company_id: item.company_id?.trim() || undefined,
     recipient_user_id: item.recipient_user_id?.trim() ?? "",
     actor_user_id: item.actor_user_id?.trim() || undefined,
-    type: item.type?.trim() ?? "",
+    type,
     source_event_id: item.source_event_id?.trim() ?? "",
-    entity_type: item.entity_type?.trim() ?? "",
+    entity_type: entityType,
     entity_id: item.entity_id?.trim() ?? "",
-    title: item.title?.trim() ?? "Update",
-    body_preview: item.body_preview?.trim() || undefined,
+    title: normalizeLegacyNotificationTitle(type, entityType, title),
+    body_preview: normalizeLegacyNotificationBody(type, bodyPreview) || undefined,
     surface: normalizeSurface(item.surface),
     role: normalizeRole(item.role),
     logic_gate_id: item.logic_gate_id?.trim() || undefined,

@@ -764,7 +764,7 @@ function permissionMapsEqual(left: Map<PermissionSelectionKey, ResourceAccessLev
 function permissionResourceTypeLabel(resourceType: string): string {
   switch (resourceType) {
     case "company_explorer_folder": return "parent folder";
-    case "logic_gate": return "parent Logic Gate";
+    case "logic_gate": return "parent Process";
     case "project": return "parent project";
     case "shared_inbox_folder": return "parent email folder";
     default: return "parent resource";

@@ -193,7 +193,7 @@ export const LogicGateKPISection: React.FC<Props> = ({ companyID, logicGateID, c
       await requestJSON(`/v1/logic-gates/${encodeURIComponent(logicGateID)}/huddle-logic-gates/${encodeURIComponent(item.huddle_logic_gate_id)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
       setHuddleLogicGates((current) => current.filter((candidate) => candidate.huddle_logic_gate_id !== item.huddle_logic_gate_id));
     } catch (cause) {
-      setHuddleError(cause instanceof Error ? cause.message : "Could not remove Huddle Logic Gate");
+      setHuddleError(cause instanceof Error ? cause.message : "Could not remove Huddle Process");
     }
   };
   const openHuddleLogicGate = (item: HuddleLogicGate) => {
@@ -202,23 +202,23 @@ export const LogicGateKPISection: React.FC<Props> = ({ companyID, logicGateID, c
   const closePopup = () => { if (open) void loadPreview(open); setOpen(null); };
   return (
     <div data-logic-gate-relationship-tray="split" style={relationshipTrayStyle}>
-      <section aria-label="Associated Huddle Logic Gates" style={traySectionStyle}>
-        <div style={sectionHeaderStyle}><span>Huddle Logic Gates</span>{canEdit && <button type="button" aria-label="Add Huddle Logic Gate" onClick={openHuddlePicker} style={buttonStyle}>＋</button>}</div>
+      <section aria-label="Associated Huddle Processes" style={traySectionStyle}>
+        <div style={sectionHeaderStyle}><span>Huddle Processes</span>{canEdit && <button type="button" aria-label="Add Huddle Process" onClick={openHuddlePicker} style={buttonStyle}>＋</button>}</div>
         <div style={cardRailStyle}>
           {huddleLogicGates.map((item) => (
             <article key={item.huddle_logic_gate_id} data-logic-gate-huddle-card={item.huddle_logic_gate_id} style={huddleCardStyle}>
-              <button type="button" aria-label={`Open ${item.header} Huddle Logic Gate`} onClick={() => openHuddleLogicGate(item)} style={huddleCardButtonStyle}>
+              <button type="button" aria-label={`Open ${item.header} Huddle Process`} onClick={() => openHuddleLogicGate(item)} style={huddleCardButtonStyle}>
                 <HuddleResourceIcon type="huddle_logic_gate" />
                 <strong style={cardTitleStyle}>{item.header}</strong>
               </button>
-              {canEdit && <button type="button" aria-label={`Remove ${item.header} Huddle Logic Gate`} onClick={() => void removeHuddleLogicGate(item)} style={removeButtonStyle}>×</button>}
+              {canEdit && <button type="button" aria-label={`Remove ${item.header} Huddle Process`} onClick={() => void removeHuddleLogicGate(item)} style={removeButtonStyle}>×</button>}
             </article>
           ))}
-          {huddleLogicGates.length === 0 && <span style={emptyLabelStyle}>No Huddle Logic Gates</span>}
+          {huddleLogicGates.length === 0 && <span style={emptyLabelStyle}>No Huddle Processes</span>}
         </div>
         {huddleError && <span role="alert" style={errorStyle}>{huddleError}</span>}
       </section>
-      <section aria-label="Logic Gate KPIs" style={{ ...traySectionStyle, borderLeft: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
+      <section aria-label="Process KPIs" style={{ ...traySectionStyle, borderLeft: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
         <div style={sectionHeaderStyle}><span>KPIs</span>{canEdit && <button type="button" aria-label="Create KPI" onClick={() => void create()} style={buttonStyle}>＋</button>}</div>
         <div style={cardRailStyle}>{items.map((item) => inlineName?.kpiID === item.kpi_id ? (
           <div key={item.kpi_id} style={inlineCardStyle} onContextMenu={(event) => { event.preventDefault(); if (canEdit) setContext({ item, x: event.clientX, y: event.clientY }); }}>
@@ -253,7 +253,7 @@ export const LogicGateKPISection: React.FC<Props> = ({ companyID, logicGateID, c
           companyID={companyID}
           requestJSON={requestJSON}
           sourceType="logic_gate"
-          sourceLabel="Logic Gate"
+          sourceLabel="Process"
           linkTargetTypes={["huddle_logic_gate"]}
           initialMode="link"
           initialCategory="huddle_logic_gate"

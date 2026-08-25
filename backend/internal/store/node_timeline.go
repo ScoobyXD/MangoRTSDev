@@ -173,7 +173,7 @@ func (r *MemoryRepo) appendLogicGateTransferTimelineEventLocked(companyID, nodeI
 			actorDisplayName = strings.TrimSpace(actor.Email)
 		}
 	}
-	fromName, toName := "Deleted logic gate", "Deleted logic gate"
+	fromName, toName := "Deleted process", "Deleted process"
 	if gate, ok := r.logicGates[key(companyID, fromLogicGateID)]; ok {
 		fromName = strings.TrimSpace(gate.Header)
 	}

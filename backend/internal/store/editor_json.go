@@ -16,7 +16,7 @@ const (
 	EditorJSONDeletedEventType         = "editor.document.deleted"
 	EditorJSONOperationMaxIDSize       = 160
 	EditorOwnerTextMaxBytes      int64 = 1 << 30
-	EditorOwnerTextLimitMessage        = "Mango gives each Node, Project, and Logic Gate a 1 GB editor-text limit. This counts only text and text-box document data. Attachments are separate and do not count toward the 1 GB."
+	EditorOwnerTextLimitMessage        = "Mango gives each Node, Project, and Process a 1 GB editor-text limit. This counts only text and text-box document data. Attachments are separate and do not count toward the 1 GB."
 )
 
 var emptyMangoTiptapDocument = json.RawMessage(

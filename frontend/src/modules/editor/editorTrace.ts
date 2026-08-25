@@ -615,7 +615,7 @@ export function createEditorTraceContext(input: {
     sessionID: `editor-${traceSessionSequence}`,
     resourceType: input.resourceType,
     documentLabel: input.resourceType === "logic_gate"
-      ? "Logic Gate editor"
+      ? "Process editor"
       : input.resourceType === "project" ? "Project editor" : "Node editor",
     inputSequence: 0,
     currentInputID: 0,

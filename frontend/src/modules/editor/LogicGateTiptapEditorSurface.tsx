@@ -12,6 +12,6 @@ export const LogicGateTiptapEditorSurface: React.FC<LogicGateTiptapEditorSurface
   <LazyMangoTiptapEditor
     {...props}
     resourceType="logic_gate"
-    ariaLabel="Logic Gate editor"
+    ariaLabel="Process editor"
   />
 );

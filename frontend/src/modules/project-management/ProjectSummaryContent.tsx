@@ -2173,7 +2173,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const cleanLogicGateID = logicGateID.trim();
     if (!companyID || !cleanProjectID) return;
     if (!cleanLogicGateID) {
-      setError("Add email work through a Logic Gate in this Project.");
+      setError("Add email work through a Process in this Project.");
       return;
     }
     const sharedInboxID = drag.sharedInboxID?.trim() || undefined;
@@ -2419,7 +2419,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     setError("");
     const targetLogicGateID = relationshipContextMenu?.logicGateID?.trim() ?? "";
     if (!targetLogicGateID) {
-      setError("Create the Node from a Logic Gate in this Project.");
+      setError("Create the Node from a Process in this Project.");
       return;
     }
     try {
@@ -2461,7 +2461,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setSelectedRelationshipNodeIDs((current) => new Set(Array.from(current).filter((relationshipID) => !removedRelationshipIDs.has(relationshipID))));
       setSelectionAnchorRelationshipNodeID((current) => (removedRelationshipIDs.has(current) ? "" : current));
     } catch (removeError) {
-      const label = target.resourceType === "logic_gate" ? "logic gate" : "node";
+      const label = target.resourceType === "logic_gate" ? "process" : "node";
       setError(removeError instanceof Error ? removeError.message : `Failed to remove ${label} from project`);
     }
   }, [companyID, projectID, relationshipContextMenu?.relationship, relationships, selectedRelationshipNodeIDs]);
@@ -2475,7 +2475,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     const uniqueResourceIDs = Array.from(new Set(targets.map((item) => item.resourceID).filter(Boolean)));
     if (uniqueResourceIDs.length === 0) return;
     const label = isLogicGate
-      ? "logic gate"
+      ? "process"
       : `${uniqueResourceIDs.length} node${uniqueResourceIDs.length === 1 ? "" : "s"}`;
     setRelationshipDeleteConfirmation({ isLogicGate, resourceIDs: uniqueResourceIDs, label, position: position ?? null });
   }, [relationshipContextMenu?.relationship, relationships, selectedRelationshipNodeIDs]);
@@ -2495,7 +2495,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
       setSelectedRelationshipNodePanel((current) => (current && resourceIDs.includes(current.nodeID) ? null : current));
       await loadProject({ showLoading: false });
     } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : `Failed to delete ${isLogicGate ? "logic gate" : "node"}`);
+      setError(deleteError instanceof Error ? deleteError.message : `Failed to delete ${isLogicGate ? "process" : "node"}`);
     }
   }, [companyID, loadProject]);
 
@@ -2738,7 +2738,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             >
               <span style={relationshipResourceIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
               <span
-                title={logicGateID ? "Double-click to open logic gate" : undefined}
+                title={logicGateID ? "Double-click to open process" : undefined}
                 style={relationshipResourceTitleStyle}
                 onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID, relationship.display_title, {
                   projectID,
@@ -2866,7 +2866,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 <button
                   type="button"
                   style={relationshipGroupResourceButtonStyle}
-                  title="Double-click to open logic gate"
+                  title="Double-click to open process"
                   onDoubleClick={() => logicGateID && onLogicGateOpen?.(logicGateID, group.label, {
                     projectID,
                     workPanelTab: "relationships",
@@ -3687,7 +3687,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 style={rightPanelTabStyle(activeRightPanelTab === "relationships")}
                 onClick={() => selectRightPanelTab("relationships")}
               >
-                Logic Gates / Nodes
+                Processes / Nodes
               </button>
               <button
                 type="button"
@@ -3804,18 +3804,18 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
             >
               {relationshipContextMenu.relationship?.resourceType === "logic_gate" ? (
                 <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => void createRelationshipNode()}>
-                  Create new node in logic gate
+                  Create new node in process
                 </button>
               ) : null}
               {relationshipContextMenu.relationship ? (
                 <button type="button" role="menuitem" style={relationshipContextMenuButtonStyle} onClick={() => openRelationshipResourceInNewTab(relationshipContextMenu.relationship!)}>
-                  {relationshipContextMenu.relationship.resourceType === "logic_gate" ? "Open logic gate in new browser tab" : "Open node in new browser tab"}
+                  {relationshipContextMenu.relationship.resourceType === "logic_gate" ? "Open process in new browser tab" : "Open node in new browser tab"}
                 </button>
               ) : null}
               {relationshipContextMenu.relationship ? (
                 <button type="button" role="menuitem" style={relationshipContextMenuDangerButtonStyle} onClick={() => void removeRelationshipFromProject()}>
                   {relationshipContextMenu.relationship.resourceType === "logic_gate"
-                    ? "Remove logic gate from project"
+                    ? "Remove process from project"
                     : selectedRelationshipNodeIDs.has(relationshipContextMenu.relationship.relationshipID) && selectedRelationshipNodeIDs.size > 1
                       ? `Remove ${selectedRelationshipNodeIDs.size} nodes from project`
                       : "Remove node from project"}
@@ -3824,7 +3824,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
               {relationshipContextMenu.relationship ? (
                 <button type="button" role="menuitem" style={relationshipContextMenuDangerButtonStyle} onClick={(event) => requestDeleteRelationshipResource(confirmMenuPositionFromElement(event.currentTarget))}>
                   {relationshipContextMenu.relationship.resourceType === "logic_gate"
-                    ? "Delete logic gate"
+                    ? "Delete process"
                     : selectedRelationshipNodeIDs.has(relationshipContextMenu.relationship.relationshipID) && selectedRelationshipNodeIDs.size > 1
                       ? `Delete ${selectedRelationshipNodeIDs.size} nodes`
                       : "Delete node"}
@@ -4043,7 +4043,8 @@ function CriticalPathTable({
           const logicGateID = step.logic_gate_id?.trim() || relationship?.logic_gate_id?.trim() || (resourceType === "logic_gate" ? resourceID : "");
           const nodeID = step.node_id?.trim() || relationship?.node_id?.trim() || (resourceType === "node" ? resourceID : "");
           const title = step.display_title || relationship?.display_title || "";
-          const status = step.status ?? relationship?.status ?? (resourceType === "logic_gate" ? "Logic Gate" : "");
+          const sourceStatus = step.status ?? relationship?.status ?? (resourceType === "logic_gate" ? "Process" : "");
+          const status = resourceType === "logic_gate" && /^logic gate$/i.test(sourceStatus.trim()) ? "Process" : sourceStatus;
           const ownerValue = step.owner_type && step.owner_id ? `${step.owner_type}:${step.owner_id}` : "";
           const nodePickerOpen = nodePickerStepID === step.step_id;
           const nodePreview = criticalPathNodePreviewFromStep(step, relationshipByID);
@@ -4089,7 +4090,7 @@ function CriticalPathTable({
                   {title ? (
                     <button
                       type="button"
-                      title={resourceType === "node" ? "Click to preview node. Click again to collapse. Double-click to open node." : "Open logic gate"}
+                      title={resourceType === "node" ? "Click to preview node. Click again to collapse. Double-click to open node." : "Open process"}
                       style={criticalPathLinkedResourceStyle(resourceType, nodePreviewSelected)}
                       onClick={() => {
                         if (resourceType === "logic_gate" && logicGateID) onLogicGateOpen?.(logicGateID, title);

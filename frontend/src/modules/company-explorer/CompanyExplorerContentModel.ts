@@ -125,7 +125,7 @@ export function buildCompanyExplorerContextMenuSections(input: {
     ],
     [
       { id: "create_folder", label: "Create New Folder", enabled: input.createFolderEnabled },
-      { id: "create_logic_gate", label: "Create Logic Gate", enabled: input.createLogicGateEnabled },
+      { id: "create_logic_gate", label: "Create Process", enabled: input.createLogicGateEnabled },
       { id: "create_project", label: "Create Project", enabled: input.createProjectEnabled },
     ],
     [
@@ -152,7 +152,7 @@ export function getSystemFolderKeyForTreeRowID(rowID: string): CompanyExplorerSy
 function getDeleteVocabulary(kind: ExplorerDeleteTarget["kind"], plural = false): string {
   if (kind === "folder") return plural ? "folders" : "folder";
   if (kind === "node") return plural ? "nodes" : "node";
-  if (kind === "logic_gate") return plural ? "Logic Gates" : "Logic Gate";
+  if (kind === "logic_gate") return plural ? "Processes" : "Process";
   if (kind === "project") return plural ? "projects" : "project";
   return plural ? "Kanban Boards" : "Kanban Board";
 }

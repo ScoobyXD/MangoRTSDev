@@ -131,13 +131,13 @@ function pickerPanelPosition(anchor: UniversalEntityPickerAnchor, emailActive: b
 const categoryOptions: Array<{ type: UniversalEntityPickerEntityType; label: string }> = [
   { type: "node", label: "Nodes" },
   { type: "project", label: "Projects" },
-  { type: "logic_gate", label: "Logic Gates" },
+  { type: "logic_gate", label: "Processes" },
   { type: "email_message", label: "Emails" },
   { type: "huddle_logic_gate", label: "Huddles" },
 ];
 
 function pickerEntityTypeLabel(type: UniversalEntityPickerEntityType): string {
-  return type === "huddle_logic_gate" ? "Huddle Logic Gate" : editorEntityTypeLabel(type);
+  return type === "huddle_logic_gate" ? "Huddle Process" : editorEntityTypeLabel(type);
 }
 
 export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (props) => {

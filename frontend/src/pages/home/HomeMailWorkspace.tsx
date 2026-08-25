@@ -896,7 +896,7 @@ export function HomeMailWorkspace({
                               key={logicGateID}
                               kind="logic_gate"
                               placement="mailbox-card"
-                              label={`Open ${logicGateByID.get(logicGateID)?.header?.trim() || "Logic Gate"}`}
+                              label={`Open ${logicGateByID.get(logicGateID)?.header?.trim() || "Process"}`}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 openEmailLogicGate(logicGateID);
@@ -954,7 +954,7 @@ export function HomeMailWorkspace({
                               key={logicGateID}
                               kind="logic_gate"
                               placement="mailbox-card"
-                              label={`Open ${logicGateByID.get(logicGateID)?.header?.trim() || "Logic Gate"}`}
+                              label={`Open ${logicGateByID.get(logicGateID)?.header?.trim() || "Process"}`}
                               onClick={(event) => {
                                 event.stopPropagation();
                                 openEmailLogicGate(logicGateID);

@@ -40,7 +40,7 @@ export const PROJECT_RELATIONSHIP_GROUPING_FIELDS: ReadonlyArray<{
   value: ProjectRelationshipGroupingField;
   label: string;
 }> = [
-  { value: "logic_gate", label: "Logic Gate" },
+  { value: "logic_gate", label: "Process" },
   { value: "type", label: "Type" },
   { value: "status", label: "Status" },
   { value: "date_added", label: "Date Added" },
@@ -153,12 +153,13 @@ export function getProjectRelationshipGroupValues(
 
   if (field === "type") {
     return relationship.resource_type === "logic_gate"
-      ? [{ key: "logic_gate", label: "Logic Gates", sortValue: 1 }]
+      ? [{ key: "logic_gate", label: "Processes", sortValue: 1 }]
       : [{ key: "node", label: "Nodes", sortValue: 2 }];
   }
 
   if (field === "status") {
-    const status = relationship.status?.trim() ?? "";
+    const sourceStatus = relationship.status?.trim() ?? "";
+    const status = relationship.resource_type === "logic_gate" && /^logic gate$/i.test(sourceStatus) ? "Process" : sourceStatus;
     return [getUniversalStatusGroupValue(status)];
   }
 
@@ -230,12 +231,12 @@ function visibleLogicGateGroupValue(
   logicGateID: string,
   gate: ProjectRelationshipProjection,
 ): UniversalGroupValue {
-  const label = gate.display_title.trim() || "Logic Gate";
+  const label = gate.display_title.trim() || "Process";
   return { key: logicGateID, label, sortValue: label.toLowerCase() };
 }
 
 function noLogicGateGroupValue(): UniversalGroupValue {
-  return { key: "none", label: "No logic gate", sortValue: "", sortLast: true };
+  return { key: "none", label: "No process", sortValue: "", sortLast: true };
 }
 
 function projectRelationshipLogicGateID(relationship: ProjectRelationshipProjection): string {

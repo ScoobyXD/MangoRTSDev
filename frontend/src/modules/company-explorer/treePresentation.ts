@@ -131,6 +131,12 @@ export function isExplorerSystemFolderKey(value: unknown): value is CompanyExplo
 }
 
 export function formatExplorerFolderLabel(name: string): string {
+  switch (name.trim().toLowerCase()) {
+    case "logic gates": return "Processes";
+    case "active logic gates": return "Active Processes";
+    case "logic gates by function": return "Processes by Function";
+    case "logic gates by person": return "Processes by Person";
+  }
   return name;
 }
 

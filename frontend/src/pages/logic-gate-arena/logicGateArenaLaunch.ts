@@ -17,10 +17,11 @@ function parsePendingLogicGateArenaSelection(companyID: string, raw: string): Pe
   const parsed = JSON.parse(raw) as Partial<PendingLogicGateArenaSelection>;
   const logicGateID = typeof parsed.logicGateID === "string" ? parsed.logicGateID.trim() : "";
   if (!logicGateID) return null;
+  const label = typeof parsed.label === "string" ? parsed.label.trim() : "";
   return {
     companyID,
     logicGateID,
-    label: typeof parsed.label === "string" ? parsed.label.trim() : "",
+    label: label === "Logic Gate" ? "Process" : label,
     nodeID: typeof parsed.nodeID === "string" ? parsed.nodeID.trim() : undefined,
     informationID: typeof parsed.informationID === "string" ? parsed.informationID.trim() : undefined,
     createdAt: typeof parsed.createdAt === "number" && Number.isFinite(parsed.createdAt) ? parsed.createdAt : Date.now(),

@@ -1527,7 +1527,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             {entityMenuOpen && activeEntityDraft && (
               <div
                 role="listbox"
-                aria-label="Link a Node, Logic Gate, or Project"
+                aria-label="Link a Node, Process, or Project"
                 data-mango-chat-entity-menu="true"
                 style={{
                   position: "absolute",

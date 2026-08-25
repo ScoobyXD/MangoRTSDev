@@ -713,7 +713,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(pickerCategories.style.overflowX, "", "category tabs do not use a horizontal scrollbar");
     assert.deepEqual(
       [...pickerCategories.querySelectorAll<HTMLButtonElement>("button")].map((button) => button.textContent?.trim()),
-      ["Nodes", "Projects", "Logic Gates", "Emails"],
+      ["Nodes", "Projects", "Processes", "Emails"],
       "category tabs show only their icon and name",
     );
     assert.equal(pickerCategories.querySelector("kbd"), null, "category tabs do not show shortcut instructions");

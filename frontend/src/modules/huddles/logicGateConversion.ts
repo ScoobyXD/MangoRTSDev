@@ -18,9 +18,9 @@ export function logicGateConversionErrorMessage(cause: unknown): string {
       const instruction = joinActions(actions);
       return `Conversion is blocked. ${instruction[0]?.toUpperCase()}${instruction.slice(1)}, then try again.`;
     }
-    return "Conversion is blocked. Check the Logic Gate content and try again.";
+    return "Conversion is blocked. Check the Process content and try again.";
   }
-  return cause instanceof Error ? cause.message : "Could not convert this Logic Gate.";
+  return cause instanceof Error ? cause.message : "Could not convert this Process.";
 }
 
 function readConversionErrorPayload(cause: unknown): { error?: unknown; blockers?: ConversionBlockers } | null {

@@ -1934,13 +1934,13 @@ function getUpdateGroupValues(
   if (field === "project") return [updateResourceGroupValue("project", row.project, "No project")];
   if (field === "logic_gate") {
     const logicGateID = resolveUpdateLogicGateID(row);
-    if (!logicGateID) return [updateResourceGroupValue("logic_gate", undefined, "No logic gate")];
+    if (!logicGateID) return [updateResourceGroupValue("logic_gate", undefined, "No process")];
     const groupValue = resolveCurrentUpdateLogicGateGroupValue({
       row,
       currentDetails: resolveLogicGateDetails?.(logicGateID),
       historicalEntityLabel: row.item.entity_type === "logic_gate" ? extractMentionTargetLabel(row.item) : "",
     });
-    if (!groupValue) return [updateResourceGroupValue("logic_gate", undefined, "No logic gate")];
+    if (!groupValue) return [updateResourceGroupValue("logic_gate", undefined, "No process")];
     return [{ key: `logic_gate:${groupValue.id}`, label: groupValue.label, sortValue: groupValue.sortValue }];
   }
   if (field === "type") return [updateTypeGroupValue(row.item)];

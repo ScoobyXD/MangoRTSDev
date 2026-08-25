@@ -1286,9 +1286,9 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     );
     assert.ok(pageHostContainer.querySelector('[aria-label="Node text box"]'));
     assert.ok(pageHostContainer.querySelector('[aria-label="Project text box"]'));
-    assert.ok(pageHostContainer.querySelector('[aria-label="Logic Gate editor"]'));
+    assert.ok(pageHostContainer.querySelector('[aria-label="Process editor"]'));
     assert.equal(pageHostContainer.querySelector('[aria-label="Project text box"]')?.closest('[data-mango-editor-format="tiptap_json"]')?.getAttribute("data-mango-editor-sync-mode"), "revisioned-json");
-    assert.equal(pageHostContainer.querySelector('[aria-label="Logic Gate editor"]')?.closest('[data-mango-editor-format="tiptap_json"]')?.getAttribute("data-mango-editor-sync-mode"), "revisioned-json");
+    assert.equal(pageHostContainer.querySelector('[aria-label="Process editor"]')?.closest('[data-mango-editor-format="tiptap_json"]')?.getAttribute("data-mango-editor-sync-mode"), "revisioned-json");
     await waitFor(
       () => pageHostPaths.some((path) => path.includes("/v1/editor-json/node/node-host/documents/node-document"))
         && pageHostPaths.some((path) => path.includes("/v1/editor-json/project/project-host/documents/project-document"))
@@ -1379,14 +1379,14 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     await flushAsyncWork(2);
     await act(async () => { Simulate.keyDown(pickerInput, { key: "Tab" }); });
     await flushAsyncWork(2);
-    const logicGateCategory = [...picker.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("Logic Gates"));
+    const logicGateCategory = [...picker.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.includes("Processes"));
     assert.equal(logicGateCategory?.getAttribute("aria-pressed"), "true", "L then Tab should select Logic Gates");
     await act(async () => { Simulate.keyDown(pickerInput, { key: "#" }); });
     await flushAsyncWork(2);
     assert.equal(picker.dataset.mangoUniversalPickerMode, "link", "a second # should switch to link mode");
     const categoryButtons = [...picker.querySelectorAll<HTMLButtonElement>("button")];
     assert.equal(categoryButtons.find((button) => button.textContent?.includes("Nodes"))?.disabled, true);
-    assert.equal(categoryButtons.find((button) => button.textContent?.includes("Logic Gates"))?.disabled, false);
+    assert.equal(categoryButtons.find((button) => button.textContent?.includes("Processes"))?.disabled, false);
     assert.equal(categoryButtons.find((button) => button.textContent?.includes("Projects"))?.disabled, false);
     assert.equal(categoryButtons.find((button) => button.textContent?.includes("Emails"))?.disabled, false);
     assert.deepEqual(linkedPickerEntities, []);

@@ -340,7 +340,7 @@ function storeTextPaneLayout(companyID: string, nodeID: string, snapshot: TextPa
 }
 
 function logicGateOptionLabel(logicGate: LogicGateRecord): string {
-  return humanLabelOrFallback(logicGate.header, humanLabelOrFallback(logicGate.logic_gate_id, "Logic Gate"));
+  return humanLabelOrFallback(logicGate.header, humanLabelOrFallback(logicGate.logic_gate_id, "Process"));
 }
 
 function nodeTimelineErrorMessage(cause: unknown, fallback: string): string {
@@ -381,8 +381,8 @@ const TimelineLogicGateLink: React.FC<{
       type="button"
       className="mango-editor-entity-link mango-editor-entity-link--logic_gate"
       data-node-timeline-logic-gate-link={position}
-      aria-label={`Open Logic Gate ${logicGateName}`}
-      title={`Open Logic Gate: ${logicGateName}`}
+      aria-label={`Open Process ${logicGateName}`}
+      title={`Open Process: ${logicGateName}`}
       onClick={() => openEditorEntityLink({ entityType: "logic_gate", entityID: cleanLogicGateID, label: logicGateName })}
       style={{ margin: 0 }}
     >
@@ -657,7 +657,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     for (const logicGateID of assignedLogicGateIDs) {
       const cleanLogicGateID = logicGateID.trim();
       if (!cleanLogicGateID) continue;
-      return logicGateLabelByID.get(cleanLogicGateID) ?? humanLabelOrFallback(cleanLogicGateID, "Logic Gate");
+      return logicGateLabelByID.get(cleanLogicGateID) ?? humanLabelOrFallback(cleanLogicGateID, "Process");
     }
     return "None";
   }, [assignedLogicGateIDs, lastAssignedLogicGateLabel, logicGateLabelByID]);
@@ -2370,7 +2370,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     if (!canEdit) throw new Error("You do not have permission to edit this Node.");
     if (entity.entityType === "logic_gate") {
       const logicGateID = entity.entityID.trim();
-      if (!logicGateID) throw new Error("Select a Logic Gate to link.");
+      if (!logicGateID) throw new Error("Select a Process to link.");
       await onAssignToLogicGate(logicGateID);
       await loadNodeTimelineEvents();
       setLastAssignedLogicGateID(logicGateID);
@@ -2396,7 +2396,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
       await attachEmail(messageAttachmentPayload(entity.emailMessage, entity.emailSharedInboxID, entity.emailAccountEmail));
       return;
     }
-    throw new Error("A Node can only be linked to a Logic Gate, Project, or Email.");
+    throw new Error("A Node can only be linked to a Process, Project, or Email.");
   }, [
     attachEmail, canEdit, companyID, loadNodeTimelineEvents, nodeID, onAssignToLogicGate,
   ]);
@@ -2835,8 +2835,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     const createdLabel = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.created_timestamp));
     const isVerification = item.type === "verification_request";
     const isProjectAssignment = item.type === "project_assignment";
-    const fromLogicGateName = item.from_logic_gate_name?.trim() || "Deleted logic gate";
-    const toLogicGateName = item.to_logic_gate_name?.trim() || "Deleted logic gate";
+    const fromLogicGateName = item.from_logic_gate_name?.trim().replace(/^Deleted logic gate$/i, "Deleted process") || "Deleted process";
+    const toLogicGateName = item.to_logic_gate_name?.trim().replace(/^Deleted logic gate$/i, "Deleted process") || "Deleted process";
     const projectName = item.project_name?.trim() || "Deleted project";
     return (
       <React.Fragment key={item.event_id}>
@@ -2853,7 +2853,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
             <time dateTime={item.created_timestamp} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, opacity: 0.72 }}><TimelineClockIcon color={surfaceText} />{createdLabel}</time>
             <span aria-hidden="true" style={{ width: 1, height: 12, background: ruleColor }} />
             {!isVerification && <span data-node-timeline-entity-icon="header" aria-hidden="true" style={{ display: "inline-flex" }}><ExplorerRowIcon kind={isProjectAssignment ? "project" : "logic_gate"} /></span>}
-            <strong style={{ fontSize: 12, letterSpacing: "0.01em" }}>{isVerification ? "Requested verification" : isProjectAssignment ? "Project assignment" : "Logic Gate transfer"}</strong>
+            <strong style={{ fontSize: 12, letterSpacing: "0.01em" }}>{isVerification ? "Requested verification" : isProjectAssignment ? "Project assignment" : "Process transfer"}</strong>
           </div>
           {isVerification ? (
             <>

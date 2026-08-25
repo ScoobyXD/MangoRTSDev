@@ -254,7 +254,7 @@ export async function moveKanbanCardsToPriorityGroupCommand(args: {
 
   const persistedCards = await Promise.all(cardsToPersist.map(async (card) => {
     const logicGateID = logicGateIDForCard(context, card);
-    if (!logicGateID) throw new Error("Priority group moves require a Logic Gate card");
+    if (!logicGateID) throw new Error("Priority group moves require a Process card");
     const result = await client.moveLogicGateAssignment({
       apiBase: context.apiBase,
       companyID: context.companyID,

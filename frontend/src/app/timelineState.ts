@@ -44,7 +44,7 @@ const DEFAULT_START_MINUTE = 8 * 60;
 const DEFAULT_END_MINUTE = 17 * 60;
 const DEFAULT_LABEL: Record<AppTimelineEntityKind, string> = {
   node: "Node",
-  logic_gate: "Logic Gate",
+  logic_gate: "Process",
 };
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -78,7 +78,9 @@ export function alignTimelineMinute(value: number): number {
 }
 
 function normalizeLabel(kind: AppTimelineEntityKind, label: string): string {
-  return label.trim().replace(/\s+/g, " ") || DEFAULT_LABEL[kind];
+  const normalized = label.trim().replace(/\s+/g, " ");
+  if (kind === "logic_gate" && normalized === "Logic Gate") return "Process";
+  return normalized || DEFAULT_LABEL[kind];
 }
 
 function timelineItemID(kind: AppTimelineEntityKind, entityID: string): string {

@@ -403,8 +403,8 @@ function recycleBinUserLabel(user: CompanyUser | undefined, fallbackUserID: stri
 }
 
 function formatObjectKind(kind: RecycleBinObjectKind, folderKind?: string): string {
-  if (kind === "logic_gate") return "Logic Gate";
-  if (kind === "huddle_logic_gate") return "Huddle Logic Gate";
+  if (kind === "logic_gate") return "Process";
+  if (kind === "huddle_logic_gate") return "Huddle Process";
   if (kind === "huddle_node") return "Huddle Node";
   if (kind === "huddle_explorer_folder") return "Huddles folder";
   if (kind === "huddle_explorer_item") return "Huddles placement";

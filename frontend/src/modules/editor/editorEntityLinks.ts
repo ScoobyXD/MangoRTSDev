@@ -59,7 +59,7 @@ export function isEditorEntityType(value: unknown): value is EditorEntityType {
 
 export function editorEntityTypeLabel(type: EditorEntityType): string {
   if (type === "email_message") return "Email";
-  if (type === "logic_gate") return "Logic Gate";
+  if (type === "logic_gate") return "Process";
   return type === "project" ? "Project" : "Node";
 }
 

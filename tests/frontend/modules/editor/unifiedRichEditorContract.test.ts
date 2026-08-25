@@ -1271,7 +1271,7 @@ test("obsolete email pickers and the Node attach shortcut are removed while emai
   assert.doesNotMatch(nodeWorkspace, /emailPickerAnchor|emailPickerLauncherRef|aria-label="Attach email"|initialCategory="email_message"/);
   assert.match(projectSummary, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
   assert.match(universalPicker, /ALL_ENTITY_TYPES[^\n]*\["node", "project", "logic_gate", "email_message"\]/);
-  assert.match(universalPicker, /label: "Nodes"[\s\S]*label: "Projects"[\s\S]*label: "Logic Gates"[\s\S]*label: "Emails"/);
+  assert.match(universalPicker, /label: "Nodes"[\s\S]*label: "Projects"[\s\S]*label: "Processes"[\s\S]*label: "Emails"/);
   assert.match(universalPicker, /searchEmailInAll = category === "all"[\s\S]*mailbox: "all"[\s\S]*requestJSON<MessagePage>\(path, \{ signal: controller\.signal \}\)/);
   assert.match(universalPicker, /controller\.abort\(\)/);
   assert.match(universalPicker, /emailSearchSequenceRef\.current !== sequence/);

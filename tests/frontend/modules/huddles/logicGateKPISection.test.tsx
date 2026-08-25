@@ -101,7 +101,7 @@ test("Logic Gate relationship tray links Huddles and opens a KPI from one click 
     assert.ok(huddleCard.querySelector("svg"), "the Huddle Logic Gate card should show its Huddle icon");
     assert.match(huddleCard.textContent ?? "", /Weekly Leadership/);
 
-    const huddlePlus = container.querySelector<HTMLButtonElement>('button[aria-label="Add Huddle Logic Gate"]');
+    const huddlePlus = container.querySelector<HTMLButtonElement>('button[aria-label="Add Huddle Process"]');
     assert.ok(huddlePlus);
     await act(async () => huddlePlus.click());
     await flushAsyncWork();

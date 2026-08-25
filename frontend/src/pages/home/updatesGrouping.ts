@@ -11,7 +11,7 @@ export const UPDATE_GROUPING_FIELDS: ReadonlyArray<{ value: UpdateGroupingField;
   { value: "gvic", label: "RACI" },
   { value: "priority", label: "Priority" },
   { value: "project", label: "Project" },
-  { value: "logic_gate", label: "Logic Gate" },
+  { value: "logic_gate", label: "Process" },
   { value: "status", label: "Status" },
 ];
 

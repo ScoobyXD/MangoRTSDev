@@ -155,7 +155,7 @@ function logicGateTargetFromRoute(route: DeepLinkRoute | null | undefined): Logi
   if (route?.kind !== "logic_gate") return null;
   return {
     logicGateID: route.logicGateID,
-    label: "Logic Gate",
+    label: "Process",
     nodeID: route.nodeID,
     requestID: Date.now(),
   };
@@ -180,7 +180,7 @@ function projectTargetFromRoute(route: DeepLinkRoute | null | undefined): Projec
 
 function createPrimaryPageTab(page: PrimaryPage, id = createTabId()): ViewTab {
   if (page === "home") return { id, name: "Home", page: "home", frames: createHomeViewFrames() };
-  if (page === "logic-gate-arena") return { id, name: "Logic Gate Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() };
+  if (page === "logic-gate-arena") return { id, name: "Process Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() };
   if (page === "project-management") return { id, name: "Projects", page: "project-management", frames: createProjectManagementFrames() };
   if (page === "process-map") return { id, name: "Process Map", page: "process-map", frames: [] };
   if (page === "account-manager") return { id, name: "Accounts", page: "account-manager", frames: createAccountManagerFrames() };
@@ -259,7 +259,7 @@ function pageForTab(tab: ViewTab): PrimaryPage | null {
 function labelForTab(tab: ViewTab): string {
   const page = pageForTab(tab);
   if (page === "home") return "Home";
-  if (page === "logic-gate-arena") return "Logic Gate Arena";
+  if (page === "logic-gate-arena") return "Process Arena";
   if (page === "project-management") return "Projects";
   if (page === "process-map") return "Process Map";
   if (page === "account-manager") return "Accounts";
@@ -1018,7 +1018,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     preloadLogicGateArenaSurface();
     const framesForView = createLogicGateArenaFrames();
     const replacedFrameIDs = new Set(tabs.find((tab) => tab.id === tabID)?.frames.map((frame) => frame.id) ?? []);
-    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Logic Gate Arena", page: "logic-gate-arena", frames: framesForView } : tab)));
+    setTabs((previous) => previous.map((tab) => (tab.id === tabID ? { ...tab, name: "Process Arena", page: "logic-gate-arena", frames: framesForView } : tab)));
     setFrameLinks((previous) => mergeLinkPlan(previous.filter((edge) => !replacedFrameIDs.has(edge.a) && !replacedFrameIDs.has(edge.b)), computeLinkPlan(framesForView)));
     setActiveTabId(tabID);
     setEditMode(false);
@@ -1114,7 +1114,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       const preserveContext = current?.logicGateID === deepLinkLogicGateID;
       return {
         logicGateID: deepLinkLogicGateID,
-        label: preserveContext ? current.label : "Logic Gate",
+        label: preserveContext ? current.label : "Process",
         nodeID: deepLinkLogicGateNodeID || undefined,
         requestID: Date.now(),
       };
@@ -1523,7 +1523,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     setExplorerNodePopup(null);
     setActiveDockTabID(null);
     routeManagedExplorerNodePopupRef.current = false;
-    const cleanLabel = label?.trim() || "Logic Gate";
+    const cleanLabel = label?.trim() || "Process";
     setLogicGateArenaTarget({
       logicGateID: cleanLogicGateID,
       label: cleanLabel,
@@ -2253,7 +2253,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         <FrameRightClickMenu x={tabMenu.x} y={tabMenu.y} onClose={closeMenus}>
           <button style={menuBtnBase} onClick={() => { startRenamingTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Rename View</button>
           <button style={{ ...menuBtnBase, color: tabs.length > 1 ? "#dc2626" : "#999" }} disabled={tabs.length === 1} onClick={() => { deleteTab(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Delete View</button>
-          <button style={menuBtnBase} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Logic Gate Arena</button>
+          <button style={menuBtnBase} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => { openLogicGateArena(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Process Arena</button>
           <button style={menuBtnBase} onPointerEnter={preloadHomeSurface} onFocus={preloadHomeSurface} onPointerDown={preloadHomeSurface} onClick={() => { openHomeView(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Home</button>
           <button style={menuBtnBase} onClick={() => { saveCurrentAsTemplate(tabMenu.id); closeMenus(); }} {...hoverHandlers}>Save Current as Template</button>
         </FrameRightClickMenu>

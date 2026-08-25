@@ -4453,9 +4453,9 @@ export function HomePage({
       });
       if (!result) return;
       setMyLogicGateShortcuts((previous) => mergeLogicGateShortcuts(previous, result.shortcuts));
-      setNotice(result.logicGateIDs.length === 1 ? "Added to My Logic Gates." : `${result.logicGateIDs.length} Logic Gates added.`);
+      setNotice(result.logicGateIDs.length === 1 ? "Added to My Processes." : `${result.logicGateIDs.length} Processes added.`);
     } catch (shortcutError) {
-      setError(formatError(shortcutError, "Failed to add My Logic Gates"));
+      setError(formatError(shortcutError, "Failed to add My Processes"));
     } finally {
       setBusy("");
     }
@@ -4469,7 +4469,7 @@ export function HomePage({
       if (!removedLogicGateID) return;
       setMyLogicGateShortcuts((previous) => previous.filter((shortcut) => shortcut.logic_gate_id !== removedLogicGateID));
     } catch (shortcutError) {
-      setError(formatError(shortcutError, "Failed to remove My Logic Gate"));
+      setError(formatError(shortcutError, "Failed to remove My Process"));
     } finally {
       setBusy("");
     }
@@ -4505,10 +4505,10 @@ export function HomePage({
       const converted = conversion.convertedMessageIDs;
       reconcileConvertedMessageUnstars(conversion.unstarredMessageIDs);
       patchConvertedMessageLogicGatePlacement(converted, conversion.logicGateID || logicGateID, { sharedInboxID, accountEmail: sharedInboxID ? undefined : activeMailAccountEmail });
-      const title = logicGateByID.get(logicGateID)?.header || "Logic Gate";
+      const title = logicGateByID.get(logicGateID)?.header || "Process";
       showNoticeWithResourceAction(converted.length === 1 ? `Sent to ${title}.` : `${converted.length} messages sent to ${title}.`, { kind: "logic_gate", logicGateID });
     } catch (convertError) {
-      setError(formatError(convertError, "Failed to send messages to Logic Gate"));
+      setError(formatError(convertError, "Failed to send messages to Process"));
     } finally {
       setBusy("");
     }
@@ -4792,7 +4792,7 @@ export function HomePage({
           ...projectedLogicGate,
           company_id: projectedLogicGate?.company_id || contextRow?.company_id || companyID,
           logic_gate_id: logicGateID,
-          header: contextRow?.logic_gate_name || projectedLogicGate?.header || previousLogicGate?.header || "Untitled Logic Gate",
+          header: contextRow?.logic_gate_name || projectedLogicGate?.header || previousLogicGate?.header || "Untitled Process",
           created_timestamp: projectedLogicGate?.created_timestamp || previousLogicGate?.created_timestamp || new Date().toISOString(),
           gvic_assignments: projectedLogicGate?.gvic_assignments ?? previousLogicGate?.gvic_assignments ?? [],
           effective_access_level: projectedLogicGate?.effective_access_level ?? previousLogicGate?.effective_access_level ?? "edit",
@@ -4876,12 +4876,12 @@ export function HomePage({
         });
         applyRACIMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
         for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
-        setNotice("Node created and added to Logic Gate.");
+        setNotice("Node created and added to Process.");
         return;
       }
       setNotice("Node created.");
     } catch (createError) {
-      setError(formatError(createError, assignment?.logicGateID ? "Failed to create node in Logic Gate" : "Failed to create node"));
+      setError(formatError(createError, assignment?.logicGateID ? "Failed to create node in Process" : "Failed to create node"));
     } finally {
       setBusy("");
     }
@@ -4894,13 +4894,13 @@ export function HomePage({
       const titleVersionAtStart = readCommittedEntityTitleVersion();
       const result = await createHomeLogicGateCommand({ apiBase, companyID, creatorRACIRole });
       const logicGate = mergeCreatedLogicGate(result.logicGate, titleVersionAtStart);
-      setNotice(creatorRACIRole ? "Logic Gate created and assigned to you." : "Logic Gate created.");
+      setNotice(creatorRACIRole ? "Process created and assigned to you." : "Process created.");
       if (options.openArena ?? true) {
-        openLogicGateArena(logicGate.logic_gate_id, logicGate.header || "Logic Gate");
+        openLogicGateArena(logicGate.logic_gate_id, logicGate.header || "Process");
       }
       return logicGate;
     } catch (createError) {
-      setError(formatError(createError, "Failed to create Logic Gate"));
+      setError(formatError(createError, "Failed to create Process"));
       return null;
     } finally {
       setBusy("");
@@ -4920,12 +4920,12 @@ export function HomePage({
         priority: input.priority,
         status: input.status,
         creatorRACIRole: input.creatorRACIRole,
-        createLogicGateTitle: "new logic gate",
+        createLogicGateTitle: "new process",
       });
       if (result.logicGate) mergeCreatedLogicGate(result.logicGate, titleVersionAtStart);
       applyRACIMatrixProjectionRows(result.gvic_projection_rows, { titleVersionAtStart });
       mergeUpdatedNode(result.node, titleVersionAtStart);
-      setNotice("Note created in a new Logic Gate.");
+      setNotice("Note created in a new Process.");
     } catch (createError) {
       setError(formatError(createError, "Failed to create note in matrix cell"));
     } finally {
@@ -4992,13 +4992,13 @@ export function HomePage({
         if (node) mergeUpdatedNode(node, titleVersionAtStart);
       }
       if (fromLogicGateID === logicGateID) {
-        setNotice(nodeIDs.length === 1 ? "Node updated in Logic Gate." : `${nodeIDs.length} nodes updated in Logic Gate.`);
+        setNotice(nodeIDs.length === 1 ? "Node updated in Process." : `${nodeIDs.length} nodes updated in Process.`);
       } else {
         const action = fromLogicGateID ? "moved" : "added";
-        setNotice(nodeIDs.length === 1 ? `Node ${action} to Logic Gate.` : `${nodeIDs.length} nodes ${action} to Logic Gate.`);
+        setNotice(nodeIDs.length === 1 ? `Node ${action} to Process.` : `${nodeIDs.length} nodes ${action} to Process.`);
       }
     } catch (dropError) {
-      setError(formatError(dropError, "Failed to add nodes to Logic Gate"));
+      setError(formatError(dropError, "Failed to add nodes to Process"));
     } finally {
       setBusy("");
     }
@@ -5026,9 +5026,9 @@ export function HomePage({
       });
       applyRACIMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
       for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
-      setNotice(nodeIDs.length === 1 ? "Node moved into a new Logic Gate." : `${nodeIDs.length} nodes moved into a new Logic Gate.`);
+      setNotice(nodeIDs.length === 1 ? "Node moved into a new Process." : `${nodeIDs.length} nodes moved into a new Process.`);
     } catch (dropError) {
-      setError(formatError(dropError, "Failed to move nodes into a new Logic Gate"));
+      setError(formatError(dropError, "Failed to move nodes into a new Process"));
     } finally {
       setBusy("");
     }
@@ -5090,10 +5090,10 @@ export function HomePage({
         for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
       }
       setNotice(logicGateIDs.length === 1
-        ? (movedNodeCount > 0 ? "Logic Gate moved." : "Logic Gate assignment updated.")
-        : `${logicGateIDs.length} Logic Gates moved.`);
+        ? (movedNodeCount > 0 ? "Process moved." : "Process assignment updated.")
+        : `${logicGateIDs.length} Processes moved.`);
     } catch (dropError) {
-      setError(formatError(dropError, "Failed to move Logic Gates"));
+      setError(formatError(dropError, "Failed to move Processes"));
     } finally {
       setBusy("");
     }
@@ -5117,9 +5117,9 @@ export function HomePage({
       });
       for (const node of updatedNodes) mergeUpdatedNode(node, titleVersionAtStart);
       invalidateLogicGateArenaViewCache(apiBase, companyID, cleanLogicGateID);
-      setNotice(ids.length === 1 ? "Node added to Logic Gate." : `${ids.length} nodes added to Logic Gate.`);
+      setNotice(ids.length === 1 ? "Node added to Process." : `${ids.length} nodes added to Process.`);
     } catch (addError) {
-      setError(formatError(addError, "Failed to add nodes to Logic Gate"));
+      setError(formatError(addError, "Failed to add nodes to Process"));
     } finally {
       setBusy("");
       setBulkEditMenu(null);
@@ -5293,9 +5293,9 @@ export function HomePage({
         const update = updates.find((item) => item.logicGateID === logicGate.logic_gate_id);
         return update ? { ...logicGate, gvic_assignments: update.assignments } : logicGate;
       }));
-      setNotice(ids.length === 1 ? "Logic Gate assignments updated." : `${ids.length} Logic Gate assignments updated.`);
+      setNotice(ids.length === 1 ? "Process assignments updated." : `${ids.length} Process assignments updated.`);
     } catch (bulkError) {
-      setError(formatError(bulkError, "Failed to update selected Logic Gates"));
+      setError(formatError(bulkError, "Failed to update selected Processes"));
     } finally {
       setBusy("");
       setBulkEditMenu(null);
@@ -5336,7 +5336,7 @@ export function HomePage({
     if (noticeResourceAction.kind === "logic_gate") {
       const logicGateID = noticeResourceAction.logicGateID;
       return {
-        label: "Go to Logic Gate",
+        label: "Go to Process",
         onClick: () => openLogicGateArena(logicGateID, logicGateTitle(logicGateByID.get(logicGateID))),
       };
     }
@@ -5587,7 +5587,7 @@ export function HomePage({
         <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
           {me && <span style={userPillStyle}>{me.user.display_name?.trim() || me.user.email}</span>}
           <button style={headerButtonStyle} onClick={() => onNavigate?.("/")}>MangoRTS</button>
-          <button style={headerButtonStyle} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => onNavigate?.("/logic-gate-arena")}>Logic Gate Arena</button>
+          <button style={headerButtonStyle} onPointerEnter={preloadLogicGateArenaSurface} onFocus={preloadLogicGateArenaSurface} onPointerDown={preloadLogicGateArenaSurface} onClick={() => onNavigate?.("/logic-gate-arena")}>Process Arena</button>
           <button style={headerButtonStyle} onClick={() => onNavigate?.("/settings")}>Settings</button>
         </div>
       </header>

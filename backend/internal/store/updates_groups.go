@@ -263,7 +263,7 @@ func updateLogicGateLayer(logicGateID, label string) updatesLayer {
 		ResourceType: EntityTypeLogicGate,
 		ResourceID:   logicGateID,
 		Key:          EntityTypeLogicGate + ":" + logicGateID,
-		Label:        firstNonEmpty(label, "Logic Gate"),
+		Label:        firstNonEmpty(label, "Process"),
 	}
 }
 

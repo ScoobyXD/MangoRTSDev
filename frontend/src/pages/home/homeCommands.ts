@@ -452,7 +452,7 @@ export async function createHomeLogicGateCommand(args: {
     mutationOrigin: "matrix",
     items: [{
       client_id: createWorkspaceEntityBatchClientID("home-logic-gate"),
-      title: args.title?.trim() || "new logic gate",
+      title: args.title?.trim() || "new process",
     }],
     requestJSON: bindHomeEntityCreateRequest(args.apiBase, requestJSON),
   });

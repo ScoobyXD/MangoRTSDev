@@ -53,7 +53,7 @@ export type SidebarPinRequestDetail = {
 export const EVENT_APP_SIDEBAR_PIN_REQUESTED = "mangorts:app-sidebar-pin-requested";
 
 export function sidebarPinFallbackName(kind: SidebarPinKind, id: string): string {
-  if (kind === "logic_gate") return "Logic Gate";
+  if (kind === "logic_gate") return "Process";
 	if (kind === "project") return "Project";
 	if (kind === "huddle_logic_gate") return "Huddle";
 	if (kind === "huddle_node") return "Huddle Node";

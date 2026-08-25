@@ -34,6 +34,7 @@ test("the built-in Updates grouping chain is Date, RACI, Priority, then Logic Ga
     "logic_gate",
   ]);
   assert.equal(UPDATE_GROUPING_FIELDS.some((field) => field.value === "priority" && field.label === "Priority"), true);
+  assert.equal(UPDATE_GROUPING_FIELDS.some((field) => field.value === "logic_gate" && field.label === "Process"), true);
   assert.deepEqual(normalizeUpdateGroupingStack(undefined), DEFAULT_UPDATE_GROUPINGS);
 });
 

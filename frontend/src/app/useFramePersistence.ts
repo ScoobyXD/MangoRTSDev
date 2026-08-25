@@ -1,11 +1,11 @@
-import type { FrameDataModel } from "../types";
-import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph";
-import { createAccountManagerFrames, createFieldsFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews";
+import type { FrameDataModel } from "../types.js";
+import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph.js";
+import { createAccountManagerFrames, createFieldsFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews.js";
 import {
   FRAME_LINKS_KEY,
   sanitizeFrameLinks,
   type FrameLinkEdge,
-} from "./frameLinking";
+} from "./frameLinking.js";
 import {
   COLORWAYS,
   DEFAULT_COLORWAY,
@@ -15,7 +15,7 @@ import {
   snapToHalfStep,
   type ColorwayKey,
   type ViewTab,
-} from "./frameLayoutTypes";
+} from "./frameLayoutTypes.js";
 
 const VIEWS_KEY = "grid-dashboard-views-v1";
 const SETTINGS_KEY = "grid-dashboard-settings";
@@ -91,9 +91,11 @@ function coerceFrame(value: unknown): FrameDataModel | null {
   const normalizedKind = kind === "node-doc" ? "editor" : kind === "communications" ? "home" : kind;
   const normalizedTitle = normalizedKind === "kanban" && title === "Kanban"
     ? "Kanban board"
-    : normalizedKind === "company-explorer" && title === "Company Explorer"
-      ? "Explorer"
-      : title;
+    : normalizedKind === "kanban" && title === "Logic Gate Kanban"
+      ? "Process Kanban"
+      : normalizedKind === "company-explorer" && title === "Company Explorer"
+        ? "Explorer"
+        : title;
   if (!SUPPORTED_PERSISTED_FRAME_KINDS.has(normalizedKind)) return null;
 
   const normalizedTheme: ColorwayKey = isColorway(theme)
@@ -150,7 +152,7 @@ function isCommunicationsTab(tab: ViewTab): boolean {
 }
 
 function isLogicGateArenaTab(tab: ViewTab): boolean {
-  return tab.page === "logic-gate-arena" || /^logic gate arena$/i.test(tab.name.trim());
+  return tab.page === "logic-gate-arena" || /^(process|logic gate) arena$/i.test(tab.name.trim());
 }
 
 function isProjectManagementTab(tab: ViewTab): boolean {
@@ -175,7 +177,7 @@ function isFieldsTab(tab: ViewTab): boolean {
 
 function normalizePrimaryTab(tab: ViewTab): ViewTab {
   if (isCommunicationsTab(tab)) return { ...tab, name: "Home", page: "home" };
-  if (isLogicGateArenaTab(tab)) return { ...tab, name: "Logic Gate Arena", page: "logic-gate-arena" };
+  if (isLogicGateArenaTab(tab)) return { ...tab, name: "Process Arena", page: "logic-gate-arena" };
   if (isProjectManagementTab(tab)) return { ...tab, name: "Projects", page: "project-management" };
   if (isProcessMapTab(tab)) return { ...tab, name: "Process Map", page: "process-map", frames: [] };
   if (isAccountManagerTab(tab)) return { ...tab, name: "Accounts", page: "account-manager" };
@@ -187,7 +189,7 @@ function normalizePrimaryTab(tab: ViewTab): ViewTab {
 function createPrimaryTabs(): ViewTab[] {
   return [
     { id: "view-home", name: "Home", page: "home", frames: createHomeViewFrames() },
-    { id: "view-logic-gate-arena", name: "Logic Gate Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() },
+    { id: "view-logic-gate-arena", name: "Process Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() },
     { id: "view-project-management", name: "Projects", page: "project-management", frames: createProjectManagementFrames() },
     { id: "view-process-map", name: "Process Map", page: "process-map", frames: [] },
     { id: "view-account-manager", name: "Accounts", page: "account-manager", frames: createAccountManagerFrames() },

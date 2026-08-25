@@ -210,14 +210,14 @@ export function EmailNodeDestinationSearch({
             <ExplorerEntityIcon kind={pendingLink.entityType} />
             <span style={{ minWidth: 0 }}>
               <strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5 }}>{pendingLink.label}</strong>
-              <span style={{ color: "#64748b", fontSize: 9.5 }}>{pendingLink.entityType === "logic_gate" ? "Create a new email Node in this Logic Gate" : "Create a new email Node in this Project"}</span>
+              <span style={{ color: "#64748b", fontSize: 9.5 }}>{pendingLink.entityType === "logic_gate" ? "Create a new email Node in this Process" : "Create a new email Node in this Project"}</span>
             </span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 7, alignItems: "start" }}>
             {pendingLink.entityType === "project" && (
-              <section aria-label="Project Logic Gate" style={{ minWidth: 0, display: "grid", gap: 4, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
-                <span>Choose Logic Gate</span>
-                <div className="editor-document-scroll" data-email-project-logic-gate-choices="pre-open" role="group" aria-label="Project Logic Gate choices" style={{ ...choiceGroupStyle, maxHeight: 174, overflowY: "auto" }}>
+              <section aria-label="Project Process" style={{ minWidth: 0, display: "grid", gap: 4, color: "#64748b", fontSize: 9.5, fontWeight: 850 }}>
+                <span>Choose Process</span>
+                <div className="editor-document-scroll" data-email-project-logic-gate-choices="pre-open" role="group" aria-label="Project Process choices" style={{ ...choiceGroupStyle, maxHeight: 174, overflowY: "auto" }}>
                   {logicGates.map((logicGate) => {
                     const selected = projectLogicGateID === logicGate.logic_gate_id;
                     return (
@@ -237,7 +237,7 @@ export function EmailNodeDestinationSearch({
                       </button>
                     );
                   })}
-                  {logicGates.length === 0 && <span style={{ padding: 6, color: "#94a3b8", fontSize: 10 }}>No Logic Gates available</span>}
+                  {logicGates.length === 0 && <span style={{ padding: 6, color: "#94a3b8", fontSize: 10 }}>No Processes available</span>}
                 </div>
               </section>
             )}

@@ -705,12 +705,12 @@ test("RACI inbox group builder classifies work by role, status, and priority", (
   assert.deepEqual(otherGroups.get(RACIRoleCellKey("other", "pending", 3))?.[0]?.nodeIDs, ["node-assigned-other-RACI"]);
   assert.deepEqual(otherGroups.get(RACIRoleCellKey("other", "pending", 4))?.[0], {
     logicGateID: "__mango_inbox_no_logic_gate__",
-    label: "No Logic Gate",
+    label: "No Process",
     nodeIDs: ["node-other-no-gate"],
   });
   const opaqueID = "019e3de8-c507-7a03-a7ab-fbea8f4e1d22";
-  assert.equal(inboxLogicGateLabel(opaqueID, new Map()), "Logic Gate");
-  assert.equal(logicGateTitle({ logic_gate_id: opaqueID, header: opaqueID }), "Logic Gate");
+  assert.equal(inboxLogicGateLabel(opaqueID, new Map()), "Process");
+  assert.equal(logicGateTitle({ logic_gate_id: opaqueID, header: opaqueID }), "Process");
   assert.deepEqual(missingLogicGateRecordIDs([
     node("node-missing-a", "Missing A", { logic_gate_ids: [opaqueID, "gate-r"] }),
     node("node-missing-b", "Missing B", { logic_gate_ids: [opaqueID, "gate-new"] }),
@@ -802,7 +802,7 @@ test("my logic gate groups merge shortcuts with RACI-assigned gates without Expl
   });
 
   assert.deepEqual(groups.map((group) => [group.label, group.logicGates.map((item) => item.logic_gate_id)]), [
-    ["My Logic Gates", ["gate-shortcut", "gate-assigned"]],
+    ["My Processes", ["gate-shortcut", "gate-assigned"]],
   ]);
 });
 
