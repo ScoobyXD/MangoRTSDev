@@ -8,6 +8,7 @@ import (
 
 func processMapFunctionBodyForContractTest(t *testing.T, source, signature, nextSignature string) string {
 	t.Helper()
+	source = strings.ReplaceAll(source, "\r\n", "\n")
 	start := strings.Index(source, signature)
 	if start < 0 {
 		t.Fatalf("missing %q", signature)
