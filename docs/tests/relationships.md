@@ -218,6 +218,22 @@ Deleting a personal pin folder removes only its descendant folder and pin record
 
 Last updated: 2026-08-14
 
+# Process Story: Process Map keeps operational truth separate from trace geometry
+
+An editor maps an exact Company Explorer Folder or Process without changing its source resource or Company Explorer placement
+↓
+Mango stores that exact typed identity and its independent map parent and grid position in `process_map_placements`
+↓
+Drawing a trace atomically creates or reuses one exact directed `resource_operational_relationships` edge and stores only its ordered route points in `process_map_traces`
+↓
+Fan-out and fan-in remain several pairwise operational edges whose trace routes may overlap visually without creating a junction resource or another relationship meaning
+↓
+Reads join current source labels and permissions, while a restricted placement reveals only its saved existence and position and exposes no incident relationship
+↓
+Removing map placement never deletes a source endpoint, while deleting a selected trace removes its operational edge and dependent geometry without deleting either endpoint, and permanent deletion or recycle follows the exact typed cleanup contract
+
+Last updated: 2026-08-24
+
 # Relationship Business Logic Laws
 
 These laws define how MangoRTS represents relationships. They apply to schema design, backend commands, APIs, events, caches, derived projections, deletion, recycle/restore, tests, and documentation.
@@ -255,7 +271,7 @@ Mango MUST NOT put every edge into one universal graph table. Different relation
 Examples include:
 
 - `node_relationships` for Node-to-Node parent, child, and peer structure.
-- `logic_gate_relationships` for Logic-Gate input and output flow.
+- `resource_operational_relationships` for directed Folder and Process operational flow.
 - `project_relationships` for a Project's Node and Logic Gate membership.
 - `email_relationships` for normalized email messages attached to supported Mango owners.
 - `attachment_relationships` for stored files owned or used by supported Mango resources.
@@ -276,7 +292,7 @@ Separate tables are correct when the business meaning or required fields differ,
 
 When a relationship table has a fixed endpoint by definition, that endpoint SHOULD use its direct typed column. `project_relationships.project_id`, for example, is the exact owning Project, while `resource_type + resource_id` identifies the supported related resource.
 
-Same-type structural tables MAY use two explicit typed columns when both sides have one fixed type. `node_relationships.node_id_a/node_id_b` and `logic_gate_relationships.logic_gate_id_a/logic_gate_id_b` are valid because their relationship meanings and endpoint types are fixed. `huddle_nodes.huddle_logic_gate_id` and `kpis.logic_gate_id` are also valid direct owner columns because each relationship has one fixed owner type.
+Same-type structural tables MAY use two explicit typed columns when both sides have one fixed type. `node_relationships.node_id_a/node_id_b` is valid because its relationship meaning and endpoint types are fixed. `huddle_nodes.huddle_logic_gate_id` and `kpis.logic_gate_id` are also valid direct owner columns because each relationship has one fixed owner type.
 
 `huddle_logic_gate_relationships.huddle_logic_gate_id/logic_gate_id`, `huddle_node_logic_gate_relationships.huddle_node_id/logic_gate_id`, and `huddle_node_kpi_relationships.huddle_node_id/logic_gate_id/kpi_id` are valid literal typed columns because every endpoint type and relationship meaning is fixed.
 
@@ -488,6 +504,24 @@ The Huddle Logic Gate page and normal Logic Gate editor MUST read and mutate tha
 Creating a Huddle Node MUST atomically copy the owner Huddle Logic Gate's current normal Logic Gate identities into `huddle_node_logic_gate_relationships` and the current KPI identities for those Logic Gates into `huddle_node_kpi_relationships`. Those captured relationship sets MUST remain immutable after creation and MUST NOT be rewritten by later live membership or KPI-set changes.
 
 Snapshot reads MUST resolve current data from `logic_gates` and `kpis` through those literal IDs. They MUST NOT store copied labels, editor documents, previews, generic resource types, relationship-only endpoint IDs, or a background synchronization stream. Recycling and restoring any endpoint MUST preserve every promised exact Huddle edge; permanent deletion MUST leave no stale edge.
+
+### Law 34 — Process Map placement uses exact typed source identities
+
+`process_map_placements` MUST store only the exact same-company `company_explorer_folder` or `logic_gate` type and literal source ID, its independent exact Folder map parent or root, snapped integer grid coordinates, revision, and timestamps. A placement row makes that source resource visible on Process Map but MUST NOT copy its name, permissions, payload, Company Explorer parentage, or resource identity and MUST NOT become a permission or RACI parent.
+
+One exact typed resource has at most one company Process Map placement. Company Explorer creation or movement MUST NOT create or move that placement, and placement creation, movement, or removal MUST NOT mutate Company Explorer or the source resource. Permanent deletion and recycle/restore MUST handle the exact typed placement through every required deletion path.
+
+### Law 35 — Resource operational relationships are exact directed pairwise edges
+
+`resource_operational_relationships` MUST be the sole canonical authority for directed Folder-to-Folder, Folder-to-Process, Process-to-Folder, and Process-to-Process operational flow. Every row stores the exact same-company typed source and target IDs, rejects a self-edge, and has one semantic edge for one exact directed endpoint pair; repeating the same creation command returns or reuses that edge instead of inserting a duplicate.
+
+The source and target of an operational relationship are immutable. Changing either endpoint or reversing direction deletes the old edge and its trace before creating a new edge and trace. The Process-to-Process meaning currently owned by `logic_gate_relationships` MUST move through one forward-only cutover before `resource_operational_relationships` becomes live authority, with no dual writer, compatibility reader, fallback, or second live Process-flow authority afterward. Removing one operational edge deletes neither endpoint, placement, permission, RACI assignment, nor organizational parent.
+
+### Law 36 — Process Map traces are dependent geometry, not relationship authority
+
+`process_map_traces` MUST identify one exact `resource_operational_relationships` row and store only one ordered JSONB array of snapped integer route points, revision, and timestamps. Every Folder and Process has exactly one fixed input anchor and one fixed output anchor defined by presentation rules; the trace source always uses the source output and the trace target always uses the target input, so trace storage MUST NOT contain anchor columns, endpoint coordinates, endpoint identities, or endpoint payloads. Trace geometry MUST NOT invent a junction resource or become another operational relationship authority.
+
+One operational relationship has at most one company-map trace, and a relationship may exist without a trace. Deleting a selected Process Map trace MUST delete its operational relationship and dependent geometry in one transaction while preserving both endpoint resources; the first version exposes no user command that deletes only trace geometry. Fan-out and fan-in use several pairwise relationships whose routes may share points, and hidden endpoints suppress every incident relationship and trace. Permanent deletion and recycle/restore MUST preserve or clean the exact dependent geometry through every required path.
 
 ## Required design examples
 
