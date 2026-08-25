@@ -756,6 +756,97 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     });
     assert.equal(pickerCancelCount, 1, "clicking outside the picker should request dismissal exactly once");
 
+    let draggedProcessID = "";
+    const dragWrites = new Map<string, string>();
+    await act(async () => root.render(
+      <AppModalPortal ownerDocument={dom.window.document}>
+        <UniversalEntityPicker
+          companyID="company-1"
+          requestJSON={async <T,>(): Promise<T> => ({
+            pin_folders: [],
+            user_pins: [{
+              pin_id: "pin-process-1",
+              company_id: "company-1",
+              user_id: "user-1",
+              resource_type: "logic_gate",
+              resource_id: "process-1",
+              name: "Order review",
+              position: 1000,
+              created_timestamp: "2026-08-25T00:00:00Z",
+            }],
+          }) as T}
+          sourceLabel="Process Map"
+          linkTargetTypes={["logic_gate"]}
+          initialMode="link"
+          initialCategory="logic_gate"
+          lockMode
+          anchor={{ left: 24, top: 24 }}
+          onEntityDragStart={(event, entity) => {
+            draggedProcessID = entity.entityID;
+            event.dataTransfer.effectAllowed = "copy";
+            event.dataTransfer.setData("application/x-mangorts-company-explorer-row", JSON.stringify({
+              kind: "logic_gate",
+              label: entity.label,
+              itemID: entity.entityID,
+              itemType: "logic_gate",
+            }));
+          }}
+          onCancel={() => undefined}
+        />
+      </AppModalPortal>,
+    ));
+    await flushAsyncWork();
+    const dragPicker = dom.window.document.querySelector<HTMLElement>('[data-mango-universal-picker="true"]');
+    const dragPickerInput = dragPicker?.querySelector<HTMLInputElement>('input[aria-label="Search Processes to drag"]');
+    const dragCategories = dragPicker?.querySelector<HTMLElement>('[data-mango-universal-picker-categories="true"]');
+    const processRow = [...(dragPicker?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])]
+      .find((button) => button.textContent?.includes("Order review"));
+    assert.ok(dragPicker);
+    assert.ok(dragPickerInput);
+    assert.ok(dragCategories);
+    assert.ok(processRow);
+    assert.equal(processRow.draggable, true, "Process Map picker rows are draggable");
+    assert.deepEqual(
+      [...dragCategories.querySelectorAll<HTMLButtonElement>("button")].map((button) => ({ label: button.textContent?.trim(), disabled: button.disabled })),
+      [
+        { label: "Nodes", disabled: true },
+        { label: "Projects", disabled: true },
+        { label: "Processes", disabled: false },
+        { label: "Emails", disabled: true },
+      ],
+      "only Processes are enabled in the locked Process Map picker",
+    );
+    const dragStart = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+    const dragDataTransfer = {
+      effectAllowed: "",
+      setData: (type: string, value: string) => dragWrites.set(type, value),
+    };
+    Object.defineProperty(dragStart, "dataTransfer", { value: dragDataTransfer });
+    await act(async () => processRow.dispatchEvent(dragStart));
+    assert.equal(draggedProcessID, "process-1");
+    assert.equal(dragDataTransfer.effectAllowed, "copy");
+    assert.deepEqual(JSON.parse(dragWrites.get("application/x-mangorts-company-explorer-row") ?? "{}"), {
+      kind: "logic_gate",
+      label: "Order review",
+      itemID: "process-1",
+      itemType: "logic_gate",
+    });
+    const dragDismissLayer = dom.window.document.querySelector<HTMLElement>('[data-mango-universal-picker-dismiss-layer="true"]');
+    assert.equal(dragDismissLayer?.style.pointerEvents, "none", "the transparent dismiss layer lets an active drag reach the map");
+    await act(async () => processRow.click());
+    assert.ok(dom.window.document.querySelector('[data-mango-universal-picker="true"]'), "clicking a drag-only row does not choose or close it");
+    const enter = new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    const tab = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    await act(async () => {
+      dragPickerInput.dispatchEvent(enter);
+      dragPickerInput.dispatchEvent(tab);
+    });
+    assert.equal(enter.defaultPrevented, false, "Enter does not choose a drag-only row");
+    assert.equal(dragPickerInput.disabled, false, "click, Enter, and Tab do not start a drag-only selection command");
+    assert.ok(dom.window.document.querySelector('[data-mango-universal-picker="true"]'), "keyboard use does not close a drag-only picker");
+    await act(async () => processRow.dispatchEvent(new dom.window.Event("dragend", { bubbles: true })));
+    assert.equal(dragDismissLayer?.style.pointerEvents, "auto", "normal outside-click dismissal resumes when dragging ends");
+
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();
