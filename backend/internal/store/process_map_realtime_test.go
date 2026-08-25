@@ -43,19 +43,17 @@ func TestProcessMapRealtimeDoorbellIsCompactStableAndCompanyScoped(t *testing.T)
 	}
 }
 
-func TestMemoryProcessMapRealtimeDoorbellUsesCompanyAudience(t *testing.T) {
+func TestMemoryProcessMapRealtimeDoorbellUsesCompanyAudienceForFolderCreation(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "89898989-8989-4989-8989-898989898982"
 	repo.EnsureCompany(companyID, "Process Map Realtime")
 	user := mustCreateRACIMembershipUser(t, repo, "process-map-realtime-user", companyID)
 	resetMemoryMembershipEventState(repo)
-	events := []domain.DomainEvent{{
-		CompanyID: companyID, EventID: "89898989-8989-4989-8989-898989898983",
-		StreamType: workspaceDomainStreamType, StreamID: companyID, Type: "logic_gate_permissions_updated",
-		ActorUserID: &user.UserID,
-	}}
-
-	if err := repo.enqueueProcessMapRealtimeForDomainEventsLocked(events); err != nil {
+	if _, err := repo.AppendDomainEvent(workspaceDomainEventInput(
+		companyID,
+		"company_explorer_folder_created",
+		map[string]any{"folder_id": "89898989-8989-4989-8989-898989898983"},
+	)); err != nil {
 		t.Fatal(err)
 	}
 	if len(repo.realtimeOutbox) != 1 {
@@ -186,7 +184,7 @@ func TestProcessMapRealtimeOriginRequiresEveryRelevantEventToShareOneDirectConne
 	}
 }
 
-func TestProcessMapRealtimeFilterIncludesVisibilityChangesAndRestoreOnlyCreates(t *testing.T) {
+func TestProcessMapRealtimeFilterIncludesTraySourceCreationVisibilityAndRestoredProcesses(t *testing.T) {
 	companyID := "89898989-8989-4989-8989-898989898985"
 	event := func(eventType string, payload map[string]any) domain.DomainEvent {
 		return domain.DomainEvent{
@@ -195,6 +193,7 @@ func TestProcessMapRealtimeFilterIncludesVisibilityChangesAndRestoreOnlyCreates(
 		}
 	}
 	for _, eventType := range []string{
+		"company_explorer_folder_created",
 		"logic_gate_permissions_updated", "company_explorer_folder_permissions_updated",
 		"company_user_group_updated", "company_user_group_deleted", "company_user_group_members_updated",
 		CompanyMembershipSavedEventType, CompanyMembershipDeletedEventType,

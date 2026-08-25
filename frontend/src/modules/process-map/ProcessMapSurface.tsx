@@ -20,8 +20,18 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
-import { NODE_ICON_GRADIENT_END, NODE_ICON_GRADIENT_START } from "../../icons/index.js";
+import {
+  ExplorerDisclosureIcon,
+  ExplorerRowIcon,
+  NODE_ICON_GRADIENT_END,
+  NODE_ICON_GRADIENT_START,
+} from "../../icons/index.js";
 import { readExplorerDragPayload, EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop.js";
+import {
+  fetchCompanyExplorerChildren,
+  fetchCompanyExplorerRoots,
+  type CompanyExplorerV2Row,
+} from "../company-explorer/companyExplorerLazyApi.js";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh.js";
 import { getCurrentRealtimeConnectionID, subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
 import { isAbortError } from "../api/requestJSON.js";
@@ -59,6 +69,8 @@ import {
   decideProcessMapExplorerDrop,
   isValidProcessMapConnection,
   processMapFolderDrillTarget,
+  processMapResourceNodeID,
+  processMapTrayCandidates,
   shouldApplyProcessMapCommit,
   shouldApplyProcessMapMutationAck,
 } from "./processMapInteraction.js";
@@ -126,10 +138,6 @@ export type ProcessMapSurfaceProps = {
   onLayerChange?: (layer: ProcessMapLayerResponse["layer"] | null) => void;
 };
 
-function resourceNodeID(resource: ProcessMapResourceRef): string {
-  return `${resource.resource_type}:${resource.resource_id}`;
-}
-
 function resourceFromNode(node: ProcessMapNode | undefined): ProcessMapResourceRef | null {
   if (!node || node.data.restricted) return null;
   return { resource_type: node.data.resourceType, resource_id: node.data.resourceID };
@@ -153,7 +161,7 @@ function processMapNodeFromPlacement(placement: ProcessMapPlacement, index: numb
     };
   }
   return {
-    id: resourceNodeID({ resource_type: placement.resource_type, resource_id: placement.resource_id }),
+    id: processMapResourceNodeID({ resource_type: placement.resource_type, resource_id: placement.resource_id }),
     type: "processMapCard",
     position,
     data: {
@@ -318,6 +326,7 @@ function ProcessMapTraceEdge({ id, sourceX, sourceY, targetX, targetY, selected,
           strokeLinejoin: "miter",
         }}
       />
+      <path d={path} className="process-map-trace__flow" aria-hidden="true" pointerEvents="none" />
       {selected && data && (
         <EdgeLabelRenderer>
           {routePoints.map((point, index) => (
@@ -339,6 +348,23 @@ function ProcessMapTraceEdge({ id, sourceX, sourceY, targetX, targetY, selected,
 const nodeTypes = { processMapCard: ProcessMapCard };
 const edgeTypes = { processMapTrace: ProcessMapTraceEdge };
 const PROCESS_MAP_HANDLE_RADIUS_PX = 6;
+const PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY = "mangorts.process-map.placement-tray-collapsed.v1";
+
+function readProcessMapTrayCollapsed(): boolean {
+  if (typeof localStorage === "undefined") return false;
+  try {
+    return localStorage.getItem(PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function storeProcessMapTrayCollapsed(collapsed: boolean): void {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
+  } catch {}
+}
 
 function processMapErrorMessage(cause: unknown, fallback: string): string {
   if (cause instanceof Error && cause.message.trim()) return cause.message;
@@ -353,7 +379,12 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [trayRows, setTrayRows] = useState<CompanyExplorerV2Row[]>([]);
+  const [trayLoading, setTrayLoading] = useState(true);
+  const [trayError, setTrayError] = useState("");
+  const [trayCollapsed, setTrayCollapsed] = useState(readProcessMapTrayCollapsed);
   const reactFlow = useReactFlow<ProcessMapNode, ProcessMapEdge>();
+  const trayListID = React.useId();
   const dragStartRef = useRef<{ id: string; position: ProcessMapGridPoint } | null>(null);
   const layerRequestGenerationRef = useRef(0);
   const activeLayerReadRef = useRef<number | null>(null);
@@ -364,10 +395,45 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
   const traceSaveGenerationRef = useRef(new Map<string, number>());
   const placementOperationGenerationRef = useRef(new Map<string, number>());
   const deletedRelationshipIDsRef = useRef(new Set<string>());
+  const trayBranchReadRef = useRef<Promise<void> | null>(null);
   const committedPlacementRef = useRef(new Map<string, {
     position: ProcessMapGridPoint;
     data: ProcessMapVisibleNodeData;
   }>());
+
+  useEffect(() => {
+    if (trayCollapsed) {
+      setTrayRows([]);
+      setTrayLoading(false);
+      setTrayError("");
+      return undefined;
+    }
+    let active = true;
+    setTrayRows([]);
+    setTrayLoading(true);
+    setTrayError("");
+    const loadBranch = () => folderID?.trim()
+      ? fetchCompanyExplorerChildren(apiBase, companyID, "all", folderID.trim())
+      : fetchCompanyExplorerRoots(apiBase, companyID, "all");
+    const previousRead = refreshVersion > 0 ? trayBranchReadRef.current : null;
+    const request = (async () => {
+      if (previousRead) await previousRead;
+      if (!active) return undefined;
+      return loadBranch();
+    })();
+    trayBranchReadRef.current = request.then(() => undefined, () => undefined);
+    void request.then((snapshot) => {
+      if (active && snapshot) setTrayRows(snapshot.rows ?? []);
+    }).catch((cause) => {
+      if (!active) return;
+      setTrayError(processMapErrorMessage(cause, "Failed to load available items"));
+    }).finally(() => {
+      if (active) setTrayLoading(false);
+    });
+    return () => {
+      active = false;
+    };
+  }, [apiBase, companyID, folderID, refreshVersion, trayCollapsed]);
 
   const requestRefresh = useCallback(() => new Promise<void>((resolve) => {
     canonicalRefreshGenerationRef.current += 1;
@@ -473,8 +539,8 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
   const edgeFromTrace = useCallback((trace: ProcessMapTrace): ProcessMapEdge => ({
     id: trace.resource_operational_relationship_id,
     type: "processMapTrace",
-    source: resourceNodeID(trace.source),
-    target: resourceNodeID(trace.target),
+    source: processMapResourceNodeID(trace.source),
+    target: processMapResourceNodeID(trace.target),
     sourceHandle: "output",
     targetHandle: "input",
     data: {
@@ -847,7 +913,7 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     }
     const flowPosition = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY }, { snapToGrid: true });
     const gridPosition = processMapFlowToGridPosition(flowPosition);
-    const nodeID = resourceNodeID(decision.resource);
+    const nodeID = processMapResourceNodeID(decision.resource);
     const operationGeneration = (placementOperationGenerationRef.current.get(nodeID) ?? 0) + 1;
     placementOperationGenerationRef.current.set(nodeID, operationGeneration);
     setNotice("Saving placement…");
@@ -926,13 +992,19 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     return node && !node.data.restricted ? node.data.label : "";
   }, [nodes, selection]);
 
+  const trayCandidates = useMemo(() => {
+    const unavailableNodeIDs = new Set<string>();
+    for (const node of nodes) {
+      if (!node.data.restricted) unavailableNodeIDs.add(node.id);
+    }
+    return processMapTrayCandidates(trayRows, folderID, unavailableNodeIDs);
+  }, [folderID, nodes, trayRows]);
+
   return (
     <section
       className="process-map-surface"
       aria-label="Process Map canvas"
       tabIndex={0}
-      onDragOver={acceptsExplorerDrop}
-      onDrop={handleDrop}
       onKeyDown={(event) => {
         if ((event.key !== "Delete" && event.key !== "Backspace") || !selection) return;
         event.preventDefault();
@@ -941,7 +1013,7 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
       }}
     >
       <div className="process-map-toolbar" aria-label="Process Map tools">
-        <span>Drag a Folder or Process from Explorer to place it.</span>
+        <span>Drag a card onto the map to place it.</span>
         {selection?.kind === "trace" && <span>Double-click the trace to add a waypoint.</span>}
         {selection && (
           <button type="button" onClick={removeSelection}>
@@ -949,6 +1021,69 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
           </button>
         )}
       </div>
+      <aside
+        className={`process-map-placement-tray${trayCollapsed ? " is-collapsed" : ""}`}
+        aria-label="Process Map placement tray"
+      >
+        <button
+          type="button"
+          className="process-map-placement-tray__toggle"
+          aria-expanded={!trayCollapsed}
+          aria-controls={trayListID}
+          title={trayCollapsed ? "Expand placement tray" : "Collapse placement tray"}
+          onClick={() => {
+            setTrayCollapsed((current) => {
+              const next = !current;
+              storeProcessMapTrayCollapsed(next);
+              return next;
+            });
+          }}
+        >
+          <span className="process-map-placement-tray__heading">
+            {folderID ? "Inside this Folder" : "Root Folders"}
+          </span>
+          {!trayCollapsed && <span className="process-map-placement-tray__hint">Drag to place</span>}
+          <ExplorerDisclosureIcon open={!trayCollapsed} color="#64748b" />
+        </button>
+        <div id={trayListID} className="process-map-placement-tray__body" hidden={trayCollapsed}>
+          {(trayLoading || loading) && <p className="process-map-placement-tray__status">Loading available items…</p>}
+          {!trayLoading && !loading && trayError && (
+            <p className="process-map-placement-tray__status is-error" role="alert">{trayError}</p>
+          )}
+          {!trayLoading && !loading && !trayError && trayCandidates.length === 0 && (
+            <p className="process-map-placement-tray__status">Nothing left to place in this layer.</p>
+          )}
+          {!trayLoading && !loading && !trayError && trayCandidates.length > 0 && (
+            <div className="process-map-placement-tray__list" role="list">
+              {trayCandidates.map((candidate) => {
+                const isFolder = candidate.resource.resource_type === "company_explorer_folder";
+                return (
+                  <div
+                    key={processMapResourceNodeID(candidate.resource)}
+                    className={`process-map-placement-tray__card is-${isFolder ? "folder" : "process"}`}
+                    role="listitem"
+                    draggable
+                    aria-label={`Drag ${isFolder ? "Folder" : "Process"}: ${candidate.label}`}
+                    title="Drag onto the map to place"
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(candidate.dragPayload));
+                      event.dataTransfer.effectAllowed = "copy";
+                    }}
+                  >
+                    <span className="process-map-placement-tray__icon">
+                      <ExplorerRowIcon kind={isFolder ? "folder" : "logic_gate"} />
+                    </span>
+                    <span className="process-map-placement-tray__card-copy">
+                      <span className="process-map-placement-tray__card-kind">{isFolder ? "Folder" : "Process"}</span>
+                      <span className="process-map-placement-tray__card-label">{candidate.label}</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </aside>
       {(error || notice) && (
         <div className={`process-map-message${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>
           {error || notice}
@@ -962,6 +1097,8 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
         edgeTypes={edgeTypes}
         onNodesChange={handleNodesChange}
         onEdgesChange={handleEdgesChange}
+        onDragOver={acceptsExplorerDrop}
+        onDrop={handleDrop}
         onNodeDragStart={handleNodeDragStart}
         onNodeDragStop={handleNodeDragStop}
         onNodeClick={(_, node) => {

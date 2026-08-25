@@ -136,6 +136,155 @@
   box-shadow: 3px 3px 8px rgba(148, 163, 184, 0.16), -3px -3px 8px rgba(255, 255, 255, 0.92);
 }
 
+.process-map-placement-tray {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  width: min(268px, calc(100% - 24px));
+  max-height: calc(100% - 24px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 8px 10px 24px rgba(100, 116, 139, 0.2), -5px -5px 16px rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(14px);
+}
+
+.process-map-placement-tray.is-collapsed {
+  width: auto;
+}
+
+.process-map-placement-tray__toggle {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  background: transparent;
+  color: #334155;
+  cursor: pointer;
+  text-align: left;
+}
+
+.process-map-placement-tray__toggle:focus-visible {
+  outline: 2px solid rgba(14, 165, 233, 0.48);
+  outline-offset: -2px;
+  border-radius: 12px;
+}
+
+.process-map-placement-tray__heading {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 760;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-map-placement-tray__hint {
+  margin-left: auto;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 680;
+  white-space: nowrap;
+}
+
+.process-map-placement-tray__body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 8px;
+}
+
+.process-map-placement-tray__body[hidden] {
+  display: none;
+}
+
+.process-map-placement-tray__list {
+  display: grid;
+  gap: 7px;
+}
+
+.process-map-placement-tray__card {
+  min-width: 0;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid;
+  border-radius: 11px;
+  cursor: grab;
+  box-shadow: 3px 4px 10px rgba(100, 116, 139, 0.13), inset 1px 1px 0 rgba(255, 255, 255, 0.82);
+  user-select: none;
+}
+
+.process-map-placement-tray__card:active {
+  cursor: grabbing;
+}
+
+.process-map-placement-tray__card.is-folder {
+  border-color: rgba(255, 138, 0, 0.38);
+  background: linear-gradient(135deg, rgba(255, 90, 31, 0.12), rgba(255, 214, 0, 0.18));
+}
+
+.process-map-placement-tray__card.is-process {
+  border-color: rgba(25, 240, 122, 0.4);
+  background: linear-gradient(135deg, rgba(124, 255, 155, 0.14), rgba(0, 200, 111, 0.16));
+}
+
+.process-map-placement-tray__icon {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  flex: 0 0 24px;
+  place-items: center;
+}
+
+.process-map-placement-tray__icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.process-map-placement-tray__card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.process-map-placement-tray__card-kind {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 780;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.process-map-placement-tray__card-label {
+  overflow: hidden;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.process-map-placement-tray__status {
+  margin: 0;
+  padding: 11px 7px 8px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.process-map-placement-tray__status.is-error {
+  color: #9f1239;
+}
+
 .process-map-message,
 .process-map-loading {
   position: absolute;
@@ -202,8 +351,29 @@
 }
 
 .process-map-card--folder .process-map-card__body {
+  position: relative;
+  border: 0;
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
   padding-inline: 28px;
+  background: #ff8a00;
+}
+
+.process-map-card--folder .process-map-card__body::before {
+  position: absolute;
+  inset: 1px;
+  z-index: 0;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
+  content: "";
+}
+
+.process-map-card--folder .process-map-card__body > * {
+  position: relative;
+  z-index: 1;
+}
+
+.process-map-card--process .process-map-card__body {
+  border-color: #19f07a;
 }
 
 .process-map-card--process .process-map-card__body,
@@ -212,12 +382,15 @@
 }
 
 .process-map-card.is-selected .process-map-card__body {
-  border-color: rgba(14, 165, 233, 0.7);
-  background: linear-gradient(145deg, #ffffff 0%, #f0f9ff 58%, #f5f3ff 100%);
   box-shadow:
     inset 1px 1px 0 rgba(255, 255, 255, 0.96),
     0 0 0 2px rgba(56, 189, 248, 0.18),
     0 0 24px rgba(139, 92, 246, 0.15);
+}
+
+.process-map-card--folder.is-selected .process-map-card__body::before,
+.process-map-card--process.is-selected .process-map-card__body {
+  background: linear-gradient(145deg, #ffffff 0%, #f0f9ff 58%, #f5f3ff 100%);
 }
 
 .process-map-card__kind {
@@ -277,6 +450,28 @@
 
 .process-map-trace.is-selected {
   opacity: 1;
+}
+
+.process-map-trace__flow {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.62);
+  stroke-width: 3px;
+  stroke-linecap: round;
+  stroke-dasharray: 8 20;
+  pointer-events: none;
+  animation: process-map-trace-flow 1.1s linear infinite;
+}
+
+@keyframes process-map-trace-flow {
+  to {
+    stroke-dashoffset: -28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .process-map-trace__flow {
+    animation: none;
+  }
 }
 
 .process-map-waypoint {

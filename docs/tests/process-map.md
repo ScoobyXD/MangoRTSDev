@@ -38,7 +38,7 @@
 36. Every accessible Folder MUST be a fixed point-up hexagon occupying exactly seven by seven smallest grid squares.
 37. Every accessible Process MUST be a fixed rectangle occupying exactly seven by five smallest grid squares.
 38. Folder and Process dimensions MUST NOT be user-adjustable or stored as placement data in the first version.
-39. The first Process Map version MUST use neutral item styling and MUST NOT add semantic item colors.
+39. Every accessible Folder and Process MUST keep a neutral elevated surface with one thin type outline matching Company Explorer: orange for a Folder and green for a Process; selection MUST preserve that type outline, and the first version MUST NOT add filled semantic item colors.
 40. A single click on an accessible map item MUST select that item.
 41. A double click on an accessible Folder MUST navigate to that Folder's Process Map layer.
 42. A Process MUST be a leaf on Process Map and MUST NOT open a Process Map Node layer in the first version.
@@ -106,7 +106,7 @@
 104. One trace route-point array MUST contain at most 256 points, and every point MUST be an object with exactly the signed integer fields `x` and `y`.
 105. Repeating a trace save with the same exact ordered route points MUST return the existing trace without advancing its revision or timestamps.
 106. The first Process Map version MAY allow placement cards to overlap and MUST NOT add automatic collision repair or automatic layout.
-107. The first Process Map manual-add entry point MUST be dragging one exact supported resource from Company Explorer onto the current layer, and MUST NOT add a separate candidate-search API.
+107. Every Process Map manual-add entry point MUST use the existing exact-resource Company Explorer drag payload, whether the drag starts in Company Explorer or the current-layer placement tray, and MUST NOT add a separate candidate-search API; releasing a drag over any fixed Process Map UI instead of the map canvas MUST NOT create a placement.
 108. The Process Map editor SHOULD use orthogonal circuit-style trace routing where practical while preserving the one bounded integer route-point array as the only saved geometry.
 109. Every restricted placeholder MUST occupy one fixed four-by-three smallest-grid-square rectangle regardless of its hidden resource type.
 110. The fixed input anchor MUST touch the physical center of the accessible card's left side and the fixed output anchor MUST touch the physical center of its right side, with no visible gap before a trace.
@@ -115,5 +115,10 @@
 113. A successful placement, relationship, or trace mutation MUST update the initiating mounted map from its committed response and MUST NOT echo a redundant realtime reload to that exact originating connection; every other current company connection MUST receive one compact invalidation, source and visibility changes MUST invalidate every affected viewer, and Process Map MUST NOT poll.
 114. Every Folder layer MUST display its complete visible Process Map path from the root-most mapped ancestor through the current Folder, and every visible ancestor name MUST navigate directly to that Folder layer.
 115. Folder path ancestry MUST follow only saved Process Map parentage, MUST NOT use Company Explorer parentage or load the full tree, and MUST omit the entire ancestor list when any ancestor is missing or inaccessible.
+116. The root placement tray MUST list only authorized immediate Company Explorer root Folders, and a Folder-layer tray MUST list only authorized immediate child Folders and Processes from that exact Folder branch; neither tray may include descendants, Projects, Nodes, or other resource types, and an expanded tray MUST reconcile its exact branch on accepted Process Map realtime invalidations.
+117. A placement tray item already present as an accessible placement on the current map layer MUST be omitted; a dragged item MUST remain in the tray until its placement save commits, then disappear locally, and MUST become available again when that current-layer placement is removed.
+118. The placement tray MUST reuse the existing bounded Company Explorer root or exact-parent child read and existing drag/drop placement path; it MUST NOT load the complete Explorer tree, search for candidates, poll, automatically place items, or automatically lay them out.
+119. The placement tray MUST remain fixed to the left side of the Process Map UI while the map pans or zooms; its browser-local collapsed preference MUST default to expanded when unset, persist across Process Map layer navigation, and prevent hidden Explorer branch reads while collapsed.
+120. Every visible saved or pending trace MUST show one soft moving center pattern over its canonical source-to-target trace with the same direction and cadence; reduced-motion preference MUST stop the animation without hiding or changing the underlying trace or saved map state.
 
 Last updated: 2026-08-25
