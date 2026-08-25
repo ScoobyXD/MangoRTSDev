@@ -266,6 +266,8 @@ test("QA deploy permissions exclude account-wide IAM, Route53, S3, and WAF mutat
   assert.deepEqual(
     [...qaAccountMetadataPolicy.matchAll(/"((?:ec2|ecr|route53|sts):[^"]+)"/g)].map((match) => match[1]),
     [
+      "ec2:DescribeManagedPrefixLists",
+      "ec2:DescribeSubnets",
       "ecr:GetAuthorizationToken",
       "sts:GetCallerIdentity",
     ],

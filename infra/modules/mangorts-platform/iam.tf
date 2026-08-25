@@ -267,6 +267,8 @@ data "aws_iam_policy_document" "github_deploy" {
     content {
       sid = "ReadRequiredQAAccountMetadata"
       actions = [
+        "ec2:DescribeManagedPrefixLists",
+        "ec2:DescribeSubnets",
         "ecr:GetAuthorizationToken",
         "sts:GetCallerIdentity"
       ]
