@@ -452,101 +452,111 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               justifyItems: "start",
             }}
           >
-            {hierarchyBreadcrumb}
             <div
-            onMouseDown={(event) => {
-              if (!canEdit) return;
-              if (editingTitleRef.current?.contains(event.target as Node)) return;
-              event.preventDefault();
-              event.stopPropagation();
-              beginTitleEditAtEnd();
-            }}
-            style={{
-              minWidth: 0,
-              maxWidth: "min(720px, 100%)",
-              width: "min(720px, 100%)",
-              display: "flex",
-              alignItems: "baseline",
-              gap: 6,
-              border: isEditingTitle ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
-              borderRadius: 12,
-              background: isEditingTitle ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
-              boxShadow: isEditingTitle ? "8px 8px 20px rgba(174,174,192,0.22), -7px -7px 16px rgba(255,255,255,0.90), 0 0 18px rgba(183,124,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW,
-              padding: "7px 10px",
-              fontSize: 18,
-              fontWeight: 500,
-              letterSpacing: 0,
-              color: titleTextColor,
-              cursor: canEdit ? "text" : "default",
-              overflowWrap: "anywhere",
-              wordBreak: "break-word",
-            }}
-          >
-            <span
-              aria-label={linkedEntityKind === "logic_gate" ? "Process" : "Node"}
-              title={linkedEntityKind === "logic_gate" ? "Process" : "Node"}
-              style={{ flex: "0 0 auto", alignSelf: "center", display: "inline-flex" }}
+              data-editor-entity-title-container="true"
+              style={{
+                minWidth: 0,
+                maxWidth: "min(720px, 100%)",
+                width: "min(720px, 100%)",
+                display: "grid",
+                gap: 2,
+                border: isEditingTitle ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`,
+                borderRadius: 12,
+                background: isEditingTitle ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE,
+                boxShadow: isEditingTitle ? "8px 8px 20px rgba(174,174,192,0.22), -7px -7px 16px rgba(255,255,255,0.90), 0 0 18px rgba(183,124,255,0.14), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW,
+                padding: "6px 10px 7px",
+              }}
             >
-              <ExplorerEntityIcon kind={linkedEntityKind === "logic_gate" ? "logic_gate" : "node"} />
-            </span>
-            <span
-              ref={editingTitleRef}
-              aria-label={linkedEntityKind === "logic_gate" ? "Process title" : "Node title"}
-              data-floating-selection-actions="disabled"
-              contentEditable={canEdit}
-              suppressContentEditableWarning
-              onFocus={() => beginTitleEditPreservingSelection()}
-              onMouseDown={(event) => {
-                event.stopPropagation();
-                beginTitleEditPreservingSelection();
-              }}
-              onDoubleClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                beginTitleEditSelectingAll();
-              }}
-              onInput={(event) => {
-                if (!canEdit) return;
-                editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
-              }}
-              onBlur={() => {
-                if (!titleBlurSuppressionRef.current.shouldHandleBlur()) return;
-                if (!canEdit || !isEditingTitle) return;
-                const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
-                void onUpdateTitle(latestTitle);
-                onSetIsEditingTitle(false);
-              }}
-              onKeyDown={(event) => {
-                if (!canEdit) {
+              {hierarchyBreadcrumb}
+              <div
+                onMouseDown={(event) => {
+                  if (!canEdit) return;
+                  if (editingTitleRef.current?.contains(event.target as Node)) return;
                   event.preventDefault();
-                  return;
-                }
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  titleBlurSuppressionRef.current.suppress();
-                  const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
-                  void onUpdateTitle(latestTitle);
-                  onSetIsEditingTitle(false);
-                  event.currentTarget.blur();
-                }
-                if (event.key === "Escape") {
-                  event.preventDefault();
-                  titleBlurSuppressionRef.current.suppress();
-                  if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
-                  onSetIsEditingTitle(false);
-                  event.currentTarget.blur();
-                }
-              }}
-              style={{ minWidth: 0, flex: "1 1 auto", outline: "none", cursor: canEdit ? "text" : "default", caretColor: canEdit ? titleTextColor : "transparent", overflowWrap: "anywhere", wordBreak: "break-word" }}
-            >
-              {linkedNodeTitle || "\u00A0"}
-            </span>
-          </div>
-          {gvicBoard && (
-            <div style={{ justifySelf: "start", alignSelf: "start", minWidth: 0, maxWidth: "min(780px, 100%)", width: "min(780px, 100%)" }}>
-              {gvicBoard}
+                  event.stopPropagation();
+                  beginTitleEditAtEnd();
+                }}
+                style={{
+                  minWidth: 0,
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: 6,
+                  fontSize: 18,
+                  fontWeight: 500,
+                  letterSpacing: 0,
+                  color: titleTextColor,
+                  cursor: canEdit ? "text" : "default",
+                  overflowWrap: "anywhere",
+                  wordBreak: "break-word",
+                }}
+              >
+                <span
+                  aria-label={linkedEntityKind === "logic_gate" ? "Process" : "Node"}
+                  title={linkedEntityKind === "logic_gate" ? "Process" : "Node"}
+                  style={{ flex: "0 0 auto", alignSelf: "center", display: "inline-flex" }}
+                >
+                  <ExplorerEntityIcon kind={linkedEntityKind === "logic_gate" ? "logic_gate" : "node"} />
+                </span>
+                <span
+                  ref={editingTitleRef}
+                  aria-label={linkedEntityKind === "logic_gate" ? "Process title" : "Node title"}
+                  data-floating-selection-actions="disabled"
+                  contentEditable={canEdit}
+                  suppressContentEditableWarning
+                  onFocus={() => beginTitleEditPreservingSelection()}
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
+                    beginTitleEditPreservingSelection();
+                  }}
+                  onDoubleClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    beginTitleEditSelectingAll();
+                  }}
+                  onInput={(event) => {
+                    if (!canEdit) return;
+                    editingTitleDraftRef.current = event.currentTarget.textContent ?? "";
+                  }}
+                  onBlur={() => {
+                    if (!titleBlurSuppressionRef.current.shouldHandleBlur()) return;
+                    if (!canEdit || !isEditingTitle) return;
+                    const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
+                    void onUpdateTitle(latestTitle);
+                    onSetIsEditingTitle(false);
+                  }}
+                  onKeyDown={(event) => {
+                    if (!canEdit) {
+                      event.preventDefault();
+                      return;
+                    }
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      titleBlurSuppressionRef.current.suppress();
+                      const latestTitle = (editingTitleRef.current?.textContent ?? editingTitleDraftRef.current).trim();
+                      void onUpdateTitle(latestTitle);
+                      onSetIsEditingTitle(false);
+                      event.currentTarget.blur();
+                    }
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      titleBlurSuppressionRef.current.suppress();
+                      if (editingTitleRef.current) editingTitleRef.current.textContent = linkedNodeTitle;
+                      onSetIsEditingTitle(false);
+                      event.currentTarget.blur();
+                    }
+                  }}
+                  style={{ minWidth: 0, flex: "1 1 auto", outline: "none", cursor: canEdit ? "text" : "default", caretColor: canEdit ? titleTextColor : "transparent", overflowWrap: "anywhere", wordBreak: "break-word" }}
+                >
+                  {linkedNodeTitle || "\u00A0"}
+                </span>
+              </div>
             </div>
-          )}
+            {gvicBoard && (
+              <div style={{ justifySelf: "start", alignSelf: "start", minWidth: 0, maxWidth: "min(780px, 100%)", width: "min(780px, 100%)" }}>
+                {gvicBoard}
+              </div>
+            )}
           </div>
           {nodePresetFields && (
             <div
