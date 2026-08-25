@@ -97,8 +97,8 @@
 95. Directly opening a Folder layer the current user cannot access MUST follow the normal inaccessible-resource response and MUST NOT return that layer's placements or traces.
 96. Traces MUST render below map items so that items remain the top interactive layer.
 97. The Process Map background MUST be very white.
-98. Every large background grid square MUST be divided into four equal smallest squares in a two-by-two arrangement.
-99. The background grid MUST use subtle light and shadow to feel like one gently elevated surface rather than a flat dark grid or separate raised tiles.
+98. The background MUST use one uniform smallest-square grid whose lines have one color and weight, with no emphasized large-square or two-by-two grouping.
+99. Every accessible Folder and Process card MUST render as a neutral elevated surface above the grid.
 100. The background grid MUST move and scale with the map viewport while the user pans and zooms.
 101. The first Process Map version MUST NOT include a minimap.
 102. The first Process Map version MUST omit decorative infographic ribbons, ornamental paths, and visuals that do not represent map data.
@@ -111,5 +111,7 @@
 109. Every restricted placeholder MUST occupy the same fixed four-by-three smallest-grid-square rectangle used by an accessible Process, regardless of its hidden resource type.
 110. The fixed input anchor MUST be centered on the left side and the fixed output anchor MUST be centered on the right side of every accessible card.
 111. The Process Map frontend MAY use `@xyflow/react` for interaction and rendering, but Mango-owned placements, relationships, and traces MUST remain the only persisted map state; React Flow's graph JSON and viewport MUST NOT be persisted.
+112. Every visible trace MUST render below cards as an orthogonal cyan-to-blue surface exactly one smallest grid square thick, using the same gradient stops as the Node icon.
+113. A successful placement, relationship, or trace mutation MUST update the initiating mounted map from its committed response and MUST NOT echo a redundant realtime reload to that exact originating connection; every other current company connection MUST receive one compact invalidation, source and visibility changes MUST invalidate every affected viewer, and Process Map MUST NOT poll.
 
 Last updated: 2026-08-24

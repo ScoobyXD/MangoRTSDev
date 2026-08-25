@@ -46,6 +46,7 @@ type RealtimeReadyMessage = RealtimeBaseMessage & {
   type: "ready";
   user_id?: string;
   connection_id?: string;
+  connection_correlation?: string;
 };
 
 export type RealtimeSubscriptionAcceptedMessage = RealtimeBaseMessage & {
@@ -127,6 +128,7 @@ export type RealtimeProcessMapChangedMessage = RealtimeBaseMessage & {
   type: "process_map.changed";
   company_id: string;
   scope: string;
+  origin_connection_id?: string;
   ts?: string;
 };
 
@@ -311,7 +313,13 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 
   switch (type) {
     case "ready":
-      return { ...base, type, user_id: stringValue(payload.user_id) || undefined, connection_id: stringValue(payload.connection_id) || undefined };
+      return {
+        ...base,
+        type,
+        user_id: stringValue(payload.user_id) || undefined,
+        connection_id: stringValue(payload.connection_id) || undefined,
+        connection_correlation: stringValue(payload.connection_correlation) || undefined,
+      };
     case "subscription.accepted": {
       const scope = stringValue(payload.scope);
       if (!scope) throw new Error("realtime_scope_required");
@@ -369,7 +377,12 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
     }
     case "process_map.changed": {
       const scoped = scopedMessageBase(payload, type);
-      return { ...scoped, type, ts: stringValue(payload.ts) || undefined };
+      return {
+        ...scoped,
+        type,
+        origin_connection_id: stringValue(payload.origin_connection_id) || undefined,
+        ts: stringValue(payload.ts) || undefined,
+      };
     }
     case "raci_tabs.changed": {
       const scoped = scopedMessageBase(payload, type);
@@ -518,6 +531,8 @@ export class MangoRealtimeClient {
   private healthRefCount = 0;
   private serverReady = false;
   private heartbeatConfirmed = false;
+  private connectionID = "";
+  private connectionCorrelation = "";
   private lastHeartbeatConfirmedAt: number | undefined;
   private outageStartedAt: number | undefined;
   private recoveryPromise: Promise<void> | undefined;
@@ -579,6 +594,14 @@ export class MangoRealtimeClient {
     };
   }
 
+  currentConnectionID(): string | undefined {
+    return this.connectionID || undefined;
+  }
+
+  currentConnectionCorrelation(): string | undefined {
+    return this.connectionCorrelation || undefined;
+  }
+
   ensureOpen(): void {
     if (!this.hasConsumers() || isTerminalAuthFailureActive()) return;
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING || this.opening) return;
@@ -586,6 +609,8 @@ export class MangoRealtimeClient {
     this.opening = true;
     this.serverReady = false;
     this.heartbeatConfirmed = false;
+    this.connectionID = "";
+    this.connectionCorrelation = "";
     this.recoveredAttemptID = 0;
     this.acceptedScopes.clear();
     this.rejectedScopes.clear();
@@ -621,6 +646,8 @@ export class MangoRealtimeClient {
           this.opening = false;
           this.serverReady = false;
           this.heartbeatConfirmed = false;
+          this.connectionID = "";
+          this.connectionCorrelation = "";
           this.recoveredAttemptID = 0;
           this.acceptedScopes.clear();
           this.rejectedScopes.clear();
@@ -655,6 +682,8 @@ export class MangoRealtimeClient {
     this.opening = false;
     this.serverReady = false;
     this.heartbeatConfirmed = false;
+    this.connectionID = "";
+    this.connectionCorrelation = "";
     this.acceptedScopes.clear();
     this.rejectedScopes.clear();
     setRealtimeHealthClientActive(this.healthKey, false);
@@ -696,6 +725,8 @@ export class MangoRealtimeClient {
     this.opening = false;
     this.serverReady = false;
     this.heartbeatConfirmed = false;
+    this.connectionID = "";
+    this.connectionCorrelation = "";
     this.acceptedScopes.clear();
     this.rejectedScopes.clear();
     this.reconnectAttempts = 0;
@@ -731,6 +762,8 @@ export class MangoRealtimeClient {
       return;
     }
     if (message.type === "ready") {
+      this.connectionID = message.connection_id ?? "";
+      this.connectionCorrelation = message.connection_correlation ?? "";
       this.serverReady = true;
       this.maybeFinishRecovery();
       return;
@@ -907,6 +940,14 @@ function getMangoRealtimeClient(apiBase: string, companyID: string, options: Rea
   const client = new MangoRealtimeClient(apiBase, companyID, options);
   realtimeClients.set(key, client);
   return client;
+}
+
+export function getCurrentRealtimeConnectionID(apiBase: string, companyID: string): string | undefined {
+  return realtimeClients.get(realtimeHealthKey(apiBase, companyID))?.currentConnectionID();
+}
+
+export function getCurrentRealtimeConnectionCorrelation(apiBase: string, companyID: string): string | undefined {
+  return realtimeClients.get(realtimeHealthKey(apiBase, companyID))?.currentConnectionCorrelation();
 }
 
 export function subscribeRealtimeScope(apiBase: string, companyID: string, scope: string, handlers: RealtimeSubscriptionHandlers): () => void {

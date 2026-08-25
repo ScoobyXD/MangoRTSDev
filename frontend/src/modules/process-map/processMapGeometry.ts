@@ -1,5 +1,4 @@
 export const PROCESS_MAP_GRID_PX = 28;
-export const PROCESS_MAP_LARGE_GRID_DIVISOR = 2;
 export const PROCESS_MAP_MAX_ROUTE_POINTS = 256;
 
 export type ProcessMapResourceType = "company_explorer_folder" | "logic_gate";
@@ -35,11 +34,26 @@ export function processMapGridToFlowPosition(point: ProcessMapGridPoint): Proces
   };
 }
 
+export function processMapGridPointToFlowPosition(point: ProcessMapGridPoint): ProcessMapGridPoint {
+  return { x: point.x * PROCESS_MAP_GRID_PX, y: point.y * PROCESS_MAP_GRID_PX };
+}
+
 export function processMapFlowToGridPosition(point: ProcessMapGridPoint): ProcessMapGridPoint {
   return {
     x: snapProcessMapGridCoordinate(point.x / PROCESS_MAP_GRID_PX),
     y: snapProcessMapGridCoordinate(point.y / PROCESS_MAP_GRID_PX),
   };
+}
+
+export function processMapFlowToRoutePoint(point: ProcessMapGridPoint): ProcessMapGridPoint {
+  return {
+    x: snapProcessMapGridCoordinate((point.x / PROCESS_MAP_GRID_PX) + 0.5),
+    y: snapProcessMapGridCoordinate((point.y / PROCESS_MAP_GRID_PX) + 0.5),
+  };
+}
+
+export function processMapRoutePointToSurfaceCenter(point: ProcessMapGridPoint): ProcessMapGridPoint {
+  return { x: point.x - 0.5, y: point.y - 0.5 };
 }
 
 export function processMapInputAnchor(
@@ -117,14 +131,21 @@ export function defaultProcessMapRoutePoints(
   ]);
 }
 
-export function processMapOrthogonalPolyline(
+function renderProcessMapOrthogonalPolyline(
   source: ProcessMapGridPoint,
   routePoints: readonly ProcessMapGridPoint[],
   target: ProcessMapGridPoint,
 ): ProcessMapGridPoint[] {
-  const normalizedRoute = normalizeProcessMapRoutePoints(routePoints);
-  if (normalizedRoute.length === 0) return [source, target];
-  const requested = [source, ...normalizedRoute, target];
+  if (routePoints.length === 0) {
+    const fallback = defaultProcessMapRoutePoints(source, target);
+    if (fallback.length === 0) return [source, target];
+    return renderProcessMapOrthogonalPolyline(
+      source,
+      fallback.map(processMapRoutePointToSurfaceCenter),
+      target,
+    );
+  }
+  const requested = [source, ...routePoints, target];
   const rendered: ProcessMapGridPoint[] = [];
   for (const [index, point] of requested.entries()) {
     const previous = rendered[rendered.length - 1];
@@ -181,7 +202,8 @@ export function processMapTracePath(
   routePoints: readonly ProcessMapGridPoint[],
   target: ProcessMapGridPoint,
 ): string {
-  const points = processMapOrthogonalPolyline(source, routePoints, target)
-    .map(processMapGridToFlowPosition);
+  const surfaceCenters = routePoints.map(processMapRoutePointToSurfaceCenter);
+  const points = renderProcessMapOrthogonalPolyline(source, surfaceCenters, target)
+    .map(processMapGridPointToFlowPosition);
   return points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
 }

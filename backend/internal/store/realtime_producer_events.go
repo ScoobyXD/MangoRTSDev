@@ -360,7 +360,7 @@ func raciTabsChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []str
 	})
 }
 
-func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []string) (RealtimeOutboxInput, error) {
+func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []string, originConnectionID string) (RealtimeOutboxInput, error) {
 	companyID = strings.TrimSpace(companyID)
 	eventIDs = append([]string(nil), eventIDs...)
 	for index := range eventIDs {
@@ -372,9 +372,13 @@ func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []s
 	if companyID == "" || len(eventIDs) == 0 {
 		return RealtimeOutboxInput{}, ErrInvalid
 	}
-	payload, err := json.Marshal(map[string]any{
+	payloadFields := map[string]any{
 		"type": "process_map.changed", "company_id": companyID, "scope": processMapRealtimeScope,
-	})
+	}
+	if originConnectionID = strings.TrimSpace(originConnectionID); originConnectionID != "" {
+		payloadFields["origin_connection_id"] = originConnectionID
+	}
+	payload, err := json.Marshal(payloadFields)
 	if err != nil {
 		return RealtimeOutboxInput{}, err
 	}
@@ -395,6 +399,45 @@ func isProcessMapChangedDomainEvent(event domain.DomainEvent) bool {
 	}
 	return (eventType == "logic_gate_created" || eventType == "company_explorer_folder_created") &&
 		workspaceEventPayloadString(event.Payload, "realtime_change_type") == "resource_restored"
+}
+
+func isDirectProcessMapMutationDomainEvent(event domain.DomainEvent) bool {
+	switch strings.TrimSpace(event.Type) {
+	case ProcessMapPlacementSavedEvent, ProcessMapPlacementDeletedEvent,
+		ResourceOperationalRelationshipCreatedEvent, ResourceOperationalRelationshipDeletedEvent,
+		ProcessMapTraceSavedEvent:
+		return true
+	default:
+		return false
+	}
+}
+
+func processMapChangedOriginConnectionIDsByCompany(events []domain.DomainEvent) map[string]string {
+	originConnectionIDs := map[string]string{}
+	invalid := map[string]bool{}
+	for _, event := range events {
+		if !isProcessMapChangedDomainEvent(event) {
+			continue
+		}
+		companyID := strings.TrimSpace(event.CompanyID)
+		if companyID == "" {
+			continue
+		}
+		originConnectionID := workspaceEventPayloadString(event.Payload, processMapRealtimeOriginConnectionIDPayloadKey)
+		if !isDirectProcessMapMutationDomainEvent(event) || originConnectionID == "" {
+			invalid[companyID] = true
+			continue
+		}
+		if existing := originConnectionIDs[companyID]; existing != "" && existing != originConnectionID {
+			invalid[companyID] = true
+			continue
+		}
+		originConnectionIDs[companyID] = originConnectionID
+	}
+	for companyID := range invalid {
+		delete(originConnectionIDs, companyID)
+	}
+	return originConnectionIDs
 }
 
 func processMapChangedEventIDsByCompany(events []domain.DomainEvent) map[string][]string {
@@ -436,6 +479,7 @@ func processMapChangedAffectedUserIDsByCompany(events []domain.DomainEvent) map[
 
 func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []domain.DomainEvent) error {
 	affectedUserIDs := processMapChangedAffectedUserIDsByCompany(events)
+	originConnectionIDs := processMapChangedOriginConnectionIDsByCompany(events)
 	for companyID, eventIDs := range processMapChangedEventIDsByCompany(events) {
 		allowed := []string{}
 		for _, membership := range r.memberships {
@@ -445,7 +489,7 @@ func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []dom
 		}
 		allowed = append(allowed, affectedUserIDs[companyID]...)
 		slices.Sort(allowed)
-		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed)
+		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID])
 		if err != nil {
 			return err
 		}
@@ -458,6 +502,7 @@ func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []dom
 
 func (r *PostgresRepo) enqueueProcessMapRealtimeForDomainEventsTx(ctx context.Context, tx *sql.Tx, events []domain.DomainEvent) error {
 	affectedUserIDs := processMapChangedAffectedUserIDsByCompany(events)
+	originConnectionIDs := processMapChangedOriginConnectionIDsByCompany(events)
 	for companyID, eventIDs := range processMapChangedEventIDsByCompany(events) {
 		rows, err := tx.QueryContext(ctx, `
 select distinct user_id::text
@@ -482,7 +527,7 @@ order by user_id::text`, companyID)
 			return err
 		}
 		allowed = append(allowed, affectedUserIDs[companyID]...)
-		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed)
+		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID])
 		if err != nil {
 			return err
 		}

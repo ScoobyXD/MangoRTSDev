@@ -28,6 +28,16 @@ import {
 } from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
 
 test("parses retained product and scoped mailbox message families", () => {
+  const ready = parseRealtimeMessage(JSON.stringify({
+    type: "ready",
+    connection_id: " connection-1 ",
+    connection_correlation: " correlation-1 ",
+  }));
+  assert.equal(ready.type, "ready");
+  if (ready.type !== "ready") throw new Error("expected_ready_message");
+  assert.equal(ready.connection_id, "connection-1");
+  assert.equal(ready.connection_correlation, "correlation-1");
+
   const notification = parseRealtimeMessage(JSON.stringify({
     type: "notification.created",
     company_id: "company-1",
@@ -91,10 +101,12 @@ test("parses retained product and scoped mailbox message families", () => {
     type: "process_map.changed",
     company_id: "company-1",
     scope: "process-map:company",
+    origin_connection_id: " connection-1 ",
     ts: "2026-08-24T12:00:00Z",
   })) as RealtimeProcessMapChangedMessage;
   assert.equal(processMap.company_id, "company-1");
   assert.equal(processMap.scope, "process-map:company");
+  assert.equal(processMap.origin_connection_id, "connection-1");
 
   const raciTabs = parseRealtimeMessage(JSON.stringify({
     type: "raci_tabs.changed",
@@ -212,10 +224,12 @@ test("one client shares a socket and dispatches compact messages to exact scopes
 
     constructor(_url: string) {
       sockets.push(this);
+      const connectionID = `connection-${sockets.length}`;
+      const connectionCorrelation = `correlation-${sockets.length}`;
       queueMicrotask(() => {
         this.readyState = FakeWebSocket.OPEN;
         this.onopen?.();
-        this.onmessage?.({ data: JSON.stringify({ type: "ready" }) });
+        this.onmessage?.({ data: JSON.stringify({ type: "ready", connection_id: connectionID, connection_correlation: connectionCorrelation }) });
       });
     }
 
@@ -254,6 +268,8 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
 
     assert.equal(sockets.length, 1);
+    assert.equal(client.currentConnectionID(), "connection-1");
+    assert.equal(client.currentConnectionCorrelation(), "correlation-1");
     const subscriptions = sockets[0].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe");
     assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
 
@@ -328,6 +344,8 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     assert.equal(mailbox, 1);
 
     sockets[0].close();
+    assert.equal(client.currentConnectionID(), undefined, "a closed socket cannot leave an obsolete write origin");
+    assert.equal(client.currentConnectionCorrelation(), undefined, "a closed socket cannot leave an obsolete cross-server correlation");
     let downtimeChatAcceptances = 0;
     let downtimeBoardAcceptances = 0;
     const unsubDowntimeChat = client.subscribe("chat:node:node-1", {
@@ -341,6 +359,8 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     client.ensureOpen();
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
     assert.equal(sockets.length, 2);
+    assert.equal(client.currentConnectionID(), "connection-2");
+    assert.equal(client.currentConnectionCorrelation(), "correlation-2");
     assert.deepEqual(sockets[1].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe").map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });

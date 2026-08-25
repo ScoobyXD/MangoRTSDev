@@ -295,7 +295,7 @@ Placement upsert transaction:
 5. Upsert the position and map parent.
 6. Increment revision for every successful placement save.
 7. If the map parent changed, delete now-invalid incident trace geometry while preserving operational relationships.
-8. Append the domain event and realtime outbox work in the same transaction.
+8. Append the domain event and advance the Process Map read version in the same transaction; the committed response updates the initiating surface, while one compact realtime hint reaches every other current company connection.
 
 A position-only move on the same layer preserves its trace rows. Trace endpoints follow the moved card because endpoint coordinates are derived; intermediate points stay saved until the user reroutes them.
 
@@ -327,7 +327,7 @@ Relationship deletion transaction:
 4. Preserve both endpoint resources and placements.
 5. Append the deletion event in the same transaction.
 
-Handlers wake realtime only after a successful repository commit. Generic domain-event append coalesces the permission-safe Process Map outbox row inside the same transaction or memory rollback boundary, including source, permission, and group visibility changes.
+Handlers wake realtime only after a successful repository commit. Generic domain-event append creates one permission-safe Process Map outbox row. A direct map write carries its validated originating realtime connection ID so only that exact connection can ignore the redundant echo; every other current company connection, including another tab or device for the same user, still receives the compact hint. Source, Explorer-parent, permission, group, and membership visibility changes notify every affected viewer.
 
 ### Validation
 
@@ -591,7 +591,7 @@ Start with one company-wide `workspace_read_versions` scope named `process-map`.
 
 The strong ETag must include the layer identity and a viewer or permission-policy fingerprint because two users can receive different visible and restricted projections for the same layer. Do not reuse the current generic ETag hash without adding that fingerprint. Direct Folder access must be authorized before an `If-None-Match` request can return `304`. Responses must not allow one user's authorized projection to be reused for another user.
 
-Realtime messages should be invalidation hints, not copies of hidden resources or relationship payloads. The browser refetches the current layer after a relevant committed hint. The durable state change, domain event, read-version update, and realtime outbox entry must share the required transaction boundary.
+Realtime messages are invalidation hints, never copies of hidden resources or relationship payloads. A routine placement, relationship, or trace write updates its originating surface from the committed HTTP response; the same compact hint refreshes every other subscribed connection, while the exact originating connection ignores its own echo. Source and visibility hints refresh every affected viewer. The durable state change, domain event, read-version update, and realtime outbox entry share the required transaction boundary.
 
 ## Permission Rules in the API
 
@@ -707,7 +707,7 @@ Mango still owns:
 - conversion between integer grid units and screen pixels;
 - persisted route points;
 - trace drawing and waypoint editing behavior;
-- the white elevated two-level grid design.
+- the white uniform grid and elevated-card design.
 
 Do not persist React Flow's full node, edge, or viewport JSON. Do not add ELK or another automatic-layout engine. Do not reuse the dashboard `FrameCanvas`, the global Node relationship graph, or the global Logic Gate relationship graph.
 
@@ -727,7 +727,7 @@ Process      rectangle,        4 x 3 smallest grid squares
 Restricted   uniform rectangle, 4 x 3 smallest grid squares, containing only ?
 Input        one fixed left-center anchor per accessible card
 Output       one fixed right-center anchor per accessible card
-Large grid   2 x 2 smallest grid squares
+Trace        cyan-to-blue Node-icon gradient, one smallest grid square thick
 ```
 
 The exact screen pixel size of one smallest square is a CSS/design token. Changing that token changes rendering scale, not saved coordinates.
@@ -755,11 +755,11 @@ placement drag draft
 trace route draft
 ```
 
-Save a placement only when dragging stops, not on every pointer move. The UI may move optimistically, then use the server response as truth. On failure, restore or refetch the current layer.
+Save a placement only when dragging stops, not on every pointer move. The UI may move optimistically, then uses the server response as truth without reloading the layer. On failure, restore or refetch the current layer.
 
 Single click selects. Double-clicking an accessible Folder navigates inward. Double-clicking a Process does not open a deeper Process Map layer. Pan and zoom remain local and unsaved.
 
-The trace renderer builds one path from the derived source output, through the ordered intermediate points, to the derived target input. Several pairwise traces may use identical leading or trailing points to look like one branched or merged route. A crossing is not a junction unless the saved traces share the same explicit point.
+The trace renderer builds one orthogonal, one-smallest-square-thick cyan-to-blue surface from the derived source output, through the ordered intermediate points, to the derived target input. Several pairwise traces may use identical leading or trailing points to look like one branched or merged route. A crossing is not a junction unless the saved traces share the same explicit point.
 
 Items render above traces. Restricted placeholders have no handles or event handlers.
 
@@ -819,7 +819,7 @@ This task's verification gate is proportionate WSL backend tests, the frontend b
 
 Verified results:
 
-- WSL `/usr/local/go/bin/go test ./internal/store ./internal/http -count=1`: passed; Store 5.039 seconds and HTTP 15.142 seconds.
+- WSL `/usr/local/go/bin/go test ./internal/store ./internal/http ./cmd/miraeopus-api -count=1`: passed; Store 3.144 seconds, HTTP 12.625 seconds, and API command 0.009 seconds.
 - From `frontend`, `npm.cmd run build`: passed with 537 modules; only the existing chunk-size warning remained.
 - From `frontend`, `npm.cmd run test:node-relationships`: passed the complete established frontend feature-test list, including the rendered Process Map surface.
 - From `frontend`, `node node_modules/typescript/bin/tsc -p ..\tests\frontend\config\tsconfig.node-tests.json`: passed.
@@ -868,7 +868,7 @@ This phase must leave one working operational relationship authority. It must no
 - [x] Add server-side permission sanitization and ETags.
 - [x] Add placement create, move, reparent, and remove commands.
 - [x] Add the full-page Process Map route and lazy page.
-- [x] Render the white two-level grid.
+- [x] Render one uniform white grid with elevated Folder and Process cards.
 - [x] Render fixed Folder, Process, and restricted cards.
 - [x] Add snapped dragging and server persistence.
 - [x] Add Folder double-click URLs and browser history.

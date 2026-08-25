@@ -11,6 +11,8 @@ import (
 	"strings"
 )
 
+const processMapRealtimeConnectionIDHeader = "X-Mango-Realtime-Connection-ID"
+
 func decodeProcessMapJSON(r *http.Request, destination any) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -135,6 +137,20 @@ func (s *Server) processMapMutationActor(w http.ResponseWriter, r *http.Request,
 	return actorUserID, true
 }
 
+func (s *Server) processMapMutationRealtimeConnectionID(r *http.Request, companyID, actorUserID string) string {
+	correlation := strings.TrimSpace(r.Header.Get(processMapRealtimeConnectionIDHeader))
+	if correlation == "" {
+		return ""
+	}
+	if connectionID, ok := s.realtimeTickets.validateRealtimeConnectionCorrelation(correlation, companyID, actorUserID); ok {
+		return connectionID
+	}
+	if s.realtimeRegistry.ownsConnection(correlation, companyID, actorUserID) {
+		return correlation
+	}
+	return ""
+}
+
 func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Request) {
 	resourceType, resourceID, ok := processMapPlacementPath(r.URL.Path)
 	if !ok {
@@ -150,6 +166,7 @@ func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	realtimeConnectionID := s.processMapMutationRealtimeConnectionID(r, companyID, actorUserID)
 	switch r.Method {
 	case http.MethodPut:
 		var request struct {
@@ -174,7 +191,7 @@ func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Reques
 		result, err := s.repo.PutProcessMapPlacement(store.ProcessMapPlacementPutInput{
 			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
 			MapParentFolderID: parentID, GridX: *request.GridX, GridY: *request.GridY,
-			ActorUserID: actorUserID, PermissionUserID: actorUserID,
+			ActorUserID: actorUserID, PermissionUserID: actorUserID, RealtimeConnectionID: realtimeConnectionID,
 		})
 		if err != nil {
 			writeProcessMapError(w, err, "failed_to_save_process_map_placement")
@@ -189,7 +206,7 @@ func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Reques
 	case http.MethodDelete:
 		result, err := s.repo.DeleteProcessMapPlacement(store.ProcessMapPlacementDeleteInput{
 			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
-			ActorUserID: actorUserID, PermissionUserID: actorUserID,
+			ActorUserID: actorUserID, PermissionUserID: actorUserID, RealtimeConnectionID: realtimeConnectionID,
 		})
 		if err != nil {
 			writeProcessMapError(w, err, "failed_to_delete_process_map_placement")
@@ -280,6 +297,7 @@ func (s *Server) handleProcessMapOperationalRelationships(w http.ResponseWriter,
 		if !ok {
 			return
 		}
+		realtimeConnectionID := s.processMapMutationRealtimeConnectionID(r, request.CompanyID, actorUserID)
 		var trace *store.ProcessMapTraceInput
 		if request.Trace != nil {
 			points, ok := routePointsFromRaw(request.Trace.RoutePoints)
@@ -294,6 +312,7 @@ func (s *Server) handleProcessMapOperationalRelationships(w http.ResponseWriter,
 			Source:    domain.ProcessMapResourceRef{ResourceType: request.Source.ResourceType, ResourceID: request.Source.ResourceID},
 			Target:    domain.ProcessMapResourceRef{ResourceType: request.Target.ResourceType, ResourceID: request.Target.ResourceID},
 			Trace:     trace, ActorUserID: actorUserID, PermissionUserID: actorUserID,
+			RealtimeConnectionID: realtimeConnectionID,
 		})
 		if err != nil {
 			writeProcessMapError(w, err, "failed_to_save_operational_relationship")
@@ -322,6 +341,7 @@ func (s *Server) handleProcessMapOperationalRelationshipByID(w http.ResponseWrit
 	if !ok {
 		return
 	}
+	realtimeConnectionID := s.processMapMutationRealtimeConnectionID(r, companyID, actorUserID)
 	relationshipID := strings.TrimSpace(parts[0])
 	if len(parts) == 2 {
 		if parts[1] != "trace" || r.Method != http.MethodPut {
@@ -342,7 +362,7 @@ func (s *Server) handleProcessMapOperationalRelationshipByID(w http.ResponseWrit
 		}
 		result, err := s.repo.PutProcessMapTrace(store.ProcessMapTracePutInput{
 			CompanyID: companyID, ResourceOperationalRelationshipID: relationshipID, RoutePoints: points,
-			ActorUserID: actorUserID, PermissionUserID: actorUserID,
+			ActorUserID: actorUserID, PermissionUserID: actorUserID, RealtimeConnectionID: realtimeConnectionID,
 		})
 		if err != nil {
 			writeProcessMapError(w, err, "failed_to_save_process_map_trace")
@@ -358,7 +378,7 @@ func (s *Server) handleProcessMapOperationalRelationshipByID(w http.ResponseWrit
 	}
 	result, err := s.repo.DeleteResourceOperationalRelationship(store.ResourceOperationalRelationshipDeleteInput{
 		CompanyID: companyID, ResourceOperationalRelationshipID: relationshipID,
-		ActorUserID: actorUserID, PermissionUserID: actorUserID,
+		ActorUserID: actorUserID, PermissionUserID: actorUserID, RealtimeConnectionID: realtimeConnectionID,
 	})
 	if err != nil {
 		writeProcessMapError(w, err, "failed_to_delete_operational_relationship")

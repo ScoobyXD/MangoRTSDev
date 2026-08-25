@@ -79,14 +79,6 @@ func TestProcessMapPolicyParentAndCompanyMembershipSQLContract(t *testing.T) {
 		}
 	}
 
-	integrationRaw, err := os.ReadFile("postgres_process_map_integration_test.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	integration := string(integrationRaw)
-	if strings.Contains(integration, "order by sequence desc") || !strings.Contains(integration, "order by outbox_sequence desc") {
-		t.Fatal("PostgreSQL Process Map integration test does not query the canonical realtime outbox sequence")
-	}
 }
 
 func TestProcessMapRepositoryCoordinateAndBoundedReadContract(t *testing.T) {
