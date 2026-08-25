@@ -17,9 +17,13 @@ Use the repo for schema:
 
 - `backend/db/schema.sql`
 - `backend/db/migrations/`
-- `scripts/apply_canonical_schema.ps1`
+- `backend/cmd/miraeopus-migrate`
+- `backend/Dockerfile.migrations`
 - `scripts/apply_db_migrations.ps1`
 - `scripts/check_db_ready.ps1`
+
+Fresh databases use `-mode schema -baseline-migrations -require-empty-database`;
+existing databases use ordered migrations.
 
 Use dev data only as migration input. The dev database may contain test rows, old drift, provider state, projection rows, and one-off manual changes that should not become production truth.
 

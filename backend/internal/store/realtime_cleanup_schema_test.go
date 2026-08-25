@@ -11,7 +11,7 @@ func TestRealtimeCleanupCanonicalSchemaAndForwardMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile schema.sql: %v", err)
 	}
-	schema := strings.ToLower(string(schemaBytes))
+	schema := normalizeCanonicalSchemaContract(string(schemaBytes))
 	for _, forbidden := range []string{
 		"create table if not exists event_rows",
 		"notification_domain_event_projection_checkpoints",

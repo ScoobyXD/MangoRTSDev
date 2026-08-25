@@ -59,7 +59,7 @@ func TestLogicGateFinalSchemaAndMigrationSafety(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := strings.ToLower(string(schemaBytes))
+	schema := normalizeCanonicalSchemaContract(string(schemaBytes))
 	for _, legacy := range []string{"logic_gate_information", "logic_gate_projection_table", "logic_gate_textbox_chats"} {
 		if strings.Contains(schema, "create table if not exists "+legacy) {
 			t.Errorf("canonical schema creates retired or unsupported table %s", legacy)
@@ -67,10 +67,10 @@ func TestLogicGateFinalSchemaAndMigrationSafety(t *testing.T) {
 	}
 	for _, required := range []string{
 		"create table if not exists logic_gate_textboxes",
-		"title text not null default ''",
-		"email_message_id text not null default ''",
-		"email_accent text not null default ''",
-		"metadata_revision bigint not null default 1",
+		"title text default ''::text not null",
+		"email_message_id text default ''::text not null",
+		"email_accent text default ''::text not null",
+		"metadata_revision bigint default 1 not null",
 		"create table if not exists logic_gate_textboxes_history",
 	} {
 		if !strings.Contains(schema, required) {

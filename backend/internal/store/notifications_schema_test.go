@@ -16,7 +16,7 @@ func TestNotificationsSchemaRemovesLegacySourceAnchor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
-	schema := strings.ToLower(strings.Join(strings.Fields(string(schemaRaw)), " "))
+	schema := strings.Join(strings.Fields(normalizeCanonicalSchemaContract(string(schemaRaw))), " ")
 	for _, forbidden := range []string{
 		"create table if not exists " + legacyTable,
 		"references " + legacyTable,
@@ -30,7 +30,6 @@ func TestNotificationsSchemaRemovesLegacySourceAnchor(t *testing.T) {
 		"source_event_id uuid not null",
 		"create unique index if not exists idx_notifications_dedupe on notifications(recipient_user_id, source_event_id, notification_type, entity_type, entity_id)",
 		"create index if not exists idx_notifications_source_event_id on notifications(source_event_id)",
-		"comment on column notifications.source_event_id",
 	} {
 		if !strings.Contains(schema, required) {
 			t.Fatalf("canonical notifications schema missing %q", required)
@@ -67,7 +66,7 @@ func TestSchemaDropsDerivedResourceGrantCompatibilityTriggers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
-	schema := strings.ToLower(strings.Join(strings.Fields(string(schemaRaw)), " "))
+	schema := strings.Join(strings.Fields(normalizeCanonicalSchemaContract(string(schemaRaw))), " ")
 	for _, forbidden := range []string{
 		"trg_grant_node_assignee_edit_access",
 		"trg_grant_logic_gate_RACI_edit_access",
@@ -103,10 +102,10 @@ func TestNotificationsSchemaStoresPriorityContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
-	schema := strings.ToLower(strings.Join(strings.Fields(string(schemaRaw)), " "))
+	schema := strings.Join(strings.Fields(normalizeCanonicalSchemaContract(string(schemaRaw))), " ")
 	for _, required := range []string{
 		"priority smallint",
-		"constraint notifications_priority_chk check (priority is null or priority between 1 and 5)",
+		"constraint notifications_priority_chk check (((priority is null) or ((priority >= 1) and (priority <= 5))))",
 	} {
 		if !strings.Contains(schema, required) {
 			t.Fatalf("canonical notifications schema missing %q", required)

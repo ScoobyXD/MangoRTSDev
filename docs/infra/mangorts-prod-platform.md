@@ -94,8 +94,12 @@ The repo is the schema source of truth:
 
 - `backend/db/schema.sql`
 - `backend/db/migrations/`
-- `scripts/apply_canonical_schema.ps1`
+- `backend/cmd/miraeopus-migrate`
+- `backend/Dockerfile.migrations`
 - `scripts/apply_db_migrations.ps1`
+
+Fresh databases use `-mode schema -baseline-migrations -require-empty-database`;
+existing databases use ordered migrations.
 
 Do not create prod by cloning the dev database schema and accepting all dev drift. Use a scratch database to prove that repo schema/migrations create the structure the app expects, then migrate selected data into prod.
 

@@ -66,6 +66,9 @@ func TestProcessMapPolicyParentAndCompanyMembershipSQLContract(t *testing.T) {
 			t.Fatal(err)
 		}
 		source := string(raw)
+		if path == "../../db/schema.sql" {
+			source = normalizeCanonicalSchemaContract(source)
+		}
 		for _, required := range []string{
 			"new.parent_folder_id is null",
 			"before update of parent_folder_id on company_explorer_items",
@@ -153,6 +156,9 @@ func TestPostgresMappedSourceMutationsAppendBeforeCommit(t *testing.T) {
 			t.Fatal(err)
 		}
 		source := string(raw)
+		if path == "../../db/schema.sql" {
+			source = normalizeCanonicalSchemaContract(source)
+		}
 		start := strings.Index(source, "'process_map_placement_saved'")
 		if start < 0 {
 			t.Fatalf("%s is missing Process Map read-version mapping", path)

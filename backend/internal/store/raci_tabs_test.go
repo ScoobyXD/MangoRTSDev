@@ -250,11 +250,12 @@ func TestRACITabsSchemaAndMigrationContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	schemaNormalized := normalizeCanonicalSchemaContract(string(schema))
 	for name, expected := range map[string][]string{
 		"raci_tabs_items":   {"company_id", "user_id", "role", "logic_gate_id", "folder_id", "name", "position", "created_timestamp", "updated_timestamp"},
 		"raci_tabs_folders": {"company_id", "folder_id", "user_id", "role", "parent_folder_id", "name", "position", "created_timestamp", "updated_timestamp"},
 	} {
-		assertExactUnorderedColumns(t, name, createTableColumnNames(t, string(schema), name), expected)
+		assertExactUnorderedColumns(t, name, createTableColumnNames(t, schemaNormalized, name), expected)
 	}
 	normalized := strings.ToLower(string(migration))
 	for _, required := range []string{
@@ -284,7 +285,6 @@ func TestRACITabsSchemaAndMigrationContract(t *testing.T) {
 			t.Fatalf("targeted RACI Tabs migration missing %q", required)
 		}
 	}
-	schemaNormalized := strings.ToLower(string(schema))
 	for _, forbiddenDefinition := range []string{
 		"create or replace function mangorts_sync_raci_tabs_company",
 		"create or replace function mangorts_raci_tabs_company_changed",

@@ -11,11 +11,14 @@ func TestCommunicationsReadReceiptExactAccountUpgradeContract(t *testing.T) {
 	migration := readCommunicationsReadReceiptContractFile(t, "../../db/migrations/20260713_00_exact_account_communications_read_receipts.sql")
 	runtimeSource := readCommunicationsReadReceiptContractFile(t, "postgres_communications.go")
 	scopeSource := readCommunicationsReadReceiptContractFile(t, "memory_communications.go")
-	for name, source := range map[string]string{"canonical schema": schema, "migration": migration} {
-		for _, required := range []string{"receipt_scope_id like user_id::text || ':%'", "length(receipt_scope_id) > length(user_id::text) + 1"} {
-			if !strings.Contains(source, required) {
-				t.Fatalf("%s missing exact personal-account constraint %q", name, required)
-			}
+	for _, required := range []string{"receipt_scope_id like user_id::text || ':%'", "length(receipt_scope_id) > length(user_id::text) + 1"} {
+		if !strings.Contains(migration, required) {
+			t.Fatalf("migration missing exact personal-account constraint %q", required)
+		}
+	}
+	for _, required := range []string{"(receipt_scope_id)::text ~~ ((user_id)::text || ':%'::text)", "length((receipt_scope_id)::text) > (length((user_id)::text) + 1)"} {
+		if !strings.Contains(schema, required) {
+			t.Fatalf("canonical schema missing exact personal-account constraint %q", required)
 		}
 	}
 	for _, forbidden := range []string{"create table", "alter table", "drop table", "create index", "create trigger"} {
@@ -36,5 +39,9 @@ func readCommunicationsReadReceiptContractFile(t *testing.T, path string) string
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
-	return strings.ToLower(strings.Join(strings.Fields(string(body)), " "))
+	source := string(body)
+	if path == "../../db/schema.sql" {
+		source = normalizeCanonicalSchemaContract(source)
+	}
+	return strings.ToLower(strings.Join(strings.Fields(source), " "))
 }

@@ -489,7 +489,10 @@ func TestLogicGateWorkFastPathMigrationMatchesCanonicalSchema(t *testing.T) {
 			t.Fatalf("ReadFile %s: %v", path, err)
 		}
 		normalized := strings.ToLower(string(source))
-		for _, required := range []string{
+		if path == "../../db/schema.sql" {
+			normalized = normalizeCanonicalSchemaContract(string(source))
+		}
+		requiredMarkers := []string{
 			"status_rank smallint generated always as",
 			"company_id, logic_gate_id, status_rank, position",
 			"assignment_created_timestamp, assignment_id",
@@ -497,9 +500,6 @@ func TestLogicGateWorkFastPathMigrationMatchesCanonicalSchema(t *testing.T) {
 			"primary key (company_id, logic_gate_id)",
 			"logic_gate_work_versions_board_key unique (company_id, board_id)",
 			"trg_logic_gate_work_version_gate",
-			"trg_logic_gate_work_version_permissions",
-			"trg_logic_gate_work_version_permission_applications",
-			"trg_logic_gate_work_version_gvic",
 			"trg_logic_gate_work_version_explorer_items",
 			"trg_logic_gate_work_version_explorer_folder_update",
 			"trg_logic_gate_work_version_memberships",
@@ -507,7 +507,15 @@ func TestLogicGateWorkFastPathMigrationMatchesCanonicalSchema(t *testing.T) {
 			"trg_logic_gate_work_version_assignments",
 			"trg_logic_gate_work_version_projection",
 			"trg_logic_gate_work_version_nodes",
-		} {
+		}
+		requiredMarkers = append(requiredMarkers,
+			"trg_logic_gate_work_version_permissions",
+			"trg_logic_gate_work_version_gvic",
+		)
+		if path != "../../db/schema.sql" {
+			requiredMarkers = append(requiredMarkers, "trg_logic_gate_work_version_permission_applications")
+		}
+		for _, required := range requiredMarkers {
 			if !strings.Contains(normalized, required) {
 				t.Fatalf("%s missing Logic Gate fast-path contract %q", path, required)
 			}

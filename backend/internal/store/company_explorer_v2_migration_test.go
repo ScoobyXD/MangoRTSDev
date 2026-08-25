@@ -24,16 +24,16 @@ func TestCompanyExplorerFinalSchemaDefinesContainmentTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
-	normalized := normalizeSQLForCompanyExplorerV2Test(string(raw))
+	normalized := normalizeSQLForCompanyExplorerV2Test(normalizeCanonicalSchemaContract(string(raw)))
 
 	for _, want := range []string{
 		"create table if not exists company_explorer_folders",
 		"parent_folder_id uuid",
-		"default_access text not null default 'edit'",
+		"default_access text default 'edit'::text not null",
 		"create table if not exists company_explorer_items",
 		"target_type text not null",
 		"target_id uuid not null",
-		"constraint company_explorer_items_target_type_chk check (target_type in ('project', 'logic_gate'))",
+		"constraint company_explorer_items_target_type_chk check ((target_type = any (array['project'::text, 'logic_gate'::text])))",
 		"unique (company_id, target_type, target_id)",
 		"foreign key (company_id, parent_folder_id) references company_explorer_folders(company_id, folder_id) on delete cascade",
 		"create index if not exists idx_company_explorer_items_parent_position",
@@ -368,7 +368,11 @@ func TestCompanyExplorerFinalVerificationViewCoversCutoverInvariants(t *testing.
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		normalized := normalizeSQLForCompanyExplorerV2Test(string(raw))
+		source := string(raw)
+		if strings.HasSuffix(filepath.ToSlash(path), "db/schema.sql") {
+			source = normalizeCanonicalSchemaContract(source)
+		}
+		normalized := normalizeSQLForCompanyExplorerV2Test(source)
 		for _, want := range []string{
 			"create or replace view company_explorer_final_backfill_verification",
 			"manual_references_have_existing_targets",
@@ -392,7 +396,11 @@ func TestCompanyExplorerAccessHelperCutoverUsesFinalFolderStorage(t *testing.T) 
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
 		}
-		normalized := extractAccessHelperSQLForCompanyExplorerV2Test(t, normalizeSQLForCompanyExplorerV2Test(string(raw)))
+		source := string(raw)
+		if strings.HasSuffix(filepath.ToSlash(path), "db/schema.sql") {
+			source = normalizeCanonicalSchemaContract(source)
+		}
+		normalized := extractAccessHelperSQLForCompanyExplorerV2Test(t, normalizeSQLForCompanyExplorerV2Test(source))
 		if strings.HasSuffix(filepath.ToSlash(path), "db/schema.sql") {
 			for _, want := range []string{
 				"from mangorts_v2_resolve_permission_policy",

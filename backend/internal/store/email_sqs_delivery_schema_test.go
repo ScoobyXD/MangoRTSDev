@@ -12,7 +12,11 @@ func readEmailSQSContractFile(t *testing.T, path string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return strings.ToLower(strings.ReplaceAll(string(raw), "\r\n", "\n"))
+	source := string(raw)
+	if path == "../../db/schema.sql" {
+		source = normalizeCanonicalSchemaContract(source)
+	}
+	return strings.ToLower(strings.ReplaceAll(source, "\r\n", "\n"))
 }
 
 func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T) {
@@ -26,13 +30,18 @@ func TestEmailSQSSchemaUsesPermanentIdentityAndProviderAttemptFence(t *testing.T
 			"attempt_token",
 			"enqueue_source_id",
 			"sqs_accepted_timestamp",
-			"status in ('accepted','processing','completed','parked','exhausted')",
 			"idx_email_ingestion_jobs_stable_message",
 		} {
 			if !strings.Contains(compact, strings.Join(strings.Fields(required), "")) {
 				t.Errorf("%s is missing %q", label, required)
 			}
 		}
+	}
+	if compact := strings.Join(strings.Fields(schema), ""); !strings.Contains(compact, strings.Join(strings.Fields("status = any (array['accepted'::text, 'processing'::text, 'completed'::text, 'parked'::text, 'exhausted'::text])"), "")) {
+		t.Fatal("canonical schema is missing the final email ingestion status fence")
+	}
+	if compact := strings.Join(strings.Fields(migration), ""); !strings.Contains(compact, strings.Join(strings.Fields("status in ('accepted','processing','completed','parked','exhausted')"), "")) {
+		t.Fatal("migration is missing the final email ingestion status fence")
 	}
 	if !strings.Contains(schema, "idx_email_relationships_one_textbox_per_message_owner") {
 		t.Fatal("canonical schema is missing the final Node/Project textbox cardinality index")

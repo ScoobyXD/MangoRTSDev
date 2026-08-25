@@ -285,6 +285,44 @@ Run another audit afterward:
 
 The helper requires `schema_inventory_sha256` to equal the fresh dev hash, the repository fingerprint to match, and both `missing_from_ledger=0` and `unknown_to_repository=0`. This is the physical catalog parity gate. It covers exact unordered column names/counts and the other material objects defined in `schema_inventory.sql`; it deliberately ignores physical column order, grants, row data, and the `schema_migrations` table itself. Stop on any nonzero task exit code, hash mismatch, or migration-ledger mismatch. Do not deploy the API, create Jonat, or add synthetic data before it passes.
 
+If this final audit fails after bootstrap, do not rerun bootstrap and do not patch
+QA by hand. The empty-database guard will correctly reject the now-populated
+catalog. Keep the API and email worker stopped and align dev and the canonical
+snapshot first.
+
+The one approved recovery for the original empty QA bootstrap is
+`20260825_canonical_schema_reconciliation.sql`. Build a new immutable migration
+image from the reviewed commit. Its read-only preflight must report the exact
+approved current QA inventory hash, exactly one repository migration missing
+from the ledger, and zero unknown ledger rows:
+
+```powershell
+.\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
+  -Action Audit `
+  -AuditPurpose ReconciliationPreflight `
+  -ExpectedSchemaInventorySHA256 "d95d43d17b274a440c0a28f6a68050650be60fd765af9b2841ae113716fcbbfc" `
+  -Execute `
+  -HumanOperatorApproval
+```
+
+Save the audit task ARN. A human may then run only that migration through the
+guarded action:
+
+```powershell
+.\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
+  -Action Reconcile `
+  -ExpectedSchemaInventorySHA256 "d95d43d17b274a440c0a28f6a68050650be60fd765af9b2841ae113716fcbbfc" `
+  -ReconciliationAuditTaskArn "<completed-reconciliation-audit-task-arn>" `
+  -Execute `
+  -HumanOperatorApproval
+```
+
+The migration refuses partial or populated retired V2 storage, uses no
+`CASCADE`, and is recorded in the ledger in the same transaction. Run the normal
+Parity audit immediately afterward with the fresh aligned-dev hash. If the
+preflight shape differs, the migration stops, or parity still fails, use the
+QA-only RDS replacement procedure under **Reset** after its separate approval.
+
 ## Phase 4: Deploy The Base App
 
 Deploy the QA backend and frontend using the same reviewed image/build patterns as dev, but with only QA variables, roles, buckets, secrets, domains, Cognito IDs, and Terraform state. The API must use `AUTH_MODE=cognito`. Keep `TF_REALTIME_VALKEY_ENABLED=true`, `TF_ECS_CONTAINER_INSIGHTS_ENABLED=true`, `TF_CLOUDWATCH_ALARMS_ENABLED=true`, and `TF_WAF_ENABLED=true`.

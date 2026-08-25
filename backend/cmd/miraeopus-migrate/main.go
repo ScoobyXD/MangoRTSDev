@@ -346,9 +346,15 @@ func schemaInventoryDigest(raw []byte) (int, string, error) {
 		if item.ObjectKind == "grant" || strings.Contains(item.ObjectIdentity, "schema_migrations") {
 			continue
 		}
-		if item.ObjectKind == "column" {
-			if definition, ok := item.Definition.(map[string]any); ok {
+		if definition, ok := item.Definition.(map[string]any); ok {
+			switch item.ObjectKind {
+			case "column":
 				delete(definition, "ordinal_position")
+			case "function":
+				if functionDefinition, ok := definition["definition"].(string); ok {
+					functionDefinition = strings.ReplaceAll(functionDefinition, "\r\n", "\n")
+					definition["definition"] = strings.ReplaceAll(functionDefinition, "\r", "\n")
+				}
 			}
 		}
 		filtered = append(filtered, item)

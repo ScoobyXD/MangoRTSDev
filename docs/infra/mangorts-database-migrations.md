@@ -48,14 +48,16 @@ The later human-run conversion/cutover is separate: drain editor writes or enter
 MangoRTS uses both migration history and a current schema snapshot:
 
 - `backend/db/migrations/` is the append-only change history. Every durable schema repair belongs here, even if the same SQL also exists in a DBeaver/runbook file.
-- `backend/db/schema.sql` is the current canonical schema snapshot for reviewed fresh-database bootstrap and object inventory.
+- `backend/db/schema.sql` is the current canonical, data-free PostgreSQL 17 schema snapshot for reviewed fresh-database bootstrap and object inventory.
 - `schema_migrations` is only a ledger of recorded filenames. It is not proof that the live database physically has every expected table, column, constraint, index, function, trigger, and type.
 
 For a normal existing database, run pending migrations.
 
 For a brand-new database, apply `backend/db/schema.sql` with `-baseline-migrations` after confirming the snapshot is the intended current schema. Historical replay from empty is an optional disposable audit only after proving that the full history is reconstructable; it is not the fresh QA bootstrap path.
 
-Do not create a new environment by cloning dev schema drift or by blindly importing dev `schema_migrations`. Before calling a new database ready, compare its fresh same-commit physical catalog hash against the fresh source-environment hash: tables, exact unordered column names/counts, primary keys, foreign keys, check constraints, unique constraints, indexes, functions, triggers, enum/custom types, defaults, nullability, and extensions. Physical column order is not drift. Use `backend/db/schema_inventory.sql`, the audit hashes, and `scripts/compare_schema_inventory.py`; the runbook is `docs/infra/mangorts-schema-audit.md`.
+Do not create a new environment by cloning dev schema drift or by blindly importing dev `schema_migrations`. A canonical snapshot may be regenerated from a reviewed, schema-only PostgreSQL 17 dump only after every difference from the prior canonical snapshot has been classified. Run `scripts/sanitize_pg_dump_schema.py`; never copy rows, owners, grants, tablespaces, database commands, or the migration ledger into the snapshot. Remove retired objects and repair missing required objects before approving it. Prove that the sanitized snapshot bootstraps an empty PostgreSQL 17 database and produces an identical physical inventory.
+
+Before calling a new environment ready, first align the source environment to that reviewed canonical inventory. Then compare fresh same-commit source and target hashes: tables, exact unordered column names/counts, primary keys, foreign keys, check constraints, unique constraints, indexes, functions, triggers, enum/custom types, defaults, nullability, and extensions. Physical column order is not drift. Use `backend/db/schema_inventory.sql`, the audit hashes, and `scripts/compare_schema_inventory.py`; the runbook is `docs/infra/mangorts-schema-audit.md`.
 
 Available flags:
 

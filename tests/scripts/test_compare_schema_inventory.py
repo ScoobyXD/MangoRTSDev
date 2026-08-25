@@ -99,6 +99,43 @@ class SchemaInventoryComparatorTests(unittest.TestCase):
         )
         self.assertNotIn("ordinal_position", query.lower())
 
+    def test_function_line_endings_compare_and_hash_equal(self) -> None:
+        definition = {
+            "schema": "public",
+            "name": "touch_widget",
+            "definition": "CREATE FUNCTION public.touch_widget()\r\n RETURNS trigger\rAS $$\r\nBEGIN\r\nEND;\r\n$$;\r\n",
+        }
+        expected = compare_schema_inventory.InventoryItem(
+            "function", "public.touch_widget()", definition
+        )
+        actual = compare_schema_inventory.InventoryItem(
+            "function",
+            "public.touch_widget()",
+            {
+                **definition,
+                "definition": definition["definition"]
+                .replace("\r\n", "\n")
+                .replace("\r", "\n"),
+            },
+        )
+
+        self.assertEqual(
+            compare_schema_inventory.compare([expected], [actual]),
+            ([], [], []),
+        )
+        self.assertEqual(expected.normalized_definition(), actual.normalized_definition())
+        self.assertEqual(
+            compare_schema_inventory.inventory_digest([expected]),
+            compare_schema_inventory.inventory_digest([actual]),
+        )
+
+    def test_catalog_query_normalizes_function_line_endings(self) -> None:
+        query = (REPO_ROOT / "backend" / "db" / "schema_inventory.sql").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("replace(pg_get_functiondef(proc.oid), E'\\r\\n', E'\\n')", query)
+        self.assertIn("E'\\r',\n        E'\\n'", query)
+
     def test_gate_rejects_unstamped_historical_arrays(self) -> None:
         exports = compare_schema_inventory.InventoryExport([item("alpha")], {})
         errors = compare_schema_inventory.validate_export_gate(
@@ -228,6 +265,18 @@ class SchemaInventoryComparatorTests(unittest.TestCase):
         self.assertIn("[Text.UTF8Encoding]::new($false)", script)
         self.assertIn("Remove-Item -LiteralPath $networkConfigurationPath", script)
         self.assertIn("Remove-Item -LiteralPath $overridesPath", script)
+
+    def test_qa_reconciliation_requires_read_only_evidence_and_one_exact_migration(self) -> None:
+        script = (REPO_ROOT / "scripts" / "qa_run_database_task.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('[ValidateSet("Audit", "Bootstrap", "Reconcile")]', script)
+        self.assertIn("20260825_canonical_schema_reconciliation.sql", script)
+        self.assertIn('@("-mode", "migrate", "-start-at", $ReconciliationMigration)', script)
+        self.assertIn("ReconciliationAuditTaskArn", script)
+        self.assertIn("missing_from_ledger=1", script)
+        self.assertIn("unknown_to_repository=0", script)
 
     def test_generated_schema_audit_outputs_are_ignored(self) -> None:
         ignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")

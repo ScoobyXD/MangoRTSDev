@@ -49,7 +49,7 @@ run("RACI Tabs disposable PostgreSQL contract", "node scripts/test_raci_tabs_pos
 run("Huddle Explorer disposable PostgreSQL contract", "node scripts/test_huddle_explorer_postgres.mjs", repoRoot);
 run(
   "Schema inventory comparator tests",
-  `${process.platform === "win32" ? "python" : "python3"} -m unittest tests.scripts.test_compare_schema_inventory`,
+  `${process.platform === "win32" ? "python" : "python3"} -m unittest tests.scripts.test_compare_schema_inventory tests.scripts.test_prepare_prod_db_schema_copy tests.scripts.test_sanitize_pg_dump_schema tests.scripts.test_schema_alignment_contracts`,
   repoRoot,
 );
 runBackendGoTests();

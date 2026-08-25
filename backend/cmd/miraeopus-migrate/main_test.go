@@ -211,6 +211,30 @@ func TestSchemaInventoryDigestIgnoresObjectOrderAndDefaultExclusions(t *testing.
 	}
 }
 
+func TestSchemaInventoryDigestNormalizesFunctionLineEndings(t *testing.T) {
+	crlf := []byte(`[
+  {"object_kind":"function","object_identity":"public.touch_widget()","definition":{"name":"touch_widget","definition":"CREATE FUNCTION public.touch_widget()\r\n RETURNS trigger\rAS $$\r\nBEGIN\r\nEND;\r\n$$;\r\n"}}
+]`)
+	lf := []byte(`[
+  {"object_kind":"function","object_identity":"public.touch_widget()","definition":{"name":"touch_widget","definition":"CREATE FUNCTION public.touch_widget()\n RETURNS trigger\nAS $$\nBEGIN\nEND;\n$$;\n"}}
+]`)
+
+	crlfCount, crlfDigest, err := schemaInventoryDigest(crlf)
+	if err != nil {
+		t.Fatalf("schemaInventoryDigest CRLF: %v", err)
+	}
+	lfCount, lfDigest, err := schemaInventoryDigest(lf)
+	if err != nil {
+		t.Fatalf("schemaInventoryDigest LF: %v", err)
+	}
+	if crlfCount != 1 || lfCount != 1 {
+		t.Fatalf("compared counts = %d and %d, want 1 and 1", crlfCount, lfCount)
+	}
+	if crlfDigest != lfDigest {
+		t.Fatalf("function inventory digests differ: CRLF=%s LF=%s", crlfDigest, lfDigest)
+	}
+}
+
 func TestSchemaInventoryDigestRejectsMissingAndExtraColumns(t *testing.T) {
 	base := []byte(`[
   {"object_kind":"column","object_identity":"public.widgets.alpha","definition":{"column":"alpha","data_type":"text"}},
@@ -277,6 +301,9 @@ func TestSchemaInventoryQueryDoesNotIncludePhysicalColumnOrder(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(string(raw)), "ordinal_position") {
 		t.Fatal("schema inventory must not include physical column order")
+	}
+	if !strings.Contains(string(raw), "replace(pg_get_functiondef(proc.oid), E'\\r\\n', E'\\n')") {
+		t.Fatal("schema inventory must normalize function definition line endings")
 	}
 }
 

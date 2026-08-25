@@ -13,6 +13,9 @@ func readNodeFinalContractFile(t *testing.T, parts ...string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if filepath.Base(filepath.Join(parts...)) == "schema.sql" {
+		return normalizeCanonicalSchemaContract(string(body))
+	}
 	return strings.ToLower(string(body))
 }
 

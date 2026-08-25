@@ -15,11 +15,11 @@ func TestPinsUseCanonicalTableName(t *testing.T) {
 	}
 	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
 
-	schema := readRepoFile(t, repoRoot, "backend/db/schema.sql")
-	assertContains(t, schema, "create table if not exists pins (", "schema must create pins table")
-	assertContains(t, schema, "create table if not exists pin_folders (", "schema must create pin folders table")
+	schema := strings.ToLower(readRepoFile(t, repoRoot, "backend/db/schema.sql"))
+	assertContains(t, schema, "create table public.pins (", "schema must create pins table")
+	assertContains(t, schema, "create table public.pin_folders (", "schema must create pin folders table")
 	assertContains(t, schema, "parent_folder_id uuid", "schema must store pin tree parents")
-	assertContains(t, schema, "references pin_folders(company_id, user_id, folder_id) on delete cascade", "pin tree parents must be owner scoped and cascade only pin records")
+	assertContains(t, schema, "references public.pin_folders(company_id, user_id, folder_id) on delete cascade", "pin tree parents must be owner scoped and cascade only pin records")
 	assertNotContains(t, schema, "user_pins", "schema must not create or reference user_pins")
 
 	store := readRepoFile(t, repoRoot, "backend/internal/store/postgres_user_pins.go")

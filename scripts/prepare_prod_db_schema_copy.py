@@ -33,6 +33,11 @@ TENANT_ROW_MARKERS = (
 # Tables whose rows may be considered metadata, not customer/work data. This list
 # is deliberately tiny; everything else needs a human review before copying.
 METADATA_TABLE_ALLOWLIST = {"schema_migrations"}
+TABLE_PATTERN = r"create\s+table\s+(?:if\s+not\s+exists\s+)?([a-zA-Z_][\w.]*)"
+INDEX_PATTERN = r"create\s+(?:unique\s+)?index\s+(?:if\s+not\s+exists\s+)?([a-zA-Z_][\w.]*)"
+FUNCTION_PATTERN = r"create\s+(?:or\s+replace\s+)?function\s+([a-zA-Z_][\w.]*)"
+TRIGGER_PATTERN = r"create\s+trigger\s+([a-zA-Z_][\w.]*)"
+TYPE_PATTERN = r"create\s+type\s+([a-zA-Z_][\w.]*)"
 
 
 @dataclass(frozen=True)
@@ -66,6 +71,10 @@ def stable_unique(items: Iterable[str]) -> list[str]:
     output: list[str] = []
     for item in items:
         clean = item.strip().strip('"').lower()
+        if "." in clean:
+            schema, clean = clean.split(".", 1)
+            if schema != "public":
+                raise ValueError(f"canonical schema contains an unexpected object schema: {schema}")
         if clean and clean not in seen:
             seen.add(clean)
             output.append(clean)
@@ -87,11 +96,11 @@ def build_manifest(repo_root: Path) -> SchemaManifest:
     schema_sql = read_text(schema_path)
     migration_files = sorted(path.name for path in migrations_dir.glob("*.sql"))
 
-    tables = object_names(r"create\s+table\s+(?:if\s+not\s+exists\s+)?([a-zA-Z_][\w.]*)", schema_sql)
-    indexes = object_names(r"create\s+(?:unique\s+)?index\s+(?:if\s+not\s+exists\s+)?([a-zA-Z_][\w.]*)", schema_sql)
-    functions = object_names(r"create\s+or\s+replace\s+function\s+([a-zA-Z_][\w.]*)", schema_sql)
-    triggers = object_names(r"create\s+trigger\s+([a-zA-Z_][\w.]*)", schema_sql)
-    types = object_names(r"create\s+type\s+([a-zA-Z_][\w.]*)", schema_sql)
+    tables = object_names(TABLE_PATTERN, schema_sql)
+    indexes = object_names(INDEX_PATTERN, schema_sql)
+    functions = object_names(FUNCTION_PATTERN, schema_sql)
+    triggers = object_names(TRIGGER_PATTERN, schema_sql)
+    types = object_names(TYPE_PATTERN, schema_sql)
     insert_statements = re.findall(r"\binsert\s+into\b", schema_sql, flags=re.IGNORECASE)
 
     metadata_tables = sorted(METADATA_TABLE_ALLOWLIST)

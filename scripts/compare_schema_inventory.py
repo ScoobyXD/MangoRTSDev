@@ -33,10 +33,23 @@ class InventoryItem:
         return (self.object_kind, self.object_identity)
 
     def normalized_definition_value(self) -> Any:
-        if self.object_kind == "column" and isinstance(self.definition, dict):
+        if not isinstance(self.definition, dict):
+            return self.definition
+
+        if self.object_kind == "column":
             normalized = dict(self.definition)
             normalized.pop("ordinal_position", None)
             return normalized
+
+        if self.object_kind == "function":
+            normalized = dict(self.definition)
+            function_definition = normalized.get("definition")
+            if isinstance(function_definition, str):
+                normalized["definition"] = function_definition.replace("\r\n", "\n").replace(
+                    "\r", "\n"
+                )
+            return normalized
+
         return self.definition
 
     def normalized_definition(self) -> str:

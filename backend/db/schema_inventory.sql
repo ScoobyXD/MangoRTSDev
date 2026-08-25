@@ -206,7 +206,11 @@ function_objects as (
       'strict', proc.proisstrict,
       'security_definer', proc.prosecdef,
       'parallel', proc.proparallel,
-      'definition', pg_get_functiondef(proc.oid)
+      'definition', replace(
+        replace(pg_get_functiondef(proc.oid), E'\r\n', E'\n'),
+        E'\r',
+        E'\n'
+      )
     ) as definition
   from pg_proc proc
   join included_namespaces namespace on namespace.oid = proc.pronamespace

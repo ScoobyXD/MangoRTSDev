@@ -118,7 +118,10 @@ func TestEntityFieldsSchemaAndMigrationMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read migration: %v", err)
 	}
-	for name, sql := range map[string]string{"schema": string(schemaRaw), "migration": string(migrationRaw)} {
+	for name, sql := range map[string]string{
+		"schema":    normalizeCanonicalSchemaContract(string(schemaRaw)),
+		"migration": string(migrationRaw),
+	} {
 		for _, marker := range []string{
 			"create table if not exists entity_fields",
 			"idx_entity_fields_company_name_unique",

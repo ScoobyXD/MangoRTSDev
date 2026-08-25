@@ -1,8 +1,10 @@
 # MangoRTS Schema Parity Audit
 
 Use this workflow to prove that two PostgreSQL databases have the same material
-schema. For fresh QA, the blocking comparison is a fresh dev inventory against a
-fresh QA inventory produced from the same Git commit before the API, users, or
+schema. For fresh QA, first prove that the canonical schema replays exactly on a
+disposable PostgreSQL 17 database, then align dev to that canonical inventory.
+The blocking hosted comparison is a fresh aligned-dev inventory against a fresh
+QA inventory produced from the same Git commit before the API, users, or
 synthetic data are added.
 
 `schema_migrations` is a separate ledger audit. Matching filenames do not prove
@@ -23,6 +25,9 @@ that the physical schema matches.
 Physical column order is deliberately absent. The comparator uses the exact
 unordered set of column identities and the exact object count. The same columns
 in a different physical order pass; a missing or extra column fails.
+
+Function definitions normalize Windows and Unix line endings before hashing.
+This removes operating-system-only differences without hiding SQL differences.
 
 By default, both the audit hash and offline comparator exclude grant objects and
 any identity containing `schema_migrations`. This keeps environment-specific
@@ -65,16 +70,27 @@ an old writer-backed ECS audit as the dev reference.
 
 The QA sequence is then:
 
-1. Run the empty QA audit from the exact migration image commit and require
+1. Bootstrap the canonical snapshot in a disposable PostgreSQL 17 database and
+   require its inventory to match the reviewed canonical target exactly.
+2. Run the guarded dev alignment as a separate human database operation, then
+   export a fresh read-only dev inventory and require it to match canonical.
+3. Run the empty QA audit from the exact migration image commit and require
    PostgreSQL 17.x, `public_tables=0`, and the dev repository fingerprint.
-2. A human runs the transactional `-mode schema -baseline-migrations` task.
-3. Before starting the API or creating any users/data, run the final QA audit.
-4. Require the QA inventory SHA-256 to equal fresh dev and require both migration
+4. A human runs the transactional `-mode schema -baseline-migrations` task.
+5. Before starting the API or creating any users/data, run the final QA audit.
+6. Require the QA inventory SHA-256 to equal fresh dev and require both migration
    ledger difference counts to be zero.
 
 `scripts/qa_run_database_task.ps1` enforces these values from completed CloudWatch
 logs. It never reads or prints the ECS database secret. The hosted bootstrap
 switch remains human-only because that task receives a writer credential.
+
+An already-bootstrapped but still empty QA catalog may use the guarded one-time
+`Reconcile` action only when its same-image read-only preflight proves the exact
+approved source inventory, exactly one missing migration ledger row, and zero
+unknown rows. The action starts at the fixed reconciliation migration; it is not
+a general hosted repair command. Any other mismatch follows the reviewed QA reset
+procedure.
 
 ## Create A Stamped Read-Only Export
 
@@ -154,11 +170,12 @@ python scripts\compare_schema_inventory.py `
 
 ## Optional Disposable Precheck
 
-A human may apply the current `backend/db/schema.sql` and migration baseline to a
-disposable PostgreSQL 17 database, then run `schema_inventory.sql` to check the
-canonical projection before QA exists. This is an additional precheck, not a new
-permanent environment and not a substitute for fresh dev-versus-QA catalog
-parity. Agents must not run the schema write or receive that writer credential.
+A human or agent may apply the current `backend/db/schema.sql` and migration
+baseline to an isolated disposable local PostgreSQL 17 database, then run
+`schema_inventory.sql` to check the canonical projection before QA exists. This
+local replay is required release evidence, but it is not a permanent environment
+and does not replace fresh aligned-dev-versus-QA catalog parity. Agents must not
+run the schema write on hosted dev or QA or receive a hosted writer credential.
 
 PostgreSQL 18 can exercise the tooling locally, but it is not release evidence for
 the PostgreSQL 17.x QA target.

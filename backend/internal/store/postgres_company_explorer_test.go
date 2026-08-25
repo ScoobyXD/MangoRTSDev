@@ -230,7 +230,11 @@ func TestEditorEntitySearchTrigramIndexesAreCanonical(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ReadFile %s: %v", path, err)
 		}
-		source := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+		sourceText := string(raw)
+		if path == "../../db/schema.sql" {
+			sourceText = normalizeCanonicalSchemaContract(sourceText)
+		}
+		source := strings.ToLower(strings.Join(strings.Fields(sourceText), " "))
 		for _, want := range []string{
 			"create extension if not exists pg_trgm",
 			"idx_nodes_name_trgm",

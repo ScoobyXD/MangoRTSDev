@@ -17,11 +17,14 @@ Do not put database passwords in Terraform variables, GitHub secrets, docs, or s
 
 ## Schema
 
-Bootstrap schema:
+Canonical schema snapshot:
 
 ```text
 backend/db/schema.sql
 ```
+
+Fresh databases must apply this snapshot only through the guarded migration
+runner with `-mode schema -baseline-migrations -require-empty-database`.
 
 
 ### Entity field labels (2026-07-21)
@@ -103,10 +106,11 @@ $env:PGPASSWORD=$password
 $env:PGSSLMODE="require"
 ```
 
-For a fresh empty DB:
+For a fresh empty DB, follow `docs/infra/mangorts-database-migrations.md` and run
+the human-controlled migration task with:
 
-```powershell
-.\scripts\apply_canonical_schema.ps1
+```text
+miraeopus-migrate -mode schema -baseline-migrations -require-empty-database
 ```
 
 For an existing DB:
@@ -155,8 +159,7 @@ export DB_PORT="5432"
 export DB_NAME="mangorts"
 export DB_USER="mangorts_app"
 export PGPASSWORD="<db-password>"
-./scripts/apply_canonical_schema.sh
-# or, for existing DBs:
+# Existing databases only:
 ./scripts/apply_db_migrations.sh --dry-run
 ./scripts/apply_db_migrations.sh
 ```

@@ -13,7 +13,7 @@ func TestLegacyKanbanTablesAreRemovedFromCanonicalSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
-	normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	normalized := strings.Join(strings.Fields(normalizeCanonicalSchemaContract(string(raw))), " ")
 
 	for _, forbidden := range []string{
 		"create table if not exists kanban_boards",
@@ -49,12 +49,12 @@ func TestNodeLogicGateAssignmentMemberReferenceFksNullOnlyUserColumns(t *testing
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
-	assignmentTable := normalizedCreateTableForTest(t, string(raw), "node_logic_gate_assignments")
+	normalizedSchema := strings.Join(strings.Fields(normalizeCanonicalSchemaContract(string(raw))), " ")
 	for _, required := range []string{
-		"foreign key (company_id, requested_by_user_id) references company_memberships (company_id, user_id) on delete set null (requested_by_user_id)",
-		"foreign key (company_id, placed_by_user_id) references company_memberships (company_id, user_id) on delete set null (placed_by_user_id)",
+		"add constraint node_logic_gate_assignments_requested_by_user_id_fkey foreign key (company_id, requested_by_user_id) references company_memberships(company_id, user_id) on delete set null (requested_by_user_id)",
+		"add constraint node_logic_gate_assignments_placed_by_user_id_fkey foreign key (company_id, placed_by_user_id) references company_memberships(company_id, user_id) on delete set null (placed_by_user_id)",
 	} {
-		if !strings.Contains(assignmentTable, required) {
+		if !strings.Contains(normalizedSchema, required) {
 			t.Fatalf("node_logic_gate_assignments missing member FK shape %q", required)
 		}
 	}
@@ -196,7 +196,7 @@ func TestKanbanBoardProjectionMigrationAndSchemaAreBounded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
-	normalizedSchema := strings.ToLower(strings.Join(strings.Fields(string(schemaRaw)), " "))
+	normalizedSchema := strings.Join(strings.Fields(normalizeCanonicalSchemaContract(string(schemaRaw))), " ")
 	if !strings.Contains(normalizedSchema, "create table if not exists kanban_board_projection") {
 		t.Fatal("canonical schema is missing kanban_board_projection")
 	}

@@ -358,7 +358,7 @@ func TestCommunicationsEmailThreadSchemaKeepsBodiesAndMetadataOutOfHotProjection
 	if err != nil {
 		t.Fatalf("read canonical schema: %v", err)
 	}
-	source := strings.ToLower(string(raw))
+	source := normalizeCanonicalSchemaContract(string(raw))
 	for _, required := range []string{
 		"create table if not exists email_threads",
 		"create table if not exists email_messages",
@@ -597,16 +597,17 @@ func TestCommunicationsEmailThreadDurableDownloadSchemaContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read canonical schema: %v", err)
 	}
-	source := strings.ToLower(string(raw))
+	source := normalizeCanonicalSchemaContract(string(raw))
+	compact := strings.Join(strings.Fields(source), "")
 	for _, fragment := range []string{
-		"download_status text not null",
-		"download_complete boolean not null default false",
+		"download_status text default 'partial'::text not null",
+		"download_complete boolean default false not null",
 		"create table if not exists email_ingestion_jobs",
 		"email_connection_id uuid not null",
-		"priority smallint not null",
+		"priority smallint default 30 not null",
 		"unique (company_id,email_thread_id,provider_message_id)",
 	} {
-		if !strings.Contains(strings.ReplaceAll(source, " ", ""), strings.ReplaceAll(fragment, " ", "")) {
+		if !strings.Contains(compact, strings.Join(strings.Fields(fragment), "")) {
 			t.Fatalf("canonical schema missing %q", fragment)
 		}
 	}

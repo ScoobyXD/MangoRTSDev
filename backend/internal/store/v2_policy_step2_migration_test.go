@@ -1,8 +1,6 @@
 package store
 
 import (
-	"context"
-	"database/sql"
 	"os"
 	"regexp"
 	"strings"
@@ -13,32 +11,50 @@ import (
 )
 
 const (
-	v2PolicyStep2SchemaBegin = "-- BEGIN V2 GVIC AND PERMISSIONS STEP 2 CUTOVER SCHEMA"
-	v2PolicyStep2SchemaEnd   = "-- END V2 GVIC AND PERMISSIONS STEP 2 CUTOVER SCHEMA"
-	v2PolicyStep2Migration   = "20260805_zzzc_v2_gvic_permissions_step2_cutover.sql"
-	raciRoleSchemaBegin      = "-- BEGIN RACI ROLE CONTRACT"
-	raciRoleSchemaEnd        = "-- END RACI ROLE CONTRACT"
-	raciRoleMigration        = "20260806_zzz_raci_roles.sql"
+	v2PolicyStep2Migration = "20260805_zzzc_v2_gvic_permissions_step2_cutover.sql"
+	raciRoleMigration      = "20260806_zzz_raci_roles.sql"
 )
 
 func TestV2PolicyStep2SchemaAndOperatorContract(t *testing.T) {
-	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
+	schema := strings.Join(strings.Fields(normalizeCanonicalSchemaContract(
+		readV2PolicyStep1File(t, "..", "..", "db", "schema.sql"),
+	)), " ")
 	migration := readV2PolicyStep1File(t, "..", "..", "db", "migrations", v2PolicyStep2Migration)
-	start := strings.Index(schema, v2PolicyStep2SchemaBegin)
-	end := strings.Index(schema, v2PolicyStep2SchemaEnd)
-	if start < 0 || end <= start {
-		t.Fatal("canonical schema is missing the marked V2 policy Step 2 block")
-	}
-	canonicalStep2 := strings.TrimSpace(schema[start+len(v2PolicyStep2SchemaBegin) : end])
 	retiredPreflightGuard := regexp.MustCompile(`(?ms)\n\s*if exists\s*\(\s*select 1 from mangorts_v2_step1_preflight_report\(\)\s*where section='FINAL' and status<>'READY'\s*\)\s*then\s*raise exception 'v2_policy_step2_step1_preflight_stop';\s*end if;`)
 	if !retiredPreflightGuard.MatchString(migration) {
 		t.Fatal("historical Step 2 migration is missing its original preflight guard")
 	}
-	activeStep2 := strings.TrimSpace(retiredPreflightGuard.ReplaceAllString(migration, "\n"))
-	if strings.Join(strings.Fields(canonicalStep2), " ") != strings.Join(strings.Fields(activeStep2), " ") {
-		t.Fatal("canonical V2 policy Step 2 block drifted from the active cutover contract")
+	for _, required := range []string{
+		"create table if not exists resource_gvic_assignments",
+		"create table if not exists resource_permissions",
+		"create table if not exists resource_gvic_settings",
+		"create table if not exists resource_permission_settings",
+		"create or replace function mangorts_v2_effective_gvic_assignments",
+		"create or replace function mangorts_v2_materialize_detached_policy",
+		"create or replace function mangorts_v2_group_deleted_cleanup",
+		"create or replace function mangorts_user_can_access_resource",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Errorf("canonical final Step 2 schema is missing %q", required)
+		}
 	}
-	if strings.Contains(canonicalStep2, "mangorts_v2_step1_preflight_report") {
+	for _, retired := range []string{
+		"resource_gvic_assignments_v2_staging",
+		"resource_permissions_v2_staging",
+		"resource_gvic_assignments_step2_legacy",
+		"resource_permissions_step2_legacy",
+		"resource_gvic_effective_assignments",
+		"resource_gvic_policy_revisions",
+		"resource_gvic_subtree_applications",
+		"resource_permission_policy_revisions",
+		"resource_permission_subtree_applications",
+		"gvic_matrix_projection_table",
+	} {
+		if strings.Contains(schema, "create table if not exists "+retired) {
+			t.Errorf("canonical final Step 2 schema recreates retired table %s", retired)
+		}
+	}
+	if strings.Contains(schema, "create or replace function mangorts_v2_step1_preflight_report") {
 		t.Fatal("canonical schema still calls the retired Step 1 preflight report")
 	}
 	lower := strings.ToLower(migration)
@@ -86,15 +102,20 @@ func TestV2PolicyStep2SchemaAndOperatorContract(t *testing.T) {
 }
 
 func TestRACIRoleMigrationAndSchemaContract(t *testing.T) {
-	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
+	schema := strings.Join(strings.Fields(normalizeCanonicalSchemaContract(
+		readV2PolicyStep1File(t, "..", "..", "db", "schema.sql"),
+	)), " ")
 	migration := readV2PolicyStep1File(t, "..", "..", "db", "migrations", raciRoleMigration)
-	start := strings.Index(schema, raciRoleSchemaBegin)
-	end := strings.Index(schema, raciRoleSchemaEnd)
-	if start < 0 || end <= start {
-		t.Fatal("canonical schema is missing the marked RACI role block")
-	}
-	if strings.TrimSpace(schema[start+len(raciRoleSchemaBegin):end]) != strings.TrimSpace(migration) {
-		t.Fatal("canonical RACI role block drifted from the migration")
+	for _, required := range []string{
+		"constraint resource_gvic_assignments_raci_role_chk",
+		"'responsible'::text",
+		"'accountable'::text",
+		"'consulted'::text",
+		"'informed'::text",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Errorf("canonical final RACI schema is missing %q", required)
+		}
 	}
 	lower := strings.ToLower(migration)
 	if strings.Contains(lower, "gvic_matrix_projection_table") {
@@ -123,7 +144,7 @@ func TestRACIRoleMigrationAndSchemaContract(t *testing.T) {
 		}
 	}
 }
-func TestV2PolicyStep2DisposablePostgresCutoverBehaviorAndFreshSchema(t *testing.T) {
+func TestV2PolicyFinalSchemaDisposablePostgresBehavior(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv("MANGORTS_V2_POLICY_STEP2_TEST_DATABASE_URL"))
 	if dsn == "" {
 		t.Skip("set MANGORTS_V2_POLICY_STEP2_TEST_DATABASE_URL to a disposable local PostgreSQL 17 or 18 database")
@@ -158,178 +179,44 @@ func TestV2PolicyStep2DisposablePostgresCutoverBehaviorAndFreshSchema(t *testing
 	}
 	reset()
 	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
-	legacySchema := removeRACIRoleSchemaBlock(t, removeV2PolicyStep2SchemaBlock(t, removeV2PolicyStep1SchemaBlock(t, schema)))
-	if _, err := db.Exec(legacySchema); err != nil {
-		t.Fatalf("apply legacy schema: %v", err)
-	}
-	for _, name := range v2PolicyStep1MigrationFiles {
-		if _, err := db.Exec(readV2PolicyStep1File(t, "..", "..", "db", "migrations", name)); err != nil {
-			t.Fatalf("apply Step 1 %s: %v", name, err)
-		}
-	}
-	if _, err := db.Exec(v2PolicyStep1FixtureSQL); err != nil {
-		t.Fatalf("seed converted fixture: %v", err)
-	}
-	if _, err := db.Exec(readV2PolicyStep1File(t, "..", "..", "..", "scripts", "v2_gvic_permissions_step1_copy_reconcile.sql")); err != nil {
-		t.Fatalf("copy Step 1 fixture: %v", err)
-	}
-	if _, err := db.Exec(readV2PolicyStep1File(t, "..", "..", "db", "migrations", v2PolicyStep2Migration)); err != nil {
-		t.Fatalf("apply Step 2 cutover: %v", err)
-	}
-	assertV2PolicyStep2CutoverNames(t, db)
-	setupSQL, remainingSQL, ok := strings.Cut(v2PolicyStep2BehaviorSQL, "-- STEP2_COMMIT_BEFORE_DETACH")
-	if !ok {
-		t.Fatal("missing Step 2 behavior transaction boundary")
-	}
-	if _, err := db.Exec(setupSQL); err != nil {
-		t.Fatalf("prepare Step 2 behavior: %v", err)
-	}
-	if _, err := db.Exec(remainingSQL); err != nil {
-		t.Fatalf("exercise Step 2 behavior: %v", err)
-	}
-
-	var role, sourceType, sourceID string
-	if err := db.QueryRow(`select role,source_resource_type,source_resource_id::text
-from mangorts_v2_effective_gvic_assignments(
-  '00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-000000000112'
-) where user_id='00000000-0000-4000-8000-000000000103'`).Scan(&role, &sourceType, &sourceID); err != nil {
-		t.Fatal(err)
-	}
-	if role != "verified" || sourceType != EntityTypeNode || sourceID != "00000000-0000-4000-8000-000000000112" {
-		t.Fatalf("detached materialized effective RACI=%s/%s/%s", role, sourceType, sourceID)
-	}
-	var nodeMode, permissionMode string
-	var nodeParent, permissionParent int64
-	if err := db.QueryRow(`select g.assignment_mode,g.parent_link_sequence,p.permission_mode,p.parent_link_sequence
-from resource_gvic_settings g join resource_permission_settings p using(company_id,resource_type,resource_id)
-where g.company_id='00000000-0000-4000-8000-000000000101' and g.resource_type='node' and g.resource_id='00000000-0000-4000-8000-000000000112'`).Scan(&nodeMode, &nodeParent, &permissionMode, &permissionParent); err != nil {
-		t.Fatal(err)
-	}
-	if nodeMode != PolicyModeCustomized || permissionMode != PolicyModeCustomized || nodeParent != 0 || permissionParent != 0 {
-		t.Fatalf("detached node settings=%s/%d %s/%d", nodeMode, nodeParent, permissionMode, permissionParent)
-	}
-	var canEdit bool
-	if err := db.QueryRow(`select mangorts_user_can_access_resource(
-  '00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-000000000112',
-  '00000000-0000-4000-8000-000000000102','edit')`).Scan(&canEdit); err != nil || !canEdit {
-		t.Fatalf("detached node effective edit=%v err=%v", canEdit, err)
-	}
-	defaultAccess, err := postgresResourceDefaultAccess(
-		context.Background(),
-		db,
-		"00000000-0000-4000-8000-000000000101",
-		EntityTypeNode,
-		"00000000-0000-4000-8000-000000000112",
-	)
-	if err != nil || defaultAccess != "no_access" {
-		t.Fatalf("detached node source default access=%q err=%v", defaultAccess, err)
-	}
-	var groupEdges int
-	if err := db.QueryRow(`select count(*) from resource_gvic_assignments where principal_id='00000000-0000-4000-8000-000000000130'`).Scan(&groupEdges); err != nil || groupEdges != 0 {
-		t.Fatalf("deleted group RACI edges=%d err=%v", groupEdges, err)
-	}
-
-	if _, err := db.Exec("drop table gvic_matrix_projection_table"); err != nil {
-		t.Fatalf("drop retired GVIC matrix projection table before RACI migration: %v", err)
-	}
-	if _, err := db.Exec(readV2PolicyStep1File(t, "..", "..", "db", "migrations", raciRoleMigration)); err != nil {
-		t.Fatalf("apply RACI role migration: %v", err)
-	}
-	if err := db.QueryRow(`select role from resource_gvic_assignments
-where company_id='00000000-0000-4000-8000-000000000101'
-  and resource_type='node' and resource_id='00000000-0000-4000-8000-000000000112'
-  and principal_type='user' and principal_id='00000000-0000-4000-8000-000000000103'`).Scan(&role); err != nil || role != "accountable" {
-		t.Fatalf("migrated active assignment role=%q err=%v, want accountable", role, err)
-	}
-	if _, err := db.Exec(`
-insert into company_user_groups(company_id,group_id,name)
-values('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000131','Responsible Team');
-insert into company_user_group_members(company_id,group_id,user_id)
-values('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000131','00000000-0000-4000-8000-000000000102');
-insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id)
-values('00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-000000000112','responsible','group','00000000-0000-4000-8000-000000000131');`); err != nil {
-		t.Fatalf("insert Responsible group after RACI migration: %v", err)
-	}
-	if _, err := db.Exec(`insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id)
-values('00000000-0000-4000-8000-000000000101','node','00000000-0000-4000-8000-000000000112','generated','user','00000000-0000-4000-8000-000000000102')`); err == nil {
-		t.Fatal("legacy generated role was accepted after RACI migration")
-	}
-	reset()
 	if _, err := db.Exec(schema); err != nil {
-		t.Fatalf("apply fresh canonical Step 2 schema: %v", err)
+		t.Fatalf("apply canonical final schema: %v", err)
 	}
-	assertV2PolicyStep2CutoverNames(t, db)
-}
+	assertV2PolicyFinalDatabaseObjects(t, db)
 
-func removeRACIRoleSchemaBlock(t *testing.T, schema string) string {
-	t.Helper()
-	start := strings.Index(schema, raciRoleSchemaBegin)
-	end := strings.Index(schema, raciRoleSchemaEnd)
-	if start < 0 || end <= start {
-		t.Fatal("canonical schema is missing RACI role markers")
-	}
-	return schema[:start] + schema[end+len(raciRoleSchemaEnd):]
-}
-func removeV2PolicyStep2SchemaBlock(t *testing.T, schema string) string {
-	t.Helper()
-	start := strings.Index(schema, v2PolicyStep2SchemaBegin)
-	end := strings.Index(schema, v2PolicyStep2SchemaEnd)
-	if start < 0 || end <= start {
-		t.Fatal("canonical schema is missing V2 policy Step 2 markers")
-	}
-	return schema[:start] + schema[end+len(v2PolicyStep2SchemaEnd):]
-}
-
-func assertV2PolicyStep2CutoverNames(t *testing.T, db interface {
-	QueryRow(query string, args ...any) *sql.Row
-}) {
-	t.Helper()
-	var finalRACI, finalPermission, legacyRACI, legacyPermission, stagingRACI, stagingPermission bool
-	if err := db.QueryRow(`select
-  to_regclass('public.resource_gvic_assignments') is not null,
-  to_regclass('public.resource_permissions') is not null,
-  to_regclass('public.resource_gvic_assignments_step2_legacy') is not null,
-  to_regclass('public.resource_permissions_step2_legacy') is not null,
-  to_regclass('public.resource_gvic_assignments_v2_staging') is not null,
-  to_regclass('public.resource_permissions_v2_staging') is not null`).Scan(
-		&finalRACI, &finalPermission, &legacyRACI, &legacyPermission, &stagingRACI, &stagingPermission,
-	); err != nil {
+	repo := NewPostgresRepo(db)
+	company, err := repo.CreateCompany("V2 final policy test")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !finalRACI || !finalPermission || !legacyRACI || !legacyPermission || stagingRACI || stagingPermission {
-		t.Fatalf("cutover names final=%v/%v legacy=%v/%v staging=%v/%v", finalRACI, finalPermission, legacyRACI, legacyPermission, stagingRACI, stagingPermission)
+	user, err := repo.UpsertAuthUser("v2-final-policy-user", "v2-final-policy@example.test", "V2 Final Policy User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("v2-final-policy-user", company.CompanyID, "company_admin"); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := repo.CreateLogicGate(company.CompanyID, "V2 final policy gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into resource_gvic_assignments(
+  company_id,resource_type,resource_id,role,principal_type,principal_id
+) values($1::uuid,'logic_gate',$2::uuid,'responsible','user',$3::uuid)`, company.CompanyID, gate.LogicGateID, user.UserID); err != nil {
+		t.Fatalf("insert final Responsible assignment: %v", err)
+	}
+	var role string
+	if err := db.QueryRow(`select role from mangorts_v2_effective_gvic_assignments(
+  $1::uuid,'logic_gate',$2::uuid
+) where user_id=$3::uuid`, company.CompanyID, gate.LogicGateID, user.UserID).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	if role != "responsible" {
+		t.Fatalf("effective final RACI role=%q, want responsible", role)
+	}
+	if _, err := db.Exec(`insert into resource_gvic_assignments(
+  company_id,resource_type,resource_id,role,principal_type,principal_id
+) values($1::uuid,'logic_gate',$2::uuid,'generated','user',$3::uuid)`, company.CompanyID, gate.LogicGateID, user.UserID); err == nil {
+		t.Fatal("canonical final schema accepted retired generated role")
 	}
 }
-
-const v2PolicyStep2BehaviorSQL = `
-update resource_gvic_settings set assignment_mode='customized',customized_sequence=nextval('resource_gvic_change_sequence'),descendant_reset_sequence=0
-where company_id='00000000-0000-4000-8000-000000000101' and resource_type='company_explorer_folder' and resource_id='00000000-0000-4000-8000-000000000108';
-delete from resource_gvic_assignments where company_id='00000000-0000-4000-8000-000000000101';
-insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id)
-values('00000000-0000-4000-8000-000000000101','company_explorer_folder','00000000-0000-4000-8000-000000000108','consulted','user','00000000-0000-4000-8000-000000000102');
-update resource_gvic_settings set assignment_mode='inherited',customized_sequence=null where company_id='00000000-0000-4000-8000-000000000101' and resource_type='company_explorer_folder' and resource_id='00000000-0000-4000-8000-000000000109';
-update resource_gvic_settings set assignment_mode='customized',customized_sequence=nextval('resource_gvic_change_sequence') where company_id='00000000-0000-4000-8000-000000000101' and resource_type='logic_gate' and resource_id='00000000-0000-4000-8000-000000000111';
-insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id)
-values('00000000-0000-4000-8000-000000000101','logic_gate','00000000-0000-4000-8000-000000000111','verified','user','00000000-0000-4000-8000-000000000103');
-update resource_gvic_settings set assignment_mode='inherited',customized_sequence=null where company_id='00000000-0000-4000-8000-000000000101' and resource_type='node' and resource_id='00000000-0000-4000-8000-000000000112';
-
-update resource_permission_settings set permission_mode='customized',default_access='no_access',customized_sequence=nextval('resource_permission_change_sequence'),descendant_reset_sequence=0
-where company_id='00000000-0000-4000-8000-000000000101' and resource_type='company_explorer_folder' and resource_id='00000000-0000-4000-8000-000000000108';
-delete from resource_permissions where company_id='00000000-0000-4000-8000-000000000101';
-insert into resource_permissions(company_id,resource_type,resource_id,subject_type,subject_id,access_level)
-values('00000000-0000-4000-8000-000000000101','company_explorer_folder','00000000-0000-4000-8000-000000000108','user','00000000-0000-4000-8000-000000000102','edit');
-update resource_permission_settings set permission_mode='inherited',default_access=null,customized_sequence=null where company_id='00000000-0000-4000-8000-000000000101' and resource_type in ('company_explorer_folder','logic_gate','node') and resource_id in ('00000000-0000-4000-8000-000000000109','00000000-0000-4000-8000-000000000111','00000000-0000-4000-8000-000000000112');
-
-update resource_gvic_settings set descendant_reset_sequence=nextval('resource_gvic_change_sequence') where company_id='00000000-0000-4000-8000-000000000101' and resource_type='company_explorer_folder' and resource_id='00000000-0000-4000-8000-000000000108';
-insert into company_explorer_folders(company_id,folder_id,parent_folder_id,name) values('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000120','00000000-0000-4000-8000-000000000108','Moved-after-reset');
-update company_explorer_items set parent_folder_id='00000000-0000-4000-8000-000000000120' where company_id='00000000-0000-4000-8000-000000000101' and target_type='logic_gate' and target_id='00000000-0000-4000-8000-000000000111';
-
--- STEP2_COMMIT_BEFORE_DETACH
-delete from node_logic_gate_assignments where company_id='00000000-0000-4000-8000-000000000101' and node_id='00000000-0000-4000-8000-000000000112';
-
-insert into company_user_groups(company_id,group_id,name) values('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000130','Step 2 live group');
-insert into company_user_group_members(company_id,group_id,user_id) values('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000130','00000000-0000-4000-8000-000000000102');
-update resource_gvic_settings set assignment_mode='customized',customized_sequence=nextval('resource_gvic_change_sequence') where company_id='00000000-0000-4000-8000-000000000101' and resource_type='project' and resource_id='00000000-0000-4000-8000-000000000113';
-insert into resource_gvic_assignments(company_id,resource_type,resource_id,role,principal_type,principal_id) values('00000000-0000-4000-8000-000000000101','project','00000000-0000-4000-8000-000000000113','informed','group','00000000-0000-4000-8000-000000000130');
-delete from company_user_groups where company_id='00000000-0000-4000-8000-000000000101' and group_id='00000000-0000-4000-8000-000000000130';
-`

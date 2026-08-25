@@ -3,6 +3,7 @@ package store
 import (
 	"miraeopus/backend/internal/domain"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -14,6 +15,9 @@ func readMapRemovalContractFile(t *testing.T, parts ...string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
+	}
+	if strings.HasSuffix(filepath.ToSlash(path), "/db/schema.sql") {
+		return normalizeCanonicalSchemaContract(string(data))
 	}
 	return strings.ToLower(string(data))
 }
@@ -30,12 +34,19 @@ func extractWorkspaceReadVersionFunctionForTest(t *testing.T, source string) str
 	if start < 0 {
 		t.Fatalf("workspace read-version function not found")
 	}
-	const terminator = "$$ language plpgsql immutable;"
-	end := strings.Index(source[start:], terminator)
+	end := -1
+	terminatorLength := 0
+	for _, terminator := range []string{"$$ language plpgsql immutable;", "\n$$;"} {
+		if candidate := strings.Index(source[start:], terminator); candidate >= 0 {
+			end = candidate
+			terminatorLength = len(terminator)
+			break
+		}
+	}
 	if end < 0 {
 		t.Fatalf("workspace read-version function terminator not found")
 	}
-	return source[start : start+end+len(terminator)]
+	return source[start : start+end+terminatorLength]
 }
 
 func workspaceReadVersionEventNamesForTest(source string) map[string]struct{} {

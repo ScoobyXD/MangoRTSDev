@@ -209,10 +209,10 @@ Do not paste DB passwords into chat or commit them. Secret ARN is okay.
 
 Required before app works.
 
-First empty DB can be bootstrapped from repo schema using existing scripts or a future migration runner:
+The first empty DB must be bootstrapped through the human-controlled migration task:
 
-```powershell
-.\scripts\apply_canonical_schema.ps1
+```text
+miraeopus-migrate -mode schema -baseline-migrations -require-empty-database
 ```
 
 This requires a machine/path that can reach the prod DB. If the DB is private-only, options include:

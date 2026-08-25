@@ -227,9 +227,10 @@ func TestNodeTimelineSchemaAndMigrationContract(t *testing.T) {
 			"create table if not exists node_timeline_events",
 			"create table if not exists node_timeline_verification_recipients",
 			"idx_node_timeline_events_idempotency",
-			"event_type in ('logic_gate_transfer', 'project_assignment', 'verification_request')",
+			"constraint node_timeline_events_type_chk",
+			"array['logic_gate_transfer'::text, 'project_assignment'::text, 'verification_request'::text]",
 			"project_id uuid",
-			"project_name text not null default ''",
+			"project_name text default ''::text not null",
 			"trg_node_view_version_timeline_events",
 			"trg_node_view_version_timeline_recipients",
 		},
@@ -251,6 +252,9 @@ func TestNodeTimelineSchemaAndMigrationContract(t *testing.T) {
 			t.Fatalf("ReadFile %s: %v", path, err)
 		}
 		source := strings.ToLower(string(payload))
+		if path == "../../db/schema.sql" {
+			source = normalizeCanonicalSchemaContract(string(payload))
+		}
 		for _, marker := range markers {
 			if !strings.Contains(source, marker) {
 				t.Fatalf("%s missing %q", path, marker)

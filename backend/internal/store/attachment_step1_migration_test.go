@@ -27,7 +27,7 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 	step1 := readAttachmentStep1Artifact(t, "..", "..", "..", "scripts", "attachment_step1_create_copy_reconcile.sql")
 	boundary := readAttachmentStep1Artifact(t, "..", "..", "..", "scripts", "attachment_step2_database_cutover.sql")
 	migration := readAttachmentStep1Artifact(t, "..", "..", "db", "migrations", "20260804_attachment_step1_expansion.sql")
-	schema := readAttachmentStep1Artifact(t, "..", "..", "db", "schema.sql")
+	schema := normalizeCanonicalSchemaContract(readAttachmentStep1Artifact(t, "..", "..", "db", "schema.sql"))
 	cleanupMain := readAttachmentStep1Artifact(t, "..", "..", "cmd", "mango-attachment-step1-cleanup", "main.go")
 
 	inlineStart := strings.Index(step1, "-- additive attachment step 1 expansion only.")
@@ -115,12 +115,17 @@ func TestAttachmentStep1ArtifactsArePhasedAndOperatorGated(t *testing.T) {
 		"create table if not exists attachment_upload_jobs",
 		"attachment_relationship_id uuid",
 		"create table if not exists attachment_previews",
-		"preview_type in ('display', 'thumbnail')",
 		"trg_attachment_relationships_validate_live_owner",
 	} {
 		if !strings.Contains(migration, required) || !strings.Contains(schema, required) {
 			t.Errorf("canonical/additive schema missing %q", required)
 		}
+	}
+	if !strings.Contains(migration, "preview_type in ('display', 'thumbnail')") {
+		t.Error("additive migration is missing the display/thumbnail preview type fence")
+	}
+	if !strings.Contains(schema, "preview_type = any (array['display'::text, 'thumbnail'::text])") {
+		t.Error("canonical schema is missing the display/thumbnail preview type fence")
 	}
 	for _, required := range []string{
 		"do not run during step 1", "access exclusive mode",

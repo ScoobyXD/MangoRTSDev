@@ -16,35 +16,26 @@ func TestAttachmentUploadStep2SchemaContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := strings.ToLower(string(schemaBody))
+	schema := normalizeCanonicalSchemaContract(string(schemaBody))
 	boundary := strings.ToLower(string(boundaryBody))
-	jobStart := strings.Index(schema, "create table if not exists attachment_upload_jobs")
-	if jobStart < 0 {
-		t.Fatal("could not find final upload-job schema")
-	}
-	previewOffset := strings.Index(schema[jobStart:], "create table if not exists attachment_previews")
-	if previewOffset <= 0 {
-		t.Fatal("could not isolate final upload-job schema")
-	}
-	previewStart := jobStart + previewOffset
-	contract := schema[jobStart:previewStart]
 	for _, required := range []string{
-		"attachment_upload_jobs", "upload_job_id uuid primary key",
-		"attachment_relationship_id uuid", "attachment_upload_parts",
-		"upload_job_id uuid not null", "primary key (upload_job_id, part_number)",
-		"references attachment_upload_jobs(upload_job_id)",
+		"create table if not exists attachment_upload_jobs", "upload_job_id uuid not null",
+		"add constraint attachment_upload_jobs_pkey primary key (upload_job_id)",
+		"attachment_relationship_id uuid", "create table if not exists attachment_upload_parts",
+		"add constraint attachment_upload_parts_pkey primary key (upload_job_id, part_number)",
+		"foreign key (upload_job_id) references attachment_upload_jobs(upload_job_id)",
 		"unique (company_id, actor_user_id, client_request_id)", "unique (attachment_id)",
 		"sha256_verification_method", "storage_checksum_algorithm", "storage_checksum_value",
 		"storage_checksum_type", "expected_size_bytes", "observed_size_bytes",
 		"signing_attempt_count", "last_signed_timestamp",
-		"status in ('pending', 'uploading', 'completing', 'completed', 'failed', 'aborted', 'expired')",
+		"status = any (array['pending'::text, 'uploading'::text, 'completing'::text, 'completed'::text, 'failed'::text, 'aborted'::text, 'expired'::text])",
 	} {
-		if !strings.Contains(contract, required) {
+		if !strings.Contains(schema, required) {
 			t.Errorf("final upload schema missing %q", required)
 		}
 	}
 	for _, forbidden := range []string{"upload_intent_id", "resource_attachment_id", "presigned_url", "upload_url", "part_url"} {
-		if strings.Contains(contract, forbidden) {
+		if strings.Contains(schema, forbidden) {
 			t.Errorf("final upload schema must not contain %q", forbidden)
 		}
 	}

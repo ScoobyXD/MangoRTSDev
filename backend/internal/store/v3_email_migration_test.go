@@ -30,7 +30,7 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := strings.ToLower(string(schemaRaw))
+	schema := normalizeCanonicalSchemaContract(string(schemaRaw))
 
 	for _, sqlText := range []string{expand, schema} {
 		for _, required := range []string{
@@ -40,12 +40,23 @@ func TestV3EmailExpansionIsAdditiveAndOperatorGated(t *testing.T) {
 			"create table if not exists email_drafts",
 			"create table if not exists email_signatures",
 			"create table if not exists attachment_relationships",
-			"email_account_type in ('personal_email_account','shared_email_account')",
 			"attachment_relationship_id uuid not null",
 		} {
 			if !strings.Contains(strings.ReplaceAll(sqlText, " ", ""), strings.ReplaceAll(required, " ", "")) {
 				t.Errorf("schema expansion is missing %q", required)
 			}
+		}
+	}
+	if !strings.Contains(strings.ReplaceAll(expand, " ", ""), "email_account_typein('personal_email_account','shared_email_account')") {
+		t.Error("historical expansion lost the final email account type constraint")
+	}
+	for _, required := range []string{
+		"constraint email_drafts_account_type_chk",
+		"'personal_email_account'::text",
+		"'shared_email_account'::text",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Errorf("canonical schema is missing final email account contract %q", required)
 		}
 	}
 	if !strings.Contains(strings.ReplaceAll(expand, " ", ""), strings.ReplaceAll("references email_relationships(company_id,email_relationship_id) on delete set null", " ", "")) {

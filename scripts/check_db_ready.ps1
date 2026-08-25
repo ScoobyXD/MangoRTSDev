@@ -37,7 +37,7 @@ begin
      or to_regclass('public.logic_gates') is null
      or to_regclass('public.logic_gate_textboxes') is null
      or to_regclass('public.logic_gate_textboxes_history') is null then
-    raise exception 'canonical schema tables are missing; run apply_canonical_schema first';
+    raise exception 'canonical schema tables are missing; fresh databases require miraeopus-migrate -mode schema -baseline-migrations -require-empty-database';
   end if;
   if not exists (select 1 from pg_constraint where conname = 'node_relationships_position_pair_chk') then
     raise exception 'missing constraint node_relationships_position_pair_chk; run apply_db_migrations';

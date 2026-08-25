@@ -119,28 +119,17 @@ go test ./...
 
 ## Bootstrap canonical schema
 
-### Windows PowerShell (recommended for Windows laptops)
+For a fresh empty database, use the guarded migration runner documented in
+`docs/infra/mangorts-database-migrations.md`:
 
-```powershell
-./scripts/apply_canonical_schema.ps1
-./scripts/apply_db_migrations.ps1
-./scripts/check_db_ready.ps1
+```text
+miraeopus-migrate -mode schema -baseline-migrations -require-empty-database
 ```
 
-### macOS/Linux
-
-```bash
-./scripts/apply_canonical_schema.sh
-./scripts/apply_db_migrations.sh
-./scripts/check_db_ready.sh
-```
-
-Or directly:
-
-```bash
-psql "host=$DB_HOST port=${DB_PORT:-5432} user=$DB_USER dbname=$DB_NAME sslmode=${DB_SSLMODE:-require}" \
-  -f db/schema.sql
-```
+This is the only supported fresh bootstrap. It requires an empty database and
+records the current migration filenames in the same transaction. Do not apply
+`db/schema.sql` directly or follow a schema snapshot with historical migration
+replay.
 
 For existing databases that were created before Node relationship guard constraints or Process Map storage were added, run the generic migration runner:
 

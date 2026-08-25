@@ -12,7 +12,7 @@ func TestProjectSchemaUsesAssignmentTables(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read schema: %v", err)
 	}
-	schema := string(raw)
+	schema := normalizeCanonicalSchemaContract(string(raw))
 	projectsBlock := sqlBlockAfter(t, schema, "create table if not exists projects (")
 	if strings.Contains(projectsBlock, "account_id") {
 		t.Fatalf("projects table still contains account_id:\n%s", projectsBlock)

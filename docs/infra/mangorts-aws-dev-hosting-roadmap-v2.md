@@ -90,7 +90,7 @@ Update `docs/README.md` to say V2 means the `infra/aws-dev` platform with Cognit
 
 ### Phase 7: Database Readiness
 - Keep existing AWS PostgreSQL/Aurora.
-- Apply `backend/db/schema.sql` for fresh DBs.
+- Bootstrap fresh DBs through `miraeopus-migrate -mode schema -baseline-migrations -require-empty-database`.
 - Apply ordered migrations in `backend/db/migrations/` for existing DBs.
 - Ensure auth migration `20260505_auth_identity_and_memberships.sql` is applied.
 - Seed the dev company row and the first user membership after Cognito user creation.
@@ -157,7 +157,7 @@ Update `docs/README.md` to say V2 means the `infra/aws-dev` platform with Cognit
 
 10. Apply database schema/migrations.
     - Run from a machine that can reach the DB.
-    - Apply `backend/db/schema.sql` for fresh DBs, or ordered migrations for existing DBs.
+    - Use guarded schema bootstrap with migration baselining for fresh DBs, or ordered migrations for existing DBs.
     - Ensure auth tables exist.
 
 11. Create Cognito dev user.

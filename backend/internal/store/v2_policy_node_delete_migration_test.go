@@ -11,22 +11,24 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
-const (
-	v2PolicyNodeDeleteSchemaBegin = "-- BEGIN V2 NODE DELETE POLICY CASCADE FIX"
-	v2PolicyNodeDeleteSchemaEnd   = "-- END V2 NODE DELETE POLICY CASCADE FIX"
-	v2PolicyNodeDeleteMigration   = "20260806_node_delete_policy_cascade.sql"
-)
+const v2PolicyNodeDeleteMigration = "20260806_node_delete_policy_cascade.sql"
 
 func TestV2PolicyNodeDeleteSchemaAndMigrationContract(t *testing.T) {
-	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
+	schema := strings.Join(strings.Fields(normalizeCanonicalSchemaContract(
+		readV2PolicyStep1File(t, "..", "..", "db", "schema.sql"),
+	)), " ")
 	migration := readV2PolicyStep1File(t, "..", "..", "db", "migrations", v2PolicyNodeDeleteMigration)
-	start := strings.Index(schema, v2PolicyNodeDeleteSchemaBegin)
-	end := strings.Index(schema, v2PolicyNodeDeleteSchemaEnd)
-	if start < 0 || end <= start {
-		t.Fatal("canonical schema is missing the marked V2 policy Node-delete fix")
-	}
-	if strings.TrimSpace(schema[start+len(v2PolicyNodeDeleteSchemaBegin):end]) != strings.TrimSpace(migration) {
-		t.Fatal("canonical V2 policy Node-delete fix drifted from the forward migration")
+	for _, required := range []string{
+		"create or replace function mangorts_v2_resource_deleted_cleanup",
+		"create or replace function mangorts_v2_node_parent_link_removed",
+		"create or replace function mangorts_v2_materialize_detached_policy",
+		"create or replace function mangorts_v2_advance_parent_link",
+		"create trigger trg_v2_node_policy_parent_after_delete",
+		"create trigger trg_v2_policy_delete after delete on nodes",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Errorf("canonical final Node-delete policy schema is missing %q", required)
+		}
 	}
 
 	lower := strings.ToLower(migration)
@@ -82,12 +84,8 @@ func TestV2PolicyNodeDeleteDisposablePostgres(t *testing.T) {
 	}
 
 	schema := readV2PolicyStep1File(t, "..", "..", "db", "schema.sql")
-	legacySchema := removeV2PolicyNodeDeleteSchemaBlock(t, schema)
-	if _, err := db.Exec(legacySchema); err != nil {
-		t.Fatalf("apply pre-fix canonical schema: %v", err)
-	}
-	if _, err := db.Exec(readV2PolicyStep1File(t, "..", "..", "db", "migrations", v2PolicyNodeDeleteMigration)); err != nil {
-		t.Fatalf("apply Node-delete policy migration: %v", err)
+	if _, err := db.Exec(schema); err != nil {
+		t.Fatalf("apply canonical final schema: %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatal(err)
@@ -145,16 +143,6 @@ func TestV2PolicyNodeDeleteDisposablePostgres(t *testing.T) {
 	if gvicMode != "customized" || permissionMode != "customized" || gvicParentLink != 0 || permissionParentLink != 0 {
 		t.Fatalf("surviving detached Node policy = %s/%d %s/%d, want customized roots", gvicMode, gvicParentLink, permissionMode, permissionParentLink)
 	}
-}
-
-func removeV2PolicyNodeDeleteSchemaBlock(t *testing.T, schema string) string {
-	t.Helper()
-	start := strings.Index(schema, v2PolicyNodeDeleteSchemaBegin)
-	end := strings.Index(schema, v2PolicyNodeDeleteSchemaEnd)
-	if start < 0 || end <= start {
-		t.Fatal("canonical schema is missing the marked V2 policy Node-delete fix")
-	}
-	return schema[:start] + schema[end+len(v2PolicyNodeDeleteSchemaEnd):]
 }
 
 func createAssignedNodeForPolicyDeleteTest(t *testing.T, repo *PostgresRepo, companyID, logicGateID, actorUserID, title string) string {

@@ -244,9 +244,19 @@ func TestHuddleExplorerStoresOnlyHuddleLogicGates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for name, body := range map[string]string{"migration": strings.ToLower(string(migration)), "canonical schema": strings.ToLower(string(schema))} {
-		if !strings.Contains(body, "check (huddle_type = 'huddle_logic_gate')") {
-			t.Fatalf("%s does not restrict Huddle Explorer items to Huddle Logic Gates", name)
+	checks := map[string][]string{
+		"migration":        {"check (huddle_type = 'huddle_logic_gate')"},
+		"canonical schema": {"constraint huddle_explorer_items_huddle_type_chk", "huddle_type = 'huddle_logic_gate'::text"},
+	}
+	for name, markers := range checks {
+		body := strings.ToLower(string(migration))
+		if name == "canonical schema" {
+			body = normalizeCanonicalSchemaContract(string(schema))
+		}
+		for _, marker := range markers {
+			if !strings.Contains(body, marker) {
+				t.Fatalf("%s does not restrict Huddle Explorer items to Huddle Logic Gates", name)
+			}
 		}
 	}
 	migrationSQL := strings.ToLower(string(migration))

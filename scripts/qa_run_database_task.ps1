@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("Audit", "Bootstrap")]
+  [ValidateSet("Audit", "Bootstrap", "Reconcile")]
   [string]$Action = "Audit",
   [string]$AwsProfile = "mangorts-dev",
   [string]$AwsRegion = "us-west-1",
@@ -26,14 +26,16 @@ param(
   [ValidatePattern('^[0-9a-fA-F]{40}$')]
   [string]$ExpectedGitCommit,
   [string]$ExpectedSchemaInventorySHA256 = "",
-  [ValidateSet("EmptyPreflight", "Parity")]
+  [ValidateSet("EmptyPreflight", "ReconciliationPreflight", "Parity")]
   [string]$AuditPurpose = "Parity",
   [string]$EmptyDatabaseAuditTaskArn = "",
+  [string]$ReconciliationAuditTaskArn = "",
   [switch]$Execute,
   [switch]$HumanOperatorApproval
 )
 
 $ErrorActionPreference = "Stop"
+$ReconciliationMigration = "20260825_canonical_schema_reconciliation.sql"
 
 function Invoke-AwsJson {
   param([string[]]$Arguments)
@@ -134,6 +136,53 @@ function Assert-EmptyDatabaseAudit {
   Write-Host "Verified empty-database audit: $TaskArn"
 }
 
+function Assert-ReconciliationAudit {
+  param(
+    [string]$TaskArn,
+    [object]$ExpectedTaskDefinition,
+    [object]$ExpectedContainerDefinition,
+    [string]$ClusterArn,
+    [string]$ExpectedRepositoryDigest,
+    [string]$ExpectedInventoryDigest
+  )
+
+  if ([string]::IsNullOrWhiteSpace($TaskArn)) {
+    throw "Reconcile requires -ReconciliationAuditTaskArn from a completed ReconciliationPreflight Audit run."
+  }
+  $auditResult = Invoke-AwsJson -Arguments @("ecs", "describe-tasks", "--cluster", $ClusterArn, "--tasks", $TaskArn)
+  if ($auditResult.failures.Count -gt 0 -or $auditResult.tasks.Count -ne 1) {
+    throw "The reconciliation audit task was not found in the QA cluster."
+  }
+  $auditTask = $auditResult.tasks[0]
+  if ([string]$auditTask.taskDefinitionArn -cne [string]$ExpectedTaskDefinition.taskDefinitionArn) {
+    throw "The reconciliation audit used a different task definition."
+  }
+  if ([string]$auditTask.lastStatus -cne "STOPPED") {
+    throw "The reconciliation audit task has not stopped."
+  }
+  $auditContainer = @($auditTask.containers | Where-Object { $_.name -ceq $ContainerName })
+  if ($auditContainer.Count -ne 1 -or $null -eq $auditContainer[0].exitCode -or [int]$auditContainer[0].exitCode -ne 0) {
+    throw "The reconciliation audit task did not complete successfully."
+  }
+  $auditOverride = @($auditTask.overrides.containerOverrides | Where-Object { $_.name -ceq $ContainerName })
+  if ($auditOverride.Count -ne 1 -or (@($auditOverride[0].command) -join ' ') -cne "-mode audit") {
+    throw "The supplied reconciliation evidence was not a read-only migration audit."
+  }
+  $messages = Get-QaTaskLogMessages -TaskRecord $auditTask -ContainerDefinition $ExpectedContainerDefinition
+  if (-not ($messages | Where-Object { $_ -match 'server_version_num=17\d{4}(?:\s|$)' })) {
+    throw "STOP: the reconciliation audit did not report PostgreSQL 17.x."
+  }
+  Assert-AuditDigest -Messages $messages -FieldName "repository_schema_sha256" -ExpectedDigest $ExpectedRepositoryDigest
+  Assert-AuditDigest -Messages $messages -FieldName "schema_inventory_sha256" -ExpectedDigest $ExpectedInventoryDigest
+  if (-not ($messages | Where-Object { $_ -match 'missing_from_ledger=1(?:\s|$)' })) {
+    throw "STOP: reconciliation requires exactly one repository migration missing from the QA ledger."
+  }
+  if (-not ($messages | Where-Object { $_ -match 'unknown_to_repository=0(?:\s|$)' })) {
+    throw "STOP: reconciliation audit reported a migration ledger row unknown to the repository."
+  }
+  Write-Host "Verified reconciliation audit: $TaskArn"
+}
+
 function Assert-AuditDigest {
   param(
     [string[]]$Messages,
@@ -172,11 +221,14 @@ $ExpectedSchemaInventorySHA256 = $ExpectedSchemaInventorySHA256.ToLowerInvariant
 if (-not [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256) -and $ExpectedSchemaInventorySHA256 -notmatch '^[0-9a-f]{64}$') {
   throw "-ExpectedSchemaInventorySHA256 must be a 64-character hexadecimal SHA-256."
 }
-if ($Action -eq "Audit" -and $AuditPurpose -eq "Parity" -and [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256)) {
-  throw "Parity audit requires -ExpectedSchemaInventorySHA256 from a fresh same-commit dev export."
+if ($Action -eq "Audit" -and $AuditPurpose -ne "EmptyPreflight" -and [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256)) {
+  throw "$AuditPurpose audit requires -ExpectedSchemaInventorySHA256."
 }
-if ($Action -eq "Bootstrap" -and $AuditPurpose -ne "Parity") {
-  throw "-AuditPurpose applies only to -Action Audit. Omit it for Bootstrap."
+if ($Action -eq "Reconcile" -and [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256)) {
+  throw "Reconcile requires the expected current QA schema inventory SHA-256."
+}
+if ($Action -ne "Audit" -and $AuditPurpose -ne "Parity") {
+  throw "-AuditPurpose applies only to -Action Audit. Omit it for $Action."
 }
 
 $identity = Invoke-AwsJson -Arguments @("sts", "get-caller-identity")
@@ -275,8 +327,10 @@ foreach ($securityGroup in $securityGroupResult.SecurityGroups) {
 
 $command = if ($Action -eq "Audit") {
   @("-mode", "audit")
-} else {
+} elseif ($Action -eq "Bootstrap") {
   @("-mode", "schema", "-baseline-migrations", "-require-empty-database")
+} else {
+  @("-mode", "migrate", "-start-at", $ReconciliationMigration)
 }
 $networkConfiguration = @{
   awsvpcConfiguration = @{
@@ -310,6 +364,14 @@ if ($Action -eq "Bootstrap") {
     -ExpectedContainerDefinition $container `
     -ClusterArn ([string]$clusterRecord.clusterArn) `
     -ExpectedRepositoryDigest $ExpectedRepositorySchemaSHA256
+} elseif ($Action -eq "Reconcile") {
+  Assert-ReconciliationAudit `
+    -TaskArn $ReconciliationAuditTaskArn `
+    -ExpectedTaskDefinition $task `
+    -ExpectedContainerDefinition $container `
+    -ClusterArn ([string]$clusterRecord.clusterArn) `
+    -ExpectedRepositoryDigest $ExpectedRepositorySchemaSHA256 `
+    -ExpectedInventoryDigest $ExpectedSchemaInventorySHA256
 }
 
 if (-not $Execute) {
@@ -396,6 +458,18 @@ if ($Action -eq "Audit") {
       throw "STOP: empty-database audit did not report public_tables=0."
     }
     Write-Host "Empty database and repository fingerprint verified."
+  } elseif ($AuditPurpose -eq "ReconciliationPreflight") {
+    Assert-AuditDigest `
+      -Messages $messages `
+      -FieldName "schema_inventory_sha256" `
+      -ExpectedDigest $ExpectedSchemaInventorySHA256
+    if (-not ($messages | Where-Object { $_ -match 'missing_from_ledger=1(?:\s|$)' })) {
+      throw "STOP: reconciliation preflight requires exactly one migration missing from the ledger."
+    }
+    if (-not ($messages | Where-Object { $_ -match 'unknown_to_repository=0(?:\s|$)' })) {
+      throw "STOP: reconciliation preflight reported a migration ledger row unknown to the repository."
+    }
+    Write-Host "Current QA schema and one-migration reconciliation state verified."
   } else {
     Assert-AuditDigest `
       -Messages $messages `
@@ -410,6 +484,8 @@ if ($Action -eq "Audit") {
     Write-Host "Final QA schema hash, repository fingerprint, and migration ledger verified."
   }
   Write-Host "Audit task ARN: $taskArn"
-} else {
+} elseif ($Action -eq "Bootstrap") {
   Write-Host "Run a new Parity Audit with the fresh same-commit dev schema hash before deploying the API."
+} else {
+  Write-Host "Run a new Parity Audit with the fresh same-commit aligned-dev schema hash before deploying the API."
 }

@@ -130,7 +130,7 @@ func TestRACIMatrixReadsUseV2PolicySourcesWithoutRetiredTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile schema: %v", err)
 	}
-	schema := normalizeProjectionSource(string(schemaRaw))
+	schema := normalizeProjectionSource(normalizeCanonicalSchemaContract(string(schemaRaw)))
 	if strings.Contains(schema, "create table if not exists gvic_matrix_projection_table") {
 		t.Fatal("canonical schema still creates the retired RACI matrix projection table")
 	}

@@ -38,7 +38,7 @@ func TestProjectProductionStorageDoesNotUseLegacyInformationTables(t *testing.T)
 }
 
 func TestProjectFinalStorageSchemaAndRuntimeContracts(t *testing.T) {
-	schema := readProjectFinalContractFile(t, "..", "..", "db", "schema.sql")
+	schema := normalizeCanonicalSchemaContract(readProjectFinalContractFile(t, "..", "..", "db", "schema.sql"))
 	migration := readProjectFinalContractFile(t, "..", "..", "db", "migrations", "20260818_project_email_textbox_parity.sql")
 	runtime := readProjectFinalContractFile(t, "postgres_project_final_storage.go") +
 		readProjectFinalContractFile(t, "postgres_project_email_relationships.go") +
@@ -50,7 +50,7 @@ func TestProjectFinalStorageSchemaAndRuntimeContracts(t *testing.T) {
 		"references project_textbox_chats(company_id, project_id, textbox_id, chat_id) on delete cascade",
 		"idx_project_textbox_chats_textbox_created",
 		"idx_project_textbox_chats_email_selection",
-		"metadata_revision bigint not null default 1",
+		"metadata_revision bigint default 1 not null",
 		"constraint project_textboxes_color_chk",
 		"constraint='email_relationship_project_document_forbidden'",
 		"constraint='project_document_chat_forbidden'",
@@ -116,12 +116,7 @@ func TestProjectFinalStorageSchemaAndRuntimeContracts(t *testing.T) {
 			t.Errorf("Project final runtime missing %q", required)
 		}
 	}
-	projectTextboxesStart := strings.Index(schema, "create table if not exists project_textboxes")
-	projectTextboxChatsStart := strings.Index(schema, "create table if not exists project_textbox_chats")
-	if projectTextboxesStart < 0 || projectTextboxChatsStart <= projectTextboxesStart {
-		t.Fatal("could not isolate final Project textbox schema")
-	}
-	projectTextboxSchema := schema[projectTextboxesStart:projectTextboxChatsStart]
+	projectTextboxSchema := sqlBlockAfter(t, schema, "create table if not exists project_textboxes (")
 	for _, obsolete := range []string{
 		"email_message_id text not null default ''",
 		"email_accent text not null default ''",
@@ -138,7 +133,7 @@ func TestEmailTextboxDependenciesLockTheirPrerequisiteRelationships(t *testing.T
 	projectChatRuntime := readProjectFinalContractFile(t, "postgres_project_textbox_chats.go")
 	nodeEmailRuntime := readProjectFinalContractFile(t, "postgres_node_final_storage.go")
 	nodeChatRuntime := readProjectFinalContractFile(t, "postgres_node_textbox_chats.go")
-	schema := readProjectFinalContractFile(t, "..", "..", "db", "schema.sql")
+	schema := normalizeCanonicalSchemaContract(readProjectFinalContractFile(t, "..", "..", "db", "schema.sql"))
 	migration := readProjectFinalContractFile(t, "..", "..", "db", "migrations", "20260818_project_email_textbox_parity.sql")
 
 	for label, source := range map[string]string{

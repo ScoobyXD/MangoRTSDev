@@ -42,20 +42,32 @@ func TestV3NodeTextboxChatPhaseIsAdditiveAndOperatorGated(t *testing.T) {
 	step2SQL := strings.ToLower(readV3NodeTextboxChatSQL(
 		t, "..", "..", "..", "scripts", v3NodeTextboxChatStep2Script,
 	))
-	schema := strings.ToLower(readV3NodeTextboxChatSQL(t, "..", "..", "db", "schema.sql"))
+	schema := normalizeCanonicalSchemaContract(readV3NodeTextboxChatSQL(t, "..", "..", "db", "schema.sql"))
 
-	for name, sqlText := range map[string]string{"expansion component": expansion, "canonical schema": schema} {
-		for _, required := range []string{
-			"create table node_textbox_chats",
-			"primary key (company_id, chat_id)",
-			"references node_textboxes(company_id, node_id, textbox_id) on delete cascade",
-			"references users(user_id) on delete set null",
-			"edited_timestamp timestamptz",
-			"selection_source = 'email' and selection_email_message_id is not null",
-		} {
-			if !strings.Contains(sqlText, required) && !(name == "canonical schema" && strings.Contains(sqlText, strings.Replace(required, "create table ", "create table if not exists ", 1))) {
-				t.Errorf("%s is missing %q", name, required)
-			}
+	for _, required := range []string{
+		"create table node_textbox_chats",
+		"primary key (company_id, chat_id)",
+		"references node_textboxes(company_id, node_id, textbox_id) on delete cascade",
+		"references users(user_id) on delete set null",
+		"edited_timestamp timestamptz",
+		"selection_source = 'email' and selection_email_message_id is not null",
+	} {
+		if !strings.Contains(expansion, required) {
+			t.Errorf("expansion component is missing %q", required)
+		}
+	}
+	for _, required := range []string{
+		"create table if not exists node_textbox_chats",
+		"primary key (company_id, chat_id)",
+		"references node_textboxes(company_id, node_id, textbox_id) on delete cascade",
+		"references users(user_id) on delete set null",
+		"edited_timestamp timestamp with time zone",
+		"constraint node_textbox_chats_selection_target_chk",
+		"selection_source = 'email'::text",
+		"selection_email_message_id is not null",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Errorf("canonical schema is missing %q", required)
 		}
 	}
 	for _, required := range []string{

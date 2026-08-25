@@ -15,7 +15,7 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := strings.ToLower(string(schemaBytes))
+	schema := normalizeCanonicalSchemaContract(string(schemaBytes))
 	migration := strings.ToLower(string(migrationBytes))
 	retiredTables := []string{
 		"workspace_editor_formats",
@@ -72,15 +72,7 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 			t.Errorf("Node operator retirement does not strictly drop %s", table)
 		}
 	}
-	nodeStart := strings.Index(schema, "create table if not exists node_textboxes (")
-	if nodeStart < 0 {
-		t.Fatal("canonical current node_textboxes block not found")
-	}
-	nodeEnd := strings.Index(schema[nodeStart:], "create table if not exists project_textboxes (")
-	if nodeEnd < 0 {
-		t.Fatal("canonical current node_textboxes block not found")
-	}
-	nodeBlock := schema[nodeStart : nodeStart+nodeEnd]
+	nodeBlock := sqlBlockAfter(t, schema, "create table if not exists node_textboxes (")
 	for _, forbidden := range []string{
 		"source_information_id",
 		"document_schema_version",
@@ -104,8 +96,8 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 		"body_json jsonb not null",
 		"color text,",
 		"constraint node_textboxes_color_chk check",
-		"revision bigint not null default 0",
-		"display_order bigint not null default 0",
+		"revision bigint default 0 not null",
+		"display_order bigint default 0 not null",
 		"create table if not exists node_textboxes_history",
 	} {
 		if !strings.Contains(schema, required) {

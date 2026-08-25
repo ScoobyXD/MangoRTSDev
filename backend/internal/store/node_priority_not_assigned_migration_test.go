@@ -109,7 +109,7 @@ func TestCorrectedPriorityAndSQSMigrationsShareTheFinalEmailRelationshipGuard(t 
 			t.Errorf("%s retains obsolete one-Node enforcement function", name)
 		}
 	}
-	canonical := strings.ToLower(string(schemaRaw))
+	canonical := normalizeCanonicalSchemaContract(string(schemaRaw))
 	for _, required := range []string{
 		"idx_email_relationships_active_identity",
 		"idx_email_relationships_one_textbox_per_message_owner",
@@ -117,7 +117,7 @@ func TestCorrectedPriorityAndSQSMigrationsShareTheFinalEmailRelationshipGuard(t 
 		"relationship.resource_id=new.node_id",
 		"relationship.resource_textbox_id=new.textbox_id::text",
 		"mangorts_protect_email_relationship_dependencies",
-		"update of company_id,email_thread_id,email_message_id,resource_type,resource_id,resource_textbox_id",
+		"update of company_id, email_thread_id, email_message_id, resource_type, resource_id, resource_textbox_id",
 	} {
 		if !strings.Contains(canonical, required) {
 			t.Errorf("canonical schema is missing %q", required)
