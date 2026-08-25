@@ -299,6 +299,10 @@ try {
   output = runFile(contractApply, true);
   requireText(output, "duplicate stable identity group(s)", "final duplicate apply");
   if (shapeCounts() !== "[13, 17, 11]") throw new Error("duplicate STOP changed final schema");
+  console.log("restoring the coherent final shape for downstream readiness");
+  sql("delete from email_ingestion_jobs where ingestion_job_id='80000000-0000-0000-0000-000000000002'");
+  runFile(contractApply);
+  requireText(runFile(preflight), "READY: all email SQS tables are in the coherent final shape", "downstream readiness");
   console.log(`email SQS disposable PostgreSQL contract passed on server_version_num=${version}`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", data, "-m", "fast", "-w", "stop"], { encoding: "utf8" });
