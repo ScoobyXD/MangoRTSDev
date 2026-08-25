@@ -191,6 +191,13 @@ test("production delegates only qa.mangorts.com to the exact protected QA zone",
   assert.doesNotMatch(prodQADelegation, /provider\s*=|assume_role|aws\.us_east_1/);
 });
 
+test("the shared edge uses the exact AWS-managed CloudFront policy IDs", () => {
+  assert.match(moduleLocals, /cloudfront_caching_optimized_policy_id\s*=\s*"658327ea-f89d-4fab-a63d-7e88639e58f6"/);
+  assert.match(moduleLocals, /cloudfront_caching_disabled_policy_id\s*=\s*"4135ea2d-6df8-44a3-9df3-4b5a84be39ad"/);
+  assert.match(moduleLocals, /cloudfront_all_viewer_except_host_policy_id\s*=\s*"b689b0a8-53d0-40ab-baf2-68738e2966ac"/);
+  assert.doesNotMatch(moduleLocals, /413f1609-33d4-4f8c-8d(?:d|f)f-bd6df8fac40f/);
+});
+
 test("QA registers immutable migration images before schema bootstrap without starting the app", () => {
   assert.match(
     qaWorkflow,

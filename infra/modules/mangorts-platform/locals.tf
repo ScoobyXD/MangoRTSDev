@@ -1,7 +1,7 @@
 locals {
   name_prefix                                 = "${var.project_name}-${var.environment}"
   cloudfront_caching_optimized_policy_id      = "658327ea-f89d-4fab-a63d-7e88639e58f6"
-  cloudfront_caching_disabled_policy_id       = "413f1609-33d4-4f8c-8dff-bd6df8fac40f"
+  cloudfront_caching_disabled_policy_id       = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
   cloudfront_all_viewer_except_host_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
   root_domain                                 = trimsuffix(var.root_domain_name, ".")
   route53_zone_id                             = trimspace(var.route53_zone_id)
