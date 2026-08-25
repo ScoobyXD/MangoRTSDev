@@ -389,13 +389,22 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Scope: scope, Error: rejectCode})
 		return
 	}
+	// Serialize admission with exact-scope publication so the accepted frame is
+	// queued before any event can target this newly visible subscription.
+	unlockPublish := s.realtimeRegistry.lockPublishScope(conn.companyID, scope)
 	if !s.realtimeRegistry.subscribeWithinLimit(conn, scope, maxRealtimeSubscriptionsPerConnection) {
+		unlockPublish()
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Scope: scope, Error: "subscription_limit_exceeded"})
 		return
 	}
+	if err := conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionAccepted, CompanyID: conn.companyID, Scope: scope}); err != nil {
+		s.realtimeRegistry.unsubscribe(conn.id, conn.companyID, scope)
+		unlockPublish()
+		return
+	}
+	unlockPublish()
 	s.recordRealtimeActiveSubscriptions()
 	log.Printf("realtime_subscription_accepted company_id=%s user_id=%s connection_id=%s scope_type=%s scope=%s", conn.companyID, conn.userID, conn.id, realtimeScopeType(scope), scope)
-	_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionAccepted, CompanyID: conn.companyID, Scope: scope})
 }
 
 func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, scope string) (bool, string, error) {
