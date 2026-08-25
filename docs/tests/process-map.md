@@ -39,7 +39,7 @@
 37. Every accessible Process MUST be a fixed rectangle occupying exactly seven by five smallest grid squares.
 38. Folder and Process dimensions MUST NOT be user-adjustable or stored as placement data in the first version.
 39. Every accessible Folder and Process MUST keep a neutral elevated surface with one thin type outline matching Company Explorer: orange for a Folder and green for a Process; selection MUST preserve that type outline, and the first version MUST NOT add filled semantic item colors.
-40. A single click on an accessible map item MUST select that item.
+40. A single click on an accessible Folder MUST select that Folder; a single click on an accessible Process MUST select that Process and pin its Process data card immediately to its right; completing a placement drag or connection gesture MUST perform only that gesture and MUST NOT be treated as a click or open, close, pin, or unpin a data card.
 41. A double click on an accessible Folder MUST navigate to that Folder's Process Map layer.
 42. A Process MUST be a leaf on Process Map and MUST NOT open a Process Map Node layer in the first version.
 43. Panning or zooming MUST change only the current map viewport and MUST NOT enter or leave a Folder or change saved placement coordinates.
@@ -122,5 +122,24 @@
 120. Every visible saved or pending trace MUST show one soft moving center pattern over its canonical source-to-target trace with the same direction and cadence; reduced-motion preference MUST stop the animation without hiding or changing the underlying trace or saved map state.
 121. A Folder-layer Process Map header MUST expose the shared Universal picker locked to authorized Processes only; its rows MUST be drag-only, MUST emit the existing exact Logic Gate Explorer payload, MUST let that active drag reach only the existing map canvas drop path, and MUST NOT create a placement, reference, or operational relationship from click, Enter, or Tab. The root layer MUST NOT expose this Process-only launcher.
 122. Accessible placement anchors MUST be invisible and noninteractive by default; selecting one placement MUST reveal only that placement's input and output anchors, starting a connection gesture MUST reveal every accessible placement anchor, and finishing or canceling the gesture MUST hide every anchor and clear the source placement selection.
+123. The Process Map header MUST expose one **Hover mode** checkbox that controls only transient Process data cards; changing it MUST NOT change selection, a pinned card, placement, operational relationships, traces, or saved Process Map state.
+124. When Hover mode is checked, hovering an accessible Process MUST show its transient data card immediately to the Process's right and leaving both the Process and card MUST remove it; unchecked hover MUST show no data card.
+125. A transient hover data card MUST be read-only; clicking an accessible Process MUST pin its data card regardless of Hover mode, and the pinned card MUST remain visible after the pointer leaves the Process.
+126. Every transient or pinned Process data card MUST stay immediately to the right of its Process without covering or disabling the Process's fixed output anchor or its connection hit area, and moving the placement or viewport MUST keep a pinned card attached to that Process.
+127. Once a pointer gesture crosses the placement-drag activation threshold or starts a connection gesture, releasing the pointer MUST NOT fire Process click or pin behavior even when snapping or pointer movement leaves the final X-Y position unchanged; only a press and release that remains a click gesture may select the Process and pin its data card.
+128. Every transient or pinned Process data card MUST show the same complete 31-slice Quality tracker and 31-slice Delivery tracker, in the same day order and from the same canonical Q/D values used by that exact Process's editor; Process Map placement rows, React Flow node/rendering state, and browser state MUST NOT become another Q/D authority.
+129. Only the slices matching the viewing device's current local calendar date MAY be changed from a pinned Process data card by a user with Edit access to that Process; every other slice and every slice in a transient hover card MUST remain visible and read-only.
+130. The bottom of every Process data card MUST show the same resolved Responsible and Accountable user or group labels presented by that exact Process's current canonical RACI view, using the established role colors; it MUST NOT expose internal principal IDs, copy or rewrite an assignment, grant access, or become another RACI authority.
+131. At most one Process data card may be pinned; clicking another accessible Process MUST replace the pin, an explicit close action or click on empty map canvas MUST dismiss it, and a placement drag, connection gesture, viewport change, or Hover mode change MUST NOT dismiss or replace it.
 
 Last updated: 2026-08-25
+
+# Process Story: A mapped Process reveals its shared daily Q/D card
+
+A user optionally enables Hover mode and receives a transient read-only card while pointing at an accessible Process
+↓
+A single click that never becomes a placement drag or connection gesture pins the card to the Process's right, while those gestures leave pin state unchanged
+↓
+The pinned card reads the Process's shared 31-slice Quality and Delivery values and permits only today's local slices when the user has Edit access
+↓
+Responsible and Accountable appear at the bottom through the Process's current canonical RACI presentation, and no Process Map record becomes another Q/D or RACI authority
