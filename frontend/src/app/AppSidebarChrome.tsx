@@ -7,10 +7,10 @@ import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { AppSidebarPinnedSection } from "./AppSidebarPinnedSection";
 import { AppSidebarRACITabsSection } from "./AppSidebarRACITabsSection";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderMapIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
-import { preloadAccountManagerSurface, preloadFieldsSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadFieldsSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
 import { requestProjectViewSettings } from "../modules/project-management/projectViewEvents";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../icons/index.js";
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
@@ -148,7 +148,7 @@ type SidebarSectionID = "shared-triage";
 export type HomeKeyViewID = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
-type AppSidebarPrimaryPage = "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "fields";
+type AppSidebarPrimaryPage = "home" | "logic-gate-arena" | "project-management" | "process-map" | "account-manager" | "teams" | "fields";
 
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;
@@ -1393,6 +1393,16 @@ export function AppSidebar({
             ariaLabel: "Edit Projects view",
             onOpen: requestProjectViewSettings,
           }}
+        />
+        <AppSidebarButton
+          label="Process Map"
+          active={activePage === "process-map"}
+          icon={<HeaderMapIcon color="#0ea5e9" />}
+          elevated
+          onPointerEnter={preloadProcessMapSurface}
+          onFocus={preloadProcessMapSurface}
+          onPointerDown={preloadProcessMapSurface}
+          onClick={() => onPageSelect("process-map")}
         />
       </section>
 

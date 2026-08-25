@@ -32,16 +32,6 @@ export type LogicGateRACIAssignment = {
   updated_timestamp?: string;
 };
 
-export type LogicGateRelationship = {
-  company_id: string;
-  logic_gate_relationship_id: string;
-  logic_gate_id_a: string;
-  logic_gate_id_b: string;
-  a_position: "Input" | "Output";
-  b_position: "Input" | "Output";
-  created_timestamp: string;
-};
-
 export type LogicGateInformation = {
   company_id: string;
   information_id: string;
@@ -55,9 +45,7 @@ export type LogicGateInformation = {
 export type LogicGateDetails = ResourceAccessFields & {
   logic_gate: LogicGateRecord;
   information: LogicGateInformation[];
-  relationships: LogicGateRelationship[];
   information_count?: number;
-  relationships_count?: number;
 };
 
 export type LogicGateViewRecord = LogicGateRecord & {
@@ -65,51 +53,8 @@ export type LogicGateViewRecord = LogicGateRecord & {
   title: string;
 };
 
-export type LogicGateViewRelationship = LogicGateRelationship & {
-  node_relationship_id: string;
-  node_id_a: string;
-  node_id_b: string;
-};
-
-export type LogicGateViewInformation = LogicGateInformation & {
-  node_id: string;
-};
-
-export type LogicGateViewDetails = ResourceAccessFields & {
-  logic_gate: LogicGateRecord;
-  node: LogicGateViewRecord;
-  information: LogicGateViewInformation[];
-  relationships: LogicGateViewRelationship[];
-  information_count?: number;
-  relationships_count?: number;
-};
-
 export function toLogicGateViewRecord(record: LogicGateRecord): LogicGateViewRecord {
   return { ...record, node_id: record.logic_gate_id, title: record.header };
-}
-
-export function toLogicGateViewRelationship(record: LogicGateRelationship): LogicGateViewRelationship {
-  return {
-    ...record,
-    node_relationship_id: record.logic_gate_relationship_id,
-    node_id_a: record.logic_gate_id_a,
-    node_id_b: record.logic_gate_id_b,
-  };
-}
-
-export function toLogicGateViewInformation(record: LogicGateInformation): LogicGateViewInformation {
-  return { ...record, node_id: record.logic_gate_id };
-}
-
-export function toLogicGateViewDetails(details: LogicGateDetails): LogicGateViewDetails {
-  return {
-    logic_gate: details.logic_gate,
-    node: toLogicGateViewRecord(details.logic_gate),
-    information: (details.information ?? []).map(toLogicGateViewInformation),
-    relationships: (details.relationships ?? []).map(toLogicGateViewRelationship),
-    information_count: details.information_count ?? details.information?.length ?? 0,
-    relationships_count: details.relationships_count ?? details.relationships?.length ?? 0,
-  };
 }
 
 export function getLogicGateTitle(record: Pick<LogicGateViewRecord, "header" | "title">): string {

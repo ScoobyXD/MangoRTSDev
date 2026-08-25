@@ -11,6 +11,9 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 	defer r.mu.Unlock()
 
 	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
+	if input.EntityKind == EntityTypeLogicGate && len(input.Relationships) > 0 {
+		return WorkspaceEntityBatchResult{}, ErrInvalid
+	}
 	if input.EntityKind == EntityTypeNode && strings.TrimSpace(input.FolderID) != "" {
 		return WorkspaceEntityBatchResult{}, ErrInvalid
 	}
@@ -178,6 +181,9 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		}
 	}
 	for _, relationship := range input.Relationships {
+		if input.EntityKind != EntityTypeNode {
+			return WorkspaceEntityBatchResult{}, ErrInvalid
+		}
 		entityIDA := relationship.EntityIDA
 		if entityIDA == "" {
 			entityIDA = clientToEntityID[relationship.ClientIDA]
@@ -190,44 +196,23 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			return WorkspaceEntityBatchResult{}, ErrInvalid
 		}
 
-		if input.EntityKind == "node" {
-			if _, ok := r.nodes[key(input.CompanyID, entityIDA)]; !ok {
-				return WorkspaceEntityBatchResult{}, ErrNotFound
-			}
-			if _, ok := r.nodes[key(input.CompanyID, entityIDB)]; !ok {
-				return WorkspaceEntityBatchResult{}, ErrNotFound
-			}
-			item := domain.NodeRelationship{
-				CompanyID:          input.CompanyID,
-				NodeRelationshipID: newUUIDv7String(),
-				NodeIDA:            entityIDA,
-				NodeIDB:            entityIDB,
-				APosition:          relationship.APosition,
-				BPosition:          relationship.BPosition,
-				CreatedTimestamp:   now,
-			}
-			r.nodeRels[input.CompanyID] = append(r.nodeRels[input.CompanyID], item)
-			result.Relationships = append(result.Relationships, item)
-			continue
-		}
-
-		if _, ok := r.logicGates[key(input.CompanyID, entityIDA)]; !ok {
+		if _, ok := r.nodes[key(input.CompanyID, entityIDA)]; !ok {
 			return WorkspaceEntityBatchResult{}, ErrNotFound
 		}
-		if _, ok := r.logicGates[key(input.CompanyID, entityIDB)]; !ok {
+		if _, ok := r.nodes[key(input.CompanyID, entityIDB)]; !ok {
 			return WorkspaceEntityBatchResult{}, ErrNotFound
 		}
-		item := domain.LogicGateRelationship{
-			CompanyID:               input.CompanyID,
-			LogicGateRelationshipID: newUUIDv7String(),
-			LogicGateIDA:            entityIDA,
-			LogicGateIDB:            entityIDB,
-			APosition:               relationship.APosition,
-			BPosition:               relationship.BPosition,
-			CreatedTimestamp:        now,
+		item := domain.NodeRelationship{
+			CompanyID:          input.CompanyID,
+			NodeRelationshipID: newUUIDv7String(),
+			NodeIDA:            entityIDA,
+			NodeIDB:            entityIDB,
+			APosition:          relationship.APosition,
+			BPosition:          relationship.BPosition,
+			CreatedTimestamp:   now,
 		}
-		r.logicGateRels[input.CompanyID] = append(r.logicGateRels[input.CompanyID], item)
-		result.LogicGateRelationships = append(result.LogicGateRelationships, item)
+		r.nodeRels[input.CompanyID] = append(r.nodeRels[input.CompanyID], item)
+		result.Relationships = append(result.Relationships, item)
 	}
 
 	return result, nil

@@ -11,7 +11,6 @@ var (
 	nodeListWorkspaceEventTypes                  = store.NodeListWorkspaceEventTypes
 	nodeRelationshipWorkspaceEventTypes          = store.NodeRelationshipWorkspaceEventTypes
 	logicGateListWorkspaceEventTypes             = store.LogicGateListWorkspaceEventTypes
-	logicGateRelationshipWorkspaceEventTypes     = store.LogicGateRelationshipWorkspaceEventTypes
 	companyExplorerFolderWorkspaceEventTypes     = store.CompanyExplorerFolderWorkspaceEventTypes
 	companyExplorerFolderItemWorkspaceEventTypes = store.CompanyExplorerFolderItemWorkspaceEventTypes
 	kanbanBoardWorkspaceEventTypes               = store.KanbanBoardWorkspaceEventTypes
@@ -89,7 +88,7 @@ func (s *Server) workspaceEventVersionWithReadVersion(companyID string, readVers
 
 func workspaceReadVersionQueryForResource(companyID, resource string, queries []store.DomainEventStreamQuery) store.WorkspaceReadVersionQuery {
 	switch resource {
-	case "nodes", "node-relationships", "logic-gates", "logic-gate-relationships", "kanban-boards":
+	case "nodes", "node-relationships", "logic-gates", "kanban-boards", "process-map":
 		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource}
 	case "company-explorer-folder-items":
 		itemType := workspaceEventQueryPayloadValue(queries, "item_type")

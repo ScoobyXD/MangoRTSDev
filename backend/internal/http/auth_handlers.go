@@ -209,6 +209,7 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 	s.authCache.invalidateSubject(result.User.CognitoSubject)
 	s.authCache.invalidateUser(result.User.UserID)
 	s.authCache.invalidateCompany(companyID)
+	s.wakeRealtimeSpine()
 	nylasGrantsDeleted := 0
 	nylasGrantDeleteFailures := 0
 	if result.DeleteExternalIdentity {
@@ -348,7 +349,7 @@ func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *ht
 			writeError(w, http.StatusInternalServerError, "failed_to_update_user_group_members")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "company_user_group_members_updated", map[string]any{"group_id": strings.TrimSpace(parts[0])})
+		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, map[string]any{"members": members})
 		return
 	}
@@ -404,7 +405,7 @@ func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *ht
 			writeError(w, http.StatusInternalServerError, "failed_to_update_user_group")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "company_user_group_updated", map[string]any{"group_id": groupID})
+		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, group)
 		return
 	case http.MethodDelete:
@@ -421,7 +422,7 @@ func (s *Server) handleCompanyUserGroupsSubresource(w http.ResponseWriter, r *ht
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_user_group")
 			return
 		}
-		s.publishWorkspaceEvent(companyID, "company_user_group_deleted", map[string]any{"group_id": groupID})
+		s.wakeRealtimeSpine()
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return
 	default:
@@ -682,6 +683,7 @@ func (s *Server) handleInvitationAcceptAuthenticated(w http.ResponseWriter, r *h
 func (s *Server) writeInvitationAcceptSuccess(w http.ResponseWriter, r *http.Request, cognitoSubject string, invitation domain.Invitation) {
 	s.authCache.invalidateSubject(cognitoSubject)
 	s.authCache.invalidateCompany(invitation.CompanyID)
+	s.wakeRealtimeSpine()
 	emailStatus := "not_configured"
 	if s.emailSender != nil {
 		emailStatus = "sent"

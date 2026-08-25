@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
-import { preloadAccountManagerSurface, preloadFieldsSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadFieldsSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
 import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
@@ -64,6 +64,10 @@ function preloadRouteSurface(path: string): void {
   }
   if (path === "/project-management") {
     preloadProjectManagementSurface();
+    return;
+  }
+  if (route?.kind === "process_map") {
+    preloadProcessMapSurface();
     return;
   }
   if (path === "/account-manager") {
@@ -422,19 +426,21 @@ export default function AuthGate() {
 
   const normalizedPath = normalizeAppPath(path);
   const deepLinkRoute = parseDeepLinkRoute(normalizedPath);
-  const deepLinkInitialPage = deepLinkRoute?.kind === "logic_gate"
-    ? "logic-gate-arena"
-    : deepLinkRoute?.kind === "gvic"
-      ? "home"
-      : deepLinkRoute?.kind === "project" || normalizedPath === "/project-management"
-        ? "project-management"
-        : normalizedPath === "/account-manager"
-          ? "account-manager"
-          : normalizedPath === "/teams"
-            ? "teams"
-            : normalizedPath === "/fields"
-              ? "fields"
-              : undefined;
+  const deepLinkInitialPage = deepLinkRoute?.kind === "process_map"
+    ? "process-map"
+    : deepLinkRoute?.kind === "logic_gate"
+      ? "logic-gate-arena"
+      : deepLinkRoute?.kind === "gvic"
+        ? "home"
+        : deepLinkRoute?.kind === "project" || normalizedPath === "/project-management"
+          ? "project-management"
+          : normalizedPath === "/account-manager"
+            ? "account-manager"
+            : normalizedPath === "/teams"
+              ? "teams"
+              : normalizedPath === "/fields"
+                ? "fields"
+                : undefined;
 
   if (!authEnabled) {
     return (

@@ -1,0 +1,386 @@
+package httpapi
+
+import (
+	"encoding/json"
+	"errors"
+	"io"
+	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/store"
+	"net/http"
+	"strconv"
+	"strings"
+)
+
+func decodeProcessMapJSON(r *http.Request, destination any) error {
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Server) processMapActor(r *http.Request, companyID string) (string, string, bool, error) {
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		return "", "", false, nil
+	}
+	actorUserID := strings.TrimSpace(actor.User.UserID)
+	role, err := s.currentActorRoleForCompany(actor, companyID)
+	return actorUserID, role, actorUserID != "" && role != "", err
+}
+
+func (s *Server) processMapETag(r *http.Request, companyID, actorUserID, actorRole, contract string) (string, error) {
+	processVersion, found, err := s.repo.CurrentWorkspaceReadVersion(store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "process-map"})
+	if err != nil {
+		return "", err
+	}
+	if !found {
+		processVersion, err = s.workspaceEventVersion(companyID, []store.DomainEventStreamQuery{{}})
+		if err != nil {
+			return "", err
+		}
+	}
+	groupVersion, _, err := s.repo.CurrentWorkspaceReadVersion(store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "policy-group-membership"})
+	if err != nil {
+		return "", err
+	}
+	return strongETagFromString(contract + ":" + companyID + ":" + actorUserID + ":" + actorRole + ":" + r.URL.Path + "?" + r.URL.Query().Encode() + ":" + strconv.FormatInt(processVersion, 10) + ":" + strconv.FormatInt(groupVersion, 10)), nil
+}
+
+func (s *Server) authorizeProcessMapRead(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) (string, string, bool) {
+	actorUserID, actorRole, ok, err := s.processMapActor(r, companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_check_company_access")
+		return "", "", false
+	}
+	if !ok {
+		writeError(w, http.StatusForbidden, "company_access_denied")
+		return "", "", false
+	}
+	if resourceID != "" {
+		allowed, err := s.repo.UserHasEffectiveAccess(companyID, actorUserID, resourceType, resourceID, store.EntityPermissionEdit)
+		if errors.Is(err, store.ErrNotFound) || (err == nil && !allowed) {
+			writeAccessResourceNotFound(w)
+			return "", "", false
+		}
+		if errors.Is(err, store.ErrInvalid) {
+			writeError(w, http.StatusBadRequest, "invalid_process_map_request")
+			return "", "", false
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_check_process_map_access")
+			return "", "", false
+		}
+	}
+	return actorUserID, actorRole, true
+}
+
+func (s *Server) handleProcessMapLayer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	actorUserID, actorRole, ok := s.authorizeProcessMapRead(w, r, companyID, domain.ProcessMapResourceTypeFolder, folderID)
+	if !ok {
+		return
+	}
+	etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, "process-map-layer-v1")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_process_map_version")
+		return
+	}
+	if writeNotModifiedWithETag(w, r, etag) {
+		return
+	}
+	view, err := s.repo.GetProcessMapLayer(store.ProcessMapLayerQuery{CompanyID: companyID, FolderID: folderID, PermissionUserID: actorUserID})
+	if err != nil {
+		writeProcessMapError(w, err, "failed_to_read_process_map_layer")
+		return
+	}
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, view, etag)
+}
+
+func processMapPlacementPath(path string) (string, string, bool) {
+	remainder := strings.Trim(strings.TrimPrefix(path, "/v1/process-map/placements/"), "/")
+	parts := strings.Split(remainder, "/")
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return "", "", false
+	}
+	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), true
+}
+
+func (s *Server) processMapMutationActor(w http.ResponseWriter, r *http.Request, companyID string) (string, bool) {
+	actorUserID, _, ok, err := s.processMapActor(r, companyID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_check_company_access")
+		return "", false
+	}
+	if !ok {
+		writeError(w, http.StatusForbidden, "company_access_denied")
+		return "", false
+	}
+	return actorUserID, true
+}
+
+func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Request) {
+	resourceType, resourceID, ok := processMapPlacementPath(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	actorUserID, ok := s.processMapMutationActor(w, r, companyID)
+	if !ok {
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var request struct {
+			MapParentFolderID json.RawMessage `json:"map_parent_folder_id"`
+			GridX             *int            `json:"grid_x"`
+			GridY             *int            `json:"grid_y"`
+		}
+		if err := decodeProcessMapJSON(r, &request); err != nil || request.MapParentFolderID == nil || request.GridX == nil || request.GridY == nil {
+			writeError(w, http.StatusBadRequest, "invalid_process_map_placement")
+			return
+		}
+		var parentID *string
+		if strings.TrimSpace(string(request.MapParentFolderID)) != "null" {
+			var value string
+			if err := json.Unmarshal(request.MapParentFolderID, &value); err != nil || strings.TrimSpace(value) == "" {
+				writeError(w, http.StatusBadRequest, "invalid_process_map_placement")
+				return
+			}
+			value = strings.TrimSpace(value)
+			parentID = &value
+		}
+		result, err := s.repo.PutProcessMapPlacement(store.ProcessMapPlacementPutInput{
+			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
+			MapParentFolderID: parentID, GridX: *request.GridX, GridY: *request.GridY,
+			ActorUserID: actorUserID, PermissionUserID: actorUserID,
+		})
+		if err != nil {
+			writeProcessMapError(w, err, "failed_to_save_process_map_placement")
+			return
+		}
+		s.publishCommittedWorkspaceEvents(result.Events)
+		status := http.StatusOK
+		if result.Created {
+			status = http.StatusCreated
+		}
+		writeJSON(w, status, result.Placement)
+	case http.MethodDelete:
+		result, err := s.repo.DeleteProcessMapPlacement(store.ProcessMapPlacementDeleteInput{
+			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
+			ActorUserID: actorUserID, PermissionUserID: actorUserID,
+		})
+		if err != nil {
+			writeProcessMapError(w, err, "failed_to_delete_process_map_placement")
+			return
+		}
+		s.publishCommittedWorkspaceEvents(result.Events)
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
+}
+
+type processMapResourceRefRequest struct {
+	ResourceType string `json:"resource_type"`
+	ResourceID   string `json:"resource_id"`
+}
+
+func routePointsFromRaw(raw json.RawMessage) ([]domain.ProcessMapRoutePoint, bool) {
+	if raw == nil || strings.TrimSpace(string(raw)) == "null" {
+		return nil, false
+	}
+	var objects []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &objects); err != nil || objects == nil || len(objects) > store.ProcessMapMaxRoutePoints {
+		return nil, false
+	}
+	points := make([]domain.ProcessMapRoutePoint, 0, len(objects))
+	for _, object := range objects {
+		if len(object) != 2 || object["x"] == nil || object["y"] == nil {
+			return nil, false
+		}
+		var point domain.ProcessMapRoutePoint
+		if err := json.Unmarshal(object["x"], &point.X); err != nil {
+			return nil, false
+		}
+		if err := json.Unmarshal(object["y"], &point.Y); err != nil {
+			return nil, false
+		}
+		points = append(points, point)
+	}
+	return points, true
+}
+
+func (s *Server) handleProcessMapOperationalRelationships(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+		resourceType := strings.TrimSpace(r.URL.Query().Get("resource_type"))
+		resourceID := strings.TrimSpace(r.URL.Query().Get("resource_id"))
+		direction := strings.TrimSpace(r.URL.Query().Get("direction"))
+		if companyID == "" || resourceType == "" || resourceID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_resource_required")
+			return
+		}
+		actorUserID, actorRole, ok := s.authorizeProcessMapRead(w, r, companyID, resourceType, resourceID)
+		if !ok {
+			return
+		}
+		etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, "operational-relationships-v1")
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_read_process_map_version")
+			return
+		}
+		if writeNotModifiedWithETag(w, r, etag) {
+			return
+		}
+		items, err := s.repo.ListResourceOperationalRelationshipsForResource(store.ResourceOperationalRelationshipQuery{
+			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, Direction: direction, PermissionUserID: actorUserID,
+		})
+		if err != nil {
+			writeProcessMapError(w, err, "failed_to_read_operational_relationships")
+			return
+		}
+		writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{"resource_operational_relationships": items}, etag)
+	case http.MethodPost:
+		var request struct {
+			CompanyID string                       `json:"company_id"`
+			Source    processMapResourceRefRequest `json:"source"`
+			Target    processMapResourceRefRequest `json:"target"`
+			Trace     *struct {
+				RoutePoints json.RawMessage `json:"route_points"`
+			} `json:"trace"`
+		}
+		if err := decodeProcessMapJSON(r, &request); err != nil || strings.TrimSpace(request.CompanyID) == "" {
+			writeError(w, http.StatusBadRequest, "invalid_operational_relationship")
+			return
+		}
+		actorUserID, ok := s.processMapMutationActor(w, r, request.CompanyID)
+		if !ok {
+			return
+		}
+		var trace *store.ProcessMapTraceInput
+		if request.Trace != nil {
+			points, ok := routePointsFromRaw(request.Trace.RoutePoints)
+			if !ok {
+				writeError(w, http.StatusBadRequest, "invalid_process_map_trace")
+				return
+			}
+			trace = &store.ProcessMapTraceInput{RoutePoints: points}
+		}
+		result, err := s.repo.CreateResourceOperationalRelationship(store.ResourceOperationalRelationshipCreateInput{
+			CompanyID: request.CompanyID,
+			Source:    domain.ProcessMapResourceRef{ResourceType: request.Source.ResourceType, ResourceID: request.Source.ResourceID},
+			Target:    domain.ProcessMapResourceRef{ResourceType: request.Target.ResourceType, ResourceID: request.Target.ResourceID},
+			Trace:     trace, ActorUserID: actorUserID, PermissionUserID: actorUserID,
+		})
+		if err != nil {
+			writeProcessMapError(w, err, "failed_to_save_operational_relationship")
+			return
+		}
+		s.publishCommittedWorkspaceEvents(result.Events)
+		writeJSON(w, http.StatusOK, result)
+	default:
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+	}
+}
+
+func (s *Server) handleProcessMapOperationalRelationshipByID(w http.ResponseWriter, r *http.Request) {
+	remainder := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/process-map/operational-relationships/"), "/")
+	parts := strings.Split(remainder, "/")
+	if len(parts) == 0 || len(parts) > 2 || strings.TrimSpace(parts[0]) == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	actorUserID, ok := s.processMapMutationActor(w, r, companyID)
+	if !ok {
+		return
+	}
+	relationshipID := strings.TrimSpace(parts[0])
+	if len(parts) == 2 {
+		if parts[1] != "trace" || r.Method != http.MethodPut {
+			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+			return
+		}
+		var request struct {
+			RoutePoints json.RawMessage `json:"route_points"`
+		}
+		if err := decodeProcessMapJSON(r, &request); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_process_map_trace")
+			return
+		}
+		points, ok := routePointsFromRaw(request.RoutePoints)
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid_process_map_trace")
+			return
+		}
+		result, err := s.repo.PutProcessMapTrace(store.ProcessMapTracePutInput{
+			CompanyID: companyID, ResourceOperationalRelationshipID: relationshipID, RoutePoints: points,
+			ActorUserID: actorUserID, PermissionUserID: actorUserID,
+		})
+		if err != nil {
+			writeProcessMapError(w, err, "failed_to_save_process_map_trace")
+			return
+		}
+		s.publishCommittedWorkspaceEvents(result.Events)
+		writeJSON(w, http.StatusOK, result.Trace)
+		return
+	}
+	if r.Method != http.MethodDelete {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	result, err := s.repo.DeleteResourceOperationalRelationship(store.ResourceOperationalRelationshipDeleteInput{
+		CompanyID: companyID, ResourceOperationalRelationshipID: relationshipID,
+		ActorUserID: actorUserID, PermissionUserID: actorUserID,
+	})
+	if err != nil {
+		writeProcessMapError(w, err, "failed_to_delete_operational_relationship")
+		return
+	}
+	s.publishCommittedWorkspaceEvents(result.Events)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func writeProcessMapError(w http.ResponseWriter, err error, fallback string) {
+	switch {
+	case errors.Is(err, store.ErrInvalid):
+		writeError(w, http.StatusBadRequest, "invalid_process_map_request")
+	case errors.Is(err, store.ErrProcessMapRootProcess):
+		writeError(w, http.StatusBadRequest, "process_map_root_process_not_allowed")
+	case errors.Is(err, store.ErrProcessMapCycle):
+		writeError(w, http.StatusConflict, "process_map_cycle")
+	case errors.Is(err, store.ErrProcessMapLayerMismatch):
+		writeError(w, http.StatusConflict, "process_map_layer_mismatch")
+	case errors.Is(err, store.ErrNotFound):
+		writeAccessResourceNotFound(w)
+	default:
+		writeError(w, http.StatusInternalServerError, fallback)
+	}
+}

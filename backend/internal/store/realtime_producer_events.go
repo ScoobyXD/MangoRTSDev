@@ -16,6 +16,7 @@ const (
 	NotificationRealtimeDeleteEach = "deleted"
 	NotificationRealtimeClear      = "cleared"
 	raciTabsRealtimeScope          = "raci-tabs:company"
+	processMapRealtimeScope        = "process-map:company"
 )
 
 func stableRealtimeEventID(parts ...string) string {
@@ -357,6 +358,139 @@ func raciTabsChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []str
 		CompanyID: companyID, Scope: raciTabsRealtimeScope, EventType: "raci_tabs.changed", Payload: payload,
 		AllowedUserIDs: allowedUserIDs, AudienceRestricted: true,
 	})
+}
+
+func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []string) (RealtimeOutboxInput, error) {
+	companyID = strings.TrimSpace(companyID)
+	eventIDs = append([]string(nil), eventIDs...)
+	for index := range eventIDs {
+		eventIDs[index] = strings.TrimSpace(eventIDs[index])
+	}
+	eventIDs = slices.DeleteFunc(eventIDs, func(eventID string) bool { return eventID == "" })
+	slices.Sort(eventIDs)
+	eventIDs = slices.Compact(eventIDs)
+	if companyID == "" || len(eventIDs) == 0 {
+		return RealtimeOutboxInput{}, ErrInvalid
+	}
+	payload, err := json.Marshal(map[string]any{
+		"type": "process_map.changed", "company_id": companyID, "scope": processMapRealtimeScope,
+	})
+	if err != nil {
+		return RealtimeOutboxInput{}, err
+	}
+	return normalizeRealtimeOutboxInput(RealtimeOutboxInput{
+		EventID:   stableRealtimeEventID("process_map.changed", companyID, strings.Join(eventIDs, ",")),
+		CompanyID: companyID, Scope: processMapRealtimeScope, EventType: "process_map.changed", Payload: payload,
+		AllowedUserIDs: allowedUserIDs, AudienceRestricted: true,
+	})
+}
+
+func isProcessMapChangedDomainEvent(event domain.DomainEvent) bool {
+	if !isWorkspaceStreamDomainEvent(event) {
+		return false
+	}
+	eventType := strings.TrimSpace(event.Type)
+	if stringInList(eventType, ProcessMapWorkspaceEventTypes) {
+		return true
+	}
+	return (eventType == "logic_gate_created" || eventType == "company_explorer_folder_created") &&
+		workspaceEventPayloadString(event.Payload, "realtime_change_type") == "resource_restored"
+}
+
+func processMapChangedEventIDsByCompany(events []domain.DomainEvent) map[string][]string {
+	byCompany := map[string][]string{}
+	for _, event := range events {
+		if !isProcessMapChangedDomainEvent(event) {
+			continue
+		}
+		companyID := strings.TrimSpace(event.CompanyID)
+		eventID := strings.TrimSpace(event.EventID)
+		if companyID == "" || eventID == "" || slices.Contains(byCompany[companyID], eventID) {
+			continue
+		}
+		byCompany[companyID] = append(byCompany[companyID], eventID)
+	}
+	return byCompany
+}
+
+func processMapChangedAffectedUserIDsByCompany(events []domain.DomainEvent) map[string][]string {
+	byCompany := map[string][]string{}
+	for _, event := range events {
+		if !isWorkspaceStreamDomainEvent(event) {
+			continue
+		}
+		switch strings.TrimSpace(event.Type) {
+		case CompanyMembershipSavedEventType, CompanyMembershipDeletedEventType:
+		default:
+			continue
+		}
+		companyID := strings.TrimSpace(event.CompanyID)
+		userID := workspaceEventPayloadString(event.Payload, "user_id")
+		if companyID == "" || userID == "" || slices.Contains(byCompany[companyID], userID) {
+			continue
+		}
+		byCompany[companyID] = append(byCompany[companyID], userID)
+	}
+	return byCompany
+}
+
+func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []domain.DomainEvent) error {
+	affectedUserIDs := processMapChangedAffectedUserIDsByCompany(events)
+	for companyID, eventIDs := range processMapChangedEventIDsByCompany(events) {
+		allowed := []string{}
+		for _, membership := range r.memberships {
+			if membership.CompanyID == companyID || membership.Role == domain.RoleDevAdmin {
+				allowed = append(allowed, membership.UserID)
+			}
+		}
+		allowed = append(allowed, affectedUserIDs[companyID]...)
+		slices.Sort(allowed)
+		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed)
+		if err != nil {
+			return err
+		}
+		if _, err := r.enqueueRealtimeOutboxLocked(input); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *PostgresRepo) enqueueProcessMapRealtimeForDomainEventsTx(ctx context.Context, tx *sql.Tx, events []domain.DomainEvent) error {
+	affectedUserIDs := processMapChangedAffectedUserIDsByCompany(events)
+	for companyID, eventIDs := range processMapChangedEventIDsByCompany(events) {
+		rows, err := tx.QueryContext(ctx, `
+select distinct user_id::text
+from company_memberships
+where company_id=$1::uuid or role='dev_admin'
+order by user_id::text`, companyID)
+		if err != nil {
+			return err
+		}
+		allowed := []string{}
+		for rows.Next() {
+			var userID string
+			if err := rows.Scan(&userID); err != nil {
+				rows.Close()
+				return err
+			}
+			allowed = append(allowed, userID)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		allowed = append(allowed, affectedUserIDs[companyID]...)
+		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed)
+		if err != nil {
+			return err
+		}
+		if _, err := r.enqueueRealtimeOutboxTx(ctx, tx, input); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func raciTabsChangedEventIDsByCompany(events []domain.DomainEvent) map[string][]string {

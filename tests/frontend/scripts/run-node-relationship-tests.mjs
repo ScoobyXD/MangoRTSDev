@@ -41,6 +41,10 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeMailDrafts.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/pages/home/homeMailboxRealtime.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/realtime/realtimeWebSocket.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/process-map/processMapGeometry.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/process-map/processMapApi.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/process-map/processMapInteraction.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/process-map/processMapContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/hooks/keyboardShortcutRouting.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/frameLinking.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/framePointerRouting.test.js"),
@@ -107,6 +111,11 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorDates.test.js"),
 ];
 const componentTests = [
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/process-map/processMapSurface.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/process-map/processMapSurface.test.cjs"),
+    bundleDependencies: true,
+  },
   {
     source: resolve(repoRoot, "tests/frontend/modules/communications/EmailQuotedHistory.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/EmailQuotedHistory.test.js"),
@@ -212,8 +221,10 @@ for (const componentTest of componentTests) {
     entryPoints: [componentTest.source],
     bundle: true,
     platform: "node",
-    format: "esm",
-    packages: "external",
+    format: componentTest.bundleDependencies ? "cjs" : "esm",
+    ...(componentTest.bundleDependencies
+      ? { external: ["react", "react-dom", "react-dom/*", "jsdom"] }
+      : { packages: "external" }),
     define: { "import.meta.env": "{}" },
     outfile: componentTest.file,
   });

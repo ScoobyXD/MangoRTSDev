@@ -230,6 +230,38 @@ func TestCompanyExplorerFolderAPIsSupportNestedFoldersAndMembership(t *testing.T
 	}
 }
 
+func TestDirectCompanyExplorerFolderDeleteRouteIsRetired(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	server := NewServer(repo)
+	companyID := "company-folder-direct-delete-retired"
+	repo.EnsureCompany(companyID, "Direct delete retired")
+	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Preserved")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/company-explorer/folders/"+folder.FolderID+"?company_id="+companyID, nil)
+	rec := httptest.NewRecorder()
+	server.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("direct folder DELETE status = %d, want %d body=%s", rec.Code, http.StatusMethodNotAllowed, rec.Body.String())
+	}
+	folders, err := repo.ListCompanyExplorerFolders(companyID, "logic_gate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range folders {
+		if item.FolderID == folder.FolderID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("retired direct DELETE removed the folder")
+	}
+}
+
 func TestCompanyExplorerSnapshotCarriesRACIAndLogicGateMembership(t *testing.T) {
 	t.Parallel()
 
@@ -1054,23 +1086,6 @@ func TestCompanyExplorerItemPlacementDoesNotBreakNativeRelationships(t *testing.
 		return payload.FolderID
 	}
 
-	assign := func(folderID, itemType, itemID string, position int) {
-		t.Helper()
-		body, _ := json.Marshal(map[string]any{
-			"company_id":       companyID,
-			"parent_entity_id": folderID,
-			"target_type":      itemType,
-			"target_id":        itemID,
-			"position":         position,
-		})
-		req := httptest.NewRequest(http.MethodPost, "/v1/company-explorer/items", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("POST company explorer item %s/%s status = %d, want %d body=%s", itemType, itemID, rec.Code, http.StatusCreated, rec.Body.String())
-		}
-	}
 	assignInvalid := func(folderID, itemType, itemID string, position int) {
 		t.Helper()
 		body, _ := json.Marshal(map[string]any{
@@ -1127,30 +1142,6 @@ func TestCompanyExplorerItemPlacementDoesNotBreakNativeRelationships(t *testing.
 		t.Fatalf("node relationships after invalid reorder = %d, want 2", len(nodeRelationships))
 	}
 
-	gateA, err := repo.CreateLogicGate(companyID, "Gate A")
-	if err != nil {
-		t.Fatalf("CreateLogicGate A error = %v", err)
-	}
-	gateB, err := repo.CreateLogicGate(companyID, "Gate B")
-	if err != nil {
-		t.Fatalf("CreateLogicGate B error = %v", err)
-	}
-	logicFolderA := createFolder("logic_gate", "Logic Folder A")
-	logicFolderB := createFolder("logic_gate", "Logic Folder B")
-	assign(logicFolderA, "logic_gate", gateA.LogicGateID, 0)
-	assign(logicFolderA, "logic_gate", gateB.LogicGateID, 0)
-	if _, err := repo.CreateLogicGateRelationship(companyID, gateA.LogicGateID, gateB.LogicGateID, "Input", "Output"); err != nil {
-		t.Fatalf("CreateLogicGateRelationship error = %v", err)
-	}
-
-	assign(logicFolderB, "logic_gate", gateA.LogicGateID, 0)
-	logicRelationships, err := repo.ListLogicGateRelationships(companyID)
-	if err != nil {
-		t.Fatalf("ListLogicGateRelationships after move error = %v", err)
-	}
-	if len(logicRelationships) != 1 {
-		t.Fatalf("logic-gate relationships after cross-folder reference move = %d, want 1", len(logicRelationships))
-	}
 }
 
 func TestCompanyExplorerBatchItemPlacementSupportsMixedResourceTypes(t *testing.T) {

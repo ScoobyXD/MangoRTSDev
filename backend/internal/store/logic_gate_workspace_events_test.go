@@ -63,8 +63,8 @@ func TestMemoryLogicGateWorkspaceEventsAreAtomic(t *testing.T) {
 		if err != nil || len(boards) != 1 || boards[0].Title != "committed" {
 			t.Fatalf("mounted board after commit = %+v err=%v", boards, err)
 		}
-		if len(repo.domainEvents) != 2 || len(repo.realtimeOutbox) != 2 {
-			t.Fatalf("committed update domain_events=%d outbox=%d, want 2/2", len(repo.domainEvents), len(repo.realtimeOutbox))
+		if len(repo.domainEvents) != 2 || len(repo.realtimeOutbox) != 3 {
+			t.Fatalf("committed update domain_events=%d outbox=%d, want 2 events and board plus Process Map invalidations", len(repo.domainEvents), len(repo.realtimeOutbox))
 		}
 	})
 }

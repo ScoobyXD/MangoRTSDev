@@ -25,6 +25,7 @@ func TestMemoryLogicGateRACICommandsAreIdempotentAndInvalidateReadVersions(t *te
 	if _, err := repo.AddCompanyMembership("RACI-command-responsible", companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
+	resetMemoryMembershipEventState(repo)
 
 	addInput := LogicGateRACIAssignmentCommandInput{
 		CompanyID:   companyID,
@@ -634,6 +635,7 @@ func TestMemoryLogicGateRACICommandsRejectInvalidRoleUserAndCompanyAndAllowsGrou
 	if _, err := repo.AddCompanyMembership("RACI-command-outsider", otherCompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership outsider: %v", err)
 	}
+	resetMemoryMembershipEventState(repo)
 
 	_, err = repo.AddLogicGateRACIAssignments(LogicGateRACIAssignmentCommandInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Assignments: []LogicGateRACIAssignmentInput{{Role: "owner", UserID: member.UserID}}})
 	if !errors.Is(err, ErrInvalid) {

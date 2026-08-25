@@ -542,7 +542,22 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	return r.deleteLogicGateLocked(companyID, logicGateID)
+	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
+		return ErrNotFound
+	}
+	beforeEvent := r.snapshotProcessMapMutationLocked()
+	eventInput := workspaceDomainEventInput(companyID, "logic_gate_deleted", map[string]any{
+		"logic_gate_id": logicGateID, "realtime_change_type": "resource_deleted", "realtime_audience_snapshot": true,
+	})
+	if _, err := r.appendDomainEventLocked(eventInput); err != nil {
+		r.restoreProcessMapMutationLocked(beforeEvent)
+		return err
+	}
+	if err := r.deleteLogicGateLocked(companyID, logicGateID); err != nil {
+		r.restoreProcessMapMutationLocked(beforeEvent)
+		return err
+	}
+	return nil
 }
 
 func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error {
@@ -563,6 +578,7 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 			delete(r.projectTimelineProjection, itemKey)
 		}
 	}
+	r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeProcess, logicGateID)
 	delete(r.logicGates, k)
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
@@ -608,95 +624,6 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 		}
 	}
 
-	filtered := make([]domain.LogicGateRelationship, 0, len(r.logicGateRels[companyID]))
-	for _, rel := range r.logicGateRels[companyID] {
-		if rel.LogicGateIDA == logicGateID || rel.LogicGateIDB == logicGateID {
-			continue
-		}
-		filtered = append(filtered, rel)
-	}
-	r.logicGateRels[companyID] = filtered
-	return nil
-}
-
-func (r *MemoryRepo) ListLogicGateRelationships(companyID string) ([]domain.LogicGateRelationship, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	items := append([]domain.LogicGateRelationship{}, r.logicGateRels[companyID]...)
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-	})
-	return items, nil
-}
-
-func (r *MemoryRepo) ListLogicGateRelationshipsInFolderSubtree(companyID, folderID string) ([]domain.LogicGateRelationship, error) {
-	folderID = strings.TrimSpace(folderID)
-	if folderID == "" {
-		return r.ListLogicGateRelationships(companyID)
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	folderIDs := companyExplorerFolderSubtreeIDsLocked(r.folders, companyID, folderID, "logic_gate")
-	visible := map[string]bool{}
-	for _, item := range r.folderItems {
-		if item.CompanyID == companyID && item.ItemType == "logic_gate" && folderIDs[item.FolderID] {
-			visible[item.ItemID] = true
-		}
-	}
-	items := make([]domain.LogicGateRelationship, 0)
-	for _, rel := range r.logicGateRels[companyID] {
-		if visible[rel.LogicGateIDA] && visible[rel.LogicGateIDB] {
-			items = append(items, rel)
-		}
-	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
-	})
-	return items, nil
-}
-func (r *MemoryRepo) CreateLogicGateRelationship(companyID, logicGateIDA, logicGateIDB, aPosition, bPosition string) (domain.LogicGateRelationship, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, ok := r.logicGates[key(companyID, logicGateIDA)]; !ok {
-		return domain.LogicGateRelationship{}, ErrNotFound
-	}
-	if _, ok := r.logicGates[key(companyID, logicGateIDB)]; !ok {
-		return domain.LogicGateRelationship{}, ErrNotFound
-	}
-
-	item := domain.LogicGateRelationship{
-		CompanyID:               companyID,
-		LogicGateRelationshipID: newUUIDv7String(),
-		LogicGateIDA:            logicGateIDA,
-		LogicGateIDB:            logicGateIDB,
-		APosition:               aPosition,
-		BPosition:               bPosition,
-		CreatedTimestamp:        time.Now().UTC(),
-	}
-	r.logicGateRels[companyID] = append(r.logicGateRels[companyID], item)
-	return item, nil
-}
-
-func (r *MemoryRepo) DeleteLogicGateRelationship(companyID, relationshipID string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	items := r.logicGateRels[companyID]
-	filtered := make([]domain.LogicGateRelationship, 0, len(items))
-	deleted := false
-	for _, item := range items {
-		if item.LogicGateRelationshipID == relationshipID {
-			deleted = true
-			continue
-		}
-		filtered = append(filtered, item)
-	}
-	if !deleted {
-		return ErrNotFound
-	}
-	r.logicGateRels[companyID] = filtered
 	return nil
 }
 
@@ -851,20 +778,9 @@ func (r *MemoryRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.
 		return info[i].CreatedTimestamp.Before(info[j].CreatedTimestamp)
 	})
 
-	relationships := make([]domain.LogicGateRelationship, 0)
-	for _, rel := range r.logicGateRels[companyID] {
-		if rel.LogicGateIDA == logicGateID || rel.LogicGateIDB == logicGateID {
-			relationships = append(relationships, rel)
-		}
-	}
-	sort.Slice(relationships, func(i, j int) bool {
-		return relationships[i].CreatedTimestamp.Before(relationships[j].CreatedTimestamp)
-	})
-
 	return domain.LogicGateDetails{
-		LogicGate:     r.withLogicGateRACILocked(logicGate),
-		Information:   info,
-		Relationships: relationships,
+		LogicGate:   r.withLogicGateRACILocked(logicGate),
+		Information: info,
 	}, nil
 }
 func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header string) (domain.LogicGate, domain.DomainEvent, error) {

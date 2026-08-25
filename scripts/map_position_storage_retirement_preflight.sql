@@ -67,7 +67,7 @@ from classified
 group by company_id
 order by company_id;
 
--- Report the exact target and protected-table presence before the blocking checks.
+-- Report the exact target, retired, and protected-table presence before the blocking checks.
 select name,
        to_regclass('public.' || name) is not null as present
 from (values
@@ -75,6 +75,9 @@ from (values
   ('logic_gate_map_positions'),
   ('node_relationships'),
   ('logic_gate_relationships'),
+  ('process_map_placements'),
+  ('resource_operational_relationships'),
+  ('process_map_traces'),
   ('node_textboxes_history'),
   ('logic_gate_textboxes_history'),
   ('node_view_user_versions')
@@ -244,7 +247,9 @@ begin
     select 1
     from (values
       ('node_relationships'),
-      ('logic_gate_relationships'),
+      ('process_map_placements'),
+      ('resource_operational_relationships'),
+      ('process_map_traces'),
       ('node_textboxes_history'),
       ('logic_gate_textboxes_history'),
       ('node_view_user_versions')
@@ -252,6 +257,10 @@ begin
     where to_regclass('public.' || protected.name) is null
   ) then
     raise exception 'STOP: a protected relationship, history, or Node view-version table is missing';
+  end if;
+
+  if to_regclass('public.logic_gate_relationships') is not null then
+    raise exception 'STOP: retired logic_gate_relationships authority is still present';
   end if;
 end
 $$;

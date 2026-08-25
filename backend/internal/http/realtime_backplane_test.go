@@ -607,11 +607,30 @@ func publishRealtimeFixtureFromOtherTask(t *testing.T, repo *store.MemoryRepo, b
 	return event
 }
 
+func markCurrentRealtimeOutboxPublishedForTest(t *testing.T, repo store.Repository) int64 {
+	t.Helper()
+	claimed, err := repo.ClaimRealtimeOutbox(context.Background(), store.RealtimeOutboxClaimQuery{Limit: 100, LeaseDuration: time.Minute})
+	if err != nil {
+		t.Fatalf("claim fixture realtime outbox: %v", err)
+	}
+	for _, event := range claimed {
+		if err := repo.MarkRealtimeOutboxPublished(context.Background(), event.EventID, event.ClaimToken); err != nil {
+			t.Fatalf("mark fixture realtime outbox published: %v", err)
+		}
+	}
+	sequence, err := repo.CurrentPublishedRealtimeOutboxSequence(context.Background())
+	if err != nil {
+		t.Fatalf("read fixture realtime cursor: %v", err)
+	}
+	return sequence
+}
+
 func TestRealtimeAdmissionWaitsForCertifiedCursorAndRecoversAfterSubscriberReady(t *testing.T) {
 	base := store.NewMemoryRepo()
 	companyID := "50505050-5050-4050-8050-505050505050"
 	base.EnsureCompany(companyID, "Realtime bootstrap admission")
 	user := mustRealtimeAuthUser(t, base, companyID, "realtime-bootstrap-admission", domain.RoleCompanyUser)
+	baselineSequence := markCurrentRealtimeOutboxPublishedForTest(t, base)
 	token := "realtime-bootstrap-admission-token"
 	actor := ActorContext{
 		Claims: auth.Claims{Subject: user.CognitoSubject, Email: user.Email, Name: user.DisplayName},
@@ -638,8 +657,8 @@ func TestRealtimeAdmissionWaitsForCertifiedCursorAndRecoversAfterSubscriberReady
 		AllowedUserIDs: []string{user.UserID}, AudienceRestricted: true,
 		Payload: json.RawMessage(`{"type":"bootstrap.before_cursor","scope":"` + scope + `"}`),
 	})
-	if first.Sequence != 1 {
-		t.Fatalf("other-task pre-cursor sequence=%d want 1", first.Sequence)
+	if first.Sequence != baselineSequence+1 {
+		t.Fatalf("other-task pre-cursor sequence=%d want %d", first.Sequence, baselineSequence+1)
 	}
 
 	ticketRequest := func() *httptest.ResponseRecorder {

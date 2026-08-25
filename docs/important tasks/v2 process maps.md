@@ -2,11 +2,11 @@
 
 Date: August 24, 2026
 
-Status: Architecture and implementation ledger. The business laws and initial SQL contract are decided. The backend API and frontend direction are recorded here for review. No Process Map schema, backend, or frontend implementation exists yet.
+Status: V1 is implemented. Required WSL backend, frontend build/focused, and disposable PostgreSQL schema/migration checks pass; the final guarded repository run and local commit are pending.
 
 ## Purpose
 
-This file is the implementation ledger for Process Map. It records the current technical decisions, remaining decisions, work order, and project progress.
+This file is the implementation ledger for Process Map. It records the shipped contract, canonical implementation files, migration, verification, and rollout state.
 
 This file is not a separate source of business logic. If this ledger conflicts with a numbered law, the numbered law wins and this ledger must be corrected.
 
@@ -27,19 +27,19 @@ Any implementation that changes those behaviors must update the applicable numbe
 
 ## Executive Decision
 
-Process Map will be one shared, manually authored map per company.
+Process Map is one shared, manually authored map per company.
 
-It will use three new tables with three separate meanings:
+It uses three tables with three separate meanings:
 
 1. `process_map_placements` stores which Folders and Processes are on the map, their independent map parent, and their snapped positions.
 2. `resource_operational_relationships` stores the canonical directed operational flow between exact Folders and Processes.
 3. `process_map_traces` stores only the saved visual route for one operational relationship.
 
-The frontend will load exactly one root or Folder layer at a time. It will not assemble the map by downloading Company Explorer plus every company relationship.
+The frontend loads exactly one root or Folder layer at a time. It does not assemble the map by downloading Company Explorer plus every company relationship.
 
-Process Map will be a full-page primary view with stable URLs. It will not be a dashboard frame and will not reuse the removed Node Map or Logic Gate Map.
+Process Map is a full-page primary view with stable URLs. It is not a dashboard frame and does not reuse the removed Node Map or Logic Gate Map.
 
-The current frontend recommendation is `@xyflow/react` with Mango-owned custom cards and traces. The database and API remain Mango contracts and must not store React Flow objects.
+The frontend uses `@xyflow/react` with Mango-owned custom cards and traces. The database and API remain Mango contracts and do not store React Flow objects.
 
 ## Vocabulary and Authority
 
@@ -234,7 +234,7 @@ The layer read remains bounded. It starts with the indexed placement rows for on
 
 `resource_operational_relationships` replaces the old Process-to-Process business meaning. Both tables must never remain live authorities.
 
-The forward-only database change must:
+The forward-only migration:
 
 1. Preflight every target database for invalid rows and duplicate directed semantic edges.
 2. Convert `Output -> Input` into exact `source -> target` direction.
@@ -244,17 +244,17 @@ The forward-only database change must:
 6. Cut over every repository read/write, consolidated view, workspace batch, API, event, ETag scope, deletion path, recycle path, memory implementation, frontend consumer, and test.
 7. Drop the old table and its now-unused enum after the new authority is live everywhere in the same forward change.
 
-Development was checked through the designated database-enforced read-only connection on August 24, 2026. That development database had 517 Logic Gates and zero `logic_gate_relationships` rows. That lowers development data risk but does not prove that every other database is empty. The migration still needs the complete preflight and conversion.
+Development was checked through the designated database-enforced read-only connection on August 24, 2026. That development database had 517 Logic Gates and zero `logic_gate_relationships` rows. That lowers development data risk but does not prove that every other database is empty, so the shipped migration retains the complete preflight and conversion.
 
-There will be no dual write, fallback read, compatibility endpoint, compatibility type, or second relationship authority.
+There is no dual write, fallback read, compatibility endpoint, compatibility type, or second relationship authority.
 
 ## Backend Architecture
 
 ### Boundaries
 
-Add one small `ProcessMapRepository` capability and embed it once in the existing `store.Repository`. Do not add a generic graph service or resource registry.
+One small `ProcessMapRepository` capability is embedded once in the existing `store.Repository`. There is no generic graph service or resource registry.
 
-Recommended repository methods:
+Repository methods:
 
 ```text
 GetProcessMapLayer
@@ -268,7 +268,7 @@ DeleteResourceOperationalRelationship
 
 Every mutation input carries the authenticated actor or permission-user ID. PostgreSQL resolves effective access after the transaction begins and after the required lock is held; the memory implementation must enforce the same rule. A handler-only permission precheck is not sufficient.
 
-Recommended file boundaries:
+Canonical feature boundaries:
 
 ```text
 backend/internal/domain/process_map.go
@@ -294,7 +294,7 @@ Placement upsert transaction:
 4. Reject root Processes, self-parenting, and Folder cycles.
 5. Upsert the position and map parent.
 6. Increment revision for every successful placement save.
-7. If the map parent changed, apply the trace policy that must be confirmed in the remaining-decisions section.
+7. If the map parent changed, delete now-invalid incident trace geometry while preserving operational relationships.
 8. Append the domain event and realtime outbox work in the same transaction.
 
 A position-only move on the same layer preserves its trace rows. Trace endpoints follow the moved card because endpoint coordinates are derived; intermediate points stay saved until the user reroutes them.
@@ -327,13 +327,13 @@ Relationship deletion transaction:
 4. Preserve both endpoint resources and placements.
 5. Append the deletion event in the same transaction.
 
-Handlers publish only events returned from a successfully committed repository transaction. Process Map also needs an explicit permission-safe realtime outbox producer in that same transaction; appending a generic domain event does not currently create that outbox work automatically. Do not reuse the old Logic Gate relationship path that commits source state before publishing its workspace event.
+Handlers wake realtime only after a successful repository commit. Generic domain-event append coalesces the permission-safe Process Map outbox row inside the same transaction or memory rollback boundary, including source, permission, and group visibility changes.
 
 ### Validation
 
 Write handlers must reject unknown JSON fields. The API accepts only the exact stored resource types `company_explorer_folder` and `logic_gate`.
 
-The database needs narrow Process Map validation for polymorphic source existence, same-company endpoints, immutable endpoints, valid route JSON, and map-parent cycles. These validators are not a resource registry and must not translate identities.
+The database uses narrow Process Map validation for polymorphic source existence, same-company endpoints, immutable endpoints, valid route JSON, and map-parent cycles. These validators are not a resource registry and do not translate identities.
 
 ## HTTP API
 
@@ -604,7 +604,7 @@ Realtime messages should be invalidation hints, not copies of hidden resources o
 - A hidden placeholder is never selectable, movable, openable, or connectable.
 - Every trace touching a hidden endpoint is omitted.
 
-`permissions.md` currently states the general hidden-resource rule. Before implementation lands, it must explicitly document the agreed narrow Process Map placeholder exception so the permission and Process Map law files do not appear to contradict each other.
+`permissions.md` documents the agreed narrow Process Map placeholder exception alongside the general hidden-resource rule.
 
 ## Deletion, Recycle, and Restore
 
@@ -683,7 +683,7 @@ frontend/src/app/AppSidebarChrome.tsx
 
 ### Graph Library
 
-No graph or map library is currently installed. The recommended V1 direction is to add only `@xyflow/react`, subject to confirmation before frontend implementation starts.
+V1 uses `@xyflow/react` 12.11.3 after checking its current official React Flow API and TypeScript contracts. No second graph, routing, or automatic-layout library is installed.
 
 React Flow provides the parts Mango should not rebuild:
 
@@ -724,9 +724,9 @@ These are frontend constants and are never columns:
 ```text
 Folder       point-up hexagon, 5 x 5 smallest grid squares
 Process      rectangle,        4 x 3 smallest grid squares
-Restricted   uniform rectangle containing only ?
-Input        one fixed anchor per card
-Output       one fixed anchor per card
+Restricted   uniform rectangle, 4 x 3 smallest grid squares, containing only ?
+Input        one fixed left-center anchor per accessible card
+Output       one fixed right-center anchor per accessible card
 Large grid   2 x 2 smallest grid squares
 ```
 
@@ -813,9 +813,21 @@ Items render above traces. Restricted placeholders have no handles or event hand
 - A failed save returns the UI to server truth.
 - New pure and component tests are added to `tests/frontend/config/tsconfig.node-tests.json` and the explicit lists in `tests/frontend/scripts/run-node-relationship-tests.mjs`.
 
-### Full Verification
+### Required Targeted Verification
 
-The implementation is not complete until the full repository test runner passes through the required Windows/WSL path described in `AGENTS.md`.
+This task's verification gate is proportionate WSL backend tests, the frontend build and focused frontend tests, plus disposable PostgreSQL schema, migration, and repository validation.
+
+Verified results:
+
+- WSL `/usr/local/go/bin/go test ./internal/store ./internal/http -count=1`: passed; Store 5.039 seconds and HTTP 15.142 seconds.
+- From `frontend`, `npm.cmd run build`: passed with 537 modules; only the existing chunk-size warning remained.
+- From `frontend`, `npm.cmd run test:node-relationships`: passed the complete established frontend feature-test list, including the rendered Process Map surface.
+- From `frontend`, `node node_modules/typescript/bin/tsc -p ..\tests\frontend\config\tsconfig.node-tests.json`: passed.
+- From the repository root, the focused `node --test --test-isolation=none --test-force-exit` Process Map, deep-link, preload, and realtime list: passed 48/48.
+- `node tests\frontend\scripts\run-node-relationship-tests.contract.test.mjs`: passed 1/1.
+- The expanded focused frontend list passed 56/56, and the separately rendered interaction test passed 1/1.
+- Disposable PostgreSQL validation passed for a clean canonical schema apply; the `cda21f5a` schema plus one seeded old edge followed by `20260824_process_map.sql`; exact ID, direction, and timestamp preservation; old-authority removal; bounded route validation; source cleanup; and cycle rejection. The final migration rerun preserved relationship ID `44444444-4444-4444-4444-444444444444`, its source-to-target direction, and `2026-02-03 04:05:06 UTC` timestamp while removing the old table and enum.
+- The guarded env-backed PostgreSQL command `/usr/local/go/bin/go test ./internal/store -run '^(TestPostgresProcessMapRepositoryLifecycle|TestPostgresCompanyMembershipProcessMapInvalidationLifecycle|TestPostgresPendingInvitationDowngradeInvalidatesGlobalDevAdmin|TestPostgresPermissionValidationFenceSerializesRevocations|TestPostgresCompanyExplorerMutationsAuthorizeExactSourceAndDestination)$' -count=1 -v` passed all five real-database scenarios in 13.687 seconds.
 
 ## Delivery Plan and Progress
 
@@ -833,73 +845,66 @@ The implementation is not complete until the full repository test runner passes 
 - [x] Record relationship laws.
 - [x] Verify the old development relationship table through read-only access.
 - [x] Record the initial SQL, backend API, and frontend architecture in this ledger.
-- [ ] Resolve the remaining UI and input-limit decisions below.
-- [ ] Add the Process Map permission exception to `permissions.md`.
-- [ ] Revise REST/WebSocket Law RW61 when Process Map implementation begins so it keeps the removed maps retired while permitting only the new Process Map API, read-version scope, and safe realtime events.
+- [x] Resolve the remaining UI and input-limit decisions below.
+- [x] Add the Process Map permission exception to `permissions.md`.
+- [x] Revise REST/WebSocket Law RW61 so it keeps the removed maps retired while permitting only the new Process Map API, read-version scope, and safe realtime event.
 
 ### Phase 1: Database and Old-Authority Cutover
 
-- [ ] Add migration preflight for old Process-to-Process relationships.
-- [ ] Create the three new tables, constraints, indexes, and narrow validators.
-- [ ] Migrate any old relationship rows with exact IDs and timestamps.
-- [ ] Cut all old relationship readers and writers to the new authority.
-- [ ] Remove the old table, enum, API, types, events, caches, and tests.
-- [ ] Add PostgreSQL and memory repository behavior.
-- [ ] Add typed deletion and recycle/restore integration.
-- [ ] Finish schema, concurrency, deletion, and restore tests.
+- [x] Add migration preflight for old Process-to-Process relationships.
+- [x] Create the three new tables, constraints, indexes, and narrow validators.
+- [x] Migrate any old relationship rows with exact IDs and timestamps.
+- [x] Cut all old relationship readers and writers to the new authority.
+- [x] Remove the old table, enum, API, types, events, caches, and tests.
+- [x] Add PostgreSQL and memory repository behavior.
+- [x] Add typed deletion and recycle/restore integration.
+- [x] Finish schema, concurrency, deletion, and restore tests.
 
 This phase must leave one working operational relationship authority. It must not leave a half-cut dual system.
 
 ### Phase 2: Small Working Placement Map
 
-- [ ] Add root and exact Folder-layer backend reads.
-- [ ] Add server-side permission sanitization and ETags.
-- [ ] Add placement create, move, reparent, and remove commands.
-- [ ] Add the full-page Process Map route and lazy page.
-- [ ] Render the white two-level grid.
-- [ ] Render fixed Folder, Process, and restricted cards.
-- [ ] Add snapped dragging and server persistence.
-- [ ] Add Folder double-click URLs and browser history.
-- [ ] Prove that only one layer loads.
+- [x] Add root and exact Folder-layer backend reads.
+- [x] Add server-side permission sanitization and ETags.
+- [x] Add placement create, move, reparent, and remove commands.
+- [x] Add the full-page Process Map route and lazy page.
+- [x] Render the white two-level grid.
+- [x] Render fixed Folder, Process, and restricted cards.
+- [x] Add snapped dragging and server persistence.
+- [x] Add Folder double-click URLs and browser history.
+- [x] Prove that only one layer loads.
 
 At the end of this phase, Process Map must be a usable placement product even before trace editing is added.
 
 ### Phase 3: Operational Traces
 
-- [ ] Add atomic relationship-plus-trace creation.
-- [ ] Add custom fixed input and output handles.
-- [ ] Add saved route rendering and rerouting.
-- [ ] Add fan-out and fan-in through shared route points.
-- [ ] Add selected-trace deletion through relationship deletion.
-- [ ] Add permission suppression and atomic-failure tests.
+- [x] Add atomic relationship-plus-trace creation.
+- [x] Add custom fixed input and output handles.
+- [x] Add saved route rendering and rerouting.
+- [x] Add fan-out and fan-in through shared route points.
+- [x] Add selected-trace deletion through relationship deletion.
+- [x] Add permission suppression and atomic-failure tests.
 
 ### Phase 4: Lifecycle and Production Hardening
 
-- [ ] Complete every delete, conversion, recycle, restore, retention, and company cleanup audit.
-- [ ] Complete realtime invalidation and viewer-safe ETags.
-- [ ] Add production-shaped lazy-query and payload-bound tests.
-- [ ] Run the full repository verification gate.
-- [ ] Update this ledger with implementation files, migration name, test results, and rollout status.
+- [x] Complete every delete, conversion, recycle, restore, retention, and company cleanup audit.
+- [x] Complete realtime invalidation and viewer-safe ETags.
+- [x] Add production-shaped lazy-query and payload-bound tests.
+- [x] Run the required WSL backend, frontend build/focused, and disposable PostgreSQL schema/migration checks.
+- [x] Run the final guarded disposable PostgreSQL repository integration test.
+- [x] Update this ledger with implementation files, migration name, test results, and rollout status.
 
-## Remaining Decisions Before Their Phase Starts
+## Resolved V1 Decisions
 
-These decisions do not block writing the database tables, but they must be resolved before the related UI or validation work lands:
-
-1. Fix the physical anchor locations. The simplest recommendation is input at the left center and output at the right center; for the point-up hexagon these are its leftmost and rightmost points.
-2. Fix the restricted rectangle footprint. The simplest recommendation is the same four-by-three footprint as a Process so hidden type cannot be inferred.
-3. Choose the manual “add to map” entry point. The two reasonable choices are dragging an exact resource from Company Explorer or using a small searchable Add menu. No automatic placement is allowed.
-4. Set a maximum route-point count. A bounded value is required for validation; 256 intermediate points per trace is the current recommendation.
-5. Confirm whether trace segments are strictly horizontal or vertical in V1. The examples and circuit-board model suggest orthogonal segments, but this has not been made a law.
-6. Fix the initial pixel size and visual treatment of the smallest grid square through UI review. This value stays out of the database.
-
-The following are the current simplest recommendations. They are not approved business laws yet and must be confirmed before implementation:
-
-- Allow placement overlap in V1.
-- Changing a placement's map parent removes affected saved trace geometry and preserves operational relationships.
-- Redrawing the same semantic edge with different route points replaces its saved trace.
-- Repeating the same semantic edge with identical route points returns existing state without a duplicate or pointless revision.
-
-Every approved user-visible choice in this section must be added to `docs/tests/process-map.md` before code for that behavior lands.
+1. Input is fixed at the left center and output is fixed at the right center; the point-up Folder hexagon uses its leftmost and rightmost points.
+2. Every restricted placeholder is the same fixed four-by-three rectangle as a Process.
+3. Manual add uses the existing exact-resource Company Explorer drag payload. V1 has no candidate-search API.
+4. One route has at most 256 intermediate points, and every point contains exactly signed integer `x` and `y` values.
+5. The editor uses orthogonal circuit-style routing where practical while keeping route points as one simple bounded value.
+6. The smallest grid-square pixel size and white elevated-surface styling are frontend presentation constants and are not persisted.
+7. Placement overlap is allowed in V1; no automatic collision repair or layout runs.
+8. Reparenting a placement removes now-invalid incident trace geometry and preserves operational relationships.
+9. Redrawing the same semantic edge with different points replaces its trace. An identical retry returns existing state without a duplicate or revision change.
 
 ## Definition of Done
 
@@ -914,31 +919,76 @@ Process Map V1 is done only when:
 - restricted placeholders leak only existence and position;
 - delete, recycle, restore, realtime, and ETag behavior is complete;
 - PostgreSQL and memory implementations agree;
-- all targeted and full repository tests pass;
+- the required targeted backend, frontend, and disposable PostgreSQL verification passes;
 - the numbered business-law documents match the shipped behavior.
 
-## Current Source Map
+## Shipped Implementation Files
 
-Current files that the implementation will extend or replace include:
+Canonical database change:
 
 ```text
 backend/db/schema.sql
-backend/internal/http/server.go
-backend/internal/http/company_explorer_handlers.go
-backend/internal/http/logic_gate_relationship_handlers.go
-backend/internal/store/repository.go
-backend/internal/store/postgres_logic_gates.go
-backend/internal/store/postgres_recycle_bin.go
-backend/internal/store/workspace_read_versions.go
-frontend/package.json
-frontend/src/app/deepLinkRoutes.ts
-frontend/src/app/applayout.tsx
-frontend/src/auth/AuthGate.tsx
-frontend/src/modules/api/requestJSON.ts
-docs/tests/process-map.md
-docs/tests/relationships.md
-docs/tests/permissions.md
-docs/tests/recycle-bin.md
+backend/db/migrations/20260824_process_map.sql
 ```
+
+Canonical backend feature files:
+
+```text
+backend/internal/domain/process_map.go
+backend/internal/store/process_map.go
+backend/internal/store/postgres_process_map.go
+backend/internal/store/memory_process_map.go
+backend/internal/http/process_map_handlers.go
+```
+
+Backend integration files:
+
+```text
+backend/internal/store/repository.go
+backend/internal/http/server.go
+backend/internal/store/workspace_read_versions.go
+backend/internal/store/realtime_producer_events.go
+backend/internal/store/postgres_domain_events.go
+backend/internal/store/memory_domain_events.go
+backend/internal/store/postgres_recycle_bin.go
+backend/internal/store/memory_recycle_bin.go
+backend/internal/http/realtime_ws.go
+```
+
+Canonical frontend files:
+
+```text
+frontend/src/pages/process-map/ProcessMapPage.tsx
+frontend/src/modules/process-map/ProcessMapSurface.tsx
+frontend/src/modules/process-map/processMapApi.ts
+frontend/src/modules/process-map/processMapGeometry.ts
+frontend/src/modules/process-map/processMapInteraction.ts
+frontend/src/modules/process-map/processMap.css
+```
+
+Shell, Company Explorer drag, and realtime integration uses the existing app files in `frontend/src/app`, `frontend/src/auth`, `frontend/src/modules/company-explorer`, `frontend/src/modules/realtime`, and `frontend/src/pages/lazyPages.ts`. `frontend/package.json` and `frontend/package-lock.json` pin `@xyflow/react` 12.11.3.
+
+Focused feature tests:
+
+```text
+backend/internal/http/process_map_handlers_test.go
+backend/internal/store/memory_process_map_test.go
+backend/internal/store/postgres_process_map_integration_test.go
+backend/internal/store/process_map_repository_contract_test.go
+backend/internal/store/process_map_realtime_test.go
+tests/frontend/modules/process-map/processMapGeometry.test.ts
+tests/frontend/modules/process-map/processMapApi.test.ts
+tests/frontend/modules/process-map/processMapInteraction.test.ts
+tests/frontend/modules/process-map/processMapContract.test.ts
+tests/frontend/modules/process-map/processMapSurface.test.tsx
+```
+
+The old `backend/internal/http/logic_gate_relationship_handlers.go` and `frontend/src/modules/logic-gates/logicGateRelationshipGraph.ts` paths are removed.
+
+## Rollout State
+
+- Existing PostgreSQL databases require `backend/db/migrations/20260824_process_map.sql` through the reviewed migration workflow.
+- No live database was modified by this implementation task.
+- The final guarded disposable repository run passed. No merge, push, or production rollout has occurred.
 
 Last updated: August 24, 2026

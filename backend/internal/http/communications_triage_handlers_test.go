@@ -30,6 +30,14 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
+	setupEvents, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, AfterSequence: 0, Limit: 10})
+	if err != nil {
+		t.Fatalf("ListDomainEventsAfter setup: %v", err)
+	}
+	afterSequence := int64(0)
+	if len(setupEvents) > 0 {
+		afterSequence = setupEvents[len(setupEvents)-1].Sequence
+	}
 	nylas := &fakeNylasClient{message: NylasMessage{
 		ID:       "http-message-1",
 		ThreadID: "http-thread-1",
@@ -88,7 +96,7 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 		t.Fatalf("response leaked hidden committed events: %s", rec.Body.String())
 	}
 
-	durable, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, AfterSequence: 0, Limit: 10})
+	durable, err := repo.ListDomainEventsAfter(store.DomainEventReplayQuery{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, AfterSequence: afterSequence, Limit: 10})
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}

@@ -713,6 +713,7 @@ func setupEmailConversionUserAndGate(t *testing.T, repo *MemoryRepo, companyID s
 	if _, err := repo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatalf("AddCompanyMembership: %v", err)
 	}
+	resetMemoryMembershipEventState(repo)
 	if _, err := repo.UpsertUserEmailConnection(UserEmailConnectionInput{
 		UserID: user.UserID, Provider: "google", AccountEmail: user.Email,
 		GrantID: "grant-" + suffix, Status: "connected",

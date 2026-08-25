@@ -157,9 +157,6 @@ func loadLogicGateView(loader logicGateViewLoader, companyID, logicGateID string
 	if details.Information == nil {
 		details.Information = []domain.LogicGateInformation{}
 	}
-	if details.Relationships == nil {
-		details.Relationships = []domain.LogicGateRelationship{}
-	}
 	if details.LogicGate.RACIAssignments == nil {
 		details.LogicGate.RACIAssignments = []domain.LogicGateRACIAssignment{}
 	}
@@ -174,12 +171,10 @@ func loadLogicGateView(loader logicGateViewLoader, companyID, logicGateID string
 		Information:         details.Information,
 		Projections:         projections,
 		RACIAssignments:     details.LogicGate.RACIAssignments,
-		Relationships:       details.Relationships,
 		Work:                work,
 		InformationCount:    len(details.Information),
 		ProjectionCount:     len(projections),
 		RACIAssignmentCount: len(details.LogicGate.RACIAssignments),
-		RelationshipsCount:  len(details.Relationships),
 		AssignmentCount:     len(work.Cards),
 		NodeCount:           len(work.Cards),
 	}, nil

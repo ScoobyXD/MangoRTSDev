@@ -38,3 +38,10 @@ test("planLikelyDashboardPreload isolates the Fields entity surface", () => {
     routeSurfaces: ["fields"],
   });
 });
+
+test("planLikelyDashboardPreload loads Process Map as a route surface without dashboard modules", () => {
+  assert.deepEqual(planLikelyDashboardPreload({ page: "process-map", frames: [] }), {
+    moduleKinds: [],
+    routeSurfaces: ["process-map"],
+  });
+});

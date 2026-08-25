@@ -112,6 +112,7 @@ func newEmailOutboxBoundaryFixture(t *testing.T) (*store.MemoryRepo, store.Commu
 		t.Fatal(err)
 	}
 	job := mustEnsureEmailIngestionJobForTest(t, repo, connection, created, "outbox-boundary-message")
+	markCurrentRealtimeOutboxPublishedForTest(t, repo)
 	client := newEmailCollaborationThreadTestClient()
 	client.messagesByID["outbox-boundary-message"] = NylasMessage{
 		ID: "outbox-boundary-message", Subject: "Durable hint boundary", Body: "<p>complete</p>", Date: time.Now().UTC().Unix(),
@@ -333,6 +334,10 @@ func (r *deleteFailOnceReceiver) Delete(context.Context, string) error {
 
 func TestEmailIngestionValkeyOutageAcknowledgesAfterDurableOutboxAndSpineRecovers(t *testing.T) {
 	base, job, client := newEmailOutboxBoundaryFixture(t)
+	baselineSequence, err := base.CurrentPublishedRealtimeOutboxSequence(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
 	repo := &emailOutboxBoundaryRepo{Repository: base}
 	backplane := newControllableBackplane(true)
 	options := realtimeBackplaneTestOptions(backplane)
@@ -353,14 +358,14 @@ func TestEmailIngestionValkeyOutageAcknowledgesAfterDurableOutboxAndSpineRecover
 		t.Fatalf("provider message calls=%v, want exactly one", messageIDs)
 	}
 	waitForBackplaneCondition(t, func() bool { return backplane.publishCalls.Load() >= 1 }, "failed email hint Valkey publish")
-	if sequence, err := base.CurrentPublishedRealtimeOutboxSequence(context.Background()); err != nil || sequence != 0 {
+	if sequence, err := base.CurrentPublishedRealtimeOutboxSequence(context.Background()); err != nil || sequence != baselineSequence {
 		t.Fatalf("published sequence during outage=%d err=%v", sequence, err)
 	}
 
 	backplane.reconnect()
 	waitForBackplaneCondition(t, func() bool {
 		sequence, sequenceErr := base.CurrentPublishedRealtimeOutboxSequence(context.Background())
-		return sequenceErr == nil && sequence == 1
+		return sequenceErr == nil && sequence == baselineSequence+1
 	}, "email hint recovery through realtime spine")
 	_, _, _, messageIDs = client.calls()
 	if len(messageIDs) != 1 {

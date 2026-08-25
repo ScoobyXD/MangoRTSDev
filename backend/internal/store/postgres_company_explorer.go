@@ -505,10 +505,12 @@ order by subtree.position asc, subtree.created_timestamp asc`, companyID, folder
 	return items, nil
 }
 
-func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int) (domain.CompanyExplorerFolder, error) {
+func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, parentFolderID *string, position int, actorUserID, permissionUserID string) (domain.CompanyExplorerFolder, error) {
 	companyID = cleanUUIDText(companyID)
 	folderID = cleanUUIDText(folderID)
-	if companyID == "" || folderID == "" {
+	actorUserID = cleanUUIDText(actorUserID)
+	permissionUserID = cleanUUIDText(permissionUserID)
+	if companyID == "" || folderID == "" || (actorUserID == "") != (permissionUserID == "") || (actorUserID != "" && actorUserID != permissionUserID) {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
 	ctx := context.Background()
@@ -517,6 +519,12 @@ func (r *PostgresRepo) MoveCompanyExplorerFolder(companyID, folderID string, par
 		return domain.CompanyExplorerFolder{}, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, permissionUserID, true); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if err := lockPostgresCompanyExplorerResourceEditTx(ctx, tx, companyID, permissionUserID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 
 	var currentParent sql.NullString
 	var currentPosition int
@@ -542,6 +550,9 @@ for update`, companyID, folderID).Scan(&currentParent, &currentPosition); err !=
 		}
 		parent = nil
 		if targetParentID != "" {
+			if err := lockPostgresCompanyExplorerResourceEditTx(ctx, tx, companyID, permissionUserID, EntityTypeCompanyExplorerFolder, targetParentID); err != nil {
+				return domain.CompanyExplorerFolder{}, err
+			}
 			var createsCycle bool
 			if err := tx.QueryRowContext(ctx, `
 with recursive descendants as (
@@ -558,14 +569,6 @@ select exists(select 1 from descendants where folder_id=$3::uuid)`, companyID, f
 			}
 			if createsCycle {
 				return domain.CompanyExplorerFolder{}, ErrInvalid
-			}
-			var exists bool
-			if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid)`, companyID, targetParentID).Scan(&exists); err != nil {
-				return domain.CompanyExplorerFolder{}, err
-			}
-			if !exists {
-				return domain.CompanyExplorerFolder{}, ErrNotFound
 			}
 			parent = targetParentID
 		}
@@ -606,26 +609,46 @@ returning company_id::text, folder_id::text, parent_folder_id::text, name, defau
 	if parentOut.Valid {
 		item.ParentFolderID = &parentOut.String
 	}
+	eventInput := workspaceDomainEventInput(companyID, "company_explorer_folder_updated", map[string]any{
+		"folder_id": folderID, "parent_entity_id": parentOut.String,
+	})
+	eventInput.ActorUserID = actorUserID
+	if _, err := r.appendDomainEventTx(ctx, tx, eventInput); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 	return item, nil
 }
 
-func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name string) (domain.CompanyExplorerFolder, error) {
+func (r *PostgresRepo) RenameCompanyExplorerFolder(companyID, folderID, name, actorUserID, permissionUserID string) (domain.CompanyExplorerFolder, error) {
 	companyID = cleanUUIDText(companyID)
 	folderID = cleanUUIDText(folderID)
 	name = strings.TrimSpace(name)
-	if companyID == "" || folderID == "" || name == "" {
+	actorUserID = cleanUUIDText(actorUserID)
+	permissionUserID = cleanUUIDText(permissionUserID)
+	if companyID == "" || folderID == "" || name == "" || (actorUserID == "") != (permissionUserID == "") || (actorUserID != "" && actorUserID != permissionUserID) {
 		return domain.CompanyExplorerFolder{}, ErrInvalid
 	}
 	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, permissionUserID, false); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if err := lockPostgresCompanyExplorerResourceEditTx(ctx, tx, companyID, permissionUserID, EntityTypeCompanyExplorerFolder, folderID); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	var item domain.CompanyExplorerFolder
 	var parentOut sql.NullString
-	if err := r.db.QueryRowContext(ctx, `
+	if err := tx.QueryRowContext(ctx, `
 update company_explorer_folders
 set name=$3,
     updated_timestamp=now()
@@ -648,39 +671,15 @@ returning company_id::text, folder_id::text, parent_folder_id::text, name, defau
 	if parentOut.Valid {
 		item.ParentFolderID = &parentOut.String
 	}
+	eventInput := workspaceDomainEventInput(companyID, "company_explorer_folder_updated", map[string]any{"folder_id": folderID})
+	eventInput.ActorUserID = actorUserID
+	if _, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{eventInput}); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	return item, nil
-}
-
-func (r *PostgresRepo) DeleteCompanyExplorerFolder(companyID, folderID string) error {
-	companyID = cleanUUIDText(companyID)
-	folderID = cleanUUIDText(folderID)
-	if companyID == "" || folderID == "" {
-		return ErrInvalid
-	}
-	if err := protectCompanyExplorerDefaultFolderMutation(companyID, folderID); err != nil {
-		return err
-	}
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "company_explorer_folder", folderID); err != nil {
-		return err
-	}
-	deleted, err := tx.ExecContext(ctx, `
-delete from company_explorer_folders
-where company_id=$1::uuid and folder_id=$2::uuid`, companyID, folderID)
-	if err != nil {
-		return err
-	}
-	if affected, err := deleted.RowsAffected(); err != nil {
-		return err
-	} else if affected == 0 {
-		return ErrNotFound
-	}
-	return tx.Commit()
 }
 func postgresCompanyHasConnectedEmailAccount(ctx context.Context, tx *sql.Tx, companyID, accountEmail string) (bool, error) {
 	var exists bool
@@ -913,7 +912,11 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("project", projectIDs)
 	appendSorted("kanban", kanbanBoardIDs)
-	events, err := r.appendDomainEventsTx(ctx, tx, companyExplorerTargetWorkspaceEventInputs(companyID, result.Targets, false))
+	eventInputs := companyExplorerTargetWorkspaceEventInputs(companyID, result.Targets, false)
+	for index := range eventInputs {
+		eventInputs[index].ActorUserID = deletedByUserID
+	}
+	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 	if err != nil {
 		return CompanyExplorerDeleteResult{}, err
 	}
@@ -981,6 +984,14 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	for nodeID := range nodeIDs {
 		err := postgresDeleteNodeWithDependentProjectionsTx(ctx, tx, companyID, nodeID)
 		if err != nil {
+			stop()
+			return CompanyExplorerDeleteResult{}, err
+		}
+	}
+	stop()
+	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.process_map_folder_cleanup")
+	for folderID := range folderIDs {
+		if err := postgresDeleteProcessMapResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, folderID); err != nil {
 			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
@@ -1202,6 +1213,9 @@ func postgresDeleteLogicGateTx(ctx context.Context, tx *sql.Tx, companyID, logic
 }
 
 func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, deleteProjectionRows bool) error {
+	if err := postgresDeleteProcessMapResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, logicGateID); err != nil {
+		return err
+	}
 	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
 		return err
 	}
@@ -1218,13 +1232,6 @@ func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, l
 	if _, err := tx.ExecContext(ctx, `
 delete from node_logic_gate_assignments
 where company_id=$1::uuid and logic_gate_id=$2::uuid`, companyID, logicGateID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx,
-		`delete from logic_gate_relationships
-		 where company_id=$1 and (logic_gate_id_a=$2 or logic_gate_id_b=$2)`,
-		companyID, logicGateID,
-	); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx,

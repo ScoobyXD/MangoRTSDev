@@ -211,6 +211,65 @@ func TestMemoryWorkspaceReadVersionsTrackBoardResources(t *testing.T) {
 	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 2, true)
 }
 
+func TestMemoryWorkspaceReadVersionsTrackProcessMapWithoutRetiredScope(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-444444444444"
+
+	staticRows := WorkspaceReadVersionStaticRows(companyID)
+	foundProcessMap := false
+	for _, row := range staticRows {
+		if row.Scope == "logic-gate-relationships" {
+			t.Fatal("static read versions retained removed logic-gate relationship scope")
+		}
+		if row.Scope == "process-map" && row.ResourceKey == "" {
+			foundProcessMap = true
+		}
+	}
+	if !foundProcessMap {
+		t.Fatal("static read versions missing shared process-map scope")
+	}
+
+	events := []DomainEventInput{
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "process_map_placement_saved"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "process_map_placement_deleted"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "resource_operational_relationship_created"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "resource_operational_relationship_deleted"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "process_map_trace_saved"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "logic_gate_updated"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "logic_gate_deleted"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "logic_gate_permissions_updated"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_explorer_folder_updated"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_explorer_folder_deleted"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_explorer_folder_permissions_updated"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_explorer_item_placed"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_explorer_item_removed"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_user_group_updated"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_user_group_deleted"},
+		{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "company_user_group_members_updated"},
+	}
+	for index, input := range events {
+		if _, err := repo.AppendDomainEvent(input); err != nil {
+			t.Fatalf("AppendDomainEvent %s: %v", input.Type, err)
+		}
+		assertWorkspaceReadVersion(t, repo, companyID, "process-map", "", int64(index+1), true)
+	}
+
+	if _, err := repo.AppendDomainEvent(DomainEventInput{
+		CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "logic_gate_created",
+	}); err != nil {
+		t.Fatalf("AppendDomainEvent ordinary logic_gate_created: %v", err)
+	}
+	assertWorkspaceReadVersion(t, repo, companyID, "process-map", "", int64(len(events)), true)
+
+	if _, err := repo.AppendDomainEvent(DomainEventInput{
+		CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "logic_gate_created",
+		Payload: map[string]any{"realtime_change_type": "resource_restored"},
+	}); err != nil {
+		t.Fatalf("AppendDomainEvent restored logic_gate_created: %v", err)
+	}
+	assertWorkspaceReadVersion(t, repo, companyID, "process-map", "", int64(len(events)+2), true)
+}
+
 func assertWorkspaceReadVersion(t *testing.T, repo *MemoryRepo, companyID, scope, resourceKey string, want int64, wantFound bool) {
 	t.Helper()
 	version, found, err := repo.CurrentWorkspaceReadVersion(WorkspaceReadVersionQuery{CompanyID: companyID, Scope: scope, ResourceKey: resourceKey})

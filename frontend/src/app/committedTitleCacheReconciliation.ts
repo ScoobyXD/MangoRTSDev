@@ -1,7 +1,6 @@
 import { markCommunicationsWorkspaceResourcesStale } from "../modules/communications/communicationsApi.js";
 import type { CommittedEntityTitleUpdate } from "../modules/realtime/committedEntityTitleUpdates.js";
 import { invalidateLogicGateRecordStoreCaches } from "../modules/logic-gates/logicGateRecordStore.js";
-import { reconcileLogicGateRelationshipGraphTitle } from "../modules/logic-gates/logicGateRelationshipGraph.js";
 import { reconcileKanbanBoardContentTitles } from "../modules/kanban/KanbanBoardContentStore.js";
 import { invalidateKanbanBoardListCache } from "../modules/kanban/kanbanApi.js";
 import { invalidateNodeRecordStoreCaches } from "../modules/nodes/nodeRecordStore.js";
@@ -32,5 +31,4 @@ export function reconcileCachesForCommittedEntityTitle(
   invalidateLogicGateRecordStoreCaches(apiBase, companyID, resourceID);
   markCommunicationsWorkspaceResourcesStale(companyID, { logicGates: true });
   invalidateKanbanBoardListCache(apiBase, companyID);
-  reconcileLogicGateRelationshipGraphTitle(apiBase, companyID, update);
 }

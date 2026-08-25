@@ -66,6 +66,10 @@ func (s *Server) requireEntityAccess(w http.ResponseWriter, r *http.Request, com
 		writeError(w, http.StatusBadRequest, "invalid_entity_permission_check")
 		return false
 	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return false
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_check_entity_permission")
 		return false
@@ -238,16 +242,6 @@ func filterNodeRelationshipsByVisibleNodes(items []domain.NodeRelationship, ids 
 	out := make([]domain.NodeRelationship, 0, len(items))
 	for _, item := range items {
 		if ids[item.NodeIDA] && ids[item.NodeIDB] {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-func filterLogicGateRelationshipsByVisibleGates(items []domain.LogicGateRelationship, ids map[string]bool) []domain.LogicGateRelationship {
-	out := make([]domain.LogicGateRelationship, 0, len(items))
-	for _, item := range items {
-		if ids[item.LogicGateIDA] && ids[item.LogicGateIDB] {
 			out = append(out, item)
 		}
 	}
@@ -522,7 +516,7 @@ func (s *Server) filterVisibleKanbanCards(r *http.Request, companyID string, ite
 	return out, nil
 }
 
-func (s *Server) handleEntityPermissionsLegacy(w http.ResponseWriter, r *http.Request, entityType, entityID, notFoundCode, eventType string) {
+func (s *Server) handleEntityPermissionsLegacy(w http.ResponseWriter, r *http.Request, entityType, entityID, notFoundCode string) {
 	if r.Method == http.MethodGet {
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		if companyID == "" {
@@ -652,30 +646,7 @@ func (s *Server) handleEntityPermissionsLegacy(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "failed_to_update_entity_permissions")
 		return
 	}
-	payload := map[string]any{
-		"entity_type":          entityType,
-		"entity_id":            entityID,
-		"permissions":          permissions,
-		"apply_to_descendants": req.ApplyToDescendants,
-	}
-	if entityType == store.EntityTypeNode {
-		payload["node_id"] = entityID
-	} else if entityType == store.EntityTypeLogicGate {
-		payload["logic_gate_id"] = entityID
-	} else if entityType == store.EntityTypeProject {
-		payload["project_id"] = entityID
-	} else if entityType == store.EntityTypeCompanyExplorerFolder {
-		folder, err := s.companyExplorerFolderForPermissions(req.CompanyID, entityID)
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusInternalServerError, "failed_to_load_company_explorer_folder")
-			return
-		}
-		payload["folder_id"] = entityID
-		if err == nil {
-			payload["folder_kind"] = folder.FolderKind
-		}
-	}
-	s.publishWorkspaceEvent(req.CompanyID, eventType, payload)
+	s.wakeRealtimeSpine()
 	defaultAccess, err := s.entityDefaultAccess(req.CompanyID, entityType, entityID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_load_entity_default_access")

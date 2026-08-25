@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu } from "../../app/ConfirmActionMenu";
 import { getNodeTitle, canEditResourceAccess, type NodeRecord, type NodeRelationship } from "../nodes/types";
-import { getLogicGateTitle, toLogicGateViewRecord, type LogicGateRACIAssignment, type LogicGateRACIRole, type LogicGateRACIPrincipalType, type LogicGateRecord } from "../logic-gates/types";
+import { getLogicGateTitle, type LogicGateRACIAssignment, type LogicGateRACIRole, type LogicGateRACIPrincipalType, type LogicGateRecord } from "../logic-gates/types";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeTimelineEventsSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem, type NodeTimelineEventItem } from "../nodes/nodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../nodes/nodeRelationshipGraph";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
 import { buildLinkedNodePayload } from "../nodes/relationshipRules";
 import { getLogicGateRecordSingleFlight, getLogicGateInformationProjectionSingleFlight, invalidateLogicGateRecordStoreCaches, patchLogicGateRecordStoreRACIAssignments, type LogicGateProjectionItem } from "../logic-gates/logicGateRecordStore";
-import { getLogicGateRelationshipGraphSnapshot, subscribeLogicGateRelationshipGraph, upsertLogicGateRelationshipGraphNode } from "../logic-gates/logicGateRelationshipGraph";
 import { patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache } from "../communications/communicationsApi";
 import { linkMangoResourceAttachment } from "../attachments/attachmentApi";
 import { createRequestJSON, isAbortError } from "../api/requestJSON";
@@ -957,12 +956,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     return node ? getNodeTitle(node) : "";
   }, [apiBase, companyID]);
 
-  const readLogicGateLabelFromGraph = useCallback((logicGateID: string): string => {
-    if (!logicGateID) return "";
-    const logicGate = (getLogicGateRelationshipGraphSnapshot(apiBase, companyID).nodes ?? []).find((item) => item.node_id === logicGateID);
-    return logicGate ? getLogicGateTitle(logicGate) : "";
-  }, [apiBase, companyID]);
-
   const preserveNodeTitle = useCallback((candidate: string, current: string, nodeID: string): string => {
     const cleanCandidate = candidate.trim();
     const cleanCurrent = current.trim();
@@ -1055,7 +1048,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     setLinkedEntityKind(logicGateID ? "logic_gate" : "");
     setLinkedNodeID(logicGateID);
     if (!isSameEntity) {
-      setLinkedNodeTitle(logicGateID ? (label || readLogicGateLabelFromGraph(logicGateID)) : "");
+      setLinkedNodeTitle(logicGateID ? (label || "Logic Gate") : "");
     } else if (!editingTitleActiveRef.current) {
       setLinkedNodeTitle((current) => preferResolvedEntityLabel(current, label, "Logic Gate"));
     }
@@ -1063,7 +1056,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       setActiveTab("editor");
       focusEditorDocumentWithoutScrollJump();
     }
-  }, [apiBase, clearVisibleDocumentForSelection, companyID, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, readLogicGateLabelFromGraph, rememberCurrentDocumentScroll]);
+  }, [apiBase, clearVisibleDocumentForSelection, companyID, flushPendingDocumentSave, focusEditorDocumentWithoutScrollJump, linkedEntityKind, linkedNodeID, rememberCurrentDocumentScroll]);
 
   useEffect(() => {
     if (!forcedEntityKind) return;
@@ -1098,7 +1091,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         );
         setLinkedNodeTitle(updated.header);
         onLogicGateTitleChange?.({ logicGateID: updated.logic_gate_id, label: updated.header });
-        upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateViewRecord(updated));
       } else {
         const updated = await commitEntityTitleMutation(
           () => requestJSON<NodeRecord>(`/v1/nodes/${linkedNodeID}`, {
@@ -2014,26 +2006,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   }, [apiBase, companyID, forcedEntityKind, linkedEntityKind, linkedNodeID, preserveNodeTitle]);
 
   useEffect(() => {
-    if (forcedEntityKind) return;
-    if (!linkedNodeID || linkedEntityKind !== "logic_gate") return;
-    const syncTitleFromGraph = () => {
-      const snapshot = getLogicGateRelationshipGraphSnapshot(apiBase, companyID);
-      const logicGate = (snapshot.nodes ?? []).find((item) => item.node_id === linkedNodeID);
-      if (!logicGate) return;
-      setLinkedEntityCanEdit(canEditResourceAccess(logicGate));
-      const nextTitle = getLogicGateTitle(logicGate);
-      setLinkedNodeTitle((current) => {
-        if (editingTitleActiveRef.current) return current;
-        if (current === nextTitle) return current;
-        invalidateLogicGateRecordStoreCaches(apiBase, companyID, linkedNodeID);
-        return nextTitle;
-      });
-    };
-    syncTitleFromGraph();
-    return subscribeLogicGateRelationshipGraph(apiBase, companyID, syncTitleFromGraph);
-  }, [apiBase, companyID, forcedEntityKind, linkedEntityKind, linkedNodeID]);
-
-  useEffect(() => {
     let cancelled = false;
     editorSnapshotRefreshTokenRef.current += 1;
     if (!currentUserLoaded) {
@@ -2140,7 +2112,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setLinkedNodeMetadataRows([
             { label: "Logic Gate ID", value: details.logic_gate.logic_gate_id },
             { label: "Created", value: details.logic_gate.created_timestamp },
-            { label: "Relationships", value: String(details.relationships_count ?? details.relationships.length) },
             { label: "Information records", value: String(details.information_count ?? details.information.length) },
             { label: "Text boxes", value: String(textBoxes.length) },
           ]);

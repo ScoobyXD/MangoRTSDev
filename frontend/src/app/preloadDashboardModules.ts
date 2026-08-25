@@ -1,6 +1,6 @@
 import type { FrameDataModel } from "../types";
 import { preloadModuleKinds, preloadModulesForFrames } from "../modules";
-import { preloadAccountManagerPage, preloadFieldsPage, preloadHomePage, preloadLogicGateArenaPage, preloadProjectManagementPage, preloadTeamsPage } from "../pages/lazyPages";
+import { preloadAccountManagerPage, preloadFieldsPage, preloadHomePage, preloadLogicGateArenaPage, preloadProcessMapPage, preloadProjectManagementPage, preloadTeamsPage } from "../pages/lazyPages";
 import { loadViews } from "./useFramePersistence";
 import {
   ACCOUNT_MANAGER_MODULE_KINDS,
@@ -9,6 +9,7 @@ import {
   HOME_MODULE_KINDS,
   LOGIC_GATE_ARENA_MODULE_KINDS,
   PROJECT_MANAGEMENT_MODULE_KINDS,
+  PROCESS_MAP_MODULE_KINDS,
   TEAMS_MODULE_KINDS,
   planLikelyDashboardPreload,
   type DashboardPreloadPlan,
@@ -48,6 +49,11 @@ export function preloadFieldsSurface(): void {
   preloadModuleKinds(FIELDS_MODULE_KINDS);
 }
 
+export function preloadProcessMapSurface(): void {
+  preloadProcessMapPage();
+  preloadModuleKinds(PROCESS_MAP_MODULE_KINDS);
+}
+
 export function preloadVisibleFrameModules(frames: Iterable<Pick<FrameDataModel, "kind">>): void {
   preloadModulesForFrames(frames);
 }
@@ -60,6 +66,7 @@ function preloadDashboardPlan(plan: DashboardPreloadPlan): void {
     if (surface === "account-manager") preloadAccountManagerPage();
     if (surface === "teams") preloadTeamsPage();
     if (surface === "fields") preloadFieldsPage();
+    if (surface === "process-map") preloadProcessMapPage();
   }
   preloadModuleKinds(plan.moduleKinds);
 }

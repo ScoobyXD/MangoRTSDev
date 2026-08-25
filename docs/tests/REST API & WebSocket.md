@@ -62,17 +62,19 @@ A missing/stale heartbeat, socket close, authentication failure, or accepted-sco
 
 Last updated: 2026-08-07
 
-# Process Story: Realtime remains map-free after complete Map retirement
+# Process Story: Retired maps stay absent while Process Map uses bounded HTTP truth
 
-A committed Node, Logic Gate, Editor, Explorer, Kanban, communications, Project, permission, or notification mutation appends its retained domain event
+An authorized user opens the shared company Process Map root or one exact Folder layer
 ↓
-The backend publishes only the exact authorized realtime scopes for that product
+The backend authorizes that layer and returns only its exact placements and visible traces through one conditional HTTP read; restricted placements disclose only existence and saved position
 ↓
-Frontend caches invalidate or reconcile the affected surviving entity and title views
+Placement, operational-relationship, and trace commands save Mango-owned state in one transaction and enqueue only a compact company Process Map invalidation
 ↓
-Node authored-change annotations and unread/seen ETags keep their existing routes and state transitions
+Subscribed clients coalesce that hint into the same canonical layer read; the socket never carries graph data, hidden identities, or route geometry
 ↓
-No Node Map or Logic Gate Map route, API, workspace scope, geometry event, coordinate payload, read-version scope, or derived position task exists
+The retired Node Map and Logic Gate Map routes, scopes, caches, coordinate payloads, and compatibility handlers remain absent
+
+Last updated: 2026-08-24
 
 # Process Story: Logic Gate document commands use final storage
 
@@ -106,8 +108,8 @@ RW6 - Editor state distinguishes local pending, Saving, Saved, Reconnecting with
 RW7 - Unacknowledged HTML patches are retained durably under authenticated user, company, exact document, browser client, and operation ID and survive unmount, refresh, disconnect, and reconnect.
 RW8 - Timeout investigations must identify the exact HTTP method, route, request duration, and backend log line for the affected request.
 RW9 - Backend request logs must make it possible to distinguish slow durable writes from slow background reads or refetches.
-RW10 - Notifications/Updates, mounted Node chat, mounted Logic Gate Kanban, the exact active mailbox, exact collaborative editor documents, and RACI Tabs change doorbells all publish through the one durable outbox/shared-backplane/local-registry realtime spine. Payload/recovery rules differ, but no feature owns a second livestream system.
-RW11 - Approved scope patterns are `notifications:user:{user_id}`, `chat:node:{node_id}`, `board:{board_id}`, exact personal/shared mailbox scopes, `editor:{node|logic_gate|project}:{resource_id}:{document_id}`, and the exact company-membership-checked `raci-tabs:company` doorbell scope. Broad workspace, generic company, directory, communications, Explorer, graph, other RACI, Project Management, permission, wildcard editor, and user-wide editor scopes are forbidden.
+RW10 - Notifications/Updates, mounted Node chat, mounted Logic Gate Kanban, the exact active mailbox, exact collaborative editor documents, RACI Tabs, and Process Map change doorbells all publish through the one durable outbox/shared-backplane/local-registry realtime spine. Payload/recovery rules differ, but no feature owns a second livestream system.
+RW11 - Approved scope patterns are `notifications:user:{user_id}`, `chat:node:{node_id}`, `board:{board_id}`, exact personal/shared mailbox scopes, `editor:{node|logic_gate|project}:{resource_id}:{document_id}`, and the exact company-membership-checked `raci-tabs:company` and `process-map:company` doorbell scopes. Broad workspace, generic company, directory, communications, Explorer, graph, other RACI, Project Management, permission, wildcard editor, and user-wide editor scopes are forbidden.
 RW12 - Socket open never means Connected or Saved. Green requires server ready, a confirmed application heartbeat, an admission result for every initial exact subscription, and successful recovery for accepted mounted scopes. A rejected scope is resolved but unavailable and reports through that feature's `onRejected` path; it is not evidence that the authenticated socket or unrelated features are disconnected. Saved still requires the affected write's own acknowledgement.
 RW13 - Browser-side API request timing should make status=error timeout cases visible with the route that timed out.
 RW14 - Dev or production timeout triage must consider backend, database, and cache-refetch load before changing the client timeout threshold.
@@ -158,7 +160,7 @@ RW58 - Node and Project chat edits use author-checked `PATCH .../projection/{pro
 RW59 - Global realtime health is transport/authentication/heartbeat truth, not the logical AND of every optional feature subscription. Rejection removes only that exact scope from accepted delivery, invokes its scoped rejection handler, and skips its recovery callback. It must not start or extend the global attempting/disconnected modal while server ready and heartbeat remain healthy. Genuine socket, heartbeat, ticket/authentication, or accepted-recovery failure retains the existing global outage behavior.
 RW59 - Logic Gate document writes use `/v1/editor-json/logic_gate/{logic_gate_id}/documents/{document_id}` and `logic_gate_textboxes`. A legacy text information write returns `editor_collaboration_required`; every unsupported legacy information type returns `logic_gate_information_type_not_supported`; neither path writes `logic_gate_information` or `logic_gate_projection_table`.
 RW60 - `project_information_created` and `project_information_deleted` advance the `projects`, unfiltered Company Explorer, and Project-folder Company Explorer read-version scopes. Conditional reads after either event must not reuse an older ETag or return an incorrect `304`.
-RW61 - Node Map and Logic Gate Map are fully retired. The backend exposes no Map layout or Map workspace route, accepts or returns no Map coordinates or position results, creates no Map-derived task, publishes no Map realtime event, and maintains no Map read-version scope or cache key. Historical shipped migrations remain records only.
+RW61 - The old Node Map and Logic Gate Map are fully retired: their routes, workspace snapshot, scopes, caches, position contracts, derived tasks, and compatibility handlers remain absent. The new Process Map is a separate contract backed only by `process_map_placements`, `resource_operational_relationships`, and `process_map_traces`; it must not restore or read any retired Map authority. Historical shipped migrations remain records only.
 RW62 - PostgreSQL product rows and `realtime_outbox` are the durable source of truth. Valkey carries only a best-effort committed-event signal; it is not document storage, an acknowledgement authority, or a replacement for transactional outbox atomicity.
 RW63 - An API task may publish an outbox event only after its enclosing product transaction commits. An ordinary mutation acknowledges that durable enqueue and wakes the lifecycle-owned publisher without waiting for broker I/O or current-audience lookup. The Valkey envelope contains only event sequence, stable event ID, resource revision, exact company/scope, event/resource identity, existing audience boundary, compact payload, and creation time. It never contains every keystroke, a complete editor document, attachment bytes, credentials, or claim/lease internals.
 RW64 - Every API task subscribes to the one environment Valkey channel. A received event can reach clients only after event ID/revision deduplication, ordered sequence handling, exact-scope current authorization where required, and the existing local WebSocket registry; a task never broadcasts to all company sockets merely because Valkey delivered a message.
@@ -178,6 +180,10 @@ RW77 - An attached-email surface whose stored thread is `downloading` performs i
 RW78 - Current-audience resolution supports direct typed `huddle_logic_gate` and `huddle_node` resources. A KPI editor scope resolves authorization through the KPI's exact owning Logic Gate because KPI has no independent policy; a missing KPI has no audience and is not a retryable storage failure.
 RW79 - Loaded RACI rows and pinned Logic Gates retain one board subscription per exact Logic Gate. Adding or removing one row or pin subscribes or unsubscribes only that board; unchanged boards remain subscribed and are never torn down and recreated by collection cleanup.
 RW80 - Simultaneous identical Kanban board-list reads share one in-flight HTTP request. A board-list mutation invalidates the completed cache and prevents an older in-flight response from becoming current.
+RW81 - Process Map exposes only these bounded commands: `GET /v1/process-map/layer` with an optional exact `folder_id`; `GET /v1/process-map/operational-relationships` for one exact typed resource and direction; placement `PUT` and `DELETE` at `/v1/process-map/placements/{resource_type}/{resource_id}`; relationship `POST` with an optional atomic trace; trace `PUT` at `/v1/process-map/operational-relationships/{relationship_id}/trace`; and relationship `DELETE`. There is no whole-company graph, candidate-search, trace-only DELETE, full React Flow document, or viewport API.
+RW82 - A root Process Map read loads only placements whose map parent is null and their visible same-layer traces. A Folder read authorizes that exact Folder before conditional ETag handling, then loads only placements whose map parent is that Folder and their visible same-layer traces. The response and ETag are actor- and permission-safe; a matching validator must never turn revoked or different access into `304`.
+RW83 - A Process Map layer response serializes an accessible placement with its exact typed identity and current source presentation, but serializes an inaccessible placement through a distinct restricted shape containing only `restricted: true`, `grid_x`, and `grid_y`. Every relationship and trace incident to a restricted endpoint is omitted.
+RW84 - Every committed Process Map mutation and every permission, group, or membership change that can alter its projection advances the shared company `process-map` read version and enqueues the compact `process_map.changed` hint on `process-map:company` in the same transaction. The hint carries no placements, endpoints, names, relationships, or route points; clients coalesce it into one current-layer HTTP refetch and never poll. Membership removal includes the removed user only in that one compact invalidation audience so stale rendered state clears, while current membership is rechecked for HTTP reads, reconnects, and subscribe commands and excludes that user from later hints.
 
 ## Scenarios
 
@@ -331,21 +337,27 @@ Given:
 Expected:
 - The backend publishes only to the matching notification, Node chat, board, exact personal-account mailbox, exact shared-inbox mailbox, or exact `raci-tabs:company` scope.
 - First acceptance and reconnect use only that active surface's coalesced canonical HTTP read; Updates fetches its feed only while open and mail reconciles only while the exact mailbox is active.
-- Ordinary workspace, Explorer, graph, Project Management, broad communications, permission, and document mutations emit no product socket message.
+- Ordinary workspace, Explorer, graph, Project Management, broad communications, permission, and document mutations emit no product socket message unless a source or permission change alters the Process Map projection; that exception emits only the compact company Process Map invalidation.
 
-### Scenario RW-S4B: Retired Map Contracts Stay Absent
+### Scenario RW-S4B: Retired Legacy Maps Stay Absent While Process Map Stays Bounded
 
 Business logic covered:
 - RW61
+- RW81
+- RW82
+- RW83
+- RW84
 
 Given:
-- A caller attempts a retired Map layout or Map workspace request, or old browser state names a retired Map scope.
-- A normal Node, Logic Gate, relationship, Editor, Explorer, or Kanban mutation commits.
+- A caller attempts a retired Node Map or Logic Gate Map layout, workspace request, or scope.
+- An authorized actor opens the Process Map root or one exact Folder layer, while another mapped item is inaccessible.
+- A Process Map mutation commits and another client is subscribed to the company Process Map scope.
 
 Expected:
-- No Map route or compatibility handler accepts the request, and no response contains Map coordinates or position results.
-- No Map realtime event, read-version scope, cache key, or derived position task is created.
-- Surviving product mutations continue through their exact non-Map contracts without querying Map position storage.
+- No retired route, compatibility handler, workspace snapshot, cache, derived task, or retired scope is recreated.
+- The new layer request reads only the exact layer; its restricted row contains only existence and saved position and no incident trace.
+- The mutation advances `process-map`, commits its compact outbox hint atomically, and the subscriber performs one coalesced canonical layer read.
+- No socket payload contains coordinates, endpoint identities, relationship data, or route geometry.
 
 ### Scenario RW-S5: Same-Window Node And Logic Gate Titles Converge
 

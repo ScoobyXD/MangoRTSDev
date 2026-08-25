@@ -5,7 +5,7 @@ import {
   throwIfResourceMarkedMissing,
 } from "../api/missingResources.js";
 import { isHTTPNotFoundError, requestJSON } from "../api/requestJSON.js";
-import type { LogicGateDetails, LogicGateRACIAssignment, LogicGateRecord, LogicGateRelationship } from "./types.js";
+import type { LogicGateDetails, LogicGateRACIAssignment } from "./types.js";
 
 export type LogicGateProjectionItem = {
   company_id: string;
@@ -50,9 +50,7 @@ function cacheLogicGateViewPayload(cacheKey: string, payload: LogicGateViewRespo
   const details: LogicGateDetails = {
     logic_gate: payload.logic_gate,
     information: payload.information ?? [],
-    relationships: payload.relationships ?? [],
     information_count: payload.information_count,
-    relationships_count: payload.relationships_count,
     effective_access_level: payload.effective_access_level ?? payload.logic_gate?.effective_access_level,
     can_edit: payload.can_edit,
   };
@@ -153,30 +151,6 @@ export function patchLogicGateRecordStoreRACIAssignments(
         gvic_assignments: nextAssignments,
       },
     });
-  }
-}
-
-export function primeLogicGateRecordStoreCaches(apiBase: string, companyID: string, entries: Array<{
-  logicGate: LogicGateRecord;
-  relationships?: LogicGateRelationship[];
-  projections?: LogicGateProjectionItem[];
-}>): void {
-  for (const entry of entries) {
-    const cacheKey = key(apiBase, companyID, entry.logicGate.logic_gate_id);
-    clearResourceMissing({ apiBase, companyID, resourceType: "logic_gate", resourceID: entry.logicGate.logic_gate_id });
-    bumpViewGeneration(cacheKey);
-    viewInflight.delete(cacheKey);
-    viewCache.delete(cacheKey);
-    detailsCache.set(cacheKey, {
-      logic_gate: entry.logicGate,
-      information: [],
-      relationships: entry.relationships ?? [],
-      information_count: 0,
-      relationships_count: entry.relationships?.length ?? 0,
-      effective_access_level: entry.logicGate.effective_access_level,
-      can_edit: entry.logicGate.can_edit,
-    });
-    projectionCache.set(cacheKey, entry.projections ?? []);
   }
 }
 

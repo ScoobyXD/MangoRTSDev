@@ -258,20 +258,22 @@ var recycleSnapshotTables = map[string]bool{
 	"huddle_node_logic_gate_relationships": true,
 	"huddle_node_kpi_relationships":        true,
 
-	"huddle_explorer_folders":      true,
-	"huddle_explorer_items":        true,
-	"node_textboxes":               true,
-	"node_textboxes_history":       true,
-	"node_textbox_chats":           true,
-	"logic_gate_textboxes":         true,
-	"logic_gate_textboxes_history": true,
-	"project_textboxes":            true,
-	"project_textboxes_history":    true,
-	"project_textbox_chats":        true,
-	"node_account_assignments":     true,
-	"node_relationships":           true,
-	"logic_gate_relationships":     true,
-	"user_logic_gate_shortcuts":    true,
+	"huddle_explorer_folders":            true,
+	"huddle_explorer_items":              true,
+	"node_textboxes":                     true,
+	"node_textboxes_history":             true,
+	"node_textbox_chats":                 true,
+	"logic_gate_textboxes":               true,
+	"logic_gate_textboxes_history":       true,
+	"project_textboxes":                  true,
+	"project_textboxes_history":          true,
+	"project_textbox_chats":              true,
+	"node_account_assignments":           true,
+	"node_relationships":                 true,
+	"process_map_placements":             true,
+	"resource_operational_relationships": true,
+	"process_map_traces":                 true,
+	"user_logic_gate_shortcuts":          true,
 
 	"project_relationships":                  true,
 	"project_relationship_projection":        true,
@@ -291,8 +293,12 @@ var recycleSnapshotTables = map[string]bool{
 }
 
 var recycleRestoreTableOrder = []string{
+	"company_explorer_folders",
 	"nodes",
 	"logic_gates",
+	"resource_operational_relationships",
+	"process_map_placements",
+	"process_map_traces",
 	"projects",
 	"huddle_logic_gates",
 	"huddle_nodes",
@@ -309,7 +315,6 @@ var recycleRestoreTableOrder = []string{
 	"email_relationships",
 	"node_textbox_chats",
 	"project_textbox_chats",
-	"company_explorer_folders",
 	"huddle_explorer_folders",
 	"node_account_assignments",
 	"resource_gvic_settings",
@@ -322,7 +327,6 @@ var recycleRestoreTableOrder = []string{
 	"attachment_relationships",
 	"node_logic_gate_assignments",
 	"node_relationships",
-	"logic_gate_relationships",
 	"project_relationships",
 	"project_relationship_projection",
 	"project_management_timeline_items",
@@ -430,6 +434,84 @@ where existing.company_id=restored.company_id
   and existing.attachment_relationship_id=restored.attachment_relationship_id`, string(rows)); err != nil {
 			return err
 		}
+	}
+	qualifiedColumns := make([]string, len(columns))
+	for index, column := range columns {
+		qualifiedColumns[index] = "restored_row." + column
+	}
+	if tableName == "resource_operational_relationships" {
+		query := fmt.Sprintf(`
+insert into resource_operational_relationships (%s) overriding system value
+select %s
+from jsonb_populate_recordset(null::resource_operational_relationships, coalesce($1::jsonb, '[]'::jsonb)) restored_row
+where (
+    (restored_row.source_resource_type='company_explorer_folder' and exists (
+      select 1 from company_explorer_folders folder
+      where folder.company_id=restored_row.company_id and folder.folder_id=restored_row.source_resource_id
+    ))
+    or
+    (restored_row.source_resource_type='logic_gate' and exists (
+      select 1 from logic_gates process
+      where process.company_id=restored_row.company_id and process.logic_gate_id=restored_row.source_resource_id
+    ))
+  )
+  and (
+    (restored_row.target_resource_type='company_explorer_folder' and exists (
+      select 1 from company_explorer_folders folder
+      where folder.company_id=restored_row.company_id and folder.folder_id=restored_row.target_resource_id
+    ))
+    or
+    (restored_row.target_resource_type='logic_gate' and exists (
+      select 1 from logic_gates process
+      where process.company_id=restored_row.company_id and process.logic_gate_id=restored_row.target_resource_id
+    ))
+  )
+on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
+		_, err := tx.ExecContext(ctx, query, string(rows))
+		return err
+	}
+	if tableName == "process_map_placements" {
+		query := fmt.Sprintf(`
+insert into process_map_placements (%s) overriding system value
+select %s
+from jsonb_populate_recordset(null::process_map_placements, coalesce($1::jsonb, '[]'::jsonb)) restored_row
+where (
+    (restored_row.resource_type='company_explorer_folder' and exists (
+      select 1 from company_explorer_folders folder
+      where folder.company_id=restored_row.company_id and folder.folder_id=restored_row.resource_id
+    ))
+    or
+    (restored_row.resource_type='logic_gate' and exists (
+      select 1 from logic_gates process
+      where process.company_id=restored_row.company_id and process.logic_gate_id=restored_row.resource_id
+    ))
+  )
+  and (
+    restored_row.map_parent_folder_id is null
+    or exists (
+      select 1 from company_explorer_folders parent_folder
+      where parent_folder.company_id=restored_row.company_id
+        and parent_folder.folder_id=restored_row.map_parent_folder_id
+    )
+  )
+on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
+		_, err := tx.ExecContext(ctx, query, string(rows))
+		return err
+	}
+	if tableName == "process_map_traces" {
+		query := fmt.Sprintf(`
+insert into process_map_traces (%s) overriding system value
+select %s
+from jsonb_populate_recordset(null::process_map_traces, coalesce($1::jsonb, '[]'::jsonb)) restored_row
+where exists (
+  select 1
+  from resource_operational_relationships relationship
+  where relationship.company_id=restored_row.company_id
+    and relationship.resource_operational_relationship_id=restored_row.resource_operational_relationship_id
+)
+on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
+		_, err := tx.ExecContext(ctx, query, string(rows))
+		return err
 	}
 	selectColumns := columnList
 	if tableName == "email_drafts" {
@@ -573,9 +655,6 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 				return nil, err
 			}
 		}
-		if err := addTable("logic_gate_relationships", `company_id=$1::uuid and (logic_gate_id_a = any(string_to_array($2, ',')::uuid[]) or logic_gate_id_b = any(string_to_array($2, ',')::uuid[]))`, companyID, logicGateIDCSV); err != nil {
-			return nil, err
-		}
 		if err := addTable("user_logic_gate_shortcuts", `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 			return nil, err
 		}
@@ -583,6 +662,41 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 				return nil, err
 			}
+		}
+	}
+	if len(folderIDs) > 0 || len(logicGateIDs) > 0 {
+		folderIDArray := `coalesce(string_to_array(nullif($2, ''), ',')::uuid[], '{}'::uuid[])`
+		logicGateIDArray := `coalesce(string_to_array(nullif($3, ''), ',')::uuid[], '{}'::uuid[])`
+		placementWhere := `company_id=$1::uuid and (` +
+			`(resource_type='company_explorer_folder' and resource_id = any(` + folderIDArray + `)) or ` +
+			`(resource_type='logic_gate' and resource_id = any(` + logicGateIDArray + `)) or ` +
+			`map_parent_folder_id = any(` + folderIDArray + `))`
+		if err := addTable("process_map_placements", placementWhere, companyID, folderIDCSV, logicGateIDCSV); err != nil {
+			return nil, err
+		}
+
+		relationshipWhere := `company_id=$1::uuid and (` +
+			`(source_resource_type='company_explorer_folder' and source_resource_id = any(` + folderIDArray + `)) or ` +
+			`(target_resource_type='company_explorer_folder' and target_resource_id = any(` + folderIDArray + `)) or ` +
+			`(source_resource_type='logic_gate' and source_resource_id = any(` + logicGateIDArray + `)) or ` +
+			`(target_resource_type='logic_gate' and target_resource_id = any(` + logicGateIDArray + `)))`
+		if err := addTable("resource_operational_relationships", relationshipWhere, companyID, folderIDCSV, logicGateIDCSV); err != nil {
+			return nil, err
+		}
+
+		traceWhere := `company_id=$1::uuid and resource_operational_relationship_id in (` +
+			`select relationship.resource_operational_relationship_id from resource_operational_relationships relationship ` +
+			`where relationship.company_id=$1::uuid and (` +
+			`(relationship.source_resource_type='company_explorer_folder' and relationship.source_resource_id = any(` + folderIDArray + `)) or ` +
+			`(relationship.target_resource_type='company_explorer_folder' and relationship.target_resource_id = any(` + folderIDArray + `)) or ` +
+			`(relationship.source_resource_type='logic_gate' and relationship.source_resource_id = any(` + logicGateIDArray + `)) or ` +
+			`(relationship.target_resource_type='logic_gate' and relationship.target_resource_id = any(` + logicGateIDArray + `)) or ` +
+			`exists (select 1 from process_map_placements placement where placement.company_id=$1::uuid ` +
+			`and placement.map_parent_folder_id = any(` + folderIDArray + `) and (` +
+			`(relationship.source_resource_type=placement.resource_type and relationship.source_resource_id=placement.resource_id) or ` +
+			`(relationship.target_resource_type=placement.resource_type and relationship.target_resource_id=placement.resource_id)))))`
+		if err := addTable("process_map_traces", traceWhere, companyID, folderIDCSV, logicGateIDCSV); err != nil {
+			return nil, err
 		}
 	}
 	if len(projectIDs) > 0 {

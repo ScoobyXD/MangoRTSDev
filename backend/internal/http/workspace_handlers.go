@@ -77,12 +77,6 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	projectIDs := visibleProjectIDs(projects)
-	logicGateRelationships, err := s.repo.ListLogicGateRelationships(companyID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_logic_gate_relationships")
-		return
-	}
-	logicGateRelationships = filterLogicGateRelationshipsByVisibleGates(logicGateRelationships, logicGateIDs)
 	var nodeFolders []domain.CompanyExplorerFolder
 	if userID != "" {
 		nodeFolders, err = s.repo.ListVisibleCompanyExplorerFolders(companyID, "node", userID)
@@ -129,14 +123,13 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 	}
 	folderItems = filterCompanyExplorerItemsForVisibleEntities(folderItems, nodeIDs, logicGateIDs, projectIDs)
 	payload := map[string]any{
-		"scope":                    "full",
-		"nodes":                    nodes,
-		"relationships":            relationships,
-		"logic_gates":              logicGates,
-		"logic_gate_relationships": logicGateRelationships,
-		"projects":                 projects,
-		"folders":                  folders,
-		"folder_items":             folderItems,
+		"scope":         "full",
+		"nodes":         nodes,
+		"relationships": relationships,
+		"logic_gates":   logicGates,
+		"projects":      projects,
+		"folders":       folders,
+		"folder_items":  folderItems,
 	}
 	if isTruthyQueryValue(firstNonEmptyQueryValue(r, "include_legacy_kanban", "include_kanban_payloads")) {
 		payload["kanban_boards"] = logicGateProjectionBoards(logicGates, store.KanbanBoardQuery{Limit: store.KanbanMaxBoardsLimit})

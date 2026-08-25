@@ -10,7 +10,7 @@ import (
 )
 
 func (r *PostgresRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID string) (domain.HuddleLogicGate, error) {
-	companyID, logicGateID = strings.TrimSpace(companyID), strings.TrimSpace(logicGateID)
+	companyID, logicGateID, actorID = cleanUUIDText(companyID), cleanUUIDText(logicGateID), cleanUUIDText(actorID)
 	if companyID == "" || logicGateID == "" {
 		return domain.HuddleLogicGate{}, ErrInvalid
 	}
@@ -74,6 +74,13 @@ func (r *PostgresRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID 
 	if _, err = tx.ExecContext(ctx, `insert into resource_permissions(company_id,resource_type,resource_id,subject_type,subject_id,access_level,created_timestamp,updated_timestamp) select company_id,'huddle_logic_gate',$3::uuid,subject_type,subject_id,access_level,created_timestamp,statement_timestamp() from resource_permissions where company_id=$1::uuid and resource_type=$2 and resource_id=$4::uuid`, companyID, permissionSourceType, logicGateID, permissionSourceID); err != nil {
 		return domain.HuddleLogicGate{}, err
 	}
+	eventInput := workspaceDomainEventInput(companyID, "logic_gate_deleted", map[string]any{
+		"logic_gate_id": logicGateID, "realtime_change_type": "resource_deleted", "realtime_audience_snapshot": true,
+	})
+	eventInput.ActorUserID = actorID
+	if _, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{eventInput}); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
 	// The Explorer detach trigger resolves the old Logic Gate policy, so remove
 	// the placement before deleting those policy settings.
 	if _, err = tx.ExecContext(ctx, `delete from company_explorer_items where company_id=$1::uuid and target_type='logic_gate' and target_id=$2::uuid`, companyID, logicGateID); err != nil {
@@ -84,10 +91,12 @@ func (r *PostgresRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID 
 			return domain.HuddleLogicGate{}, err
 		}
 	}
+	if err = postgresDeleteProcessMapResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, logicGateID); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
 	for _, query := range []string{
 		`delete from project_relationship_projection where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from project_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
-		`delete from logic_gate_relationships where company_id=$1::uuid and (logic_gate_id_a=$2::uuid or logic_gate_id_b=$2::uuid)`,
 		`delete from email_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from attachment_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2`,
 		`delete from user_logic_gate_shortcuts where company_id=$1::uuid and logic_gate_id=$2::uuid`,

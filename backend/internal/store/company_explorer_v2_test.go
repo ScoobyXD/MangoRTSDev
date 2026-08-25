@@ -62,6 +62,7 @@ func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 		ParentEntityID:   folder.EntityID,
 		ChildEntityType:  CompanyExplorerV2EntityProject,
 		ChildResourceID:  project.ProjectID,
+		ActorUserID:      user.UserID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
@@ -76,6 +77,7 @@ func TestMemoryCompanyExplorerV2FinalViewReadsCompanyTree(t *testing.T) {
 		ParentEntityID:   folder.EntityID,
 		ChildEntityType:  CompanyExplorerV2EntityLogicGate,
 		ChildResourceID:  logicGate.LogicGateID,
+		ActorUserID:      user.UserID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
@@ -206,6 +208,7 @@ func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testin
 		ParentEntityID:   companyID,
 		ChildEntityType:  CompanyExplorerV2EntityProject,
 		ChildResourceID:  project.ProjectID,
+		ActorUserID:      user.UserID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
@@ -237,6 +240,7 @@ func TestMemoryCompanyExplorerV2PreservesManualAndNativeParentContexts(t *testin
 		ParentEntityID:   folder.EntityID,
 		ChildEntityType:  CompanyExplorerV2EntityLogicGate,
 		ChildResourceID:  logicGate.LogicGateID,
+		ActorUserID:      user.UserID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {
@@ -669,6 +673,7 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 		ChildEntityType:  CompanyExplorerV2EntityNode,
 		ChildResourceID:  node.NodeID,
 		Position:         2000,
+		ActorUserID:      admin.UserID,
 		PermissionUserID: admin.UserID,
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("UpsertCompanyExplorerV2Edge node err = %v, want ErrInvalid", err)
@@ -683,6 +688,7 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 		ChildEntityType:  CompanyExplorerV2EntityLogicGate,
 		ChildResourceID:  logicGate.LogicGateID,
 		Position:         2000,
+		ActorUserID:      admin.UserID,
 		PermissionUserID: admin.UserID,
 	})
 	if err != nil {
@@ -697,6 +703,7 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 		EdgeID:           placedGate.EdgeID,
 		ParentEntityID:   openFolder.EntityID,
 		Position:         3000,
+		ActorUserID:      admin.UserID,
 		PermissionUserID: admin.UserID,
 	})
 	if err != nil {
@@ -736,6 +743,138 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 	}
 	if _, err := repo.GetCompanyExplorerV2FolderDefaultAccess(companyID, privateFolder.EntityID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetCompanyExplorerV2FolderDefaultAccess after delete err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestMemoryCompanyExplorerMutationsAuthorizeExactSourceAndDestination(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "11111111-1111-4111-8111-220000000120"
+	otherCompanyID := "11111111-1111-4111-8111-220000000121"
+	repo.EnsureCompany(companyID, "Explorer authorization")
+	repo.EnsureCompany(otherCompanyID, "Other explorer company")
+
+	admin, err := repo.UpsertAuthUser("explorer-auth-admin", "explorer-auth-admin@example.com", "Explorer Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := repo.UpsertAuthUser("explorer-auth-member", "explorer-auth-member@example.com", "Explorer Member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outsider, err := repo.UpsertAuthUser("explorer-auth-outsider", "explorer-auth-outsider@example.com", "Explorer Outsider")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(member.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+
+	sourceFolder, _ := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Source")
+	openFolder, _ := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Open")
+	restrictedFolder, _ := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Restricted")
+	otherFolder, _ := repo.CreateCompanyExplorerFolder(otherCompanyID, "", "logic_gate", "Other")
+	movingFolder, _ := repo.CreateCompanyExplorerFolder(companyID, sourceFolder.FolderID, "logic_gate", "Moving folder")
+	gate, err := repo.CreateLogicGate(companyID, "Moving process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	placed, err := repo.UpsertCompanyExplorerV2Edge(CompanyExplorerV2EdgeInput{
+		CompanyID: companyID, ParentEntityID: sourceFolder.FolderID,
+		ChildEntityType: CompanyExplorerV2EntityLogicGate, ChildResourceID: gate.LogicGateID,
+		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setDefaultAccess := func(resourceType, resourceID, access string) {
+		t.Helper()
+		if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+			CompanyID: companyID, EntityType: resourceType, EntityID: resourceID,
+			DefaultAccess: access, DefaultAccessSet: true, ActorUserID: admin.UserID,
+		}); err != nil {
+			t.Fatalf("SetEntityPermissions(%s/%s, %s): %v", resourceType, resourceID, access, err)
+		}
+	}
+	setDefaultAccess(EntityTypeCompanyExplorerFolder, restrictedFolder.FolderID, ResourceDefaultAccessNoAccess)
+
+	if _, err := repo.MoveCompanyExplorerV2Edge(CompanyExplorerV2MoveEdgeInput{
+		CompanyID: companyID, EdgeID: placed.EdgeID, ParentEntityID: restrictedFolder.FolderID,
+		ActorUserID: member.UserID, PermissionUserID: member.UserID,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("move to inaccessible destination error = %v, want ErrNotFound", err)
+	}
+	if edge := repo.companyExplorerV2Edges[key(companyID, placed.EdgeID)]; edge.ParentEntityID != sourceFolder.FolderID {
+		t.Fatalf("denied destination move changed parent to %q", edge.ParentEntityID)
+	}
+	if _, err := repo.MoveCompanyExplorerV2Edge(CompanyExplorerV2MoveEdgeInput{
+		CompanyID: companyID, EdgeID: placed.EdgeID, ParentEntityID: otherFolder.FolderID,
+		ActorUserID: member.UserID, PermissionUserID: member.UserID,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-company destination move error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.MoveCompanyExplorerV2Edge(CompanyExplorerV2MoveEdgeInput{
+		CompanyID: companyID, EdgeID: placed.EdgeID, ParentEntityID: companyID,
+		ActorUserID: outsider.UserID, PermissionUserID: outsider.UserID,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("nonmember root move error = %v, want ErrNotFound", err)
+	}
+	movedToRoot, err := repo.MoveCompanyExplorerV2Edge(CompanyExplorerV2MoveEdgeInput{
+		CompanyID: companyID, EdgeID: placed.EdgeID, ParentEntityID: companyID,
+		ActorUserID: member.UserID, PermissionUserID: member.UserID,
+	})
+	if err != nil || movedToRoot.ParentEntityID != "" {
+		t.Fatalf("member root move = %+v err=%v", movedToRoot, err)
+	}
+
+	setDefaultAccess(EntityTypeLogicGate, gate.LogicGateID, ResourceDefaultAccessNoAccess)
+	if _, err := repo.MoveCompanyExplorerV2Edge(CompanyExplorerV2MoveEdgeInput{
+		CompanyID: companyID, EdgeID: movedToRoot.EdgeID, ParentEntityID: openFolder.FolderID,
+		ActorUserID: member.UserID, PermissionUserID: member.UserID,
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("source-denied item move error = %v, want ErrNotFound", err)
+	}
+	if err := repo.DeleteCompanyExplorerV2Edge(companyID, movedToRoot.EdgeID, member.UserID, member.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("source-denied detach error = %v, want ErrNotFound", err)
+	}
+	if _, ok := repo.companyExplorerV2Edges[key(companyID, movedToRoot.EdgeID)]; !ok {
+		t.Fatal("source-denied detach removed the edge")
+	}
+	setDefaultAccess(EntityTypeLogicGate, gate.LogicGateID, ResourceDefaultAccessEdit)
+	if err := repo.DeleteCompanyExplorerV2Edge(companyID, movedToRoot.EdgeID, member.UserID, member.UserID); err != nil {
+		t.Fatalf("authorized detach: %v", err)
+	}
+
+	if _, err := repo.MoveCompanyExplorerFolder(companyID, movingFolder.FolderID, &restrictedFolder.FolderID, 0, member.UserID, member.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("folder move to inaccessible destination error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.MoveCompanyExplorerFolder(companyID, movingFolder.FolderID, &otherFolder.FolderID, 0, member.UserID, member.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("folder cross-company move error = %v, want ErrNotFound", err)
+	}
+	rootParent := ""
+	rootFolder, err := repo.MoveCompanyExplorerFolder(companyID, movingFolder.FolderID, &rootParent, 0, member.UserID, member.UserID)
+	if err != nil || rootFolder.ParentFolderID != nil {
+		t.Fatalf("authorized folder root move = %+v err=%v", rootFolder, err)
+	}
+	setDefaultAccess(EntityTypeCompanyExplorerFolder, movingFolder.FolderID, ResourceDefaultAccessNoAccess)
+	if _, err := repo.RenameCompanyExplorerFolder(companyID, movingFolder.FolderID, "Denied rename", member.UserID, member.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("source-denied folder rename error = %v, want ErrNotFound", err)
+	}
+	if got := repo.folders[key(companyID, movingFolder.FolderID)].Name; got != "Moving folder" {
+		t.Fatalf("denied rename changed folder name to %q", got)
+	}
+	if _, err := repo.MoveCompanyExplorerFolder(companyID, movingFolder.FolderID, &openFolder.FolderID, 0, member.UserID, member.UserID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("source-denied folder move error = %v, want ErrNotFound", err)
+	}
+
+	if _, err := repo.MoveCompanyExplorerV2Edge(CompanyExplorerV2MoveEdgeInput{
+		CompanyID: companyID, EdgeID: "11111111-1111-4111-8111-220000000999", ParentEntityID: companyID,
+		PermissionUserID: member.UserID,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("missing actor identity error = %v, want ErrInvalid", err)
 	}
 }
 
@@ -816,10 +955,10 @@ func TestMemoryCompanyExplorerDefaultFoldersAreProtected(t *testing.T) {
 	if err := repo.DeleteCompanyExplorerV2Folder(companyID, defaults.LogicGatesFolderID); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("DeleteCompanyExplorerV2Folder Logic Gates err = %v, want ErrInvalid", err)
 	}
-	if _, err := repo.RenameCompanyExplorerFolder(companyID, defaults.UnfiledFolderID, "Renamed"); !errors.Is(err, ErrInvalid) {
+	if _, err := repo.RenameCompanyExplorerFolder(companyID, defaults.UnfiledFolderID, "Renamed", "", ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("RenameCompanyExplorerFolder Unfiled err = %v, want ErrInvalid", err)
 	}
-	if _, err := repo.MoveCompanyExplorerFolder(companyID, defaults.ProjectsFolderID, nil, 2000); !errors.Is(err, ErrInvalid) {
+	if _, err := repo.MoveCompanyExplorerFolder(companyID, defaults.ProjectsFolderID, nil, 2000, "", ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("MoveCompanyExplorerFolder Projects err = %v, want ErrInvalid", err)
 	}
 
@@ -892,6 +1031,7 @@ func TestMemoryCompanyExplorerDefaultPlacementAndExplicitRootException(t *testin
 		ParentEntityID:   companyID,
 		ChildEntityType:  CompanyExplorerV2EntityLogicGate,
 		ChildResourceID:  rootGateID,
+		ActorUserID:      user.UserID,
 		PermissionUserID: user.UserID,
 	})
 	if err != nil {

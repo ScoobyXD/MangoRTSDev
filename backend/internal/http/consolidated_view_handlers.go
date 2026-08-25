@@ -162,12 +162,10 @@ type logicGateViewHTTPResponse struct {
 	Information         []domain.LogicGateInformation    `json:"information"`
 	Projections         []domain.LogicGateProjection     `json:"projections"`
 	RACIAssignments     []domain.LogicGateRACIAssignment `json:"gvic_assignments"`
-	Relationships       []domain.LogicGateRelationship   `json:"relationships"`
 	Work                *domain.LogicGateWorkView        `json:"work,omitempty"`
 	InformationCount    int                              `json:"information_count"`
 	ProjectionCount     int                              `json:"projection_count"`
 	RACIAssignmentCount int                              `json:"gvic_assignment_count"`
-	RelationshipsCount  int                              `json:"relationships_count"`
 	AssignmentCount     int                              `json:"assignment_count,omitempty"`
 	NodeCount           int                              `json:"node_count,omitempty"`
 	domain.EffectiveAccessFlags
@@ -176,9 +174,6 @@ type logicGateViewHTTPResponse struct {
 func logicGateCoreViewResponse(companyID, logicGateID string, details domain.LogicGateDetails, projections []domain.LogicGateProjection, flags domain.EffectiveAccessFlags) logicGateViewHTTPResponse {
 	if details.Information == nil {
 		details.Information = []domain.LogicGateInformation{}
-	}
-	if details.Relationships == nil {
-		details.Relationships = []domain.LogicGateRelationship{}
 	}
 	if details.LogicGate.RACIAssignments == nil {
 		details.LogicGate.RACIAssignments = []domain.LogicGateRACIAssignment{}
@@ -193,11 +188,9 @@ func logicGateCoreViewResponse(companyID, logicGateID string, details domain.Log
 		Information:          details.Information,
 		Projections:          projections,
 		RACIAssignments:      details.LogicGate.RACIAssignments,
-		Relationships:        details.Relationships,
 		InformationCount:     len(details.Information),
 		ProjectionCount:      len(projections),
 		RACIAssignmentCount:  len(details.LogicGate.RACIAssignments),
-		RelationshipsCount:   len(details.Relationships),
 		EffectiveAccessFlags: flags,
 	}
 }
@@ -211,12 +204,10 @@ func logicGateViewResponseWithWork(view domain.LogicGateView) logicGateViewHTTPR
 		Information:          view.Information,
 		Projections:          view.Projections,
 		RACIAssignments:      view.RACIAssignments,
-		Relationships:        view.Relationships,
 		Work:                 &work,
 		InformationCount:     view.InformationCount,
 		ProjectionCount:      view.ProjectionCount,
 		RACIAssignmentCount:  view.RACIAssignmentCount,
-		RelationshipsCount:   view.RelationshipsCount,
 		AssignmentCount:      view.AssignmentCount,
 		NodeCount:            view.NodeCount,
 		EffectiveAccessFlags: view.EffectiveAccessFlags,

@@ -77,11 +77,9 @@ import {
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation";
 import type { ExplorerTreeNode } from "../../modules/company-explorer/companyExplorerTypes";
 import type { LogicGateRACIRole, LogicGateRecord } from "../../modules/logic-gates/types";
-import { toLogicGateViewRecord } from "../../modules/logic-gates/types";
 import { invalidateNodeRecordStoreCaches } from "../../modules/nodes/nodeRecordStore";
 import { getLogicGateRecordSingleFlight } from "../../modules/logic-gates/logicGateRecordStore";
 import { removeNodeRelationshipGraphNode, upsertNodeRelationshipGraphNode } from "../../modules/nodes/nodeRelationshipGraph";
-import { removeLogicGateRelationshipGraphNode, upsertLogicGateRelationshipGraphNode } from "../../modules/logic-gates/logicGateRelationshipGraph";
 import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
 import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type RACIMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
 
@@ -4805,11 +4803,6 @@ export function HomePage({
         Array.from(byID.values()), companyID, options.titleVersionAtStart,
         reconcileCommittedLogicGateRecordTitles,
       );
-      const reconciledByID = new Map(reconciledLogicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
-      for (const logicGateID of nextProjectedLogicGateIDs) {
-        const logicGate = reconciledByID.get(logicGateID);
-        if (logicGate) upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateViewRecord(logicGate));
-      }
       return reconciledLogicGates;
     });
 
@@ -4859,7 +4852,6 @@ export function HomePage({
       const next = previous.filter((item) => item.logic_gate_id !== reconciledLogicGate.logic_gate_id);
       return [...next, reconciledLogicGate];
     });
-    upsertLogicGateRelationshipGraphNode(apiBase, companyID, toLogicGateViewRecord(reconciledLogicGate));
     return reconciledLogicGate;
   }, [apiBase, companyID]);
   const createHomeNode = useCallback(async (assignment?: { logicGateID: string; priority: InboxPriority; status?: RACIInboxStatus }) => {
@@ -5212,7 +5204,6 @@ export function HomePage({
       }
       for (const logicGateID of logicGateIDSet) {
         invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
-        removeLogicGateRelationshipGraphNode(apiBase, companyID, logicGateID);
       }
       for (const node of nodes) {
         if (cleanIDList(node.logic_gate_ids ?? []).some((logicGateID) => logicGateIDSet.has(logicGateID))) {

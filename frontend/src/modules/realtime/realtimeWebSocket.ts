@@ -24,6 +24,7 @@ type RealtimeMessageType =
   | "chat.message.updated"
   | "chat.message.deleted"
   | "kanban.changed"
+  | "process_map.changed"
   | "raci_tabs.changed"
   | "mailbox.message.changed"
   | "mailbox.folder.changed"
@@ -122,6 +123,13 @@ export type RealtimeKanbanChangedMessage = RealtimeBaseMessage & {
   ts?: string;
 };
 
+export type RealtimeProcessMapChangedMessage = RealtimeBaseMessage & {
+  type: "process_map.changed";
+  company_id: string;
+  scope: string;
+  ts?: string;
+};
+
 export type RealtimeRACITabsChangedMessage = RealtimeBaseMessage & {
   type: "raci_tabs.changed";
   company_id: string;
@@ -204,6 +212,7 @@ type RealtimeInboundMessage =
   | RealtimeChatMessageUpdatedMessage
   | RealtimeChatMessageDeletedMessage
   | RealtimeKanbanChangedMessage
+  | RealtimeProcessMapChangedMessage
   | RealtimeRACITabsChangedMessage
   | RealtimeMailboxMessageChangedMessage
   | RealtimeMailboxFolderChangedMessage
@@ -223,6 +232,7 @@ export type RealtimeSubscriptionHandlers = {
   onChatMessageUpdated?: (message: RealtimeChatMessageUpdatedMessage) => void;
   onChatMessageDeleted?: (message: RealtimeChatMessageDeletedMessage) => void;
   onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
+  onProcessMapChanged?: (message: RealtimeProcessMapChangedMessage) => void;
   onRACITabsChanged?: (message: RealtimeRACITabsChangedMessage) => void;
   onMailboxMessageChanged?: (message: RealtimeMailboxMessageChangedMessage) => void;
   onMailboxFolderChanged?: (message: RealtimeMailboxFolderChangedMessage) => void;
@@ -357,6 +367,10 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
       if (!boardID) throw new Error("realtime_board_id_required");
       return { ...scoped, type, board_id: boardID, change_type: stringValue(payload.change_type) || undefined, ts: stringValue(payload.ts) || undefined };
     }
+    case "process_map.changed": {
+      const scoped = scopedMessageBase(payload, type);
+      return { ...scoped, type, ts: stringValue(payload.ts) || undefined };
+    }
     case "raci_tabs.changed": {
       const scoped = scopedMessageBase(payload, type);
       return { ...scoped, type, ts: stringValue(payload.ts) || undefined };
@@ -427,7 +441,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 }
 
 export function isSupportedRealtimeScope(scope: string): boolean {
-  return /^(?:notifications:user:[^:]+|raci-tabs:company|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|huddle_logic_gate|kpi|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
+  return /^(?:notifications:user:[^:]+|raci-tabs:company|process-map:company|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|huddle_logic_gate|kpi|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
 }
 
 export function realtimePersonalMailboxScope(userID: string, accountEmail: string): string {
@@ -762,6 +776,9 @@ export class MangoRealtimeClient {
           break;
         case "kanban.changed":
           sub.onKanbanChanged?.(message);
+          break;
+        case "process_map.changed":
+          sub.onProcessMapChanged?.(message);
           break;
         case "raci_tabs.changed":
           sub.onRACITabsChanged?.(message);

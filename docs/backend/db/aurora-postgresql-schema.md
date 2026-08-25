@@ -8,6 +8,7 @@ This document captures the **exact schema structure** shown in your spreadsheet 
 - `TIMESTAMPTZ` is stored as PostgreSQL `timestamptz`.
 - `Company ID` is present on every table and included in foreign keys where applicable.
 - Position/status/info-type fields are modeled as enums.
+- `backend/db/schema.sql` is the executable authority. The abbreviated DDL below omits Process Map validation and cleanup trigger bodies.
 
 ## PostgreSQL DDL
 
@@ -20,13 +21,6 @@ do $$
 begin
   if not exists (select 1 from pg_type where typname = 'node_relationship_position') then
     create type node_relationship_position as enum ('Parent', 'Child', 'Peer');
-  end if;
-end $$;
-
-do $$
-begin
-  if not exists (select 1 from pg_type where typname = 'logic_gate_relationship_position') then
-    create type logic_gate_relationship_position as enum ('Input', 'Output');
   end if;
 end $$;
 
@@ -120,22 +114,38 @@ create table if not exists logic_gates (
   primary key (company_id, logic_gate_id)
 );
 
-create table if not exists logic_gate_relationships (
+create table if not exists resource_operational_relationships (
   company_id uuid not null,
-  logic_gate_relationship_id uuid not null,
-  logic_gate_id_a uuid not null,
-  logic_gate_id_b uuid not null,
-  a_position logic_gate_relationship_position not null,
-  b_position logic_gate_relationship_position not null,
-  created_timestamp timestamptz not null,
-  constraint logic_gate_relationships_position_pair_chk check (
-    (a_position = 'Input' and b_position = 'Output')
-    or (a_position = 'Output' and b_position = 'Input')
+  resource_operational_relationship_id uuid not null,
+  source_resource_type text not null,
+  source_resource_id uuid not null,
+  target_resource_type text not null,
+  target_resource_id uuid not null,
+  created_timestamp timestamptz not null default now(),
+  constraint resource_operational_relationships_source_type_chk check (
+    source_resource_type in ('company_explorer_folder', 'logic_gate')
   ),
-  constraint logic_gate_relationships_not_self_chk check (logic_gate_id_a <> logic_gate_id_b),
-  primary key (company_id, logic_gate_relationship_id),
-  foreign key (company_id, logic_gate_id_a) references logic_gates (company_id, logic_gate_id),
-  foreign key (company_id, logic_gate_id_b) references logic_gates (company_id, logic_gate_id)
+  constraint resource_operational_relationships_target_type_chk check (
+    target_resource_type in ('company_explorer_folder', 'logic_gate')
+  ),
+  constraint resource_operational_relationships_not_self_chk check (
+    source_resource_type <> target_resource_type or source_resource_id <> target_resource_id
+  ),
+  primary key (company_id, resource_operational_relationship_id),
+  unique (company_id, source_resource_type, source_resource_id, target_resource_type, target_resource_id),
+  foreign key (company_id) references companies (company_id) on delete cascade
+);
+
+create table if not exists process_map_traces (
+  company_id uuid not null,
+  resource_operational_relationship_id uuid not null,
+  route_points jsonb not null default '[]'::jsonb,
+  revision bigint not null default 1,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  primary key (company_id, resource_operational_relationship_id),
+  foreign key (company_id, resource_operational_relationship_id)
+    references resource_operational_relationships (company_id, resource_operational_relationship_id) on delete cascade
 );
 
 create table if not exists logic_gate_information (
@@ -197,6 +207,28 @@ create table if not exists company_explorer_folder_items (
   constraint company_explorer_folder_items_type_chk check (item_type in ('node', 'logic_gate', 'kanban')),
   primary key (company_id, item_type, item_id),
   foreign key (company_id, folder_id) references company_explorer_folders (company_id, folder_id) on delete cascade
+);
+
+create table if not exists process_map_placements (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  map_parent_folder_id uuid,
+  grid_x integer not null,
+  grid_y integer not null,
+  revision bigint not null default 1,
+  created_timestamp timestamptz not null default now(),
+  updated_timestamp timestamptz not null default now(),
+  constraint process_map_placements_resource_type_chk check (
+    resource_type in ('company_explorer_folder', 'logic_gate')
+  ),
+  constraint process_map_placements_root_folder_chk check (
+    map_parent_folder_id is not null or resource_type = 'company_explorer_folder'
+  ),
+  primary key (company_id, resource_type, resource_id),
+  foreign key (company_id) references companies (company_id) on delete cascade,
+  foreign key (company_id, map_parent_folder_id)
+    references company_explorer_folders (company_id, folder_id) on delete cascade
 );
 
 -- ==========================================================
@@ -297,17 +329,13 @@ The previous grouped/filter query indexes were removed with the query surface.
 - Header (Text) -> `logic_gates.header`
 - Created Timestamp (TIMESTAMPTZ) -> `logic_gates.created_timestamp`
 
-### Logic Gate Relationships Schema
+### Process Map Schema
 
-- Company ID (UUIDv7) (FK) -> `logic_gate_relationships.company_id`
-- Logic Gate Relationship ID (UUIDv7) -> `logic_gate_relationships.logic_gate_relationship_id`
-- Logic Gate ID A (UUIDv7) (FK) -> `logic_gate_relationships.logic_gate_id_a`
-- Logic Gate ID B (UUIDv7) (FK) -> `logic_gate_relationships.logic_gate_id_b`
-- A Position (Enum: Input, Output) -> `logic_gate_relationships.a_position`
-- B Position (Enum: Input, Output) -> `logic_gate_relationships.b_position`
-- Created Timestamp (TIMESTAMPTZ) -> `logic_gate_relationships.created_timestamp`
-- Constraint: `logic_gate_relationships_position_pair_chk` allows only Input->Output or Output->Input.
-- Constraint: `logic_gate_relationships_not_self_chk` requires `logic_gate_id_a <> logic_gate_id_b`.
+- `process_map_placements` stores only exact typed resource identity, independent map parent, integer grid position, revision, and timestamps.
+- `resource_operational_relationships` stores one unique directed same-company Folder/Process pair. Reverse direction is distinct and self-pairs are rejected.
+- `process_map_traces` stores one optional bounded route-point array for an operational relationship, with its own revision and timestamps.
+- Canonical validation triggers verify exact Folder/Logic Gate endpoints, reject cross-company rows and hierarchy cycles, and clean up placements, relationships, and dependent traces on source deletion.
+- `backend/db/migrations/20260824_process_map.sql` preserves valid legacy relationship IDs and creation timestamps while converting their Input/Output orientation to directed source/target pairs, then drops the retired table and enum. No compatibility authority remains.
 
 ### Logic Gate Information Schema
 

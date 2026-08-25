@@ -7,7 +7,6 @@ import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { type NodeRecord } from "../nodes/types";
 import { getLogicGateTitle as getLogicGateRecordTitle, toLogicGateViewRecord, type LogicGateRACIRole, type LogicGateRecord as LogicGateApiRecord, type LogicGateViewRecord } from "../logic-gates/types";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
-import { removeLogicGateRelationshipGraphNode, upsertLogicGateRelationshipGraphNode } from "../logic-gates/logicGateRelationshipGraph";
 import { emptyExplorerSelectionState, type ExplorerSelectionState } from "./selectionSync";
 import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { invalidateKanbanBoardListCache, listKanbanBoards, type RACIMatrixProjectionRow } from "../kanban/kanbanApi";
@@ -2511,7 +2510,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         }
       }
       dispatchExplorerStore({ type: "upsertLogicGate", logicGate });
-      upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
       if (!createdFolderID && position && position > 0) {
         setRootRowOrder((previous) => ({ ...previous, [`logic-gate-${logicGate.logic_gate_id}`]: position }));
       }
@@ -2672,9 +2670,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         body: JSON.stringify({ company_id: companyID, targets: deleteTargets, confirmation_display_name: confirmationDisplayName }),
       });
 
-      if (deletedLogicGateIDs.size > 0) {
-        for (const logicGateID of deletedLogicGateIDs) removeLogicGateRelationshipGraphNode(apiBase, companyID, logicGateID);
-      }
       if (deletedKanbanBoardIDs.size > 0) {
         for (const boardID of deletedKanbanBoardIDs) {
           window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, deletedBoardID: boardID } }));
@@ -2795,7 +2790,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         );
         const logicGate = toLogicGateViewRecord(updated);
         dispatchExplorerStore({ type: "replaceLogicGate", logicGate });
-        upsertLogicGateRelationshipGraphNode(apiBase, companyID, logicGate);
       }
       setRenaming((current) => (current?.treeID === activeRename.treeID ? null : current));
     } catch (err) {

@@ -211,6 +211,7 @@ func (s *Server) maybeBootstrapDevAdmin(claims auth.Claims) (bool, error) {
 	if _, err := s.repo.AddCompanyMembership(claims.Subject, company.CompanyID, domain.RoleDevAdmin); err != nil {
 		return false, err
 	}
+	s.wakeRealtimeSpine()
 	log.Printf("bootstrapped dev admin email=%s subject=%s company_id=%s", email, claims.Subject, company.CompanyID)
 	return true, nil
 }
@@ -406,6 +407,28 @@ func actorRoleForCompany(actor ActorContext, companyID string) string {
 		return domain.RoleDevAdmin
 	}
 	return ""
+}
+
+func (s *Server) currentActorRoleForCompany(actor ActorContext, companyID string) (string, error) {
+	userID := strings.TrimSpace(actor.User.UserID)
+	companyID = strings.TrimSpace(companyID)
+	if userID == "" || companyID == "" {
+		return "", nil
+	}
+	memberships, err := s.repo.ListUserMemberships(userID)
+	if err != nil {
+		return "", err
+	}
+	fresh := actor
+	fresh.Memberships = normalizeMembershipRoles(memberships)
+	fresh.IsDevAdmin = false
+	for _, membership := range fresh.Memberships {
+		if membership.Role == domain.RoleDevAdmin {
+			fresh.IsDevAdmin = true
+			break
+		}
+	}
+	return actorRoleForCompany(fresh, companyID), nil
 }
 
 func (s *Server) authorizeCompanyRequest(w http.ResponseWriter, r *http.Request, actor ActorContext, companyID, role string) bool {

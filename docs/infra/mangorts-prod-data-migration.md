@@ -43,7 +43,9 @@ Recommended starting classification:
 | `company_user_groups`, `company_user_group_members` | map | Rewrite user and company references. |
 | `nodes`, `node_textboxes`, `node_textboxes_history`, `node_textbox_chats`, `node_relationships` | copy or map | Core Node data in the final model; preserve exact textbox/chat IDs and nested dormant annotations, then copy owners before dependents. |
 | Retired Node unread-highlight tables | skip | Do not import or recreate the removed change/seen/baseline storage. Dormant anchors already live inside current/history textbox JSON. |
-| `logic_gates`, `logic_gate_textboxes`, `logic_gate_textboxes_history`, `logic_gate_relationships` | copy or map | Core Logic Gate data in the final model; preserve relationships. |
+| `logic_gates`, `logic_gate_textboxes`, `logic_gate_textboxes_history` | copy or map | Core Process records in the final model; copy owners before dependents. |
+| `process_map_placements`, `resource_operational_relationships`, `process_map_traces` | copy or map | The three Process Map authorities; copy exact Folder/Process sources first, then relationships, placements, and traces in dependency order. |
+| Retired Logic Gate relationship storage | skip | Apply `20260824_process_map.sql` before export so valid IDs and timestamps are migrated once; never recreate or import the old table as a second authority. |
 | `node_map_positions`, `logic_gate_map_positions` | skip | Retired Map-only storage. These tables are absent from the canonical schema and must not be imported, recreated, or replaced. |
 | `node_logic_gate_assignments` | copy or map | Requires nodes and logic gates to be imported first. |
 | `projects`, `project_relationships`, `accounts` | copy or map | Core business data if real. |
