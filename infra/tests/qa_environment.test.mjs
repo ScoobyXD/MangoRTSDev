@@ -21,6 +21,8 @@ const qaTfvarsExample = read("infra/aws-qa/terraform.tfvars.example");
 const qaBackend = read("infra/aws-qa/backend.hcl.example");
 const qaWorkflow = read(".github/workflows/deploy-qa.yml");
 const qaPreflight = read("scripts/qa_environment_preflight.ps1");
+const schemaInventoryExport = read("scripts/export_schema_inventory.ps1");
+const schemaAuditRunbook = read("docs/infra/mangorts-schema-audit.md");
 const prodQADelegation = read("infra/aws-prod/qa_delegation.tf");
 const moduleIAM = read("infra/modules/mangorts-platform/iam.tf");
 const moduleACM = read("infra/modules/mangorts-platform/acm.tf");
@@ -246,6 +248,31 @@ test("QA registers immutable migration images before schema bootstrap without st
   assert.match(qaWorkflow, /API desired count: 0/);
   assert.match(qaWorkflow, /Email worker: disabled/);
   assert.match(qaWorkflow, /terraform plan -refresh=false -out=tfplan/);
+});
+
+test("hosted schema exports use a noninteractive read-only libpq credential and TLS", () => {
+  assert.match(schemaInventoryExport, /@\("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_SSLMODE", "PGSSLMODE"\)/);
+  assert.match(schemaInventoryExport, /\$hasPasswordEnvironment[\s\S]*?\$hasPasswordFileEnvironment/);
+  assert.match(schemaInventoryExport, /Test-Path -LiteralPath \$env:PGPASSFILE -PathType Leaf/);
+  assert.doesNotMatch(schemaInventoryExport, /Get-Content[^\r\n]*PGPASSFILE/);
+  assert.match(schemaInventoryExport, /if \(\$env:PGSSLMODE -cne "require"\)/);
+  assert.match(schemaInventoryExport, /"--no-password"/);
+  assert.match(schemaInventoryExport, /if \(\$EnvironmentLabel -ieq "dev"\) \{ "dev\(\?:cluster\)\?" \}/);
+  assert.match(schemaInventoryExport, /prod\(\?:cluster\)\?/);
+  assert.match(schemaAuditRunbook, /\$env:PGSSLMODE = "require"/);
+  assert.match(schemaAuditRunbook, /\$env:PGPASSFILE = Join-Path \$env:APPDATA "postgresql\\pgpass\.conf"/);
+
+  const devHostMarker = /(^|[-_/.])dev(?:cluster)?($|[-_/.])/i;
+  const qaHostMarker = /(^|[-_/.])qa($|[-_/.])/i;
+  const prodHostMarker = /(^|[-_/.])prod(?:cluster)?($|[-_/.])/i;
+  assert.match("miraerts-northerncalifornia-devcluster.cluster.example.com", devHostMarker);
+  assert.match("miraerts-northerncalifornia-DEV.cluster.example.com", devHostMarker);
+  assert.doesNotMatch("miraerts-xdevcluster.cluster.example.com", devHostMarker);
+  assert.doesNotMatch("miraerts-devclusterx.cluster.example.com", devHostMarker);
+  assert.match("origin.qa.example.com", qaHostMarker);
+  assert.doesNotMatch("origin.qa-prodcluster.example.com", devHostMarker);
+  assert.match("origin.qa-prod.example.com", prodHostMarker);
+  assert.match("origin.qa-prodcluster.example.com", prodHostMarker);
 });
 
 test("QA Actions has no RDS access", () => {

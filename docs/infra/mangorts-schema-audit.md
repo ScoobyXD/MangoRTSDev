@@ -88,8 +88,11 @@ executable security-definer functions. It refuses the export when any checked
 capability is present.
 
 Set these environment values from the designated database-enforced read-only
-credential. `PGPASSWORD` must not be a writer, backend, owner, admin, or migration
-password and must never be pasted into source control or chat.
+credential. Use either `PGPASSWORD` or an explicit existing `PGPASSFILE`; the
+credential must not belong to a writer, backend, owner, admin, or migration role
+and must never be pasted into source control or chat. The helper does not read a
+password file itself, and `psql` is forbidden from opening an interactive password
+prompt.
 
 ```powershell
 $env:DB_HOST = "<approved-dev-or-qa-host>"
@@ -97,7 +100,11 @@ $env:DB_PORT = "5432"
 $env:DB_NAME = "<approved-database>"
 $env:DB_USER = "<designated-read-only-user>"
 $env:DB_SSLMODE = "require"
-# Set PGPASSWORD privately in this process from the designated read-only source.
+$env:PGSSLMODE = "require"
+# Preferred when an approved read-only libpq password file already exists:
+$env:PGPASSFILE = Join-Path $env:APPDATA "postgresql\pgpass.conf"
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
+# Otherwise, set PGPASSWORD privately in this process from the read-only source.
 
 .\scripts\export_schema_inventory.ps1 `
   -EnvironmentLabel dev `

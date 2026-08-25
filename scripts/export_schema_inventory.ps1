@@ -35,14 +35,22 @@ if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
   throw "Missing required command: python"
 }
 if (-not $ConfirmDatabaseEnforcedReadOnlyCredential) {
-  throw "STOP: pass -ConfirmDatabaseEnforcedReadOnlyCredential only after DB_USER and PGPASSWORD identify the designated database-enforced read-only login."
+  throw "STOP: pass -ConfirmDatabaseEnforcedReadOnlyCredential only after DB_USER and the configured libpq credential source identify the designated database-enforced read-only login."
 }
 
-$requiredEnvironment = @("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_SSLMODE", "PGPASSWORD")
+$requiredEnvironment = @("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_SSLMODE", "PGSSLMODE")
 foreach ($name in $requiredEnvironment) {
   if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
     throw "Missing required environment variable: $name"
   }
+}
+$hasPasswordEnvironment = -not [string]::IsNullOrWhiteSpace($env:PGPASSWORD)
+$hasPasswordFileEnvironment = -not [string]::IsNullOrWhiteSpace($env:PGPASSFILE)
+if (-not $hasPasswordEnvironment -and -not $hasPasswordFileEnvironment) {
+  throw "Missing read-only credential source: set PGPASSWORD privately or point PGPASSFILE at an existing approved file."
+}
+if (-not $hasPasswordEnvironment -and -not (Test-Path -LiteralPath $env:PGPASSFILE -PathType Leaf)) {
+  throw "PGPASSFILE does not identify an existing file."
 }
 if ($env:DB_HOST -cne $ExpectedHost) {
   throw "DB_HOST does not match -ExpectedHost."
@@ -56,10 +64,14 @@ if ($env:DB_USER -cne $ExpectedReadOnlyUser) {
 if ($env:DB_SSLMODE -cne "require") {
   throw "DB_SSLMODE must be 'require' for a hosted schema export."
 }
-if ($ExpectedHost -match '(?i)(^|[-_/.])prod($|[-_/.])') {
+if ($env:PGSSLMODE -cne "require") {
+  throw "PGSSLMODE must be 'require' so psql enforces TLS for a hosted schema export."
+}
+if ($ExpectedHost -match '(?i)(^|[-_/.])prod(?:cluster)?($|[-_/.])') {
   throw "This dev/QA helper refuses a production-marked host."
 }
-if ($ExpectedHost -notmatch "(?i)(^|[-_/.])$([regex]::Escape($EnvironmentLabel))($|[-_/.])") {
+$environmentHostMarker = if ($EnvironmentLabel -ieq "dev") { "dev(?:cluster)?" } else { [regex]::Escape($EnvironmentLabel) }
+if ($ExpectedHost -notmatch "(?i)(^|[-_/.])$environmentHostMarker($|[-_/.])") {
   throw "Expected host must contain a separate '$EnvironmentLabel' environment marker."
 }
 
@@ -157,6 +169,7 @@ from checks;
 
 $commonPsqlArguments = @(
   "--no-psqlrc",
+  "--no-password",
   "--quiet",
   "--tuples-only",
   "--no-align",
