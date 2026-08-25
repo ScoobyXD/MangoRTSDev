@@ -329,16 +329,27 @@ if ($typed -cne $confirmation) {
   throw "Confirmation did not match. No ECS task was started."
 }
 
-$runResult = Invoke-AwsJson -Arguments @(
-  "ecs", "run-task",
-  "--cluster", [string]$clusterRecord.clusterArn,
-  "--task-definition", [string]$task.taskDefinitionArn,
-  "--launch-type", "FARGATE",
-  "--count", "1",
-  "--network-configuration", $networkConfiguration,
-  "--overrides", $overrides,
-  "--started-by", "mangorts-qa-human-database-$($Action.ToLowerInvariant())"
-)
+$networkConfigurationPath = [IO.Path]::GetTempFileName()
+$overridesPath = [IO.Path]::GetTempFileName()
+try {
+  $utf8WithoutBom = [Text.UTF8Encoding]::new($false)
+  [IO.File]::WriteAllText($networkConfigurationPath, $networkConfiguration, $utf8WithoutBom)
+  [IO.File]::WriteAllText($overridesPath, $overrides, $utf8WithoutBom)
+  $runResult = Invoke-AwsJson -Arguments @(
+    "ecs", "run-task",
+    "--cluster", [string]$clusterRecord.clusterArn,
+    "--task-definition", [string]$task.taskDefinitionArn,
+    "--launch-type", "FARGATE",
+    "--count", "1",
+    "--network-configuration", "file://$networkConfigurationPath",
+    "--overrides", "file://$overridesPath",
+    "--started-by", "mangorts-qa-human-database-$($Action.ToLowerInvariant())"
+  )
+}
+finally {
+  Remove-Item -LiteralPath $networkConfigurationPath -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $overridesPath -Force -ErrorAction SilentlyContinue
+}
 if ($runResult.failures.Count -gt 0 -or $runResult.tasks.Count -ne 1) {
   throw "ECS did not start exactly one QA database task."
 }

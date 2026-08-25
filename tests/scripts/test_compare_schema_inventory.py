@@ -223,6 +223,11 @@ class SchemaInventoryComparatorTests(unittest.TestCase):
         )
         self.assertIn("ExpectedGitCommit", script)
         self.assertIn("$ExpectedGitCommit-migrations", script)
+        self.assertIn('"--network-configuration", "file://$networkConfigurationPath"', script)
+        self.assertIn('"--overrides", "file://$overridesPath"', script)
+        self.assertIn("[Text.UTF8Encoding]::new($false)", script)
+        self.assertIn("Remove-Item -LiteralPath $networkConfigurationPath", script)
+        self.assertIn("Remove-Item -LiteralPath $overridesPath", script)
 
     def test_generated_schema_audit_outputs_are_ignored(self) -> None:
         ignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
