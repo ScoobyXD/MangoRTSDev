@@ -41,7 +41,7 @@ resource "aws_cloudfront_function" "basic_auth" {
   runtime = "cloudfront-js-1.0"
   comment = "MangoRTS frontend route rewrite; legacy function name avoids CloudFront replacement ordering issues"
   publish = true
-  code    = <<-JS
+  code = replace(<<-JS
 function handler(event) {
   var request = event.request;
   if (isFrontendRoute(request.uri)) {
@@ -61,6 +61,7 @@ function isFrontendRoute(uri) {
   return lastSegment.indexOf(".") === -1;
 }
 JS
+  , "\r\n", "\n")
 }
 
 resource "aws_cloudfront_distribution" "app" {

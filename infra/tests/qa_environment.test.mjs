@@ -30,6 +30,7 @@ const moduleEmail = read("infra/modules/mangorts-platform/email_sqs.tf");
 const moduleCloudFront = read("infra/modules/mangorts-platform/cloudfront_s3.tf");
 const moduleLocals = read("infra/modules/mangorts-platform/locals.tf");
 const moduleRoute53 = read("infra/modules/mangorts-platform/route53.tf");
+const moduleSecurity = read("infra/modules/mangorts-platform/security.tf");
 const moduleVariables = read("infra/modules/mangorts-platform/variables.tf");
 const sharedDeployPolicy = moduleIAM.slice(
   moduleIAM.indexOf('data "aws_iam_policy_document" "github_deploy"'),
@@ -215,6 +216,10 @@ test("the shared edge uses the exact AWS-managed CloudFront policy IDs", () => {
   assert.doesNotMatch(moduleLocals, /413f1609-33d4-4f8c-8d(?:d|f)f-bd6df8fac40f/);
   assert.match(moduleCloudFront, /origin_access_control_id\s*=\s*aws_cloudfront_origin_access_control\.frontend\.id/);
   assert.doesNotMatch(moduleCloudFront, /s3_origin_config\s*\{/);
+  assert.match(moduleCloudFront, /code\s*=\s*replace\(<<-JS[\s\S]*?JS\s*,\s*"\\r\\n",\s*"\\n"\)/);
+  assert.match(moduleData, /data "aws_ec2_managed_prefix_lists" "cloudfront_origin_facing"/);
+  assert.doesNotMatch(moduleData, /data "aws_ec2_managed_prefix_list" "cloudfront_origin_facing"/);
+  assert.match(moduleSecurity, /prefix_list_ids\s*=\s*\[one\(data\.aws_ec2_managed_prefix_lists\.cloudfront_origin_facing\.ids\)\]/);
 });
 
 test("QA registers immutable migration images before schema bootstrap without starting the app", () => {
