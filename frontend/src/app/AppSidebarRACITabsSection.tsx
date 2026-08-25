@@ -419,7 +419,7 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
   };
 
   const removeFolder = async (folder: RACITabFolder) => {
-    if (!window.confirm(`Delete ${folder.name}? Its Logic Gates will move to the ${RACI_TAB_LABELS[folder.role]} root.`)) return;
+    if (!window.confirm(`Delete ${folder.name}? Its Processes will move to the ${RACI_TAB_LABELS[folder.role]} root.`)) return;
     setBusy(true);
     try {
       await deleteRACITabFolder(apiBase, companyID, folder.folderID);
@@ -570,7 +570,7 @@ export function AppSidebarRACITabsSection({ apiBase, companyID, onOpenLogicGate 
               >
                 {renderRows(role, "", 0)}
                 {!root && loadingKeys.has(raciTabBranchKey(role, "")) && <div style={messageStyle}>Loading…</div>}
-                {root && root.rows.length === 0 && !loadingKeys.has(raciTabBranchKey(role, "")) && <div style={messageStyle}>No Logic Gates</div>}
+                {root && root.rows.length === 0 && !loadingKeys.has(raciTabBranchKey(role, "")) && <div style={messageStyle}>No Processes</div>}
               </div>
             )}
           </div>

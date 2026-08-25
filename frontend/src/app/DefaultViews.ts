@@ -26,7 +26,7 @@ export function createLogicGateArenaFrames(): FrameDataModel[] {
       y: 1,
       w: 34,
       h: 30,
-      title: "Logic Gate Kanban",
+      title: "Process Kanban",
       ...WHITE_FRAME,
     },
   ];

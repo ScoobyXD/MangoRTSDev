@@ -221,7 +221,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       setLogicGatePickerAnchor(null);
       await refreshLogicGateCards();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not add Logic Gate");
+      setError(cause instanceof Error ? cause.message : "Could not add Process");
     }
   };
 
@@ -230,7 +230,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       await requestJSON(`/v1/huddle-logic-gates/${encodeURIComponent(resource.resourceID)}/logic-gates/${encodeURIComponent(item.logic_gate_id)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
       setLogicGateCards((current) => current.filter((candidate) => candidate.logic_gate_id !== item.logic_gate_id));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not remove Logic Gate");
+      setError(cause instanceof Error ? cause.message : "Could not remove Process");
     }
   };
 
@@ -326,7 +326,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
 
   return (
     <section
-      aria-label={isGate ? "Huddle Logic Gate" : "Huddle Node"}
+      aria-label={isGate ? "Huddle Process" : "Huddle Node"}
       data-huddle-resource-surface={resource.resourceType}
       data-huddle-fullscreen={fullscreen ? "true" : undefined}
       style={surfaceStyle}
@@ -343,16 +343,16 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
         </div>
         <div aria-label="Huddle actions" style={actionGroupStyle}>
           <button type="button" title="Move to Recycle Bin" aria-label="Move to Recycle Bin" onClick={() => void deleteResource()} style={{ ...iconButtonStyle, color: "#be123c" }}><HeaderRecycleBinIcon /></button>
-          <button type="button" title={`Pin ${isGate ? "Huddle Logic Gate" : "Huddle Node"}`} aria-label={`Pin ${isGate ? "Huddle Logic Gate" : "Huddle Node"}`} onClick={() => requestAppSidebarPin({ id: resource.resourceID, kind: resource.resourceType, name })} style={iconButtonStyle}><PinToSidebarIcon /></button>
+          <button type="button" title={`Pin ${isGate ? "Huddle Process" : "Huddle Node"}`} aria-label={`Pin ${isGate ? "Huddle Process" : "Huddle Node"}`} onClick={() => requestAppSidebarPin({ id: resource.resourceID, kind: resource.resourceType, name })} style={iconButtonStyle}><PinToSidebarIcon /></button>
           <button type="button" title={fullscreen ? "Exit fullscreen" : "Fullscreen"} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} aria-pressed={fullscreen} onClick={onToggleFullscreen} style={iconButtonStyle}><FullscreenIcon active={fullscreen} /></button>
           <button type="button" title="Close" aria-label="Close" onClick={onClose} style={closeButtonStyle}>X</button>
         </div>
       </header>
 
       <div style={identityHeaderStyle}>
-        <strong style={identityLabelStyle}>{isGate ? "Huddle Logic Gate:" : "Huddle Node:"}</strong>
+        <strong style={identityLabelStyle}>{isGate ? "Huddle Process:" : "Huddle Node:"}</strong>
         <input
-          aria-label={isGate ? "Huddle Logic Gate title" : "Huddle Node title"}
+          aria-label={isGate ? "Huddle Process title" : "Huddle Node title"}
           value={name}
           onChange={(event) => setName(event.target.value)}
           onBlur={() => void saveName()}
@@ -397,26 +397,26 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
             />
           </div>
         ) : (
-          <section aria-label={`${name} Logic Gate snapshot`} data-huddle-node-snapshot="true" style={relationshipColumnStyle}>
-            <div style={relationshipColumnHeaderStyle}><strong>Logic Gate snapshot</strong></div>
+          <section aria-label={`${name} Process snapshot`} data-huddle-node-snapshot="true" style={relationshipColumnStyle}>
+            <div style={relationshipColumnHeaderStyle}><strong>Process snapshot</strong></div>
             <HuddleLogicGateCards
               items={logicGateCards}
-              emptyLabel="No Logic Gates were linked when this Huddle Node was created."
+              emptyLabel="No Processes were linked when this Huddle Node was created."
               onOpenLogicGate={openLogicGate}
               onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
             />
           </section>
         )}
-        <div role="separator" aria-label={isGate ? "Resize Huddle editor and Logic Gate columns" : "Resize Huddle Node snapshot and chat columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
+        <div role="separator" aria-label={isGate ? "Resize Huddle editor and Process columns" : "Resize Huddle Node snapshot and chat columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
         {isGate ? (
-          <section aria-label="Huddle Logic Gates" style={relationshipColumnStyle}>
+          <section aria-label="Huddle Processes" style={relationshipColumnStyle}>
             <div style={relationshipColumnHeaderStyle}>
-              <strong>Logic Gates</strong>
-              <button type="button" aria-label="Add Logic Gate" title="Add Logic Gate" onClick={openLogicGatePicker} style={createNodeButtonStyle}>+</button>
+              <strong>Processes</strong>
+              <button type="button" aria-label="Add Process" title="Add Process" onClick={openLogicGatePicker} style={createNodeButtonStyle}>+</button>
             </div>
             <HuddleLogicGateCards
               items={logicGateCards}
-              emptyLabel="No Logic Gates linked yet."
+              emptyLabel="No Processes linked yet."
               onOpenLogicGate={openLogicGate}
               onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
               onRemove={(item) => void removeLogicGate(item)}
@@ -480,7 +480,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
         <UniversalEntityPicker
           companyID={companyID}
           requestJSON={requestJSON}
-          sourceLabel="Huddle Logic Gate"
+          sourceLabel="Huddle Process"
           linkTargetTypes={["logic_gate"]}
           initialMode="link"
           initialCategory="logic_gate"

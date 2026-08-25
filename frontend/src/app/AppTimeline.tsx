@@ -492,7 +492,7 @@ function timelineDropsFromDataTransfer(dataTransfer: DataTransfer): AppTimelineD
   return items.map((item) => ({
     kind: item.itemType === "node" ? "node" : "logic_gate",
     entityID: item.itemID,
-    label: item.itemType === "node" ? (nodeLabelByID.get(item.itemID) || singleLabel || "Node") : (singleLabel || "Logic Gate"),
+    label: item.itemType === "node" ? (nodeLabelByID.get(item.itemID) || singleLabel || "Node") : (singleLabel || "Process"),
   }));
 }
 

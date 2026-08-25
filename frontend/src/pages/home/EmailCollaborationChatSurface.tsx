@@ -863,7 +863,7 @@ export function EmailCollaborationChatSurface({
     try {
       const cleanLogicGateID = logicGateID.trim();
       const cleanProjectID = projectID.trim();
-      if (cleanProjectID && !cleanLogicGateID) throw new Error("A Project email Node must belong to a Logic Gate.");
+      if (cleanProjectID && !cleanLogicGateID) throw new Error("A Project email Node must belong to a Process.");
       const delayFloatingNodeIndicator = createNew;
       const created = await ensureCollaboration(priority, createNew, !delayFloatingNodeIndicator);
       if (cleanLogicGateID) {
@@ -896,7 +896,7 @@ export function EmailCollaborationChatSurface({
       onActionSuccess(
         cleanProjectID
           ? "Email Node was sent to project."
-          : cleanLogicGateID ? "Email Node was sent to Logic Gate." : "Floating node was created.",
+          : cleanLogicGateID ? "Email Node was sent to Process." : "Floating node was created.",
         delayFloatingNodeIndicator ? created : undefined,
       );
       onActionRequestHandled();

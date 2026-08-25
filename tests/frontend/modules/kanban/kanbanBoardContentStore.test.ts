@@ -23,10 +23,10 @@ function jsonResponse(payload: unknown, init: ResponseInit = {}): Response {
 }
 
 test("same-entity fallback labels cannot replace a resolved Logic Gate title", () => {
-  assert.equal(preferResolvedEntityLabel("Daily Operations", "Logic Gate", "Logic Gate"), "Daily Operations");
-  assert.equal(preferResolvedEntityLabel("Daily Operations", "", "Logic Gate"), "Daily Operations");
-  assert.equal(preferResolvedEntityLabel("Daily Operations", "Renamed Operations", "Logic Gate"), "Renamed Operations");
-  assert.equal(preferResolvedEntityLabel("", "Logic Gate", "Logic Gate"), "Logic Gate");
+  assert.equal(preferResolvedEntityLabel("Daily Operations", "Process", "Process"), "Daily Operations");
+  assert.equal(preferResolvedEntityLabel("Daily Operations", "", "Process"), "Daily Operations");
+  assert.equal(preferResolvedEntityLabel("Daily Operations", "Renamed Operations", "Process"), "Renamed Operations");
+  assert.equal(preferResolvedEntityLabel("", "Process", "Process"), "Process");
 });
 
 test("Kanban board content store loads Logic Gate board contents from v2 work read", async () => {

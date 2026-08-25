@@ -150,7 +150,7 @@ export const AppTaskbar: React.FC<AppTaskbarProps> = ({
   };
 
   const dockTabStrip = dockVisible ? (
-    <section style={minimizedDockStripStyle(viewportWidth, tabs.length, dockCollapsed)} aria-label="Minimized project, node, and Logic Gate tabs">
+    <section style={minimizedDockStripStyle(viewportWidth, tabs.length, dockCollapsed)} aria-label="Minimized project, node, and Process tabs">
       {!dockCollapsed && (
         <div ref={railRef} className="mango-home-scroll" style={dockScrollerStyle}>
           <div style={dockRailStyle} onDragOver={reorderDockTabFromRailDrag}>

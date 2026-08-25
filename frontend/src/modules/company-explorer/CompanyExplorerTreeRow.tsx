@@ -282,7 +282,7 @@ export const CompanyExplorerTreeRow: React.FC<CompanyExplorerTreeRowProps> = ({
             event.dataTransfer,
             explorerDragRows.map((item) => ({ label: item.label, color: rowIconColor })),
             rowIconColor,
-            row.kind === "logic_gate" ? "Explorer logic gates" : "Explorer items",
+            row.kind === "logic_gate" ? "Explorer processes" : "Explorer items",
           );
         }
         event.dataTransfer.setData("text/plain", kanbanDragItems.length > 1 ? `${kanbanDragItems.length} nodes` : row.label);

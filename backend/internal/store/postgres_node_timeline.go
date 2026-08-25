@@ -299,8 +299,8 @@ insert into node_timeline_events
  from_logic_gate_id, from_logic_gate_name, to_logic_gate_id, to_logic_gate_name)
 select $1::uuid, $2::uuid, $3::uuid, 'logic_gate_transfer', $4::uuid,
        coalesce(nullif(actor.display_name, ''), nullif(actor.email, ''), 'Unknown user'),
-       $5::uuid, coalesce(nullif(source_gate.header, ''), 'Deleted logic gate'),
-       $6::uuid, coalesce(nullif(target_gate.header, ''), 'Deleted logic gate')
+       $5::uuid, coalesce(nullif(source_gate.header, ''), 'Deleted process'),
+       $6::uuid, coalesce(nullif(target_gate.header, ''), 'Deleted process')
 from logic_gates source_gate
 join logic_gates target_gate on target_gate.company_id=source_gate.company_id and target_gate.logic_gate_id=$6::uuid
 left join users actor on actor.user_id=$4::uuid

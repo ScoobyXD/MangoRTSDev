@@ -30,7 +30,7 @@ test("compact timeline rows expose immutable relationship copy and recipient-onl
   assert.match(nodeSurface, /fromLogicGateName = item\.from_logic_gate_name[\s\S]*toLogicGateName = item\.to_logic_gate_name/);
   assert.match(nodeSurface, /moved this node from[\s\S]*fromLogicGateName[\s\S]*toLogicGateName/);
   assert.match(nodeSurface, /<TimelineCell accent=\{accent\} muted=\{false\} isLast=\{false\} minHeight=/);
-  assert.match(nodeSurface, /<time[\s\S]*<TimelineClockIcon[\s\S]*Logic Gate transfer/);
+  assert.match(nodeSurface, /<time[\s\S]*<TimelineClockIcon[\s\S]*Process transfer/);
   assert.match(nodeSurface, /data-node-timeline-entity-icon="header"/);
   assert.match(nodeSurface, /data-node-timeline-gate-icon=\{position\}/);
   assert.match(nodeSurface, /position="from"[\s\S]*position="to"/);

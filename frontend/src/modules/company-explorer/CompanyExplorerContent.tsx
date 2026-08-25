@@ -482,7 +482,7 @@ function materializeProjectionLogicGate(
 ): ExplorerLogicGateRecord | null {
   logicGateID = cleanExplorerID(logicGateID);
   if (!logicGateID) return null;
-  const header = logicGateName || projected?.header || previous?.header || previous?.title || "Untitled Logic Gate";
+  const header = logicGateName || projected?.header || previous?.header || previous?.title || "Untitled Process";
   return {
     ...previous,
     ...projected,
@@ -2482,7 +2482,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         creatorLogicGateRACIRole,
         items: [{
           client_id: createWorkspaceEntityBatchClientID("explorer-logic-gate"),
-          title: "new logic gate",
+          title: "new process",
           position,
         }],
         requestJSON,
@@ -3528,7 +3528,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         cardIDs: (result.cards ?? []).map((card) => card.card_id),
         unstarredMessageIDs: cleanExplorerIDs(result.unstarred_message_ids ?? []),
       });
-      setInternalTriageDropSuccess(convertedMessageIDs.length === 1 ? "Email added to Logic Gate." : `${convertedMessageIDs.length} emails added to Logic Gate.`);
+      setInternalTriageDropSuccess(convertedMessageIDs.length === 1 ? "Email added to Process." : `${convertedMessageIDs.length} emails added to Process.`);
       setInternalTriageDropMenu(null);
     } catch (err) {
       setInternalTriageDropSuccess("");

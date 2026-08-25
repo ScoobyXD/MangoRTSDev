@@ -110,7 +110,7 @@ export function FieldsContent({ accent = "#6366f1" }: { accent?: string }) {
         <div>
           <div style={eyebrowStyle}>Entities</div>
           <h1 style={titleStyle}>Fields</h1>
-          <p style={subtitleStyle}>Create reusable labels for Projects, Nodes, and Logic Gates. Project columns and grouping use the same field library.</p>
+          <p style={subtitleStyle}>Create reusable labels for Projects, Nodes, and Processes. Project columns and grouping use the same field library.</p>
         </div>
         <div style={fieldCountStyle(accent)}>{fields.length} {fields.length === 1 ? "field" : "fields"}</div>
       </section>

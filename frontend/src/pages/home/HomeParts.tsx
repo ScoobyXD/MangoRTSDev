@@ -182,7 +182,7 @@ function HomePinContextMenu({ menu, onClose, onDelete, resolveLabel }: {
           onClose();
         }}
       >
-        Pin {menu.kind === "logic_gate" ? "Logic Gate" : menu.kind === "project" ? "Project" : "Node"}
+        Pin {menu.kind === "logic_gate" ? "Process" : menu.kind === "project" ? "Project" : "Node"}
       </button>
       {onDelete && (
         <button
@@ -239,7 +239,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
   if (!menu) return null;
   const title = menu.kind === "node"
     ? `${menu.ids.length} node${menu.ids.length === 1 ? "" : "s"}`
-    : `${menu.ids.length} Logic Gate${menu.ids.length === 1 ? "" : "s"}`;
+    : `${menu.ids.length} Process${menu.ids.length === 1 ? "" : "es"}`;
   const fieldStyle: React.CSSProperties = {
     width: "100%",
     minHeight: 30,
@@ -312,7 +312,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
           style={actionButtonStyle}
           onClick={pinSelectedTargets}
         >
-          Pin {menu.kind === "node" ? "Node" : "Logic Gate"}
+          Pin {menu.kind === "node" ? "Node" : "Process"}
         </button>
         {menu.kind === "node" ? (
           <>
@@ -320,7 +320,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
               Priority
               <select value={priority} onChange={(event) => setPriority(event.target.value)} style={fieldStyle}>
                 <option value="__no_change__">No change</option>
-                <option value="0">Unassigned to a Logic Gate</option>
+                <option value="0">Unassigned to a Process</option>
                 <option value="1">1 URGENT(&lt;1hr)</option>
                 <option value="2">2 By end of day</option>
                 <option value="3">3 Tomorrow</option>
@@ -348,10 +348,10 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
               {dueDateMode === "set" && <input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} style={fieldStyle} />}
             </label>
             <label style={labelStyle}>
-              Add to Logic Gate
+              Add to Process
               <select value={targetLogicGateID} onChange={(event) => setTargetLogicGateID(event.target.value)} style={fieldStyle}>
                 {sortedLogicGates.length === 0 ? (
-                  <option value="">No Logic Gates</option>
+                  <option value="">No Processes</option>
                 ) : sortedLogicGates.map((logicGate) => (
                   <option key={logicGate.logic_gate_id} value={logicGate.logic_gate_id}>{logicGateTitle(logicGate)}</option>
                 ))}
@@ -366,7 +366,7 @@ export function HomeBulkEditMenu({ menu, companyUsers, logicGates, nodeByID, bus
                 onAddNodesToLogicGate(menu.ids, targetLogicGateID);
               }}
             >
-              Add to Logic Gate
+              Add to Process
             </button>
           </>
         ) : (
@@ -1603,12 +1603,12 @@ export function LogicGateRail({
         }}
       >
         <div style={logicGateRailHeaderStyle}>
-          <h2 style={panelTitleStyle}>My Logic Gates</h2>
+          <h2 style={panelTitleStyle}>My Processes</h2>
           {loading && <span style={mutedSmallStyle}>Loading</span>}
         </div>
         <div className="mango-home-scroll" style={myLogicGatesListStyle}>
           {myGroups.length === 0 ? (
-            <div style={emptySmallStyle}>No assigned Logic Gates</div>
+            <div style={emptySmallStyle}>No assigned Processes</div>
           ) : myGroups.map((group) => (
             <div key={group.key} style={myLogicGateGroupStyle}>
               <div style={myLogicGateFolderLabelStyle}>
@@ -1642,18 +1642,18 @@ export function LogicGateRail({
 
       <section style={{ ...logicGateRailSectionStyle, gridTemplateRows: "auto auto minmax(0, 1fr)" }} onContextMenu={(event) => openCreateLogicGateMenu(event)}>
         <div style={logicGateRailHeaderStyle}>
-          <h2 style={panelTitleStyle}>All Logic Gates</h2>
+          <h2 style={panelTitleStyle}>All Processes</h2>
           {loading && <span style={mutedSmallStyle}>Loading</span>}
         </div>
         <input
           style={inputStyle}
           value={search}
           onChange={(event) => onSearchChange(event.target.value)}
-          placeholder="Search Logic Gates"
+          placeholder="Search Processes"
         />
         <div className="mango-home-scroll" style={allLogicGateRowsStyle}>
           {allRows.length === 0 && !loading ? (
-            <div style={emptySmallStyle}>No Logic Gates</div>
+            <div style={emptySmallStyle}>No Processes</div>
           ) : allRows.map((row) => {
             const selected = selectedRowIDs.has(row.id);
             const isFolder = row.kind === "folder";
@@ -1746,7 +1746,7 @@ export function LogicGateRail({
             onCreateLogicGate({ creatorRACIRole });
           }}
         >
-          Create Logic Gate
+          Create Process
         </button>
       </FrameRightClickMenu>
     )}
@@ -1991,12 +1991,12 @@ export function NodeInboxRail({
   ) => (
     <section style={sectionStyle}>
       <div style={nodeInboxRailHeaderStyle}>
-        <h2 style={titleStyle}>My Logic Gates</h2>
+        <h2 style={titleStyle}>My Processes</h2>
         {loading && <span style={mutedStyle}>Loading</span>}
       </div>
       <div className="mango-home-scroll" style={myLogicGatesListStyle}>
         {myLogicGateGroups.length === 0 && !loading ? (
-          <div style={nodeInboxOtherEmptyStyle}>No assigned Logic Gates</div>
+          <div style={nodeInboxOtherEmptyStyle}>No assigned Processes</div>
         ) : myLogicGateGroups.map((group) => (
           <div key={group.key} style={myLogicGateGroupStyle}>
             <div style={myLogicGateFolderLabelStyle}>
@@ -3731,7 +3731,7 @@ export function RACIRoleInboxMatrix({
             onCreateLogicGateInCell(input);
           }}
         >
-          Create Logic Gate
+          Create Process
         </button>
         <button
           type="button"
@@ -3907,8 +3907,8 @@ export function LogicGateInboxNodeGroupCard({
       <div
         role="button"
         tabIndex={canOpenLogicGate ? 0 : -1}
-        title={canOpenLogicGate ? `Open ${group.label} in Logic Gate Arena` : group.label}
-        aria-label={canOpenLogicGate ? `Open ${group.label} in Logic Gate Arena` : group.label}
+        title={canOpenLogicGate ? `Open ${group.label} in Process Arena` : group.label}
+        aria-label={canOpenLogicGate ? `Open ${group.label} in Process Arena` : group.label}
         style={logicGateInboxGroupHeaderStyle(canOpenLogicGate, groupColor)}
         onClick={(event) => {
           event.stopPropagation();
@@ -3993,7 +3993,7 @@ export function LogicGateInboxNodeGroupCard({
       </div>}
       {!collapsed && resizeKey && onStartResize && (
         <div
-          title="Resize Logic Gate card"
+          title="Resize Process card"
           onPointerDown={(event) => onStartResize(resizeKey, event)}
           style={logicGateInboxGroupResizeHandleStyle}
         >
@@ -4011,7 +4011,7 @@ export function LogicGateInboxNodeGroupCard({
                 onCreateLogicGate();
               }}
             >
-              Create Logic Gate
+              Create Process
             </button>
           )}
           {onCreateNode && (
@@ -4049,7 +4049,7 @@ export function LogicGateInboxNodeGroupCard({
                 onOpenLogicGateBulkMenuAt(group.logicGateID, x, y);
               }}
             >
-              Edit Logic Gate assignments
+              Edit Process assignments
             </button>
           )}
           <button
@@ -4070,7 +4070,7 @@ export function LogicGateInboxNodeGroupCard({
               setGroupContextMenu(null);
             }}
           >
-            Pin Logic Gate
+            Pin Process
           </button>
           {onRequestDeleteLogicGate && (
             <button
@@ -6610,7 +6610,7 @@ export function MessageDetail({ message, threadMessages = [], nodes, companyID, 
                   key={logicGateID}
                   kind="logic_gate"
                   placement="thread-header"
-                  label="Open Logic Gate for this email thread"
+                  label="Open Process for this email thread"
                   onClick={() => onOpenLogicGate(logicGateID)}
                 />
               ))}
@@ -6694,7 +6694,7 @@ export function EmailReferencePreviewModal({ message, threadMessages, resources,
           key={`${resource.kind}:${resource.id}`}
           type="button"
           data-email-reference-resource={resource.kind}
-          title={`Open ${resource.kind === "node" ? "node" : "Logic Gate"}: ${resource.label}`}
+          title={`Open ${resource.kind === "node" ? "node" : "Process"}: ${resource.label}`}
           onClick={() => resource.kind === "node" ? onOpenNode(resource.id) : onOpenLogicGate(resource.id)}
           style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 28, maxWidth: 280, padding: "3px 9px 3px 6px", border: `1px solid ${resource.kind === "node" ? "rgba(51,221,213,0.34)" : "rgba(25,240,122,0.38)"}`, borderRadius: 8, background: resource.kind === "node" ? "rgba(236,254,255,0.9)" : "rgba(236,253,245,0.92)", color: "#334155", fontSize: 11, fontWeight: 850, cursor: "pointer" }}
         >
@@ -6819,7 +6819,7 @@ export function DeleteHomeEntitiesConfirmationModal({ targets, busy, position, o
   if (targets.length > targetList.length) targetList.push(`${targets.length - targetList.length} more`);
   const description = [
     nodeCount ? `${nodeCount} node${nodeCount === 1 ? "" : "s"}` : "",
-    logicGateCount ? `${logicGateCount} Logic Gate${logicGateCount === 1 ? "" : "s"}` : "",
+    logicGateCount ? `${logicGateCount} Process${logicGateCount === 1 ? "" : "es"}` : "",
   ].filter(Boolean).join(" and ");
   return (
     <ConfirmActionMenu

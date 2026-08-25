@@ -14,7 +14,7 @@ export const HuddleLogicGatePage: React.FC<{
   const resource = useMemo<HuddleOpenResource>(() => ({
     resourceType: "huddle_logic_gate",
     resourceID: huddleLogicGateID,
-    name: "Huddle Logic Gate",
+    name: "Huddle Process",
   }), [huddleLogicGateID]);
   const openNode = (node: HuddleOpenResource) => window.dispatchEvent(new CustomEvent("mangorts:huddle-open", { detail: node }));
   return (

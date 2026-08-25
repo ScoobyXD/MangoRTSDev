@@ -23,7 +23,7 @@ export function resolveCurrentUpdateLogicGateLabel(input: {
   return input.currentDetails?.title?.trim()
     || input.groupedLabel?.trim()
     || input.historicalEntityLabel?.trim()
-    || "Logic Gate";
+    || "Process";
 }
 
 export function resolveCurrentUpdateLogicGateGroupValue(input: {

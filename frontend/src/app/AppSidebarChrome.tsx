@@ -562,7 +562,7 @@ export function AppSidebar({
         cardIDs: (conversion?.result.cards ?? []).map((card) => card.card_id),
         unstarredMessageIDs: conversion?.unstarredMessageIDs ?? [],
       });
-      setExplorerDropSuccess(convertedMessageIDs.length === 1 ? "Email added to Logic Gate." : `${convertedMessageIDs.length} emails added to Logic Gate.`);
+      setExplorerDropSuccess(convertedMessageIDs.length === 1 ? "Email added to Process." : `${convertedMessageIDs.length} emails added to Process.`);
     } catch (error) {
       console.error("Failed to assign triage email from sidebar Explorer", error);
       setExplorerDropSuccess("");
@@ -596,7 +596,7 @@ export function AppSidebar({
     } catch (error) {
       console.error("Failed to add pinned drop nodes to Logic Gate", error);
       setPinDropSuccess("");
-      setSharedError(error instanceof Error ? error.message : "Failed to add node to pinned Logic Gate.");
+      setSharedError(error instanceof Error ? error.message : "Failed to add node to pinned Process.");
     } finally {
       setPinnedResourceDropBusy(false);
     }

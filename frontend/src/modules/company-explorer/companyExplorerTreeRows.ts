@@ -337,12 +337,14 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
     result.location_path.forEach((segment, segmentIndex) => {
       const kind = explorerKindForSearchEntity(segment.entity_type);
       const resourceID = segment.resource_id || segment.entity_id;
-      pathLabelParts.push(formatExplorerFolderLabel(segment.name || resourceID));
+      const label = segment.name || resourceID;
+      const displayLabel = segment.entity_type === "folder" ? formatExplorerFolderLabel(label) : label;
+      pathLabelParts.push(displayLabel);
       const identity = identityFor(segment.entity_type, resourceID, segment.entity_id);
       pathIDParts.push(`${segment.entity_type}-${resourceID || segment.entity_id}`);
       const row = {
         id: searchTreeIDForEntity(segment.entity_type, resourceID, segment.entity_id, `company-explorer-search-path-${pathIDParts.join("--")}-`),
-        label: segment.name || resourceID,
+        label: displayLabel,
         depth: segmentIndex,
         kind,
         entityID: segment.entity_id,
@@ -370,9 +372,10 @@ export function buildCompanyExplorerSearchTreeRows(results: CompanyExplorerSearc
     const kind = explorerKindForSearchEntity(result.resource_type);
     const folderKind = explorerFolderKindForSearchEntity(result.resource_type);
     const parentSegment = result.location_path[result.location_path.length - 1];
+    const resultLabel = result.display_name || resourceID || result.entity_id;
     const resultRow = {
       id: `company-explorer-search-result-${result.resource_type}-${resourceID || result.entity_id}`,
-      label: result.display_name || resourceID || result.entity_id,
+      label: result.resource_type === "folder" ? formatExplorerFolderLabel(resultLabel) : resultLabel,
       depth: result.location_path.length,
       kind,
       entityID: result.entity_id,
@@ -490,9 +493,11 @@ export function buildCompanyExplorerV2TreeRows({
     const displayID = row.resource_id || row.entity_id;
     const resourceID = row.resource_id || "";
     const folderKind = folderKindForRow(row);
+    const label = row.name || displayID;
+    const parentRow = row.parent_entity_id ? rowByEntityID.get(row.parent_entity_id) : undefined;
     return {
       id: treeIDForRow(row),
-      label: row.name || displayID,
+      label: row.entity_type === "folder" ? formatExplorerFolderLabel(label) : label,
       depth,
       kind,
       entityID: row.entity_id,
@@ -507,7 +512,7 @@ export function buildCompanyExplorerV2TreeRows({
       folderKind,
       protectedDefaultFolder: row.entity_type === "folder" && isProtectedDefaultFolderContext(row.native_context),
       hasPermissionRules: Boolean(row.has_permission_rules),
-      folderLabel: row.parent_entity_id ? rowByEntityID.get(row.parent_entity_id)?.name : undefined,
+      folderLabel: parentRow?.entity_type === "folder" ? formatExplorerFolderLabel(parentRow.name) : parentRow?.name,
       scopeLevel: depth,
       position: row.position || TREE_ROW_POSITION_STEP,
       createdTimestamp: String(row.created_timestamp ?? ""),

@@ -410,7 +410,7 @@ const ProjectRelationshipsSurface: React.FC<{
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${ruleColor}` }}>
         <div style={{ minWidth: 0, display: "grid", gap: 3 }}>
           <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 13, fontWeight: 950 }}>Relationships</div>
-          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 11, fontWeight: 760 }}>{resourceTitle || (resourceType === "logic_gate" ? "Logic Gate" : "Node")}</div>
+          <div style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "rgba(100,116,139,0.82)", fontSize: 11, fontWeight: 760 }}>{resourceTitle || (resourceType === "logic_gate" ? "Process" : "Node")}</div>
         </div>
         <span style={{ border: `1px solid ${strokeColor}`, borderRadius: 999, padding: "4px 8px", color: accent, fontSize: 11, fontWeight: 900 }}>{relationships.length} project{relationships.length === 1 ? "" : "s"}</span>
       </div>
@@ -1057,7 +1057,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     if (!isSameEntity) {
       setLinkedNodeTitle(logicGateID ? (label || readLogicGateLabelFromGraph(logicGateID)) : "");
     } else if (!editingTitleActiveRef.current) {
-      setLinkedNodeTitle((current) => preferResolvedEntityLabel(current, label, "Logic Gate"));
+      setLinkedNodeTitle((current) => preferResolvedEntityLabel(current, label, "Process"));
     }
     if (logicGateID && !isSameEntity && shouldFocusEditor) {
       setActiveTab("editor");
@@ -1269,10 +1269,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const linkLogicGateEntityFromEditor = useCallback(async (entity: EditorEntityLink) => {
     if (!linkedEntityCanEdit || linkedEntityKind !== "logic_gate" || !linkedNodeID) {
-      throw new Error("You do not have permission to edit this Logic Gate.");
+      throw new Error("You do not have permission to edit this Process.");
     }
     if (entity.entityType !== "project") {
-      throw new Error("A Logic Gate can only be linked to a Project.");
+      throw new Error("A Process can only be linked to a Project.");
     }
     const projectID = entity.entityID.trim();
     if (!projectID) throw new Error("Select a Project to link.");
@@ -2138,14 +2138,14 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           const textBoxes = projections.filter((item) => item.type === EDITOR_TEXT_BLOCK_TYPE);
           setLinkedNodeInfoPreview(nonText.slice(0, 2).map((item) => `${item.type}: ${item.information}`));
           setLinkedNodeMetadataRows([
-            { label: "Logic Gate ID", value: details.logic_gate.logic_gate_id },
+            { label: "Process ID", value: details.logic_gate.logic_gate_id },
             { label: "Created", value: details.logic_gate.created_timestamp },
             { label: "Relationships", value: String(details.relationships_count ?? details.relationships.length) },
             { label: "Information records", value: String(details.information_count ?? details.information.length) },
             { label: "Text boxes", value: String(textBoxes.length) },
           ]);
           const historyRows = [
-            details.logic_gate.created_timestamp ? `Logic gate created at ${details.logic_gate.created_timestamp}` : "Logic gate created",
+            details.logic_gate.created_timestamp ? `Process created at ${details.logic_gate.created_timestamp}` : "Process created",
             ...details.information.slice(-4).map((item) => `${item.type} updated at ${item.updated_timestamp}`),
           ];
           setLinkedNodeHistoryRows(historyRows);
@@ -2363,10 +2363,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const logicGateConversionAction = {
     id: "convert-to-huddle",
-    label: "Turn into Huddle Logic Gate",
+    label: "Turn into Huddle Process",
     disabled: !linkedEntityCanEdit,
     onSelect: () => {
-      if (!window.confirm("Convert this Logic Gate to a Huddle? This cannot be undone.")) return;
+      if (!window.confirm("Convert this Process to a Huddle? This cannot be undone.")) return;
       void requestJSON<{ huddle_logic_gate_id: string; header: string }>(`/v1/logic-gates/${encodeURIComponent(linkedNodeID)}/convert-to-huddle`, {
         method: "POST",
         json: { company_id: companyID },
@@ -2556,7 +2556,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               companyID={companyID}
               entityType={linkedEntityKind}
               entityID={linkedNodeID}
-              title={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
+              title={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Process" : "Node")}
               variant="embedded"
               readOnly={!linkedEntityCanEdit}
             />
@@ -2565,7 +2565,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         {hasLinkedDocument && (linkedEntityKind === "node" || linkedEntityKind === "logic_gate") && activeTab === "save-settings" && (
           <EditorSaveSettingsSurface
             topPx={documentTopPx}
-            resourceTitle={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Logic Gate" : "Node")}
+            resourceTitle={linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "Process" : "Node")}
             versions={saveVersions}
             selectedSaveID={selectedSaveVersionID}
             loading={saveVersionsLoading}

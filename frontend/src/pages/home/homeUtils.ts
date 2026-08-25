@@ -376,7 +376,7 @@ export function logicGateIDFromTreeID(treeID: string): string {
 }
 
 export function logicGateTitle(logicGate?: Pick<LogicGateRecord, "header" | "logic_gate_id">): string {
-  return humanLabelOrFallback(logicGate?.header, humanLabelOrFallback(logicGate?.logic_gate_id, "Logic Gate"));
+  return humanLabelOrFallback(logicGate?.header, humanLabelOrFallback(logicGate?.logic_gate_id, "Process"));
 }
 
 export function buildLogicGateExplorerPayload(logicGateIDs: string[]): ExplorerDragPayload | null {
@@ -407,12 +407,12 @@ export function setLogicGateDragData(dataTransfer: DataTransfer, logicGateIDs: s
   const ids = cleanIDList(logicGateIDs);
   dataTransfer.effectAllowed = "copyMove";
   dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(payload));
-  dataTransfer.setData("text/plain", ids.length === 1 ? logicGateTitle(logicGateByID.get(ids[0])) : `${ids.length} Logic Gates`);
+  dataTransfer.setData("text/plain", ids.length === 1 ? logicGateTitle(logicGateByID.get(ids[0])) : `${ids.length} Processes`);
   attachStackedDragPreview(
     dataTransfer,
     ids.map((logicGateID) => ({ label: logicGateTitle(logicGateByID.get(logicGateID)), color: "#334155" })),
     "#334155",
-    "Logic Gates",
+    "Processes",
   );
 }
 
@@ -435,7 +435,7 @@ export function nodeTitle(node?: Pick<NodeRecord, "name" | "node_id">): string {
 
 export function inboxLogicGateLabel(logicGateID: string, logicGateByID: Map<string, LogicGateRecord>): string {
   const logicGate = logicGateByID.get(logicGateID);
-  return logicGate ? logicGateTitle(logicGate) : humanLabelOrFallback(logicGateID, "Logic Gate");
+  return logicGate ? logicGateTitle(logicGate) : humanLabelOrFallback(logicGateID, "Process");
 }
 
 export function missingLogicGateRecordIDs(nodes: Pick<NodeRecord, "logic_gate_ids">[], logicGateByID: Map<string, LogicGateRecord>): string[] {
@@ -481,7 +481,7 @@ export function materializeRACIInboxGroupsByCell(
     const groups = Array.from(byLogicGate.entries())
       .map(([logicGateID, childIDs]) => ({
         logicGateID,
-        label: logicGateID === INBOX_NO_LOGIC_GATE_ID ? "No Logic Gate" : inboxLogicGateLabel(logicGateID, logicGateByID),
+        label: logicGateID === INBOX_NO_LOGIC_GATE_ID ? "No Process" : inboxLogicGateLabel(logicGateID, logicGateByID),
         nodeIDs: Array.from(childIDs).sort((a, b) => nodeTitle(nodeByID.get(a)).localeCompare(nodeTitle(nodeByID.get(b)), undefined, { numeric: true, sensitivity: "base" }) || a.localeCompare(b)),
       }))
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: "base" }) || a.logicGateID.localeCompare(b.logicGateID));
@@ -704,7 +704,7 @@ export function buildMyLogicGateGroups(input: {
     seen.add(logicGate.logic_gate_id);
     return true;
   });
-  return logicGates.length > 0 ? [{ key: "unfiled", label: "My Logic Gates", logicGates }] : [];
+  return logicGates.length > 0 ? [{ key: "unfiled", label: "My Processes", logicGates }] : [];
 }
 
 export function buildMyNodeGroups(input: {
@@ -944,7 +944,7 @@ export function getHomeViewLabel(viewID: HomeViewID, sharedInboxes: Communicatio
   if (RACISection) return RACISection.title;
   if (viewID === "updates") return "Updates";
   if (viewID === "my-nodes") return "My Nodes";
-  if (viewID === "my-logic-gates") return "My Logic Gates";
+  if (viewID === "my-logic-gates") return "My Processes";
   const folderID = viewID.startsWith("shared:") ? viewID.slice("shared:".length) : "";
   return sharedInboxes.find((folder) => folder.folder_id === folderID)?.name ?? "Shared Emails";
 }

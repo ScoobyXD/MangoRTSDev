@@ -31,8 +31,8 @@ export const HuddleLogicGateCards: React.FC<{
         <div style={logicGateSectionStyle}>
           <button
             type="button"
-            aria-label={`Open ${item.header} Logic Gate`}
-            title="Open Logic Gate"
+            aria-label={`Open ${item.header} Process`}
+            title="Open Process"
             onClick={() => onOpenLogicGate(item)}
             style={logicGateOpenButtonStyle}
           >
@@ -42,8 +42,8 @@ export const HuddleLogicGateCards: React.FC<{
           {onRemove && (
             <button
               type="button"
-              aria-label={`Remove ${item.header} from Huddle Logic Gate`}
-              title="Remove Logic Gate"
+              aria-label={`Remove ${item.header} from Huddle Process`}
+              title="Remove Process"
               onClick={() => onRemove(item)}
               style={removeButtonStyle}
             >

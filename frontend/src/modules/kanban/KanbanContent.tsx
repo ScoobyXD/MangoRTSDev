@@ -419,7 +419,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
   const initialLogicGateID = initialArenaLogicGateID || logicGateIDFromKanbanBoardID(initialBoardID);
   const [activeBoardID, setActiveBoardID] = useState(initialBoardID);
   const [activeLogicGateID, setActiveLogicGateID] = useState(initialLogicGateID);
-  const [activeLogicGateLabel, setActiveLogicGateLabel] = useState(() => initialArenaLogicGateID ? humanLabelOrFallback(forcedLogicGateLabel, "Logic Gate") : "");
+  const [activeLogicGateLabel, setActiveLogicGateLabel] = useState(() => initialArenaLogicGateID ? humanLabelOrFallback(forcedLogicGateLabel, "Process") : "");
   const [allBoardsOpen, setAllBoardsOpen] = useState(false);
   const [contentSearchQuery, setContentSearchQuery] = useState("");
   const [kanbanAccountFilterIDs, setKanbanAccountFilterIDs] = useState<string[]>([]);
@@ -1154,14 +1154,14 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       .reduce((total, column, index) => total + getColumnWidth(column) + (index > 0 ? 10 : 0), 0);
     return Math.max(0, targetRight - KANBAN_ARENA_ACCOUNT_FILTER_WIDTH_PX);
   }, [arenaMode, mainBoardColumns]);
-  const activeBoardTitle = activeLogicGateID ? (activeLogicGateLabel || (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : "Logic Gate")) : (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : KANBAN_DEFAULT_BOARD_TITLE);
+  const activeBoardTitle = activeLogicGateID ? (activeLogicGateLabel || (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : "Process")) : (activeBoard ? getKanbanBoardDisplayTitle(activeBoard) : KANBAN_DEFAULT_BOARD_TITLE);
   const boardRows = useMemo<KanbanBoard[]>(() => {
     if (activeBoard) return orderedBoards;
     return [{
       company_id: companyID,
       board_id: boardID,
       logic_gate_id: activeLogicGateID || null,
-      title: activeLogicGateID ? (activeLogicGateLabel || "Logic Gate") : (activeLogicGateLabel || `${KANBAN_DEFAULT_BOARD_TITLE} (unsaved)`),
+      title: activeLogicGateID ? (activeLogicGateLabel || "Process") : (activeLogicGateLabel || `${KANBAN_DEFAULT_BOARD_TITLE} (unsaved)`),
       position: 0,
       created_timestamp: "",
       updated_timestamp: "",
@@ -1277,7 +1277,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
           companyID,
           requestStartTitleVersion,
           (current, update) => reconcileCommittedKanbanLogicGateLabel(current, logicGateID, update),
-        ), "Logic Gate");
+        ), "Process");
         if (contents.board) {
           const board = { ...contents.board, logic_gate_id: contents.board.logic_gate_id ?? logicGateID, title: logicGateLabel };
           upsertBoardInList(board);
@@ -1305,7 +1305,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       onLoading: setLoading,
       onError: (err) => {
         if (activeBoardIDRef.current !== expectedBoardID) return;
-        setError(formatKanbanLoadError(err, "Logic gate arena API unavailable"));
+        setError(formatKanbanLoadError(err, "Process arena API unavailable"));
       },
     });
   }, [apiBase, applyCards, applyColumns, companyID, upsertBoardInList]);
@@ -1328,11 +1328,11 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
       return;
     }
     const nextBoardID = logicGateKanbanBoardID(logicGateID);
-    const nextLabel = humanLabelOrFallback(forcedLogicGateLabel, "Logic Gate");
+    const nextLabel = humanLabelOrFallback(forcedLogicGateLabel, "Process");
     const nextHighlightedEntity = forcedHighlightedNodeID.trim() ? { nodeID: forcedHighlightedNodeID.trim() } : null;
     if (activeBoardIDRef.current === nextBoardID && activeLogicGateID === logicGateID) {
       setHighlightedEntity(nextHighlightedEntity);
-      setActiveLogicGateLabel((current) => preferResolvedEntityLabel(current, nextLabel, "Logic Gate"));
+      setActiveLogicGateLabel((current) => preferResolvedEntityLabel(current, nextLabel, "Process"));
       loadLogicGateArenaView(logicGateID, nextBoardID);
       return;
     }
@@ -1703,7 +1703,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setSelectionAnchorCardID("");
         setHighlightedEntity(null);
         setActiveLogicGateID(logicGateID);
-        setActiveLogicGateLabel(logicGateID ? humanLabelOrFallback(selection.label, "Logic Gate") : "");
+        setActiveLogicGateLabel(logicGateID ? humanLabelOrFallback(selection.label, "Process") : "");
         if (!logicGateID) setActiveLogicGateRequestOwnerUserID("");
         setNodeEditorOverlay(null);
         setActiveBoardID(selection.entityID.trim());
@@ -1719,7 +1719,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         setSelectionAnchorCardID("");
         setHighlightedEntity(null);
         setActiveLogicGateID(logicGateID);
-        setActiveLogicGateLabel(humanLabelOrFallback(selection.label, "Logic Gate"));
+        setActiveLogicGateLabel(humanLabelOrFallback(selection.label, "Process"));
         setActiveLogicGateRequestOwnerUserID("");
         setNodeEditorOverlay(null);
         setActiveBoardID(nextBoardID);
@@ -2147,7 +2147,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     const logicGateID = activeLogicGateID.trim() || activeBoard?.logic_gate_id?.trim() || logicGateIDFromKanbanBoardID(boardID);
     const cleanColumnID = columnID.trim();
     if (!logicGateID || !cleanColumnID) {
-      setError("Drop emails on a Logic Gate board");
+      setError("Drop emails on a Process board");
       return;
     }
 
@@ -2222,7 +2222,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setError("");
     const logicGateID = logicGateIDFromKanbanBoardID(boardID);
     if (!logicGateID) {
-      setError("Select a Logic Gate board first");
+      setError("Select a Process board first");
       return;
     }
     const nodeID = createClientUUIDv7();
@@ -2283,7 +2283,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
     setError("");
     const logicGateID = logicGateIDFromKanbanBoardID(boardID);
     if (!logicGateID) {
-      setError("Select a Logic Gate board first");
+      setError("Select a Process board first");
       return;
     }
     const fallbackRect = boardRootRef.current?.getBoundingClientRect();
@@ -2868,7 +2868,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         boardID={boardID}
         boardTitleDraft={boardTitleDraft}
         contentSearchQuery={contentSearchQuery}
-        contentSearchPlaceholder={activeBoardIsLogicGate ? "Search this Logic Gate" : "Search this board"}
+        contentSearchPlaceholder={activeBoardIsLogicGate ? "Search this Process" : "Search this board"}
         allBoardsOpen={allBoardsOpen}
         boardsLoading={boardsLoading}
         filteredBoardRowsLength={filteredBoardRows.length}

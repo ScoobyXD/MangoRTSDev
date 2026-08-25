@@ -2096,7 +2096,7 @@ function TimelineChart({
                 ))}
               </React.Fragment>
             ))}
-            <div style={timelineEmptyOverlayStyle}>Drag a node or logic gate into the week, or use the + buttons in the lists below.</div>
+            <div style={timelineEmptyOverlayStyle}>Drag a node or process into the week, or use the + buttons in the lists below.</div>
           </>
         )}
       </div>
@@ -2197,7 +2197,7 @@ function ProjectEntityExplorerPanel({
         {rootOpen && rows.map((row) => (
           <ProjectExplorerRow key={row.id} row={row} expanded={expanded} onToggle={toggleRow} onNodeOpen={onNodeOpen} onAddEntity={onAddEntity} />
         ))}
-        {rootOpen && rows.length === 0 && <div style={emptyTreeStyle}>No nodes or logic gates</div>}
+        {rootOpen && rows.length === 0 && <div style={emptyTreeStyle}>No nodes or processes</div>}
       </div>
     </div>
   );

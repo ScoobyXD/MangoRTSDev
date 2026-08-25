@@ -81,7 +81,7 @@ run("company explorer context menu keeps fixed sections with disabled unavailabl
 
   assert.deepEqual(sections.map((section) => section.map((action) => action.label)), [
     ["Folder Permissions"],
-    ["Create New Folder", "Create Logic Gate", "Create Project"],
+    ["Create New Folder", "Create Process", "Create Project"],
     ["Rename", "Delete"],
   ]);
   assert.deepEqual(sections.map((section) => section.map((action) => action.enabled)), [
@@ -93,6 +93,10 @@ run("company explorer context menu keeps fixed sections with disabled unavailabl
 
 run("folder labels do not display counts", () => {
   assert.equal(formatExplorerFolderLabel("Invoices"), "Invoices");
+  assert.equal(formatExplorerFolderLabel("Logic Gates"), "Processes");
+  assert.equal(formatExplorerFolderLabel("Active Logic Gates"), "Active Processes");
+  assert.equal(formatExplorerFolderLabel("Logic Gates by Function"), "Processes by Function");
+  assert.equal(formatExplorerFolderLabel("Logic Gates by Person"), "Processes by Person");
 });
 
 run("tree rows render a blank root when the workspace is empty", () => {
@@ -160,18 +164,50 @@ run("search tree rows merge shared paths and render each matching resource once"
     },
   ]);
 
-  assert.deepEqual(rows.map((row) => row.label), ["Unfiled", "Logic Gates", "Search Gate", "Search Node"]);
+  assert.deepEqual(rows.map((row) => row.label), ["Unfiled", "Processes", "Search Gate", "Search Node"]);
   assert.deepEqual(rows.map((row) => row.depth), [0, 1, 2, 3]);
   assert.deepEqual(rows.map((row) => row.kind), ["folder", "folder", "logic_gate", "node"]);
   assert.equal(rows.filter((row) => row.entityID === "unfiled").length, 1);
   assert.equal(rows.filter((row) => row.entityID === "gate-a").length, 1);
   assert.equal(rows[2]?.logicGateID, "gate-a");
-  assert.equal(rows[2]?.folderLabel, "Unfiled / Logic Gates");
+  assert.equal(rows[2]?.folderLabel, "Unfiled / Processes");
   assert.equal(rows[2]?.syntheticKind, "search_result");
   assert.equal(rows[2]?.hasChildren, true);
   assert.equal(rows[3]?.nodeID, "node-a");
   assert.equal(rows[3]?.syntheticKind, "search_result");
   assert.equal(rows[3]?.hasChildren, false);
+});
+
+run("search rows rename only stored Logic Gate folder labels", () => {
+  const rows = buildCompanyExplorerSearchTreeRows([
+    {
+      company_id: "c",
+      resource_type: "folder",
+      resource_id: "logic-gates",
+      entity_id: "logic-gates",
+      display_name: "Logic Gates",
+      match_reason: "name_exact",
+      location_path: [],
+      protected_default_folder: true,
+      has_children: true,
+      created_timestamp: "1",
+      updated_timestamp: "1",
+    },
+    {
+      company_id: "c",
+      resource_type: "logic_gate",
+      resource_id: "gate-named-logic-gates",
+      entity_id: "gate-named-logic-gates",
+      display_name: "Logic Gates",
+      match_reason: "name_exact",
+      location_path: [],
+      has_children: false,
+      created_timestamp: "2",
+      updated_timestamp: "2",
+    },
+  ]);
+
+  assert.deepEqual(rows.map((row) => row.label), ["Processes", "Logic Gates"]);
 });
 
 run("search tree renders directly authorized results at the root when their locations are restricted", () => {
@@ -251,11 +287,12 @@ run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
         company_id: "c",
         entity_id: "folder-a",
         entity_type: "folder",
-        name: "Folder A",
+        name: "Logic Gates",
         parent_entity_id: "company-entity",
         edge_id: "edge-folder-a",
         position: 1000,
         has_children: true,
+        native_context: { protected_default_folder: "true" },
         created_timestamp: "2",
         updated_timestamp: "2",
       },
@@ -295,7 +332,10 @@ run("v2 tree rows preserve the existing tree shell ids and metadata", () => {
   assert.equal(rows[1]?.entityType, "folder");
   assert.equal(rows[1]?.folderID, "folder-a");
   assert.equal(rows[1]?.edgeID, "edge-folder-a");
+  assert.equal(rows[1]?.label, "Processes");
+  assert.equal(rows[1]?.protectedDefaultFolder, true);
   assert.equal(rows[2]?.logicGateID, "gate-a");
+  assert.equal(rows[2]?.folderLabel, "Processes");
   assert.equal(rows[2]?.hasChildren, false);
   assert.equal(rows.some((row) => row.kind === "node"), false);
 });

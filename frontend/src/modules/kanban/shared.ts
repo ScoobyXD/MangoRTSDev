@@ -340,7 +340,7 @@ export function getKanbanBoardDisplayTitle(board: Pick<KanbanBoard, "board_id" |
   const logicGateID = board.logic_gate_id?.trim() || logicGateIDFromKanbanBoardID(board.board_id);
   const title = board.title.trim();
   if (title && (!logicGateID || (title !== logicGateID && title !== logicGateKanbanBoardID(logicGateID) && !isLikelyOpaqueEntityID(title)))) return title;
-  if (logicGateID) return "Logic Gate";
+  if (logicGateID) return "Process";
   return humanLabelOrFallback(board.board_id, KANBAN_DEFAULT_BOARD_TITLE);
 }
 
@@ -393,7 +393,7 @@ export function hexToRgba(hex: string, alpha: number): string {
 
 export function attachStackedDragPreview(dataTransfer: DataTransfer, items: KanbanDragPreviewItem[], _accentColor: string, title: string): void {
   if (typeof document === "undefined" || items.length === 0) return;
-  const iconKind = /logic gate/i.test(title) ? "logic_gate" : "node";
+  const iconKind = /process/i.test(title) ? "logic_gate" : "node";
   const layerCount = Math.min(3, items.length);
   const container = document.createElement("div");
   container.style.position = "fixed";

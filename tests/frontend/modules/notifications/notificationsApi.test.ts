@@ -361,3 +361,111 @@ test("seen Updates APIs send only the selected date window", async () => {
     restore();
   }
 });
+
+test("Updates display normalizes only legacy system Process templates", async () => {
+  const originalFetch = globalThis.fetch;
+  const { restore } = installTestWindow();
+  (globalThis as unknown as MutableTestGlobal).fetch = async () => jsonResponse({
+    group: {
+      id: "updates/logic_gate:gate-1",
+      key: "logic_gate:gate-1",
+      field: "logic_gate",
+      label: "Logic Gate",
+      resource_type: "logic_gate",
+      resource_id: "gate-1",
+      depth: 0,
+      groups: [{
+        id: "updates/logic_gate:gate-review",
+        key: "logic_gate:gate-review",
+        field: "logic_gate",
+        label: "Logic Gate Review",
+        resource_type: "logic_gate",
+        resource_id: "gate-review",
+        depth: 1,
+        groups: [],
+      }],
+      notifications: [{
+        notification_id: "notification-assignment",
+        recipient_user_id: "user-1",
+        type: "logic_gate.gvic_updated",
+        source_event_id: "event-1",
+        entity_type: "logic_gate",
+        entity_id: "gate-1",
+        title: "Logic Gate assigned to you",
+        body_preview: "You were assigned to a Logic Gate.",
+        created_timestamp: "2026-01-01T00:00:00Z",
+      }, {
+        notification_id: "notification-work",
+        recipient_user_id: "user-1",
+        type: "work_item.logic_gate_assignment_saved",
+        source_event_id: "event-2",
+        entity_type: "node",
+        entity_id: "node-1",
+        title: "Brand new node",
+        body_preview: "Logic Gate Review was added to Logic Gate work.",
+        created_timestamp: "2026-01-01T00:00:01Z",
+      }, {
+        notification_id: "notification-removed",
+        recipient_user_id: "user-1",
+        type: "work_item.logic_gate_assignment_removed",
+        source_event_id: "event-3",
+        entity_type: "node",
+        entity_id: "node-2",
+        title: "Node removed from Logic Gate work",
+        body_preview: "Logic Gate Archive was removed from Logic Gate work.",
+        created_timestamp: "2026-01-01T00:00:02Z",
+      }, {
+        notification_id: "notification-mention",
+        recipient_user_id: "user-1",
+        type: "mention.created",
+        source_event_id: "event-4",
+        entity_type: "logic_gate",
+        entity_id: "gate-1",
+        title: "Logic Gate Advocate mentioned you in a logic gate",
+        body_preview: "Mention body",
+        created_timestamp: "2026-01-01T00:00:03Z",
+      }, {
+        notification_id: "notification-urgent-mention",
+        recipient_user_id: "user-1",
+        type: "mention.urgent_created",
+        source_event_id: "event-5",
+        entity_type: "logic_gate",
+        entity_id: "gate-1",
+        title: "URGENT Logic Gate Lead mentioned you in a logic gate",
+        body_preview: "Urgent mention body",
+        created_timestamp: "2026-01-01T00:00:04Z",
+      }, {
+        notification_id: "notification-user-copy",
+        recipient_user_id: "user-1",
+        type: "mention.created",
+        source_event_id: "event-6",
+        entity_type: "logic_gate",
+        entity_id: "gate-1",
+        title: "Logic Gate Review changed",
+        body_preview: "Keep the user-authored Logic Gate wording.",
+        created_timestamp: "2026-01-01T00:00:05Z",
+      }],
+    },
+  });
+  try {
+    const group = await fetchUpdateBranch({
+      companyID: "company-1",
+      filter: "all",
+      rootID: "updates/logic_gate:gate-1",
+    });
+    assert.equal(group.label, "Process");
+    assert.equal(group.groups[0]?.label, "Logic Gate Review");
+    assert.equal(group.notifications?.[0]?.title, "Process assigned to you");
+    assert.equal(group.notifications?.[0]?.body_preview, "You were assigned to a Process.");
+    assert.equal(group.notifications?.[1]?.body_preview, "Logic Gate Review was added to Process work.");
+    assert.equal(group.notifications?.[2]?.title, "Node removed from Process work");
+    assert.equal(group.notifications?.[2]?.body_preview, "Logic Gate Archive was removed from Process work.");
+    assert.equal(group.notifications?.[3]?.title, "Logic Gate Advocate mentioned you in a process");
+    assert.equal(group.notifications?.[4]?.title, "URGENT Logic Gate Lead mentioned you in a process");
+    assert.equal(group.notifications?.[5]?.title, "Logic Gate Review changed");
+    assert.equal(group.notifications?.[5]?.body_preview, "Keep the user-authored Logic Gate wording.");
+  } finally {
+    globalThis.fetch = originalFetch;
+    restore();
+  }
+});

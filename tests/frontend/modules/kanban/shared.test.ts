@@ -331,7 +331,7 @@ test("kanban board helpers keep saved board list stable and titled", () => {
     board_id: "logic-gate:019e3de8-c507-7a03-a7ab-fbea8f4e1d22",
     logic_gate_id: "019e3de8-c507-7a03-a7ab-fbea8f4e1d22",
     title: "019e3de8-c507-7a03-a7ab-fbea8f4e1d22",
-  })), "Logic Gate");
+  })), "Process");
   assert.equal(getKanbanBoardDisplayTitle(board({
     board_id: "logic-gate:019e3de8-c507-7a03-a7ab-fbea8f4e1d22",
     logic_gate_id: "019e3de8-c507-7a03-a7ab-fbea8f4e1d22",

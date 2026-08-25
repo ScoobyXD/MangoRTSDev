@@ -381,20 +381,20 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   const beginTitleEditAtEnd = () => {
     if (!canEdit) return;
     if (!isEditingTitle) {
-      editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
+      editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new process" : "new node");
       onSetIsEditingTitle(true);
     }
     window.requestAnimationFrame(() => focusEditableTitleAtEnd(editingTitleRef.current));
   };
   const beginTitleEditPreservingSelection = () => {
     if (!canEdit || isEditingTitle) return;
-    editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
+    editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new process" : "new node");
     onSetIsEditingTitle(true);
   };
   const beginTitleEditSelectingAll = () => {
     if (!canEdit) return;
     if (!isEditingTitle) {
-      editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new logic gate" : "new node");
+      editingTitleDraftRef.current = linkedNodeTitle || (linkedEntityKind === "logic_gate" ? "new process" : "new node");
       onSetIsEditingTitle(true);
     }
     window.requestAnimationFrame(() => selectEditableTitleContents(editingTitleRef.current));
@@ -478,7 +478,7 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               wordBreak: "break-word",
             }}
           >
-            <span style={{ flex: "0 0 auto" }}>{linkedEntityKind === "logic_gate" ? "Logic Gate:" : "Node:"}</span>
+            <span style={{ flex: "0 0 auto" }}>{linkedEntityKind === "logic_gate" ? "Process:" : "Node:"}</span>
             <span
               ref={editingTitleRef}
               data-floating-selection-actions="disabled"

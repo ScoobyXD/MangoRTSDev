@@ -214,7 +214,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			if status != "" {
 				body = fmt.Sprintf("%s was added in %s.", nodeTitle, status)
 			} else {
-				body = nodeTitle + " was added to Logic Gate work."
+				body = nodeTitle + " was added to Process work."
 			}
 		case store.WorkItemLogicGateAssignmentMovedEventType:
 			if status == "" {
@@ -223,8 +223,8 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			title = "Node status changed to " + status
 			body = fmt.Sprintf("%s moved to %s.", nodeTitle, status)
 		case store.WorkItemLogicGateAssignmentRemovedEventType:
-			title = "Node removed from Logic Gate work"
-			body = nodeTitle + " was removed from Logic Gate work."
+			title = "Node removed from Process work"
+			body = nodeTitle + " was removed from Process work."
 		case store.WorkItemLogicGateIssueToggledEventType:
 			isIssue, ok := payloadBool(payload, "is_issue")
 			if ok && isIssue {
@@ -257,9 +257,9 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 		}
 		gateTitle := payloadString(payload, "logic_gate_title")
 		if gateTitle == "" {
-			gateTitle = "a Logic Gate"
+			gateTitle = "a Process"
 		}
-		title = "Logic Gate assigned to you"
+		title = "Process assigned to you"
 		body = "You were assigned to " + gateTitle + "."
 	case domain.NotificationEventNodeAssigned:
 		node, err := s.Repo.GetNode(event.CompanyID, event.EntityID)
@@ -369,7 +369,7 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 				entityTitle = strings.TrimSpace(gate.Header)
 			}
 			if entityTitle == "" {
-				entityTitle = "a logic gate"
+				entityTitle = "a process"
 			}
 			if err := addEffectiveRecipientSubset(store.EntityTypeLogicGate, event.EntityID, mentionedUserIDs, func(userID string) notificationRecipientMeta {
 				return notificationMetaForEffectiveLogicGateUser(roles[userID], event.EntityID, "")

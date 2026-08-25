@@ -140,8 +140,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           <button
             className="mango-elevated-action"
             type="button"
-            title="Open Logic Gate in new browser tab"
-            aria-label="Open Logic Gate in new browser tab"
+            title="Open Process in new browser tab"
+            aria-label="Open Process in new browser tab"
             data-frame-interactive="true"
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onOpenInNewTab}
@@ -154,8 +154,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           <button
             className="mango-elevated-action"
             type="button"
-            title="Pin Logic Gate to Pinned"
-            aria-label="Pin Logic Gate to Pinned"
+            title="Pin Process to Pinned"
+            aria-label="Pin Process to Pinned"
             data-frame-interactive="true"
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onPinToSidebar}
@@ -168,8 +168,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
           <button
             className="mango-elevated-action"
             type="button"
-            title="Minimize Logic Gate Arena to app tab"
-            aria-label="Minimize Logic Gate Arena to app tab"
+            title="Minimize Process Arena to app tab"
+            aria-label="Minimize Process Arena to app tab"
             data-frame-interactive="true"
             onMouseDown={(event) => event.stopPropagation()}
             onClick={onCollapseToTab}
@@ -260,8 +260,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         <button
           className="mango-elevated-action"
           type="button"
-          title="Open Logic Gate in new browser tab"
-          aria-label="Open Logic Gate in new browser tab"
+          title="Open Process in new browser tab"
+          aria-label="Open Process in new browser tab"
           data-frame-interactive="true"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={onOpenInNewTab}
@@ -274,8 +274,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         <button
           className="mango-elevated-action"
           type="button"
-          title="Pin Logic Gate to Pinned"
-          aria-label="Pin Logic Gate to Pinned"
+          title="Pin Process to Pinned"
+          aria-label="Pin Process to Pinned"
           data-frame-interactive="true"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={onPinToSidebar}
@@ -288,8 +288,8 @@ export const KanbanBoardSidebar: React.FC<KanbanBoardSidebarProps> = ({
         <button
           className="mango-elevated-action"
           type="button"
-          title="Minimize Logic Gate Arena to app tab"
-          aria-label="Minimize Logic Gate Arena to app tab"
+          title="Minimize Process Arena to app tab"
+          aria-label="Minimize Process Arena to app tab"
           data-frame-interactive="true"
           onMouseDown={(event) => event.stopPropagation()}
           onClick={onCollapseToTab}

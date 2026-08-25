@@ -127,7 +127,7 @@ test("honors grouping order and direction", () => {
   ]);
   assert.deepEqual(typeFirst.groups.map((group) => [group.field, group.label]), [
     ["type", "Nodes"],
-    ["type", "Logic Gates"],
+    ["type", "Processes"],
   ]);
   assert.deepEqual(typeFirst.groups[0]?.groups.map((group) => group.label), [
     "Created from email",
@@ -145,6 +145,15 @@ test("honors grouping order and direction", () => {
   ]);
 });
 
+test("status grouping displays Process for persisted Logic Gate projection copy", () => {
+  const model = buildProjectRelationshipGroupingModel([
+    gate("gate-legacy", "Legacy Gate", { status: "Logic Gate" }),
+    gate("gate-active", "Active Gate", { status: "Active" }),
+  ], [{ field: "status", direction: "asc" }]);
+
+  assert.deepEqual(model.groups.map((group) => group.label), ["Active", "Process"]);
+});
+
 test("uses No logic gate for standalone nodes and nodes whose referenced gate is not visible", () => {
   const rows = [
     gate("gate-visible", "Visible Gate"),
@@ -156,7 +165,7 @@ test("uses No logic gate for standalone nodes and nodes whose referenced gate is
     { field: "logic_gate", direction: "desc" },
   ]);
 
-  assert.deepEqual(model.groups.map((group) => group.label), ["Visible Gate", "No logic gate"]);
+  assert.deepEqual(model.groups.map((group) => group.label), ["Visible Gate", "No process"]);
   const fallback = model.groups[1];
   assert.equal(fallback?.id.includes("gate-hidden"), false);
   assert.deepEqual(fallback?.rows.map((row) => row.relationship_id), [
@@ -298,8 +307,10 @@ test("Project Logic Gates and Nodes wires universal rows without the old card gr
   assert.match(source, /onNodeOpen=\{onNodeOpen\}/);
   assert.match(source, /onLogicGateOpen\?\.\(logicGateID, relationship\.display_title, \{/);
   assert.match(source, /onLogicGateOpen\?\.\(logicGateID, group\.label, \{/);
+  assert.match(source, /const sourceStatus = step\.status \?\? relationship\?\.status \?\? \(resourceType === "logic_gate" \? "Process" : ""\)/);
+  assert.match(source, /resourceType === "logic_gate" && \/\^logic gate\$\/i\.test\(sourceStatus\.trim\(\)\) \? "Process" : sourceStatus/);
   const appSource = readFileSync(resolve(process.cwd(), "frontend/src/app/applayout.tsx"), "utf8");
-  assert.match(appSource, /const cleanLabel = label\?\.trim\(\) \|\| "Logic Gate"/);
+  assert.match(appSource, /const cleanLabel = label\?\.trim\(\) \|\| "Process"/);
   assert.match(appSource, /label: cleanLabel/);
   assert.doesNotMatch(source, /useAppViewportAnchorRect\(containerRef\)/);
   assert.match(source, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);

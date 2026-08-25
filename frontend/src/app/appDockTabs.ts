@@ -22,7 +22,7 @@ export const EVENT_APP_DOCK_TAB_REQUESTED = "mangorts:app-dock-tab-requested";
 const APP_DOCK_TABS_STORAGE_PREFIX = "mangorts.app-taskbar.tabs.v1";
 const DEFAULT_TAB_LABEL: Record<AppDockTabKind, string> = {
   node: "Node",
-  logic_gate_arena: "Logic Gate Arena",
+  logic_gate_arena: "Process Arena",
   project: "Project",
 };
 
@@ -32,7 +32,11 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function normalizeLabel(kind: AppDockTabKind, label: string): string {
   const normalized = label.trim().replace(/\s+/g, " ");
-  if (kind === "logic_gate_arena") return humanLabelOrFallback(normalized, DEFAULT_TAB_LABEL[kind]);
+  if (kind === "logic_gate_arena") {
+    if (normalized === "Logic Gate") return "Process";
+    if (normalized === "Logic Gate Arena") return "Process Arena";
+    return humanLabelOrFallback(normalized, DEFAULT_TAB_LABEL[kind]);
+  }
   return normalized || DEFAULT_TAB_LABEL[kind];
 }
 

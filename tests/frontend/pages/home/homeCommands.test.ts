@@ -635,7 +635,7 @@ test("Home logic gate creation sends creator RACI role through batch create", as
         logic_gates: [{
           company_id: "company-1",
           logic_gate_id: "gate-1",
-          header: "new logic gate",
+          header: "new process",
           gvic_assignments: [{ company_id: "company-1", logic_gate_id: "gate-1", role: "responsible", user_id: "user-1", created_timestamp: timestamp }],
           created_timestamp: timestamp,
         }],
@@ -647,6 +647,7 @@ test("Home logic gate creation sends creator RACI role through batch create", as
   assert.equal(calls.length, 1);
   assert.equal(calls[0].path, "/v1/workspace/entity-batches");
   assert.equal(calls[0].body.creator_logic_gate_gvic_role, "responsible");
+  assert.equal((calls[0].body.items as Array<{ title?: string }>)[0]?.title, "new process");
   assert.equal(result.logicGate.gvic_assignments?.[0]?.role, "responsible");
 });
 
