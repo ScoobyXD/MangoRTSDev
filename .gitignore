@@ -24,10 +24,17 @@ infra/aws-prod/tfplan*
 infra/aws-prod/backend.hcl
 infra/aws-prod/terraform.tfvars
 infra/aws-prod/*.auto.tfvars
+infra/aws-qa/tfplan*
+infra/aws-qa/backend.hcl
+infra/aws-qa/terraform.tfvars
+infra/aws-qa/*.auto.tfvars
 scripts/start_local_cognito_backend.local.ps1
+__pycache__/
 
 # Generated attachment migration/compaction evidence and one-off AWS CLI payloads
 tmp/attachment-dry-runs/
 tmp/attachment-migration-*.json
 tmp/node-history-compaction-*.json
 tmp/s3-encryption.json
+tmp/schema-audit-*-fresh.json
+tmp/schema-audit-*-report.md

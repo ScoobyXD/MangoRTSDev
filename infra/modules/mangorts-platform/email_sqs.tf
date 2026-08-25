@@ -31,8 +31,8 @@ resource "aws_sqs_queue" "email_work_dlq" {
 
   lifecycle {
     precondition {
-      condition     = var.environment == "dev"
-      error_message = "The SQS email delivery path is development-only and cannot be enabled outside dev."
+      condition     = local.nonproduction_services_environment
+      error_message = "The SQS email delivery path can be enabled only in dev or qa."
     }
   }
 
@@ -106,7 +106,7 @@ data "aws_iam_policy_document" "github_deploy_email_sqs" {
   count = var.environment == "dev" && var.email_sqs_enabled ? 1 : 0
 
   statement {
-    sid = "ManageExactDevEmailQueues"
+    sid = "ManageExactEnvironmentEmailQueues"
     actions = [
       "sqs:CreateQueue",
       "sqs:DeleteQueue",
@@ -127,7 +127,7 @@ data "aws_iam_policy_document" "github_deploy_email_sqs" {
   }
 
   statement {
-    sid = "ManageExactDevEmailSchedule"
+    sid = "ManageExactEnvironmentEmailSchedule"
     actions = [
       "scheduler:CreateSchedule",
       "scheduler:DeleteSchedule",
@@ -138,7 +138,7 @@ data "aws_iam_policy_document" "github_deploy_email_sqs" {
   }
 
   statement {
-    sid = "ManageExactDevEmailScheduleGroup"
+    sid = "ManageExactEnvironmentEmailScheduleGroup"
     actions = [
       "scheduler:CreateScheduleGroup",
       "scheduler:DeleteScheduleGroup",
@@ -202,7 +202,7 @@ resource "aws_cloudwatch_log_group" "email_worker" {
   count = var.email_sqs_enabled ? 1 : 0
 
   name              = "/ecs/${local.name_prefix}/email-worker"
-  retention_in_days = 14
+  retention_in_days = var.cloudwatch_log_retention_days
 }
 
 resource "aws_ecs_task_definition" "email_worker" {
@@ -215,6 +215,8 @@ resource "aws_ecs_task_definition" "email_worker" {
   memory                   = var.email_worker_memory
   execution_role_arn       = aws_iam_role.email_worker_execution[0].arn
   task_role_arn            = aws_iam_role.email_worker[0].arn
+  tags                     = local.tags
+  skip_destroy             = true
 
   container_definitions = jsonencode([
     {
@@ -266,7 +268,7 @@ resource "aws_ecs_task_definition" "email_worker" {
       )
       secrets = concat(
         [
-          { name = "DB_PASSWORD", valueFrom = local.db_password_secret_arn }
+          { name = "DB_PASSWORD", valueFrom = local.db_password_secret_value_from }
         ],
         local.nylas_worker_enabled ? [
           { name = "NYLAS_API_KEY", valueFrom = var.nylas_api_key_secret_arn }
@@ -294,7 +296,7 @@ resource "aws_ecs_task_definition" "email_worker" {
   lifecycle {
     precondition {
       condition     = local.email_worker_dependencies_configured
-      error_message = "DEV email worker requires the final migrated schema, complete DB and Nylas configuration, and external Valkey."
+      error_message = "The email worker requires dev or qa, the final migrated schema, complete DB and Nylas configuration, and external Valkey."
     }
   }
 }
@@ -427,13 +429,13 @@ resource "aws_scheduler_schedule" "email_reconciliation" {
 
   lifecycle {
     precondition {
-      condition     = var.environment == "dev"
-      error_message = "Email reconciliation is development-only and cannot be enabled outside dev."
+      condition     = local.nonproduction_services_environment
+      error_message = "Email reconciliation can be enabled only in dev or qa."
     }
 
     precondition {
       condition     = var.email_worker_enabled && local.email_worker_dependencies_configured
-      error_message = "DEV email reconciliation requires the enabled worker, final migrated schema, and complete DB/Nylas/Valkey configuration."
+      error_message = "Email reconciliation requires the enabled worker, final migrated schema, and complete DB/Nylas/Valkey configuration."
     }
   }
 
@@ -441,7 +443,7 @@ resource "aws_scheduler_schedule" "email_reconciliation" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "email_worker_not_running" {
-  count = local.email_worker_service_enabled ? 1 : 0
+  count = local.email_worker_service_enabled && var.cloudwatch_alarms_enabled && var.ecs_container_insights_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-email-worker-not-running"
   alarm_description   = "The private email worker ECS service has no running task."
@@ -463,7 +465,7 @@ resource "aws_cloudwatch_metric_alarm" "email_worker_not_running" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "email_work_oldest_message" {
-  count = var.email_sqs_enabled ? 1 : 0
+  count = var.email_sqs_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-email-work-oldest-message"
   alarm_description   = "The oldest visible email work item is more than 15 minutes old."
@@ -484,7 +486,7 @@ resource "aws_cloudwatch_metric_alarm" "email_work_oldest_message" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "email_work_backlog" {
-  count = var.email_sqs_enabled ? 1 : 0
+  count = var.email_sqs_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-email-work-backlog"
   alarm_description   = "The visible email work backlog exceeded the small DEV worker's expected capacity."
@@ -505,7 +507,7 @@ resource "aws_cloudwatch_metric_alarm" "email_work_backlog" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "email_work_dlq" {
-  count = var.email_sqs_enabled ? 1 : 0
+  count = var.email_sqs_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-email-work-dlq"
   alarm_description   = "Email work reached the DLQ and requires deliberate operator review before replay."
@@ -526,7 +528,7 @@ resource "aws_cloudwatch_metric_alarm" "email_work_dlq" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "email_scheduler_dlq" {
-  count = var.email_sqs_enabled ? 1 : 0
+  count = var.email_sqs_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-email-scheduler-dlq"
   alarm_description   = "A reconciliation schedule delivery reached its separate Scheduler DLQ."

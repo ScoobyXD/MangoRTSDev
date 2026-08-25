@@ -6,7 +6,7 @@ locals {
 resource "aws_security_group" "realtime_valkey" {
   count = var.realtime_valkey_enabled ? 1 : 0
 
-  # The first dev deployment expands its own deploy policy with
+  # The first non-production deployment expands its own deploy policy with
   # ec2:CreateSecurityGroup. Do not race security-group creation ahead of it.
   depends_on = [aws_iam_role_policy_attachment.github_deploy]
 
@@ -24,8 +24,8 @@ resource "aws_security_group" "realtime_valkey" {
 
   lifecycle {
     precondition {
-      condition     = var.environment == "dev"
-      error_message = "The realtime Valkey backplane is development-only and cannot be enabled outside dev."
+      condition     = local.nonproduction_services_environment
+      error_message = "The realtime Valkey backplane can be enabled only in dev or qa."
     }
   }
 }
@@ -33,7 +33,7 @@ resource "aws_security_group" "realtime_valkey" {
 resource "aws_elasticache_user" "realtime" {
   count = var.realtime_valkey_enabled ? 1 : 0
 
-  # The first dev deployment expands its own deploy policy. Serializing the
+  # The first non-production deployment expands its own deploy policy. Serializing the
   # first ElastiCache API call avoids racing IAM policy propagation.
   depends_on = [aws_iam_role_policy_attachment.github_deploy]
 
@@ -61,7 +61,7 @@ resource "aws_elasticache_serverless_cache" "realtime" {
   # Serverless Valkey always uses TLS in transit. Omitting kms_key_id selects
   # the AWS-managed ElastiCache service key for encryption at rest.
   name                 = local.realtime_valkey_cache_name
-  description          = "MangoRTS development committed-event realtime backplane"
+  description          = "MangoRTS ${var.environment} committed-event realtime backplane"
   engine               = "valkey"
   major_engine_version = var.realtime_valkey_major_engine_version
   subnet_ids           = local.ecs_subnet_ids
@@ -122,7 +122,7 @@ resource "aws_iam_role_policy_attachment" "email_worker_realtime_valkey" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "realtime_valkey_no_connections" {
-  count = var.realtime_valkey_enabled ? 1 : 0
+  count = var.realtime_valkey_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-realtime-valkey-no-connections"
   alarm_description   = "No API task has an active Valkey connection for three minutes."
@@ -143,7 +143,7 @@ resource "aws_cloudwatch_metric_alarm" "realtime_valkey_no_connections" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "realtime_valkey_auth_failures" {
-  count = var.realtime_valkey_enabled ? 1 : 0
+  count = var.realtime_valkey_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-realtime-valkey-auth-failures"
   alarm_description   = "Valkey rejected one or more authentication attempts."
@@ -164,7 +164,7 @@ resource "aws_cloudwatch_metric_alarm" "realtime_valkey_auth_failures" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "realtime_valkey_command_authorization_failures" {
-  count = var.realtime_valkey_enabled ? 1 : 0
+  count = var.realtime_valkey_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-realtime-valkey-command-authorization-failures"
   alarm_description   = "Valkey rejected one or more commands that the realtime user was not authorized to run."
@@ -185,7 +185,7 @@ resource "aws_cloudwatch_metric_alarm" "realtime_valkey_command_authorization_fa
 }
 
 resource "aws_cloudwatch_metric_alarm" "realtime_valkey_write_latency" {
-  count = var.realtime_valkey_enabled ? 1 : 0
+  count = var.realtime_valkey_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-realtime-valkey-write-latency"
   alarm_description   = "Valkey p99 successful-write latency exceeded 10 milliseconds for five minutes."
@@ -206,7 +206,7 @@ resource "aws_cloudwatch_metric_alarm" "realtime_valkey_write_latency" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "realtime_valkey_throttled" {
-  count = var.realtime_valkey_enabled ? 1 : 0
+  count = var.realtime_valkey_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-realtime-valkey-throttled"
   alarm_description   = "ElastiCache Serverless throttled one or more realtime commands."
@@ -227,7 +227,7 @@ resource "aws_cloudwatch_metric_alarm" "realtime_valkey_throttled" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "realtime_valkey_ecpu_capacity" {
-  count = var.realtime_valkey_enabled ? 1 : 0
+  count = var.realtime_valkey_enabled && var.cloudwatch_alarms_enabled ? 1 : 0
 
   alarm_name          = "${local.name_prefix}-realtime-valkey-ecpu-capacity"
   alarm_description   = "Valkey consumed at least 75 percent of its configured ECPU limit for three minutes."

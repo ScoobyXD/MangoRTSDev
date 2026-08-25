@@ -6,7 +6,7 @@ MangoRTS has a native Go migration command for CI/ECS environments where `psql` 
 backend/cmd/miraeopus-migrate
 ```
 
-The API image in `backend/Dockerfile` remains API-only. Build migration tasks with `backend/Dockerfile.migrations`, which contains the migration binary plus `backend/db/schema.sql` and `backend/db/migrations`.
+The API image in `backend/Dockerfile` remains API-only. Build migration tasks with `backend/Dockerfile.migrations`, which contains the migration binary plus `backend/db/schema.sql`, `backend/db/schema_inventory.sql`, and `backend/db/migrations`.
 
 ## Configuration
 
@@ -25,6 +25,8 @@ Production tasks should set all database values explicitly and source `DB_PASSWO
 ## Modes
 
 Default mode is `migrate`. This is intentionally conservative for existing production databases: it creates `schema_migrations` if needed, reads applied filenames, and applies only pending files from `db/migrations` in filename order.
+
+`-mode audit` opens a read-only repeatable-read transaction and reports the connected PostgreSQL `server_version`, `server_version_num`, public-table count, migration-ledger differences, filtered physical-schema inventory SHA-256, and repository-schema SHA-256. The inventory hash excludes grants and `schema_migrations` objects. The repository hash covers normalized contents of `schema.sql`, `schema_inventory.sql`, and every sorted migration filename/content. Environment-specific operator guards must reject an unsupported server version before allowing a later write task.
 
 ## Source Of Truth Standard
 
@@ -51,26 +53,27 @@ MangoRTS uses both migration history and a current schema snapshot:
 
 For a normal existing database, run pending migrations.
 
-For a brand-new database, prefer one of these two reviewed paths:
+For a brand-new database, apply `backend/db/schema.sql` with `-baseline-migrations` after confirming the snapshot is the intended current schema. Historical replay from empty is an optional disposable audit only after proving that the full history is reconstructable; it is not the fresh QA bootstrap path.
 
-1. Apply `backend/db/schema.sql` with `-baseline-migrations` after confirming the snapshot is the intended current schema.
-2. Replay all migrations from empty and compare the resulting schema to `backend/db/schema.sql`.
-
-Do not create production by cloning dev schema drift or by blindly importing dev `schema_migrations`. Before calling a new database ready, compare the actual object inventory against the canonical schema: tables, columns, primary keys, foreign keys, check constraints, unique constraints, indexes, functions, triggers, enum/custom types, defaults, nullability, and extensions. Use `backend/db/schema_inventory.sql` and `scripts/compare_schema_inventory.py`; the runbook is `docs/infra/mangorts-schema-audit.md`.
+Do not create a new environment by cloning dev schema drift or by blindly importing dev `schema_migrations`. Before calling a new database ready, compare its fresh same-commit physical catalog hash against the fresh source-environment hash: tables, exact unordered column names/counts, primary keys, foreign keys, check constraints, unique constraints, indexes, functions, triggers, enum/custom types, defaults, nullability, and extensions. Physical column order is not drift. Use `backend/db/schema_inventory.sql`, the audit hashes, and `scripts/compare_schema_inventory.py`; the runbook is `docs/infra/mangorts-schema-audit.md`.
 
 Available flags:
 
 ```text
 -schema db/schema.sql
+-inventory db/schema_inventory.sql
 -migrations db/migrations
--mode schema|migrate|all
+-mode audit|schema|migrate|all
 -dry-run
 -baseline-migrations
+-require-empty-database
 -start-at 20260701_example.sql
 -start-after 20260701_example.sql
 ```
 
 Use `-mode schema` for a fresh empty database bootstrap from the canonical schema. It executes `schema.sql` in one transaction and ensures `schema_migrations` exists afterward.
+
+Add `-require-empty-database` for every fresh hosted bootstrap. It is valid only with `-mode schema`. Before executing `schema.sql`, the runner inventories the target inside the same transaction and permits only the default `public` schema, `plpgsql` extension, and grants. Any existing application object, including `schema_migrations`, stops the command before the schema executes; the transaction then rolls back.
 
 Use `-mode schema -baseline-migrations` only for a reviewed fresh empty database when `schema.sql` already represents all migrations currently in `backend/db/migrations/`. This records the current migration filenames in `schema_migrations` in the same transaction, so the next normal deploy only runs future migrations.
 
@@ -97,7 +100,7 @@ go run ./cmd/miraeopus-migrate -mode migrate
 Fresh empty database bootstrap:
 
 ```powershell
-go run ./cmd/miraeopus-migrate -mode schema -baseline-migrations
+go run ./cmd/miraeopus-migrate -mode schema -baseline-migrations -require-empty-database
 ```
 
 Anchor a migration reconciliation after validating the existing schema state:
@@ -143,7 +146,7 @@ Then, after review:
 For a confirmed fresh empty production database built from the canonical schema snapshot, use:
 
 ```json
-["-mode", "schema", "-baseline-migrations"]
+["-mode", "schema", "-baseline-migrations", "-require-empty-database"]
 ```
 
 The command uses PostgreSQL advisory locking during execution, skips filenames already present in `schema_migrations`, and does not require `psql` in the container.

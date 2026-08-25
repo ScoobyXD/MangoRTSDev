@@ -1,0 +1,224 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import test from "node:test";
+
+const read = (path) => readFileSync(resolve(process.cwd(), path), "utf8");
+const qaMain = read("infra/aws-qa/main.tf");
+const qaDatabase = read("infra/aws-qa/database.tf");
+const qaMigration = read("infra/aws-qa/database_migration_task.tf");
+const qaMonitoring = read("infra/aws-qa/monitoring.tf");
+const qaChecks = read("infra/aws-qa/checks.tf");
+const qaIAM = read("infra/aws-qa/iam.tf");
+const qaLocals = read("infra/aws-qa/locals.tf");
+const qaVariables = read("infra/aws-qa/variables.tf");
+const qaVersions = read("infra/aws-qa/versions.tf");
+const qaTfvarsExample = read("infra/aws-qa/terraform.tfvars.example");
+const qaBackend = read("infra/aws-qa/backend.hcl.example");
+const qaWorkflow = read(".github/workflows/deploy-qa.yml");
+const qaPreflight = read("scripts/qa_environment_preflight.ps1");
+const moduleIAM = read("infra/modules/mangorts-platform/iam.tf");
+const moduleECS = read("infra/modules/mangorts-platform/ecs_alb.tf");
+const moduleEmail = read("infra/modules/mangorts-platform/email_sqs.tf");
+const sharedDeployPolicy = moduleIAM.slice(
+  moduleIAM.indexOf('data "aws_iam_policy_document" "github_deploy"'),
+  moduleIAM.indexOf('resource "aws_iam_policy" "github_deploy"'),
+);
+const qaDeployPolicy = sharedDeployPolicy.slice(
+  sharedDeployPolicy.indexOf('"ReadRequiredQAAccountMetadata"'),
+);
+const qaAccountMetadataPolicy = qaDeployPolicy.slice(
+  0,
+  qaDeployPolicy.indexOf('"ReadExactQAResources"'),
+);
+const qaExactReadPolicy = qaDeployPolicy.slice(
+  qaDeployPolicy.indexOf('"ReadExactQAResources"'),
+  qaDeployPolicy.indexOf('"PassExactQAECSRoles"'),
+);
+const qaInventoryPolicy = qaDeployPolicy.slice(
+  0,
+  qaDeployPolicy.indexOf('"PassExactQAECSRoles"'),
+);
+const qaEcrPolicy = qaDeployPolicy.slice(
+  qaDeployPolicy.indexOf('"ManageExactQABackendRepository"'),
+  qaDeployPolicy.indexOf('"DeployQAECSTasks"'),
+);
+const qaRegisterPolicy = qaDeployPolicy.slice(
+  qaDeployPolicy.indexOf('"RegisterQAECSTaskDefinitions"'),
+  qaDeployPolicy.indexOf('"ManageQADeploymentLogs"'),
+);
+
+test("QA reuses the current network but owns a private low-cost PostgreSQL 17 database", () => {
+  assert.match(qaMain, /environment\s*=\s*local\.environment/);
+  assert.match(qaMain, /create_private_ecs_subnets\s*=\s*false/);
+  assert.match(qaMain, /database_connection_mode\s*=\s*"managed"/);
+  assert.match(qaDatabase, /engine\s*=\s*"postgres"/);
+  assert.match(qaVariables, /variable "database_engine_version"[\s\S]*?default\s*=\s*"17\.7"/);
+  assert.match(qaVariables, /variable "database_instance_class"[\s\S]*?default\s*=\s*"db\.t4g\.micro"/);
+  assert.match(qaVariables, /variable "database_name"[\s\S]*?default\s*=\s*"mangorts_qa"/);
+  assert.match(qaVariables, /variable "default_company_id"[\s\S]*?default_company_id must be a UUID/);
+  assert.match(qaDatabase, /multi_az\s*=\s*false/);
+  assert.match(qaDatabase, /publicly_accessible\s*=\s*false/);
+  assert.match(qaDatabase, /manage_master_user_password\s*=\s*true/);
+  assert.match(qaMain, /managed_db_password_secret_json_key\s*=\s*"password"/);
+  assert.match(qaMain, /attachment_s3_bucket\s*=\s*local\.attachment_bucket_name/);
+  assert.match(qaMain, /depends_on\s*=\s*\[[\s\S]*?aws_cloudwatch_log_group\.ecs_container_insights_performance[\s\S]*?aws_s3_bucket\.attachments[\s\S]*?\]/);
+});
+
+test("QA defaults to the complete production-shaped service set", () => {
+  assert.match(qaMain, /email_sqs_enabled\s*=\s*true/);
+  assert.match(qaVariables, /variable "realtime_valkey_enabled"[\s\S]*?default\s*=\s*true/);
+  assert.match(qaVariables, /variable "email_worker_enabled"[\s\S]*?default\s*=\s*true/);
+  assert.match(qaVariables, /variable "ecs_container_insights_enabled"[\s\S]*?default\s*=\s*true/);
+  assert.match(qaVariables, /variable "cloudwatch_alarms_enabled"[\s\S]*?default\s*=\s*true/);
+  assert.match(qaVariables, /variable "waf_enabled"[\s\S]*?default\s*=\s*true/);
+  assert.match(qaTfvarsExample, /email_worker_enabled\s*=\s*true/);
+  assert.match(qaTfvarsExample, /realtime_valkey_enabled\s*=\s*true/);
+  assert.match(qaTfvarsExample, /ecs_container_insights_enabled\s*=\s*true/);
+  assert.match(qaTfvarsExample, /cloudwatch_alarms_enabled\s*=\s*true/);
+  assert.match(qaTfvarsExample, /waf_enabled\s*=\s*true/);
+  assert.match(qaWorkflow, /TF_EMAIL_WORKER_ENABLED:.*\|\| 'true'/);
+  assert.match(qaWorkflow, /TF_REALTIME_VALKEY_ENABLED:.*\|\| 'true'/);
+  assert.match(qaWorkflow, /TF_ECS_CONTAINER_INSIGHTS_ENABLED:.*\|\| 'true'/);
+  assert.match(qaWorkflow, /TF_CLOUDWATCH_ALARMS_ENABLED:.*\|\| 'true'/);
+  assert.match(qaWorkflow, /TF_WAF_ENABLED:.*\|\| 'true'/);
+  assert.match(
+    qaChecks,
+    /check "email_worker_dependencies"[\s\S]*?var\.realtime_valkey_enabled[\s\S]*?var\.email_sqs_database_migration_complete[\s\S]*?local\.nylas_core_configured_count == 3[\s\S]*?trimspace\(var\.backend_image_uri\) != ""/,
+  );
+  assert.match(qaChecks, /email_worker_enabled requires an immutable backend image, Valkey/);
+  assert.match(
+    qaChecks,
+    /check "full_alarms_require_container_insights"[\s\S]*?!var\.cloudwatch_alarms_enabled \|\| var\.ecs_container_insights_enabled/,
+  );
+  assert.match(qaWorkflow, /The full QA alarm set requires TF_ECS_CONTAINER_INSIGHTS_ENABLED=true/);
+  assert.match(qaMonitoring, /count\s*=\s*var\.ecs_container_insights_enabled \? 1 : 0/);
+  assert.match(qaMonitoring, /name\s*=\s*"\/aws\/ecs\/containerinsights\/\$\{local\.name_prefix\}-cluster\/performance"/);
+  assert.match(qaMonitoring, /retention_in_days\s*=\s*var\.cloudwatch_log_retention_days/);
+});
+
+test("QA Nylas sending preserves normal unrestricted recipient behavior", () => {
+  assert.doesNotMatch(qaMain, /recipient_allowlist|allowed_recipient/i);
+  assert.doesNotMatch(moduleECS, /NYLAS_RECIPIENT_ALLOWLIST|NYLAS_ALLOWED_RECIPIENT/);
+  assert.doesNotMatch(qaWorkflow, /NYLAS_ALLOWED_RECIPIENT/);
+  assert.match(qaChecks, /nylas_core_is_all_or_none/);
+});
+
+test("QA state and deployment identities are isolated", () => {
+  assert.match(qaBackend, /key\s*=\s*"mangorts\/qa\/terraform\.tfstate"/);
+  assert.match(qaBackend, /use_lockfile\s*=\s*true/);
+  assert.match(qaVersions, /required_version\s*=\s*">= 1\.10\.0"/);
+  assert.match(qaWorkflow, /terraform_version:\s*1\.15\.7/);
+  assert.match(qaWorkflow, /key\s*=\s*"mangorts\/qa\/terraform\.tfstate"/);
+  assert.match(qaWorkflow, /use_lockfile\s*=\s*true/);
+  assert.doesNotMatch(qaWorkflow, /TF_STATE_KEY/);
+  assert.match(qaWorkflow, /environment:\s*qa/);
+  assert.match(qaWorkflow, /AWS_QA_DEPLOY_ROLE_ARN/);
+  assert.doesNotMatch(qaWorkflow, /AWS_DEV_DEPLOY_ROLE_ARN/);
+  assert.match(qaMain, /github_oidc_subjects\s*=\s*\["repo:\$\{var\.github_owner\}\/\$\{var\.github_repository\}:environment:qa"\]/);
+  assert.doesNotMatch(qaMain, /ref:refs\/heads|github_branch/);
+  assert.doesNotMatch(qaVariables, /variable "github_branch"/);
+  assert.doesNotMatch(qaWorkflow, /TF_GITHUB_BRANCH/);
+  assert.match(qaIAM, /ManageExactQAStateObjects/);
+  assert.match(qaIAM, /\$\{local\.terraform_state_key\}\.tflock/);
+});
+
+test("QA project, environment, and DNS names cannot be changed by GitHub variables", () => {
+  assert.match(qaLocals, /project_name\s*=\s*"mangorts"/);
+  assert.match(qaLocals, /environment\s*=\s*"qa"/);
+  assert.match(qaLocals, /root_domain_name\s*=\s*"mangorts\.com"/);
+  assert.match(qaLocals, /app_subdomain\s*=\s*"qa"/);
+  assert.match(qaLocals, /api_subdomain\s*=\s*"api\.qa"/);
+  assert.match(qaLocals, /origin_subdomain\s*=\s*"origin\.qa"/);
+  assert.match(qaMain, /project_name\s*=\s*local\.project_name/);
+  assert.match(qaMain, /root_domain_name\s*=\s*local\.root_domain_name/);
+  assert.match(qaMain, /app_subdomain\s*=\s*local\.app_subdomain/);
+  assert.match(qaMain, /api_subdomain\s*=\s*local\.api_subdomain/);
+  assert.match(qaMain, /origin_subdomain\s*=\s*local\.origin_subdomain/);
+  assert.doesNotMatch(qaVariables, /variable "(?:project_name|root_domain_name|app_subdomain|api_subdomain|origin_subdomain)"/);
+  assert.doesNotMatch(qaWorkflow, /TF_(?:ROOT_DOMAIN_NAME|APP_SUBDOMAIN|API_SUBDOMAIN|ORIGIN_SUBDOMAIN)/);
+  assert.match(qaChecks, /check "qa_identity_is_hard_locked"/);
+  assert.match(qaPreflight, /\[string\]\$CompanyName = "Mango QA"/);
+});
+
+test("QA registers immutable migration images before schema bootstrap without starting the app", () => {
+  assert.match(
+    qaWorkflow,
+    /workflow_dispatch:[\s\S]*?stage:[\s\S]*?type: choice[\s\S]*?- bootstrap-images[\s\S]*?- deploy/,
+  );
+  assert.match(
+    qaWorkflow,
+    /bootstrap-images\)[\s\S]*?TF_EMAIL_SCHEMA_MIGRATED" != "false"[\s\S]*?EFFECTIVE_BACKEND_DESIRED_COUNT=0[\s\S]*?EFFECTIVE_EMAIL_SCHEMA_MIGRATED=false[\s\S]*?EFFECTIVE_EMAIL_WORKER_ENABLED=false/,
+  );
+  assert.match(
+    qaWorkflow,
+    /deploy\)[\s\S]*?TF_EMAIL_SCHEMA_MIGRATED" != "true"[\s\S]*?EFFECTIVE_BACKEND_DESIRED_COUNT=1[\s\S]*?EFFECTIVE_EMAIL_SCHEMA_MIGRATED=true/,
+  );
+  assert.match(qaWorkflow, /backend_desired_count = \$EFFECTIVE_BACKEND_DESIRED_COUNT/);
+  assert.match(qaWorkflow, /email_sqs_database_migration_complete = \$EFFECTIVE_EMAIL_SCHEMA_MIGRATED/);
+  assert.match(qaWorkflow, /email_worker_enabled = \$EFFECTIVE_EMAIL_WORKER_ENABLED/);
+  assert.match(qaWorkflow, /The reviewed QA foundation must exist before either image workflow stage runs/);
+  assert.match(qaWorkflow, /- name: Build frontend\s+if: inputs\.stage == 'deploy'/);
+  assert.match(qaWorkflow, /- name: Publish frontend\s+if: inputs\.stage == 'deploy'/);
+  assert.match(qaWorkflow, /- name: Post-deploy smoke tests\s+if: inputs\.stage == 'deploy'/);
+  assert.match(qaWorkflow, /- name: Bootstrap image summary\s+if: inputs\.stage == 'bootstrap-images'/);
+  assert.match(qaWorkflow, /API desired count: 0/);
+  assert.match(qaWorkflow, /Email worker: disabled/);
+  assert.match(qaWorkflow, /terraform plan -refresh=false -out=tfplan/);
+});
+
+test("QA Actions has no RDS access", () => {
+  assert.doesNotMatch(qaIAM, /rds:/);
+  assert.doesNotMatch(qaDeployPolicy, /rds:/);
+  assert.doesNotMatch(moduleIAM, /"rds:\*"/);
+  assert.doesNotMatch(sharedDeployPolicy, /secretsmanager:GetSecretValue/);
+});
+
+test("QA deploy permissions exclude account-wide IAM, Route53, S3, and WAF mutation", () => {
+  assert.match(
+    sharedDeployPolicy,
+    /for_each\s*=\s*var\.environment == "qa" \? \[\] : \[1\][\s\S]*?"iam:\*"[\s\S]*?"route53:\*"[\s\S]*?"s3:\*"[\s\S]*?"wafv2:\*"/,
+  );
+  assert.doesNotMatch(qaDeployPolicy, /"(?:iam|route53|s3|wafv2):\*"/);
+  assert.doesNotMatch(qaDeployPolicy, /route53:/);
+  assert.match(moduleEmail, /data "aws_iam_policy_document" "github_deploy_email_sqs" \{\s+count = var\.environment == "dev"/);
+  assert.doesNotMatch(qaIAM, /"(?:iam|route53|s3|wafv2):\*"/);
+  assert.doesNotMatch(qaDeployPolicy, /iam:(?:AttachRolePolicy|CreatePolicy|CreateRole|UpdateAssumeRolePolicy)/);
+  assert.doesNotMatch(qaDeployPolicy, /cloudwatch:(?:DeleteAlarms|PutMetricAlarm|TagResource|UntagResource)/);
+  assert.doesNotMatch(qaDeployPolicy, /cognito-idp:(?:List\*|ListUsers)|iam:(?:Get\*|List\*)|ecs:(?:Describe\*|List\*)|cloudfront:(?:Get\*|List\*)|logs:Get/);
+  assert.doesNotMatch(qaExactReadPolicy, /resources\s*=\s*\["\*"\]/);
+  assert.deepEqual(
+    [...qaAccountMetadataPolicy.matchAll(/"((?:ec2|ecr|route53|sts):[^"]+)"/g)].map((match) => match[1]),
+    [
+      "ecr:GetAuthorizationToken",
+      "sts:GetCallerIdentity",
+    ],
+  );
+  assert.deepEqual([...qaInventoryPolicy.matchAll(/"(ecr:[^"]+)"/g)].map((match) => match[1]), ["ecr:GetAuthorizationToken"]);
+  assert.match(qaEcrPolicy, /ecr:BatchGetImage/);
+  assert.match(qaEcrPolicy, /resources\s*=\s*\[aws_ecr_repository\.backend\.arn\]/);
+  assert.match(qaDeployPolicy, /PassExactQAECSRoles/);
+  assert.match(qaDeployPolicy, /role\/\$\{local\.name_prefix\}-ecs-task-execution/);
+  assert.match(qaDeployPolicy, /role\/\$\{local\.name_prefix\}-ecs-task/);
+  assert.match(qaDeployPolicy, /role\/\$\{local\.name_prefix\}-email-worker-execution/);
+  assert.match(qaDeployPolicy, /role\/\$\{local\.name_prefix\}-email-worker/);
+  assert.match(qaDeployPolicy, /iam:PassedToService[\s\S]*?ecs-tasks\.amazonaws\.com/);
+  assert.match(qaRegisterPolicy, /task-definition\/\$\{local\.name_prefix\}-\*:\*/);
+  assert.doesNotMatch(qaRegisterPolicy, /resources\s*=\s*\["\*"\]/);
+  assert.match(qaRegisterPolicy, /aws:RequestTag\/environment[\s\S]*?values\s*=\s*\["qa"\]/);
+  assert.doesNotMatch(qaDeployPolicy, /ecs:DeregisterTaskDefinition/);
+  assert.match(qaDeployPolicy, /log-group:\/ecs\/\$\{local\.name_prefix\}\/\*/);
+  assert.match(moduleECS, /resource "aws_ecs_task_definition" "backend"[\s\S]*?tags\s*=\s*local\.tags[\s\S]*?skip_destroy\s*=\s*true/);
+  assert.match(moduleEmail, /resource "aws_ecs_task_definition" "email_worker"[\s\S]*?tags\s*=\s*local\.tags[\s\S]*?skip_destroy\s*=\s*true/);
+  assert.match(qaMigration, /resource "aws_ecs_task_definition" "database_migration"[\s\S]*?tags\s*=\s*local\.tags[\s\S]*?skip_destroy\s*=\s*true/);
+  assert.match(qaDeployPolicy, /resources\s*=\s*\[[\s\S]*?aws_s3_bucket\.frontend\.arn,[\s\S]*?\$\{aws_s3_bucket\.frontend\.arn\}\/\*/);
+  assert.doesNotMatch(qaDeployPolicy, /route53:(?:Change|Create|Delete)|wafv2:(?:Create|Delete|Update)/);
+});
+
+test("the migration task is defined but never run automatically", () => {
+  assert.match(qaMigration, /resource "aws_ecs_task_definition" "database_migration"/);
+  assert.match(qaMigration, /command\s*=\s*\["-mode", "audit"\]/);
+  assert.match(qaMigration, /master_user_secret\[0\]\.secret_arn\}:password::/);
+  assert.match(qaWorkflow, /Dockerfile\.migrations/);
+  assert.doesNotMatch(qaWorkflow, /aws ecs run-task|-mode schema|-baseline-migrations/);
+});

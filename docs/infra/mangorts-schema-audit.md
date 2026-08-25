@@ -1,123 +1,165 @@
-# MangoRTS Schema Audit
+# MangoRTS Schema Parity Audit
 
-Use this workflow when `schema_migrations` is not enough and you need proof that
-the live database physically matches the intended schema.
+Use this workflow to prove that two PostgreSQL databases have the same material
+schema. For fresh QA, the blocking comparison is a fresh dev inventory against a
+fresh QA inventory produced from the same Git commit before the API, users, or
+synthetic data are added.
 
-This workflow does not require agents to connect to prod. The prod export must be
-created through Jonat's human-only or physically read-only database path.
+`schema_migrations` is a separate ledger audit. Matching filenames do not prove
+that the physical schema matches.
 
-## What It Compares
+## What Is Compared
 
-The inventory query in `backend/db/schema_inventory.sql` reads PostgreSQL catalog
-tables and emits normalized JSON for:
+`backend/db/schema_inventory.sql` is the sole catalog definition. It inventories:
 
-- schemas and extensions
-- tables, views, and materialized views
-- columns, including type, nullability, defaults, generated flags, and identity flags
-- primary keys, foreign keys, unique constraints, check constraints, and exclusion constraints
-- indexes, including uniqueness, partial predicates, expressions, and full `pg_get_indexdef`
-- triggers
-- functions and procedures
-- enum and domain types
-- sequences and sequence ownership
-- RLS policies
-- grants as separate optional objects
+- schemas, extensions, tables, views, materialized views, and sequences;
+- columns, including name, type, nullability, default, identity, generated,
+  collation, and storage settings;
+- primary, foreign, unique, check, exclusion, and constraint-trigger constraints;
+- indexes, predicates, expressions, triggers, functions, procedures, enum/domain
+  types, sequence ownership, and row-level security policies;
+- grants as optional separate objects.
 
-The comparator ignores `schema_migrations` metadata objects and grants by default.
-Use explicit flags when you want to audit those separately.
+Physical column order is deliberately absent. The comparator uses the exact
+unordered set of column identities and the exact object count. The same columns
+in a different physical order pass; a missing or extra column fails.
 
-## Create The Canonical Inventory
+By default, both the audit hash and offline comparator exclude grant objects and
+any identity containing `schema_migrations`. This keeps environment-specific
+access grants and the migration ledger out of physical application-schema parity.
+Use `--include-grants` or `--include-schema-migrations` only for their separate
+audits.
 
-Create a disposable empty database using the same PostgreSQL major version or
-Aurora engine family as prod when possible. Apply the canonical schema, then run
-the inventory query.
+## Freshness Rules
 
-Example with `psql` against a scratch database:
+A QA parity result is valid only when all of these are true:
+
+1. Both inventories were made within the approved window, normally 24 hours.
+2. Both report PostgreSQL 17.x from the connected servers.
+3. Both report the same Git commit and repository schema fingerprint.
+4. The repository fingerprint matches the current `schema.sql`,
+   `schema_inventory.sql`, and every migration filename/content.
+5. The filtered inventory SHA-256 values match.
+6. The stamped `metadata.environment` values are exactly `dev` and `qa` for their
+   respective exports.
+
+The tracked historical files under `tmp/schema-audit-*.json` do not contain this
+freshness metadata and are not accepted for a QA gate. Never rename or reuse an
+old export to make it look current.
+
+## Preferred QA Gate
+
+The migration image contains `schema.sql`, `schema_inventory.sql`, and all
+migrations. Its `-mode audit` command runs one read-only repeatable-read database
+transaction and logs:
+
+- connected `server_version` and `server_version_num`;
+- migration-ledger counts;
+- `schema_inventory_objects` and `schema_inventory_sha256`;
+- `repository_schema_sha256`.
+
+Run a fresh dev audit first with the database-enforced read-only export helper
+below, then validate its stamped metadata against the current repository. Record
+only the two SHA-256 values; never retrieve or print a writer password. Do not use
+an old writer-backed ECS audit as the dev reference.
+
+The QA sequence is then:
+
+1. Run the empty QA audit from the exact migration image commit and require
+   PostgreSQL 17.x, `public_tables=0`, and the dev repository fingerprint.
+2. A human runs the transactional `-mode schema -baseline-migrations` task.
+3. Before starting the API or creating any users/data, run the final QA audit.
+4. Require the QA inventory SHA-256 to equal fresh dev and require both migration
+   ledger difference counts to be zero.
+
+`scripts/qa_run_database_task.ps1` enforces these values from completed CloudWatch
+logs. It never reads or prints the ECS database secret. The hosted bootstrap
+switch remains human-only because that task receives a writer credential.
+
+## Create A Stamped Read-Only Export
+
+Use `scripts/export_schema_inventory.ps1` only from an already approved network
+path to dev or QA. Do not create a bastion or make RDS public for this export.
+
+The helper accepts only `dev` or `qa`, rejects a production-marked host, requires
+PostgreSQL 17.x, forces read-only transactions, and checks the connected role for
+database/schema/table/sequence write powers, ownership, dangerous role flags, and
+executable security-definer functions. It refuses the export when any checked
+capability is present.
+
+Set these environment values from the designated database-enforced read-only
+credential. `PGPASSWORD` must not be a writer, backend, owner, admin, or migration
+password and must never be pasted into source control or chat.
 
 ```powershell
-psql "<scratch connection string>" -v ON_ERROR_STOP=1 -f backend\db\schema.sql
-psql "<scratch connection string>" -v ON_ERROR_STOP=1 -At -f backend\db\schema_inventory.sql > .\tmp\schema-audit-canonical.json
+$env:DB_HOST = "<approved-dev-or-qa-host>"
+$env:DB_PORT = "5432"
+$env:DB_NAME = "<approved-database>"
+$env:DB_USER = "<designated-read-only-user>"
+$env:DB_SSLMODE = "require"
+# Set PGPASSWORD privately in this process from the designated read-only source.
+
+.\scripts\export_schema_inventory.ps1 `
+  -EnvironmentLabel dev `
+  -ExpectedHost $env:DB_HOST `
+  -ExpectedDatabase $env:DB_NAME `
+  -ExpectedReadOnlyUser $env:DB_USER `
+  -OutputPath .\tmp\schema-audit-dev-fresh.json `
+  -ConfirmDatabaseEnforcedReadOnlyCredential
 ```
 
-If you create the scratch database with the Go migration runner instead, use the
-reviewed schema path:
+Repeat for QA with QA-only values and a different output path. The helper writes
+the inventory envelope and all required metadata automatically. It prints hashes,
+not secrets.
 
-```powershell
-cd backend
-go run .\cmd\miraeopus-migrate -mode schema -baseline-migrations
-```
+## Offline Full Comparison
 
-Then run `backend/db/schema_inventory.sql` against that scratch database.
-
-## Create The Prod Inventory
-
-Run the same `backend/db/schema_inventory.sql` query against prod through the
-approved human-only or physically read-only database path. This query is read-only
-catalog inspection. It must not be run from an agent session with writer/admin DB
-access.
-
-In DBeaver, run the query and save the `schema_inventory_json` cell contents to a
-local JSON file, for example:
-
-```text
-tmp/schema-audit-prod.json
-```
-
-Do not paste DB passwords, connection strings, AWS tokens, or provider secrets
-into the repo.
-
-## Compare
-
-From the repo root:
+When both fresh stamped exports are available, run:
 
 ```powershell
 python scripts\compare_schema_inventory.py `
-  --expected .\tmp\schema-audit-canonical.json `
-  --actual .\tmp\schema-audit-prod.json `
-  --expected-label canonical-schema `
-  --actual-label prod `
-  --output-md .\tmp\schema-audit-report.md
+  --expected .\tmp\schema-audit-dev-fresh.json `
+  --actual .\tmp\schema-audit-qa-fresh.json `
+  --expected-label dev `
+  --actual-label qa `
+  --require-postgres-major 17 `
+  --require-same-commit `
+  --require-current-repository `
+  --require-expected-environment dev `
+  --require-actual-environment qa `
+  --max-export-age-hours 24 `
+  --output-md .\tmp\schema-audit-dev-qa-report.md
 ```
 
-Exit code `0` means the compared objects match. Exit code `1` means at least one
-object is missing, extra, or different.
+Exit code `0` means metadata and compared objects pass. Exit code `1` means an
+object is missing, extra, or different. Exit code `2` means the freshness,
+PostgreSQL version, commit, repository fingerprint, or embedded hash gate failed.
 
-To compare grants as a separate security audit:
+The report lists exact object identities when hashes differ. Compare grants
+separately when needed:
 
 ```powershell
 python scripts\compare_schema_inventory.py `
-  --expected .\tmp\schema-audit-canonical.json `
-  --actual .\tmp\schema-audit-prod.json `
-  --include-grants `
-  --output-md .\tmp\schema-audit-grants-report.md
+  --expected .\tmp\schema-audit-dev-fresh.json `
+  --actual .\tmp\schema-audit-qa-fresh.json `
+  --include-grants
 ```
 
-To include the migration ledger table in the comparison:
+## Optional Disposable Precheck
 
-```powershell
-python scripts\compare_schema_inventory.py `
-  --expected .\tmp\schema-audit-canonical.json `
-  --actual .\tmp\schema-audit-prod.json `
-  --include-schema-migrations
-```
+A human may apply the current `backend/db/schema.sql` and migration baseline to a
+disposable PostgreSQL 17 database, then run `schema_inventory.sql` to check the
+canonical projection before QA exists. This is an additional precheck, not a new
+permanent environment and not a substitute for fresh dev-versus-QA catalog
+parity. Agents must not run the schema write or receive that writer credential.
 
-## Interpreting Results
+PostgreSQL 18 can exercise the tooling locally, but it is not release evidence for
+the PostgreSQL 17.x QA target.
 
-Treat these as blocking until understood:
+## Limits
 
-- `Missing In Actual`: canonical object is absent from prod.
-- `Different Definitions`: object exists in both places but differs physically.
-- `Extra In Actual`: prod has an object not present in the canonical schema.
-
-Some extra objects may be intentional environment metadata, but they need a
-written reason. Do not mark the audit complete just because `schema_migrations`
-looks current.
-
-## Future Database Creation Standard
-
-For production database creation, use the current canonical schema snapshot and a
-deliberate migration baseline, then run this audit before traffic.
-
-For CI/proof, periodically replay all migrations from empty and compare that
-result against the canonical schema inventory. The schema snapshot is the current
-projection; migrations remain the append-only history.
+This gate compares schema, not row data, business-data correctness, query plans,
+database parameters, extension binaries, server configuration, or application
+behavior. Grants and `schema_migrations` are excluded by default and require their
+own review. A hash mismatch is a stop, not permission to repair a hosted database
+from an agent session.
