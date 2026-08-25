@@ -1,5 +1,5 @@
 resource "aws_route53_record" "origin" {
-  zone_id = data.aws_route53_zone.root.zone_id
+  zone_id = local.route53_zone_id
   name    = local.origin_host
   type    = "A"
 
@@ -11,7 +11,7 @@ resource "aws_route53_record" "origin" {
 }
 
 resource "aws_route53_record" "app" {
-  zone_id = data.aws_route53_zone.root.zone_id
+  zone_id = local.route53_zone_id
   name    = local.app_domain
   type    = "A"
 
@@ -23,7 +23,7 @@ resource "aws_route53_record" "app" {
 }
 
 resource "aws_route53_record" "api" {
-  zone_id = data.aws_route53_zone.root.zone_id
+  zone_id = local.route53_zone_id
   name    = local.api_domain
   type    = "A"
 

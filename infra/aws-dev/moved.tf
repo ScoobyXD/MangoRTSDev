@@ -1,4 +1,9 @@
 moved {
+  from = module.platform.data.aws_route53_zone.root
+  to   = data.aws_route53_zone.root
+}
+
+moved {
   from = aws_acm_certificate.cloudfront
   to   = module.platform.aws_acm_certificate.cloudfront
 }

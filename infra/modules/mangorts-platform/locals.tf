@@ -4,6 +4,7 @@ locals {
   cloudfront_caching_disabled_policy_id       = "413f1609-33d4-4f8c-8dff-bd6df8fac40f"
   cloudfront_all_viewer_except_host_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
   root_domain                                 = trimsuffix(var.root_domain_name, ".")
+  route53_zone_id                             = trimspace(var.route53_zone_id)
   app_domain                                  = "${var.app_subdomain}.${local.root_domain}"
   api_domain                                  = "${var.api_subdomain}.${local.root_domain}"
   origin_host                                 = "${var.origin_subdomain}.${local.root_domain}"

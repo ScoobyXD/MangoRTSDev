@@ -19,7 +19,7 @@ resource "aws_route53_record" "cloudfront_cert_validation" {
     }
   }
 
-  zone_id = data.aws_route53_zone.root.zone_id
+  zone_id = local.route53_zone_id
   name    = each.value.name
   type    = each.value.type
   ttl     = 60
@@ -50,7 +50,7 @@ resource "aws_route53_record" "alb_cert_validation" {
     }
   }
 
-  zone_id = data.aws_route53_zone.root.zone_id
+  zone_id = local.route53_zone_id
   name    = each.value.name
   type    = each.value.type
   ttl     = 60
