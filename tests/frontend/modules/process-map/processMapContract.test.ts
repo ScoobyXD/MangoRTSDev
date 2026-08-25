@@ -103,7 +103,7 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   assert.match(page, /activeFolderLayer[\s\S]*layer\?\.kind === "folder"[\s\S]*layer\.folder_id === folderID/);
   assert.match(page, /useEffect\(\(\) => setPickerAnchor\(null\), \[folderID\]\)/);
   assert.match(page, /<UniversalLinkerControls[\s\S]*showCreateFloatingNode=\{false\}[\s\S]*Search Processes to place on this map/);
-  const pickerUseStart = page.indexOf("              <UniversalEntityPicker\n");
+  const pickerUseStart = page.indexOf("<UniversalEntityPicker", page.indexOf("return ("));
   assert.notEqual(pickerUseStart, -1);
   const pickerUse = page.slice(pickerUseStart, page.indexOf("/>", pickerUseStart) + 2);
   assert.match(pickerUse, /linkTargetTypes=\{PROCESS_MAP_LINK_TARGET_TYPES\}/);
