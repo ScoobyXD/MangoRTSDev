@@ -68,6 +68,34 @@ func (r *MemoryRepo) processMapResourceNameLocked(companyID, resourceType, resou
 	}
 }
 
+func (r *MemoryRepo) processMapLayerAncestorsLocked(companyID, folderID, permissionUserID string) []domain.ProcessMapLayerAncestor {
+	ancestors := []domain.ProcessMapLayerAncestor{}
+	placement, ok := r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folderID)]
+	if !ok || placement.MapParentFolderID == nil {
+		return ancestors
+	}
+	parentID := strings.TrimSpace(*placement.MapParentFolderID)
+	seen := map[string]bool{folderID: true}
+	for parentID != "" {
+		if len(ancestors) == processMapMaxLayerAncestors || seen[parentID] {
+			return []domain.ProcessMapLayerAncestor{}
+		}
+		seen[parentID] = true
+		name, exists := r.processMapResourceNameLocked(companyID, domain.ProcessMapResourceTypeFolder, parentID)
+		if !exists || !r.processMapResourceAllowedLocked(companyID, permissionUserID, domain.ProcessMapResourceTypeFolder, parentID) {
+			return []domain.ProcessMapLayerAncestor{}
+		}
+		ancestors = append(ancestors, domain.ProcessMapLayerAncestor{FolderID: parentID, Name: name})
+		placement, ok = r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, parentID)]
+		if !ok || placement.MapParentFolderID == nil {
+			break
+		}
+		parentID = strings.TrimSpace(*placement.MapParentFolderID)
+	}
+	slices.Reverse(ancestors)
+	return ancestors
+}
+
 func (r *MemoryRepo) GetProcessMapLayer(input ProcessMapLayerQuery) (domain.ProcessMapLayerView, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.FolderID = strings.TrimSpace(input.FolderID)
@@ -80,7 +108,7 @@ func (r *MemoryRepo) GetProcessMapLayer(input ProcessMapLayerQuery) (domain.Proc
 	defer r.mu.RUnlock()
 
 	view := domain.ProcessMapLayerView{
-		Layer:      domain.ProcessMapLayer{Kind: "root"},
+		Layer:      domain.ProcessMapLayer{Kind: "root", Ancestors: []domain.ProcessMapLayerAncestor{}},
 		Placements: []domain.ProcessMapLayerPlacement{},
 		Traces:     []domain.ProcessMapLayerTrace{},
 	}
@@ -89,7 +117,10 @@ func (r *MemoryRepo) GetProcessMapLayer(input ProcessMapLayerQuery) (domain.Proc
 		if !exists || !r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, domain.ProcessMapResourceTypeFolder, input.FolderID) {
 			return domain.ProcessMapLayerView{}, ErrNotFound
 		}
-		view.Layer = domain.ProcessMapLayer{Kind: "folder", FolderID: input.FolderID, Name: name}
+		view.Layer = domain.ProcessMapLayer{
+			Kind: "folder", FolderID: input.FolderID, Name: name,
+			Ancestors: r.processMapLayerAncestorsLocked(input.CompanyID, input.FolderID, input.PermissionUserID),
+		}
 	}
 
 	visible := map[string]bool{}

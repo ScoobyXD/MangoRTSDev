@@ -14,6 +14,7 @@
   display: flex;
   align-items: center;
   gap: 9px;
+  overflow-x: auto;
   padding: 0 14px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(255, 255, 255, 0.96);
@@ -32,19 +33,33 @@
   cursor: default;
 }
 
+.process-map-page__breadcrumbs,
+.process-map-page__breadcrumb {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 9px;
+}
+
 .process-map-page__separator,
-.process-map-page__layer-name {
-  min-width: 0;
+.process-map-page__layer-name,
+.process-map-page__ancestor {
   color: #94a3b8;
   font-size: 12px;
   font-weight: 680;
+  white-space: nowrap;
+}
+
+.process-map-page__ancestor {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
 }
 
 .process-map-page__layer-name {
-  overflow: hidden;
   color: #475569;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .process-map-page__canvas {
@@ -187,7 +202,7 @@
 }
 
 .process-map-card--folder .process-map-card__body {
-  clip-path: polygon(50% 0, 96% 25%, 96% 75%, 50% 100%, 4% 75%, 4% 25%);
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
   padding-inline: 28px;
 }
 
@@ -258,16 +273,10 @@
 .process-map-trace {
   fill: none;
   opacity: 0.84;
-  filter:
-    drop-shadow(4px 5px 5px rgba(25, 168, 255, 0.14))
-    drop-shadow(-2px -2px 3px rgba(255, 255, 255, 0.72));
 }
 
 .process-map-trace.is-selected {
   opacity: 1;
-  filter:
-    drop-shadow(0 0 5px rgba(51, 221, 213, 0.46))
-    drop-shadow(0 0 8px rgba(25, 168, 255, 0.3));
 }
 
 .process-map-waypoint {

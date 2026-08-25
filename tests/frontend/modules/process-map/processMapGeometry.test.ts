@@ -37,9 +37,10 @@ function assertOrthogonalTracePath(path: string): void {
 
 test("Process Map geometry keeps fixed footprints and snaps signed grid coordinates", () => {
   assert.equal(PROCESS_MAP_GRID_PX, 28);
-  assert.deepEqual(PROCESS_MAP_FOLDER_FOOTPRINT, { width: 5, height: 5 });
-  assert.deepEqual(PROCESS_MAP_PROCESS_FOOTPRINT, { width: 4, height: 3 });
-  assert.equal(PROCESS_MAP_RESTRICTED_FOOTPRINT, PROCESS_MAP_PROCESS_FOOTPRINT);
+  assert.deepEqual(PROCESS_MAP_FOLDER_FOOTPRINT, { width: 7, height: 7 });
+  assert.deepEqual(PROCESS_MAP_PROCESS_FOOTPRINT, { width: 7, height: 5 });
+  assert.deepEqual(PROCESS_MAP_RESTRICTED_FOOTPRINT, { width: 4, height: 3 });
+  assert.notEqual(PROCESS_MAP_RESTRICTED_FOOTPRINT, PROCESS_MAP_PROCESS_FOOTPRINT);
   assert.deepEqual(processMapGridToFlowPosition({ x: -3, y: 7 }), { x: -84, y: 196 });
   assert.deepEqual(processMapFlowToGridPosition({ x: -70, y: 181 }), { x: -2, y: 6 });
   assert.deepEqual(processMapGridPointToFlowPosition({ x: 1.5, y: -2.5 }), { x: 42, y: -70 });
@@ -49,10 +50,10 @@ test("Process Map geometry keeps fixed footprints and snaps signed grid coordina
 });
 
 test("Process Map derives one centered left input and right output from placement and type", () => {
-  assert.deepEqual(processMapInputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 4, y: 10.5 });
-  assert.deepEqual(processMapOutputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 9, y: 10.5 });
-  assert.deepEqual(processMapInputAnchor({ x: 12, y: 3 }, "logic_gate"), { x: 12, y: 4.5 });
-  assert.deepEqual(processMapOutputAnchor({ x: 12, y: 3 }, "logic_gate"), { x: 16, y: 4.5 });
+  assert.deepEqual(processMapInputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 4, y: 11.5 });
+  assert.deepEqual(processMapOutputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 11, y: 11.5 });
+  assert.deepEqual(processMapInputAnchor({ x: 12, y: 3 }, "logic_gate"), { x: 12, y: 5.5 });
+  assert.deepEqual(processMapOutputAnchor({ x: 12, y: 3 }, "logic_gate"), { x: 19, y: 5.5 });
 });
 
 test("Process Map route helpers store bounded integer points and render only orthogonal segments", () => {
@@ -99,6 +100,14 @@ test("Process Map route helpers store bounded integer points and render only ort
   assert.deepEqual(processMapRoutePointToSurfaceCenter({ x: 3, y: 2 }), { x: 2.5, y: 1.5 });
   assert.equal(
     processMapTracePath({ x: 0, y: 0.5 }, [{ x: 3, y: 2 }], { x: 6, y: 4.5 }),
-    "M 0 14 L 70 14 L 70 42 L 70 126 L 168 126",
+    "M 0 14 L 70 14 L 70 126 L 168 126",
   );
+  const staleOutAndBackRoute = [{ x: 3, y: 1 }, { x: 3, y: 2 }];
+  const savedRoute = staleOutAndBackRoute.map((point) => ({ ...point }));
+  assert.equal(
+    processMapTracePath({ x: 0, y: 0.5 }, staleOutAndBackRoute, { x: 6, y: 0.5 }),
+    "M 0 14 L 168 14",
+    "rendering removes an exact out-and-back bulge from an otherwise straight ribbon",
+  );
+  assert.deepEqual(staleOutAndBackRoute, savedRoute, "render simplification does not rewrite saved route points");
 });

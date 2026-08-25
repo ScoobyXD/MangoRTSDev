@@ -113,6 +113,69 @@ func normalizePostgresProcessMapQueryIDs(companyID, resourceID, permissionUserID
 	return companyID, resourceID, permissionUserID, nil
 }
 
+func (r *PostgresRepo) postgresProcessMapLayerAncestors(ctx context.Context, companyID, folderID, permissionUserID string) ([]domain.ProcessMapLayerAncestor, error) {
+	rows, err := r.db.QueryContext(ctx, `
+with recursive ancestor_path(folder_id,depth,visited,cycle) as (
+  select placement.map_parent_folder_id,1,
+         array[placement.resource_id,placement.map_parent_folder_id],
+         placement.map_parent_folder_id=placement.resource_id
+  from process_map_placements placement
+  where placement.company_id=$1::uuid
+    and placement.resource_type='company_explorer_folder'
+    and placement.resource_id=$2::uuid
+    and placement.map_parent_folder_id is not null
+  union all
+  select parent_placement.map_parent_folder_id,path.depth+1,
+         path.visited || parent_placement.map_parent_folder_id,
+         parent_placement.map_parent_folder_id=any(path.visited)
+  from ancestor_path path
+  join process_map_placements parent_placement
+    on parent_placement.company_id=$1::uuid
+   and parent_placement.resource_type='company_explorer_folder'
+   and parent_placement.resource_id=path.folder_id
+  where not path.cycle
+    and path.depth < $4
+    and parent_placement.map_parent_folder_id is not null
+)
+select path.folder_id::text,folder.name,
+       case when folder.folder_id is null then false
+            else mangorts_user_can_access_resource($1::uuid,'company_explorer_folder',path.folder_id,$3::uuid,'edit') end,
+       path.depth,path.cycle
+from ancestor_path path
+left join company_explorer_folders folder
+  on folder.company_id=$1::uuid and folder.folder_id=path.folder_id
+order by path.depth desc`, companyID, folderID, permissionUserID, processMapMaxLayerAncestors+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	ancestors := []domain.ProcessMapLayerAncestor{}
+	valid := true
+	for rows.Next() {
+		var item domain.ProcessMapLayerAncestor
+		var name sql.NullString
+		var allowed, cycle bool
+		var depth int
+		if err := rows.Scan(&item.FolderID, &name, &allowed, &depth, &cycle); err != nil {
+			return nil, err
+		}
+		if !name.Valid || !allowed || cycle || depth > processMapMaxLayerAncestors {
+			valid = false
+			continue
+		}
+		item.Name = name.String
+		ancestors = append(ancestors, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !valid {
+		return []domain.ProcessMapLayerAncestor{}, nil
+	}
+	return ancestors, nil
+}
+
 func (r *PostgresRepo) GetProcessMapLayer(input ProcessMapLayerQuery) (domain.ProcessMapLayerView, error) {
 	input.CompanyID = cleanUUIDText(input.CompanyID)
 	input.FolderID = cleanUUIDText(input.FolderID)
@@ -121,7 +184,7 @@ func (r *PostgresRepo) GetProcessMapLayer(input ProcessMapLayerQuery) (domain.Pr
 		return domain.ProcessMapLayerView{}, ErrInvalid
 	}
 	ctx := context.Background()
-	view := domain.ProcessMapLayerView{Layer: domain.ProcessMapLayer{Kind: "root"}, Placements: []domain.ProcessMapLayerPlacement{}, Traces: []domain.ProcessMapLayerTrace{}}
+	view := domain.ProcessMapLayerView{Layer: domain.ProcessMapLayer{Kind: "root", Ancestors: []domain.ProcessMapLayerAncestor{}}, Placements: []domain.ProcessMapLayerPlacement{}, Traces: []domain.ProcessMapLayerTrace{}}
 	if input.FolderID != "" {
 		if err := r.postgresRequireProcessMapResource(ctx, input.CompanyID, domain.ProcessMapResourceTypeFolder, input.FolderID, input.PermissionUserID); err != nil {
 			return domain.ProcessMapLayerView{}, err
@@ -130,7 +193,11 @@ func (r *PostgresRepo) GetProcessMapLayer(input ProcessMapLayerQuery) (domain.Pr
 		if err := r.db.QueryRowContext(ctx, `select name from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid`, input.CompanyID, input.FolderID).Scan(&name); err != nil {
 			return domain.ProcessMapLayerView{}, err
 		}
-		view.Layer = domain.ProcessMapLayer{Kind: "folder", FolderID: input.FolderID, Name: name}
+		ancestors, err := r.postgresProcessMapLayerAncestors(ctx, input.CompanyID, input.FolderID, input.PermissionUserID)
+		if err != nil {
+			return domain.ProcessMapLayerView{}, err
+		}
+		view.Layer = domain.ProcessMapLayer{Kind: "folder", FolderID: input.FolderID, Name: name, Ancestors: ancestors}
 	}
 
 	rows, err := r.db.QueryContext(ctx, `

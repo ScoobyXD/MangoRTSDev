@@ -66,7 +66,7 @@ Last updated: 2026-08-07
 
 An authorized user opens the shared company Process Map root or one exact Folder layer
 ↓
-The backend authorizes that layer and returns only its exact placements and visible traces through one conditional HTTP read; restricted placements disclose only existence and saved position
+The backend authorizes that layer and returns only its exact placements, visible traces, and permission-safe Process Map ancestor path through one conditional HTTP read; restricted placements disclose only existence and saved position
 ↓
 Placement, operational-relationship, and trace commands save Mango-owned state in one transaction and enqueue only a compact company Process Map invalidation
 ↓
@@ -74,7 +74,7 @@ The exact connection that made a routine map write uses its committed HTTP respo
 ↓
 The retired Node Map and Logic Gate Map routes, scopes, caches, coordinate payloads, and compatibility handlers remain absent
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 # Process Story: Logic Gate document commands use final storage
 
@@ -181,7 +181,7 @@ RW78 - Current-audience resolution supports direct typed `huddle_logic_gate` and
 RW79 - Loaded RACI rows and pinned Logic Gates retain one board subscription per exact Logic Gate. Adding or removing one row or pin subscribes or unsubscribes only that board; unchanged boards remain subscribed and are never torn down and recreated by collection cleanup.
 RW80 - Simultaneous identical Kanban board-list reads share one in-flight HTTP request. A board-list mutation invalidates the completed cache and prevents an older in-flight response from becoming current.
 RW81 - Process Map exposes only these bounded commands: `GET /v1/process-map/layer` with an optional exact `folder_id`; `GET /v1/process-map/operational-relationships` for one exact typed resource and direction; placement `PUT` and `DELETE` at `/v1/process-map/placements/{resource_type}/{resource_id}`; relationship `POST` with an optional atomic trace; trace `PUT` at `/v1/process-map/operational-relationships/{relationship_id}/trace`; and relationship `DELETE`. There is no whole-company graph, candidate-search, trace-only DELETE, full React Flow document, or viewport API.
-RW82 - A root Process Map read loads only placements whose map parent is null and their visible same-layer traces. A Folder read authorizes that exact Folder before conditional ETag handling, then loads only placements whose map parent is that Folder and their visible same-layer traces. The response and ETag are actor- and permission-safe; a matching validator must never turn revoked or different access into `304`.
+RW82 - A root Process Map read loads only placements whose map parent is null and their visible same-layer traces. A Folder read authorizes that exact Folder before conditional ETag handling, then loads only placements whose map parent is that Folder, their visible same-layer traces, and one bounded root-to-parent ancestor chain derived only from Process Map placements. The response omits the entire ancestor chain when any ancestor is missing or inaccessible, never reads the Company Explorer hierarchy or full map tree, and keeps its ETag actor- and permission-safe; a matching validator must never turn revoked or different access into `304`.
 RW83 - A Process Map layer response serializes an accessible placement with its exact typed identity and current source presentation, but serializes an inaccessible placement through a distinct restricted shape containing only `restricted: true`, `grid_x`, and `grid_y`. Every relationship and trace incident to a restricted endpoint is omitted.
 RW84 - Every committed Process Map mutation advances the shared company `process-map` read version. A routine placement, relationship, or trace write updates its initiating surface from the committed HTTP response, omits the redundant echo only on that exact originating realtime connection, and sends one compact `process_map.changed` hint to every other current company connection, including another tab or device for the same user. A source, Explorer-parent, permission, group, or membership change that can alter the projection sends the compact hint to every affected viewer in the same transaction. The hint carries no placements, endpoints, names, relationships, or route points; clients coalesce it into one current-layer HTTP refetch and never poll. Membership removal includes the removed user only in that one compact invalidation audience so stale rendered state clears, while current membership is rechecked for HTTP reads, reconnects, and subscribe commands and excludes that user from later hints.
 

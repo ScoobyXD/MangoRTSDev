@@ -13,6 +13,7 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   const geometry = source("frontend/src/modules/process-map/processMapGeometry.ts");
   const api = source("frontend/src/modules/process-map/processMapApi.ts");
   const icons = source("frontend/src/icons/EntityIcons.tsx");
+  const page = source("frontend/src/pages/process-map/ProcessMapPage.tsx");
   assert.match(surface, /readExplorerDragPayload/);
   assert.match(surface, /decideProcessMapExplorerDrop/);
   assert.match(surface, /zoomOnDoubleClick=\{false\}/);
@@ -26,6 +27,8 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   assert.match(surface, /onProcessMapChanged:\s*\(message\)[\s\S]*message\.origin_connection_id[\s\S]*clearLayerAndRefresh\(\)[\s\S]*onRejected:\s*clearLayerAndRefresh/);
   assert.equal(surface.match(/<Background\b/g)?.length, 1);
   assert.doesNotMatch(surface, /process-map-large-grid|PROCESS_MAP_LARGE_GRID_DIVISOR/);
+  assert.match(surface, /lineWidth=\{0\.5\}[\s\S]*color="rgba\(148, 163, 184, 0\.12\)"/);
+  assert.doesNotMatch(surface, /<Background[\s\S]{0,180}\bsize=/);
   assert.match(surface, /strokeWidth:\s*PROCESS_MAP_GRID_PX/);
   assert.match(surface, /strokeLinecap:\s*"butt"/);
   assert.match(surface, /strokeLinejoin:\s*"miter"/);
@@ -35,8 +38,11 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   assert.match(geometry, /PROCESS_MAP_GRID_PX\s*=\s*28/);
   assert.match(geometry, /processMapFlowToRoutePoint/);
   assert.match(geometry, /processMapRoutePointToSurfaceCenter/);
+  assert.match(geometry, /appendSimplifiedRenderedPoint/);
   assert.doesNotMatch(geometry, /export function processMapOrthogonalPolyline/);
   assert.doesNotMatch(styles, /vector-effect:\s*non-scaling-stroke|stroke-width:\s*2(?:\.6)?/);
+  const traceStyles = styles.slice(styles.indexOf(".process-map-trace {"), styles.indexOf(".process-map-waypoint {"));
+  assert.doesNotMatch(traceStyles, /filter|drop-shadow/);
   assert.match(styles, /process-map-card[\s\S]*drop-shadow/);
   assert.match(surface, /ReactFlowProvider key=\{layerIdentity\}/);
   assert.match(surface, /const mutationGeneration = localMutationGenerationRef\.current[\s\S]*activeLayerReadRef\.current = requestGeneration/);
@@ -61,9 +67,17 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   assert.match(surface, /deletedRelationshipIDsRef\.current\.add\(removed\.id\)/);
   assert.match(surface, /restricted:\$\{index\}/);
   assert.doesNotMatch(styles, /data-resource|resource-id/);
-  assert.match(styles, /polygon\(50% 0/);
+  assert.match(styles, /polygon\(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%\)/);
+  assert.match(surface, /PROCESS_MAP_HANDLE_RADIUS_PX\s*=\s*6/);
+  assert.match(surface, /physicalSourceX\s*=\s*sourceX\s*-\s*PROCESS_MAP_HANDLE_RADIUS_PX/);
+  assert.match(surface, /physicalTargetX\s*=\s*targetX\s*\+\s*PROCESS_MAP_HANDLE_RADIUS_PX/);
   assert.match(styles, /process-map-handle--input[\s\S]*left:\s*0\s*!important/);
   assert.match(styles, /process-map-handle--output[\s\S]*right:\s*0\s*!important/);
+  assert.match(page, /layer\.ancestors\.map\(\(ancestor\)/);
+  assert.match(page, /buildProcessMapRoute\(ancestor\.folder_id\)/);
+  assert.match(page, /aria-label="Process Map folder path"/);
+  assert.match(page, /aria-current="page"/);
+  assert.doesNotMatch(styles, /process-map-page__layer-name[\s\S]{0,180}text-overflow:\s*ellipsis/);
 });
 
 test("failed Process Map writes perform one bounded canonical recovery read", () => {

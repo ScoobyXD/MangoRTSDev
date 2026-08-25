@@ -55,9 +55,14 @@ export type ProcessMapTrace = {
 
 export type ProcessMapTraceWriteResponse = Omit<ProcessMapTrace, "source" | "target">;
 
+export type ProcessMapFolderAncestor = {
+  folder_id: string;
+  name: string;
+};
+
 export type ProcessMapLayer =
   | { kind: "root" }
-  | { kind: "folder"; folder_id: string; name: string };
+  | { kind: "folder"; folder_id: string; name: string; ancestors: ProcessMapFolderAncestor[] };
 
 export type ProcessMapLayerResponse = {
   layer: ProcessMapLayer;
@@ -214,6 +219,17 @@ function normalizeLayerResponse(value: unknown): ProcessMapLayerResponse {
           kind: "folder",
           folder_id: requiredString(value.layer.folder_id, "invalid_process_map_folder_id"),
           name: requiredString(value.layer.name, "invalid_process_map_folder_name"),
+          ancestors: value.layer.ancestors === undefined
+            ? []
+            : Array.isArray(value.layer.ancestors)
+              ? value.layer.ancestors.map((ancestor) => {
+                  if (!isRecord(ancestor)) throw new Error("invalid_process_map_folder_ancestor");
+                  return {
+                    folder_id: requiredString(ancestor.folder_id, "invalid_process_map_ancestor_folder_id"),
+                    name: requiredString(ancestor.name, "invalid_process_map_ancestor_name"),
+                  };
+                })
+              : (() => { throw new Error("invalid_process_map_folder_ancestors"); })(),
         }
       : (() => { throw new Error("invalid_process_map_layer"); })();
   const placements = value.placements.map(normalizePlacement);

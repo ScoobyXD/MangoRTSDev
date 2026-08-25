@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"miraeopus/backend/internal/domain"
 	"testing"
 )
@@ -261,32 +262,91 @@ func TestMemoryProcessMapValidationNoOpAndDeleteSemantics(t *testing.T) {
 }
 
 func TestMemoryProcessMapLayerReadIsExactAndLazy(t *testing.T) {
-	repo, companyID, admin, _, _ := newV2PolicyTestRepo(t)
+	repo, companyID, admin, viewer, _ := newV2PolicyTestRepo(t)
 	outer, _ := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Outer")
 	inner, _ := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Inner")
+	leaf, _ := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Leaf")
+	unplaced, _ := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Unplaced")
 	process, _ := repo.CreateLogicGate(companyID, "Deep process")
 	outerID := outer.FolderID
 	innerID := inner.FolderID
+	leafID := leaf.FolderID
 	for _, input := range []ProcessMapPlacementPutInput{
 		processMapTestPlacementInput(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, outer.FolderID, nil, 0, 0),
 		processMapTestPlacementInput(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, inner.FolderID, &outerID, 1, 1),
-		processMapTestPlacementInput(companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, &innerID, 2, 2),
+		processMapTestPlacementInput(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, leaf.FolderID, &innerID, 2, 2),
+		processMapTestPlacementInput(companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, &leafID, 3, 3),
 	} {
 		if _, err := repo.PutProcessMapPlacement(input); err != nil {
 			t.Fatal(err)
 		}
 	}
 	root, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: companyID, PermissionUserID: admin.UserID})
-	if err != nil || len(root.Placements) != 1 {
+	if err != nil || len(root.Placements) != 1 || root.Layer.Ancestors == nil || len(root.Layer.Ancestors) != 0 {
 		t.Fatalf("root layer = %+v err=%v, want only outer folder", root, err)
 	}
 	outerLayer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: companyID, FolderID: outer.FolderID, PermissionUserID: admin.UserID})
-	if err != nil || len(outerLayer.Placements) != 1 {
+	if err != nil || len(outerLayer.Placements) != 1 || len(outerLayer.Layer.Ancestors) != 0 {
 		t.Fatalf("outer layer = %+v err=%v, want only inner folder", outerLayer, err)
 	}
 	innerLayer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: companyID, FolderID: inner.FolderID, PermissionUserID: admin.UserID})
-	if err != nil || len(innerLayer.Placements) != 1 {
-		t.Fatalf("inner layer = %+v err=%v, want only deep process", innerLayer, err)
+	if err != nil || len(innerLayer.Placements) != 1 || len(innerLayer.Layer.Ancestors) != 1 || innerLayer.Layer.Ancestors[0] != (domain.ProcessMapLayerAncestor{FolderID: outer.FolderID, Name: "Outer"}) {
+		t.Fatalf("inner layer = %+v err=%v, want exact child and Outer breadcrumb", innerLayer, err)
+	}
+	leafLayer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: companyID, FolderID: leaf.FolderID, PermissionUserID: admin.UserID})
+	if err != nil || len(leafLayer.Placements) != 1 || len(leafLayer.Layer.Ancestors) != 2 ||
+		leafLayer.Layer.Ancestors[0] != (domain.ProcessMapLayerAncestor{FolderID: outer.FolderID, Name: "Outer"}) ||
+		leafLayer.Layer.Ancestors[1] != (domain.ProcessMapLayerAncestor{FolderID: inner.FolderID, Name: "Inner"}) {
+		t.Fatalf("leaf layer = %+v err=%v, want root-to-parent Process Map breadcrumb and only deep process", leafLayer, err)
+	}
+	unplacedLayer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: companyID, FolderID: unplaced.FolderID, PermissionUserID: admin.UserID})
+	if err != nil || unplacedLayer.Layer.Ancestors == nil || len(unplacedLayer.Layer.Ancestors) != 0 {
+		t.Fatalf("unplaced layer = %+v err=%v, want empty breadcrumb", unplacedLayer, err)
+	}
+
+	noAccess := ResourceDefaultAccessNoAccess
+	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeCompanyExplorerFolder, ResourceID: outer.FolderID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &noAccess, DescendantAction: PolicyDescendantActionInheritedOnly,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hiddenAncestorLayer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: companyID, FolderID: leaf.FolderID, PermissionUserID: viewer.UserID})
+	if err != nil || hiddenAncestorLayer.Layer.Ancestors == nil || len(hiddenAncestorLayer.Layer.Ancestors) != 0 {
+		t.Fatalf("hidden-ancestor layer = %+v err=%v, want whole breadcrumb omitted", hiddenAncestorLayer, err)
+	}
+}
+
+func TestMemoryProcessMapLayerBreadcrumbIsBounded(t *testing.T) {
+	repo, companyID, admin, _, _ := newV2PolicyTestRepo(t)
+	folderIDs := make([]string, processMapMaxLayerAncestors+2)
+	for index := range folderIDs {
+		folderID := fmt.Sprintf("22222222-3333-4444-8555-%012d", index+1)
+		folderIDs[index] = folderID
+		repo.folders[key(companyID, folderID)] = domain.CompanyExplorerFolder{
+			CompanyID: companyID, FolderID: folderID, FolderKind: "logic_gate", Name: fmt.Sprintf("Folder %d", index+1),
+		}
+		placement := domain.ProcessMapPlacement{
+			CompanyID: companyID, ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: folderID,
+		}
+		if index > 0 {
+			parentID := folderIDs[index-1]
+			placement.MapParentFolderID = &parentID
+		}
+		repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folderID)] = placement
+	}
+
+	atLimit, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{
+		CompanyID: companyID, FolderID: folderIDs[processMapMaxLayerAncestors], PermissionUserID: admin.UserID,
+	})
+	if err != nil || len(atLimit.Layer.Ancestors) != processMapMaxLayerAncestors {
+		t.Fatalf("breadcrumb at limit has %d ancestors, err=%v, want %d", len(atLimit.Layer.Ancestors), err, processMapMaxLayerAncestors)
+	}
+	overLimit, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{
+		CompanyID: companyID, FolderID: folderIDs[processMapMaxLayerAncestors+1], PermissionUserID: admin.UserID,
+	})
+	if err != nil || overLimit.Layer.Ancestors == nil || len(overLimit.Layer.Ancestors) != 0 {
+		t.Fatalf("over-limit breadcrumb = %+v err=%v, want empty list", overLimit.Layer.Ancestors, err)
 	}
 }
 

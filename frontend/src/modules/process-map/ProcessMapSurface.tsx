@@ -291,15 +291,17 @@ function ProcessMapTraceWaypoint({
 function ProcessMapTraceEdge({ id, sourceX, sourceY, targetX, targetY, selected, data }: EdgeProps<ProcessMapEdge>) {
   const routePoints = data?.routePoints ?? [];
   const gradientID = `process-map-trace-gradient-${React.useId().replace(/:/g, "")}`;
+  const physicalSourceX = sourceX - PROCESS_MAP_HANDLE_RADIUS_PX;
+  const physicalTargetX = targetX + PROCESS_MAP_HANDLE_RADIUS_PX;
   const path = processMapTracePath(
-    { x: sourceX / PROCESS_MAP_GRID_PX, y: sourceY / PROCESS_MAP_GRID_PX },
+    { x: physicalSourceX / PROCESS_MAP_GRID_PX, y: sourceY / PROCESS_MAP_GRID_PX },
     routePoints,
-    { x: targetX / PROCESS_MAP_GRID_PX, y: targetY / PROCESS_MAP_GRID_PX },
+    { x: physicalTargetX / PROCESS_MAP_GRID_PX, y: targetY / PROCESS_MAP_GRID_PX },
   );
   return (
     <>
       <defs>
-        <linearGradient id={gradientID} x1={sourceX} y1={sourceY} x2={targetX} y2={targetY} gradientUnits="userSpaceOnUse">
+        <linearGradient id={gradientID} x1={physicalSourceX} y1={sourceY} x2={physicalTargetX} y2={targetY} gradientUnits="userSpaceOnUse">
           <stop stopColor={NODE_ICON_GRADIENT_START} />
           <stop offset="1" stopColor={NODE_ICON_GRADIENT_END} />
         </linearGradient>
@@ -336,6 +338,7 @@ function ProcessMapTraceEdge({ id, sourceX, sourceY, targetX, targetY, selected,
 
 const nodeTypes = { processMapCard: ProcessMapCard };
 const edgeTypes = { processMapTrace: ProcessMapTraceEdge };
+const PROCESS_MAP_HANDLE_RADIUS_PX = 6;
 
 function processMapErrorMessage(cause: unknown, fallback: string): string {
   if (cause instanceof Error && cause.message.trim()) return cause.message;
@@ -1027,8 +1030,8 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
           id="process-map-grid"
           variant={BackgroundVariant.Lines}
           gap={PROCESS_MAP_GRID_PX}
-          size={0.7}
-          color="rgba(148, 163, 184, 0.2)"
+          lineWidth={0.5}
+          color="rgba(148, 163, 184, 0.12)"
         />
       </ReactFlow>
     </section>

@@ -199,6 +199,79 @@ func TestPostgresProcessMapRepositoryLifecycle(t *testing.T) {
 	}
 }
 
+func TestPostgresProcessMapLayerBreadcrumbIsExactAndPermissionSafe(t *testing.T) {
+	_, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map breadcrumb test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("process-map-breadcrumb-admin", "process-map-breadcrumb-admin@example.com", "Breadcrumb Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := repo.UpsertAuthUser("process-map-breadcrumb-viewer", "process-map-breadcrumb-viewer@example.com", "Breadcrumb Viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(viewer.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	outer, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Outer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	inner, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Inner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unplaced, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Unplaced")
+	if err != nil {
+		t.Fatal(err)
+	}
+	outerID := outer.FolderID
+	innerID := inner.FolderID
+	for _, input := range []ProcessMapPlacementPutInput{
+		processMapTestPlacementInput(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, outer.FolderID, nil, 0, 0),
+		processMapTestPlacementInput(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, inner.FolderID, &outerID, 1, 1),
+		processMapTestPlacementInput(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, leaf.FolderID, &innerID, 2, 2),
+	} {
+		if _, err := repo.PutProcessMapPlacement(input); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	layer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: company.CompanyID, FolderID: leaf.FolderID, PermissionUserID: admin.UserID})
+	if err != nil || len(layer.Layer.Ancestors) != 2 ||
+		layer.Layer.Ancestors[0] != (domain.ProcessMapLayerAncestor{FolderID: outer.FolderID, Name: "Outer"}) ||
+		layer.Layer.Ancestors[1] != (domain.ProcessMapLayerAncestor{FolderID: inner.FolderID, Name: "Inner"}) {
+		t.Fatalf("Postgres breadcrumb = %+v err=%v, want Outer then Inner", layer.Layer.Ancestors, err)
+	}
+	unplacedLayer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: company.CompanyID, FolderID: unplaced.FolderID, PermissionUserID: admin.UserID})
+	if err != nil || unplacedLayer.Layer.Ancestors == nil || len(unplacedLayer.Layer.Ancestors) != 0 {
+		t.Fatalf("unplaced Postgres layer = %+v err=%v, want empty breadcrumb", unplacedLayer, err)
+	}
+
+	noAccess := ResourceDefaultAccessNoAccess
+	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
+		CompanyID: company.CompanyID, ResourceType: EntityTypeCompanyExplorerFolder, ResourceID: outer.FolderID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &noAccess, DescendantAction: PolicyDescendantActionInheritedOnly,
+		ActorUserID: admin.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hiddenAncestorLayer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: company.CompanyID, FolderID: leaf.FolderID, PermissionUserID: viewer.UserID})
+	if err != nil || hiddenAncestorLayer.Layer.Ancestors == nil || len(hiddenAncestorLayer.Layer.Ancestors) != 0 {
+		t.Fatalf("hidden Postgres ancestor layer = %+v err=%v, want whole breadcrumb omitted", hiddenAncestorLayer, err)
+	}
+}
+
 func TestPostgresCompanyMembershipProcessMapInvalidationLifecycle(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
 	companyA, err := repo.CreateCompany("Membership Process Map A")

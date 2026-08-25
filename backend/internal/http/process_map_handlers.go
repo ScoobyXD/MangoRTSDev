@@ -99,7 +99,7 @@ func (s *Server) handleProcessMapLayer(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, "process-map-layer-v1")
+	etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, "process-map-layer-v2")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_read_process_map_version")
 		return
