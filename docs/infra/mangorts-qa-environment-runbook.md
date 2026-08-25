@@ -87,13 +87,31 @@ Set-Location infra/aws-qa
 terraform init -backend-config=backend.hcl
 terraform plan -target=aws_route53_zone.qa -out=qa-dns-zone.tfplan
 terraform show qa-dns-zone.tfplan
+```
+
+The targeted plan itself requires explicit approval and must contain exactly one new `aws_route53_zone.qa` resource with no changes or destroys. Discard every older saved plan after changing this DNS design. After approval:
+
+```powershell
 terraform apply qa-dns-zone.tfplan
 terraform output qa_dns_name_servers
 ```
 
-The targeted plan itself requires explicit approval and must contain exactly one new `aws_route53_zone.qa` resource with no changes or destroys. Discard every older saved plan after changing this DNS design.
+An explicitly authorized production DNS operator must then produce a targeted saved plan for the checked-in `aws_route53_record.qa_delegation`, which manages one `NS` record named `qa.mangorts.com` in the authoritative `mangorts.com` parent using exactly the four output name servers:
 
-An explicitly authorized production DNS operator must then apply only `infra/aws-prod/qa_delegation.tf`, which manages one `NS` record named `qa.mangorts.com` in the authoritative `mangorts.com` parent using exactly the four output name servers. The saved production plan must contain exactly one addition and no changes or destroys. Do not use a full production apply, leave a manually created delegation as the final state, or give the QA GitHub role production access. Verify public delegation before continuing:
+```powershell
+Set-Location ..\aws-prod
+terraform init -backend-config=backend.hcl
+terraform plan -target=aws_route53_record.qa_delegation -out=tfplan-qa-delegation -input=false
+terraform show tfplan-qa-delegation
+```
+
+The saved production plan must contain exactly one addition and no changes or destroys. Do not use a full production plan or apply. After separate explicit approval for this exact production DNS change, apply only the saved targeted plan:
+
+```powershell
+terraform apply tfplan-qa-delegation
+```
+
+Do not leave a manually created delegation as the final state or give the QA GitHub role production access. Verify public delegation before continuing:
 
 ```powershell
 Resolve-DnsName qa.mangorts.com -Type NS
