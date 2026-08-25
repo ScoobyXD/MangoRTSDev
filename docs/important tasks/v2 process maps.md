@@ -1,8 +1,8 @@
 # V2 Process Maps
 
-Date: August 24, 2026
+Date: August 25, 2026
 
-Status: V1 is implemented. Required WSL backend, frontend build/focused, and disposable PostgreSQL schema/migration checks pass; the final guarded repository run and local commit are pending.
+Status: V1 is implemented. The placement tray, type outlines, and animated trace direction pass focused frontend, frontend build, and WSL backend verification.
 
 ## Purpose
 
@@ -73,6 +73,9 @@ V1 includes:
 - stable Folder-layer URLs and browser history;
 - normal permissions plus the explicit restricted `?` placeholder rule;
 - deletion, recycle, restore, ETag, and realtime integration.
+- a fixed collapsible placement tray backed by the current exact Company Explorer branch;
+- thin Company Explorer orange Folder and green Process outlines;
+- a reduced-motion-aware visual flow direction on every real trace.
 
 V1 does not include:
 
@@ -82,7 +85,7 @@ V1 does not include:
 - automatic layout or automatic placement;
 - a minimap;
 - adjustable card sizes;
-- semantic colors;
+- filled semantic card colors beyond the thin Folder and Process type outlines;
 - a bend, segment, junction, net, or map-layer table;
 - stored viewport, zoom, selection, or personal layout state;
 - a resource registry or translated resource identity;
@@ -731,9 +734,12 @@ These are frontend constants and are never columns:
 Folder       point-up hexagon, 7 x 7 smallest grid squares
 Process      rectangle,        7 x 5 smallest grid squares
 Restricted   uniform rectangle, 4 x 3 smallest grid squares, containing only ?
+Folder edge  thin Company Explorer orange outline around a neutral surface
+Process edge thin Company Explorer green outline around a neutral surface
 Input        one fixed left-center anchor per accessible card
 Output       one fixed right-center anchor per accessible card
 Trace        cyan-to-blue Node-icon gradient, one smallest grid square thick
+Trace flow   one soft source-to-target center pattern; static under reduced motion
 ```
 
 The exact screen pixel size of one smallest square is a CSS/design token. Changing that token changes rendering scale, not saved coordinates.
@@ -748,7 +754,8 @@ On URL change:
 4. Convert visible placements to typed controlled cards.
 5. Convert restricted rows to a uniform noninteractive `?` card.
 6. Convert returned traces to custom edges.
-7. Do not preload descendants.
+7. When the placement tray is expanded, request only the matching Company Explorer root or exact Folder children and subtract current-layer placements.
+8. Do not preload descendants or a collapsed tray branch.
 
 Minimal page state:
 
@@ -756,6 +763,7 @@ Minimal page state:
 load status and error
 current layer response
 selected placement or trace
+placement tray rows and browser-local collapsed preference
 local viewport
 placement drag draft
 trace route draft
@@ -765,7 +773,7 @@ Save a placement only when dragging stops, not on every pointer move. The UI may
 
 Single click selects. Double-clicking an accessible Folder navigates inward. Double-clicking a Process does not open a deeper Process Map layer. Pan and zoom remain local and unsaved.
 
-The trace renderer builds one orthogonal, one-smallest-square-thick cyan-to-blue surface from the derived source output, through the ordered intermediate points, to the derived target input. Several pairwise traces may use identical leading or trailing points to look like one branched or merged route. A crossing is not a junction unless the saved traces share the same explicit point.
+The trace renderer builds one orthogonal, one-smallest-square-thick cyan-to-blue surface from the derived source output, through the ordered intermediate points, to the derived target input. A soft center pattern moves from that source to that target on one shared cadence and stops under reduced-motion preference. Several pairwise traces may use identical leading or trailing points to look like one branched or merged route. A crossing is not a junction unless the saved traces share the same explicit point.
 
 Items render above traces. Restricted placeholders have no handles or event handlers.
 
@@ -814,6 +822,10 @@ Items render above traces. Restricted placeholders have no handles or event hand
 - Pan and zoom never navigate or save placement changes.
 - Restricted cards render only `?`, expose no metadata, and have no interactions or handles.
 - Placement saves occur on drag stop.
+- The expanded tray loads only the current exact Explorer branch, omits current-layer placements, and writes the established Explorer drag payload.
+- Tray collapse defaults open, persists across layer navigation, stays outside viewport transforms, and suppresses hidden branch reads.
+- Folder and Process outlines match Company Explorer orange and green while surfaces remain neutral.
+- Trace flow moves source-to-target and stops under reduced-motion preference without changing the base trace.
 - Trace points render in order from the fixed output to the fixed input.
 - Fan-out, fan-in, explicit shared points, and ordinary crossings render correctly.
 - A failed save returns the UI to server truth.
@@ -904,10 +916,10 @@ At the end of this phase, Process Map must be a usable placement product even be
 
 1. Input is fixed at the left center and output is fixed at the right center; the point-up Folder hexagon uses its leftmost and rightmost points.
 2. Every restricted placeholder is the same fixed four-by-three rectangle as a Process.
-3. Manual add uses the existing exact-resource Company Explorer drag payload. V1 has no candidate-search API.
+3. Manual add uses the existing exact-resource Company Explorer drag payload from Company Explorer or the current-layer tray. V1 has no candidate-search API.
 4. One route has at most 256 intermediate points, and every point contains exactly signed integer `x` and `y` values.
 5. The editor uses orthogonal circuit-style routing where practical while keeping route points as one simple bounded value.
-6. The smallest grid-square pixel size and white elevated-surface styling are frontend presentation constants and are not persisted.
+6. The smallest grid-square pixel size, white elevated surfaces, thin orange/green type outlines, and trace-flow animation are frontend presentation constants and are not persisted.
 7. Placement overlap is allowed in V1; no automatic collision repair or layout runs.
 8. Reparenting a placement removes now-invalid incident trace geometry and preserves operational relationships.
 9. Redrawing the same semantic edge with different points replaces its trace. An identical retry returns existing state without a duplicate or revision change.
@@ -997,4 +1009,4 @@ The old `backend/internal/http/logic_gate_relationship_handlers.go` and `fronten
 - No live database was modified by this implementation task.
 - The final guarded disposable repository run passed. No merge, push, or production rollout has occurred.
 
-Last updated: August 24, 2026
+Last updated: August 25, 2026

@@ -125,6 +125,10 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
   let mixedPlacementPresent = true;
   let traceRecreated = false;
   let deferNextTracePut = false;
+  let trayTransientCandidateVisible = true;
+  let deferNextTrayBranchRead = false;
+  let finishAddedPlacementPut: (() => void) | null = null;
+  let finishTrayBranchRead: (() => void) | null = null;
   let finishPlacementDelete: (() => void) | null = null;
   let finishDelayedPlacementPut: (() => void) | null = null;
   let finishNavigationPlacementPut: (() => void) | null = null;
@@ -148,6 +152,80 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
     });
     if (url.pathname === "/v1/realtime/ticket") {
       return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.pathname === "/v1/company-explorer/roots") {
+      return new Response(JSON.stringify({ rows: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url.pathname === "/v1/company-explorer/children") {
+      const rows = url.searchParams.get("parent_id") === "parent-1" ? [
+        {
+          company_id: "company-1",
+          entity_id: "child-1",
+          entity_type: "folder",
+          name: "Child",
+          position: 1000,
+          created_timestamp: "created",
+          updated_timestamp: "created",
+        },
+        ...(trayTransientCandidateVisible ? [{
+          company_id: "company-1",
+          entity_id: "edge-transient-gate",
+          entity_type: "logic_gate",
+          resource_id: "transient-gate",
+          name: "Revoked candidate",
+          position: 3250,
+          created_timestamp: "created",
+          updated_timestamp: "created",
+        }] : []),
+        {
+          company_id: "company-1",
+          entity_id: "edge-failing-gate",
+          entity_type: "logic_gate",
+          resource_id: "failing-gate",
+          name: "Failing process",
+          position: 3500,
+          created_timestamp: "created",
+          updated_timestamp: "created",
+        },
+        {
+          company_id: "company-1",
+          entity_id: "edge-gate-1",
+          entity_type: "logic_gate",
+          resource_id: "gate-1",
+          name: "Review",
+          position: 2000,
+          created_timestamp: "created",
+          updated_timestamp: "created",
+        },
+        {
+          company_id: "company-1",
+          entity_id: "edge-added-gate",
+          entity_type: "logic_gate",
+          resource_id: "added-gate",
+          name: "Added process",
+          position: 3000,
+          created_timestamp: "created",
+          updated_timestamp: "created",
+        },
+        {
+          company_id: "company-1",
+          entity_id: "edge-project-1",
+          entity_type: "project",
+          resource_id: "project-1",
+          name: "Ignored project",
+          position: 4000,
+          created_timestamp: "created",
+          updated_timestamp: "created",
+        },
+      ] : [];
+      const response = () => new Response(JSON.stringify({ rows }), { status: 200, headers: { "content-type": "application/json" } });
+      if (deferNextTrayBranchRead) {
+        deferNextTrayBranchRead = false;
+        return await new Promise<Response>((resolve) => {
+          finishTrayBranchRead = () => resolve(response());
+        });
+      }
+      return response();
     }
     if (url.pathname.endsWith("/operational-relationships/trace-1/trace") && method === "PUT") {
       traceWrites.push(body ?? {});
@@ -223,6 +301,29 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
           created_timestamp: "created",
           updated_timestamp: "created",
         }), { status: 201, headers: { "content-type": "application/json" } }));
+      });
+    }
+    if (url.pathname.endsWith("/placements/logic_gate/added-gate")) {
+      return await new Promise<Response>((resolve) => {
+        finishAddedPlacementPut = () => {
+          placementAdded = true;
+          resolve(new Response(JSON.stringify({
+            resource_type: "logic_gate",
+            resource_id: "added-gate",
+            map_parent_folder_id: "parent-1",
+            grid_x: body?.grid_x,
+            grid_y: body?.grid_y,
+            revision: 1,
+            created_timestamp: "created",
+            updated_timestamp: "created",
+          }), { status: 201, headers: { "content-type": "application/json" } }));
+        };
+      });
+    }
+    if (url.pathname.endsWith("/placements/logic_gate/failing-gate")) {
+      return new Response(JSON.stringify({ error: "placement denied" }), {
+        status: 500,
+        headers: { "content-type": "application/json" },
       });
     }
     if (url.pathname.includes("/placements/")) {
@@ -396,7 +497,130 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       company_id: "company-1",
       folder_id: "parent-1",
     });
+    const trayBranchRequests = requests.filter((request) => request.url.pathname === "/v1/company-explorer/children");
+    assert.equal(trayBranchRequests.length, 1);
+    assert.deepEqual(Object.fromEntries(trayBranchRequests[0].url.searchParams), {
+      company_id: "company-1",
+      parent_id: "parent-1",
+    });
     assert.equal(requests.some((request) => /company-explorer\/(tree|graph)|logic-gate-relationships/.test(request.url.pathname)), false);
+
+    const tray = container.querySelector<HTMLElement>('[aria-label="Process Map placement tray"]');
+    const trayToggle = tray?.querySelector<HTMLButtonElement>('.process-map-placement-tray__toggle');
+    const trayCandidate = tray?.querySelector<HTMLElement>('[aria-label="Drag Process: Added process"]');
+    assert.ok(tray);
+    assert.ok(trayToggle);
+    assert.equal(trayToggle.getAttribute("aria-expanded"), "true", "the tray starts expanded when no preference exists");
+    assert.ok(trayCandidate, "only an immediate unplaced supported resource is available");
+    assert.equal(tray.querySelector('[aria-label="Drag Folder: Child"]'), null);
+    assert.equal(tray.querySelector('[aria-label="Drag Process: Review"]'), null);
+    assert.equal(tray.textContent?.includes("Ignored project"), false);
+    const trayDragWrites = new Map<string, string>();
+    const trayDrag = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+    const trayDataTransfer = {
+      effectAllowed: "",
+      setData: (type: string, value: string) => trayDragWrites.set(type, value),
+    };
+    Object.defineProperty(trayDrag, "dataTransfer", { value: trayDataTransfer });
+    await act(async () => {
+      trayCandidate.dispatchEvent(trayDrag);
+      await flushUI();
+    });
+    assert.deepEqual(JSON.parse(trayDragWrites.get(EXPLORER_DRAG_MIME) ?? "{}"), {
+      kind: "logic_gate",
+      label: "Added process",
+      itemID: "added-gate",
+      itemType: "logic_gate",
+    });
+    assert.equal(trayDataTransfer.effectAllowed, "copy");
+    await act(async () => {
+      trayToggle.click();
+      await flushUI();
+    });
+    assert.equal(trayToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(dom.window.localStorage.getItem("mangorts.process-map.placement-tray-collapsed.v1"), "true");
+    await act(async () => {
+      trayToggle.click();
+      await flushUI();
+      await flushUI();
+    });
+    assert.equal(trayToggle.getAttribute("aria-expanded"), "true");
+    assert.ok(tray.querySelector('[aria-label="Drag Process: Revoked candidate"]'));
+    const trayReadsBeforeRealtime = requests.filter((request) => request.url.pathname === "/v1/company-explorer/children").length;
+    deferNextTrayBranchRead = true;
+    await act(async () => {
+      realtimeSocket?.onmessage?.({ data: JSON.stringify({
+        type: "process_map.changed",
+        company_id: "company-1",
+        scope: "process-map:company",
+        origin_connection_id: "tray-old-read-connection",
+      }) });
+      await flushUI();
+      await flushUI();
+    });
+    const completeStaleTrayRead = finishTrayBranchRead;
+    assert.ok(completeStaleTrayRead, "the pre-invalidation tray read remains pending");
+    trayTransientCandidateVisible = false;
+    await act(async () => {
+      realtimeSocket?.onmessage?.({ data: JSON.stringify({
+        type: "process_map.changed",
+        company_id: "company-1",
+        scope: "process-map:company",
+        origin_connection_id: "tray-revocation-connection",
+      }) });
+      await flushUI();
+      await flushUI();
+      trayToggle.click();
+      await flushUI();
+    });
+    assert.equal(trayToggle.getAttribute("aria-expanded"), "false");
+    await act(async () => {
+      completeStaleTrayRead();
+      await flushUI();
+      await flushUI();
+    });
+    assert.equal(
+      requests.filter((request) => request.url.pathname === "/v1/company-explorer/children").length,
+      trayReadsBeforeRealtime + 1,
+      "collapsing while a replacement read is queued prevents that hidden read",
+    );
+    await act(async () => {
+      trayToggle.click();
+      await flushUI();
+      await flushUI();
+      await flushUI();
+    });
+    assert.equal(trayToggle.getAttribute("aria-expanded"), "true");
+    assert.equal(
+      requests.filter((request) => request.url.pathname === "/v1/company-explorer/children").length,
+      trayReadsBeforeRealtime + 2,
+      "a newer realtime generation waits out the shared stale read and performs one fresh exact-branch read",
+    );
+    assert.equal(tray.querySelector('[aria-label="Drag Process: Revoked candidate"]'), null, "realtime revocation removes the stale tray candidate");
+    const placementWritesBeforeOverlayCancel = requests.filter((request) => request.method === "PUT" && request.url.pathname.includes("/placements/")).length;
+    const overlayCancelDrop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(overlayCancelDrop, {
+      clientX: { value: 300 },
+      clientY: { value: 120 },
+      dataTransfer: { value: {
+        types: [EXPLORER_DRAG_MIME],
+        dropEffect: "copy",
+        getData: (type: string) => type === EXPLORER_DRAG_MIME
+          ? JSON.stringify({ kind: "logic_gate", label: "Added process", itemID: "added-gate", itemType: "logic_gate" })
+          : "",
+      } },
+    });
+    const fixedToolbar = container.querySelector<HTMLElement>('[aria-label="Process Map tools"]');
+    assert.ok(fixedToolbar);
+    await act(async () => {
+      fixedToolbar.dispatchEvent(overlayCancelDrop);
+      await flushUI();
+    });
+    assert.equal(
+      requests.filter((request) => request.method === "PUT" && request.url.pathname.includes("/placements/")).length,
+      placementWritesBeforeOverlayCancel,
+      "releasing a drag over fixed Process Map UI never creates a placement under it",
+    );
 
     const folderCard = container.querySelector<HTMLElement>('[aria-label="Folder: Child"]');
     const processCard = container.querySelector<HTMLElement>('[aria-label="Process: Review"]');
@@ -426,6 +650,7 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
 
     const traceEdge = container.querySelector<HTMLElement>(".react-flow__edge");
     assert.ok(traceEdge);
+    assert.ok(container.querySelector(".process-map-trace__flow"), "the saved trace includes one source-to-target flow overlay");
     await act(async () => {
       traceEdge.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
       await flushUI();
@@ -605,10 +830,12 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       } },
     });
     const surface = container.querySelector<HTMLElement>(".process-map-surface");
+    const mapCanvas = container.querySelector<HTMLElement>(".react-flow");
     assert.ok(surface);
+    assert.ok(mapCanvas);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 30));
-      surface.dispatchEvent(drop);
+      mapCanvas.dispatchEvent(drop);
       await flushUI();
       await flushUI();
     });
@@ -618,11 +845,46 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
     assert.equal(placementWrite.method, "PUT");
     assert.equal(placementWrite.body?.map_parent_folder_id, "parent-1");
     assert.equal(placementWrite.originConnectionID, "surface-correlation-1");
+    assert.ok(container.querySelector('[aria-label="Drag Process: Added process"]'), "the candidate remains until its placement save commits");
+    const completeAddedPlacement = finishAddedPlacementPut;
+    assert.ok(completeAddedPlacement);
+    await act(async () => {
+      completeAddedPlacement();
+      await flushUI();
+      await flushUI();
+    });
     assert.ok(container.querySelector('[aria-label="Process: Added process"]'));
+    assert.equal(container.querySelector('[aria-label="Drag Process: Added process"]'), null, "the committed placement leaves the tray");
     assert.equal(
       requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
       readsBeforeSuccessfulDrop,
       "a successful placement response updates the mounted layer without reloading it",
+    );
+    const readsBeforeFailedDrop = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
+    const failedDrop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
+    Object.defineProperties(failedDrop, {
+      clientX: { value: 420 },
+      clientY: { value: 224 },
+      dataTransfer: { value: {
+        types: [EXPLORER_DRAG_MIME],
+        dropEffect: "copy",
+        getData: (type: string) => type === EXPLORER_DRAG_MIME
+          ? JSON.stringify({ kind: "logic_gate", label: "Failing process", itemID: "failing-gate", itemType: "logic_gate" })
+          : "",
+      } },
+    });
+    await act(async () => {
+      mapCanvas.dispatchEvent(failedDrop);
+      await flushUI();
+      await flushUI();
+      await flushUI();
+    });
+    assert.equal(container.querySelector('[aria-label="Process: Failing process"]'), null);
+    assert.ok(container.querySelector('[aria-label="Drag Process: Failing process"]'), "a rejected placement remains available in the tray");
+    assert.equal(
+      requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
+      readsBeforeFailedDrop + 1,
+      "a rejected tray-origin placement performs one bounded canonical recovery read",
     );
     const layerReadCount = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
     await act(async () => {
@@ -669,6 +931,7 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       await flushUI();
     });
     assert.equal(container.querySelector('[aria-label="Process: Review"]'), null, "placement deletion starts optimistically");
+    assert.ok(container.querySelector('[aria-label="Drag Process: Review"]'), "removing a current-layer placement returns it to the tray");
     await act(async () => {
       realtimeSocket?.onmessage?.({ data: JSON.stringify({
         type: "process_map.changed",
@@ -723,7 +986,7 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
     });
     const readsBeforeDelayedDrop = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
     await act(async () => {
-      surface.dispatchEvent(delayedDrop);
+      mapCanvas.dispatchEvent(delayedDrop);
       await flushUI();
     });
     assert.ok(finishDelayedPlacementPut, "the Explorer placement write remains pending for the permission race");
@@ -768,11 +1031,15 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       } },
     });
     await act(async () => {
-      surface.dispatchEvent(navigationDrop);
+      mapCanvas.dispatchEvent(navigationDrop);
       await flushUI();
     });
     assert.ok(finishNavigationPlacementPut, "the source-layer write remains pending during navigation");
     await act(async () => {
+      const currentTrayToggle = container.querySelector<HTMLButtonElement>('.process-map-placement-tray__toggle');
+      assert.ok(currentTrayToggle);
+      currentTrayToggle.click();
+      await flushUI();
       root.render(
         <ProcessMapSurface
           apiBase="http://api.test"
@@ -783,6 +1050,16 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       );
       await flushUI();
     });
+    assert.equal(
+      container.querySelector<HTMLButtonElement>('.process-map-placement-tray__toggle')?.getAttribute("aria-expanded"),
+      "false",
+      "the collapsed preference survives Folder navigation",
+    );
+    assert.equal(
+      requests.some((request) => request.url.pathname === "/v1/company-explorer/children" && request.url.searchParams.get("parent_id") === "navigation-folder"),
+      false,
+      "a collapsed tray does not load a hidden Explorer branch",
+    );
     assert.ok(finishNavigationLayerRead, "the newly navigated layer read is in flight");
     const completeNavigationPlacement = finishNavigationPlacementPut;
     await act(async () => {
@@ -857,10 +1134,10 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       } },
     });
     const catchupReadsBeforeMixedResponses = requests.filter((request) => request.url.pathname === "/v1/process-map/layer" && request.url.searchParams.get("folder_id") === "catchup-folder").length;
-    const catchupSurface = container.querySelector<HTMLElement>(".process-map-surface");
-    assert.ok(catchupSurface);
+    const catchupCanvas = container.querySelector<HTMLElement>(".react-flow");
+    assert.ok(catchupCanvas);
     await act(async () => {
-      catchupSurface.dispatchEvent(mixedDrop);
+      catchupCanvas.dispatchEvent(mixedDrop);
       await flushUI();
     });
     assert.ok(finishMixedPlacementPut, "the newer placement PUT remains pending");

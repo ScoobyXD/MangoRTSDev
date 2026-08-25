@@ -397,7 +397,10 @@ func isProcessMapChangedDomainEvent(event domain.DomainEvent) bool {
 	if stringInList(eventType, ProcessMapWorkspaceEventTypes) {
 		return true
 	}
-	return (eventType == "logic_gate_created" || eventType == "company_explorer_folder_created") &&
+	if eventType == "company_explorer_folder_created" {
+		return true
+	}
+	return eventType == "logic_gate_created" &&
 		workspaceEventPayloadString(event.Payload, "realtime_change_type") == "resource_restored"
 }
 
