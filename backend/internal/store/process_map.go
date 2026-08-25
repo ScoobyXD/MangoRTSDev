@@ -7,6 +7,8 @@ import (
 
 const ProcessMapMaxRoutePoints = 256
 
+const processMapMaxLayerAncestors = 256
+
 const (
 	processMapMinCoordinate = -2147483648
 	processMapMaxCoordinate = 2147483647

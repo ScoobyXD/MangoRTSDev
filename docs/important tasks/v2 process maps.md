@@ -402,9 +402,15 @@ A Folder-layer response uses:
 {
   "kind": "folder",
   "folder_id": "...",
-  "name": "Operations"
+  "name": "Receiving",
+  "ancestors": [
+    { "folder_id": "...", "name": "Operations" },
+    { "folder_id": "...", "name": "Plant" }
+  ]
 }
 ```
+
+`ancestors` follows only the bounded Process Map placement chain from the root-most mapped Folder to the current Folder's immediate parent. It never follows Company Explorer parentage or loads the full tree. If any ancestor is missing or inaccessible, the server omits the complete ancestor list so hidden identity, name, count, and depth are not disclosed.
 
 The restricted placement object intentionally contains only `restricted`, `grid_x`, and `grid_y`. The frontend supplies the uniform `?` presentation. It must not receive a hidden resource ID, type, name, dimensions, revision, timestamps, anchors, or relationships.
 
@@ -722,8 +728,8 @@ Official capability references:
 These are frontend constants and are never columns:
 
 ```text
-Folder       point-up hexagon, 5 x 5 smallest grid squares
-Process      rectangle,        4 x 3 smallest grid squares
+Folder       point-up hexagon, 7 x 7 smallest grid squares
+Process      rectangle,        7 x 5 smallest grid squares
 Restricted   uniform rectangle, 4 x 3 smallest grid squares, containing only ?
 Input        one fixed left-center anchor per accessible card
 Output       one fixed right-center anchor per accessible card

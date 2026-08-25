@@ -435,14 +435,21 @@ func TestProcessMapHTTPReadsOnlyTheRequestedLayer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	leaf, err := fixture.repo.CreateCompanyExplorerFolder(fixture.companyID, "", "logic_gate", "Leaf")
+	if err != nil {
+		t.Fatal(err)
+	}
 	deep, err := fixture.repo.CreateLogicGate(fixture.companyID, "Deep")
 	if err != nil {
 		t.Fatal(err)
 	}
+	innerID := inner.FolderID
+	leafID := leaf.FolderID
 	for _, input := range []store.ProcessMapPlacementPutInput{
 		{CompanyID: fixture.companyID, ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: fixture.folder.FolderID, GridX: 0, GridY: 0, ActorUserID: fixture.admin.UserID, PermissionUserID: fixture.admin.UserID},
 		{CompanyID: fixture.companyID, ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: inner.FolderID, MapParentFolderID: &outerID, GridX: 1, GridY: 1, ActorUserID: fixture.admin.UserID, PermissionUserID: fixture.admin.UserID},
-		{CompanyID: fixture.companyID, ResourceType: domain.ProcessMapResourceTypeProcess, ResourceID: deep.LogicGateID, MapParentFolderID: &inner.FolderID, GridX: 2, GridY: 2, ActorUserID: fixture.admin.UserID, PermissionUserID: fixture.admin.UserID},
+		{CompanyID: fixture.companyID, ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: leaf.FolderID, MapParentFolderID: &innerID, GridX: 2, GridY: 2, ActorUserID: fixture.admin.UserID, PermissionUserID: fixture.admin.UserID},
+		{CompanyID: fixture.companyID, ResourceType: domain.ProcessMapResourceTypeProcess, ResourceID: deep.LogicGateID, MapParentFolderID: &leafID, GridX: 3, GridY: 3, ActorUserID: fixture.admin.UserID, PermissionUserID: fixture.admin.UserID},
 	} {
 		if _, err := fixture.repo.PutProcessMapPlacement(input); err != nil {
 			t.Fatal(err)
@@ -458,13 +465,55 @@ func TestProcessMapHTTPReadsOnlyTheRequestedLayer(t *testing.T) {
 	if outer.Code != http.StatusOK || !strings.Contains(outer.Body.String(), inner.FolderID) || strings.Contains(outer.Body.String(), deep.LogicGateID) {
 		t.Fatalf("outer layer was not exact: status=%d body=%s", outer.Code, outer.Body.String())
 	}
+	leafResponse := fixture.request(t, fixture.admin, http.MethodGet,
+		"/v1/process-map/layer?company_id="+companyQuery+"&folder_id="+url.QueryEscape(leaf.FolderID), "", nil)
+	var leafWire struct {
+		Layer domain.ProcessMapLayer `json:"layer"`
+	}
+	if leafResponse.Code != http.StatusOK {
+		t.Fatalf("leaf layer status=%d body=%s", leafResponse.Code, leafResponse.Body.String())
+	}
+	if err := json.NewDecoder(leafResponse.Body).Decode(&leafWire); err != nil {
+		t.Fatal(err)
+	}
+	if len(leafWire.Layer.Ancestors) != 2 ||
+		leafWire.Layer.Ancestors[0] != (domain.ProcessMapLayerAncestor{FolderID: fixture.folder.FolderID, Name: "Operations"}) ||
+		leafWire.Layer.Ancestors[1] != (domain.ProcessMapLayerAncestor{FolderID: inner.FolderID, Name: "Inner"}) {
+		t.Fatalf("leaf breadcrumb = %+v, want Operations then Inner", leafWire.Layer.Ancestors)
+	}
+
+	noAccess := store.ResourceDefaultAccessNoAccess
+	if _, _, err := fixture.repo.PutResourcePermissionPolicy(store.ResourcePermissionPolicyUpdateInput{
+		CompanyID: fixture.companyID, ResourceType: store.EntityTypeCompanyExplorerFolder, ResourceID: fixture.folder.FolderID,
+		PermissionMode: store.PolicyModeCustomized, DefaultAccess: &noAccess, DescendantAction: store.PolicyDescendantActionInheritedOnly,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hiddenAncestor := fixture.request(t, fixture.viewer, http.MethodGet,
+		"/v1/process-map/layer?company_id="+companyQuery+"&folder_id="+url.QueryEscape(leaf.FolderID), "", nil)
+	if hiddenAncestor.Code != http.StatusOK || strings.Contains(hiddenAncestor.Body.String(), fixture.folder.FolderID) || strings.Contains(hiddenAncestor.Body.String(), "Operations") {
+		t.Fatalf("hidden ancestor leaked: status=%d body=%s", hiddenAncestor.Code, hiddenAncestor.Body.String())
+	}
+	var hiddenWire struct {
+		Layer domain.ProcessMapLayer `json:"layer"`
+	}
+	if err := json.NewDecoder(hiddenAncestor.Body).Decode(&hiddenWire); err != nil {
+		t.Fatal(err)
+	}
+	if hiddenWire.Layer.Ancestors == nil || len(hiddenWire.Layer.Ancestors) != 0 {
+		t.Fatalf("hidden ancestor breadcrumb = %+v, want empty list", hiddenWire.Layer.Ancestors)
+	}
 }
 
 func TestProcessMapETagSeparatesViewerAndResponseContract(t *testing.T) {
 	fixture := newProcessMapHTTPFixture(t)
 	server := NewServer(fixture.repo)
 	request := httptest.NewRequest(http.MethodGet, "/same-path?company_id="+url.QueryEscape(fixture.companyID), nil)
-	layerETag, err := server.processMapETag(request, fixture.companyID, fixture.viewer.UserID, domain.RoleCompanyUser, "process-map-layer-v1")
+	layerETag, err := server.processMapETag(request, fixture.companyID, fixture.viewer.UserID, domain.RoleCompanyUser, "process-map-layer-v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyLayerETag, err := server.processMapETag(request, fixture.companyID, fixture.viewer.UserID, domain.RoleCompanyUser, "process-map-layer-v1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,12 +521,12 @@ func TestProcessMapETagSeparatesViewerAndResponseContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adminETag, err := server.processMapETag(request, fixture.companyID, fixture.admin.UserID, domain.RoleCompanyAdmin, "process-map-layer-v1")
+	adminETag, err := server.processMapETag(request, fixture.companyID, fixture.admin.UserID, domain.RoleCompanyAdmin, "process-map-layer-v2")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if layerETag == relationshipETag || layerETag == adminETag {
-		t.Fatalf("viewer-safe response contracts reused ETag: layer=%s relationship=%s admin=%s", layerETag, relationshipETag, adminETag)
+	if layerETag == legacyLayerETag || layerETag == relationshipETag || layerETag == adminETag {
+		t.Fatalf("viewer-safe response contracts reused ETag: layer=%s legacy=%s relationship=%s admin=%s", layerETag, legacyLayerETag, relationshipETag, adminETag)
 	}
 }
 

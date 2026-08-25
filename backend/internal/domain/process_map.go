@@ -85,10 +85,16 @@ type ProcessMapLayerTrace struct {
 	UpdatedTimestamp                  time.Time              `json:"updated_timestamp"`
 }
 
+type ProcessMapLayerAncestor struct {
+	FolderID string `json:"folder_id"`
+	Name     string `json:"name"`
+}
+
 type ProcessMapLayer struct {
-	Kind     string `json:"kind"`
-	FolderID string `json:"folder_id,omitempty"`
-	Name     string `json:"name,omitempty"`
+	Kind      string                    `json:"kind"`
+	FolderID  string                    `json:"folder_id,omitempty"`
+	Name      string                    `json:"name,omitempty"`
+	Ancestors []ProcessMapLayerAncestor `json:"ancestors"`
 }
 
 type ProcessMapLayerView struct {

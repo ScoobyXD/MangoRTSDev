@@ -35,8 +35,8 @@
 33. Every successful placement save MUST increment that placement's revision.
 34. Placement saves MUST use last-committed-save-wins behavior and MUST NOT reject a save merely because the client read an older revision.
 35. Every placement MUST record database-generated creation and update timestamps.
-36. Every accessible Folder MUST be a fixed point-up hexagon occupying exactly five by five smallest grid squares.
-37. Every accessible Process MUST be a fixed rectangle occupying exactly four by three smallest grid squares.
+36. Every accessible Folder MUST be a fixed point-up hexagon occupying exactly seven by seven smallest grid squares.
+37. Every accessible Process MUST be a fixed rectangle occupying exactly seven by five smallest grid squares.
 38. Folder and Process dimensions MUST NOT be user-adjustable or stored as placement data in the first version.
 39. The first Process Map version MUST use neutral item styling and MUST NOT add semantic item colors.
 40. A single click on an accessible map item MUST select that item.
@@ -108,10 +108,12 @@
 106. The first Process Map version MAY allow placement cards to overlap and MUST NOT add automatic collision repair or automatic layout.
 107. The first Process Map manual-add entry point MUST be dragging one exact supported resource from Company Explorer onto the current layer, and MUST NOT add a separate candidate-search API.
 108. The Process Map editor SHOULD use orthogonal circuit-style trace routing where practical while preserving the one bounded integer route-point array as the only saved geometry.
-109. Every restricted placeholder MUST occupy the same fixed four-by-three smallest-grid-square rectangle used by an accessible Process, regardless of its hidden resource type.
-110. The fixed input anchor MUST be centered on the left side and the fixed output anchor MUST be centered on the right side of every accessible card.
+109. Every restricted placeholder MUST occupy one fixed four-by-three smallest-grid-square rectangle regardless of its hidden resource type.
+110. The fixed input anchor MUST touch the physical center of the accessible card's left side and the fixed output anchor MUST touch the physical center of its right side, with no visible gap before a trace.
 111. The Process Map frontend MAY use `@xyflow/react` for interaction and rendering, but Mango-owned placements, relationships, and traces MUST remain the only persisted map state; React Flow's graph JSON and viewport MUST NOT be persisted.
 112. Every visible trace MUST render below cards as an orthogonal cyan-to-blue surface exactly one smallest grid square thick, using the same gradient stops as the Node icon.
 113. A successful placement, relationship, or trace mutation MUST update the initiating mounted map from its committed response and MUST NOT echo a redundant realtime reload to that exact originating connection; every other current company connection MUST receive one compact invalidation, source and visibility changes MUST invalidate every affected viewer, and Process Map MUST NOT poll.
+114. Every Folder layer MUST display its complete visible Process Map path from the root-most mapped ancestor through the current Folder, and every visible ancestor name MUST navigate directly to that Folder layer.
+115. Folder path ancestry MUST follow only saved Process Map parentage, MUST NOT use Company Explorer parentage or load the full tree, and MUST omit the entire ancestor list when any ancestor is missing or inaccessible.
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25

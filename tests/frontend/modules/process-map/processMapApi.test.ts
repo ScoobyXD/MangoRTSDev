@@ -79,6 +79,36 @@ test("identical exact-layer reads singleflight and restricted rows retain only e
   }
 });
 
+test("folder layer reads normalize the exact Process Map ancestor chain", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    ...layerPayload(),
+    layer: {
+      kind: "folder",
+      folder_id: "folder-3",
+      name: "Receiving",
+      ancestors: [
+        { folder_id: "folder-1", name: "Operations" },
+        { folder_id: "folder-2", name: "Plant" },
+      ],
+    },
+  }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+  try {
+    const response = await fetchProcessMapLayer("https://process-map-breadcrumb.test", "company-1", "folder-3");
+    assert.deepEqual(response.layer, {
+      kind: "folder",
+      folder_id: "folder-3",
+      name: "Receiving",
+      ancestors: [
+        { folder_id: "folder-1", name: "Operations" },
+        { folder_id: "folder-2", name: "Plant" },
+      ],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Strict Mode abort and immediate replay keep the shared exact-layer leader alive", async () => {
   const originalFetch = globalThis.fetch;
   let fetchCalls = 0;

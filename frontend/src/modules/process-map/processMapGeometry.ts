@@ -13,9 +13,9 @@ export type ProcessMapFootprint = {
   height: number;
 };
 
-export const PROCESS_MAP_FOLDER_FOOTPRINT: ProcessMapFootprint = { width: 5, height: 5 };
-export const PROCESS_MAP_PROCESS_FOOTPRINT: ProcessMapFootprint = { width: 4, height: 3 };
-export const PROCESS_MAP_RESTRICTED_FOOTPRINT: ProcessMapFootprint = PROCESS_MAP_PROCESS_FOOTPRINT;
+export const PROCESS_MAP_FOLDER_FOOTPRINT: ProcessMapFootprint = { width: 7, height: 7 };
+export const PROCESS_MAP_PROCESS_FOOTPRINT: ProcessMapFootprint = { width: 7, height: 5 };
+export const PROCESS_MAP_RESTRICTED_FOOTPRINT: ProcessMapFootprint = { width: 4, height: 3 };
 
 export function processMapFootprint(resourceType?: ProcessMapResourceType, restricted = false): ProcessMapFootprint {
   if (restricted) return PROCESS_MAP_RESTRICTED_FOOTPRINT;
@@ -78,6 +78,22 @@ function samePoint(left: ProcessMapGridPoint, right: ProcessMapGridPoint): boole
 
 function appendDistinct(points: ProcessMapGridPoint[], point: ProcessMapGridPoint): void {
   if (!points.length || !samePoint(points[points.length - 1], point)) points.push(point);
+}
+
+function appendSimplifiedRenderedPoint(points: ProcessMapGridPoint[], point: ProcessMapGridPoint): void {
+  appendDistinct(points, point);
+  while (points.length >= 3) {
+    const end = points.length - 1;
+    const before = points[end - 2];
+    const middle = points[end - 1];
+    const after = points[end];
+    if (!(
+      (before.x === middle.x && middle.x === after.x)
+      || (before.y === middle.y && middle.y === after.y)
+    )) return;
+    points.splice(end - 1, 1);
+    if (points.length >= 2 && samePoint(points[points.length - 2], points[points.length - 1])) points.pop();
+  }
 }
 
 export function normalizeProcessMapRoutePoints(points: readonly ProcessMapGridPoint[]): ProcessMapGridPoint[] {
@@ -150,11 +166,11 @@ function renderProcessMapOrthogonalPolyline(
   for (const [index, point] of requested.entries()) {
     const previous = rendered[rendered.length - 1];
     if (previous && previous.x !== point.x && previous.y !== point.y) {
-      appendDistinct(rendered, index === requested.length - 1
+      appendSimplifiedRenderedPoint(rendered, index === requested.length - 1
         ? { x: previous.x, y: point.y }
         : { x: point.x, y: previous.y });
     }
-    appendDistinct(rendered, point);
+    appendSimplifiedRenderedPoint(rendered, point);
   }
   return rendered;
 }

@@ -27,11 +27,25 @@ export function ProcessMapPage({ apiBase, companyID, folderID, onNavigate }: Pro
         >
           Process Map
         </button>
-        {folderID && (
-          <>
+        {layer?.kind === "folder" && (
+          <nav className="process-map-page__breadcrumbs" aria-label="Process Map folder path">
+            {layer.ancestors.map((ancestor) => (
+              <span className="process-map-page__breadcrumb" key={ancestor.folder_id}>
+                <span className="process-map-page__separator" aria-hidden="true">/</span>
+                <button
+                  type="button"
+                  className="process-map-page__ancestor"
+                  onClick={() => onNavigate?.(buildProcessMapRoute(ancestor.folder_id))}
+                >
+                  {ancestor.name}
+                </button>
+              </span>
+            ))}
+            <span className="process-map-page__breadcrumb">
             <span className="process-map-page__separator" aria-hidden="true">/</span>
-            <span className="process-map-page__layer-name">{layer?.kind === "folder" ? layer.name : "Folder"}</span>
-          </>
+              <span className="process-map-page__layer-name" aria-current="page">{layer.name}</span>
+            </span>
+          </nav>
         )}
       </header>
       <div className="process-map-page__canvas">
