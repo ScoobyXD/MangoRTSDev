@@ -269,11 +269,12 @@ test("QA deploy permissions exclude account-wide IAM, Route53, S3, and WAF mutat
   assert.doesNotMatch(qaDeployPolicy, /cognito-idp:(?:List\*|ListUsers)|iam:(?:Get\*|List\*)|ecs:(?:Describe\*|List\*)|cloudfront:(?:Get\*|List\*)|logs:Get/);
   assert.doesNotMatch(qaExactReadPolicy, /resources\s*=\s*\["\*"\]/);
   assert.deepEqual(
-    [...qaAccountMetadataPolicy.matchAll(/"((?:ec2|ecr|route53|sts):[^"]+)"/g)].map((match) => match[1]),
+    [...qaAccountMetadataPolicy.matchAll(/"((?:ec2|ecr|ecs|route53|sts):[^"]+)"/g)].map((match) => match[1]),
     [
       "ec2:DescribeManagedPrefixLists",
       "ec2:DescribeSubnets",
       "ecr:GetAuthorizationToken",
+      "ecs:DescribeTaskDefinition",
       "sts:GetCallerIdentity",
     ],
   );

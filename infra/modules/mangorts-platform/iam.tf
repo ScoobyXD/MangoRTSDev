@@ -270,6 +270,7 @@ data "aws_iam_policy_document" "github_deploy" {
         "ec2:DescribeManagedPrefixLists",
         "ec2:DescribeSubnets",
         "ecr:GetAuthorizationToken",
+        "ecs:DescribeTaskDefinition",
         "sts:GetCallerIdentity"
       ]
       resources = ["*"]
@@ -299,7 +300,6 @@ data "aws_iam_policy_document" "github_deploy" {
         "cognito-idp:ListTagsForResource",
         "ecs:DescribeClusters",
         "ecs:DescribeServices",
-        "ecs:DescribeTaskDefinition",
         "ecs:ListTagsForResource",
         "elasticache:ListTagsForResource",
         "logs:ListTagsForResource",
