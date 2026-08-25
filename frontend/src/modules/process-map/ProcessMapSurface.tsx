@@ -1030,6 +1030,7 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
           className="process-map-placement-tray__toggle"
           aria-expanded={!trayCollapsed}
           aria-controls={trayListID}
+          aria-label={trayCollapsed ? "Expand placement tray" : "Collapse placement tray"}
           title={trayCollapsed ? "Expand placement tray" : "Collapse placement tray"}
           onClick={() => {
             setTrayCollapsed((current) => {
@@ -1039,11 +1040,15 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
             });
           }}
         >
+          <span className="process-map-placement-tray__disclosure" aria-hidden="true">
+            <ExplorerDisclosureIcon open={!trayCollapsed} color="#475569" />
+          </span>
           <span className="process-map-placement-tray__heading">
             {folderID ? "Inside this Folder" : "Root Folders"}
           </span>
-          {!trayCollapsed && <span className="process-map-placement-tray__hint">Drag to place</span>}
-          <ExplorerDisclosureIcon open={!trayCollapsed} color="#64748b" />
+          <span className="process-map-placement-tray__collapse-action">
+            {trayCollapsed ? "Expand" : "Collapse"}
+          </span>
         </button>
         <div id={trayListID} className="process-map-placement-tray__body" hidden={trayCollapsed}>
           {(trayLoading || loading) && <p className="process-map-placement-tray__status">Loading available items…</p>}

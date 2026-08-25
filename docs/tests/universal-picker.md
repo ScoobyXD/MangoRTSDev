@@ -58,13 +58,13 @@ Last updated: 2026-08-17
 
 # Universal Picker Business Logic Laws
 
-UP1 - Mango has one shared Universal picker implementation. Node, Logic Gate, and Project Tiptap editors, the Node header linker, the selected-email placement toolbar, and Project Attach email must not implement separate picker search, keyboard, category, or mode behavior.
+UP1 - Mango has one shared Universal picker implementation. Node, Logic Gate, and Project Tiptap editors, the Node header linker, the selected-email placement toolbar, Project Attach email, and the Process Map Folder header must not implement separate picker search, keyboard, category, or mode behavior.
 
 UP2 - Typing `#` with a collapsed caret in an active Node, Logic Gate, or Project Tiptap editor opens the picker at the trigger position and focuses the picker's single search input. The trigger remains owned by that exact document and selection until the picker selects, cancels, or becomes stale.
 
 UP3 - The selected My Triage or Shared Triage email launcher opens the picker in `##` link mode. Project Attach email opens in `##` link mode with Emails selected. The Node header linker opens the same picker in `##` link mode with all legal Node targets, including Emails; the Node header has no separate Attach email button or picker. Ordinary editor hashtag entry starts in `#` reference mode.
 
-UP4 - The picker has exactly two meanings. `#` is reference mode and may insert an inline entity chip or open a selected resource without changing any relationship. `##` is link mode and must complete the source host's documented business relationship before an editor inserts the same target as a reference chip.
+UP4 - The picker has exactly two typed action meanings. `#` is reference mode and may insert an inline entity chip or open a selected resource without changing any relationship. `##` is action mode: selection hosts MUST complete their documented business relationship before an editor inserts the same target as a reference chip, while the Process Map drag host MUST complete only its documented placement when the exact dragged Process is dropped on the map canvas.
 
 UP5 - While the focused search is empty, typing `#` in reference mode changes to link mode only when the host supplied at least one legal link target. While the focused search is empty, Backspace in link mode changes to reference mode. The footer mode control performs the same transition. Every mode transition returns to All, clears the query, and clears workspace results.
 
@@ -86,9 +86,9 @@ UP13 - Workspace search and blank Pinned reads use the current host's authentica
 
 UP14 - Workspace rows carry the canonical resource type, literal canonical resource ID, and display label. Folders are headings and are never selectable relationship endpoints.
 
-UP15 - Enter or plain Tab selects the highlighted result. Arrow Up and Arrow Down wrap among selectable results. Pointer hover changes the highlighted result and pointer click performs the same selection. Escape closes the picker without selecting.
+UP15 - In selection hosts, Enter or plain Tab selects the highlighted result, pointer click performs the same selection, and Arrow Up and Arrow Down wrap among selectable results. In the Process Map drag host, click, Enter, and Tab MUST NOT select or place a result. Escape closes every picker without selecting.
 
-UP16 - Every picker host renders one full-viewport transparent dismiss layer immediately behind the popup. A pointer press on that layer closes the picker without reference insertion, relationship mutation, email attachment, or mailbox action.
+UP16 - Every picker host renders one full-viewport transparent dismiss layer immediately behind the popup. A pointer press on that layer closes the picker without reference insertion, relationship mutation, email attachment, mailbox action, or placement; only while a Process Map result drag is active may that layer ignore pointer events so the existing map canvas can receive the drop, and normal dismissal MUST resume on drag end.
 
 UP17 - The picker is portaled into the shared app overlay target. It stays above the dismiss layer and inside the active app-modal layer so a Node popup or other modal cannot hide the picker or steal its input focus.
 
@@ -154,6 +154,8 @@ UP47 - Every search GET is read-only. It must not open a repair transaction, ups
 
 UP48 - The search architecture in UP43 through UP47 is the rule for Mango free-text resource searches: narrow by company, selected type, text, and bounded rank first; authorize that narrowed set last. A listing endpoint that intentionally returns a complete tree is not a free-text search and retains its separately documented tree-visibility behavior.
 UP49 - The Project Logic Gates / Nodes toolbar renders the exact shared My Triage launcher pair. Its `Ready! Open universal linker` control opens the shared Universal picker locked to `##` link mode with Nodes as its only enabled target, and its compact document-plus control creates and links one floating Node without requiring a Logic Gate.
+
+UP50 - The Process Map Folder header renders the existing Universal linker without a floating-Node action and locks it to authorized Processes. Blank rows come from the existing filtered Pinned read, searched rows come from the existing bounded permission-safe workspace search, and every visible Process row is drag-only. Drag start emits the existing exact `logic_gate` Company Explorer payload; only the existing Process Map canvas drop command may create or move its placement, and the picker adds no search service, endpoint, reference, relationship, automatic placement, or automatic layout.
 
 # Scenarios
 

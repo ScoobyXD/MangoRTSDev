@@ -511,6 +511,10 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
     assert.ok(tray);
     assert.ok(trayToggle);
     assert.equal(trayToggle.getAttribute("aria-expanded"), "true", "the tray starts expanded when no preference exists");
+    assert.equal(trayToggle.getAttribute("aria-label"), "Collapse placement tray");
+    assert.equal(trayToggle.querySelector(":scope > :first-child")?.classList.contains("process-map-placement-tray__disclosure"), true);
+    assert.equal(trayToggle.querySelector(".process-map-placement-tray__collapse-action")?.textContent?.trim(), "Collapse");
+    assert.equal(trayToggle.textContent?.includes("Drag to place"), false, "the ambiguous tray hint is removed");
     assert.ok(trayCandidate, "only an immediate unplaced supported resource is available");
     assert.equal(tray.querySelector('[aria-label="Drag Folder: Child"]'), null);
     assert.equal(tray.querySelector('[aria-label="Drag Process: Review"]'), null);
@@ -538,6 +542,8 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       await flushUI();
     });
     assert.equal(trayToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(trayToggle.getAttribute("aria-label"), "Expand placement tray");
+    assert.equal(trayToggle.querySelector(".process-map-placement-tray__collapse-action")?.textContent?.trim(), "Expand");
     assert.equal(dom.window.localStorage.getItem("mangorts.process-map.placement-tray-collapsed.v1"), "true");
     await act(async () => {
       trayToggle.click();

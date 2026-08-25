@@ -14,6 +14,7 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   const api = source("frontend/src/modules/process-map/processMapApi.ts");
   const icons = source("frontend/src/icons/EntityIcons.tsx");
   const page = source("frontend/src/pages/process-map/ProcessMapPage.tsx");
+  const picker = source("frontend/src/modules/editor/UniversalEntityPicker.tsx");
   assert.match(surface, /readExplorerDragPayload/);
   assert.match(surface, /decideProcessMapExplorerDrop/);
   assert.match(surface, /fetchCompanyExplorerRoots/);
@@ -24,6 +25,9 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   assert.match(surface, /trayBranchReadRef[\s\S]*if \(previousRead\) await previousRead;[\s\S]*if \(!active\) return undefined;[\s\S]*folderID, refreshVersion, trayCollapsed/);
   assert.match(surface, /mangorts\.process-map\.placement-tray-collapsed\.v1/);
   assert.match(surface, /aria-expanded=\{!trayCollapsed\}/);
+  assert.match(surface, /aria-label=\{trayCollapsed \? "Expand placement tray" : "Collapse placement tray"\}/);
+  assert.match(surface, /process-map-placement-tray__disclosure[\s\S]*process-map-placement-tray__collapse-action/);
+  assert.doesNotMatch(surface, /Drag to place/);
   assert.match(surface, /<ReactFlow[\s\S]*onDragOver=\{acceptsExplorerDrop\}[\s\S]*onDrop=\{handleDrop\}/);
   assert.match(surface, /setData\(EXPLORER_DRAG_MIME, JSON\.stringify\(candidate\.dragPayload\)\)/);
   assert.ok(surface.indexOf("<aside") < surface.indexOf("<ReactFlow"), "the tray stays outside the transformed React Flow viewport");
@@ -95,6 +99,25 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   assert.match(page, /buildProcessMapRoute\(ancestor\.folder_id\)/);
   assert.match(page, /aria-label="Process Map folder path"/);
   assert.match(page, /aria-current="page"/);
+  assert.match(page, /PROCESS_MAP_LINK_TARGET_TYPES\s*=\s*\["logic_gate"\] as const/);
+  assert.match(page, /activeFolderLayer[\s\S]*layer\?\.kind === "folder"[\s\S]*layer\.folder_id === folderID/);
+  assert.match(page, /useEffect\(\(\) => setPickerAnchor\(null\), \[folderID\]\)/);
+  assert.match(page, /<UniversalLinkerControls[\s\S]*showCreateFloatingNode=\{false\}[\s\S]*Search Processes to place on this map/);
+  const pickerUseStart = page.indexOf("              <UniversalEntityPicker\n");
+  assert.notEqual(pickerUseStart, -1);
+  const pickerUse = page.slice(pickerUseStart, page.indexOf("/>", pickerUseStart) + 2);
+  assert.match(pickerUse, /linkTargetTypes=\{PROCESS_MAP_LINK_TARGET_TYPES\}/);
+  assert.match(pickerUse, /initialMode="link"/);
+  assert.match(pickerUse, /initialCategory="logic_gate"/);
+  assert.match(pickerUse, /lockMode/);
+  assert.match(pickerUse, /onEntityDragStart=\{startProcessDrag\}/);
+  assert.doesNotMatch(pickerUse, /onChoose/);
+  assert.match(page, /setData\(EXPLORER_DRAG_MIME, JSON\.stringify\(\{[\s\S]*kind: "logic_gate"[\s\S]*itemID: entity\.entityID[\s\S]*itemType: "logic_gate"/);
+  assert.doesNotMatch(page, /company-explorer\/search|putProcessMapPlacement|setInterval|requestAnimationFrame/);
+  assert.match(picker, /onEntityDragStart\?:/);
+  assert.match(picker, /if \(!props\.onChoose \|\| busy\) return/);
+  assert.match(picker, /pointerEvents: dragActive \? "none" : "auto"/);
+  assert.match(picker, /onDragEnd=\{\(\) => setDragActive\(false\)\}/);
   assert.doesNotMatch(styles, /process-map-page__layer-name[\s\S]{0,180}text-overflow:\s*ellipsis/);
 });
 
