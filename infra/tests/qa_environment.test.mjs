@@ -4,7 +4,11 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 const read = (path) => readFileSync(resolve(process.cwd(), path), "utf8");
+const devData = read("infra/aws-dev/data.tf");
+const devMain = read("infra/aws-dev/main.tf");
+const devMoved = read("infra/aws-dev/moved.tf");
 const qaMain = read("infra/aws-qa/main.tf");
+const qaDNS = read("infra/aws-qa/dns.tf");
 const qaDatabase = read("infra/aws-qa/database.tf");
 const qaMigration = read("infra/aws-qa/database_migration_task.tf");
 const qaMonitoring = read("infra/aws-qa/monitoring.tf");
@@ -17,9 +21,16 @@ const qaTfvarsExample = read("infra/aws-qa/terraform.tfvars.example");
 const qaBackend = read("infra/aws-qa/backend.hcl.example");
 const qaWorkflow = read(".github/workflows/deploy-qa.yml");
 const qaPreflight = read("scripts/qa_environment_preflight.ps1");
+const prodQADelegation = read("infra/aws-prod/qa_delegation.tf");
 const moduleIAM = read("infra/modules/mangorts-platform/iam.tf");
+const moduleACM = read("infra/modules/mangorts-platform/acm.tf");
+const moduleData = read("infra/modules/mangorts-platform/data.tf");
 const moduleECS = read("infra/modules/mangorts-platform/ecs_alb.tf");
 const moduleEmail = read("infra/modules/mangorts-platform/email_sqs.tf");
+const moduleCloudFront = read("infra/modules/mangorts-platform/cloudfront_s3.tf");
+const moduleLocals = read("infra/modules/mangorts-platform/locals.tf");
+const moduleRoute53 = read("infra/modules/mangorts-platform/route53.tf");
+const moduleVariables = read("infra/modules/mangorts-platform/variables.tf");
 const sharedDeployPolicy = moduleIAM.slice(
   moduleIAM.indexOf('data "aws_iam_policy_document" "github_deploy"'),
   moduleIAM.indexOf('resource "aws_iam_policy" "github_deploy"'),
@@ -139,6 +150,71 @@ test("QA project, environment, and DNS names cannot be changed by GitHub variabl
   assert.doesNotMatch(qaWorkflow, /TF_(?:ROOT_DOMAIN_NAME|APP_SUBDOMAIN|API_SUBDOMAIN|ORIGIN_SUBDOMAIN)/);
   assert.match(qaChecks, /check "qa_identity_is_hard_locked"/);
   assert.match(qaPreflight, /\[string\]\$CompanyName = "Mango QA"/);
+});
+
+test("QA cannot inherit repository-level dev Nylas or sender variables", () => {
+  for (const name of [
+    "EMAIL_FROM_ADDRESS",
+    "NYLAS_CLIENT_ID",
+    "NYLAS_API_BASE_URL",
+    "NYLAS_API_KEY_SECRET_ARN",
+    "NYLAS_STATE_SECRET_ARN",
+    "NYLAS_WEBHOOK_SECRET_ARN",
+    "NYLAS_GOOGLE_SCOPES",
+    "NYLAS_MICROSOFT_SCOPES",
+  ]) {
+    assert.match(qaWorkflow, new RegExp(`vars\\.TF_QA_${name}`));
+    assert.doesNotMatch(qaWorkflow, new RegExp(`vars\\.TF_${name}(?![A-Z_])`));
+  }
+});
+
+test("QA owns a delegated public subdomain without giving automation production DNS access", () => {
+  assert.match(qaDNS, /resource "aws_route53_zone" "qa"/);
+  assert.match(qaDNS, /name\s*=\s*"\$\{local\.app_subdomain\}\.\$\{local\.root_domain_name\}"/);
+  assert.match(qaDNS, /prevent_destroy\s*=\s*true/);
+  assert.match(qaMain, /route53_zone_id\s*=\s*aws_route53_zone\.qa\.zone_id/);
+  assert.doesNotMatch(qaDNS, /assume_role|provider\s*=|aws\.prod/);
+  assert.match(moduleVariables, /variable "route53_zone_id"[\s\S]*?route53_zone_id is required/);
+  assert.doesNotMatch(moduleData, /aws_route53_zone/);
+  assert.match(moduleLocals, /route53_zone_id\s*=\s*trimspace\(var\.route53_zone_id\)/);
+  assert.match(devData, /data "aws_route53_zone" "root"/);
+  assert.match(devMain, /route53_zone_id\s*=\s*data\.aws_route53_zone\.root\.zone_id/);
+  assert.match(devMoved, /from\s*=\s*module\.platform\.data\.aws_route53_zone\.root[\s\S]*?to\s*=\s*data\.aws_route53_zone\.root/);
+  assert.doesNotMatch(moduleACM, /data\.aws_route53_zone\.root\.zone_id/);
+  assert.doesNotMatch(moduleRoute53, /data\.aws_route53_zone\.root\.zone_id/);
+  assert.equal((moduleACM.match(/zone_id\s*=\s*local\.route53_zone_id/g) || []).length, 2);
+  assert.equal((moduleRoute53.match(/zone_id\s*=\s*local\.route53_zone_id/g) || []).length, 3);
+  assert.doesNotMatch(qaWorkflow, /TF_(?:ROUTE53|DNS_ZONE|HOSTED_ZONE)/);
+});
+
+test("production delegates only qa.mangorts.com to the exact protected QA zone", () => {
+  assert.match(prodQADelegation, /resource "aws_route53_record" "qa_delegation"/);
+  assert.match(prodQADelegation, /zone_id\s*=\s*data\.aws_route53_zone\.root\.zone_id/);
+  assert.match(prodQADelegation, /name\s*=\s*"qa\.\$\{local\.root_domain\}"/);
+  assert.match(prodQADelegation, /type\s*=\s*"NS"/);
+  assert.match(prodQADelegation, /allow_overwrite\s*=\s*false/);
+  assert.match(prodQADelegation, /prevent_destroy\s*=\s*true/);
+  assert.match(prodQADelegation, /account_id\s*==\s*"828435022930"/);
+  assert.match(prodQADelegation, /zone_id\s*==\s*"Z05521211GBNMIH6SBM5Z"/);
+  assert.deepEqual(
+    [...prodQADelegation.matchAll(/"(ns-\d+\.awsdns-[\d-]+\.(?:com|net|org|co\.uk))"/g)].map((match) => match[1]),
+    [
+      "ns-1059.awsdns-04.org",
+      "ns-1735.awsdns-24.co.uk",
+      "ns-495.awsdns-61.com",
+      "ns-736.awsdns-28.net",
+    ],
+  );
+  assert.doesNotMatch(prodQADelegation, /provider\s*=|assume_role|aws\.us_east_1/);
+});
+
+test("the shared edge uses the exact AWS-managed CloudFront policy IDs", () => {
+  assert.match(moduleLocals, /cloudfront_caching_optimized_policy_id\s*=\s*"658327ea-f89d-4fab-a63d-7e88639e58f6"/);
+  assert.match(moduleLocals, /cloudfront_caching_disabled_policy_id\s*=\s*"4135ea2d-6df8-44a3-9df3-4b5a84be39ad"/);
+  assert.match(moduleLocals, /cloudfront_all_viewer_except_host_policy_id\s*=\s*"b689b0a8-53d0-40ab-baf2-68738e2966ac"/);
+  assert.doesNotMatch(moduleLocals, /413f1609-33d4-4f8c-8d(?:d|f)f-bd6df8fac40f/);
+  assert.match(moduleCloudFront, /origin_access_control_id\s*=\s*aws_cloudfront_origin_access_control\.frontend\.id/);
+  assert.doesNotMatch(moduleCloudFront, /s3_origin_config\s*\{/);
 });
 
 test("QA registers immutable migration images before schema bootstrap without starting the app", () => {

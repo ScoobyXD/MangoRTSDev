@@ -40,7 +40,7 @@ resource "aws_elasticache_user" "realtime" {
   user_id       = local.realtime_valkey_user_name
   user_name     = local.realtime_valkey_user_name
   engine        = "valkey"
-  access_string = "on ~* &${var.realtime_valkey_channel} +@connection +cluster|slots +cluster|shards +@pubsub"
+  access_string = "on ~* resetchannels &${var.realtime_valkey_channel} -@all +@connection +cluster|slots +cluster|shards +@pubsub"
 
   authentication_mode {
     type = "iam"

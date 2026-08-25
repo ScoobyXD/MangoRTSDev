@@ -12,6 +12,7 @@ module "platform" {
   stack_name   = "aws-dev"
 
   root_domain_name = var.root_domain_name
+  route53_zone_id  = data.aws_route53_zone.root.zone_id
   app_subdomain    = var.app_subdomain
   api_subdomain    = var.api_subdomain
   origin_subdomain = var.origin_subdomain

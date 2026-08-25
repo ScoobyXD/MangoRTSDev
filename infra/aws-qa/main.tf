@@ -12,6 +12,7 @@ module "platform" {
   stack_name   = "aws-qa"
 
   root_domain_name = local.root_domain_name
+  route53_zone_id  = aws_route53_zone.qa.zone_id
   app_subdomain    = local.app_subdomain
   api_subdomain    = local.api_subdomain
   origin_subdomain = local.origin_subdomain

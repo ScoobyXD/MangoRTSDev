@@ -32,18 +32,24 @@ function postgresBinary(name) {
   return found;
 }
 
-const initdb = postgresBinary("initdb");
-const pgCtl = postgresBinary("pg_ctl");
 const psql = postgresBinary("psql");
-const root = mkdtempSync(join(tmpdir(), "mangorts-raci-tabs-pg-"));
-const data = join(root, "data");
-const log = join(root, "postgres.log");
-const host = "127.0.0.1";
-const socket = createServer();
-await new Promise((accept, reject) => socket.listen(0, host, (error) => error ? reject(error) : accept()));
-const port = socket.address().port;
-await new Promise((accept) => socket.close(accept));
-const env = { ...process.env, PGCONNECT_TIMEOUT: "5" };
+const external = Boolean(process.env.RACI_TABS_POSTGRES17_HOST?.trim());
+const initdb = external ? null : postgresBinary("initdb");
+const pgCtl = external ? null : postgresBinary("pg_ctl");
+const root = external ? null : mkdtempSync(join(tmpdir(), "mangorts-raci-tabs-pg-"));
+const data = root && join(root, "data");
+const log = root && join(root, "postgres.log");
+const host = process.env.RACI_TABS_POSTGRES17_HOST?.trim() || "127.0.0.1";
+let port = Number(process.env.RACI_TABS_POSTGRES17_PORT || 0);
+if (!external) {
+  const socket = createServer();
+  await new Promise((accept, reject) => socket.listen(0, host, (error) => error ? reject(error) : accept()));
+  port = socket.address().port;
+  await new Promise((accept) => socket.close(accept));
+}
+const database = process.env.RACI_TABS_POSTGRES17_DATABASE?.trim() || "postgres";
+const user = process.env.RACI_TABS_POSTGRES17_USER?.trim() || "postgres";
+const env = { ...process.env, PGCONNECT_TIMEOUT: "5", PGPASSWORD: process.env.RACI_TABS_POSTGRES17_PASSWORD || process.env.PGPASSWORD || "" };
 let started = false;
 
 function run(binary, args, options = {}) {
@@ -51,7 +57,7 @@ function run(binary, args, options = {}) {
 }
 
 function sql(statement, expectFailure = false) {
-  const result = spawnSync(psql, ["-X", "-h", host, "-p", String(port), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", statement], { encoding: "utf8", timeout: 30_000, env });
+  const result = spawnSync(psql, ["-X", "-h", host, "-p", String(port), "-U", user, "-d", database, "-v", "ON_ERROR_STOP=1", "-c", statement], { encoding: "utf8", timeout: 30_000, env });
   if (result.error) throw result.error;
   if (!expectFailure && result.status !== 0) throw new Error(result.stderr || result.stdout);
   if (expectFailure && result.status === 0) throw new Error(`expected SQL to fail: ${statement}`);
@@ -59,14 +65,14 @@ function sql(statement, expectFailure = false) {
 }
 
 function scalar(statement) {
-  const result = spawnSync(psql, ["-X", "-t", "-A", "-h", host, "-p", String(port), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-c", statement], { encoding: "utf8", timeout: 30_000, env });
+  const result = spawnSync(psql, ["-X", "-t", "-A", "-h", host, "-p", String(port), "-U", user, "-d", database, "-v", "ON_ERROR_STOP=1", "-c", statement], { encoding: "utf8", timeout: 30_000, env });
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(result.stderr || result.stdout);
   return result.stdout.trim();
 }
 
 function runFile(path, expectFailure = false) {
-  const result = spawnSync(psql, ["-X", "-h", host, "-p", String(port), "-U", "postgres", "-d", "postgres", "-v", "ON_ERROR_STOP=1", "-f", path], { encoding: "utf8", timeout: 60_000, env });
+  const result = spawnSync(psql, ["-X", "-h", host, "-p", String(port), "-U", user, "-d", database, "-v", "ON_ERROR_STOP=1", "-f", path], { encoding: "utf8", timeout: 60_000, env });
   if (result.error) throw result.error;
   if (!expectFailure && result.status !== 0) throw new Error(result.stderr || result.stdout);
   if (expectFailure && result.status === 0) throw new Error(`expected ${path} to reject schema drift`);
@@ -79,9 +85,11 @@ function expectScalar(statement, expected, message) {
 }
 
 try {
-  run(initdb, ["-D", data, "-A", "trust", "-U", "postgres", "--no-locale"], { stdio: "pipe" });
-  run(pgCtl, ["-D", data, "-l", log, "-o", `-p ${port} -h ${host}`, "-w", "start"], { stdio: "ignore" });
-  started = true;
+  if (!external) {
+    run(initdb, ["-D", data, "-A", "trust", "-U", "postgres", "--no-locale"], { stdio: "pipe" });
+    run(pgCtl, ["-D", data, "-l", log, "-o", `-p ${port} -h ${host}`, "-w", "start"], { stdio: "ignore" });
+    started = true;
+  }
   const version = Number(scalar("show server_version_num"));
   if (version < 170000 || version >= 190000) throw new Error(`unsupported disposable PostgreSQL version ${version}`);
 
@@ -177,5 +185,5 @@ try {
   console.log(`RACI Tabs disposable PostgreSQL contract passed on server_version_num=${version}`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", data, "-m", "fast", "-w", "stop"], { encoding: "utf8" });
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  if (root) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

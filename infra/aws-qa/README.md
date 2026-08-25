@@ -1,9 +1,10 @@
 # MangoRTS QA infrastructure
 
 This root creates an isolated QA application in the existing AWS account and
-network. It reuses the current Route 53 zone, VPC, public subnets, private
-subnets, NAT egress, Terraform state bucket, and GitHub OIDC provider. It does
-not create another VPC or NAT gateway.
+network. It reuses the current VPC, public subnets, private subnets, NAT egress,
+Terraform state bucket, and GitHub OIDC provider. It does not create another VPC
+or NAT gateway. It owns a small public hosted zone for `qa.mangorts.com` so QA
+DNS stays in the QA account instead of using the authoritative production zone.
 
 QA owns separate CloudFront/ALB/ECS, Cognito, frontend and attachment buckets,
 SQS queues, one email worker, Valkey, WAF, Container Insights, CloudWatch alarms,
@@ -21,6 +22,15 @@ the three hostnames `qa.mangorts.com`, `api.qa.mangorts.com`, and
 `origin.qa.mangorts.com`. GitHub variables cannot replace those values. The QA
 deploy role accepts only OIDC jobs running inside the protected GitHub `qa`
 Environment; a plain `main` branch job cannot assume it.
+
+Before certificate validation, an explicitly authorized production DNS operator
+must apply one checked-in Terraform `NS` record for `qa.mangorts.com` to the
+authoritative `mangorts.com` parent. Its values are the `qa_dns_name_servers`
+Terraform output. This root never assumes a production role or manages that
+parent record. After delegation, all app, API, origin, and
+certificate-validation records live in the QA-owned child zone. The child zone
+currently adds `$0.50/month` plus normal query charges; see
+[Route 53 pricing](https://aws.amazon.com/route53/pricing/).
 
 The first local-admin apply owns creation of the QA RDS instance and subnet
 group. The QA-specific checked-in RDS policy lets the GitHub QA deploy role read

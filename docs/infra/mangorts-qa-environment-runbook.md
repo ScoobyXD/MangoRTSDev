@@ -4,7 +4,7 @@
 
 QA is an isolated, production-shaped environment at `qa.mangorts.com`. It starts with a fresh PostgreSQL database, a separate Cognito pool, and no copied dev or production data. Jonat's first authenticated request creates one company and the normal protected `Unfiled`, `Projects`, and `Logic Gates` folders. It creates no Nodes, Logic Gates, Projects, chats, permissions, GVIC assignments, or email connections. Its final steady state includes the API, one email worker, Valkey, WAF, Container Insights, and the full existing email/Valkey alarm set.
 
-The QA stack reuses the current AWS account, VPC, private subnets, NAT path, Route 53 hosted zone, and deployment patterns. It must not reuse a dev or production database, Cognito pool, attachment bucket, secret, Nylas application, provider grant, or Terraform state key.
+The QA stack reuses the current development AWS account, VPC, private subnets, NAT path, and deployment patterns. It owns a delegated public Route 53 hosted zone for `qa.mangorts.com`. It must not reuse a dev or production database, Cognito pool, attachment bucket, secret, Nylas application, provider grant, or Terraform state key.
 
 ## Inputs Still Needed
 
@@ -20,6 +20,7 @@ Collect these values before an apply or account creation:
 8. Optional existing SNS or incident-response action ARNs if CloudWatch alarms should notify someone. The alarms still exist without action ARNs.
 9. A GitHub `qa` Environment restricted to `main`, with Jonat as the required deployment reviewer when the repository plan supports it. Andy and Rohan need only read access to clone the repository; do not grant them QA Environment secrets or an AWS deploy role.
 10. A reachable, designated database-enforced read-only dev connection for a fresh PostgreSQL 17.x schema export from the same commit as the QA migration image. Do not use the dev writer secret.
+11. Explicit approval for one production Route 53 change: an `NS` delegation for `qa.mangorts.com` in the authoritative `mangorts.com` parent zone. QA automation never receives production credentials.
 
 Do not put passwords, provider keys, OAuth state secrets, webhook secrets, AWS session credentials, or invitation tokens in this file, Terraform variables, GitHub variables, command history, or task output.
 
@@ -31,6 +32,7 @@ Do not put passwords, provider keys, OAuth state secrets, webhook secrets, AWS s
 - Origin: `https://origin.qa.mangorts.com`
 - Nylas callback: `https://api.qa.mangorts.com/nylas/oauth/callback`
 - Nylas webhook: `https://api.qa.mangorts.com/nylas/webhook`
+- QA DNS zone: `qa.mangorts.com`
 
 Use QA-marked names for the database instance, database, ECS cluster, migration task definition, buckets, queues, logs, Cognito pool, Secrets Manager entries, and Terraform state key. The operator guards reject production-marked resources.
 
@@ -38,14 +40,15 @@ Use QA-marked names for the database instance, database, ECS cluster, migration 
 
 Keep the first rollout small:
 
-- reuse the existing VPC, private subnets, NAT gateway, and hosted zone;
+- reuse the existing VPC, private subnets, and NAT gateway;
+- create only one QA-owned child hosted zone and no new root domain;
 - use one small Single-AZ PostgreSQL 17.x instance;
 - run only the minimum API and worker task counts needed for testing;
 - do not create another VPC, NAT gateway, bastion, database replica, or Multi-AZ database;
 - keep the worker temporarily disabled only while its image, schema, and Nylas dependencies do not yet exist;
 - keep Valkey, WAF, Container Insights, and the alarm set enabled throughout the rollout.
 
-The new database, load balancer, two running Fargate tasks, Valkey, WAF, Container Insights, CloudFront traffic, logs, storage, and alarms are the main added costs. Compared with the earlier stripped QA plan, the small worker plus minimum Valkey and three Nylas secrets add about `$18.35/month`; this four-rule WAF adds about `$9/month` before request charges; eleven standard metric alarms add up to about `$1.10/month` before any account free tier; and Container Insights adds usage-based metric/log charges. Terraform does not produce a reliable bill by itself, so re-price the complete saved plan with current AWS pricing before applying it.
+The new database, load balancer, two running Fargate tasks, Valkey, WAF, Container Insights, CloudFront traffic, logs, storage, and alarms are the main added costs. Compared with the earlier stripped QA plan, the small worker plus minimum Valkey and three Nylas secrets add about `$18.35/month`; this four-rule WAF adds about `$9/month` before request charges; eleven standard metric alarms add up to about `$1.10/month` before any account free tier; and Container Insights adds usage-based metric/log charges. The delegated public QA hosted zone adds `$0.50/month` at the current first-25-zone rate, plus normal DNS query charges. See [Route 53 pricing](https://aws.amazon.com/route53/pricing/). Terraform does not produce a reliable bill by itself, so re-price the complete saved plan with current AWS pricing before applying it.
 
 WAF means AWS Web Application Firewall. It sits at CloudFront and filters common malicious or malformed public requests before they reach Mango. The current policy deliberately allows the application API and Nylas webhook paths to reach Mango's own authentication and validation, then applies AWS common and known-bad-input managed rules to the other paths.
 
@@ -77,9 +80,50 @@ The preflight is read-only. It checks the AWS identity, QA domains, repository p
 
 Use a QA-only Terraform backend key. Do not copy a dev or production state file.
 
+First create only the QA child hosted zone from a separately reviewed saved plan:
+
 ```powershell
 Set-Location infra/aws-qa
 terraform init -backend-config=backend.hcl
+terraform plan -target=aws_route53_zone.qa -out=qa-dns-zone.tfplan
+terraform show qa-dns-zone.tfplan
+```
+
+The targeted plan itself requires explicit approval and must contain exactly one new `aws_route53_zone.qa` resource with no changes or destroys. Discard every older saved plan after changing this DNS design. After approval:
+
+```powershell
+terraform apply qa-dns-zone.tfplan
+terraform output qa_dns_name_servers
+```
+
+An explicitly authorized production DNS operator must then produce a targeted saved plan for the checked-in `aws_route53_record.qa_delegation`, which manages one `NS` record named `qa.mangorts.com` in the authoritative `mangorts.com` parent using exactly the four output name servers:
+
+```powershell
+Set-Location ..\aws-prod
+terraform init -backend-config=backend.hcl
+terraform plan -target=aws_route53_record.qa_delegation -out=tfplan-qa-delegation -input=false
+terraform show tfplan-qa-delegation
+```
+
+The saved production plan must contain exactly one addition and no changes or destroys. Do not use a full production plan or apply. After separate explicit approval for this exact production DNS change, apply only the saved targeted plan:
+
+```powershell
+terraform apply tfplan-qa-delegation
+```
+
+Do not leave a manually created delegation as the final state or give the QA GitHub role production access. Verify public delegation before continuing:
+
+```powershell
+Resolve-DnsName qa.mangorts.com -Type NS
+```
+
+The returned name servers must be the same exact set as `qa_dns_name_servers`. Stop if they differ or the public lookup returns no record.
+
+When recovering from records previously written to the wrong parent zone, the next full QA plan must relocate exactly the two CloudFront certificate-validation records, one ALB certificate-validation record, and the `origin.qa.mangorts.com` alias. It must not replace either ACM certificate or any non-DNS QA resource. Do not remove those old records from Terraform state or delete them manually; the reviewed replacement plan owns their cleanup.
+
+Then create and review the complete base plan:
+
+```powershell
 terraform fmt -check
 terraform validate
 terraform plan -out=tfplan `
@@ -303,7 +347,7 @@ Do this only after the base app and company work.
 2. Store its API key directly in a QA Secrets Manager secret.
 3. Generate a new QA OAuth state secret and store it directly in a separate QA Secrets Manager secret.
 4. Configure the callback URL as `https://api.qa.mangorts.com/nylas/oauth/callback`.
-5. Set `TF_EMAIL_WORKER_ENABLED=true` and keep `TF_REALTIME_VALKEY_ENABLED=true`. Deploy the Nylas client ID, API base URL, API-key secret ARN, state-secret ARN, callback, and frontend redirect. Leave the webhook secret unset. The workflow rejects this worker stage unless the immutable image, reviewed schema, complete Nylas core, and Valkey are all present.
+5. Set `TF_EMAIL_WORKER_ENABLED=true` and keep `TF_REALTIME_VALKEY_ENABLED=true`. Deploy the Nylas client ID, API base URL, API-key secret ARN, state-secret ARN, callback, and frontend redirect through the QA-only `TF_QA_NYLAS_*` GitHub Environment variables. Leave the webhook secret unset. The QA workflow deliberately ignores repository-level `TF_NYLAS_*` values so dev credentials cannot enter QA. The workflow rejects this worker stage unless the immutable image, reviewed schema, complete Nylas core, and Valkey are all present.
 6. Verify that this challenge returns HTTP 200 with the exact raw body `qa-smoke`:
 
 ```powershell

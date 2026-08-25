@@ -3,6 +3,16 @@ output "app_url" {
   value       = module.platform.app_url
 }
 
+output "qa_dns_zone_id" {
+  description = "Dev-account public hosted-zone ID dedicated to qa.mangorts.com."
+  value       = aws_route53_zone.qa.zone_id
+}
+
+output "qa_dns_name_servers" {
+  description = "Name servers that the authoritative mangorts.com parent must delegate for qa.mangorts.com."
+  value       = aws_route53_zone.qa.name_servers
+}
+
 output "api_url" {
   description = "MangoRTS QA API URL."
   value       = module.platform.api_url

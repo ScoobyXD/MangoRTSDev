@@ -5,14 +5,22 @@ import test from "node:test";
 
 const workflow = readFileSync(resolve(process.cwd(), ".github/workflows/ci.yml"), "utf8");
 
-test("GitHub CI gives SQS and realtime planning separate databases on pinned PostgreSQL 17", () => {
+test("GitHub CI gives each database contract an isolated database on pinned PostgreSQL 17", () => {
   assert.match(workflow, /image: postgres:17\.7/);
   assert.match(workflow, /EMAIL_SQS_POSTGRES17_HOST: 127\.0\.0\.1/);
   assert.match(workflow, /EMAIL_SQS_POSTGRES17_DATABASE: postgres/);
+  assert.match(workflow, /NODE_EMAIL_POSTGRES17_DATABASE: mangorts_node_email_test/);
+  assert.match(workflow, /EMAIL_DRAFT_POSTGRES17_DATABASE: mangorts_email_draft_test/);
+  assert.match(workflow, /RACI_TABS_POSTGRES17_DATABASE: mangorts_raci_tabs_test/);
+  assert.match(workflow, /HUDDLE_EXPLORER_POSTGRES17_DATABASE: mangorts_huddle_explorer_test/);
   assert.match(workflow, /MANGORTS_EMAIL_SQS_TEST_DSN: postgres:\/\/postgres:postgres@127\.0\.0\.1:5432\/postgres\?sslmode=disable/);
   assert.match(workflow, /MANGORTS_REALTIME_PLAN_DATABASE_URL: postgres:\/\/postgres:postgres@127\.0\.0\.1:5432\/mangorts_realtime_plan_test\?sslmode=disable/);
   assert.match(workflow, /apt-get install --yes postgresql-client/);
   assert.match(workflow, /createdb --host=127\.0\.0\.1 --port=5432 --username=postgres mangorts_realtime_plan_test/);
+  assert.match(workflow, /createdb --host=127\.0\.0\.1 --port=5432 --username=postgres mangorts_node_email_test/);
+  assert.match(workflow, /createdb --host=127\.0\.0\.1 --port=5432 --username=postgres mangorts_email_draft_test/);
+  assert.match(workflow, /createdb --host=127\.0\.0\.1 --port=5432 --username=postgres mangorts_raci_tabs_test/);
+  assert.match(workflow, /createdb --host=127\.0\.0\.1 --port=5432 --username=postgres mangorts_huddle_explorer_test/);
   assert.doesNotMatch(workflow, /POSTGRES_BIN/);
   assert.notEqual(
     workflow.match(/MANGORTS_EMAIL_SQS_TEST_DSN: [^\n]+\/([^/?\s]+)\?/)?.[1],
@@ -24,8 +32,8 @@ test("GitHub CI gives SQS and realtime planning separate databases on pinned Pos
     "PostgreSQL client tools must be available before the full repository gate",
   );
   assert.ok(
-    workflow.indexOf("Create separate realtime plan test database") < workflow.indexOf("Run repo tests"),
-    "the guarded realtime test database must exist before the full repository gate",
+    workflow.indexOf("Create separate PostgreSQL contract databases") < workflow.indexOf("Run repo tests"),
+    "the isolated PostgreSQL contract databases must exist before the full repository gate",
   );
 });
 

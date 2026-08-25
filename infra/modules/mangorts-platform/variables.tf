@@ -26,6 +26,16 @@ variable "root_domain_name" {
   type        = string
 }
 
+variable "route53_zone_id" {
+  description = "Public Route 53 hosted-zone ID for application DNS and ACM validation."
+  type        = string
+
+  validation {
+    condition     = trimspace(var.route53_zone_id) != ""
+    error_message = "route53_zone_id is required."
+  }
+}
+
 variable "app_subdomain" {
   description = "Frontend subdomain below root_domain_name."
   type        = string
