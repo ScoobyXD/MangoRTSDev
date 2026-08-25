@@ -236,7 +236,18 @@ func TestNodeDeleteBoardRefreshReauthorizesTheSurvivingLogicGate(t *testing.T) {
 	}
 	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
-	waitForPublishedRealtimeOutboxSequence(t, repo, 1)
+	waitForBackplaneCondition(t, func() bool {
+		server.realtimeSpinePublishMu.Lock()
+		defer server.realtimeSpinePublishMu.Unlock()
+		publishedSequence, err := repo.CurrentPublishedRealtimeOutboxSequence(context.Background())
+		if err != nil {
+			t.Fatalf("CurrentPublishedRealtimeOutboxSequence: %v", err)
+		}
+		server.realtimeSpineMu.Lock()
+		cursor := server.realtimeSpineCursor
+		server.realtimeSpineMu.Unlock()
+		return publishedSequence > 0 && cursor >= publishedSequence
+	}, "initial assignment batch accepted before subscription")
 
 	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
 	scope := realtimeBoardScope(boardID)
@@ -280,20 +291,4 @@ func waitForRecordingRealtimeMessages(t *testing.T, connection *recordingRealtim
 	}
 	t.Fatalf("timed out waiting for %d realtime messages", count)
 	return nil
-}
-
-func waitForPublishedRealtimeOutboxSequence(t *testing.T, repo store.RealtimeOutboxRepository, minimum int64) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		sequence, err := repo.CurrentPublishedRealtimeOutboxSequence(context.Background())
-		if err != nil {
-			t.Fatalf("CurrentPublishedRealtimeOutboxSequence: %v", err)
-		}
-		if sequence >= minimum {
-			return
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for published realtime outbox sequence %d", minimum)
 }
