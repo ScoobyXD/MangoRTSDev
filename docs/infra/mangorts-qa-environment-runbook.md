@@ -93,7 +93,7 @@ terraform output qa_dns_name_servers
 
 The targeted plan itself requires explicit approval and must contain exactly one new `aws_route53_zone.qa` resource with no changes or destroys. Discard every older saved plan after changing this DNS design.
 
-An explicitly authorized production DNS operator must then add one Terraform-managed `NS` record named `qa.mangorts.com` to the authoritative `mangorts.com` parent, using exactly the four output name servers. Do not leave a manually created delegation as the final state, and do not give the QA GitHub role production access. Verify public delegation before continuing:
+An explicitly authorized production DNS operator must then apply only `infra/aws-prod/qa_delegation.tf`, which manages one `NS` record named `qa.mangorts.com` in the authoritative `mangorts.com` parent using exactly the four output name servers. The saved production plan must contain exactly one addition and no changes or destroys. Do not use a full production apply, leave a manually created delegation as the final state, or give the QA GitHub role production access. Verify public delegation before continuing:
 
 ```powershell
 Resolve-DnsName qa.mangorts.com -Type NS

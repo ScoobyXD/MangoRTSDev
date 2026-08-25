@@ -21,6 +21,7 @@ const qaTfvarsExample = read("infra/aws-qa/terraform.tfvars.example");
 const qaBackend = read("infra/aws-qa/backend.hcl.example");
 const qaWorkflow = read(".github/workflows/deploy-qa.yml");
 const qaPreflight = read("scripts/qa_environment_preflight.ps1");
+const prodQADelegation = read("infra/aws-prod/qa_delegation.tf");
 const moduleIAM = read("infra/modules/mangorts-platform/iam.tf");
 const moduleACM = read("infra/modules/mangorts-platform/acm.tf");
 const moduleData = read("infra/modules/mangorts-platform/data.tf");
@@ -167,6 +168,27 @@ test("QA owns a delegated public subdomain without giving automation production 
   assert.equal((moduleACM.match(/zone_id\s*=\s*local\.route53_zone_id/g) || []).length, 2);
   assert.equal((moduleRoute53.match(/zone_id\s*=\s*local\.route53_zone_id/g) || []).length, 3);
   assert.doesNotMatch(qaWorkflow, /TF_(?:ROUTE53|DNS_ZONE|HOSTED_ZONE)/);
+});
+
+test("production delegates only qa.mangorts.com to the exact protected QA zone", () => {
+  assert.match(prodQADelegation, /resource "aws_route53_record" "qa_delegation"/);
+  assert.match(prodQADelegation, /zone_id\s*=\s*data\.aws_route53_zone\.root\.zone_id/);
+  assert.match(prodQADelegation, /name\s*=\s*"qa\.\$\{local\.root_domain\}"/);
+  assert.match(prodQADelegation, /type\s*=\s*"NS"/);
+  assert.match(prodQADelegation, /allow_overwrite\s*=\s*false/);
+  assert.match(prodQADelegation, /prevent_destroy\s*=\s*true/);
+  assert.match(prodQADelegation, /account_id\s*==\s*"828435022930"/);
+  assert.match(prodQADelegation, /zone_id\s*==\s*"Z05521211GBNMIH6SBM5Z"/);
+  assert.deepEqual(
+    [...prodQADelegation.matchAll(/"(ns-\d+\.awsdns-[\d-]+\.(?:com|net|org|co\.uk))"/g)].map((match) => match[1]),
+    [
+      "ns-1059.awsdns-04.org",
+      "ns-1735.awsdns-24.co.uk",
+      "ns-495.awsdns-61.com",
+      "ns-736.awsdns-28.net",
+    ],
+  );
+  assert.doesNotMatch(prodQADelegation, /provider\s*=|assume_role|aws\.us_east_1/);
 });
 
 test("QA registers immutable migration images before schema bootstrap without starting the app", () => {
