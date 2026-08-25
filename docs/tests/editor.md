@@ -105,6 +105,7 @@ Last updated: 2026-08-08
 27. Selecting an editor table must not show the detached top-right row, column, header, and delete command strip.
 28. Matching consecutive one-row image-free HTML tables or a tab-separated clipboard grid must fill the active Tiptap table from the selected cell, or create exactly one table in ordinary editor text.
 29. When a clipboard payload contains a usable HTML or tab-separated table and an unreferenced bitmap preview, every unified Tiptap editor must paste only the complete table, discard the bitmap preview and Office metadata, and retain every source row and column even when the table is wider than the editor viewport.
+30. A Node or Logic Gate header shows its existing resource icon and a separate live-derived clickable hierarchy breadcrumb instead of a fixed **Node:** or **Process:** label. The current item name remains the independently editable `nodes.name` or `logic_gates.header` value and is never copied into or saved through the breadcrumb.
 
 Last updated: 2026-08-18
 

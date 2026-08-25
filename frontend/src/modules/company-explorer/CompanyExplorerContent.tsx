@@ -6,7 +6,7 @@ import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { type NodeRecord } from "../nodes/types";
 import { getLogicGateTitle as getLogicGateRecordTitle, toLogicGateViewRecord, type LogicGateRACIRole, type LogicGateRecord as LogicGateApiRecord, type LogicGateViewRecord } from "../logic-gates/types";
-import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
+import { emitDashboardEvent, emitExplorerContextUpdated, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
 import { emptyExplorerSelectionState, type ExplorerSelectionState } from "./selectionSync";
 import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { invalidateKanbanBoardListCache, listKanbanBoards, type RACIMatrixProjectionRow } from "../kanban/kanbanApi";
@@ -2425,6 +2425,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
             return next;
           });
         }
+        emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
         return true;
       }
       const rows = await placeRows();
@@ -2446,6 +2447,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           return next;
         });
       }
+      emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_move_item");
@@ -2669,6 +2671,9 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         method: "POST",
         body: JSON.stringify({ company_id: companyID, targets: deleteTargets, confirmation_display_name: confirmationDisplayName }),
       });
+      if (normalizedTargets.some((target) => target.kind === "folder" || target.kind === "logic_gate" || target.kind === "project")) {
+        emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
+      }
 
       if (deletedKanbanBoardIDs.size > 0) {
         for (const boardID of deletedKanbanBoardIDs) {
@@ -2773,6 +2778,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           });
           dispatchExplorerStore({ type: "upsertV2Rows", rows: [row] });
           setRenaming((current) => (current?.treeID === activeRename.treeID ? null : current));
+          emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
           return;
         }
         const folder = await requestJSON<CompanyExplorerFolder>(`/v1/company-explorer/folders/${activeRename.target.id}`, {
@@ -2791,6 +2797,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         const logicGate = toLogicGateViewRecord(updated);
         dispatchExplorerStore({ type: "replaceLogicGate", logicGate });
       }
+      emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
       setRenaming((current) => (current?.treeID === activeRename.treeID ? null : current));
     } catch (err) {
       setError(err instanceof Error ? err.message : `failed_to_rename_${activeRename.target.kind}`);
@@ -2831,6 +2838,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
             return next;
           });
         }
+        emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
         return;
       }
       const body: { company_id: string; parent_folder_id?: string; position?: number } = { company_id: companyID };
@@ -2856,6 +2864,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           return next;
         });
       }
+      emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_move_folder");
     }
@@ -3049,6 +3058,29 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     pendingScrollAlignRef.current = "center";
     pendingScrollTreeIDRef.current = plan.primaryTreeID;
   }, [folderItems, folders, logicGates, nodes, projects]);
+
+  const applyExplorerPathSelection = useCallback((folderPathIDs: string[], selectRoot: boolean) => {
+    const cleanFolderPathIDs = Array.from(new Set(folderPathIDs.map((id) => id.trim()).filter(Boolean)));
+    const targetTreeID = selectRoot || cleanFolderPathIDs.length === 0
+      ? "folder-root"
+      : `workspace-folder-${cleanFolderPathIDs[cleanFolderPathIDs.length - 1]}`;
+    const nextExpanded = new Set(expandedRef.current);
+    nextExpanded.add("folder-root");
+    for (const folderID of cleanFolderPathIDs) nextExpanded.add(`workspace-folder-${folderID}`);
+    suppressNextExplorerBroadcastRef.current = true;
+    treeKeyboardActiveRef.current = true;
+    treeViewportRef.current?.focus({ preventScroll: true });
+    expandedRef.current = nextExpanded;
+    setExpanded(nextExpanded);
+    setSelectedTreeID(targetTreeID);
+    setSelectedTreeIDs(new Set([targetTreeID]));
+    setSelectionAnchorTreeID(targetTreeID);
+    setSelectedNodeID("");
+    setSelectedLogicGateID("");
+    setSelectedKanbanBoardID("");
+    pendingScrollAlignRef.current = "center";
+    pendingScrollTreeIDRef.current = targetTreeID;
+  }, []);
 
   const selectExplorerSearchResult = useCallback((row: ExplorerTreeNode) => {
     treeKeyboardActiveRef.current = true;
@@ -3456,6 +3488,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     setSelectedLogicGateID,
     setSelectedKanbanBoardID,
     expandTreeIDs,
+    applyExplorerPathSelection,
     applyExplorerFindSelection,
   });
 

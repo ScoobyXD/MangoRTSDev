@@ -4,6 +4,7 @@ import { fetchCurrentUser } from "../../auth/cognitoAuth.js";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { ExplorerRowIcon } from "../../icons/index.js";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation.js";
+import { emitExplorerContextUpdated } from "../../modules/dashboardEvents.js";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../../modules/communications/communicationsApi.js";
 import {
   listRecycleBinItems,
@@ -185,7 +186,14 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
     setBusy(true);
     setError("");
     try {
+      const restoredKinds = new Set(selectedItems.map((item) => item.object_kind));
       await restoreRecycleBinItems(companyID, selectedItemIDs);
+      if (["folder", "node", "logic_gate", "project"].some((kind) => restoredKinds.has(kind as RecycleBinObjectKind))) {
+        emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
+      }
+      if (["huddle_logic_gate", "huddle_node", "huddle_explorer_folder", "huddle_explorer_item"].some((kind) => restoredKinds.has(kind as RecycleBinObjectKind))) {
+        emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
+      }
       setSelectedIDs(new Set());
       setSelectionAnchorID("");
       await listRecycleBinItems(companyID).then(setItems);
@@ -194,7 +202,7 @@ export function RecycleBinPage({ embedded = false }: RecycleBinPageProps): React
     } finally {
       setBusy(false);
     }
-  }, [busy, canRestoreSelection, companyID, selectedItemIDs]);
+  }, [busy, canRestoreSelection, companyID, selectedItemIDs, selectedItems]);
 
   const requestDeleteSelected = useCallback((position?: ConfirmActionMenuPosition) => {
     if (!companyID || selectedItemIDs.length === 0 || busy || !canPermanentlyDelete) return;

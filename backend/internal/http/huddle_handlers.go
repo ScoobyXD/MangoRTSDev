@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
@@ -475,6 +476,53 @@ func (s *Server) handleHuddleExplorer(w http.ResponseWriter, r *http.Request) {
 	tree.Items = visible
 	writeJSON(w, http.StatusOK, tree)
 }
+
+func (s *Server) handleHuddleExplorerLocationPath(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	resourceType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("resource_type")))
+	resourceID := strings.TrimSpace(r.URL.Query().Get("resource_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	if resourceID == "" {
+		writeError(w, http.StatusBadRequest, "resource_id_required")
+		return
+	}
+	if resourceType != store.EntityTypeHuddleLogicGate && resourceType != store.EntityTypeHuddleNode {
+		writeError(w, http.StatusBadRequest, "invalid_resource_type")
+		return
+	}
+	if _, ok := huddleActor(w, r, companyID); !ok {
+		return
+	}
+	path, err := s.repo.GetHuddleExplorerHierarchyPath(store.HuddleExplorerHierarchyPathQuery{
+		Context:          r.Context(),
+		CompanyID:        companyID,
+		ResourceType:     resourceType,
+		ResourceID:       resourceID,
+		PermissionUserID: s.entityPermissionActorUserID(r, companyID),
+	})
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_huddle_explorer_location_path_query")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeAccessResourceNotFound(w)
+		return
+	}
+	if err != nil {
+		log.Printf("huddle explorer location path: failed company_id=%s resource_type=%s resource_id=%s: %v", companyID, resourceType, resourceID, err)
+		writeError(w, http.StatusInternalServerError, "failed_to_get_huddle_explorer_location_path")
+		return
+	}
+	writeJSONMaybeNotModified(w, r, http.StatusOK, path)
+}
+
 func (s *Server) handleHuddleExplorerFolders(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

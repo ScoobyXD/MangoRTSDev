@@ -91,6 +91,7 @@ import {
   type SidebarLogicGateStatusCounts,
 } from "./sidebarLogicGateStatusCounts";
 import { HuddleExplorerSection } from "../modules/huddles/HuddleExplorerSection";
+import { useExplorerSearchQuery } from "../modules/hierarchy/useExplorerSearchQuery.js";
 
 const SidebarCompanyExplorerContent = React.lazy(() => import("../modules/company-explorer/CompanyExplorerContent").then((module) => ({ default: module.CompanyExplorerContent })));
 const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorContent").then((module) => ({
@@ -103,6 +104,7 @@ const AppNodeEditorContent = React.lazy(() => import("../modules/editor/EditorCo
     forcedLabel?: string;
     focusInformationID?: string;
     focusRequestID?: number;
+    onBeforeHierarchyNavigate?: () => void;
   }>,
 })));
 
@@ -333,7 +335,7 @@ export function AppSidebar({
   const [explorerDropSuccess, setExplorerDropSuccess] = useState("");
   const [pinDropSuccess, setPinDropSuccess] = useState("");
   const [mailUnreadCounts, setMailUnreadCounts] = useState({ myTriage: 0, sharedTriage: 0 });
-  const [explorerSearchQuery, setExplorerSearchQuery] = useState("");
+  const [explorerSearchQuery, setExplorerSearchQuery] = useExplorerSearchQuery(companyID);
   const [nodeEditorFullscreenChromeActive, setNodeEditorFullscreenChromeActiveState] = useState(readNodeEditorFullscreenChromeActive);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
@@ -1406,8 +1408,15 @@ export function AppSidebar({
         />
       </section>
 
-      <HuddleExplorerSection apiBase={apiBase} companyID={companyID} currentUserID={currentUserID} />
+        </>
+      )}
 
+      <div hidden={explorerSearchActive}>
+        <HuddleExplorerSection apiBase={apiBase} companyID={companyID} currentUserID={currentUserID} />
+      </div>
+
+      {!explorerSearchActive && (
+        <>
       <section style={appSidebarNavSectionStyle} aria-label="Entities">
         <AppSidebarSectionHeader label="Entities" />
         <AppSidebarButton
@@ -2122,7 +2131,7 @@ type NodeEditorPopupRestoreState = {
   viewMode: Exclude<NodeEditorPopupViewMode, "fullscreen">;
 };
 
-export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar-node-popup", focusInformationID, focusRequestID, initialSidebarFill = false, onClose, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
+export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar-node-popup", focusInformationID, focusRequestID, initialSidebarFill = false, onClose, onHierarchyNavigate, onCollapseToTab, onOpenInNewTab, onDeleteNode }: {
   nodeID: string;
   nodeTitle: string;
   surfaceID?: "app-sidebar-node-popup" | "dock-restored-node-popup";
@@ -2130,6 +2139,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
   focusRequestID?: number;
   initialSidebarFill?: boolean;
   onClose: () => void;
+  onHierarchyNavigate?: () => void;
   onCollapseToTab?: () => void;
   onOpenInNewTab?: () => void;
   onDeleteNode?: (nodeID: string, confirmationDisplayName: string) => boolean | void | Promise<boolean | void>;
@@ -2334,6 +2344,7 @@ export function AppNodeEditorPopup({ nodeID, nodeTitle, surfaceID = "app-sidebar
             forcedLabel={nodeTitle}
             focusInformationID={focusInformationID}
             focusRequestID={focusRequestID}
+            onBeforeHierarchyNavigate={popupSidebarFill ? undefined : (onHierarchyNavigate ?? onClose)}
           />
         </React.Suspense>
         {deleteConfirmation && (

@@ -120,6 +120,7 @@ const LazyHomeNodeEditorContent = React.lazy(() => import("../../modules/editor/
     focusInformationID?: string;
     focusEmailMessageID?: string;
     focusRequestID?: number;
+    onBeforeHierarchyNavigate?: () => void;
   }>,
 })));
 
@@ -971,6 +972,7 @@ export function NodeEditorPopup({ nodeID, nodeTitle, focusInformationID, focusEm
             focusInformationID={focusInformationID}
             focusEmailMessageID={focusEmailMessageID}
             focusRequestID={focusRequestID}
+            onBeforeHierarchyNavigate={onClose}
           />
         </React.Suspense>
         {deleteConfirmation && (

@@ -2336,6 +2336,18 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               onNavigate("/", { replace: true });
             }
           }}
+          onHierarchyNavigate={() => {
+            const wasRouteManaged = routeManagedExplorerNodePopupRef.current || deepLink?.kind === "node";
+            setExplorerNodePopup(null);
+            setActiveDockTabID((current) => {
+              const activeTab = dockTabs.find((tab) => tab.id === current);
+              return activeTab?.kind === "node" && activeTab.entityID === explorerNodePopup.nodeID ? null : current;
+            });
+            if (wasRouteManaged) {
+              routeManagedExplorerNodePopupRef.current = false;
+              onNavigate?.("/", { replace: true });
+            }
+          }}
           onCollapseToTab={collapseExplorerNodePopupToTab}
           onOpenInNewTab={() => openAppPathInNewTab(buildContextualNodeRoute(explorerNodePopup.nodeID))}
           onDeleteNode={deleteExplorerNodePopupNode}

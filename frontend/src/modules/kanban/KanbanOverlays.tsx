@@ -38,6 +38,7 @@ const LazyKanbanNodeEditorContent = React.lazy(() => import("../editor/EditorCon
     forcedEntityKind?: "node" | "logic_gate";
     forcedEntityID?: string;
     forcedLabel?: string;
+    onBeforeHierarchyNavigate?: () => void;
   }>,
 })));
 
@@ -330,6 +331,7 @@ export function KanbanNodeEditorOverlay({
           forcedEntityKind="node"
           forcedEntityID={overlay.nodeID}
           forcedLabel={overlay.nodeTitle}
+          onBeforeHierarchyNavigate={fullscreen ? (onToggleFullscreen ?? onClose) : undefined}
         />
       </React.Suspense>
       </UnifiedNodeShell>

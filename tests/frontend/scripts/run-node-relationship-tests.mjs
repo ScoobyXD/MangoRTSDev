@@ -112,6 +112,10 @@ const testFiles = [
 ];
 const componentTests = [
   {
+    source: resolve(repoRoot, "tests/frontend/modules/hierarchy/hierarchyBreadcrumb.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/hierarchy/hierarchyBreadcrumb.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/process-map/processMapSurface.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/process-map/processMapSurface.test.cjs"),
     bundleDependencies: true,

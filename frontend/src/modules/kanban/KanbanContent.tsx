@@ -3,6 +3,7 @@ import { applyCommittedNodeTitleToKanbanAccountAssignment, kanbanRealtimeCanonic
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { buildContextualNodeRoute, openAppPathInNewTab } from "../../app/resourceLinks";
+import { emitExplorerContextUpdated } from "../dashboardEvents.js";
 import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl";
 import { clearResourceMissing, isTerminalResourceNotFoundError } from "../api/missingResources";
@@ -1477,6 +1478,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({
         },
       );
       upsertBoardInList(saved);
+      emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
       window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail: { companyID, board: saved } }));
       setEditingBoardTitle(false);
     } catch {

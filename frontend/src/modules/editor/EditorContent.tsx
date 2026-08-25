@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ConfirmActionMenu } from "../../app/ConfirmActionMenu";
 import { getNodeTitle, canEditResourceAccess, type NodeRecord, type NodeRelationship } from "../nodes/types";
 import { getLogicGateTitle, type LogicGateRACIAssignment, type LogicGateRACIRole, type LogicGateRACIPrincipalType, type LogicGateRecord } from "../logic-gates/types";
-import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
+import { emitDashboardEvent, emitExplorerContextUpdated, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
 import { getNodeRecordSingleFlight, getNodeInformationProjectionSingleFlight, getNodeTimelineEventsSingleFlight, invalidateNodeRecordStoreCaches, primeNodeRecordStoreCaches, type NodeProjectionItem, type NodeTimelineEventItem } from "../nodes/nodeRecordStore";
 import { getNodeRelationshipGraphSnapshot, subscribeNodeRelationshipGraph, upsertNodeRelationshipGraphNode, upsertNodeRelationshipGraphRelationship } from "../nodes/nodeRelationshipGraph";
 import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand } from "../workspace/workspaceEntityCommands";
@@ -86,6 +86,7 @@ import { assignNodeToLogicGateStatus, moveLogicGateAssignment } from "../kanban/
 import { EntityPermissionsPanel } from "../permissions/EntityPermissionsDialog";
 import { invalidateProjectRelationshipsForResource, listProjectRelationshipsForResource, type ProjectRelationshipProjection } from "../project-management/projectManagementApi";
 import { ExplorerRowIcon } from "../../icons/index.js";
+import { HierarchyBreadcrumb } from "../hierarchy/HierarchyBreadcrumb.js";
 import { commitEntityTitleMutation, createCommittedTitleEditBuffer, foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
 import { preferResolvedEntityLabel } from "../entityLabels.js";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh";
@@ -132,6 +133,7 @@ type EditorContentProps = {
   focusInformationMode?: "focus" | "scroll";
   compactLinkedDocumentHeader?: boolean;
   onLogicGateTitleChange?: (update: { logicGateID: string; label: string }) => void;
+  onBeforeHierarchyNavigate?: () => void;
 };
 
 type CompanyUser = {
@@ -557,7 +559,7 @@ const EditorSaveSettingsSurface: React.FC<{
   );
 };
 // Editor module: linked document canvas for node or logic-gate context.
-export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusMentionUserID, focusEmailMessageID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange }) => {
+export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, theme = "mango", forcedEntityKind, forcedEntityID = "", forcedLabel = "", forcedEmptyMessage = "", focusInformationID, focusMentionUserID, focusEmailMessageID, focusRequestID, focusInformationMode = "focus", compactLinkedDocumentHeader = false, onLogicGateTitleChange, onBeforeHierarchyNavigate }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const companyID = getActiveCompanyID();
   const scope = widgetId?.trim() ? widgetId : "global";
@@ -1091,6 +1093,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         );
         setLinkedNodeTitle(updated.header);
         onLogicGateTitleChange?.({ logicGateID: updated.logic_gate_id, label: updated.header });
+        emitExplorerContextUpdated({ companyID, kind: "company_explorer" });
       } else {
         const updated = await commitEntityTitleMutation(
           () => requestJSON<NodeRecord>(`/v1/nodes/${linkedNodeID}`, {
@@ -2421,6 +2424,16 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             linkedNodeInfoPreview={linkedNodeInfoPreview}
             linkedNodeMetadataRows={linkedNodeMetadataRows}
             linkedNodeHistoryRows={linkedNodeHistoryRows}
+            hierarchyBreadcrumb={linkedEntityKind && linkedNodeID ? (
+              <HierarchyBreadcrumb
+                apiBase={apiBase}
+                companyID={companyID}
+                kind="company_explorer"
+                resourceType={linkedEntityKind}
+                resourceID={linkedNodeID}
+                onBeforeNavigate={onBeforeHierarchyNavigate}
+              />
+            ) : null}
             canEdit={linkedEntityCanEdit}
             canEditRACI={Boolean(linkedNodeID) && linkedEntityCanEdit}
             compactHeader={compactLinkedDocumentHeader}

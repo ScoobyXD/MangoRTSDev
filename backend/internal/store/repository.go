@@ -872,6 +872,7 @@ type CompanyExplorerRepository interface {
 	ListCompanyExplorerV2RootRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error)
 	ListCompanyExplorerV2ChildRows(query CompanyExplorerV2RowsQuery) (CompanyExplorerV2Rows, error)
 	SearchCompanyExplorer(query CompanyExplorerSearchQuery) (CompanyExplorerSearchResults, error)
+	GetCompanyExplorerHierarchyPath(query CompanyExplorerHierarchyPathQuery) (ExplorerHierarchyPath, error)
 	GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID string) (CompanyExplorerV2Row, error)
 	GetCompanyExplorerV2FolderDefaultAccess(companyID, entityID string) (string, error)
 	CreateCompanyExplorerV2Folder(input CompanyExplorerV2FolderInput) (CompanyExplorerV2Row, error)
@@ -975,6 +976,35 @@ type CompanyExplorerLocationSegment struct {
 	EntityID   string `json:"entity_id"`
 	ResourceID string `json:"resource_id,omitempty"`
 	Name       string `json:"name"`
+}
+
+const (
+	ExplorerHierarchyKindCompanyExplorer = "company_explorer"
+	ExplorerHierarchyKindHuddleExplorer  = "huddle_explorer"
+	ExplorerHierarchyStatusResolved      = "resolved"
+	ExplorerHierarchyStatusOmitted       = "omitted"
+)
+
+type ExplorerHierarchyPath struct {
+	Kind     string                           `json:"kind"`
+	Status   string                           `json:"status"`
+	Segments []CompanyExplorerLocationSegment `json:"segments"`
+}
+
+type CompanyExplorerHierarchyPathQuery struct {
+	Context          context.Context
+	CompanyID        string
+	ResourceType     string
+	ResourceID       string
+	PermissionUserID string
+}
+
+type HuddleExplorerHierarchyPathQuery struct {
+	Context          context.Context
+	CompanyID        string
+	ResourceType     string
+	ResourceID       string
+	PermissionUserID string
 }
 
 type CompanyExplorerSearchQuery struct {
@@ -1638,6 +1668,7 @@ type HuddleRepository interface {
 	UpdateKPI(input HuddleUpdateInput) (domain.KPI, error)
 	DeleteKPI(companyID, kpiID, deletedByUserID string) error
 	ListHuddleExplorer(companyID string) (domain.HuddleExplorer, error)
+	GetHuddleExplorerHierarchyPath(query HuddleExplorerHierarchyPathQuery) (ExplorerHierarchyPath, error)
 	CreateHuddleExplorerFolder(input HuddleCreateInput) (domain.HuddleExplorerFolder, error)
 	UpdateHuddleExplorerFolder(input HuddleUpdateInput) (domain.HuddleExplorerFolder, error)
 	MoveHuddleExplorerFolder(input HuddleMoveInput) error

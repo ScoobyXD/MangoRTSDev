@@ -23,5 +23,7 @@
 21. Huddle Explorer ordering uses existing row dates and names; the first version has no custom position or ordering model.
 22. Huddle rows match the Pinned section's text scale, color, spacing, raised hover treatment, and elevated section surface.
 23. A visible Huddle Logic Gate row combines the normal Logic Gate icon with a Huddle people icon instead of using a separate replacement resource icon.
+24. A Huddle Logic Gate or Huddle Node title surface derives its breadcrumb from the current canonical Huddle Explorer placement and exact Huddle ownership when read; no database column, copied full path, or client cache becomes path authority. A Huddle Node follows its owning Huddle Logic Gate's visible placement and adds that Gate as its final ancestor.
+25. A Huddle breadcrumb shows the clickable Huddles root followed by every fully visible ancestor, excludes the current item's editable title, and omits the whole hierarchy path when any required ancestor is missing, hidden, recycled, cyclic, or too deep to resolve safely. Clicking a folder reveals that exact Huddle Explorer branch, clicking a Huddle Logic Gate opens that exact Gate, and a committed same-window hierarchy change refreshes mounted breadcrumbs.
 
-Last updated: 2026-08-11
+Last updated: 2026-08-25
