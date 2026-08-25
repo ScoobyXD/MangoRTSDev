@@ -5,11 +5,15 @@ import {
   deleteProcessMapPlacement,
   deleteProcessMapRelationship,
   fetchProcessMapLayer,
-  fetchProcessMapOperationalRelationships,
   postProcessMapRelationship,
   putProcessMapPlacement,
   putProcessMapTrace,
 } from "../../../../frontend/src/modules/process-map/processMapApi.js";
+import {
+  getCurrentRealtimeConnectionCorrelation,
+  getCurrentRealtimeConnectionID,
+  subscribeRealtimeScope,
+} from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
 
 function layerPayload() {
   return {
@@ -119,52 +123,104 @@ test("completed layer reads revalidate with their viewer-safe ETag", async () =>
   }
 });
 
-test("exact-resource relationship reads stay bounded to one typed resource", async () => {
+test("a committed write detaches a stale in-flight layer read without aborting its mounted caller", async () => {
   const originalFetch = globalThis.fetch;
-  const requested: string[] = [];
+  let layerReads = 0;
+  let staleReadAborted = false;
+  let releaseStaleRead!: () => void;
   globalThis.fetch = (async (input, init) => {
-    requested.push(input.toString());
-    assert.equal(init?.method ?? "GET", "GET");
+    const url = new URL(input.toString());
+    if (url.pathname === "/v1/process-map/layer") {
+      layerReads += 1;
+      if (layerReads === 1) {
+        return await new Promise<Response>((resolve, reject) => {
+          releaseStaleRead = () => resolve(new Response(JSON.stringify(layerPayload()), { status: 200, headers: { "content-type": "application/json" } }));
+          init?.signal?.addEventListener("abort", () => {
+            staleReadAborted = true;
+            reject(new DOMException("aborted", "AbortError"));
+          }, { once: true });
+        });
+      }
+      return new Response(JSON.stringify(layerPayload()), { status: 200, headers: { "content-type": "application/json" } });
+    }
     return new Response(JSON.stringify({
-      resource_operational_relationships: [{
-        resource_operational_relationship_id: "relationship-1",
-        source: { resource_type: "company_explorer_folder", resource_id: "folder-1" },
-        target: { resource_type: "logic_gate", resource_id: "gate-1" },
-        created_timestamp: "created",
-      }],
-    }), { status: 200, headers: { "content-type": "application/json" } });
+      resource_type: "logic_gate",
+      resource_id: "gate-1",
+      map_parent_folder_id: null,
+      grid_x: 2,
+      grid_y: 3,
+      revision: 1,
+      created_timestamp: "created",
+      updated_timestamp: "created",
+    }), { status: 201, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   try {
-    const relationships = await fetchProcessMapOperationalRelationships(
-      "https://process-map-resource.test",
+    const staleRead = fetchProcessMapLayer("https://process-map-stale-read.test", "company-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await putProcessMapPlacement(
+      "https://process-map-stale-read.test",
       "company-1",
-      { resource_type: "logic_gate", resource_id: "gate / 1" },
-      "incoming",
+      { resource_type: "logic_gate", resource_id: "gate-1" },
+      { map_parent_folder_id: null, grid_x: 2, grid_y: 3 },
     );
-    assert.equal(requested.length, 1);
-    const url = new URL(requested[0]);
-    assert.equal(url.pathname, "/v1/process-map/operational-relationships");
-    assert.deepEqual(Object.fromEntries(url.searchParams), {
-      company_id: "company-1",
-      resource_type: "logic_gate",
-      resource_id: "gate / 1",
-      direction: "incoming",
-    });
-    assert.equal(relationships.length, 1);
-    assert.equal(relationships[0].resource_operational_relationship_id, "relationship-1");
+    await fetchProcessMapLayer("https://process-map-stale-read.test", "company-1");
+    assert.equal(layerReads, 2, "the post-commit replay must not rejoin the detached stale read leader");
+    releaseStaleRead();
+    await staleRead;
+    assert.equal(staleReadAborted, false, "an unrelated mounted layer caller remains usable after company cache invalidation");
   } finally {
+    releaseStaleRead?.();
     globalThis.fetch = originalFetch;
   }
 });
 
 test("Process Map mutations use the small canonical API and integer route bodies", async () => {
   const originalFetch = globalThis.fetch;
-  const calls: Array<{ url: URL; method: string; body: unknown }> = [];
+  const originalWebSocket = globalThis.WebSocket;
+  class OriginWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSED = 3;
+    readyState = OriginWebSocket.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    constructor(_url: string) {
+      queueMicrotask(() => {
+        this.readyState = OriginWebSocket.OPEN;
+        this.onopen?.();
+        this.onmessage?.({ data: JSON.stringify({
+          type: "ready",
+          connection_id: "process-map-connection-1",
+          connection_correlation: "process-map-correlation-1",
+        }) });
+        this.onmessage?.({ data: JSON.stringify({ type: "heartbeat.confirmed", nonce: "process-map-heartbeat" }) });
+        this.onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "process-map:company" }) });
+      });
+    }
+    send(_message: string): void {}
+    close(): void {
+      if (this.readyState === OriginWebSocket.CLOSED) return;
+      this.readyState = OriginWebSocket.CLOSED;
+      this.onclose?.();
+    }
+  }
+  (globalThis as typeof globalThis & { WebSocket: typeof WebSocket }).WebSocket = OriginWebSocket as unknown as typeof WebSocket;
+  const calls: Array<{ url: URL; method: string; body: unknown; originConnectionID: string | null }> = [];
   globalThis.fetch = (async (input, init) => {
     const url = new URL(input.toString());
     const method = init?.method ?? "GET";
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
-    calls.push({ url, method, body });
+    if (url.pathname === "/v1/realtime/ticket") {
+      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    calls.push({
+      url,
+      method,
+      body,
+      originConnectionID: new Headers(init?.headers).get("X-Mango-Realtime-Connection-ID"),
+    });
     if (method === "DELETE") return new Response(null, { status: 204 });
     if (url.pathname.endsWith("/trace")) {
       return new Response(JSON.stringify({
@@ -205,7 +261,22 @@ test("Process Map mutations use the small canonical API and integer route bodies
       updated_timestamp: "created",
     }), { status: 201, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
+  const unsubscribe = subscribeRealtimeScope(
+    "https://process-map-mutations.test",
+    "company-1",
+    "process-map:company",
+    {},
+  );
   try {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(
+      getCurrentRealtimeConnectionID("https://process-map-mutations.test", "company-1"),
+      "process-map-connection-1",
+    );
+    assert.equal(
+      getCurrentRealtimeConnectionCorrelation("https://process-map-mutations.test", "company-1"),
+      "process-map-correlation-1",
+    );
     const folder = { resource_type: "company_explorer_folder" as const, resource_id: "folder-1" };
     const gate = { resource_type: "logic_gate" as const, resource_id: "gate-1" };
     const savedPlacement = await putProcessMapPlacement("https://process-map-mutations.test", "company-1", gate, { map_parent_folder_id: "folder-1", grid_x: 4.4, grid_y: -2.6 });
@@ -225,7 +296,12 @@ test("Process Map mutations use the small canonical API and integer route bodies
     assert.match(calls[3].url.pathname, /\/operational-relationships\/relationship-1$/);
     assert.equal(calls[4].method, "DELETE");
     assert.match(calls[4].url.pathname, /\/placements\/logic_gate\/gate-1$/);
+    assert.deepEqual(calls.map((call) => call.originConnectionID), Array(5).fill("process-map-correlation-1"));
   } finally {
+    unsubscribe();
+    assert.equal(getCurrentRealtimeConnectionID("https://process-map-mutations.test", "company-1"), undefined);
+    assert.equal(getCurrentRealtimeConnectionCorrelation("https://process-map-mutations.test", "company-1"), undefined);
     globalThis.fetch = originalFetch;
+    globalThis.WebSocket = originalWebSocket;
   }
 });

@@ -20,6 +20,8 @@ const (
 	ProcessMapTraceSavedEvent                   = "process_map_trace_saved"
 )
 
+const processMapRealtimeOriginConnectionIDPayloadKey = "realtime_origin_connection_id"
+
 type ProcessMapLayerQuery struct {
 	CompanyID        string
 	FolderID         string
@@ -35,14 +37,15 @@ type ResourceOperationalRelationshipQuery struct {
 }
 
 type ProcessMapPlacementPutInput struct {
-	CompanyID         string
-	ResourceType      string
-	ResourceID        string
-	MapParentFolderID *string
-	GridX             int
-	GridY             int
-	ActorUserID       string
-	PermissionUserID  string
+	CompanyID            string
+	ResourceType         string
+	ResourceID           string
+	MapParentFolderID    *string
+	GridX                int
+	GridY                int
+	ActorUserID          string
+	PermissionUserID     string
+	RealtimeConnectionID string
 }
 
 type ProcessMapPlacementMutationResult struct {
@@ -52,11 +55,12 @@ type ProcessMapPlacementMutationResult struct {
 }
 
 type ProcessMapPlacementDeleteInput struct {
-	CompanyID        string
-	ResourceType     string
-	ResourceID       string
-	ActorUserID      string
-	PermissionUserID string
+	CompanyID            string
+	ResourceType         string
+	ResourceID           string
+	ActorUserID          string
+	PermissionUserID     string
+	RealtimeConnectionID string
 }
 
 type ProcessMapPlacementDeleteResult struct {
@@ -64,12 +68,13 @@ type ProcessMapPlacementDeleteResult struct {
 }
 
 type ResourceOperationalRelationshipCreateInput struct {
-	CompanyID        string
-	Source           domain.ProcessMapResourceRef
-	Target           domain.ProcessMapResourceRef
-	Trace            *ProcessMapTraceInput
-	ActorUserID      string
-	PermissionUserID string
+	CompanyID            string
+	Source               domain.ProcessMapResourceRef
+	Target               domain.ProcessMapResourceRef
+	Trace                *ProcessMapTraceInput
+	ActorUserID          string
+	PermissionUserID     string
+	RealtimeConnectionID string
 }
 
 type ProcessMapTraceInput struct {
@@ -90,6 +95,7 @@ type ProcessMapTracePutInput struct {
 	RoutePoints                       []domain.ProcessMapRoutePoint
 	ActorUserID                       string
 	PermissionUserID                  string
+	RealtimeConnectionID              string
 }
 
 type ProcessMapTraceMutationResult struct {
@@ -103,6 +109,7 @@ type ResourceOperationalRelationshipDeleteInput struct {
 	ResourceOperationalRelationshipID string
 	ActorUserID                       string
 	PermissionUserID                  string
+	RealtimeConnectionID              string
 }
 
 type ResourceOperationalRelationshipDeleteResult struct {
@@ -157,6 +164,13 @@ func processMapEventInput(companyID, actorUserID, eventType string, payload map[
 		ActorUserID: actorUserID,
 		Payload:     payload,
 	}
+}
+
+func processMapMutationEventInput(companyID, actorUserID, realtimeConnectionID, eventType string, payload map[string]any) DomainEventInput {
+	if realtimeConnectionID = strings.TrimSpace(realtimeConnectionID); realtimeConnectionID != "" {
+		payload[processMapRealtimeOriginConnectionIDPayloadKey] = realtimeConnectionID
+	}
+	return processMapEventInput(companyID, actorUserID, eventType, payload)
 }
 
 func processMapResourceEventPayload(resourceType, resourceID string) map[string]any {

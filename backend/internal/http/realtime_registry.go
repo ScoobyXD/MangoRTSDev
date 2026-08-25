@@ -72,6 +72,19 @@ func (r *realtimeSubscriptionRegistry) addConnection(conn *realtimeConnection) {
 	r.mu.Unlock()
 }
 
+func (r *realtimeSubscriptionRegistry) ownsConnection(connectionID, companyID, userID string) bool {
+	connectionID = strings.TrimSpace(connectionID)
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if r == nil || connectionID == "" || companyID == "" || userID == "" {
+		return false
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	connection := r.connections[connectionID]
+	return connection != nil && strings.TrimSpace(connection.companyID) == companyID && strings.TrimSpace(connection.userID) == userID
+}
+
 func (r *realtimeSubscriptionRegistry) removeConnection(connectionID string) {
 	connectionID = strings.TrimSpace(connectionID)
 	if r == nil || connectionID == "" {

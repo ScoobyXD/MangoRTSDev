@@ -27,6 +27,7 @@ export type ExplorerCreationContextRow = {
 
 export type ExplorerDropPayload = {
   kind: ExplorerTreeEntityKind | "batch";
+  label?: string;
   sourceTreeID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;

@@ -1,5 +1,6 @@
 import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import { requestJSON, requestJSONWithMeta } from "../api/requestJSON.js";
+import { getCurrentRealtimeConnectionCorrelation } from "../realtime/realtimeWebSocket.js";
 import {
   normalizeProcessMapRoutePoints,
   type ProcessMapGridPoint,
@@ -71,8 +72,6 @@ export type ProcessMapOperationalRelationship = {
   created_timestamp: string;
 };
 
-export type ProcessMapRelationshipDirection = "incoming" | "outgoing" | "both";
-
 export type ProcessMapRelationshipWriteResponse = {
   relationship: ProcessMapOperationalRelationship;
   trace?: ProcessMapTraceWriteResponse;
@@ -91,8 +90,16 @@ type LayerInflightEntry = {
   promise: Promise<ProcessMapLayerResponse>;
   callers: Set<symbol>;
   settled: boolean;
+  cacheable: boolean;
   abortTimer?: ReturnType<typeof setTimeout>;
 };
+
+const PROCESS_MAP_REALTIME_CONNECTION_HEADER = "X-Mango-Realtime-Connection-ID";
+
+function processMapMutationHeaders(apiBase: string, companyID: string): HeadersInit | undefined {
+  const connectionCorrelation = getCurrentRealtimeConnectionCorrelation(apiBase, companyID);
+  return connectionCorrelation ? { [PROCESS_MAP_REALTIME_CONNECTION_HEADER]: connectionCorrelation } : undefined;
+}
 
 const layerCache = new Map<string, LayerCacheEntry>();
 const layerInflight = new Map<string, LayerInflightEntry>();
@@ -330,14 +337,14 @@ export function fetchProcessMapLayer(
       return cached.response;
     }
     const normalized = normalizeLayerResponse(response.body);
-    layerCache.set(key, { response: normalized, etag: response.etag });
+    if (entry.cacheable) layerCache.set(key, { response: normalized, etag: response.etag });
     return normalized;
   }).finally(() => {
     entry.settled = true;
     if (entry.abortTimer !== undefined) clearTimeout(entry.abortTimer);
     if (layerInflight.get(key) === entry) layerInflight.delete(key);
   });
-  entry = { key, controller, promise, callers: new Set(), settled: false };
+  entry = { key, controller, promise, callers: new Set(), settled: false, cacheable: true };
   layerInflight.set(key, entry);
   return subscribeLayerInflight(entry, signal);
 }
@@ -349,29 +356,9 @@ export function invalidateProcessMapLayers(apiBase: string, companyID: string): 
   }
   for (const [key, entry] of layerInflight) {
     if (!key.startsWith(prefix)) continue;
+    entry.cacheable = false;
     layerInflight.delete(key);
-    if (!entry.settled) entry.controller.abort();
   }
-}
-
-export async function fetchProcessMapOperationalRelationships(
-  apiBase: string,
-  companyID: string,
-  resource: ProcessMapResourceRef,
-  direction: ProcessMapRelationshipDirection = "both",
-  signal?: AbortSignal,
-): Promise<ProcessMapOperationalRelationship[]> {
-  const params = new URLSearchParams({
-    company_id: companyID.trim(),
-    resource_type: resource.resource_type,
-    resource_id: resource.resource_id.trim(),
-    direction,
-  });
-  const payload = await requestJSON<unknown>(apiBase, `/v1/process-map/operational-relationships?${params}`, { signal });
-  if (!isRecord(payload) || !Array.isArray(payload.resource_operational_relationships)) {
-    throw new Error("invalid_process_map_relationship_response");
-  }
-  return payload.resource_operational_relationships.map(normalizeRelationship);
 }
 
 export async function putProcessMapPlacement(
@@ -386,6 +373,7 @@ export async function putProcessMapPlacement(
     `/v1/process-map/placements/${encodeURIComponent(resource.resource_type)}/${encodeURIComponent(resource.resource_id)}?${params}`,
     {
       method: "PUT",
+      headers: processMapMutationHeaders(apiBase, companyID),
       json: {
         map_parent_folder_id: placement.map_parent_folder_id?.trim() || null,
         grid_x: Math.round(placement.grid_x),
@@ -406,7 +394,7 @@ export async function deleteProcessMapPlacement(
   await requestJSON<void>(
     apiBase,
     `/v1/process-map/placements/${encodeURIComponent(resource.resource_type)}/${encodeURIComponent(resource.resource_id)}?${params}`,
-    { method: "DELETE" },
+    { method: "DELETE", headers: processMapMutationHeaders(apiBase, companyID) },
   );
   invalidateProcessMapLayers(apiBase, companyID);
 }
@@ -420,6 +408,7 @@ export async function postProcessMapRelationship(
 ): Promise<ProcessMapRelationshipWriteResponse> {
   const payload = await requestJSON<unknown>(apiBase, "/v1/process-map/operational-relationships", {
     method: "POST",
+    headers: processMapMutationHeaders(apiBase, companyID),
     json: {
       company_id: companyID.trim(),
       source,
@@ -447,7 +436,11 @@ export async function putProcessMapTrace(
   const payload = await requestJSON<unknown>(
     apiBase,
     `/v1/process-map/operational-relationships/${encodeURIComponent(relationshipID.trim())}/trace?${params}`,
-    { method: "PUT", json: { route_points: normalizeProcessMapRoutePoints(routePoints) } },
+    {
+      method: "PUT",
+      headers: processMapMutationHeaders(apiBase, companyID),
+      json: { route_points: normalizeProcessMapRoutePoints(routePoints) },
+    },
   );
   invalidateProcessMapLayers(apiBase, companyID);
   return normalizeTraceWriteResponse(payload);
@@ -462,7 +455,7 @@ export async function deleteProcessMapRelationship(
   await requestJSON<void>(
     apiBase,
     `/v1/process-map/operational-relationships/${encodeURIComponent(relationshipID.trim())}?${params}`,
-    { method: "DELETE" },
+    { method: "DELETE", headers: processMapMutationHeaders(apiBase, companyID) },
   );
   invalidateProcessMapLayers(apiBase, companyID);
 }

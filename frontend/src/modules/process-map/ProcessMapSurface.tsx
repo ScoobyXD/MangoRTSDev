@@ -20,14 +20,16 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/base.css";
+import { NODE_ICON_GRADIENT_END, NODE_ICON_GRADIENT_START } from "../../icons/index.js";
 import { readExplorerDragPayload, EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop.js";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh.js";
-import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
+import { getCurrentRealtimeConnectionID, subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
 import { isAbortError } from "../api/requestJSON.js";
 import {
   deleteProcessMapPlacement,
   deleteProcessMapRelationship,
   fetchProcessMapLayer,
+  invalidateProcessMapLayers,
   postProcessMapRelationship,
   putProcessMapPlacement,
   putProcessMapTrace,
@@ -38,15 +40,17 @@ import {
 } from "./processMapApi.js";
 import {
   PROCESS_MAP_GRID_PX,
-  PROCESS_MAP_LARGE_GRID_DIVISOR,
   defaultProcessMapRoutePoints,
   insertProcessMapRoutePoint,
   orthogonalizeProcessMapRoutePoints,
+  processMapFlowToRoutePoint,
   processMapFlowToGridPosition,
   processMapFootprint,
+  processMapGridPointToFlowPosition,
   processMapGridToFlowPosition,
   processMapInputAnchor,
   processMapOutputAnchor,
+  processMapRoutePointToSurfaceCenter,
   processMapTracePath,
   type ProcessMapGridPoint,
   type ProcessMapResourceType,
@@ -55,9 +59,8 @@ import {
   decideProcessMapExplorerDrop,
   isValidProcessMapConnection,
   processMapFolderDrillTarget,
-  processMapSelectionTarget,
   shouldApplyProcessMapCommit,
-  shouldRollbackProcessMapOptimisticSave,
+  shouldApplyProcessMapMutationAck,
 } from "./processMapInteraction.js";
 import "./processMap.css";
 
@@ -91,9 +94,10 @@ type ReplaceTraceRoute = (
 type MoveTraceWaypoint = (
   relationshipID: string,
   waypointIndex: number,
-  clientPoint: ProcessMapGridPoint,
+  clientPoint: ProcessMapGridPoint | null,
   startingRoutePoints: ProcessMapGridPoint[],
-  commit: boolean,
+  action: "preview" | "commit" | "cancel",
+  canonicalGeneration: number,
 ) => void;
 
 type ProcessMapEdgeData = {
@@ -104,6 +108,7 @@ type ProcessMapEdgeData = {
   updatedTimestamp: string;
   onMoveWaypoint: MoveTraceWaypoint;
   onReplaceRoute: ReplaceTraceRoute;
+  getCanonicalGeneration: () => number;
 };
 
 type ProcessMapEdge = Edge<ProcessMapEdgeData, "processMapTrace">;
@@ -207,8 +212,85 @@ function ProcessMapCard({ data, selected, isConnectable }: NodeProps<ProcessMapN
   );
 }
 
+function ProcessMapTraceWaypoint({
+  relationshipID,
+  waypointIndex,
+  point,
+  routePoints,
+  data,
+}: {
+  relationshipID: string;
+  waypointIndex: number;
+  point: ProcessMapGridPoint;
+  routePoints: ProcessMapGridPoint[];
+  data: ProcessMapEdgeData;
+}) {
+  const gestureRef = React.useRef<{
+    pointerID: number;
+    startingRoutePoints: ProcessMapGridPoint[];
+    canonicalGeneration: number;
+  } | null>(null);
+  const flowPoint = processMapGridPointToFlowPosition(processMapRoutePointToSurfaceCenter(point));
+  const finishGesture = (event: React.PointerEvent<HTMLButtonElement>, action: "commit" | "cancel") => {
+    const gesture = gestureRef.current;
+    if (!gesture || gesture.pointerID !== event.pointerId) return;
+    gestureRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    data.onMoveWaypoint(
+      relationshipID,
+      waypointIndex,
+      action === "commit" ? { x: event.clientX, y: event.clientY } : null,
+      gesture.startingRoutePoints,
+      action,
+      gesture.canonicalGeneration,
+    );
+  };
+  return (
+    <button
+      type="button"
+      className="nodrag nopan process-map-waypoint"
+      aria-label={`Trace waypoint ${waypointIndex + 1}`}
+      title="Drag to move. Double-click to remove."
+      style={{ transform: `translate(-50%, -50%) translate(${flowPoint.x}px, ${flowPoint.y}px)` }}
+      onDoubleClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        data.onReplaceRoute(relationshipID, routePoints.filter((_, routeIndex) => routeIndex !== waypointIndex));
+      }}
+      onPointerDown={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        gestureRef.current = {
+          pointerID: event.pointerId,
+          startingRoutePoints: routePoints.map((item) => ({ ...item })),
+          canonicalGeneration: data.getCanonicalGeneration(),
+        };
+        event.currentTarget.setPointerCapture?.(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        const gesture = gestureRef.current;
+        if (!gesture || gesture.pointerID !== event.pointerId) return;
+        data.onMoveWaypoint(
+          relationshipID,
+          waypointIndex,
+          { x: event.clientX, y: event.clientY },
+          gesture.startingRoutePoints,
+          "preview",
+          gesture.canonicalGeneration,
+        );
+      }}
+      onPointerUp={(event) => finishGesture(event, "commit")}
+      onPointerCancel={(event) => finishGesture(event, "cancel")}
+      onLostPointerCapture={(event) => finishGesture(event, "cancel")}
+    />
+  );
+}
+
 function ProcessMapTraceEdge({ id, sourceX, sourceY, targetX, targetY, selected, data }: EdgeProps<ProcessMapEdge>) {
   const routePoints = data?.routePoints ?? [];
+  const gradientID = `process-map-trace-gradient-${React.useId().replace(/:/g, "")}`;
   const path = processMapTracePath(
     { x: sourceX / PROCESS_MAP_GRID_PX, y: sourceY / PROCESS_MAP_GRID_PX },
     routePoints,
@@ -216,47 +298,36 @@ function ProcessMapTraceEdge({ id, sourceX, sourceY, targetX, targetY, selected,
   );
   return (
     <>
-      <BaseEdge id={id} path={path} className={`process-map-trace${selected ? " is-selected" : ""}`} />
+      <defs>
+        <linearGradient id={gradientID} x1={sourceX} y1={sourceY} x2={targetX} y2={targetY} gradientUnits="userSpaceOnUse">
+          <stop stopColor={NODE_ICON_GRADIENT_START} />
+          <stop offset="1" stopColor={NODE_ICON_GRADIENT_END} />
+        </linearGradient>
+      </defs>
+      <BaseEdge
+        id={id}
+        path={path}
+        className={`process-map-trace${selected ? " is-selected" : ""}`}
+        interactionWidth={PROCESS_MAP_GRID_PX}
+        style={{
+          stroke: `url(#${gradientID})`,
+          strokeWidth: PROCESS_MAP_GRID_PX,
+          strokeLinecap: "butt",
+          strokeLinejoin: "miter",
+        }}
+      />
       {selected && data && (
         <EdgeLabelRenderer>
-          {routePoints.map((point, index) => {
-            const flowPoint = processMapGridToFlowPosition(point);
-            return (
-              <button
-                type="button"
-                key={`${index}:${point.x}:${point.y}`}
-                className="nodrag nopan process-map-waypoint"
-                aria-label={`Trace waypoint ${index + 1}`}
-                title="Drag to move. Double-click to remove."
-                style={{ transform: `translate(-50%, -50%) translate(${flowPoint.x}px, ${flowPoint.y}px)` }}
-                onDoubleClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  data.onReplaceRoute(id, routePoints.filter((_, routeIndex) => routeIndex !== index));
-                }}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  const startingRoutePoints = routePoints.map((item) => ({ ...item }));
-                  const pointerID = event.pointerId;
-                  const onMove = (moveEvent: PointerEvent) => {
-                    if (moveEvent.pointerId !== pointerID) return;
-                    data.onMoveWaypoint(id, index, { x: moveEvent.clientX, y: moveEvent.clientY }, startingRoutePoints, false);
-                  };
-                  const onUp = (upEvent: PointerEvent) => {
-                    if (upEvent.pointerId !== pointerID) return;
-                    window.removeEventListener("pointermove", onMove);
-                    window.removeEventListener("pointerup", onUp);
-                    window.removeEventListener("pointercancel", onUp);
-                    data.onMoveWaypoint(id, index, { x: upEvent.clientX, y: upEvent.clientY }, startingRoutePoints, true);
-                  };
-                  window.addEventListener("pointermove", onMove);
-                  window.addEventListener("pointerup", onUp);
-                  window.addEventListener("pointercancel", onUp);
-                }}
-              />
-            );
-          })}
+          {routePoints.map((point, index) => (
+            <ProcessMapTraceWaypoint
+              key={index}
+              relationshipID={id}
+              waypointIndex={index}
+              point={point}
+              routePoints={routePoints}
+              data={data}
+            />
+          ))}
         </EdgeLabelRenderer>
       )}
     </>
@@ -282,11 +353,13 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
   const reactFlow = useReactFlow<ProcessMapNode, ProcessMapEdge>();
   const dragStartRef = useRef<{ id: string; position: ProcessMapGridPoint } | null>(null);
   const layerRequestGenerationRef = useRef(0);
+  const activeLayerReadRef = useRef<number | null>(null);
+  const localMutationGenerationRef = useRef(0);
   const canonicalRefreshGenerationRef = useRef(0);
   const activeLayerKeyRef = useRef("");
   const refreshResolversRef = useRef(new Set<() => void>());
   const traceSaveGenerationRef = useRef(new Map<string, number>());
-  const placementSaveGenerationRef = useRef(new Map<string, number>());
+  const placementOperationGenerationRef = useRef(new Map<string, number>());
   const deletedRelationshipIDsRef = useRef(new Set<string>());
   const committedPlacementRef = useRef(new Map<string, {
     position: ProcessMapGridPoint;
@@ -299,6 +372,15 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     setRefreshVersion((version) => version + 1);
   }), []);
 
+  const markLocalMutationCommitted = useCallback((): boolean => {
+    localMutationGenerationRef.current += 1;
+    if (!activeLayerReadRef.current) return false;
+    activeLayerReadRef.current = null;
+    layerRequestGenerationRef.current += 1;
+    void requestRefresh();
+    return true;
+  }, [requestRefresh]);
+
   useEffect(() => () => {
     for (const resolve of refreshResolversRef.current) resolve();
     refreshResolversRef.current.clear();
@@ -308,12 +390,24 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     const nextRoute = orthogonalizeProcessMapRoutePoints(routePoints);
     const saveGeneration = (traceSaveGenerationRef.current.get(relationshipID) ?? 0) + 1;
     traceSaveGenerationRef.current.set(relationshipID, saveGeneration);
+    const responseGeneration = canonicalRefreshGenerationRef.current;
     setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
       ? { ...edge, data: { ...edge.data, routePoints: nextRoute } }
       : edge));
     setError("");
     void putProcessMapTrace(apiBase, companyID, relationshipID, nextRoute)
       .then((trace) => {
+        const responseWasSuperseded = !shouldApplyProcessMapMutationAck(
+          responseGeneration,
+          canonicalRefreshGenerationRef.current,
+          saveGeneration,
+          traceSaveGenerationRef.current.get(relationshipID) ?? 0,
+        );
+        const refreshQueued = markLocalMutationCommitted();
+        if (responseWasSuperseded) {
+          if (!refreshQueued) void requestRefresh();
+          return;
+        }
         setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
           && shouldApplyProcessMapCommit(edge.data.revision, trace.revision)
           ? {
@@ -330,26 +424,47 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
           : edge));
       })
       .catch((cause) => {
-        if (!shouldRollbackProcessMapOptimisticSave(
+        if (!shouldApplyProcessMapMutationAck(
+          responseGeneration,
+          responseGeneration,
           saveGeneration,
           traceSaveGenerationRef.current.get(relationshipID) ?? 0,
         )) return;
+        if (canonicalRefreshGenerationRef.current !== responseGeneration) {
+          setError(processMapErrorMessage(cause, "Failed to save trace route"));
+          void requestRefresh();
+          return;
+        }
         setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
           ? { ...edge, data: { ...edge.data, routePoints: edge.data.committedRoutePoints.map((point) => ({ ...point })) } }
           : edge));
         setError(processMapErrorMessage(cause, "Failed to save trace route"));
+        void requestRefresh();
       });
-  }, [apiBase, companyID]);
+  }, [apiBase, companyID, markLocalMutationCommitted, requestRefresh]);
 
-  const moveTraceWaypoint = useCallback<MoveTraceWaypoint>((relationshipID, waypointIndex, clientPoint, startingRoutePoints, commit) => {
+  const currentCanonicalGeneration = useCallback(() => canonicalRefreshGenerationRef.current, []);
+
+  const moveTraceWaypoint = useCallback<MoveTraceWaypoint>((relationshipID, waypointIndex, clientPoint, startingRoutePoints, action, canonicalGeneration) => {
+    if (canonicalRefreshGenerationRef.current !== canonicalGeneration) return;
     if (waypointIndex < 0 || waypointIndex >= startingRoutePoints.length) return;
-    const flowPoint = reactFlow.screenToFlowPosition(clientPoint, { snapToGrid: true });
-    const gridPoint = processMapFlowToGridPosition(flowPoint);
+    if (action === "cancel") {
+      setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
+        ? { ...edge, data: { ...edge.data, routePoints: startingRoutePoints.map((point) => ({ ...point })) } }
+        : edge));
+      return;
+    }
+    if (!clientPoint) return;
+    const flowPoint = reactFlow.screenToFlowPosition(clientPoint, { snapToGrid: false });
+    const gridPoint = processMapFlowToRoutePoint(flowPoint);
     const next = startingRoutePoints.map((point, index) => index === waypointIndex ? gridPoint : point);
     setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
       ? { ...edge, data: { ...edge.data, routePoints: next } }
       : edge));
-    if (commit) replaceTraceRoute(relationshipID, next);
+    const startingPoint = startingRoutePoints[waypointIndex];
+    if (action === "commit" && (gridPoint.x !== startingPoint.x || gridPoint.y !== startingPoint.y)) {
+      replaceTraceRoute(relationshipID, next);
+    }
   }, [reactFlow, replaceTraceRoute]);
 
   const edgeFromTrace = useCallback((trace: ProcessMapTrace): ProcessMapEdge => ({
@@ -367,12 +482,13 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
       updatedTimestamp: trace.updated_timestamp,
       onMoveWaypoint: moveTraceWaypoint,
       onReplaceRoute: replaceTraceRoute,
+      getCanonicalGeneration: currentCanonicalGeneration,
     },
     selectable: true,
     focusable: true,
     deletable: false,
     zIndex: 0,
-  }), [moveTraceWaypoint, replaceTraceRoute]);
+  }), [currentCanonicalGeneration, moveTraceWaypoint, replaceTraceRoute]);
 
   useEffect(() => {
     const layerKey = `${companyID.trim()}:${folderID?.trim() ?? ""}`;
@@ -380,7 +496,13 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     activeLayerKeyRef.current = layerKey;
     const requestGeneration = layerRequestGenerationRef.current + 1;
     layerRequestGenerationRef.current = requestGeneration;
+    const mutationGeneration = localMutationGenerationRef.current;
+    const canonicalGeneration = canonicalRefreshGenerationRef.current;
+    const refreshResolvers = [...refreshResolversRef.current];
+    refreshResolversRef.current.clear();
+    activeLayerReadRef.current = requestGeneration;
     const controller = new AbortController();
+    let responseApplied = false;
     setLoading(true);
     setError("");
     setNotice("");
@@ -392,9 +514,14 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     }
     void fetchProcessMapLayer(apiBase, companyID, folderID, controller.signal)
       .then((response) => {
-        if (controller.signal.aborted || layerRequestGenerationRef.current !== requestGeneration || activeLayerKeyRef.current !== layerKey) return;
+        if (
+          controller.signal.aborted
+          || layerRequestGenerationRef.current !== requestGeneration
+          || localMutationGenerationRef.current !== mutationGeneration
+          || canonicalRefreshGenerationRef.current !== canonicalGeneration
+          || activeLayerKeyRef.current !== layerKey
+        ) return;
         const nextNodes = response.placements.map(processMapNodeFromPlacement);
-        const visibleNodeIDs = new Set(nextNodes.filter((node) => !node.data.restricted).map((node) => node.id));
         for (const node of nextNodes) {
           if (node.data.restricted) continue;
           committedPlacementRef.current.set(node.id, {
@@ -403,13 +530,18 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
           });
         }
         setNodes(nextNodes);
-        setEdges(response.traces
-          .map(edgeFromTrace)
-          .filter((edge) => visibleNodeIDs.has(edge.source) && visibleNodeIDs.has(edge.target)));
+        setEdges(response.traces.map(edgeFromTrace));
         onLayerChange?.(response.layer);
+        responseApplied = true;
       })
       .catch((cause) => {
-        if (controller.signal.aborted || isAbortError(cause) || layerRequestGenerationRef.current !== requestGeneration) return;
+        if (
+          controller.signal.aborted
+          || isAbortError(cause)
+          || layerRequestGenerationRef.current !== requestGeneration
+          || localMutationGenerationRef.current !== mutationGeneration
+          || canonicalRefreshGenerationRef.current !== canonicalGeneration
+        ) return;
         setNodes([]);
         setEdges([]);
         committedPlacementRef.current.clear();
@@ -417,12 +549,23 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
         setError(processMapErrorMessage(cause, "Failed to load Process Map layer"));
       })
       .finally(() => {
-        if (controller.signal.aborted || layerRequestGenerationRef.current !== requestGeneration) return;
-        setLoading(false);
-        for (const resolve of refreshResolversRef.current) resolve();
-        refreshResolversRef.current.clear();
+        if (
+          !controller.signal.aborted
+          && layerRequestGenerationRef.current === requestGeneration
+          && localMutationGenerationRef.current === mutationGeneration
+          && canonicalRefreshGenerationRef.current === canonicalGeneration
+        ) {
+          if (responseApplied && activeLayerReadRef.current === requestGeneration) {
+            activeLayerReadRef.current = null;
+          }
+          setLoading(false);
+        }
+        for (const resolve of refreshResolvers) resolve();
       });
-    return () => controller.abort();
+    return () => {
+      if (activeLayerReadRef.current === requestGeneration) activeLayerReadRef.current = null;
+      controller.abort();
+    };
   }, [apiBase, companyID, edgeFromTrace, folderID, onLayerChange, refreshVersion]);
 
   useEffect(() => {
@@ -442,12 +585,19 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
       setError(processMapErrorMessage(cause, "Failed to refresh Process Map"));
     });
     const clearLayerAndRefresh = () => {
+      invalidateProcessMapLayers(apiBase, companyID);
       clearLayer();
       refresh.request();
     };
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, PROCESS_MAP_REALTIME_SCOPE, {
-      onProcessMapChanged: clearLayerAndRefresh,
-      onRecover: clearLayerAndRefresh,
+      onProcessMapChanged: (message) => {
+        const connectionID = getCurrentRealtimeConnectionID(apiBase, companyID);
+        if (message.origin_connection_id && connectionID === message.origin_connection_id) return;
+        clearLayerAndRefresh();
+      },
+      onAccepted: () => {
+        clearLayerAndRefresh();
+      },
       onRejected: clearLayerAndRefresh,
     });
     return () => {
@@ -483,9 +633,10 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
       ? { ...item, position: snappedPosition, data: optimisticData }
       : item));
     if (original && original.position.x === gridPosition.x && original.position.y === gridPosition.y) return;
-    const saveGeneration = (placementSaveGenerationRef.current.get(node.id) ?? 0) + 1;
-    placementSaveGenerationRef.current.set(node.id, saveGeneration);
+    const operationGeneration = (placementOperationGenerationRef.current.get(node.id) ?? 0) + 1;
+    placementOperationGenerationRef.current.set(node.id, operationGeneration);
     setError("");
+    const responseGeneration = canonicalRefreshGenerationRef.current;
     void putProcessMapPlacement(apiBase, companyID, {
       resource_type: node.data.resourceType,
       resource_id: node.data.resourceID,
@@ -494,6 +645,17 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
       grid_x: gridPosition.x,
       grid_y: gridPosition.y,
     }).then((saved) => {
+      const responseWasSuperseded = !shouldApplyProcessMapMutationAck(
+        responseGeneration,
+        canonicalRefreshGenerationRef.current,
+        operationGeneration,
+        placementOperationGenerationRef.current.get(node.id) ?? 0,
+      );
+      const refreshQueued = markLocalMutationCommitted();
+      if (responseWasSuperseded) {
+        if (!refreshQueued) void requestRefresh();
+        return;
+      }
       setNodes((current) => current.map((item) => item.id === node.id && !item.data.restricted
         && shouldApplyProcessMapCommit(item.data.revision, saved.revision)
         ? (() => {
@@ -511,10 +673,17 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
           })()
         : item));
     }).catch((cause) => {
-      if (!shouldRollbackProcessMapOptimisticSave(
-        saveGeneration,
-        placementSaveGenerationRef.current.get(node.id) ?? 0,
+      if (!shouldApplyProcessMapMutationAck(
+        responseGeneration,
+        responseGeneration,
+        operationGeneration,
+        placementOperationGenerationRef.current.get(node.id) ?? 0,
       )) return;
+      if (canonicalRefreshGenerationRef.current !== responseGeneration) {
+        setError(processMapErrorMessage(cause, "Failed to save placement"));
+        void requestRefresh();
+        return;
+      }
       const committed = committedPlacementRef.current.get(node.id);
       if (committed) {
         setNodes((current) => current.map((item) => item.id === node.id
@@ -524,12 +693,11 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
               data: { ...committed.data },
             }
           : item));
-      } else {
-        void requestRefresh();
       }
       setError(processMapErrorMessage(cause, "Failed to save placement"));
+      void requestRefresh();
     });
-  }, [apiBase, companyID, folderID, requestRefresh]);
+  }, [apiBase, companyID, folderID, markLocalMutationCommitted, requestRefresh]);
 
   const handleConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return;
@@ -564,6 +732,7 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
         updatedTimestamp: "",
         onMoveWaypoint: moveTraceWaypoint,
         onReplaceRoute: replaceTraceRoute,
+        getCanonicalGeneration: currentCanonicalGeneration,
       },
       selectable: false,
       focusable: false,
@@ -575,14 +744,16 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     const responseGeneration = canonicalRefreshGenerationRef.current;
     void postProcessMapRelationship(apiBase, companyID, source, target, routePoints)
       .then((response) => {
+        const responseWasSuperseded = canonicalRefreshGenerationRef.current !== responseGeneration;
+        const refreshQueued = markLocalMutationCommitted();
         if (response.trace) {
           const trace = { ...response.trace, source, target };
           if (
-            canonicalRefreshGenerationRef.current !== responseGeneration
+            responseWasSuperseded
             || deletedRelationshipIDsRef.current.has(trace.resource_operational_relationship_id)
           ) {
             setEdges((current) => current.filter((edge) => edge.id !== pendingID));
-            void requestRefresh();
+            if (!refreshQueued) void requestRefresh();
             return;
           }
           const committedEdge = edgeFromTrace(trace);
@@ -599,15 +770,15 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
           });
         } else {
           setEdges((current) => current.filter((edge) => edge.id !== pendingID));
-          void requestRefresh();
+          if (!refreshQueued) void requestRefresh();
         }
       })
       .catch((cause) => {
-        if (canonicalRefreshGenerationRef.current !== responseGeneration) return;
         setEdges((current) => current.filter((edge) => edge.id !== pendingID));
         setError(processMapErrorMessage(cause, "Failed to create trace"));
+        void requestRefresh();
       });
-  }, [apiBase, companyID, edgeFromTrace, moveTraceWaypoint, nodes, replaceTraceRoute, requestRefresh]);
+  }, [apiBase, companyID, currentCanonicalGeneration, edgeFromTrace, markLocalMutationCommitted, moveTraceWaypoint, nodes, replaceTraceRoute, requestRefresh]);
 
   const removeSelection = useCallback(() => {
     if (!selection) return;
@@ -618,10 +789,15 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
       setEdges((current) => current.filter((edge) => edge.id !== removed.id));
       setSelection(null);
       setError("");
-      void deleteProcessMapRelationship(apiBase, companyID, removed.id).catch((cause) => {
-        setError(processMapErrorMessage(cause, "Failed to delete trace"));
-        void requestRefresh();
-      });
+      void deleteProcessMapRelationship(apiBase, companyID, removed.id)
+        .then(() => {
+          markLocalMutationCommitted();
+          setEdges((current) => current.filter((edge) => edge.id !== removed.id));
+        })
+        .catch((cause) => {
+          setError(processMapErrorMessage(cause, "Failed to delete trace"));
+          void requestRefresh();
+        });
       return;
     }
     const removed = nodes.find((node) => node.id === selection.id);
@@ -631,11 +807,30 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     setEdges((current) => current.filter((edge) => edge.source !== removed.id && edge.target !== removed.id));
     setSelection(null);
     setError("");
-    void deleteProcessMapPlacement(apiBase, companyID, resource).catch((cause) => {
-      setError(processMapErrorMessage(cause, "Failed to remove placement"));
-      void requestRefresh();
-    });
-  }, [apiBase, companyID, edges, nodes, requestRefresh, selection]);
+    const operationGeneration = (placementOperationGenerationRef.current.get(removed.id) ?? 0) + 1;
+    placementOperationGenerationRef.current.set(removed.id, operationGeneration);
+    const responseGeneration = canonicalRefreshGenerationRef.current;
+    void deleteProcessMapPlacement(apiBase, companyID, resource)
+      .then(() => {
+        const responseWasSuperseded = !shouldApplyProcessMapMutationAck(
+          responseGeneration,
+          canonicalRefreshGenerationRef.current,
+          operationGeneration,
+          placementOperationGenerationRef.current.get(removed.id) ?? 0,
+        );
+        const refreshQueued = markLocalMutationCommitted();
+        if (responseWasSuperseded) {
+          if (!refreshQueued) void requestRefresh();
+          return;
+        }
+        setNodes((current) => current.filter((node) => node.id !== removed.id));
+        setEdges((current) => current.filter((edge) => edge.source !== removed.id && edge.target !== removed.id));
+      })
+      .catch((cause) => {
+        setError(processMapErrorMessage(cause, "Failed to remove placement"));
+        void requestRefresh();
+      });
+  }, [apiBase, companyID, edges, markLocalMutationCommitted, nodes, requestRefresh, selection]);
 
   const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     const payload = readExplorerDragPayload(event.dataTransfer);
@@ -649,20 +844,70 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     }
     const flowPosition = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY }, { snapToGrid: true });
     const gridPosition = processMapFlowToGridPosition(flowPosition);
+    const nodeID = resourceNodeID(decision.resource);
+    const operationGeneration = (placementOperationGenerationRef.current.get(nodeID) ?? 0) + 1;
+    placementOperationGenerationRef.current.set(nodeID, operationGeneration);
     setNotice("Saving placement…");
     setError("");
+    const responseGeneration = canonicalRefreshGenerationRef.current;
     void putProcessMapPlacement(apiBase, companyID, decision.resource, {
       map_parent_folder_id: decision.mapParentFolderID,
       grid_x: gridPosition.x,
       grid_y: gridPosition.y,
-    }).then(() => {
-      setNotice("");
-      void requestRefresh();
+    }).then((saved) => {
+      const responseWasSuperseded = !shouldApplyProcessMapMutationAck(
+        responseGeneration,
+        canonicalRefreshGenerationRef.current,
+        operationGeneration,
+        placementOperationGenerationRef.current.get(nodeID) ?? 0,
+      );
+      const refreshQueued = markLocalMutationCommitted();
+      if (responseWasSuperseded) {
+        if (operationGeneration === (placementOperationGenerationRef.current.get(nodeID) ?? 0)) setNotice("");
+        if (!refreshQueued) void requestRefresh();
+        return;
+      }
+      const placement: ProcessMapPlacement = {
+        restricted: false,
+        resource_type: saved.resource_type,
+        resource_id: saved.resource_id,
+        name: decision.label,
+        grid_x: saved.grid_x,
+        grid_y: saved.grid_y,
+        revision: saved.revision,
+        created_timestamp: saved.created_timestamp,
+        updated_timestamp: saved.updated_timestamp,
+      };
+      const added = processMapNodeFromPlacement(placement, 0);
+      const addedData = added.data;
+      if (addedData.restricted) {
+        void requestRefresh();
+        return;
+      }
+      setNodes((current) => {
+        const existing = current.find((node) => node.id === added.id);
+        if (existing && !existing.data.restricted && !shouldApplyProcessMapCommit(existing.data.revision, addedData.revision)) {
+          return current;
+        }
+        committedPlacementRef.current.set(added.id, {
+          position: { x: addedData.gridX, y: addedData.gridY },
+          data: { ...addedData },
+        });
+        return [...current.filter((node) => node.id !== added.id), added];
+      });
+      if (operationGeneration === (placementOperationGenerationRef.current.get(nodeID) ?? 0)) setNotice("");
     }).catch((cause) => {
+      if (!shouldApplyProcessMapMutationAck(
+        responseGeneration,
+        responseGeneration,
+        operationGeneration,
+        placementOperationGenerationRef.current.get(nodeID) ?? 0,
+      )) return;
       setNotice("");
       setError(processMapErrorMessage(cause, "Failed to add placement"));
+      void requestRefresh();
     });
-  }, [apiBase, companyID, folderID, reactFlow, requestRefresh]);
+  }, [apiBase, companyID, folderID, markLocalMutationCommitted, reactFlow, requestRefresh]);
 
   const acceptsExplorerDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
@@ -717,9 +962,8 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
         onNodeDragStart={handleNodeDragStart}
         onNodeDragStop={handleNodeDragStop}
         onNodeClick={(_, node) => {
-          const selectedNodeID = processMapSelectionTarget(node.id, node.data.restricted);
-          if (!selectedNodeID) return;
-          setSelection({ kind: "placement", id: selectedNodeID });
+          if (node.data.restricted) return;
+          setSelection({ kind: "placement", id: node.id });
           setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })));
           setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
         }}
@@ -735,7 +979,10 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
         onEdgeDoubleClick={(event, edge) => {
           event.preventDefault();
           if (!edge.data || edge.id.startsWith("pending:")) return;
-          const point = processMapFlowToGridPosition(reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY }, { snapToGrid: true }));
+          const point = processMapFlowToRoutePoint(reactFlow.screenToFlowPosition(
+            { x: event.clientX, y: event.clientY },
+            { snapToGrid: false },
+          ));
           const sourceNode = nodes.find((node) => node.id === edge.source);
           const targetNode = nodes.find((node) => node.id === edge.target);
           if (!sourceNode || !targetNode || sourceNode.data.restricted || targetNode.data.restricted) return;
@@ -777,18 +1024,11 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
         proOptions={{ hideAttribution: true }}
       >
         <Background
-          id="process-map-small-grid"
+          id="process-map-grid"
           variant={BackgroundVariant.Lines}
           gap={PROCESS_MAP_GRID_PX}
-          size={0.55}
-          color="rgba(148, 163, 184, 0.16)"
-        />
-        <Background
-          id="process-map-large-grid"
-          variant={BackgroundVariant.Lines}
-          gap={PROCESS_MAP_GRID_PX * PROCESS_MAP_LARGE_GRID_DIVISOR}
-          size={1.05}
-          color="rgba(100, 116, 139, 0.2)"
+          size={0.7}
+          color="rgba(148, 163, 184, 0.2)"
         />
       </ReactFlow>
     </section>

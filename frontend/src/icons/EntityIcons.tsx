@@ -2,6 +2,8 @@ import React from "react";
 
 export type ExplorerEntityIconKind = "node" | "logic_gate" | "project" | "email_message";
 export type ExplorerEntityIconTone = "default" | "inverse" | "orange";
+export const NODE_ICON_GRADIENT_START = "#33ddd5";
+export const NODE_ICON_GRADIENT_END = "#19a8ff";
 
 type SVGSpec = {
   tag: string;
@@ -41,8 +43,8 @@ function iconSpecs(kind: ExplorerEntityIconKind, tone: ExplorerEntityIconTone, i
           tag: "linearGradient",
           attrs: { id, x1: "8", y1: "1.7", x2: "8", y2: "14.3", gradientUnits: "userSpaceOnUse" },
           children: [
-            { tag: "stop", attrs: { stopColor: "#33ddd5" } },
-            { tag: "stop", attrs: { offset: "1", stopColor: "#19a8ff" } },
+            { tag: "stop", attrs: { stopColor: NODE_ICON_GRADIENT_START } },
+            { tag: "stop", attrs: { offset: "1", stopColor: NODE_ICON_GRADIENT_END } },
           ],
         }],
       } satisfies SVGSpec] : []),

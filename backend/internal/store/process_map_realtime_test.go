@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,11 +14,11 @@ import (
 
 func TestProcessMapRealtimeDoorbellIsCompactStableAndCompanyScoped(t *testing.T) {
 	companyID := "89898989-8989-4989-8989-898989898981"
-	first, err := processMapChangedOutboxInput(companyID, []string{"event-b", "event-a", "event-a"}, []string{"user-b", "user-a"})
+	first, err := processMapChangedOutboxInput(companyID, []string{"event-b", "event-a", "event-a"}, []string{"user-b", "user-a"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	retry, err := processMapChangedOutboxInput(companyID, []string{"event-a", "event-b"}, []string{"user-a"})
+	retry, err := processMapChangedOutboxInput(companyID, []string{"event-a", "event-b"}, []string{"user-a"}, "connection-a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +35,12 @@ func TestProcessMapRealtimeDoorbellIsCompactStableAndCompanyScoped(t *testing.T)
 	if len(payload) != 3 || payload["type"] != "process_map.changed" || payload["company_id"] != companyID || payload["scope"] != processMapRealtimeScope {
 		t.Fatalf("doorbell leaked more than compact invalidation fields: %s", first.Payload)
 	}
+	if err := json.Unmarshal(retry.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 4 || payload["origin_connection_id"] != "connection-a" {
+		t.Fatalf("correlated doorbell payload = %s", retry.Payload)
+	}
 }
 
 func TestMemoryProcessMapRealtimeDoorbellUsesCompanyAudience(t *testing.T) {
@@ -44,7 +51,8 @@ func TestMemoryProcessMapRealtimeDoorbellUsesCompanyAudience(t *testing.T) {
 	resetMemoryMembershipEventState(repo)
 	events := []domain.DomainEvent{{
 		CompanyID: companyID, EventID: "89898989-8989-4989-8989-898989898983",
-		StreamType: workspaceDomainStreamType, StreamID: companyID, Type: "process_map_trace_saved",
+		StreamType: workspaceDomainStreamType, StreamID: companyID, Type: "logic_gate_permissions_updated",
+		ActorUserID: &user.UserID,
 	}}
 
 	if err := repo.enqueueProcessMapRealtimeForDomainEventsLocked(events); err != nil {
@@ -68,13 +76,113 @@ func TestMemoryProcessMapRealtimeCoalescesDomainEventBatch(t *testing.T) {
 	resetMemoryMembershipEventState(repo)
 
 	if _, err := repo.AppendDomainEvents([]DomainEventInput{
-		workspaceDomainEventInput(companyID, "process_map_placement_saved", map[string]any{}),
-		workspaceDomainEventInput(companyID, "process_map_trace_saved", map[string]any{}),
+		workspaceDomainEventInput(companyID, "logic_gate_permissions_updated", map[string]any{}),
+		workspaceDomainEventInput(companyID, "company_explorer_folder_permissions_updated", map[string]any{}),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if len(repo.realtimeOutbox) != 1 {
 		t.Fatalf("Process Map batch outbox rows = %d, want one coalesced row", len(repo.realtimeOutbox))
+	}
+}
+
+func TestMemoryProcessMapMutationsKeepCompanyAudienceAndCorrelateExactOrigin(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "89898989-8989-4989-8989-898989898980"
+	repo.EnsureCompany(companyID, "Process Map Direct Mutations")
+	actor := mustCreateRACIMembershipUser(t, repo, "process-map-direct-actor", companyID)
+	other := mustCreateRACIMembershipUser(t, repo, "process-map-direct-other", companyID)
+	resetMemoryMembershipEventState(repo)
+
+	if _, err := repo.AppendDomainEvents([]DomainEventInput{
+		processMapMutationEventInput(companyID, actor.UserID, "connection-a", ProcessMapPlacementSavedEvent, map[string]any{}),
+		processMapMutationEventInput(companyID, actor.UserID, "connection-a", ResourceOperationalRelationshipCreatedEvent, map[string]any{}),
+		processMapMutationEventInput(companyID, actor.UserID, "connection-a", ProcessMapTraceSavedEvent, map[string]any{}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(repo.realtimeOutbox) != 1 {
+		t.Fatalf("direct Process Map mutations enqueued %d refresh hints, want one for other viewers", len(repo.realtimeOutbox))
+	}
+	for _, item := range repo.realtimeOutbox {
+		wantAudience := []string{actor.UserID, other.UserID}
+		slices.Sort(wantAudience)
+		if !reflect.DeepEqual(item.AllowedUserIDs, wantAudience) {
+			t.Fatalf("direct Process Map refresh audience = %v, want every viewer %v", item.AllowedUserIDs, wantAudience)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(item.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["origin_connection_id"] != "connection-a" {
+			t.Fatalf("direct Process Map refresh payload = %s", item.Payload)
+		}
+	}
+	if got := repo.workspaceReadVersions[workspaceReadVersionMemoryKey(companyID, "process-map", "")]; got != 3 {
+		t.Fatalf("Process Map read version = %d, want 3", got)
+	}
+}
+
+func TestProcessMapRealtimeOriginRequiresEveryRelevantEventToShareOneDirectConnection(t *testing.T) {
+	companyID := "89898989-8989-4989-8989-898989898979"
+	event := func(eventID, eventType, connectionID string) domain.DomainEvent {
+		payload := map[string]any{}
+		if connectionID != "" {
+			payload[processMapRealtimeOriginConnectionIDPayloadKey] = connectionID
+		}
+		return domain.DomainEvent{
+			CompanyID: companyID, EventID: eventID, StreamType: workspaceDomainStreamType,
+			StreamID: companyID, Type: eventType, Payload: payload,
+		}
+	}
+	for _, test := range []struct {
+		name   string
+		events []domain.DomainEvent
+		want   string
+	}{
+		{
+			name: "same direct connection",
+			events: []domain.DomainEvent{
+				event("one", ProcessMapPlacementSavedEvent, "connection-a"),
+				event("two", ProcessMapTraceSavedEvent, "connection-a"),
+			},
+			want: "connection-a",
+		},
+		{
+			name: "different direct connections",
+			events: []domain.DomainEvent{
+				event("one", ProcessMapPlacementSavedEvent, "connection-a"),
+				event("two", ProcessMapTraceSavedEvent, "connection-b"),
+			},
+		},
+		{
+			name: "missing direct connection",
+			events: []domain.DomainEvent{
+				event("one", ProcessMapPlacementSavedEvent, "connection-a"),
+				event("two", ProcessMapTraceSavedEvent, ""),
+			},
+		},
+		{
+			name: "source visibility event",
+			events: []domain.DomainEvent{
+				event("one", ProcessMapPlacementSavedEvent, "connection-a"),
+				event("two", "logic_gate_permissions_updated", "connection-a"),
+			},
+		},
+		{
+			name: "unrelated event ignored",
+			events: []domain.DomainEvent{
+				event("one", ProcessMapPlacementSavedEvent, "connection-a"),
+				event("two", "node_updated", ""),
+			},
+			want: "connection-a",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := processMapChangedOriginConnectionIDsByCompany(test.events)[companyID]; got != test.want {
+				t.Fatalf("origin connection = %q, want %q", got, test.want)
+			}
+		})
 	}
 }
 
@@ -100,6 +208,15 @@ func TestProcessMapRealtimeFilterIncludesVisibilityChangesAndRestoreOnlyCreates(
 	}
 	if !isProcessMapChangedDomainEvent(event("logic_gate_created", map[string]any{"realtime_change_type": "resource_restored"})) {
 		t.Error("restored source creation must invalidate restored Process Map state")
+	}
+	for _, eventType := range []string{
+		ProcessMapPlacementSavedEvent, ProcessMapPlacementDeletedEvent,
+		ResourceOperationalRelationshipCreatedEvent, ResourceOperationalRelationshipDeletedEvent,
+		ProcessMapTraceSavedEvent,
+	} {
+		if !isProcessMapChangedDomainEvent(event(eventType, nil)) {
+			t.Errorf("direct Process Map mutation %q must refresh other viewers", eventType)
+		}
 	}
 }
 

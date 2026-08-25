@@ -20,16 +20,16 @@ export const TREE_ROW_POSITION_STEP = 1000;
 export function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPayload | null {
   if (row.syntheticKind === "RACI_folder" || row.syntheticKind === "default_scope_folder") return null;
   if (row.kind === "folder" && row.folderID && (row.folderKind || row.entityType === "folder")) {
-    return { kind: "folder", folderID: row.folderID, folderKind: row.folderKind ?? "logic_gate" };
+    return { kind: "folder", label: row.label, folderID: row.folderID, folderKind: row.folderKind ?? "logic_gate" };
   }
   if (row.kind === "logic_gate" && row.logicGateID) {
-    return { kind: "logic_gate", itemID: row.logicGateID, itemType: "logic_gate", sourceTreeID: row.id };
+    return { kind: "logic_gate", label: row.label, itemID: row.logicGateID, itemType: "logic_gate", sourceTreeID: row.id };
   }
   if (row.kind === "project" && row.projectID) {
-    return { kind: "project", itemID: row.projectID, itemType: "project", sourceTreeID: row.id };
+    return { kind: "project", label: row.label, itemID: row.projectID, itemType: "project", sourceTreeID: row.id };
   }
   if (row.kind === "kanban" && row.kanbanBoardID) {
-    return { kind: "kanban", itemID: row.kanbanBoardID, itemType: "kanban", sourceTreeID: row.id };
+    return { kind: "kanban", label: row.label, itemID: row.kanbanBoardID, itemType: "kanban", sourceTreeID: row.id };
   }
   return null;
 }
@@ -68,9 +68,13 @@ export function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDra
     const raw = dataTransfer.getData(EXPLORER_DRAG_MIME);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as ExplorerDragPayload;
-    if (parsed.kind === "folder" && parsed.folderID && parsed.folderKind) return parsed;
+    if (parsed.kind === "folder" && parsed.folderID && parsed.folderKind) return {
+      ...parsed,
+      label: typeof parsed.label === "string" ? parsed.label.trim() : undefined,
+    };
     if ((parsed.kind === "logic_gate" || parsed.kind === "project" || parsed.kind === "kanban") && parsed.itemID && parsed.itemType) return {
       ...parsed,
+      label: typeof parsed.label === "string" ? parsed.label.trim() : undefined,
       sourceTreeID: typeof parsed.sourceTreeID === "string" ? parsed.sourceTreeID : undefined,
     };
     if (parsed.kind === "batch") {

@@ -294,13 +294,6 @@ from resource_operational_relationships
 where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`+lock, companyID, relationshipID))
 }
 
-func (r *PostgresRepo) appendProcessMapEventsTx(ctx context.Context, tx *sql.Tx, inputs []DomainEventInput) ([]domain.DomainEvent, error) {
-	if len(inputs) == 0 {
-		return []domain.DomainEvent{}, nil
-	}
-	return r.appendDomainEventsTx(ctx, tx, inputs)
-}
-
 func (r *PostgresRepo) PutProcessMapPlacement(input ProcessMapPlacementPutInput) (ProcessMapPlacementMutationResult, error) {
 	companyID, actorUserID, permissionUserID, err := normalizePostgresProcessMapMutation(input.CompanyID, input.ActorUserID, input.PermissionUserID)
 	resourceType, typeOK := normalizeProcessMapResourceType(input.ResourceType)
@@ -399,7 +392,7 @@ where trace.company_id=$1::uuid and relationship.company_id=trace.company_id
 			return ProcessMapPlacementMutationResult{}, err
 		}
 	}
-	events, err := r.appendProcessMapEventsTx(ctx, tx, []DomainEventInput{processMapEventInput(companyID, actorUserID, ProcessMapPlacementSavedEvent, processMapResourceEventPayload(resourceType, resourceID))})
+	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapPlacementSavedEvent, processMapResourceEventPayload(resourceType, resourceID))})
 	if err != nil {
 		return ProcessMapPlacementMutationResult{}, err
 	}
@@ -440,7 +433,7 @@ where trace.company_id=$1::uuid and relationship.company_id=trace.company_id and
 	if _, err := tx.ExecContext(ctx, `delete from process_map_placements where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, resourceID); err != nil {
 		return ProcessMapPlacementDeleteResult{}, err
 	}
-	events, err := r.appendProcessMapEventsTx(ctx, tx, []DomainEventInput{processMapEventInput(companyID, actorUserID, ProcessMapPlacementDeletedEvent, processMapResourceEventPayload(resourceType, resourceID))})
+	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapPlacementDeletedEvent, processMapResourceEventPayload(resourceType, resourceID))})
 	if err != nil {
 		return ProcessMapPlacementDeleteResult{}, err
 	}
@@ -569,7 +562,7 @@ for update`, companyID, input.Source.ResourceType, input.Source.ResourceID, inpu
 	result := ResourceOperationalRelationshipMutationResult{Relationship: relationship, RelationshipCreated: created}
 	eventInputs := []DomainEventInput{}
 	if created {
-		eventInputs = append(eventInputs, processMapEventInput(companyID, actorUserID, ResourceOperationalRelationshipCreatedEvent, map[string]any{"resource_operational_relationship_id": relationship.ResourceOperationalRelationshipID}))
+		eventInputs = append(eventInputs, processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipCreatedEvent, map[string]any{"resource_operational_relationship_id": relationship.ResourceOperationalRelationshipID}))
 	}
 	if input.Trace != nil {
 		if err := validatePostgresProcessMapTraceEndpointsTx(ctx, tx, companyID, relationship); err != nil {
@@ -582,10 +575,10 @@ for update`, companyID, input.Source.ResourceType, input.Source.ResourceID, inpu
 		result.Trace = &trace
 		result.TraceChanged = changed
 		if changed {
-			eventInputs = append(eventInputs, processMapEventInput(companyID, actorUserID, ProcessMapTraceSavedEvent, map[string]any{"resource_operational_relationship_id": relationship.ResourceOperationalRelationshipID}))
+			eventInputs = append(eventInputs, processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, map[string]any{"resource_operational_relationship_id": relationship.ResourceOperationalRelationshipID}))
 		}
 	}
-	result.Events, err = r.appendProcessMapEventsTx(ctx, tx, eventInputs)
+	result.Events, err = r.appendDomainEventsTx(ctx, tx, eventInputs)
 	if err != nil {
 		return ResourceOperationalRelationshipMutationResult{}, err
 	}
@@ -630,7 +623,7 @@ func (r *PostgresRepo) PutProcessMapTrace(input ProcessMapTracePutInput) (Proces
 	}
 	result := ProcessMapTraceMutationResult{Trace: trace, Changed: changed}
 	if changed {
-		result.Events, err = r.appendProcessMapEventsTx(ctx, tx, []DomainEventInput{processMapEventInput(companyID, actorUserID, ProcessMapTraceSavedEvent, map[string]any{"resource_operational_relationship_id": relationshipID})})
+		result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, map[string]any{"resource_operational_relationship_id": relationshipID})})
 		if err != nil {
 			return ProcessMapTraceMutationResult{}, err
 		}
@@ -669,7 +662,7 @@ func (r *PostgresRepo) DeleteResourceOperationalRelationship(input ResourceOpera
 	if _, err := tx.ExecContext(ctx, `delete from resource_operational_relationships where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`, companyID, relationshipID); err != nil {
 		return ResourceOperationalRelationshipDeleteResult{}, err
 	}
-	events, err := r.appendProcessMapEventsTx(ctx, tx, []DomainEventInput{processMapEventInput(companyID, actorUserID, ResourceOperationalRelationshipDeletedEvent, map[string]any{"resource_operational_relationship_id": relationshipID})})
+	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipDeletedEvent, map[string]any{"resource_operational_relationship_id": relationshipID})})
 	if err != nil {
 		return ResourceOperationalRelationshipDeleteResult{}, err
 	}

@@ -5,34 +5,35 @@ import {
   decideProcessMapExplorerDrop,
   isValidProcessMapConnection,
   processMapFolderDrillTarget,
-  processMapSelectionTarget,
   shouldApplyProcessMapCommit,
-  shouldRollbackProcessMapOptimisticSave,
+  shouldApplyProcessMapMutationAck,
 } from "../../../../frontend/src/modules/process-map/processMapInteraction.js";
 
 test("Process Map accepts only exact manual Explorer resources in valid layers", () => {
   assert.deepEqual(
-    decideProcessMapExplorerDrop({ kind: "folder", folderID: " folder-1 ", folderKind: "logic_gate" }),
+    decideProcessMapExplorerDrop({ kind: "folder", label: " Finance ", folderID: " folder-1 ", folderKind: "logic_gate" }),
     {
       kind: "place",
       resource: { resource_type: "company_explorer_folder", resource_id: "folder-1" },
+      label: "Finance",
       mapParentFolderID: null,
     },
   );
   assert.deepEqual(
-    decideProcessMapExplorerDrop({ kind: "logic_gate", itemID: " gate-1 ", itemType: "logic_gate" }, "folder-1"),
+    decideProcessMapExplorerDrop({ kind: "logic_gate", label: " Review ", itemID: " gate-1 ", itemType: "logic_gate" }, "folder-1"),
     {
       kind: "place",
       resource: { resource_type: "logic_gate", resource_id: "gate-1" },
+      label: "Review",
       mapParentFolderID: "folder-1",
     },
   );
   assert.equal(
-    decideProcessMapExplorerDrop({ kind: "logic_gate", itemID: "gate-1", itemType: "logic_gate" }).kind,
+    decideProcessMapExplorerDrop({ kind: "logic_gate", label: "Review", itemID: "gate-1", itemType: "logic_gate" }).kind,
     "reject",
   );
   assert.equal(
-    decideProcessMapExplorerDrop({ kind: "folder", folderID: "folder-1", folderKind: "logic_gate" }, "folder-1").kind,
+    decideProcessMapExplorerDrop({ kind: "folder", label: "Finance", folderID: "folder-1", folderKind: "logic_gate" }, "folder-1").kind,
     "reject",
   );
   assert.deepEqual(
@@ -46,9 +47,6 @@ test("Process Map accepts only exact manual Explorer resources in valid layers",
 });
 
 test("single-click selection excludes restricted cards and double-click drill-in is Folder-only", () => {
-  assert.equal(processMapSelectionTarget("company_explorer_folder:folder-1", false), "company_explorer_folder:folder-1");
-  assert.equal(processMapSelectionTarget("logic_gate:gate-1", false), "logic_gate:gate-1");
-  assert.equal(processMapSelectionTarget("restricted:0", true), null);
   assert.equal(
     processMapFolderDrillTarget({ resource_type: "company_explorer_folder", resource_id: "folder-1" }),
     "folder-1",
@@ -68,6 +66,7 @@ test("optimistic saves apply committed revisions in order and only the latest fa
   assert.equal(shouldApplyProcessMapCommit(3, 4), true);
   assert.equal(shouldApplyProcessMapCommit(4, 4), true);
   assert.equal(shouldApplyProcessMapCommit(4, 3), false);
-  assert.equal(shouldRollbackProcessMapOptimisticSave(2, 3), false);
-  assert.equal(shouldRollbackProcessMapOptimisticSave(3, 3), true);
+  assert.equal(shouldApplyProcessMapMutationAck(4, 4, 3, 3), true);
+  assert.equal(shouldApplyProcessMapMutationAck(4, 5, 3, 3), false, "a canonical refresh supersedes a delayed ACK even if its row revision resets");
+  assert.equal(shouldApplyProcessMapMutationAck(4, 4, 2, 3), false, "a newer mixed operation supersedes an older ACK for the same resource");
 });

@@ -10,6 +10,9 @@ function source(path: string): string {
 test("Process Map surface keeps interaction, geometry, privacy, and lazy-load rules local", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const styles = source("frontend/src/modules/process-map/processMap.css");
+  const geometry = source("frontend/src/modules/process-map/processMapGeometry.ts");
+  const api = source("frontend/src/modules/process-map/processMapApi.ts");
+  const icons = source("frontend/src/icons/EntityIcons.tsx");
   assert.match(surface, /readExplorerDragPayload/);
   assert.match(surface, /decideProcessMapExplorerDrop/);
   assert.match(surface, /zoomOnDoubleClick=\{false\}/);
@@ -20,10 +23,40 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   assert.match(surface, /onMoveWaypoint/);
   assert.match(surface, /clearLayer[\s\S]*setNodes\(\[\]\)[\s\S]*setEdges\(\[\]\)[\s\S]*setSelection\(null\)[\s\S]*onLayerChange\?\.\(null\)/);
   assert.match(surface, /createCoalescedCanonicalRefresh\(\(\)\s*=>\s*\{[\s\S]*clearLayer\(\)[\s\S]*return requestRefresh\(\)/);
-  assert.match(surface, /onProcessMapChanged:\s*clearLayerAndRefresh[\s\S]*onRejected:\s*clearLayerAndRefresh/);
+  assert.match(surface, /onProcessMapChanged:\s*\(message\)[\s\S]*message\.origin_connection_id[\s\S]*clearLayerAndRefresh\(\)[\s\S]*onRejected:\s*clearLayerAndRefresh/);
+  assert.equal(surface.match(/<Background\b/g)?.length, 1);
+  assert.doesNotMatch(surface, /process-map-large-grid|PROCESS_MAP_LARGE_GRID_DIVISOR/);
+  assert.match(surface, /strokeWidth:\s*PROCESS_MAP_GRID_PX/);
+  assert.match(surface, /strokeLinecap:\s*"butt"/);
+  assert.match(surface, /strokeLinejoin:\s*"miter"/);
+  assert.match(surface, /NODE_ICON_GRADIENT_START[\s\S]*NODE_ICON_GRADIENT_END/);
+  assert.match(icons, /NODE_ICON_GRADIENT_START\s*=\s*"#33ddd5"/);
+  assert.match(icons, /NODE_ICON_GRADIENT_END\s*=\s*"#19a8ff"/);
+  assert.match(geometry, /PROCESS_MAP_GRID_PX\s*=\s*28/);
+  assert.match(geometry, /processMapFlowToRoutePoint/);
+  assert.match(geometry, /processMapRoutePointToSurfaceCenter/);
+  assert.doesNotMatch(geometry, /export function processMapOrthogonalPolyline/);
+  assert.doesNotMatch(styles, /vector-effect:\s*non-scaling-stroke|stroke-width:\s*2(?:\.6)?/);
+  assert.match(styles, /process-map-card[\s\S]*drop-shadow/);
   assert.match(surface, /ReactFlowProvider key=\{layerIdentity\}/);
+  assert.match(surface, /const mutationGeneration = localMutationGenerationRef\.current[\s\S]*activeLayerReadRef\.current = requestGeneration/);
+  assert.match(surface, /localMutationGenerationRef\.current !== mutationGeneration/);
+  assert.match(surface, /markLocalMutationCommitted[\s\S]*localMutationGenerationRef\.current \+= 1[\s\S]*layerRequestGenerationRef\.current \+= 1[\s\S]*requestRefresh\(\)/);
+  assert.match(surface, /const nodeID = resourceNodeID\(decision\.resource\)[\s\S]*operationGeneration[\s\S]*shouldApplyProcessMapCommit\(existing\.data\.revision, addedData\.revision\)/);
+  assert.match(surface, /putProcessMapPlacement\(apiBase, companyID, decision\.resource[\s\S]*responseWasSuperseded[\s\S]*if \(responseWasSuperseded\)[\s\S]*requestRefresh\(\)/);
+  assert.match(surface, /replaceTraceRoute[\s\S]*responseGeneration[\s\S]*shouldApplyProcessMapMutationAck[\s\S]*requestRefresh\(\)/);
+  assert.match(surface, /handleNodeDragStop[\s\S]*operationGeneration[\s\S]*shouldApplyProcessMapMutationAck[\s\S]*requestRefresh\(\)/);
+  assert.match(surface, /deleteProcessMapPlacement[\s\S]*operationGeneration[\s\S]*shouldApplyProcessMapMutationAck[\s\S]*requestRefresh\(\)/);
+  assert.match(surface, /startingPoint[\s\S]*gridPoint\.x !== startingPoint\.x[\s\S]*replaceTraceRoute/);
+  assert.match(surface, /const clearLayerAndRefresh = \(\) => \{[\s\S]*invalidateProcessMapLayers[\s\S]*clearLayer\(\)[\s\S]*refresh\.request\(\)/);
+  assert.match(surface, /onAccepted:\s*\(\)\s*=>\s*\{[\s\S]*clearLayerAndRefresh/);
+  assert.match(surface, /setPointerCapture[\s\S]*onPointerMove[\s\S]*onPointerUp[\s\S]*onPointerCancel/);
+  assert.doesNotMatch(surface, /window\.addEventListener\("pointer(?:move|up|cancel)"/);
+  assert.match(surface, /canonicalRefreshGenerationRef\.current !== canonicalGeneration[\s\S]*return/);
+  const invalidation = api.slice(api.indexOf("export function invalidateProcessMapLayers"), api.indexOf("export async function putProcessMapPlacement"));
+  assert.doesNotMatch(invalidation, /controller\.abort/);
   assert.match(surface, /shouldApplyProcessMapCommit\(existing\.data\.revision, trace\.revision\)/);
-  assert.match(surface, /canonicalRefreshGenerationRef\.current\s*!==\s*responseGeneration[\s\S]*requestRefresh\(\)/);
+  assert.match(surface, /responseWasSuperseded[\s\S]*requestRefresh\(\)/);
   assert.match(surface, /deletedRelationshipIDsRef\.current\.has\(trace\.resource_operational_relationship_id\)[\s\S]*requestRefresh\(\)/);
   assert.match(surface, /deletedRelationshipIDsRef\.current\.add\(removed\.id\)/);
   assert.match(surface, /restricted:\$\{index\}/);
@@ -31,6 +64,22 @@ test("Process Map surface keeps interaction, geometry, privacy, and lazy-load ru
   assert.match(styles, /polygon\(50% 0/);
   assert.match(styles, /process-map-handle--input[\s\S]*left:\s*0\s*!important/);
   assert.match(styles, /process-map-handle--output[\s\S]*right:\s*0\s*!important/);
+});
+
+test("failed Process Map writes perform one bounded canonical recovery read", () => {
+  const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  for (const message of [
+    "Failed to save trace route",
+    "Failed to save placement",
+    "Failed to create trace",
+    "Failed to delete trace",
+    "Failed to remove placement",
+    "Failed to add placement",
+  ]) {
+    const start = surface.indexOf(message);
+    assert.notEqual(start, -1, message);
+    assert.match(surface.slice(start, start + 220), /requestRefresh\(\)/, message);
+  }
 });
 
 test("Process Map deletes traces through canonical relationships and has no trace-only DELETE", () => {

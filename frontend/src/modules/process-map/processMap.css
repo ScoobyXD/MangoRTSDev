@@ -64,9 +64,7 @@
   overflow: hidden;
   outline: none;
   border-radius: 16px;
-  background:
-    radial-gradient(circle at 18% 12%, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0) 36%),
-    linear-gradient(145deg, #ffffff 0%, #fbfcfe 58%, #f8fafc 100%);
+  background: #fcfdff;
   box-shadow:
     inset 1px 1px 0 rgba(255, 255, 255, 0.96),
     inset -1px -1px 0 rgba(148, 163, 184, 0.1),
@@ -162,7 +160,9 @@
   place-items: center;
   color: #1e293b;
   cursor: grab;
-  filter: drop-shadow(8px 10px 13px rgba(100, 116, 139, 0.18));
+  filter:
+    drop-shadow(9px 11px 13px rgba(100, 116, 139, 0.2))
+    drop-shadow(-5px -5px 8px rgba(255, 255, 255, 0.98));
 }
 
 .process-map-card:active {
@@ -179,11 +179,11 @@
   justify-content: center;
   gap: 7px;
   padding: 15px;
-  border: 1px solid rgba(148, 163, 184, 0.34);
-  background: linear-gradient(145deg, #ffffff 0%, #fbfcfd 62%, #f1f5f9 100%);
+  border: 1px solid rgba(255, 255, 255, 0.96);
+  background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
   box-shadow:
     inset 2px 2px 0 rgba(255, 255, 255, 0.98),
-    inset -3px -3px 8px rgba(148, 163, 184, 0.09);
+    inset -3px -3px 8px rgba(148, 163, 184, 0.1);
 }
 
 .process-map-card--folder .process-map-card__body {
@@ -226,7 +226,7 @@
 }
 
 .process-map-card--restricted {
-  border: 1px solid rgba(148, 163, 184, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.96);
   background: linear-gradient(145deg, #ffffff 0%, #f8fafc 100%);
   color: #64748b;
   cursor: default;
@@ -257,17 +257,17 @@
 
 .process-map-trace {
   fill: none;
-  stroke: rgba(71, 85, 105, 0.76);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  vector-effect: non-scaling-stroke;
+  opacity: 0.84;
+  filter:
+    drop-shadow(4px 5px 5px rgba(25, 168, 255, 0.14))
+    drop-shadow(-2px -2px 3px rgba(255, 255, 255, 0.72));
 }
 
 .process-map-trace.is-selected {
-  stroke: #0284c7;
-  stroke-width: 2.6;
-  filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.34));
+  opacity: 1;
+  filter:
+    drop-shadow(0 0 5px rgba(51, 221, 213, 0.46))
+    drop-shadow(0 0 8px rgba(25, 168, 255, 0.3));
 }
 
 .process-map-waypoint {

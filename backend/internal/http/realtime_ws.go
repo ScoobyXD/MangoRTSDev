@@ -102,14 +102,15 @@ type realtimeClientMessage struct {
 }
 
 type realtimeServerMessage struct {
-	Type         string    `json:"type"`
-	CompanyID    string    `json:"company_id,omitempty"`
-	UserID       string    `json:"user_id,omitempty"`
-	ConnectionID string    `json:"connection_id,omitempty"`
-	Scope        string    `json:"scope,omitempty"`
-	Nonce        string    `json:"nonce,omitempty"`
-	ServerTime   time.Time `json:"server_time,omitempty"`
-	Error        string    `json:"error,omitempty"`
+	Type                  string    `json:"type"`
+	CompanyID             string    `json:"company_id,omitempty"`
+	UserID                string    `json:"user_id,omitempty"`
+	ConnectionID          string    `json:"connection_id,omitempty"`
+	ConnectionCorrelation string    `json:"connection_correlation,omitempty"`
+	Scope                 string    `json:"scope,omitempty"`
+	Nonce                 string    `json:"nonce,omitempty"`
+	ServerTime            time.Time `json:"server_time,omitempty"`
+	Error                 string    `json:"error,omitempty"`
 }
 
 type realtimeChatMessage struct {
@@ -200,10 +201,11 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 	}()
 
 	if err := realtimeConn.sendJSON(realtimeServerMessage{
-		Type:         realtimeMessageReady,
-		CompanyID:    companyID,
-		UserID:       realtimeConn.userID,
-		ConnectionID: realtimeConn.id,
+		Type:                  realtimeMessageReady,
+		CompanyID:             companyID,
+		UserID:                realtimeConn.userID,
+		ConnectionID:          realtimeConn.id,
+		ConnectionCorrelation: s.realtimeTickets.mintRealtimeConnectionCorrelation(companyID, realtimeConn.userID, realtimeConn.id),
 	}); err != nil {
 		return
 	}

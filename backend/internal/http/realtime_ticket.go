@@ -18,6 +18,7 @@ const realtimeTicketTTL = 30 * time.Second
 const editorOwnerCollaborationTicketTTL = 2 * time.Minute
 const realtimeTicketCookieName = "mangorts_realtime_ticket"
 const realtimeSignedTicketVersion = 1
+const realtimeConnectionCorrelationVersion = "realtime-connection-correlation-v1"
 
 type realtimeTicket struct {
 	Actor     ActorContext
@@ -197,6 +198,58 @@ func (s *realtimeTicketStore) consumeSigned(token, companyID string, now time.Ti
 		return ActorContext{}, false
 	}
 	return actor, true
+}
+
+func (s *realtimeTicketStore) mintRealtimeConnectionCorrelation(companyID, userID, connectionID string) string {
+	if s == nil {
+		return ""
+	}
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	connectionID = strings.TrimSpace(connectionID)
+	if companyID == "" || userID == "" || connectionID == "" {
+		return ""
+	}
+	if strings.TrimSpace(s.secret) == "" {
+		return connectionID
+	}
+	body := base64.RawURLEncoding.EncodeToString([]byte(connectionID))
+	return body + "." + s.sign(realtimeConnectionCorrelationSigningInput(companyID, userID, body))
+}
+
+func (s *realtimeTicketStore) validateRealtimeConnectionCorrelation(token, companyID, userID string) (string, bool) {
+	if s == nil || strings.TrimSpace(s.secret) == "" {
+		return "", false
+	}
+	token = strings.TrimSpace(token)
+	companyID = strings.TrimSpace(companyID)
+	userID = strings.TrimSpace(userID)
+	if token == "" || len(token) > 512 || companyID == "" || userID == "" {
+		return "", false
+	}
+	body, signature, ok := strings.Cut(token, ".")
+	if !ok || body == "" || signature == "" || strings.Contains(signature, ".") {
+		return "", false
+	}
+	expected := s.sign(realtimeConnectionCorrelationSigningInput(companyID, userID, body))
+	if !hmac.Equal([]byte(expected), []byte(signature)) {
+		return "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(body)
+	if err != nil {
+		return "", false
+	}
+	connectionID := strings.TrimSpace(string(raw))
+	if connectionID == "" || len(connectionID) > 128 {
+		return "", false
+	}
+	return connectionID, true
+}
+
+func realtimeConnectionCorrelationSigningInput(companyID, userID, body string) string {
+	return realtimeConnectionCorrelationVersion + "." +
+		base64.RawURLEncoding.EncodeToString([]byte(companyID)) + "." +
+		base64.RawURLEncoding.EncodeToString([]byte(userID)) + "." + body
 }
 
 func (s *realtimeTicketStore) sign(body string) string {

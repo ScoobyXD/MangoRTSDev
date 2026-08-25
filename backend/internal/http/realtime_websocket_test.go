@@ -56,6 +56,14 @@ func TestRealtimeWebSocketSignedTicketWorksAcrossServerInstances(t *testing.T) {
 	if ready["type"] != realtimeMessageReady || ready["company_id"] != companyID || ready["user_id"] != user.UserID {
 		t.Fatalf("cross-server ticket ready = %+v, want ready for company/user", ready)
 	}
+	connectionID, _ := ready["connection_id"].(string)
+	correlation, _ := ready["connection_correlation"].(string)
+	if connectionID == "" || correlation == "" || correlation == connectionID {
+		t.Fatalf("cross-server ready connection correlation = %+v, want signed correlation separate from raw ID", ready)
+	}
+	if got, ok := serverA.realtimeTickets.validateRealtimeConnectionCorrelation(correlation, companyID, user.UserID); !ok || got != connectionID {
+		t.Fatalf("shared-secret server validated connection = (%q,%t), want (%q,true)", got, ok, connectionID)
+	}
 }
 
 func TestRealtimeWebSocketHeartbeatUsesProtocolPingBeforeIdleTimeout(t *testing.T) {
