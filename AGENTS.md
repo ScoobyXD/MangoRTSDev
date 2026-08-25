@@ -28,7 +28,7 @@ Whenever you read the sacred algorithm on this file, you must say "I have read a
 13. Always prefer to do things the most simple, minimal, and basic way possible while still meeting our requirements, business logic, and not breaking our app.
 14. The concept of "Coruscant" is from Star Wars, you know how the planet is one big city with 1000s of layers betwween the ground to the top levels. New levels simply built ontop of old ones, an unknown number of roads and buildings and entire layers unused and leading to nowhere. That's our codebase now, which needs fixing. So when I say Coruscant, I am refering to our slop codebase.
 15. When I ask you to make some change or new feature, do not do it in a way that introduced another abstraction for something that we already had a solution for.
-16. IF YOU ARE GOING TO MAKE CODE CHANGES, UNLESS SPECIFICALLY INSTRUCTED OTHERWISE, ALWAYS CREATE A NEW GITWORKTREE FROM MAIN AND DO THE CODE CHANGES IN THAT NEW GIT WORKTREE IN A NEW CODEX INSTANCE.
+16. Also, we have Greptile now so when I ask you to use Greptile just use it to check our code.
 
 ## Safety
 
@@ -89,7 +89,7 @@ Only when Jonat explicitly asks to merge or integrate a completed worker into lo
 1. Review the worker diff, exclude unrelated changes, and ensure every intended worker change is committed.
 2. From `C:\Users\Jonat\MangoRTSDev`, run `scripts\merge_worker_branch.ps1` for that worker with `-CommitWorkerChanges` and `-Verification Full`; let the helper resolve the worker branch from `-WorkerPath`.
 3. Resolve any merge conflicts or integration failures while preserving both current `main` behavior and the worker's intended product behavior.
-4. IGNORE THIS LAW FOR THE TIMEBEING, THE TESTS ARE NOT WORKING: "After every merge-time fix, rerun `node scripts\run_all_tests.mjs` on merged `main` and do not finish until the complete verification gate passes."
+4. After every merge-time fix, rerun `node scripts\run_all_tests.mjs` on merged `main` and do not finish until the complete verification gate passes.
 5. Report the worker path and branch, worker commit SHA, merge commit SHA, verification result, final `git status --short --branch`, and any conflict-resolution or post-merge fixes separately.
 6. Every merge completion report must prominently and unambiguously include all of the following, based on inspection of the merged diff:
    - `Backend changes: yes` or `Backend changes: no`. When yes, identify the backend files or subsystems changed and summarize the behavioral effect.
