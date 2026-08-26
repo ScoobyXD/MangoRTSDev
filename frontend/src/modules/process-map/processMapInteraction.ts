@@ -2,7 +2,6 @@ import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLa
 import type { ExplorerDragPayload } from "../company-explorer/companyExplorerTypes.js";
 import { formatExplorerFolderLabel } from "../company-explorer/treePresentation.js";
 import type { ProcessMapResourceRef } from "./processMapApi.js";
-import type { ProcessMapViewState } from "./processMapGeometry.js";
 
 export type ProcessMapDropDecision =
   | { kind: "place"; resource: ProcessMapResourceRef; label: string }
@@ -174,16 +173,6 @@ export function createProcessMapSettlementGate(options: {
       disposed = true;
       clearTimer();
     },
-  };
-}
-
-export function centerProcessMapZoom(current: ProcessMapViewState, proposed: ProcessMapViewState): ProcessMapViewState {
-  return {
-    ...proposed,
-    target: [...current.target] as [number, number, number],
-    zoom: Math.max(current.minZoom, Math.min(current.maxZoom, proposed.zoom)),
-    minZoom: current.minZoom,
-    maxZoom: current.maxZoom,
   };
 }
 

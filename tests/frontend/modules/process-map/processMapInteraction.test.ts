@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  centerProcessMapZoom,
   createProcessMapSettlementGate,
   decideProcessMapExplorerDrop,
   isValidProcessMapConnection,
@@ -89,16 +88,6 @@ test("camera settlement waits for one quiet, all-inactive generation", async () 
   } finally {
     gate.dispose();
   }
-});
-
-test("wheel zoom changes scale while preserving the current camera center", () => {
-  const current = { target: [120, -40, 0] as [number, number, number], zoom: 2, minZoom: -24, maxZoom: 24 };
-  const pointerAnchoredProposal = { target: [135, -25, 0] as [number, number, number], zoom: 3, minZoom: -24, maxZoom: 24 };
-  const centered = centerProcessMapZoom(current, pointerAnchoredProposal);
-  assert.deepEqual(centered.target, current.target);
-  assert.equal(centered.zoom, 3);
-  assert.equal(centered.minZoom, -24);
-  assert.equal(centered.maxZoom, 24);
 });
 
 test("transparent-vector refinement keeps one loaded covering level until the complete replacement is ready", () => {

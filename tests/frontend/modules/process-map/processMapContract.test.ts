@@ -119,7 +119,8 @@ test("company or auth scope changes synchronously suppress protected geometry be
   assert.match(surface, /const activeScene = protectedScopeCurrent \? scene : null/);
   assert.match(surface, /\(\) => protectedScopeCurrent \? mergeTilePresentation\(loadedTiles\) : emptyPresentation\(\)/);
   assert.match(surface, /const presentation = useMemo\(\(\) => protectedScopeCurrent[\s\S]{0,240}: emptyPresentation\(\)/);
-  assert.match(surface, /const layers = useMemo\(\(\) => activeScene \? buildProcessMapLayers/);
+  assert.match(surface, /const spatialLayers = useMemo\(\(\) => activeScene \? buildProcessMapSpatialLayers/);
+  assert.match(surface, /const layers = useMemo\(\(\) => activeScene && spatialLayers \? composeProcessMapLayers/);
 
   const purgeStart = surface.indexOf("if (purgeProtectedGeometry) {");
   const purgeEnd = surface.indexOf("\n    }", purgeStart);
@@ -165,17 +166,50 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
   assert.match(app, /aria-modal="true"/);
 });
 
-test("V3 Surface explicitly keeps wheel zoom centered on the camera target", () => {
+test("V3 Surface keeps loaded coverage visible and accepts deck cursor-anchored zoom", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
-  assert.match(surface, /const zoomChanged = Math\.abs\(proposed\.zoom - viewRef\.current\.zoom\) > Number\.EPSILON/);
-  assert.match(surface, /zoomChanged\s*\?\s*centerProcessMapZoom\(viewRef\.current, proposed\)\s*:\s*proposed/);
+  const markStart = surface.indexOf("const markUnsettled = useCallback");
+  const markEnd = surface.indexOf("const loadScene = useCallback", markStart);
+  const tileReadStart = surface.indexOf("const guardedGetTileData = useCallback");
+  const tileReadEnd = surface.indexOf("const handleTileLoad = useCallback", tileReadStart);
+  const spatialStart = surface.indexOf("const editedPlacementMembership =");
+  const spatialEnd = surface.indexOf("\n\n  const layers = useMemo", spatialStart);
+  const layersEnd = surface.indexOf("\n\n  const handleViewStateChange", spatialEnd);
+  const viewStart = surface.indexOf("const handleViewStateChange = useCallback");
+  const viewEnd = surface.indexOf("const clearHoverTimer = useCallback", viewStart);
+  assert.ok(markStart >= 0 && markEnd > markStart && tileReadStart >= 0 && tileReadEnd > tileReadStart);
+  assert.ok(spatialStart >= 0 && spatialEnd > spatialStart && layersEnd > spatialEnd);
+  assert.ok(viewStart >= 0 && viewEnd > viewStart);
+  const markUnsettled = surface.slice(markStart, markEnd);
+  const guardedGetTileData = surface.slice(tileReadStart, tileReadEnd);
+  const spatialLayers = surface.slice(spatialStart, spatialEnd);
+  const overlayLayers = surface.slice(spatialEnd, layersEnd);
+  const handleViewStateChange = surface.slice(viewStart, viewEnd);
+  assert.match(markUnsettled, /settledReadyRef\.current = false/);
+  assert.match(markUnsettled, /settlementGateRef\.current\?\.onViewStateChange\(\)/);
+  assert.doesNotMatch(markUnsettled, /setSettled\(false\)/);
+  assert.match(guardedGetTileData, /if \(!settledReadyRef\.current \|\| !currentScene/);
+  assert.match(spatialLayers, /const spatialEditedPlacementKeys = useMemo[\s\S]*?\[editedPlacementMembership\]/);
+  assert.match(spatialLayers, /const spatialEditedTraceIDs = useMemo[\s\S]*?\[editedTraceMembership\]/);
+  assert.match(spatialLayers, /const spatialLayers = useMemo\(\(\) => activeScene \? buildProcessMapSpatialLayers/);
+  assert.match(spatialLayers, /editedPlacementKeys: spatialEditedPlacementKeys/);
+  assert.match(spatialLayers, /editedTraceIDs: spatialEditedTraceIDs/);
+  assert.doesNotMatch(spatialLayers, /\b(?:presentation|editOverlay|gesture|previewPlacements|previewTraces|viewState)\b/);
+  assert.match(overlayLayers, /composeProcessMapLayers\([\s\S]*?, spatialLayers\)/);
+  assert.doesNotMatch(overlayLayers, /buildProcessMap(?:Spatial)?Layers/);
+  assert.match(handleViewStateChange, /target: \[params\.viewState\.target\?\.\[0\]/);
+  assert.match(handleViewStateChange, /viewRef\.current = proposed/);
+  assert.match(handleViewStateChange, /setViewState\(proposed\)/);
+  assert.match(handleViewStateChange, /settledReadyRef\.current = false/);
+  assert.doesNotMatch(handleViewStateChange, /setSettled\(false\)|centerProcessMapZoom|zoomChanged|const next/);
+  assert.doesNotMatch(surface, /centerProcessMapZoom/);
   assert.match(surface, /onViewStateChange=\{handleViewStateChange\}/);
   assert.match(surface, /onInteractionStateChange=\{\(state: InteractionState\) => settlementGateRef\.current\?\.onInteractionStateChange\(state\)\}/);
 });
 
 test("static XY traces remain below placements with no moving marker path", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
-  assert.match(surface, /return \[background, editTraces\.path, \.\.\.\(tiles \? \[tiles\] : \[\]\), editTraces\.waypoints, \.\.\.editPlacementLayers\(options\)\]/);
+  assert.match(surface, /return \[spatial\.background, editTraces\.path, \.\.\.\(spatial\.tile \? \[spatial\.tile\] : \[\]\), editTraces\.waypoints, \.\.\.editPlacementLayers\(options\)\]/);
   assert.equal((surface.match(/positionFormat:\s*"XY"/g) ?? []).length, 6, "all six Process Map PathLayers must opt into flat XY coordinates");
   for (const removed of [
     /buildProcessMapFlowLayer/,
