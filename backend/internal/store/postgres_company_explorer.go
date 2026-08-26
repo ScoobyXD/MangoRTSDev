@@ -990,7 +990,12 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	}
 	stop()
 	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.process_map_folder_cleanup")
-	for folderID := range folderIDs {
+	folderCleanupOrder, err := postgresProcessMapFolderCleanupOrderTx(ctx, tx, companyID, sortedMapKeys(folderIDs))
+	if err != nil {
+		stop()
+		return CompanyExplorerDeleteResult{}, err
+	}
+	for _, folderID := range folderCleanupOrder {
 		if err := postgresDeleteProcessMapResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, folderID); err != nil {
 			stop()
 			return CompanyExplorerDeleteResult{}, err

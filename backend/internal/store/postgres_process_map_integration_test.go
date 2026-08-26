@@ -1,10 +1,12 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -33,7 +35,7 @@ func postgresPolicyGroupVersionForTest(t *testing.T, repo *PostgresRepo, company
 	return version
 }
 
-func openPostgresProcessMapIntegration(t *testing.T) (*sql.DB, *PostgresRepo) {
+func openPostgresProcessMapTestDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("MANGORTS_PROCESS_MAP_TEST_DATABASE_URL"))
 	if dsn == "" {
@@ -46,14 +48,19 @@ func openPostgresProcessMapIntegration(t *testing.T) (*sql.DB, *PostgresRepo) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.Host != "127.0.0.1" && !strings.EqualFold(config.Host, "localhost") {
+	privateHostAck := strings.TrimSpace(os.Getenv("MANGORTS_PROCESS_MAP_TEST_PRIVATE_HOST_ACK"))
+	privateHostIP := net.ParseIP(config.Host)
+	isLoopback := config.Host == "127.0.0.1" || strings.EqualFold(config.Host, "localhost")
+	isAcknowledgedPrivateHost := privateHostAck != "" && config.Host == privateHostAck && privateHostIP != nil && privateHostIP.IsPrivate()
+	if !isLoopback && !isAcknowledgedPrivateHost {
 		t.Fatalf("refusing non-local disposable database host %q", config.Host)
 	}
 	config.RuntimeParams["client_encoding"] = "UTF8"
+	config.RuntimeParams["application_name"] = "mangorts_process_map_test"
 	config.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	db := stdlib.OpenDB(*config)
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
+	db.SetMaxOpenConns(4)
+	db.SetMaxIdleConns(4)
 	t.Cleanup(func() { _ = db.Close() })
 
 	var version int
@@ -67,6 +74,12 @@ func openPostgresProcessMapIntegration(t *testing.T) (*sql.DB, *PostgresRepo) {
 	if _, err := db.Exec("drop schema public cascade; create schema public"); err != nil {
 		t.Fatalf("reset disposable schema: %v", err)
 	}
+	return db
+}
+
+func openPostgresProcessMapIntegration(t *testing.T) (*sql.DB, *PostgresRepo) {
+	t.Helper()
+	db := openPostgresProcessMapTestDatabase(t)
 	schema, err := os.ReadFile(filepath.Join("..", "..", "db", "schema.sql"))
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +91,7 @@ func openPostgresProcessMapIntegration(t *testing.T) (*sql.DB, *PostgresRepo) {
 }
 
 func TestPostgresProcessMapRepositoryLifecycle(t *testing.T) {
+	ctx := context.Background()
 	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Process Map repository test")
 	if err != nil {
@@ -108,19 +122,19 @@ func TestPostgresProcessMapRepositoryLifecycle(t *testing.T) {
 	}
 	parentID := folder.FolderID
 	placements := []ProcessMapPlacementPutInput{
-		processMapTestPlacementInput(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0),
-		processMapTestPlacementInput(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, processA.LogicGateID, &parentID, 1, 2),
-		processMapTestPlacementInput(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, processB.LogicGateID, &parentID, 5, 2),
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 80, 40),
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, processA.LogicGateID, &parentID, 10, 10, 10, 6),
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, processB.LogicGateID, &parentID, 30, 10, 10, 6),
 	}
 	for _, input := range placements {
-		if _, err := repo.PutProcessMapPlacement(input); err != nil {
+		if _, err := repo.PutProcessMapPlacement(ctx, input); err != nil {
 			t.Fatalf("PutProcessMapPlacement(%s/%s): %v", input.ResourceType, input.ResourceID, err)
 		}
 	}
 	denied := placements[1]
 	denied.ActorUserID = outsider.UserID
 	denied.PermissionUserID = outsider.UserID
-	if _, err := repo.PutProcessMapPlacement(denied); !errors.Is(err, ErrNotFound) {
+	if _, err := repo.PutProcessMapPlacement(ctx, denied); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("unauthorized placement error = %v, want %v", err, ErrNotFound)
 	}
 
@@ -131,59 +145,67 @@ func TestPostgresProcessMapRepositoryLifecycle(t *testing.T) {
 		Trace:       &ProcessMapTraceInput{RoutePoints: []domain.ProcessMapRoutePoint{{X: 2, Y: 2}, {X: 2, Y: 4}, {X: 5, Y: 4}}},
 		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
 	}
-	created, err := repo.CreateResourceOperationalRelationship(relationshipInput)
+	created, err := repo.CreateResourceOperationalRelationship(ctx, relationshipInput)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !created.RelationshipCreated || !created.TraceChanged || created.Trace == nil || created.Trace.Revision != 1 {
+	if !created.Created || !created.Changed || created.Relationship == nil || len(created.Traces) != 1 || created.Traces[0].Revision != 1 {
 		t.Fatalf("created relationship = %+v", created)
 	}
-	retry, err := repo.CreateResourceOperationalRelationship(relationshipInput)
+	requireProcessMapRelationshipEventIdentities(t, created.Events, *created.Relationship)
+	retry, err := repo.CreateResourceOperationalRelationship(ctx, relationshipInput)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retry.RelationshipCreated || retry.TraceChanged || retry.Trace == nil || retry.Trace.Revision != 1 || retry.Relationship.ResourceOperationalRelationshipID != created.Relationship.ResourceOperationalRelationshipID {
+	if retry.Created || retry.Changed || retry.Relationship == nil || len(retry.Traces) != 1 || retry.Traces[0].Revision != 1 || retry.Relationship.ResourceOperationalRelationshipID != created.Relationship.ResourceOperationalRelationshipID {
 		t.Fatalf("idempotent relationship retry = %+v", retry)
 	}
 
-	layer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: company.CompanyID, FolderID: folder.FolderID, PermissionUserID: admin.UserID})
-	if err != nil || len(layer.Placements) != 2 || len(layer.Traces) != 1 {
-		t.Fatalf("folder layer placements=%d traces=%d err=%v", len(layer.Placements), len(layer.Traces), err)
+	scene, err := repo.GetProcessMapScene(ctx, ProcessMapSceneQuery{CompanyID: company.CompanyID, PermissionUserID: admin.UserID})
+	if err != nil || scene.Bounds == nil || *scene.Bounds != (domain.ProcessMapBounds{MinX: 0, MinY: 0, MaxX: 80, MaxY: 40}) {
+		t.Fatalf("global scene = %+v err=%v", scene, err)
 	}
-	rootForOutsider, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: company.CompanyID, PermissionUserID: outsider.UserID})
-	if err != nil || len(rootForOutsider.Placements) != 1 || len(rootForOutsider.Traces) != 0 {
-		t.Fatalf("restricted root placements=%d traces=%d err=%v", len(rootForOutsider.Placements), len(rootForOutsider.Traces), err)
+	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{CompanyID: company.CompanyID, PermissionUserID: admin.UserID, Z: 0, X: 0, Y: 0})
+	if err != nil || len(tile.Placements) != 3 || len(tile.Traces) != 1 || len(tile.Traces[0].PathFragments) == 0 {
+		t.Fatalf("global tile = %+v err=%v", tile, err)
 	}
-	if _, ok := rootForOutsider.Placements[0].(domain.ProcessMapRestrictedPlacement); !ok {
-		t.Fatalf("outsider root placement = %#v, want restricted projection", rootForOutsider.Placements[0])
-	}
-	if _, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: company.CompanyID, FolderID: folder.FolderID, PermissionUserID: outsider.UserID}); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("restricted folder layer error = %v, want %v", err, ErrNotFound)
+	if _, err := repo.GetProcessMapScene(ctx, ProcessMapSceneQuery{CompanyID: company.CompanyID, PermissionUserID: outsider.UserID}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("non-member scene error = %v, want %v", err, ErrNotFound)
 	}
 
 	points := []domain.ProcessMapRoutePoint{{X: 1, Y: 2}, {X: 1, Y: 6}, {X: 5, Y: 6}}
 	traceInput := ProcessMapTracePutInput{CompanyID: company.CompanyID, ResourceOperationalRelationshipID: created.Relationship.ResourceOperationalRelationshipID, RoutePoints: points, ActorUserID: admin.UserID, PermissionUserID: admin.UserID}
-	routed, err := repo.PutProcessMapTrace(traceInput)
-	if err != nil || !routed.Changed || routed.Trace.Revision != 2 {
+	routed, err := repo.PutProcessMapTrace(ctx, traceInput)
+	if err != nil || !routed.Changed || len(routed.Traces) != 1 || routed.Traces[0].Revision != 2 {
 		t.Fatalf("rerouted trace = %+v err=%v", routed, err)
 	}
-	identical, err := repo.PutProcessMapTrace(traceInput)
-	if err != nil || identical.Changed || identical.Trace.Revision != 2 {
+	requireProcessMapRelationshipEventIdentities(t, routed.Events, *created.Relationship)
+	identical, err := repo.PutProcessMapTrace(ctx, traceInput)
+	if err != nil || identical.Changed || len(identical.Traces) != 1 || identical.Traces[0].Revision != 2 {
 		t.Fatalf("identical trace retry = %+v err=%v", identical, err)
 	}
-	relationships, err := repo.ListResourceOperationalRelationshipsForResource(ResourceOperationalRelationshipQuery{
+	relationships, err := repo.ListResourceOperationalRelationshipsForResource(ctx, ResourceOperationalRelationshipQuery{
 		CompanyID: company.CompanyID, ResourceType: domain.ProcessMapResourceTypeProcess, ResourceID: processA.LogicGateID, Direction: "outgoing", PermissionUserID: admin.UserID,
 	})
 	if err != nil || len(relationships) != 1 || relationships[0].ResourceOperationalRelationshipID != created.Relationship.ResourceOperationalRelationshipID {
 		t.Fatalf("bounded relationships = %+v err=%v", relationships, err)
 	}
 
-	if _, err := repo.DeleteResourceOperationalRelationship(ResourceOperationalRelationshipDeleteInput{
+	deletedPlacement, err := repo.DeleteProcessMapPlacement(ctx, ProcessMapPlacementDeleteInput{
+		CompanyID: company.CompanyID, ResourceType: domain.ProcessMapResourceTypeProcess, ResourceID: processB.LogicGateID,
+		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+	})
+	if err != nil || len(deletedPlacement.DeletedTraceIDs) != 1 || deletedPlacement.DeletedTraceIDs[0] != created.Relationship.ResourceOperationalRelationshipID {
+		t.Fatalf("placement delete envelope = %+v err=%v", deletedPlacement, err)
+	}
+	deletedRelationship, err := repo.DeleteResourceOperationalRelationship(ctx, ResourceOperationalRelationshipDeleteInput{
 		CompanyID: company.CompanyID, ResourceOperationalRelationshipID: created.Relationship.ResourceOperationalRelationshipID,
 		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
+	requireProcessMapRelationshipEventIdentities(t, deletedRelationship.Events, *created.Relationship)
 	var relationshipCount, traceCount, placementCount int
 	if err := db.QueryRow(`select count(*) from resource_operational_relationships where company_id=$1::uuid`, company.CompanyID).Scan(&relationshipCount); err != nil {
 		t.Fatal(err)
@@ -194,81 +216,141 @@ func TestPostgresProcessMapRepositoryLifecycle(t *testing.T) {
 	if err := db.QueryRow(`select count(*) from process_map_placements where company_id=$1::uuid`, company.CompanyID).Scan(&placementCount); err != nil {
 		t.Fatal(err)
 	}
-	if relationshipCount != 0 || traceCount != 0 || placementCount != 3 {
-		t.Fatalf("delete counts relationships=%d traces=%d placements=%d, want 0/0/3", relationshipCount, traceCount, placementCount)
+	if relationshipCount != 0 || traceCount != 0 || placementCount != 2 {
+		t.Fatalf("delete counts relationships=%d traces=%d placements=%d, want 0/0/2", relationshipCount, traceCount, placementCount)
 	}
 }
 
-func TestPostgresProcessMapLayerBreadcrumbIsExactAndPermissionSafe(t *testing.T) {
+func TestPostgresProcessMapFolderResizeDoesNotRequireUnmovedDescendantAccess(t *testing.T) {
+	ctx := context.Background()
 	_, repo := openPostgresProcessMapIntegration(t)
-	company, err := repo.CreateCompany("Process Map breadcrumb test")
+	company, err := repo.CreateCompany("Process Map Folder resize permission test")
 	if err != nil {
 		t.Fatal(err)
 	}
-	admin, err := repo.UpsertAuthUser("process-map-breadcrumb-admin", "process-map-breadcrumb-admin@example.com", "Breadcrumb Admin")
+	admin, err := repo.UpsertAuthUser("process-map-resize-admin", "process-map-resize-admin@example.com", "Resize Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := repo.UpsertAuthUser("process-map-resize-viewer", "process-map-resize-viewer@example.com", "Resize Viewer")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
 		t.Fatal(err)
 	}
-	viewer, err := repo.UpsertAuthUser("process-map-breadcrumb-viewer", "process-map-breadcrumb-viewer@example.com", "Breadcrumb Viewer")
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := repo.AddCompanyMembership(viewer.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	outer, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Outer")
+	folder, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Visible Folder")
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Inner")
+	child, err := repo.CreateLogicGate(company.CompanyID, "Restricted Child")
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaf, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Leaf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	unplaced, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Unplaced")
-	if err != nil {
-		t.Fatal(err)
-	}
-	outerID := outer.FolderID
-	innerID := inner.FolderID
+	parentID := folder.FolderID
 	for _, input := range []ProcessMapPlacementPutInput{
-		processMapTestPlacementInput(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, outer.FolderID, nil, 0, 0),
-		processMapTestPlacementInput(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, inner.FolderID, &outerID, 1, 1),
-		processMapTestPlacementInput(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, leaf.FolderID, &innerID, 2, 2),
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 50, 40),
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, child.LogicGateID, &parentID, 10, 10, 10, 6),
 	} {
-		if _, err := repo.PutProcessMapPlacement(input); err != nil {
+		if _, err := repo.PutProcessMapPlacement(ctx, input); err != nil {
 			t.Fatal(err)
 		}
 	}
-
-	layer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: company.CompanyID, FolderID: leaf.FolderID, PermissionUserID: admin.UserID})
-	if err != nil || len(layer.Layer.Ancestors) != 2 ||
-		layer.Layer.Ancestors[0] != (domain.ProcessMapLayerAncestor{FolderID: outer.FolderID, Name: "Outer"}) ||
-		layer.Layer.Ancestors[1] != (domain.ProcessMapLayerAncestor{FolderID: inner.FolderID, Name: "Inner"}) {
-		t.Fatalf("Postgres breadcrumb = %+v err=%v, want Outer then Inner", layer.Layer.Ancestors, err)
-	}
-	unplacedLayer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: company.CompanyID, FolderID: unplaced.FolderID, PermissionUserID: admin.UserID})
-	if err != nil || unplacedLayer.Layer.Ancestors == nil || len(unplacedLayer.Layer.Ancestors) != 0 {
-		t.Fatalf("unplaced Postgres layer = %+v err=%v, want empty breadcrumb", unplacedLayer, err)
-	}
-
 	noAccess := ResourceDefaultAccessNoAccess
 	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
-		CompanyID: company.CompanyID, ResourceType: EntityTypeCompanyExplorerFolder, ResourceID: outer.FolderID,
+		CompanyID: company.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: child.LogicGateID,
 		PermissionMode: PolicyModeCustomized, DefaultAccess: &noAccess, DescendantAction: PolicyDescendantActionInheritedOnly,
 		ActorUserID: admin.UserID,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	hiddenAncestorLayer, err := repo.GetProcessMapLayer(ProcessMapLayerQuery{CompanyID: company.CompanyID, FolderID: leaf.FolderID, PermissionUserID: viewer.UserID})
-	if err != nil || hiddenAncestorLayer.Layer.Ancestors == nil || len(hiddenAncestorLayer.Layer.Ancestors) != 0 {
-		t.Fatalf("hidden Postgres ancestor layer = %+v err=%v, want whole breadcrumb omitted", hiddenAncestorLayer, err)
+
+	resized, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, viewer.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 60, 50,
+	))
+	if err != nil || len(resized.Placements) != 1 || resized.Placements[0].GridWidth != 60 {
+		t.Fatalf("Folder resize with restricted unmoved child = %+v, err=%v", resized, err)
+	}
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, viewer.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 1, 0, 60, 50,
+	)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Folder group move with restricted child error = %v, want %v", err, ErrNotFound)
+	}
+}
+
+func TestPostgresProcessMapSceneTilePrivacyMatchesMemory(t *testing.T) {
+	ctx := context.Background()
+	_, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map privacy test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("process-map-privacy-admin", "process-map-privacy-admin@example.com", "Privacy Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := repo.UpsertAuthUser("process-map-privacy-viewer", "process-map-privacy-viewer@example.com", "Privacy Viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(viewer.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	visible, _ := repo.CreateLogicGate(company.CompanyID, "Visible")
+	hidden, _ := repo.CreateLogicGate(company.CompanyID, "Hidden")
+	for _, input := range []ProcessMapPlacementPutInput{
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, visible.LogicGateID, nil, 0, 0, 10, 8),
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, hidden.LogicGateID, nil, 100, 20, 90, 70),
+	} {
+		if _, err := repo.PutProcessMapPlacement(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
+		CompanyID:   company.CompanyID,
+		Source:      processMapTestRef(domain.ProcessMapResourceTypeProcess, visible.LogicGateID),
+		Target:      processMapTestRef(domain.ProcessMapResourceTypeProcess, hidden.LogicGateID),
+		Trace:       &ProcessMapTraceInput{RoutePoints: []domain.ProcessMapRoutePoint{{X: 50, Y: 4}}},
+		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	noAccess := ResourceDefaultAccessNoAccess
+	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
+		CompanyID: company.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: hidden.LogicGateID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &noAccess, DescendantAction: PolicyDescendantActionInheritedOnly,
+		ActorUserID: admin.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scene, err := repo.GetProcessMapScene(ctx, ProcessMapSceneQuery{CompanyID: company.CompanyID, PermissionUserID: viewer.UserID})
+	if err != nil || scene.Bounds == nil || *scene.Bounds != (domain.ProcessMapBounds{MinX: 0, MinY: 0, MaxX: 104, MaxY: 23}) {
+		t.Fatalf("permission-safe scene = %+v err=%v", scene, err)
+	}
+	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{CompanyID: company.CompanyID, PermissionUserID: viewer.UserID, Z: 0, X: 0, Y: 0})
+	if err != nil || len(tile.Placements) != 2 || len(tile.Traces) != 0 {
+		t.Fatalf("permission-safe tile = %+v err=%v", tile, err)
+	}
+	wire, err := json.Marshal(tile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Placements []map[string]any `json:"placements"`
+	}
+	if err := json.Unmarshal(wire, &payload); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range payload.Placements {
+		if restricted, _ := item["restricted"].(bool); restricted && len(item) != 3 {
+			t.Fatalf("restricted placeholder leaked fields: %+v", item)
+		}
 	}
 }
 
@@ -431,5 +513,121 @@ func TestPostgresPendingInvitationDowngradeInvalidatesGlobalDevAdmin(t *testing.
 		if got := postgresPolicyGroupVersionForTest(t, repo, companyID); got <= policyBefore[companyID] {
 			t.Fatalf("invitation downgrade policy/group version for %s = %d, want > %d", companyID, got, policyBefore[companyID])
 		}
+	}
+}
+
+func TestPostgresProcessMapRecycleFolderRestoreDoesNotReclaimRecreatedCleanupChild(t *testing.T) {
+	ctx := context.Background()
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map cleanup incarnation fence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("process-map-cleanup-incarnation-admin", "process-map-cleanup-incarnation@example.com", "Cleanup Incarnation Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Map perimeter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := repo.CreateLogicGate(company.CompanyID, "Surviving Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentID := folder.FolderID
+	for _, input := range []ProcessMapPlacementPutInput{
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 80, 60),
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, &parentID, 11, 13, 9, 6),
+	} {
+		if _, err := repo.PutProcessMapPlacement(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	placementState := func() (string, string) {
+		t.Helper()
+		var token, state string
+		if err := db.QueryRow(`
+select placement_incarnation_token::text,
+       jsonb_build_object(
+         'map_parent_folder_id',map_parent_folder_id,
+         'revision',revision,
+         'created_timestamp',created_timestamp,
+         'updated_timestamp',updated_timestamp,
+         'grid_x',grid_x,'grid_y',grid_y,'grid_width',grid_width,'grid_height',grid_height
+       )::text
+from process_map_placements
+where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, process.LogicGateID).Scan(&token, &state); err != nil {
+			t.Fatal(err)
+		}
+		return token, state
+	}
+	originalToken, _ := placementState()
+	if _, err := repo.DeleteCompanyExplorerTargets(company.CompanyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: folder.FolderID}}, admin.UserID); err != nil {
+		t.Fatal(err)
+	}
+	cleanupToken, cleanupState := placementState()
+	if cleanupToken != originalToken {
+		t.Fatalf("Folder cleanup changed placement incarnation token: %s -> %s", originalToken, cleanupToken)
+	}
+
+	items, err := repo.ListRecycleBinItems(company.CompanyID, admin.UserID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("Folder recycle items = %+v, err=%v", items, err)
+	}
+	folderRecycleID := items[0].RecycleBinItemID
+	var claimedToken string
+	if err := db.QueryRow(`
+select claim->>'placement_incarnation_token'
+from recycle_bin_items item
+cross join lateral jsonb_array_elements(coalesce(item.restore_payload->'process_map_cleanup_child_reparents','[]'::jsonb)) claim
+where item.company_id=$1::uuid and item.recycle_bin_item_id=$2::uuid
+  and claim->>'resource_id'=$3`, company.CompanyID, folderRecycleID, process.LogicGateID).Scan(&claimedToken); err != nil {
+		t.Fatal(err)
+	}
+	if claimedToken != cleanupToken {
+		t.Fatalf("cleanup claim token = %q, want %q", claimedToken, cleanupToken)
+	}
+
+	var placementPayload []byte
+	if err := db.QueryRow(`
+select jsonb_agg(to_jsonb(placement))
+from process_map_placements placement
+where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, process.LogicGateID).Scan(&placementPayload); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `delete from process_map_placements where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, process.LogicGateID); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := postgresRestoreProcessMapPlacementsTx(ctx, tx, json.RawMessage(placementPayload)); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	recreatedToken, recreatedState := placementState()
+	if recreatedToken == cleanupToken {
+		t.Fatalf("restored placement reused incarnation token %s", recreatedToken)
+	}
+	if recreatedState != cleanupState {
+		t.Fatalf("restored placement claim fields changed:\ncleanup:   %s\nrecreated: %s", cleanupState, recreatedState)
+	}
+
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, admin.UserID, []string{folderRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	finalToken, finalState := placementState()
+	if finalToken != recreatedToken || finalState != recreatedState {
+		t.Fatalf("Folder restore reclaimed recreated cleanup child:\nbefore: %s %s\nafter:  %s %s", recreatedToken, recreatedState, finalToken, finalState)
 	}
 }

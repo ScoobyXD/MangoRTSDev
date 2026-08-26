@@ -1,1358 +1,888 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import React, { act } from "react";
-import { JSDOM } from "jsdom";
 
-import { EXPLORER_DRAG_MIME } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
+import type { Layer } from "@deck.gl/core";
 import {
-  realtimeHealthKey,
-  updateRealtimeHealth,
-} from "../../../../frontend/src/modules/realtime/realtimeHealth.js";
+  applyProcessMapMutationEnvelope,
+  buildProcessMapFlowLayer,
+  buildProcessMapLayers,
+  mergeProcessMapPresentation,
+  ProcessMapProtectedTileLayer,
+  processMapCurrentOperationKeys,
+  processMapPerimeterSegments,
+  processMapViewportHasCompleteCoverage,
+  reconcileProcessMapKnownMappedKeys,
+  replaceProcessMapPreviewEntries,
+  retireProcessMapMutationMasks,
+  type ProcessMapLayerBuildOptions,
+  type ProcessMapPresentationState,
+} from "../../../../frontend/src/modules/process-map/ProcessMapSurface.js";
+import type {
+  ProcessMapMutationEnvelope,
+  ProcessMapSceneResponse,
+  ProcessMapTileResponse,
+  ProcessMapTrace,
+  ProcessMapVisiblePlacement,
+} from "../../../../frontend/src/modules/process-map/processMapApi.js";
+import {
+  fetchProcessMapScene,
+  fetchProcessMapTile,
+  getProcessMapReadCacheStats,
+  invalidateProcessMapReadCaches,
+} from "../../../../frontend/src/modules/process-map/processMapApi.js";
+import {
+  PROCESS_MAP_DEFAULT_HEIGHT,
+  PROCESS_MAP_DEFAULT_WIDTH,
+  PROCESS_MAP_EDITING_LOD_MIN_PX,
+  PROCESS_MAP_MAX_CAMERA_ZOOM,
+  PROCESS_MAP_MAX_TILE_REQUESTS,
+  PROCESS_MAP_MIN_CAMERA_ZOOM,
+  PROCESS_MAP_NORMAL_LOD_MIN_PX,
+  PROCESS_MAP_SAFE_WORLD_COORDINATE,
+  PROCESS_MAP_SETTLE_DELAY_MS,
+  PROCESS_MAP_TILE_CACHE_BYTES,
+  PROCESS_MAP_TILE_DEBOUNCE_MS,
+  PROCESS_MAP_TILE_SIZE,
+  fitProcessMapViewState,
+  processMapDeckTileSize,
+  processMapPlacementLOD,
+} from "../../../../frontend/src/modules/process-map/processMapGeometry.js";
+import { createProcessMapSettlementGate } from "../../../../frontend/src/modules/process-map/processMapInteraction.js";
 
-type Restore = () => void;
-
-function installGlobal(name: string, value: unknown, restores: Restore[]): void {
-  const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
-  Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
-  restores.push(() => {
-    if (descriptor) Object.defineProperty(globalThis, name, descriptor);
-    else delete (globalThis as Record<string, unknown>)[name];
-  });
-}
-
-async function flushUI(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  await Promise.resolve();
-}
-
-test("Process Map keeps Folder navigation and opens Process Logic Gates on double-click", async () => {
-  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
-    pretendToBeVisual: true,
-    url: "http://localhost/process-map/folders/parent-1",
-  });
-  const restores: Restore[] = [];
-  for (const name of [
-    "window", "document", "navigator", "self", "Node", "Element", "HTMLElement", "SVGElement", "Event",
-    "EventTarget", "MouseEvent", "PointerEvent", "WheelEvent", "CustomEvent", "getComputedStyle", "localStorage",
-  ] as const) {
-    const value = name === "window" || name === "self"
-      ? dom.window
-      : name === "document"
-        ? dom.window.document
-        : name === "getComputedStyle"
-          ? dom.window.getComputedStyle.bind(dom.window)
-          : (dom.window as unknown as Record<string, unknown>)[name];
-    if (value !== undefined) installGlobal(name, value, restores);
-  }
-  installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
-  installGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0), restores);
-  installGlobal("cancelAnimationFrame", (timer: ReturnType<typeof setTimeout>) => clearTimeout(timer), restores);
-  class IdentityDOMMatrixReadOnly { readonly m22 = 1; }
-  Object.defineProperty(dom.window, "DOMMatrixReadOnly", { configurable: true, value: IdentityDOMMatrixReadOnly });
-  installGlobal("DOMMatrixReadOnly", IdentityDOMMatrixReadOnly, restores);
-
-  const originalHTMLElementRect = dom.window.HTMLElement.prototype.getBoundingClientRect;
-  const originalSVGRect = dom.window.SVGElement.prototype.getBoundingClientRect;
-  const surfaceRect = {
-    x: 0, y: 0, left: 0, top: 0, right: 900, bottom: 600, width: 900, height: 600,
-    toJSON: () => ({}),
+function placement(id: string, x: number, y: number, width = 10, height = 6, resourceType: "logic_gate" | "company_explorer_folder" = "logic_gate"): ProcessMapVisiblePlacement {
+  return {
+    restricted: false,
+    presentation: "editing",
+    resource_type: resourceType,
+    resource_id: id,
+    name: id,
+    map_parent_folder_id: null,
+    grid_x: x,
+    grid_y: y,
+    grid_width: width,
+    grid_height: height,
+    can_edit: true,
+    revision: 5,
+    created_timestamp: "created",
+    updated_timestamp: "updated",
   };
-  dom.window.HTMLElement.prototype.getBoundingClientRect = () => surfaceRect;
-  dom.window.SVGElement.prototype.getBoundingClientRect = () => surfaceRect;
-  const originalElementFromPoint = dom.window.document.elementFromPoint;
-  Object.defineProperty(dom.window.document, "elementFromPoint", {
-    configurable: true,
-    value: () => null,
-  });
-  for (const [name, value] of [["clientWidth", 900], ["clientHeight", 600], ["offsetWidth", 900], ["offsetHeight", 600]] as const) {
-    const descriptor = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, name);
-    Object.defineProperty(dom.window.HTMLElement.prototype, name, { configurable: true, get: () => value });
-    restores.push(() => {
-      if (descriptor) Object.defineProperty(dom.window.HTMLElement.prototype, name, descriptor);
-      else delete (dom.window.HTMLElement.prototype as unknown as Record<string, unknown>)[name];
-    });
-  }
-  restores.push(() => {
-    dom.window.HTMLElement.prototype.getBoundingClientRect = originalHTMLElementRect;
-    dom.window.SVGElement.prototype.getBoundingClientRect = originalSVGRect;
-    Object.defineProperty(dom.window.document, "elementFromPoint", {
-      configurable: true,
-      value: originalElementFromPoint,
-    });
-  });
+}
 
-  class ImmediateResizeObserver {
-    private readonly callback: ResizeObserverCallback;
-    constructor(callback: ResizeObserverCallback) { this.callback = callback; }
-    observe(target: Element): void {
-      queueMicrotask(() => this.callback([{
-        target,
-        contentRect: surfaceRect,
-        borderBoxSize: [],
-        contentBoxSize: [],
-        devicePixelContentBoxSize: [],
-      } as unknown as ResizeObserverEntry], this as unknown as ResizeObserver));
-    }
-    unobserve(): void {}
-    disconnect(): void {}
-  }
-  installGlobal("ResizeObserver", ImmediateResizeObserver, restores);
+function trace(source: ProcessMapVisiblePlacement, target: ProcessMapVisiblePlacement): ProcessMapTrace {
+  return {
+    presentation: "editing",
+    resource_operational_relationship_id: "relationship-1",
+    source: { resource_type: source.resource_type, resource_id: source.resource_id },
+    target: { resource_type: target.resource_type, resource_id: target.resource_id },
+    route_points: [{ x: 15, y: 3 }],
+    path_fragments: [[{ x: 10, y: 3 }, { x: 20, y: 3 }]],
+    revision: 4,
+    created_timestamp: "created",
+    updated_timestamp: "updated",
+  };
+}
 
-  let realtimeSocket: SilentWebSocket | null = null;
-  class SilentWebSocket {
-    static CONNECTING = 0;
-    static OPEN = 1;
-    static CLOSED = 3;
-    readyState = SilentWebSocket.CONNECTING;
-    onopen: (() => void) | null = null;
-    onmessage: ((event: { data: string }) => void) | null = null;
-    onclose: (() => void) | null = null;
-    onerror: (() => void) | null = null;
-    constructor(_url: string) {
-      realtimeSocket = this;
-      queueMicrotask(() => {
-        this.readyState = SilentWebSocket.OPEN;
-        this.onopen?.();
-        this.onmessage?.({ data: JSON.stringify({
-          type: "ready",
-          connection_id: "surface-connection-1",
-          connection_correlation: "surface-correlation-1",
-        }) });
-      });
-    }
-    send(_message: string): void {}
-    close(): void { this.readyState = SilentWebSocket.CLOSED; }
-  }
-  installGlobal("WebSocket", SilentWebSocket, restores);
+const scene: ProcessMapSceneResponse = {
+  bounds: { min_x: 0, min_y: 0, max_x: 256, max_y: 256 },
+  process_map_read_version: 11,
+  tile_size: 256,
+  min_tile_zoom: 0,
+  max_tile_zoom: 22,
+};
 
-  const requests: Array<{ url: URL; method: string; body?: Record<string, unknown>; originConnectionID: string | null }> = [];
-  let placementAdded = false;
-  let placementDeleted = false;
-  let placementRecreated = false;
-  let delayedPlacementRestricted = false;
-  let catchupPlacementVisible = false;
-  let mixedPlacementPresent = true;
-  let traceRecreated = false;
-  let deferNextTracePut = false;
-  let trayTransientCandidateVisible = true;
-  let deferNextTrayBranchRead = false;
-  let finishAddedPlacementPut: (() => void) | null = null;
-  let finishTrayBranchRead: (() => void) | null = null;
-  let finishPlacementDelete: (() => void) | null = null;
-  let finishDelayedPlacementPut: (() => void) | null = null;
-  let finishNavigationPlacementPut: (() => void) | null = null;
-  let finishNavigationLayerRead: (() => void) | null = null;
-  let finishMixedPlacementDelete: (() => void) | null = null;
-  let finishMixedPlacementPut: (() => void) | null = null;
-  let finishDeferredTracePut: (() => void) | null = null;
-  let permissionLayerReadCount = 0;
-  let finishOldPermissionLayerRead: (() => void) | null = null;
-  let finishReplacementPermissionLayerRead: (() => void) | null = null;
-  const traceWrites: Array<Record<string, unknown>> = [];
-  installGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
-    const url = new URL(typeof input === "string" ? input : input.toString(), "http://localhost");
-    const method = init?.method ?? "GET";
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : undefined;
-    requests.push({
-      url,
-      method,
-      body,
-      originConnectionID: new Headers(init?.headers).get("X-Mango-Realtime-Connection-ID"),
-    });
-    if (url.pathname === "/v1/realtime/ticket") {
-      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    if (url.pathname === "/v1/company-explorer/roots") {
-      return new Response(JSON.stringify({ rows: [] }), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    if (url.pathname === "/v1/company-explorer/children") {
-      const rows = url.searchParams.get("parent_id") === "parent-1" ? [
-        {
-          company_id: "company-1",
-          entity_id: "child-1",
-          entity_type: "folder",
-          name: "Child",
-          position: 1000,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        },
-        ...(trayTransientCandidateVisible ? [{
-          company_id: "company-1",
-          entity_id: "edge-transient-gate",
-          entity_type: "logic_gate",
-          resource_id: "transient-gate",
-          name: "Revoked candidate",
-          position: 3250,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        }] : []),
-        {
-          company_id: "company-1",
-          entity_id: "edge-failing-gate",
-          entity_type: "logic_gate",
-          resource_id: "failing-gate",
-          name: "Failing process",
-          position: 3500,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        },
-        {
-          company_id: "company-1",
-          entity_id: "edge-gate-1",
-          entity_type: "logic_gate",
-          resource_id: "gate-1",
-          name: "Review",
-          position: 2000,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        },
-        {
-          company_id: "company-1",
-          entity_id: "edge-added-gate",
-          entity_type: "logic_gate",
-          resource_id: "added-gate",
-          name: "Added process",
-          position: 3000,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        },
-        {
-          company_id: "company-1",
-          entity_id: "edge-project-1",
-          entity_type: "project",
-          resource_id: "project-1",
-          name: "Ignored project",
-          position: 4000,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        },
-      ] : [];
-      const response = () => new Response(JSON.stringify({ rows }), { status: 200, headers: { "content-type": "application/json" } });
-      if (deferNextTrayBranchRead) {
-        deferNextTrayBranchRead = false;
-        return await new Promise<Response>((resolve) => {
-          finishTrayBranchRead = () => resolve(response());
-        });
-      }
-      return response();
-    }
-    if (url.pathname.endsWith("/operational-relationships/trace-1/trace") && method === "PUT") {
-      traceWrites.push(body ?? {});
-      const responseRevision = deferNextTracePut ? 9 : traceWrites.length + 1;
-      const response = () => new Response(JSON.stringify({
-        resource_operational_relationship_id: "trace-1",
-        route_points: body?.route_points,
-        revision: responseRevision,
-        created_timestamp: "created",
-        updated_timestamp: "updated",
-      }), { status: 200, headers: { "content-type": "application/json" } });
-      if (deferNextTracePut) {
-        deferNextTracePut = false;
-        return await new Promise<Response>((resolve) => {
-          finishDeferredTracePut = () => resolve(response());
-        });
-      }
-      return response();
-    }
-    if (url.pathname.endsWith("/placements/logic_gate/mixed-gate") && method === "DELETE") {
-      return await new Promise<Response>((resolve) => {
-        finishMixedPlacementDelete = () => resolve(new Response(null, { status: 204 }));
-      });
-    }
-    if (url.pathname.includes("/placements/") && method === "DELETE") {
-      return await new Promise<Response>((resolve) => {
-        finishPlacementDelete = () => {
-          if (!placementRecreated) placementDeleted = true;
-          resolve(new Response(null, { status: 204 }));
-        };
-      });
-    }
-    if (url.pathname.endsWith("/placements/logic_gate/navigation-gate")) {
-      return await new Promise<Response>((resolve) => {
-        finishNavigationPlacementPut = () => resolve(new Response(JSON.stringify({
-          resource_type: "logic_gate",
-          resource_id: "navigation-gate",
-          map_parent_folder_id: "parent-1",
-          grid_x: body?.grid_x,
-          grid_y: body?.grid_y,
-          revision: 1,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        }), { status: 201, headers: { "content-type": "application/json" } }));
-      });
-    }
-    if (url.pathname.endsWith("/placements/logic_gate/mixed-gate")) {
-      return await new Promise<Response>((resolve) => {
-        finishMixedPlacementPut = () => {
-          mixedPlacementPresent = true;
-          resolve(new Response(JSON.stringify({
-            resource_type: "logic_gate",
-            resource_id: "mixed-gate",
-            map_parent_folder_id: "catchup-folder",
-            grid_x: body?.grid_x,
-            grid_y: body?.grid_y,
-            revision: 2,
-            created_timestamp: "created",
-            updated_timestamp: "recreated",
-          }), { status: 200, headers: { "content-type": "application/json" } }));
-        };
-      });
-    }
-    if (url.pathname.endsWith("/placements/logic_gate/delayed-gate")) {
-      return await new Promise<Response>((resolve) => {
-        finishDelayedPlacementPut = () => resolve(new Response(JSON.stringify({
-          resource_type: "logic_gate",
-          resource_id: "delayed-gate",
-          map_parent_folder_id: "parent-1",
-          grid_x: body?.grid_x,
-          grid_y: body?.grid_y,
-          revision: 1,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        }), { status: 201, headers: { "content-type": "application/json" } }));
-      });
-    }
-    if (url.pathname.endsWith("/placements/logic_gate/added-gate")) {
-      return await new Promise<Response>((resolve) => {
-        finishAddedPlacementPut = () => {
-          placementAdded = true;
-          resolve(new Response(JSON.stringify({
-            resource_type: "logic_gate",
-            resource_id: "added-gate",
-            map_parent_folder_id: "parent-1",
-            grid_x: body?.grid_x,
-            grid_y: body?.grid_y,
-            revision: 1,
-            created_timestamp: "created",
-            updated_timestamp: "created",
-          }), { status: 201, headers: { "content-type": "application/json" } }));
-        };
-      });
-    }
-    if (url.pathname.endsWith("/placements/logic_gate/failing-gate")) {
-      return new Response(JSON.stringify({ error: "placement denied" }), {
-        status: 500,
-        headers: { "content-type": "application/json" },
-      });
-    }
-    if (url.pathname.includes("/placements/")) {
-      placementAdded = true;
-      return new Response(JSON.stringify({
-        resource_type: "logic_gate",
-        resource_id: "added-gate",
-        map_parent_folder_id: "parent-1",
-        grid_x: body?.grid_x,
-        grid_y: body?.grid_y,
-        revision: 1,
-        created_timestamp: "created",
-        updated_timestamp: "created",
-      }), { status: 201, headers: { "content-type": "application/json" } });
-    }
-    if (url.pathname === "/v1/process-map/layer" && url.searchParams.get("folder_id") === "navigation-folder") {
-      return await new Promise<Response>((resolve) => {
-        finishNavigationLayerRead = () => resolve(new Response(JSON.stringify({
-          layer: { kind: "folder", folder_id: "navigation-folder", name: "Navigation target" },
-          placements: [{
-            restricted: false,
-            resource_type: "logic_gate",
-            resource_id: "navigation-target-gate",
-            name: "Navigation target process",
-            grid_x: 3,
-            grid_y: 4,
-            revision: 1,
-            created_timestamp: "created",
-            updated_timestamp: "created",
-          }],
-          traces: [],
-        }), { status: 200, headers: { "content-type": "application/json" } }));
-      });
-    }
-    if (url.pathname === "/v1/process-map/layer" && url.searchParams.get("folder_id") === "catchup-folder") {
-      return new Response(JSON.stringify({
-        layer: { kind: "folder", folder_id: "catchup-folder", name: "Catch-up" },
-        placements: [
-          ...(catchupPlacementVisible ? [{
-            restricted: false,
-            resource_type: "logic_gate",
-            resource_id: "catchup-gate",
-            name: "Missed during subscribe",
-            grid_x: 5,
-            grid_y: 5,
-            revision: 1,
-            created_timestamp: "created",
-            updated_timestamp: "created",
-          }] : []),
-          ...(mixedPlacementPresent ? [{
-            restricted: false,
-            resource_type: "logic_gate",
-            resource_id: "mixed-gate",
-            name: "Mixed final process",
-            grid_x: 12,
-            grid_y: 5,
-            revision: 2,
-            created_timestamp: "created",
-            updated_timestamp: "recreated",
-          }] : []),
-        ],
-        traces: [],
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    if (url.pathname === "/v1/process-map/layer" && url.searchParams.get("folder_id") === "permission-hint-folder") {
-      permissionLayerReadCount += 1;
-      return await new Promise<Response>((resolve) => {
-        if (permissionLayerReadCount === 1) {
-          finishOldPermissionLayerRead = () => resolve(new Response(JSON.stringify({
-            layer: { kind: "folder", folder_id: "permission-hint-folder", name: "Permission hint" },
-            placements: [{
-              restricted: false,
-              resource_type: "logic_gate",
-              resource_id: "old-permission-gate",
-              name: "Old pre-hint process",
-              grid_x: 4,
-              grid_y: 4,
-              revision: 1,
-              created_timestamp: "created",
-              updated_timestamp: "created",
-            }],
-            traces: [],
-          }), { status: 200, headers: { "content-type": "application/json" } }));
-          return;
-        }
-        finishReplacementPermissionLayerRead = () => resolve(new Response(JSON.stringify({
-          layer: { kind: "folder", folder_id: "permission-hint-folder", name: "Permission hint" },
-          placements: [{ restricted: true, grid_x: 4, grid_y: 4 }],
-          traces: [],
-        }), { status: 200, headers: { "content-type": "application/json" } }));
-      });
-    }
-    return new Response(JSON.stringify({
-      layer: { kind: "folder", folder_id: "parent-1", name: "Parent" },
-      placements: [
-        {
-          restricted: false,
-          resource_type: "company_explorer_folder",
-          resource_id: "child-1",
-          name: "Child",
-          grid_x: 1,
-          grid_y: 2,
-          revision: 1,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        },
-        ...(!placementDeleted ? [{
-          restricted: false,
-          resource_type: "logic_gate",
-          resource_id: "gate-1",
-          name: placementRecreated ? "Review recreated" : "Review",
-          grid_x: 9,
-          grid_y: 2,
-          revision: placementRecreated ? 2 : 1,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        }] : []),
-        { restricted: true, grid_x: 16, grid_y: 2 },
-        ...(delayedPlacementRestricted ? [{ restricted: true, grid_x: 22, grid_y: 7 }] : []),
-        ...(placementAdded ? [{
-          restricted: false,
-          resource_type: "logic_gate",
-          resource_id: "added-gate",
-          name: "Added process",
-          grid_x: 10,
-          grid_y: 7,
-          revision: 1,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        }] : []),
-      ],
-      traces: [{
-        resource_operational_relationship_id: "trace-1",
-        source: { resource_type: "company_explorer_folder", resource_id: "child-1" },
-        target: { resource_type: "logic_gate", resource_id: "gate-1" },
-        route_points: traceRecreated ? [{ x: 9, y: 8 }] : [{ x: 7, y: 5 }],
-        revision: 1,
-        created_timestamp: "created",
-        updated_timestamp: "created",
-      }],
-    }), { status: 200, headers: { "content-type": "application/json", etag: "\"viewer-1\"" } });
-  }, restores);
+function emptyPresentation(): ProcessMapPresentationState {
+  return { placements: new Map(), traces: new Map(), removedPlacementKeys: new Set() };
+}
 
-  let mountedRoot: { unmount(): void } | null = null;
-  const openedFolders: string[] = [];
-  const openedLogicGates: Array<{ logicGateID: string; label: string }> = [];
-  const openLogicGate = (logicGateID: string, label: string) => openedLogicGates.push({ logicGateID, label });
+function buildOptions(overrides: Partial<ProcessMapLayerBuildOptions> = {}): ProcessMapLayerBuildOptions {
+  return {
+    scene,
+    protectedGeneration: 0,
+    settled: true,
+    settledGeneration: 3,
+    settledPixelsPerGridUnit: 0.25,
+    presentation: emptyPresentation(),
+    editedPlacementKeys: new Set(),
+    editedTraceIDs: new Set(),
+    reducedMotion: false,
+    flowPhase: 0,
+    editOverlay: {
+      placements: [], traces: [], selectedPlacementKey: null, selectedTraceID: null,
+      connectionPreview: null, highlightedFolderKey: null, showAllAnchors: false,
+    },
+    getTileData: async () => null,
+    onTileLoad: () => undefined,
+    onTileUnload: () => undefined,
+    ...overrides,
+  };
+}
+
+function layerByID(layers: Layer[], id: string): Layer {
+  const layer = layers.find((candidate) => candidate.id === id);
+  assert.ok(layer, `missing layer ${id}`);
+  return layer;
+}
+
+test("one TileLayer owns non-geographic selection, bounded scheduling, and the settled read gate", async () => {
+  let reads = 0;
+  const payload: ProcessMapTileResponse = { z: 22, x: 0, y: 0, process_map_read_version: 11, placements: [], traces: [], byteLength: 100 };
+  const unsettled = buildProcessMapLayers(buildOptions({
+    settled: false,
+    getTileData: async () => { reads += 1; return payload; },
+  }));
+  const unsettledTiles = layerByID(unsettled, "process-map-spatial-tiles");
+  assert.equal(unsettled.filter((layer) => layer.id === "process-map-spatial-tiles").length, 1);
+  const getUnsettled = unsettledTiles.props.getTileData as unknown as (request: { id: string; index: { z: number; x: number; y: number }; signal: AbortSignal }) => Promise<ProcessMapTileResponse | null> | null;
+  assert.equal(getUnsettled({ id: "22-0-0", index: { z: 22, x: 0, y: 0 }, signal: new AbortController().signal }), null);
+  assert.equal(reads, 0, "interim wheel and pan candidates must not schedule business reads");
+
+  const settled = buildProcessMapLayers(buildOptions({ getTileData: async () => { reads += 1; return payload; } }));
+  const tiles = layerByID(settled, "process-map-spatial-tiles");
+  assert.equal(tiles.props.tileSize, processMapDeckTileSize(scene.tile_size, scene.max_tile_zoom));
+  assert.equal(tiles.props.zoomOffset, scene.max_tile_zoom);
+  assert.equal(tiles.props.maxCacheByteSize, PROCESS_MAP_TILE_CACHE_BYTES);
+  assert.ok(Number(tiles.props.maxRequests) > 0 && Number(tiles.props.maxRequests) <= 16);
+  const getSettled = tiles.props.getTileData as unknown as (request: { id: string; index: { z: number; x: number; y: number }; signal: AbortSignal }) => Promise<ProcessMapTileResponse | null>;
+  assert.equal(await getSettled({ id: "22-0-0", index: { z: 22, x: 0, y: 0 }, signal: new AbortController().signal }), payload);
+  assert.equal(reads, 1);
+});
+
+test("protected generations keep one logical TileLayer while replacing and disposing protected Tilesets", () => {
+  const first = layerByID(buildProcessMapLayers(buildOptions({ protectedGeneration: 0 })), "process-map-spatial-tiles");
+  const second = layerByID(buildProcessMapLayers(buildOptions({ protectedGeneration: 1 })), "process-map-spatial-tiles");
+  assert.equal(first.id, second.id, "the deck layer identity remains stable across protected generations");
+  assert.equal(first.props.data, "11:0");
+  assert.equal(second.props.data, "11:1");
+  assert.deepEqual(first.props.updateTriggers?.getTileData, [3, 11, 0]);
+  assert.deepEqual(second.props.updateTriggers?.getTileData, [3, 11, 1]);
+
+  const parent = Object.getPrototypeOf(ProcessMapProtectedTileLayer.prototype) as { updateState: (params: unknown) => void };
+  const originalParentUpdate = parent.updateState;
+  let parentUpdates = 0;
+  let finalizes = 0;
+  const fake = {
+    state: { tileset: { finalize: () => { finalizes += 1; } }, isLoaded: true },
+    setState(next: Record<string, unknown>) { this.state = { ...this.state, ...next }; },
+  };
+  parent.updateState = () => { parentUpdates += 1; };
   try {
-    const [{ createRoot }, { ProcessMapSurface }] = await Promise.all([
-      import("react-dom/client"),
-      import("../../../../frontend/src/modules/process-map/ProcessMapSurface.tsx"),
-    ]);
-    const container = dom.window.document.getElementById("root");
-    assert.ok(container);
-    const root = createRoot(container);
-    mountedRoot = root;
-    await act(async () => {
-      root.render(
-        <ProcessMapSurface
-          apiBase="http://api.test"
-          companyID="company-1"
-          folderID="parent-1"
-          onOpenFolder={(folderID) => openedFolders.push(folderID)}
-          onOpenLogicGate={openLogicGate}
-        />,
-      );
-      await flushUI();
-      await flushUI();
-    });
+    ProcessMapProtectedTileLayer.prototype.updateState.call(fake as never, {
+      oldProps: { protectedGeneration: 4 },
+      props: { protectedGeneration: 4 },
+    } as never);
+    assert.equal(finalizes, 0);
+    ProcessMapProtectedTileLayer.prototype.updateState.call(fake as never, {
+      oldProps: { protectedGeneration: 4 },
+      props: { protectedGeneration: 5 },
+    } as never);
+    assert.equal(finalizes, 1, "permission generation changes must finalize the old protected Tileset");
+    assert.equal(fake.state.tileset, null);
+    assert.equal(fake.state.isLoaded, false);
+    assert.equal(parentUpdates, 2);
+  } finally {
+    parent.updateState = originalParentUpdate;
+  }
+});
 
-    const layerRequests = requests.filter((request) => request.url.pathname === "/v1/process-map/layer");
-    assert.equal(layerRequests.length, 1);
-    assert.deepEqual(Object.fromEntries(layerRequests[0].url.searchParams), {
-      company_id: "company-1",
-      folder_id: "parent-1",
-    });
-    const trayBranchRequests = requests.filter((request) => request.url.pathname === "/v1/company-explorer/children");
-    assert.equal(trayBranchRequests.length, 1);
-    assert.deepEqual(Object.fromEntries(trayBranchRequests[0].url.searchParams), {
-      company_id: "company-1",
-      parent_id: "parent-1",
-    });
-    assert.equal(requests.some((request) => /company-explorer\/(tree|graph)|logic-gate-relationships/.test(request.url.pathname)), false);
+test("known mapped keys accumulate by exact identity and preview replacement preserves unrelated operations", () => {
+  const folder = { resource_type: "company_explorer_folder" as const, resource_id: "folder-1" };
+  const process = { resource_type: "logic_gate" as const, resource_id: "process-1" };
+  const another = { resource_type: "logic_gate" as const, resource_id: "process-2" };
+  const empty = new Set<string>();
+  const first = reconcileProcessMapKnownMappedKeys(empty, [folder]);
+  const accumulated = reconcileProcessMapKnownMappedKeys(first, [process, another]);
+  assert.deepEqual([...accumulated].sort(), [
+    "company_explorer_folder:folder-1",
+    "logic_gate:process-1",
+    "logic_gate:process-2",
+  ]);
+  const removed = reconcileProcessMapKnownMappedKeys(accumulated, [], [folder, another]);
+  assert.deepEqual([...removed], ["logic_gate:process-1"]);
+  assert.deepEqual([...accumulated].sort(), [
+    "company_explorer_folder:folder-1",
+    "logic_gate:process-1",
+    "logic_gate:process-2",
+  ], "reconciliation returns a new scoped set");
 
-    const tray = container.querySelector<HTMLElement>('[aria-label="Process Map placement tray"]');
-    const trayToggle = tray?.querySelector<HTMLButtonElement>('.process-map-placement-tray__toggle');
-    const trayHeading = trayToggle?.querySelector<HTMLElement>('.process-map-placement-tray__heading');
-    const trayDisclosure = trayToggle?.querySelector<HTMLElement>('.process-map-placement-tray__disclosure');
-    const trayCandidate = tray?.querySelector<HTMLElement>('[aria-label="Drag Process: Added process"]');
-    assert.ok(tray);
-    assert.ok(trayToggle);
-    assert.ok(trayHeading);
-    assert.ok(trayDisclosure);
-    assert.equal(trayToggle.getAttribute("aria-expanded"), "true", "the tray starts expanded when no preference exists");
-    assert.equal(trayToggle.getAttribute("aria-label"), "Collapse placement tray");
-    assert.equal(trayToggle.querySelector(":scope > :last-child")?.classList.contains("process-map-placement-tray__disclosure"), true);
-    assert.equal(trayToggle.querySelector(".process-map-placement-tray__collapse-action"), null);
-    assert.equal(trayToggle.textContent?.includes("Drag to place"), false, "the ambiguous tray hint is removed");
-    assert.ok(trayCandidate, "only an immediate unplaced supported resource is available");
-    assert.equal(tray.querySelector('[aria-label="Drag Folder: Child"]'), null);
-    assert.equal(tray.querySelector('[aria-label="Drag Process: Review"]'), null);
-    assert.equal(tray.textContent?.includes("Ignored project"), false);
-    const trayDragWrites = new Map<string, string>();
-    const trayDrag = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
-    const trayDataTransfer = {
-      effectAllowed: "",
-      setData: (type: string, value: string) => trayDragWrites.set(type, value),
-    };
-    Object.defineProperty(trayDrag, "dataTransfer", { value: trayDataTransfer });
-    await act(async () => {
-      trayCandidate.dispatchEvent(trayDrag);
-      await flushUI();
-    });
-    assert.deepEqual(JSON.parse(trayDragWrites.get(EXPLORER_DRAG_MIME) ?? "{}"), {
-      kind: "logic_gate",
-      label: "Added process",
-      itemID: "added-gate",
-      itemType: "logic_gate",
-    });
-    assert.equal(trayDataTransfer.effectAllowed, "copy");
-    await act(async () => {
-      trayHeading.click();
-      await flushUI();
-    });
-    assert.equal(trayToggle.getAttribute("aria-expanded"), "false");
-    assert.equal(trayToggle.getAttribute("aria-label"), "Expand placement tray");
-    assert.equal(trayToggle.querySelector(".process-map-placement-tray__disclosure"), trayToggle.lastElementChild);
-    assert.equal(dom.window.localStorage.getItem("mangorts.process-map.placement-tray-collapsed.v1"), "true");
-    await act(async () => {
-      trayDisclosure.click();
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(trayToggle.getAttribute("aria-expanded"), "true");
-    assert.ok(tray.querySelector('[aria-label="Drag Process: Revoked candidate"]'));
-    const trayReadsBeforeRealtime = requests.filter((request) => request.url.pathname === "/v1/company-explorer/children").length;
-    deferNextTrayBranchRead = true;
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "tray-old-read-connection",
-      }) });
-      await flushUI();
-      await flushUI();
-    });
-    const completeStaleTrayRead = finishTrayBranchRead;
-    assert.ok(completeStaleTrayRead, "the pre-invalidation tray read remains pending");
-    trayTransientCandidateVisible = false;
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "tray-revocation-connection",
-      }) });
-      await flushUI();
-      await flushUI();
-      trayToggle.click();
-      await flushUI();
-    });
-    assert.equal(trayToggle.getAttribute("aria-expanded"), "false");
-    await act(async () => {
-      completeStaleTrayRead();
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/company-explorer/children").length,
-      trayReadsBeforeRealtime + 1,
-      "collapsing while a replacement read is queued prevents that hidden read",
-    );
-    await act(async () => {
-      trayToggle.click();
-      await flushUI();
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(trayToggle.getAttribute("aria-expanded"), "true");
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/company-explorer/children").length,
-      trayReadsBeforeRealtime + 2,
-      "a newer realtime generation waits out the shared stale read and performs one fresh exact-branch read",
-    );
-    assert.equal(tray.querySelector('[aria-label="Drag Process: Revoked candidate"]'), null, "realtime revocation removes the stale tray candidate");
-    const placementWritesBeforeOverlayCancel = requests.filter((request) => request.method === "PUT" && request.url.pathname.includes("/placements/")).length;
-    const overlayCancelDrop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperties(overlayCancelDrop, {
-      clientX: { value: 300 },
-      clientY: { value: 120 },
-      dataTransfer: { value: {
-        types: [EXPLORER_DRAG_MIME],
-        dropEffect: "copy",
-        getData: (type: string) => type === EXPLORER_DRAG_MIME
-          ? JSON.stringify({ kind: "logic_gate", label: "Added process", itemID: "added-gate", itemType: "logic_gate" })
-          : "",
-      } },
-    });
-    const fixedToolbar = container.querySelector<HTMLElement>('[aria-label="Process Map tools"]');
-    assert.ok(fixedToolbar);
-    await act(async () => {
-      fixedToolbar.dispatchEvent(overlayCancelDrop);
-      await flushUI();
-    });
-    assert.equal(
-      requests.filter((request) => request.method === "PUT" && request.url.pathname.includes("/placements/")).length,
-      placementWritesBeforeOverlayCancel,
-      "releasing a drag over fixed Process Map UI never creates a placement under it",
-    );
+  const previews = new Map([["unrelated", "keep"], ["owned-a", "old-a"], ["owned-b", "old-b"]]);
+  const replaced = replaceProcessMapPreviewEntries(previews, ["owned-a", "owned-b"], new Map([["owned-a", "new-a"]]));
+  assert.deepEqual([...replaced], [["unrelated", "keep"], ["owned-a", "new-a"]]);
+  assert.deepEqual([...previews], [["unrelated", "keep"], ["owned-a", "old-a"], ["owned-b", "old-b"]]);
+});
 
-    const folderCard = container.querySelector<HTMLElement>('[aria-label="Folder: Child"]');
-    const processCard = container.querySelector<HTMLElement>('[aria-label="Process: Review"]');
-    const restrictedCard = container.querySelector<HTMLElement>('[aria-label="?"]');
-    assert.ok(folderCard);
-    assert.ok(processCard);
-    assert.ok(restrictedCard);
-    assert.equal(folderCard.querySelectorAll(".process-map-handle").length, 2);
-    assert.equal(processCard.querySelectorAll(".process-map-handle").length, 2);
-    assert.equal(folderCard.classList.contains("is-selected"), false, "unselected placements do not reveal handles");
-    assert.equal(folderCard.classList.contains("is-connecting"), false, "idle placements are not in connection mode");
-    assert.equal(restrictedCard.textContent, "?");
-    assert.equal(restrictedCard.querySelectorAll(".react-flow__handle").length, 0);
-    assert.equal(restrictedCard.closest(".react-flow__node")?.classList.contains("selectable"), false);
-    assert.equal(restrictedCard.closest(".react-flow__node")?.classList.contains("draggable"), false);
-    await act(async () => {
-      processCard.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
-      await flushUI();
-    });
-    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "hover is off by default");
-    await act(async () => {
-      root.render(
-        <ProcessMapSurface
-          apiBase="http://api.test"
-          companyID="company-1"
-          folderID="parent-1"
-          hoverModeEnabled
-          onOpenFolder={(folderID) => openedFolders.push(folderID)}
-          onOpenLogicGate={openLogicGate}
-        />,
-      );
-      await flushUI();
-    });
-    const hoverProcessCard = container.querySelector<HTMLElement>('[aria-label="Process: Review"]');
-    assert.ok(hoverProcessCard);
-    await act(async () => {
-      hoverProcessCard.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
-      await flushUI();
-    });
-    assert.ok(container.querySelector('[aria-label="Review Q, C and D"]'), "enabled hover shows the transient QDC card");
-    assert.equal(container.querySelector('[aria-label="Close Review Q, C and D"]'), null, "the transient card is not pinned");
-    await act(async () => {
-      container.querySelector<HTMLElement>('[aria-label="Process: Review"]')
-        ?.dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true }));
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      root.render(
-        <ProcessMapSurface
-          apiBase="http://api.test"
-          companyID="company-1"
-          folderID="parent-1"
-          onOpenFolder={(folderID) => openedFolders.push(folderID)}
-          onOpenLogicGate={openLogicGate}
-        />,
-      );
-      await flushUI();
-    });
-    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "leaving removes the transient card");
-    const readsBeforeAdmission = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "process-map:company" }) });
-      await flushUI();
-      await flushUI();
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({ type: "heartbeat.confirmed", nonce: "process-map-ready" }) });
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
-      readsBeforeAdmission + 1,
-      "subscription admission and recovery share one canonical catch-up read",
-    );
-    updateRealtimeHealth(realtimeHealthKey("http://api.test", "company-1"), { status: "connected" });
+test("whole-company tile rendering keeps every placement perceptible without leaking restricted picks", () => {
+  const process = placement("Process", 10, 10);
+  const folder = placement("Folder", 0, 0, 80, 60, "company_explorer_folder");
+  const tileData: ProcessMapTileResponse = {
+    z: 0, x: 0, y: 0, process_map_read_version: 11, byteLength: 1,
+    placements: [folder, process, { restricted: true, grid_x: 100, grid_y: 20 }],
+    traces: [],
+  };
+  const tileLayer = layerByID(buildProcessMapLayers(buildOptions()), "process-map-spatial-tiles");
+  const render = tileLayer.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
+  const sublayers = render({ id: "tile", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
+  const bodies = layerByID(sublayers, "tile-placements");
+  const fences = layerByID(sublayers, "tile-folder-fences");
+  const restricted = layerByID(sublayers, "tile-restricted");
+  const labels = layerByID(sublayers, "tile-labels");
+  assert.equal((bodies.props.data as unknown[]).length, 2, "Folder and Process remain perceptible at whole-company LOD");
+  assert.ok((fences.props.data as unknown[]).length > 0, "transparent Folder perimeter remains visible");
+  assert.equal((restricted.props.data as unknown[]).length, 1);
+  assert.equal(restricted.props.pickable, false);
+  const texts = (labels.props.data as Array<{ text: string }>).map((item) => item.text);
+  assert.deepEqual(texts, ["?"], "whole LOD suppresses names but retains a permission-safe placeholder");
+});
 
-    const traceEdge = container.querySelector<HTMLElement>(".react-flow__edge");
-    assert.ok(traceEdge);
-    assert.ok(container.querySelector(".process-map-trace__flow"), "the saved trace includes one source-to-target flow overlay");
-    await act(async () => {
-      traceEdge.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      await flushUI();
+test("declared presentation ceilings suppress labels and waypoints above authorized detail", () => {
+  const wholeProcess = { ...placement("whole", 10, 10), presentation: "whole" as const, name: "Must stay hidden" };
+  const tileData: ProcessMapTileResponse = {
+    z: 22,
+    x: 0,
+    y: 0,
+    process_map_read_version: 11,
+    byteLength: 1,
+    placements: [wholeProcess],
+    traces: [],
+  };
+  const tileLayer = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 3 })), "process-map-spatial-tiles");
+  const render = tileLayer.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
+  const tileLayers = render({ id: "capped", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
+  assert.deepEqual(layerByID(tileLayers, "capped-labels").props.data, []);
+
+  const source = placement("source", 0, 0);
+  const target = placement("target", 20, 0);
+  const normalTrace = { ...trace(source, target), presentation: "normal" as const };
+  const normalPresentation: ProcessMapPresentationState = {
+    placements: new Map([["logic_gate:source", source], ["logic_gate:target", target]]),
+    traces: new Map([[normalTrace.resource_operational_relationship_id, normalTrace]]),
+    removedPlacementKeys: new Set(),
+  };
+  const normalLayers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 100,
+    presentation: normalPresentation,
+    editedTraceIDs: new Set([normalTrace.resource_operational_relationship_id]),
+    editOverlay: {
+      placements: [], traces: [normalTrace], selectedPlacementKey: null,
+      selectedTraceID: normalTrace.resource_operational_relationship_id,
+      connectionPreview: null, highlightedFolderKey: null, showAllAnchors: false,
+    },
+  }));
+  assert.deepEqual(layerByID(normalLayers, "process-map-edit-waypoints").props.data, []);
+
+  const editingTrace = { ...normalTrace, presentation: "editing" as const };
+  const editingLayers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 100,
+    presentation: { ...normalPresentation, traces: new Map([[editingTrace.resource_operational_relationship_id, editingTrace]]) },
+    editedTraceIDs: new Set([editingTrace.resource_operational_relationship_id]),
+    editOverlay: {
+      placements: [], traces: [editingTrace], selectedPlacementKey: null,
+      selectedTraceID: editingTrace.resource_operational_relationship_id,
+      connectionPreview: null, highlightedFolderKey: null, showAllAnchors: false,
+    },
+  }));
+  assert.equal((layerByID(editingLayers, "process-map-edit-waypoints").props.data as unknown[]).length, 1);
+  const editingLayerIDs = editingLayers.map((layer) => layer.id);
+  assert.ok(
+    editingLayerIDs.indexOf("process-map-edit-traces") < editingLayerIDs.indexOf("process-map-spatial-tiles"),
+    "selected traces and connection previews stay below ordinary placement bodies",
+  );
+  assert.ok(
+    editingLayerIDs.indexOf("process-map-spatial-tiles") < editingLayerIDs.indexOf("process-map-edit-waypoints"),
+    "selected route waypoints remain visible and pickable above tiled geometry",
+  );
+  assert.ok(
+    editingLayerIDs.indexOf("process-map-edit-waypoints") < editingLayerIDs.indexOf("process-map-edit-placement-bodies"),
+    "actively edited placements remain the top interactive map items",
+  );
+});
+
+test("Folder move and delete acknowledgements clear only previews from their own still-current operations", () => {
+  const expected = new Map([
+    ["company_explorer_folder:folder", 2],
+    ["logic_gate:child", 4],
+    ["trace:relationship-1", 3],
+  ]);
+  const current = new Map([
+    ["company_explorer_folder:folder", 2],
+    ["logic_gate:child", 5],
+    ["trace:relationship-1", 4],
+  ]);
+  assert.deepEqual(
+    [...processMapCurrentOperationKeys(
+      ["company_explorer_folder:folder", "logic_gate:child"],
+      expected,
+      current,
+    )],
+    ["company_explorer_folder:folder"],
+  );
+  assert.deepEqual(
+    [...processMapCurrentOperationKeys(["relationship-1"], expected, current, "trace:")],
+    [],
+  );
+  assert.deepEqual(
+    [...processMapCurrentOperationKeys(
+      ["company_explorer_folder:folder", "logic_gate:child"],
+      expected,
+      new Map([
+        ["company_explorer_folder:folder", 2],
+        ["logic_gate:child", 5],
+      ]),
+    )],
+    ["company_explorer_folder:folder"],
+    "a Folder-delete reply cannot clear a direct child's newer edit preview",
+  );
+  assert.deepEqual(
+    [...processMapCurrentOperationKeys(["logic_gate:child"], undefined, current)],
+    ["logic_gate:child"],
+    "ordinary envelopes without an operation fence keep their existing cleanup behavior",
+  );
+});
+
+test("selected Folder editing stays transparent and exposes saved-geometry resize and connection handles", () => {
+  const folder = placement("Folder", 10, 20, 80, 60, "company_explorer_folder");
+  const key = "company_explorer_folder:Folder";
+  const presentation: ProcessMapPresentationState = {
+    placements: new Map([[key, folder]]), traces: new Map(), removedPlacementKeys: new Set(),
+  };
+  const layers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 24,
+    presentation,
+    editedPlacementKeys: new Set([key]),
+    editOverlay: {
+      placements: [folder], traces: [], selectedPlacementKey: key, selectedTraceID: null,
+      connectionPreview: null, highlightedFolderKey: key, showAllAnchors: false,
+    },
+  }));
+  const fences = layerByID(layers, "process-map-edit-folder-fences").props.data as unknown[];
+  const bodies = layerByID(layers, "process-map-edit-placement-bodies").props.data as Array<{ fill: number[] }>;
+  const handles = layerByID(layers, "process-map-edit-resize-handles").props.data as unknown[];
+  const anchors = layerByID(layers, "process-map-edit-anchors").props.data as unknown[];
+  assert.equal(fences.length, 4, "a Folder is a perimeter fence, not an opaque card");
+  assert.equal(bodies[0].fill[3], 1, "Folder interior remains transparent enough to see contained work");
+  assert.equal(handles.length, 4, "all four corners resize the saved global bounds");
+  assert.equal(anchors.length, 2, "physical input and output sides remain connectable while editing");
+});
+
+test("Folder perimeter ownership crosses tile boundaries once without internal stroke seams", () => {
+  const left = { minX: 0, minY: 0, maxX: 256, maxY: 256 };
+  const right = { minX: 256, minY: 0, maxX: 512, maxY: 256 };
+  const spanning = { min_x: 100, min_y: 20, max_x: 400, max_y: 80 };
+  const spanningSegments = [
+    ...processMapPerimeterSegments(spanning, left),
+    ...processMapPerimeterSegments(spanning, right),
+  ];
+  assert.equal(
+    spanningSegments.filter((segment) => segment[0][0] === 256 && segment[1][0] === 256).length,
+    0,
+    "a tile boundary inside a Folder must not become a visible fence",
+  );
+  assert.equal(new Set(spanningSegments.map((segment) => JSON.stringify(segment))).size, spanningSegments.length);
+  assert.deepEqual(spanningSegments, [
+    [[100, 20], [256, 20]], [[100, 80], [256, 80]], [[100, 20], [100, 80]],
+    [[256, 20], [400, 20]], [[256, 80], [400, 80]], [[400, 20], [400, 80]],
+  ]);
+
+  const endingOnBoundary = { min_x: 120, min_y: 100, max_x: 256, max_y: 160 };
+  const boundarySegments = [
+    ...processMapPerimeterSegments(endingOnBoundary, left),
+    ...processMapPerimeterSegments(endingOnBoundary, right),
+  ];
+  assert.equal(
+    boundarySegments.filter((segment) => segment[0][0] === 256 && segment[1][0] === 256).length,
+    1,
+    "a real max edge on a tile boundary has exactly one owner",
+  );
+});
+
+test("only complete current-version viewport coverage retires mutation masks", () => {
+  const current: Parameters<typeof retireProcessMapMutationMasks>[0] = {
+    committedOverlay: {
+      placements: new Map([["logic_gate:gate", placement("gate", 1, 2)]]),
+      traces: new Map(),
+      removedPlacementKeys: new Set(["logic_gate:removed"]),
+    },
+    removedTraceIDs: new Set(["trace-1"]),
+  };
+  const currentTile = { z: 1, x: 0, y: 0, process_map_read_version: 11, placements: [], traces: [], byteLength: 1 };
+  assert.equal(processMapViewportHasCompleteCoverage([], 11), false);
+  assert.equal(processMapViewportHasCompleteCoverage([{ isLoaded: true, content: null }], 11), false);
+  assert.equal(processMapViewportHasCompleteCoverage([{ isLoaded: true, content: { ...currentTile, process_map_read_version: 10 } }], 11), false);
+  assert.equal(processMapViewportHasCompleteCoverage([{ isLoaded: true, content: currentTile }], 11), true);
+  assert.equal(retireProcessMapMutationMasks(current, false), current, "partial coverage retains rollback masks");
+  const retired = retireProcessMapMutationMasks(current, true);
+  assert.equal(retired.committedOverlay.placements.size, 0);
+  assert.equal(retired.committedOverlay.traces.size, 0);
+  assert.equal(retired.committedOverlay.removedPlacementKeys.size, 0);
+  assert.equal(retired.removedTraceIDs.size, 0);
+
+  const completedGenerations: number[] = [];
+  const tileLayer = layerByID(buildProcessMapLayers(buildOptions({
+    onViewportLoad: (generation) => completedGenerations.push(generation),
+  })), "process-map-spatial-tiles");
+  const onViewportLoad = tileLayer.props.onViewportLoad as unknown as (tiles: Array<{ isLoaded: boolean; content?: ProcessMapTileResponse | null }>) => void;
+  onViewportLoad([{ isLoaded: true, content: null }]);
+  onViewportLoad([{ isLoaded: true, content: { ...currentTile, process_map_read_version: 10 } }]);
+  assert.deepEqual(completedGenerations, []);
+  onViewportLoad([{ isLoaded: true, content: currentTile }]);
+  assert.deepEqual(completedGenerations, [3], "only the settled generation with current content may retire masks");
+});
+
+test("delete masks win over every overlay and cleared previews cannot return after mask retirement", () => {
+  const source = placement("source", 0, 0);
+  const target = placement("target", 20, 0);
+  const relationship = trace(source, target);
+  const placementKey = "logic_gate:source";
+  const traceID = relationship.resource_operational_relationship_id;
+  const base: ProcessMapPresentationState = {
+    placements: new Map([[placementKey, source]]),
+    traces: new Map([[traceID, relationship]]),
+    removedPlacementKeys: new Set(),
+  };
+  const committed: ProcessMapPresentationState = {
+    placements: new Map([[placementKey, { ...source, grid_x: 1 }]]),
+    traces: new Map([[traceID, { ...relationship, revision: relationship.revision + 1 }]]),
+    removedPlacementKeys: new Set([placementKey]),
+  };
+  const previewPlacements = new Map([[placementKey, { ...source, grid_x: 2 }]]);
+  const previewTraces = new Map([[traceID, { ...relationship, revision: relationship.revision + 2 }]]);
+  const masked = mergeProcessMapPresentation(base, committed, previewPlacements, previewTraces, new Set([traceID]));
+  assert.equal(masked.placements.has(placementKey), false);
+  assert.equal(masked.traces.has(traceID), false);
+
+  const clearedPlacements = replaceProcessMapPreviewEntries(previewPlacements, [placementKey], new Map());
+  const clearedTraces = replaceProcessMapPreviewEntries(previewTraces, [traceID], new Map());
+  const lateSaveKeys = processMapCurrentOperationKeys(
+    [placementKey],
+    new Map([[placementKey, 1]]),
+    new Map([[placementKey, 2]]),
+  );
+  assert.deepEqual([...lateSaveKeys], [], "delete generation fences the older save acknowledgement");
+  const afterCoverage = mergeProcessMapPresentation(
+    { placements: new Map(), traces: new Map(), removedPlacementKeys: new Set() },
+    { placements: new Map(), traces: new Map(), removedPlacementKeys: new Set() },
+    clearedPlacements,
+    clearedTraces,
+    new Set(),
+  );
+  assert.equal(afterCoverage.placements.has(placementKey), false);
+  assert.equal(afterCoverage.traces.has(traceID), false);
+});
+
+test("canonical mutation envelopes reject stale acknowledgements and rebuild route geometry from saved dimensions", () => {
+  const source = placement("source", 0, 0);
+  const target = placement("target", 20, 0);
+  const currentTrace = trace(source, target);
+  const current: ProcessMapPresentationState = {
+    placements: new Map([["logic_gate:source", source], ["logic_gate:target", target]]),
+    traces: new Map([[currentTrace.resource_operational_relationship_id, currentTrace]]),
+    removedPlacementKeys: new Set(),
+  };
+  const stale: ProcessMapMutationEnvelope = {
+    placements: [{ company_id: "company", resource_type: "logic_gate", resource_id: "source", map_parent_folder_id: null, grid_x: 99, grid_y: 99, grid_width: 2, grid_height: 2, revision: 4, created_timestamp: "created", updated_timestamp: "stale" }],
+    traces: [{ resource_operational_relationship_id: "relationship-1", route_points: [{ x: 99, y: 99 }], revision: 3, created_timestamp: "created", updated_timestamp: "stale" }],
+    deleted_trace_ids: [],
+    process_map_read_version: 12,
+  };
+  const ignored = applyProcessMapMutationEnvelope(current, stale);
+  assert.equal(ignored.placements.get("logic_gate:source")?.grid_x, 0);
+  assert.deepEqual(ignored.traces.get("relationship-1")?.route_points, [{ x: 15, y: 3 }]);
+
+  const committed: ProcessMapMutationEnvelope = {
+    placements: [{ company_id: "company", resource_type: "logic_gate", resource_id: "source", map_parent_folder_id: null, grid_x: 2, grid_y: 4, grid_width: 14, grid_height: 8, revision: 6, created_timestamp: "created", updated_timestamp: "committed" }],
+    traces: [{ resource_operational_relationship_id: "relationship-1", route_points: [{ x: 18, y: 8 }], revision: 5, created_timestamp: "created", updated_timestamp: "committed" }],
+    deleted_trace_ids: [],
+    process_map_read_version: 13,
+  };
+  const applied = applyProcessMapMutationEnvelope(current, committed);
+  const saved = applied.placements.get("logic_gate:source");
+  assert.deepEqual(saved && [saved.grid_x, saved.grid_y, saved.grid_width, saved.grid_height, saved.revision], [2, 4, 14, 8, 6]);
+  assert.deepEqual(applied.traces.get("relationship-1")?.path_fragments, [[
+    { x: 16, y: 8 }, { x: 18, y: 8 }, { x: 18, y: 3 }, { x: 20, y: 3 },
+  ]]);
+
+  const removed = applyProcessMapMutationEnvelope(applied, {
+    placements: [],
+    traces: [],
+    deleted_trace_ids: ["relationship-1"],
+    process_map_read_version: 14,
+  });
+  assert.equal(removed.traces.has("relationship-1"), false);
+});
+
+test("one group-move envelope reconciles every moved placement and translated internal trace together", () => {
+  const folder = placement("folder", 0, 0, 100, 80, "company_explorer_folder");
+  const source = { ...placement("source", 10, 10), map_parent_folder_id: "folder" };
+  const target = { ...placement("target", 40, 10), map_parent_folder_id: "folder" };
+  const relationship = trace(source, target);
+  const current: ProcessMapPresentationState = {
+    placements: new Map([
+      ["company_explorer_folder:folder", folder], ["logic_gate:source", source], ["logic_gate:target", target],
+    ]),
+    traces: new Map([[relationship.resource_operational_relationship_id, relationship]]),
+    removedPlacementKeys: new Set(),
+  };
+  const committed = (item: ProcessMapVisiblePlacement, x: number, y: number) => ({
+    company_id: "company", resource_type: item.resource_type, resource_id: item.resource_id,
+    map_parent_folder_id: item.map_parent_folder_id, grid_x: x, grid_y: y,
+    grid_width: item.grid_width, grid_height: item.grid_height, revision: 6,
+    created_timestamp: "created", updated_timestamp: "moved",
+  });
+  const next = applyProcessMapMutationEnvelope(current, {
+    placements: [committed(folder, 5, 7), committed(source, 15, 17), committed(target, 45, 17)],
+    traces: [{ resource_operational_relationship_id: "relationship-1", route_points: [{ x: 20, y: 10 }], revision: 5, created_timestamp: "created", updated_timestamp: "moved" }],
+    deleted_trace_ids: [],
+    process_map_read_version: 12,
+  });
+  assert.deepEqual(
+    [...next.placements.values()].map((item) => [item.resource_id, item.grid_x, item.grid_y]),
+    [["folder", 5, 7], ["source", 15, 17], ["target", 45, 17]],
+  );
+  assert.deepEqual(next.traces.get("relationship-1")?.route_points, [{ x: 20, y: 10 }]);
+  assert.equal(next.traces.get("relationship-1")?.revision, 5);
+});
+
+test("reduced motion freezes operational flow markers while ordinary motion follows phase", () => {
+  const source = placement("source", 0, 0);
+  const target = placement("target", 20, 0);
+  const relationship = trace(source, target);
+  const presentation: ProcessMapPresentationState = {
+    placements: new Map([["logic_gate:source", source], ["logic_gate:target", target]]),
+    traces: new Map([[relationship.resource_operational_relationship_id, relationship]]),
+    removedPlacementKeys: new Set(),
+  };
+  const marker = (reducedMotion: boolean, flowPhase: number): [number, number] => {
+    const layer = buildProcessMapFlowLayer(presentation, reducedMotion, flowPhase);
+    const data = layer.props.data as Array<{ position: [number, number] }>;
+    assert.equal(data.length, 1);
+    return data[0].position;
+  };
+  assert.deepEqual(marker(true, 0), marker(true, 1));
+  assert.notDeepEqual(marker(false, 0), marker(false, 1));
+
+  const normalTrace: ProcessMapTrace = {
+    ...relationship,
+    presentation: "normal",
+    route_points: [],
+    path_fragments: [
+      [{ x: 20, y: 0 }, { x: 30, y: 0 }],
+      [{ x: 0, y: 0 }, { x: 10, y: 0 }],
+    ],
+  };
+  const fragmentedLayer = buildProcessMapFlowLayer({
+    ...presentation,
+    traces: new Map([[normalTrace.resource_operational_relationship_id, normalTrace]]),
+  }, false, 0.25);
+  const fragmentedMarkers = fragmentedLayer.props.data as Array<{ position: [number, number] }>;
+  assert.deepEqual(
+    fragmentedMarkers.map((item) => item.position).sort((left, right) => left[0] - right[0]),
+    [[2.5, 0], [22.5, 0]],
+    "coarse cross-tile fragments animate in their own canonical source-to-target direction instead of tile-load order",
+  );
+});
+
+test("representative large-company transport and presentation stay byte-, request-, and datum-bounded", async (t) => {
+  const companyTileCount = 20;
+  const placementsPerTile = 1_000;
+  const finalViewportTileCount = 12;
+  const companyPlacementCount = companyTileCount * placementsPerTile;
+  const apiBase = "https://process-map-large-company.test";
+  const companyID = "large-company";
+  const readVersion = 41;
+  const largeScene: ProcessMapSceneResponse = {
+    bounds: { min_x: 0, min_y: 0, max_x: companyTileCount * PROCESS_MAP_TILE_SIZE, max_y: PROCESS_MAP_TILE_SIZE },
+    process_map_read_version: readVersion,
+    tile_size: PROCESS_MAP_TILE_SIZE,
+    min_tile_zoom: 0,
+    max_tile_zoom: 22,
+  };
+  const encodedBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  const tilePayload = (tileX: number): Omit<ProcessMapTileResponse, "byteLength"> => {
+    const placements: ProcessMapTileResponse["placements"] = [];
+    const visible: ProcessMapVisiblePlacement[] = [];
+    for (let index = 0; index < placementsPerTile; index += 1) {
+      const gridX = tileX * PROCESS_MAP_TILE_SIZE + (index % 40) * 6;
+      const gridY = Math.floor(index / 40) * 10;
+      if (index % 25 === 0) {
+        placements.push({ restricted: true, grid_x: gridX, grid_y: gridY });
+        continue;
+      }
+      const item: ProcessMapVisiblePlacement = {
+        restricted: false,
+        presentation: "normal",
+        resource_type: index % 10 === 0 ? "company_explorer_folder" : "logic_gate",
+        resource_id: `tile-${tileX}-placement-${index}`,
+        name: `Placement ${tileX}-${index}`,
+        map_parent_folder_id: null,
+        grid_x: gridX,
+        grid_y: gridY,
+        grid_width: 5,
+        grid_height: 3,
+        can_edit: true,
+        revision: 1,
+        created_timestamp: "2026-08-26T00:00:00Z",
+        updated_timestamp: "2026-08-26T00:00:00Z",
+      };
+      visible.push(item);
+      placements.push(item);
+    }
+    const traces: ProcessMapTrace[] = visible.slice(1).map((target, index) => {
+      const source = visible[index];
+      return {
+        presentation: "normal",
+        resource_operational_relationship_id: `tile-${tileX}-relationship-${index}`,
+        source: { resource_type: source.resource_type, resource_id: source.resource_id },
+        target: { resource_type: target.resource_type, resource_id: target.resource_id },
+        route_points: [],
+        path_fragments: [[
+          { x: source.grid_x + source.grid_width, y: source.grid_y + source.grid_height / 2 },
+          { x: target.grid_x, y: target.grid_y + target.grid_height / 2 },
+        ]],
+        revision: 1,
+        created_timestamp: "2026-08-26T00:00:00Z",
+        updated_timestamp: "2026-08-26T00:00:00Z",
+      };
     });
-    const waypoint = container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]');
-    assert.ok(waypoint);
-    const startingWaypointTransform = waypoint.style.transform;
-    await act(async () => {
-      waypoint.dispatchEvent(new dom.window.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 10, clientX: 182, clientY: 126 }));
-      waypoint.dispatchEvent(new dom.window.PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 10, clientX: 322, clientY: 266 }));
-      await flushUI();
-    });
-    const movedWaypoint = container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]');
-    assert.ok(movedWaypoint);
-    assert.notEqual(movedWaypoint.style.transform, startingWaypointTransform, "waypoint movement previews locally");
-    await act(async () => {
-      movedWaypoint.dispatchEvent(new dom.window.PointerEvent("pointercancel", { bubbles: true, cancelable: true, pointerId: 10, clientX: 490, clientY: 406 }));
-      movedWaypoint.dispatchEvent(new dom.window.PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 10, clientX: 602, clientY: 518 }));
-      await flushUI();
-    });
-    const restoredWaypoint = container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]');
-    assert.ok(restoredWaypoint);
-    assert.equal(restoredWaypoint.style.transform, startingWaypointTransform, "pointer cancel restores the starting route and removes movement listeners");
-    assert.equal(traceWrites.length, 0, "pointer cancel does not save the preview route");
-    for (const pointerID of [11, 12]) {
-      await act(async () => {
-        restoredWaypoint.dispatchEvent(new dom.window.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: pointerID, clientX: 182, clientY: 126 }));
-        restoredWaypoint.dispatchEvent(new dom.window.PointerEvent("pointerup", { bubbles: true, cancelable: true, pointerId: pointerID, clientX: 182, clientY: 126 }));
-        await flushUI();
+    return { z: 22, x: tileX, y: 0, process_map_read_version: readVersion, placements, traces };
+  };
+
+  assert.equal(companyPlacementCount, 20_000, "the fixture represents a large mapped company, not a toy tile");
+  assert.deepEqual({
+    tile_size: PROCESS_MAP_TILE_SIZE,
+    cache_bytes: PROCESS_MAP_TILE_CACHE_BYTES,
+    max_requests: PROCESS_MAP_MAX_TILE_REQUESTS,
+    debounce_ms: PROCESS_MAP_TILE_DEBOUNCE_MS,
+    settlement_ms: PROCESS_MAP_SETTLE_DELAY_MS,
+    normal_lod_px: PROCESS_MAP_NORMAL_LOD_MIN_PX,
+    editing_lod_px: PROCESS_MAP_EDITING_LOD_MIN_PX,
+    default_width: PROCESS_MAP_DEFAULT_WIDTH,
+    default_height: PROCESS_MAP_DEFAULT_HEIGHT,
+    min_camera_zoom: PROCESS_MAP_MIN_CAMERA_ZOOM,
+    max_camera_zoom: PROCESS_MAP_MAX_CAMERA_ZOOM,
+    safe_world_coordinate: PROCESS_MAP_SAFE_WORLD_COORDINATE,
+  }, {
+    tile_size: 256,
+    cache_bytes: 32 * 1024 * 1024,
+    max_requests: 6,
+    debounce_ms: 60,
+    settlement_ms: 180,
+    normal_lod_px: 24,
+    editing_lod_px: 96,
+    default_width: 7,
+    default_height: 5,
+    min_camera_zoom: -24,
+    max_camera_zoom: 20,
+    safe_world_coordinate: 1_000_000_000,
+  });
+  const safeWorldFit = fitProcessMapViewState({
+    min_x: -PROCESS_MAP_SAFE_WORLD_COORDINATE,
+    min_y: -PROCESS_MAP_SAFE_WORLD_COORDINATE,
+    max_x: PROCESS_MAP_SAFE_WORLD_COORDINATE,
+    max_y: PROCESS_MAP_SAFE_WORLD_COORDINATE,
+  }, { width: 1_920, height: 1_080 });
+  assert.ok(safeWorldFit.zoom >= PROCESS_MAP_MIN_CAMERA_ZOOM, "the safe company world must fit inside the tested camera range");
+  assert.equal(processMapPlacementLOD({ grid_width: 1, grid_height: 1 }, 2 ** PROCESS_MAP_MAX_CAMERA_ZOOM), "editing");
+
+  invalidateProcessMapReadCaches(apiBase, companyID);
+  const originalFetch = globalThis.fetch;
+  let sceneRequests = 0;
+  let tileRequests = 0;
+  let canceledRequests = 0;
+  let resolveCanceledFetch: (() => void) | null = null;
+  const canceledFetchObserved = new Promise<void>((resolve) => { resolveCanceledFetch = resolve; });
+  globalThis.fetch = (async (input, init) => {
+    const url = new URL(input.toString());
+    if (url.pathname.endsWith("/v1/process-map/scene")) {
+      sceneRequests += 1;
+      return new Response(JSON.stringify(largeScene), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    const match = url.pathname.match(/\/tiles\/(-?\d+)\/(-?\d+)\/(-?\d+)$/);
+    assert.ok(match, `unexpected Process Map request ${url.pathname}`);
+    tileRequests += 1;
+    const z = Number(match[1]);
+    const x = Number(match[2]);
+    const y = Number(match[3]);
+    if (x === companyTileCount) {
+      return new Promise<Response>((_resolve, reject) => {
+        const abort = () => {
+          canceledRequests += 1;
+          resolveCanceledFetch?.();
+          reject(new DOMException("aborted", "AbortError"));
+        };
+        if (init?.signal?.aborted) abort();
+        else init?.signal?.addEventListener("abort", abort, { once: true });
       });
     }
-    const traceAfterClicks = container.querySelector<HTMLElement>(".react-flow__edge");
-    assert.ok(traceAfterClicks);
-    await act(async () => {
-      traceAfterClicks.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      await flushUI();
+    return new Response(JSON.stringify({ ...tilePayload(x), z, x, y }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
     });
-    const waypointAfterClicks = container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]');
-    assert.ok(waypointAfterClicks);
-    await act(async () => {
-      waypointAfterClicks.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true }));
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(traceWrites.length, 1, `a no-move double-click performs only the waypoint-removal PUT: ${JSON.stringify(traceWrites)}`);
-    assert.deepEqual(traceWrites[0].route_points, []);
+  }) as typeof fetch;
 
-    deferNextTracePut = true;
-    const traceForDeferredEdit = container.querySelector<HTMLElement>(".react-flow__edge");
-    assert.ok(traceForDeferredEdit);
-    await act(async () => {
-      traceForDeferredEdit.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, clientX: 238, clientY: 210 }));
-      await flushUI();
-    });
-    assert.ok(finishDeferredTracePut, "the trace edit acknowledgement remains pending");
-    traceRecreated = true;
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "trace-recreated-connection",
-      }) });
-      await flushUI();
-      await flushUI();
-    });
-    const recreatedTraceEdge = container.querySelector<HTMLElement>(".react-flow__edge");
-    assert.ok(recreatedTraceEdge);
-    await act(async () => {
-      recreatedTraceEdge.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      await flushUI();
-    });
-    const recreatedWaypoint = container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]');
-    assert.ok(recreatedWaypoint);
-    const recreatedWaypointTransform = recreatedWaypoint.style.transform;
-    const readsBeforeTraceAck = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
-    const completeDeferredTrace = finishDeferredTracePut;
-    await act(async () => {
-      completeDeferredTrace();
-      await flushUI();
-      await flushUI();
-      await flushUI();
-    });
-    const recoveredTraceEdge = container.querySelector<HTMLElement>(".react-flow__edge");
-    assert.ok(recoveredTraceEdge);
-    await act(async () => {
-      recoveredTraceEdge.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      await flushUI();
-    });
-    assert.equal(
-      container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]')?.style.transform,
-      recreatedWaypointTransform,
-      "a delayed trace ACK cannot overwrite a canonically recreated relationship with reset revision",
-    );
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
-      readsBeforeTraceAck + 1,
-      "a superseded trace acknowledgement performs one bounded canonical recovery read",
-    );
+  try {
+    const loadedScene = await fetchProcessMapScene(apiBase, companyID);
+    assert.deepEqual(loadedScene, largeScene);
+    assert.equal(sceneRequests, 1);
+    assert.ok(encodedBytes(largeScene) <= 256, "initial scene metadata must stay independent of the company graph size");
 
-    const gestureWaypoint = container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]');
-    assert.ok(gestureWaypoint);
-    const writesBeforeGestureRefresh = traceWrites.length;
-    await act(async () => {
-      gestureWaypoint.dispatchEvent(new dom.window.PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerId: 13, clientX: 238, clientY: 210 }));
-      gestureWaypoint.dispatchEvent(new dom.window.PointerEvent("pointermove", { bubbles: true, cancelable: true, pointerId: 13, clientX: 350, clientY: 322 }));
-      await flushUI();
-    });
-    assert.notEqual(
-      container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]')?.style.transform,
-      recreatedWaypointTransform,
-      "the active waypoint gesture previews before refresh",
+    const tileLoader = (request: Parameters<ProcessMapLayerBuildOptions["getTileData"]>[0]) => (
+      fetchProcessMapTile(apiBase, companyID, readVersion, request.z, request.x, request.y, request.signal)
     );
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "gesture-refresh-connection",
-      }) });
-      await flushUI();
-      await flushUI();
-    });
-    const edgeAfterGestureRefresh = container.querySelector<HTMLElement>(".react-flow__edge");
-    assert.ok(edgeAfterGestureRefresh);
-    await act(async () => {
-      edgeAfterGestureRefresh.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      await flushUI();
-    });
-    const canonicalWaypointAfterGestureRefresh = container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]');
-    assert.ok(canonicalWaypointAfterGestureRefresh);
-    const canonicalTransformAfterGestureRefresh = canonicalWaypointAfterGestureRefresh.style.transform;
-    await act(async () => {
-      gestureWaypoint.dispatchEvent(new dom.window.PointerEvent("pointercancel", { bubbles: true, cancelable: true, pointerId: 13, clientX: 490, clientY: 406 }));
-      await flushUI();
-    });
-    assert.equal(
-      container.querySelector<HTMLButtonElement>('[aria-label="Trace waypoint 1"]')?.style.transform,
-      canonicalTransformAfterGestureRefresh,
-      "cancel from a pre-refresh gesture cannot restore stale route geometry",
-    );
-    assert.equal(traceWrites.length, writesBeforeGestureRefresh, "a refresh-cancelled waypoint gesture performs no PUT");
+    const unsettledLayer = layerByID(buildProcessMapLayers(buildOptions({
+      scene: largeScene,
+      settled: false,
+      getTileData: tileLoader,
+    })), "process-map-spatial-tiles");
+    const readUnsettled = unsettledLayer.props.getTileData as unknown as (request: {
+      id: string;
+      index: { z: number; x: number; y: number };
+      signal: AbortSignal;
+    }) => Promise<ProcessMapTileResponse | null> | null;
+    for (let update = 0; update < 240; update += 1) {
+      assert.equal(readUnsettled({
+        id: `interim-${update}`,
+        index: { z: 22, x: update % companyTileCount, y: 0 },
+        signal: new AbortController().signal,
+      }), null);
+    }
+    assert.equal(tileRequests, 0, "240 wheel/pan candidates must schedule no business read before settlement");
 
-    const refreshedFolderCard = container.querySelector<HTMLElement>('[aria-label="Folder: Child"]');
-    const refreshedProcessCard = container.querySelector<HTMLElement>('[aria-label="Process: Review"]');
-    assert.ok(refreshedFolderCard);
-    assert.ok(refreshedProcessCard);
-    await act(async () => {
-      refreshedFolderCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      await flushUI();
+    const settledLayer = layerByID(buildProcessMapLayers(buildOptions({
+      scene: largeScene,
+      settled: true,
+      settledPixelsPerGridUnit: 8,
+      getTileData: tileLoader,
+    })), "process-map-spatial-tiles");
+    assert.equal(settledLayer.props.maxRequests, PROCESS_MAP_MAX_TILE_REQUESTS);
+    assert.equal(settledLayer.props.maxCacheByteSize, PROCESS_MAP_TILE_CACHE_BYTES);
+    const readSettled = settledLayer.props.getTileData as unknown as (request: {
+      id: string;
+      index: { z: number; x: number; y: number };
+      signal: AbortSignal;
+    }) => Promise<ProcessMapTileResponse>;
+    let settledLoadCount = 0;
+    let settleFailure: (cause: unknown) => void = () => undefined;
+    let settleSuccess: (tiles: ProcessMapTileResponse[]) => void = () => undefined;
+    const settledTiles = new Promise<ProcessMapTileResponse[]>((resolve, reject) => {
+      settleSuccess = resolve;
+      settleFailure = reject;
     });
-    assert.equal(openedFolders.length, 0, "single click selects without navigation");
-    assert.equal(refreshedFolderCard.classList.contains("is-selected"), true, "selection reveals only the selected placement's handles");
-    assert.equal(refreshedProcessCard.classList.contains("is-selected"), false);
-    assert.equal(container.querySelector(".process-map-toolbar button")?.textContent, "Remove Child");
+    const settlementGate = createProcessMapSettlementGate({
+      delayMs: 0,
+      onSettle: () => {
+        settledLoadCount += 1;
+        void Promise.all(Array.from({ length: finalViewportTileCount }, (_, x) => readSettled({
+          id: `final-${x}`,
+          index: { z: 22, x, y: 0 },
+          signal: new AbortController().signal,
+        }))).then(settleSuccess, settleFailure);
+      },
+    });
+    settlementGate.onInteractionStateChange({ isZooming: true });
+    for (let update = 0; update < 240; update += 1) settlementGate.onViewStateChange();
+    assert.equal(settledLoadCount, 0);
+    settlementGate.onInteractionStateChange({});
+    const responses = await settledTiles;
+    settlementGate.dispose();
+    assert.equal(settledLoadCount, 1, "one wheel/pan burst must produce one final load generation");
+    assert.equal(tileRequests, finalViewportTileCount, "only missing tiles from the final viewport are requested");
 
-    const outputHandle = refreshedFolderCard.querySelector<HTMLElement>('.process-map-handle--output');
-    assert.ok(outputHandle);
-    await act(async () => {
-      outputHandle.dispatchEvent(new dom.window.MouseEvent("mousedown", {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-        buttons: 1,
-        clientX: 196,
-        clientY: 70,
-      }));
-      dom.window.document.dispatchEvent(new dom.window.MouseEvent("mousemove", {
-        bubbles: true,
-        cancelable: true,
-        buttons: 1,
-        clientX: 224,
-        clientY: 98,
-      }));
-      await flushUI();
-    });
-    assert.equal(refreshedFolderCard.classList.contains("is-connecting"), true);
-    assert.equal(refreshedProcessCard.classList.contains("is-connecting"), true, "a connection drag reveals every accessible placement anchor");
-    await act(async () => {
-      dom.window.document.dispatchEvent(new dom.window.MouseEvent("mouseup", {
-        bubbles: true,
-        cancelable: true,
-        button: 0,
-        clientX: 224,
-        clientY: 98,
-      }));
-      await flushUI();
-    });
-    assert.equal(refreshedFolderCard.classList.contains("is-connecting"), false);
-    assert.equal(refreshedProcessCard.classList.contains("is-connecting"), false);
-    assert.equal(refreshedFolderCard.classList.contains("is-selected"), false, "finishing or canceling a connection hides every handle");
+    await Promise.all(Array.from({ length: finalViewportTileCount }, (_, x) => (
+      fetchProcessMapTile(apiBase, companyID, readVersion, 22, x, 0)
+    )));
+    assert.equal(tileRequests, finalViewportTileCount, "the final viewport reuses its tile cache without new requests");
+    const cache = getProcessMapReadCacheStats();
+    const retainedTileBytes = responses.reduce((total, response) => total + response.byteLength, 0);
+    assert.equal(cache.scene_entries, 1);
+    assert.equal(cache.tile_entries, finalViewportTileCount);
+    assert.equal(cache.tile_bytes, retainedTileBytes);
+    assert.ok(cache.tile_bytes <= PROCESS_MAP_TILE_CACHE_BYTES);
+    assert.ok(Math.max(...responses.map((response) => response.byteLength)) <= 1024 * 1024, "a representative tile must remain below 1 MiB");
 
-    const refreshedProcessNode = refreshedProcessCard.closest<HTMLElement>(".react-flow__node");
-    assert.ok(refreshedProcessNode);
-    await act(async () => {
-      refreshedProcessNode.dispatchEvent(new dom.window.KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
-      await flushUI();
-    });
-    assert.deepEqual(openedLogicGates, [{ logicGateID: "gate-1", label: "Review" }], "Enter on a focused Process opens its exact Logic Gate page");
-    openedLogicGates.length = 0;
+    const cancelController = new AbortController();
+    const canceled = fetchProcessMapTile(apiBase, companyID, readVersion, 22, companyTileCount, 0, cancelController.signal);
+    cancelController.abort();
+    await assert.rejects(canceled, (cause: unknown) => cause instanceof Error && cause.name === "AbortError");
+    await canceledFetchObserved;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(canceledRequests, 1, "a settled request with no remaining consumer aborts its underlying fetch");
+    assert.equal(getProcessMapReadCacheStats().inflight_reads, 0);
 
-    await act(async () => {
-      refreshedProcessNode.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, buttons: 1, clientX: 454, clientY: 154, view: dom.window }));
-      dom.window.document.dispatchEvent(new dom.window.MouseEvent("mousemove", { bubbles: true, cancelable: true, buttons: 1, clientX: 466, clientY: 166, view: dom.window }));
-      dom.window.document.dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0, clientX: 466, clientY: 166, view: dom.window }));
-      refreshedProcessNode.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, view: dom.window }));
-      await flushUI();
+    let placementVisits = 0;
+    let traceVisits = 0;
+    const countedArray = <T,>(values: T[], onVisit: () => void): T[] => new Proxy(values, {
+      get(target, property, receiver) {
+        if (property !== Symbol.iterator) return Reflect.get(target, property, receiver);
+        return function* countedIterator() {
+          for (const value of target) {
+            onVisit();
+            yield value;
+          }
+        };
+      },
     });
-    assert.deepEqual(openedLogicGates, [], "dragging and releasing a Process never opens its Logic Gate page");
-    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "the click emitted after a placement drag does not pin its QDC card");
+    const representative = responses[0];
+    const render = settledLayer.props.renderSubLayers as unknown as (props: {
+      id: string;
+      data: ProcessMapTileResponse;
+      tile: { boundingBox: [number[], number[]] };
+    }) => Layer[];
+    const presentationLayers = render({
+      id: "representative-large-tile",
+      data: {
+        ...representative,
+        placements: countedArray(representative.placements, () => { placementVisits += 1; }),
+        traces: countedArray(representative.traces, () => { traceVisits += 1; }),
+      },
+      tile: { boundingBox: [[0, 0], [PROCESS_MAP_TILE_SIZE, PROCESS_MAP_TILE_SIZE]] },
+    });
+    assert.equal(placementVisits, representative.placements.length, "presentation construction visits each placement once");
+    assert.equal(traceVisits, representative.traces.length, "presentation construction visits each trace once");
+    const labelData = layerByID(presentationLayers, "representative-large-tile-labels").props.data as Array<{ text: string }>;
+    const pickableDatumCount = presentationLayers
+      .filter((layer) => layer.props.pickable)
+      .reduce((total, layer) => total + ((layer.props.data as unknown[])?.length ?? 0), 0);
+    const visiblePlacementCount = representative.placements.filter((item) => !item.restricted).length;
+    assert.equal(labelData.length, representative.placements.length, "normal LOD contributes one bounded label datum per displayable placement");
+    assert.equal(
+      pickableDatumCount,
+      visiblePlacementCount * 5 + representative.traces.length,
+      "picking data grows by five bounded placement datums plus one datum per single-segment trace",
+    );
+    const labelBytes = labelData.reduce((total, datum) => total + encodedBytes(datum.text), 0);
+    assert.ok(labelBytes < 64 * 1024, "representative label text stays bounded before the shared font atlas");
 
-    await act(async () => {
-      refreshedFolderCard.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true }));
-      refreshedProcessCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      refreshedProcessCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      refreshedProcessCard.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true }));
-      const pane = container.querySelector<HTMLElement>(".react-flow__pane");
-      assert.ok(pane);
-      pane.dispatchEvent(new dom.window.WheelEvent("wheel", { bubbles: true, deltaY: -10 }));
-      pane.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true }));
-      await flushUI();
-    });
-    assert.deepEqual(openedFolders, ["child-1"], "only Folder double-click drills into a map layer");
-    assert.deepEqual(openedLogicGates, [{ logicGateID: "gate-1", label: "Review" }], "Process double-click opens its exact Logic Gate page");
-    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "Process double-click does not leave a pinned data card behind");
-
-    const readsBeforeSuccessfulDrop = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
-    const drop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperties(drop, {
-      clientX: { value: 280 },
-      clientY: { value: 196 },
-      dataTransfer: { value: {
-        types: [EXPLORER_DRAG_MIME],
-        dropEffect: "copy",
-        getData: (type: string) => type === EXPLORER_DRAG_MIME
-          ? JSON.stringify({ kind: "logic_gate", label: "Added process", itemID: "added-gate", itemType: "logic_gate" })
-          : "",
-      } },
-    });
-    const surface = container.querySelector<HTMLElement>(".process-map-surface");
-    const mapCanvas = container.querySelector<HTMLElement>(".react-flow");
-    assert.ok(surface);
-    assert.ok(mapCanvas);
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      mapCanvas.dispatchEvent(drop);
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(drop.defaultPrevented, true, "the Process Map owns exact Explorer drops");
-    const placementWrite = requests.find((request) => request.url.pathname.endsWith("/placements/logic_gate/added-gate"));
-    assert.ok(placementWrite, JSON.stringify(requests.map((request) => ({ path: request.url.pathname, method: request.method }))));
-    assert.equal(placementWrite.method, "PUT");
-    assert.equal(placementWrite.body?.map_parent_folder_id, "parent-1");
-    assert.equal(placementWrite.originConnectionID, "surface-correlation-1");
-    assert.ok(container.querySelector('[aria-label="Drag Process: Added process"]'), "the candidate remains until its placement save commits");
-    const completeAddedPlacement = finishAddedPlacementPut;
-    assert.ok(completeAddedPlacement);
-    await act(async () => {
-      completeAddedPlacement();
-      await flushUI();
-      await flushUI();
-    });
-    assert.ok(container.querySelector('[aria-label="Process: Added process"]'));
-    assert.equal(container.querySelector('[aria-label="Drag Process: Added process"]'), null, "the committed placement leaves the tray");
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
-      readsBeforeSuccessfulDrop,
-      "a successful placement response updates the mounted layer without reloading it",
-    );
-    const readsBeforeFailedDrop = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
-    const failedDrop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperties(failedDrop, {
-      clientX: { value: 420 },
-      clientY: { value: 224 },
-      dataTransfer: { value: {
-        types: [EXPLORER_DRAG_MIME],
-        dropEffect: "copy",
-        getData: (type: string) => type === EXPLORER_DRAG_MIME
-          ? JSON.stringify({ kind: "logic_gate", label: "Failing process", itemID: "failing-gate", itemType: "logic_gate" })
-          : "",
-      } },
-    });
-    await act(async () => {
-      mapCanvas.dispatchEvent(failedDrop);
-      await flushUI();
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(container.querySelector('[aria-label="Process: Failing process"]'), null);
-    assert.ok(container.querySelector('[aria-label="Drag Process: Failing process"]'), "a rejected placement remains available in the tray");
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
-      readsBeforeFailedDrop + 1,
-      "a rejected tray-origin placement performs one bounded canonical recovery read",
-    );
-    const layerReadCount = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "surface-connection-1",
-      }) });
-      await flushUI();
-    });
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
-      layerReadCount,
-      "the initiating connection ignores only its exact echoed hint",
-    );
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "another-connection",
-      }) });
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
-      layerReadCount + 1,
-      "a hint from every other connection still reloads the exact mounted layer",
-    );
-
-    const reviewCard = container.querySelector<HTMLElement>('[aria-label="Process: Review"]');
-    assert.ok(reviewCard);
-    await act(async () => {
-      reviewCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      await flushUI();
-    });
-    assert.ok(container.querySelector('[aria-label="Review Q, C and D"]'), "a Process click always pins its QDC card");
-    const qdClose = container.querySelector<HTMLButtonElement>('[aria-label="Close Review Q, C and D"]');
-    assert.ok(qdClose, "a pinned QDC card has an explicit close action");
-    await act(async () => {
-      qdClose.click();
-      await flushUI();
-    });
-    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "the explicit close action dismisses the pinned card");
-    const removeButton = [...container.querySelectorAll<HTMLButtonElement>(".process-map-toolbar button")]
-      .find((button) => button.textContent === "Remove Review");
-    assert.ok(removeButton);
-    await act(async () => {
-      removeButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      await flushUI();
-    });
-    assert.equal(container.querySelector('[aria-label="Process: Review"]'), null, "placement deletion starts optimistically");
-    assert.ok(container.querySelector('[aria-label="Drag Process: Review"]'), "removing a current-layer placement returns it to the tray");
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "delete-race-connection",
-      }) });
-      await flushUI();
-      await flushUI();
-    });
-    placementRecreated = true;
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "placement-recreated-connection",
-      }) });
-      await flushUI();
-      await flushUI();
-    });
-    assert.ok(container.querySelector('[aria-label="Process: Review recreated"]'), "a newer remote recreation supersedes the pending delete");
-    const readsBeforeDeleteCommit = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
-    const completeDelete = finishPlacementDelete;
-    assert.ok(completeDelete);
-    await act(async () => {
-      completeDelete();
-      await flushUI();
-      await flushUI();
-      await flushUI();
-    });
-    assert.ok(container.querySelector('[aria-label="Process: Review recreated"]'), "a delayed delete acknowledgement cannot remove a newer recreation");
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
-      readsBeforeDeleteCommit + 1,
-      "a superseded delete acknowledgement performs one bounded canonical recovery read",
-    );
-    const placementDelete = requests.find((request) => request.method === "DELETE" && request.url.pathname.endsWith("/placements/logic_gate/gate-1"));
-    assert.equal(placementDelete?.originConnectionID, "surface-correlation-1");
-
-    const delayedDrop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperties(delayedDrop, {
-      clientX: { value: 560 },
-      clientY: { value: 280 },
-      dataTransfer: { value: {
-        types: [EXPLORER_DRAG_MIME],
-        dropEffect: "copy",
-        getData: (type: string) => type === EXPLORER_DRAG_MIME
-          ? JSON.stringify({ kind: "logic_gate", label: "Permission-hidden process", itemID: "delayed-gate", itemType: "logic_gate" })
-          : "",
-      } },
-    });
-    const readsBeforeDelayedDrop = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
-    await act(async () => {
-      mapCanvas.dispatchEvent(delayedDrop);
-      await flushUI();
-    });
-    assert.ok(finishDelayedPlacementPut, "the Explorer placement write remains pending for the permission race");
-    delayedPlacementRestricted = true;
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "permission-change-connection",
-      }) });
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(container.querySelector('[aria-label="Process: Permission-hidden process"]'), null);
-    assert.equal(container.querySelectorAll('[aria-label="?"]').length, 2, "the canonical permission response exposes only opaque placeholders");
-    const completeDelayedPlacement = finishDelayedPlacementPut;
-    await act(async () => {
-      completeDelayedPlacement();
-      await flushUI();
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(container.querySelector('[aria-label="Process: Permission-hidden process"]'), null, "a delayed placement response cannot restore a name after permission invalidation");
-    assert.equal(container.querySelectorAll('[aria-label="?"]').length, 2);
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length,
-      readsBeforeDelayedDrop + 2,
-      "the permission hint and superseded write each perform one bounded canonical layer read",
-    );
-
-    const navigationDrop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperties(navigationDrop, {
-      clientX: { value: 700 },
-      clientY: { value: 336 },
-      dataTransfer: { value: {
-        types: [EXPLORER_DRAG_MIME],
-        dropEffect: "copy",
-        getData: (type: string) => type === EXPLORER_DRAG_MIME
-          ? JSON.stringify({ kind: "logic_gate", label: "Navigation source write", itemID: "navigation-gate", itemType: "logic_gate" })
-          : "",
-      } },
-    });
-    await act(async () => {
-      mapCanvas.dispatchEvent(navigationDrop);
-      await flushUI();
-    });
-    assert.ok(finishNavigationPlacementPut, "the source-layer write remains pending during navigation");
-    await act(async () => {
-      const currentTrayToggle = container.querySelector<HTMLButtonElement>('.process-map-placement-tray__toggle');
-      assert.ok(currentTrayToggle);
-      currentTrayToggle.click();
-      await flushUI();
-      root.render(
-        <ProcessMapSurface
-          apiBase="http://api.test"
-          companyID="company-1"
-          folderID="navigation-folder"
-          onOpenFolder={(folderID) => openedFolders.push(folderID)}
-          onOpenLogicGate={openLogicGate}
-        />,
-      );
-      await flushUI();
-    });
-    assert.equal(
-      container.querySelector<HTMLButtonElement>('.process-map-placement-tray__toggle')?.getAttribute("aria-expanded"),
-      "false",
-      "the collapsed preference survives Folder navigation",
-    );
-    assert.equal(
-      requests.some((request) => request.url.pathname === "/v1/company-explorer/children" && request.url.searchParams.get("parent_id") === "navigation-folder"),
-      false,
-      "a collapsed tray does not load a hidden Explorer branch",
-    );
-    assert.ok(finishNavigationLayerRead, "the newly navigated layer read is in flight");
-    const completeNavigationPlacement = finishNavigationPlacementPut;
-    await act(async () => {
-      completeNavigationPlacement();
-      await flushUI();
-    });
-    const completeNavigationLayer = finishNavigationLayerRead;
-    await act(async () => {
-      completeNavigationLayer();
-      await flushUI();
-      await flushUI();
-    });
-    assert.ok(container.querySelector('[aria-label="Process: Navigation target process"]'), "a source-layer write completion cannot abort the newly navigated layer read");
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer" && request.url.searchParams.get("folder_id") === "navigation-folder").length,
-      1,
-    );
-
-    await act(async () => {
-      root.render(
-        <ProcessMapSurface
-          apiBase="http://api.test"
-          companyID="company-1"
-          folderID="catchup-folder"
-          onOpenFolder={(folderID) => openedFolders.push(folderID)}
-          onOpenLogicGate={openLogicGate}
-        />,
-      );
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(container.querySelector('[aria-label="Process: Missed during subscribe"]'), null, "the first snapshot predates the missed event");
-    catchupPlacementVisible = true;
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "process-map:company" }) });
-      await flushUI();
-      await flushUI();
-    });
-    assert.ok(container.querySelector('[aria-label="Process: Missed during subscribe"]'), "subscription acceptance performs one canonical catch-up read");
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer" && request.url.searchParams.get("folder_id") === "catchup-folder").length,
-      2,
-    );
-    updateRealtimeHealth(realtimeHealthKey("http://api.test", "company-1"), { status: "connected" });
-
-    const mixedCard = container.querySelector<HTMLElement>('[aria-label="Process: Mixed final process"]');
-    assert.ok(mixedCard);
-    await act(async () => {
-      mixedCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
-      await flushUI();
-    });
-    const removeMixedButton = [...container.querySelectorAll<HTMLButtonElement>(".process-map-toolbar button")]
-      .find((button) => button.textContent === "Remove Mixed final process");
-    assert.ok(removeMixedButton);
-    await act(async () => {
-      removeMixedButton.click();
-      await flushUI();
-      await flushUI();
-    });
-    assert.ok(finishMixedPlacementDelete, "the older placement delete remains pending");
-    assert.equal(container.querySelector('[aria-label="Process: Mixed final process"]'), null);
-    mixedPlacementPresent = false;
-    const mixedDrop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
-    Object.defineProperties(mixedDrop, {
-      clientX: { value: 420 },
-      clientY: { value: 392 },
-      dataTransfer: { value: {
-        types: [EXPLORER_DRAG_MIME],
-        dropEffect: "copy",
-        getData: (type: string) => type === EXPLORER_DRAG_MIME
-          ? JSON.stringify({ kind: "logic_gate", label: "Mixed final process", itemID: "mixed-gate", itemType: "logic_gate" })
-          : "",
-      } },
-    });
-    const catchupReadsBeforeMixedResponses = requests.filter((request) => request.url.pathname === "/v1/process-map/layer" && request.url.searchParams.get("folder_id") === "catchup-folder").length;
-    const catchupCanvas = container.querySelector<HTMLElement>(".react-flow");
-    assert.ok(catchupCanvas);
-    await act(async () => {
-      catchupCanvas.dispatchEvent(mixedDrop);
-      await flushUI();
-    });
-    assert.ok(finishMixedPlacementPut, "the newer placement PUT remains pending");
-    const completeMixedPut = finishMixedPlacementPut;
-    await act(async () => {
-      completeMixedPut();
-      await flushUI();
-      await flushUI();
-    });
-    assert.ok(container.querySelector('[aria-label="Process: Mixed final process"]'), "the last committed PUT is applied locally");
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer" && request.url.searchParams.get("folder_id") === "catchup-folder").length,
-      catchupReadsBeforeMixedResponses,
-      "the normal successful PUT performs no layer GET",
-    );
-    const completeMixedDelete = finishMixedPlacementDelete;
-    await act(async () => {
-      completeMixedDelete();
-      await flushUI();
-      await flushUI();
-      await flushUI();
-    });
-    assert.ok(container.querySelector('[aria-label="Process: Mixed final process"]'), "the older delayed DELETE acknowledgement cannot override the newer PUT");
-    assert.equal(
-      requests.filter((request) => request.url.pathname === "/v1/process-map/layer" && request.url.searchParams.get("folder_id") === "catchup-folder").length,
-      catchupReadsBeforeMixedResponses + 1,
-      "the superseded mixed-operation acknowledgement performs one bounded canonical read",
-    );
-
-    await act(async () => {
-      root.render(
-        <ProcessMapSurface
-          apiBase="http://api.test"
-          companyID="company-1"
-          folderID="permission-hint-folder"
-          onOpenFolder={(folderID) => openedFolders.push(folderID)}
-          onOpenLogicGate={openLogicGate}
-        />,
-      );
-      await flushUI();
-    });
-    assert.ok(finishOldPermissionLayerRead, "the pre-hint layer response remains pending");
-    await act(async () => {
-      realtimeSocket?.onmessage?.({ data: JSON.stringify({
-        type: "process_map.changed",
-        company_id: "company-1",
-        scope: "process-map:company",
-        origin_connection_id: "permission-hint-connection",
-      }) });
-      await flushUI();
-      await flushUI();
-    });
-    assert.ok(finishReplacementPermissionLayerRead, "the permission hint starts a separate canonical replacement read");
-    const completeOldPermissionLayer = finishOldPermissionLayerRead;
-    await act(async () => {
-      completeOldPermissionLayer();
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(
-      container.querySelector('[aria-label="Process: Old pre-hint process"]'),
-      null,
-      "a pre-hint response cannot render while the canonical replacement is pending",
-    );
-    const completeReplacementPermissionLayer = finishReplacementPermissionLayerRead;
-    await act(async () => {
-      completeReplacementPermissionLayer();
-      await flushUI();
-      await flushUI();
-    });
-    assert.equal(container.querySelector('[aria-label="Process: Old pre-hint process"]'), null);
-    assert.equal(container.querySelectorAll('[aria-label="?"]').length, 1);
-    assert.equal(permissionLayerReadCount, 2);
+    const modeledCompanyTileBytes = Array.from({ length: companyTileCount }, (_, x) => encodedBytes(tilePayload(x)))
+      .reduce((total, bytes) => total + bytes, 0);
+    t.diagnostic(JSON.stringify({
+      fixture_company_placements: companyPlacementCount,
+      fixture_company_traces: representative.traces.length * companyTileCount,
+      initial_scene_bytes: encodedBytes(largeScene),
+      largest_tile_bytes: Math.max(...responses.map((response) => response.byteLength)),
+      modeled_company_tile_bytes: modeledCompanyTileBytes,
+      settled_viewport_requests: finalViewportTileCount,
+      canceled_requests: canceledRequests,
+      settled_load_count: settledLoadCount,
+      label_datums: labelData.length,
+      label_utf8_bytes: labelBytes,
+      pickable_datums: pickableDatumCount,
+      presentation_placement_visits: placementVisits,
+      presentation_trace_visits: traceVisits,
+      retained_tile_payload_bytes: cache.tile_bytes,
+      tile_cache_limit_bytes: PROCESS_MAP_TILE_CACHE_BYTES,
+    }));
   } finally {
-    if (mountedRoot) await act(async () => mountedRoot?.unmount());
-    restores.reverse().forEach((restore) => restore());
-    dom.window.close();
+    invalidateProcessMapReadCaches(apiBase, companyID);
+    globalThis.fetch = originalFetch;
   }
+});
+
+test("GPU frame timing is left to a browser/GPU benchmark instead of a synthetic Node threshold", (t) => {
+  const hasBrowserGPUFrameSource = typeof globalThis.requestAnimationFrame === "function"
+    && typeof globalThis.WebGL2RenderingContext === "function";
+  assert.equal(hasBrowserGPUFrameSource, false, "this Node suite has no real browser animation loop or WebGL2 device");
+  t.diagnostic(JSON.stringify({
+    gpu_frame_behavior: "not measured in Node: profile real pan/zoom frames in a browser with a representative GPU",
+    node_scope: "assert transport, settlement, cancellation, label, picking, cache-byte, and linear-construction bounds",
+    rule: "correctness is not traded for a fabricated frame-time number",
+  }));
 });

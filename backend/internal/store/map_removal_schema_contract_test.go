@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"os"
 	"path/filepath"
@@ -174,14 +175,16 @@ func TestProcessMapCanonicalSchemaDefinesTheThreeAuthoritiesAndLifecycleGuards(t
 		"constraint process_map_traces_route_points_chk check (mangorts_process_map_route_points_valid(route_points))",
 		"jsonb_array_length(p_route_points) > 256",
 		"p_route_points is null",
-		"x_text::numeric not between -2147483648 and 2147483647",
-		"y_text::numeric not between -2147483648 and 2147483647",
+		"x_text::numeric not between -1000000000 and 1000000000",
+		"y_text::numeric not between -1000000000 and 1000000000",
+		"grid_width integer default 7 not null",
+		"grid_height integer default 5 not null",
+		"idx_process_map_placements_spatial",
 		"create trigger trg_validate_process_map_placement",
 		"raise exception 'process_map_parent_cycle'",
 		"create trigger trg_validate_resource_operational_relationship",
 		"create trigger trg_cleanup_process_map_folder_delete",
 		"create trigger trg_cleanup_process_map_logic_gate_delete",
-		"delete from process_map_traces trace",
 		"delete from resource_operational_relationships relationship",
 	} {
 		if !strings.Contains(schema, required) {
@@ -215,6 +218,73 @@ func TestProcessMapForwardMigrationPreflightsAndPreservesValidLegacyRows(t *test
 	}
 }
 
+func TestV3ProcessMapGlobalGeometryMigrationAndCanonicalSchemaContract(t *testing.T) {
+	migration := readMapRemovalContractFile(t, "..", "..", "db", "migrations", "20260825_v3_process_map_global_canvas.sql")
+	schema := readMapRemovalContractFile(t, "..", "..", "db", "schema.sql")
+
+	for _, required := range []string{
+		"current_setting('server_version_num')::integer < 170000",
+		"global geometry was already applied or partially drifted",
+		"contains an unmapped or cross-company map parent",
+		"contains a map-parent cycle",
+		"trace is invalid or its endpoints do not share one legacy layer",
+		"create temporary table process_map_v3_geometry_plan",
+		"legacy_x bigint not null",
+		"global_x bigint",
+		"offset_x bigint",
+		"with recursive",
+		"set global_x=legacy_x,global_y=legacy_y,offset_x=0,offset_y=0",
+		"global coordinate expansion did not converge",
+		"trace translation would be ambiguous or overflow canonical bounds",
+		"add column grid_width integer not null default 7",
+		"add column grid_height integer not null default 5",
+		"drop constraint process_map_placements_root_folder_chk",
+		"update process_map_placements",
+		"set map_parent_folder_id=replacement_parent_id",
+		"references company_explorer_folders(company_id,folder_id);",
+		"idx_process_map_placements_spatial",
+		"using gist",
+	} {
+		if !strings.Contains(migration, required) {
+			t.Errorf("V3 global-canvas migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"latitude", "longitude", "mapbox", "maplibre",
+		"folder.folder_kind", "folder_kind<>'communications'",
+		"add column if not exists grid_width",
+		"add column if not exists grid_height",
+		"drop constraint if exists process_map_placements_root_folder_chk",
+		"process_map_placements_root_folder_chk check",
+		"references company_explorer_folders(company_id,folder_id) on delete cascade",
+	} {
+		if strings.Contains(migration, forbidden) {
+			t.Errorf("V3 global-canvas migration retained geographic or root-only contract %q", forbidden)
+		}
+	}
+
+	for _, required := range []string{
+		"grid_width integer default 7 not null",
+		"grid_height integer default 5 not null",
+		"placement_incarnation_token uuid default gen_random_uuid() not null",
+		"process_map_placements_geometry_chk",
+		"idx_process_map_placements_spatial",
+		"using gist",
+		"process_map_parent_cycle",
+		"set map_parent_folder_id=replacement_parent_id",
+	} {
+		if !strings.Contains(schema, required) {
+			t.Errorf("canonical V3 Process Map schema missing %q", required)
+		}
+	}
+	if strings.Contains(schema, "process_map_placements_root_folder_chk") {
+		t.Error("canonical V3 schema still rejects company-root Processes")
+	}
+	if strings.Contains(schema, "folder.folder_kind") {
+		t.Error("canonical V3 Process Map trigger references removed Company Explorer folder_kind storage")
+	}
+}
+
 func TestProcessMapRecycleSnapshotIncludesAllAuthoritiesInDependencyOrder(t *testing.T) {
 	source := readMapRemovalContractFile(t, "postgres_recycle_bin.go")
 	for _, tableName := range []string{"process_map_placements", "resource_operational_relationships", "process_map_traces"} {
@@ -240,6 +310,9 @@ func TestProcessMapRecycleSnapshotIncludesAllAuthoritiesInDependencyOrder(t *tes
 
 func TestPostgresProcessMapPartialRecycleRestoreRequiresLiveDependencies(t *testing.T) {
 	source := readMapRemovalContractFile(t, "postgres_recycle_bin.go")
+	if strings.Contains(source, "folder.folder_kind") {
+		t.Fatal("PostgreSQL Process Map restore references removed Company Explorer folder_kind storage")
+	}
 	for _, required := range []string{
 		`if tablename == "resource_operational_relationships"`,
 		"folder.company_id=restored_row.company_id and folder.folder_id=restored_row.source_resource_id",
@@ -247,17 +320,36 @@ func TestPostgresProcessMapPartialRecycleRestoreRequiresLiveDependencies(t *test
 		"folder.company_id=restored_row.company_id and folder.folder_id=restored_row.target_resource_id",
 		"process.company_id=restored_row.company_id and process.logic_gate_id=restored_row.target_resource_id",
 		`if tablename == "process_map_placements"`,
-		"folder.company_id=restored_row.company_id and folder.folder_id=restored_row.resource_id",
-		"process.company_id=restored_row.company_id and process.logic_gate_id=restored_row.resource_id",
-		"restored_row.map_parent_folder_id is null",
-		"parent_folder.folder_id=restored_row.map_parent_folder_id",
+		"func postgresrestoreprocessmapplacementstx",
+		"folder.company_id=$1::uuid and folder.folder_id=$3::uuid",
+		"process.company_id=$1::uuid and process.logic_gate_id=$3::uuid",
+		"and ($4::uuid is null or exists",
+		"parent.resource_type='company_explorer_folder' and parent.resource_id=$4::uuid",
 		`if tablename == "process_map_traces"`,
 		"relationship.company_id=restored_row.company_id",
 		"relationship.resource_operational_relationship_id=restored_row.resource_operational_relationship_id",
+		`const processmapcleanupchildrecyclepayloadkey = "process_map_cleanup_child_reparents"`,
+		"func postgresrestoreprocessmapcleanupchildrentx",
+		"placement.map_parent_folder_id is not distinct from cleanup.cleanup_parent_folder_id",
+		"placement.placement_incarnation_token=cleanup.placement_incarnation_token",
+		"placement.revision=cleanup.cleanup_revision",
+		"placement.created_timestamp=cleanup.created_timestamp",
+		"placement.grid_x=cleanup.grid_x and placement.grid_y=cleanup.grid_y",
+		"placement.grid_width=cleanup.grid_width and placement.grid_height=cleanup.grid_height",
 	} {
 		if !strings.Contains(source, required) {
 			t.Errorf("PostgreSQL partial Process Map restore missing %q", required)
 		}
+	}
+}
+
+func TestProcessMapPlacementIncarnationTokenIsPrivate(t *testing.T) {
+	wire, err := json.Marshal(domain.ProcessMapPlacement{PlacementIncarnationToken: "private-cleanup-fence"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "incarnation") || strings.Contains(string(wire), "private-cleanup-fence") {
+		t.Fatalf("Process Map placement exposed its private cleanup fence: %s", wire)
 	}
 }
 
@@ -345,6 +437,23 @@ func TestActiveBackendAndMigrationDocsUseOnlyProcessMapAuthorities(t *testing.T)
 			if !strings.Contains(document, required) {
 				t.Errorf("%s missing canonical Process Map contract %q", label, required)
 			}
+		}
+	}
+}
+
+func TestBackendREADMEAdvertisesOnlyV3ProcessMapReads(t *testing.T) {
+	readme := readMapRemovalContractFile(t, "..", "..", "..", "docs", "backend", "README.md")
+	if strings.Contains(readme, "/v1/process-map/layer") {
+		t.Fatal("backend README still advertises the deleted exact-layer reader")
+	}
+	for _, required := range []string{
+		"get /v1/process-map/scene?company_id={uuid}",
+		"get /v1/process-map/tiles/{z}/{x}/{y}?company_id={uuid}&process_map_read_version={version}",
+		"sealed restricted placeholders",
+		"complete route points plus clipped display paths",
+	} {
+		if !strings.Contains(readme, required) {
+			t.Errorf("backend README missing V3 Process Map read contract %q", required)
 		}
 	}
 }

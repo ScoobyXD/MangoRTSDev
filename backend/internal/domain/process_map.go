@@ -17,38 +17,73 @@ type ProcessMapRoutePoint struct {
 	Y int `json:"y"`
 }
 
-type ProcessMapPlacement struct {
-	CompanyID         string    `json:"company_id"`
-	ResourceType      string    `json:"resource_type"`
-	ResourceID        string    `json:"resource_id"`
-	MapParentFolderID *string   `json:"map_parent_folder_id"`
-	GridX             int       `json:"grid_x"`
-	GridY             int       `json:"grid_y"`
-	Revision          int64     `json:"revision"`
-	CreatedTimestamp  time.Time `json:"created_timestamp"`
-	UpdatedTimestamp  time.Time `json:"updated_timestamp"`
+type ProcessMapPathPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
-// ProcessMapLayerPlacement is deliberately sealed to the domain package. A
-// restricted projection can therefore never acquire visible resource fields
-// through a caller-defined implementation.
-type ProcessMapLayerPlacement interface {
-	isProcessMapLayerPlacement()
+type ProcessMapPlacement struct {
+	CompanyID                 string    `json:"company_id"`
+	ResourceType              string    `json:"resource_type"`
+	ResourceID                string    `json:"resource_id"`
+	PlacementIncarnationToken string    `json:"-"`
+	MapParentFolderID         *string   `json:"map_parent_folder_id"`
+	GridX                     int       `json:"grid_x"`
+	GridY                     int       `json:"grid_y"`
+	GridWidth                 int       `json:"grid_width"`
+	GridHeight                int       `json:"grid_height"`
+	Revision                  int64     `json:"revision"`
+	CreatedTimestamp          time.Time `json:"created_timestamp"`
+	UpdatedTimestamp          time.Time `json:"updated_timestamp"`
 }
+
+type ProcessMapBounds struct {
+	MinX int `json:"min_x"`
+	MinY int `json:"min_y"`
+	MaxX int `json:"max_x"`
+	MaxY int `json:"max_y"`
+}
+
+type ProcessMapScene struct {
+	Bounds                *ProcessMapBounds `json:"bounds"`
+	ProcessMapReadVersion int64             `json:"process_map_read_version"`
+	TileSize              int               `json:"tile_size"`
+	MinTileZoom           int               `json:"min_tile_zoom"`
+	MaxTileZoom           int               `json:"max_tile_zoom"`
+}
+
+// ProcessMapTilePlacement is sealed so restricted projections cannot acquire
+// visible resource fields through caller-defined implementations.
+type ProcessMapTilePlacement interface {
+	isProcessMapTilePlacement()
+}
+
+type ProcessMapPresentation string
+
+const (
+	ProcessMapPresentationWhole   ProcessMapPresentation = "whole"
+	ProcessMapPresentationNormal  ProcessMapPresentation = "normal"
+	ProcessMapPresentationEditing ProcessMapPresentation = "editing"
+)
 
 type ProcessMapVisiblePlacement struct {
-	Restricted       bool      `json:"restricted"`
-	ResourceType     string    `json:"resource_type"`
-	ResourceID       string    `json:"resource_id"`
-	Name             string    `json:"name"`
-	GridX            int       `json:"grid_x"`
-	GridY            int       `json:"grid_y"`
-	Revision         int64     `json:"revision"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+	Restricted        bool                   `json:"restricted"`
+	Presentation      ProcessMapPresentation `json:"presentation"`
+	ResourceType      string                 `json:"resource_type"`
+	ResourceID        string                 `json:"resource_id"`
+	Name              string                 `json:"name,omitempty"`
+	MapParentFolderID *string                `json:"map_parent_folder_id"`
+	GridX             int                    `json:"grid_x"`
+	GridY             int                    `json:"grid_y"`
+	GridWidth         int                    `json:"grid_width"`
+	GridHeight        int                    `json:"grid_height"`
+	Revision          int64                  `json:"revision"`
+	CreatedTimestamp  time.Time              `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time              `json:"updated_timestamp"`
+	CanEdit           bool                   `json:"can_edit"`
 }
 
-func (ProcessMapVisiblePlacement) isProcessMapLayerPlacement() {}
+func (ProcessMapVisiblePlacement) isProcessMapTilePlacement() {}
 
 type ProcessMapRestrictedPlacement struct {
 	Restricted bool `json:"restricted"`
@@ -56,7 +91,7 @@ type ProcessMapRestrictedPlacement struct {
 	GridY      int  `json:"grid_y"`
 }
 
-func (ProcessMapRestrictedPlacement) isProcessMapLayerPlacement() {}
+func (ProcessMapRestrictedPlacement) isProcessMapTilePlacement() {}
 
 type ResourceOperationalRelationship struct {
 	CompanyID                         string                `json:"company_id"`
@@ -75,30 +110,23 @@ type ProcessMapTrace struct {
 	UpdatedTimestamp                  time.Time              `json:"updated_timestamp"`
 }
 
-type ProcessMapLayerTrace struct {
-	ResourceOperationalRelationshipID string                 `json:"resource_operational_relationship_id"`
-	Source                            ProcessMapResourceRef  `json:"source"`
-	Target                            ProcessMapResourceRef  `json:"target"`
-	RoutePoints                       []ProcessMapRoutePoint `json:"route_points"`
-	Revision                          int64                  `json:"revision"`
-	CreatedTimestamp                  time.Time              `json:"created_timestamp"`
-	UpdatedTimestamp                  time.Time              `json:"updated_timestamp"`
+type ProcessMapTileTrace struct {
+	ResourceOperationalRelationshipID string                  `json:"resource_operational_relationship_id"`
+	Presentation                      ProcessMapPresentation  `json:"presentation"`
+	Source                            ProcessMapResourceRef   `json:"source"`
+	Target                            ProcessMapResourceRef   `json:"target"`
+	RoutePoints                       []ProcessMapRoutePoint  `json:"route_points,omitempty"`
+	PathFragments                     [][]ProcessMapPathPoint `json:"path_fragments"`
+	Revision                          int64                   `json:"revision"`
+	CreatedTimestamp                  time.Time               `json:"created_timestamp"`
+	UpdatedTimestamp                  time.Time               `json:"updated_timestamp"`
 }
 
-type ProcessMapLayerAncestor struct {
-	FolderID string `json:"folder_id"`
-	Name     string `json:"name"`
-}
-
-type ProcessMapLayer struct {
-	Kind      string                    `json:"kind"`
-	FolderID  string                    `json:"folder_id,omitempty"`
-	Name      string                    `json:"name,omitempty"`
-	Ancestors []ProcessMapLayerAncestor `json:"ancestors"`
-}
-
-type ProcessMapLayerView struct {
-	Layer      ProcessMapLayer            `json:"layer"`
-	Placements []ProcessMapLayerPlacement `json:"placements"`
-	Traces     []ProcessMapLayerTrace     `json:"traces"`
+type ProcessMapTile struct {
+	Z                     int                       `json:"z"`
+	X                     int                       `json:"x"`
+	Y                     int                       `json:"y"`
+	ProcessMapReadVersion int64                     `json:"process_map_read_version"`
+	Placements            []ProcessMapTilePlacement `json:"placements"`
+	Traces                []ProcessMapTileTrace     `json:"traces"`
 }

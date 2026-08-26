@@ -34,22 +34,12 @@ func (s *Server) processMapActor(r *http.Request, companyID string) (string, str
 		return "", "", false, nil
 	}
 	actorUserID := strings.TrimSpace(actor.User.UserID)
-	role, err := s.currentActorRoleForCompany(actor, companyID)
+	role, err := s.currentActorRoleForCompanyContext(r.Context(), actor, companyID)
 	return actorUserID, role, actorUserID != "" && role != "", err
 }
 
 func (s *Server) processMapETag(r *http.Request, companyID, actorUserID, actorRole, contract string) (string, error) {
-	processVersion, found, err := s.repo.CurrentWorkspaceReadVersion(store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "process-map"})
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		processVersion, err = s.workspaceEventVersion(companyID, []store.DomainEventStreamQuery{{}})
-		if err != nil {
-			return "", err
-		}
-	}
-	groupVersion, _, err := s.repo.CurrentWorkspaceReadVersion(store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: "policy-group-membership"})
+	processVersion, groupVersion, err := s.repo.CurrentProcessMapVersions(r.Context(), companyID)
 	if err != nil {
 		return "", err
 	}
@@ -67,7 +57,7 @@ func (s *Server) authorizeProcessMapRead(w http.ResponseWriter, r *http.Request,
 		return "", "", false
 	}
 	if resourceID != "" {
-		allowed, err := s.repo.UserHasEffectiveAccess(companyID, actorUserID, resourceType, resourceID, store.EntityPermissionEdit)
+		allowed, err := s.repo.UserHasEffectiveAccessContext(r.Context(), companyID, actorUserID, resourceType, resourceID, store.EntityPermissionEdit)
 		if errors.Is(err, store.ErrNotFound) || (err == nil && !allowed) {
 			writeAccessResourceNotFound(w)
 			return "", "", false
@@ -84,22 +74,21 @@ func (s *Server) authorizeProcessMapRead(w http.ResponseWriter, r *http.Request,
 	return actorUserID, actorRole, true
 }
 
-func (s *Server) handleProcessMapLayer(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleProcessMapScene(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-	folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
 	if companyID == "" {
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	actorUserID, actorRole, ok := s.authorizeProcessMapRead(w, r, companyID, domain.ProcessMapResourceTypeFolder, folderID)
+	actorUserID, actorRole, ok := s.authorizeProcessMapRead(w, r, companyID, "", "")
 	if !ok {
 		return
 	}
-	etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, "process-map-layer-v2")
+	etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, "process-map-scene-v3")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_read_process_map_version")
 		return
@@ -107,12 +96,66 @@ func (s *Server) handleProcessMapLayer(w http.ResponseWriter, r *http.Request) {
 	if writeNotModifiedWithETag(w, r, etag) {
 		return
 	}
-	view, err := s.repo.GetProcessMapLayer(store.ProcessMapLayerQuery{CompanyID: companyID, FolderID: folderID, PermissionUserID: actorUserID})
+	scene, err := s.repo.GetProcessMapScene(r.Context(), store.ProcessMapSceneQuery{CompanyID: companyID, PermissionUserID: actorUserID})
 	if err != nil {
-		writeProcessMapError(w, err, "failed_to_read_process_map_layer")
+		writeProcessMapError(w, err, "failed_to_read_process_map_scene")
 		return
 	}
-	writeJSONWithPrecomputedETag(w, r, http.StatusOK, view, etag)
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, scene, etag)
+}
+
+func processMapTilePath(path string) (int, int, int, bool) {
+	remainder := strings.Trim(strings.TrimPrefix(path, "/v1/process-map/tiles/"), "/")
+	parts := strings.Split(remainder, "/")
+	if len(parts) != 3 {
+		return 0, 0, 0, false
+	}
+	values := [3]int{}
+	for index, part := range parts {
+		value, err := strconv.Atoi(strings.TrimSpace(part))
+		if err != nil {
+			return 0, 0, 0, false
+		}
+		values[index] = value
+	}
+	return values[0], values[1], values[2], true
+}
+
+func (s *Server) handleProcessMapTile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	z, x, y, ok := processMapTilePath(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if companyID == "" {
+		writeError(w, http.StatusBadRequest, "company_id_required")
+		return
+	}
+	actorUserID, actorRole, ok := s.authorizeProcessMapRead(w, r, companyID, "", "")
+	if !ok {
+		return
+	}
+	etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, "process-map-tile-v3")
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_read_process_map_version")
+		return
+	}
+	if writeNotModifiedWithETag(w, r, etag) {
+		return
+	}
+	tile, err := s.repo.GetProcessMapTile(r.Context(), store.ProcessMapTileQuery{
+		CompanyID: companyID, PermissionUserID: actorUserID, Z: z, X: x, Y: y,
+	})
+	if err != nil {
+		writeProcessMapError(w, err, "failed_to_read_process_map_tile")
+		return
+	}
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, tile, etag)
 }
 
 func processMapPlacementPath(path string) (string, string, bool) {
@@ -173,8 +216,11 @@ func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Reques
 			MapParentFolderID json.RawMessage `json:"map_parent_folder_id"`
 			GridX             *int            `json:"grid_x"`
 			GridY             *int            `json:"grid_y"`
+			GridWidth         *int            `json:"grid_width"`
+			GridHeight        *int            `json:"grid_height"`
 		}
-		if err := decodeProcessMapJSON(r, &request); err != nil || request.MapParentFolderID == nil || request.GridX == nil || request.GridY == nil {
+		if err := decodeProcessMapJSON(r, &request); err != nil || request.MapParentFolderID == nil ||
+			request.GridX == nil || request.GridY == nil || request.GridWidth == nil || request.GridHeight == nil {
 			writeError(w, http.StatusBadRequest, "invalid_process_map_placement")
 			return
 		}
@@ -188,9 +234,10 @@ func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Reques
 			value = strings.TrimSpace(value)
 			parentID = &value
 		}
-		result, err := s.repo.PutProcessMapPlacement(store.ProcessMapPlacementPutInput{
+		result, err := s.repo.PutProcessMapPlacement(r.Context(), store.ProcessMapPlacementPutInput{
 			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
 			MapParentFolderID: parentID, GridX: *request.GridX, GridY: *request.GridY,
+			GridWidth: *request.GridWidth, GridHeight: *request.GridHeight,
 			ActorUserID: actorUserID, PermissionUserID: actorUserID, RealtimeConnectionID: realtimeConnectionID,
 		})
 		if err != nil {
@@ -202,9 +249,9 @@ func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Reques
 		if result.Created {
 			status = http.StatusCreated
 		}
-		writeJSON(w, status, result.Placement)
+		writeJSON(w, status, result)
 	case http.MethodDelete:
-		result, err := s.repo.DeleteProcessMapPlacement(store.ProcessMapPlacementDeleteInput{
+		result, err := s.repo.DeleteProcessMapPlacement(r.Context(), store.ProcessMapPlacementDeleteInput{
 			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
 			ActorUserID: actorUserID, PermissionUserID: actorUserID, RealtimeConnectionID: realtimeConnectionID,
 		})
@@ -213,7 +260,7 @@ func (s *Server) handleProcessMapPlacement(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		s.publishCommittedWorkspaceEvents(result.Events)
-		w.WriteHeader(http.StatusNoContent)
+		writeJSON(w, http.StatusOK, result)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
@@ -272,7 +319,7 @@ func (s *Server) handleProcessMapOperationalRelationships(w http.ResponseWriter,
 		if writeNotModifiedWithETag(w, r, etag) {
 			return
 		}
-		items, err := s.repo.ListResourceOperationalRelationshipsForResource(store.ResourceOperationalRelationshipQuery{
+		items, err := s.repo.ListResourceOperationalRelationshipsForResource(r.Context(), store.ResourceOperationalRelationshipQuery{
 			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, Direction: direction, PermissionUserID: actorUserID,
 		})
 		if err != nil {
@@ -307,7 +354,7 @@ func (s *Server) handleProcessMapOperationalRelationships(w http.ResponseWriter,
 			}
 			trace = &store.ProcessMapTraceInput{RoutePoints: points}
 		}
-		result, err := s.repo.CreateResourceOperationalRelationship(store.ResourceOperationalRelationshipCreateInput{
+		result, err := s.repo.CreateResourceOperationalRelationship(r.Context(), store.ResourceOperationalRelationshipCreateInput{
 			CompanyID: request.CompanyID,
 			Source:    domain.ProcessMapResourceRef{ResourceType: request.Source.ResourceType, ResourceID: request.Source.ResourceID},
 			Target:    domain.ProcessMapResourceRef{ResourceType: request.Target.ResourceType, ResourceID: request.Target.ResourceID},
@@ -319,7 +366,11 @@ func (s *Server) handleProcessMapOperationalRelationships(w http.ResponseWriter,
 			return
 		}
 		s.publishCommittedWorkspaceEvents(result.Events)
-		writeJSON(w, http.StatusOK, result)
+		status := http.StatusOK
+		if result.Created {
+			status = http.StatusCreated
+		}
+		writeJSON(w, status, result)
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
@@ -360,7 +411,7 @@ func (s *Server) handleProcessMapOperationalRelationshipByID(w http.ResponseWrit
 			writeError(w, http.StatusBadRequest, "invalid_process_map_trace")
 			return
 		}
-		result, err := s.repo.PutProcessMapTrace(store.ProcessMapTracePutInput{
+		result, err := s.repo.PutProcessMapTrace(r.Context(), store.ProcessMapTracePutInput{
 			CompanyID: companyID, ResourceOperationalRelationshipID: relationshipID, RoutePoints: points,
 			ActorUserID: actorUserID, PermissionUserID: actorUserID, RealtimeConnectionID: realtimeConnectionID,
 		})
@@ -369,14 +420,14 @@ func (s *Server) handleProcessMapOperationalRelationshipByID(w http.ResponseWrit
 			return
 		}
 		s.publishCommittedWorkspaceEvents(result.Events)
-		writeJSON(w, http.StatusOK, result.Trace)
+		writeJSON(w, http.StatusOK, result)
 		return
 	}
 	if r.Method != http.MethodDelete {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
-	result, err := s.repo.DeleteResourceOperationalRelationship(store.ResourceOperationalRelationshipDeleteInput{
+	result, err := s.repo.DeleteResourceOperationalRelationship(r.Context(), store.ResourceOperationalRelationshipDeleteInput{
 		CompanyID: companyID, ResourceOperationalRelationshipID: relationshipID,
 		ActorUserID: actorUserID, PermissionUserID: actorUserID, RealtimeConnectionID: realtimeConnectionID,
 	})
@@ -385,19 +436,17 @@ func (s *Server) handleProcessMapOperationalRelationshipByID(w http.ResponseWrit
 		return
 	}
 	s.publishCommittedWorkspaceEvents(result.Events)
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, result)
 }
 
 func writeProcessMapError(w http.ResponseWriter, err error, fallback string) {
 	switch {
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_process_map_request")
-	case errors.Is(err, store.ErrProcessMapRootProcess):
-		writeError(w, http.StatusBadRequest, "process_map_root_process_not_allowed")
 	case errors.Is(err, store.ErrProcessMapCycle):
 		writeError(w, http.StatusConflict, "process_map_cycle")
-	case errors.Is(err, store.ErrProcessMapLayerMismatch):
-		writeError(w, http.StatusConflict, "process_map_layer_mismatch")
+	case errors.Is(err, store.ErrProcessMapContainment):
+		writeError(w, http.StatusConflict, "process_map_containment")
 	case errors.Is(err, store.ErrNotFound):
 		writeAccessResourceNotFound(w)
 	default:

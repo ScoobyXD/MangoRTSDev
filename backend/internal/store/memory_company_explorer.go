@@ -764,8 +764,9 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	if err := r.deleteCompanyExplorerRecycleScopeLocked(companyID, deleteScope); err != nil {
 		return CompanyExplorerDeleteResult{}, err
 	}
-	deletedSnapshot := memoryRecycleSnapshotDelta(recycleSnapshot, r.snapshotRecycleStateLocked())
-	recycleContext := memoryRecycleSnapshotWithProcessMapTraceContext(recycleSnapshot, deletedSnapshot)
+	afterDeleteSnapshot := r.snapshotRecycleStateLocked()
+	deletedSnapshot := memoryRecycleSnapshotDelta(recycleSnapshot, afterDeleteSnapshot)
+	recycleContext := memoryRecycleSnapshotWithProcessMapTraceContext(recycleSnapshot, afterDeleteSnapshot, deletedSnapshot)
 	if err := r.createRecycleBinItemsLocked(companyID, deletedByUserID, recycleRoots, recycleSnapshot, recycleContext); err != nil {
 		return CompanyExplorerDeleteResult{}, err
 	}

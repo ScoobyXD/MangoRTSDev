@@ -410,12 +410,16 @@ func actorRoleForCompany(actor ActorContext, companyID string) string {
 }
 
 func (s *Server) currentActorRoleForCompany(actor ActorContext, companyID string) (string, error) {
+	return s.currentActorRoleForCompanyContext(context.Background(), actor, companyID)
+}
+
+func (s *Server) currentActorRoleForCompanyContext(ctx context.Context, actor ActorContext, companyID string) (string, error) {
 	userID := strings.TrimSpace(actor.User.UserID)
 	companyID = strings.TrimSpace(companyID)
 	if userID == "" || companyID == "" {
 		return "", nil
 	}
-	memberships, err := s.repo.ListUserMemberships(userID)
+	memberships, err := s.repo.ListUserMembershipsContext(ctx, userID)
 	if err != nil {
 		return "", err
 	}

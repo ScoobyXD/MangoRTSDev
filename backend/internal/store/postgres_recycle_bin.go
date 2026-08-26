@@ -225,6 +225,9 @@ for update`, companyID, deletedByUserID, strings.Join(itemIDs, ","))
 			return RecycleBinRestoreResult{}, err
 		}
 	}
+	if err := postgresRestoreProcessMapCleanupChildrenTx(ctx, tx, mergedPayload[processMapCleanupChildRecyclePayloadKey]); err != nil {
+		return RecycleBinRestoreResult{}, err
+	}
 	if err := reconcileRestoredProjectTextboxColorsTx(ctx, tx, mergedPayload["project_textboxes"]); err != nil {
 		return RecycleBinRestoreResult{}, err
 	}
@@ -292,6 +295,8 @@ var recycleSnapshotTables = map[string]bool{
 	"attachments":                            true,
 	"attachment_relationships":               true,
 }
+
+const processMapCleanupChildRecyclePayloadKey = "process_map_cleanup_child_reparents"
 
 var recycleRestoreTableOrder = []string{
 	"company_explorer_folders",
@@ -361,6 +366,127 @@ where textbox.company_id=restored.company_id
   and textbox.project_id=restored.project_id
   and textbox.textbox_id=restored.textbox_id`, string(rows))
 	return err
+}
+
+func postgresRestoreProcessMapCleanupChildrenTx(ctx context.Context, tx *sql.Tx, rows json.RawMessage) error {
+	if len(rows) == 0 || string(rows) == "null" || string(rows) == "[]" {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `
+with cleanup as (
+  select *
+  from jsonb_to_recordset($1::jsonb) item(
+    company_id uuid,
+    resource_type text,
+    resource_id uuid,
+    placement_incarnation_token uuid,
+    original_parent_folder_id uuid,
+    cleanup_parent_folder_id uuid,
+    cleanup_revision bigint,
+    created_timestamp timestamptz,
+    grid_x integer,
+    grid_y integer,
+    grid_width integer,
+    grid_height integer
+  )
+)
+update process_map_placements placement
+set map_parent_folder_id=cleanup.original_parent_folder_id,
+    revision=placement.revision+1,
+    updated_timestamp=statement_timestamp()
+from cleanup
+where placement.company_id=cleanup.company_id
+  and placement.resource_type=cleanup.resource_type
+  and placement.resource_id=cleanup.resource_id
+  and placement.placement_incarnation_token=cleanup.placement_incarnation_token
+  and placement.map_parent_folder_id is not distinct from cleanup.cleanup_parent_folder_id
+  and placement.revision=cleanup.cleanup_revision
+  and placement.created_timestamp=cleanup.created_timestamp
+  and placement.grid_x=cleanup.grid_x and placement.grid_y=cleanup.grid_y
+  and placement.grid_width=cleanup.grid_width and placement.grid_height=cleanup.grid_height
+  and exists (
+    select 1 from process_map_placements restored_parent
+    where restored_parent.company_id=cleanup.company_id
+      and restored_parent.resource_type='company_explorer_folder'
+      and restored_parent.resource_id=cleanup.original_parent_folder_id
+  )`, string(rows))
+	return err
+}
+
+func postgresRestoreProcessMapPlacementsTx(ctx context.Context, tx *sql.Tx, rows json.RawMessage) error {
+	var pending []domain.ProcessMapPlacement
+	if err := json.Unmarshal(rows, &pending); err != nil {
+		return err
+	}
+	sort.Slice(pending, func(i, j int) bool {
+		if pending[i].ResourceType != pending[j].ResourceType {
+			return pending[i].ResourceType < pending[j].ResourceType
+		}
+		return pending[i].ResourceID < pending[j].ResourceID
+	})
+	for len(pending) > 0 {
+		progress := false
+		next := make([]domain.ProcessMapPlacement, 0, len(pending))
+		for _, placement := range pending {
+			var parentID any
+			if placement.MapParentFolderID != nil {
+				parentID = *placement.MapParentFolderID
+			}
+			result, err := tx.ExecContext(ctx, `
+insert into process_map_placements(
+  company_id,resource_type,resource_id,map_parent_folder_id,
+  grid_x,grid_y,grid_width,grid_height,revision,created_timestamp,updated_timestamp
+)
+select $1::uuid,$2,$3::uuid,$4::uuid,$5,$6,$7,$8,$9,$10,$11
+where (
+    ($2='company_explorer_folder' and exists (
+      select 1 from company_explorer_folders folder
+      where folder.company_id=$1::uuid and folder.folder_id=$3::uuid
+    ))
+    or ($2='logic_gate' and exists (
+      select 1 from logic_gates process
+      where process.company_id=$1::uuid and process.logic_gate_id=$3::uuid
+    ))
+  )
+  and ($4::uuid is null or exists (
+    select 1 from process_map_placements parent
+    where parent.company_id=$1::uuid
+      and parent.resource_type='company_explorer_folder' and parent.resource_id=$4::uuid
+  ))
+on conflict do nothing`, placement.CompanyID, placement.ResourceType, placement.ResourceID, parentID,
+				placement.GridX, placement.GridY, placement.GridWidth, placement.GridHeight, placement.Revision,
+				placement.CreatedTimestamp, placement.UpdatedTimestamp)
+			if err != nil {
+				return err
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if affected == 1 {
+				progress = true
+				continue
+			}
+			var exists bool
+			if err := tx.QueryRowContext(ctx, `
+select exists (
+  select 1 from process_map_placements
+  where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid
+)`, placement.CompanyID, placement.ResourceType, placement.ResourceID).Scan(&exists); err != nil {
+				return err
+			}
+			if exists {
+				progress = true
+				continue
+			}
+			next = append(next, placement)
+		}
+		if !progress {
+			break
+		}
+		pending = next
+	}
+	return nil
 }
 
 func postgresRestoreRecycleTableTx(ctx context.Context, tx *sql.Tx, tableName string, rows json.RawMessage) error {
@@ -473,32 +599,7 @@ on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
 		return err
 	}
 	if tableName == "process_map_placements" {
-		query := fmt.Sprintf(`
-insert into process_map_placements (%s) overriding system value
-select %s
-from jsonb_populate_recordset(null::process_map_placements, coalesce($1::jsonb, '[]'::jsonb)) restored_row
-where (
-    (restored_row.resource_type='company_explorer_folder' and exists (
-      select 1 from company_explorer_folders folder
-      where folder.company_id=restored_row.company_id and folder.folder_id=restored_row.resource_id
-    ))
-    or
-    (restored_row.resource_type='logic_gate' and exists (
-      select 1 from logic_gates process
-      where process.company_id=restored_row.company_id and process.logic_gate_id=restored_row.resource_id
-    ))
-  )
-  and (
-    restored_row.map_parent_folder_id is null
-    or exists (
-      select 1 from company_explorer_folders parent_folder
-      where parent_folder.company_id=restored_row.company_id
-        and parent_folder.folder_id=restored_row.map_parent_folder_id
-    )
-  )
-on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
-		_, err := tx.ExecContext(ctx, query, string(rows))
-		return err
+		return postgresRestoreProcessMapPlacementsTx(ctx, tx, rows)
 	}
 	if tableName == "process_map_traces" {
 		query := fmt.Sprintf(`
@@ -604,7 +705,7 @@ func mergeRecyclePayloads(payloads [][]byte) (map[string]json.RawMessage, error)
 			return nil, err
 		}
 		for tableName, rows := range record {
-			if !recycleSnapshotTables[tableName] {
+			if !recycleSnapshotTables[tableName] && tableName != processMapCleanupChildRecyclePayloadKey {
 				continue
 			}
 			merged[tableName] = append(merged[tableName], rows...)
@@ -625,7 +726,69 @@ func postgresSnapshotRecyclePayloadTx(ctx context.Context, tx *sql.Tx, companyID
 	return postgresSnapshotRecyclePayloadWithCacheTx(ctx, tx, nil, companyID, scope)
 }
 
+func postgresSnapshotProcessMapCleanupChildrenTx(ctx context.Context, tx *sql.Tx, companyID, candidateFolderIDCSV, deletedFolderIDCSV, deletedLogicGateIDCSV string) (json.RawMessage, error) {
+	var raw []byte
+	err := tx.QueryRowContext(ctx, `
+with recursive deleted_folders(folder_id) as (
+  select unnest(coalesce(string_to_array(nullif($3,''),',')::uuid[],'{}'::uuid[]))
+), candidate_folders(folder_id) as (
+  select unnest(coalesce(string_to_array(nullif($2,''),',')::uuid[],'{}'::uuid[]))
+), candidate as (
+  select child.company_id,child.resource_type,child.resource_id,child.placement_incarnation_token,
+         child.map_parent_folder_id original_parent_folder_id,
+         child.revision+1 cleanup_revision,child.created_timestamp,
+         child.grid_x,child.grid_y,child.grid_width,child.grid_height
+  from process_map_placements child
+  join candidate_folders candidate_parent on candidate_parent.folder_id=child.map_parent_folder_id
+  where child.company_id=$1::uuid
+    and not (child.resource_type='company_explorer_folder'
+      and child.resource_id=any(coalesce(string_to_array(nullif($3,''),',')::uuid[],'{}'::uuid[])))
+    and not (child.resource_type='logic_gate'
+      and child.resource_id=any(coalesce(string_to_array(nullif($4,''),',')::uuid[],'{}'::uuid[])))
+), climb as (
+  select candidate.*,parent.map_parent_folder_id cleanup_parent_folder_id,1 depth
+  from candidate
+  join process_map_placements parent
+    on parent.company_id=candidate.company_id
+   and parent.resource_type='company_explorer_folder'
+   and parent.resource_id=candidate.original_parent_folder_id
+  union all
+  select climb.company_id,climb.resource_type,climb.resource_id,climb.placement_incarnation_token,
+         climb.original_parent_folder_id,climb.cleanup_revision,climb.created_timestamp,
+         climb.grid_x,climb.grid_y,climb.grid_width,climb.grid_height,
+         parent.map_parent_folder_id,climb.depth+1
+  from climb
+  join deleted_folders deleted on deleted.folder_id=climb.cleanup_parent_folder_id
+  join process_map_placements parent
+    on parent.company_id=climb.company_id
+   and parent.resource_type='company_explorer_folder'
+   and parent.resource_id=climb.cleanup_parent_folder_id
+), terminal as (
+  select climb.*
+  from climb
+  where climb.cleanup_parent_folder_id is null
+     or not exists(select 1 from deleted_folders deleted where deleted.folder_id=climb.cleanup_parent_folder_id)
+)
+select coalesce(jsonb_agg(jsonb_build_object(
+  'company_id',company_id,
+  'resource_type',resource_type,
+  'resource_id',resource_id,
+  'placement_incarnation_token',placement_incarnation_token,
+  'original_parent_folder_id',original_parent_folder_id,
+  'cleanup_parent_folder_id',cleanup_parent_folder_id,
+  'cleanup_revision',cleanup_revision,
+  'created_timestamp',created_timestamp,
+  'grid_x',grid_x,'grid_y',grid_y,'grid_width',grid_width,'grid_height',grid_height
+) order by resource_type,resource_id),'[]'::jsonb)
+from terminal`, companyID, candidateFolderIDCSV, deletedFolderIDCSV, deletedLogicGateIDCSV).Scan(&raw)
+	return raw, err
+}
+
 func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, cache *recycleSnapshotCache, companyID string, scope companyExplorerRecycleScope) (json.RawMessage, error) {
+	return postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx, tx, cache, companyID, scope, scope)
+}
+
+func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *sql.Tx, cache *recycleSnapshotCache, companyID string, scope, cleanupScope companyExplorerRecycleScope) (json.RawMessage, error) {
 	payload := map[string]json.RawMessage{}
 	addTable := func(tableName, whereClause string, args ...any) error {
 		rows, err := postgresSnapshotRowsWithCacheTx(ctx, tx, cache, tableName, whereClause, args...)
@@ -648,6 +811,8 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 	nodeIDCSV := strings.Join(nodeIDs, ",")
 	logicGateIDCSV := strings.Join(logicGateIDs, ",")
 	projectIDCSV := strings.Join(projectIDs, ",")
+	cleanupFolderIDCSV := strings.Join(sortedMapKeys(cleanupScope.FolderIDs), ",")
+	cleanupLogicGateIDCSV := strings.Join(sortedMapKeys(cleanupScope.LogicGateIDs), ",")
 
 	if len(folderIDs) > 0 {
 		if err := addTable("company_explorer_folders", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {
@@ -688,6 +853,13 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 			`map_parent_folder_id = any(` + folderIDArray + `))`
 		if err := addTable("process_map_placements", placementWhere, companyID, folderIDCSV, logicGateIDCSV); err != nil {
 			return nil, err
+		}
+		cleanupChildren, err := postgresSnapshotProcessMapCleanupChildrenTx(ctx, tx, companyID, folderIDCSV, cleanupFolderIDCSV, cleanupLogicGateIDCSV)
+		if err != nil {
+			return nil, err
+		}
+		if len(cleanupChildren) > 0 && string(cleanupChildren) != "[]" {
+			payload[processMapCleanupChildRecyclePayloadKey] = cleanupChildren
 		}
 
 		relationshipWhere := `company_id=$1::uuid and (` +
@@ -1107,6 +1279,10 @@ func postgresCreateRecycleBinItemsTx(ctx context.Context, tx *sql.Tx, companyID,
 		return nil
 	}
 	snapshotCache := newRecycleSnapshotCache()
+	cleanupScope := newCompanyExplorerRecycleScope()
+	for _, root := range roots {
+		root.Scope.mergeInto(&cleanupScope)
+	}
 	seen := map[string]bool{}
 	for _, root := range roots {
 		if !root.Scope.hasAnyRows() {
@@ -1117,7 +1293,7 @@ func postgresCreateRecycleBinItemsTx(ctx context.Context, tx *sql.Tx, companyID,
 			continue
 		}
 		seen[key] = true
-		payload, err := postgresSnapshotRecyclePayloadWithCacheTx(ctx, tx, snapshotCache, companyID, root.Scope)
+		payload, err := postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx, tx, snapshotCache, companyID, root.Scope, cleanupScope)
 		if err != nil {
 			return err
 		}

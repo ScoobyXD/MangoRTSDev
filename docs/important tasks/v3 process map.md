@@ -299,7 +299,7 @@ Continue using the one company `process-map:company` realtime doorbell and the o
 
 A successful mutation updates the initiating edit overlay from its committed HTTP response and does not echo a redundant reload to that exact originating connection. Every other current company connection receives one compact permission-safe `process_map.changed` invalidation.
 
-The invalidation contains no placement, identity, endpoint, relationship, trace, route, tile, or geometry payload. The client advances its company scene/tile generation, invalidates affected cached reads, and performs one coalesced read for the currently settled viewport. It does not reload an obsolete Folder layer and does not poll.
+The invalidation contains no placement, identity, endpoint, relationship, trace, route, tile, or geometry payload. This scope-only doorbell exception does not weaken durable relationship events, which retain the exact typed source and target identities required for audit and projection consumers. The client advances its company scene/tile generation, invalidates affected cached reads, and performs one coalesced read for the currently settled viewport. It does not reload an obsolete Folder layer and does not poll.
 
 Source-name, Explorer organization, permission, group, membership, recycle, restore, and permanent-delete changes continue to invalidate every affected viewer through the current validation fence and viewer-safe ETag rules.
 

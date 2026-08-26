@@ -30,18 +30,21 @@ func TestPostgresProcessMapConcurrencyAndPermissionContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := string(raw)
-	for _, forbidden := range []string{"folder_kind", "$4::text=''", "$3::text=''"} {
+	for _, forbidden := range []string{"GetProcessMapLayer", "ProcessMapLayerQuery", "context.Background()", "context.TODO()", "folder.folder_kind", "folder_kind<>'communications'"} {
 		if strings.Contains(source, forbidden) {
-			t.Fatalf("Postgres Process Map contains permission/schema bypass %q", forbidden)
+			t.Fatalf("Postgres Process Map contains obsolete or uncancellable contract %q", forbidden)
 		}
 	}
 	for _, required := range []string{
-		"input.CompanyID == \"\" || input.PermissionUserID == \"\"",
-		"visiblePlacements[item.Source.ResourceType+\":\"+item.Source.ResourceID]",
-		"visiblePlacements[item.Target.ResourceType+\":\"+item.Target.ResourceID]",
-		"on conflict(company_id,source_resource_type,source_resource_id,target_resource_type,target_resource_id) do nothing",
-		"inserted.RowsAffected()",
-		"for update`, companyID, input.Source.ResourceType",
+		"GetProcessMapScene(ctx context.Context",
+		"GetProcessMapTile(ctx context.Context",
+		"PutProcessMapPlacement(ctx context.Context",
+		"DeleteProcessMapPlacement(ctx context.Context",
+		"CreateResourceOperationalRelationship(ctx context.Context",
+		"PutProcessMapTrace(ctx context.Context",
+		"DeleteResourceOperationalRelationship(ctx context.Context",
+		"QueryContext(ctx",
+		"ExecContext(ctx",
 		"pg_advisory_xact_lock(hashtextextended('process-map-parent:' || $1,0))",
 		"lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, false)",
 	} {
@@ -50,12 +53,10 @@ func TestPostgresProcessMapConcurrencyAndPermissionContract(t *testing.T) {
 		}
 	}
 
-	placementPut := processMapFunctionBodyForContractTest(t, source,
-		"func (r *PostgresRepo) PutProcessMapPlacement", "func (r *PostgresRepo) DeleteProcessMapPlacement")
-	resourceLock := strings.Index(placementPut, "postgresRequireProcessMapResourceTx")
-	placementLock := strings.Index(placementPut, "processMapPlacementByResourceTx")
-	if resourceLock < 0 || placementLock < 0 || resourceLock >= placementLock {
-		t.Fatalf("placement PUT lock order is not canonical resource then placement row")
+	for _, signature := range []string{"GetProcessMapScene", "GetProcessMapTile", "PutProcessMapPlacement", "DeleteProcessMapPlacement", "CreateResourceOperationalRelationship", "PutProcessMapTrace", "DeleteResourceOperationalRelationship"} {
+		if !strings.Contains(source, "func (r *PostgresRepo) "+signature+"(ctx context.Context") {
+			t.Fatalf("%s does not accept authoritative request cancellation", signature)
+		}
 	}
 }
 
@@ -85,18 +86,28 @@ func TestProcessMapPolicyParentAndCompanyMembershipSQLContract(t *testing.T) {
 }
 
 func TestProcessMapRepositoryCoordinateAndBoundedReadContract(t *testing.T) {
-	raw, err := os.ReadFile("process_map.go")
-	if err != nil {
-		t.Fatal(err)
+	if ProcessMapMaxRoutePoints != 256 || ProcessMapMinCoordinate != -1_000_000_000 || ProcessMapMaxCoordinate != 1_000_000_000 || ProcessMapMaxDimension != 1_000_000 {
+		t.Fatalf("unexpected V3 geometry bounds: route=%d coordinate=%d..%d dimension=%d", ProcessMapMaxRoutePoints, ProcessMapMinCoordinate, ProcessMapMaxCoordinate, ProcessMapMaxDimension)
 	}
-	validation := string(raw)
-	for _, required := range []string{
-		"ProcessMapMaxRoutePoints = 256",
-		"processMapMinCoordinate = -2147483648",
-		"processMapMaxCoordinate = 2147483647",
-	} {
-		if !strings.Contains(validation, required) {
-			t.Fatalf("Process Map validation missing %q", required)
+	if _, ok := processMapTileBounds(ProcessMapMaxTileZoom+1, 0, 0); ok {
+		t.Fatal("tile bounds accepted zoom above the scene contract")
+	}
+	if bounds, ok := processMapTileBounds(ProcessMapMaxTileZoom, 3, -2); !ok || bounds.MaxX-bounds.MinX != ProcessMapTileSize || bounds.MaxY-bounds.MinY != ProcessMapTileSize {
+		t.Fatalf("maximum-zoom tile bounds = %+v/%t", bounds, ok)
+	}
+	maxInt := int(^uint(0) >> 1)
+	minInt := -maxInt - 1
+	for _, coordinate := range []int{minInt, maxInt} {
+		if _, ok := processMapTileBounds(ProcessMapMinTileZoom, coordinate, 0); ok {
+			t.Fatalf("minimum-zoom tile bounds accepted overflowing x index %d", coordinate)
+		}
+		if _, ok := processMapTileBounds(ProcessMapMinTileZoom, 0, coordinate); ok {
+			t.Fatalf("minimum-zoom tile bounds accepted overflowing y index %d", coordinate)
+		}
+	}
+	for _, coordinate := range []int{-2, 0} {
+		if _, ok := processMapTileBounds(ProcessMapMinTileZoom, coordinate, coordinate); !ok {
+			t.Fatalf("minimum-zoom tile bounds rejected valid edge index %d", coordinate)
 		}
 	}
 	postgresRaw, err := os.ReadFile("postgres_process_map.go")
@@ -104,8 +115,8 @@ func TestProcessMapRepositoryCoordinateAndBoundedReadContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	postgres := string(postgresRaw)
-	if !strings.Contains(postgres, "placement.map_parent_folder_id is not distinct from nullif($2,'')::uuid") {
-		t.Fatal("layer read is not bounded to the exact saved map parent")
+	if strings.Contains(postgres, "GetProcessMapLayer") || strings.Contains(postgres, "map_parent_folder_id is not distinct from nullif($2,'')") {
+		t.Fatal("Postgres still contains the obsolete exact-layer reader")
 	}
 	boundedRelationships := processMapFunctionBodyForContractTest(t, postgres,
 		"func (r *PostgresRepo) ListResourceOperationalRelationshipsForResource", "func normalizePostgresProcessMapMutation")
@@ -277,10 +288,10 @@ func TestPostgresPermissionValidationFenceContract(t *testing.T) {
 	processMap := string(processMapRaw)
 	processMapFunctions := []struct{ signature, next string }{
 		{"func (r *PostgresRepo) PutProcessMapPlacement", "func (r *PostgresRepo) DeleteProcessMapPlacement"},
-		{"func (r *PostgresRepo) DeleteProcessMapPlacement", "func sortProcessMapEndpoints"},
+		{"func (r *PostgresRepo) DeleteProcessMapPlacement", "func (r *PostgresRepo) CreateResourceOperationalRelationship"},
 		{"func (r *PostgresRepo) CreateResourceOperationalRelationship", "func (r *PostgresRepo) PutProcessMapTrace"},
 		{"func (r *PostgresRepo) PutProcessMapTrace", "func (r *PostgresRepo) DeleteResourceOperationalRelationship"},
-		{"func (r *PostgresRepo) DeleteResourceOperationalRelationship", "func postgresDeleteProcessMapResourceTx"},
+		{"func (r *PostgresRepo) DeleteResourceOperationalRelationship", "func postgresProcessMapFolderCleanupOrderTx"},
 	}
 	for _, function := range processMapFunctions {
 		body := processMapFunctionBodyForContractTest(t, processMap, function.signature, function.next)

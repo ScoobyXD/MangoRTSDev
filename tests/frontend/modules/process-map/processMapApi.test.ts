@@ -2,31 +2,46 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  deleteProcessMapPlacement,
-  deleteProcessMapRelationship,
-  fetchProcessMapLayer,
+  combineProcessMapAbortSignals,
+  fetchProcessMapScene,
+  fetchProcessMapTile,
+  getProcessMapReadCacheStats,
+  invalidateProcessMapReadCaches,
   postProcessMapRelationship,
   putProcessMapPlacement,
-  putProcessMapTrace,
 } from "../../../../frontend/src/modules/process-map/processMapApi.js";
-import {
-  getCurrentRealtimeConnectionCorrelation,
-  getCurrentRealtimeConnectionID,
-  subscribeRealtimeScope,
-} from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
+import { PROCESS_MAP_TILE_CACHE_BYTES } from "../../../../frontend/src/modules/process-map/processMapGeometry.js";
 
-function layerPayload() {
+function scenePayload(readVersion = 11) {
   return {
-    layer: { kind: "root" },
+    bounds: { min_x: -20, min_y: -10, max_x: 80, max_y: 50 },
+    process_map_read_version: readVersion,
+    tile_size: 256,
+    min_tile_zoom: -8,
+    max_tile_zoom: 20,
+  };
+}
+
+function tilePayload(readVersion = 11, z = 2, x = 3, y = -1) {
+  return {
+    z,
+    x,
+    y,
+    process_map_read_version: readVersion,
     placements: [
       {
         restricted: false,
-        resource_type: "company_explorer_folder",
-        resource_id: "folder-1",
-        name: "Operations",
+        presentation: "editing",
+        resource_type: "logic_gate",
+        resource_id: "gate-1",
+        name: "Receive",
+        map_parent_folder_id: null,
         grid_x: 4,
         grid_y: 8,
-        revision: 1,
+        grid_width: 9,
+        grid_height: 6,
+        can_edit: true,
+        revision: 3,
         created_timestamp: "created",
         updated_timestamp: "updated",
       },
@@ -35,303 +50,409 @@ function layerPayload() {
         grid_x: 14,
         grid_y: 8,
         resource_id: "must-not-survive",
-        resource_type: "logic_gate",
+        resource_type: "company_explorer_folder",
         name: "must-not-survive",
+        grid_width: 99,
+        grid_height: 99,
+        can_edit: true,
+        revision: 400,
       },
     ],
-    traces: [{
-      resource_operational_relationship_id: "must-not-survive",
-      source: { resource_type: "company_explorer_folder", resource_id: "folder-1" },
-      target: { resource_type: "logic_gate", resource_id: "must-not-survive" },
-      route_points: [],
-      revision: 1,
-      created_timestamp: "created",
-      updated_timestamp: "updated",
-    }],
+    traces: [],
   };
 }
 
-test("identical exact-layer reads singleflight and restricted rows retain only existence and position", async () => {
-  const originalFetch = globalThis.fetch;
-  const requested: string[] = [];
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  globalThis.fetch = (async (input) => {
-    requested.push(input.toString());
-    await gate;
-    return new Response(JSON.stringify(layerPayload()), { status: 200, headers: { "content-type": "application/json", etag: '"viewer-1"' } });
-  }) as typeof fetch;
-  try {
-    const first = fetchProcessMapLayer("https://process-map-singleflight.test", "company-1");
-    const second = fetchProcessMapLayer("https://process-map-singleflight.test", "company-1");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(requested.length, 1);
-    assert.match(requested[0], /\/v1\/process-map\/layer\?company_id=company-1$/);
-    release();
-    const [left, right] = await Promise.all([first, second]);
-    assert.deepEqual(left, right);
-    assert.deepEqual(left.placements[1], { restricted: true, grid_x: 14, grid_y: 8 });
-    assert.deepEqual(Object.keys(left.placements[1]).sort(), ["grid_x", "grid_y", "restricted"]);
-    assert.deepEqual(left.traces, []);
-  } finally {
-    release();
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("folder layer reads normalize the exact Process Map ancestor chain", async () => {
+test("tile presentation normalizes omitted whole names and coarse trace routes", async () => {
+  const apiBase = "https://process-map-presentation-normalization.test";
+  invalidateProcessMapReadCaches(apiBase, "company-1");
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(JSON.stringify({
-    ...layerPayload(),
-    layer: {
-      kind: "folder",
-      folder_id: "folder-3",
-      name: "Receiving",
-      ancestors: [
-        { folder_id: "folder-1", name: "Operations" },
-        { folder_id: "folder-2", name: "Plant" },
-      ],
-    },
+    z: 4,
+    x: 2,
+    y: 1,
+    process_map_read_version: 14,
+    placements: [{
+      restricted: false,
+      presentation: "whole",
+      resource_type: "logic_gate",
+      resource_id: "whole-gate",
+      map_parent_folder_id: null,
+      grid_x: 10,
+      grid_y: 12,
+      grid_width: 6,
+      grid_height: 5,
+      can_edit: true,
+      revision: 2,
+      created_timestamp: "created",
+      updated_timestamp: "updated",
+    }],
+    traces: [{
+      presentation: "normal",
+      resource_operational_relationship_id: "coarse-trace",
+      source: { resource_type: "logic_gate", resource_id: "source" },
+      target: { resource_type: "logic_gate", resource_id: "target" },
+      path_fragments: [[{ x: 16, y: 14.5 }, { x: 40, y: 14.5 }]],
+      revision: 3,
+      created_timestamp: "created",
+      updated_timestamp: "updated",
+    }],
   }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
   try {
-    const response = await fetchProcessMapLayer("https://process-map-breadcrumb.test", "company-1", "folder-3");
-    assert.deepEqual(response.layer, {
-      kind: "folder",
-      folder_id: "folder-3",
-      name: "Receiving",
-      ancestors: [
-        { folder_id: "folder-1", name: "Operations" },
-        { folder_id: "folder-2", name: "Plant" },
-      ],
-    });
+    const tile = await fetchProcessMapTile(apiBase, "company-1", 14, 4, 2, 1);
+    const visible = tile.placements[0];
+    assert.equal(visible.restricted, false);
+    assert.equal(visible.restricted ? undefined : visible.presentation, "whole");
+    assert.equal(visible.restricted ? undefined : visible.name, "");
+    assert.equal(tile.traces[0].presentation, "normal");
+    assert.deepEqual(tile.traces[0].route_points, []);
   } finally {
+    invalidateProcessMapReadCaches(apiBase, "company-1");
     globalThis.fetch = originalFetch;
   }
 });
 
-test("Strict Mode abort and immediate replay keep the shared exact-layer leader alive", async () => {
+test("tile parser rejects missing or invalid presentation ceilings", async () => {
   const originalFetch = globalThis.fetch;
-  let fetchCalls = 0;
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  globalThis.fetch = (async () => {
-    fetchCalls += 1;
-    await gate;
-    return new Response(JSON.stringify(layerPayload()), { status: 200, headers: { "content-type": "application/json" } });
-  }) as typeof fetch;
+  const visiblePlacement = {
+    restricted: false,
+    presentation: "editing" as unknown,
+    resource_type: "logic_gate",
+    resource_id: "gate-1",
+    name: "Gate",
+    map_parent_folder_id: null,
+    grid_x: 1,
+    grid_y: 2,
+    grid_width: 7,
+    grid_height: 5,
+    can_edit: true,
+    revision: 1,
+    created_timestamp: "created",
+    updated_timestamp: "updated",
+  };
+  const visibleTrace = {
+    presentation: "editing" as unknown,
+    resource_operational_relationship_id: "trace-1",
+    source: { resource_type: "logic_gate", resource_id: "source" },
+    target: { resource_type: "logic_gate", resource_id: "target" },
+    route_points: [],
+    path_fragments: [[{ x: 8, y: 4 }, { x: 20, y: 4 }]],
+    revision: 1,
+    created_timestamp: "created",
+    updated_timestamp: "updated",
+  };
+  const cases = [
+    { label: "placement missing", target: "placement", value: undefined },
+    { label: "placement invalid", target: "placement", value: "summary" },
+    { label: "trace missing", target: "trace", value: undefined },
+    { label: "trace invalid", target: "trace", value: "summary" },
+  ] as const;
   try {
-    const controller = new AbortController();
-    const abandoned = fetchProcessMapLayer("https://process-map-strict.test", "company-1", "folder-1", controller.signal);
-    controller.abort();
-    const replay = fetchProcessMapLayer("https://process-map-strict.test", "company-1", "folder-1");
-    release();
-    await assert.rejects(abandoned, (cause: unknown) => cause instanceof Error && cause.name === "AbortError");
-    await replay;
-    assert.equal(fetchCalls, 1);
+    for (const [index, testCase] of cases.entries()) {
+      const apiBase = `https://process-map-invalid-presentation-${index}.test`;
+      const placement = { ...visiblePlacement, presentation: testCase.target === "placement" ? testCase.value : "editing" };
+      const trace = { ...visibleTrace, presentation: testCase.target === "trace" ? testCase.value : "editing" };
+      globalThis.fetch = (async () => new Response(JSON.stringify({
+        z: 3,
+        x: index,
+        y: 0,
+        process_map_read_version: 15,
+        placements: [placement],
+        traces: [trace],
+      }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+      await assert.rejects(
+        fetchProcessMapTile(apiBase, "company-1", 15, 3, index, 0),
+        /invalid_process_map_presentation/,
+        testCase.label,
+      );
+      invalidateProcessMapReadCaches(apiBase, "company-1");
+    }
   } finally {
-    release();
     globalThis.fetch = originalFetch;
   }
 });
 
-test("completed layer reads revalidate with their viewer-safe ETag", async () => {
+test("scene reads singleflight, revalidate with ETag, and expose only camera metadata", async () => {
+  const apiBase = "https://process-map-scene.test";
+  invalidateProcessMapReadCaches(apiBase, "company-1");
   const originalFetch = globalThis.fetch;
   const requestETags: Array<string | null> = [];
-  globalThis.fetch = (async (_input, init) => {
-    const headers = new Headers(init?.headers);
-    requestETags.push(headers.get("If-None-Match"));
-    if (requestETags.length === 2) return new Response(null, { status: 304, headers: { etag: '"viewer-1"' } });
-    return new Response(JSON.stringify(layerPayload()), { status: 200, headers: { "content-type": "application/json", etag: '"viewer-1"' } });
-  }) as typeof fetch;
-  try {
-    const first = await fetchProcessMapLayer("https://process-map-etag.test", "company-1");
-    const second = await fetchProcessMapLayer("https://process-map-etag.test", "company-1");
-    assert.deepEqual(second, first);
-    assert.deepEqual(requestETags, [null, '"viewer-1"']);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("a committed write detaches a stale in-flight layer read without aborting its mounted caller", async () => {
-  const originalFetch = globalThis.fetch;
-  let layerReads = 0;
-  let staleReadAborted = false;
-  let releaseStaleRead!: () => void;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
   globalThis.fetch = (async (input, init) => {
     const url = new URL(input.toString());
-    if (url.pathname === "/v1/process-map/layer") {
-      layerReads += 1;
-      if (layerReads === 1) {
-        return await new Promise<Response>((resolve, reject) => {
-          releaseStaleRead = () => resolve(new Response(JSON.stringify(layerPayload()), { status: 200, headers: { "content-type": "application/json" } }));
-          init?.signal?.addEventListener("abort", () => {
-            staleReadAborted = true;
-            reject(new DOMException("aborted", "AbortError"));
-          }, { once: true });
-        });
-      }
-      return new Response(JSON.stringify(layerPayload()), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    return new Response(JSON.stringify({
-      resource_type: "logic_gate",
-      resource_id: "gate-1",
-      map_parent_folder_id: null,
-      grid_x: 2,
-      grid_y: 3,
-      revision: 1,
-      created_timestamp: "created",
-      updated_timestamp: "created",
-    }), { status: 201, headers: { "content-type": "application/json" } });
-  }) as typeof fetch;
-  try {
-    const staleRead = fetchProcessMapLayer("https://process-map-stale-read.test", "company-1");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await putProcessMapPlacement(
-      "https://process-map-stale-read.test",
-      "company-1",
-      { resource_type: "logic_gate", resource_id: "gate-1" },
-      { map_parent_folder_id: null, grid_x: 2, grid_y: 3 },
-    );
-    await fetchProcessMapLayer("https://process-map-stale-read.test", "company-1");
-    assert.equal(layerReads, 2, "the post-commit replay must not rejoin the detached stale read leader");
-    releaseStaleRead();
-    await staleRead;
-    assert.equal(staleReadAborted, false, "an unrelated mounted layer caller remains usable after company cache invalidation");
-  } finally {
-    releaseStaleRead?.();
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("Process Map mutations use the small canonical API and integer route bodies", async () => {
-  const originalFetch = globalThis.fetch;
-  const originalWebSocket = globalThis.WebSocket;
-  class OriginWebSocket {
-    static CONNECTING = 0;
-    static OPEN = 1;
-    static CLOSED = 3;
-    readyState = OriginWebSocket.CONNECTING;
-    onopen: (() => void) | null = null;
-    onmessage: ((event: { data: string }) => void) | null = null;
-    onerror: (() => void) | null = null;
-    onclose: (() => void) | null = null;
-    constructor(_url: string) {
-      queueMicrotask(() => {
-        this.readyState = OriginWebSocket.OPEN;
-        this.onopen?.();
-        this.onmessage?.({ data: JSON.stringify({
-          type: "ready",
-          connection_id: "process-map-connection-1",
-          connection_correlation: "process-map-correlation-1",
-        }) });
-        this.onmessage?.({ data: JSON.stringify({ type: "heartbeat.confirmed", nonce: "process-map-heartbeat" }) });
-        this.onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "process-map:company" }) });
+    assert.equal(url.pathname, "/v1/process-map/scene");
+    assert.equal(url.searchParams.get("company_id"), "company-1");
+    requestETags.push(new Headers(init?.headers).get("If-None-Match"));
+    if (requestETags.length === 1) {
+      await gate;
+      return new Response(JSON.stringify(scenePayload()), {
+        status: 200,
+        headers: { "content-type": "application/json", etag: '"scene-viewer-11"' },
       });
     }
-    send(_message: string): void {}
-    close(): void {
-      if (this.readyState === OriginWebSocket.CLOSED) return;
-      this.readyState = OriginWebSocket.CLOSED;
-      this.onclose?.();
-    }
+    return new Response(null, { status: 304, headers: { etag: '"scene-viewer-11"' } });
+  }) as typeof fetch;
+  try {
+    const first = fetchProcessMapScene(apiBase, "company-1");
+    const joined = fetchProcessMapScene(apiBase, "company-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(requestETags.length, 1);
+    release();
+    const [left, right] = await Promise.all([first, joined]);
+    assert.deepEqual(left, scenePayload());
+    assert.deepEqual(right, left);
+    assert.notEqual(right, left, "shared reads return isolated response objects");
+
+    const revalidated = await fetchProcessMapScene(apiBase, "company-1");
+    assert.deepEqual(revalidated, left);
+    assert.deepEqual(requestETags, [null, '"scene-viewer-11"']);
+    assert.deepEqual(Object.keys(revalidated).sort(), [
+      "bounds",
+      "max_tile_zoom",
+      "min_tile_zoom",
+      "process_map_read_version",
+      "tile_size",
+    ]);
+  } finally {
+    release();
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+    globalThis.fetch = originalFetch;
   }
-  (globalThis as typeof globalThis & { WebSocket: typeof WebSocket }).WebSocket = OriginWebSocket as unknown as typeof WebSocket;
-  const calls: Array<{ url: URL; method: string; body: unknown; originConnectionID: string | null }> = [];
+});
+
+test("tile cache identity includes read version and z/x/y while restricted rows stay sealed", async () => {
+  const apiBase = "https://process-map-tiles.test";
+  invalidateProcessMapReadCaches(apiBase, "company-1");
+  const originalFetch = globalThis.fetch;
+  const requests: URL[] = [];
+  let release!: () => void;
+  const firstGate = new Promise<void>((resolve) => { release = resolve; });
+  globalThis.fetch = (async (input) => {
+    const url = new URL(input.toString());
+    requests.push(url);
+    if (requests.length === 1) await firstGate;
+    const [, zText, xText, yText] = url.pathname.match(/\/tiles\/(-?\d+)\/(-?\d+)\/(-?\d+)$/) ?? [];
+    return new Response(JSON.stringify(tilePayload(
+      requests.length === 1 ? 11 : 12,
+      Number(zText),
+      Number(xText),
+      Number(yText),
+    )), { status: 200, headers: { "content-type": "application/json", etag: `"tile-${requests.length}"` } });
+  }) as typeof fetch;
+  try {
+    const first = fetchProcessMapTile(apiBase, "company-1", 11, 2, 3, -1);
+    const joined = fetchProcessMapTile(apiBase, "company-1", 11, 2, 3, -1);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(requests.length, 1);
+    release();
+    const [left, right] = await Promise.all([first, joined]);
+    assert.deepEqual(left, right);
+    assert.match(requests[0].pathname, /\/v1\/process-map\/tiles\/2\/3\/-1$/);
+    assert.equal(requests[0].searchParams.get("company_id"), "company-1");
+    assert.deepEqual(left.placements[1], { restricted: true, grid_x: 14, grid_y: 8 });
+    assert.deepEqual(Object.keys(left.placements[1]).sort(), ["grid_x", "grid_y", "restricted"]);
+
+    await fetchProcessMapTile(apiBase, "company-1", 12, 2, 3, -1);
+    await fetchProcessMapTile(apiBase, "company-1", 12, 3, 3, -1);
+    assert.equal(requests.length, 3, "new read versions and tile coordinates cannot reuse another payload");
+  } finally {
+    release();
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("generation and TileLayer cancellation combine into the browser fetch signal", async () => {
+  const apiBase = "https://process-map-cancel.test";
+  invalidateProcessMapReadCaches(apiBase, "company-1");
+  const originalFetch = globalThis.fetch;
+  let observedSignal: AbortSignal | null = null;
+  globalThis.fetch = ((_, init) => new Promise<Response>((_resolve, reject) => {
+    observedSignal = init?.signal ?? null;
+    observedSignal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+  })) as typeof fetch;
+  const generation = new AbortController();
+  const tile = new AbortController();
+  const combined = combineProcessMapAbortSignals(generation.signal, tile.signal);
+  try {
+    const request = fetchProcessMapTile(apiBase, "company-1", 11, 2, 0, 0, combined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.ok(observedSignal);
+    assert.equal((observedSignal as AbortSignal).aborted, false);
+    tile.abort("tile superseded");
+    await assert.rejects(request, (cause: unknown) => cause === "tile superseded");
+    assert.equal(combined.aborted, true);
+    assert.equal(generation.signal.aborted, false, "tile cancellation does not abort the whole generation controller");
+  } finally {
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("permission-generation invalidation synchronously disposes cached data and aborts stale leaders", async () => {
+  const apiBase = "https://process-map-permission-invalidation.test";
+  invalidateProcessMapReadCaches(apiBase, "company-1");
+  const originalFetch = globalThis.fetch;
+  const before = getProcessMapReadCacheStats();
+  let requestCount = 0;
+  globalThis.fetch = (async (_input, init) => {
+    requestCount += 1;
+    if (requestCount === 1) {
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+      });
+    }
+    return new Response(JSON.stringify(tilePayload(12, 2, 0, 0)), {
+      status: 200,
+      headers: { "content-type": "application/json", etag: '"replacement"' },
+    });
+  }) as typeof fetch;
+  try {
+    const stale = fetchProcessMapTile(apiBase, "company-1", 11, 2, 0, 0);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(getProcessMapReadCacheStats().inflight_reads, before.inflight_reads + 1);
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+    assert.deepEqual(getProcessMapReadCacheStats(), before, "protected cache state is removed before replacement reads");
+    await assert.rejects(stale, (cause: unknown) => cause instanceof Error && cause.name === "AbortError");
+
+    const replacement = await fetchProcessMapTile(apiBase, "company-1", 12, 2, 0, 0);
+    assert.equal(replacement.process_map_read_version, 12);
+    assert.equal(requestCount, 2);
+  } finally {
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("committed placement mutations send saved dimensions and return the complete canonical envelope", async () => {
+  const apiBase = "https://process-map-mutation.test";
+  const originalFetch = globalThis.fetch;
+  let requestBody: unknown;
   globalThis.fetch = (async (input, init) => {
     const url = new URL(input.toString());
-    const method = init?.method ?? "GET";
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
-    if (url.pathname === "/v1/realtime/ticket") {
-      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    calls.push({
-      url,
-      method,
-      body,
-      originConnectionID: new Headers(init?.headers).get("X-Mango-Realtime-Connection-ID"),
-    });
-    if (method === "DELETE") return new Response(null, { status: 204 });
-    if (url.pathname.endsWith("/trace")) {
-      return new Response(JSON.stringify({
-        resource_operational_relationship_id: "relationship-1",
-        route_points: body.route_points,
-        revision: 2,
-        created_timestamp: "created",
-        updated_timestamp: "updated-2",
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }
-    if (url.pathname.endsWith("/operational-relationships")) {
-      return new Response(JSON.stringify({
-        relationship: {
-          resource_operational_relationship_id: "relationship-1",
-          source: body.source,
-          target: body.target,
-          created_timestamp: "created",
-        },
-        trace: {
-          resource_operational_relationship_id: "relationship-1",
-          route_points: body.trace.route_points,
-          revision: 1,
-          created_timestamp: "created",
-          updated_timestamp: "created",
-        },
-        relationship_created: true,
-        trace_changed: true,
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    }
+    assert.equal(url.pathname, "/v1/process-map/placements/logic_gate/gate-1");
+    assert.equal(url.searchParams.get("company_id"), "company-1");
+    assert.equal(init?.method, "PUT");
+    requestBody = JSON.parse(String(init?.body));
     return new Response(JSON.stringify({
-      resource_type: "logic_gate",
-      resource_id: "gate-1",
-      map_parent_folder_id: "folder-1",
-      grid_x: body.grid_x,
-      grid_y: body.grid_y,
-      revision: 1,
-      created_timestamp: "created",
-      updated_timestamp: "created",
+      placements: [{
+        company_id: "company-1",
+        resource_type: "logic_gate",
+        resource_id: "gate-1",
+        map_parent_folder_id: null,
+        grid_x: 4,
+        grid_y: 8,
+        grid_width: 9,
+        grid_height: 6,
+        revision: 3,
+        created_timestamp: "created",
+        updated_timestamp: "updated",
+      }],
+      traces: [{
+        resource_operational_relationship_id: "relationship-1",
+        route_points: [{ x: 13, y: 11 }],
+        revision: 7,
+        created_timestamp: "created",
+        updated_timestamp: "updated",
+      }],
+      deleted_trace_ids: [],
+      process_map_read_version: 12,
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const envelope = await putProcessMapPlacement(
+      apiBase,
+      "company-1",
+      { resource_type: "logic_gate", resource_id: "gate-1" },
+      { map_parent_folder_id: null, grid_x: 4.4, grid_y: 8.4, grid_width: 9.4, grid_height: 6.4 },
+    );
+    assert.deepEqual(requestBody, {
+      map_parent_folder_id: null,
+      grid_x: 4,
+      grid_y: 8,
+      grid_width: 9,
+      grid_height: 6,
+    });
+    assert.equal(envelope.process_map_read_version, 12);
+    assert.equal(envelope.placements[0].grid_width, 9);
+    assert.deepEqual(envelope.traces[0].route_points, [{ x: 13, y: 11 }]);
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(envelope.traces[0], "path_fragments"),
+      false,
+      "mutation envelopes carry authoritative route geometry; tile reads own clipped display paths",
+    );
+  } finally {
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("connection creation always commits an owned trace, including the empty default route", async () => {
+  const apiBase = "https://process-map-connection.test";
+  const originalFetch = globalThis.fetch;
+  let requestBody: unknown;
+  globalThis.fetch = (async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({
+      placements: [],
+      traces: [{ resource_operational_relationship_id: "relationship-1", route_points: [], revision: 1, created_timestamp: "created", updated_timestamp: "created" }],
+      deleted_trace_ids: [],
+      relationship: {
+        resource_operational_relationship_id: "relationship-1",
+        source: { resource_type: "logic_gate", resource_id: "source" },
+        target: { resource_type: "logic_gate", resource_id: "target" },
+        created_timestamp: "created",
+      },
+      created: true,
+      changed: true,
+      process_map_read_version: 12,
     }), { status: 201, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
-  const unsubscribe = subscribeRealtimeScope(
-    "https://process-map-mutations.test",
-    "company-1",
-    "process-map:company",
-    {},
-  );
   try {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(
-      getCurrentRealtimeConnectionID("https://process-map-mutations.test", "company-1"),
-      "process-map-connection-1",
+    const envelope = await postProcessMapRelationship(
+      apiBase,
+      "company-1",
+      { resource_type: "logic_gate", resource_id: "source" },
+      { resource_type: "logic_gate", resource_id: "target" },
+      [],
     );
-    assert.equal(
-      getCurrentRealtimeConnectionCorrelation("https://process-map-mutations.test", "company-1"),
-      "process-map-correlation-1",
-    );
-    const folder = { resource_type: "company_explorer_folder" as const, resource_id: "folder-1" };
-    const gate = { resource_type: "logic_gate" as const, resource_id: "gate-1" };
-    const savedPlacement = await putProcessMapPlacement("https://process-map-mutations.test", "company-1", gate, { map_parent_folder_id: "folder-1", grid_x: 4.4, grid_y: -2.6 });
-    const createdRelationship = await postProcessMapRelationship("https://process-map-mutations.test", "company-1", folder, gate, [{ x: 4.4, y: -2.6 }]);
-    const savedTrace = await putProcessMapTrace("https://process-map-mutations.test", "company-1", "relationship-1", [{ x: 8.8, y: 10.2 }]);
-    await deleteProcessMapRelationship("https://process-map-mutations.test", "company-1", "relationship-1");
-    await deleteProcessMapPlacement("https://process-map-mutations.test", "company-1", gate);
-    assert.deepEqual(calls[0].body, { map_parent_folder_id: "folder-1", grid_x: 4, grid_y: -3 });
-    assert.equal(savedPlacement.map_parent_folder_id, "folder-1");
-    assert.equal("name" in savedPlacement, false);
-    assert.deepEqual((calls[1].body as { trace: { route_points: unknown } }).trace.route_points, [{ x: 4, y: -3 }]);
-    assert.deepEqual(createdRelationship.trace?.route_points, [{ x: 4, y: -3 }]);
-    assert.equal(createdRelationship.trace ? "source" in createdRelationship.trace : true, false);
-    assert.deepEqual(calls[2].body, { route_points: [{ x: 9, y: 10 }] });
-    assert.deepEqual(savedTrace.route_points, [{ x: 9, y: 10 }]);
-    assert.equal(calls[3].method, "DELETE");
-    assert.match(calls[3].url.pathname, /\/operational-relationships\/relationship-1$/);
-    assert.equal(calls[4].method, "DELETE");
-    assert.match(calls[4].url.pathname, /\/placements\/logic_gate\/gate-1$/);
-    assert.deepEqual(calls.map((call) => call.originConnectionID), Array(5).fill("process-map-correlation-1"));
+    assert.deepEqual(requestBody, {
+      company_id: "company-1",
+      source: { resource_type: "logic_gate", resource_id: "source" },
+      target: { resource_type: "logic_gate", resource_id: "target" },
+      trace: { route_points: [] },
+    });
+    assert.equal(envelope.traces.length, 1);
+    assert.equal(envelope.relationship?.resource_operational_relationship_id, "relationship-1");
   } finally {
-    unsubscribe();
-    assert.equal(getCurrentRealtimeConnectionID("https://process-map-mutations.test", "company-1"), undefined);
-    assert.equal(getCurrentRealtimeConnectionCorrelation("https://process-map-mutations.test", "company-1"), undefined);
+    invalidateProcessMapReadCaches(apiBase, "company-1");
     globalThis.fetch = originalFetch;
-    globalThis.WebSocket = originalWebSocket;
+  }
+});
+
+test("tile cache stays within the documented 32 MiB budget during a representative pan", async () => {
+  const apiBase = "https://process-map-cache-budget.test";
+  invalidateProcessMapReadCaches(apiBase, "company-1");
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  const largeName = "x".repeat(1024 * 1024);
+  globalThis.fetch = (async (input) => {
+    requests += 1;
+    const url = new URL(input.toString());
+    const [, zText, xText, yText] = url.pathname.match(/\/tiles\/(-?\d+)\/(-?\d+)\/(-?\d+)$/) ?? [];
+    const payload = tilePayload(21, Number(zText), Number(xText), Number(yText));
+    (payload.placements[0] as { name: string }).name = `${requests}-${largeName}`;
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    await Promise.all(Array.from({ length: 38 }, (_, x) => fetchProcessMapTile(apiBase, "company-1", 21, 8, x, 0)));
+    const stats = getProcessMapReadCacheStats();
+    assert.equal(requests, 38);
+    assert.equal(stats.inflight_reads, 0);
+    assert.ok(stats.tile_bytes <= PROCESS_MAP_TILE_CACHE_BYTES, `${stats.tile_bytes} exceeds ${PROCESS_MAP_TILE_CACHE_BYTES}`);
+    assert.ok(stats.tile_entries < requests, "the LRU must evict old tiles once the byte budget is crossed");
+  } finally {
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+    globalThis.fetch = originalFetch;
   }
 });

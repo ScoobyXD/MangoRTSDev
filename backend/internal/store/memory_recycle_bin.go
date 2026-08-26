@@ -16,6 +16,21 @@ type memoryRecycleBinItem struct {
 	UseDelta bool
 }
 
+type memoryProcessMapCleanupChild struct {
+	CompanyID                 string
+	ResourceType              string
+	ResourceID                string
+	PlacementIncarnationToken string
+	OriginalParentFolderID    string
+	CleanupParentFolderID     *string
+	CleanupRevision           int64
+	CreatedTimestamp          time.Time
+	GridX                     int
+	GridY                     int
+	GridWidth                 int
+	GridHeight                int
+}
+
 type memoryRecycleBinSnapshot struct {
 	nodes                            map[string]domain.Node
 	nodeInfo                         map[string][]domain.NodeInformation
@@ -48,6 +63,7 @@ type memoryRecycleBinSnapshot struct {
 	resourceOperationalRelationships map[string]domain.ResourceOperationalRelationship
 	processMapPlacements             map[string]domain.ProcessMapPlacement
 	processMapTraces                 map[string]domain.ProcessMapTrace
+	processMapCleanupChildren        map[string]memoryProcessMapCleanupChild
 	kanbanBoards                     map[string]domain.KanbanBoard
 	kanbanColumns                    map[string][]domain.KanbanColumn
 	kanbanCards                      map[string][]domain.KanbanCard
@@ -260,10 +276,17 @@ func memoryRecycleSnapshotForDeleteScope(companyID string, snapshot memoryRecycl
 	if err := repo.deleteCompanyExplorerRecycleScopeLocked(companyID, scope); err != nil {
 		return memoryRecycleBinSnapshot{}, err
 	}
-	return memoryRecycleSnapshotDelta(snapshot, repo.snapshotRecycleStateLocked()), nil
+	delta := memoryRecycleSnapshotDelta(snapshot, repo.snapshotRecycleStateLocked())
+	delta.processMapCleanupChildren = map[string]memoryProcessMapCleanupChild{}
+	for placementKey, cleanup := range snapshot.processMapCleanupChildren {
+		if cleanup.CompanyID == companyID && scope.FolderIDs[cleanup.OriginalParentFolderID] {
+			delta.processMapCleanupChildren[placementKey] = cleanup
+		}
+	}
+	return delta, nil
 }
 
-func memoryRecycleSnapshotWithProcessMapTraceContext(before, deleted memoryRecycleBinSnapshot) memoryRecycleBinSnapshot {
+func memoryRecycleSnapshotWithProcessMapTraceContext(before, after, deleted memoryRecycleBinSnapshot) memoryRecycleBinSnapshot {
 	deleted.resourceOperationalRelationships = cloneMap(deleted.resourceOperationalRelationships)
 	for traceKey, trace := range deleted.processMapTraces {
 		relationship, ok := before.resourceOperationalRelationships[traceKey]
@@ -272,6 +295,25 @@ func memoryRecycleSnapshotWithProcessMapTraceContext(before, deleted memoryRecyc
 		}
 		if ok {
 			deleted.resourceOperationalRelationships[key(relationship.CompanyID, relationship.ResourceOperationalRelationshipID)] = relationship
+		}
+	}
+	deleted.processMapCleanupChildren = map[string]memoryProcessMapCleanupChild{}
+	for placementKey, beforePlacement := range before.processMapPlacements {
+		afterPlacement, survives := after.processMapPlacements[placementKey]
+		if !survives || beforePlacement.MapParentFolderID == nil {
+			continue
+		}
+		originalParentID := strings.TrimSpace(*beforePlacement.MapParentFolderID)
+		if _, deletedParent := deleted.folders[key(beforePlacement.CompanyID, originalParentID)]; !deletedParent {
+			continue
+		}
+		deleted.processMapCleanupChildren[placementKey] = memoryProcessMapCleanupChild{
+			CompanyID: beforePlacement.CompanyID, ResourceType: beforePlacement.ResourceType, ResourceID: beforePlacement.ResourceID,
+			PlacementIncarnationToken: afterPlacement.PlacementIncarnationToken,
+			OriginalParentFolderID:    originalParentID, CleanupParentFolderID: cloneProcessMapPlacement(afterPlacement).MapParentFolderID,
+			CleanupRevision: afterPlacement.Revision, CreatedTimestamp: afterPlacement.CreatedTimestamp,
+			GridX: afterPlacement.GridX, GridY: afterPlacement.GridY,
+			GridWidth: afterPlacement.GridWidth, GridHeight: afterPlacement.GridHeight,
 		}
 	}
 	return deleted
@@ -310,7 +352,7 @@ func (r *MemoryRepo) deleteCompanyExplorerRecycleScopeLocked(companyID string, s
 	for nodeID := range scope.NodeIDs {
 		r.deleteCompanyExplorerV2NativeEntityProjectionLocked(companyID, CompanyExplorerV2EntityNode, nodeID)
 	}
-	for folderID := range scope.FolderIDs {
+	for _, folderID := range r.processMapFolderCleanupOrderLocked(companyID, scope.FolderIDs) {
 		r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeFolder, folderID)
 		delete(r.folders, key(companyID, folderID))
 		delete(r.sharedInboxRACI, sharedInboxRACIKey(companyID, folderID))
@@ -385,6 +427,7 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		resourceOperationalRelationships: cloneMap(r.resourceOperationalRelationships),
 		processMapPlacements:             cloneMap(r.processMapPlacements),
 		processMapTraces:                 cloneMap(r.processMapTraces),
+		processMapCleanupChildren:        map[string]memoryProcessMapCleanupChild{},
 		kanbanBoards:                     cloneMap(r.kanbanBoards),
 		kanbanColumns:                    cloneSliceMap(r.kanbanColumns),
 		kanbanCards:                      cloneSliceMap(r.kanbanCards),
@@ -510,6 +553,7 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		resourceOperationalRelationships: recycleMapDelta(before.resourceOperationalRelationships, after.resourceOperationalRelationships),
 		processMapPlacements:             recycleMapDelta(before.processMapPlacements, after.processMapPlacements),
 		processMapTraces:                 recycleMapDelta(before.processMapTraces, after.processMapTraces),
+		processMapCleanupChildren:        recycleMapDelta(before.processMapCleanupChildren, after.processMapCleanupChildren),
 		kanbanBoards:                     recycleMapDelta(before.kanbanBoards, after.kanbanBoards),
 		kanbanColumns:                    recycleMapDelta(before.kanbanColumns, after.kanbanColumns),
 		kanbanCards:                      recycleMapDelta(before.kanbanCards, after.kanbanCards),
@@ -578,22 +622,43 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 			destination.resourceOperationalRelationships[relationshipKey] = relationship
 		}
 	}
-	for placementKey, placement := range delta.processMapPlacements {
-		if _, exists := destination.processMapPlacements[placementKey]; exists {
-			continue
+	pendingPlacements := cloneMap(delta.processMapPlacements)
+	for len(pendingPlacements) > 0 {
+		progress := false
+		placementKeys := make([]string, 0, len(pendingPlacements))
+		for placementKey := range pendingPlacements {
+			placementKeys = append(placementKeys, placementKey)
 		}
-		if !memoryRecycleProcessMapResourceExists(*destination, placement.CompanyID, domain.ProcessMapResourceRef{
-			ResourceType: placement.ResourceType,
-			ResourceID:   placement.ResourceID,
-		}) {
-			continue
-		}
-		if placement.MapParentFolderID != nil {
-			if _, ok := destination.folders[key(placement.CompanyID, strings.TrimSpace(*placement.MapParentFolderID))]; !ok {
+		sort.Strings(placementKeys)
+		for _, placementKey := range placementKeys {
+			placement := pendingPlacements[placementKey]
+			if _, exists := destination.processMapPlacements[placementKey]; exists {
+				delete(pendingPlacements, placementKey)
+				progress = true
 				continue
 			}
+			if !memoryRecycleProcessMapResourceExists(*destination, placement.CompanyID, domain.ProcessMapResourceRef{
+				ResourceType: placement.ResourceType,
+				ResourceID:   placement.ResourceID,
+			}) {
+				delete(pendingPlacements, placementKey)
+				progress = true
+				continue
+			}
+			if placement.MapParentFolderID != nil {
+				parentID := strings.TrimSpace(*placement.MapParentFolderID)
+				if _, ok := destination.processMapPlacements[processMapPlacementMemoryKey(placement.CompanyID, domain.ProcessMapResourceTypeFolder, parentID)]; !ok {
+					continue
+				}
+			}
+			placement.PlacementIncarnationToken = newUUIDv7String()
+			destination.processMapPlacements[placementKey] = placement
+			delete(pendingPlacements, placementKey)
+			progress = true
 		}
-		destination.processMapPlacements[placementKey] = placement
+		if !progress {
+			break
+		}
 	}
 	for traceKey, trace := range delta.processMapTraces {
 		if _, exists := destination.processMapTraces[traceKey]; exists {
@@ -602,6 +667,25 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 		if _, ok := destination.resourceOperationalRelationships[key(trace.CompanyID, trace.ResourceOperationalRelationshipID)]; ok {
 			destination.processMapTraces[traceKey] = trace
 		}
+	}
+	for placementKey, cleanup := range delta.processMapCleanupChildren {
+		placement, exists := destination.processMapPlacements[placementKey]
+		if !exists || placement.CompanyID != cleanup.CompanyID || placement.ResourceType != cleanup.ResourceType || placement.ResourceID != cleanup.ResourceID ||
+			placement.PlacementIncarnationToken != cleanup.PlacementIncarnationToken ||
+			placement.Revision != cleanup.CleanupRevision || !placement.CreatedTimestamp.Equal(cleanup.CreatedTimestamp) ||
+			placement.GridX != cleanup.GridX || placement.GridY != cleanup.GridY ||
+			placement.GridWidth != cleanup.GridWidth || placement.GridHeight != cleanup.GridHeight ||
+			!processMapParentIDsEqual(placement.MapParentFolderID, cleanup.CleanupParentFolderID) {
+			continue
+		}
+		if _, restoredParent := destination.processMapPlacements[processMapPlacementMemoryKey(cleanup.CompanyID, domain.ProcessMapResourceTypeFolder, cleanup.OriginalParentFolderID)]; !restoredParent {
+			continue
+		}
+		parentID := cleanup.OriginalParentFolderID
+		placement.MapParentFolderID = &parentID
+		placement.Revision++
+		placement.UpdatedTimestamp = time.Now().UTC()
+		destination.processMapPlacements[placementKey] = placement
 	}
 	mergeRecycleMap(destination.kanbanBoards, delta.kanbanBoards)
 	mergeRecycleMap(destination.kanbanColumns, delta.kanbanColumns)
@@ -630,6 +714,13 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.huddleLogicGateRelationships, delta.huddleLogicGateRelationships)
 	mergeRecycleMap(destination.huddleNodeLogicGateRelationships, delta.huddleNodeLogicGateRelationships)
 	mergeRecycleMap(destination.huddleNodeKPIRelationships, delta.huddleNodeKPIRelationships)
+}
+
+func processMapParentIDsEqual(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return strings.TrimSpace(*left) == strings.TrimSpace(*right)
 }
 
 func memoryRecycleProcessMapResourceExists(snapshot memoryRecycleBinSnapshot, companyID string, resource domain.ProcessMapResourceRef) bool {

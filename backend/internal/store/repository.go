@@ -46,9 +46,8 @@ var (
 	ErrAttachmentShared                 = errors.New("attachment is linked to another resource")
 	ErrProjectionRevisionRequired       = errors.New("projection revision required")
 	ErrNoVerificationRecipients         = errors.New("no verification recipients")
-	ErrProcessMapRootProcess            = errors.New("processes cannot be placed on the process map root")
 	ErrProcessMapCycle                  = errors.New("process map folder cycle")
-	ErrProcessMapLayerMismatch          = errors.New("process map endpoints must be placed on the same layer")
+	ErrProcessMapContainment            = errors.New("process map placement is outside its mapped folder")
 )
 
 type ProjectionRevisionConflictError struct {
@@ -589,16 +588,6 @@ type LogicGateRepository interface {
 	PutLogicGateQDRating(input QDRatingPutInput) (QDRatingMutationResult, error)
 }
 
-type ProcessMapRepository interface {
-	GetProcessMapLayer(input ProcessMapLayerQuery) (domain.ProcessMapLayerView, error)
-	ListResourceOperationalRelationshipsForResource(input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error)
-	PutProcessMapPlacement(input ProcessMapPlacementPutInput) (ProcessMapPlacementMutationResult, error)
-	DeleteProcessMapPlacement(input ProcessMapPlacementDeleteInput) (ProcessMapPlacementDeleteResult, error)
-	CreateResourceOperationalRelationship(input ResourceOperationalRelationshipCreateInput) (ResourceOperationalRelationshipMutationResult, error)
-	PutProcessMapTrace(input ProcessMapTracePutInput) (ProcessMapTraceMutationResult, error)
-	DeleteResourceOperationalRelationship(input ResourceOperationalRelationshipDeleteInput) (ResourceOperationalRelationshipDeleteResult, error)
-}
-
 type ProjectRepository interface {
 	CreateProject(input ProjectInput) (ProjectMutationResult, error)
 	UpdateProject(input ProjectInput) (ProjectMutationResult, error)
@@ -638,6 +627,7 @@ type EntityPermissionRepository interface {
 
 type EffectiveAccessRepository interface {
 	UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error)
+	UserHasEffectiveAccessContext(ctx context.Context, companyID, userID, resourceType, resourceID, accessLevel string) (bool, error)
 	ListEffectiveResourceIDsForUser(companyID, userID, resourceType, accessLevel string, resourceIDs []string) (map[string]bool, error)
 	ListEffectiveUsersForResource(companyID, resourceType, resourceID, accessLevel string) ([]string, error)
 	ResolveEffectiveUsersForResource(ctx context.Context, companyID, resourceType, resourceID, accessLevel string, candidateUserIDs []string) (bool, []string, error)

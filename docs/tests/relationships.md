@@ -409,7 +409,7 @@ Deleting or rebuilding a projection MUST NOT delete or rewrite the source relati
 
 ### Law 21 — Events preserve typed literal identity
 
-Relationship events and invalidation messages MUST carry enough information to identify the exact company, relationship meaning, resource type, and literal resource ID affected. Consumers MUST NOT infer a type from UUID shape, screen location, or cached title.
+Durable relationship events MUST identify the exact company and relationship meaning plus every affected endpoint's canonical stored resource type and literal resource ID. Permission-safe invalidation hints MAY carry only their documented exact scope when consumers perform a canonical read instead of reconstructing a relationship from the hint. Consumers MUST NOT infer a type from UUID shape, screen location, or cached title.
 
 ### Law 22 — Generic relationship lookups are indexed by the typed identity
 

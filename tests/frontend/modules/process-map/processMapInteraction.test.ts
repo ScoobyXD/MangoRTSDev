@@ -2,153 +2,125 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  centerProcessMapZoom,
+  createProcessMapSettlementGate,
   decideProcessMapExplorerDrop,
   isValidProcessMapConnection,
-  processMapFolderDrillTarget,
-  processMapResourceNodeID,
-  processMapTrayCandidates,
   shouldApplyProcessMapCommit,
   shouldApplyProcessMapMutationAck,
+  transparentVectorRefinementStrategy,
 } from "../../../../frontend/src/modules/process-map/processMapInteraction.js";
 
-const explorerRows = [
-  {
-    company_id: "company-1",
-    entity_id: "folder-1",
-    entity_type: "folder" as const,
-    name: "Logic Gates",
-    position: 1000,
-    created_timestamp: "created",
-    updated_timestamp: "created",
-  },
-  {
-    company_id: "company-1",
-    entity_id: "folder-2",
-    entity_type: "folder" as const,
-    name: "Finance",
-    position: 2000,
-    created_timestamp: "created",
-    updated_timestamp: "created",
-  },
-  {
-    company_id: "company-1",
-    entity_id: "edge-gate-1",
-    entity_type: "logic_gate" as const,
-    resource_id: "gate-1",
-    name: "Review",
-    position: 3000,
-    created_timestamp: "created",
-    updated_timestamp: "created",
-  },
-  {
-    company_id: "company-1",
-    entity_id: "edge-project-1",
-    entity_type: "project" as const,
-    resource_id: "project-1",
-    name: "Ignored project",
-    position: 4000,
-    created_timestamp: "created",
-    updated_timestamp: "created",
-  },
-];
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
-test("Process Map tray reuses only the exact current Explorer branch and existing drag payload", () => {
-  assert.deepEqual(
-    processMapTrayCandidates(explorerRows, undefined, new Set()),
-    [
-      {
-        resource: { resource_type: "company_explorer_folder", resource_id: "folder-1" },
-        label: "Processes",
-        dragPayload: { kind: "folder", label: "Processes", folderID: "folder-1", folderKind: "logic_gate" },
-      },
-      {
-        resource: { resource_type: "company_explorer_folder", resource_id: "folder-2" },
-        label: "Finance",
-        dragPayload: { kind: "folder", label: "Finance", folderID: "folder-2", folderKind: "logic_gate" },
-      },
-    ],
-    "the root tray includes root Folders only and keeps the established Process label",
-  );
-
-  const unavailable = new Set([
-    processMapResourceNodeID({ resource_type: "company_explorer_folder", resource_id: "folder-2" }),
-  ]);
-  assert.deepEqual(
-    processMapTrayCandidates([...explorerRows, explorerRows[2]], "parent-folder", unavailable),
-    [
-      {
-        resource: { resource_type: "company_explorer_folder", resource_id: "folder-1" },
-        label: "Processes",
-        dragPayload: { kind: "folder", label: "Processes", folderID: "folder-1", folderKind: "logic_gate" },
-      },
-      {
-        resource: { resource_type: "logic_gate", resource_id: "gate-1" },
-        label: "Review",
-        dragPayload: { kind: "logic_gate", label: "Review", itemID: "gate-1", itemType: "logic_gate" },
-      },
-    ],
-    "a Folder tray includes immediate Folders and Processes once, excluding current placements and unsupported rows",
-  );
-});
-
-test("Process Map accepts only exact manual Explorer resources in valid layers", () => {
+test("exact Explorer payloads may place Folders or Processes at root or in the deepest chosen map fence", () => {
   assert.deepEqual(
     decideProcessMapExplorerDrop({ kind: "folder", label: " Finance ", folderID: " folder-1 ", folderKind: "logic_gate" }),
     {
       kind: "place",
       resource: { resource_type: "company_explorer_folder", resource_id: "folder-1" },
       label: "Finance",
-      mapParentFolderID: null,
     },
   );
   assert.deepEqual(
-    decideProcessMapExplorerDrop({ kind: "logic_gate", label: " Review ", itemID: " gate-1 ", itemType: "logic_gate" }, "folder-1"),
+    decideProcessMapExplorerDrop({ kind: "logic_gate", label: " Review ", itemID: " gate-1 ", itemType: "logic_gate" }),
     {
       kind: "place",
       resource: { resource_type: "logic_gate", resource_id: "gate-1" },
       label: "Review",
-      mapParentFolderID: "folder-1",
     },
-  );
-  assert.equal(
-    decideProcessMapExplorerDrop({ kind: "logic_gate", label: "Review", itemID: "gate-1", itemType: "logic_gate" }).kind,
-    "reject",
-  );
-  assert.equal(
-    decideProcessMapExplorerDrop({ kind: "folder", label: "Finance", folderID: "folder-1", folderKind: "logic_gate" }, "folder-1").kind,
-    "reject",
+    "Processes are valid company-root placements",
   );
   assert.deepEqual(
-    decideProcessMapExplorerDrop({ kind: "project", itemID: "project-1", itemType: "project" }, "folder-1"),
-    { kind: "ignore" },
+    decideProcessMapExplorerDrop({ kind: "folder", label: "Finance", folderID: "folder-1", folderKind: "logic_gate" }),
+    {
+      kind: "place",
+      resource: { resource_type: "company_explorer_folder", resource_id: "folder-1" },
+      label: "Finance",
+    },
+    "the Explorer payload carries identity only; map containment is decided from final geometry",
   );
   assert.deepEqual(
-    decideProcessMapExplorerDrop({ kind: "batch", items: [{ itemID: "gate-1", itemType: "logic_gate" }] }, "folder-1"),
+    decideProcessMapExplorerDrop({ kind: "project", itemID: "project-1", itemType: "project" }),
     { kind: "ignore" },
   );
 });
 
-test("single-click selection excludes restricted cards and double-click drill-in is Folder-only", () => {
-  assert.equal(
-    processMapFolderDrillTarget({ resource_type: "company_explorer_folder", resource_id: "folder-1" }),
-    "folder-1",
-  );
-  assert.equal(processMapFolderDrillTarget({ resource_type: "logic_gate", resource_id: "gate-1" }), null);
-  assert.equal(processMapFolderDrillTarget(null), null);
-});
-
-test("connections require distinct cards and the fixed output-to-input direction", () => {
+test("connections keep exact directed endpoint identities", () => {
   assert.equal(isValidProcessMapConnection({ source: "folder-1", target: "gate-1", sourceHandle: "output", targetHandle: "input" }), true);
   assert.equal(isValidProcessMapConnection({ source: "folder-1", target: "folder-1", sourceHandle: "output", targetHandle: "input" }), false);
   assert.equal(isValidProcessMapConnection({ source: "folder-1", target: "gate-1", sourceHandle: "input", targetHandle: "output" }), false);
   assert.equal(isValidProcessMapConnection({ source: null, target: "gate-1", sourceHandle: "output", targetHandle: "input" }), false);
 });
 
-test("optimistic saves apply committed revisions in order and only the latest failed save rolls back", () => {
+test("mutation acknowledgements cannot replace a newer canonical generation", () => {
   assert.equal(shouldApplyProcessMapCommit(3, 4), true);
   assert.equal(shouldApplyProcessMapCommit(4, 4), true);
   assert.equal(shouldApplyProcessMapCommit(4, 3), false);
   assert.equal(shouldApplyProcessMapMutationAck(4, 4, 3, 3), true);
-  assert.equal(shouldApplyProcessMapMutationAck(4, 5, 3, 3), false, "a canonical refresh supersedes a delayed ACK even if its row revision resets");
-  assert.equal(shouldApplyProcessMapMutationAck(4, 4, 2, 3), false, "a newer mixed operation supersedes an older ACK for the same resource");
+  assert.equal(shouldApplyProcessMapMutationAck(4, 5, 3, 3), false);
+  assert.equal(shouldApplyProcessMapMutationAck(4, 4, 2, 3), false);
+});
+
+test("camera settlement waits for one quiet, all-inactive generation", async () => {
+  let settled = 0;
+  const gate = createProcessMapSettlementGate({ delayMs: 15, onSettle: () => { settled += 1; } });
+  try {
+    gate.onInteractionStateChange({ isDragging: false, isPanning: false, isZooming: true, inTransition: false });
+    gate.onViewStateChange();
+    await wait(4);
+    gate.onViewStateChange();
+    await wait(4);
+    gate.onViewStateChange();
+    await wait(20);
+    assert.equal(settled, 0, "quiet-period expiry cannot load while deck still reports interaction");
+
+    gate.onInteractionStateChange({ isDragging: false, isPanning: false, isZooming: false, inTransition: false });
+    await wait(1);
+    assert.equal(settled, 1, "release settles even when it produces no final view event");
+
+    gate.onViewStateChange();
+    gate.onViewStateChange();
+    gate.onViewStateChange();
+    await wait(20);
+    assert.equal(settled, 2, "a wheel burst produces one settled generation, not one per tick");
+  } finally {
+    gate.dispose();
+  }
+});
+
+test("wheel zoom changes scale while preserving the current camera center", () => {
+  const current = { target: [120, -40, 0] as [number, number, number], zoom: 2, minZoom: -24, maxZoom: 24 };
+  const pointerAnchoredProposal = { target: [135, -25, 0] as [number, number, number], zoom: 3, minZoom: -24, maxZoom: 24 };
+  const centered = centerProcessMapZoom(current, pointerAnchoredProposal);
+  assert.deepEqual(centered.target, current.target);
+  assert.equal(centered.zoom, 3);
+  assert.equal(centered.minZoom, -24);
+  assert.equal(centered.maxZoom, 24);
+});
+
+test("transparent-vector refinement keeps one loaded covering level until the complete replacement is ready", () => {
+  const tiles: Parameters<typeof transparentVectorRefinementStrategy>[0] = [
+    { index: { x: 0, y: 0, z: 0 }, isSelected: false, isVisible: false, isLoaded: true, content: { level: "coarse" } },
+    { index: { x: 0, y: 0, z: 1 }, isSelected: true, isVisible: true, isLoaded: true, content: { level: "fine" } },
+    { index: { x: 1, y: 0, z: 1 }, isSelected: true, isVisible: true, isLoaded: true, content: { level: "fine" } },
+    { index: { x: 0, y: 1, z: 1 }, isSelected: true, isVisible: true, isLoaded: true, content: { level: "fine" } },
+    { index: { x: 1, y: 1, z: 1 }, isSelected: true, isVisible: true, isLoaded: true, content: null },
+  ];
+
+  transparentVectorRefinementStrategy(tiles);
+  assert.equal(tiles[0].isVisible, true);
+  assert.deepEqual(tiles.slice(1).map((tile) => tile.isVisible), [false, false, false, false], "a selected null-content tile cannot replace valid coarse geometry");
+
+  tiles[4].content = { level: "fine" };
+  transparentVectorRefinementStrategy(tiles);
+  assert.equal(tiles[0].isVisible, false);
+  assert.deepEqual(tiles.slice(1).map((tile) => tile.isVisible), [true, true, true, true]);
+
+  tiles[4].content = null;
+  transparentVectorRefinementStrategy(tiles);
+  assert.equal(tiles[0].isVisible, true, "failed or unavailable finer coverage retains valid coarse geometry");
+  assert.deepEqual(tiles.slice(1).map((tile) => tile.isVisible), [false, false, false, false]);
 });
