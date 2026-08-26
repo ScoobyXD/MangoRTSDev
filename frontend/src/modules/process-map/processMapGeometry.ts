@@ -11,8 +11,6 @@ export const PROCESS_MAP_PROCESS_MIN_HEIGHT = 1;
 export const PROCESS_MAP_FOLDER_MIN_WIDTH = 2;
 export const PROCESS_MAP_FOLDER_MIN_HEIGHT = 2;
 export const PROCESS_MAP_MAX_DIMENSION = 1_000_000;
-export const PROCESS_MAP_TRACE_MIN_WIDTH_PX = 2;
-export const PROCESS_MAP_TRACE_MAX_WIDTH_PX = 24;
 export const PROCESS_MAP_RESTRICTED_WIDTH = 4;
 export const PROCESS_MAP_RESTRICTED_HEIGHT = 3;
 export const PROCESS_MAP_TILE_SIZE = 256;
@@ -234,13 +232,6 @@ export function processMapInputAnchor(placement: ProcessMapPlacementGeometry): P
 
 export function processMapOutputAnchor(placement: ProcessMapPlacementGeometry): ProcessMapGridPoint {
   return { x: placement.grid_x + placement.grid_width, y: placement.grid_y + placement.grid_height / 2 };
-}
-
-export function processMapTraceWidth(
-  source: Pick<ProcessMapPlacementGeometry, "grid_width" | "grid_height"> & { resource_type: ProcessMapResourceType },
-): number {
-  const baselineHeight = source.resource_type === "company_explorer_folder" ? 7 : 5;
-  return Math.min(source.grid_width / 7, source.grid_height / baselineHeight);
 }
 
 function samePoint(left: ProcessMapGridPoint, right: ProcessMapGridPoint): boolean {

@@ -75,7 +75,6 @@ function trace(source: ProcessMapVisiblePlacement, target: ProcessMapVisiblePlac
     resource_operational_relationship_id: "relationship-1",
     source: { resource_type: source.resource_type, resource_id: source.resource_id },
     target: { resource_type: target.resource_type, resource_id: target.resource_id },
-    trace_width: 1,
     route_points: [{ x: 15, y: 3 }],
     path_fragments: [[{ x: 10, y: 3 }, { x: 20, y: 3 }]],
     revision: 4,
@@ -332,7 +331,7 @@ test("every Process Map PathLayer declares and yields flat XY geometry", () => {
   const source = placement("source", 10, 10);
   const target = placement("target", 40, 10);
   const folder = placement("folder", 0, 0, 80, 60, "company_explorer_folder");
-  const relationship = { ...trace(source, target), trace_width: 3 };
+  const relationship = trace(source, target);
   const tileData: ProcessMapTileResponse = {
     z: 22,
     x: 0,
@@ -356,8 +355,10 @@ test("every Process Map PathLayer declares and yields flat XY geometry", () => {
     "xy-tile-restricted-perimeters",
   ]) assertFlatXYPathLayer(layerByID(tileLayers, id));
   const tiledTraceLayer = layerByID(tileLayers, "xy-tile-traces");
-  assert.equal(tiledTraceLayer.props.widthUnits, "common");
-  assert.ok((tiledTraceLayer.props.data as Array<{ width: number }>).every((item) => item.width === 3), "tile traces use the server-derived source width");
+  assert.equal(tiledTraceLayer.props.widthUnits, "pixels");
+  assert.equal(tiledTraceLayer.props.widthMinPixels, 2);
+  assert.equal(tiledTraceLayer.props.widthMaxPixels, Number.MAX_SAFE_INTEGER, "normal traces keep deck.gl's unbounded pixel-width default");
+  assert.ok((tiledTraceLayer.props.data as Array<{ width: number }>).every((item) => item.width === 3), "tile traces keep the established fixed screen width");
 
   const presentation: ProcessMapPresentationState = {
     placements: new Map([
@@ -387,9 +388,11 @@ test("every Process Map PathLayer declares and yields flat XY geometry", () => {
   const editTraceLayer = layerByID(editLayers, "process-map-edit-traces");
   assertFlatXYPathLayer(editTraceLayer);
   assertFlatXYPathLayer(layerByID(editLayers, "process-map-edit-folder-fences"));
-  const editTraceData = editTraceLayer.props.data as Array<{ path: [number, number][]; color: number[] }>;
+  const editTraceData = editTraceLayer.props.data as Array<{ path: [number, number][]; color: number[]; width: number }>;
   assert.ok(editTraceData.every((item) => item.color.join(",") === "38,195,234,220"), "saved and pending traces retain one static cyan-blue treatment");
   assert.ok(editTraceData.every((item) => item.path.slice(1).every((point, index) => point[0] === item.path[index][0] || point[1] === item.path[index][1])), "saved and pending traces contain only horizontal or vertical segments");
+  assert.equal(editTraceData[0].width, 4, "the selected trace keeps the established fixed edit width");
+  assert.equal(editTraceData[editTraceData.length - 1]?.width, 3, "the connection preview keeps the established fixed width");
 });
 
 test("declared presentation ceilings suppress labels and waypoints above authorized detail", () => {
@@ -661,10 +664,10 @@ test("an active connection keeps only the source output and distinct eligible ta
   const firstEnd = previewData[0].path[1];
   assert.equal(firstEnd[1], start[1], "the preview exits horizontally before its first bend");
   assert.ok(firstEnd[0] > start[0], "the preview first moves out from the source's right edge");
-  assert.ok(previewData.every((item) => item.width === 1.2), "preview width follows the source Process dimensions");
-  assert.equal(preview.props.widthUnits, "common");
+  assert.ok(previewData.every((item) => item.width === 3), "preview width stays fixed in screen pixels");
+  assert.equal(preview.props.widthUnits, "pixels");
   assert.equal(preview.props.widthMinPixels, 2);
-  assert.equal(preview.props.widthMaxPixels, 24);
+  assert.equal(preview.props.widthMaxPixels, Number.MAX_SAFE_INTEGER, "the preview keeps deck.gl's unbounded pixel-width default");
   assert.ok(
     layers.indexOf(preview) < layers.indexOf(layerByID(layers, "process-map-spatial-tiles")),
     "the pending trace remains below placement bodies",
@@ -901,7 +904,6 @@ test("representative large-company transport and presentation stay byte-, reques
         resource_operational_relationship_id: `tile-${tileX}-relationship-${index}`,
         source: { resource_type: source.resource_type, resource_id: source.resource_id },
         target: { resource_type: target.resource_type, resource_id: target.resource_id },
-        trace_width: 1,
         route_points: [],
         path_fragments: [[
           { x: source.grid_x + source.grid_width, y: source.grid_y + source.grid_height / 2 },

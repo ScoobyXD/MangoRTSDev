@@ -520,7 +520,7 @@ func TestProcessMapHTTPTileRejectsPreviousRepresentationETag(t *testing.T) {
 	fixture := newProcessMapHTTPFixture(t)
 	path := "/v1/process-map/tiles/22/0/0?company_id=" + url.QueryEscape(fixture.companyID)
 	request := httptest.NewRequest(http.MethodGet, path, nil)
-	legacyETag, err := fixture.server.processMapETag(request, fixture.companyID, fixture.viewer.UserID, domain.RoleCompanyUser, "process-map-tile-v3")
+	legacyETag, err := fixture.server.processMapETag(request, fixture.companyID, fixture.viewer.UserID, domain.RoleCompanyUser, "process-map-tile-v5")
 	if err != nil {
 		t.Fatal(err)
 	}

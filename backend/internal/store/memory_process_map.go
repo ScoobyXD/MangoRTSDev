@@ -239,7 +239,7 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 		result.Traces = append(result.Traces, domain.ProcessMapTileTrace{
 			ResourceOperationalRelationshipID: relationship.ResourceOperationalRelationshipID,
 			Presentation:                      presentation,
-			Source:                            relationship.Source, Target: relationship.Target, TraceWidth: processMapTraceWidth(source), RoutePoints: routePoints,
+			Source:                            relationship.Source, Target: relationship.Target, RoutePoints: routePoints,
 			PathFragments: fragments, Revision: trace.Revision,
 			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
 		})

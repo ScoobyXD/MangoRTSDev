@@ -393,7 +393,6 @@ order by relationship.resource_operational_relationship_id`,
 		if trace.RoutePoints == nil {
 			trace.RoutePoints = []domain.ProcessMapRoutePoint{}
 		}
-		source.ResourceType = relationship.Source.ResourceType
 		fragments := processMapClipPath(processMapTracePath(source, target, trace.RoutePoints), tileBounds)
 		if len(fragments) == 0 {
 			continue
@@ -409,7 +408,7 @@ order by relationship.resource_operational_relationship_id`,
 		result.Traces = append(result.Traces, domain.ProcessMapTileTrace{
 			ResourceOperationalRelationshipID: relationship.ResourceOperationalRelationshipID,
 			Presentation:                      presentation,
-			Source:                            relationship.Source, Target: relationship.Target, TraceWidth: processMapTraceWidth(source), RoutePoints: routePoints,
+			Source:                            relationship.Source, Target: relationship.Target, RoutePoints: routePoints,
 			PathFragments: fragments, Revision: trace.Revision,
 			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
 		})
