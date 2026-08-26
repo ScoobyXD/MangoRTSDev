@@ -90,6 +90,7 @@ test("tile presentation normalizes omitted whole names and coarse trace routes",
       resource_operational_relationship_id: "coarse-trace",
       source: { resource_type: "logic_gate", resource_id: "source" },
       target: { resource_type: "logic_gate", resource_id: "target" },
+      trace_width: 1.2,
       path_fragments: [[{ x: 16, y: 14.5 }, { x: 40, y: 14.5 }]],
       revision: 3,
       created_timestamp: "created",
@@ -133,6 +134,7 @@ test("tile parser rejects missing or invalid presentation ceilings", async () =>
     resource_operational_relationship_id: "trace-1",
     source: { resource_type: "logic_gate", resource_id: "source" },
     target: { resource_type: "logic_gate", resource_id: "target" },
+    trace_width: 1,
     route_points: [],
     path_fragments: [[{ x: 8, y: 4 }, { x: 20, y: 4 }]],
     revision: 1,
@@ -359,7 +361,7 @@ test("committed placement mutations send saved dimensions and return the complet
   }
 });
 
-test("connection creation always commits an owned trace, including the empty default route", async () => {
+test("connection creation serializes only exact endpoint identities and commits an owned trace", async () => {
   const apiBase = "https://process-map-connection.test";
   const originalFetch = globalThis.fetch;
   let requestBody: unknown;
@@ -381,11 +383,33 @@ test("connection creation always commits an owned trace, including the empty def
     }), { status: 201, headers: { "content-type": "application/json" } });
   }) as typeof fetch;
   try {
+    const source = {
+      resource_type: "logic_gate" as const,
+      resource_id: "source",
+      restricted: false,
+      presentation: "editing",
+      name: "Source placement",
+      grid_x: 1,
+      grid_y: 2,
+      grid_width: 7,
+      grid_height: 5,
+    };
+    const target = {
+      resource_type: "logic_gate" as const,
+      resource_id: "target",
+      restricted: false,
+      presentation: "editing",
+      name: "Target placement",
+      grid_x: 20,
+      grid_y: 8,
+      grid_width: 7,
+      grid_height: 5,
+    };
     const envelope = await postProcessMapRelationship(
       apiBase,
       "company-1",
-      { resource_type: "logic_gate", resource_id: "source" },
-      { resource_type: "logic_gate", resource_id: "target" },
+      source,
+      target,
       [],
     );
     assert.deepEqual(requestBody, {

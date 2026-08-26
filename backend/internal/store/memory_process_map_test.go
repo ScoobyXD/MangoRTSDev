@@ -24,6 +24,31 @@ func processMapTestRef(resourceType, resourceID string) domain.ProcessMapResourc
 	return domain.ProcessMapResourceRef{ResourceType: resourceType, ResourceID: resourceID}
 }
 
+func TestProcessMapTraceWidthUsesSourcePlacementGeometry(t *testing.T) {
+	tests := []struct {
+		name         string
+		resourceType string
+		width        int
+		height       int
+		want         float64
+	}{
+		{name: "Process", resourceType: domain.ProcessMapResourceTypeProcess, width: 14, height: 15, want: 2},
+		{name: "Folder", resourceType: domain.ProcessMapResourceTypeFolder, width: 21, height: 14, want: 2},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := processMapTraceWidth(domain.ProcessMapPlacement{
+				ResourceType: test.resourceType,
+				GridWidth:    test.width,
+				GridHeight:   test.height,
+			})
+			if got != test.want {
+				t.Fatalf("trace width = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func requireProcessMapRelationshipEventIdentities(t *testing.T, events []domain.DomainEvent, relationship domain.ResourceOperationalRelationship) {
 	t.Helper()
 	if len(events) == 0 {
@@ -218,14 +243,23 @@ func TestMemoryProcessMapFolderGroupMoveResizeAndEnvelopes(t *testing.T) {
 	if internalRoute[0] != (domain.ProcessMapRoutePoint{X: 30, Y: 20}) || externalRoute[0] != (domain.ProcessMapRoutePoint{X: 80, Y: 13}) {
 		t.Fatalf("route movement internal=%+v external=%+v", internalRoute, externalRoute)
 	}
+	resizedFromNorthWest, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 105, 87))
+	if err != nil || len(resizedFromNorthWest.Placements) != 1 || len(resizedFromNorthWest.Traces) != 0 {
+		t.Fatalf("north-west resize envelope = %+v, err=%v", resizedFromNorthWest, err)
+	}
+	childAfterResize := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, insideA.LogicGateID)]
+	internalRouteAfterResize := repo.processMapTraces[key(companyID, internal.Relationship.ResourceOperationalRelationshipID)].RoutePoints
+	if childAfterResize.GridX != 15 || childAfterResize.GridY != 17 || internalRouteAfterResize[0] != (domain.ProcessMapRoutePoint{X: 30, Y: 20}) {
+		t.Fatalf("north-west resize moved contents: child=%+v route=%+v", childAfterResize, internalRouteAfterResize)
+	}
 	before := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folder.FolderID)]
-	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 5, 7, 20, 20)); !errors.Is(err, ErrProcessMapContainment) {
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 20, 20)); !errors.Is(err, ErrProcessMapContainment) {
 		t.Fatalf("invalid resize error = %v", err)
 	}
 	if after := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folder.FolderID)]; after != before {
 		t.Fatalf("failed resize was not atomic: before=%+v after=%+v", before, after)
 	}
-	resized, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 5, 7, 120, 90))
+	resized, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 120, 90))
 	if err != nil || len(resized.Placements) != 1 || len(resized.Traces) != 0 || resized.Placements[0].GridWidth != 120 {
 		t.Fatalf("resize envelope = %+v, err=%v", resized, err)
 	}
@@ -279,6 +313,9 @@ func TestMemoryProcessMapTileDerivesOrthogonalTraceFragments(t *testing.T) {
 				t.Fatalf("tile traces = %+v, err=%v", tile.Traces, err)
 			}
 			trace := tile.Traces[0]
+			if trace.TraceWidth != 1.2 {
+				t.Fatalf("trace width=%v, want 1.2 from the source placement", trace.TraceWidth)
+			}
 			if trace.Presentation != domain.ProcessMapPresentationEditing {
 				t.Fatalf("trace presentation=%q, want editing", trace.Presentation)
 			}

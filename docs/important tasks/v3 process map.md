@@ -106,7 +106,7 @@ grid_height
 
 Coordinates and dimensions are canonical manual map facts. They are not pixels, CSS values, latitude/longitude, deck.gl state, or derived Explorer data.
 
-Folders render as resizable transparent fences with a colored perimeter. Processes render as resizable neutral cards with the existing green Process outline. Initial drop sizes are defaults only; they are not permanent type-wide mandated dimensions. Restricted placements retain one uniform permission-safe placeholder size and never reveal their real type or dimensions.
+Folders render as transparent fences with a colored perimeter and no opaque or invisible interior hit surface over contained placements. A Folder's visible name and perimeter select and move it, and its selected corner grips resize it. Processes render as movable, resizable neutral elevated cards with the existing green Process outline and a subtle presentation shadow. Map and tray rows show the current source name without adding a redundant `Folder` or `Process` caption; the existing icon, outline, and orange or green treatment retain type identity. Initial Folder and Process sizes are separate defaults derived once from the current settled camera scale and snapped to positive integer grid dimensions, with the Process smaller and shorter than the Folder at the same scale. They do not start ongoing automatic resizing. Restricted placements retain one uniform permission-safe placeholder size and never reveal their real type or dimensions.
 
 Moving a Folder moves its recursively contained placements by the same company-world delta as one committed map operation. A saved trace whose two endpoints are both in that moved set translates every intermediate route point by the same delta exactly once; a trace with only one moved endpoint keeps its global intermediate route points and reconnects through the endpoint's newly derived anchor. Resizing a Folder does not automatically scale, rearrange, or relayout its contents and may not finish with a recursively contained placement outside the fence. No ongoing automatic layout or collision repair runs.
 
@@ -222,7 +222,7 @@ GET /v1/process-map/tiles/{z}/{x}/{y}?company_id={company_id}
 
 The scene response contains only permission-safe camera and tile metadata required to initialize the canvas, including the current display bounds and tile/read version. It is not a whole-company business graph or copied Explorer tree.
 
-The tile response contains only the placements, clipped trace geometry, labels, and presentation fields needed for that tile's LOD. It must never return full Process documents, Node data, QDC history, email data, tasks, attachments, the complete Company Explorer tree, or generic relationship graphs.
+The tile response contains only the placements, clipped trace geometry, labels, and presentation fields needed for that tile's LOD. Each accessible trace includes a positive presentation-only `trace_width` derived from its current source placement size so every clipped tile fragment uses one consistent source-sized width; that value is not stored trace geometry or relationship authority. Adding or changing that field or its derivation advances the tile response-contract validator before an older ETag can reuse a pre-change body through `304`. The response must never return full Process documents, Node data, QDC history, email data, tasks, attachments, the complete Company Explorer tree, or generic relationship graphs.
 
 Existing exact mutation meanings remain:
 
@@ -261,14 +261,14 @@ Tile boundaries, cache reuse, parent refinement, stable feature handling, and re
 
 Reuse the existing exact-resource Company Explorer drag payload. Do not create another resource identity or drag format.
 
-The fixed left placement tray locates authorized Folders and Processes, while the one Process Map header's shared Universal picker remains locked to authorized Processes. Expanded, the tray shows `Root Folders` or the current Folder, a simple back treatment, `Drag to place`, one internally scrolling Explorer-style list, warm orange Folder cards, and green Process cards using the existing Explorer icons. A Folder card is one unified row: dragging emits the exact existing Explorer payload, while clicking browses that authorized branch without placing it. A Process card uses the existing Logic Gate identity under the product name Process and has no second category. The expanded control points left; the collapsed tray is one genuinely narrow tab whose control points right. The browser-local collapsed preference remains local, and a collapsed tray performs no candidate reads.
+The fixed left placement tray locates authorized Folders and Processes, while the one Process Map header's shared Universal picker remains locked to authorized Processes. Expanded, the tray shows `Root Folders` or the current Folder, a simple back treatment, `Drag to place`, one internally scrolling Explorer-style list, warm orange Folder cards, and green Process cards using the existing Explorer icons. Each row shows only the current source name; its icon and orange or green treatment identify the type without a repeated `Folder` or `Process` caption. A Folder card is one unified row: dragging emits the exact existing Explorer payload, while clicking browses that authorized branch without placing it. A Process card uses the existing Logic Gate identity under the product name Process and has no second category. The expanded control points left; the collapsed tray is one genuinely narrow tab whose control points right. The browser-local collapsed preference remains local, and a collapsed tray performs no candidate reads.
 
 Explorer branch membership is only candidate organization. It never chooses the map parent. Branch browsing must reuse existing bounded permission-safe root-or-child reads, clear stale rows while the next branch loads, and must not download the entire Explorer tree or add a candidate API.
 
 On drop or drag stop:
 
 1. Convert the pointer through the one deck.gl OrthographicView into company-world grid coordinates.
-2. Snap position and dimensions to the smallest grid.
+2. Derive the selected resource type's initial dimensions once from the current settled camera scale, keep the Process default smaller and shorter than the Folder default, and snap position and dimensions to the smallest grid.
 3. Identify and visibly highlight the deepest eligible mapped Folder fence under the final placement.
 4. Reject self-parenting and Folder cycles.
 5. Save the chosen map parent and geometry once, at gesture completion.
@@ -291,7 +291,9 @@ Every accessible placement has exactly one presentation-defined input anchor and
 
 Hovering an accessible placement or either of its revealed anchors at editing detail, regardless of the Process data-card Hover mode, or selecting that placement reveals only its left input and right output. Hover alone does not reveal resize grips. Starting at the output keeps that source output visible, reveals and clearly highlights only distinct eligible target inputs, and draws one static orthogonal cyan-to-blue preview. Leaving hides hover-only anchors. Dropping on or reasonably near a valid target input creates or selects the canonical directed operational relationship and trace. Completion, invalid drop, Escape, camera change, and permission change clear the connection gesture, temporary anchors, target highlights, and source selection.
 
-The trace route stores only ordered intermediate global integer grid points. Endpoint coordinates remain derived. Trace tiles clip the canonical route for rendering without rewriting it.
+The trace route stores only ordered intermediate global integer grid points. Endpoint coordinates remain derived. A default saved route and pending preview leave the source output horizontally before the first bend and enter the target input horizontally after the final bend. Those egress and approach segments are derived presentation and are not added to saved route points. Trace tiles clip the canonical route for rendering without rewriting it.
+
+Trace width is also derived presentation. Its requested width comes from the current saved size of the source placement, the renderer bounds that width to one perceptible screen-space minimum and maximum, and the tile contract carries the positive derived `trace_width` so fragments remain consistent even when the source placement is outside that tile. No width is written to `process_map_traces`.
 
 Changing a placement's map parent, position, or dimensions preserves the operational relationship and its saved trace. Moving endpoints changes their derived anchor positions. Removing a placement may remove its saved incident trace geometry while preserving the underlying operational relationship. Permanently deleting an endpoint removes its placement, incident operational relationships, and dependent traces through the existing exact-identity lifecycle.
 
@@ -402,9 +404,11 @@ Frontend coverage must prove:
 - permission-safe loaded coverage remains visible through first and later zoom, pan, placement drag, LOD settlement, and the initiating client's committed same-permission read-version replacement, while unclassified remote and protected-permission invalidations still purge immediately;
 - every displayable Process keeps a green cue, every displayable Folder keeps an orange fence, and static traces remain visible at whole-company detail;
 - every Process Map `PathLayer` explicitly declares XY positions and supplies valid two-coordinate paths for Folder fences, Process and restricted outlines, saved and selected traces, connection previews, and selected Folder fences;
-- Folder fences are transparent, colored, resizable, and valid drop targets;
+- Folder names and perimeters select and move their transparent fences, selected corner grips resize them, and no opaque or invisible Folder interior blocks contained placements;
+- Process cards remain neutral elevated surfaces with a subtle shadow, support move and resize, and map and tray labels show only source names while existing icons, outlines, and colors retain type identity;
+- initial Folder and Process drop dimensions derive from the settled camera scale, snap to positive integer grid sizes, and keep the Process smaller and shorter than the Folder at the same scale;
 - candidate Explorer hierarchy does not choose map containment;
-- drag, move, group move, resize, reparent, selection, hover-visible placement anchors, selected-placement resize grips, active-connection target inputs, static traces, waypoints, QDC cards, Process modal open/close, and failure rollback work;
+- drag, move, group move, resize, reparent, selection, hover-visible placement anchors, selected-placement resize grips, active-connection target inputs, source-horizontal default egress, target-horizontal default entry, source-size-derived bounded trace width, static traces, waypoints, QDC cards, Process modal open/close, and failure rollback work;
 - the expanded and collapsed Explorer-style tray, collapsed-read suppression, Folder browse-versus-drag behavior, exact Explorer payload, and internal scrolling work;
 - hovered placements retain their anchors while the pointer enters a revealed anchor, active connection previews and eligible target inputs remain visible, near-target drops commit the canonical relationship and trace, and leaving, completion, invalid drop, cancellation, camera change, and permission change clear the applicable temporary controls;
 - every group-move response contains all committed placement and trace revisions required for immediate reconciliation;

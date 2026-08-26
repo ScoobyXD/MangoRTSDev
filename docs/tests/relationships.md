@@ -224,7 +224,7 @@ An editor maps an exact Company Explorer Folder or Process without changing its 
 ↓
 Mango stores that exact typed identity and its independent map parent, global grid position, and dimensions in `process_map_placements`
 ↓
-Drawing a trace atomically creates or reuses one exact directed `resource_operational_relationships` edge and stores only its ordered route points in `process_map_traces`
+Drawing a trace sends only the exact source and target `{resource_type, resource_id}` pairs, atomically creates or reuses that one directed `resource_operational_relationships` edge, and stores only its ordered route points in `process_map_traces`
 ↓
 Fan-out and fan-in remain several pairwise operational edges whose trace routes may overlap visually without creating a junction resource or another relationship meaning
 ↓
@@ -513,7 +513,7 @@ One exact typed resource has at most one company Process Map placement. Company 
 
 ### Law 35 — Resource operational relationships are exact directed pairwise edges
 
-`resource_operational_relationships` MUST be the sole canonical authority for directed Folder-to-Folder, Folder-to-Process, Process-to-Folder, and Process-to-Process operational flow. Every row stores the exact same-company typed source and target IDs, rejects a self-edge, and has one semantic edge for one exact directed endpoint pair; repeating the same creation command returns or reuses that edge instead of inserting a duplicate.
+`resource_operational_relationships` MUST be the sole canonical authority for directed Folder-to-Folder, Folder-to-Process, Process-to-Folder, and Process-to-Process operational flow. Every row stores the exact same-company typed source and target IDs, rejects a self-edge, and has one semantic edge for one exact directed endpoint pair; repeating the same creation command returns or reuses that edge instead of inserting a duplicate. Every create transport MUST carry `source` and `target` as objects containing exactly `{resource_type, resource_id}` and MUST NOT carry a placement, label, geometry, permission, or alternate endpoint identity.
 
 The source and target of an operational relationship are immutable. Changing either endpoint or reversing direction deletes the old edge and its trace before creating a new edge and trace. The Process-to-Process meaning formerly owned by `logic_gate_relationships` MUST move through one forward-only cutover before `resource_operational_relationships` becomes live authority, with no dual writer, compatibility reader, fallback, or second live Process-flow authority afterward. Removing one operational edge deletes neither endpoint, placement, permission, RACI assignment, nor organizational parent.
 

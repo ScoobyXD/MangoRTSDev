@@ -223,7 +223,7 @@ func TestPostgresProcessMapRepositoryLifecycle(t *testing.T) {
 
 func TestPostgresProcessMapFolderResizeDoesNotRequireUnmovedDescendantAccess(t *testing.T) {
 	ctx := context.Background()
-	_, repo := openPostgresProcessMapIntegration(t)
+	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Process Map Folder resize permission test")
 	if err != nil {
 		t.Fatal(err)
@@ -250,14 +250,30 @@ func TestPostgresProcessMapFolderResizeDoesNotRequireUnmovedDescendantAccess(t *
 	if err != nil {
 		t.Fatal(err)
 	}
+	peer, err := repo.CreateLogicGate(company.CompanyID, "Visible Peer")
+	if err != nil {
+		t.Fatal(err)
+	}
 	parentID := folder.FolderID
 	for _, input := range []ProcessMapPlacementPutInput{
 		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 50, 40),
 		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, child.LogicGateID, &parentID, 10, 10, 10, 6),
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, peer.LogicGateID, &parentID, 30, 10, 10, 6),
 	} {
 		if _, err := repo.PutProcessMapPlacement(ctx, input); err != nil {
 			t.Fatal(err)
 		}
+	}
+	route := []domain.ProcessMapRoutePoint{{X: 24, Y: 13}, {X: 28, Y: 13}}
+	created, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
+		CompanyID:   company.CompanyID,
+		Source:      processMapTestRef(domain.ProcessMapResourceTypeProcess, child.LogicGateID),
+		Target:      processMapTestRef(domain.ProcessMapResourceTypeProcess, peer.LogicGateID),
+		Trace:       &ProcessMapTraceInput{RoutePoints: route},
+		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+	})
+	if err != nil || created.Relationship == nil {
+		t.Fatalf("create internal trace = %+v, err=%v", created, err)
 	}
 	noAccess := ResourceDefaultAccessNoAccess
 	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
@@ -269,13 +285,28 @@ func TestPostgresProcessMapFolderResizeDoesNotRequireUnmovedDescendantAccess(t *
 	}
 
 	resized, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
-		company.CompanyID, viewer.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 60, 50,
+		company.CompanyID, viewer.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, -5, -7, 55, 47,
 	))
-	if err != nil || len(resized.Placements) != 1 || resized.Placements[0].GridWidth != 60 {
+	if err != nil || len(resized.Placements) != 1 || len(resized.Traces) != 0 || resized.Placements[0].GridX != -5 || resized.Placements[0].GridY != -7 {
 		t.Fatalf("Folder resize with restricted unmoved child = %+v, err=%v", resized, err)
 	}
+	var childX, childY int
+	if err := db.QueryRow(`select grid_x,grid_y from process_map_placements where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, child.LogicGateID).Scan(&childX, &childY); err != nil {
+		t.Fatal(err)
+	}
+	var routeJSON []byte
+	if err := db.QueryRow(`select route_points from process_map_traces where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`, company.CompanyID, created.Relationship.ResourceOperationalRelationshipID).Scan(&routeJSON); err != nil {
+		t.Fatal(err)
+	}
+	var routeAfterResize []domain.ProcessMapRoutePoint
+	if err := json.Unmarshal(routeJSON, &routeAfterResize); err != nil {
+		t.Fatal(err)
+	}
+	if childX != 10 || childY != 10 || !slices.Equal(routeAfterResize, route) {
+		t.Fatalf("Folder resize moved contents: child=(%d,%d) route=%+v", childX, childY, routeAfterResize)
+	}
 	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
-		company.CompanyID, viewer.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 1, 0, 60, 50,
+		company.CompanyID, viewer.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, -4, -7, 55, 47,
 	)); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Folder group move with restricted child error = %v, want %v", err, ErrNotFound)
 	}

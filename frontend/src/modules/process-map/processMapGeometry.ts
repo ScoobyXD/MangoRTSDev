@@ -2,8 +2,17 @@
 // whole-company fit through editing detail without turning camera or tile state
 // into business data. Tile/cache/request values are deliberately bounded.
 export const PROCESS_MAP_MAX_ROUTE_POINTS = 256;
-export const PROCESS_MAP_DEFAULT_WIDTH = 7;
-export const PROCESS_MAP_DEFAULT_HEIGHT = 5;
+export const PROCESS_MAP_PROCESS_DROP_WIDTH_PX = 196;
+export const PROCESS_MAP_PROCESS_DROP_HEIGHT_PX = 140;
+export const PROCESS_MAP_FOLDER_DROP_WIDTH_PX = 196;
+export const PROCESS_MAP_FOLDER_DROP_HEIGHT_PX = 196;
+export const PROCESS_MAP_PROCESS_MIN_WIDTH = 2;
+export const PROCESS_MAP_PROCESS_MIN_HEIGHT = 1;
+export const PROCESS_MAP_FOLDER_MIN_WIDTH = 2;
+export const PROCESS_MAP_FOLDER_MIN_HEIGHT = 2;
+export const PROCESS_MAP_MAX_DIMENSION = 1_000_000;
+export const PROCESS_MAP_TRACE_MIN_WIDTH_PX = 2;
+export const PROCESS_MAP_TRACE_MAX_WIDTH_PX = 24;
 export const PROCESS_MAP_RESTRICTED_WIDTH = 4;
 export const PROCESS_MAP_RESTRICTED_HEIGHT = 3;
 export const PROCESS_MAP_TILE_SIZE = 256;
@@ -62,6 +71,52 @@ export function snapProcessMapDimensions(width: number, height: number): { width
   return {
     width: Math.max(1, snapProcessMapGridCoordinate(width)),
     height: Math.max(1, snapProcessMapGridCoordinate(height)),
+  };
+}
+
+export function processMapMinimumPlacementDimensions(resourceType: ProcessMapResourceType): { width: number; height: number } {
+  return resourceType === "company_explorer_folder"
+    ? { width: PROCESS_MAP_FOLDER_MIN_WIDTH, height: PROCESS_MAP_FOLDER_MIN_HEIGHT }
+    : { width: PROCESS_MAP_PROCESS_MIN_WIDTH, height: PROCESS_MAP_PROCESS_MIN_HEIGHT };
+}
+
+export function processMapInitialPlacementDimensions(
+  resourceType: ProcessMapResourceType,
+  pixelsPerGridUnit: number,
+): { width: number; height: number } {
+  const scale = Number.isFinite(pixelsPerGridUnit) && pixelsPerGridUnit > 0 ? pixelsPerGridUnit : 1;
+  const target = resourceType === "company_explorer_folder"
+    ? { width: PROCESS_MAP_FOLDER_DROP_WIDTH_PX, height: PROCESS_MAP_FOLDER_DROP_HEIGHT_PX }
+    : { width: PROCESS_MAP_PROCESS_DROP_WIDTH_PX, height: PROCESS_MAP_PROCESS_DROP_HEIGHT_PX };
+  const minimum = processMapMinimumPlacementDimensions(resourceType);
+  return {
+    width: Math.min(PROCESS_MAP_MAX_DIMENSION, Math.max(minimum.width, Math.round(target.width / scale))),
+    height: Math.min(PROCESS_MAP_MAX_DIMENSION, Math.max(minimum.height, Math.round(target.height / scale))),
+  };
+}
+
+export function resizeProcessMapPlacement(
+  placement: ProcessMapPlacementGeometry,
+  resourceType: ProcessMapResourceType,
+  deltaX: number,
+  deltaY: number,
+  horizontal: "west" | "east",
+  vertical: "north" | "south",
+): ProcessMapPlacementGeometry {
+  const minimum = processMapMinimumPlacementDimensions(resourceType);
+  let minX = placement.grid_x;
+  let minY = placement.grid_y;
+  let maxX = placement.grid_x + placement.grid_width;
+  let maxY = placement.grid_y + placement.grid_height;
+  if (horizontal === "west") minX = Math.min(maxX - minimum.width, minX + deltaX);
+  else maxX = Math.max(minX + minimum.width, maxX + deltaX);
+  if (vertical === "north") minY = Math.min(maxY - minimum.height, minY + deltaY);
+  else maxY = Math.max(minY + minimum.height, maxY + deltaY);
+  return {
+    grid_x: minX,
+    grid_y: minY,
+    grid_width: maxX - minX,
+    grid_height: maxY - minY,
   };
 }
 
@@ -181,6 +236,13 @@ export function processMapOutputAnchor(placement: ProcessMapPlacementGeometry): 
   return { x: placement.grid_x + placement.grid_width, y: placement.grid_y + placement.grid_height / 2 };
 }
 
+export function processMapTraceWidth(
+  source: Pick<ProcessMapPlacementGeometry, "grid_width" | "grid_height"> & { resource_type: ProcessMapResourceType },
+): number {
+  const baselineHeight = source.resource_type === "company_explorer_folder" ? 7 : 5;
+  return Math.min(source.grid_width / 7, source.grid_height / baselineHeight);
+}
+
 function samePoint(left: ProcessMapGridPoint, right: ProcessMapGridPoint): boolean {
   return left.x === right.x && left.y === right.y;
 }
@@ -221,6 +283,31 @@ export function orthogonalizeProcessMapRoutePoints(points: readonly ProcessMapGr
     if (orthogonal.length >= PROCESS_MAP_MAX_ROUTE_POINTS) break;
   }
   return orthogonal.slice(0, PROCESS_MAP_MAX_ROUTE_POINTS);
+}
+
+export function defaultProcessMapRoutePoints(
+  source: ProcessMapGridPoint,
+  target: ProcessMapGridPoint,
+): ProcessMapGridPoint[] {
+  const sourceY = snapProcessMapGridCoordinate(source.y);
+  const targetY = snapProcessMapGridCoordinate(target.y);
+  if (source.x >= target.x) {
+    const sourceExitX = snapProcessMapGridCoordinate(source.x + 2);
+    const targetEntryX = snapProcessMapGridCoordinate(target.x - 2);
+    const clearanceY = snapProcessMapGridCoordinate(Math.floor(Math.min(source.y, target.y)) - 3);
+    return normalizeProcessMapRoutePoints([
+      { x: sourceExitX, y: sourceY },
+      { x: sourceExitX, y: clearanceY },
+      { x: targetEntryX, y: clearanceY },
+      { x: targetEntryX, y: targetY },
+    ]).filter((point) => !samePoint(point, source) && !samePoint(point, target));
+  }
+  if (source.y === target.y) return [];
+  const middleX = snapProcessMapGridCoordinate((source.x + target.x) / 2);
+  return normalizeProcessMapRoutePoints([
+    { x: middleX, y: sourceY },
+    { x: middleX, y: targetY },
+  ]).filter((point) => !samePoint(point, source) && !samePoint(point, target));
 }
 
 export function processMapOrthogonalPathPoints(

@@ -2,16 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  defaultProcessMapRoutePoints,
   fitProcessMapViewState,
   normalizeProcessMapRoutePoints,
   orthogonalizeProcessMapRoutePoints,
   processMapDeepestContainingFolder,
   processMapDeckTileSize,
   processMapInputAnchor,
+  processMapInitialPlacementDimensions,
+  processMapOrthogonalPathPoints,
   processMapOutputAnchor,
   processMapPlacementBounds,
   processMapPlacementDisplayLOD,
   processMapPlacementLOD,
+  processMapTraceWidth,
+  resizeProcessMapPlacement,
 } from "../../../../frontend/src/modules/process-map/processMapGeometry.js";
 
 type ContainmentFolder = Parameters<typeof processMapDeepestContainingFolder>[1][number];
@@ -157,4 +162,52 @@ test("trace route helpers keep one bounded ordered integer geometry without diag
     256,
     "local previews use the same hard route bound as committed writes",
   );
+});
+
+test("new trace routes leave the output before bending and approach the input horizontally", () => {
+  const source = { x: 7, y: 2.5 };
+  const target = { x: 20, y: 11 };
+  const route = defaultProcessMapRoutePoints(source, target);
+  const path = processMapOrthogonalPathPoints(source, route, target);
+  assert.ok(path[1].x > source.x && path[1].y === source.y, "the first visible segment exits right from the output");
+  assert.ok(path[path.length - 2]?.y === target.y && path[path.length - 2]?.x < target.x, "the last visible segment approaches the left input horizontally");
+  assert.ok(path.slice(1).every((point, index) => point.x === path[index].x || point.y === path[index].y));
+
+  const reverseTarget = { x: -10, y: 15 };
+  const reversePath = processMapOrthogonalPathPoints(source, defaultProcessMapRoutePoints(source, reverseTarget), reverseTarget);
+  assert.ok(reversePath[1].x > source.x && reversePath[1].y === source.y, "reverse routes also clear the source before turning");
+  assert.ok(reversePath.slice(1).every((point, index) => point.x === reversePath[index].x || point.y === reversePath[index].y));
+});
+
+test("drop dimensions stay screen-sized while Process remains shorter than Folder", () => {
+  assert.deepEqual(processMapInitialPlacementDimensions("logic_gate", 28), { width: 7, height: 5 });
+  assert.deepEqual(processMapInitialPlacementDimensions("company_explorer_folder", 28), { width: 7, height: 7 });
+  assert.deepEqual(processMapInitialPlacementDimensions("logic_gate", 14), { width: 14, height: 10 });
+  assert.deepEqual(processMapInitialPlacementDimensions("company_explorer_folder", 14), { width: 14, height: 14 });
+  assert.deepEqual(processMapInitialPlacementDimensions("logic_gate", 1_000), { width: 2, height: 1 });
+  assert.deepEqual(processMapInitialPlacementDimensions("company_explorer_folder", 1_000), { width: 2, height: 2 });
+});
+
+test("manual resize keeps distinct minimum dimensions and source-sized trace widths", () => {
+  const process = resizeProcessMapPlacement(
+    { grid_x: 10, grid_y: 10, grid_width: 7, grid_height: 5 },
+    "logic_gate",
+    100,
+    100,
+    "west",
+    "north",
+  );
+  assert.deepEqual(process, { grid_x: 15, grid_y: 14, grid_width: 2, grid_height: 1 });
+  const folder = resizeProcessMapPlacement(
+    { grid_x: 10, grid_y: 10, grid_width: 7, grid_height: 7 },
+    "company_explorer_folder",
+    100,
+    100,
+    "west",
+    "north",
+  );
+  assert.deepEqual(folder, { grid_x: 15, grid_y: 15, grid_width: 2, grid_height: 2 });
+  assert.equal(processMapTraceWidth({ resource_type: "logic_gate", grid_width: 7, grid_height: 5 }), 1);
+  assert.equal(processMapTraceWidth({ resource_type: "logic_gate", grid_width: 14, grid_height: 10 }), 2);
+  assert.equal(processMapTraceWidth({ resource_type: "company_explorer_folder", grid_width: 14, grid_height: 7 }), 1);
 });
