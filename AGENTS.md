@@ -87,7 +87,7 @@ This launcher/worker behavior should be driven from Jonat's natural-language req
 Only when Jonat explicitly asks to merge or integrate a completed worker into local `main`:
 
 1. Review the worker diff, exclude unrelated changes, and ensure every intended worker change is committed.
-2. From `C:\Users\Jonat\MangoRTSDev`, run `scripts\merge_worker_branch.ps1` for that worker with `-CommitWorkerChanges` and `-Verification Full`; let the helper resolve the worker branch from `-WorkerPath`.
+2. From `C:\Users\Jonat\MangoRTSDev`, run `scripts\merge_worker_branch.ps1` for that worker with `-CommitWorkerChanges` and `-Verification Full`; let the helper resolve the worker branch from `-WorkerPath`. BUT THIS CAN BE IGNORED IF I GIVE SPECIFIC INSTRUCTIONS TO IGNORE.
 3. Resolve any merge conflicts or integration failures while preserving both current `main` behavior and the worker's intended product behavior.
 4. After every merge-time fix, rerun `node scripts\run_all_tests.mjs` on merged `main` and do not finish until the complete verification gate passes.
 5. Report the worker path and branch, worker commit SHA, merge commit SHA, verification result, final `git status --short --branch`, and any conflict-resolution or post-merge fixes separately.
