@@ -104,7 +104,9 @@ func (r *MemoryRepo) PutLogicGateQDRating(input QDRatingPutInput) (QDRatingMutat
 	}
 	if exists {
 		currentValue := current.QualityRating
-		if input.Metric == QDRatingMetricDelivery {
+		if input.Metric == QDRatingMetricCost {
+			currentValue = current.CostRating
+		} else if input.Metric == QDRatingMetricDelivery {
 			currentValue = current.DeliveryRating
 		}
 		if (currentValue == nil && input.Rating == nil) ||
@@ -122,6 +124,8 @@ func (r *MemoryRepo) PutLogicGateQDRating(input QDRatingPutInput) (QDRatingMutat
 	}
 	if input.Metric == QDRatingMetricQuality {
 		next.QualityRating = input.Rating
+	} else if input.Metric == QDRatingMetricCost {
+		next.CostRating = input.Rating
 	} else {
 		next.DeliveryRating = input.Rating
 	}
@@ -139,7 +143,7 @@ func (r *MemoryRepo) PutLogicGateQDRating(input QDRatingPutInput) (QDRatingMutat
 	if _, err := r.enqueueRealtimeOutboxLocked(outbox); err != nil {
 		return QDRatingMutationResult{}, err
 	}
-	if next.QualityRating == nil && next.DeliveryRating == nil {
+	if next.QualityRating == nil && next.CostRating == nil && next.DeliveryRating == nil {
 		delete(r.qdRatings, dayKey)
 		return QDRatingMutationResult{Changed: true}, nil
 	}

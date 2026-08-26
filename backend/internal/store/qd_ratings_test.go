@@ -27,25 +27,37 @@ func TestMemoryQDRatingsKeepOneSharedRowPerProcessBusinessDay(t *testing.T) {
 	if err != nil || !quality.Changed || quality.QDRating == nil {
 		t.Fatalf("quality result = %+v err=%v", quality, err)
 	}
-	if quality.QDRating.QualityRating == nil || *quality.QDRating.QualityRating != green || quality.QDRating.DeliveryRating != nil {
+	if quality.QDRating.QualityRating == nil || *quality.QDRating.QualityRating != green || quality.QDRating.CostRating != nil || quality.QDRating.DeliveryRating != nil {
 		t.Fatalf("quality row = %+v", quality.QDRating)
 	}
 
 	secondTime := firstTime.Add(2 * time.Hour)
+	red := "red"
+	cost, err := repo.PutLogicGateQDRating(QDRatingPutInput{
+		CompanyID: companyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricCost,
+		Rating: &red, RatedByUserID: secondUserID, RatedByDisplayName: "Bob", Now: secondTime,
+	})
+	if err != nil || !cost.Changed || cost.QDRating == nil || cost.QDRating.QDRatingID != quality.QDRating.QDRatingID ||
+		cost.QDRating.CostRating == nil || *cost.QDRating.CostRating != red {
+		t.Fatalf("cost result = %+v err=%v", cost, err)
+	}
+
+	thirdTime := secondTime.Add(2 * time.Hour)
 	yellow := "yellow"
 	delivery, err := repo.PutLogicGateQDRating(QDRatingPutInput{
 		CompanyID: companyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricDelivery,
-		Rating: &yellow, RatedByUserID: secondUserID, RatedByDisplayName: "Bob", Now: secondTime,
+		Rating: &yellow, RatedByUserID: secondUserID, RatedByDisplayName: "Bob", Now: thirdTime,
 	})
 	if err != nil || !delivery.Changed || delivery.QDRating == nil {
 		t.Fatalf("delivery result = %+v err=%v", delivery, err)
 	}
 	if delivery.QDRating.QDRatingID != quality.QDRating.QDRatingID ||
 		delivery.QDRating.QualityRating == nil || *delivery.QDRating.QualityRating != green ||
+		delivery.QDRating.CostRating == nil || *delivery.QDRating.CostRating != red ||
 		delivery.QDRating.DeliveryRating == nil || *delivery.QDRating.DeliveryRating != yellow {
 		t.Fatalf("combined row = %+v", delivery.QDRating)
 	}
-	if !delivery.QDRating.RatedCreatedTimestamp.Equal(firstTime) || !delivery.QDRating.RatedUpdatedTimestamp.Equal(secondTime) ||
+	if !delivery.QDRating.RatedCreatedTimestamp.Equal(firstTime) || !delivery.QDRating.RatedUpdatedTimestamp.Equal(thirdTime) ||
 		delivery.QDRating.RatedByUserID == nil || *delivery.QDRating.RatedByUserID != secondUserID || delivery.QDRating.RatedByDisplayName != "Bob" {
 		t.Fatalf("combined attribution = %+v", delivery.QDRating)
 	}
@@ -58,7 +70,7 @@ func TestMemoryQDRatingsKeepOneSharedRowPerProcessBusinessDay(t *testing.T) {
 	}
 	noChange, err := repo.PutLogicGateQDRating(QDRatingPutInput{
 		CompanyID: companyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricDelivery,
-		Rating: &yellow, RatedByUserID: firstUserID, RatedByDisplayName: "Alice", Now: secondTime.Add(time.Hour),
+		Rating: &yellow, RatedByUserID: firstUserID, RatedByDisplayName: "Alice", Now: thirdTime.Add(time.Hour),
 	})
 	if err != nil || noChange.Changed || noChange.QDRating == nil || noChange.QDRating.RatedByDisplayName != "Bob" {
 		t.Fatalf("same-value result = %+v err=%v", noChange, err)
@@ -66,13 +78,19 @@ func TestMemoryQDRatingsKeepOneSharedRowPerProcessBusinessDay(t *testing.T) {
 
 	if _, err := repo.PutLogicGateQDRating(QDRatingPutInput{
 		CompanyID: companyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricQuality,
-		RatedByUserID: firstUserID, RatedByDisplayName: "Alice", Now: secondTime.Add(2 * time.Hour),
+		RatedByUserID: firstUserID, RatedByDisplayName: "Alice", Now: thirdTime.Add(2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PutLogicGateQDRating(QDRatingPutInput{
+		CompanyID: companyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricDelivery,
+		RatedByUserID: firstUserID, RatedByDisplayName: "Alice", Now: thirdTime.Add(3 * time.Hour),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	cleared, err := repo.PutLogicGateQDRating(QDRatingPutInput{
-		CompanyID: companyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricDelivery,
-		RatedByUserID: firstUserID, RatedByDisplayName: "Alice", Now: secondTime.Add(3 * time.Hour),
+		CompanyID: companyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricCost,
+		RatedByUserID: firstUserID, RatedByDisplayName: "Alice", Now: thirdTime.Add(4 * time.Hour),
 	})
 	if err != nil || !cleared.Changed || cleared.QDRating != nil {
 		t.Fatalf("clear result = %+v err=%v", cleared, err)
@@ -112,11 +130,11 @@ func TestMemoryQDRatingWriteProducesAuthorizedTargetedRealtimeEvent(t *testing.T
 		}
 		found = true
 		if item.Scope != wantScope || item.ResourceType != EntityTypeLogicGate || item.ResourceID != gate.LogicGateID || item.Permission != EntityPermissionEdit {
-			t.Fatalf("Q/D realtime event = %+v", item)
+			t.Fatalf("QDC realtime event = %+v", item)
 		}
 	}
 	if !found {
-		t.Fatalf("Q/D realtime event missing from %+v", items)
+		t.Fatalf("QDC realtime event missing from %+v", items)
 	}
 }
 
@@ -167,7 +185,7 @@ func TestMemoryQDRatingsRecycleAndRestoreWithLogicGate(t *testing.T) {
 
 func TestMemoryQDRatingsKeepDisplaySnapshotAfterRaterDeletion(t *testing.T) {
 	repo := NewMemoryRepo()
-	company, err := repo.CreateCompany("Memory Q/D rater deletion")
+	company, err := repo.CreateCompany("Memory QDC rater deletion")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,6 +253,18 @@ func TestQDRatingSchemaKeepsThePrototypeColumnsAndBusinessDayUniqueness(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	costMigration, err := os.ReadFile("../../db/migrations/20260825_z_qd_cost_rating.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, raw := range map[string][]byte{"cost migration": costMigration, "schema": schema} {
+		text := strings.ToLower(string(raw))
+		for _, required := range []string{"qd_ratings", "cost_rating", "qd_ratings_cost_rating_chk", "quality_rating is not null", "cost_rating is not null", "delivery_rating is not null"} {
+			if !strings.Contains(text, required) {
+				t.Fatalf("%s missing %q", name, required)
+			}
+		}
+	}
 	for name, raw := range map[string][]byte{"migration": migration, "schema": schema} {
 		text := strings.ToLower(string(raw))
 		for _, required := range []string{
@@ -258,7 +288,7 @@ func TestQDRatingSchemaKeepsThePrototypeColumnsAndBusinessDayUniqueness(t *testi
 
 func TestPostgresQDRatingRepositoryLifecycle(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
-	company, err := repo.CreateCompany("Q/D repository test")
+	company, err := repo.CreateCompany("QDC repository test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +304,7 @@ func TestPostgresQDRatingRepositoryLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := time.Date(2026, time.August, 25, 7, 30, 0, 0, time.UTC)
-	green, yellow := "green", "yellow"
+	green, red, yellow := "green", "red", "yellow"
 	first, err := repo.PutLogicGateQDRating(QDRatingPutInput{
 		CompanyID: company.CompanyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricQuality,
 		Rating: &green, RatedByUserID: user.UserID, RatedByDisplayName: user.DisplayName, Now: created,
@@ -282,20 +312,31 @@ func TestPostgresQDRatingRepositoryLifecycle(t *testing.T) {
 	if err != nil || !first.Changed || first.QDRating == nil {
 		t.Fatalf("first Postgres rating=%+v err=%v", first, err)
 	}
+	cost, err := repo.PutLogicGateQDRating(QDRatingPutInput{
+		CompanyID: company.CompanyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricCost,
+		Rating: &red, RatedByUserID: user.UserID, RatedByDisplayName: user.DisplayName, Now: created.Add(time.Hour),
+	})
+	if err != nil || !cost.Changed || cost.QDRating == nil || cost.QDRating.QDRatingID != first.QDRating.QDRatingID ||
+		cost.QDRating.CostRating == nil || *cost.QDRating.CostRating != red {
+		t.Fatalf("cost Postgres rating=%+v err=%v", cost, err)
+	}
 	second, err := repo.PutLogicGateQDRating(QDRatingPutInput{
 		CompanyID: company.CompanyID, LogicGateID: gate.LogicGateID, Metric: QDRatingMetricDelivery,
-		Rating: &yellow, RatedByUserID: user.UserID, RatedByDisplayName: user.DisplayName, Now: created.Add(time.Hour),
+		Rating: &yellow, RatedByUserID: user.UserID, RatedByDisplayName: user.DisplayName, Now: created.Add(2 * time.Hour),
 	})
 	if err != nil || !second.Changed || second.QDRating == nil || second.QDRating.QDRatingID != first.QDRating.QDRatingID {
 		t.Fatalf("second Postgres rating=%+v err=%v", second, err)
 	}
 	var rowCount int
 	if err := db.QueryRow(`select count(*) from qd_ratings where company_id=$1::uuid and logic_gate_id=$2::uuid`, company.CompanyID, gate.LogicGateID).Scan(&rowCount); err != nil || rowCount != 1 {
-		t.Fatalf("Postgres Q/D row count=%d err=%v", rowCount, err)
+		t.Fatalf("Postgres QDC row count=%d err=%v", rowCount, err)
 	}
 	if _, err := db.Exec(`insert into qd_ratings(company_id,qd_rating_id,logic_gate_id,rated_by_display_name,rated_created_timestamp,rated_updated_timestamp)
 values($1::uuid,$2::uuid,$3::uuid,'Invalid empty row',$4,$4)`, company.CompanyID, newUUIDv7String(), gate.LogicGateID, created.AddDate(0, 0, 1)); err == nil {
-		t.Fatal("Postgres accepted a Q/D row with both ratings null")
+		t.Fatal("Postgres accepted a QDC row with all ratings null")
+	}
+	if _, err := db.Exec(`update qd_ratings set cost_rating='blue' where company_id=$1::uuid and logic_gate_id=$2::uuid`, company.CompanyID, gate.LogicGateID); err == nil {
+		t.Fatal("Postgres accepted an invalid Cost rating")
 	}
 	if _, err := db.Exec(`delete from users where user_id=$1::uuid`, user.UserID); err != nil {
 		t.Fatal(err)
@@ -310,7 +351,7 @@ values($1::uuid,$2::uuid,$3::uuid,'Invalid empty row',$4,$4)`, company.CompanyID
 
 func TestPostgresQDRatingRestoreSurvivesDeletedRater(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
-	company, err := repo.CreateCompany("Q/D recycled rater deletion")
+	company, err := repo.CreateCompany("QDC recycled rater deletion")
 	if err != nil {
 		t.Fatal(err)
 	}

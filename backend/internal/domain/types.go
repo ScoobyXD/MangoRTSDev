@@ -908,6 +908,7 @@ type QDRating struct {
 	QDRatingID            string    `json:"qd_rating_id"`
 	LogicGateID           string    `json:"logic_gate_id"`
 	QualityRating         *string   `json:"quality_rating"`
+	CostRating            *string   `json:"cost_rating"`
 	DeliveryRating        *string   `json:"delivery_rating"`
 	RatedByUserID         *string   `json:"rated_by_user_id"`
 	RatedByDisplayName    string    `json:"rated_by_display_name"`
