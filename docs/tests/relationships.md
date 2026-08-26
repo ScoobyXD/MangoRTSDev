@@ -222,17 +222,17 @@ Last updated: 2026-08-14
 
 An editor maps an exact Company Explorer Folder or Process without changing its source resource or Company Explorer placement
 ↓
-Mango stores that exact typed identity and its independent map parent and grid position in `process_map_placements`
+Mango stores that exact typed identity and its independent map parent, global grid position, and dimensions in `process_map_placements`
 ↓
 Drawing a trace atomically creates or reuses one exact directed `resource_operational_relationships` edge and stores only its ordered route points in `process_map_traces`
 ↓
 Fan-out and fan-in remain several pairwise operational edges whose trace routes may overlap visually without creating a junction resource or another relationship meaning
 ↓
-Reads join current source labels and permissions, while a restricted placement reveals only its saved existence and position and exposes no incident relationship
+Scene and spatial tile reads join current source labels and permissions, while a restricted placement reveals only its saved existence and permission-safe position and exposes no real fence, descendants, identity, or incident relationship
 ↓
-Removing or reparenting a map placement removes only incident trace geometry that is no longer valid on the former layer and preserves its operational edges; deleting a selected trace removes its operational edge and dependent geometry without deleting either endpoint, and permanent deletion or recycle follows the exact typed cleanup contract
+Moving, resizing, or reparenting a mapped placement preserves its operational edges and trace geometry across the one continuous canvas; removing a placement may remove its dependent trace geometry while preserving its operational edges, deleting a selected trace removes its operational edge and dependent geometry without deleting either endpoint, and permanent deletion or recycle follows the exact typed cleanup contract
 
-Last updated: 2026-08-24
+Last updated: 2026-08-25
 
 # Relationship Business Logic Laws
 
@@ -507,9 +507,9 @@ Snapshot reads MUST resolve current data from `logic_gates` and `kpis` through t
 
 ### Law 34 — Process Map placement uses exact typed source identities
 
-`process_map_placements` MUST store only the exact same-company `company_explorer_folder` or `logic_gate` type and literal source ID, its independent exact Folder map parent or root, snapped integer grid coordinates, revision, and timestamps. A placement row makes that source resource visible on Process Map but MUST NOT copy its name, permissions, payload, Company Explorer parentage, or resource identity and MUST NOT become a permission or RACI parent.
+`process_map_placements` MUST store only the exact same-company `company_explorer_folder` or `logic_gate` type and literal source ID, its independent exact mapped Folder parent or root, snapped global integer grid coordinates, positive integer grid dimensions, revision, and timestamps. A placement row makes that source resource visible on Process Map but MUST NOT copy its name, permissions, payload, Company Explorer parentage, spatial tile membership, or resource identity and MUST NOT become a permission or RACI parent.
 
-One exact typed resource has at most one company Process Map placement. Company Explorer creation or movement MUST NOT create or move that placement, and placement creation, movement, or removal MUST NOT mutate Company Explorer or the source resource. Removing a placement or changing its map parent MUST remove only incident trace geometry that is invalid on the former layer and MUST preserve every operational relationship. Permanent deletion and recycle/restore MUST handle the exact typed placement through every required deletion path.
+One exact typed resource has at most one company Process Map placement. Company Explorer creation or movement MUST NOT create or move that placement, and placement creation, movement, resizing, reparenting, or removal MUST NOT mutate Company Explorer or the source resource. Moving, resizing, or changing a mapped placement's map parent MUST preserve every operational relationship and saved trace; removing the placement MAY remove its incident trace geometry while preserving every operational relationship. Moving a Folder MUST translate every recursively map-contained placement by the same snapped global delta atomically; every intermediate route point whose two endpoints are both in that moved set MUST receive the same translation exactly once, while route points with only one moved endpoint remain global. Every changed placement and translated trace MUST advance its own revision and update timestamp exactly once and be returned in the committed group response. Resizing a Folder MUST neither transform its contents nor leave a recursively contained placement outside its fence. Permanent deletion and recycle/restore MUST handle the exact typed placement through every required deletion path.
 
 ### Law 35 — Resource operational relationships are exact directed pairwise edges
 
@@ -519,9 +519,9 @@ The source and target of an operational relationship are immutable. Changing eit
 
 ### Law 36 — Process Map traces are dependent geometry, not relationship authority
 
-`process_map_traces` MUST identify one exact `resource_operational_relationships` row and store only one ordered JSONB array of at most 256 snapped integer route points, revision, and timestamps. Every route point MUST contain exactly `x` and `y`; repeating an identical ordered array MUST not advance the trace revision or timestamps. Every Folder and Process has exactly one fixed input anchor and one fixed output anchor defined by presentation rules; the trace source always uses the source output and the trace target always uses the target input, so trace storage MUST NOT contain anchor columns, endpoint coordinates, endpoint identities, or endpoint payloads. Trace geometry MUST NOT invent a junction resource or become another operational relationship authority.
+`process_map_traces` MUST identify one exact `resource_operational_relationships` row and store only one ordered JSONB array of at most 256 snapped global company-world integer route points, revision, and timestamps. Every route point MUST contain exactly `x` and `y`; repeating an identical ordered array MUST not advance the trace revision or timestamps. Every Folder and Process has exactly one input anchor and one output anchor derived by presentation rules from its current saved bounds; the trace source always uses the source output and the trace target always uses the target input, so trace storage MUST NOT contain anchor columns, endpoint coordinates, endpoint identities, or endpoint payloads. Trace geometry MUST NOT invent a junction resource or become another operational relationship authority.
 
-One operational relationship has at most one company-map trace, and a relationship may exist without a trace. Deleting a selected Process Map trace MUST delete its operational relationship and dependent geometry in one transaction while preserving both endpoint resources; the first version exposes no user command that deletes only trace geometry. Fan-out and fan-in use several pairwise relationships whose routes may share points, and hidden endpoints suppress every incident relationship and trace. Permanent deletion and recycle/restore MUST preserve or clean the exact dependent geometry through every required path.
+One operational relationship has at most one company-map trace, and a relationship may exist without a trace. Deleting a selected Process Map trace MUST delete its operational relationship and dependent geometry in one transaction while preserving both endpoint resources; Process Map exposes no user command that deletes only trace geometry. Fan-out and fan-in use several pairwise relationships whose routes may share points, traces MAY cross map parents and derived spatial tile boundaries, and hidden endpoints suppress every incident relationship and trace. Permanent deletion and recycle/restore MUST preserve or clean the exact dependent geometry through every required path.
 
 ## Required design examples
 
