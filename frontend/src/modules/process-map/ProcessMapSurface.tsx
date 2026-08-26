@@ -1,34 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Background,
-  BackgroundVariant,
-  BaseEdge,
-  EdgeLabelRenderer,
-  Handle,
-  NodeToolbar,
-  Position,
-  ReactFlow,
-  ReactFlowProvider,
-  applyEdgeChanges,
-  applyNodeChanges,
-  useConnection,
-  useReactFlow,
-  type Connection,
-  type Edge,
-  type EdgeChange,
-  type EdgeProps,
-  type Node,
-  type NodeChange,
-  type NodeProps,
-} from "@xyflow/react";
-import "@xyflow/react/dist/base.css";
-import {
-  ExplorerDisclosureIcon,
-  ExplorerRowIcon,
-  NODE_ICON_GRADIENT_END,
-  NODE_ICON_GRADIENT_START,
-} from "../../icons/index.js";
-import { readExplorerDragPayload, EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop.js";
+  OrthographicView,
+  type InteractionState,
+  type Layer,
+  type OrthographicViewState,
+  type PickingInfo,
+  type UpdateParameters,
+  type ViewStateChangeParameters,
+} from "@deck.gl/core";
+import { TileLayer, type TileLayerProps } from "@deck.gl/geo-layers";
+import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
+import DeckGL, { type DeckGLRef } from "@deck.gl/react";
+import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
+import { createRequestJSON, isAbortError } from "../api/requestJSON.js";
+import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import {
   fetchCompanyExplorerChildren,
   fetchCompanyExplorerRoots,
@@ -36,521 +21,1029 @@ import {
 } from "../company-explorer/companyExplorerLazyApi.js";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh.js";
 import { getCurrentRealtimeConnectionID, subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
-import { createRequestJSON, isAbortError } from "../api/requestJSON.js";
 import { ProcessMapQDCard } from "./ProcessMapQDCard.js";
 import {
+  combineProcessMapAbortSignals,
   deleteProcessMapPlacement,
   deleteProcessMapRelationship,
-  fetchProcessMapLayer,
-  invalidateProcessMapLayers,
+  fetchProcessMapScene,
+  fetchProcessMapTile,
+  invalidateProcessMapReadCaches,
   postProcessMapRelationship,
   putProcessMapPlacement,
   putProcessMapTrace,
-  type ProcessMapLayerResponse,
+  type ProcessMapMutationEnvelope,
   type ProcessMapPlacement,
   type ProcessMapResourceRef,
+  type ProcessMapSceneResponse,
+  type ProcessMapTileResponse,
   type ProcessMapTrace,
+  type ProcessMapVisiblePlacement,
 } from "./processMapApi.js";
 import {
-  PROCESS_MAP_GRID_PX,
-  defaultProcessMapRoutePoints,
+  PROCESS_MAP_DEFAULT_HEIGHT,
+  PROCESS_MAP_DEFAULT_WIDTH,
+  PROCESS_MAP_MAX_CAMERA_ZOOM,
+  PROCESS_MAP_MAX_TILE_REQUESTS,
+  PROCESS_MAP_MIN_CAMERA_ZOOM,
+  PROCESS_MAP_RESTRICTED_HEIGHT,
+  PROCESS_MAP_RESTRICTED_WIDTH,
+  PROCESS_MAP_SETTLE_DELAY_MS,
+  PROCESS_MAP_TILE_CACHE_BYTES,
+  PROCESS_MAP_TILE_DEBOUNCE_MS,
+  fitProcessMapViewState,
   insertProcessMapRoutePoint,
-  orthogonalizeProcessMapRoutePoints,
-  processMapFlowToRoutePoint,
-  processMapFlowToGridPosition,
-  processMapFootprint,
-  processMapGridPointToFlowPosition,
-  processMapGridToFlowPosition,
+  normalizeProcessMapRoutePoints,
+  processMapBoundsContain,
+  processMapDeckTileSize,
+  processMapDeepestContainingFolder,
   processMapInputAnchor,
+  processMapOrthogonalPathPoints,
   processMapOutputAnchor,
-  processMapRoutePointToSurfaceCenter,
-  processMapTracePath,
+  processMapPlacementBounds,
+  processMapPlacementDisplayLOD,
+  snapProcessMapGridCoordinate,
+  type ProcessMapBounds,
   type ProcessMapGridPoint,
-  type ProcessMapResourceType,
+  type ProcessMapViewState,
 } from "./processMapGeometry.js";
 import {
+  centerProcessMapZoom,
+  createProcessMapSettlementGate,
   decideProcessMapExplorerDrop,
-  isValidProcessMapConnection,
-  processMapFolderDrillTarget,
   processMapResourceNodeID,
   processMapTrayCandidates,
   shouldApplyProcessMapCommit,
   shouldApplyProcessMapMutationAck,
+  transparentVectorRefinementStrategy,
 } from "./processMapInteraction.js";
 import "./processMap.css";
 
 const PROCESS_MAP_REALTIME_SCOPE = "process-map:company";
+const PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY = "mangorts.process-map.placement-tray-collapsed.v1";
+const PROCESS_MAP_DOUBLE_CLICK_MS = 300;
+const COLOR_FOLDER: [number, number, number, number] = [249, 115, 22, 230];
+const COLOR_PROCESS: [number, number, number, number] = [25, 240, 122, 235];
+const COLOR_TRACE_START: [number, number, number, number] = [51, 221, 213, 220];
+const COLOR_TRACE_END: [number, number, number, number] = [25, 168, 255, 220];
+const COLOR_TEXT: [number, number, number, number] = [30, 41, 59, 245];
 
-type ProcessMapNodeData = {
-  restricted: false;
-  resourceType: ProcessMapResourceType;
-  resourceID: string;
-  label: string;
-  gridX: number;
-  gridY: number;
-  revision: number;
-  createdTimestamp: string;
-  updatedTimestamp: string;
-} | {
-  restricted: true;
-  gridX: number;
-  gridY: number;
+export class ProcessMapProtectedTileLayer extends TileLayer<ProcessMapTileResponse, { protectedGeneration: number }> {
+  static override layerName = "ProcessMapProtectedTileLayer";
+
+  override updateState(params: UpdateParameters<this>): void {
+    if (
+      this.state.tileset
+      && params.oldProps.protectedGeneration !== params.props.protectedGeneration
+    ) {
+      this.state.tileset.finalize();
+      this.setState({ tileset: null, isLoaded: false });
+    }
+    super.updateState(params);
+  }
+}
+
+type ProcessMapSelection = { kind: "placement" | "trace"; id: string } | null;
+type PlacementPick = { kind: "placement"; key: string; placement: ProcessMapVisiblePlacement };
+type TracePick = { kind: "trace"; id: string; trace: ProcessMapTrace };
+type AnchorPick = {
+  kind: "anchor";
+  anchor: "input" | "output";
+  key: string;
+  placement: ProcessMapVisiblePlacement;
+};
+type ResizePick = {
+  kind: "resize";
+  horizontal: "west" | "east";
+  vertical: "north" | "south";
+  key: string;
+  placement: ProcessMapVisiblePlacement;
+};
+type WaypointPick = { kind: "waypoint"; id: string; index: number; trace: ProcessMapTrace };
+type ProcessMapPick = PlacementPick | TracePick | AnchorPick | ResizePick | WaypointPick;
+
+export type ProcessMapPresentationState = {
+  placements: Map<string, ProcessMapVisiblePlacement>;
+  traces: Map<string, ProcessMapTrace>;
+  removedPlacementKeys: Set<string>;
 };
 
-type ProcessMapVisibleNodeData = Extract<ProcessMapNodeData, { restricted: false }>;
-
-type ProcessMapNode = Node<ProcessMapNodeData, "processMapCard">;
-
-type ReplaceTraceRoute = (
-  relationshipID: string,
-  routePoints: ProcessMapGridPoint[],
-) => void;
-
-type MoveTraceWaypoint = (
-  relationshipID: string,
-  waypointIndex: number,
-  clientPoint: ProcessMapGridPoint | null,
-  startingRoutePoints: ProcessMapGridPoint[],
-  action: "preview" | "commit" | "cancel",
-  canonicalGeneration: number,
-) => void;
-
-type ProcessMapEdgeData = {
-  routePoints: ProcessMapGridPoint[];
-  committedRoutePoints: ProcessMapGridPoint[];
-  revision: number;
-  createdTimestamp: string;
-  updatedTimestamp: string;
-  onMoveWaypoint: MoveTraceWaypoint;
-  onReplaceRoute: ReplaceTraceRoute;
-  getCanonicalGeneration: () => number;
+export type ProcessMapEditOverlayModel = {
+  placements: ProcessMapVisiblePlacement[];
+  traces: ProcessMapTrace[];
+  selectedPlacementKey: string | null;
+  selectedTraceID: string | null;
+  connectionPreview: { source: ProcessMapVisiblePlacement; point: ProcessMapGridPoint } | null;
+  highlightedFolderKey: string | null;
+  showAllAnchors: boolean;
 };
 
-type ProcessMapEdge = Edge<ProcessMapEdgeData, "processMapTrace">;
+export type ProcessMapTileLoadRequest = {
+  tileID: string;
+  z: number;
+  x: number;
+  y: number;
+  signal?: AbortSignal;
+};
 
-type ProcessMapSelection =
-  | { kind: "placement"; id: string }
-  | { kind: "trace"; id: string }
-  | null;
+export type ProcessMapLayerBuildOptions = {
+  scene: ProcessMapSceneResponse;
+  protectedGeneration: number;
+  settled: boolean;
+  settledGeneration: number;
+  settledPixelsPerGridUnit: number;
+  presentation: ProcessMapPresentationState;
+  editedPlacementKeys: ReadonlySet<string>;
+  editedTraceIDs: ReadonlySet<string>;
+  reducedMotion: boolean;
+  flowPhase: number;
+  editOverlay: ProcessMapEditOverlayModel;
+  getTileData: (request: ProcessMapTileLoadRequest) => Promise<ProcessMapTileResponse | null>;
+  onTileLoad: (tileID: string, data: ProcessMapTileResponse, settledGeneration: number) => void;
+  onTileUnload: (tileID: string, settledGeneration: number) => void;
+  onViewportLoad?: (settledGeneration: number) => void;
+  onTileError?: (cause: unknown) => void;
+};
 
 export type ProcessMapSurfaceProps = {
   apiBase: string;
   companyID: string;
-  folderID?: string;
   hoverModeEnabled?: boolean;
-  onOpenFolder: (folderID: string) => void;
   onOpenLogicGate: (logicGateID: string, label: string) => void;
-  onLayerChange?: (layer: ProcessMapLayerResponse["layer"] | null) => void;
 };
 
-type ProcessMapQDOverlayContextValue = {
-  apiBase: string;
-  companyID: string;
-  hoverModeEnabled: boolean;
-  hoveredProcessID: string | null;
-  pinnedProcessID: string | null;
-  requestJSON: ReturnType<typeof createRequestJSON>;
-  showHoverCard: (logicGateID: string) => void;
-  scheduleHoverCardClose: (logicGateID: string) => void;
-  closePinnedCard: () => void;
+type PlacementGesture = {
+  kind: "move" | "resize";
+  key: string;
+  start: ProcessMapGridPoint;
+  basePlacements: Map<string, ProcessMapVisiblePlacement>;
+  baseTraces: Map<string, ProcessMapTrace>;
+  horizontal?: "west" | "east";
+  vertical?: "north" | "south";
+  moved: boolean;
+};
+type ConnectionGesture = {
+  kind: "connection";
+  source: ProcessMapVisiblePlacement;
+  point: ProcessMapGridPoint;
+  moved: boolean;
+};
+type WaypointGesture = {
+  kind: "waypoint";
+  trace: ProcessMapTrace;
+  index: number;
+  startingRoute: ProcessMapGridPoint[];
+  moved: boolean;
+};
+type ProcessMapGesture = PlacementGesture | ConnectionGesture | WaypointGesture;
+type TileBounds = { minX: number; minY: number; maxX: number; maxY: number };
+type PolygonDatum = {
+  polygon: number[][];
+  fill: [number, number, number, number];
+  line: [number, number, number, number];
+  lineWidth: number;
+  pick?: ProcessMapPick;
+};
+type PathDatum = {
+  path: number[][];
+  color: [number, number, number, number];
+  width: number;
+  pick?: ProcessMapPick;
+};
+type TextDatum = { position: [number, number]; text: string; size: number };
+type PointDatum = {
+  position: [number, number];
+  radius: number;
+  fill: [number, number, number, number];
+  line: [number, number, number, number];
+  pick?: ProcessMapPick;
 };
 
-const ProcessMapQDOverlayContext = React.createContext<ProcessMapQDOverlayContextValue | null>(null);
-
-function resourceFromNode(node: ProcessMapNode | undefined): ProcessMapResourceRef | null {
-  if (!node || node.data.restricted) return null;
-  return { resource_type: node.data.resourceType, resource_id: node.data.resourceID };
+function placementKey(resource: ProcessMapResourceRef): string {
+  return processMapResourceNodeID(resource);
 }
 
-function processMapNodeFromPlacement(placement: ProcessMapPlacement, index: number): ProcessMapNode {
-  const footprint = processMapFootprint(placement.restricted ? undefined : placement.resource_type, placement.restricted);
-  const position = processMapGridToFlowPosition({ x: placement.grid_x, y: placement.grid_y });
-  if (placement.restricted) {
-    return {
-      id: `restricted:${index}`,
-      type: "processMapCard",
-      position,
-      data: { restricted: true, gridX: placement.grid_x, gridY: placement.grid_y },
-      style: { width: footprint.width * PROCESS_MAP_GRID_PX, height: footprint.height * PROCESS_MAP_GRID_PX },
-      draggable: false,
-      selectable: false,
-      connectable: false,
-      focusable: false,
-      deletable: false,
+function isProcessMapPick(value: unknown): value is ProcessMapPick {
+  if (!value || typeof value !== "object") return false;
+  const kind = (value as { kind?: unknown }).kind;
+  return kind === "placement" || kind === "trace" || kind === "anchor" || kind === "resize" || kind === "waypoint";
+}
+
+function pickFromObject(value: unknown): ProcessMapPick | null {
+  if (isProcessMapPick(value)) return value;
+  if (!value || typeof value !== "object") return null;
+  const pick = (value as { pick?: unknown }).pick;
+  return isProcessMapPick(pick) ? pick : null;
+}
+
+function clonePlacement(placement: ProcessMapVisiblePlacement): ProcessMapVisiblePlacement {
+  return { ...placement };
+}
+
+function cloneTrace(trace: ProcessMapTrace): ProcessMapTrace {
+  return {
+    ...trace,
+    source: { ...trace.source },
+    target: { ...trace.target },
+    route_points: trace.route_points.map((point) => ({ ...point })),
+    path_fragments: trace.path_fragments.map((fragment) => fragment.map((point) => ({ ...point }))),
+  };
+}
+
+function tracePath(
+  trace: ProcessMapTrace,
+  placements: ReadonlyMap<string, ProcessMapVisiblePlacement>,
+): ProcessMapGridPoint[] | null {
+  if (trace.presentation !== "editing") return null;
+  const source = placements.get(placementKey(trace.source));
+  const target = placements.get(placementKey(trace.target));
+  return source && target
+    ? processMapOrthogonalPathPoints(processMapOutputAnchor(source), trace.route_points, processMapInputAnchor(target))
+    : null;
+}
+
+export function applyProcessMapMutationEnvelope(
+  current: ProcessMapPresentationState,
+  envelope: ProcessMapMutationEnvelope,
+  pending: ReadonlyMap<string, ProcessMapVisiblePlacement> = new Map(),
+): ProcessMapPresentationState {
+  const placements = new Map([...current.placements].map(([key, placement]) => [key, clonePlacement(placement)]));
+  const traces = new Map([...current.traces].map(([id, trace]) => [id, cloneTrace(trace)]));
+  const removedPlacementKeys = new Set(current.removedPlacementKeys);
+  for (const committed of envelope.placements) {
+    const key = placementKey(committed);
+    const existing = pending.get(key) ?? placements.get(key);
+    if (!existing || !shouldApplyProcessMapCommit(existing.revision, committed.revision)) continue;
+    placements.set(key, {
+      ...existing,
+      map_parent_folder_id: committed.map_parent_folder_id,
+      grid_x: committed.grid_x,
+      grid_y: committed.grid_y,
+      grid_width: committed.grid_width,
+      grid_height: committed.grid_height,
+      revision: committed.revision,
+      created_timestamp: committed.created_timestamp,
+      updated_timestamp: committed.updated_timestamp,
+    });
+    removedPlacementKeys.delete(key);
+  }
+  for (const committed of envelope.traces) {
+    const existing = traces.get(committed.resource_operational_relationship_id);
+    const relationship = envelope.relationship?.resource_operational_relationship_id === committed.resource_operational_relationship_id
+      ? envelope.relationship
+      : null;
+    if (!existing && !relationship) continue;
+    if (existing && !shouldApplyProcessMapCommit(existing.revision, committed.revision)) continue;
+    const source = existing?.source ?? relationship?.source;
+    const target = existing?.target ?? relationship?.target;
+    if (!source || !target) continue;
+    const next: ProcessMapTrace = {
+      presentation: existing?.presentation ?? "editing",
+      resource_operational_relationship_id: committed.resource_operational_relationship_id,
+      source: { ...source },
+      target: { ...target },
+      route_points: committed.route_points.map((point) => ({ ...point })),
+      path_fragments: existing?.path_fragments.map((fragment) => fragment.map((point) => ({ ...point }))) ?? [],
+      revision: committed.revision,
+      created_timestamp: committed.created_timestamp,
+      updated_timestamp: committed.updated_timestamp,
     };
+    const fullPath = tracePath(next, new Map([...pending, ...placements]));
+    if (fullPath) next.path_fragments = [fullPath];
+    traces.set(next.resource_operational_relationship_id, next);
+  }
+  for (const deletedTraceID of envelope.deleted_trace_ids) traces.delete(deletedTraceID);
+  return { placements, traces, removedPlacementKeys };
+}
+
+function emptyPresentation(): ProcessMapPresentationState {
+  return { placements: new Map(), traces: new Map(), removedPlacementKeys: new Set() };
+}
+
+export type ProcessMapViewportTile = {
+  isLoaded: boolean;
+  content?: ProcessMapTileResponse | null;
+};
+
+export function processMapViewportHasCompleteCoverage(
+  tiles: readonly ProcessMapViewportTile[],
+  processMapReadVersion: number,
+): boolean {
+  return tiles.length > 0 && tiles.every((tile) => (
+    tile.isLoaded
+    && tile.content != null
+    && tile.content.process_map_read_version === processMapReadVersion
+  ));
+}
+
+export type ProcessMapMutationMasks = {
+  committedOverlay: ProcessMapPresentationState;
+  removedTraceIDs: Set<string>;
+};
+
+export function retireProcessMapMutationMasks(
+  current: ProcessMapMutationMasks,
+  completeCoverage: boolean,
+): ProcessMapMutationMasks {
+  if (!completeCoverage) return current;
+  return { committedOverlay: emptyPresentation(), removedTraceIDs: new Set() };
+}
+
+export function processMapCurrentOperationKeys(
+  keys: Iterable<string>,
+  expectedGenerations: ReadonlyMap<string, number> | undefined,
+  currentGenerations: ReadonlyMap<string, number>,
+  operationPrefix = "",
+): Set<string> {
+  const currentKeys = new Set<string>();
+  for (const key of keys) {
+    if (!expectedGenerations) {
+      currentKeys.add(key);
+      continue;
+    }
+    const operationKey = `${operationPrefix}${key}`;
+    const expected = expectedGenerations.get(operationKey);
+    if (expected !== undefined && currentGenerations.get(operationKey) === expected) currentKeys.add(key);
+  }
+  return currentKeys;
+}
+
+export function reconcileProcessMapKnownMappedKeys(
+  current: ReadonlySet<string>,
+  additions: readonly ProcessMapResourceRef[],
+  removals: readonly ProcessMapResourceRef[] = [],
+): Set<string> {
+  const next = new Set(current);
+  for (const resource of additions) next.add(placementKey(resource));
+  for (const resource of removals) next.delete(placementKey(resource));
+  return next;
+}
+
+export function replaceProcessMapPreviewEntries<T>(
+  current: ReadonlyMap<string, T>,
+  ownedKeys: Iterable<string>,
+  replacements: ReadonlyMap<string, T>,
+): Map<string, T> {
+  const next = new Map(current);
+  for (const key of ownedKeys) next.delete(key);
+  for (const [key, value] of replacements) next.set(key, value);
+  return next;
+}
+
+function processMapPresentationRank(value: ProcessMapTrace["presentation"]): number {
+  return value === "editing" ? 2 : value === "normal" ? 1 : 0;
+}
+
+function mergeTilePresentation(tiles: ReadonlyMap<string, ProcessMapTileResponse>): ProcessMapPresentationState {
+  const placements = new Map<string, ProcessMapVisiblePlacement>();
+  const traces = new Map<string, ProcessMapTrace>();
+  const fragmentKeys = new Map<string, Set<string>>();
+  for (const tile of tiles.values()) {
+    for (const placement of tile.placements) {
+      if (placement.restricted) continue;
+      const key = placementKey(placement);
+      const current = placements.get(key);
+      if (
+        !current
+        || placement.revision > current.revision
+        || (placement.revision === current.revision && processMapPresentationRank(placement.presentation) > processMapPresentationRank(current.presentation))
+      ) placements.set(key, clonePlacement(placement));
+    }
+    for (const trace of tile.traces) {
+      const id = trace.resource_operational_relationship_id;
+      const current = traces.get(id);
+      if (
+        !current
+        || trace.revision > current.revision
+        || (trace.revision === current.revision && processMapPresentationRank(trace.presentation) > processMapPresentationRank(current.presentation))
+      ) {
+        traces.set(id, { ...cloneTrace(trace), path_fragments: [] });
+        fragmentKeys.set(id, new Set());
+      }
+      const merged = traces.get(id);
+      const seen = fragmentKeys.get(id);
+      if (!merged || !seen || merged.revision !== trace.revision) continue;
+      for (const fragment of trace.path_fragments) {
+        const key = fragment.map((point) => `${point.x},${point.y}`).join(";");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.path_fragments.push(fragment.map((point) => ({ ...point })));
+      }
+    }
+  }
+  return { placements, traces, removedPlacementKeys: new Set() };
+}
+
+export function mergeProcessMapPresentation(
+  base: ProcessMapPresentationState,
+  committed: ProcessMapPresentationState,
+  previewPlacements: ReadonlyMap<string, ProcessMapVisiblePlacement>,
+  previewTraces: ReadonlyMap<string, ProcessMapTrace>,
+  removedTraceIDs: ReadonlySet<string>,
+): ProcessMapPresentationState {
+  const placements = new Map(base.placements);
+  for (const entry of committed.placements) placements.set(...entry);
+  for (const entry of previewPlacements) placements.set(...entry);
+  for (const key of committed.removedPlacementKeys) placements.delete(key);
+  const traces = new Map(base.traces);
+  for (const entry of committed.traces) traces.set(...entry);
+  for (const entry of previewTraces) traces.set(...entry);
+  for (const id of removedTraceIDs) traces.delete(id);
+  return { placements, traces, removedPlacementKeys: new Set(committed.removedPlacementKeys) };
+}
+
+function tileBounds(bounds: [number[], number[]]): TileBounds {
+  return {
+    minX: Math.min(bounds[0][0], bounds[1][0]),
+    minY: Math.min(bounds[0][1], bounds[1][1]),
+    maxX: Math.max(bounds[0][0], bounds[1][0]),
+    maxY: Math.max(bounds[0][1], bounds[1][1]),
+  };
+}
+
+function clipRectangle(bounds: ProcessMapBounds, tile: TileBounds): ProcessMapBounds | null {
+  const clipped = {
+    min_x: Math.max(bounds.min_x, tile.minX),
+    min_y: Math.max(bounds.min_y, tile.minY),
+    max_x: Math.min(bounds.max_x, tile.maxX),
+    max_y: Math.min(bounds.max_y, tile.maxY),
+  };
+  return clipped.max_x > clipped.min_x && clipped.max_y > clipped.min_y ? clipped : null;
+}
+
+function boundsPolygon(bounds: ProcessMapBounds): number[][] {
+  return [
+    [bounds.min_x, bounds.min_y],
+    [bounds.max_x, bounds.min_y],
+    [bounds.max_x, bounds.max_y],
+    [bounds.min_x, bounds.max_y],
+  ];
+}
+
+function ownsCoordinate(point: ProcessMapGridPoint, tile: TileBounds): boolean {
+  return point.x >= tile.minX && point.x < tile.maxX && point.y >= tile.minY && point.y < tile.maxY;
+}
+
+export function processMapPerimeterSegments(bounds: ProcessMapBounds, tile: TileBounds): number[][][] {
+  const result: number[][][] = [];
+  const horizontal = (y: number, edge: "min" | "max") => {
+    const owned = edge === "min"
+      ? y >= tile.minY && y < tile.maxY
+      : y > tile.minY && y <= tile.maxY;
+    if (!owned) return;
+    const start = Math.max(bounds.min_x, tile.minX);
+    const end = Math.min(bounds.max_x, tile.maxX);
+    if (end > start) result.push([[start, y], [end, y]]);
+  };
+  const vertical = (x: number, edge: "min" | "max") => {
+    const owned = edge === "min"
+      ? x >= tile.minX && x < tile.maxX
+      : x > tile.minX && x <= tile.maxX;
+    if (!owned) return;
+    const start = Math.max(bounds.min_y, tile.minY);
+    const end = Math.min(bounds.max_y, tile.maxY);
+    if (end > start) result.push([[x, start], [x, end]]);
+  };
+  horizontal(bounds.min_y, "min");
+  horizontal(bounds.max_y, "max");
+  vertical(bounds.min_x, "min");
+  vertical(bounds.max_x, "max");
+  return result;
+}
+
+function segmentColor(index: number, count: number): [number, number, number, number] {
+  const ratio = count <= 1 ? 0.5 : index / (count - 1);
+  return [
+    Math.round(COLOR_TRACE_START[0] + (COLOR_TRACE_END[0] - COLOR_TRACE_START[0]) * ratio),
+    Math.round(COLOR_TRACE_START[1] + (COLOR_TRACE_END[1] - COLOR_TRACE_START[1]) * ratio),
+    Math.round(COLOR_TRACE_START[2] + (COLOR_TRACE_END[2] - COLOR_TRACE_START[2]) * ratio),
+    220,
+  ];
+}
+
+function traceSegments(trace: ProcessMapTrace): PathDatum[] {
+  const pairs = trace.path_fragments.flatMap((fragment) => fragment.slice(1).map((point, index) => [fragment[index], point] as const));
+  const pick: TracePick = { kind: "trace", id: trace.resource_operational_relationship_id, trace };
+  return pairs.map((pair, index) => ({
+    path: pair.map((point) => [point.x, point.y]),
+    color: segmentColor(index, pairs.length),
+    width: 3,
+    pick,
+  }));
+}
+
+function pointAtPhase(fragments: readonly ProcessMapGridPoint[][], phase: number): [number, number] | null {
+  const segments = fragments.flatMap((fragment) => fragment.slice(1).map((end, index) => {
+    const start = fragment[index];
+    return { start, end, length: Math.hypot(end.x - start.x, end.y - start.y) };
+  })).filter((segment) => segment.length > 0);
+  const total = segments.reduce((sum, segment) => sum + segment.length, 0);
+  if (!total) return null;
+  let offset = Math.max(0, Math.min(1, phase)) * total;
+  for (const segment of segments) {
+    if (offset > segment.length) {
+      offset -= segment.length;
+      continue;
+    }
+    const ratio = offset / segment.length;
+    return [
+      segment.start.x + (segment.end.x - segment.start.x) * ratio,
+      segment.start.y + (segment.end.y - segment.start.y) * ratio,
+    ];
+  }
+  return [segments[segments.length - 1].end.x, segments[segments.length - 1].end.y];
+}
+
+function placementBounds(placement: ProcessMapPlacement): ProcessMapBounds {
+  return placement.restricted ? {
+    min_x: placement.grid_x,
+    min_y: placement.grid_y,
+    max_x: placement.grid_x + PROCESS_MAP_RESTRICTED_WIDTH,
+    max_y: placement.grid_y + PROCESS_MAP_RESTRICTED_HEIGHT,
+  } : processMapPlacementBounds(placement);
+}
+
+function renderTileSubLayers(
+  props: Parameters<NonNullable<TileLayerProps<ProcessMapTileResponse>["renderSubLayers"]>>[0],
+  options: ProcessMapLayerBuildOptions,
+): Layer[] {
+  if (!props.data) return [];
+  const tile = tileBounds(props.tile.boundingBox);
+  const fences: PathDatum[] = [];
+  const traces: PathDatum[] = [];
+  const bodies: PolygonDatum[] = [];
+  const restricted: PolygonDatum[] = [];
+  const processPerimeters: PathDatum[] = [];
+  const restrictedPerimeters: PathDatum[] = [];
+  const labels: TextDatum[] = [];
+  for (const placement of props.data.placements) {
+    const bounds = placementBounds(placement);
+    const clipped = clipRectangle(bounds, tile);
+    if (!clipped) continue;
+    if (placement.restricted) {
+      restricted.push({ polygon: boundsPolygon(clipped), fill: [226, 232, 240, 245], line: [100, 116, 139, 210], lineWidth: 0 });
+      for (const path of processMapPerimeterSegments(bounds, tile)) restrictedPerimeters.push({ path, color: [100, 116, 139, 210], width: 1 });
+      const center = { x: (bounds.min_x + bounds.max_x) / 2, y: (bounds.min_y + bounds.max_y) / 2 };
+      if (ownsCoordinate(center, tile)) labels.push({ position: [center.x, center.y], text: "?", size: 13 });
+      continue;
+    }
+    const key = placementKey(placement);
+    if (options.editedPlacementKeys.has(key) || options.editOverlay.selectedPlacementKey === key) continue;
+    const pick: PlacementPick = { kind: "placement", key, placement };
+    const lod = processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit);
+    if (placement.resource_type === "company_explorer_folder") {
+      for (const path of processMapPerimeterSegments(bounds, tile)) fences.push({ path, color: COLOR_FOLDER, width: lod === "editing" ? 2.5 : 1.5, pick });
+      bodies.push({ polygon: boundsPolygon(clipped), fill: [255, 255, 255, 1], line: [255, 255, 255, 0], lineWidth: 0, pick });
+    } else {
+      bodies.push({
+        polygon: boundsPolygon(clipped),
+        fill: lod === "whole" ? [226, 232, 240, 238] : [255, 255, 255, 238],
+        line: COLOR_PROCESS,
+        lineWidth: 0,
+        pick,
+      });
+      for (const path of processMapPerimeterSegments(bounds, tile)) processPerimeters.push({ path, color: COLOR_PROCESS, width: lod === "editing" ? 2.5 : 1.5, pick });
+    }
+    const center = { x: (bounds.min_x + bounds.max_x) / 2, y: (bounds.min_y + bounds.max_y) / 2 };
+    if (lod !== "whole" && ownsCoordinate(center, tile)) labels.push({
+      position: [center.x, center.y],
+      text: lod === "editing" ? `${placement.resource_type === "company_explorer_folder" ? "Folder" : "Process"}\n${placement.name}` : placement.name,
+      size: lod === "editing" ? 13 : 11,
+    });
+  }
+  for (const trace of props.data.traces) {
+    const id = trace.resource_operational_relationship_id;
+    if (!options.editedTraceIDs.has(id) && options.editOverlay.selectedTraceID !== id) traces.push(...traceSegments(trace));
+  }
+  return [
+    new PathLayer<PathDatum>({ id: `${props.id}-traces`, data: traces, pickable: true, widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PathLayer<PathDatum>({ id: `${props.id}-folder-fences`, data: fences, pickable: true, widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PolygonLayer<PolygonDatum>({ id: `${props.id}-placements`, data: bodies, pickable: true, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
+    new PolygonLayer<PolygonDatum>({ id: `${props.id}-restricted`, data: restricted, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
+    new PathLayer<PathDatum>({ id: `${props.id}-process-perimeters`, data: processPerimeters, pickable: true, widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PathLayer<PathDatum>({ id: `${props.id}-restricted-perimeters`, data: restrictedPerimeters, pickable: false, widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new TextLayer<TextDatum>({ id: `${props.id}-labels`, data: labels, pickable: false, billboard: true, sizeUnits: "pixels", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", fontWeight: 700, getPosition: (item) => item.position, getText: (item) => item.text, getSize: (item) => item.size, getColor: COLOR_TEXT, getTextAnchor: "middle", getAlignmentBaseline: "center" }),
+  ];
+}
+
+function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; waypoints: Layer } {
+  const paths: PathDatum[] = [];
+  const waypoints: PointDatum[] = [];
+  for (const trace of options.editOverlay.traces) {
+    const fullPath = tracePath(trace, options.presentation.placements);
+    const pathFragments = fullPath ? [fullPath] : trace.path_fragments;
+    paths.push(...traceSegments({ ...trace, path_fragments: pathFragments }).map((item) => ({ ...item, width: 4 })));
+    if (trace.presentation !== "editing" || options.editOverlay.selectedTraceID !== trace.resource_operational_relationship_id) continue;
+    trace.route_points.forEach((point, index) => waypoints.push({
+      position: [point.x, point.y],
+      radius: 5,
+      fill: [255, 255, 255, 255],
+      line: [14, 165, 233, 255],
+      pick: { kind: "waypoint", id: trace.resource_operational_relationship_id, index, trace },
+    }));
+  }
+  if (options.editOverlay.connectionPreview) {
+    const start = processMapOutputAnchor(options.editOverlay.connectionPreview.source);
+    const end = options.editOverlay.connectionPreview.point;
+    paths.push({ path: processMapOrthogonalPathPoints(start, [], end).map((point) => [point.x, point.y]), color: COLOR_TRACE_START, width: 3 });
   }
   return {
-    id: processMapResourceNodeID({ resource_type: placement.resource_type, resource_id: placement.resource_id }),
-    type: "processMapCard",
-    position,
-    data: {
-      restricted: false,
-      resourceType: placement.resource_type,
-      resourceID: placement.resource_id,
-      label: placement.name,
-      gridX: placement.grid_x,
-      gridY: placement.grid_y,
-      revision: placement.revision,
-      createdTimestamp: placement.created_timestamp,
-      updatedTimestamp: placement.updated_timestamp,
-    },
-    style: { width: footprint.width * PROCESS_MAP_GRID_PX, height: footprint.height * PROCESS_MAP_GRID_PX },
-    draggable: true,
-    selectable: true,
-    connectable: true,
-    focusable: true,
-    deletable: false,
+    path: new PathLayer<PathDatum>({ id: "process-map-edit-traces", data: paths, pickable: true, widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    waypoints: new ScatterplotLayer<PointDatum>({ id: "process-map-edit-waypoints", data: waypoints, pickable: true, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 2 }),
   };
 }
 
-function ProcessMapCard({ data, selected, isConnectable }: NodeProps<ProcessMapNode>) {
-  const connectionInProgress = useConnection((connection) => connection.inProgress);
-  const qdOverlay = React.useContext(ProcessMapQDOverlayContext);
-  if (data.restricted) {
-    return (
-      <div className="process-map-card process-map-card--restricted" aria-label="?">
-        <span aria-hidden="true">?</span>
-      </div>
-    );
-  }
-  const isFolder = data.resourceType === "company_explorer_folder";
-  const qdCardPinned = !isFolder && qdOverlay?.pinnedProcessID === data.resourceID;
-  const qdCardVisible = qdCardPinned || (
-    !isFolder
-    && qdOverlay?.hoverModeEnabled === true
-    && qdOverlay.hoveredProcessID === data.resourceID
-  );
-  return (
-    <div
-      className={`process-map-card process-map-card--${isFolder ? "folder" : "process"}${selected ? " is-selected" : ""}${connectionInProgress ? " is-connecting" : ""}`}
-      aria-label={`${isFolder ? "Folder" : "Process"}: ${data.label}`}
-      onMouseEnter={!isFolder ? () => qdOverlay?.showHoverCard(data.resourceID) : undefined}
-      onMouseLeave={!isFolder ? () => qdOverlay?.scheduleHoverCardClose(data.resourceID) : undefined}
-    >
-      <Handle
-        id="input"
-        className="process-map-handle process-map-handle--input"
-        type="target"
-        position={Position.Left}
-        isConnectable={isConnectable}
-      />
-      <div className="process-map-card__body">
-        <span className="process-map-card__kind">{isFolder ? "Folder" : "Process"}</span>
-        <span className="process-map-card__label">{data.label}</span>
-      </div>
-      <Handle
-        id="output"
-        className="process-map-handle process-map-handle--output"
-        type="source"
-        position={Position.Right}
-        isConnectable={isConnectable}
-      />
-      {!isFolder && qdOverlay && (
-        <NodeToolbar
-          className="process-map-qd-toolbar"
-          position={Position.Right}
-          align="start"
-          offset={24}
-          isVisible={qdCardVisible}
-          style={{ zIndex: 30 }}
-        >
-          <ProcessMapQDCard
-            apiBase={qdOverlay.apiBase}
-            companyID={qdOverlay.companyID}
-            logicGateID={data.resourceID}
-            processName={data.label}
-            pinned={qdCardPinned}
-            requestJSON={qdOverlay.requestJSON}
-            onClose={qdOverlay.closePinnedCard}
-            onPointerEnter={() => qdOverlay.showHoverCard(data.resourceID)}
-            onPointerLeave={() => qdOverlay.scheduleHoverCardClose(data.resourceID)}
-          />
-        </NodeToolbar>
-      )}
-    </div>
-  );
-}
-
-function ProcessMapTraceWaypoint({
-  relationshipID,
-  waypointIndex,
-  point,
-  routePoints,
-  data,
-}: {
-  relationshipID: string;
-  waypointIndex: number;
-  point: ProcessMapGridPoint;
-  routePoints: ProcessMapGridPoint[];
-  data: ProcessMapEdgeData;
-}) {
-  const gestureRef = React.useRef<{
-    pointerID: number;
-    startingRoutePoints: ProcessMapGridPoint[];
-    canonicalGeneration: number;
-  } | null>(null);
-  const flowPoint = processMapGridPointToFlowPosition(processMapRoutePointToSurfaceCenter(point));
-  const finishGesture = (event: React.PointerEvent<HTMLButtonElement>, action: "commit" | "cancel") => {
-    const gesture = gestureRef.current;
-    if (!gesture || gesture.pointerID !== event.pointerId) return;
-    gestureRef.current = null;
-    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
+  const bodies: PolygonDatum[] = [];
+  const fences: PathDatum[] = [];
+  const labels: TextDatum[] = [];
+  const handles: PointDatum[] = [];
+  const anchors: PointDatum[] = [];
+  for (const placement of options.editOverlay.placements) {
+    const key = placementKey(placement);
+    const bounds = processMapPlacementBounds(placement);
+    const pick: PlacementPick = { kind: "placement", key, placement };
+    if (placement.resource_type === "company_explorer_folder") {
+      const color = options.editOverlay.highlightedFolderKey === key ? [14, 165, 233, 250] as const : COLOR_FOLDER;
+      const perimeter = [
+        [[bounds.min_x, bounds.min_y], [bounds.max_x, bounds.min_y]],
+        [[bounds.max_x, bounds.min_y], [bounds.max_x, bounds.max_y]],
+        [[bounds.max_x, bounds.max_y], [bounds.min_x, bounds.max_y]],
+        [[bounds.min_x, bounds.max_y], [bounds.min_x, bounds.min_y]],
+      ];
+      for (const path of perimeter) fences.push({ path, color: [...color], width: options.editOverlay.highlightedFolderKey === key ? 4 : 3, pick });
+      bodies.push({ polygon: boundsPolygon(bounds), fill: [255, 255, 255, 1], line: [255, 255, 255, 0], lineWidth: 0, pick });
+    } else {
+      bodies.push({ polygon: boundsPolygon(bounds), fill: [255, 255, 255, 244], line: COLOR_PROCESS, lineWidth: 3, pick });
     }
-    data.onMoveWaypoint(
-      relationshipID,
-      waypointIndex,
-      action === "commit" ? { x: event.clientX, y: event.clientY } : null,
-      gesture.startingRoutePoints,
-      action,
-      gesture.canonicalGeneration,
-    );
-  };
-  return (
-    <button
-      type="button"
-      className="nodrag nopan process-map-waypoint"
-      aria-label={`Trace waypoint ${waypointIndex + 1}`}
-      title="Drag to move. Double-click to remove."
-      style={{ transform: `translate(-50%, -50%) translate(${flowPoint.x}px, ${flowPoint.y}px)` }}
-      onDoubleClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        data.onReplaceRoute(relationshipID, routePoints.filter((_, routeIndex) => routeIndex !== waypointIndex));
-      }}
-      onPointerDown={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        gestureRef.current = {
-          pointerID: event.pointerId,
-          startingRoutePoints: routePoints.map((item) => ({ ...item })),
-          canonicalGeneration: data.getCanonicalGeneration(),
-        };
-        event.currentTarget.setPointerCapture?.(event.pointerId);
-      }}
-      onPointerMove={(event) => {
-        const gesture = gestureRef.current;
-        if (!gesture || gesture.pointerID !== event.pointerId) return;
-        data.onMoveWaypoint(
-          relationshipID,
-          waypointIndex,
-          { x: event.clientX, y: event.clientY },
-          gesture.startingRoutePoints,
-          "preview",
-          gesture.canonicalGeneration,
-        );
-      }}
-      onPointerUp={(event) => finishGesture(event, "commit")}
-      onPointerCancel={(event) => finishGesture(event, "cancel")}
-      onLostPointerCapture={(event) => finishGesture(event, "cancel")}
-    />
-  );
+    const lod = processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit);
+    if (lod !== "whole") labels.push({
+      position: [(bounds.min_x + bounds.max_x) / 2, (bounds.min_y + bounds.max_y) / 2],
+      text: lod === "editing" ? `${placement.resource_type === "company_explorer_folder" ? "Folder" : "Process"}\n${placement.name}` : placement.name,
+      size: 13,
+    });
+    if (!options.settled || options.editOverlay.selectedPlacementKey !== key || lod !== "editing") continue;
+    const corners: Array<[ResizePick["horizontal"], ResizePick["vertical"], [number, number]]> = [
+      ["west", "north", [bounds.min_x, bounds.min_y]], ["east", "north", [bounds.max_x, bounds.min_y]],
+      ["east", "south", [bounds.max_x, bounds.max_y]], ["west", "south", [bounds.min_x, bounds.max_y]],
+    ];
+    for (const [horizontal, vertical, position] of corners) handles.push({ position, radius: 5, fill: [255, 255, 255, 255], line: placement.resource_type === "company_explorer_folder" ? COLOR_FOLDER : COLOR_PROCESS, pick: { kind: "resize", horizontal, vertical, key, placement } });
+  }
+  if (options.settled) {
+    for (const placement of options.presentation.placements.values()) {
+      const key = placementKey(placement);
+      if (!options.editOverlay.showAllAnchors && options.editOverlay.selectedPlacementKey !== key) continue;
+      if (processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit) !== "editing") continue;
+      const input = processMapInputAnchor(placement);
+      const output = processMapOutputAnchor(placement);
+      anchors.push({ position: [input.x, input.y], radius: 6, fill: [255, 255, 255, 255], line: [14, 165, 233, 255], pick: { kind: "anchor", anchor: "input", key, placement } });
+      anchors.push({ position: [output.x, output.y], radius: 6, fill: [14, 165, 233, 255], line: [255, 255, 255, 255], pick: { kind: "anchor", anchor: "output", key, placement } });
+    }
+  }
+  return [
+    new PathLayer<PathDatum>({ id: "process-map-edit-folder-fences", data: fences, pickable: true, widthUnits: "pixels", getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PolygonLayer<PolygonDatum>({ id: "process-map-edit-placement-bodies", data: bodies, pickable: true, filled: true, stroked: true, lineWidthUnits: "pixels", getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: (item) => item.lineWidth }),
+    new TextLayer<TextDatum>({ id: "process-map-edit-labels", data: labels, pickable: false, billboard: true, sizeUnits: "pixels", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", fontWeight: 700, getPosition: (item) => item.position, getText: (item) => item.text, getSize: (item) => item.size, getColor: COLOR_TEXT, getTextAnchor: "middle", getAlignmentBaseline: "center" }),
+    new ScatterplotLayer<PointDatum>({ id: "process-map-edit-resize-handles", data: handles, pickable: true, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 2 }),
+    new ScatterplotLayer<PointDatum>({ id: "process-map-edit-anchors", data: anchors, pickable: true, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 2 }),
+  ];
 }
 
-function ProcessMapTraceEdge({ id, sourceX, sourceY, targetX, targetY, selected, data }: EdgeProps<ProcessMapEdge>) {
-  const routePoints = data?.routePoints ?? [];
-  const gradientID = `process-map-trace-gradient-${React.useId().replace(/:/g, "")}`;
-  const physicalSourceX = sourceX - PROCESS_MAP_HANDLE_RADIUS_PX;
-  const physicalTargetX = targetX + PROCESS_MAP_HANDLE_RADIUS_PX;
-  const path = processMapTracePath(
-    { x: physicalSourceX / PROCESS_MAP_GRID_PX, y: sourceY / PROCESS_MAP_GRID_PX },
-    routePoints,
-    { x: physicalTargetX / PROCESS_MAP_GRID_PX, y: targetY / PROCESS_MAP_GRID_PX },
-  );
-  return (
-    <>
-      <defs>
-        <linearGradient id={gradientID} x1={physicalSourceX} y1={sourceY} x2={physicalTargetX} y2={targetY} gradientUnits="userSpaceOnUse">
-          <stop stopColor={NODE_ICON_GRADIENT_START} />
-          <stop offset="1" stopColor={NODE_ICON_GRADIENT_END} />
-        </linearGradient>
-      </defs>
-      <BaseEdge
-        id={id}
-        path={path}
-        className={`process-map-trace${selected ? " is-selected" : ""}`}
-        interactionWidth={PROCESS_MAP_GRID_PX}
-        style={{
-          stroke: `url(#${gradientID})`,
-          strokeWidth: PROCESS_MAP_GRID_PX,
-          strokeLinecap: "butt",
-          strokeLinejoin: "miter",
-        }}
-      />
-      <path d={path} className="process-map-trace__flow" aria-hidden="true" pointerEvents="none" />
-      {selected && data && (
-        <EdgeLabelRenderer>
-          {routePoints.map((point, index) => (
-            <ProcessMapTraceWaypoint
-              key={index}
-              relationshipID={id}
-              waypointIndex={index}
-              point={point}
-              routePoints={routePoints}
-              data={data}
-            />
-          ))}
-        </EdgeLabelRenderer>
-      )}
-    </>
-  );
+export function buildProcessMapLayers(options: ProcessMapLayerBuildOptions): Layer[] {
+  const sceneBounds = options.scene.bounds;
+  const backgroundBounds = sceneBounds ?? { min_x: -1, min_y: -1, max_x: 1, max_y: 1 };
+  const background = new PolygonLayer<PolygonDatum>({
+    id: "process-map-background",
+    data: [{ polygon: boundsPolygon(backgroundBounds), fill: [255, 255, 255, 255], line: [255, 255, 255, 0], lineWidth: 0 }],
+    pickable: false,
+    filled: true,
+    stroked: false,
+    getPolygon: (item) => item.polygon,
+    getFillColor: (item) => item.fill,
+  });
+  const tiles = sceneBounds ? new ProcessMapProtectedTileLayer({
+    id: "process-map-spatial-tiles",
+    protectedGeneration: options.protectedGeneration,
+    data: `${options.scene.process_map_read_version}:${options.protectedGeneration}`,
+    extent: [sceneBounds.min_x, sceneBounds.min_y, sceneBounds.max_x, sceneBounds.max_y],
+    tileSize: processMapDeckTileSize(options.scene.tile_size, options.scene.max_tile_zoom),
+    minZoom: options.scene.min_tile_zoom,
+    maxZoom: options.scene.max_tile_zoom,
+    zoomOffset: options.scene.max_tile_zoom,
+    maxCacheByteSize: PROCESS_MAP_TILE_CACHE_BYTES,
+    maxRequests: PROCESS_MAP_MAX_TILE_REQUESTS,
+    debounceTime: PROCESS_MAP_TILE_DEBOUNCE_MS,
+    refinementStrategy: (headers) => transparentVectorRefinementStrategy(headers),
+    updateTriggers: {
+      getTileData: [options.settledGeneration, options.scene.process_map_read_version, options.protectedGeneration],
+      renderSubLayers: [options.settledPixelsPerGridUnit, options.editedPlacementKeys, options.editedTraceIDs, options.editOverlay.selectedPlacementKey, options.editOverlay.selectedTraceID],
+    },
+    getTileData: ((props) => {
+      // Returning before a Promise is created keeps interim wheel/pan candidates
+      // from issuing delayed HTTP after the gesture has already moved on.
+      if (!options.settled) return null;
+      return options.getTileData({ tileID: props.id, z: props.index.z, x: props.index.x, y: props.index.y, signal: props.signal });
+    }) as TileLayerProps<ProcessMapTileResponse>["getTileData"],
+    onTileLoad: (tile) => { if (tile.content) options.onTileLoad(tile.id, tile.content, options.settledGeneration); },
+    onTileUnload: (tile) => options.onTileUnload(tile.id, options.settledGeneration),
+    onViewportLoad: (headers) => {
+      if (
+        options.settled
+        && processMapViewportHasCompleteCoverage(headers, options.scene.process_map_read_version)
+      ) options.onViewportLoad?.(options.settledGeneration);
+    },
+    onTileError: (cause) => options.onTileError?.(cause),
+    renderSubLayers: (props) => renderTileSubLayers(props, options),
+  }) : null;
+  const editTraces = editTraceLayers(options);
+  return [background, editTraces.path, ...(tiles ? [tiles] : []), editTraces.waypoints, ...editPlacementLayers(options)];
 }
 
-const nodeTypes = { processMapCard: ProcessMapCard };
-const edgeTypes = { processMapTrace: ProcessMapTraceEdge };
-const PROCESS_MAP_HANDLE_RADIUS_PX = 6;
-const PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY = "mangorts.process-map.placement-tray-collapsed.v1";
+export function buildProcessMapFlowLayer(
+  presentation: ProcessMapPresentationState,
+  reducedMotion: boolean,
+  flowPhase: number,
+): Layer {
+  const data: PointDatum[] = [];
+  for (const trace of presentation.traces.values()) {
+    const fullPath = trace.presentation === "editing" ? tracePath(trace, presentation.placements) : null;
+    const paths = fullPath ? [fullPath] : trace.path_fragments;
+    for (const path of paths) {
+      const point = pointAtPhase([path], reducedMotion ? 0.5 : flowPhase);
+      if (point) data.push({ position: point, radius: 3, fill: [255, 255, 255, 230], line: COLOR_TRACE_START });
+    }
+  }
+  return new ScatterplotLayer<PointDatum>({ id: "process-map-trace-flow-markers", data, pickable: false, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 1 });
+}
 
-function readProcessMapTrayCollapsed(): boolean {
-  if (typeof localStorage === "undefined") return false;
+function readTrayCollapsed(): boolean {
   try {
-    return localStorage.getItem(PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY) === "true";
+    return typeof localStorage !== "undefined" && localStorage.getItem(PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY) === "true";
   } catch {
     return false;
   }
 }
 
-function storeProcessMapTrayCollapsed(collapsed: boolean): void {
-  if (typeof localStorage === "undefined") return;
+function storeTrayCollapsed(collapsed: boolean): void {
   try {
     localStorage.setItem(PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
-  } catch {}
+  } catch {
+    // Browser storage is only a view preference.
+  }
 }
 
-function processMapErrorMessage(cause: unknown, fallback: string): string {
-  if (cause instanceof Error && cause.message.trim()) return cause.message;
-  return fallback;
+function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 }
 
-function ProcessMapSurfaceInner({
-  apiBase,
-  companyID,
-  folderID,
-  hoverModeEnabled = false,
-  onOpenFolder,
-  onOpenLogicGate,
-  onLayerChange,
-}: ProcessMapSurfaceProps) {
-  const [nodes, setNodes] = useState<ProcessMapNode[]>([]);
-  const [edges, setEdges] = useState<ProcessMapEdge[]>([]);
+function pointFromInfo(info: PickingInfo): ProcessMapGridPoint | null {
+  return info.coordinate && info.coordinate.length >= 2 ? { x: info.coordinate[0], y: info.coordinate[1] } : null;
+}
+
+function descendantsForMove(
+  root: ProcessMapVisiblePlacement,
+  placements: ReadonlyMap<string, ProcessMapVisiblePlacement>,
+): Map<string, ProcessMapVisiblePlacement> {
+  const result = new Map<string, ProcessMapVisiblePlacement>([[placementKey(root), clonePlacement(root)]]);
+  if (root.resource_type !== "company_explorer_folder") return result;
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const placement of placements.values()) {
+      const key = placementKey(placement);
+      if (result.has(key) || !placement.map_parent_folder_id) continue;
+      const hasParent = [...result.values()].some((parent) => (
+        parent.resource_type === "company_explorer_folder" && parent.resource_id === placement.map_parent_folder_id
+      ));
+      if (!hasParent) continue;
+      result.set(key, clonePlacement(placement));
+      changed = true;
+    }
+  }
+  return result;
+}
+
+function folderContainsItsChildren(
+  folder: ProcessMapVisiblePlacement,
+  placements: ReadonlyMap<string, ProcessMapVisiblePlacement>,
+): boolean {
+  const descendants = descendantsForMove(folder, placements);
+  descendants.delete(placementKey(folder));
+  return [...descendants.values()].every((placement) => (
+    processMapBoundsContain(processMapPlacementBounds(folder), processMapPlacementBounds(placement))
+  ));
+}
+
+function translatedTraces(
+  traces: ReadonlyMap<string, ProcessMapTrace>,
+  movedKeys: ReadonlySet<string>,
+  dx: number,
+  dy: number,
+): Map<string, ProcessMapTrace> {
+  const result = new Map<string, ProcessMapTrace>();
+  for (const trace of traces.values()) {
+    if (!movedKeys.has(placementKey(trace.source)) || !movedKeys.has(placementKey(trace.target))) continue;
+    result.set(trace.resource_operational_relationship_id, {
+      ...cloneTrace(trace),
+      route_points: trace.route_points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
+      path_fragments: trace.path_fragments.map((fragment) => fragment.map((point) => ({ x: point.x + dx, y: point.y + dy }))),
+    });
+  }
+  return result;
+}
+
+export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false, onOpenLogicGate }: ProcessMapSurfaceProps) {
+  const authGeneration = getAuthSessionCacheGeneration();
+  const knownMappedScope = `${apiBase.trim()}\u0000${companyID.trim()}\u0000${authGeneration}`;
+  const surfaceRef = useRef<HTMLDivElement | null>(null);
+  const deckRef = useRef<DeckGLRef<OrthographicView> | null>(null);
+  const [scene, setScene] = useState<ProcessMapSceneResponse | null>(null);
+  const [viewState, setViewState] = useState<ProcessMapViewState>(() => fitProcessMapViewState(null, { width: 1, height: 1 }));
+  const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 });
+  const [settled, setSettled] = useState(false);
+  const [settledGeneration, setSettledGeneration] = useState(0);
+  const [protectedGeneration, setProtectedGeneration] = useState(0);
+  const [protectedScope, setProtectedScope] = useState(knownMappedScope);
+  const [settledViewState, setSettledViewState] = useState(viewState);
+  const [loadedTiles, setLoadedTiles] = useState<Map<string, ProcessMapTileResponse>>(new Map());
+  const [committedOverlay, setCommittedOverlay] = useState<ProcessMapPresentationState>(emptyPresentation);
+  const [previewPlacements, setPreviewPlacements] = useState<Map<string, ProcessMapVisiblePlacement>>(new Map());
+  const [previewTraces, setPreviewTraces] = useState<Map<string, ProcessMapTrace>>(new Map());
+  const [removedTraceIDs, setRemovedTraceIDs] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<ProcessMapSelection>(null);
   const [hoveredProcessID, setHoveredProcessID] = useState<string | null>(null);
   const [pinnedProcessID, setPinnedProcessID] = useState<string | null>(null);
+  const [gesture, setGesture] = useState<ProcessMapGesture | null>(null);
+  const [externalDropPoint, setExternalDropPoint] = useState<ProcessMapGridPoint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [trayCollapsed, setTrayCollapsed] = useState(readTrayCollapsed);
   const [trayRows, setTrayRows] = useState<CompanyExplorerV2Row[]>([]);
-  const [trayLoading, setTrayLoading] = useState(true);
+  const [trayPath, setTrayPath] = useState<Array<{ id: string; label: string }>>([]);
+  const [trayLoading, setTrayLoading] = useState(false);
   const [trayError, setTrayError] = useState("");
-  const [trayCollapsed, setTrayCollapsed] = useState(readProcessMapTrayCollapsed);
-  const reactFlow = useReactFlow<ProcessMapNode, ProcessMapEdge>();
+  const [reducedMotion, setReducedMotion] = useState(false);
+  const [flowPhase, setFlowPhase] = useState(0);
+  const [knownMapped, setKnownMapped] = useState<{ scope: string; keys: Set<string> }>(() => ({ scope: knownMappedScope, keys: new Set() }));
+  const protectedScopeCurrent = protectedScope === knownMappedScope;
+  const activeScene = protectedScopeCurrent ? scene : null;
+  const knownMappedPlacementKeys = knownMapped.scope === knownMappedScope ? knownMapped.keys : new Set<string>();
+
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
-  const trayListID = React.useId();
-  const dragStartRef = useRef<{ id: string; position: ProcessMapGridPoint } | null>(null);
-  const suppressedNodeClickRef = useRef<string | null>(null);
-  const suppressedNodeClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const viewRef = useRef(viewState);
+  const sceneRef = useRef(activeScene);
+  const presentationRef = useRef<ProcessMapPresentationState>(emptyPresentation());
+  const committedOverlayRef = useRef(committedOverlay);
+  const removedTraceIDsRef = useRef(removedTraceIDs);
+  const gestureRef = useRef<ProcessMapGesture | null>(null);
+  const settlementGateRef = useRef<ReturnType<typeof createProcessMapSettlementGate> | null>(null);
+  const settledReadyRef = useRef(false);
+  const settledGenerationRef = useRef(0);
+  const settledAbortRef = useRef<AbortController | null>(null);
+  const sceneAbortRef = useRef<AbortController | null>(null);
+  const fittedSceneRef = useRef(false);
+  const canonicalGenerationRef = useRef(0);
+  const operationGenerationRef = useRef(new Map<string, number>());
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const layerRequestGenerationRef = useRef(0);
-  const activeLayerReadRef = useRef<number | null>(null);
-  const localMutationGenerationRef = useRef(0);
-  const canonicalRefreshGenerationRef = useRef(0);
-  const activeLayerKeyRef = useRef("");
-  const refreshResolversRef = useRef(new Set<() => void>());
-  const traceSaveGenerationRef = useRef(new Map<string, number>());
-  const placementOperationGenerationRef = useRef(new Map<string, number>());
-  const deletedRelationshipIDsRef = useRef(new Set<string>());
-  const trayBranchReadRef = useRef<Promise<void> | null>(null);
-  const committedPlacementRef = useRef(new Map<string, {
-    position: ProcessMapGridPoint;
-    data: ProcessMapVisibleNodeData;
-  }>());
+  const suppressClickRef = useRef(false);
+  const lastClickRef = useRef<{ id: string; at: number } | null>(null);
+  viewRef.current = viewState;
+  sceneRef.current = activeScene;
+  gestureRef.current = gesture;
+  committedOverlayRef.current = committedOverlay;
+  removedTraceIDsRef.current = removedTraceIDs;
 
-  const clearHoverCloseTimer = useCallback(() => {
-    if (hoverCloseTimerRef.current === null) return;
-    clearTimeout(hoverCloseTimerRef.current);
-    hoverCloseTimerRef.current = null;
-  }, []);
-
-  const showHoverCard = useCallback((logicGateID: string) => {
-    clearHoverCloseTimer();
-    if (hoverModeEnabled) setHoveredProcessID(logicGateID);
-  }, [clearHoverCloseTimer, hoverModeEnabled]);
-
-  const scheduleHoverCardClose = useCallback((logicGateID: string) => {
-    clearHoverCloseTimer();
-    hoverCloseTimerRef.current = setTimeout(() => {
-      hoverCloseTimerRef.current = null;
-      setHoveredProcessID((current) => current === logicGateID ? null : current);
-    }, 80);
-  }, [clearHoverCloseTimer]);
-
-  const closePinnedCard = useCallback(() => {
-    clearHoverCloseTimer();
-    setPinnedProcessID(null);
-    setHoveredProcessID(null);
-  }, [clearHoverCloseTimer]);
-
-  const openPlacement = useCallback((node: ProcessMapNode) => {
-    const folderTarget = processMapFolderDrillTarget(resourceFromNode(node));
-    if (folderTarget) {
-      onOpenFolder(folderTarget);
-      return;
-    }
-    if (node.data.restricted || node.data.resourceType !== "logic_gate") return;
-    clearHoverCloseTimer();
-    setHoveredProcessID(null);
-    setPinnedProcessID(null);
-    onOpenLogicGate(node.data.resourceID, node.data.label);
-  }, [clearHoverCloseTimer, onOpenFolder, onOpenLogicGate]);
-
-  const scheduleSuppressedNodeClickClear = useCallback(() => {
-    if (suppressedNodeClickTimerRef.current !== null) clearTimeout(suppressedNodeClickTimerRef.current);
-    suppressedNodeClickTimerRef.current = setTimeout(() => {
-      suppressedNodeClickTimerRef.current = null;
-      suppressedNodeClickRef.current = null;
-    }, 0);
-  }, []);
-
-  useEffect(() => {
-    if (!hoverModeEnabled) {
-      clearHoverCloseTimer();
-      setHoveredProcessID(null);
-    }
-  }, [clearHoverCloseTimer, hoverModeEnabled]);
-
-  useEffect(() => {
-    clearHoverCloseTimer();
-    setHoveredProcessID(null);
-    setPinnedProcessID(null);
-  }, [clearHoverCloseTimer, folderID]);
-
-  useEffect(() => () => {
-    clearHoverCloseTimer();
-    if (suppressedNodeClickTimerRef.current !== null) clearTimeout(suppressedNodeClickTimerRef.current);
-  }, [clearHoverCloseTimer]);
-
-  const qdOverlayContext = useMemo<ProcessMapQDOverlayContextValue>(() => ({
-    apiBase,
-    companyID,
-    hoverModeEnabled,
-    hoveredProcessID,
-    pinnedProcessID,
-    requestJSON,
-    showHoverCard,
-    scheduleHoverCardClose,
-    closePinnedCard,
-  }), [
-    apiBase,
-    companyID,
-    closePinnedCard,
-    hoverModeEnabled,
-    hoveredProcessID,
-    pinnedProcessID,
-    requestJSON,
-    scheduleHoverCardClose,
-    showHoverCard,
+  const tilePresentation = useMemo(
+    () => protectedScopeCurrent ? mergeTilePresentation(loadedTiles) : emptyPresentation(),
+    [loadedTiles, protectedScopeCurrent],
+  );
+  const presentation = useMemo(() => protectedScopeCurrent
+    ? mergeProcessMapPresentation(tilePresentation, committedOverlay, previewPlacements, previewTraces, removedTraceIDs)
+    : emptyPresentation(), [
+    committedOverlay,
+    previewPlacements,
+    previewTraces,
+    removedTraceIDs,
+    protectedScopeCurrent,
+    tilePresentation,
   ]);
+  presentationRef.current = presentation;
+
+  useEffect(() => {
+    setKnownMapped((current) => current.scope === knownMappedScope ? current : { scope: knownMappedScope, keys: new Set() });
+  }, [knownMappedScope]);
+
+  const updateKnownMapped = useCallback((additions: readonly ProcessMapResourceRef[], removals: readonly ProcessMapResourceRef[] = []) => {
+    setKnownMapped((current) => ({
+      scope: knownMappedScope,
+      keys: reconcileProcessMapKnownMappedKeys(current.scope === knownMappedScope ? current.keys : new Set(), additions, removals),
+    }));
+  }, [knownMappedScope]);
+
+  const advanceProtectedGeneration = useCallback(() => {
+    const next = canonicalGenerationRef.current + 1;
+    canonicalGenerationRef.current = next;
+    setProtectedGeneration(next);
+  }, []);
+
+  const settleNow = useCallback(() => {
+    settledAbortRef.current?.abort();
+    settledAbortRef.current = new AbortController();
+    settledGenerationRef.current += 1;
+    settledReadyRef.current = true;
+    setSettled(true);
+    setSettledViewState({ ...viewRef.current, target: [...viewRef.current.target] as [number, number, number] });
+    setSettledGeneration(settledGenerationRef.current);
+  }, []);
+
+  useEffect(() => {
+    const gate = createProcessMapSettlementGate({ delayMs: PROCESS_MAP_SETTLE_DELAY_MS, onSettle: settleNow });
+    settlementGateRef.current = gate;
+    return () => {
+      if (settlementGateRef.current === gate) settlementGateRef.current = null;
+      gate.dispose();
+    };
+  }, [settleNow]);
+
+  const markUnsettled = useCallback(() => {
+    settledReadyRef.current = false;
+    setSettled(false);
+    settlementGateRef.current?.onViewStateChange();
+  }, []);
+
+  const loadScene = useCallback(async (purgeProtectedGeometry: boolean) => {
+    if (!companyID.trim()) return;
+    if (purgeProtectedGeometry) {
+      setProtectedScope(knownMappedScope);
+      advanceProtectedGeneration();
+      invalidateProcessMapReadCaches(apiBase, companyID);
+      settledReadyRef.current = false;
+      settledAbortRef.current?.abort();
+      setSettled(false);
+      setLoadedTiles(new Map());
+      setCommittedOverlay(emptyPresentation());
+      setPreviewPlacements(new Map());
+      setPreviewTraces(new Map());
+      setRemovedTraceIDs(new Set());
+      setSelection(null);
+      setHoveredProcessID(null);
+      setPinnedProcessID(null);
+    }
+    sceneAbortRef.current?.abort();
+    const controller = new AbortController();
+    sceneAbortRef.current = controller;
+    setLoading(true);
+    setError("");
+    try {
+      const nextScene = await fetchProcessMapScene(apiBase, companyID, controller.signal);
+      if (controller.signal.aborted) return;
+      setScene(nextScene);
+      setLoading(false);
+      markUnsettled();
+    } catch (cause) {
+      if (isAbortError(cause)) return;
+      setLoading(false);
+      setError(errorMessage(cause, "Process Map could not be loaded."));
+    }
+  }, [advanceProtectedGeneration, apiBase, companyID, knownMappedScope, markUnsettled]);
+
+  useEffect(() => {
+    fittedSceneRef.current = false;
+    setScene(null);
+    void loadScene(true);
+    return () => {
+      sceneAbortRef.current?.abort();
+      settledAbortRef.current?.abort();
+      invalidateProcessMapReadCaches(apiBase, companyID);
+    };
+  }, [apiBase, companyID, loadScene]);
+
+  useEffect(() => {
+    if (!activeScene || fittedSceneRef.current || viewportSize.width <= 1 || viewportSize.height <= 1) return;
+    fittedSceneRef.current = true;
+    const fitted = fitProcessMapViewState(activeScene.bounds, viewportSize);
+    viewRef.current = fitted;
+    setViewState(fitted);
+    setSelection(null);
+    setHoveredProcessID(null);
+    setPinnedProcessID(null);
+    markUnsettled();
+  }, [activeScene, markUnsettled, viewportSize]);
+
+  useEffect(() => {
+    if (typeof matchMedia === "undefined") return undefined;
+    const query = matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(query.matches);
+    update();
+    query.addEventListener?.("change", update);
+    return () => query.removeEventListener?.("change", update);
+  }, []);
+
+  useEffect(() => {
+    if (reducedMotion || presentation.traces.size === 0) return undefined;
+    const timer = setInterval(() => setFlowPhase((phase) => (phase + 0.035) % 1), 50);
+    return () => clearInterval(timer);
+  }, [presentation.traces.size, reducedMotion]);
 
   useEffect(() => {
     if (trayCollapsed) {
@@ -560,817 +1053,842 @@ function ProcessMapSurfaceInner({
       return undefined;
     }
     let active = true;
-    setTrayRows([]);
     setTrayLoading(true);
     setTrayError("");
-    const loadBranch = () => folderID?.trim()
-      ? fetchCompanyExplorerChildren(apiBase, companyID, "all", folderID.trim())
+    const folderID = trayPath[trayPath.length - 1]?.id;
+    const read = folderID
+      ? fetchCompanyExplorerChildren(apiBase, companyID, "all", folderID)
       : fetchCompanyExplorerRoots(apiBase, companyID, "all");
-    const previousRead = refreshVersion > 0 ? trayBranchReadRef.current : null;
-    const request = (async () => {
-      if (previousRead) await previousRead;
-      if (!active) return undefined;
-      return loadBranch();
-    })();
-    trayBranchReadRef.current = request.then(() => undefined, () => undefined);
-    void request.then((snapshot) => {
-      if (active && snapshot) setTrayRows(snapshot.rows ?? []);
+    void read.then((snapshot) => {
+      if (active) setTrayRows(snapshot.rows ?? []);
     }).catch((cause) => {
-      if (!active) return;
-      setTrayError(processMapErrorMessage(cause, "Failed to load available items"));
+      if (active) setTrayError(errorMessage(cause, "Placement choices are unavailable."));
     }).finally(() => {
       if (active) setTrayLoading(false);
     });
-    return () => {
-      active = false;
-    };
-  }, [apiBase, companyID, folderID, refreshVersion, trayCollapsed]);
-
-  const requestRefresh = useCallback(() => new Promise<void>((resolve) => {
-    canonicalRefreshGenerationRef.current += 1;
-    refreshResolversRef.current.add(resolve);
-    setRefreshVersion((version) => version + 1);
-  }), []);
-
-  const markLocalMutationCommitted = useCallback((): boolean => {
-    localMutationGenerationRef.current += 1;
-    if (!activeLayerReadRef.current) return false;
-    activeLayerReadRef.current = null;
-    layerRequestGenerationRef.current += 1;
-    void requestRefresh();
-    return true;
-  }, [requestRefresh]);
-
-  useEffect(() => () => {
-    for (const resolve of refreshResolversRef.current) resolve();
-    refreshResolversRef.current.clear();
-  }, []);
-
-  const replaceTraceRoute = useCallback<ReplaceTraceRoute>((relationshipID, routePoints) => {
-    const nextRoute = orthogonalizeProcessMapRoutePoints(routePoints);
-    const saveGeneration = (traceSaveGenerationRef.current.get(relationshipID) ?? 0) + 1;
-    traceSaveGenerationRef.current.set(relationshipID, saveGeneration);
-    const responseGeneration = canonicalRefreshGenerationRef.current;
-    setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
-      ? { ...edge, data: { ...edge.data, routePoints: nextRoute } }
-      : edge));
-    setError("");
-    void putProcessMapTrace(apiBase, companyID, relationshipID, nextRoute)
-      .then((trace) => {
-        const responseWasSuperseded = !shouldApplyProcessMapMutationAck(
-          responseGeneration,
-          canonicalRefreshGenerationRef.current,
-          saveGeneration,
-          traceSaveGenerationRef.current.get(relationshipID) ?? 0,
-        );
-        const refreshQueued = markLocalMutationCommitted();
-        if (responseWasSuperseded) {
-          if (!refreshQueued) void requestRefresh();
-          return;
-        }
-        setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
-          && shouldApplyProcessMapCommit(edge.data.revision, trace.revision)
-          ? {
-              ...edge,
-              data: {
-                ...edge.data,
-                routePoints: trace.route_points,
-                committedRoutePoints: trace.route_points.map((point) => ({ ...point })),
-                revision: trace.revision,
-                createdTimestamp: trace.created_timestamp,
-                updatedTimestamp: trace.updated_timestamp,
-              },
-            }
-          : edge));
-      })
-      .catch((cause) => {
-        if (!shouldApplyProcessMapMutationAck(
-          responseGeneration,
-          responseGeneration,
-          saveGeneration,
-          traceSaveGenerationRef.current.get(relationshipID) ?? 0,
-        )) return;
-        if (canonicalRefreshGenerationRef.current !== responseGeneration) {
-          setError(processMapErrorMessage(cause, "Failed to save trace route"));
-          void requestRefresh();
-          return;
-        }
-        setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
-          ? { ...edge, data: { ...edge.data, routePoints: edge.data.committedRoutePoints.map((point) => ({ ...point })) } }
-          : edge));
-        setError(processMapErrorMessage(cause, "Failed to save trace route"));
-        void requestRefresh();
-      });
-  }, [apiBase, companyID, markLocalMutationCommitted, requestRefresh]);
-
-  const currentCanonicalGeneration = useCallback(() => canonicalRefreshGenerationRef.current, []);
-
-  const moveTraceWaypoint = useCallback<MoveTraceWaypoint>((relationshipID, waypointIndex, clientPoint, startingRoutePoints, action, canonicalGeneration) => {
-    if (canonicalRefreshGenerationRef.current !== canonicalGeneration) return;
-    if (waypointIndex < 0 || waypointIndex >= startingRoutePoints.length) return;
-    if (action === "cancel") {
-      setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
-        ? { ...edge, data: { ...edge.data, routePoints: startingRoutePoints.map((point) => ({ ...point })) } }
-        : edge));
-      return;
-    }
-    if (!clientPoint) return;
-    const flowPoint = reactFlow.screenToFlowPosition(clientPoint, { snapToGrid: false });
-    const gridPoint = processMapFlowToRoutePoint(flowPoint);
-    const next = startingRoutePoints.map((point, index) => index === waypointIndex ? gridPoint : point);
-    setEdges((current) => current.map((edge) => edge.id === relationshipID && edge.data
-      ? { ...edge, data: { ...edge.data, routePoints: next } }
-      : edge));
-    const startingPoint = startingRoutePoints[waypointIndex];
-    if (action === "commit" && (gridPoint.x !== startingPoint.x || gridPoint.y !== startingPoint.y)) {
-      replaceTraceRoute(relationshipID, next);
-    }
-  }, [reactFlow, replaceTraceRoute]);
-
-  const edgeFromTrace = useCallback((trace: ProcessMapTrace): ProcessMapEdge => ({
-    id: trace.resource_operational_relationship_id,
-    type: "processMapTrace",
-    source: processMapResourceNodeID(trace.source),
-    target: processMapResourceNodeID(trace.target),
-    sourceHandle: "output",
-    targetHandle: "input",
-    data: {
-      routePoints: trace.route_points.map((point) => ({ ...point })),
-      committedRoutePoints: trace.route_points.map((point) => ({ ...point })),
-      revision: trace.revision,
-      createdTimestamp: trace.created_timestamp,
-      updatedTimestamp: trace.updated_timestamp,
-      onMoveWaypoint: moveTraceWaypoint,
-      onReplaceRoute: replaceTraceRoute,
-      getCanonicalGeneration: currentCanonicalGeneration,
-    },
-    selectable: true,
-    focusable: true,
-    deletable: false,
-    zIndex: 0,
-  }), [currentCanonicalGeneration, moveTraceWaypoint, replaceTraceRoute]);
+    return () => { active = false; };
+  }, [apiBase, companyID, trayCollapsed, trayPath]);
 
   useEffect(() => {
-    const layerKey = `${companyID.trim()}:${folderID?.trim() ?? ""}`;
-    const layerChanged = activeLayerKeyRef.current !== layerKey;
-    activeLayerKeyRef.current = layerKey;
-    const requestGeneration = layerRequestGenerationRef.current + 1;
-    layerRequestGenerationRef.current = requestGeneration;
-    const mutationGeneration = localMutationGenerationRef.current;
-    const canonicalGeneration = canonicalRefreshGenerationRef.current;
-    const refreshResolvers = [...refreshResolversRef.current];
-    refreshResolversRef.current.clear();
-    activeLayerReadRef.current = requestGeneration;
-    const controller = new AbortController();
-    let responseApplied = false;
-    setLoading(true);
-    setError("");
-    setNotice("");
-    setSelection(null);
-    if (layerChanged) {
-      setNodes([]);
-      setEdges([]);
-      committedPlacementRef.current.clear();
-    }
-    void fetchProcessMapLayer(apiBase, companyID, folderID, controller.signal)
-      .then((response) => {
-        if (
-          controller.signal.aborted
-          || layerRequestGenerationRef.current !== requestGeneration
-          || localMutationGenerationRef.current !== mutationGeneration
-          || canonicalRefreshGenerationRef.current !== canonicalGeneration
-          || activeLayerKeyRef.current !== layerKey
-        ) return;
-        const nextNodes = response.placements.map(processMapNodeFromPlacement);
-        for (const node of nextNodes) {
-          if (node.data.restricted) continue;
-          committedPlacementRef.current.set(node.id, {
-            position: { x: node.data.gridX, y: node.data.gridY },
-            data: { ...node.data },
-          });
-        }
-        setNodes(nextNodes);
-        setEdges(response.traces.map(edgeFromTrace));
-        onLayerChange?.(response.layer);
-        responseApplied = true;
-      })
-      .catch((cause) => {
-        if (
-          controller.signal.aborted
-          || isAbortError(cause)
-          || layerRequestGenerationRef.current !== requestGeneration
-          || localMutationGenerationRef.current !== mutationGeneration
-          || canonicalRefreshGenerationRef.current !== canonicalGeneration
-        ) return;
-        setNodes([]);
-        setEdges([]);
-        committedPlacementRef.current.clear();
-        onLayerChange?.(null);
-        setError(processMapErrorMessage(cause, "Failed to load Process Map layer"));
-      })
-      .finally(() => {
-        if (
-          !controller.signal.aborted
-          && layerRequestGenerationRef.current === requestGeneration
-          && localMutationGenerationRef.current === mutationGeneration
-          && canonicalRefreshGenerationRef.current === canonicalGeneration
-        ) {
-          if (responseApplied && activeLayerReadRef.current === requestGeneration) {
-            activeLayerReadRef.current = null;
-          }
-          setLoading(false);
-        }
-        for (const resolve of refreshResolvers) resolve();
-      });
-    return () => {
-      if (activeLayerReadRef.current === requestGeneration) activeLayerReadRef.current = null;
-      controller.abort();
-    };
-  }, [apiBase, companyID, edgeFromTrace, folderID, onLayerChange, refreshVersion]);
-
-  useEffect(() => {
-    const clearLayer = () => {
-      canonicalRefreshGenerationRef.current += 1;
-      setNodes([]);
-      setEdges([]);
-      setSelection(null);
-      committedPlacementRef.current.clear();
-      onLayerChange?.(null);
-      setLoading(true);
-    };
-    const refresh = createCoalescedCanonicalRefresh(() => {
-      clearLayer();
-      return requestRefresh();
-    }, (cause) => {
-      setError(processMapErrorMessage(cause, "Failed to refresh Process Map"));
-    });
-    const clearLayerAndRefresh = () => {
-      invalidateProcessMapLayers(apiBase, companyID);
-      clearLayer();
-      refresh.request();
-    };
+    const coalesced = createCoalescedCanonicalRefresh(
+      () => loadScene(true),
+      (cause) => setError(errorMessage(cause, "Process Map could not refresh.")),
+    );
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, PROCESS_MAP_REALTIME_SCOPE, {
       onProcessMapChanged: (message) => {
-        const connectionID = getCurrentRealtimeConnectionID(apiBase, companyID);
-        if (message.origin_connection_id && connectionID === message.origin_connection_id) return;
-        clearLayerAndRefresh();
+        if (message.origin_connection_id && message.origin_connection_id === getCurrentRealtimeConnectionID(apiBase, companyID)) return;
+        coalesced.request();
       },
-      onAccepted: () => {
-        clearLayerAndRefresh();
+      onRecover: () => { coalesced.request(); },
+      onRejected: () => {
+        advanceProtectedGeneration();
+        invalidateProcessMapReadCaches(apiBase, companyID);
+        sceneAbortRef.current?.abort();
+        settledAbortRef.current?.abort();
+        settledReadyRef.current = false;
+        setSettled(false);
+        setLoadedTiles(new Map());
+        setCommittedOverlay(emptyPresentation());
+        setPreviewPlacements(new Map());
+        setPreviewTraces(new Map());
+        setRemovedTraceIDs(new Set());
+        setKnownMapped({ scope: knownMappedScope, keys: new Set() });
+        setSelection(null);
+        setGesture(null);
+        setHoveredProcessID(null);
+        setPinnedProcessID(null);
+        setScene(null);
+        setError("Process Map access changed. Refresh after your permissions are restored.");
       },
-      onRejected: clearLayerAndRefresh,
     });
     return () => {
-      refresh.dispose();
+      coalesced.dispose();
       unsubscribe();
     };
-  }, [apiBase, companyID, onLayerChange, requestRefresh]);
+  }, [advanceProtectedGeneration, apiBase, companyID, knownMappedScope, loadScene]);
 
-  const handleNodesChange = useCallback((changes: NodeChange<ProcessMapNode>[]) => {
-    setNodes((current) => applyNodeChanges(changes, current));
-  }, []);
+  const guardedGetTileData = useCallback(async (request: ProcessMapTileLoadRequest): Promise<ProcessMapTileResponse | null> => {
+    const expectedGeneration = settledGenerationRef.current;
+    const currentScene = sceneRef.current;
+    if (!settledReadyRef.current || !currentScene || request.z < currentScene.min_tile_zoom || request.z > currentScene.max_tile_zoom) return null;
+    const signal = combineProcessMapAbortSignals(settledAbortRef.current?.signal, request.signal);
+    try {
+      const tile = await fetchProcessMapTile(apiBase, companyID, currentScene.process_map_read_version, request.z, request.x, request.y, signal);
+      if (
+        signal.aborted
+        || !settledReadyRef.current
+        || expectedGeneration !== settledGenerationRef.current
+        || tile.process_map_read_version !== sceneRef.current?.process_map_read_version
+      ) return null;
+      return tile;
+    } catch (cause) {
+      if (isAbortError(cause)) return null;
+      throw cause;
+    }
+  }, [apiBase, companyID]);
 
-  const handleEdgesChange = useCallback((changes: EdgeChange<ProcessMapEdge>[]) => {
-    setEdges((current) => applyEdgeChanges(changes, current));
-  }, []);
+  const handleTileLoad = useCallback((tileID: string, data: ProcessMapTileResponse, generation: number) => {
+    if (!settledReadyRef.current || generation !== settledGenerationRef.current || data.process_map_read_version !== sceneRef.current?.process_map_read_version) return;
+    setLoadedTiles((current) => new Map(current).set(tileID, data));
+    updateKnownMapped(data.placements.filter((placement): placement is ProcessMapVisiblePlacement => !placement.restricted));
+    setLoading(false);
+  }, [updateKnownMapped]);
 
-  const handleNodeDragStart = useCallback((_: MouseEvent | TouchEvent, node: ProcessMapNode) => {
-    if (node.data.restricted) return;
-    suppressedNodeClickRef.current = node.id;
-    dragStartRef.current = {
-      id: node.id,
-      position: { x: node.data.gridX, y: node.data.gridY },
-    };
-  }, []);
-
-  const handleNodeDragStop = useCallback((_: MouseEvent | TouchEvent, node: ProcessMapNode) => {
-    if (node.data.restricted) return;
-    scheduleSuppressedNodeClickClear();
-    const original = dragStartRef.current?.id === node.id ? dragStartRef.current : null;
-    dragStartRef.current = null;
-    const gridPosition = processMapFlowToGridPosition(node.position);
-    const snappedPosition = processMapGridToFlowPosition(gridPosition);
-    const optimisticData: ProcessMapNodeData = { ...node.data, gridX: gridPosition.x, gridY: gridPosition.y };
-    setNodes((current) => current.map((item) => item.id === node.id
-      ? { ...item, position: snappedPosition, data: optimisticData }
-      : item));
-    if (original && original.position.x === gridPosition.x && original.position.y === gridPosition.y) return;
-    const operationGeneration = (placementOperationGenerationRef.current.get(node.id) ?? 0) + 1;
-    placementOperationGenerationRef.current.set(node.id, operationGeneration);
-    setError("");
-    const responseGeneration = canonicalRefreshGenerationRef.current;
-    void putProcessMapPlacement(apiBase, companyID, {
-      resource_type: node.data.resourceType,
-      resource_id: node.data.resourceID,
-    }, {
-      map_parent_folder_id: folderID?.trim() || null,
-      grid_x: gridPosition.x,
-      grid_y: gridPosition.y,
-    }).then((saved) => {
-      const responseWasSuperseded = !shouldApplyProcessMapMutationAck(
-        responseGeneration,
-        canonicalRefreshGenerationRef.current,
-        operationGeneration,
-        placementOperationGenerationRef.current.get(node.id) ?? 0,
-      );
-      const refreshQueued = markLocalMutationCommitted();
-      if (responseWasSuperseded) {
-        if (!refreshQueued) void requestRefresh();
-        return;
-      }
-      setNodes((current) => current.map((item) => item.id === node.id && !item.data.restricted
-        && shouldApplyProcessMapCommit(item.data.revision, saved.revision)
-        ? (() => {
-            const nextData: ProcessMapVisibleNodeData = {
-              ...item.data,
-              gridX: saved.grid_x,
-              gridY: saved.grid_y,
-              revision: saved.revision,
-              createdTimestamp: saved.created_timestamp,
-              updatedTimestamp: saved.updated_timestamp,
-            };
-            const nextPosition = { x: saved.grid_x, y: saved.grid_y };
-            committedPlacementRef.current.set(node.id, { position: nextPosition, data: { ...nextData } });
-            return { ...item, position: processMapGridToFlowPosition(nextPosition), data: nextData };
-          })()
-        : item));
-    }).catch((cause) => {
-      if (!shouldApplyProcessMapMutationAck(
-        responseGeneration,
-        responseGeneration,
-        operationGeneration,
-        placementOperationGenerationRef.current.get(node.id) ?? 0,
-      )) return;
-      if (canonicalRefreshGenerationRef.current !== responseGeneration) {
-        setError(processMapErrorMessage(cause, "Failed to save placement"));
-        void requestRefresh();
-        return;
-      }
-      const committed = committedPlacementRef.current.get(node.id);
-      if (committed) {
-        setNodes((current) => current.map((item) => item.id === node.id
-          ? {
-              ...item,
-              position: processMapGridToFlowPosition(committed.position),
-              data: { ...committed.data },
-            }
-          : item));
-      }
-      setError(processMapErrorMessage(cause, "Failed to save placement"));
-      void requestRefresh();
+  const handleTileUnload = useCallback((tileID: string, generation: number) => {
+    if (generation !== settledGenerationRef.current) return;
+    setLoadedTiles((current) => {
+      if (!current.has(tileID)) return current;
+      const next = new Map(current);
+      next.delete(tileID);
+      return next;
     });
-  }, [apiBase, companyID, folderID, markLocalMutationCommitted, requestRefresh, scheduleSuppressedNodeClickClear]);
+  }, []);
 
-  const handleConnect = useCallback((connection: Connection) => {
-    if (!connection.source || !connection.target || connection.source === connection.target) return;
-    const sourceNode = nodes.find((node) => node.id === connection.source);
-    const targetNode = nodes.find((node) => node.id === connection.target);
-    if (!sourceNode || !targetNode || sourceNode.data.restricted || targetNode.data.restricted) return;
-    const source = resourceFromNode(sourceNode);
-    const target = resourceFromNode(targetNode);
-    if (!source || !target) return;
-    const sourceAnchor = processMapOutputAnchor(
-      { x: sourceNode.data.gridX, y: sourceNode.data.gridY },
-      sourceNode.data.resourceType,
-    );
-    const targetAnchor = processMapInputAnchor(
-      { x: targetNode.data.gridX, y: targetNode.data.gridY },
-      targetNode.data.resourceType,
-    );
-    const routePoints = defaultProcessMapRoutePoints(sourceAnchor, targetAnchor);
-    const pendingID = `pending:${sourceNode.id}:${targetNode.id}`;
-    setEdges((current) => [...current.filter((edge) => edge.id !== pendingID), {
-      id: pendingID,
-      type: "processMapTrace",
-      source: sourceNode.id,
-      target: targetNode.id,
-      sourceHandle: "output",
-      targetHandle: "input",
-      data: {
-        routePoints,
-        committedRoutePoints: routePoints.map((point) => ({ ...point })),
-        revision: 0,
-        createdTimestamp: "",
-        updatedTimestamp: "",
-        onMoveWaypoint: moveTraceWaypoint,
-        onReplaceRoute: replaceTraceRoute,
-        getCanonicalGeneration: currentCanonicalGeneration,
-      },
-      selectable: false,
-      focusable: false,
-      deletable: false,
-      animated: true,
-      zIndex: 0,
-    }]);
-    setError("");
-    const responseGeneration = canonicalRefreshGenerationRef.current;
-    void postProcessMapRelationship(apiBase, companyID, source, target, routePoints)
-      .then((response) => {
-        const responseWasSuperseded = canonicalRefreshGenerationRef.current !== responseGeneration;
-        const refreshQueued = markLocalMutationCommitted();
-        if (response.trace) {
-          const trace = { ...response.trace, source, target };
-          if (
-            responseWasSuperseded
-            || deletedRelationshipIDsRef.current.has(trace.resource_operational_relationship_id)
-          ) {
-            setEdges((current) => current.filter((edge) => edge.id !== pendingID));
-            if (!refreshQueued) void requestRefresh();
-            return;
-          }
-          const committedEdge = edgeFromTrace(trace);
-          setEdges((current) => {
-            const withoutPending = current.filter((edge) => edge.id !== pendingID);
-            const existing = withoutPending.find((edge) => edge.id === trace.resource_operational_relationship_id);
-            if (existing?.data && !shouldApplyProcessMapCommit(existing.data.revision, trace.revision)) {
-              return withoutPending;
-            }
-            return [
-              ...withoutPending.filter((edge) => edge.id !== trace.resource_operational_relationship_id),
-              committedEdge,
-            ];
-          });
-        } else {
-          setEdges((current) => current.filter((edge) => edge.id !== pendingID));
-          if (!refreshQueued) void requestRefresh();
-        }
-      })
-      .catch((cause) => {
-        setEdges((current) => current.filter((edge) => edge.id !== pendingID));
-        setError(processMapErrorMessage(cause, "Failed to create trace"));
-        void requestRefresh();
-      });
-  }, [apiBase, companyID, currentCanonicalGeneration, edgeFromTrace, markLocalMutationCommitted, moveTraceWaypoint, nodes, replaceTraceRoute, requestRefresh]);
+  const handleViewportLoad = useCallback((generation: number) => {
+    if (!settledReadyRef.current || generation !== settledGenerationRef.current) return;
+    const retired = retireProcessMapMutationMasks({
+      committedOverlay: committedOverlayRef.current,
+      removedTraceIDs: removedTraceIDsRef.current,
+    }, true);
+    setCommittedOverlay(retired.committedOverlay);
+    setRemovedTraceIDs(retired.removedTraceIDs);
+  }, []);
 
-  const removeSelection = useCallback(() => {
-    if (!selection) return;
-    if (selection.kind === "trace") {
-      const removed = edges.find((edge) => edge.id === selection.id);
-      if (!removed || removed.id.startsWith("pending:")) return;
-      deletedRelationshipIDsRef.current.add(removed.id);
-      setEdges((current) => current.filter((edge) => edge.id !== removed.id));
-      setSelection(null);
-      setError("");
-      void deleteProcessMapRelationship(apiBase, companyID, removed.id)
-        .then(() => {
-          markLocalMutationCommitted();
-          setEdges((current) => current.filter((edge) => edge.id !== removed.id));
-        })
-        .catch((cause) => {
-          setError(processMapErrorMessage(cause, "Failed to delete trace"));
-          void requestRefresh();
-        });
-      return;
-    }
-    const removed = nodes.find((node) => node.id === selection.id);
-    const resource = resourceFromNode(removed);
-    if (!removed || !resource) return;
-    if (resource.resource_type === "logic_gate") {
-      setPinnedProcessID((current) => current === resource.resource_id ? null : current);
-      setHoveredProcessID((current) => current === resource.resource_id ? null : current);
-    }
-    setNodes((current) => current.filter((node) => node.id !== removed.id));
-    setEdges((current) => current.filter((edge) => edge.source !== removed.id && edge.target !== removed.id));
-    setSelection(null);
-    setError("");
-    const operationGeneration = (placementOperationGenerationRef.current.get(removed.id) ?? 0) + 1;
-    placementOperationGenerationRef.current.set(removed.id, operationGeneration);
-    const responseGeneration = canonicalRefreshGenerationRef.current;
-    void deleteProcessMapPlacement(apiBase, companyID, resource)
-      .then(() => {
-        const responseWasSuperseded = !shouldApplyProcessMapMutationAck(
-          responseGeneration,
-          canonicalRefreshGenerationRef.current,
-          operationGeneration,
-          placementOperationGenerationRef.current.get(removed.id) ?? 0,
-        );
-        const refreshQueued = markLocalMutationCommitted();
-        if (responseWasSuperseded) {
-          if (!refreshQueued) void requestRefresh();
-          return;
-        }
-        setNodes((current) => current.filter((node) => node.id !== removed.id));
-        setEdges((current) => current.filter((edge) => edge.source !== removed.id && edge.target !== removed.id));
-      })
-      .catch((cause) => {
-        setError(processMapErrorMessage(cause, "Failed to remove placement"));
-        void requestRefresh();
-      });
-  }, [apiBase, companyID, edges, markLocalMutationCommitted, nodes, requestRefresh, selection]);
+  const refreshAfterMutation = useCallback((readVersion: number) => {
+    setScene((current) => current && readVersion >= current.process_map_read_version ? { ...current, process_map_read_version: readVersion } : current);
+    setLoadedTiles(new Map());
+    markUnsettled();
+    void loadScene(false);
+  }, [loadScene, markUnsettled]);
 
-  const handleDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    const payload = readExplorerDragPayload(event.dataTransfer);
-    const decision = decideProcessMapExplorerDrop(payload, folderID);
-    if (decision.kind === "ignore") return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (decision.kind === "reject") {
-      setNotice(decision.message);
-      return;
-    }
-    const flowPosition = reactFlow.screenToFlowPosition({ x: event.clientX, y: event.clientY }, { snapToGrid: true });
-    const gridPosition = processMapFlowToGridPosition(flowPosition);
-    const nodeID = processMapResourceNodeID(decision.resource);
-    const operationGeneration = (placementOperationGenerationRef.current.get(nodeID) ?? 0) + 1;
-    placementOperationGenerationRef.current.set(nodeID, operationGeneration);
-    setNotice("Saving placement…");
-    setError("");
-    const responseGeneration = canonicalRefreshGenerationRef.current;
-    void putProcessMapPlacement(apiBase, companyID, decision.resource, {
-      map_parent_folder_id: decision.mapParentFolderID,
-      grid_x: gridPosition.x,
-      grid_y: gridPosition.y,
-    }).then((saved) => {
-      const responseWasSuperseded = !shouldApplyProcessMapMutationAck(
-        responseGeneration,
-        canonicalRefreshGenerationRef.current,
-        operationGeneration,
-        placementOperationGenerationRef.current.get(nodeID) ?? 0,
-      );
-      const refreshQueued = markLocalMutationCommitted();
-      if (responseWasSuperseded) {
-        if (operationGeneration === (placementOperationGenerationRef.current.get(nodeID) ?? 0)) setNotice("");
-        if (!refreshQueued) void requestRefresh();
-        return;
-      }
-      const placement: ProcessMapPlacement = {
-        restricted: false,
-        resource_type: saved.resource_type,
-        resource_id: saved.resource_id,
-        name: decision.label,
-        grid_x: saved.grid_x,
-        grid_y: saved.grid_y,
-        revision: saved.revision,
-        created_timestamp: saved.created_timestamp,
-        updated_timestamp: saved.updated_timestamp,
+  const applyEnvelope = useCallback((
+    envelope: ProcessMapMutationEnvelope,
+    pending: ReadonlyMap<string, ProcessMapVisiblePlacement>,
+    pendingTraceIDs: Iterable<string> = [],
+    expectedOperationGenerations?: ReadonlyMap<string, number>,
+  ) => {
+    setCommittedOverlay((current) => {
+      const seeded: ProcessMapPresentationState = {
+        placements: new Map(current.placements),
+        traces: new Map(current.traces),
+        removedPlacementKeys: new Set(current.removedPlacementKeys),
       };
-      const added = processMapNodeFromPlacement(placement, 0);
-      const addedData = added.data;
-      if (addedData.restricted) {
-        void requestRefresh();
-        return;
+      for (const row of envelope.placements) {
+        const key = placementKey(row);
+        const existing = pending.get(key) ?? presentationRef.current.placements.get(key);
+        if (existing && !seeded.placements.has(key)) seeded.placements.set(key, existing);
       }
-      setNodes((current) => {
-        const existing = current.find((node) => node.id === added.id);
-        if (existing && !existing.data.restricted && !shouldApplyProcessMapCommit(existing.data.revision, addedData.revision)) {
-          return current;
-        }
-        committedPlacementRef.current.set(added.id, {
-          position: { x: addedData.gridX, y: addedData.gridY },
-          data: { ...addedData },
-        });
-        return [...current.filter((node) => node.id !== added.id), added];
-      });
-      if (operationGeneration === (placementOperationGenerationRef.current.get(nodeID) ?? 0)) setNotice("");
-    }).catch((cause) => {
-      if (!shouldApplyProcessMapMutationAck(
-        responseGeneration,
-        responseGeneration,
-        operationGeneration,
-        placementOperationGenerationRef.current.get(nodeID) ?? 0,
-      )) return;
-      setNotice("");
-      setError(processMapErrorMessage(cause, "Failed to add placement"));
-      void requestRefresh();
+      for (const row of envelope.traces) {
+        const existing = presentationRef.current.traces.get(row.resource_operational_relationship_id);
+        if (existing && !seeded.traces.has(row.resource_operational_relationship_id)) seeded.traces.set(row.resource_operational_relationship_id, existing);
+      }
+      return applyProcessMapMutationEnvelope(seeded, envelope, pending);
     });
-  }, [apiBase, companyID, folderID, markLocalMutationCommitted, reactFlow, requestRefresh]);
+    if (envelope.deleted_trace_ids.length > 0) {
+      setRemovedTraceIDs((current) => new Set([...current, ...envelope.deleted_trace_ids]));
+    }
+    const placementKeys = new Set([...pending.keys(), ...envelope.placements.map((placement) => placementKey(placement))]);
+    const traceIDs = new Set([
+      ...pendingTraceIDs,
+      ...envelope.traces.map((trace) => trace.resource_operational_relationship_id),
+      ...envelope.deleted_trace_ids,
+    ]);
+    const currentPlacementKeys = processMapCurrentOperationKeys(
+      placementKeys,
+      expectedOperationGenerations,
+      operationGenerationRef.current,
+    );
+    const currentTraceIDs = processMapCurrentOperationKeys(
+      traceIDs,
+      expectedOperationGenerations,
+      operationGenerationRef.current,
+      "trace:",
+    );
+    setPreviewPlacements((current) => replaceProcessMapPreviewEntries(current, currentPlacementKeys, new Map()));
+    setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, currentTraceIDs, new Map()));
+    updateKnownMapped(envelope.placements);
+    refreshAfterMutation(envelope.process_map_read_version);
+  }, [refreshAfterMutation, updateKnownMapped]);
 
-  const acceptsExplorerDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    if (!Array.from(event.dataTransfer.types).includes(EXPLORER_DRAG_MIME)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    event.dataTransfer.dropEffect = "copy";
+  const nextOperation = useCallback((key: string) => {
+    const next = (operationGenerationRef.current.get(key) ?? 0) + 1;
+    operationGenerationRef.current.set(key, next);
+    return next;
   }, []);
 
-  const selectedLabel = useMemo(() => {
-    if (selection?.kind === "trace") return "trace";
-    if (selection?.kind !== "placement") return "";
-    const node = nodes.find((item) => item.id === selection.id);
-    return node && !node.data.restricted ? node.data.label : "";
-  }, [nodes, selection]);
-
-  const trayCandidates = useMemo(() => {
-    const unavailableNodeIDs = new Set<string>();
-    for (const node of nodes) {
-      if (!node.data.restricted) unavailableNodeIDs.add(node.id);
+  const savePlacement = useCallback(async (
+    placement: ProcessMapVisiblePlacement,
+    pending: ReadonlyMap<string, ProcessMapVisiblePlacement>,
+    pendingTraceIDs: ReadonlySet<string> = new Set(),
+  ) => {
+    const key = placementKey(placement);
+    const canonicalGeneration = canonicalGenerationRef.current;
+    const expectedOperationGenerations = new Map<string, number>();
+    for (const pendingKey of pending.keys()) {
+      expectedOperationGenerations.set(pendingKey, nextOperation(pendingKey));
     }
-    return processMapTrayCandidates(trayRows, folderID, unavailableNodeIDs);
-  }, [folderID, nodes, trayRows]);
+    if (!expectedOperationGenerations.has(key)) expectedOperationGenerations.set(key, nextOperation(key));
+    for (const traceID of pendingTraceIDs) {
+      const operationKey = `trace:${traceID}`;
+      expectedOperationGenerations.set(operationKey, nextOperation(operationKey));
+    }
+    const operationGeneration = expectedOperationGenerations.get(key)!;
+    setNotice("Saving placement…");
+    try {
+      const envelope = await putProcessMapPlacement(apiBase, companyID, placement, placement);
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
+      applyEnvelope(envelope, pending, pendingTraceIDs, expectedOperationGenerations);
+      setNotice("Placement saved.");
+    } catch (cause) {
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
+      const currentPlacementKeys = processMapCurrentOperationKeys(
+        pending.keys(),
+        expectedOperationGenerations,
+        operationGenerationRef.current,
+      );
+      const currentTraceIDs = processMapCurrentOperationKeys(
+        pendingTraceIDs,
+        expectedOperationGenerations,
+        operationGenerationRef.current,
+        "trace:",
+      );
+      setPreviewPlacements((current) => replaceProcessMapPreviewEntries(current, currentPlacementKeys, new Map()));
+      setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, currentTraceIDs, new Map()));
+      setNotice(errorMessage(cause, "Placement was restored because it could not be saved."));
+    }
+  }, [apiBase, applyEnvelope, companyID, nextOperation]);
+
+  const saveTrace = useCallback(async (trace: ProcessMapTrace, routePoints: readonly ProcessMapGridPoint[]) => {
+    const id = trace.resource_operational_relationship_id;
+    const key = `trace:${id}`;
+    const canonicalGeneration = canonicalGenerationRef.current;
+    const operationGeneration = nextOperation(key);
+    const preview = { ...cloneTrace(trace), route_points: normalizeProcessMapRoutePoints(routePoints) };
+    setPreviewTraces((current) => new Map(current).set(id, preview));
+    try {
+      const envelope = await putProcessMapTrace(apiBase, companyID, id, preview.route_points);
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
+      applyEnvelope(envelope, new Map());
+      setNotice(envelope.changed === false ? "Trace route was already current." : "Trace route saved.");
+    } catch (cause) {
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
+      setPreviewTraces((current) => {
+        const next = new Map(current);
+        next.delete(id);
+        return next;
+      });
+      setNotice(errorMessage(cause, "Trace route was restored because it could not be saved."));
+    }
+  }, [apiBase, applyEnvelope, companyID, nextOperation]);
+
+  const folders = useMemo(() => [...presentation.placements.values()].filter((placement) => placement.resource_type === "company_explorer_folder"), [presentation.placements]);
+  const highlightedFolder = useMemo(() => {
+    let bounds: ProcessMapBounds | null = null;
+    let excludedFolderID: string | undefined;
+    const activePlacement = gesture && (gesture.kind === "move" || gesture.kind === "resize") ? previewPlacements.get(gesture.key) : null;
+    if (activePlacement) {
+      bounds = processMapPlacementBounds(activePlacement);
+      if (activePlacement.resource_type === "company_explorer_folder") excludedFolderID = activePlacement.resource_id;
+    } else if (externalDropPoint) {
+      const x = snapProcessMapGridCoordinate(externalDropPoint.x);
+      const y = snapProcessMapGridCoordinate(externalDropPoint.y);
+      bounds = { min_x: x, min_y: y, max_x: x + PROCESS_MAP_DEFAULT_WIDTH, max_y: y + PROCESS_MAP_DEFAULT_HEIGHT };
+    }
+    return bounds ? processMapDeepestContainingFolder(bounds, folders, excludedFolderID) : null;
+  }, [externalDropPoint, folders, gesture, previewPlacements]);
+
+  const selectedPlacement = selection?.kind === "placement" ? presentation.placements.get(selection.id) ?? null : null;
+  const editedPlacementKeys = useMemo(() => new Set([
+    ...committedOverlay.placements.keys(),
+    ...previewPlacements.keys(),
+    ...(selection?.kind === "placement" ? [selection.id] : []),
+  ]), [committedOverlay.placements, previewPlacements, selection]);
+  const editedTraceIDs = useMemo(() => new Set([
+    ...committedOverlay.traces.keys(),
+    ...previewTraces.keys(),
+    ...removedTraceIDs,
+    ...(selection?.kind === "trace" ? [selection.id] : []),
+  ]), [committedOverlay.traces, previewTraces, removedTraceIDs, selection]);
+  const overlayPlacements = useMemo(() => {
+    const result = new Map<string, ProcessMapVisiblePlacement>();
+    for (const key of editedPlacementKeys) {
+      const placement = presentation.placements.get(key);
+      if (placement) result.set(key, placement);
+    }
+    if (highlightedFolder) result.set(placementKey(highlightedFolder), highlightedFolder);
+    return [...result.values()];
+  }, [editedPlacementKeys, highlightedFolder, presentation.placements]);
+  const overlayTraces = useMemo(() => {
+    const result: ProcessMapTrace[] = [];
+    for (const id of editedTraceIDs) {
+      const trace = presentation.traces.get(id);
+      if (trace) result.push(trace);
+    }
+    return result;
+  }, [editedTraceIDs, presentation.traces]);
+  const editOverlay = useMemo<ProcessMapEditOverlayModel>(() => ({
+    placements: overlayPlacements,
+    traces: overlayTraces,
+    selectedPlacementKey: selection?.kind === "placement" ? selection.id : null,
+    selectedTraceID: selection?.kind === "trace" ? selection.id : null,
+    connectionPreview: gesture?.kind === "connection" ? { source: gesture.source, point: gesture.point } : null,
+    highlightedFolderKey: highlightedFolder ? placementKey(highlightedFolder) : null,
+    showAllAnchors: gesture?.kind === "connection",
+  }), [gesture, highlightedFolder, overlayPlacements, overlayTraces, selection]);
+
+  const baseLayers = useMemo(() => activeScene ? buildProcessMapLayers({
+    scene: activeScene,
+    protectedGeneration,
+    settled,
+    settledGeneration,
+    settledPixelsPerGridUnit: 2 ** settledViewState.zoom,
+    presentation,
+    editedPlacementKeys,
+    editedTraceIDs,
+    reducedMotion,
+    flowPhase: 0,
+    editOverlay,
+    getTileData: guardedGetTileData,
+    onTileLoad: handleTileLoad,
+    onTileUnload: handleTileUnload,
+    onViewportLoad: handleViewportLoad,
+    onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
+  }) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, reducedMotion, settled, settledGeneration, settledViewState.zoom]);
+  const flowLayer = useMemo(() => buildProcessMapFlowLayer(presentation, reducedMotion, flowPhase), [flowPhase, presentation, reducedMotion]);
+  const layers = useMemo(() => {
+    return [...baseLayers.slice(0, 1), flowLayer, ...baseLayers.slice(1)];
+  }, [baseLayers, flowLayer]);
+
+  const handleViewStateChange = useCallback(<ViewStateT extends OrthographicViewState,>(params: ViewStateChangeParameters<ViewStateT>): ViewStateT => {
+    const proposed: ProcessMapViewState = {
+      target: [params.viewState.target?.[0] ?? viewRef.current.target[0], params.viewState.target?.[1] ?? viewRef.current.target[1], 0],
+      zoom: typeof params.viewState.zoom === "number" ? params.viewState.zoom : viewRef.current.zoom,
+      minZoom: PROCESS_MAP_MIN_CAMERA_ZOOM,
+      maxZoom: PROCESS_MAP_MAX_CAMERA_ZOOM,
+    };
+    const zoomChanged = Math.abs(proposed.zoom - viewRef.current.zoom) > Number.EPSILON;
+    const next = zoomChanged ? centerProcessMapZoom(viewRef.current, proposed) : proposed;
+    viewRef.current = next;
+    setViewState(next);
+    settledReadyRef.current = false;
+    setSettled(false);
+    settlementGateRef.current?.onViewStateChange();
+    return next as ViewStateT;
+  }, []);
+
+  const clearHoverTimer = useCallback(() => {
+    if (hoverCloseTimerRef.current === null) return;
+    clearTimeout(hoverCloseTimerRef.current);
+    hoverCloseTimerRef.current = null;
+  }, []);
+  const showHoverCard = useCallback((id: string) => {
+    clearHoverTimer();
+    if (hoverModeEnabled) setHoveredProcessID(id);
+  }, [clearHoverTimer, hoverModeEnabled]);
+  const scheduleHoverClose = useCallback((id: string) => {
+    clearHoverTimer();
+    hoverCloseTimerRef.current = setTimeout(() => {
+      setHoveredProcessID((current) => current === id ? null : current);
+      hoverCloseTimerRef.current = null;
+    }, 80);
+  }, [clearHoverTimer]);
+  useEffect(() => {
+    if (!hoverModeEnabled) {
+      clearHoverTimer();
+      setHoveredProcessID(null);
+    }
+  }, [clearHoverTimer, hoverModeEnabled]);
+  useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
+
+  const startPlacementGesture = useCallback((pick: PlacementPick | ResizePick, point: ProcessMapGridPoint) => {
+    if (processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) !== "editing") return;
+    const basePlacements = pick.kind === "placement" ? descendantsForMove(pick.placement, presentationRef.current.placements) : new Map([[pick.key, clonePlacement(pick.placement)]]);
+    const baseTraces = translatedTraces(presentationRef.current.traces, new Set(basePlacements.keys()), 0, 0);
+    const next: PlacementGesture = {
+      kind: pick.kind === "resize" ? "resize" : "move",
+      key: pick.key,
+      start: point,
+      basePlacements,
+      baseTraces,
+      ...(pick.kind === "resize" ? { horizontal: pick.horizontal, vertical: pick.vertical } : {}),
+      moved: false,
+    };
+    setSelection({ kind: "placement", id: pick.key });
+    setGesture(next);
+    setPreviewPlacements((current) => replaceProcessMapPreviewEntries(current, basePlacements.keys(), basePlacements));
+    setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, baseTraces.keys(), baseTraces));
+  }, [settledViewState.zoom]);
+
+  const handleDragStart = useCallback((info: PickingInfo, event: { stopPropagation: () => void }) => {
+    const point = pointFromInfo(info);
+    const pick = pickFromObject(info.object);
+    if (!point || !pick) return;
+    event.stopPropagation();
+    suppressClickRef.current = true;
+    if (pick.kind === "placement" || pick.kind === "resize") startPlacementGesture(pick, point);
+    else if (pick.kind === "anchor" && pick.anchor === "output") setGesture({ kind: "connection", source: pick.placement, point, moved: false });
+    else if (pick.kind === "waypoint") setGesture({ kind: "waypoint", trace: pick.trace, index: pick.index, startingRoute: pick.trace.route_points.map((routePoint) => ({ ...routePoint })), moved: false });
+  }, [startPlacementGesture]);
+
+  const handleDrag = useCallback((info: PickingInfo) => {
+    const point = pointFromInfo(info);
+    const current = gestureRef.current;
+    if (!point || !current) return;
+    if (current.kind === "connection") {
+      setGesture({ ...current, point, moved: true });
+      return;
+    }
+    if (current.kind === "waypoint") {
+      const route = current.startingRoute.map((routePoint) => ({ ...routePoint }));
+      route[current.index] = { x: snapProcessMapGridCoordinate(point.x), y: snapProcessMapGridCoordinate(point.y) };
+      const id = current.trace.resource_operational_relationship_id;
+      setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, [id], new Map([[id, { ...cloneTrace(current.trace), route_points: route }]])));
+      setGesture({ ...current, moved: true });
+      return;
+    }
+    const dx = snapProcessMapGridCoordinate(point.x - current.start.x);
+    const dy = snapProcessMapGridCoordinate(point.y - current.start.y);
+    if (current.kind === "move") {
+      const next = new Map<string, ProcessMapVisiblePlacement>();
+      for (const [key, placement] of current.basePlacements) next.set(key, { ...placement, grid_x: placement.grid_x + dx, grid_y: placement.grid_y + dy });
+      const nextTraces = translatedTraces(current.baseTraces, new Set(next.keys()), dx, dy);
+      setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), next));
+      setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, current.baseTraces.keys(), nextTraces));
+    } else {
+      const base = current.basePlacements.get(current.key);
+      if (!base) return;
+      let minX = base.grid_x;
+      let minY = base.grid_y;
+      let maxX = base.grid_x + base.grid_width;
+      let maxY = base.grid_y + base.grid_height;
+      if (current.horizontal === "west") minX = Math.min(maxX - 1, minX + dx);
+      else maxX = Math.max(minX + 1, maxX + dx);
+      if (current.vertical === "north") minY = Math.min(maxY - 1, minY + dy);
+      else maxY = Math.max(minY + 1, maxY + dy);
+      const next = new Map([[current.key, { ...base, grid_x: minX, grid_y: minY, grid_width: maxX - minX, grid_height: maxY - minY }]]);
+      setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), next));
+    }
+    setGesture({ ...current, moved: current.moved || dx !== 0 || dy !== 0 });
+  }, []);
+
+  const finishConnection = useCallback(async (current: ConnectionGesture, info: PickingInfo) => {
+    const picked = deckRef.current?.pickObject({ x: info.x, y: info.y, radius: 8 });
+    const target = pickFromObject(picked?.object);
+    setGesture(null);
+    setSelection(null);
+    if (!target || target.kind !== "anchor" || target.anchor !== "input" || placementKey(current.source) === target.key) return;
+    const operationKey = `relationship:${placementKey(current.source)}:${target.key}`;
+    const canonicalGeneration = canonicalGenerationRef.current;
+    const operationGeneration = nextOperation(operationKey);
+    try {
+      const envelope = await postProcessMapRelationship(apiBase, companyID, current.source, target.placement, []);
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) return;
+      applyEnvelope(envelope, new Map());
+      if (envelope.relationship) setSelection({ kind: "trace", id: envelope.relationship.resource_operational_relationship_id });
+      setNotice(envelope.created === false ? "Existing operational trace selected." : "Operational trace created.");
+    } catch (cause) {
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) return;
+      setNotice(errorMessage(cause, "Operational trace was not created."));
+    }
+  }, [apiBase, applyEnvelope, companyID, nextOperation]);
+
+  const handleDragEnd = useCallback((info: PickingInfo) => {
+    const current = gestureRef.current;
+    setTimeout(() => { suppressClickRef.current = false; }, 0);
+    if (!current) return;
+    if (current.kind === "connection") {
+      void finishConnection(current, info);
+      return;
+    }
+    if (current.kind === "waypoint") {
+      const trace = previewTraces.get(current.trace.resource_operational_relationship_id) ?? current.trace;
+      setGesture(null);
+      if (current.moved) void saveTrace(trace, trace.route_points);
+      else setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, [current.trace.resource_operational_relationship_id], new Map()));
+      return;
+    }
+    const placement = previewPlacements.get(current.key);
+    setGesture(null);
+    if (!placement || !current.moved) {
+      setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), new Map()));
+      setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, current.baseTraces.keys(), new Map()));
+      return;
+    }
+    const parent = processMapDeepestContainingFolder(processMapPlacementBounds(placement), folders, placement.resource_type === "company_explorer_folder" ? placement.resource_id : undefined);
+    const saved = { ...placement, map_parent_folder_id: parent?.resource_id ?? null };
+    const pending = new Map<string, ProcessMapVisiblePlacement>();
+    for (const key of current.basePlacements.keys()) {
+      const preview = previewPlacements.get(key);
+      if (preview) pending.set(key, preview);
+    }
+    pending.set(current.key, saved);
+    if (current.kind === "resize" && saved.resource_type === "company_explorer_folder" && !folderContainsItsChildren(saved, presentationRef.current.placements)) {
+      setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), new Map()));
+      setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, current.baseTraces.keys(), new Map()));
+      setNotice("Folder resize was restored because every contained placement must remain inside its fence.");
+      return;
+    }
+    setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), pending));
+    void savePlacement(saved, pending, new Set(current.baseTraces.keys()));
+  }, [finishConnection, folders, previewPlacements, previewTraces, savePlacement, saveTrace]);
+
+  const fitFolder = useCallback((placement: ProcessMapVisiblePlacement) => {
+    const next = fitProcessMapViewState(processMapPlacementBounds(placement), viewportSize, { padding: 80 });
+    viewRef.current = next;
+    setViewState(next);
+    markUnsettled();
+  }, [markUnsettled, viewportSize]);
+
+  const openProcess = useCallback((placement: ProcessMapVisiblePlacement) => {
+    if (
+      placement.resource_type !== "logic_gate"
+      || processMapPlacementDisplayLOD(placement, 2 ** settledViewState.zoom) !== "editing"
+    ) return;
+    clearHoverTimer();
+    setHoveredProcessID(null);
+    setPinnedProcessID(null);
+    onOpenLogicGate(placement.resource_id, placement.name);
+  }, [clearHoverTimer, onOpenLogicGate, settledViewState.zoom]);
+
+  const handleClick = useCallback((info: PickingInfo) => {
+    surfaceRef.current?.focus();
+    if (suppressClickRef.current) return;
+    const pick = pickFromObject(info.object);
+    if (!pick) {
+      setSelection(null);
+      setPinnedProcessID(null);
+      setHoveredProcessID(null);
+      return;
+    }
+    const now = Date.now();
+    const clickID = pick.kind === "placement" || pick.kind === "anchor" || pick.kind === "resize"
+      ? `placement:${pick.key}`
+      : `trace:${pick.id}${pick.kind === "waypoint" ? `:${pick.index}` : ""}`;
+    const doubleClick = lastClickRef.current?.id === clickID && now - lastClickRef.current.at <= PROCESS_MAP_DOUBLE_CLICK_MS;
+    lastClickRef.current = { id: clickID, at: now };
+    if (pick.kind === "placement") {
+      setSelection({ kind: "placement", id: pick.key });
+      if (doubleClick) {
+        if (pick.placement.resource_type === "company_explorer_folder") fitFolder(pick.placement);
+        else if (processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "editing") openProcess(pick.placement);
+      } else if (pick.placement.resource_type === "logic_gate" && processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "editing") {
+        setPinnedProcessID(pick.placement.resource_id);
+        setHoveredProcessID(null);
+      }
+      return;
+    }
+    if (pick.kind === "trace") {
+      setSelection({ kind: "trace", id: pick.id });
+      if (doubleClick && pick.trace.presentation === "editing") {
+        const point = pointFromInfo(info);
+        const source = presentationRef.current.placements.get(placementKey(pick.trace.source));
+        const target = presentationRef.current.placements.get(placementKey(pick.trace.target));
+        if (point && source && target) void saveTrace(pick.trace, insertProcessMapRoutePoint(processMapOutputAnchor(source), pick.trace.route_points, processMapInputAnchor(target), point));
+      }
+      return;
+    }
+    if (pick.kind === "waypoint" && pick.trace.presentation === "editing" && doubleClick) void saveTrace(pick.trace, pick.trace.route_points.filter((_, index) => index !== pick.index));
+  }, [fitFolder, openProcess, saveTrace, settledViewState.zoom]);
+
+  const handleHover = useCallback((info: PickingInfo) => {
+    const pick = pickFromObject(info.object);
+    if (pick?.kind === "placement" && pick.placement.resource_type === "logic_gate" && processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "editing") {
+      showHoverCard(pick.placement.resource_id);
+    } else if (hoveredProcessID) {
+      scheduleHoverClose(hoveredProcessID);
+    }
+  }, [hoveredProcessID, scheduleHoverClose, settledViewState.zoom, showHoverCard]);
+
+  const removeSelection = useCallback(async () => {
+    if (!selection) return;
+    gestureRef.current = null;
+    setGesture(null);
+    if (selection.kind === "trace") {
+      const trace = presentationRef.current.traces.get(selection.id);
+      if (!trace) return;
+      const id = trace.resource_operational_relationship_id;
+      const operationKey = `trace:${id}`;
+      const canonicalGeneration = canonicalGenerationRef.current;
+      const operationGeneration = nextOperation(operationKey);
+      setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, [id], new Map()));
+      setRemovedTraceIDs((current) => new Set(current).add(id));
+      setSelection(null);
+      try {
+        const envelope = await deleteProcessMapRelationship(apiBase, companyID, id);
+        if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) return;
+        refreshAfterMutation(envelope.process_map_read_version);
+        setNotice("Operational relationship removed.");
+      } catch (cause) {
+        if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) return;
+        setRemovedTraceIDs((current) => {
+          const next = new Set(current);
+          next.delete(id);
+          return next;
+        });
+        setNotice(errorMessage(cause, "Operational relationship could not be removed."));
+      }
+      return;
+    }
+    const placement = presentationRef.current.placements.get(selection.id);
+    if (!placement) return;
+    const key = placementKey(placement);
+    const canonicalGeneration = canonicalGenerationRef.current;
+    const expectedOperationGenerations = new Map<string, number>();
+    const reserveOperation = (operationKey: string) => {
+      const generation = nextOperation(operationKey);
+      expectedOperationGenerations.set(operationKey, generation);
+      return generation;
+    };
+    const operationGeneration = reserveOperation(key);
+    const removalPlacementKeys = placement.resource_type === "company_explorer_folder"
+      ? new Set(descendantsForMove(placement, presentationRef.current.placements).keys())
+      : new Set([key]);
+    for (const affectedKey of removalPlacementKeys) {
+      if (affectedKey !== key) reserveOperation(affectedKey);
+    }
+    const affectedTraceIDs = new Set(
+      [...presentationRef.current.traces.values()]
+        .filter((trace) => removalPlacementKeys.has(placementKey(trace.source)) || removalPlacementKeys.has(placementKey(trace.target)))
+        .map((trace) => trace.resource_operational_relationship_id),
+    );
+    for (const traceID of affectedTraceIDs) reserveOperation(`trace:${traceID}`);
+    setPreviewPlacements((current) => replaceProcessMapPreviewEntries(current, removalPlacementKeys, new Map()));
+    setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, affectedTraceIDs, new Map()));
+    setCommittedOverlay((current) => {
+      const placements = new Map(current.placements);
+      placements.delete(key);
+      return { placements, traces: new Map(current.traces), removedPlacementKeys: new Set(current.removedPlacementKeys).add(key) };
+    });
+    const incident = [...presentationRef.current.traces.values()].filter((trace) => placementKey(trace.source) === key || placementKey(trace.target) === key).map((trace) => trace.resource_operational_relationship_id);
+    setRemovedTraceIDs((current) => new Set([...current, ...incident]));
+    setSelection(null);
+    if (placement.resource_type === "logic_gate") setPinnedProcessID((current) => current === placement.resource_id ? null : current);
+    try {
+      const envelope = await deleteProcessMapPlacement(apiBase, companyID, placement);
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
+      updateKnownMapped([], [placement]);
+      applyEnvelope(envelope, new Map(), affectedTraceIDs, expectedOperationGenerations);
+      setNotice("Placement removed. Its source resource is unchanged.");
+    } catch (cause) {
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
+      setCommittedOverlay((current) => {
+        const removedPlacementKeys = new Set(current.removedPlacementKeys);
+        removedPlacementKeys.delete(key);
+        return { ...current, removedPlacementKeys };
+      });
+      setRemovedTraceIDs((current) => {
+        const next = new Set(current);
+        incident.forEach((id) => next.delete(id));
+        return next;
+      });
+      invalidateProcessMapReadCaches(apiBase, companyID);
+      setLoadedTiles(new Map());
+      markUnsettled();
+      void loadScene(false);
+      setNotice(errorMessage(cause, "Placement removal was rolled back."));
+    }
+  }, [apiBase, applyEnvelope, companyID, loadScene, markUnsettled, nextOperation, refreshAfterMutation, selection, updateKnownMapped]);
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Delete" || event.key === "Backspace") {
+      if (!selection) return;
+      event.preventDefault();
+      void removeSelection();
+    } else if ((event.key === "Enter" || event.key === " ") && selectedPlacement?.resource_type === "logic_gate") {
+      event.preventDefault();
+      openProcess(selectedPlacement);
+    } else if (event.key === "Escape") {
+      const current = gestureRef.current;
+      if (current?.kind === "waypoint") {
+        setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, [current.trace.resource_operational_relationship_id], new Map()));
+      } else if (current && current.kind !== "connection") {
+        setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), new Map()));
+        setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, current.baseTraces.keys(), new Map()));
+      }
+      setGesture(null);
+      setSelection(null);
+    }
+  }, [openProcess, removeSelection, selectedPlacement, selection]);
+
+  const worldPointFromClient = useCallback((clientX: number, clientY: number): ProcessMapGridPoint | null => {
+    const rect = surfaceRef.current?.getBoundingClientRect();
+    const viewport = deckRef.current?.deck?.getViewports()[0];
+    if (!rect || !viewport) return null;
+    const point = viewport.unproject([clientX - rect.left, clientY - rect.top]);
+    return point.length >= 2 ? { x: point[0], y: point[1] } : null;
+  }, []);
+
+  const handleExternalDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const hit = typeof document === "undefined" ? null : document.elementFromPoint(event.clientX, event.clientY);
+    if (loading || error || hit?.closest("[data-process-map-fixed-overlay='true']")) {
+      setExternalDropPoint(null);
+      return;
+    }
+    const decision = decideProcessMapExplorerDrop(readExplorerDragPayload(event.dataTransfer));
+    const point = worldPointFromClient(event.clientX, event.clientY);
+    setExternalDropPoint(null);
+    if (decision.kind !== "place" || !point) return;
+    const key = placementKey(decision.resource);
+    if (knownMappedPlacementKeys.has(key) || presentationRef.current.placements.has(key)) {
+      setNotice("That authorized resource is already placed on the Process Map.");
+      return;
+    }
+    const now = new Date().toISOString();
+    const pending: ProcessMapVisiblePlacement = {
+      restricted: false,
+      presentation: "editing",
+      ...decision.resource,
+      name: decision.label,
+      map_parent_folder_id: null,
+      grid_x: snapProcessMapGridCoordinate(point.x),
+      grid_y: snapProcessMapGridCoordinate(point.y),
+      grid_width: PROCESS_MAP_DEFAULT_WIDTH,
+      grid_height: PROCESS_MAP_DEFAULT_HEIGHT,
+      can_edit: true,
+      revision: 0,
+      created_timestamp: now,
+      updated_timestamp: now,
+    };
+    pending.map_parent_folder_id = processMapDeepestContainingFolder(processMapPlacementBounds(pending), folders)?.resource_id ?? null;
+    const pendingMap = new Map([[placementKey(pending), pending]]);
+    setPreviewPlacements((current) => replaceProcessMapPreviewEntries(current, [placementKey(pending)], pendingMap));
+    setSelection({ kind: "placement", id: placementKey(pending) });
+    void savePlacement(pending, pendingMap);
+  }, [error, folders, knownMappedPlacementKeys, loading, savePlacement, worldPointFromClient]);
+
+  const guardFixedOverlayDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setExternalDropPoint(null);
+  }, []);
+
+  const unavailableTrayIDs = useMemo(() => new Set([...knownMappedPlacementKeys, ...presentation.placements.keys()]), [knownMappedPlacementKeys, presentation.placements]);
+  const trayCandidates = useMemo(() => processMapTrayCandidates(trayRows, unavailableTrayIDs), [trayRows, unavailableTrayIDs]);
+  const qdPlacement = useMemo(() => {
+    const id = pinnedProcessID ?? (hoverModeEnabled ? hoveredProcessID : null);
+    return id ? [...presentation.placements.values()].find((placement) => placement.resource_type === "logic_gate" && placement.resource_id === id) ?? null : null;
+  }, [hoverModeEnabled, hoveredProcessID, pinnedProcessID, presentation.placements]);
+  const qdVisible = qdPlacement && processMapPlacementDisplayLOD(qdPlacement, 2 ** settledViewState.zoom) === "editing";
+  const qdPosition = useMemo(() => {
+    if (!qdVisible || !qdPlacement) return null;
+    const scale = 2 ** viewState.zoom;
+    return {
+      left: viewportSize.width / 2 + (qdPlacement.grid_x + qdPlacement.grid_width - viewState.target[0]) * scale + 22,
+      top: viewportSize.height / 2 + (qdPlacement.grid_y - viewState.target[1]) * scale,
+    };
+  }, [qdPlacement, qdVisible, viewState, viewportSize]);
+  const orthographicView = useMemo(() => new OrthographicView({
+    id: "process-map",
+    flipY: true,
+    controller: {
+      dragPan: gesture === null,
+      dragRotate: false,
+      scrollZoom: true,
+      doubleClickZoom: false,
+      touchRotate: false,
+      keyboard: false,
+      inertia: false,
+    },
+  }), [gesture]);
 
   return (
-    <ProcessMapQDOverlayContext.Provider value={qdOverlayContext}>
-    <section
+    <div
+      ref={surfaceRef}
       className="process-map-surface"
-      aria-label="Process Map canvas"
       tabIndex={0}
-      onKeyDown={(event) => {
-        if ((event.key !== "Delete" && event.key !== "Backspace") || !selection) return;
+      role="application"
+      aria-label={selectedPlacement ? `Process Map. Selected ${selectedPlacement.name}.` : "Process Map company canvas"}
+      onKeyDown={handleKeyDown}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes(EXPLORER_DRAG_MIME)) return;
         event.preventDefault();
-        event.stopPropagation();
-        removeSelection();
+        event.dataTransfer.dropEffect = "copy";
+        const point = worldPointFromClient(event.clientX, event.clientY);
+        if (point) setExternalDropPoint(point);
       }}
+      onDragLeave={(event) => {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        setExternalDropPoint(null);
+      }}
+      onDrop={handleExternalDrop}
     >
-      <div className="process-map-toolbar" aria-label="Process Map tools">
-        <span>Drag a card onto the map to place it.</span>
-        {selection?.kind === "trace" && <span>Double-click the trace to add a waypoint.</span>}
-        {selection && (
-          <button type="button" onClick={removeSelection}>
-            {selection.kind === "trace" ? "Delete trace" : `Remove ${selectedLabel || "placement"}`}
-          </button>
-        )}
-      </div>
-      <aside
-        className={`process-map-placement-tray${trayCollapsed ? " is-collapsed" : ""}`}
-        aria-label="Process Map placement tray"
-      >
-        <button
-          type="button"
-          className="process-map-placement-tray__toggle"
-          aria-expanded={!trayCollapsed}
-          aria-controls={trayListID}
-          aria-label={trayCollapsed ? "Expand placement tray" : "Collapse placement tray"}
-          title={trayCollapsed ? "Expand placement tray" : "Collapse placement tray"}
-          onClick={() => {
-            setTrayCollapsed((current) => {
-              const next = !current;
-              storeProcessMapTrayCollapsed(next);
-              return next;
-            });
-          }}
-        >
-          <span className="process-map-placement-tray__heading">
-            {folderID ? "Inside this Folder" : "Root Folders"}
-          </span>
-          <span className="process-map-placement-tray__disclosure" aria-hidden="true">
-            <ExplorerDisclosureIcon open={false} color="#475569" />
-          </span>
-        </button>
-        <div id={trayListID} className="process-map-placement-tray__body" hidden={trayCollapsed}>
-          {(trayLoading || loading) && <p className="process-map-placement-tray__status">Loading available items…</p>}
-          {!trayLoading && !loading && trayError && (
-            <p className="process-map-placement-tray__status is-error" role="alert">{trayError}</p>
-          )}
-          {!trayLoading && !loading && !trayError && trayCandidates.length === 0 && (
-            <p className="process-map-placement-tray__status">Nothing left to place in this layer.</p>
-          )}
-          {!trayLoading && !loading && !trayError && trayCandidates.length > 0 && (
-            <div className="process-map-placement-tray__list" role="list">
-              {trayCandidates.map((candidate) => {
-                const isFolder = candidate.resource.resource_type === "company_explorer_folder";
-                return (
-                  <div
-                    key={processMapResourceNodeID(candidate.resource)}
-                    className={`process-map-placement-tray__card is-${isFolder ? "folder" : "process"}`}
-                    role="listitem"
-                    draggable
-                    aria-label={`Drag ${isFolder ? "Folder" : "Process"}: ${candidate.label}`}
-                    title="Drag onto the map to place"
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(candidate.dragPayload));
-                      event.dataTransfer.effectAllowed = "copy";
-                    }}
-                  >
-                    <span className="process-map-placement-tray__icon">
-                      <ExplorerRowIcon kind={isFolder ? "folder" : "logic_gate"} />
-                    </span>
-                    <span className="process-map-placement-tray__card-copy">
-                      <span className="process-map-placement-tray__card-kind">{isFolder ? "Folder" : "Process"}</span>
-                      <span className="process-map-placement-tray__card-label">{candidate.label}</span>
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </aside>
-      {(error || notice) && (
-        <div className={`process-map-message${error ? " is-error" : ""}`} role={error ? "alert" : "status"}>
-          {error || notice}
-        </div>
-      )}
-      {loading && <div className="process-map-loading" aria-busy="true">Loading layer…</div>}
-      <ReactFlow<ProcessMapNode, ProcessMapEdge>
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onNodesChange={handleNodesChange}
-        onEdgesChange={handleEdgesChange}
-        onDragOver={acceptsExplorerDrop}
-        onDrop={handleDrop}
-        onNodeDragStart={handleNodeDragStart}
-        onNodeDragStop={handleNodeDragStop}
-        onNodeClick={(_, node) => {
-          if (node.data.restricted) return;
-          if (suppressedNodeClickRef.current === node.id) {
-            suppressedNodeClickRef.current = null;
-            if (suppressedNodeClickTimerRef.current !== null) {
-              clearTimeout(suppressedNodeClickTimerRef.current);
-              suppressedNodeClickTimerRef.current = null;
-            }
-            return;
-          }
-          setSelection({ kind: "placement", id: node.id });
-          setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })));
-          setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
-          if (node.data.resourceType === "logic_gate") setPinnedProcessID(node.data.resourceID);
-        }}
-        onNodeDoubleClick={(_, node) => {
-          openPlacement(node);
-        }}
-        onKeyDownCapture={(event) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          const target = event.target as HTMLElement;
-          if (!target.classList.contains("react-flow__node")) return;
-          const node = nodes.find((item) => item.id === target.dataset.id);
-          if (!node || node.data.restricted) return;
-          event.preventDefault();
-          event.stopPropagation();
-          openPlacement(node);
-        }}
-        onEdgeClick={(_, edge) => {
-          setSelection({ kind: "trace", id: edge.id });
-          setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node));
-          setEdges((current) => current.map((item) => ({ ...item, selected: item.id === edge.id })));
-        }}
-        onEdgeDoubleClick={(event, edge) => {
-          event.preventDefault();
-          if (!edge.data || edge.id.startsWith("pending:")) return;
-          const point = processMapFlowToRoutePoint(reactFlow.screenToFlowPosition(
-            { x: event.clientX, y: event.clientY },
-            { snapToGrid: false },
-          ));
-          const sourceNode = nodes.find((node) => node.id === edge.source);
-          const targetNode = nodes.find((node) => node.id === edge.target);
-          if (!sourceNode || !targetNode || sourceNode.data.restricted || targetNode.data.restricted) return;
-          const sourceAnchor = processMapOutputAnchor(
-            { x: sourceNode.data.gridX, y: sourceNode.data.gridY },
-            sourceNode.data.resourceType,
-          );
-          const targetAnchor = processMapInputAnchor(
-            { x: targetNode.data.gridX, y: targetNode.data.gridY },
-            targetNode.data.resourceType,
-          );
-          replaceTraceRoute(
-            edge.id,
-            insertProcessMapRoutePoint(sourceAnchor, edge.data.routePoints, targetAnchor, point),
-          );
-        }}
-        onPaneClick={() => {
-          setSelection(null);
-          setPinnedProcessID(null);
-          setHoveredProcessID(null);
-          clearHoverCloseTimer();
-          setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node));
-          setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
-        }}
-        onConnectStart={(_, params) => {
-          if (params.nodeId) suppressedNodeClickRef.current = params.nodeId;
-        }}
-        onConnect={handleConnect}
-        onConnectEnd={() => {
-          scheduleSuppressedNodeClickClear();
-          setSelection((current) => current?.kind === "placement" ? null : current);
-          setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node));
-        }}
-        isValidConnection={isValidProcessMapConnection}
-        connectOnClick={false}
-        snapToGrid
-        snapGrid={[PROCESS_MAP_GRID_PX, PROCESS_MAP_GRID_PX]}
-        zoomOnDoubleClick={false}
-        deleteKeyCode={null}
-        multiSelectionKeyCode={null}
-        selectionKeyCode={null}
-        nodesConnectable
-        nodesDraggable
-        elementsSelectable
-        panOnDrag
-        panOnScroll={false}
-        zoomOnScroll
-        minZoom={0.2}
-        maxZoom={2.5}
-        elevateEdgesOnSelect={false}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background
-          id="process-map-grid"
-          variant={BackgroundVariant.Lines}
-          gap={PROCESS_MAP_GRID_PX}
-          lineWidth={0.5}
-          color="rgba(148, 163, 184, 0.12)"
-        />
-      </ReactFlow>
-    </section>
-    </ProcessMapQDOverlayContext.Provider>
-  );
-}
+      <DeckGL
+        ref={deckRef}
+        views={orthographicView}
+        viewState={viewState}
+        layers={layers}
+        pickingRadius={4}
+        useDevicePixels
+        onResize={({ width, height }) => setViewportSize({ width, height })}
+        onViewStateChange={handleViewStateChange}
+        onInteractionStateChange={(state: InteractionState) => settlementGateRef.current?.onInteractionStateChange(state)}
+        onHover={handleHover}
+        onClick={handleClick}
+        onDragStart={handleDragStart}
+        onDrag={handleDrag}
+        onDragEnd={handleDragEnd}
+        onError={(cause) => setNotice(errorMessage(cause, "Process Map drawing failed."))}
+        getCursor={({ isDragging, isHovering }) => isDragging ? "grabbing" : isHovering ? "pointer" : "grab"}
+      />
 
-export function ProcessMapSurface(props: ProcessMapSurfaceProps) {
-  const layerIdentity = `${props.apiBase.trim()}\u0000${props.companyID.trim()}\u0000${props.folderID?.trim() ?? ""}`;
-  return (
-    <ReactFlowProvider key={layerIdentity}>
-      <ProcessMapSurfaceInner {...props} />
-    </ReactFlowProvider>
+      <aside data-process-map-fixed-overlay="true" className={`process-map-placement-tray${trayCollapsed ? " is-collapsed" : ""}`} aria-label="Process Map placement tray" onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>
+        <button type="button" className="process-map-placement-tray__toggle" aria-expanded={!trayCollapsed} onClick={() => {
+          const next = !trayCollapsed;
+          setTrayCollapsed(next);
+          storeTrayCollapsed(next);
+        }}>
+          <span className="process-map-placement-tray__heading">Place Folder or Process</span>
+          <span className="process-map-placement-tray__disclosure" aria-hidden="true">⌄</span>
+        </button>
+        {!trayCollapsed && <div className="process-map-placement-tray__body">
+          {trayPath.length > 0 && <button type="button" className="process-map-placement-tray__back" onClick={() => setTrayPath((current) => current.slice(0, -1))}>← {trayPath[trayPath.length - 1]?.label}</button>}
+          {trayLoading && <p className="process-map-placement-tray__status">Loading authorized choices…</p>}
+          {trayError && <p className="process-map-placement-tray__status is-error">{trayError}</p>}
+          {!trayLoading && !trayError && trayCandidates.length === 0 && <p className="process-map-placement-tray__status">No unplaced choices in this branch.</p>}
+          <div className="process-map-placement-tray__list">
+            {trayCandidates.map((candidate) => {
+              const row = trayRows.find((item) => item.entity_id === candidate.resource.resource_id || item.resource_id === candidate.resource.resource_id);
+              const folder = candidate.resource.resource_type === "company_explorer_folder";
+              return <div className={`process-map-placement-tray__row${folder ? " is-folder" : " is-process"}`} key={placementKey(candidate.resource)}>
+                <button type="button" draggable className="process-map-placement-tray__card" onDragStart={(event) => {
+                  event.dataTransfer.effectAllowed = "copy";
+                  event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(candidate.dragPayload));
+                }}>
+                  <span className="process-map-placement-tray__card-kind">{folder ? "Folder" : "Process"}</span>
+                  <span className="process-map-placement-tray__card-label">{candidate.label}</span>
+                </button>
+                {folder && row?.has_children && <button type="button" className="process-map-placement-tray__browse" aria-label={`Browse ${candidate.label}`} onClick={() => setTrayPath((current) => [...current, { id: row.entity_id, label: candidate.label }])}>›</button>}
+              </div>;
+            })}
+          </div>
+        </div>}
+      </aside>
+
+      {selection && <div data-process-map-fixed-overlay="true" className="process-map-toolbar" onPointerDown={(event) => event.stopPropagation()} onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>
+        <span>{selection.kind === "placement" ? "Placement selected" : "Operational trace selected"}</span>
+        <button type="button" onClick={() => void removeSelection()}>{selection.kind === "placement" ? "Remove from map" : "Delete relationship"}</button>
+      </div>}
+
+      {qdPosition && qdPlacement && <div data-process-map-fixed-overlay="true" className="process-map-qd-overlay" style={qdPosition} onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>
+        <ProcessMapQDCard
+          apiBase={apiBase}
+          companyID={companyID}
+          logicGateID={qdPlacement.resource_id}
+          processName={qdPlacement.name}
+          pinned={pinnedProcessID === qdPlacement.resource_id}
+          requestJSON={requestJSON}
+          onClose={() => {
+            setPinnedProcessID(null);
+            setHoveredProcessID(null);
+          }}
+          onPointerEnter={() => showHoverCard(qdPlacement.resource_id)}
+          onPointerLeave={() => scheduleHoverClose(qdPlacement.resource_id)}
+        />
+      </div>}
+      {loading && <div data-process-map-fixed-overlay="true" className="process-map-loading" role="status" onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>Loading Process Map…</div>}
+      {error && <div data-process-map-fixed-overlay="true" className="process-map-message is-error" role="alert" onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}><span>{error}</span><button type="button" onClick={() => void loadScene(true)}>Retry</button></div>}
+      {!error && notice && <div data-process-map-fixed-overlay="true" className="process-map-message" role="status" onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>{notice}</div>}
+    </div>
   );
 }

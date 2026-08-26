@@ -211,7 +211,8 @@ Communications invitation response:
 - `DELETE /v1/logic-gates/{logic_gate_id}?company_id={uuid}`
 - `POST /v1/logic-gates/{logic_gate_id}/information`
 - `GET /v1/logic-gates/{logic_gate_id}/projection?company_id={uuid}`
-- `GET /v1/process-map/layer?company_id={uuid}&folder_id={uuid}` (`folder_id` omitted for root)
+- `GET /v1/process-map/scene?company_id={uuid}` returns permission-safe whole-company bounds, the Process Map read version, and the tile-size/zoom contract used for the one-time initial fit.
+- `GET /v1/process-map/tiles/{z}/{x}/{y}?company_id={uuid}&process_map_read_version={version}` returns that exact Cartesian tile: authorized placements, sealed restricted placeholders, and operational traces with complete route points plus clipped display paths.
 - `PUT /v1/process-map/placements/{resource_type}/{resource_id}?company_id={uuid}`
 - `DELETE /v1/process-map/placements/{resource_type}/{resource_id}?company_id={uuid}`
 - `GET /v1/process-map/operational-relationships?company_id={uuid}&resource_type={resource_type}&resource_id={uuid}&direction={incoming|outgoing|both}`

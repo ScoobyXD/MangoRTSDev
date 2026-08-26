@@ -20,25 +20,22 @@ import {
 } from "../../../frontend/src/app/projectRouteHistory.js";
 
 describe("deepLinkRoutes", () => {
-  it("round-trips root and exact Folder Process Map routes", () => {
+  it("keeps Process Map on one company route", () => {
     assert.equal(buildProcessMapRoute(), "/process-map");
     assert.deepEqual(parseDeepLinkRoute("/process-map"), { kind: "process_map" });
-    const folderPath = buildProcessMapRoute("folder / 1");
-    assert.equal(folderPath, "/process-map/folders/folder%20%2F%201");
-    assert.deepEqual(parseDeepLinkRoute(folderPath), { kind: "process_map", folderID: "folder / 1" });
     assert.equal(parseDeepLinkRoute("/process-map/folders"), null);
+    assert.equal(parseDeepLinkRoute("/process-map/folders/folder-1"), null);
     assert.equal(parseDeepLinkRoute("/process-map/folders/%E0%A4%A"), null);
   });
 
-  it("wires Folder drill-in through browser history and passes popstate folder changes into the page", () => {
+  it("does not wire Process Map camera or Folder focus into browser history", () => {
     const authGate = readFileSync(resolve(process.cwd(), "frontend/src/auth/AuthGate.tsx"), "utf8");
     const appLayout = readFileSync(resolve(process.cwd(), "frontend/src/app/applayout.tsx"), "utf8");
     const page = readFileSync(resolve(process.cwd(), "frontend/src/pages/process-map/ProcessMapPage.tsx"), "utf8");
-    assert.match(authGate, /window\.history\.pushState\(\{\}, "", normalizedNextPath\)/);
-    assert.match(authGate, /const onPop = \(\) => setPath\(window\.location\.pathname\)/);
-    assert.match(appLayout, /deepLink\?\.kind === "process_map" \? deepLink\.folderID/);
-    assert.match(appLayout, /<LazyProcessMapPage[\s\S]*folderID=\{processMapFolderID\}/);
-    assert.match(page, /onNavigate\?\.\(buildProcessMapRoute\(nextFolderID\)\)/);
+    for (const source of [authGate, appLayout, page]) {
+      assert.doesNotMatch(source, /process-map\/folders|processMapFolderID|folderID=\{processMapFolderID\}/);
+    }
+    assert.doesNotMatch(page, /pushState|replaceState|popstate|buildProcessMapRoute\([^)]/);
   });
 
   it("round-trips canonical Logic Gate routes", () => {

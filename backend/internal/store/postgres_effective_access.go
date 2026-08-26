@@ -47,6 +47,13 @@ where company_id=$1::uuid
 }
 
 func (r *PostgresRepo) UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
+	return r.UserHasEffectiveAccessContext(context.Background(), companyID, userID, resourceType, resourceID, accessLevel)
+}
+
+func (r *PostgresRepo) UserHasEffectiveAccessContext(ctx context.Context, companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	companyID = cleanUUIDText(companyID)
 	userID = cleanUUIDText(userID)
 	resourceID = cleanUUIDText(resourceID)
@@ -55,7 +62,6 @@ func (r *PostgresRepo) UserHasEffectiveAccess(companyID, userID, resourceType, r
 	if companyID == "" || userID == "" || resourceID == "" || !typeOK || !accessOK || EntityPermissionRank(accessLevel) == 0 {
 		return false, ErrInvalid
 	}
-	ctx := context.Background()
 	var allowed bool
 	err := r.db.QueryRowContext(ctx, `
 select mangorts_user_can_access_resource($1::uuid, $2::text, $3::uuid, $4::uuid, $5::text)`,

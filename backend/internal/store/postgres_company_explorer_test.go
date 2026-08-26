@@ -384,7 +384,7 @@ func TestPostgresRecycleSnapshotSkipsOptionalShapeDriftWithSavepoint(t *testing.
 	createItems := strings.ToLower(strings.Join(strings.Fields(extractFunctionSourceForTest(t, source, "func postgresCreateRecycleBinItemsTx")), " "))
 	for _, want := range []string{
 		"snapshotcache := newrecyclesnapshotcache()",
-		"postgressnapshotrecyclepayloadwithcachetx",
+		"postgressnapshotrecyclepayloadwithcleanupscopetx",
 	} {
 		if !strings.Contains(createItems, want) {
 			t.Fatalf("postgresCreateRecycleBinItemsTx missing %q", want)

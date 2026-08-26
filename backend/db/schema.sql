@@ -403,8 +403,8 @@ begin
     if x_text !~ '^-?(0|[1-9][0-9]*)$' or y_text !~ '^-?(0|[1-9][0-9]*)$' then
       return false;
     end if;
-    if x_text::numeric not between -2147483648 and 2147483647
-       or y_text::numeric not between -2147483648 and 2147483647 then
+    if x_text::numeric not between -1000000000 and 1000000000
+       or y_text::numeric not between -1000000000 and 1000000000 then
       return false;
     end if;
   end loop;
@@ -2602,29 +2602,27 @@ declare
   deleted_company_id uuid := (to_jsonb(old)->>'company_id')::uuid;
   deleted_resource_type text;
   deleted_resource_id uuid;
+  replacement_parent_id uuid;
 begin
   if tg_table_name = 'company_explorer_folders' then
     deleted_resource_type := 'company_explorer_folder';
     deleted_resource_id := (to_jsonb(old)->>'folder_id')::uuid;
 
-    delete from process_map_traces trace
-    using resource_operational_relationships relationship
-    where trace.company_id = deleted_company_id
-      and trace.company_id = relationship.company_id
-      and trace.resource_operational_relationship_id = relationship.resource_operational_relationship_id
-      and exists (
-        select 1
-        from process_map_placements placement
-        where placement.company_id = deleted_company_id
-          and placement.map_parent_folder_id = deleted_resource_id
-          and (
-            (relationship.source_resource_type = placement.resource_type
-             and relationship.source_resource_id = placement.resource_id)
-            or
-            (relationship.target_resource_type = placement.resource_type
-             and relationship.target_resource_id = placement.resource_id)
-          )
-      );
+    perform pg_advisory_xact_lock(hashtextextended('process-map-parent:' || deleted_company_id::text, 0));
+    select placement.map_parent_folder_id
+      into replacement_parent_id
+    from process_map_placements placement
+    where placement.company_id = deleted_company_id
+      and placement.resource_type = deleted_resource_type
+      and placement.resource_id = deleted_resource_id
+    for update;
+
+    update process_map_placements placement
+    set map_parent_folder_id=replacement_parent_id,
+        revision = placement.revision + 1,
+        updated_timestamp = statement_timestamp()
+    where placement.company_id = deleted_company_id
+      and placement.map_parent_folder_id = deleted_resource_id;
   elsif tg_table_name = 'logic_gates' then
     deleted_resource_type := 'logic_gate';
     deleted_resource_id := (to_jsonb(old)->>'logic_gate_id')::uuid;
@@ -2644,13 +2642,8 @@ begin
 
   delete from process_map_placements placement
   where placement.company_id = deleted_company_id
-    and (
-      (placement.resource_type = deleted_resource_type
-       and placement.resource_id = deleted_resource_id)
-      or
-      (deleted_resource_type = 'company_explorer_folder'
-       and placement.map_parent_folder_id = deleted_resource_id)
-    );
+    and placement.resource_type = deleted_resource_type
+    and placement.resource_id = deleted_resource_id;
   return old;
 end;
 $$;
@@ -2706,7 +2699,7 @@ begin
     parent_changed := new.map_parent_folder_id is distinct from old.map_parent_folder_id;
   end if;
 
-  if new.resource_type = 'company_explorer_folder' and parent_changed then
+  if parent_changed then
     perform pg_advisory_xact_lock(hashtextextended('process-map-parent:' || new.company_id::text, 0));
   end if;
 
@@ -2737,6 +2730,16 @@ begin
     for key share;
     if not found then
       raise exception 'process_map_parent_folder_not_found' using errcode='23503';
+    end if;
+
+    perform 1
+    from process_map_placements parent_placement
+    where parent_placement.company_id = new.company_id
+      and parent_placement.resource_type = 'company_explorer_folder'
+      and parent_placement.resource_id = new.map_parent_folder_id
+    for key share;
+    if not found then
+      raise exception 'process_map_parent_folder_not_mapped' using errcode='23503';
     end if;
   end if;
 
@@ -4375,16 +4378,19 @@ CREATE TABLE public.process_map_placements (
     company_id uuid NOT NULL,
     resource_type text NOT NULL,
     resource_id uuid NOT NULL,
+    placement_incarnation_token uuid DEFAULT gen_random_uuid() NOT NULL,
     map_parent_folder_id uuid,
     grid_x integer NOT NULL,
     grid_y integer NOT NULL,
+    grid_width integer DEFAULT 7 NOT NULL,
+    grid_height integer DEFAULT 5 NOT NULL,
     revision bigint DEFAULT 1 NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT process_map_placements_parent_not_self_chk CHECK (((resource_type <> 'company_explorer_folder'::text) OR (map_parent_folder_id IS NULL) OR (map_parent_folder_id <> resource_id))),
     CONSTRAINT process_map_placements_resource_type_chk CHECK ((resource_type = ANY (ARRAY['company_explorer_folder'::text, 'logic_gate'::text]))),
     CONSTRAINT process_map_placements_revision_positive_chk CHECK ((revision > 0)),
-    CONSTRAINT process_map_placements_root_folder_chk CHECK (((map_parent_folder_id IS NOT NULL) OR (resource_type = 'company_explorer_folder'::text))),
+    CONSTRAINT process_map_placements_geometry_chk CHECK (((grid_x >= '-1000000000'::integer) AND (grid_y >= '-1000000000'::integer) AND (grid_width > 0) AND (grid_width <= 1000000) AND (grid_height > 0) AND (grid_height <= 1000000) AND (((grid_x)::bigint + grid_width) <= 1000000000) AND (((grid_y)::bigint + grid_height) <= 1000000000))),
     CONSTRAINT process_map_placements_timestamps_chk CHECK ((updated_timestamp >= created_timestamp))
 );
 
@@ -6552,10 +6558,17 @@ CREATE INDEX idx_pins_owner_parent_position ON public.pins USING btree (company_
 
 
 --
--- Name: idx_process_map_placements_layer; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_process_map_placements_parent; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_process_map_placements_layer ON public.process_map_placements USING btree (company_id, map_parent_folder_id, resource_type, resource_id);
+CREATE INDEX idx_process_map_placements_parent ON public.process_map_placements USING btree (company_id, map_parent_folder_id, resource_type, resource_id);
+
+
+--
+-- Name: idx_process_map_placements_spatial; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_process_map_placements_spatial ON public.process_map_placements USING gist (box(point((grid_x)::double precision, (grid_y)::double precision), point((((grid_x)::bigint + grid_width))::double precision, (((grid_y)::bigint + grid_height))::double precision)));
 
 
 --
@@ -8369,7 +8382,7 @@ ALTER TABLE ONLY public.process_map_placements
 --
 
 ALTER TABLE ONLY public.process_map_placements
-    ADD CONSTRAINT process_map_placements_company_id_map_parent_folder_id_fkey FOREIGN KEY (company_id, map_parent_folder_id) REFERENCES public.company_explorer_folders(company_id, folder_id) ON DELETE CASCADE;
+    ADD CONSTRAINT process_map_placements_company_id_map_parent_folder_id_fkey FOREIGN KEY (company_id, map_parent_folder_id) REFERENCES public.company_explorer_folders(company_id, folder_id);
 
 
 --

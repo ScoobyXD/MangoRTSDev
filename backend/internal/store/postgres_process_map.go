@@ -12,7 +12,11 @@ import (
 func scanProcessMapPlacement(row interface{ Scan(...any) error }) (domain.ProcessMapPlacement, error) {
 	var item domain.ProcessMapPlacement
 	var parentID sql.NullString
-	err := row.Scan(&item.CompanyID, &item.ResourceType, &item.ResourceID, &parentID, &item.GridX, &item.GridY, &item.Revision, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	err := row.Scan(
+		&item.CompanyID, &item.ResourceType, &item.ResourceID, &parentID,
+		&item.GridX, &item.GridY, &item.GridWidth, &item.GridHeight,
+		&item.Revision, &item.CreatedTimestamp, &item.UpdatedTimestamp,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.ProcessMapPlacement{}, ErrNotFound
 	}
@@ -113,144 +117,228 @@ func normalizePostgresProcessMapQueryIDs(companyID, resourceID, permissionUserID
 	return companyID, resourceID, permissionUserID, nil
 }
 
-func (r *PostgresRepo) postgresProcessMapLayerAncestors(ctx context.Context, companyID, folderID, permissionUserID string) ([]domain.ProcessMapLayerAncestor, error) {
-	rows, err := r.db.QueryContext(ctx, `
-with recursive ancestor_path(folder_id,depth,visited,cycle) as (
-  select placement.map_parent_folder_id,1,
-         array[placement.resource_id,placement.map_parent_folder_id],
-         placement.map_parent_folder_id=placement.resource_id
-  from process_map_placements placement
-  where placement.company_id=$1::uuid
-    and placement.resource_type='company_explorer_folder'
-    and placement.resource_id=$2::uuid
-    and placement.map_parent_folder_id is not null
-  union all
-  select parent_placement.map_parent_folder_id,path.depth+1,
-         path.visited || parent_placement.map_parent_folder_id,
-         parent_placement.map_parent_folder_id=any(path.visited)
-  from ancestor_path path
-  join process_map_placements parent_placement
-    on parent_placement.company_id=$1::uuid
-   and parent_placement.resource_type='company_explorer_folder'
-   and parent_placement.resource_id=path.folder_id
-  where not path.cycle
-    and path.depth < $4
-    and parent_placement.map_parent_folder_id is not null
-)
-select path.folder_id::text,folder.name,
-       case when folder.folder_id is null then false
-            else mangorts_user_can_access_resource($1::uuid,'company_explorer_folder',path.folder_id,$3::uuid,'edit') end,
-       path.depth,path.cycle
-from ancestor_path path
-left join company_explorer_folders folder
-  on folder.company_id=$1::uuid and folder.folder_id=path.folder_id
-order by path.depth desc`, companyID, folderID, permissionUserID, processMapMaxLayerAncestors+1)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	ancestors := []domain.ProcessMapLayerAncestor{}
-	valid := true
-	for rows.Next() {
-		var item domain.ProcessMapLayerAncestor
-		var name sql.NullString
-		var allowed, cycle bool
-		var depth int
-		if err := rows.Scan(&item.FolderID, &name, &allowed, &depth, &cycle); err != nil {
-			return nil, err
-		}
-		if !name.Valid || !allowed || cycle || depth > processMapMaxLayerAncestors {
-			valid = false
-			continue
-		}
-		item.Name = name.String
-		ancestors = append(ancestors, item)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	if !valid {
-		return []domain.ProcessMapLayerAncestor{}, nil
-	}
-	return ancestors, nil
+func processMapVersionsQueryRow(row interface{ Scan(...any) error }) (int64, int64, error) {
+	var processVersion, permissionVersion int64
+	err := row.Scan(&processVersion, &permissionVersion)
+	return processVersion, permissionVersion, err
 }
 
-func (r *PostgresRepo) GetProcessMapLayer(input ProcessMapLayerQuery) (domain.ProcessMapLayerView, error) {
-	input.CompanyID = cleanUUIDText(input.CompanyID)
-	input.FolderID = cleanUUIDText(input.FolderID)
-	input.PermissionUserID = cleanUUIDText(input.PermissionUserID)
-	if input.CompanyID == "" || input.PermissionUserID == "" {
-		return domain.ProcessMapLayerView{}, ErrInvalid
+func (r *PostgresRepo) CurrentProcessMapVersions(ctx context.Context, companyID string) (int64, int64, error) {
+	companyID = cleanUUIDText(companyID)
+	if companyID == "" {
+		return 0, 0, ErrInvalid
 	}
-	ctx := context.Background()
-	view := domain.ProcessMapLayerView{Layer: domain.ProcessMapLayer{Kind: "root", Ancestors: []domain.ProcessMapLayerAncestor{}}, Placements: []domain.ProcessMapLayerPlacement{}, Traces: []domain.ProcessMapLayerTrace{}}
-	if input.FolderID != "" {
-		if err := r.postgresRequireProcessMapResource(ctx, input.CompanyID, domain.ProcessMapResourceTypeFolder, input.FolderID, input.PermissionUserID); err != nil {
-			return domain.ProcessMapLayerView{}, err
-		}
-		var name string
-		if err := r.db.QueryRowContext(ctx, `select name from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid`, input.CompanyID, input.FolderID).Scan(&name); err != nil {
-			return domain.ProcessMapLayerView{}, err
-		}
-		ancestors, err := r.postgresProcessMapLayerAncestors(ctx, input.CompanyID, input.FolderID, input.PermissionUserID)
-		if err != nil {
-			return domain.ProcessMapLayerView{}, err
-		}
-		view.Layer = domain.ProcessMapLayer{Kind: "folder", FolderID: input.FolderID, Name: name, Ancestors: ancestors}
-	}
+	return processMapVersionsQueryRow(r.db.QueryRowContext(ctx, `
+select
+  coalesce(max(version) filter (where scope='process-map' and resource_key=''),0),
+  coalesce(max(version) filter (where scope='policy-group-membership' and resource_key=''),0)
+from workspace_read_versions
+where company_id=$1::uuid
+  and scope in ('process-map','policy-group-membership')`, companyID))
+}
 
-	rows, err := r.db.QueryContext(ctx, `
-select placement.company_id::text,placement.resource_type,placement.resource_id::text,
-       placement.grid_x,placement.grid_y,placement.revision,placement.created_timestamp,placement.updated_timestamp,
-       case placement.resource_type when 'company_explorer_folder' then folder.name else process.header end as resource_name,
-       mangorts_user_can_access_resource(placement.company_id,placement.resource_type,placement.resource_id,$3::uuid,'edit') as allowed
-from process_map_placements placement
-left join company_explorer_folders folder
-  on placement.resource_type='company_explorer_folder' and folder.company_id=placement.company_id and folder.folder_id=placement.resource_id
-left join logic_gates process
-  on placement.resource_type='logic_gate' and process.company_id=placement.company_id and process.logic_gate_id=placement.resource_id
-where placement.company_id=$1::uuid
-  and placement.map_parent_folder_id is not distinct from nullif($2,'')::uuid
-order by placement.grid_y,placement.grid_x,placement.resource_type,placement.resource_id`, input.CompanyID, input.FolderID, input.PermissionUserID)
-	if err != nil {
-		return domain.ProcessMapLayerView{}, err
+func processMapVersionsTx(ctx context.Context, tx *sql.Tx, companyID string) (int64, int64, error) {
+	return processMapVersionsQueryRow(tx.QueryRowContext(ctx, `
+select
+  coalesce(max(version) filter (where scope='process-map' and resource_key=''),0),
+  coalesce(max(version) filter (where scope='policy-group-membership' and resource_key=''),0)
+from workspace_read_versions
+where company_id=$1::uuid
+  and scope in ('process-map','policy-group-membership')`, companyID))
+}
+
+func postgresRequireProcessMapMembershipTx(ctx context.Context, tx *sql.Tx, companyID, permissionUserID string) error {
+	var allowed bool
+	if err := tx.QueryRowContext(ctx, `
+select exists (
+  select 1 from company_memberships membership
+  where membership.user_id=$2::uuid
+    and (membership.company_id=$1::uuid or membership.role='dev_admin')
+)`, companyID, permissionUserID).Scan(&allowed); err != nil {
+		return err
 	}
-	visiblePlacements := map[string]bool{}
+	if !allowed {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func normalizePostgresProcessMapRead(companyID, permissionUserID string) (string, string, error) {
+	companyID = cleanUUIDText(companyID)
+	permissionUserID = cleanUUIDText(permissionUserID)
+	if companyID == "" || permissionUserID == "" {
+		return "", "", ErrInvalid
+	}
+	return companyID, permissionUserID, nil
+}
+
+func (r *PostgresRepo) GetProcessMapScene(ctx context.Context, input ProcessMapSceneQuery) (domain.ProcessMapScene, error) {
+	companyID, permissionUserID, err := normalizePostgresProcessMapRead(input.CompanyID, input.PermissionUserID)
+	if err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	defer tx.Rollback()
+	if err := postgresRequireProcessMapMembershipTx(ctx, tx, companyID, permissionUserID); err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	var minX, minY, maxX, maxY sql.NullInt64
+	err = tx.QueryRowContext(ctx, `
+select min(placement.grid_x),min(placement.grid_y),
+       max(placement.grid_x + case when allowed then placement.grid_width else $3 end),
+       max(placement.grid_y + case when allowed then placement.grid_height else $4 end)
+from (
+  select placement.*,
+         mangorts_user_can_access_resource(placement.company_id,placement.resource_type,placement.resource_id,$2::uuid,'edit') allowed
+  from process_map_placements placement
+  left join company_explorer_folders folder
+    on placement.resource_type='company_explorer_folder'
+   and folder.company_id=placement.company_id and folder.folder_id=placement.resource_id
+  left join logic_gates process
+    on placement.resource_type='logic_gate'
+   and process.company_id=placement.company_id and process.logic_gate_id=placement.resource_id
+  where placement.company_id=$1::uuid
+    and ((placement.resource_type='company_explorer_folder' and folder.folder_id is not null)
+      or (placement.resource_type='logic_gate' and process.logic_gate_id is not null))
+) placement`, companyID, permissionUserID, ProcessMapRestrictedWidth, ProcessMapRestrictedHeight).Scan(&minX, &minY, &maxX, &maxY)
+	if err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	processVersion, _, err := processMapVersionsTx(ctx, tx, companyID)
+	if err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	result := domain.ProcessMapScene{
+		ProcessMapReadVersion: processVersion, TileSize: ProcessMapTileSize,
+		MinTileZoom: ProcessMapMinTileZoom, MaxTileZoom: ProcessMapMaxTileZoom,
+	}
+	if minX.Valid && minY.Valid && maxX.Valid && maxY.Valid {
+		result.Bounds = &domain.ProcessMapBounds{MinX: int(minX.Int64), MinY: int(minY.Int64), MaxX: int(maxX.Int64), MaxY: int(maxY.Int64)}
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	return result, nil
+}
+
+func (r *PostgresRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (domain.ProcessMapTile, error) {
+	companyID, permissionUserID, err := normalizePostgresProcessMapRead(input.CompanyID, input.PermissionUserID)
+	if err != nil {
+		return domain.ProcessMapTile{}, err
+	}
+	tileBounds, ok := processMapTileBounds(input.Z, input.X, input.Y)
+	if !ok {
+		return domain.ProcessMapTile{}, ErrInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return domain.ProcessMapTile{}, err
+	}
+	defer tx.Rollback()
+	if err := postgresRequireProcessMapMembershipTx(ctx, tx, companyID, permissionUserID); err != nil {
+		return domain.ProcessMapTile{}, err
+	}
+	processVersion, _, err := processMapVersionsTx(ctx, tx, companyID)
+	if err != nil {
+		return domain.ProcessMapTile{}, err
+	}
+	result := domain.ProcessMapTile{
+		Z: input.Z, X: input.X, Y: input.Y, ProcessMapReadVersion: processVersion,
+		Placements: []domain.ProcessMapTilePlacement{}, Traces: []domain.ProcessMapTileTrace{},
+	}
+	rows, err := tx.QueryContext(ctx, `
+with candidate as (
+  select placement.*,
+         case placement.resource_type when 'company_explorer_folder' then folder.name else process.header end resource_name,
+         mangorts_user_can_access_resource(placement.company_id,placement.resource_type,placement.resource_id,$2::uuid,'edit') allowed,
+         case when placement.map_parent_folder_id is null then true else
+           mangorts_user_can_access_resource(placement.company_id,'company_explorer_folder',placement.map_parent_folder_id,$2::uuid,'edit') end parent_allowed
+  from process_map_placements placement
+  left join company_explorer_folders folder
+    on placement.resource_type='company_explorer_folder'
+   and folder.company_id=placement.company_id and folder.folder_id=placement.resource_id
+  left join logic_gates process
+    on placement.resource_type='logic_gate'
+   and process.company_id=placement.company_id and process.logic_gate_id=placement.resource_id
+  where placement.company_id=$1::uuid
+    and ((placement.resource_type='company_explorer_folder' and folder.folder_id is not null)
+      or (placement.resource_type='logic_gate' and process.logic_gate_id is not null))
+)
+select placement.company_id::text,placement.resource_type,placement.resource_id::text,
+       placement.map_parent_folder_id::text,placement.grid_x,placement.grid_y,
+       placement.grid_width,placement.grid_height,placement.revision,
+       placement.created_timestamp,placement.updated_timestamp,
+       placement.resource_name,placement.allowed,placement.parent_allowed
+from candidate placement
+where (placement.allowed
+  and box(
+      point(placement.grid_x::double precision,placement.grid_y::double precision),
+      point((placement.grid_x::bigint+placement.grid_width)::double precision,(placement.grid_y::bigint+placement.grid_height)::double precision)
+    ) && box(point($3::double precision,$4::double precision),point($5::double precision,$6::double precision))
+  and placement.grid_x < $5 and placement.grid_x::bigint+placement.grid_width > $3
+  and placement.grid_y < $6 and placement.grid_y::bigint+placement.grid_height > $4)
+ or (not placement.allowed
+  and placement.grid_x < $5 and placement.grid_x::bigint+$7 > $3
+  and placement.grid_y < $6 and placement.grid_y::bigint+$8 > $4)
+order by placement.grid_y,placement.grid_x,placement.resource_type,placement.resource_id`,
+		companyID, permissionUserID, tileBounds.MinX, tileBounds.MinY, tileBounds.MaxX, tileBounds.MaxY,
+		ProcessMapRestrictedWidth, ProcessMapRestrictedHeight)
+	if err != nil {
+		return domain.ProcessMapTile{}, err
+	}
 	for rows.Next() {
-		var companyID, resourceType, resourceID, name string
-		var gridX, gridY int
-		var revision int64
-		var createdTimestamp, updatedTimestamp sql.NullTime
-		var allowed bool
-		if err := rows.Scan(&companyID, &resourceType, &resourceID, &gridX, &gridY, &revision, &createdTimestamp, &updatedTimestamp, &name, &allowed); err != nil {
+		var placement domain.ProcessMapPlacement
+		var parentID, name sql.NullString
+		var allowed, parentAllowed bool
+		if err := rows.Scan(
+			&placement.CompanyID, &placement.ResourceType, &placement.ResourceID, &parentID,
+			&placement.GridX, &placement.GridY, &placement.GridWidth, &placement.GridHeight,
+			&placement.Revision, &placement.CreatedTimestamp, &placement.UpdatedTimestamp,
+			&name, &allowed, &parentAllowed,
+		); err != nil {
 			rows.Close()
-			return domain.ProcessMapLayerView{}, err
+			return domain.ProcessMapTile{}, err
 		}
 		if !allowed {
-			view.Placements = append(view.Placements, domain.ProcessMapRestrictedPlacement{Restricted: true, GridX: gridX, GridY: gridY})
+			restrictedBounds := domain.ProcessMapBounds{MinX: placement.GridX, MinY: placement.GridY, MaxX: placement.GridX + ProcessMapRestrictedWidth, MaxY: placement.GridY + ProcessMapRestrictedHeight}
+			if processMapBoundsIntersect(restrictedBounds, tileBounds) {
+				result.Placements = append(result.Placements, domain.ProcessMapRestrictedPlacement{Restricted: true, GridX: placement.GridX, GridY: placement.GridY})
+			}
 			continue
 		}
-		visiblePlacements[resourceType+":"+resourceID] = true
-		view.Placements = append(view.Placements, domain.ProcessMapVisiblePlacement{
-			Restricted: false, ResourceType: resourceType, ResourceID: resourceID, Name: name,
-			GridX: gridX, GridY: gridY, Revision: revision,
-			CreatedTimestamp: createdTimestamp.Time, UpdatedTimestamp: updatedTimestamp.Time,
+		if parentID.Valid && parentAllowed {
+			placement.MapParentFolderID = &parentID.String
+		}
+		presentation := processMapPlacementPresentationAtTileZoom(placement.GridWidth, placement.GridHeight, input.Z)
+		visibleName := name.String
+		if presentation == domain.ProcessMapPresentationWhole {
+			visibleName = ""
+		}
+		result.Placements = append(result.Placements, domain.ProcessMapVisiblePlacement{
+			Restricted: false, Presentation: presentation, ResourceType: placement.ResourceType, ResourceID: placement.ResourceID, Name: visibleName,
+			MapParentFolderID: placement.MapParentFolderID, GridX: placement.GridX, GridY: placement.GridY,
+			GridWidth: placement.GridWidth, GridHeight: placement.GridHeight, Revision: placement.Revision,
+			CreatedTimestamp: placement.CreatedTimestamp, UpdatedTimestamp: placement.UpdatedTimestamp, CanEdit: true,
 		})
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return domain.ProcessMapLayerView{}, err
+		return domain.ProcessMapTile{}, err
 	}
 	if err := rows.Close(); err != nil {
-		return domain.ProcessMapLayerView{}, err
+		return domain.ProcessMapTile{}, err
 	}
 
-	traceRows, err := r.db.QueryContext(ctx, `
-select relationship.resource_operational_relationship_id::text,
+	traceRows, err := tx.QueryContext(ctx, `
+select relationship.company_id::text,relationship.resource_operational_relationship_id::text,
        relationship.source_resource_type,relationship.source_resource_id::text,
        relationship.target_resource_type,relationship.target_resource_id::text,
-       trace.route_points,trace.revision,trace.created_timestamp,trace.updated_timestamp
+       trace.route_points,trace.revision,trace.created_timestamp,trace.updated_timestamp,
+       source_placement.grid_x,source_placement.grid_y,source_placement.grid_width,source_placement.grid_height,
+       target_placement.grid_x,target_placement.grid_y,target_placement.grid_width,target_placement.grid_height
 from process_map_traces trace
 join resource_operational_relationships relationship
   on relationship.company_id=trace.company_id and relationship.resource_operational_relationship_id=trace.resource_operational_relationship_id
@@ -258,44 +346,89 @@ join process_map_placements source_placement
   on source_placement.company_id=relationship.company_id and source_placement.resource_type=relationship.source_resource_type and source_placement.resource_id=relationship.source_resource_id
 join process_map_placements target_placement
   on target_placement.company_id=relationship.company_id and target_placement.resource_type=relationship.target_resource_type and target_placement.resource_id=relationship.target_resource_id
+cross join lateral (
+  select min(point_x) min_x,min(point_y) min_y,max(point_x) max_x,max(point_y) max_y
+  from (
+    select (source_placement.grid_x+source_placement.grid_width)::double precision point_x,
+           (source_placement.grid_y::double precision+source_placement.grid_height::double precision/2) point_y
+    union all
+    select target_placement.grid_x::double precision,
+           (target_placement.grid_y::double precision+target_placement.grid_height::double precision/2)
+    union all
+    select (point->>'x')::double precision,(point->>'y')::double precision
+    from jsonb_array_elements(trace.route_points) point
+  ) path_point
+) path_bounds
 where trace.company_id=$1::uuid
-  and source_placement.map_parent_folder_id is not distinct from nullif($2,'')::uuid
-  and target_placement.map_parent_folder_id is not distinct from nullif($2,'')::uuid
-  and mangorts_user_can_access_resource(relationship.company_id,relationship.source_resource_type,relationship.source_resource_id,$3::uuid,'edit')
-  and mangorts_user_can_access_resource(relationship.company_id,relationship.target_resource_type,relationship.target_resource_id,$3::uuid,'edit')
-order by relationship.resource_operational_relationship_id`, input.CompanyID, input.FolderID, input.PermissionUserID)
+  and path_bounds.min_x < $5 and path_bounds.max_x >= $3
+  and path_bounds.min_y < $6 and path_bounds.max_y >= $4
+  and mangorts_user_can_access_resource(relationship.company_id,relationship.source_resource_type,relationship.source_resource_id,$2::uuid,'edit')
+  and mangorts_user_can_access_resource(relationship.company_id,relationship.target_resource_type,relationship.target_resource_id,$2::uuid,'edit')
+order by relationship.resource_operational_relationship_id`,
+		companyID, permissionUserID, tileBounds.MinX, tileBounds.MinY, tileBounds.MaxX, tileBounds.MaxY)
 	if err != nil {
-		return domain.ProcessMapLayerView{}, err
+		return domain.ProcessMapTile{}, err
 	}
 	defer traceRows.Close()
 	for traceRows.Next() {
-		var item domain.ProcessMapLayerTrace
+		var relationship domain.ResourceOperationalRelationship
+		var trace domain.ProcessMapTrace
 		var routeJSON []byte
-		if err := traceRows.Scan(&item.ResourceOperationalRelationshipID, &item.Source.ResourceType, &item.Source.ResourceID, &item.Target.ResourceType, &item.Target.ResourceID, &routeJSON, &item.Revision, &item.CreatedTimestamp, &item.UpdatedTimestamp); err != nil {
-			return domain.ProcessMapLayerView{}, err
+		var source, target domain.ProcessMapPlacement
+		if err := traceRows.Scan(
+			&relationship.CompanyID, &relationship.ResourceOperationalRelationshipID,
+			&relationship.Source.ResourceType, &relationship.Source.ResourceID,
+			&relationship.Target.ResourceType, &relationship.Target.ResourceID,
+			&routeJSON, &trace.Revision, &trace.CreatedTimestamp, &trace.UpdatedTimestamp,
+			&source.GridX, &source.GridY, &source.GridWidth, &source.GridHeight,
+			&target.GridX, &target.GridY, &target.GridWidth, &target.GridHeight,
+		); err != nil {
+			return domain.ProcessMapTile{}, err
 		}
-		if err := json.Unmarshal(routeJSON, &item.RoutePoints); err != nil {
-			return domain.ProcessMapLayerView{}, err
+		trace.CompanyID = relationship.CompanyID
+		trace.ResourceOperationalRelationshipID = relationship.ResourceOperationalRelationshipID
+		if err := json.Unmarshal(routeJSON, &trace.RoutePoints); err != nil {
+			return domain.ProcessMapTile{}, err
 		}
-		if !visiblePlacements[item.Source.ResourceType+":"+item.Source.ResourceID] || !visiblePlacements[item.Target.ResourceType+":"+item.Target.ResourceID] {
+		if trace.RoutePoints == nil {
+			trace.RoutePoints = []domain.ProcessMapRoutePoint{}
+		}
+		fragments := processMapClipPath(processMapTracePath(source, target, trace.RoutePoints), tileBounds)
+		if len(fragments) == 0 {
 			continue
 		}
-		if item.RoutePoints == nil {
-			item.RoutePoints = []domain.ProcessMapRoutePoint{}
+		presentation := processMapMaxPresentation(
+			processMapPlacementPresentationAtTileZoom(source.GridWidth, source.GridHeight, input.Z),
+			processMapPlacementPresentationAtTileZoom(target.GridWidth, target.GridHeight, input.Z),
+		)
+		routePoints := []domain.ProcessMapRoutePoint(nil)
+		if presentation == domain.ProcessMapPresentationEditing {
+			routePoints = trace.RoutePoints
 		}
-		view.Traces = append(view.Traces, item)
+		result.Traces = append(result.Traces, domain.ProcessMapTileTrace{
+			ResourceOperationalRelationshipID: relationship.ResourceOperationalRelationshipID,
+			Presentation:                      presentation,
+			Source:                            relationship.Source, Target: relationship.Target, RoutePoints: routePoints,
+			PathFragments: fragments, Revision: trace.Revision,
+			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
+		})
 	}
-	return view, traceRows.Err()
+	if err := traceRows.Err(); err != nil {
+		return domain.ProcessMapTile{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.ProcessMapTile{}, err
+	}
+	return result, nil
 }
 
-func (r *PostgresRepo) ListResourceOperationalRelationshipsForResource(input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error) {
+func (r *PostgresRepo) ListResourceOperationalRelationshipsForResource(ctx context.Context, input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error) {
 	resourceType, typeOK := normalizeProcessMapResourceType(input.ResourceType)
 	direction, directionOK := normalizeProcessMapDirection(input.Direction)
 	companyID, resourceID, permissionUserID, err := normalizePostgresProcessMapQueryIDs(input.CompanyID, input.ResourceID, input.PermissionUserID)
 	if err != nil || !typeOK || !directionOK {
 		return nil, ErrInvalid
 	}
-	ctx := context.Background()
 	if err := r.postgresRequireProcessMapResource(ctx, companyID, resourceType, resourceID, permissionUserID); err != nil {
 		return nil, err
 	}
@@ -345,7 +478,8 @@ func processMapPlacementByResourceTx(ctx context.Context, tx *sql.Tx, companyID,
 		lock = " for update"
 	}
 	return scanProcessMapPlacement(tx.QueryRowContext(ctx, `
-select company_id::text,resource_type,resource_id::text,map_parent_folder_id::text,grid_x,grid_y,revision,created_timestamp,updated_timestamp
+select company_id::text,resource_type,resource_id::text,map_parent_folder_id::text,
+       grid_x,grid_y,grid_width,grid_height,revision,created_timestamp,updated_timestamp
 from process_map_placements
 where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`+lock, companyID, resourceType, resourceID))
 }
@@ -361,153 +495,14 @@ from resource_operational_relationships
 where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`+lock, companyID, relationshipID))
 }
 
-func (r *PostgresRepo) PutProcessMapPlacement(input ProcessMapPlacementPutInput) (ProcessMapPlacementMutationResult, error) {
-	companyID, actorUserID, permissionUserID, err := normalizePostgresProcessMapMutation(input.CompanyID, input.ActorUserID, input.PermissionUserID)
-	resourceType, typeOK := normalizeProcessMapResourceType(input.ResourceType)
-	resourceID := cleanUUIDText(input.ResourceID)
-	parentID := ""
-	if input.MapParentFolderID != nil {
-		parentID = cleanUUIDText(*input.MapParentFolderID)
+func processMapTraceByRelationshipTx(ctx context.Context, tx *sql.Tx, companyID, relationshipID string, forUpdate bool) (domain.ProcessMapTrace, error) {
+	lock := ""
+	if forUpdate {
+		lock = " for update"
 	}
-	if err != nil || !typeOK || resourceID == "" || (input.MapParentFolderID != nil && parentID == "") || !validProcessMapCoordinate(input.GridX) || !validProcessMapCoordinate(input.GridY) {
-		return ProcessMapPlacementMutationResult{}, ErrInvalid
-	}
-	if resourceType == domain.ProcessMapResourceTypeProcess && parentID == "" {
-		return ProcessMapPlacementMutationResult{}, ErrProcessMapRootProcess
-	}
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return ProcessMapPlacementMutationResult{}, err
-	}
-	defer tx.Rollback()
-	if err := lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, false); err != nil {
-		return ProcessMapPlacementMutationResult{}, err
-	}
-
-	// Folder parentage is serialized before any row lock. All Process Map
-	// mutations then lock canonical resources in typed-ID order before map rows.
-	// That one order prevents placement moves from deadlocking trace writes.
-	if resourceType == domain.ProcessMapResourceTypeFolder {
-		if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended('process-map-parent:' || $1,0))`, companyID); err != nil {
-			return ProcessMapPlacementMutationResult{}, err
-		}
-	}
-	resources := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
-	if parentID != "" {
-		resources = append(resources, domain.ProcessMapResourceRef{ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: parentID})
-	}
-	sort.Slice(resources, func(i, j int) bool {
-		if resources[i].ResourceType == resources[j].ResourceType {
-			return resources[i].ResourceID < resources[j].ResourceID
-		}
-		return resources[i].ResourceType < resources[j].ResourceType
-	})
-	for index, resource := range resources {
-		if index > 0 && resource == resources[index-1] {
-			continue
-		}
-		if err := postgresRequireProcessMapResourceTx(ctx, tx, companyID, resource.ResourceType, resource.ResourceID, permissionUserID); err != nil {
-			return ProcessMapPlacementMutationResult{}, err
-		}
-	}
-	if resourceType == domain.ProcessMapResourceTypeFolder && parentID == resourceID {
-		return ProcessMapPlacementMutationResult{}, ErrProcessMapCycle
-	}
-	current, currentErr := processMapPlacementByResourceTx(ctx, tx, companyID, resourceType, resourceID, true)
-	exists := currentErr == nil
-	if currentErr != nil && !errors.Is(currentErr, ErrNotFound) {
-		return ProcessMapPlacementMutationResult{}, currentErr
-	}
-	parentChanged := !exists || !sameProcessMapLayer(current.MapParentFolderID, input.MapParentFolderID)
-	if resourceType == domain.ProcessMapResourceTypeFolder && parentID != "" {
-		var cycle bool
-		if err := tx.QueryRowContext(ctx, `
-with recursive ancestors(folder_id) as (
-  select $3::uuid
-  union
-  select placement.map_parent_folder_id
-  from process_map_placements placement
-  join ancestors on placement.company_id=$1::uuid and placement.resource_type='company_explorer_folder' and placement.resource_id=ancestors.folder_id
-  where placement.map_parent_folder_id is not null
-)
-select exists(select 1 from ancestors where folder_id=$2::uuid)`, companyID, resourceID, parentID).Scan(&cycle); err != nil {
-			return ProcessMapPlacementMutationResult{}, err
-		}
-		if cycle {
-			return ProcessMapPlacementMutationResult{}, ErrProcessMapCycle
-		}
-	}
-	placement, err := scanProcessMapPlacement(tx.QueryRowContext(ctx, `
-insert into process_map_placements(company_id,resource_type,resource_id,map_parent_folder_id,grid_x,grid_y,revision,created_timestamp,updated_timestamp)
-values($1::uuid,$2,$3::uuid,nullif($4,'')::uuid,$5,$6,1,statement_timestamp(),statement_timestamp())
-on conflict(company_id,resource_type,resource_id) do update
-set map_parent_folder_id=excluded.map_parent_folder_id,grid_x=excluded.grid_x,grid_y=excluded.grid_y,
-    revision=process_map_placements.revision+1,updated_timestamp=statement_timestamp()
-returning company_id::text,resource_type,resource_id::text,map_parent_folder_id::text,grid_x,grid_y,revision,created_timestamp,updated_timestamp`, companyID, resourceType, resourceID, parentID, input.GridX, input.GridY))
-	if err != nil {
-		return ProcessMapPlacementMutationResult{}, err
-	}
-	if exists && parentChanged {
-		if _, err := tx.ExecContext(ctx, `
-delete from process_map_traces trace
-using resource_operational_relationships relationship
-where trace.company_id=$1::uuid and relationship.company_id=trace.company_id
-  and relationship.resource_operational_relationship_id=trace.resource_operational_relationship_id
-  and ((relationship.source_resource_type=$2 and relationship.source_resource_id=$3::uuid)
-    or (relationship.target_resource_type=$2 and relationship.target_resource_id=$3::uuid))`, companyID, resourceType, resourceID); err != nil {
-			return ProcessMapPlacementMutationResult{}, err
-		}
-	}
-	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapPlacementSavedEvent, processMapResourceEventPayload(resourceType, resourceID))})
-	if err != nil {
-		return ProcessMapPlacementMutationResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return ProcessMapPlacementMutationResult{}, err
-	}
-	return ProcessMapPlacementMutationResult{Placement: placement, Created: !exists, Events: events}, nil
-}
-
-func (r *PostgresRepo) DeleteProcessMapPlacement(input ProcessMapPlacementDeleteInput) (ProcessMapPlacementDeleteResult, error) {
-	companyID, actorUserID, permissionUserID, err := normalizePostgresProcessMapMutation(input.CompanyID, input.ActorUserID, input.PermissionUserID)
-	resourceType, typeOK := normalizeProcessMapResourceType(input.ResourceType)
-	resourceID := cleanUUIDText(input.ResourceID)
-	if err != nil || !typeOK || resourceID == "" {
-		return ProcessMapPlacementDeleteResult{}, ErrInvalid
-	}
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return ProcessMapPlacementDeleteResult{}, err
-	}
-	defer tx.Rollback()
-	if err := lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, false); err != nil {
-		return ProcessMapPlacementDeleteResult{}, err
-	}
-	if err := postgresRequireProcessMapResourceTx(ctx, tx, companyID, resourceType, resourceID, permissionUserID); err != nil {
-		return ProcessMapPlacementDeleteResult{}, err
-	}
-	if _, err := processMapPlacementByResourceTx(ctx, tx, companyID, resourceType, resourceID, true); err != nil {
-		return ProcessMapPlacementDeleteResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `
-delete from process_map_traces trace using resource_operational_relationships relationship
-where trace.company_id=$1::uuid and relationship.company_id=trace.company_id and relationship.resource_operational_relationship_id=trace.resource_operational_relationship_id
-  and ((relationship.source_resource_type=$2 and relationship.source_resource_id=$3::uuid) or (relationship.target_resource_type=$2 and relationship.target_resource_id=$3::uuid))`, companyID, resourceType, resourceID); err != nil {
-		return ProcessMapPlacementDeleteResult{}, err
-	}
-	if _, err := tx.ExecContext(ctx, `delete from process_map_placements where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, resourceID); err != nil {
-		return ProcessMapPlacementDeleteResult{}, err
-	}
-	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapPlacementDeletedEvent, processMapResourceEventPayload(resourceType, resourceID))})
-	if err != nil {
-		return ProcessMapPlacementDeleteResult{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return ProcessMapPlacementDeleteResult{}, err
-	}
-	return ProcessMapPlacementDeleteResult{Events: events}, nil
+	return scanProcessMapTrace(tx.QueryRowContext(ctx, `
+select company_id::text,resource_operational_relationship_id::text,route_points,revision,created_timestamp,updated_timestamp
+from process_map_traces where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`+lock, companyID, relationshipID))
 }
 
 func sortProcessMapEndpoints(source, target domain.ProcessMapResourceRef) []domain.ProcessMapResourceRef {
@@ -530,30 +525,120 @@ func postgresRequireProcessMapEndpointsTx(ctx context.Context, tx *sql.Tx, compa
 	return nil
 }
 
-func processMapTraceByRelationshipTx(ctx context.Context, tx *sql.Tx, companyID, relationshipID string, forUpdate bool) (domain.ProcessMapTrace, error) {
-	lock := ""
-	if forUpdate {
-		lock = " for update"
+func postgresRequireMappedProcessMapParentTx(ctx context.Context, tx *sql.Tx, companyID, parentID, permissionUserID string) (domain.ProcessMapPlacement, error) {
+	if err := postgresRequireProcessMapResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, parentID, permissionUserID); err != nil {
+		return domain.ProcessMapPlacement{}, err
 	}
-	return scanProcessMapTrace(tx.QueryRowContext(ctx, `
-select company_id::text,resource_operational_relationship_id::text,route_points,revision,created_timestamp,updated_timestamp
-from process_map_traces where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`+lock, companyID, relationshipID))
+	return processMapPlacementByResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, parentID, true)
 }
 
-func validatePostgresProcessMapTraceEndpointsTx(ctx context.Context, tx *sql.Tx, companyID string, relationship domain.ResourceOperationalRelationship) error {
-	placements := make([]domain.ProcessMapPlacement, 0, 2)
+func postgresProcessMapDescendantsTx(ctx context.Context, tx *sql.Tx, companyID, folderID string, forUpdate bool) ([]domain.ProcessMapPlacement, error) {
+	lock := ""
+	if forUpdate {
+		lock = " for update of placement"
+	}
+	rows, err := tx.QueryContext(ctx, `
+with recursive descendants(resource_type,resource_id,depth,path,cycle) as (
+  select placement.resource_type,placement.resource_id,1,array[$2::uuid,placement.resource_id],placement.resource_id=$2::uuid
+  from process_map_placements placement
+  where placement.company_id=$1::uuid and placement.map_parent_folder_id=$2::uuid
+  union all
+  select placement.resource_type,placement.resource_id,descendants.depth+1,
+         descendants.path || placement.resource_id,placement.resource_id=any(descendants.path)
+  from descendants
+  join process_map_placements placement
+    on placement.company_id=$1::uuid
+   and descendants.resource_type='company_explorer_folder'
+   and placement.map_parent_folder_id=descendants.resource_id
+  where not descendants.cycle and descendants.depth<1000
+)
+select placement.company_id::text,placement.resource_type,placement.resource_id::text,placement.map_parent_folder_id::text,
+       placement.grid_x,placement.grid_y,placement.grid_width,placement.grid_height,
+       placement.revision,placement.created_timestamp,placement.updated_timestamp,
+       descendants.depth,descendants.cycle
+from descendants
+join process_map_placements placement
+  on placement.company_id=$1::uuid and placement.resource_type=descendants.resource_type and placement.resource_id=descendants.resource_id
+order by descendants.depth,placement.resource_type,placement.resource_id`+lock, companyID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.ProcessMapPlacement{}
+	for rows.Next() {
+		var item domain.ProcessMapPlacement
+		var parentID sql.NullString
+		var depth int
+		var cycle bool
+		if err := rows.Scan(&item.CompanyID, &item.ResourceType, &item.ResourceID, &parentID,
+			&item.GridX, &item.GridY, &item.GridWidth, &item.GridHeight,
+			&item.Revision, &item.CreatedTimestamp, &item.UpdatedTimestamp, &depth, &cycle); err != nil {
+			return nil, err
+		}
+		if cycle || depth >= 1000 {
+			return nil, ErrProcessMapCycle
+		}
+		if parentID.Valid {
+			item.MapParentFolderID = &parentID.String
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func postgresProcessMapFolderCycleTx(ctx context.Context, tx *sql.Tx, companyID, folderID, parentID string) (bool, error) {
+	if parentID == "" {
+		return false, nil
+	}
+	var cycle bool
+	err := tx.QueryRowContext(ctx, `
+with recursive ancestors(folder_id,path,cycle) as (
+  select $3::uuid,array[$3::uuid],$3::uuid=$2::uuid
+  union all
+  select placement.map_parent_folder_id,ancestors.path || placement.map_parent_folder_id,
+         placement.map_parent_folder_id=any(ancestors.path)
+  from ancestors
+  join process_map_placements placement
+    on placement.company_id=$1::uuid and placement.resource_type='company_explorer_folder' and placement.resource_id=ancestors.folder_id
+  where placement.map_parent_folder_id is not null and not ancestors.cycle and cardinality(ancestors.path)<1000
+)
+select exists(select 1 from ancestors where folder_id=$2::uuid or cycle)`, companyID, folderID, parentID).Scan(&cycle)
+	return cycle, err
+}
+
+func postgresUpdateProcessMapPlacementTx(ctx context.Context, tx *sql.Tx, item domain.ProcessMapPlacement) (domain.ProcessMapPlacement, error) {
+	parentID := ""
+	if item.MapParentFolderID != nil {
+		parentID = *item.MapParentFolderID
+	}
+	return scanProcessMapPlacement(tx.QueryRowContext(ctx, `
+update process_map_placements
+set map_parent_folder_id=nullif($4,'')::uuid,grid_x=$5,grid_y=$6,grid_width=$7,grid_height=$8,
+    revision=revision+1,updated_timestamp=statement_timestamp()
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid
+returning company_id::text,resource_type,resource_id::text,map_parent_folder_id::text,
+          grid_x,grid_y,grid_width,grid_height,revision,created_timestamp,updated_timestamp`,
+		item.CompanyID, item.ResourceType, item.ResourceID, parentID, item.GridX, item.GridY, item.GridWidth, item.GridHeight))
+}
+
+func postgresInsertProcessMapPlacementTx(ctx context.Context, tx *sql.Tx, item domain.ProcessMapPlacement) (domain.ProcessMapPlacement, error) {
+	parentID := ""
+	if item.MapParentFolderID != nil {
+		parentID = *item.MapParentFolderID
+	}
+	return scanProcessMapPlacement(tx.QueryRowContext(ctx, `
+insert into process_map_placements(company_id,resource_type,resource_id,map_parent_folder_id,grid_x,grid_y,grid_width,grid_height,revision,created_timestamp,updated_timestamp)
+values($1::uuid,$2,$3::uuid,nullif($4,'')::uuid,$5,$6,$7,$8,1,statement_timestamp(),statement_timestamp())
+returning company_id::text,resource_type,resource_id::text,map_parent_folder_id::text,
+          grid_x,grid_y,grid_width,grid_height,revision,created_timestamp,updated_timestamp`,
+		item.CompanyID, item.ResourceType, item.ResourceID, parentID, item.GridX, item.GridY, item.GridWidth, item.GridHeight))
+}
+
+func postgresValidateTraceEndpointsMappedTx(ctx context.Context, tx *sql.Tx, companyID string, relationship domain.ResourceOperationalRelationship) error {
 	for _, endpoint := range sortProcessMapEndpoints(relationship.Source, relationship.Target) {
-		placement, err := processMapPlacementByResourceTx(ctx, tx, companyID, endpoint.ResourceType, endpoint.ResourceID, true)
-		if err != nil {
-			if errors.Is(err, ErrNotFound) {
-				return ErrProcessMapLayerMismatch
-			}
+		if _, err := processMapPlacementByResourceTx(ctx, tx, companyID, endpoint.ResourceType, endpoint.ResourceID, true); err != nil {
 			return err
 		}
-		placements = append(placements, placement)
-	}
-	if len(placements) != 2 || !sameProcessMapLayer(placements[0].MapParentFolderID, placements[1].MapParentFolderID) {
-		return ErrProcessMapLayerMismatch
 	}
 	return nil
 }
@@ -585,197 +670,693 @@ returning company_id::text,resource_operational_relationship_id::text,route_poin
 	return current, true, err
 }
 
-func (r *PostgresRepo) CreateResourceOperationalRelationship(input ResourceOperationalRelationshipCreateInput) (ResourceOperationalRelationshipMutationResult, error) {
+func postgresLockProcessMapCompanyTx(ctx context.Context, tx *sql.Tx, companyID string) error {
+	_, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended('process-map-parent:' || $1,0))`, companyID)
+	return err
+}
+
+func postgresRequireProcessMapResourcesTx(ctx context.Context, tx *sql.Tx, companyID, permissionUserID string, resources []domain.ProcessMapResourceRef) error {
+	resources = append([]domain.ProcessMapResourceRef{}, resources...)
+	sort.Slice(resources, func(i, j int) bool {
+		if resources[i].ResourceType == resources[j].ResourceType {
+			return resources[i].ResourceID < resources[j].ResourceID
+		}
+		return resources[i].ResourceType < resources[j].ResourceType
+	})
+	for index, resource := range resources {
+		if index > 0 && resource == resources[index-1] {
+			continue
+		}
+		if err := postgresRequireProcessMapResourceTx(ctx, tx, companyID, resource.ResourceType, resource.ResourceID, permissionUserID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func postgresDirectProcessMapChildrenTx(ctx context.Context, tx *sql.Tx, companyID, folderID string, forUpdate bool) ([]domain.ProcessMapPlacement, error) {
+	lock := ""
+	if forUpdate {
+		lock = " for update"
+	}
+	rows, err := tx.QueryContext(ctx, `
+select company_id::text,resource_type,resource_id::text,map_parent_folder_id::text,
+       grid_x,grid_y,grid_width,grid_height,revision,created_timestamp,updated_timestamp
+from process_map_placements
+where company_id=$1::uuid and map_parent_folder_id=$2::uuid
+order by resource_type,resource_id`+lock, companyID, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.ProcessMapPlacement{}
+	for rows.Next() {
+		item, err := scanProcessMapPlacement(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func postgresInternalProcessMapTracesTx(ctx context.Context, tx *sql.Tx, companyID string, moved []domain.ProcessMapResourceRef) ([]domain.ProcessMapTrace, error) {
+	if len(moved) == 0 {
+		return []domain.ProcessMapTrace{}, nil
+	}
+	movedJSON, err := json.Marshal(moved)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+with moved as (
+  select resource_type,resource_id
+  from jsonb_to_recordset($2::jsonb) item(resource_type text,resource_id uuid)
+)
+select trace.company_id::text,trace.resource_operational_relationship_id::text,
+       trace.route_points,trace.revision,trace.created_timestamp,trace.updated_timestamp
+from process_map_traces trace
+join resource_operational_relationships relationship
+  on relationship.company_id=trace.company_id
+ and relationship.resource_operational_relationship_id=trace.resource_operational_relationship_id
+join moved source_moved
+  on source_moved.resource_type=relationship.source_resource_type
+ and source_moved.resource_id=relationship.source_resource_id
+join moved target_moved
+  on target_moved.resource_type=relationship.target_resource_type
+ and target_moved.resource_id=relationship.target_resource_id
+where trace.company_id=$1::uuid
+order by trace.resource_operational_relationship_id
+for update of trace`, companyID, string(movedJSON))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []domain.ProcessMapTrace{}
+	for rows.Next() {
+		item, err := scanProcessMapTrace(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func postgresSaveTranslatedProcessMapTraceTx(ctx context.Context, tx *sql.Tx, item domain.ProcessMapTrace, deltaX, deltaY int) (domain.ProcessMapTrace, error) {
+	for index := range item.RoutePoints {
+		if !validProcessMapCoordinate(item.RoutePoints[index].X+deltaX) || !validProcessMapCoordinate(item.RoutePoints[index].Y+deltaY) {
+			return domain.ProcessMapTrace{}, ErrInvalid
+		}
+		item.RoutePoints[index].X += deltaX
+		item.RoutePoints[index].Y += deltaY
+	}
+	routeJSON, err := json.Marshal(item.RoutePoints)
+	if err != nil {
+		return domain.ProcessMapTrace{}, err
+	}
+	return scanProcessMapTrace(tx.QueryRowContext(ctx, `
+update process_map_traces
+set route_points=$3::jsonb,revision=revision+1,updated_timestamp=statement_timestamp()
+where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid
+returning company_id::text,resource_operational_relationship_id::text,route_points,revision,created_timestamp,updated_timestamp`,
+		item.CompanyID, item.ResourceOperationalRelationshipID, string(routeJSON)))
+}
+
+func processMapEnvelopeVersionTx(ctx context.Context, tx *sql.Tx, companyID string, result *ProcessMapMutationEnvelope) error {
+	version, _, err := processMapVersionsTx(ctx, tx, companyID)
+	if err == nil {
+		result.ProcessMapReadVersion = version
+	}
+	return err
+}
+
+func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMapPlacementPutInput) (ProcessMapMutationEnvelope, error) {
+	companyID, actorUserID, permissionUserID, err := normalizePostgresProcessMapMutation(input.CompanyID, input.ActorUserID, input.PermissionUserID)
+	resourceType, typeOK := normalizeProcessMapResourceType(input.ResourceType)
+	resourceID := cleanUUIDText(input.ResourceID)
+	parentID := ""
+	if input.MapParentFolderID != nil {
+		parentID = cleanUUIDText(*input.MapParentFolderID)
+	}
+	if err != nil || !typeOK || resourceID == "" || (input.MapParentFolderID != nil && parentID == "") ||
+		!validProcessMapGeometry(input.GridX, input.GridY, input.GridWidth, input.GridHeight) {
+		return ProcessMapMutationEnvelope{}, ErrInvalid
+	}
+	if resourceType == domain.ProcessMapResourceTypeFolder && parentID == resourceID {
+		return ProcessMapMutationEnvelope{}, ErrProcessMapCycle
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	defer tx.Rollback()
+	if err := lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, false); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := postgresLockProcessMapCompanyTx(ctx, tx, companyID); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+
+	current, currentErr := processMapPlacementByResourceTx(ctx, tx, companyID, resourceType, resourceID, false)
+	exists := currentErr == nil
+	if currentErr != nil && !errors.Is(currentErr, ErrNotFound) {
+		return ProcessMapMutationEnvelope{}, currentErr
+	}
+	descendants := []domain.ProcessMapPlacement{}
+	if resourceType == domain.ProcessMapResourceTypeFolder && exists {
+		descendants, err = postgresProcessMapDescendantsTx(ctx, tx, companyID, resourceID, false)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+	}
+	movesFolderGroup := resourceType == domain.ProcessMapResourceTypeFolder && exists &&
+		(input.GridX != current.GridX || input.GridY != current.GridY)
+	resources := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
+	if parentID != "" {
+		resources = append(resources, domain.ProcessMapResourceRef{ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: parentID})
+	}
+	if movesFolderGroup {
+		for _, item := range descendants {
+			resources = append(resources, domain.ProcessMapResourceRef{ResourceType: item.ResourceType, ResourceID: item.ResourceID})
+		}
+	}
+	if err := postgresRequireProcessMapResourcesTx(ctx, tx, companyID, permissionUserID, resources); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	current, currentErr = processMapPlacementByResourceTx(ctx, tx, companyID, resourceType, resourceID, true)
+	exists = currentErr == nil
+	if currentErr != nil && !errors.Is(currentErr, ErrNotFound) {
+		return ProcessMapMutationEnvelope{}, currentErr
+	}
+	if resourceType == domain.ProcessMapResourceTypeFolder && exists {
+		descendants, err = postgresProcessMapDescendantsTx(ctx, tx, companyID, resourceID, true)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+	}
+	var parent domain.ProcessMapPlacement
+	if parentID != "" {
+		parent, err = processMapPlacementByResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, parentID, true)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+	}
+	if resourceType == domain.ProcessMapResourceTypeFolder {
+		cycle, err := postgresProcessMapFolderCycleTx(ctx, tx, companyID, resourceID, parentID)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+		if cycle {
+			return ProcessMapMutationEnvelope{}, ErrProcessMapCycle
+		}
+	}
+
+	deltaX, deltaY := 0, 0
+	if exists {
+		deltaX, deltaY = input.GridX-current.GridX, input.GridY-current.GridY
+	}
+	target := current
+	if !exists {
+		target = domain.ProcessMapPlacement{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID}
+	}
+	if parentID == "" {
+		target.MapParentFolderID = nil
+	} else {
+		parentCopy := parentID
+		target.MapParentFolderID = &parentCopy
+	}
+	target.GridX, target.GridY = input.GridX, input.GridY
+	target.GridWidth, target.GridHeight = input.GridWidth, input.GridHeight
+	if parentID != "" && !processMapBoundsContain(processMapPlacementBounds(parent), processMapPlacementBounds(target)) {
+		return ProcessMapMutationEnvelope{}, ErrProcessMapContainment
+	}
+
+	changedPlacements := []domain.ProcessMapPlacement{}
+	movedRefs := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
+	if resourceType == domain.ProcessMapResourceTypeFolder {
+		folderBounds := processMapPlacementBounds(target)
+		for _, descendant := range descendants {
+			shifted := descendant
+			shifted.GridX += deltaX
+			shifted.GridY += deltaY
+			if !validProcessMapGeometry(shifted.GridX, shifted.GridY, shifted.GridWidth, shifted.GridHeight) {
+				return ProcessMapMutationEnvelope{}, ErrInvalid
+			}
+			if !processMapBoundsContain(folderBounds, processMapPlacementBounds(shifted)) {
+				return ProcessMapMutationEnvelope{}, ErrProcessMapContainment
+			}
+			movedRefs = append(movedRefs, domain.ProcessMapResourceRef{ResourceType: descendant.ResourceType, ResourceID: descendant.ResourceID})
+		}
+	}
+	internalTraces := []domain.ProcessMapTrace{}
+	if resourceType == domain.ProcessMapResourceTypeFolder && exists && (deltaX != 0 || deltaY != 0) {
+		internalTraces, err = postgresInternalProcessMapTracesTx(ctx, tx, companyID, movedRefs)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+		for _, trace := range internalTraces {
+			for _, point := range trace.RoutePoints {
+				if !validProcessMapCoordinate(point.X+deltaX) || !validProcessMapCoordinate(point.Y+deltaY) {
+					return ProcessMapMutationEnvelope{}, ErrInvalid
+				}
+			}
+		}
+		for _, descendant := range descendants {
+			descendant.GridX += deltaX
+			descendant.GridY += deltaY
+			updated, err := postgresUpdateProcessMapPlacementTx(ctx, tx, descendant)
+			if err != nil {
+				return ProcessMapMutationEnvelope{}, err
+			}
+			changedPlacements = append(changedPlacements, updated)
+		}
+	}
+	var saved domain.ProcessMapPlacement
+	if exists {
+		saved, err = postgresUpdateProcessMapPlacementTx(ctx, tx, target)
+	} else {
+		saved, err = postgresInsertProcessMapPlacementTx(ctx, tx, target)
+	}
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	changedPlacements = append(changedPlacements, saved)
+	changedTraces := []domain.ProcessMapTrace{}
+	for _, trace := range internalTraces {
+		updated, err := postgresSaveTranslatedProcessMapTraceTx(ctx, tx, trace, deltaX, deltaY)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+		changedTraces = append(changedTraces, updated)
+	}
+	sort.Slice(changedPlacements, func(i, j int) bool {
+		return compareProcessMapPlacements(changedPlacements[i], changedPlacements[j]) < 0
+	})
+	result := ProcessMapMutationEnvelope{Placements: changedPlacements, Traces: changedTraces, DeletedTraceIDs: []string{}, Created: !exists, Changed: true}
+	result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapPlacementSavedEvent, processMapResourceEventPayload(resourceType, resourceID))})
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := processMapEnvelopeVersionTx(ctx, tx, companyID, &result); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	return result, nil
+}
+func (r *PostgresRepo) DeleteProcessMapPlacement(ctx context.Context, input ProcessMapPlacementDeleteInput) (ProcessMapMutationEnvelope, error) {
+	companyID, actorUserID, permissionUserID, err := normalizePostgresProcessMapMutation(input.CompanyID, input.ActorUserID, input.PermissionUserID)
+	resourceType, typeOK := normalizeProcessMapResourceType(input.ResourceType)
+	resourceID := cleanUUIDText(input.ResourceID)
+	if err != nil || !typeOK || resourceID == "" {
+		return ProcessMapMutationEnvelope{}, ErrInvalid
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	defer tx.Rollback()
+	if err := lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, false); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := postgresLockProcessMapCompanyTx(ctx, tx, companyID); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	placement, err := processMapPlacementByResourceTx(ctx, tx, companyID, resourceType, resourceID, false)
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	directChildren := []domain.ProcessMapPlacement{}
+	if resourceType == domain.ProcessMapResourceTypeFolder {
+		directChildren, err = postgresDirectProcessMapChildrenTx(ctx, tx, companyID, resourceID, false)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+	}
+	resources := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
+	for _, child := range directChildren {
+		resources = append(resources, domain.ProcessMapResourceRef{ResourceType: child.ResourceType, ResourceID: child.ResourceID})
+	}
+	if len(directChildren) > 0 && placement.MapParentFolderID != nil {
+		resources = append(resources, domain.ProcessMapResourceRef{ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: *placement.MapParentFolderID})
+	}
+	if err := postgresRequireProcessMapResourcesTx(ctx, tx, companyID, permissionUserID, resources); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	placement, err = processMapPlacementByResourceTx(ctx, tx, companyID, resourceType, resourceID, true)
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if resourceType == domain.ProcessMapResourceTypeFolder {
+		directChildren, err = postgresDirectProcessMapChildrenTx(ctx, tx, companyID, resourceID, true)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+	}
+	changedPlacements := []domain.ProcessMapPlacement{}
+	for _, child := range directChildren {
+		child.MapParentFolderID = placement.MapParentFolderID
+		if placement.MapParentFolderID != nil {
+			parent, err := processMapPlacementByResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, *placement.MapParentFolderID, true)
+			if err != nil {
+				return ProcessMapMutationEnvelope{}, err
+			}
+			if !processMapBoundsContain(processMapPlacementBounds(parent), processMapPlacementBounds(child)) {
+				return ProcessMapMutationEnvelope{}, ErrProcessMapContainment
+			}
+		}
+		updated, err := postgresUpdateProcessMapPlacementTx(ctx, tx, child)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+		changedPlacements = append(changedPlacements, updated)
+	}
+	deletedTraceIDs := []string{}
+	deletedTraceRows, err := tx.QueryContext(ctx, `
+delete from process_map_traces trace using resource_operational_relationships relationship
+where trace.company_id=$1::uuid and relationship.company_id=trace.company_id
+  and relationship.resource_operational_relationship_id=trace.resource_operational_relationship_id
+  and ((relationship.source_resource_type=$2 and relationship.source_resource_id=$3::uuid)
+	    or (relationship.target_resource_type=$2 and relationship.target_resource_id=$3::uuid))
+returning trace.resource_operational_relationship_id::text`, companyID, resourceType, resourceID)
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	for deletedTraceRows.Next() {
+		var relationshipID string
+		if err := deletedTraceRows.Scan(&relationshipID); err != nil {
+			deletedTraceRows.Close()
+			return ProcessMapMutationEnvelope{}, err
+		}
+		deletedTraceIDs = append(deletedTraceIDs, relationshipID)
+	}
+	if err := deletedTraceRows.Err(); err != nil {
+		deletedTraceRows.Close()
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := deletedTraceRows.Close(); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	sort.Strings(deletedTraceIDs)
+	if _, err := tx.ExecContext(ctx, `delete from process_map_placements where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, resourceID); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	result := ProcessMapMutationEnvelope{Placements: changedPlacements, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: deletedTraceIDs, Changed: true}
+	result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapPlacementDeletedEvent, processMapResourceEventPayload(resourceType, resourceID))})
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := processMapEnvelopeVersionTx(ctx, tx, companyID, &result); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	return result, nil
+}
+
+func (r *PostgresRepo) CreateResourceOperationalRelationship(ctx context.Context, input ResourceOperationalRelationshipCreateInput) (ProcessMapMutationEnvelope, error) {
 	companyID, actorUserID, permissionUserID, err := normalizePostgresProcessMapMutation(input.CompanyID, input.ActorUserID, input.PermissionUserID)
 	sourceType, sourceOK := normalizeProcessMapResourceType(input.Source.ResourceType)
 	targetType, targetOK := normalizeProcessMapResourceType(input.Target.ResourceType)
 	input.Source = domain.ProcessMapResourceRef{ResourceType: sourceType, ResourceID: cleanUUIDText(input.Source.ResourceID)}
 	input.Target = domain.ProcessMapResourceRef{ResourceType: targetType, ResourceID: cleanUUIDText(input.Target.ResourceID)}
-	if err != nil || !sourceOK || !targetOK || input.Source.ResourceID == "" || input.Target.ResourceID == "" || input.Source == input.Target || (input.Trace != nil && !validProcessMapRoutePoints(input.Trace.RoutePoints)) {
-		return ResourceOperationalRelationshipMutationResult{}, ErrInvalid
+	if err != nil || !sourceOK || !targetOK || input.Source.ResourceID == "" || input.Target.ResourceID == "" ||
+		input.Source == input.Target || (input.Trace != nil && !validProcessMapRoutePoints(input.Trace.RoutePoints)) {
+		return ProcessMapMutationEnvelope{}, ErrInvalid
 	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return ResourceOperationalRelationshipMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	defer tx.Rollback()
 	if err := lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, false); err != nil {
-		return ResourceOperationalRelationshipMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := postgresLockProcessMapCompanyTx(ctx, tx, companyID); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	if err := postgresRequireProcessMapEndpointsTx(ctx, tx, companyID, permissionUserID, input.Source, input.Target); err != nil {
-		return ResourceOperationalRelationshipMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	inserted, err := tx.ExecContext(ctx, `
-insert into resource_operational_relationships(company_id,resource_operational_relationship_id,source_resource_type,source_resource_id,target_resource_type,target_resource_id,created_timestamp)
+insert into resource_operational_relationships(
+  company_id,resource_operational_relationship_id,source_resource_type,source_resource_id,
+  target_resource_type,target_resource_id,created_timestamp
+)
 values($1::uuid,$2::uuid,$3,$4::uuid,$5,$6::uuid,statement_timestamp())
-on conflict(company_id,source_resource_type,source_resource_id,target_resource_type,target_resource_id) do nothing`, companyID, newUUIDv7String(), input.Source.ResourceType, input.Source.ResourceID, input.Target.ResourceType, input.Target.ResourceID)
+on conflict(company_id,source_resource_type,source_resource_id,target_resource_type,target_resource_id) do nothing`,
+		companyID, newUUIDv7String(), input.Source.ResourceType, input.Source.ResourceID, input.Target.ResourceType, input.Target.ResourceID)
 	if err != nil {
-		return ResourceOperationalRelationshipMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	affected, err := inserted.RowsAffected()
 	if err != nil {
-		return ResourceOperationalRelationshipMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	created := affected == 1
 	relationship, err := scanResourceOperationalRelationship(tx.QueryRowContext(ctx, `
-select company_id::text,resource_operational_relationship_id::text,source_resource_type,source_resource_id::text,target_resource_type,target_resource_id::text,created_timestamp
+select company_id::text,resource_operational_relationship_id::text,
+       source_resource_type,source_resource_id::text,target_resource_type,target_resource_id::text,created_timestamp
 from resource_operational_relationships
-where company_id=$1::uuid and source_resource_type=$2 and source_resource_id=$3::uuid and target_resource_type=$4 and target_resource_id=$5::uuid
+where company_id=$1::uuid and source_resource_type=$2 and source_resource_id=$3::uuid
+  and target_resource_type=$4 and target_resource_id=$5::uuid
 for update`, companyID, input.Source.ResourceType, input.Source.ResourceID, input.Target.ResourceType, input.Target.ResourceID))
 	if err != nil {
-		return ResourceOperationalRelationshipMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
-	result := ResourceOperationalRelationshipMutationResult{Relationship: relationship, RelationshipCreated: created}
+	result := ProcessMapMutationEnvelope{
+		Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: []string{},
+		Relationship: &relationship, Created: created, Changed: created,
+	}
 	eventInputs := []DomainEventInput{}
 	if created {
-		eventInputs = append(eventInputs, processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipCreatedEvent, map[string]any{"resource_operational_relationship_id": relationship.ResourceOperationalRelationshipID}))
+		eventInputs = append(eventInputs, processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID,
+			ResourceOperationalRelationshipCreatedEvent, processMapRelationshipEventPayload(relationship)))
 	}
 	if input.Trace != nil {
-		if err := validatePostgresProcessMapTraceEndpointsTx(ctx, tx, companyID, relationship); err != nil {
-			return ResourceOperationalRelationshipMutationResult{}, err
+		if err := postgresValidateTraceEndpointsMappedTx(ctx, tx, companyID, relationship); err != nil {
+			return ProcessMapMutationEnvelope{}, err
 		}
 		trace, changed, err := upsertPostgresProcessMapTraceTx(ctx, tx, companyID, relationship.ResourceOperationalRelationshipID, input.Trace.RoutePoints)
 		if err != nil {
-			return ResourceOperationalRelationshipMutationResult{}, err
+			return ProcessMapMutationEnvelope{}, err
 		}
-		result.Trace = &trace
-		result.TraceChanged = changed
+		result.Traces = append(result.Traces, trace)
+		result.Changed = result.Changed || changed
 		if changed {
-			eventInputs = append(eventInputs, processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, map[string]any{"resource_operational_relationship_id": relationship.ResourceOperationalRelationshipID}))
+			eventInputs = append(eventInputs, processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID,
+				ProcessMapTraceSavedEvent, processMapRelationshipEventPayload(relationship)))
 		}
 	}
-	result.Events, err = r.appendDomainEventsTx(ctx, tx, eventInputs)
-	if err != nil {
-		return ResourceOperationalRelationshipMutationResult{}, err
+	if len(eventInputs) > 0 {
+		result.Events, err = r.appendDomainEventsTx(ctx, tx, eventInputs)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+	} else {
+		result.Events = []domain.DomainEvent{}
+	}
+	if err := processMapEnvelopeVersionTx(ctx, tx, companyID, &result); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return ResourceOperationalRelationshipMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	return result, nil
 }
 
-func (r *PostgresRepo) PutProcessMapTrace(input ProcessMapTracePutInput) (ProcessMapTraceMutationResult, error) {
+func (r *PostgresRepo) PutProcessMapTrace(ctx context.Context, input ProcessMapTracePutInput) (ProcessMapMutationEnvelope, error) {
 	companyID, actorUserID, permissionUserID, err := normalizePostgresProcessMapMutation(input.CompanyID, input.ActorUserID, input.PermissionUserID)
 	relationshipID := cleanUUIDText(input.ResourceOperationalRelationshipID)
 	if err != nil || relationshipID == "" || !validProcessMapRoutePoints(input.RoutePoints) {
-		return ProcessMapTraceMutationResult{}, ErrInvalid
+		return ProcessMapMutationEnvelope{}, ErrInvalid
 	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return ProcessMapTraceMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	defer tx.Rollback()
 	if err := lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, false); err != nil {
-		return ProcessMapTraceMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := postgresLockProcessMapCompanyTx(ctx, tx, companyID); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	relationship, err := processMapRelationshipByIDTx(ctx, tx, companyID, relationshipID, false)
 	if err != nil {
-		return ProcessMapTraceMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	if err := postgresRequireProcessMapEndpointsTx(ctx, tx, companyID, permissionUserID, relationship.Source, relationship.Target); err != nil {
-		return ProcessMapTraceMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	relationship, err = processMapRelationshipByIDTx(ctx, tx, companyID, relationshipID, true)
 	if err != nil {
-		return ProcessMapTraceMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
-	if err := validatePostgresProcessMapTraceEndpointsTx(ctx, tx, companyID, relationship); err != nil {
-		return ProcessMapTraceMutationResult{}, err
+	if err := postgresValidateTraceEndpointsMappedTx(ctx, tx, companyID, relationship); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	trace, changed, err := upsertPostgresProcessMapTraceTx(ctx, tx, companyID, relationshipID, input.RoutePoints)
 	if err != nil {
-		return ProcessMapTraceMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
-	result := ProcessMapTraceMutationResult{Trace: trace, Changed: changed}
+	result := ProcessMapMutationEnvelope{
+		Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{trace}, DeletedTraceIDs: []string{},
+		Relationship: &relationship, Changed: changed, Events: []domain.DomainEvent{},
+	}
 	if changed {
-		result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, map[string]any{"resource_operational_relationship_id": relationshipID})})
+		result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID,
+			ProcessMapTraceSavedEvent, processMapRelationshipEventPayload(relationship))})
 		if err != nil {
-			return ProcessMapTraceMutationResult{}, err
+			return ProcessMapMutationEnvelope{}, err
 		}
 	}
+	if err := processMapEnvelopeVersionTx(ctx, tx, companyID, &result); err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
 	if err := tx.Commit(); err != nil {
-		return ProcessMapTraceMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	return result, nil
 }
 
-func (r *PostgresRepo) DeleteResourceOperationalRelationship(input ResourceOperationalRelationshipDeleteInput) (ResourceOperationalRelationshipDeleteResult, error) {
+func (r *PostgresRepo) DeleteResourceOperationalRelationship(ctx context.Context, input ResourceOperationalRelationshipDeleteInput) (ProcessMapMutationEnvelope, error) {
 	companyID, actorUserID, permissionUserID, err := normalizePostgresProcessMapMutation(input.CompanyID, input.ActorUserID, input.PermissionUserID)
 	relationshipID := cleanUUIDText(input.ResourceOperationalRelationshipID)
 	if err != nil || relationshipID == "" {
-		return ResourceOperationalRelationshipDeleteResult{}, ErrInvalid
+		return ProcessMapMutationEnvelope{}, ErrInvalid
 	}
-	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		return ResourceOperationalRelationshipDeleteResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	defer tx.Rollback()
 	if err := lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, false); err != nil {
-		return ResourceOperationalRelationshipDeleteResult{}, err
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := postgresLockProcessMapCompanyTx(ctx, tx, companyID); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	relationship, err := processMapRelationshipByIDTx(ctx, tx, companyID, relationshipID, false)
 	if err != nil {
-		return ResourceOperationalRelationshipDeleteResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	if err := postgresRequireProcessMapEndpointsTx(ctx, tx, companyID, permissionUserID, relationship.Source, relationship.Target); err != nil {
-		return ResourceOperationalRelationshipDeleteResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	if _, err := processMapRelationshipByIDTx(ctx, tx, companyID, relationshipID, true); err != nil {
-		return ResourceOperationalRelationshipDeleteResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `delete from resource_operational_relationships where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`, companyID, relationshipID); err != nil {
-		return ResourceOperationalRelationshipDeleteResult{}, err
+	if _, err := tx.ExecContext(ctx, `
+delete from resource_operational_relationships
+where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`, companyID, relationshipID); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
-	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipDeletedEvent, map[string]any{"resource_operational_relationship_id": relationshipID})})
+	result := ProcessMapMutationEnvelope{
+		Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: []string{},
+		Relationship: &relationship, Changed: true,
+	}
+	result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID,
+		ResourceOperationalRelationshipDeletedEvent, processMapRelationshipEventPayload(relationship))})
 	if err != nil {
-		return ResourceOperationalRelationshipDeleteResult{}, err
+		return ProcessMapMutationEnvelope{}, err
+	}
+	if err := processMapEnvelopeVersionTx(ctx, tx, companyID, &result); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return ResourceOperationalRelationshipDeleteResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
-	return ResourceOperationalRelationshipDeleteResult{Events: events}, nil
+	return result, nil
+}
+
+func postgresProcessMapFolderCleanupOrderTx(ctx context.Context, tx *sql.Tx, companyID string, folderIDs []string) ([]string, error) {
+	if len(folderIDs) == 0 {
+		return []string{}, nil
+	}
+	folderJSON, err := json.Marshal(folderIDs)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+with recursive selected(folder_id) as (
+  select value::uuid from jsonb_array_elements_text($2::jsonb)
+), ancestry(start_id,parent_id,depth,path,cycle) as (
+  select selected.folder_id,placement.map_parent_folder_id,0,array[selected.folder_id],false
+  from selected
+  left join process_map_placements placement
+    on placement.company_id=$1::uuid
+   and placement.resource_type='company_explorer_folder'
+   and placement.resource_id=selected.folder_id
+  union all
+  select ancestry.start_id,parent.map_parent_folder_id,ancestry.depth+1,
+         ancestry.path || ancestry.parent_id,ancestry.parent_id=any(ancestry.path)
+  from ancestry
+  join process_map_placements parent
+    on parent.company_id=$1::uuid
+   and parent.resource_type='company_explorer_folder'
+   and parent.resource_id=ancestry.parent_id
+  where ancestry.parent_id is not null and not ancestry.cycle
+)
+select start_id::text,max(depth) depth
+from ancestry
+group by start_id
+order by max(depth),start_id`, companyID, string(folderJSON))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]string, 0, len(folderIDs))
+	for rows.Next() {
+		var folderID string
+		var depth int
+		if err := rows.Scan(&folderID, &depth); err != nil {
+			return nil, err
+		}
+		result = append(result, folderID)
+	}
+	return result, rows.Err()
 }
 
 // postgresDeleteProcessMapResourceTx is the one typed permanent-source cleanup
-// path. Folder-owned child placements lose geometry, while their operational
-// relationships remain because those endpoint resources still exist.
+// path. A deleted mapped Folder reparents its direct map children to its former
+// map parent. Operational relationships survive unless the deleted source is an
+// exact endpoint.
 func postgresDeleteProcessMapResourceTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) error {
-	var locked int
-	var err error
-	switch resourceType {
-	case domain.ProcessMapResourceTypeFolder:
-		err = tx.QueryRowContext(ctx, `select 1 from company_explorer_folders where company_id=$1::uuid and folder_id=$2::uuid for update`, companyID, resourceID).Scan(&locked)
-	case domain.ProcessMapResourceTypeProcess:
-		err = tx.QueryRowContext(ctx, `select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid for update`, companyID, resourceID).Scan(&locked)
-	default:
+	if resourceType != domain.ProcessMapResourceTypeFolder && resourceType != domain.ProcessMapResourceTypeProcess {
 		return ErrInvalid
 	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	}
-	if err != nil {
+	if err := postgresLockProcessMapCompanyTx(ctx, tx, companyID); err != nil {
 		return err
 	}
-	if resourceType == domain.ProcessMapResourceTypeFolder {
-		if _, err := tx.ExecContext(ctx, `
-delete from process_map_traces trace using resource_operational_relationships relationship
-where trace.company_id=$1::uuid and relationship.company_id=trace.company_id and relationship.resource_operational_relationship_id=trace.resource_operational_relationship_id
-  and (exists(select 1 from process_map_placements placement where placement.company_id=$1::uuid and placement.map_parent_folder_id=$2::uuid and placement.resource_type=relationship.source_resource_type and placement.resource_id=relationship.source_resource_id)
-    or exists(select 1 from process_map_placements placement where placement.company_id=$1::uuid and placement.map_parent_folder_id=$2::uuid and placement.resource_type=relationship.target_resource_type and placement.resource_id=relationship.target_resource_id))`, companyID, resourceID); err != nil {
+	placement, err := processMapPlacementByResourceTx(ctx, tx, companyID, resourceType, resourceID, true)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if resourceType == domain.ProcessMapResourceTypeFolder && err == nil {
+		children, err := postgresDirectProcessMapChildrenTx(ctx, tx, companyID, resourceID, true)
+		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `delete from process_map_placements where company_id=$1::uuid and map_parent_folder_id=$2::uuid`, companyID, resourceID); err != nil {
-			return err
+		for _, child := range children {
+			child.MapParentFolderID = placement.MapParentFolderID
+			if _, err := postgresUpdateProcessMapPlacementTx(ctx, tx, child); err != nil {
+				return err
+			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `delete from process_map_placements where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, resourceID); err != nil {
+	if _, err := tx.ExecContext(ctx, `
+delete from process_map_placements
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, resourceType, resourceID); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `
 delete from resource_operational_relationships
-where company_id=$1::uuid and ((source_resource_type=$2 and source_resource_id=$3::uuid) or (target_resource_type=$2 and target_resource_id=$3::uuid))`, companyID, resourceType, resourceID)
+where company_id=$1::uuid
+  and ((source_resource_type=$2 and source_resource_id=$3::uuid)
+    or (target_resource_type=$2 and target_resource_id=$3::uuid))`, companyID, resourceType, resourceID)
 	return err
 }

@@ -519,7 +519,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const isAccountManagerView = activePrimaryPage === "account-manager";
   const isTeamsView = activePrimaryPage === "teams";
   const isFieldsView = activePrimaryPage === "fields";
-  const processMapFolderID = deepLink?.kind === "process_map" ? deepLink.folderID : undefined;
   const huddleLogicGateID = deepLink?.kind === "huddle_logic_gate" ? deepLink.huddleLogicGateID : "";
   const isHuddleLogicGateView = Boolean(huddleLogicGateID);
   const isFullPageView = isHuddleLogicGateView || isLogicGateArenaView || isHomeView || isProjectManagementView || isProcessMapView || isAccountManagerView || isTeamsView || isFieldsView;
@@ -579,7 +578,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   useEffect(() => {
     if (!isProcessMapView) setProcessMapLogicGateOverlay(null);
   }, [isProcessMapView]);
-  useEffect(() => setProcessMapLogicGateOverlay(null), [activeCompanyID, processMapFolderID]);
+  useEffect(() => setProcessMapLogicGateOverlay(null), [activeCompanyID]);
   const childrenByParent = useMemo(() => {
     const grouped = new Map<string, FrameDataModel[]>();
     for (const frame of frames) {
@@ -2119,8 +2118,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
             <LazyProcessMapPage
               apiBase={apiBase}
               companyID={activeCompanyID}
-              folderID={processMapFolderID}
-              onNavigate={onNavigate}
               onOpenLogicGate={openProcessMapLogicGateOverlay}
             />
           </React.Suspense>

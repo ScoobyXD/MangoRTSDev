@@ -8,6 +8,13 @@ import (
 )
 
 func (r *MemoryRepo) UserHasEffectiveAccess(companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
+	return r.UserHasEffectiveAccessContext(context.Background(), companyID, userID, resourceType, resourceID, accessLevel)
+}
+
+func (r *MemoryRepo) UserHasEffectiveAccessContext(ctx context.Context, companyID, userID, resourceType, resourceID, accessLevel string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	resourceID = strings.TrimSpace(resourceID)
@@ -19,6 +26,9 @@ func (r *MemoryRepo) UserHasEffectiveAccess(companyID, userID, resourceType, res
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 
 	if !r.entityExistsLocked(companyID, resourceType, resourceID) {
 		return false, ErrNotFound

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"maps"
 	"miraeopus/backend/internal/domain"
 	"slices"
@@ -12,19 +13,20 @@ func processMapPlacementMemoryKey(companyID, resourceType, resourceID string) st
 	return companyID + ":" + resourceType + ":" + resourceID
 }
 
-func sameProcessMapLayer(a, b *string) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return strings.TrimSpace(*a) == strings.TrimSpace(*b)
-}
-
 func cloneProcessMapRoutePoints(points []domain.ProcessMapRoutePoint) []domain.ProcessMapRoutePoint {
 	return append([]domain.ProcessMapRoutePoint{}, points...)
 }
 
 func cloneProcessMapTrace(item domain.ProcessMapTrace) domain.ProcessMapTrace {
 	item.RoutePoints = cloneProcessMapRoutePoints(item.RoutePoints)
+	return item
+}
+
+func cloneProcessMapPlacement(item domain.ProcessMapPlacement) domain.ProcessMapPlacement {
+	if item.MapParentFolderID != nil {
+		parentID := *item.MapParentFolderID
+		item.MapParentFolderID = &parentID
+	}
 	return item
 }
 
@@ -68,133 +70,203 @@ func (r *MemoryRepo) processMapResourceNameLocked(companyID, resourceType, resou
 	}
 }
 
-func (r *MemoryRepo) processMapLayerAncestorsLocked(companyID, folderID, permissionUserID string) []domain.ProcessMapLayerAncestor {
-	ancestors := []domain.ProcessMapLayerAncestor{}
-	placement, ok := r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folderID)]
-	if !ok || placement.MapParentFolderID == nil {
-		return ancestors
-	}
-	parentID := strings.TrimSpace(*placement.MapParentFolderID)
-	seen := map[string]bool{folderID: true}
-	for parentID != "" {
-		if len(ancestors) == processMapMaxLayerAncestors || seen[parentID] {
-			return []domain.ProcessMapLayerAncestor{}
-		}
-		seen[parentID] = true
-		name, exists := r.processMapResourceNameLocked(companyID, domain.ProcessMapResourceTypeFolder, parentID)
-		if !exists || !r.processMapResourceAllowedLocked(companyID, permissionUserID, domain.ProcessMapResourceTypeFolder, parentID) {
-			return []domain.ProcessMapLayerAncestor{}
-		}
-		ancestors = append(ancestors, domain.ProcessMapLayerAncestor{FolderID: parentID, Name: name})
-		placement, ok = r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, parentID)]
-		if !ok || placement.MapParentFolderID == nil {
-			break
-		}
-		parentID = strings.TrimSpace(*placement.MapParentFolderID)
-	}
-	slices.Reverse(ancestors)
-	return ancestors
+func (r *MemoryRepo) processMapVersionsLocked(companyID string) (int64, int64) {
+	return r.workspaceReadVersions[workspaceReadVersionMemoryKey(companyID, "process-map", "")],
+		r.workspaceReadVersions[workspaceReadVersionMemoryKey(companyID, "policy-group-membership", "")]
 }
 
-func (r *MemoryRepo) GetProcessMapLayer(input ProcessMapLayerQuery) (domain.ProcessMapLayerView, error) {
-	input.CompanyID = strings.TrimSpace(input.CompanyID)
-	input.FolderID = strings.TrimSpace(input.FolderID)
-	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
-	if input.CompanyID == "" || input.PermissionUserID == "" {
-		return domain.ProcessMapLayerView{}, ErrInvalid
+func (r *MemoryRepo) CurrentProcessMapVersions(ctx context.Context, companyID string) (int64, int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, 0, err
 	}
-
+	companyID = strings.TrimSpace(companyID)
+	if companyID == "" {
+		return 0, 0, ErrInvalid
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	processVersion, permissionVersion := r.processMapVersionsLocked(companyID)
+	return processVersion, permissionVersion, nil
+}
 
-	view := domain.ProcessMapLayerView{
-		Layer:      domain.ProcessMapLayer{Kind: "root", Ancestors: []domain.ProcessMapLayerAncestor{}},
-		Placements: []domain.ProcessMapLayerPlacement{},
-		Traces:     []domain.ProcessMapLayerTrace{},
+func normalizeMemoryProcessMapRead(companyID, permissionUserID string) (string, string, error) {
+	companyID = strings.TrimSpace(companyID)
+	permissionUserID = strings.TrimSpace(permissionUserID)
+	if companyID == "" || permissionUserID == "" {
+		return "", "", ErrInvalid
 	}
-	if input.FolderID != "" {
-		name, exists := r.processMapResourceNameLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, input.FolderID)
-		if !exists || !r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, domain.ProcessMapResourceTypeFolder, input.FolderID) {
-			return domain.ProcessMapLayerView{}, ErrNotFound
+	return companyID, permissionUserID, nil
+}
+
+func (r *MemoryRepo) GetProcessMapScene(ctx context.Context, input ProcessMapSceneQuery) (domain.ProcessMapScene, error) {
+	companyID, permissionUserID, err := normalizeMemoryProcessMapRead(input.CompanyID, input.PermissionUserID)
+	if err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.userHasCompanyMembershipLocked(companyID, permissionUserID) {
+		return domain.ProcessMapScene{}, ErrNotFound
+	}
+	var bounds *domain.ProcessMapBounds
+	for _, placement := range r.processMapPlacements {
+		if placement.CompanyID != companyID || !r.processMapResourceExistsLocked(companyID, placement.ResourceType, placement.ResourceID) {
+			continue
 		}
-		view.Layer = domain.ProcessMapLayer{
-			Kind: "folder", FolderID: input.FolderID, Name: name,
-			Ancestors: r.processMapLayerAncestorsLocked(input.CompanyID, input.FolderID, input.PermissionUserID),
+		itemBounds := processMapPlacementBounds(placement)
+		if !r.processMapResourceAllowedLocked(companyID, permissionUserID, placement.ResourceType, placement.ResourceID) {
+			itemBounds.MaxX = itemBounds.MinX + ProcessMapRestrictedWidth
+			itemBounds.MaxY = itemBounds.MinY + ProcessMapRestrictedHeight
 		}
+		if bounds == nil {
+			copyBounds := itemBounds
+			bounds = &copyBounds
+			continue
+		}
+		bounds.MinX = min(bounds.MinX, itemBounds.MinX)
+		bounds.MinY = min(bounds.MinY, itemBounds.MinY)
+		bounds.MaxX = max(bounds.MaxX, itemBounds.MaxX)
+		bounds.MaxY = max(bounds.MaxY, itemBounds.MaxY)
+	}
+	processVersion, _ := r.processMapVersionsLocked(companyID)
+	return domain.ProcessMapScene{
+		Bounds: bounds, ProcessMapReadVersion: processVersion,
+		TileSize: ProcessMapTileSize, MinTileZoom: ProcessMapMinTileZoom, MaxTileZoom: ProcessMapMaxTileZoom,
+	}, nil
+}
+
+func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (domain.ProcessMapTile, error) {
+	companyID, permissionUserID, err := normalizeMemoryProcessMapRead(input.CompanyID, input.PermissionUserID)
+	if err != nil {
+		return domain.ProcessMapTile{}, err
+	}
+	tileBounds, ok := processMapTileBounds(input.Z, input.X, input.Y)
+	if !ok {
+		return domain.ProcessMapTile{}, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return domain.ProcessMapTile{}, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if !r.userHasCompanyMembershipLocked(companyID, permissionUserID) {
+		return domain.ProcessMapTile{}, ErrNotFound
+	}
+	processVersion, _ := r.processMapVersionsLocked(companyID)
+	result := domain.ProcessMapTile{
+		Z: input.Z, X: input.X, Y: input.Y, ProcessMapReadVersion: processVersion,
+		Placements: []domain.ProcessMapTilePlacement{}, Traces: []domain.ProcessMapTileTrace{},
 	}
 
-	visible := map[string]bool{}
 	placements := make([]domain.ProcessMapPlacement, 0)
 	for _, placement := range r.processMapPlacements {
-		if placement.CompanyID != input.CompanyID {
-			continue
+		if placement.CompanyID == companyID {
+			placements = append(placements, cloneProcessMapPlacement(placement))
 		}
-		if input.FolderID == "" {
-			if placement.MapParentFolderID != nil {
-				continue
-			}
-		} else if placement.MapParentFolderID == nil || strings.TrimSpace(*placement.MapParentFolderID) != input.FolderID {
-			continue
-		}
-		placements = append(placements, placement)
 	}
-	slices.SortFunc(placements, func(a, b domain.ProcessMapPlacement) int {
-		if a.GridY != b.GridY {
-			return a.GridY - b.GridY
-		}
-		if a.GridX != b.GridX {
-			return a.GridX - b.GridX
-		}
-		if byType := strings.Compare(a.ResourceType, b.ResourceType); byType != 0 {
-			return byType
-		}
-		return strings.Compare(a.ResourceID, b.ResourceID)
-	})
+	slices.SortFunc(placements, compareProcessMapPlacements)
+	visible := map[string]domain.ProcessMapPlacement{}
 	for _, placement := range placements {
-		placementKey := processMapPlacementMemoryKey(placement.CompanyID, placement.ResourceType, placement.ResourceID)
-		if !r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, placement.ResourceType, placement.ResourceID) {
-			view.Placements = append(view.Placements, domain.ProcessMapRestrictedPlacement{Restricted: true, GridX: placement.GridX, GridY: placement.GridY})
+		if !r.processMapResourceExistsLocked(companyID, placement.ResourceType, placement.ResourceID) {
 			continue
 		}
-		name, exists := r.processMapResourceNameLocked(input.CompanyID, placement.ResourceType, placement.ResourceID)
-		if !exists {
+		allowed := r.processMapResourceAllowedLocked(companyID, permissionUserID, placement.ResourceType, placement.ResourceID)
+		itemBounds := processMapPlacementBounds(placement)
+		if !allowed {
+			itemBounds.MaxX = itemBounds.MinX + ProcessMapRestrictedWidth
+			itemBounds.MaxY = itemBounds.MinY + ProcessMapRestrictedHeight
+			if processMapBoundsIntersect(itemBounds, tileBounds) {
+				result.Placements = append(result.Placements, domain.ProcessMapRestrictedPlacement{Restricted: true, GridX: placement.GridX, GridY: placement.GridY})
+			}
 			continue
 		}
-		visible[placementKey] = true
-		view.Placements = append(view.Placements, domain.ProcessMapVisiblePlacement{
-			Restricted: false, ResourceType: placement.ResourceType, ResourceID: placement.ResourceID, Name: name,
-			GridX: placement.GridX, GridY: placement.GridY, Revision: placement.Revision,
-			CreatedTimestamp: placement.CreatedTimestamp, UpdatedTimestamp: placement.UpdatedTimestamp,
+		name, exists := r.processMapResourceNameLocked(companyID, placement.ResourceType, placement.ResourceID)
+		if !exists || !processMapBoundsIntersect(itemBounds, tileBounds) {
+			continue
+		}
+		visible[processMapPlacementMemoryKey(companyID, placement.ResourceType, placement.ResourceID)] = placement
+		parentID := placement.MapParentFolderID
+		if parentID != nil && !r.processMapResourceAllowedLocked(companyID, permissionUserID, domain.ProcessMapResourceTypeFolder, *parentID) {
+			parentID = nil
+		}
+		presentation := processMapPlacementPresentationAtTileZoom(placement.GridWidth, placement.GridHeight, input.Z)
+		if presentation == domain.ProcessMapPresentationWhole {
+			name = ""
+		}
+		result.Placements = append(result.Placements, domain.ProcessMapVisiblePlacement{
+			Restricted: false, Presentation: presentation, ResourceType: placement.ResourceType, ResourceID: placement.ResourceID, Name: name,
+			MapParentFolderID: parentID, GridX: placement.GridX, GridY: placement.GridY,
+			GridWidth: placement.GridWidth, GridHeight: placement.GridHeight, Revision: placement.Revision,
+			CreatedTimestamp: placement.CreatedTimestamp, UpdatedTimestamp: placement.UpdatedTimestamp, CanEdit: true,
 		})
 	}
 
+	traceItems := make([]domain.ProcessMapTrace, 0)
 	for _, trace := range r.processMapTraces {
-		if trace.CompanyID != input.CompanyID {
+		if trace.CompanyID == companyID {
+			traceItems = append(traceItems, cloneProcessMapTrace(trace))
+		}
+	}
+	slices.SortFunc(traceItems, func(a, b domain.ProcessMapTrace) int {
+		return strings.Compare(a.ResourceOperationalRelationshipID, b.ResourceOperationalRelationshipID)
+	})
+	for _, trace := range traceItems {
+		relationship, exists := r.resourceOperationalRelationships[key(companyID, trace.ResourceOperationalRelationshipID)]
+		if !exists || !r.processMapResourceAllowedLocked(companyID, permissionUserID, relationship.Source.ResourceType, relationship.Source.ResourceID) ||
+			!r.processMapResourceAllowedLocked(companyID, permissionUserID, relationship.Target.ResourceType, relationship.Target.ResourceID) {
 			continue
 		}
-		relationship, ok := r.resourceOperationalRelationships[key(input.CompanyID, trace.ResourceOperationalRelationshipID)]
-		if !ok {
+		source, sourceOK := r.processMapPlacements[processMapPlacementMemoryKey(companyID, relationship.Source.ResourceType, relationship.Source.ResourceID)]
+		target, targetOK := r.processMapPlacements[processMapPlacementMemoryKey(companyID, relationship.Target.ResourceType, relationship.Target.ResourceID)]
+		if !sourceOK || !targetOK {
 			continue
 		}
-		sourceKey := processMapPlacementMemoryKey(input.CompanyID, relationship.Source.ResourceType, relationship.Source.ResourceID)
-		targetKey := processMapPlacementMemoryKey(input.CompanyID, relationship.Target.ResourceType, relationship.Target.ResourceID)
-		if !visible[sourceKey] || !visible[targetKey] {
+		fragments := processMapClipPath(processMapTracePath(source, target, trace.RoutePoints), tileBounds)
+		if len(fragments) == 0 {
 			continue
 		}
-		view.Traces = append(view.Traces, domain.ProcessMapLayerTrace{
+		presentation := processMapMaxPresentation(
+			processMapPlacementPresentationAtTileZoom(source.GridWidth, source.GridHeight, input.Z),
+			processMapPlacementPresentationAtTileZoom(target.GridWidth, target.GridHeight, input.Z),
+		)
+		routePoints := []domain.ProcessMapRoutePoint(nil)
+		if presentation == domain.ProcessMapPresentationEditing {
+			routePoints = cloneProcessMapRoutePoints(trace.RoutePoints)
+		}
+		result.Traces = append(result.Traces, domain.ProcessMapTileTrace{
 			ResourceOperationalRelationshipID: relationship.ResourceOperationalRelationshipID,
-			Source:                            relationship.Source, Target: relationship.Target,
-			RoutePoints: cloneProcessMapRoutePoints(trace.RoutePoints), Revision: trace.Revision,
+			Presentation:                      presentation,
+			Source:                            relationship.Source, Target: relationship.Target, RoutePoints: routePoints,
+			PathFragments: fragments, Revision: trace.Revision,
 			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
 		})
 	}
-	slices.SortFunc(view.Traces, func(a, b domain.ProcessMapLayerTrace) int {
-		return strings.Compare(a.ResourceOperationalRelationshipID, b.ResourceOperationalRelationshipID)
-	})
-	return view, nil
+	return result, nil
 }
 
-func (r *MemoryRepo) ListResourceOperationalRelationshipsForResource(input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error) {
+func compareProcessMapPlacements(a, b domain.ProcessMapPlacement) int {
+	if a.GridY != b.GridY {
+		if a.GridY < b.GridY {
+			return -1
+		}
+		return 1
+	}
+	if a.GridX != b.GridX {
+		if a.GridX < b.GridX {
+			return -1
+		}
+		return 1
+	}
+	if byType := strings.Compare(a.ResourceType, b.ResourceType); byType != 0 {
+		return byType
+	}
+	return strings.Compare(a.ResourceID, b.ResourceID)
+}
+
+func (r *MemoryRepo) ListResourceOperationalRelationshipsForResource(ctx context.Context, input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.ResourceID = strings.TrimSpace(input.ResourceID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
@@ -203,7 +275,9 @@ func (r *MemoryRepo) ListResourceOperationalRelationshipsForResource(input Resou
 	if input.CompanyID == "" || input.ResourceID == "" || input.PermissionUserID == "" || !typeOK || !directionOK {
 		return nil, ErrInvalid
 	}
-
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if !r.processMapResourceExistsLocked(input.CompanyID, resourceType, input.ResourceID) ||
@@ -243,9 +317,17 @@ type memoryProcessMapMutationSnapshot struct {
 }
 
 func (r *MemoryRepo) snapshotProcessMapMutationLocked() memoryProcessMapMutationSnapshot {
+	placements := maps.Clone(r.processMapPlacements)
+	for itemKey, item := range placements {
+		placements[itemKey] = cloneProcessMapPlacement(item)
+	}
+	traces := maps.Clone(r.processMapTraces)
+	for itemKey, item := range traces {
+		traces[itemKey] = cloneProcessMapTrace(item)
+	}
 	return memoryProcessMapMutationSnapshot{
-		placements: maps.Clone(r.processMapPlacements), relationships: maps.Clone(r.resourceOperationalRelationships),
-		traces: maps.Clone(r.processMapTraces), events: maps.Clone(r.domainEvents), versions: maps.Clone(r.workspaceReadVersions),
+		placements: placements, relationships: maps.Clone(r.resourceOperationalRelationships),
+		traces: traces, events: maps.Clone(r.domainEvents), versions: maps.Clone(r.workspaceReadVersions),
 		outbox: maps.Clone(r.realtimeOutbox), outboxSequence: r.realtimeOutboxSequence,
 	}
 }
@@ -276,123 +358,310 @@ func (r *MemoryRepo) processMapFolderCycleLocked(companyID, folderID, parentFold
 	return false
 }
 
-func (r *MemoryRepo) PutProcessMapPlacement(input ProcessMapPlacementPutInput) (ProcessMapPlacementMutationResult, error) {
+func (r *MemoryRepo) processMapDescendantsLocked(companyID, folderID string) []domain.ProcessMapPlacement {
+	result := []domain.ProcessMapPlacement{}
+	queue := []string{folderID}
+	seen := map[string]bool{folderID: true}
+	for len(queue) > 0 {
+		parentID := queue[0]
+		queue = queue[1:]
+		children := []domain.ProcessMapPlacement{}
+		for _, placement := range r.processMapPlacements {
+			if placement.CompanyID == companyID && placement.MapParentFolderID != nil && strings.TrimSpace(*placement.MapParentFolderID) == parentID {
+				children = append(children, cloneProcessMapPlacement(placement))
+			}
+		}
+		slices.SortFunc(children, compareProcessMapPlacements)
+		for _, child := range children {
+			result = append(result, child)
+			if child.ResourceType == domain.ProcessMapResourceTypeFolder && !seen[child.ResourceID] {
+				seen[child.ResourceID] = true
+				queue = append(queue, child.ResourceID)
+			}
+		}
+	}
+	return result
+}
+
+func (r *MemoryRepo) processMapFolderCleanupOrderLocked(companyID string, folderIDs map[string]bool) []string {
+	type folderDepth struct {
+		id    string
+		depth int
+	}
+	items := make([]folderDepth, 0, len(folderIDs))
+	for folderID := range folderIDs {
+		depth := 0
+		seen := map[string]bool{folderID: true}
+		placement, mapped := r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folderID)]
+		for mapped && placement.MapParentFolderID != nil {
+			parentID := strings.TrimSpace(*placement.MapParentFolderID)
+			if parentID == "" || seen[parentID] {
+				break
+			}
+			seen[parentID] = true
+			depth++
+			placement, mapped = r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, parentID)]
+		}
+		items = append(items, folderDepth{id: folderID, depth: depth})
+	}
+	slices.SortFunc(items, func(a, b folderDepth) int {
+		if a.depth != b.depth {
+			return a.depth - b.depth
+		}
+		return strings.Compare(a.id, b.id)
+	})
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		result = append(result, item.id)
+	}
+	return result
+}
+
+func (r *MemoryRepo) processMapRequireMappedParentLocked(companyID, permissionUserID, parentID string) (domain.ProcessMapPlacement, error) {
+	parent, exists := r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, parentID)]
+	if !exists || !r.processMapResourceExistsLocked(companyID, domain.ProcessMapResourceTypeFolder, parentID) ||
+		!r.processMapResourceAllowedLocked(companyID, permissionUserID, domain.ProcessMapResourceTypeFolder, parentID) {
+		return domain.ProcessMapPlacement{}, ErrNotFound
+	}
+	return cloneProcessMapPlacement(parent), nil
+}
+
+func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMapPlacementPutInput) (ProcessMapMutationEnvelope, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.ResourceID = strings.TrimSpace(input.ResourceID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	resourceType, ok := normalizeProcessMapResourceType(input.ResourceType)
-	if input.CompanyID == "" || input.ResourceID == "" || input.ActorUserID == "" || input.PermissionUserID == "" || !ok || !validProcessMapCoordinate(input.GridX) || !validProcessMapCoordinate(input.GridY) {
-		return ProcessMapPlacementMutationResult{}, ErrInvalid
+	if input.CompanyID == "" || input.ResourceID == "" || input.ActorUserID == "" || input.PermissionUserID == "" || !ok ||
+		!validProcessMapGeometry(input.GridX, input.GridY, input.GridWidth, input.GridHeight) {
+		return ProcessMapMutationEnvelope{}, ErrInvalid
 	}
 	var parentID string
 	if input.MapParentFolderID != nil {
 		parentID = strings.TrimSpace(*input.MapParentFolderID)
 		if parentID == "" {
-			return ProcessMapPlacementMutationResult{}, ErrInvalid
+			return ProcessMapMutationEnvelope{}, ErrInvalid
 		}
-	} else if resourceType == domain.ProcessMapResourceTypeProcess {
-		return ProcessMapPlacementMutationResult{}, ErrProcessMapRootProcess
+	}
+	if err := ctx.Err(); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotProcessMapMutationLocked()
-	restore := func(err error) (ProcessMapPlacementMutationResult, error) {
+	restore := func(err error) (ProcessMapMutationEnvelope, error) {
 		r.restoreProcessMapMutationLocked(snapshot)
-		return ProcessMapPlacementMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	if !r.processMapResourceExistsLocked(input.CompanyID, resourceType, input.ResourceID) ||
 		!r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, resourceType, input.ResourceID) {
 		return restore(ErrNotFound)
 	}
+	var parent domain.ProcessMapPlacement
 	if parentID != "" {
-		if !r.processMapResourceExistsLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, parentID) ||
-			!r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, domain.ProcessMapResourceTypeFolder, parentID) {
-			return restore(ErrNotFound)
+		var err error
+		parent, err = r.processMapRequireMappedParentLocked(input.CompanyID, input.PermissionUserID, parentID)
+		if err != nil {
+			return restore(err)
 		}
 	}
-	if resourceType == domain.ProcessMapResourceTypeFolder && parentID == input.ResourceID {
-		return restore(ErrProcessMapCycle)
-	}
-	if resourceType == domain.ProcessMapResourceTypeFolder && r.processMapFolderCycleLocked(input.CompanyID, input.ResourceID, parentID) {
+	if resourceType == domain.ProcessMapResourceTypeFolder && (parentID == input.ResourceID || r.processMapFolderCycleLocked(input.CompanyID, input.ResourceID, parentID)) {
 		return restore(ErrProcessMapCycle)
 	}
 
 	placementKey := processMapPlacementMemoryKey(input.CompanyID, resourceType, input.ResourceID)
 	current, exists := r.processMapPlacements[placementKey]
 	now := time.Now().UTC()
-	created := !exists
-	parentChanged := exists && !sameProcessMapLayer(current.MapParentFolderID, input.MapParentFolderID)
+	deltaX, deltaY := 0, 0
+	if exists {
+		deltaX, deltaY = input.GridX-current.GridX, input.GridY-current.GridY
+	}
+	changedPlacements := []domain.ProcessMapPlacement{}
+	movedKeys := map[string]bool{}
+	if resourceType == domain.ProcessMapResourceTypeFolder && exists && (deltaX != 0 || deltaY != 0) {
+		moved := append([]domain.ProcessMapPlacement{cloneProcessMapPlacement(current)}, r.processMapDescendantsLocked(input.CompanyID, input.ResourceID)...)
+		for _, item := range moved {
+			if !r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, item.ResourceType, item.ResourceID) {
+				return restore(ErrNotFound)
+			}
+			if !validProcessMapGeometry(item.GridX+deltaX, item.GridY+deltaY, item.GridWidth, item.GridHeight) {
+				return restore(ErrInvalid)
+			}
+		}
+		for _, item := range moved[1:] {
+			item.GridX += deltaX
+			item.GridY += deltaY
+			item.Revision++
+			item.UpdatedTimestamp = now
+			itemKey := processMapPlacementMemoryKey(item.CompanyID, item.ResourceType, item.ResourceID)
+			r.processMapPlacements[itemKey] = item
+			movedKeys[itemKey] = true
+			changedPlacements = append(changedPlacements, cloneProcessMapPlacement(item))
+		}
+	}
+
 	if !exists {
-		current = domain.ProcessMapPlacement{CompanyID: input.CompanyID, ResourceType: resourceType, ResourceID: input.ResourceID, Revision: 1, CreatedTimestamp: now}
+		current = domain.ProcessMapPlacement{
+			CompanyID: input.CompanyID, ResourceType: resourceType, ResourceID: input.ResourceID,
+			PlacementIncarnationToken: newUUIDv7String(), Revision: 1, CreatedTimestamp: now,
+		}
 	} else {
 		current.Revision++
 	}
-	if input.MapParentFolderID == nil {
+	if parentID == "" {
 		current.MapParentFolderID = nil
 	} else {
 		parentCopy := parentID
 		current.MapParentFolderID = &parentCopy
 	}
-	current.GridX = input.GridX
-	current.GridY = input.GridY
+	current.GridX, current.GridY = input.GridX, input.GridY
+	current.GridWidth, current.GridHeight = input.GridWidth, input.GridHeight
 	current.UpdatedTimestamp = now
-	r.processMapPlacements[placementKey] = current
-	if parentChanged {
-		r.deleteProcessMapTracesIncidentToResourceLocked(input.CompanyID, resourceType, input.ResourceID)
+	if parentID != "" && !processMapBoundsContain(processMapPlacementBounds(parent), processMapPlacementBounds(current)) {
+		return restore(ErrProcessMapContainment)
 	}
-	eventInput := processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ProcessMapPlacementSavedEvent, processMapResourceEventPayload(resourceType, input.ResourceID))
-	events, err := r.appendDomainEventsLocked([]DomainEventInput{eventInput})
+	if resourceType == domain.ProcessMapResourceTypeFolder {
+		folderBounds := processMapPlacementBounds(current)
+		for _, descendant := range r.processMapDescendantsLocked(input.CompanyID, input.ResourceID) {
+			if !processMapBoundsContain(folderBounds, processMapPlacementBounds(descendant)) {
+				return restore(ErrProcessMapContainment)
+			}
+		}
+	}
+	r.processMapPlacements[placementKey] = current
+	movedKeys[placementKey] = true
+	changedPlacements = append(changedPlacements, cloneProcessMapPlacement(current))
+
+	changedTraces := []domain.ProcessMapTrace{}
+	if resourceType == domain.ProcessMapResourceTypeFolder && exists && (deltaX != 0 || deltaY != 0) {
+		for traceKey, trace := range r.processMapTraces {
+			relationship, ok := r.resourceOperationalRelationships[traceKey]
+			if !ok {
+				relationship, ok = r.resourceOperationalRelationships[key(input.CompanyID, trace.ResourceOperationalRelationshipID)]
+			}
+			if !ok || relationship.CompanyID != input.CompanyID {
+				continue
+			}
+			sourceMoved := movedKeys[processMapPlacementMemoryKey(input.CompanyID, relationship.Source.ResourceType, relationship.Source.ResourceID)]
+			targetMoved := movedKeys[processMapPlacementMemoryKey(input.CompanyID, relationship.Target.ResourceType, relationship.Target.ResourceID)]
+			if !sourceMoved || !targetMoved {
+				continue
+			}
+			for _, point := range trace.RoutePoints {
+				if !validProcessMapCoordinate(point.X+deltaX) || !validProcessMapCoordinate(point.Y+deltaY) {
+					return restore(ErrInvalid)
+				}
+			}
+			for index := range trace.RoutePoints {
+				trace.RoutePoints[index].X += deltaX
+				trace.RoutePoints[index].Y += deltaY
+			}
+			trace.Revision++
+			trace.UpdatedTimestamp = now
+			r.processMapTraces[traceKey] = trace
+			changedTraces = append(changedTraces, cloneProcessMapTrace(trace))
+		}
+	}
+	slices.SortFunc(changedPlacements, compareProcessMapPlacements)
+	slices.SortFunc(changedTraces, func(a, b domain.ProcessMapTrace) int {
+		return strings.Compare(a.ResourceOperationalRelationshipID, b.ResourceOperationalRelationshipID)
+	})
+	events, err := r.appendDomainEventsLocked([]DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ProcessMapPlacementSavedEvent, processMapResourceEventPayload(resourceType, input.ResourceID))})
 	if err != nil {
 		return restore(err)
 	}
-	return ProcessMapPlacementMutationResult{Placement: current, Created: created, Events: events}, nil
+	readVersion, _ := r.processMapVersionsLocked(input.CompanyID)
+	return ProcessMapMutationEnvelope{Placements: changedPlacements, Traces: changedTraces, DeletedTraceIDs: []string{}, ProcessMapReadVersion: readVersion, Created: !exists, Changed: true, Events: events}, nil
 }
 
-func (r *MemoryRepo) deleteProcessMapTracesIncidentToResourceLocked(companyID, resourceType, resourceID string) {
+func (r *MemoryRepo) deleteProcessMapTracesIncidentToResourceLocked(companyID, resourceType, resourceID string) []string {
+	deletedTraceIDs := []string{}
 	for relationshipKey, relationship := range r.resourceOperationalRelationships {
 		if relationship.CompanyID != companyID {
 			continue
 		}
 		if (relationship.Source.ResourceType == resourceType && relationship.Source.ResourceID == resourceID) ||
 			(relationship.Target.ResourceType == resourceType && relationship.Target.ResourceID == resourceID) {
-			delete(r.processMapTraces, relationshipKey)
+			if _, exists := r.processMapTraces[relationshipKey]; exists {
+				delete(r.processMapTraces, relationshipKey)
+				deletedTraceIDs = append(deletedTraceIDs, relationship.ResourceOperationalRelationshipID)
+			}
 		}
 	}
+	slices.Sort(deletedTraceIDs)
+	return deletedTraceIDs
 }
 
-func (r *MemoryRepo) DeleteProcessMapPlacement(input ProcessMapPlacementDeleteInput) (ProcessMapPlacementDeleteResult, error) {
+func (r *MemoryRepo) DeleteProcessMapPlacement(ctx context.Context, input ProcessMapPlacementDeleteInput) (ProcessMapMutationEnvelope, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.ResourceID = strings.TrimSpace(input.ResourceID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	resourceType, ok := normalizeProcessMapResourceType(input.ResourceType)
 	if input.CompanyID == "" || input.ResourceID == "" || input.ActorUserID == "" || input.PermissionUserID == "" || !ok {
-		return ProcessMapPlacementDeleteResult{}, ErrInvalid
+		return ProcessMapMutationEnvelope{}, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotProcessMapMutationLocked()
-	restore := func(err error) (ProcessMapPlacementDeleteResult, error) {
+	restore := func(err error) (ProcessMapMutationEnvelope, error) {
 		r.restoreProcessMapMutationLocked(snapshot)
-		return ProcessMapPlacementDeleteResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	if !r.processMapResourceExistsLocked(input.CompanyID, resourceType, input.ResourceID) ||
 		!r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, resourceType, input.ResourceID) {
 		return restore(ErrNotFound)
 	}
 	placementKey := processMapPlacementMemoryKey(input.CompanyID, resourceType, input.ResourceID)
-	if _, exists := r.processMapPlacements[placementKey]; !exists {
+	placement, exists := r.processMapPlacements[placementKey]
+	if !exists {
 		return restore(ErrNotFound)
 	}
-	r.deleteProcessMapTracesIncidentToResourceLocked(input.CompanyID, resourceType, input.ResourceID)
+	changedPlacements := []domain.ProcessMapPlacement{}
+	if resourceType == domain.ProcessMapResourceTypeFolder {
+		directChildren := []domain.ProcessMapPlacement{}
+		for _, child := range r.processMapPlacements {
+			if child.CompanyID == input.CompanyID && child.MapParentFolderID != nil && strings.TrimSpace(*child.MapParentFolderID) == input.ResourceID {
+				directChildren = append(directChildren, cloneProcessMapPlacement(child))
+			}
+		}
+		slices.SortFunc(directChildren, compareProcessMapPlacements)
+		var destinationID string
+		if len(directChildren) > 0 && placement.MapParentFolderID != nil {
+			destinationID = strings.TrimSpace(*placement.MapParentFolderID)
+			if _, err := r.processMapRequireMappedParentLocked(input.CompanyID, input.PermissionUserID, destinationID); err != nil {
+				return restore(err)
+			}
+		}
+		now := time.Now().UTC()
+		for _, child := range directChildren {
+			if !r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, child.ResourceType, child.ResourceID) {
+				return restore(ErrNotFound)
+			}
+			if destinationID == "" {
+				child.MapParentFolderID = nil
+			} else {
+				destinationCopy := destinationID
+				child.MapParentFolderID = &destinationCopy
+			}
+			child.Revision++
+			child.UpdatedTimestamp = now
+			r.processMapPlacements[processMapPlacementMemoryKey(child.CompanyID, child.ResourceType, child.ResourceID)] = child
+			changedPlacements = append(changedPlacements, cloneProcessMapPlacement(child))
+		}
+	}
+	deletedTraceIDs := r.deleteProcessMapTracesIncidentToResourceLocked(input.CompanyID, resourceType, input.ResourceID)
 	delete(r.processMapPlacements, placementKey)
 	events, err := r.appendDomainEventsLocked([]DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ProcessMapPlacementDeletedEvent, processMapResourceEventPayload(resourceType, input.ResourceID))})
 	if err != nil {
 		return restore(err)
 	}
-	return ProcessMapPlacementDeleteResult{Events: events}, nil
+	readVersion, _ := r.processMapVersionsLocked(input.CompanyID)
+	return ProcessMapMutationEnvelope{Placements: changedPlacements, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: deletedTraceIDs, ProcessMapReadVersion: readVersion, Changed: true, Events: events}, nil
 }
 
 func (r *MemoryRepo) processMapRelationshipBySemanticLocked(companyID string, source, target domain.ProcessMapResourceRef) (domain.ResourceOperationalRelationship, bool) {
@@ -405,10 +674,10 @@ func (r *MemoryRepo) processMapRelationshipBySemanticLocked(companyID string, so
 }
 
 func (r *MemoryRepo) validateProcessMapTraceEndpointsLocked(companyID string, relationship domain.ResourceOperationalRelationship) error {
-	source, sourceOK := r.processMapPlacements[processMapPlacementMemoryKey(companyID, relationship.Source.ResourceType, relationship.Source.ResourceID)]
-	target, targetOK := r.processMapPlacements[processMapPlacementMemoryKey(companyID, relationship.Target.ResourceType, relationship.Target.ResourceID)]
-	if !sourceOK || !targetOK || !sameProcessMapLayer(source.MapParentFolderID, target.MapParentFolderID) {
-		return ErrProcessMapLayerMismatch
+	_, sourceOK := r.processMapPlacements[processMapPlacementMemoryKey(companyID, relationship.Source.ResourceType, relationship.Source.ResourceID)]
+	_, targetOK := r.processMapPlacements[processMapPlacementMemoryKey(companyID, relationship.Target.ResourceType, relationship.Target.ResourceID)]
+	if !sourceOK || !targetOK {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -431,7 +700,7 @@ func (r *MemoryRepo) upsertProcessMapTraceLocked(companyID string, relationship 
 	return cloneProcessMapTrace(current), true
 }
 
-func (r *MemoryRepo) CreateResourceOperationalRelationship(input ResourceOperationalRelationshipCreateInput) (ResourceOperationalRelationshipMutationResult, error) {
+func (r *MemoryRepo) CreateResourceOperationalRelationship(ctx context.Context, input ResourceOperationalRelationshipCreateInput) (ProcessMapMutationEnvelope, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
@@ -439,18 +708,20 @@ func (r *MemoryRepo) CreateResourceOperationalRelationship(input ResourceOperati
 	input.Target.ResourceID = strings.TrimSpace(input.Target.ResourceID)
 	sourceType, sourceOK := normalizeProcessMapResourceType(input.Source.ResourceType)
 	targetType, targetOK := normalizeProcessMapResourceType(input.Target.ResourceType)
-	input.Source.ResourceType = sourceType
-	input.Target.ResourceType = targetType
-	if input.CompanyID == "" || input.ActorUserID == "" || input.PermissionUserID == "" || input.Source.ResourceID == "" || input.Target.ResourceID == "" || !sourceOK || !targetOK ||
-		(input.Source == input.Target) || (input.Trace != nil && !validProcessMapRoutePoints(input.Trace.RoutePoints)) {
-		return ResourceOperationalRelationshipMutationResult{}, ErrInvalid
+	input.Source.ResourceType, input.Target.ResourceType = sourceType, targetType
+	if input.CompanyID == "" || input.ActorUserID == "" || input.PermissionUserID == "" || input.Source.ResourceID == "" || input.Target.ResourceID == "" ||
+		!sourceOK || !targetOK || input.Source == input.Target || (input.Trace != nil && !validProcessMapRoutePoints(input.Trace.RoutePoints)) {
+		return ProcessMapMutationEnvelope{}, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotProcessMapMutationLocked()
-	restore := func(err error) (ResourceOperationalRelationshipMutationResult, error) {
+	restore := func(err error) (ProcessMapMutationEnvelope, error) {
 		r.restoreProcessMapMutationLocked(snapshot)
-		return ResourceOperationalRelationshipMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	for _, endpoint := range []domain.ProcessMapResourceRef{input.Source, input.Target} {
 		if !r.processMapResourceExistsLocked(input.CompanyID, endpoint.ResourceType, endpoint.ResourceID) ||
@@ -461,60 +732,62 @@ func (r *MemoryRepo) CreateResourceOperationalRelationship(input ResourceOperati
 	relationship, exists := r.processMapRelationshipBySemanticLocked(input.CompanyID, input.Source, input.Target)
 	created := !exists
 	if !exists {
-		relationship = domain.ResourceOperationalRelationship{
-			CompanyID: input.CompanyID, ResourceOperationalRelationshipID: newUUIDv7String(),
-			Source: input.Source, Target: input.Target, CreatedTimestamp: time.Now().UTC(),
-		}
+		relationship = domain.ResourceOperationalRelationship{CompanyID: input.CompanyID, ResourceOperationalRelationshipID: newUUIDv7String(), Source: input.Source, Target: input.Target, CreatedTimestamp: time.Now().UTC()}
 		r.resourceOperationalRelationships[key(input.CompanyID, relationship.ResourceOperationalRelationshipID)] = relationship
 	}
-	result := ResourceOperationalRelationshipMutationResult{Relationship: relationship, RelationshipCreated: created}
 	eventInputs := []DomainEventInput{}
 	if created {
-		eventInputs = append(eventInputs, processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipCreatedEvent, map[string]any{"resource_operational_relationship_id": relationship.ResourceOperationalRelationshipID}))
+		eventInputs = append(eventInputs, processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipCreatedEvent, processMapRelationshipEventPayload(relationship)))
 	}
+	changedTraces := []domain.ProcessMapTrace{}
+	changed := created
 	if input.Trace != nil {
 		if err := r.validateProcessMapTraceEndpointsLocked(input.CompanyID, relationship); err != nil {
 			return restore(err)
 		}
-		trace, changed := r.upsertProcessMapTraceLocked(input.CompanyID, relationship, input.Trace.RoutePoints)
-		result.Trace = &trace
-		result.TraceChanged = changed
-		if changed {
-			eventInputs = append(eventInputs, processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, map[string]any{"resource_operational_relationship_id": relationship.ResourceOperationalRelationshipID}))
+		trace, traceChanged := r.upsertProcessMapTraceLocked(input.CompanyID, relationship, input.Trace.RoutePoints)
+		changed = changed || traceChanged
+		changedTraces = append(changedTraces, trace)
+		if traceChanged {
+			eventInputs = append(eventInputs, processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, processMapRelationshipEventPayload(relationship)))
 		}
 	}
+	events := []domain.DomainEvent{}
+	var err error
 	if len(eventInputs) > 0 {
-		events, err := r.appendDomainEventsLocked(eventInputs)
+		events, err = r.appendDomainEventsLocked(eventInputs)
 		if err != nil {
 			return restore(err)
 		}
-		result.Events = events
 	}
-	return result, nil
+	readVersion, _ := r.processMapVersionsLocked(input.CompanyID)
+	return ProcessMapMutationEnvelope{Placements: []domain.ProcessMapPlacement{}, Traces: changedTraces, DeletedTraceIDs: []string{}, ProcessMapReadVersion: readVersion, Relationship: &relationship, Created: created, Changed: changed, Events: events}, nil
 }
 
-func (r *MemoryRepo) PutProcessMapTrace(input ProcessMapTracePutInput) (ProcessMapTraceMutationResult, error) {
+func (r *MemoryRepo) PutProcessMapTrace(ctx context.Context, input ProcessMapTracePutInput) (ProcessMapMutationEnvelope, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.ResourceOperationalRelationshipID = strings.TrimSpace(input.ResourceOperationalRelationshipID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	if input.CompanyID == "" || input.ActorUserID == "" || input.PermissionUserID == "" || input.ResourceOperationalRelationshipID == "" || !validProcessMapRoutePoints(input.RoutePoints) {
-		return ProcessMapTraceMutationResult{}, ErrInvalid
+		return ProcessMapMutationEnvelope{}, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotProcessMapMutationLocked()
-	restore := func(err error) (ProcessMapTraceMutationResult, error) {
+	restore := func(err error) (ProcessMapMutationEnvelope, error) {
 		r.restoreProcessMapMutationLocked(snapshot)
-		return ProcessMapTraceMutationResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	relationship, exists := r.resourceOperationalRelationships[key(input.CompanyID, input.ResourceOperationalRelationshipID)]
 	if !exists {
 		return restore(ErrNotFound)
 	}
 	for _, endpoint := range []domain.ProcessMapResourceRef{relationship.Source, relationship.Target} {
-		if !r.processMapResourceExistsLocked(input.CompanyID, endpoint.ResourceType, endpoint.ResourceID) ||
-			!r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, endpoint.ResourceType, endpoint.ResourceID) {
+		if !r.processMapResourceExistsLocked(input.CompanyID, endpoint.ResourceType, endpoint.ResourceID) || !r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, endpoint.ResourceType, endpoint.ResourceID) {
 			return restore(ErrNotFound)
 		}
 	}
@@ -522,31 +795,35 @@ func (r *MemoryRepo) PutProcessMapTrace(input ProcessMapTracePutInput) (ProcessM
 		return restore(err)
 	}
 	trace, changed := r.upsertProcessMapTraceLocked(input.CompanyID, relationship, input.RoutePoints)
-	result := ProcessMapTraceMutationResult{Trace: trace, Changed: changed}
+	events := []domain.DomainEvent{}
+	var err error
 	if changed {
-		events, err := r.appendDomainEventsLocked([]DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, map[string]any{"resource_operational_relationship_id": relationship.ResourceOperationalRelationshipID})})
+		events, err = r.appendDomainEventsLocked([]DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, processMapRelationshipEventPayload(relationship))})
 		if err != nil {
 			return restore(err)
 		}
-		result.Events = events
 	}
-	return result, nil
+	readVersion, _ := r.processMapVersionsLocked(input.CompanyID)
+	return ProcessMapMutationEnvelope{Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{trace}, DeletedTraceIDs: []string{}, ProcessMapReadVersion: readVersion, Relationship: &relationship, Changed: changed, Events: events}, nil
 }
 
-func (r *MemoryRepo) DeleteResourceOperationalRelationship(input ResourceOperationalRelationshipDeleteInput) (ResourceOperationalRelationshipDeleteResult, error) {
+func (r *MemoryRepo) DeleteResourceOperationalRelationship(ctx context.Context, input ResourceOperationalRelationshipDeleteInput) (ProcessMapMutationEnvelope, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.ResourceOperationalRelationshipID = strings.TrimSpace(input.ResourceOperationalRelationshipID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.PermissionUserID = strings.TrimSpace(input.PermissionUserID)
 	if input.CompanyID == "" || input.ActorUserID == "" || input.PermissionUserID == "" || input.ResourceOperationalRelationshipID == "" {
-		return ResourceOperationalRelationshipDeleteResult{}, ErrInvalid
+		return ProcessMapMutationEnvelope{}, ErrInvalid
+	}
+	if err := ctx.Err(); err != nil {
+		return ProcessMapMutationEnvelope{}, err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotProcessMapMutationLocked()
-	restore := func(err error) (ResourceOperationalRelationshipDeleteResult, error) {
+	restore := func(err error) (ProcessMapMutationEnvelope, error) {
 		r.restoreProcessMapMutationLocked(snapshot)
-		return ResourceOperationalRelationshipDeleteResult{}, err
+		return ProcessMapMutationEnvelope{}, err
 	}
 	relationshipKey := key(input.CompanyID, input.ResourceOperationalRelationshipID)
 	relationship, exists := r.resourceOperationalRelationships[relationshipKey]
@@ -560,27 +837,39 @@ func (r *MemoryRepo) DeleteResourceOperationalRelationship(input ResourceOperati
 	}
 	delete(r.processMapTraces, relationshipKey)
 	delete(r.resourceOperationalRelationships, relationshipKey)
-	events, err := r.appendDomainEventsLocked([]DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipDeletedEvent, map[string]any{"resource_operational_relationship_id": input.ResourceOperationalRelationshipID})})
+	events, err := r.appendDomainEventsLocked([]DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipDeletedEvent, processMapRelationshipEventPayload(relationship))})
 	if err != nil {
 		return restore(err)
 	}
-	return ResourceOperationalRelationshipDeleteResult{Events: events}, nil
+	readVersion, _ := r.processMapVersionsLocked(input.CompanyID)
+	return ProcessMapMutationEnvelope{Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: []string{}, ProcessMapReadVersion: readVersion, Relationship: &relationship, Changed: true, Events: events}, nil
 }
 
-// deleteProcessMapResourceLocked is the single memory cleanup path for a
-// permanently removed Folder or Process. Folder-owned child placements lose
-// only placement/trace geometry; relationships between surviving children stay.
+// deleteProcessMapResourceLocked is the typed lifecycle cleanup path. A source
+// Folder deletion reparents surviving direct map children without granting or
+// disclosing access; endpoint deletion still removes its exact relationships.
 func (r *MemoryRepo) deleteProcessMapResourceLocked(companyID, resourceType, resourceID string) {
-	if resourceType == domain.ProcessMapResourceTypeFolder {
-		for placementKey, placement := range r.processMapPlacements {
-			if placement.CompanyID == companyID && placement.MapParentFolderID != nil && strings.TrimSpace(*placement.MapParentFolderID) == resourceID {
-				r.deleteProcessMapTracesIncidentToResourceLocked(companyID, placement.ResourceType, placement.ResourceID)
-				delete(r.processMapPlacements, placementKey)
+	placementKey := processMapPlacementMemoryKey(companyID, resourceType, resourceID)
+	placement, mapped := r.processMapPlacements[placementKey]
+	if resourceType == domain.ProcessMapResourceTypeFolder && mapped {
+		now := time.Now().UTC()
+		for childKey, child := range r.processMapPlacements {
+			if child.CompanyID != companyID || child.MapParentFolderID == nil || strings.TrimSpace(*child.MapParentFolderID) != resourceID {
+				continue
 			}
+			if placement.MapParentFolderID == nil {
+				child.MapParentFolderID = nil
+			} else {
+				parentID := *placement.MapParentFolderID
+				child.MapParentFolderID = &parentID
+			}
+			child.Revision++
+			child.UpdatedTimestamp = now
+			r.processMapPlacements[childKey] = child
 		}
 	}
 	r.deleteProcessMapTracesIncidentToResourceLocked(companyID, resourceType, resourceID)
-	delete(r.processMapPlacements, processMapPlacementMemoryKey(companyID, resourceType, resourceID))
+	delete(r.processMapPlacements, placementKey)
 	for relationshipKey, relationship := range r.resourceOperationalRelationships {
 		if relationship.CompanyID != companyID {
 			continue

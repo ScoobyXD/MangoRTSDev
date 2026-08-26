@@ -2,112 +2,159 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  PROCESS_MAP_GRID_PX,
-  PROCESS_MAP_FOLDER_FOOTPRINT,
-  PROCESS_MAP_PROCESS_FOOTPRINT,
-  PROCESS_MAP_RESTRICTED_FOOTPRINT,
-  defaultProcessMapRoutePoints,
-  insertProcessMapRoutePoint,
+  fitProcessMapViewState,
   normalizeProcessMapRoutePoints,
   orthogonalizeProcessMapRoutePoints,
-  processMapFlowToGridPosition,
-  processMapFlowToRoutePoint,
-  processMapGridPointToFlowPosition,
-  processMapGridToFlowPosition,
+  processMapDeepestContainingFolder,
+  processMapDeckTileSize,
   processMapInputAnchor,
   processMapOutputAnchor,
-  processMapRoutePointToSurfaceCenter,
-  processMapTracePath,
+  processMapPlacementBounds,
+  processMapPlacementDisplayLOD,
+  processMapPlacementLOD,
 } from "../../../../frontend/src/modules/process-map/processMapGeometry.js";
 
-function tracePathPoints(path: string): Array<{ x: number; y: number }> {
-  return [...path.matchAll(/[ML]\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)/g)]
-    .map((match) => ({ x: Number(match[1]), y: Number(match[2]) }));
+type ContainmentFolder = Parameters<typeof processMapDeepestContainingFolder>[1][number];
+
+function folder(
+  resourceID: string,
+  bounds: { x: number; y: number; width: number; height: number },
+  mapParentFolderID: string | null = null,
+): ContainmentFolder {
+  return {
+    restricted: false,
+    presentation: "editing",
+    resource_type: "company_explorer_folder",
+    resource_id: resourceID,
+    name: resourceID,
+    map_parent_folder_id: mapParentFolderID,
+    grid_x: bounds.x,
+    grid_y: bounds.y,
+    grid_width: bounds.width,
+    grid_height: bounds.height,
+    can_edit: true,
+    revision: 1,
+    created_timestamp: "created",
+    updated_timestamp: "updated",
+  } as ContainmentFolder;
 }
 
-function assertOrthogonalTracePath(path: string): void {
-  const points = tracePathPoints(path);
-  assert.ok(points.length >= 2);
-  for (let index = 1; index < points.length; index += 1) {
-    const previous = points[index - 1];
-    const current = points[index];
-    assert.ok(previous.x === current.x || previous.y === current.y, `${path} contains a diagonal segment`);
+test("saved global dimensions define placement bounds and physical side anchors", () => {
+  const placement = { grid_x: -4, grid_y: 8, grid_width: 11, grid_height: 7 };
+  assert.deepEqual(processMapPlacementBounds(placement), {
+    min_x: -4,
+    min_y: 8,
+    max_x: 7,
+    max_y: 15,
+  });
+  assert.deepEqual(processMapInputAnchor(placement), { x: -4, y: 11.5 });
+  assert.deepEqual(processMapOutputAnchor(placement), { x: 7, y: 11.5 });
+});
+
+test("the deepest eligible saved map Folder contains the final placement independently from Explorer", () => {
+  const outer = folder("outer", { x: 0, y: 0, width: 30, height: 24 });
+  const inner = folder("inner", { x: 5, y: 4, width: 12, height: 10 }, "outer");
+  const unrelated = folder("unrelated", { x: 40, y: 40, width: 10, height: 10 });
+  const folders = [outer, unrelated, inner];
+
+  assert.equal(
+    processMapDeepestContainingFolder({ min_x: 7, min_y: 6, max_x: 12, max_y: 10 }, folders)?.resource_id,
+    "inner",
+  );
+  assert.equal(
+    processMapDeepestContainingFolder({ min_x: 7, min_y: 6, max_x: 12, max_y: 10 }, folders, "inner")?.resource_id,
+    "outer",
+    "a moved Folder cannot choose itself as its map parent",
+  );
+  assert.equal(
+    processMapDeepestContainingFolder({ min_x: 16, min_y: 10, max_x: 22, max_y: 16 }, folders)?.resource_id,
+    "outer",
+    "partial overlap with a nested fence does not count as containment",
+  );
+  assert.equal(
+    processMapDeepestContainingFolder({ min_x: -2, min_y: -2, max_x: 2, max_y: 2 }, folders),
+    null,
+  );
+});
+
+test("LOD follows each placement's projected screen size", () => {
+  assert.equal(processMapPlacementLOD({ grid_width: 7, grid_height: 5 }, 0.25), "whole");
+  assert.equal(processMapPlacementLOD({ grid_width: 7, grid_height: 5 }, 6), "normal");
+  assert.equal(processMapPlacementLOD({ grid_width: 7, grid_height: 5 }, 24), "editing");
+
+  assert.equal(processMapPlacementLOD({ grid_width: 2, grid_height: 2 }, 8), "whole");
+  assert.equal(processMapPlacementLOD({ grid_width: 20, grid_height: 20 }, 8), "editing");
+});
+
+test("one tile zoom carries conservative size-specific ceilings while fractional client LOD stays exact", () => {
+  const boundaryPlacement = { grid_width: 8, grid_height: 8, presentation: "normal" as const };
+  assert.equal(processMapPlacementLOD(boundaryPlacement, 2.9), "whole");
+  assert.equal(processMapPlacementDisplayLOD(boundaryPlacement, 2.9), "whole");
+  assert.equal(processMapPlacementLOD(boundaryPlacement, 3.1), "normal");
+  assert.equal(processMapPlacementDisplayLOD(boundaryPlacement, 3.1), "normal");
+
+  const pixelsPerGridUnit = 3.25;
+  const smaller = { grid_width: 8, grid_height: 8, presentation: "normal" as const };
+  const larger = { grid_width: 30, grid_height: 30, presentation: "editing" as const };
+  assert.equal(processMapPlacementLOD(smaller, pixelsPerGridUnit), "normal");
+  assert.equal(processMapPlacementLOD(larger, pixelsPerGridUnit), "editing");
+  assert.equal(processMapPlacementDisplayLOD(smaller, pixelsPerGridUnit), "normal");
+  assert.equal(processMapPlacementDisplayLOD(larger, pixelsPerGridUnit), "editing");
+
+  assert.equal(
+    processMapPlacementDisplayLOD({ ...larger, presentation: "normal" }, pixelsPerGridUnit),
+    "normal",
+    "the declared ceiling defensively caps detail even if client scale moves beyond it",
+  );
+});
+
+test("initial fit centers the complete permission-safe bounds and remains finite at safe coordinate extremes", () => {
+  const fit = fitProcessMapViewState(
+    { min_x: -100, min_y: -50, max_x: 300, max_y: 50 },
+    { width: 1000, height: 500 },
+    { padding: 50, minZoom: -24, maxZoom: 24 },
+  );
+  assert.deepEqual(fit.target, [100, 0, 0]);
+  assert.ok(Number.isFinite(fit.zoom));
+  assert.ok(fit.zoom >= fit.minZoom && fit.zoom <= fit.maxZoom);
+
+  const extreme = fitProcessMapViewState(
+    { min_x: -2_147_483_648, min_y: -2_147_483_648, max_x: 2_147_483_647, max_y: 2_147_483_647 },
+    { width: 1920, height: 1080 },
+  );
+  assert.ok(extreme.target.every(Number.isFinite));
+  assert.ok(Number.isFinite(extreme.zoom));
+
+  const empty = fitProcessMapViewState(null, { width: 900, height: 600 });
+  assert.deepEqual(empty.target, [0, 0, 0]);
+  assert.ok(Number.isFinite(empty.zoom));
+});
+
+test("deck non-geographic tile indexing exactly matches the backend z/x/y world spans", () => {
+  const tileSize = 256;
+  const maxTileZoom = 22;
+  const deckTileSize = processMapDeckTileSize(tileSize, maxTileZoom);
+  assert.equal(deckTileSize, tileSize * 2 ** maxTileZoom);
+  for (const z of [0, 1, 7, 16, maxTileZoom]) {
+    const deckWorldSpan = deckTileSize / 2 ** z;
+    const backendWorldSpan = tileSize * 2 ** (maxTileZoom - z);
+    assert.equal(deckWorldSpan, backendWorldSpan, `z=${z}`);
   }
-}
-
-test("Process Map geometry keeps fixed footprints and snaps signed grid coordinates", () => {
-  assert.equal(PROCESS_MAP_GRID_PX, 28);
-  assert.deepEqual(PROCESS_MAP_FOLDER_FOOTPRINT, { width: 7, height: 5 });
-  assert.deepEqual(PROCESS_MAP_PROCESS_FOOTPRINT, { width: 7, height: 5 });
-  assert.deepEqual(PROCESS_MAP_RESTRICTED_FOOTPRINT, { width: 4, height: 3 });
-  assert.notEqual(PROCESS_MAP_RESTRICTED_FOOTPRINT, PROCESS_MAP_PROCESS_FOOTPRINT);
-  assert.deepEqual(processMapGridToFlowPosition({ x: -3, y: 7 }), { x: -84, y: 196 });
-  assert.deepEqual(processMapFlowToGridPosition({ x: -70, y: 181 }), { x: -2, y: 6 });
-  assert.deepEqual(processMapGridPointToFlowPosition({ x: 1.5, y: -2.5 }), { x: 42, y: -70 });
-  assert.deepEqual(processMapFlowToRoutePoint({ x: 70, y: 42 }), { x: 3, y: 2 });
-  assert.deepEqual(processMapFlowToRoutePoint({ x: 56.01, y: 55.99 }), { x: 3, y: 2 });
-  assert.deepEqual(processMapFlowToRoutePoint({ x: 55.99, y: 56.01 }), { x: 2, y: 3 });
+  assert.notEqual(deckTileSize, tileSize, "ordinary 256 would shift deck selection by 2^22 tiles");
 });
 
-test("Process Map derives one centered left input and right output from placement and type", () => {
-  assert.deepEqual(processMapInputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 4, y: 10.5 });
-  assert.deepEqual(processMapOutputAnchor({ x: 4, y: 8 }, "company_explorer_folder"), { x: 11, y: 10.5 });
-  assert.deepEqual(processMapInputAnchor({ x: 12, y: 3 }, "logic_gate"), { x: 12, y: 5.5 });
-  assert.deepEqual(processMapOutputAnchor({ x: 12, y: 3 }, "logic_gate"), { x: 19, y: 5.5 });
-});
-
-test("Process Map route helpers store bounded integer points and render only orthogonal segments", () => {
-  const normalized = normalizeProcessMapRoutePoints([{ x: 1.2, y: -2.8 }, { x: 1.2, y: -2.8 }]);
-  assert.deepEqual(normalized, [{ x: 1, y: -3 }]);
-  assert.deepEqual(orthogonalizeProcessMapRoutePoints([{ x: 1, y: 1 }, { x: 4, y: 5 }]), [
-    { x: 1, y: 1 },
-    { x: 4, y: 1 },
-    { x: 4, y: 5 },
-  ]);
-  assertOrthogonalTracePath(processMapTracePath({ x: 0, y: 0.5 }, [{ x: 3, y: 2 }], { x: 6, y: 4.5 }));
-  assertOrthogonalTracePath(processMapTracePath({ x: 0, y: 0.5 }, [], { x: 6, y: 4.5 }));
-  assert.deepEqual(defaultProcessMapRoutePoints({ x: 3, y: 1 }, { x: 9, y: 5 }), [
-    { x: 6, y: 1 },
-    { x: 6, y: 5 },
-  ]);
-  const backwardRoute = defaultProcessMapRoutePoints({ x: 16, y: 4.5 }, { x: 4, y: 4.5 });
-  assert.deepEqual(backwardRoute, [
-    { x: 18, y: 5 },
-    { x: 18, y: 1 },
-    { x: 2, y: 1 },
-    { x: 2, y: 5 },
-  ]);
-  const backwardPolyline = tracePathPoints(processMapTracePath(
-    { x: 16, y: 4.5 },
-    backwardRoute,
-    { x: 4, y: 4.5 },
-  ));
-  assert.ok(backwardPolyline[1].x > 16 * PROCESS_MAP_GRID_PX && backwardPolyline[1].y === 4.5 * PROCESS_MAP_GRID_PX, "a backward trace must first leave horizontally through the right output");
-  assert.ok(backwardPolyline[backwardPolyline.length - 2].x < 4 * PROCESS_MAP_GRID_PX && backwardPolyline[backwardPolyline.length - 2].y === 4.5 * PROCESS_MAP_GRID_PX, "a backward trace must approach the left input horizontally from the left");
-  assertOrthogonalTracePath(processMapTracePath({ x: 16, y: 4.5 }, backwardRoute, { x: 4, y: 4.5 }));
-  const emptyBackwardPolyline = tracePathPoints(processMapTracePath(
-    { x: 16, y: 4.5 },
-    [],
-    { x: 4, y: 4.5 },
-  ));
-  assert.ok(emptyBackwardPolyline[1].x > 16 * PROCESS_MAP_GRID_PX && emptyBackwardPolyline[1].y === 4.5 * PROCESS_MAP_GRID_PX, "an empty backward trace must first leave horizontally through the right output");
-  assert.ok(emptyBackwardPolyline[emptyBackwardPolyline.length - 2].x < 4 * PROCESS_MAP_GRID_PX && emptyBackwardPolyline[emptyBackwardPolyline.length - 2].y === 4.5 * PROCESS_MAP_GRID_PX, "an empty backward trace must approach the left input horizontally from the left");
-  assertOrthogonalTracePath(processMapTracePath({ x: 16, y: 4.5 }, [], { x: 4, y: 4.5 }));
+test("trace route helpers keep one bounded ordered integer geometry without diagonal segments", () => {
   assert.deepEqual(
-    insertProcessMapRoutePoint({ x: 0, y: 0 }, [{ x: 5, y: 0 }], { x: 5, y: 5 }, { x: 4, y: 4 }),
-    [{ x: 5, y: 0 }, { x: 4, y: 4 }],
+    normalizeProcessMapRoutePoints([{ x: 1.2, y: -2.8 }, { x: 1.2, y: -2.8 }]),
+    [{ x: 1, y: -3 }],
   );
-  assert.deepEqual(processMapRoutePointToSurfaceCenter({ x: 3, y: 2 }), { x: 2.5, y: 1.5 });
+  assert.deepEqual(
+    orthogonalizeProcessMapRoutePoints([{ x: 1, y: 1 }, { x: 4, y: 5 }]),
+    [{ x: 1, y: 1 }, { x: 4, y: 1 }, { x: 4, y: 5 }],
+  );
   assert.equal(
-    processMapTracePath({ x: 0, y: 0.5 }, [{ x: 3, y: 2 }], { x: 6, y: 4.5 }),
-    "M 0 14 L 70 14 L 70 126 L 168 126",
+    normalizeProcessMapRoutePoints(Array.from({ length: 257 }, (_, index) => ({ x: index, y: 0 }))).length,
+    256,
+    "local previews use the same hard route bound as committed writes",
   );
-  const staleOutAndBackRoute = [{ x: 3, y: 1 }, { x: 3, y: 2 }];
-  const savedRoute = staleOutAndBackRoute.map((point) => ({ ...point }));
-  assert.equal(
-    processMapTracePath({ x: 0, y: 0.5 }, staleOutAndBackRoute, { x: 6, y: 0.5 }),
-    "M 0 14 L 168 14",
-    "rendering removes an exact out-and-back bulge from an otherwise straight ribbon",
-  );
-  assert.deepEqual(staleOutAndBackRoute, savedRoute, "render simplification does not rewrite saved route points");
 });
