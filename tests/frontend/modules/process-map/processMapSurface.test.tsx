@@ -387,8 +387,9 @@ test("every Process Map PathLayer declares and yields flat XY geometry", () => {
   const editTraceLayer = layerByID(editLayers, "process-map-edit-traces");
   assertFlatXYPathLayer(editTraceLayer);
   assertFlatXYPathLayer(layerByID(editLayers, "process-map-edit-folder-fences"));
-  const colors = (editTraceLayer.props.data as Array<{ color: number[] }>).map((item) => item.color);
-  assert.notDeepEqual(colors[0], colors[colors.length - 1], "saved and pending traces retain a static cyan-to-blue treatment");
+  const editTraceData = editTraceLayer.props.data as Array<{ path: [number, number][]; color: number[] }>;
+  assert.ok(editTraceData.every((item) => item.color.join(",") === "38,195,234,220"), "saved and pending traces retain one static cyan-blue treatment");
+  assert.ok(editTraceData.every((item) => item.path.slice(1).every((point, index) => point[0] === item.path[index][0] || point[1] === item.path[index][1])), "saved and pending traces contain only horizontal or vertical segments");
 });
 
 test("declared presentation ceilings suppress labels and waypoints above authorized detail", () => {
@@ -653,12 +654,13 @@ test("an active connection keeps only the source output and distinct eligible ta
   const preview = layerByID(layers, "process-map-edit-traces");
   assertFlatXYPathLayer(preview);
   const previewData = preview.props.data as Array<{ path: [number, number][]; color: number[]; width: number }>;
-  const colors = previewData.map((item) => item.color);
-  assert.notDeepEqual(colors[0], colors[colors.length - 1], "the pending orthogonal preview is a static cyan-to-blue path");
+  assert.equal(previewData.length, 1, "the pending preview remains one continuous path through every bend");
+  assert.deepEqual(previewData[0].color, [38, 195, 234, 220], "the pending orthogonal preview uses the static cyan-blue trace color");
+  assert.ok(previewData[0].path.slice(1).every((point, index) => point[0] === previewData[0].path[index][0] || point[1] === previewData[0].path[index][1]), "the pending preview contains only horizontal or vertical segments");
   const start = previewData[0].path[0];
-  const firstHalfEnd = previewData[0].path[1];
-  assert.equal(firstHalfEnd[1], start[1], "the preview exits horizontally before its first bend");
-  assert.ok(firstHalfEnd[0] > start[0], "the preview first moves out from the source's right edge");
+  const firstEnd = previewData[0].path[1];
+  assert.equal(firstEnd[1], start[1], "the preview exits horizontally before its first bend");
+  assert.ok(firstEnd[0] > start[0], "the preview first moves out from the source's right edge");
   assert.ok(previewData.every((item) => item.width === 1.2), "preview width follows the source Process dimensions");
   assert.equal(preview.props.widthUnits, "common");
   assert.equal(preview.props.widthMinPixels, 2);
@@ -1083,8 +1085,8 @@ test("representative large-company transport and presentation stay byte-, reques
     assert.equal(labelData.length, representative.placements.length, "normal LOD contributes one bounded label datum per displayable placement");
     assert.equal(
       pickableDatumCount,
-      visiblePlacementCount * 5 - visibleFolderCount + representative.placements.length + representative.traces.length * 2,
-      "Folder interiors add no pick datum while name or permission-safe placeholder labels, fences, Process bodies, and static trace halves remain bounded",
+      visiblePlacementCount * 5 - visibleFolderCount + representative.placements.length + representative.traces.length,
+      "Folder interiors add no pick datum while name or permission-safe placeholder labels, fences, Process bodies, and continuous static trace paths remain bounded",
     );
     const labelBytes = labelData.reduce((total, datum) => total + encodedBytes(datum.text), 0);
     assert.ok(labelBytes < 64 * 1024, "representative label text stays bounded before the shared font atlas");

@@ -87,8 +87,7 @@ const PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY = "mangorts.process-map.placement-t
 const PROCESS_MAP_DOUBLE_CLICK_MS = 300;
 const COLOR_FOLDER: [number, number, number, number] = [249, 115, 22, 230];
 const COLOR_PROCESS: [number, number, number, number] = [25, 240, 122, 235];
-const COLOR_TRACE_START: [number, number, number, number] = [51, 221, 213, 220];
-const COLOR_TRACE_END: [number, number, number, number] = [25, 168, 255, 220];
+const COLOR_TRACE: [number, number, number, number] = [38, 195, 234, 220];
 const COLOR_TEXT: [number, number, number, number] = [30, 41, 59, 245];
 const COLOR_PROCESS_SURFACE: [number, number, number, number] = [248, 250, 252, 252];
 const COLOR_PROCESS_SHADOW: [number, number, number, number] = [100, 116, 139, 42];
@@ -534,37 +533,22 @@ export function processMapPerimeterSegments(bounds: ProcessMapBounds, tile: Tile
   return result;
 }
 
-function segmentColor(index: number, count: number): [number, number, number, number] {
-  const ratio = count <= 1 ? 0.5 : index / (count - 1);
-  return [
-    Math.round(COLOR_TRACE_START[0] + (COLOR_TRACE_END[0] - COLOR_TRACE_START[0]) * ratio),
-    Math.round(COLOR_TRACE_START[1] + (COLOR_TRACE_END[1] - COLOR_TRACE_START[1]) * ratio),
-    Math.round(COLOR_TRACE_START[2] + (COLOR_TRACE_END[2] - COLOR_TRACE_START[2]) * ratio),
-    220,
-  ];
-}
-
-function staticTraceSegments(
+function staticTracePaths(
   fragments: readonly ProcessMapGridPoint[][],
   width: number,
   pick?: ProcessMapPick,
 ): PathDatum[] {
-  const pairs = fragments.flatMap((fragment) => fragment.slice(1).map((point, index) => [fragment[index], point] as const));
-  const halves = pairs.flatMap(([start, end]) => {
-    const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
-    return [[start, midpoint], [midpoint, end]] as const;
-  });
-  return halves.map((pair, index) => ({
-    path: pair.map((point) => [point.x, point.y]),
-    color: segmentColor(index, halves.length),
+  return fragments.filter((fragment) => fragment.length >= 2).map((fragment) => ({
+    path: fragment.map((point) => [point.x, point.y] as [number, number]),
+    color: COLOR_TRACE,
     width,
     pick,
   }));
 }
 
-function traceSegments(trace: ProcessMapTrace, width = trace.trace_width): PathDatum[] {
+function tracePaths(trace: ProcessMapTrace, width = trace.trace_width): PathDatum[] {
   const pick: TracePick = { kind: "trace", id: trace.resource_operational_relationship_id, trace };
-  return staticTraceSegments(trace.path_fragments, width, pick);
+  return staticTracePaths(trace.path_fragments, width, pick);
 }
 
 function placementBounds(placement: ProcessMapPlacement): ProcessMapBounds {
@@ -648,7 +632,7 @@ function renderTileSubLayers(
   }
   for (const trace of props.data.traces) {
     const id = trace.resource_operational_relationship_id;
-    if (!options.editedTraceIDs.has(id) && options.selectedTraceID !== id) traces.push(...traceSegments(trace));
+    if (!options.editedTraceIDs.has(id) && options.selectedTraceID !== id) traces.push(...tracePaths(trace));
   }
   return [
     new PathLayer<PathDatum>({ id: `${props.id}-traces`, data: traces, pickable: true, positionFormat: "XY", widthUnits: "common", widthMinPixels: PROCESS_MAP_TRACE_MIN_WIDTH_PX, widthMaxPixels: PROCESS_MAP_TRACE_MAX_WIDTH_PX, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
@@ -670,7 +654,7 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
     const target = options.presentation.placements.get(placementKey(trace.target));
     const fullPath = tracePath(trace, options.presentation.placements);
     const pathFragments = fullPath ? [fullPath] : trace.path_fragments;
-    paths.push(...traceSegments(
+    paths.push(...tracePaths(
       { ...trace, path_fragments: pathFragments },
       source ? processMapTraceWidth(source) : trace.trace_width,
     ));
@@ -693,7 +677,7 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
     const start = processMapOutputAnchor(options.editOverlay.connectionPreview.source);
     const end = options.editOverlay.connectionPreview.point;
     const route = defaultProcessMapRoutePoints(start, end);
-    paths.push(...staticTraceSegments(
+    paths.push(...staticTracePaths(
       [processMapOrthogonalPathPoints(start, route, end)],
       processMapTraceWidth(options.editOverlay.connectionPreview.source),
     ));
