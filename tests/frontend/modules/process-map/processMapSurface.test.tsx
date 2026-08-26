@@ -104,7 +104,7 @@ function buildOptions(overrides: Partial<ProcessMapLayerBuildOptions> = {}): Pro
     editedTraceIDs: new Set(),
     editOverlay: {
       placements: [], traces: [], selectedPlacementKey: null, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
     },
     getTileData: async () => null,
     onTileLoad: () => undefined,
@@ -171,16 +171,36 @@ test("protected generations keep one logical TileLayer while replacing and dispo
     ProcessMapProtectedTileLayer.prototype.updateState.call(fake as never, {
       oldProps: { protectedGeneration: 4 },
       props: { protectedGeneration: 4 },
+      changeFlags: { dataChanged: false, updateTriggersChanged: false },
     } as never);
     assert.equal(finalizes, 0);
     ProcessMapProtectedTileLayer.prototype.updateState.call(fake as never, {
       oldProps: { protectedGeneration: 4 },
       props: { protectedGeneration: 5 },
+      changeFlags: { dataChanged: false, updateTriggersChanged: false },
     } as never);
     assert.equal(finalizes, 1, "permission generation changes must finalize the old protected Tileset");
     assert.equal(fake.state.tileset, null);
     assert.equal(fake.state.isLoaded, false);
     assert.equal(parentUpdates, 2);
+  } finally {
+    parent.updateState = originalParentUpdate;
+  }
+});
+
+test("mutation masks regenerate cached tile sublayers during a same-permission version reload", () => {
+  const parent = Object.getPrototypeOf(ProcessMapProtectedTileLayer.prototype) as { updateState: (params: unknown) => void };
+  const originalParentUpdate = parent.updateState;
+  const cachedTile = { layers: [{}] as unknown[] | null };
+  const fake = { state: { tileset: { tiles: [cachedTile] } } };
+  parent.updateState = () => undefined;
+  try {
+    ProcessMapProtectedTileLayer.prototype.updateState.call(fake as never, {
+      oldProps: { protectedGeneration: 4 },
+      props: { protectedGeneration: 4 },
+      changeFlags: { dataChanged: true, updateTriggersChanged: { renderSubLayers: true } },
+    } as never);
+    assert.equal(cachedTile.layers, null, "mutation masks must immediately regenerate cached drawing sublayers");
   } finally {
     parent.updateState = originalParentUpdate;
   }
@@ -344,6 +364,7 @@ test("every Process Map PathLayer declares and yields flat XY geometry", () => {
       connectionPreview: { source, point: { x: 35, y: 28 } },
       highlightedFolderKey: "company_explorer_folder:folder",
       connectionSourceKey: "logic_gate:source",
+      hoveredPlacementKey: null,
     },
   }));
   const editTraceLayer = layerByID(editLayers, "process-map-edit-traces");
@@ -384,7 +405,7 @@ test("declared presentation ceilings suppress labels and waypoints above authori
     editOverlay: {
       placements: [], traces: [normalTrace], selectedPlacementKey: null,
       selectedTraceID: normalTrace.resource_operational_relationship_id,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
     },
   }));
   assert.deepEqual(layerByID(normalLayers, "process-map-edit-waypoints").props.data, []);
@@ -397,7 +418,7 @@ test("declared presentation ceilings suppress labels and waypoints above authori
     editOverlay: {
       placements: [], traces: [editingTrace], selectedPlacementKey: null,
       selectedTraceID: editingTrace.resource_operational_relationship_id,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
     },
   }));
   assert.deepEqual(
@@ -412,7 +433,7 @@ test("declared presentation ceilings suppress labels and waypoints above authori
     editOverlay: {
       placements: [], traces: [editingTrace], selectedPlacementKey: null,
       selectedTraceID: editingTrace.resource_operational_relationship_id,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
     },
   }));
   assert.equal((layerByID(editingLayers, "process-map-edit-waypoints").props.data as unknown[]).length, 1);
@@ -486,7 +507,7 @@ test("selected Folder editing stays transparent and exposes saved-geometry resiz
     editedPlacementKeys: new Set([key]),
     editOverlay: {
       placements: [folder], traces: [], selectedPlacementKey: key, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: key, connectionSourceKey: null,
+      connectionPreview: null, highlightedFolderKey: key, connectionSourceKey: null, hoveredPlacementKey: null,
     },
   }));
   const fences = layerByID(layers, "process-map-edit-folder-fences").props.data as unknown[];
@@ -510,13 +531,49 @@ test("selected Folder editing stays transparent and exposes saved-geometry resiz
   assert.equal(anchors.length, 2, "physical input and output sides remain connectable while editing");
 });
 
+test("hovering an accessible Process or Folder reveals its physical input and output anchors", () => {
+  const process = placement("process", 0, 0);
+  const folder = placement("folder", 20, 0, 12, 8, "company_explorer_folder");
+  const processKey = "logic_gate:process";
+  const folderKey = "company_explorer_folder:folder";
+  const presentation: ProcessMapPresentationState = {
+    placements: new Map([[processKey, process], [folderKey, folder]]),
+    traces: new Map(),
+    removedPlacementKeys: new Set(),
+  };
+  const anchorsFor = (hoveredPlacementKey: string) => {
+    const layers = buildProcessMapLayers(buildOptions({
+      settledPixelsPerGridUnit: 24,
+      presentation,
+      editOverlay: {
+        placements: [], traces: [], selectedPlacementKey: null, selectedTraceID: null,
+        connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey,
+      },
+    }));
+    return layerByID(layers, "process-map-edit-anchors").props.data as Array<{
+      pick: { anchor: "input" | "output"; key: string };
+    }>;
+  };
+
+  assert.deepEqual(
+    anchorsFor(processKey).map((item) => [item.pick.key, item.pick.anchor]),
+    [[processKey, "input"], [processKey, "output"]],
+  );
+  assert.deepEqual(
+    anchorsFor(folderKey).map((item) => [item.pick.key, item.pick.anchor]),
+    [[folderKey, "input"], [folderKey, "output"]],
+  );
+});
+
 test("an active connection keeps only the source output and distinct eligible target inputs", () => {
   const source = placement("source", 0, 0);
   const target = placement("target", 20, 0, 12, 8, "company_explorer_folder");
+  const secondTarget = placement("second-target", 40, 0);
   const sourceKey = "logic_gate:source";
   const targetKey = "company_explorer_folder:target";
+  const secondTargetKey = "logic_gate:second-target";
   const presentation: ProcessMapPresentationState = {
-    placements: new Map([[sourceKey, source], [targetKey, target]]),
+    placements: new Map([[sourceKey, source], [targetKey, target], [secondTargetKey, secondTarget]]),
     traces: new Map(),
     removedPlacementKeys: new Set(),
   };
@@ -532,6 +589,7 @@ test("an active connection keeps only the source output and distinct eligible ta
       connectionPreview: { source, point: { x: target.grid_x, y: target.grid_y + target.grid_height / 2 } },
       highlightedFolderKey: null,
       connectionSourceKey: sourceKey,
+      hoveredPlacementKey: null,
     },
   }));
   const anchors = layerByID(layers, "process-map-edit-anchors").props.data as Array<{
@@ -540,9 +598,10 @@ test("an active connection keeps only the source output and distinct eligible ta
   }>;
   assert.deepEqual(
     anchors.map((item) => [item.pick.key, item.pick.anchor]),
-    [[sourceKey, "output"], [targetKey, "input"]],
+    [[sourceKey, "output"], [targetKey, "input"], [secondTargetKey, "input"]],
   );
-  assert.ok(anchors[1].radius > anchors[0].radius, "eligible inputs receive the clearer target treatment");
+  assert.ok(anchors.slice(1).every((anchor) => anchor.radius > anchors[0].radius), "eligible inputs receive the clearer target treatment");
+  assert.deepEqual(layerByID(layers, "process-map-edit-resize-handles").props.data, [], "connection mode does not mix resize grips with anchors");
   const preview = layerByID(layers, "process-map-edit-traces");
   assertFlatXYPathLayer(preview);
   const colors = (preview.props.data as Array<{ color: number[] }>).map((item) => item.color);

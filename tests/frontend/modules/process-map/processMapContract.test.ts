@@ -136,6 +136,35 @@ test("company or auth scope changes synchronously suppress protected geometry be
   assert.match(purge, /setExternalDropPoint\(null\)/);
 });
 
+test("same-permission mutation reconciliation keeps loaded coverage and refreshes masked tile layers", () => {
+  const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  const refreshStart = surface.indexOf("const refreshAfterMutation = useCallback");
+  const refreshEnd = surface.indexOf("\n\n  const applyEnvelope", refreshStart);
+  assert.ok(refreshStart >= 0 && refreshEnd > refreshStart);
+  const refresh = surface.slice(refreshStart, refreshEnd);
+  assert.match(refresh, /setScene\(/);
+  assert.match(refresh, /loadScene\(false\)/);
+  assert.doesNotMatch(refresh, /setLoadedTiles\(new Map\(\)\)/);
+  assert.match(surface, /committedOverlay\.removedPlacementKeys/);
+  assert.match(surface, /tile\.layers = null/);
+  assert.match(surface, /tile\.process_map_read_version === readVersion/);
+});
+
+test("editing hover reveals anchors and connection drag starts synchronously", () => {
+  const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  const hoverStart = surface.indexOf("const handleHover = useCallback");
+  const hoverEnd = surface.indexOf("\n\n  const removeSelection", hoverStart);
+  const dragStart = surface.indexOf("const handleDragStart = useCallback");
+  const dragEnd = surface.indexOf("\n\n  const handleDrag = useCallback", dragStart);
+  assert.ok(hoverStart >= 0 && hoverEnd > hoverStart && dragStart >= 0 && dragEnd > dragStart);
+  const hover = surface.slice(hoverStart, hoverEnd);
+  const drag = surface.slice(dragStart, dragEnd);
+  assert.match(hover, /pick\.kind === "placement" \|\| pick\.kind === "anchor" \|\| pick\.kind === "resize"/);
+  assert.match(hover, /setHoveredPlacementKey\(placementKey\(anchorPlacement\)\)/);
+  assert.match(drag, /pick\.kind === "anchor" && pick\.anchor === "output"/);
+  assert.ok(drag.indexOf("gestureRef.current = next") < drag.indexOf("setGesture(next)"));
+});
+
 test("V3 Surface keeps QDC hover and pin controls plus the full Process modal entry points", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const page = source("frontend/src/pages/process-map/ProcessMapPage.tsx");
