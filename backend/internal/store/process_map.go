@@ -238,6 +238,14 @@ func processMapPlacementBounds(item domain.ProcessMapPlacement) domain.ProcessMa
 	return domain.ProcessMapBounds{MinX: item.GridX, MinY: item.GridY, MaxX: item.GridX + item.GridWidth, MaxY: item.GridY + item.GridHeight}
 }
 
+func processMapTraceWidth(source domain.ProcessMapPlacement) float64 {
+	referenceHeight := 5.0
+	if source.ResourceType == domain.ProcessMapResourceTypeFolder {
+		referenceHeight = 7.0
+	}
+	return math.Min(float64(source.GridWidth)/7.0, float64(source.GridHeight)/referenceHeight)
+}
+
 func processMapBoundsContain(outer, inner domain.ProcessMapBounds) bool {
 	return inner.MinX >= outer.MinX && inner.MinY >= outer.MinY && inner.MaxX <= outer.MaxX && inner.MaxY <= outer.MaxY
 }

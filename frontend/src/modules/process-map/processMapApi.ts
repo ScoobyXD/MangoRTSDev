@@ -62,6 +62,7 @@ export type ProcessMapTrace = {
   resource_operational_relationship_id: string;
   source: ProcessMapResourceRef;
   target: ProcessMapResourceRef;
+  trace_width: number;
   route_points: ProcessMapGridPoint[];
   path_fragments: ProcessMapGridPoint[][];
   revision: number;
@@ -244,11 +245,14 @@ function normalizeTrace(value: unknown): ProcessMapTrace {
     if (!Array.isArray(fragment)) throw new Error("invalid_process_map_path_fragment");
     return fragment.map((point) => normalizePoint(point, false));
   }).filter((fragment) => fragment.length >= 2);
+  const traceWidth = requiredFiniteNumber(value.trace_width, "invalid_process_map_trace_width");
+  if (traceWidth <= 0) throw new Error("invalid_process_map_trace_width");
   return {
     presentation: maxPresentation,
     resource_operational_relationship_id: requiredString(value.resource_operational_relationship_id, "invalid_process_map_relationship_id"),
     source: resourceRef(value.source),
     target: resourceRef(value.target),
+    trace_width: traceWidth,
     route_points: routePoints,
     path_fragments: pathFragments,
     revision: requiredInteger(value.revision, "invalid_process_map_trace_revision"),
@@ -665,8 +669,8 @@ export function postProcessMapRelationship(
     method: "POST",
     json: {
       company_id: companyID.trim(),
-      source,
-      target,
+      source: { resource_type: source.resource_type, resource_id: source.resource_id },
+      target: { resource_type: target.resource_type, resource_id: target.resource_id },
       ...(routePoints ? { trace: { route_points: normalizeProcessMapRoutePoints(routePoints) } } : {}),
     },
   });

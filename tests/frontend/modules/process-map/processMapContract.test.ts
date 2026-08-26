@@ -82,7 +82,7 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
   assert.match(surface, /processMapDeepestContainingFolder\(processMapPlacementBounds\(placement\)/);
   assert.match(surface, /processMapDeepestContainingFolder\(processMapPlacementBounds\(pending\), folders\)/);
   assert.match(surface, /folderContainsItsChildren\(saved, presentationRef\.current\.placements\)/);
-  assert.match(surface, /postProcessMapRelationship\(apiBase, companyID, current\.source, target, \[\]\)/);
+  assert.match(surface, /const routePoints = defaultProcessMapRoutePoints\([\s\S]{0,220}postProcessMapRelationship\(apiBase, companyID, current\.source, target, routePoints\)/);
   assert.match(surface, /shouldApplyProcessMapMutationAck/);
   assert.match(surface, /Placement was restored because it could not be saved/);
   assert.match(surface, /Placement removal was rolled back/);
@@ -268,6 +268,8 @@ test("placement tray reuses Explorer identity, one unified card, and suppresses 
     "EXPLORER_DRAG_MIME",
   ]) assert.ok(surface.includes(required), `placement tray must retain ${required}`);
   assert.doesNotMatch(surface, /process-map-placement-tray__browse/);
+  assert.doesNotMatch(surface, /process-map-placement-tray__card-kind/);
+  assert.doesNotMatch(css, /process-map-placement-tray__card-kind/);
 
   const readStart = surface.indexOf("useEffect(() => {\n    if (trayCollapsed) {");
   const readEnd = surface.indexOf("\n  }, [apiBase, companyID, trayCollapsed, trayPath]);", readStart);

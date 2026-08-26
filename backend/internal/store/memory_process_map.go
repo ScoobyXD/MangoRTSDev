@@ -239,7 +239,7 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 		result.Traces = append(result.Traces, domain.ProcessMapTileTrace{
 			ResourceOperationalRelationshipID: relationship.ResourceOperationalRelationshipID,
 			Presentation:                      presentation,
-			Source:                            relationship.Source, Target: relationship.Target, RoutePoints: routePoints,
+			Source:                            relationship.Source, Target: relationship.Target, TraceWidth: processMapTraceWidth(source), RoutePoints: routePoints,
 			PathFragments: fragments, Revision: trace.Revision,
 			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
 		})
@@ -477,9 +477,11 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 	if exists {
 		deltaX, deltaY = input.GridX-current.GridX, input.GridY-current.GridY
 	}
+	movesFolderGroup := resourceType == domain.ProcessMapResourceTypeFolder && exists &&
+		(deltaX != 0 || deltaY != 0) && input.GridWidth == current.GridWidth && input.GridHeight == current.GridHeight
 	changedPlacements := []domain.ProcessMapPlacement{}
 	movedKeys := map[string]bool{}
-	if resourceType == domain.ProcessMapResourceTypeFolder && exists && (deltaX != 0 || deltaY != 0) {
+	if movesFolderGroup {
 		moved := append([]domain.ProcessMapPlacement{cloneProcessMapPlacement(current)}, r.processMapDescendantsLocked(input.CompanyID, input.ResourceID)...)
 		for _, item := range moved {
 			if !r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, item.ResourceType, item.ResourceID) {
@@ -534,7 +536,7 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 	changedPlacements = append(changedPlacements, cloneProcessMapPlacement(current))
 
 	changedTraces := []domain.ProcessMapTrace{}
-	if resourceType == domain.ProcessMapResourceTypeFolder && exists && (deltaX != 0 || deltaY != 0) {
+	if movesFolderGroup {
 		for traceKey, trace := range r.processMapTraces {
 			relationship, ok := r.resourceOperationalRelationships[traceKey]
 			if !ok {

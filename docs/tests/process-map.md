@@ -35,10 +35,10 @@
 33. Every successful placement save MUST increment that placement's revision.
 34. Placement saves MUST use last-committed-save-wins behavior and MUST NOT reject a save merely because the client read an older revision.
 35. Every placement MUST record database-generated creation and update timestamps.
-36. Every accessible Folder MUST be a transparent resizable perimeter fence whose saved positive integer width and height are canonical placement geometry.
-37. Every accessible Process MUST be a resizable neutral card whose saved positive integer width and height are canonical placement geometry.
-38. Initial Folder and Process dimensions MUST be drop defaults only; every successful manual resize MUST save `grid_width` and `grid_height` on the existing placement and advance its revision.
-39. Every accessible Folder perimeter and Process card MUST keep one thin type outline matching Company Explorer: orange for a Folder and green for a Process; selection MUST preserve that type outline, Folder interiors MUST remain transparent, and Process Map MUST NOT add filled semantic item colors.
+36. Every accessible Folder MUST be a transparent perimeter fence whose visible name and perimeter select and move it, whose selected corner grips resize it, and whose saved positive integer width and height are canonical placement geometry; it MUST NOT place an opaque or invisible interior hit surface over contained placements.
+37. Every accessible Process MUST be a movable, resizable neutral card whose saved positive integer width and height are canonical placement geometry.
+38. Initial Folder and Process dimensions MUST be distinct type-specific drop defaults derived once from the current settled camera scale and snapped to positive integer grid dimensions; at the same scale a Process default MUST be smaller and shorter than a Folder default, and every successful manual resize MUST save `grid_width` and `grid_height` on the existing placement and advance its revision without starting ongoing automatic resizing.
+39. Every accessible Folder perimeter and Process card MUST keep one thin type outline matching Company Explorer: orange for a Folder and green for a Process; selection MUST preserve that type outline, Folder interiors MUST remain transparent, and Process Map MUST NOT add filled semantic item colors. The map and placement tray MUST show the current source name without a redundant `Folder` or `Process` caption while the existing icon, outline, and color retain type identity.
 40. A single click on an accessible Folder MUST select that Folder; a single click on an accessible Process MUST select that Process and pin its Process data card immediately to its right; completing a placement drag or connection gesture MUST perform only that gesture and MUST NOT be treated as a click or open, close, pin, or unpin a data card.
 41. A double click on an accessible Folder MAY fit the one existing camera to that Folder fence and MUST NOT navigate, change browser history, or open another semantic map.
 42. A Process MUST remain a leaf on Process Map and MUST NOT open a Process Map child layer; double-clicking it, or pressing Enter or Space while it is focused, MUST instead open that exact Process's canonical Logic Gate editor and Kanban page in the shared blocking overlay.
@@ -53,7 +53,7 @@
 51. Structural map parentage, operational relationships, and trace geometry MUST remain three separate meanings.
 52. Company Explorer hierarchy and Process Map parentage MUST describe organization only and MUST NOT create or imply operational flow.
 53. Map position, visual proximity, shared route geometry, and Company Explorer ordering MUST NOT create or imply an operational relationship.
-54. `resource_operational_relationships` MUST store the exact typed source and exact typed target of every operational relationship.
+54. `resource_operational_relationships` MUST store the exact typed source and exact typed target of every operational relationship, and its create request MUST serialize each endpoint as exactly `{resource_type, resource_id}` without placement geometry, labels, permissions, or other presentation fields.
 55. Process Map MUST allow Folder-to-Folder, Folder-to-Process, Process-to-Folder, and Process-to-Process operational relationships.
 56. Every operational relationship MUST be directed, same-company, and non-self-referential.
 57. Repeating creation for the same exact typed source and target MUST return or reuse the one existing operational relationship and MUST NOT create a duplicate row.
@@ -65,7 +65,7 @@
 63. An operational relationship MAY exist without a Process Map trace, and an absent trace MUST remain absent from the map.
 64. One exact operational relationship MUST have at most one saved `process_map_traces` row in the company map.
 65. Every Folder and Process MUST expose exactly one presentation-defined input anchor and exactly one presentation-defined output anchor derived from its current saved bounds, and those anchor locations MUST NOT be saved trace data.
-66. Every trace MUST leave its source through the source resource's one output anchor and enter its target through the target resource's one input anchor, with no alternate sides or per-trace anchor selection.
+66. Every trace MUST leave its source through the source resource's one output anchor and enter its target through the target resource's one input anchor, with no alternate sides or per-trace anchor selection. A default saved trace or pending preview MUST leave the source horizontally before its first bend and enter the target horizontally after its final bend; those presentation-derived egress and approach segments MUST NOT become saved endpoint or route-point data.
 67. Trace route geometry MUST be one ordered JSONB array of intermediate points expressed as snapped global company-world integer grid coordinates.
 68. Trace JSONB MUST NOT copy endpoint resource IDs, resource types, names, permissions, operational direction, or other source payload.
 69. Trace endpoint coordinates MUST be derived from current placements and their presentation-defined input and output anchors and MUST NOT be duplicated in the route-point array.
@@ -98,7 +98,7 @@
 96. Traces MUST render below map items so that items remain the top interactive layer.
 97. The Process Map background MUST be a very white plain non-geographic canvas with no basemap, imagery, terrain, streets, buildings, globe, latitude/longitude projection, or geographic attribution.
 98. If the existing background grid is retained, it MUST use one subtle uniform smallest-square pattern whose lines have one color and weight, with no emphasized large-square or two-by-two grouping.
-99. Every accessible Process card MUST render as a neutral elevated surface above the grid, while every accessible Folder MUST render above the grid only as its transparent perimeter fence.
+99. Every accessible Process card MUST render as a neutral elevated surface with a subtle presentation shadow above the grid, while every accessible Folder MUST render above the grid only as its transparent perimeter fence.
 100. The background grid MUST move and scale with the map viewport while the user pans and zooms.
 101. Process Map MUST NOT include a minimap.
 102. Process Map MUST omit decorative infographic ribbons, ornamental paths, and visuals that do not represent map data.
@@ -111,7 +111,7 @@
 109. Every restricted placeholder MUST occupy one fixed four-by-three smallest-grid-square rectangle regardless of its hidden resource type.
 110. The input anchor MUST touch the physical center of the accessible placement's left side and the output anchor MUST touch the physical center of its right side using its current saved dimensions, with no visible gap before a trace.
 111. Process Map MUST use one deck.gl instance with one `OrthographicView` and MUST NOT run React Flow or another camera underneath it; Mango-owned placements, relationships, and traces remain the only persisted map state, and deck.gl view, tile, and picking state MUST NOT be persisted.
-112. Every visible trace MUST render below placements as a static orthogonal cyan-to-blue surface whose screen-space width remains perceptible in its active detail band, using the same gradient stops as the Node icon.
+112. Every visible trace MUST render below placements as a static orthogonal cyan-to-blue surface using the same gradient stops as the Node icon. Its requested width MUST derive from the current saved size of its source placement, and its rendered screen width MUST remain within one bounded perceptible minimum and maximum; this derived presentation width MUST NOT become saved trace geometry or relationship authority.
 113. A successful placement, relationship, or trace mutation MUST apply its committed response to the initiating client's edit overlay and advance that client's company read version without clearing loaded same-permission tile coverage, visually resetting the canvas, or showing a blank frame; committed and removed identity masks MUST suppress stale changed fragments until complete current-version viewport coverage arrives while unrelated placements and traces remain visible. The originating connection MUST receive no redundant realtime reload, every other current company connection MUST receive one compact unclassified invalidation that still purges protected geometry, source and visibility changes MUST invalidate every affected viewer, and Process Map MUST NOT poll.
 114. Process Map MUST NOT render Folder-layer breadcrumbs, semantic drill paths, or navigation controls for a canvas that is already continuously visible.
 115. Map-parent ancestry MAY be resolved only for containment validation, Folder group movement, permission-safe presentation, and tile geometry; it MUST follow saved Process Map parentage and MUST NOT be inferred from Company Explorer.

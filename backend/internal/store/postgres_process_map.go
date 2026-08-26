@@ -393,6 +393,7 @@ order by relationship.resource_operational_relationship_id`,
 		if trace.RoutePoints == nil {
 			trace.RoutePoints = []domain.ProcessMapRoutePoint{}
 		}
+		source.ResourceType = relationship.Source.ResourceType
 		fragments := processMapClipPath(processMapTracePath(source, target, trace.RoutePoints), tileBounds)
 		if len(fragments) == 0 {
 			continue
@@ -408,7 +409,7 @@ order by relationship.resource_operational_relationship_id`,
 		result.Traces = append(result.Traces, domain.ProcessMapTileTrace{
 			ResourceOperationalRelationshipID: relationship.ResourceOperationalRelationshipID,
 			Presentation:                      presentation,
-			Source:                            relationship.Source, Target: relationship.Target, RoutePoints: routePoints,
+			Source:                            relationship.Source, Target: relationship.Target, TraceWidth: processMapTraceWidth(source), RoutePoints: routePoints,
 			PathFragments: fragments, Revision: trace.Revision,
 			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
 		})
@@ -831,7 +832,8 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 		}
 	}
 	movesFolderGroup := resourceType == domain.ProcessMapResourceTypeFolder && exists &&
-		(input.GridX != current.GridX || input.GridY != current.GridY)
+		(input.GridX != current.GridX || input.GridY != current.GridY) &&
+		input.GridWidth == current.GridWidth && input.GridHeight == current.GridHeight
 	resources := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
 	if parentID != "" {
 		resources = append(resources, domain.ProcessMapResourceRef{ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: parentID})
@@ -898,19 +900,23 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 		folderBounds := processMapPlacementBounds(target)
 		for _, descendant := range descendants {
 			shifted := descendant
-			shifted.GridX += deltaX
-			shifted.GridY += deltaY
+			if movesFolderGroup {
+				shifted.GridX += deltaX
+				shifted.GridY += deltaY
+			}
 			if !validProcessMapGeometry(shifted.GridX, shifted.GridY, shifted.GridWidth, shifted.GridHeight) {
 				return ProcessMapMutationEnvelope{}, ErrInvalid
 			}
 			if !processMapBoundsContain(folderBounds, processMapPlacementBounds(shifted)) {
 				return ProcessMapMutationEnvelope{}, ErrProcessMapContainment
 			}
-			movedRefs = append(movedRefs, domain.ProcessMapResourceRef{ResourceType: descendant.ResourceType, ResourceID: descendant.ResourceID})
+			if movesFolderGroup {
+				movedRefs = append(movedRefs, domain.ProcessMapResourceRef{ResourceType: descendant.ResourceType, ResourceID: descendant.ResourceID})
+			}
 		}
 	}
 	internalTraces := []domain.ProcessMapTrace{}
-	if resourceType == domain.ProcessMapResourceTypeFolder && exists && (deltaX != 0 || deltaY != 0) {
+	if movesFolderGroup {
 		internalTraces, err = postgresInternalProcessMapTracesTx(ctx, tx, companyID, movedRefs)
 		if err != nil {
 			return ProcessMapMutationEnvelope{}, err
