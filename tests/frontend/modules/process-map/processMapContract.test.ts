@@ -148,6 +148,9 @@ test("same-permission mutation reconciliation keeps loaded coverage and refreshe
   assert.match(surface, /committedOverlay\.removedPlacementKeys/);
   assert.match(surface, /tile\.layers = null/);
   assert.match(surface, /tile\.process_map_read_version === readVersion/);
+  assert.match(surface, /removedPlacementKeys: new Set\(current\.removedPlacementKeys\)\.add\(key\)/);
+  assert.match(surface, /placementKey\(trace\.source\) === key \|\| placementKey\(trace\.target\) === key/);
+  assert.match(surface, /setRemovedTraceIDs\(\(current\) => new Set\(\[\.\.\.current, \.\.\.incident\]\)\)/);
 });
 
 test("editing hover reveals anchors and connection drag starts synchronously", () => {
