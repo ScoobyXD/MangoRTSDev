@@ -15,7 +15,6 @@ import {
   processMapPlacementBounds,
   processMapPlacementDisplayLOD,
   processMapPlacementLOD,
-  processMapTraceWidth,
   resizeProcessMapPlacement,
 } from "../../../../frontend/src/modules/process-map/processMapGeometry.js";
 
@@ -188,7 +187,7 @@ test("drop dimensions stay screen-sized while Process remains shorter than Folde
   assert.deepEqual(processMapInitialPlacementDimensions("company_explorer_folder", 1_000), { width: 2, height: 2 });
 });
 
-test("manual resize keeps distinct minimum dimensions and source-sized trace widths", () => {
+test("manual resize keeps distinct minimum dimensions", () => {
   const process = resizeProcessMapPlacement(
     { grid_x: 10, grid_y: 10, grid_width: 7, grid_height: 5 },
     "logic_gate",
@@ -207,7 +206,4 @@ test("manual resize keeps distinct minimum dimensions and source-sized trace wid
     "north",
   );
   assert.deepEqual(folder, { grid_x: 15, grid_y: 15, grid_width: 2, grid_height: 2 });
-  assert.equal(processMapTraceWidth({ resource_type: "logic_gate", grid_width: 7, grid_height: 5 }), 1);
-  assert.equal(processMapTraceWidth({ resource_type: "logic_gate", grid_width: 14, grid_height: 10 }), 2);
-  assert.equal(processMapTraceWidth({ resource_type: "company_explorer_folder", grid_width: 14, grid_height: 7 }), 1);
 });

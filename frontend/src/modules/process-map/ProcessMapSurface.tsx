@@ -49,8 +49,6 @@ import {
   PROCESS_MAP_SETTLE_DELAY_MS,
   PROCESS_MAP_TILE_CACHE_BYTES,
   PROCESS_MAP_TILE_DEBOUNCE_MS,
-  PROCESS_MAP_TRACE_MAX_WIDTH_PX,
-  PROCESS_MAP_TRACE_MIN_WIDTH_PX,
   defaultProcessMapRoutePoints,
   fitProcessMapViewState,
   insertProcessMapRoutePoint,
@@ -64,7 +62,6 @@ import {
   processMapOutputAnchor,
   processMapPlacementBounds,
   processMapPlacementDisplayLOD,
-  processMapTraceWidth,
   resizeProcessMapPlacement,
   snapProcessMapGridCoordinate,
   type ProcessMapBounds,
@@ -88,6 +85,8 @@ const PROCESS_MAP_DOUBLE_CLICK_MS = 300;
 const COLOR_FOLDER: [number, number, number, number] = [249, 115, 22, 230];
 const COLOR_PROCESS: [number, number, number, number] = [25, 240, 122, 235];
 const COLOR_TRACE: [number, number, number, number] = [38, 195, 234, 220];
+const PROCESS_MAP_TRACE_WIDTH_PX = 3;
+const PROCESS_MAP_SELECTED_TRACE_WIDTH_PX = 4;
 const COLOR_TEXT: [number, number, number, number] = [30, 41, 59, 245];
 const COLOR_PROCESS_SURFACE: [number, number, number, number] = [248, 250, 252, 252];
 const COLOR_PROCESS_SHADOW: [number, number, number, number] = [100, 116, 139, 42];
@@ -317,13 +316,11 @@ export function applyProcessMapMutationEnvelope(
     const source = existing?.source ?? relationship?.source;
     const target = existing?.target ?? relationship?.target;
     if (!source || !target) continue;
-    const sourcePlacement = pending.get(placementKey(source)) ?? placements.get(placementKey(source));
     const next: ProcessMapTrace = {
       presentation: existing?.presentation ?? "editing",
       resource_operational_relationship_id: committed.resource_operational_relationship_id,
       source: { ...source },
       target: { ...target },
-      trace_width: sourcePlacement ? processMapTraceWidth(sourcePlacement) : existing?.trace_width ?? 1,
       route_points: committed.route_points.map((point) => ({ ...point })),
       path_fragments: existing?.path_fragments.map((fragment) => fragment.map((point) => ({ ...point }))) ?? [],
       revision: committed.revision,
@@ -546,7 +543,7 @@ function staticTracePaths(
   }));
 }
 
-function tracePaths(trace: ProcessMapTrace, width = trace.trace_width): PathDatum[] {
+function tracePaths(trace: ProcessMapTrace, width = PROCESS_MAP_TRACE_WIDTH_PX): PathDatum[] {
   const pick: TracePick = { kind: "trace", id: trace.resource_operational_relationship_id, trace };
   return staticTracePaths(trace.path_fragments, width, pick);
 }
@@ -635,7 +632,7 @@ function renderTileSubLayers(
     if (!options.editedTraceIDs.has(id) && options.selectedTraceID !== id) traces.push(...tracePaths(trace));
   }
   return [
-    new PathLayer<PathDatum>({ id: `${props.id}-traces`, data: traces, pickable: true, positionFormat: "XY", widthUnits: "common", widthMinPixels: PROCESS_MAP_TRACE_MIN_WIDTH_PX, widthMaxPixels: PROCESS_MAP_TRACE_MAX_WIDTH_PX, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PathLayer<PathDatum>({ id: `${props.id}-traces`, data: traces, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
     new PathLayer<PathDatum>({ id: `${props.id}-folder-fences`, data: fences, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
     new PolygonLayer<PolygonDatum>({ id: `${props.id}-process-shadows`, data: processShadows, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
     new PolygonLayer<PolygonDatum>({ id: `${props.id}-placements`, data: bodies, pickable: true, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
@@ -654,10 +651,7 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
     const target = options.presentation.placements.get(placementKey(trace.target));
     const fullPath = tracePath(trace, options.presentation.placements);
     const pathFragments = fullPath ? [fullPath] : trace.path_fragments;
-    paths.push(...tracePaths(
-      { ...trace, path_fragments: pathFragments },
-      source ? processMapTraceWidth(source) : trace.trace_width,
-    ));
+    paths.push(...tracePaths({ ...trace, path_fragments: pathFragments }, PROCESS_MAP_SELECTED_TRACE_WIDTH_PX));
     if (trace.presentation !== "editing" || options.editOverlay.selectedTraceID !== trace.resource_operational_relationship_id) continue;
     if (
       !source
@@ -679,11 +673,11 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
     const route = defaultProcessMapRoutePoints(start, end);
     paths.push(...staticTracePaths(
       [processMapOrthogonalPathPoints(start, route, end)],
-      processMapTraceWidth(options.editOverlay.connectionPreview.source),
+      PROCESS_MAP_TRACE_WIDTH_PX,
     ));
   }
   return {
-    path: new PathLayer<PathDatum>({ id: "process-map-edit-traces", data: paths, pickable: true, positionFormat: "XY", widthUnits: "common", widthMinPixels: PROCESS_MAP_TRACE_MIN_WIDTH_PX, widthMaxPixels: PROCESS_MAP_TRACE_MAX_WIDTH_PX, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    path: new PathLayer<PathDatum>({ id: "process-map-edit-traces", data: paths, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
     waypoints: new ScatterplotLayer<PointDatum>({ id: "process-map-edit-waypoints", data: waypoints, pickable: true, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 2 }),
   };
 }
@@ -1646,16 +1640,13 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [markUnsettled, viewportSize]);
 
   const openProcess = useCallback((placement: ProcessMapVisiblePlacement) => {
-    if (
-      placement.resource_type !== "logic_gate"
-      || processMapPlacementDisplayLOD(placement, 2 ** settledViewState.zoom) !== "editing"
-    ) return;
+    if (placement.resource_type !== "logic_gate") return;
     clearHoverTimer();
     setHoveredPlacementKey(null);
     setHoveredProcessID(null);
     setPinnedProcessID(null);
     onOpenLogicGate(placement.resource_id, placement.name);
-  }, [clearHoverTimer, onOpenLogicGate, settledViewState.zoom]);
+  }, [clearHoverTimer, onOpenLogicGate]);
 
   const handleClick = useCallback((info: PickingInfo) => {
     surfaceRef.current?.focus();
@@ -1678,7 +1669,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setSelection({ kind: "placement", id: pick.key });
       if (doubleClick) {
         if (pick.placement.resource_type === "company_explorer_folder") fitFolder(pick.placement);
-        else if (processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "editing") openProcess(pick.placement);
+        else openProcess(pick.placement);
       } else if (pick.placement.resource_type === "logic_gate" && processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "editing") {
         setPinnedProcessID(pick.placement.resource_id);
         setHoveredProcessID(null);

@@ -187,7 +187,9 @@ The required settled bands are:
 
 - Whole-company detail: every displayable Process contributes a stable green-cued cheap mark, every displayable Folder keeps a perceptible orange fence, and static operational traces remain perceptible. The initial fit has no selection, QDC card, anchors, resize grips, waypoints, or editing controls; retained pinned-card behavior remains governed by its existing law after user interaction.
 - Normal map detail: full neutral Process shapes with green outlines, transparent orange Folder fences, readable names, and static traces appear.
-- Editing detail: the same shapes remain visible and the selected placement adds its distinct input/output anchors or resize grips, trace route points, hover behavior, pinned QDC card behavior, Process modal launch behavior, and current editing affordances.
+- Editing detail: the same shapes remain visible and the selected placement adds its distinct input/output anchors or resize grips, trace route points, hover behavior, pinned QDC card behavior, and current editing affordances.
+
+At every detail band, double-clicking an accessible Process opens its canonical full-page Logic Gate overlay; this action is not gated by editing zoom.
 
 Do not invent extra operational summary data merely to fill a zoom band. Current source names and existing UI facts are enough until a separate product requirement adds another canonical fact.
 
@@ -222,7 +224,7 @@ GET /v1/process-map/tiles/{z}/{x}/{y}?company_id={company_id}
 
 The scene response contains only permission-safe camera and tile metadata required to initialize the canvas, including the current display bounds and tile/read version. It is not a whole-company business graph or copied Explorer tree.
 
-The tile response contains only the placements, clipped trace geometry, labels, and presentation fields needed for that tile's LOD. Each accessible trace includes a positive presentation-only `trace_width` derived from its current source placement size so every clipped tile fragment uses one consistent source-sized width; that value is not stored trace geometry or relationship authority. If an otherwise valid trace omits that presentation hint, the client uses neutral width `1` instead of rejecting the complete tile; an explicitly invalid value still fails validation. Adding or changing that field or its derivation advances the tile response-contract validator before an older ETag can reuse a pre-change body through `304`. The response must never return full Process documents, Node data, QDC history, email data, tasks, attachments, the complete Company Explorer tree, or generic relationship graphs.
+The tile response contains only the placements, clipped trace geometry, labels, and presentation fields needed for that tile's LOD. Trace width is fixed client presentation and is not carried in the tile contract or stored as trace geometry. Any response-representation change advances the tile response-contract validator before an older ETag can reuse a pre-change body through `304`. The response must never return full Process documents, Node data, QDC history, email data, tasks, attachments, the complete Company Explorer tree, or generic relationship graphs.
 
 Existing exact mutation meanings remain:
 
@@ -293,7 +295,7 @@ Hovering an accessible placement or either of its revealed anchors at editing de
 
 The trace route stores only ordered intermediate global integer grid points. Endpoint coordinates remain derived. A default saved route and pending preview leave the source output horizontally before the first bend and enter the target input horizontally after the final bend. Those egress and approach segments are derived presentation and are not added to saved route points. Trace tiles clip the canonical route for rendering without rewriting it.
 
-Trace width is also derived presentation. Its requested width comes from the current saved size of the source placement, the renderer bounds that width to one perceptible screen-space minimum and maximum, and the tile contract carries the positive derived `trace_width` so fragments remain consistent even when the source placement is outside that tile. No width is written to `process_map_traces`.
+Trace width is fixed screen-space presentation: saved traces and connection previews use three pixels, while selected or edited traces use four pixels. Placement size and camera zoom do not change those widths, and no width is written to `process_map_traces` or returned by the tile contract.
 
 Changing a placement's map parent, position, or dimensions preserves the operational relationship and its saved trace. Moving endpoints changes their derived anchor positions. Removing a placement may remove its saved incident trace geometry while preserving the underlying operational relationship. Permanently deleting an endpoint removes its placement, incident operational relationships, and dependent traces through the existing exact-identity lifecycle.
 
@@ -408,7 +410,7 @@ Frontend coverage must prove:
 - Process cards remain neutral elevated surfaces with a subtle shadow, support move and resize, and map and tray labels show only source names while existing icons, outlines, and colors retain type identity;
 - initial Folder and Process drop dimensions derive from the settled camera scale, snap to positive integer grid sizes, and keep the Process smaller and shorter than the Folder at the same scale;
 - candidate Explorer hierarchy does not choose map containment;
-- drag, move, group move, resize, reparent, selection, hover-visible placement anchors, selected-placement resize grips, active-connection target inputs, source-horizontal default egress, target-horizontal default entry, source-size-derived bounded trace width, static traces, waypoints, QDC cards, Process modal open/close, and failure rollback work;
+- drag, move, group move, resize, reparent, selection, hover-visible placement anchors, selected-placement resize grips, active-connection target inputs, source-horizontal default egress, target-horizontal default entry, fixed screen-pixel trace widths, static traces, waypoints, QDC cards, Process modal open/close at every detail band, and failure rollback work;
 - the expanded and collapsed Explorer-style tray, collapsed-read suppression, Folder browse-versus-drag behavior, exact Explorer payload, and internal scrolling work;
 - hovered placements retain their anchors while the pointer enters a revealed anchor, active connection previews and eligible target inputs remain visible, near-target drops commit the canonical relationship and trace, and leaving, completion, invalid drop, cancellation, camera change, and permission change clear the applicable temporary controls;
 - every group-move response contains all committed placement and trace revisions required for immediate reconciliation;

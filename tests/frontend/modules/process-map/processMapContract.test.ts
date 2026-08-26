@@ -174,6 +174,7 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
   const card = source("frontend/src/modules/process-map/ProcessMapQDCard.tsx");
   const css = source("frontend/src/modules/process-map/processMap.css");
   const app = source("frontend/src/app/applayout.tsx");
+  const shell = source("frontend/src/modules/editor/UnifiedNodeShell.tsx");
 
   assert.match(page, /hoverModeEnabled/);
   assert.match(surface, /hoveredProcessID/);
@@ -190,12 +191,23 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
   assert.ok(clickStart >= 0 && clickEnd > clickStart);
   const click = surface.slice(clickStart, clickEnd);
   assert.match(click, /if \(doubleClick\)/);
-  assert.match(click, /processMapPlacementDisplayLOD\(pick\.placement, 2 \*\* settledViewState\.zoom\) === "editing"\) openProcess\(pick\.placement\)/);
+  assert.match(click, /else openProcess\(pick\.placement\)/);
+  const openStart = surface.indexOf("const openProcess = useCallback");
+  const openEnd = surface.indexOf("const handleClick = useCallback", openStart);
+  const openProcess = surface.slice(openStart, openEnd);
+  assert.match(openProcess, /placement\.resource_type !== "logic_gate"/);
+  assert.doesNotMatch(openProcess, /processMapPlacementDisplayLOD/);
+  assert.match(openProcess, /onOpenLogicGate\(placement\.resource_id, placement\.name\)/);
+  assert.match(click, /processMapPlacementDisplayLOD\(pick\.placement, 2 \*\* settledViewState\.zoom\) === "editing"[\s\S]*setPinnedProcessID/);
   assert.match(surface, /event\.key === "Enter" \|\| event\.key === " "/);
   assert.match(surface, /openProcess\(selectedPlacement\)/);
   assert.match(app, /onOpenLogicGate=\{openProcessMapLogicGateOverlay\}/);
   assert.match(app, /<AppModalPortal[\s\S]{0,1800}<LazyLogicGateArenaPage/);
   assert.match(app, /aria-modal="true"/);
+  assert.match(app, /width: "calc\(100vw - 12px\)"/);
+  assert.match(app, /height: "calc\(100vh - 12px\)"/);
+  assert.match(app, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
+  assert.match(shell, /background: "linear-gradient\(135deg, #ff5a6b, #ef334e\)"/);
 });
 
 test("V3 Surface keeps valid tile data through camera settlement and accepts deck cursor-anchored zoom", () => {

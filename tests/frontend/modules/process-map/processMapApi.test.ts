@@ -61,7 +61,7 @@ function tilePayload(readVersion = 11, z = 2, x = 3, y = -1) {
   };
 }
 
-test("tile presentation normalizes omitted names, routes, and trace width without discarding the tile", async () => {
+test("tile presentation normalizes omitted names and routes without discarding the tile", async () => {
   const apiBase = "https://process-map-presentation-normalization.test";
   invalidateProcessMapReadCaches(apiBase, "company-1");
   const originalFetch = globalThis.fetch;
@@ -103,7 +103,6 @@ test("tile presentation normalizes omitted names, routes, and trace width withou
     assert.equal(visible.restricted ? undefined : visible.presentation, "whole");
     assert.equal(visible.restricted ? undefined : visible.name, "");
     assert.equal(tile.traces[0].presentation, "normal");
-    assert.equal(tile.traces[0].trace_width, 1);
     assert.deepEqual(tile.traces[0].route_points, []);
   } finally {
     invalidateProcessMapReadCaches(apiBase, "company-1");
@@ -134,7 +133,6 @@ test("tile parser rejects missing or invalid presentation ceilings", async () =>
     resource_operational_relationship_id: "trace-1",
     source: { resource_type: "logic_gate", resource_id: "source" },
     target: { resource_type: "logic_gate", resource_id: "target" },
-    trace_width: 1,
     route_points: [],
     path_fragments: [[{ x: 8, y: 4 }, { x: 20, y: 4 }]],
     revision: 1,

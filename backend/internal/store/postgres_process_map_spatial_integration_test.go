@@ -110,11 +110,11 @@ func TestPostgresProcessMapTileLODMatchesMemoryProjection(t *testing.T) {
 		traceByID[trace.ResourceOperationalRelationshipID] = trace
 	}
 	wholeTrace := traceByID[wholeRelationship.Relationship.ResourceOperationalRelationshipID]
-	if wholeTrace.Presentation != domain.ProcessMapPresentationWhole || len(wholeTrace.RoutePoints) != 0 || wholeTrace.TraceWidth != 1 {
+	if wholeTrace.Presentation != domain.ProcessMapPresentationWhole || len(wholeTrace.RoutePoints) != 0 {
 		t.Fatalf("whole trace projection = %+v, want omitted route_points", wholeTrace)
 	}
 	editingTrace := traceByID[editingRelationship.Relationship.ResourceOperationalRelationshipID]
-	if editingTrace.Presentation != domain.ProcessMapPresentationEditing || !reflect.DeepEqual(editingTrace.RoutePoints, editingRoute) || editingTrace.TraceWidth != 400.0/7.0 {
+	if editingTrace.Presentation != domain.ProcessMapPresentationEditing || !reflect.DeepEqual(editingTrace.RoutePoints, editingRoute) {
 		t.Fatalf("editing trace projection = %+v, want route_points %v", editingTrace, editingRoute)
 	}
 

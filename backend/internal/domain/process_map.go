@@ -115,7 +115,6 @@ type ProcessMapTileTrace struct {
 	Presentation                      ProcessMapPresentation  `json:"presentation"`
 	Source                            ProcessMapResourceRef   `json:"source"`
 	Target                            ProcessMapResourceRef   `json:"target"`
-	TraceWidth                        float64                 `json:"trace_width"`
 	RoutePoints                       []ProcessMapRoutePoint  `json:"route_points"`
 	PathFragments                     [][]ProcessMapPathPoint `json:"path_fragments"`
 	Revision                          int64                   `json:"revision"`
