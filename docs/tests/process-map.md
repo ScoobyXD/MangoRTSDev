@@ -156,9 +156,9 @@
 154. The V3 migration MUST preflight and atomically reject cycles, missing or cross-company map parents, traces whose endpoints do not share their legacy layer, coordinate overflow, or any row it cannot convert deterministically; after success, the exact-layer coordinate meaning and reader MUST be deleted with no fallback or partial company conversion.
 155. A successful Folder group move MUST advance every changed placement revision and every translated trace revision and update timestamp exactly once, and its committed HTTP response MUST contain every changed placement and trace row plus the new company Process Map read version so the initiating client can reconcile without guessing or waiting for its own realtime echo.
 156. User-initiated removal of a mapped Folder with direct map children MUST require Edit access to the Folder, every direct child whose map parent changes, and the destination Folder when one exists, MUST lock and revalidate the complete affected set, and MUST change nothing on denial; authorized permanent source-Folder deletion MAY perform the same reparenting as system lifecycle cleanup without granting access or disclosing hidden identities.
-157. A tile's z/x/y, company read version, actor, and permission generation MUST fully identify its server payload: the server MUST return a conservative permission-safe presentation superset for the whole integer-z interval, and the client MUST choose each object's exact settled LOD from projected screen size without issuing another request merely because fractional zoom crossed a visual threshold.
+157. A tile's z/x/y, company read version, actor, permission generation, and response-contract version MUST fully identify its server payload: the server MUST return a conservative permission-safe presentation superset for the whole integer-z interval, and the client MUST choose each object's exact settled LOD from projected screen size without issuing another request merely because fractional zoom crossed a visual threshold.
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 # Process Story: One company canvas moves from overview to Process work
 

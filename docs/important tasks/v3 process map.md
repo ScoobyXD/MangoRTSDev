@@ -171,7 +171,7 @@ One tile request returns the permission-safe representation for its integer zoom
 - Fine-detail tiles add the current full Process Map card presentation and editing targets.
 - Tile representations always use the same canonical placement and relationship identities; a detail representation is not a copied business entity.
 - Folder fences and traces intersecting tile boundaries are clipped into deterministic tile fragments or returned with stable identities and deterministic deduplication.
-- Tile cache keys and ETags are viewer-, permission-, company-read-version-, and tile-coordinate-safe.
+- Tile cache keys are viewer-, permission-, company-read-version-, and tile-coordinate-safe. Tile ETags additionally include the response-contract version. A code-only tile representation change must advance that response contract so an older cached body cannot be reused through `304`.
 
 Use a transparent-vector-safe refinement function through deck.gl's supported refinement hook. When suitable coarse coverage is already loaded, keep the nearest loaded covering ancestor visible until every selected replacement needed for that covered region is ready. Then hide the ancestor and reveal the complete replacement coverage together. A parent and child representation of the same business identity must never both be pickable or produce duplicate edits. Initial loading may show the plain canvas until the first coarse response exists, but a transition between already loaded and requested levels must not flash blank. Failed finer requests keep valid coarse coverage visible and expose the existing bounded error/retry treatment without polling.
 
@@ -454,4 +454,4 @@ Touch shared routing, realtime, permission, recycle, Explorer drag, or test-runn
 - [deck.gl performance guidance](https://deck.gl/docs/developer-guide/performance)
 - [Google KML Regions and screen-space LOD](https://developers.google.com/kml/documentation/regions)
 
-Last updated: August 25, 2026
+Last updated: August 26, 2026
