@@ -61,7 +61,7 @@ func (s *Server) handleListLogicGateQDRatings(w http.ResponseWriter, r *http.Req
 
 func (s *Server) handlePutLogicGateQDRating(w http.ResponseWriter, r *http.Request, logicGateID, metric string) {
 	metric = strings.TrimSpace(metric)
-	if metric != store.QDRatingMetricQuality && metric != store.QDRatingMetricDelivery {
+	if metric != store.QDRatingMetricQuality && metric != store.QDRatingMetricCost && metric != store.QDRatingMetricDelivery {
 		writeError(w, http.StatusBadRequest, "invalid_qd_rating_metric")
 		return
 	}

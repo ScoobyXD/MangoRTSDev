@@ -9,6 +9,7 @@ import (
 
 const (
 	QDRatingMetricQuality      = "quality"
+	QDRatingMetricCost         = "cost"
 	QDRatingMetricDelivery     = "delivery"
 	QDRatingRealtimeEventType  = "logic_gate_qd_rating_updated"
 	QDRatingRealtimeDocumentID = "qd-ratings"
@@ -55,7 +56,7 @@ func normalizeQDRatingPutInput(input QDRatingPutInput) (QDRatingPutInput, error)
 	if input.CompanyID == "" || input.LogicGateID == "" || input.RatedByUserID == "" || input.RatedByDisplayName == "" {
 		return QDRatingPutInput{}, ErrInvalid
 	}
-	if input.Metric != QDRatingMetricQuality && input.Metric != QDRatingMetricDelivery {
+	if input.Metric != QDRatingMetricQuality && input.Metric != QDRatingMetricCost && input.Metric != QDRatingMetricDelivery {
 		return QDRatingPutInput{}, ErrInvalid
 	}
 	if input.Rating != nil {
@@ -123,6 +124,10 @@ func cloneQDRating(item domain.QDRating) domain.QDRating {
 	if item.QualityRating != nil {
 		value := *item.QualityRating
 		item.QualityRating = &value
+	}
+	if item.CostRating != nil {
+		value := *item.CostRating
+		item.CostRating = &value
 	}
 	if item.DeliveryRating != nil {
 		value := *item.DeliveryRating

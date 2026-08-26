@@ -13,10 +13,10 @@ type qdRatingScanner interface {
 
 func scanQDRating(row qdRatingScanner) (domain.QDRating, error) {
 	var item domain.QDRating
-	var quality, delivery, ratedByUserID sql.NullString
+	var quality, cost, delivery, ratedByUserID sql.NullString
 	err := row.Scan(
 		&item.CompanyID, &item.QDRatingID, &item.LogicGateID,
-		&quality, &delivery, &ratedByUserID, &item.RatedByDisplayName,
+		&quality, &cost, &delivery, &ratedByUserID, &item.RatedByDisplayName,
 		&item.RatedCreatedTimestamp, &item.RatedUpdatedTimestamp,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -27,6 +27,9 @@ func scanQDRating(row qdRatingScanner) (domain.QDRating, error) {
 	}
 	if quality.Valid {
 		item.QualityRating = &quality.String
+	}
+	if cost.Valid {
+		item.CostRating = &cost.String
 	}
 	if delivery.Valid {
 		item.DeliveryRating = &delivery.String
@@ -39,7 +42,7 @@ func scanQDRating(row qdRatingScanner) (domain.QDRating, error) {
 
 const qdRatingSelectColumns = `
 company_id::text,qd_rating_id::text,logic_gate_id::text,
-quality_rating,delivery_rating,rated_by_user_id::text,rated_by_display_name,
+quality_rating,cost_rating,delivery_rating,rated_by_user_id::text,rated_by_display_name,
 rated_created_timestamp,rated_updated_timestamp`
 
 func (r *PostgresRepo) ListLogicGateQDRatings(input QDRatingMonthQuery) ([]domain.QDRating, error) {
@@ -111,7 +114,9 @@ func (r *PostgresRepo) PutLogicGateQDRating(input QDRatingPutInput) (QDRatingMut
 
 func (r *PostgresRepo) clearPostgresLogicGateQDRating(ctx context.Context, tx *sql.Tx, input QDRatingPutInput, businessDate string) (QDRatingMutationResult, error) {
 	column := "quality_rating"
-	if input.Metric == QDRatingMetricDelivery {
+	if input.Metric == QDRatingMetricCost {
+		column = "cost_rating"
+	} else if input.Metric == QDRatingMetricDelivery {
 		column = "delivery_rating"
 	}
 	current, err := scanQDRating(tx.QueryRowContext(ctx, `select `+qdRatingSelectColumns+`
@@ -128,10 +133,10 @@ for update`, input.CompanyID, input.LogicGateID, businessDate))
 		return QDRatingMutationResult{}, err
 	}
 	currentValue := current.QualityRating
-	otherValue := current.DeliveryRating
-	if input.Metric == QDRatingMetricDelivery {
+	if input.Metric == QDRatingMetricCost {
+		currentValue = current.CostRating
+	} else if input.Metric == QDRatingMetricDelivery {
 		currentValue = current.DeliveryRating
-		otherValue = current.QualityRating
 	}
 	if currentValue == nil {
 		if err := tx.Commit(); err != nil {
@@ -140,7 +145,10 @@ for update`, input.CompanyID, input.LogicGateID, businessDate))
 		return QDRatingMutationResult{QDRating: &current}, nil
 	}
 	result := QDRatingMutationResult{Changed: true}
-	if otherValue == nil {
+	hasOtherRating := (input.Metric != QDRatingMetricQuality && current.QualityRating != nil) ||
+		(input.Metric != QDRatingMetricCost && current.CostRating != nil) ||
+		(input.Metric != QDRatingMetricDelivery && current.DeliveryRating != nil)
+	if !hasOtherRating {
 		if _, err := tx.ExecContext(ctx, `delete from qd_ratings where company_id=$1::uuid and qd_rating_id=$2::uuid`, input.CompanyID, current.QDRatingID); err != nil {
 			return QDRatingMutationResult{}, err
 		}
@@ -165,7 +173,9 @@ returning `+qdRatingSelectColumns, input.CompanyID, current.QDRatingID, input.Ra
 
 func (r *PostgresRepo) setPostgresLogicGateQDRating(ctx context.Context, tx *sql.Tx, input QDRatingPutInput, businessDate string) (QDRatingMutationResult, error) {
 	column := "quality_rating"
-	if input.Metric == QDRatingMetricDelivery {
+	if input.Metric == QDRatingMetricCost {
+		column = "cost_rating"
+	} else if input.Metric == QDRatingMetricDelivery {
 		column = "delivery_rating"
 	}
 	item, err := scanQDRating(tx.QueryRowContext(ctx, `insert into qd_ratings(

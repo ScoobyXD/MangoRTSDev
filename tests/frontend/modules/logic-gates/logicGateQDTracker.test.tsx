@@ -20,7 +20,7 @@ async function flushAsyncWork(rounds = 8) {
   });
 }
 
-test("the shared Logic Gate Q/D tracker renders 31 slices and reconciles a committed choice", async () => {
+test("the shared Logic Gate QDC tracker renders reference-shaped slices and reconciles a committed choice", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -80,6 +80,7 @@ test("the shared Logic Gate Q/D tracker renders 31 slices and reconciles a commi
           qd_rating_id: "rating-1",
           logic_gate_id: "gate-1",
           quality_rating: "green",
+          cost_rating: null,
           delivery_rating: null,
           rated_by_user_id: "user-1",
           rated_by_display_name: "Avery Stone",
@@ -112,22 +113,37 @@ test("the shared Logic Gate Q/D tracker renders 31 slices and reconciles a commi
     assert.ok(cardTracker);
     for (const tracker of [fullTracker, cardTracker]) {
       assert.equal(tracker.querySelectorAll('[data-qd-metric="quality"]').length, 31);
+      assert.equal(tracker.querySelectorAll('[data-qd-metric="cost"]').length, 31);
       assert.equal(tracker.querySelectorAll('[data-qd-metric="delivery"]').length, 31);
+      assert.match(tracker.textContent ?? "", /Quality, Cost & Delivery/);
     }
     const fullGrid = fullTracker.querySelector<HTMLElement>('[data-qd-letter="Q"]');
     const cardGrid = cardTracker.querySelector<HTMLElement>('[data-qd-letter="Q"]');
+    const fullCostGrid = fullTracker.querySelector<HTMLElement>('[data-qd-letter="C"]');
+    const fullDeliveryGrid = fullTracker.querySelector<HTMLElement>('[data-qd-letter="D"]');
     assert.ok(fullGrid);
     assert.ok(cardGrid);
-    assert.equal(fullGrid.style.maxWidth, "168px");
-    assert.equal(cardGrid.style.maxWidth, "154px");
+    assert.ok(fullCostGrid);
+    assert.ok(fullDeliveryGrid);
+    assert.equal(fullGrid.style.maxWidth, "149px");
+    assert.equal(cardGrid.style.maxWidth, "131px");
     for (const grid of [fullGrid, cardGrid]) {
-      assert.equal(grid.style.gridTemplateColumns, "repeat(7, minmax(0, 1fr))");
+      assert.equal(grid.style.gridTemplateColumns, "repeat(6, minmax(0, 1fr))");
       assert.equal(grid.style.gridTemplateRows, "repeat(7, minmax(0, 1fr))");
       assert.equal(grid.style.gap, "1px");
       const cell = grid.querySelector<HTMLButtonElement>('[data-qd-day="1"]');
       assert.equal(cell?.style.width, "100%");
       assert.equal(cell?.style.height, "100%");
     }
+    assert.equal(fullCostGrid.style.maxWidth, "174px");
+    assert.equal(fullCostGrid.style.gridTemplateColumns, "repeat(7, minmax(0, 1fr))");
+    assert.equal(fullCostGrid.style.gridTemplateRows, "repeat(8, minmax(0, 1fr))");
+    assert.equal(fullDeliveryGrid.style.gridTemplateColumns, "repeat(6, minmax(0, 1fr))");
+    assert.equal(fullGrid.querySelectorAll('[data-qd-filler="Q"]').length, 2);
+    assert.equal(fullCostGrid.querySelectorAll('[data-qd-filler="C"]').length, 1);
+    assert.equal(fullDeliveryGrid.querySelectorAll('[data-qd-filler="D"]').length, 3);
+    assert.equal(fullGrid.querySelector<HTMLElement>('[data-qd-day="1"]')?.style.borderRadius, "12px 3px 3px 3px");
+    assert.equal(fullCostGrid.querySelector<HTMLElement>('[data-qd-filler="C"]')?.style.background, "rgb(200, 205, 212)");
     assert.equal(fullGrid.parentElement?.parentElement?.style.overflowX, "");
     const day31 = fullTracker.querySelector<HTMLButtonElement>('[data-qd-metric="quality"][data-qd-day="31"]');
     assert.ok(day31);
@@ -135,12 +151,25 @@ test("the shared Logic Gate Q/D tracker renders 31 slices and reconciles a commi
     const todayQuality = fullTracker.querySelector<HTMLButtonElement>(`[data-qd-metric="quality"][data-qd-day="${businessDate.day}"]`);
     assert.ok(todayQuality);
     assert.equal(todayQuality.disabled, false);
-    await act(async () => todayQuality.click());
 
-    const closeChoices = fullTracker.querySelector<HTMLButtonElement>('[aria-label="Close rating choices"]');
-    assert.ok(closeChoices);
-    assert.match(closeChoices.style.background, /linear-gradient/);
-    assert.equal(closeChoices.style.color, "rgb(255, 255, 255)");
+    const todayCost = fullTracker.querySelector<HTMLButtonElement>(`[data-qd-metric="cost"][data-qd-day="${businessDate.day}"]`);
+    assert.ok(todayCost);
+    await act(async () => todayCost.click());
+    assert.ok(fullTracker.querySelector('[aria-label="Set cost rating for today"]'));
+    assert.equal(fullTracker.querySelector('[aria-label="Close rating choices"]'), null, "the inline picker has no competing close button");
+    const title = [...fullTracker.querySelectorAll<HTMLElement>('strong')].find((element) => element.textContent === "Quality, Cost & Delivery");
+    assert.ok(title);
+    await act(async () => title.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true })));
+    assert.equal(fullTracker.querySelector('[aria-label="Set cost rating for today"]'), null, "clicking elsewhere in the card dismisses the picker");
+
+    await act(async () => todayCost.click());
+    const anotherDay = fullTracker.querySelector<HTMLButtonElement>(`[data-qd-metric="cost"][data-qd-day="${businessDate.day === 1 ? 2 : 1}"]`);
+    assert.ok(anotherDay);
+    assert.equal(anotherDay.disabled, true);
+    await act(async () => anotherDay.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true })));
+    assert.equal(fullTracker.querySelector('[aria-label="Set cost rating for today"]'), null, "an uneditable slice dismisses the picker");
+
+    await act(async () => todayQuality.click());
 
     const green = [...fullTracker.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent === "Green");

@@ -70,6 +70,7 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		{"logic_gate_textboxes", "metadata_revision"},
 		{"qd_ratings", "qd_rating_id"},
 		{"qd_ratings", "quality_rating"},
+		{"qd_ratings", "cost_rating"},
 		{"qd_ratings", "delivery_rating"},
 		{"qd_ratings", "rated_created_timestamp"},
 	}

@@ -4007,14 +4007,16 @@ CREATE TABLE public.qd_ratings (
     qd_rating_id uuid NOT NULL,
     logic_gate_id uuid NOT NULL,
     quality_rating text,
+    cost_rating text,
     delivery_rating text,
     rated_by_user_id uuid,
     rated_by_display_name text NOT NULL,
     rated_created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     rated_updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT qd_ratings_cost_rating_chk CHECK (((cost_rating IS NULL) OR (cost_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
     CONSTRAINT qd_ratings_delivery_rating_chk CHECK (((delivery_rating IS NULL) OR (delivery_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
     CONSTRAINT qd_ratings_display_name_chk CHECK ((btrim(rated_by_display_name) <> ''::text)),
-    CONSTRAINT qd_ratings_has_rating_chk CHECK (((quality_rating IS NOT NULL) OR (delivery_rating IS NOT NULL))),
+    CONSTRAINT qd_ratings_has_rating_chk CHECK (((quality_rating IS NOT NULL) OR (cost_rating IS NOT NULL) OR (delivery_rating IS NOT NULL))),
     CONSTRAINT qd_ratings_quality_rating_chk CHECK (((quality_rating IS NULL) OR (quality_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
     CONSTRAINT qd_ratings_timestamps_chk CHECK ((rated_updated_timestamp >= rated_created_timestamp))
 );

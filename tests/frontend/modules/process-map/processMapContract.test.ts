@@ -148,7 +148,7 @@ test("failed Process Map writes perform one bounded canonical recovery read", ()
   }
 });
 
-test("Process Map Q/D cards stay canonical, private, and separate from placement gestures", () => {
+test("Process Map QDC cards stay canonical, private, and separate from placement gestures", () => {
   const page = source("frontend/src/pages/process-map/ProcessMapPage.tsx");
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const card = source("frontend/src/modules/process-map/ProcessMapQDCard.tsx");
@@ -175,6 +175,8 @@ test("Process Map Q/D cards stay canonical, private, and separate from placement
   assert.match(surface, /onPaneClick[\s\S]*setPinnedProcessID\(null\)/);
 
   assert.match(card, /<LogicGateQDTracker[\s\S]*variant="card"/);
+  assert.match(card, /Q, C and D/);
+  assert.match(styles, /\.process-map-qd-card \{[\s\S]*width: min\(560px, calc\(100vw - 48px\)\)/);
   assert.match(styles, /\.process-map-qd-card__header button[\s\S]*linear-gradient\(135deg, #ff5a6b, #ef334e\)[\s\S]*color: #ffffff/);
   assert.match(card, /readOnly=\{!pinned\}/);
   assert.match(card, /\/v1\/resources\/logic_gate\/\$\{encodeURIComponent\(logicGateID\)\}\/gvic/);
@@ -183,15 +185,22 @@ test("Process Map Q/D cards stay canonical, private, and separate from placement
   assert.doesNotMatch(card, /getLogicGateRecordSingleFlight|canEditResourceAccess/);
   assert.doesNotMatch(card, /method:\s*"(?:POST|PUT|DELETE)"[\s\S]*gvic/);
 
-  assert.match(tracker, /gridMaxSize = props\.compact \? 154 : 168/);
-  assert.match(tracker, /repeat\(7, minmax\(0, 1fr\)\)[\s\S]*gap: 1/);
+  assert.match(tracker, /Q_LAYOUT[\s\S]*columns: 6,[\s\S]*rows: 7,[\s\S]*position: \[6, 1\][\s\S]*position: \[6, 6\]/);
+  assert.match(tracker, /C_LAYOUT[\s\S]*columns: 7,[\s\S]*rows: 8,[\s\S]*position: \[8, 6\]/);
+  assert.match(tracker, /D_LAYOUT[\s\S]*columns: 6,[\s\S]*rows: 7,[\s\S]*position: \[2, 6\][\s\S]*position: \[6, 6\][\s\S]*position: \[7, 5\]/);
+  assert.match(tracker, /gridTemplateColumns: `repeat\(\$\{props\.layout\.columns\}, minmax\(0, 1fr\)\)`[\s\S]*gap: 1/);
   assert.match(tracker, /width: "100%"[\s\S]*height: "100%"/);
+  assert.match(tracker, /document\.addEventListener\("pointerdown", dismissChoices, true\)/);
+  assert.doesNotMatch(tracker, /Close rating choices/);
   assert.doesNotMatch(tracker, /overflowX: "auto"/);
 
   assert.match(app, /onOpenLogicGate=\{openProcessMapLogicGateOverlay\}/);
   assert.match(app, /processMapLogicGateOverlay[\s\S]*<AppModalPortal[\s\S]*role="dialog"[\s\S]*Close \$\{processMapLogicGateOverlay\.label\} Logic Gate[\s\S]*UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE[\s\S]*<LazyLogicGateArenaPage/);
+  assert.match(app, /processMapLogicGateOverlayBackdropStyle[\s\S]*padding: 6/);
+  assert.match(app, /processMapLogicGateOverlayStyle[\s\S]*width: "calc\(100vw - 12px\)"[\s\S]*height: "calc\(100vh - 12px\)"/);
+  assert.doesNotMatch(app, /processMapLogicGateOverlayStyle[\s\S]{0,180}min\(1500px/);
 
-  assert.doesNotMatch(api, /qd_rating|quality_rating|delivery_rating|rated_by_/);
+  assert.doesNotMatch(api, /qd_rating|quality_rating|cost_rating|delivery_rating|rated_by_/);
 });
 
 test("Process Map deletes traces through canonical relationships and has no trace-only DELETE", () => {

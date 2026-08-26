@@ -382,20 +382,20 @@ const processMapLogicGateOverlayBackdropStyle: React.CSSProperties = {
   zIndex: 1,
   display: "grid",
   placeItems: "center",
-  padding: 16,
+  padding: 6,
   background: "rgba(15, 23, 42, 0.62)",
 };
 
 const processMapLogicGateOverlayStyle: React.CSSProperties = {
-  width: "min(1500px, calc(100vw - 32px))",
-  height: "calc(100vh - 32px)",
+  width: "calc(100vw - 12px)",
+  height: "calc(100vh - 12px)",
   minWidth: 0,
   minHeight: 0,
   display: "grid",
   gridTemplateRows: "42px minmax(0, 1fr)",
   overflow: "hidden",
   border: "1px solid rgba(148, 163, 184, 0.32)",
-  borderRadius: 16,
+  borderRadius: 12,
   background: "#ffffff",
   boxShadow: "0 26px 80px rgba(15, 23, 42, 0.34)",
 };

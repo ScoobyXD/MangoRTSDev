@@ -662,7 +662,7 @@ test("Process Map keeps Folder navigation and opens Process Logic Gates on doubl
       processCard.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
       await flushUI();
     });
-    assert.equal(container.querySelector('[aria-label="Review Q and D"]'), null, "hover is off by default");
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "hover is off by default");
     await act(async () => {
       root.render(
         <ProcessMapSurface
@@ -682,8 +682,8 @@ test("Process Map keeps Folder navigation and opens Process Logic Gates on doubl
       hoverProcessCard.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
       await flushUI();
     });
-    assert.ok(container.querySelector('[aria-label="Review Q and D"]'), "enabled hover shows the transient Q/D card");
-    assert.equal(container.querySelector('[aria-label="Close Review Q and D"]'), null, "the transient card is not pinned");
+    assert.ok(container.querySelector('[aria-label="Review Q, C and D"]'), "enabled hover shows the transient QDC card");
+    assert.equal(container.querySelector('[aria-label="Close Review Q, C and D"]'), null, "the transient card is not pinned");
     await act(async () => {
       container.querySelector<HTMLElement>('[aria-label="Process: Review"]')
         ?.dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true }));
@@ -699,7 +699,7 @@ test("Process Map keeps Folder navigation and opens Process Logic Gates on doubl
       );
       await flushUI();
     });
-    assert.equal(container.querySelector('[aria-label="Review Q and D"]'), null, "leaving removes the transient card");
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "leaving removes the transient card");
     const readsBeforeAdmission = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
     await act(async () => {
       realtimeSocket?.onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "process-map:company" }) });
@@ -928,7 +928,7 @@ test("Process Map keeps Folder navigation and opens Process Logic Gates on doubl
       await flushUI();
     });
     assert.deepEqual(openedLogicGates, [], "dragging and releasing a Process never opens its Logic Gate page");
-    assert.equal(container.querySelector('[aria-label="Review Q and D"]'), null, "the click emitted after a placement drag does not pin its Q/D card");
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "the click emitted after a placement drag does not pin its QDC card");
 
     await act(async () => {
       refreshedFolderCard.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true }));
@@ -943,7 +943,7 @@ test("Process Map keeps Folder navigation and opens Process Logic Gates on doubl
     });
     assert.deepEqual(openedFolders, ["child-1"], "only Folder double-click drills into a map layer");
     assert.deepEqual(openedLogicGates, [{ logicGateID: "gate-1", label: "Review" }], "Process double-click opens its exact Logic Gate page");
-    assert.equal(container.querySelector('[aria-label="Review Q and D"]'), null, "Process double-click does not leave a pinned data card behind");
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "Process double-click does not leave a pinned data card behind");
 
     const readsBeforeSuccessfulDrop = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
     const drop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
@@ -1052,14 +1052,14 @@ test("Process Map keeps Folder navigation and opens Process Logic Gates on doubl
       reviewCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
       await flushUI();
     });
-    assert.ok(container.querySelector('[aria-label="Review Q and D"]'), "a Process click always pins its Q/D card");
-    const qdClose = container.querySelector<HTMLButtonElement>('[aria-label="Close Review Q and D"]');
-    assert.ok(qdClose, "a pinned Q/D card has an explicit close action");
+    assert.ok(container.querySelector('[aria-label="Review Q, C and D"]'), "a Process click always pins its QDC card");
+    const qdClose = container.querySelector<HTMLButtonElement>('[aria-label="Close Review Q, C and D"]');
+    assert.ok(qdClose, "a pinned QDC card has an explicit close action");
     await act(async () => {
       qdClose.click();
       await flushUI();
     });
-    assert.equal(container.querySelector('[aria-label="Review Q and D"]'), null, "the explicit close action dismisses the pinned card");
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "the explicit close action dismisses the pinned card");
     const removeButton = [...container.querySelectorAll<HTMLButtonElement>(".process-map-toolbar button")]
       .find((button) => button.textContent === "Remove Review");
     assert.ok(removeButton);
