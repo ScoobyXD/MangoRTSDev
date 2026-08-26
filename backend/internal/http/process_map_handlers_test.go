@@ -499,7 +499,7 @@ func TestProcessMapETagSeparatesViewerAndResponseContract(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/same-path?company_id="+url.QueryEscape(fixture.companyID), nil)
 	contracts := []struct{ userID, role, contract string }{
 		{fixture.viewer.UserID, domain.RoleCompanyUser, "process-map-scene-v3"},
-		{fixture.viewer.UserID, domain.RoleCompanyUser, "process-map-tile-v3"},
+		{fixture.viewer.UserID, domain.RoleCompanyUser, processMapTileETagContract},
 		{fixture.viewer.UserID, domain.RoleCompanyUser, "operational-relationships-v1"},
 		{fixture.admin.UserID, domain.RoleCompanyAdmin, "process-map-scene-v3"},
 	}
@@ -513,6 +513,29 @@ func TestProcessMapETagSeparatesViewerAndResponseContract(t *testing.T) {
 			t.Fatalf("viewer or response contract reused ETag %s", etag)
 		}
 		seen[etag] = true
+	}
+}
+
+func TestProcessMapHTTPTileRejectsPreviousRepresentationETag(t *testing.T) {
+	fixture := newProcessMapHTTPFixture(t)
+	path := "/v1/process-map/tiles/22/0/0?company_id=" + url.QueryEscape(fixture.companyID)
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	legacyETag, err := fixture.server.processMapETag(request, fixture.companyID, fixture.viewer.UserID, domain.RoleCompanyUser, "process-map-tile-v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fresh := fixture.request(t, fixture.viewer, http.MethodGet, path, "", map[string]string{"If-None-Match": legacyETag})
+	if fresh.Code != http.StatusOK {
+		t.Fatalf("legacy tile validator status=%d body=%s", fresh.Code, fresh.Body.String())
+	}
+	currentETag := fresh.Header().Get("ETag")
+	if currentETag == "" || currentETag == legacyETag {
+		t.Fatalf("current tile ETag=%q, legacy=%q", currentETag, legacyETag)
+	}
+	current := fixture.request(t, fixture.viewer, http.MethodGet, path, "", map[string]string{"If-None-Match": currentETag})
+	if current.Code != http.StatusNotModified || current.Body.Len() != 0 {
+		t.Fatalf("current tile validator status=%d body=%s", current.Code, current.Body.String())
 	}
 }
 

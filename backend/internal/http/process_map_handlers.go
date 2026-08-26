@@ -12,6 +12,7 @@ import (
 )
 
 const processMapRealtimeConnectionIDHeader = "X-Mango-Realtime-Connection-ID"
+const processMapTileETagContract = "process-map-tile-v4"
 
 func decodeProcessMapJSON(r *http.Request, destination any) error {
 	decoder := json.NewDecoder(r.Body)
@@ -140,7 +141,7 @@ func (s *Server) handleProcessMapTile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, "process-map-tile-v3")
+	etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, processMapTileETagContract)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_read_process_map_version")
 		return
