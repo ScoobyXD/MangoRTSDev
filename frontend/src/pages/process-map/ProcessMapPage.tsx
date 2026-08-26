@@ -23,6 +23,7 @@ export type ProcessMapPageProps = {
 export function ProcessMapPage({ apiBase, companyID, folderID, onNavigate }: ProcessMapPageProps) {
   const [layer, setLayer] = useState<ProcessMapLayerResponse["layer"] | null>(null);
   const [pickerAnchor, setPickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
+  const [hoverModeEnabled, setHoverModeEnabled] = useState(false);
   const pickerOpen = pickerAnchor !== null;
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const activeFolderLayer = layer?.kind === "folder" && layer.folder_id === folderID ? layer : null;
@@ -85,6 +86,14 @@ export function ProcessMapPage({ apiBase, companyID, folderID, onNavigate }: Pro
             </nav>
           )}
         </div>
+        <label className="process-map-page__hover-mode">
+          <input
+            type="checkbox"
+            checked={hoverModeEnabled}
+            onChange={(event) => setHoverModeEnabled(event.currentTarget.checked)}
+          />
+          <span>Hover mode</span>
+        </label>
         {activeFolderLayer && (
           <div className="process-map-page__actions">
             <UniversalLinkerControls
@@ -116,6 +125,7 @@ export function ProcessMapPage({ apiBase, companyID, folderID, onNavigate }: Pro
           apiBase={apiBase}
           companyID={companyID}
           folderID={folderID}
+          hoverModeEnabled={hoverModeEnabled}
           onOpenFolder={openFolder}
           onLayerChange={setLayer}
         />

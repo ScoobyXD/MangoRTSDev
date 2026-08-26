@@ -585,6 +585,8 @@ type LogicGateRepository interface {
 	CreateLogicGateEditorSaveVersion(input EditorSaveVersionInput) (domain.EditorSaveVersion, error)
 	ListLogicGateEditorSaveVersions(companyID, logicGateID string) ([]domain.EditorSaveVersion, error)
 	RestoreLogicGateEditorSaveVersion(input EditorSaveVersionRestoreInput) (domain.EditorSaveVersion, error)
+	ListLogicGateQDRatings(input QDRatingMonthQuery) ([]domain.QDRating, error)
+	PutLogicGateQDRating(input QDRatingPutInput) (QDRatingMutationResult, error)
 }
 
 type ProcessMapRepository interface {

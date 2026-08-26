@@ -3999,6 +3999,28 @@ CREATE TABLE public.kpis (
 
 
 --
+-- Name: qd_ratings; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.qd_ratings (
+    company_id uuid NOT NULL,
+    qd_rating_id uuid NOT NULL,
+    logic_gate_id uuid NOT NULL,
+    quality_rating text,
+    delivery_rating text,
+    rated_by_user_id uuid,
+    rated_by_display_name text NOT NULL,
+    rated_created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    rated_updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT qd_ratings_delivery_rating_chk CHECK (((delivery_rating IS NULL) OR (delivery_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
+    CONSTRAINT qd_ratings_display_name_chk CHECK ((btrim(rated_by_display_name) <> ''::text)),
+    CONSTRAINT qd_ratings_has_rating_chk CHECK (((quality_rating IS NOT NULL) OR (delivery_rating IS NOT NULL))),
+    CONSTRAINT qd_ratings_quality_rating_chk CHECK (((quality_rating IS NULL) OR (quality_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
+    CONSTRAINT qd_ratings_timestamps_chk CHECK ((rated_updated_timestamp >= rated_created_timestamp))
+);
+
+
+--
 -- Name: logic_gate_textboxes; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5398,6 +5420,14 @@ ALTER TABLE ONLY public.kpis
 
 
 --
+-- Name: qd_ratings qd_ratings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.qd_ratings
+    ADD CONSTRAINT qd_ratings_pkey PRIMARY KEY (company_id, qd_rating_id);
+
+
+--
 -- Name: logic_gate_textboxes_history logic_gate_textboxes_history_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6314,6 +6344,13 @@ CREATE INDEX idx_kanban_board_projection_updated ON public.kanban_board_projecti
 --
 
 CREATE INDEX idx_kpis_logic_gate ON public.kpis USING btree (company_id, logic_gate_id, created_timestamp, kpi_id);
+
+
+--
+-- Name: uq_qd_ratings_logic_gate_business_day; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX uq_qd_ratings_logic_gate_business_day ON public.qd_ratings USING btree (company_id, logic_gate_id, (((rated_created_timestamp AT TIME ZONE 'America/Los_Angeles'::text))::date));
 
 
 --
@@ -8051,6 +8088,22 @@ ALTER TABLE ONLY public.kanban_board_projection
 
 ALTER TABLE ONLY public.kpis
     ADD CONSTRAINT kpis_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
+
+
+--
+-- Name: qd_ratings qd_ratings_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.qd_ratings
+    ADD CONSTRAINT qd_ratings_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
+
+
+--
+-- Name: qd_ratings qd_ratings_rated_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.qd_ratings
+    ADD CONSTRAINT qd_ratings_rated_by_user_id_fkey FOREIGN KEY (rated_by_user_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
 
 
 --

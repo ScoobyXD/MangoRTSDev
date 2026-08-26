@@ -134,6 +134,10 @@ func (s *Server) handleLogicGateSubresource(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	logicGateID := parts[0]
+	if len(parts) >= 2 && parts[1] == "qd-ratings" {
+		s.handleLogicGateQDRatings(w, r, logicGateID, parts[2:])
+		return
+	}
 	if len(parts) == 2 && parts[1] == "convert-to-huddle" {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

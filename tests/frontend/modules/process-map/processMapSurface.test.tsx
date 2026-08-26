@@ -655,6 +655,46 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
     assert.equal(restrictedCard.querySelectorAll(".react-flow__handle").length, 0);
     assert.equal(restrictedCard.closest(".react-flow__node")?.classList.contains("selectable"), false);
     assert.equal(restrictedCard.closest(".react-flow__node")?.classList.contains("draggable"), false);
+    await act(async () => {
+      processCard.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
+      await flushUI();
+    });
+    assert.equal(container.querySelector('[aria-label="Review Q and D"]'), null, "hover is off by default");
+    await act(async () => {
+      root.render(
+        <ProcessMapSurface
+          apiBase="http://api.test"
+          companyID="company-1"
+          folderID="parent-1"
+          hoverModeEnabled
+          onOpenFolder={(folderID) => openedFolders.push(folderID)}
+        />,
+      );
+      await flushUI();
+    });
+    const hoverProcessCard = container.querySelector<HTMLElement>('[aria-label="Process: Review"]');
+    assert.ok(hoverProcessCard);
+    await act(async () => {
+      hoverProcessCard.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
+      await flushUI();
+    });
+    assert.ok(container.querySelector('[aria-label="Review Q and D"]'), "enabled hover shows the transient Q/D card");
+    assert.equal(container.querySelector('[aria-label="Close Review Q and D"]'), null, "the transient card is not pinned");
+    await act(async () => {
+      container.querySelector<HTMLElement>('[aria-label="Process: Review"]')
+        ?.dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      root.render(
+        <ProcessMapSurface
+          apiBase="http://api.test"
+          companyID="company-1"
+          folderID="parent-1"
+          onOpenFolder={(folderID) => openedFolders.push(folderID)}
+        />,
+      );
+      await flushUI();
+    });
+    assert.equal(container.querySelector('[aria-label="Review Q and D"]'), null, "leaving removes the transient card");
     const readsBeforeAdmission = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
     await act(async () => {
       realtimeSocket?.onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "process-map:company" }) });
@@ -984,6 +1024,8 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       reviewCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
       await flushUI();
     });
+    assert.ok(container.querySelector('[aria-label="Review Q and D"]'), "a Process click always pins its Q/D card");
+    assert.ok(container.querySelector('[aria-label="Close Review Q and D"]'), "a pinned Q/D card has an explicit close action");
     const removeButton = [...container.querySelectorAll<HTMLButtonElement>(".process-map-toolbar button")]
       .find((button) => button.textContent === "Remove Review");
     assert.ok(removeButton);

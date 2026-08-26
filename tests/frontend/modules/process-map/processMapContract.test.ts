@@ -147,6 +147,36 @@ test("failed Process Map writes perform one bounded canonical recovery read", ()
   }
 });
 
+test("Process Map Q/D cards stay canonical, private, and separate from placement gestures", () => {
+  const page = source("frontend/src/pages/process-map/ProcessMapPage.tsx");
+  const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  const card = source("frontend/src/modules/process-map/ProcessMapQDCard.tsx");
+  const api = source("frontend/src/modules/process-map/processMapApi.ts");
+
+  assert.match(page, /useState\(false\)[\s\S]*Hover mode/);
+  assert.match(page, /checked=\{hoverModeEnabled\}[\s\S]*hoverModeEnabled=\{hoverModeEnabled\}/);
+  assert.doesNotMatch(page, /hover-mode[^\n]*(?:localStorage|sessionStorage)/i);
+
+  assert.match(surface, /data\.restricted[\s\S]*return[\s\S]*resourceType === "company_explorer_folder"/);
+  assert.match(surface, /NodeToolbar[\s\S]*position=\{Position\.Right\}[\s\S]*offset=\{24\}/);
+  assert.match(surface, /qdCardPinned[\s\S]*pinned=\{qdCardPinned\}/);
+  assert.match(surface, /onNodeDragStart=\{handleNodeDragStart\}[\s\S]*onNodeDragStop=\{handleNodeDragStop\}/);
+  assert.match(surface, /handleNodeDragStart[\s\S]*suppressedNodeClickRef\.current = node\.id/);
+  assert.match(surface, /onConnectStart[\s\S]*suppressedNodeClickRef\.current = params\.nodeId/);
+  assert.match(surface, /onNodeClick[\s\S]*suppressedNodeClickRef\.current === node\.id[\s\S]*return;[\s\S]*setPinnedProcessID/);
+  assert.match(surface, /onPaneClick[\s\S]*setPinnedProcessID\(null\)/);
+
+  assert.match(card, /<LogicGateQDTracker[\s\S]*variant="card"/);
+  assert.match(card, /readOnly=\{!pinned\}/);
+  assert.match(card, /\/v1\/resources\/logic_gate\/\$\{encodeURIComponent\(logicGateID\)\}\/gvic/);
+  assert.match(card, /logicGateRACIRolePresentation/);
+  assert.match(card, /rated_by_display_name|LogicGateQDTracker/);
+  assert.doesNotMatch(card, /getLogicGateRecordSingleFlight|canEditResourceAccess/);
+  assert.doesNotMatch(card, /method:\s*"(?:POST|PUT|DELETE)"[\s\S]*gvic/);
+
+  assert.doesNotMatch(api, /qd_rating|quality_rating|delivery_rating|rated_by_/);
+});
+
 test("Process Map deletes traces through canonical relationships and has no trace-only DELETE", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const api = source("frontend/src/modules/process-map/processMapApi.ts");

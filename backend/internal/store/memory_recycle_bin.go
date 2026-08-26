@@ -23,6 +23,7 @@ type memoryRecycleBinSnapshot struct {
 	nodeRels                         map[string][]domain.NodeRelationship
 	nodeAccountAssignments           map[string]domain.NodeAccountAssignment
 	logicGates                       map[string]domain.LogicGate
+	qdRatings                        map[string]domain.QDRating
 	huddleLogicGates                 map[string]domain.HuddleLogicGate
 	huddleNodes                      map[string]domain.HuddleNode
 	kpis                             map[string]domain.KPI
@@ -359,6 +360,7 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		nodeRels:                         cloneSliceMap(r.nodeRels),
 		nodeAccountAssignments:           cloneMap(r.nodeAccountAssignments),
 		logicGates:                       cloneMap(r.logicGates),
+		qdRatings:                        cloneMap(r.qdRatings),
 		huddleLogicGates:                 cloneMap(r.huddleLogicGates),
 		huddleNodes:                      cloneMap(r.huddleNodes),
 		kpis:                             cloneMap(r.kpis),
@@ -421,6 +423,7 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.nodeRels = cloneSliceMap(snapshot.nodeRels)
 	r.nodeAccountAssignments = cloneMap(snapshot.nodeAccountAssignments)
 	r.logicGates = cloneMap(snapshot.logicGates)
+	r.qdRatings = cloneMap(snapshot.qdRatings)
 	r.huddleLogicGates = cloneMap(snapshot.huddleLogicGates)
 	r.huddleNodes = cloneMap(snapshot.huddleNodes)
 	r.kpis = cloneMap(snapshot.kpis)
@@ -482,6 +485,7 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		nodeRels:                         recycleMapDelta(before.nodeRels, after.nodeRels),
 		nodeAccountAssignments:           recycleMapDelta(before.nodeAccountAssignments, after.nodeAccountAssignments),
 		logicGates:                       recycleMapDelta(before.logicGates, after.logicGates),
+		qdRatings:                        recycleMapDelta(before.qdRatings, after.qdRatings),
 		huddleLogicGates:                 recycleMapDelta(before.huddleLogicGates, after.huddleLogicGates),
 		huddleNodes:                      recycleMapDelta(before.huddleNodes, after.huddleNodes),
 		kpis:                             recycleMapDelta(before.kpis, after.kpis),
@@ -543,6 +547,7 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.nodeRels, delta.nodeRels)
 	mergeRecycleMap(destination.nodeAccountAssignments, delta.nodeAccountAssignments)
 	mergeRecycleMap(destination.logicGates, delta.logicGates)
+	mergeRecycleMap(destination.qdRatings, delta.qdRatings)
 	mergeRecycleMap(destination.huddleLogicGates, delta.huddleLogicGates)
 	mergeRecycleMap(destination.huddleNodes, delta.huddleNodes)
 	mergeRecycleMap(destination.kpis, delta.kpis)
