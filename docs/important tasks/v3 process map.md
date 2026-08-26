@@ -127,7 +127,7 @@ When the map first opens:
 3. Do not select a Folder or Process.
 4. Do not refit when later tiles or detail arrive.
 
-Wheel zoom targets the current camera center. This is not the deck.gl controller default: Mango must use controlled view state, a small custom OrthographicController, or its own wheel handler so wheel input changes scale while keeping the camera `target` fixed rather than anchoring to the pointer. Folder double-click may remain only as an optional camera convenience that fits that Folder fence; it must not navigate, load a different semantic map, or create a history entry.
+Wheel zoom remains anchored to the pointer: the company-world point beneath it stays at the same screen position while scale changes. Mango must accept deck.gl's pointer-anchored target rather than replacing it with the previous camera center. Folder double-click may remain only as an optional camera convenience that fits that Folder fence; it must not navigate, load a different semantic map, or create a history entry.
 
 Viewport position, zoom, selection, hover, open QDC card, open Process overlay, loaded tiles, and deck.gl internal state remain browser runtime state and are not persisted as Process Map business facts.
 
@@ -175,7 +175,7 @@ One tile request returns the permission-safe representation for its integer zoom
 - Folder fences and traces intersecting tile boundaries are clipped into deterministic tile fragments or returned with stable identities and deterministic deduplication.
 - Tile cache keys are viewer-, permission-, company-read-version-, and tile-coordinate-safe. Tile ETags additionally include the response-contract version. A code-only tile representation change must advance that response contract so an older cached body cannot be reused through `304`.
 
-Use a transparent-vector-safe refinement function through deck.gl's supported refinement hook. When suitable coarse coverage is already loaded, keep the nearest loaded covering ancestor visible until every selected replacement needed for that covered region is ready. Then hide the ancestor and reveal the complete replacement coverage together. A parent and child representation of the same business identity must never both be pickable or produce duplicate edits. Initial loading may show the plain canvas until the first coarse response exists, but a transition between already loaded and requested levels must not flash blank. Failed finer requests keep valid coarse coverage visible and expose the existing bounded error/retry treatment without polling.
+Use a transparent-vector-safe refinement function through deck.gl's supported refinement hook. When suitable coarse coverage is already loaded, keep the nearest loaded covering ancestor visible until every selected replacement needed for that covered region is ready. Then hide the ancestor and reveal the complete replacement coverage together. A parent and child representation of the same business identity must never both be pickable or produce duplicate edits. Initial loading may show the plain canvas until the first coarse response exists, but after permission-safe coverage has rendered it remains visible and transforms through the first and every later zoom, pan, or placement drag; ordinary unsettled interaction must not replace the spatial `TileLayer` or flash the loaded canvas blank. Failed finer requests keep valid coarse coverage visible and expose the existing bounded error/retry treatment without polling.
 
 ## Detail Is Chosen by Screen Size
 
@@ -195,11 +195,11 @@ Several placements occupying the exact same screen pixel cannot be individually 
 
 ## Camera Settlement Is a Hard Loading Boundary
 
-The live camera may transform already loaded GPU buffers on every animation frame, but Mango must not evaluate a new business detail band or begin a new viewport/tile data load for every wheel event.
+The live camera transforms already loaded GPU buffers on every animation frame, including during the first and later zoom, pan, and placement drag, but Mango must not evaluate a new business detail band or begin a new viewport/tile data load for every wheel event.
 
 Use deck.gl view and interaction callbacks plus an application-owned quiet-period timer so new LOD and data work begins only after dragging, panning, zooming, and camera transition have all ended. Every view change restarts the timer. The interaction callback must also drive completion because pointer release may change interaction state without another view change. Timer expiry commits one settled generation only when all interaction flags remain inactive; otherwise the later all-inactive callback settles after any remaining quiet time. Wheel ticks therefore cannot each become a settled load, and a drag release cannot leave the final view permanently unsettled.
 
-The camera may continuously update deck.gl's internal viewport and candidate bookkeeping. That internal graphics work is not permissioned business loading. Mango-owned detail-band changes and HTTP scene/tile reads remain behind the committed settled generation. Interim tile candidates are discarded or held without starting network reads, and `debounceTime` is not the authority for declaring settlement.
+The camera may continuously update deck.gl's internal viewport and candidate bookkeeping. That internal graphics work is not permissioned business loading. Mango-owned detail-band changes and HTTP scene/tile reads remain behind the committed settled generation. Interim tile candidates are discarded or held without starting network reads, while the last permission-safe spatial `TileLayer` remains mounted and visible; `debounceTime` is not the authority for declaring settlement.
 
 On settlement:
 
@@ -364,7 +364,7 @@ The implementation branch must deliver all of the following together:
 - plain white non-geographic background;
 - initial whole-company camera fit;
 - settled-only LOD and data loading;
-- transparent-vector-safe coarse-to-fine refinement without transition blank flashes or duplicate picks;
+- stable permission-safe spatial `TileLayer` reuse through first and later zoom, pan, and placement drag, plus transparent-vector-safe coarse-to-fine refinement without blank flashes or duplicate picks;
 - Folder fences, Processes, restricted placeholders, traces, labels, and edit overlay;
 - placement drag, group move, resize, reparent, remove, and rollback;
 - cross-Folder operational trace creation and route editing;
@@ -399,9 +399,9 @@ Frontend coverage must prove:
 
 - the initial route opens one company canvas, fits all authorized map bounds once, and starts without selection, QDC cards, anchors, resize grips, waypoints, or editing controls;
 - the renderer uses OrthographicView with no geographic map or second camera;
-- zoom targets camera center and never navigates;
+- wheel zoom preserves the company-world point beneath the pointer and never navigates;
 - LOD and data work do not run on individual wheel updates and run once after settlement;
-- coarse geometry remains until detailed tiles are ready;
+- permission-safe loaded coverage remains visible through first and later zoom, pan, and placement drag, and coarse geometry remains until detailed tiles are ready;
 - every displayable Process keeps a green cue, every displayable Folder keeps an orange fence, and static traces remain visible at whole-company detail;
 - every Process Map `PathLayer` explicitly declares XY positions and supplies valid two-coordinate paths for Folder fences, Process and restricted outlines, saved and selected traces, connection previews, and selected Folder fences;
 - Folder fences are transparent, colored, resizable, and valid drop targets;

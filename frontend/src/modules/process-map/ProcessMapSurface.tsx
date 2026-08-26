@@ -69,7 +69,6 @@ import {
   type ProcessMapViewState,
 } from "./processMapGeometry.js";
 import {
-  centerProcessMapZoom,
   createProcessMapSettlementGate,
   decideProcessMapExplorerDrop,
   processMapResourceNodeID,
@@ -162,6 +161,16 @@ export type ProcessMapLayerBuildOptions = {
   onTileUnload: (tileID: string, settledGeneration: number) => void;
   onViewportLoad?: (settledGeneration: number) => void;
   onTileError?: (cause: unknown) => void;
+};
+
+type ProcessMapSpatialLayerBuildOptions = Omit<ProcessMapLayerBuildOptions, "presentation" | "editOverlay"> & {
+  selectedPlacementKey: string | null;
+  selectedTraceID: string | null;
+};
+
+type ProcessMapSpatialLayers = {
+  background: Layer;
+  tile: Layer | null;
 };
 
 export type ProcessMapSurfaceProps = {
@@ -554,7 +563,7 @@ function placementBounds(placement: ProcessMapPlacement): ProcessMapBounds {
 
 function renderTileSubLayers(
   props: Parameters<NonNullable<TileLayerProps<ProcessMapTileResponse>["renderSubLayers"]>>[0],
-  options: ProcessMapLayerBuildOptions,
+  options: ProcessMapSpatialLayerBuildOptions,
 ): Layer[] {
   if (!props.data) return [];
   const tile = tileBounds(props.tile.boundingBox);
@@ -577,7 +586,7 @@ function renderTileSubLayers(
       continue;
     }
     const key = placementKey(placement);
-    if (options.editedPlacementKeys.has(key) || options.editOverlay.selectedPlacementKey === key) continue;
+    if (options.editedPlacementKeys.has(key) || options.selectedPlacementKey === key) continue;
     const pick: PlacementPick = { kind: "placement", key, placement };
     const lod = processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit);
     if (placement.resource_type === "company_explorer_folder") {
@@ -606,7 +615,7 @@ function renderTileSubLayers(
   }
   for (const trace of props.data.traces) {
     const id = trace.resource_operational_relationship_id;
-    if (!options.editedTraceIDs.has(id) && options.editOverlay.selectedTraceID !== id) traces.push(...traceSegments(trace));
+    if (!options.editedTraceIDs.has(id) && options.selectedTraceID !== id) traces.push(...traceSegments(trace));
   }
   return [
     new PathLayer<PathDatum>({ id: `${props.id}-traces`, data: traces, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
@@ -722,7 +731,7 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
   ];
 }
 
-export function buildProcessMapLayers(options: ProcessMapLayerBuildOptions): Layer[] {
+function buildProcessMapSpatialLayers(options: ProcessMapSpatialLayerBuildOptions): ProcessMapSpatialLayers {
   const sceneBounds = options.scene.bounds;
   const backgroundBounds = sceneBounds ?? { min_x: -1, min_y: -1, max_x: 1, max_y: 1 };
   const background = new PolygonLayer<PolygonDatum>({
@@ -734,7 +743,7 @@ export function buildProcessMapLayers(options: ProcessMapLayerBuildOptions): Lay
     getPolygon: (item) => item.polygon,
     getFillColor: (item) => item.fill,
   });
-  const tiles = sceneBounds ? new ProcessMapProtectedTileLayer({
+  const tile = sceneBounds ? new ProcessMapProtectedTileLayer({
     id: "process-map-spatial-tiles",
     protectedGeneration: options.protectedGeneration,
     data: `${options.scene.process_map_read_version}:${options.protectedGeneration}`,
@@ -749,7 +758,7 @@ export function buildProcessMapLayers(options: ProcessMapLayerBuildOptions): Lay
     refinementStrategy: (headers) => transparentVectorRefinementStrategy(headers),
     updateTriggers: {
       getTileData: [options.settledGeneration, options.scene.process_map_read_version, options.protectedGeneration],
-      renderSubLayers: [options.settledPixelsPerGridUnit, options.editedPlacementKeys, options.editedTraceIDs, options.editOverlay.selectedPlacementKey, options.editOverlay.selectedTraceID],
+      renderSubLayers: [options.settledPixelsPerGridUnit, options.editedPlacementKeys, options.editedTraceIDs, options.selectedPlacementKey, options.selectedTraceID],
     },
     getTileData: ((props) => {
       // Returning before a Promise is created keeps interim wheel/pan candidates
@@ -768,8 +777,21 @@ export function buildProcessMapLayers(options: ProcessMapLayerBuildOptions): Lay
     onTileError: (cause) => options.onTileError?.(cause),
     renderSubLayers: (props) => renderTileSubLayers(props, options),
   }) : null;
+  return { background, tile };
+}
+
+function composeProcessMapLayers(options: ProcessMapLayerBuildOptions, spatial: ProcessMapSpatialLayers): Layer[] {
   const editTraces = editTraceLayers(options);
-  return [background, editTraces.path, ...(tiles ? [tiles] : []), editTraces.waypoints, ...editPlacementLayers(options)];
+  return [spatial.background, editTraces.path, ...(spatial.tile ? [spatial.tile] : []), editTraces.waypoints, ...editPlacementLayers(options)];
+}
+
+export function buildProcessMapLayers(options: ProcessMapLayerBuildOptions): Layer[] {
+  const spatial = buildProcessMapSpatialLayers({
+    ...options,
+    selectedPlacementKey: options.editOverlay.selectedPlacementKey,
+    selectedTraceID: options.editOverlay.selectedTraceID,
+  });
+  return composeProcessMapLayers(options, spatial);
 }
 
 function readTrayCollapsed(): boolean {
@@ -962,7 +984,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const markUnsettled = useCallback(() => {
     settledReadyRef.current = false;
-    setSettled(false);
     settlementGateRef.current?.onViewStateChange();
   }, []);
 
@@ -1322,7 +1343,37 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     connectionSourceKey: gesture?.kind === "connection" ? placementKey(gesture.source) : null,
   }), [gesture, highlightedFolder, overlayPlacements, overlayTraces, selection]);
 
-  const layers = useMemo(() => activeScene ? buildProcessMapLayers({
+  const editedPlacementMembership = [...editedPlacementKeys].sort().join("\0");
+  const editedTraceMembership = [...editedTraceIDs].sort().join("\0");
+  const spatialEditedPlacementKeys = useMemo(
+    () => new Set(editedPlacementMembership ? editedPlacementMembership.split("\0") : []),
+    [editedPlacementMembership],
+  );
+  const spatialEditedTraceIDs = useMemo(
+    () => new Set(editedTraceMembership ? editedTraceMembership.split("\0") : []),
+    [editedTraceMembership],
+  );
+  const selectedPlacementKey = selection?.kind === "placement" ? selection.id : null;
+  const selectedTraceID = selection?.kind === "trace" ? selection.id : null;
+
+  const spatialLayers = useMemo(() => activeScene ? buildProcessMapSpatialLayers({
+    scene: activeScene,
+    protectedGeneration,
+    settled,
+    settledGeneration,
+    settledPixelsPerGridUnit: 2 ** settledViewState.zoom,
+    editedPlacementKeys: spatialEditedPlacementKeys,
+    editedTraceIDs: spatialEditedTraceIDs,
+    selectedPlacementKey,
+    selectedTraceID,
+    getTileData: guardedGetTileData,
+    onTileLoad: handleTileLoad,
+    onTileUnload: handleTileUnload,
+    onViewportLoad: handleViewportLoad,
+    onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
+  }) : null, [activeScene, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, protectedGeneration, selectedPlacementKey, selectedTraceID, settled, settledGeneration, settledViewState.zoom, spatialEditedPlacementKeys, spatialEditedTraceIDs]);
+
+  const layers = useMemo(() => activeScene && spatialLayers ? composeProcessMapLayers({
     scene: activeScene,
     protectedGeneration,
     settled,
@@ -1337,7 +1388,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     onTileUnload: handleTileUnload,
     onViewportLoad: handleViewportLoad,
     onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
-  }) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, settled, settledGeneration, settledViewState.zoom]);
+  }, spatialLayers) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, settled, settledGeneration, settledViewState.zoom, spatialLayers]);
 
   const handleViewStateChange = useCallback(<ViewStateT extends OrthographicViewState,>(params: ViewStateChangeParameters<ViewStateT>): ViewStateT => {
     if (gestureRef.current?.kind === "connection") {
@@ -1351,14 +1402,11 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       minZoom: PROCESS_MAP_MIN_CAMERA_ZOOM,
       maxZoom: PROCESS_MAP_MAX_CAMERA_ZOOM,
     };
-    const zoomChanged = Math.abs(proposed.zoom - viewRef.current.zoom) > Number.EPSILON;
-    const next = zoomChanged ? centerProcessMapZoom(viewRef.current, proposed) : proposed;
-    viewRef.current = next;
-    setViewState(next);
+    viewRef.current = proposed;
+    setViewState(proposed);
     settledReadyRef.current = false;
-    setSettled(false);
     settlementGateRef.current?.onViewStateChange();
-    return next as ViewStateT;
+    return proposed as ViewStateT;
   }, []);
 
   const clearHoverTimer = useCallback(() => {
@@ -1785,11 +1833,12 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [qdPlacement, qdVisible, viewState, viewportSize]);
   const currentTrayFolder = trayPath[trayPath.length - 1] ?? null;
   const trayBackLabel = trayPath.length > 1 ? trayPath[trayPath.length - 2].label : "Root Folders";
+  const cameraDragEnabled = gesture === null;
   const orthographicView = useMemo(() => new OrthographicView({
     id: "process-map",
     flipY: true,
     controller: {
-      dragPan: gesture === null,
+      dragPan: cameraDragEnabled,
       dragRotate: false,
       scrollZoom: true,
       doubleClickZoom: false,
@@ -1797,7 +1846,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       keyboard: false,
       inertia: false,
     },
-  }), [gesture]);
+  }), [cameraDragEnabled]);
 
   return (
     <div
