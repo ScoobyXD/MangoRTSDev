@@ -116,7 +116,7 @@ function QDLetter(props: {
   busy: boolean;
   onChoose: (metric: QDRatingMetric) => void;
 }) {
-  const cellSize = props.compact ? 14 : 16;
+  const gridMaxSize = props.compact ? 154 : 168;
   return (
     <section aria-label={`${props.metric} ratings`} style={letterPanelStyle}>
       <div style={letterHeadingStyle}>
@@ -129,10 +129,12 @@ function QDLetter(props: {
         data-qd-letter={props.letter}
         style={{
           display: "grid",
-          gridTemplateColumns: `repeat(7, ${cellSize}px)`,
-          gridTemplateRows: `repeat(7, ${cellSize}px)`,
-          gap: 2,
-          justifyContent: "center",
+          width: "100%",
+          maxWidth: gridMaxSize,
+          aspectRatio: "1",
+          gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+          gridTemplateRows: "repeat(7, minmax(0, 1fr))",
+          gap: 1,
         }}
       >
         {DAY_NUMBERS.map((day, index) => {
@@ -160,9 +162,11 @@ function QDLetter(props: {
                 ...dayCellStyle,
                 gridRow: position[0],
                 gridColumn: position[1],
-                width: cellSize,
-                height: cellSize,
-                fontSize: props.compact ? 7 : 10,
+                width: "100%",
+                height: "100%",
+                minWidth: 0,
+                minHeight: 0,
+                fontSize: props.compact ? 9 : 10,
                 color: value === "yellow" ? "#5c4410" : value ? "#fff" : "#526074",
                 background: value ? COLORS[value] : "#e7ebf1",
                 outline: isToday ? "2px solid #2586d7" : "none",
@@ -313,12 +317,12 @@ const trackerHeaderStyle: React.CSSProperties = { minWidth: 0, display: "flex", 
 const trackerTitleStyle: React.CSSProperties = { display: "block", fontSize: 13, fontWeight: 900 };
 const monthLabelStyle: React.CSSProperties = { display: "block", color: "#64748b", fontSize: 10, fontWeight: 700 };
 const attributionStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 10, fontWeight: 700 };
-const lettersStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignItems: "start", gap: 10, overflowX: "auto" };
-const letterPanelStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", justifyContent: "center", gap: 5, padding: 5 };
+const lettersStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignItems: "start", gap: 6 };
+const letterPanelStyle: React.CSSProperties = { width: "100%", minWidth: 0, display: "grid", alignContent: "start", justifyItems: "center", gap: 5, padding: 2 };
 const letterHeadingStyle: React.CSSProperties = { display: "flex", alignItems: "baseline", justifyContent: "center", gap: 5, fontSize: 10, fontWeight: 800 };
 const dayCellStyle: React.CSSProperties = { display: "grid", placeItems: "center", boxSizing: "border-box", border: "1px solid rgba(255,255,255,.76)", borderRadius: 3, padding: 0, lineHeight: 1, fontWeight: 850, fontFamily: "inherit", boxShadow: "inset 0 0 0 1px rgba(15,23,42,.04)" };
 const chooserStyle: React.CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "7px 8px", border: "1px solid rgba(37,134,215,.22)", borderRadius: 9, background: "rgba(255,255,255,.74)" };
 const chooserLabelStyle: React.CSSProperties = { marginRight: 2, fontSize: 11, fontWeight: 850 };
 const choiceButtonStyle: React.CSSProperties = { minWidth: 49, height: 27, border: "1px solid rgba(15,23,42,.12)", borderRadius: 7, color: "#fff", padding: "0 8px", cursor: "pointer", fontSize: 10, fontWeight: 850, fontFamily: "inherit" };
-const closeButtonStyle: React.CSSProperties = { width: 27, height: 27, display: "grid", placeItems: "center", border: "1px solid rgba(15,23,42,.12)", borderRadius: 7, background: "#fff", color: "#64748b", padding: 0, cursor: "pointer", fontSize: 17, lineHeight: 1 };
+const closeButtonStyle: React.CSSProperties = { width: 27, height: 27, display: "grid", placeItems: "center", border: "1px solid transparent", borderRadius: 7, background: "linear-gradient(135deg,#ff5a6b,#ef334e)", color: "#fff", padding: 0, cursor: "pointer", fontSize: 17, fontWeight: 700, lineHeight: 1, boxShadow: "0 8px 18px rgba(239,51,78,.26), inset 1px 1px 0 rgba(255,255,255,.38)" };
 const errorStyle: React.CSSProperties = { color: "#b91c1c", fontSize: 10, fontWeight: 750 };

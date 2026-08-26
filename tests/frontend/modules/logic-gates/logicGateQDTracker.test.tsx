@@ -95,7 +95,7 @@ test("the shared Logic Gate Q/D tracker renders 31 slices and reconciles a commi
     await act(async () => root.render(
       <>
         <LogicGateQDTracker apiBase="" companyID="company-1" logicGateID="gate-1" canEdit requestJSON={requestJSON} />
-        <LogicGateQDTracker apiBase="" companyID="company-1" logicGateID="gate-1" canEdit requestJSON={requestJSON} />
+        <LogicGateQDTracker apiBase="" companyID="company-1" logicGateID="gate-1" canEdit variant="card" requestJSON={requestJSON} />
       </>,
     ));
     await flushAsyncWork();
@@ -104,19 +104,45 @@ test("the shared Logic Gate Q/D tracker renders 31 slices and reconciles a commi
     await act(async () => exactObservers.forEach((observer) => observer.trigger(true)));
     await flushAsyncWork();
 
-    const trackers = container.querySelectorAll<HTMLElement>('[data-logic-gate-qd-tracker="full"]');
+    const trackers = container.querySelectorAll<HTMLElement>('[data-logic-gate-qd-tracker]');
     assert.equal(trackers.length, 2);
-    assert.equal(trackers[0]?.querySelectorAll('[data-qd-metric="quality"]').length, 31);
-    assert.equal(trackers[0]?.querySelectorAll('[data-qd-metric="delivery"]').length, 31);
-    const day31 = trackers[0]?.querySelector<HTMLButtonElement>('[data-qd-metric="quality"][data-qd-day="31"]');
+    const fullTracker = container.querySelector<HTMLElement>('[data-logic-gate-qd-tracker="full"]');
+    const cardTracker = container.querySelector<HTMLElement>('[data-logic-gate-qd-tracker="card"]');
+    assert.ok(fullTracker);
+    assert.ok(cardTracker);
+    for (const tracker of [fullTracker, cardTracker]) {
+      assert.equal(tracker.querySelectorAll('[data-qd-metric="quality"]').length, 31);
+      assert.equal(tracker.querySelectorAll('[data-qd-metric="delivery"]').length, 31);
+    }
+    const fullGrid = fullTracker.querySelector<HTMLElement>('[data-qd-letter="Q"]');
+    const cardGrid = cardTracker.querySelector<HTMLElement>('[data-qd-letter="Q"]');
+    assert.ok(fullGrid);
+    assert.ok(cardGrid);
+    assert.equal(fullGrid.style.maxWidth, "168px");
+    assert.equal(cardGrid.style.maxWidth, "154px");
+    for (const grid of [fullGrid, cardGrid]) {
+      assert.equal(grid.style.gridTemplateColumns, "repeat(7, minmax(0, 1fr))");
+      assert.equal(grid.style.gridTemplateRows, "repeat(7, minmax(0, 1fr))");
+      assert.equal(grid.style.gap, "1px");
+      const cell = grid.querySelector<HTMLButtonElement>('[data-qd-day="1"]');
+      assert.equal(cell?.style.width, "100%");
+      assert.equal(cell?.style.height, "100%");
+    }
+    assert.equal(fullGrid.parentElement?.parentElement?.style.overflowX, "");
+    const day31 = fullTracker.querySelector<HTMLButtonElement>('[data-qd-metric="quality"][data-qd-day="31"]');
     assert.ok(day31);
     assert.doesNotMatch(day31.style.background, /repeating-linear-gradient/, "day 31 stays a normal fixed slice in every month");
-    const todayQuality = trackers[0]?.querySelector<HTMLButtonElement>(`[data-qd-metric="quality"][data-qd-day="${businessDate.day}"]`);
+    const todayQuality = fullTracker.querySelector<HTMLButtonElement>(`[data-qd-metric="quality"][data-qd-day="${businessDate.day}"]`);
     assert.ok(todayQuality);
     assert.equal(todayQuality.disabled, false);
     await act(async () => todayQuality.click());
 
-    const green = [...trackers[0]!.querySelectorAll<HTMLButtonElement>('button')]
+    const closeChoices = fullTracker.querySelector<HTMLButtonElement>('[aria-label="Close rating choices"]');
+    assert.ok(closeChoices);
+    assert.match(closeChoices.style.background, /linear-gradient/);
+    assert.equal(closeChoices.style.color, "rgb(255, 255, 255)");
+
+    const green = [...fullTracker.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent === "Green");
     assert.ok(green);
     await act(async () => green.click());
