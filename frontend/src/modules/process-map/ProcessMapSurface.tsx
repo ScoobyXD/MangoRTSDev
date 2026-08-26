@@ -91,6 +91,11 @@ export class ProcessMapProtectedTileLayer extends TileLayer<ProcessMapTileRespon
   static override layerName = "ProcessMapProtectedTileLayer";
 
   override updateState(params: UpdateParameters<this>): void {
+    const regenerateMaskedLayers = Boolean(
+      params.changeFlags.dataChanged
+      && params.changeFlags.updateTriggersChanged
+      && params.changeFlags.updateTriggersChanged.renderSubLayers,
+    );
     if (
       this.state.tileset
       && params.oldProps.protectedGeneration !== params.props.protectedGeneration
@@ -99,6 +104,9 @@ export class ProcessMapProtectedTileLayer extends TileLayer<ProcessMapTileRespon
       this.setState({ tileset: null, isLoaded: false });
     }
     super.updateState(params);
+    if (regenerateMaskedLayers) {
+      this.state.tileset?.tiles.forEach((tile) => { tile.layers = null; });
+    }
   }
 }
 
@@ -131,6 +139,7 @@ export type ProcessMapEditOverlayModel = {
   placements: ProcessMapVisiblePlacement[];
   traces: ProcessMapTrace[];
   selectedPlacementKey: string | null;
+  hoveredPlacementKey: string | null;
   selectedTraceID: string | null;
   connectionPreview: { source: ProcessMapVisiblePlacement; point: ProcessMapGridPoint } | null;
   highlightedFolderKey: string | null;
@@ -694,7 +703,12 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
       text: lod === "editing" ? `${placement.resource_type === "company_explorer_folder" ? "Folder" : "Process"}\n${placement.name}` : placement.name,
       size: 13,
     });
-    if (!options.settled || options.editOverlay.selectedPlacementKey !== key || lod !== "editing") continue;
+    if (
+      !options.settled
+      || options.editOverlay.connectionSourceKey
+      || options.editOverlay.selectedPlacementKey !== key
+      || lod !== "editing"
+    ) continue;
     const corners: Array<[ResizePick["horizontal"], ResizePick["vertical"], [number, number]]> = [
       ["west", "north", [bounds.min_x, bounds.min_y]], ["east", "north", [bounds.max_x, bounds.min_y]],
       ["east", "south", [bounds.max_x, bounds.max_y]], ["west", "south", [bounds.min_x, bounds.max_y]],
@@ -715,7 +729,10 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
         }
         continue;
       }
-      if (options.editOverlay.selectedPlacementKey !== key) continue;
+      if (
+        options.editOverlay.selectedPlacementKey !== key
+        && options.editOverlay.hoveredPlacementKey !== key
+      ) continue;
       anchors.push({ position: [input.x, input.y], radius: 6, fill: [255, 255, 255, 255], line: [14, 165, 233, 255], pick: { kind: "anchor", anchor: "input", key, placement } });
       anchors.push({ position: [output.x, output.y], radius: 6, fill: [14, 165, 233, 255], line: [255, 255, 255, 255], pick: { kind: "anchor", anchor: "output", key, placement } });
     }
@@ -878,6 +895,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const [previewTraces, setPreviewTraces] = useState<Map<string, ProcessMapTrace>>(new Map());
   const [removedTraceIDs, setRemovedTraceIDs] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<ProcessMapSelection>(null);
+  const [hoveredPlacementKey, setHoveredPlacementKey] = useState<string | null>(null);
   const [hoveredProcessID, setHoveredProcessID] = useState<string | null>(null);
   const [pinnedProcessID, setPinnedProcessID] = useState<string | null>(null);
   const [gesture, setGesture] = useState<ProcessMapGesture | null>(null);
@@ -985,13 +1003,14 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setGesture(null);
       setExternalDropPoint(null);
       setSelection(null);
+      setHoveredPlacementKey(null);
       setHoveredProcessID(null);
       setPinnedProcessID(null);
     }
     sceneAbortRef.current?.abort();
     const controller = new AbortController();
     sceneAbortRef.current = controller;
-    setLoading(true);
+    if (purgeProtectedGeometry) setLoading(true);
     setError("");
     try {
       const nextScene = await fetchProcessMapScene(apiBase, companyID, controller.signal);
@@ -1023,6 +1042,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     viewRef.current = fitted;
     setViewState(fitted);
     setSelection(null);
+    setHoveredPlacementKey(null);
     setHoveredProcessID(null);
     setPinnedProcessID(null);
     markUnsettled();
@@ -1079,6 +1099,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         setSelection(null);
         setGesture(null);
         setExternalDropPoint(null);
+        setHoveredPlacementKey(null);
         setHoveredProcessID(null);
         setPinnedProcessID(null);
         setScene(null);
@@ -1123,6 +1144,13 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const handleViewportLoad = useCallback((generation: number) => {
     if (generation !== canonicalGenerationRef.current) return;
+    const readVersion = sceneRef.current?.process_map_read_version;
+    if (readVersion !== undefined) {
+      setLoadedTiles((current) => {
+        if ([...current.values()].every((tile) => tile.process_map_read_version === readVersion)) return current;
+        return new Map([...current].filter(([, tile]) => tile.process_map_read_version === readVersion));
+      });
+    }
     const retired = retireProcessMapMutationMasks({
       committedOverlay: committedOverlayRef.current,
       removedTraceIDs: removedTraceIDsRef.current,
@@ -1133,7 +1161,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const refreshAfterMutation = useCallback((readVersion: number) => {
     setScene((current) => current && readVersion >= current.process_map_read_version ? { ...current, process_map_read_version: readVersion } : current);
-    setLoadedTiles(new Map());
     markUnsettled();
     void loadScene(false);
   }, [loadScene, markUnsettled]);
@@ -1277,9 +1304,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const selectedPlacement = selection?.kind === "placement" ? presentation.placements.get(selection.id) ?? null : null;
   const editedPlacementKeys = useMemo(() => new Set([
     ...committedOverlay.placements.keys(),
+    ...committedOverlay.removedPlacementKeys,
     ...previewPlacements.keys(),
     ...(selection?.kind === "placement" ? [selection.id] : []),
-  ]), [committedOverlay.placements, previewPlacements, selection]);
+  ]), [committedOverlay.placements, committedOverlay.removedPlacementKeys, previewPlacements, selection]);
   const editedTraceIDs = useMemo(() => new Set([
     ...committedOverlay.traces.keys(),
     ...previewTraces.keys(),
@@ -1307,11 +1335,12 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     placements: overlayPlacements,
     traces: overlayTraces,
     selectedPlacementKey: selection?.kind === "placement" ? selection.id : null,
+    hoveredPlacementKey,
     selectedTraceID: selection?.kind === "trace" ? selection.id : null,
     connectionPreview: gesture?.kind === "connection" ? { source: gesture.source, point: gesture.point } : null,
     highlightedFolderKey: highlightedFolder ? placementKey(highlightedFolder) : null,
     connectionSourceKey: gesture?.kind === "connection" ? placementKey(gesture.source) : null,
-  }), [gesture, highlightedFolder, overlayPlacements, overlayTraces, selection]);
+  }), [gesture, highlightedFolder, hoveredPlacementKey, overlayPlacements, overlayTraces, selection]);
 
   const editedPlacementMembership = [...editedPlacementKeys].sort().join("\0");
   const editedTraceMembership = [...editedTraceIDs].sort().join("\0");
@@ -1363,6 +1392,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setGesture(null);
       setSelection(null);
     }
+    setHoveredPlacementKey(null);
     const proposed: ProcessMapViewState = {
       target: [params.viewState.target?.[0] ?? viewRef.current.target[0], params.viewState.target?.[1] ?? viewRef.current.target[1], 0],
       zoom: typeof params.viewState.zoom === "number" ? params.viewState.zoom : viewRef.current.zoom,
@@ -1412,6 +1442,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       ...(pick.kind === "resize" ? { horizontal: pick.horizontal, vertical: pick.vertical } : {}),
       moved: false,
     };
+    gestureRef.current = next;
     setSelection({ kind: "placement", id: pick.key });
     setGesture(next);
     setPreviewPlacements((current) => replaceProcessMapPreviewEntries(current, basePlacements.keys(), basePlacements));
@@ -1425,8 +1456,17 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     event.stopPropagation();
     suppressClickRef.current = true;
     if (pick.kind === "placement" || pick.kind === "resize") startPlacementGesture(pick, point);
-    else if (pick.kind === "anchor" && pick.anchor === "output") setGesture({ kind: "connection", source: pick.placement, point, moved: false });
-    else if (pick.kind === "waypoint") setGesture({ kind: "waypoint", trace: pick.trace, index: pick.index, startingRoute: pick.trace.route_points.map((routePoint) => ({ ...routePoint })), moved: false });
+    else if (pick.kind === "anchor" && pick.anchor === "output") {
+      const next: ConnectionGesture = { kind: "connection", source: pick.placement, point, moved: false };
+      gestureRef.current = next;
+      setHoveredPlacementKey(null);
+      setSelection({ kind: "placement", id: pick.key });
+      setGesture(next);
+    } else if (pick.kind === "waypoint") {
+      const next: WaypointGesture = { kind: "waypoint", trace: pick.trace, index: pick.index, startingRoute: pick.trace.route_points.map((routePoint) => ({ ...routePoint })), moved: false };
+      gestureRef.current = next;
+      setGesture(next);
+    }
   }, [startPlacementGesture]);
 
   const handleDrag = useCallback((info: PickingInfo) => {
@@ -1494,6 +1534,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     gestureRef.current = null;
     setGesture(null);
     setSelection(null);
+    setHoveredPlacementKey(null);
     if (!target) return;
     const operationKey = `relationship:${sourceKey}:${targetKey}`;
     const canonicalGeneration = canonicalGenerationRef.current;
@@ -1563,6 +1604,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       || processMapPlacementDisplayLOD(placement, 2 ** settledViewState.zoom) !== "editing"
     ) return;
     clearHoverTimer();
+    setHoveredPlacementKey(null);
     setHoveredProcessID(null);
     setPinnedProcessID(null);
     onOpenLogicGate(placement.resource_id, placement.name);
@@ -1574,6 +1616,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     const pick = pickFromObject(info.object);
     if (!pick) {
       setSelection(null);
+      setHoveredPlacementKey(null);
       setPinnedProcessID(null);
       setHoveredProcessID(null);
       return;
@@ -1610,6 +1653,14 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const handleHover = useCallback((info: PickingInfo) => {
     const pick = pickFromObject(info.object);
+    const anchorPlacement = pick && (pick.kind === "placement" || pick.kind === "anchor" || pick.kind === "resize")
+      ? pick.placement
+      : null;
+    if (!gestureRef.current && anchorPlacement && processMapPlacementDisplayLOD(anchorPlacement, 2 ** settledViewState.zoom) === "editing") {
+      setHoveredPlacementKey(placementKey(anchorPlacement));
+    } else if (!gestureRef.current) {
+      setHoveredPlacementKey(null);
+    }
     if (pick?.kind === "placement" && pick.placement.resource_type === "logic_gate" && processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "editing") {
       showHoverCard(pick.placement.resource_id);
     } else if (hoveredProcessID) {
@@ -1621,6 +1672,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     if (!selection) return;
     gestureRef.current = null;
     setGesture(null);
+    setHoveredPlacementKey(null);
     if (selection.kind === "trace") {
       const trace = presentationRef.current.traces.get(selection.id);
       if (!trace) return;
@@ -1674,11 +1726,14 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, affectedTraceIDs, new Map()));
     setCommittedOverlay((current) => {
       const placements = new Map(current.placements);
-      placements.delete(key);
-      return { placements, traces: new Map(current.traces), removedPlacementKeys: new Set(current.removedPlacementKeys).add(key) };
+      for (const affectedKey of removalPlacementKeys) placements.delete(affectedKey);
+      return {
+        placements,
+        traces: new Map(current.traces),
+        removedPlacementKeys: new Set([...current.removedPlacementKeys, ...removalPlacementKeys]),
+      };
     });
-    const incident = [...presentationRef.current.traces.values()].filter((trace) => placementKey(trace.source) === key || placementKey(trace.target) === key).map((trace) => trace.resource_operational_relationship_id);
-    setRemovedTraceIDs((current) => new Set([...current, ...incident]));
+    setRemovedTraceIDs((current) => new Set([...current, ...affectedTraceIDs]));
     setSelection(null);
     if (placement.resource_type === "logic_gate") setPinnedProcessID((current) => current === placement.resource_id ? null : current);
     try {
@@ -1691,16 +1746,15 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
       setCommittedOverlay((current) => {
         const removedPlacementKeys = new Set(current.removedPlacementKeys);
-        removedPlacementKeys.delete(key);
+        for (const affectedKey of removalPlacementKeys) removedPlacementKeys.delete(affectedKey);
         return { ...current, removedPlacementKeys };
       });
       setRemovedTraceIDs((current) => {
         const next = new Set(current);
-        incident.forEach((id) => next.delete(id));
+        affectedTraceIDs.forEach((id) => next.delete(id));
         return next;
       });
       invalidateProcessMapReadCaches(apiBase, companyID);
-      setLoadedTiles(new Map());
       markUnsettled();
       void loadScene(false);
       setNotice(errorMessage(cause, "Placement removal was rolled back."));
@@ -1726,6 +1780,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       gestureRef.current = null;
       setGesture(null);
       setSelection(null);
+      setHoveredPlacementKey(null);
     }
   }, [openProcess, removeSelection, selectedPlacement, selection]);
 

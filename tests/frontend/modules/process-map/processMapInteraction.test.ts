@@ -108,6 +108,11 @@ test("transparent-vector refinement keeps one loaded covering level until the co
   assert.equal(tiles[0].isVisible, false);
   assert.deepEqual(tiles.slice(1).map((tile) => tile.isVisible), [true, true, true, true]);
 
+  tiles[2].isLoaded = false;
+  transparentVectorRefinementStrategy(tiles);
+  assert.equal(tiles[2].isVisible, true, "cached tile content remains drawable while its replacement reloads");
+  tiles[2].isLoaded = true;
+
   tiles[4].content = null;
   transparentVectorRefinementStrategy(tiles);
   assert.equal(tiles[0].isVisible, true, "failed or unavailable finer coverage retains valid coarse geometry");

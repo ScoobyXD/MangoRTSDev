@@ -152,7 +152,7 @@ Keep the layer count small and stable:
 3. Static cyan-to-blue operational trace geometry using orthogonal path segments below placements.
 4. Folder, Process, and restricted placement bodies using cheap GPU geometry or icons.
 5. Labels using `TextLayer` only in detail bands that can display them legibly.
-6. One small untiled edit overlay for the selected or actively dragged placement, anchors, resize handles, connection preview, selected trace, and route waypoints.
+6. One small untiled edit overlay for selected or actively dragged placement geometry, hovered or selected placement anchors, selected-placement resize handles, active-connection target inputs, the connection preview, selected trace, and route waypoints.
 
 Every deck.gl `PathLayer` in this stack must explicitly declare two-coordinate Cartesian XY positions. Folder fences, Process and restricted outlines, saved and selected traces, connection previews, and selected Folder fences must never depend on deck.gl's default three-coordinate format or invent a business Z coordinate.
 
@@ -175,7 +175,7 @@ One tile request returns the permission-safe representation for its integer zoom
 - Folder fences and traces intersecting tile boundaries are clipped into deterministic tile fragments or returned with stable identities and deterministic deduplication.
 - Tile cache keys are viewer-, permission-, company-read-version-, and tile-coordinate-safe. Tile ETags additionally include the response-contract version. A code-only tile representation change must advance that response contract so an older cached body cannot be reused through `304`.
 
-Use a transparent-vector-safe refinement function through deck.gl's supported refinement hook. When suitable coarse coverage is already loaded, keep the nearest loaded covering ancestor visible until every selected replacement needed for that covered region is ready. Then hide the ancestor and reveal the complete replacement coverage together. A parent and child representation of the same business identity must never both be pickable or produce duplicate edits. Initial loading may show the plain canvas until the first coarse response exists, but after permission-safe coverage has rendered it remains visible and transforms through the first and every later zoom, pan, placement drag, and LOD settlement; camera movement must not replace the spatial `TileLayer`, synthesize empty tiles, or flash the loaded canvas blank. Failed finer requests keep valid loaded coverage visible and expose the existing bounded error/retry treatment without polling.
+Use a transparent-vector-safe refinement function through deck.gl's supported refinement hook. When suitable coarse coverage is already loaded, keep the nearest loaded covering ancestor visible until every selected replacement needed for that covered region is ready. The same permission-safe continuity applies while a committed mutation's new read version replaces cached coverage: committed overlays and removal masks suppress stale changed identities while unrelated cached geometry remains visible until complete current-version viewport coverage arrives. Then hide the old coverage and reveal the complete replacement coverage together. A parent and child representation of the same business identity must never both be pickable or produce duplicate edits. Initial loading may show the plain canvas until the first coarse response exists, but after permission-safe coverage has rendered it remains visible through zoom, pan, placement drag, LOD settlement, and ordinary same-permission mutation reconciliation; camera movement must not replace the spatial `TileLayer`, synthesize empty tiles, or flash the loaded canvas blank. Failed finer requests keep valid loaded coverage visible without polling. Protected-permission invalidation still purges the old scope immediately.
 
 ## Detail Is Chosen by Screen Size
 
@@ -272,7 +272,7 @@ On drop or drag stop:
 3. Identify and visibly highlight the deepest eligible mapped Folder fence under the final placement.
 4. Reject self-parenting and Folder cycles.
 5. Save the chosen map parent and geometry once, at gesture completion.
-6. Apply the committed response to the edit overlay and affected tiles.
+6. Apply the committed response to the edit overlay and affected tiles without clearing unrelated loaded coverage or blanking the canvas.
 
 Do not save on every pointer move. Failed writes restore the last committed geometry. A delayed response from an older drag, resize, trace edit, tile read, permission state, or realtime generation must never overwrite newer canonical state.
 
@@ -289,7 +289,7 @@ The existing four endpoint combinations remain valid:
 
 Every accessible placement has exactly one presentation-defined input anchor and output anchor derived from its current global bounds. Anchor locations are not saved columns.
 
-Selecting an accessible placement at editing detail reveals only its left input and right output. Starting at the output keeps that source output visible, reveals and clearly highlights only distinct eligible target inputs, and draws one static orthogonal cyan-to-blue preview. Dropping on or reasonably near a valid target input creates or selects the canonical directed operational relationship and trace. Completion, invalid drop, Escape, camera change, and permission change clear the connection gesture, temporary anchors, target highlights, and source selection.
+Hovering an accessible placement or either of its revealed anchors at editing detail, regardless of the Process data-card Hover mode, or selecting that placement reveals only its left input and right output. Hover alone does not reveal resize grips. Starting at the output keeps that source output visible, reveals and clearly highlights only distinct eligible target inputs, and draws one static orthogonal cyan-to-blue preview. Leaving hides hover-only anchors. Dropping on or reasonably near a valid target input creates or selects the canonical directed operational relationship and trace. Completion, invalid drop, Escape, camera change, and permission change clear the connection gesture, temporary anchors, target highlights, and source selection.
 
 The trace route stores only ordered intermediate global integer grid points. Endpoint coordinates remain derived. Trace tiles clip the canonical route for rendering without rewriting it.
 
@@ -301,9 +301,9 @@ The current trace creation, pairwise fan-out/fan-in, shared explicit route point
 
 Continue using the one company `process-map:company` realtime doorbell and the one shared outbox/backplane system.
 
-A successful mutation updates the initiating edit overlay from its committed HTTP response and does not echo a redundant reload to that exact originating connection. Every other current company connection receives one compact permission-safe `process_map.changed` invalidation.
+A successful mutation updates the initiating edit overlay from its committed HTTP response and advances the company read version without clearing loaded same-permission tile coverage, visually resetting the canvas, or showing a blank frame. Committed and removed identity masks suppress stale changed fragments until complete current-version viewport coverage arrives while unrelated placements and traces remain visible. The exact originating connection receives no redundant realtime reload; every other current company connection receives one compact permission-safe `process_map.changed` invalidation.
 
-The invalidation contains no placement, identity, endpoint, relationship, trace, route, tile, or geometry payload. This scope-only doorbell exception does not weaken durable relationship events, which retain the exact typed source and target identities required for audit and projection consumers. The client performs one coalesced scene refresh, invalidates tile data only when the returned company read version or protected permission scope changes, and lets `TileLayer` schedule replacement data for its currently selected tiles. It does not reload an obsolete Folder layer and does not poll.
+The invalidation contains no placement, identity, endpoint, relationship, trace, route, tile, or geometry payload. This scope-only doorbell exception does not weaken durable relationship events, which retain the exact typed source and target identities required for audit and projection consumers. The client performs one coalesced scene refresh, invalidates tile data only when the returned company read version or protected permission scope changes, and lets `TileLayer` schedule replacement data for its currently selected tiles. An ordinary same-permission refresh keeps safe cached coverage visible until its replacement is ready; protected-permission invalidation disposes the old scope immediately. It does not reload an obsolete Folder layer and does not poll.
 
 Source-name, Explorer organization, permission, group, membership, recycle, restore, and permanent-delete changes continue to invalidate every affected viewer through the current validation fence and viewer-safe ETag rules.
 
@@ -362,7 +362,7 @@ The implementation branch must deliver all of the following together:
 - plain white non-geographic background;
 - initial whole-company camera fit;
 - settled-only LOD plus `TileLayer`-debounced loading of genuinely missing tiles;
-- stable permission-safe spatial `TileLayer` reuse through first and later zoom, pan, placement drag, and LOD settlement, with no synthetic empty candidates or camera-settlement reload, plus transparent-vector-safe coarse-to-fine refinement without blank flashes or duplicate picks;
+- stable permission-safe spatial `TileLayer` reuse through first and later zoom, pan, placement drag, LOD settlement, and ordinary same-permission mutation reconciliation, with no synthetic empty candidates, camera-settlement reload, or committed-mutation blank frame, plus transparent-vector-safe refinement without duplicate picks;
 - Folder fences, Processes, restricted placeholders, traces, labels, and edit overlay;
 - placement drag, group move, resize, reparent, remove, and rollback;
 - cross-Folder operational trace creation and route editing;
@@ -399,14 +399,14 @@ Frontend coverage must prove:
 - the renderer uses OrthographicView with no geographic map or second camera;
 - wheel zoom preserves the company-world point beneath the pointer and never navigates;
 - LOD does not run on individual wheel updates and commits once after settlement, while `TileLayer` debounces genuinely missing selected tiles without turning each wheel update into a read or globally reloading cached tiles;
-- permission-safe loaded coverage remains visible through first and later zoom, pan, placement drag, and LOD settlement, while coarse geometry remains until detailed tiles are ready;
+- permission-safe loaded coverage remains visible through first and later zoom, pan, placement drag, LOD settlement, and committed same-permission read-version replacement, while protected-permission invalidation still purges immediately;
 - every displayable Process keeps a green cue, every displayable Folder keeps an orange fence, and static traces remain visible at whole-company detail;
 - every Process Map `PathLayer` explicitly declares XY positions and supplies valid two-coordinate paths for Folder fences, Process and restricted outlines, saved and selected traces, connection previews, and selected Folder fences;
 - Folder fences are transparent, colored, resizable, and valid drop targets;
 - candidate Explorer hierarchy does not choose map containment;
-- drag, move, group move, resize, reparent, selection, distinct anchors and resize grips, static traces, waypoints, QDC cards, Process modal open/close, and failure rollback work;
+- drag, move, group move, resize, reparent, selection, hover-visible placement anchors, selected-placement resize grips, active-connection target inputs, static traces, waypoints, QDC cards, Process modal open/close, and failure rollback work;
 - the expanded and collapsed Explorer-style tray, collapsed-read suppression, Folder browse-versus-drag behavior, exact Explorer payload, and internal scrolling work;
-- connection previews and eligible target inputs remain visible, near-target drops commit the canonical relationship and trace, and completion, invalid drop, cancellation, camera change, and permission change clear every temporary connection control;
+- hovered placements retain their anchors while the pointer enters a revealed anchor, active connection previews and eligible target inputs remain visible, near-target drops commit the canonical relationship and trace, and leaving, completion, invalid drop, cancellation, camera change, and permission change clear the applicable temporary controls;
 - every group-move response contains all committed placement and trace revisions required for immediate reconciliation;
 - restricted placeholders leak nothing and are noninteractive;
 - Folder removal authorizes every user-mutated child while lifecycle cleanup remains permission-safe, and recycle restore reclaims only cleanup-unchanged children;

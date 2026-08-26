@@ -188,19 +188,19 @@ export function transparentVectorRefinementStrategy(tiles: ProcessMapRefinementT
   for (const tile of tiles) tile.isVisible = false;
   const selected = tiles.filter((tile) => tile.isSelected);
   const loadedAncestors = tiles
-    .filter((tile) => tile.isLoaded && tile.content != null && !tile.isSelected)
+    .filter((tile) => tile.content != null && !tile.isSelected)
     .sort((left, right) => right.index.z - left.index.z);
   const blockedAncestors = new Set<ProcessMapRefinementTile>();
 
   for (const tile of selected) {
-    if (tile.isLoaded && tile.content != null) continue;
+    if (tile.content != null) continue;
     const ancestor = loadedAncestors.find((candidate) => tileCovers(candidate, tile));
     if (ancestor) blockedAncestors.add(ancestor);
   }
 
   for (const ancestor of blockedAncestors) ancestor.isVisible = true;
   for (const tile of selected) {
-    if (!tile.isLoaded || tile.content == null) continue;
+    if (tile.content == null) continue;
     const coveredByVisibleAncestor = [...blockedAncestors].some((ancestor) => tileCovers(ancestor, tile));
     if (!coveredByVisibleAncestor) tile.isVisible = true;
   }
