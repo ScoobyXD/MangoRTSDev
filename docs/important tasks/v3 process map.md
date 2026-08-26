@@ -297,7 +297,7 @@ Trace width is also derived presentation. Its requested width comes from the cur
 
 Changing a placement's map parent, position, or dimensions preserves the operational relationship and its saved trace. Moving endpoints changes their derived anchor positions. Removing a placement may remove its saved incident trace geometry while preserving the underlying operational relationship. Permanently deleting an endpoint removes its placement, incident operational relationships, and dependent traces through the existing exact-identity lifecycle.
 
-The current trace creation, pairwise fan-out/fan-in, shared explicit route points, selection, waypoint editing, idempotence, revision, timestamp, and relationship-delete behavior remain in force. Saved traces and pending previews are static cyan-to-blue paths. The standalone moving flow markers, animation timer, and phase state are deleted and are not replaced by another animation.
+The current trace creation, pairwise fan-out/fan-in, shared explicit route points, selection, waypoint editing, idempotence, revision, timestamp, and relationship-delete behavior remain in force. Each saved trace fragment and pending preview is one continuous static cyan-blue path containing only horizontal or vertical segments; the renderer does not split paths into separate color pieces at bends. The standalone moving flow markers, animation timer, and phase state are deleted and are not replaced by another animation.
 
 ## Realtime, Cache, and Mutation Reconciliation
 
@@ -403,7 +403,7 @@ Frontend coverage must prove:
 - LOD does not run on individual wheel updates and commits once after settlement, while `TileLayer` debounces genuinely missing selected tiles without turning each wheel update into a read or globally reloading cached tiles;
 - permission-safe loaded coverage remains visible through first and later zoom, pan, placement drag, LOD settlement, and the initiating client's committed same-permission read-version replacement, while unclassified remote and protected-permission invalidations still purge immediately;
 - every displayable Process keeps a green cue, every displayable Folder keeps an orange fence, and static traces remain visible at whole-company detail;
-- every Process Map `PathLayer` explicitly declares XY positions and supplies valid two-coordinate paths for Folder fences, Process and restricted outlines, saved and selected traces, connection previews, and selected Folder fences;
+- every Process Map `PathLayer` explicitly declares XY positions and supplies valid two-coordinate paths for Folder fences, Process and restricted outlines, saved and selected traces, connection previews, and selected Folder fences, while every trace fragment and preview stays one continuous path with only horizontal or vertical segments;
 - Folder names and perimeters select and move their transparent fences, selected corner grips resize them, and no opaque or invisible Folder interior blocks contained placements;
 - Process cards remain neutral elevated surfaces with a subtle shadow, support move and resize, and map and tray labels show only source names while existing icons, outlines, and colors retain type identity;
 - initial Folder and Process drop dimensions derive from the settled camera scale, snap to positive integer grid sizes, and keep the Process smaller and shorter than the Folder at the same scale;
