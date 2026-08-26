@@ -58,7 +58,7 @@ Last updated: 2026-08-17
 
 # Universal Picker Business Logic Laws
 
-UP1 - Mango has one shared Universal picker implementation. Node, Logic Gate, and Project Tiptap editors, the Node header linker, the selected-email placement toolbar, Project Attach email, and the Process Map Folder header must not implement separate picker search, keyboard, category, or mode behavior.
+UP1 - Mango has one shared Universal picker implementation. Node, Logic Gate, and Project Tiptap editors, the Node header linker, the selected-email placement toolbar, Project Attach email, and the one Process Map header must not implement separate picker search, keyboard, category, or mode behavior.
 
 UP2 - Typing `#` with a collapsed caret in an active Node, Logic Gate, or Project Tiptap editor opens the picker at the trigger position and focuses the picker's single search input. The trigger remains owned by that exact document and selection until the picker selects, cancels, or becomes stale.
 
@@ -155,7 +155,7 @@ UP47 - Every search GET is read-only. It must not open a repair transaction, ups
 UP48 - The search architecture in UP43 through UP47 is the rule for Mango free-text resource searches: narrow by company, selected type, text, and bounded rank first; authorize that narrowed set last. A listing endpoint that intentionally returns a complete tree is not a free-text search and retains its separately documented tree-visibility behavior.
 UP49 - The Project Logic Gates / Nodes toolbar renders the exact shared My Triage launcher pair. Its `Ready! Open universal linker` control opens the shared Universal picker locked to `##` link mode with Nodes as its only enabled target, and its compact document-plus control creates and links one floating Node without requiring a Logic Gate.
 
-UP50 - The Process Map Folder header renders the existing Universal linker without a floating-Node action and locks it to authorized Processes. Blank rows come from the existing filtered Pinned read, searched rows come from the existing bounded permission-safe workspace search, and every visible Process row is drag-only. Drag start emits the existing exact `logic_gate` Company Explorer payload; only the existing Process Map canvas drop command may create or move its placement, and the picker adds no search service, endpoint, reference, relationship, automatic placement, or automatic layout.
+UP50 - The one Process Map header renders the existing Universal linker without a floating-Node action and locks it to authorized Processes. Blank rows come from the existing filtered Pinned read, searched rows come from the existing bounded permission-safe workspace search, and every visible Process row is drag-only. Drag start emits the existing exact `logic_gate` Company Explorer payload; only the Process Map canvas drop command may create or move its placement, Explorer parentage never chooses the map parent, and the picker adds no search service, endpoint, reference, relationship, automatic placement, or automatic layout.
 
 # Scenarios
 

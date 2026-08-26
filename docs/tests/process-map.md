@@ -2,7 +2,7 @@
 
 1. Process Map MUST reference the exact canonical Company Explorer Folder and Process identities and MUST NOT create copied Folder or Process entities.
 2. Process is the product name for the existing Logic Gate resource and MUST reuse the exact existing Logic Gate identity and records.
-3. The first Process Map version MUST support only Company Explorer Folders and Processes and MUST NOT support Nodes, Projects, or other resource types.
+3. Process Map MUST support only Company Explorer Folders and Processes and MUST NOT support Nodes, Projects, textboxes, annotations, or other resource types.
 4. Folder names and facts MUST come from `company_explorer_folders`, and Process names and facts MUST come from the canonical Logic Gate records.
 5. Current source names and permissions MUST be joined when Process Map is read and MUST NOT be copied into Process Map storage.
 6. `process_map_placements` MUST be the authority for Process Map inclusion, independent map parentage, and manually saved position.
@@ -10,18 +10,18 @@
 8. `process_map_traces` MUST be the authority only for the saved visual routing of an operational relationship.
 9. Manually authored Process Map placement and trace facts MUST be treated as canonical map facts and MUST NOT be treated as disposable projections.
 10. Process Map MUST NOT introduce a resource registry, surrogate resource identity, translated identity, copied resource payload, or compatibility identity layer.
-11. The first Process Map version MUST have one shared Process Map per company and MUST NOT add separate map records.
+11. Process Map MUST have one shared continuous canvas per company and MUST NOT add separate map records.
 12. Process Map generic resource references MUST use the exact canonical stored types `company_explorer_folder` and `logic_gate`; the Process display name MUST NOT create a parallel stored `process` identity.
 13. One `process_map_placements` row MUST mean that its exact typed resource is explicitly mapped.
 14. One exact typed resource MUST have at most one Process Map placement in its company.
 15. Process Map parentage MUST remain independent from Company Explorer parentage and placement.
-16. A root placement MUST have no map parent and MUST reference a Folder.
-17. A non-root placement MUST name one exact same-company Company Explorer Folder as its map parent.
+16. A root placement MUST have no map parent and MAY reference either a Folder or a Process.
+17. A non-root placement MUST name one exact same-company mapped Company Explorer Folder as its map parent.
 18. A Process MUST NOT parent another Process Map placement.
 19. Process Map Folder parentage MUST reject self-parenting, descendant cycles, missing Folders, and cross-company Folders.
-20. A Folder's map layer MUST be identified by that Folder's exact canonical ID.
-21. Removing a Folder's placement from its parent layer MUST preserve the saved placements and traces inside that Folder's own map layer.
-22. A user with access to an unplaced Folder's exact layer URL MUST still be able to open that preserved Folder layer.
+20. A Folder's exact canonical ID MUST identify only its manually authored Process Map fence and map-parent role and MUST NOT identify a separate Process Map layer or route.
+21. Removing a mapped Folder that parents placements MUST atomically reparent its direct map children to the removed Folder's former map parent or root while preserving their global geometry, operational relationships, and otherwise valid traces.
+22. An unplaced Folder MUST have no hidden Process Map layer, descendant route, or separately openable Process Map URL.
 23. Creating, moving, or reordering an item in Company Explorer MUST NOT automatically add, move, position, arrange, or rearrange a Process Map placement.
 24. Renaming a mapped Folder or Process at its source MUST be reflected on the next Process Map read without rewriting its placement.
 25. Adding, moving, reparenting, or removing a Process Map placement MUST NOT add, move, rename, delete, or otherwise mutate its source resource or Company Explorer placement.
@@ -29,32 +29,32 @@
 27. Permanently deleting a Folder or Process MUST remove every Process Map placement, operational relationship, and trace that references its exact typed identity without affecting unrelated resources.
 28. Recycling a Folder or Process MUST capture every placement, operational relationship, and trace promised for restoration before live cleanup occurs.
 29. Restoring a recycled Folder or Process MUST restore its promised exact Process Map state after its source resources and operational relationships exist again.
-30. A saved Process Map position MUST use signed integer coordinates measured in the smallest grid squares and MUST NOT use pixels or floating-point coordinates.
-31. Every manually moved placement and every manually routed point MUST snap to the smallest grid squares before it is saved.
+30. A saved Process Map position and size MUST use global signed integer company-world grid coordinates and positive integer grid dimensions and MUST NOT use pixels, latitude/longitude, or floating-point coordinates.
+31. Every manually moved or resized placement and every manually routed point MUST snap to the smallest grid squares before it is saved.
 32. Process Map placements and traces MUST be shared company state rather than personal browser state.
 33. Every successful placement save MUST increment that placement's revision.
 34. Placement saves MUST use last-committed-save-wins behavior and MUST NOT reject a save merely because the client read an older revision.
 35. Every placement MUST record database-generated creation and update timestamps.
-36. Every accessible Folder MUST be a fixed rounded rectangle occupying exactly seven by five smallest grid squares.
-37. Every accessible Process MUST be a fixed rectangle occupying exactly seven by five smallest grid squares.
-38. Folder and Process dimensions MUST NOT be user-adjustable or stored as placement data in the first version.
-39. Every accessible Folder and Process MUST keep a neutral elevated surface with one thin type outline matching Company Explorer: orange for a Folder and green for a Process; selection MUST preserve that type outline, and the first version MUST NOT add filled semantic item colors.
+36. Every accessible Folder MUST be a transparent resizable perimeter fence whose saved positive integer width and height are canonical placement geometry.
+37. Every accessible Process MUST be a resizable neutral card whose saved positive integer width and height are canonical placement geometry.
+38. Initial Folder and Process dimensions MUST be drop defaults only; every successful manual resize MUST save `grid_width` and `grid_height` on the existing placement and advance its revision.
+39. Every accessible Folder perimeter and Process card MUST keep one thin type outline matching Company Explorer: orange for a Folder and green for a Process; selection MUST preserve that type outline, Folder interiors MUST remain transparent, and Process Map MUST NOT add filled semantic item colors.
 40. A single click on an accessible Folder MUST select that Folder; a single click on an accessible Process MUST select that Process and pin its Process data card immediately to its right; completing a placement drag or connection gesture MUST perform only that gesture and MUST NOT be treated as a click or open, close, pin, or unpin a data card.
-41. A double click on an accessible Folder MUST navigate to that Folder's Process Map layer.
-42. A Process MUST be a leaf on Process Map and MUST NOT open a Process Map Node layer in the first version.
+41. A double click on an accessible Folder MAY fit the one existing camera to that Folder fence and MUST NOT navigate, change browser history, or open another semantic map.
+42. A Process MUST be a leaf on Process Map and MUST NOT open a Process Map Node layer.
 43. Panning or zooming MUST change only the current map viewport and MUST NOT enter or leave a Folder or change saved placement coordinates.
-44. The root layer and every Folder layer MUST have a stable and directly openable URL.
-45. Every double-click drill-in MUST navigate to the destination Folder layer's URL and add that navigation to browser history.
-46. Copying and opening a Process Map URL MUST restore the same identified layer for an authorized recipient.
-47. Browser Back MUST return to the previously visited Process Map layer.
-48. The root route MUST load only placements whose saved map parent is root and the traces required for that root layer.
-49. A Folder route MUST load only placements whose saved map parent is that exact Folder and the traces required for that Folder layer.
-50. Process Map MUST NOT preload deeper descendants, hidden layer contents, the complete Company Explorer tree, or the complete company relationship graph.
+44. Process Map MUST have one stable company canvas URL, `/process-map`, and MUST NOT expose Folder-layer Process Map routes.
+45. Zooming, panning, camera fitting, selecting, and crossing a detail threshold MUST remain within the one company canvas and MUST NOT add browser history.
+46. Copying and opening the Process Map URL MUST open the same company canvas for an authorized recipient without persisting another user's viewport or selection.
+47. Browser Back MUST navigate only between real application pages and MUST NOT traverse camera positions or Folder focus states.
+48. The initial Process Map scene read MUST return only permission-safe company bounds, tile/read version, and camera-loading metadata required to fit the whole authorized canvas.
+49. Spatial tile reads MUST load only the permission-safe geometry and presentation required for the final settled viewport and screen-space detail, MUST return for each integer tile z only the conservative presentation superset an object can require anywhere in that z interval so fractional zoom needs no new request key, and MUST NOT use Explorer hierarchy or map-parent depth as the tile pyramid.
+50. Process Map MUST NOT load the complete Company Explorer tree, full Process documents, Q/D history, Nodes, emails, tasks, attachments, or a generic complete company relationship graph merely to draw the canvas.
 51. Structural map parentage, operational relationships, and trace geometry MUST remain three separate meanings.
 52. Company Explorer hierarchy and Process Map parentage MUST describe organization only and MUST NOT create or imply operational flow.
 53. Map position, visual proximity, shared route geometry, and Company Explorer ordering MUST NOT create or imply an operational relationship.
 54. `resource_operational_relationships` MUST store the exact typed source and exact typed target of every operational relationship.
-55. The first version MUST allow Folder-to-Folder, Folder-to-Process, Process-to-Folder, and Process-to-Process operational relationships.
+55. Process Map MUST allow Folder-to-Folder, Folder-to-Process, Process-to-Folder, and Process-to-Process operational relationships.
 56. Every operational relationship MUST be directed, same-company, and non-self-referential.
 57. Repeating creation for the same exact typed source and target MUST return or reuse the one existing operational relationship and MUST NOT create a duplicate row.
 58. An operational relationship MUST NOT grant access, RACI, ownership, Company Explorer parentage, or Process Map parentage to either endpoint.
@@ -64,12 +64,12 @@
 62. Finishing a newly drawn trace MUST atomically create or reuse its operational relationship and save its trace, or save neither.
 63. An operational relationship MAY exist without a Process Map trace, and an absent trace MUST remain absent from the map.
 64. One exact operational relationship MUST have at most one saved `process_map_traces` row in the company map.
-65. Every Folder and Process MUST expose exactly one fixed input anchor and exactly one fixed output anchor, and those anchor locations MUST be type-wide presentation rules rather than saved trace data.
+65. Every Folder and Process MUST expose exactly one presentation-defined input anchor and exactly one presentation-defined output anchor derived from its current saved bounds, and those anchor locations MUST NOT be saved trace data.
 66. Every trace MUST leave its source through the source resource's one output anchor and enter its target through the target resource's one input anchor, with no alternate sides or per-trace anchor selection.
-67. Trace route geometry MUST be one ordered JSONB array of intermediate points expressed as snapped integer grid coordinates.
+67. Trace route geometry MUST be one ordered JSONB array of intermediate points expressed as snapped global company-world integer grid coordinates.
 68. Trace JSONB MUST NOT copy endpoint resource IDs, resource types, names, permissions, operational direction, or other source payload.
-69. Trace endpoint coordinates MUST be derived from current placements and the fixed input and output anchors and MUST NOT be duplicated in the route-point array.
-70. A trace route MUST be read and replaced as one small atomic value, and the first version MUST NOT add bend, segment, junction, net, or route-node tables.
+69. Trace endpoint coordinates MUST be derived from current placements and their presentation-defined input and output anchors and MUST NOT be duplicated in the route-point array.
+70. A trace route MUST be read and replaced as one small atomic value, and Process Map MUST NOT add bend, segment, junction, net, or route-node tables.
 71. One-to-many flow MUST use several pairwise operational relationships whose traces MAY share the same route prefix.
 72. Many-to-one flow MUST use several pairwise operational relationships whose traces MAY share the same route suffix.
 73. An intentional visual junction MUST use the same explicit snapped grid point in every participating trace route.
@@ -81,10 +81,10 @@
 79. Trace creation MUST set both trace timestamps, and a successful trace edit MUST preserve `created_timestamp` and advance `updated_timestamp`.
 80. A failed trace write MUST change neither its route, revision, nor timestamps.
 81. Deleting a selected trace in the Process Map UI MUST atomically delete its operational relationship and dependent saved trace while preserving both endpoint resources and their placements.
-82. The first version MUST NOT expose a user command that deletes only saved trace geometry while preserving that trace's operational relationship.
-83. Removing a placement or changing its map parent MUST remove every incident trace that is no longer valid on the former layer and MUST preserve the underlying operational relationships.
-84. A trace MUST render only when both exact endpoints have placements on the current layer and both endpoints are visible to the current user.
-85. Every Process Map read, direct layer navigation, and mutation MUST enforce the normal Mango permission system.
+82. Process Map MUST NOT expose a user command that deletes only saved trace geometry while preserving that trace's operational relationship.
+83. Removing a placement MAY remove its incident saved trace geometry while preserving the underlying operational relationships, but moving, resizing, or changing the map parent of a still-mapped placement MUST preserve both its operational relationships and saved traces.
+84. A trace MUST render whenever both exact endpoints are mapped and visible to the current user, regardless of Explorer parentage, Process Map parentage, or spatial tile boundaries.
+85. Every Process Map scene read, tile read, pick projection, and mutation MUST enforce the normal Mango permission system.
 86. Adding, moving, or removing a placement MUST require Edit access to the placed resource.
 87. Changing a placement's map parent MUST also require Edit access to the destination Folder.
 88. Creating, rerouting, removing, or deleting an operational relationship or trace MUST require Edit access to both exact endpoints.
@@ -94,53 +94,77 @@
 92. A restricted `?` placeholder MUST display no name, resource type, type-specific dimensions, icon, canonical ID, contents, metadata, anchors, route points, direction, or neighboring endpoint information.
 93. A restricted `?` placeholder MUST be noninteractive and MUST NOT allow selection, opening, editing, movement, trace creation, or drill-in navigation.
 94. Mango MUST omit every operational relationship and trace touching an endpoint the current user cannot access.
-95. Directly opening a Folder layer the current user cannot access MUST follow the normal inaccessible-resource response and MUST NOT return that layer's placements or traces.
+95. An inaccessible mapped Folder MUST render only as the uniform restricted placeholder; its real perimeter, map identity, descendant map structure, anchors, and incident traces MUST NOT be returned through scene or tile reads.
 96. Traces MUST render below map items so that items remain the top interactive layer.
-97. The Process Map background MUST be very white.
-98. The background MUST use one uniform smallest-square grid whose lines have one color and weight, with no emphasized large-square or two-by-two grouping.
-99. Every accessible Folder and Process card MUST render as a neutral elevated surface above the grid.
+97. The Process Map background MUST be a very white plain non-geographic canvas with no basemap, imagery, terrain, streets, buildings, globe, latitude/longitude projection, or geographic attribution.
+98. If the existing background grid is retained, it MUST use one subtle uniform smallest-square pattern whose lines have one color and weight, with no emphasized large-square or two-by-two grouping.
+99. Every accessible Process card MUST render as a neutral elevated surface above the grid, while every accessible Folder MUST render above the grid only as its transparent perimeter fence.
 100. The background grid MUST move and scale with the map viewport while the user pans and zooms.
-101. The first Process Map version MUST NOT include a minimap.
-102. The first Process Map version MUST omit decorative infographic ribbons, ornamental paths, and visuals that do not represent map data.
+101. Process Map MUST NOT include a minimap.
+102. Process Map MUST omit decorative infographic ribbons, ornamental paths, and visuals that do not represent map data.
 103. The new Process Map MUST NOT restore, depend on, or add compatibility behavior for the removed Node Map or Logic Gate Map implementations.
 104. One trace route-point array MUST contain at most 256 points, and every point MUST be an object with exactly the signed integer fields `x` and `y`.
 105. Repeating a trace save with the same exact ordered route points MUST return the existing trace without advancing its revision or timestamps.
-106. The first Process Map version MAY allow placement cards to overlap and MUST NOT add automatic collision repair or automatic layout.
-107. Every Process Map manual-add entry point MUST use the existing exact-resource Company Explorer drag payload, whether the drag starts in Company Explorer, the current-layer placement tray, or the Folder-header Universal picker, and MUST NOT add a separate placement or candidate-search API; releasing a drag over any fixed Process Map UI instead of the map canvas MUST NOT create a placement.
+106. Process Map MAY allow placement cards to overlap and MUST NOT add automatic collision repair or automatic layout.
+107. Every Process Map manual-add entry point MUST use the existing exact-resource Company Explorer drag payload, whether the drag starts in Company Explorer, the company placement tray, or the Process Map header Universal picker; Explorer parentage MUST NOT select the map parent, no separate resource identity or candidate-search API may be added, and releasing a drag over fixed Process Map UI instead of the canvas MUST NOT create a placement.
 108. The Process Map editor SHOULD use orthogonal circuit-style trace routing where practical while preserving the one bounded integer route-point array as the only saved geometry.
 109. Every restricted placeholder MUST occupy one fixed four-by-three smallest-grid-square rectangle regardless of its hidden resource type.
-110. The fixed input anchor MUST touch the physical center of the accessible card's left side and the fixed output anchor MUST touch the physical center of its right side, with no visible gap before a trace.
-111. The Process Map frontend MAY use `@xyflow/react` for interaction and rendering, but Mango-owned placements, relationships, and traces MUST remain the only persisted map state; React Flow's graph JSON and viewport MUST NOT be persisted.
-112. Every visible trace MUST render below cards as an orthogonal cyan-to-blue surface exactly one smallest grid square thick, using the same gradient stops as the Node icon.
-113. A successful placement, relationship, or trace mutation MUST update the initiating mounted map from its committed response and MUST NOT echo a redundant realtime reload to that exact originating connection; every other current company connection MUST receive one compact invalidation, source and visibility changes MUST invalidate every affected viewer, and Process Map MUST NOT poll.
-114. Every Folder layer MUST display its complete visible Process Map path from the root-most mapped ancestor through the current Folder, and every visible ancestor name MUST navigate directly to that Folder layer.
-115. Folder path ancestry MUST follow only saved Process Map parentage, MUST NOT use Company Explorer parentage or load the full tree, and MUST omit the entire ancestor list when any ancestor is missing or inaccessible.
-116. The root placement tray MUST list only authorized immediate Company Explorer root Folders, and a Folder-layer tray MUST list only authorized immediate child Folders and Processes from that exact Folder branch; neither tray may include descendants, Projects, Nodes, or other resource types, and an expanded tray MUST reconcile its exact branch on accepted Process Map realtime invalidations.
-117. A placement tray item already present as an accessible placement on the current map layer MUST be omitted; a dragged item MUST remain in the tray until its placement save commits, then disappear locally, and MUST become available again when that current-layer placement is removed.
-118. The placement tray MUST reuse the existing bounded Company Explorer root or exact-parent child read and existing drag/drop placement path; it MUST NOT load the complete Explorer tree, search for candidates, poll, automatically place items, or automatically lay them out.
-119. The placement tray MUST remain fixed to the left side of the Process Map UI while the map pans or zooms; its whole header MUST be the one toggle, its disclosure MUST stay at the header's top-right and point right while collapsed and left while expanded, and its browser-local collapsed preference MUST default to expanded when unset, persist across Process Map layer navigation, and prevent hidden Explorer branch reads while collapsed.
+110. The input anchor MUST touch the physical center of the accessible placement's left side and the output anchor MUST touch the physical center of its right side using its current saved dimensions, with no visible gap before a trace.
+111. Process Map MUST use one deck.gl instance with one `OrthographicView` and MUST NOT run React Flow or another camera underneath it; Mango-owned placements, relationships, and traces remain the only persisted map state, and deck.gl view, tile, and picking state MUST NOT be persisted.
+112. Every visible trace MUST render below placements as an orthogonal cyan-to-blue surface whose screen-space width remains perceptible in its active detail band, using the same gradient stops as the Node icon.
+113. A successful placement, relationship, or trace mutation MUST update the initiating edit overlay from its committed response and MUST NOT echo a redundant reload to that exact originating connection; every other current company connection MUST receive one compact invalidation, affected scene/tile caches MUST reconcile only the settled viewport, source and visibility changes MUST invalidate every affected viewer, and Process Map MUST NOT poll.
+114. Process Map MUST NOT render Folder-layer breadcrumbs, semantic drill paths, or navigation controls for a canvas that is already continuously visible.
+115. Map-parent ancestry MAY be resolved only for containment validation, Folder group movement, permission-safe presentation, and tile geometry; it MUST follow saved Process Map parentage and MUST NOT be inferred from Company Explorer.
+116. The company placement tray MAY browse authorized Folders and Processes through existing bounded Company Explorer reads, while the one Process Map header's shared Universal picker MUST remain locked to authorized Processes through its existing bounded reads; candidate organization MUST NOT constrain where either resource may be placed on Process Map.
+117. A placement tray item already present anywhere on the company map as an accessible placement MUST be omitted; a dragged item MUST remain until its placement save commits, then disappear locally, and MUST become available again when that placement is removed.
+118. The placement tray MUST reuse existing bounded permission-safe Explorer or Universal picker reads and the one existing drag payload; it MUST NOT load the complete Explorer tree, poll, automatically place items, or automatically lay them out.
+119. The placement tray MUST remain fixed to the left side of Process Map while the camera pans or zooms; its header remains the one toggle, its browser-local collapsed preference defaults to expanded when unset, and collapsing it prevents hidden candidate reads.
 120. Every visible saved or pending trace MUST show one soft moving center pattern over its canonical source-to-target trace with the same direction and cadence; reduced-motion preference MUST stop the animation without hiding or changing the underlying trace or saved map state.
-121. A Folder-layer Process Map header MUST expose the shared Universal picker locked to authorized Processes only; its rows MUST be drag-only, MUST emit the existing exact Logic Gate Explorer payload, MUST let that active drag reach only the existing map canvas drop path, and MUST NOT create a placement, reference, or operational relationship from click, Enter, or Tab. The root layer MUST NOT expose this Process-only launcher.
+121. The one Process Map header MUST expose the shared Universal picker locked to authorized Processes only; its rows MUST be drag-only, MUST emit the existing exact Logic Gate Explorer payload, MUST let that active drag reach only the map canvas drop path, and MUST NOT create a placement, reference, or operational relationship from click, Enter, or Tab.
 122. Accessible placement anchors MUST be invisible and noninteractive by default; selecting one placement MUST reveal only that placement's input and output anchors, starting a connection gesture MUST reveal every accessible placement anchor, and finishing or canceling the gesture MUST hide every anchor and clear the source placement selection.
 123. The Process Map header MUST expose one **Hover mode** checkbox that controls only transient Process data cards; changing it MUST NOT change selection, a pinned card, placement, operational relationships, traces, or saved Process Map state.
 124. When Hover mode is checked, hovering an accessible Process MUST show its transient data card immediately to the Process's right and leaving both the Process and card MUST remove it; unchecked hover MUST show no data card.
 125. A transient hover data card MUST be read-only; clicking an accessible Process MUST pin its data card regardless of Hover mode, and the pinned card MUST remain visible after the pointer leaves the Process.
-126. Every transient or pinned Process data card MUST stay immediately to the right of its Process without covering or disabling the Process's fixed output anchor or its connection hit area, and moving the placement or viewport MUST keep a pinned card attached to that Process.
+126. Every transient or pinned Process data card MUST stay immediately to the right of its Process through deck.gl projection without covering or disabling the Process's output anchor or connection hit area, and moving the placement or camera MUST keep a pinned card attached to that Process.
 127. Once a pointer gesture crosses the placement-drag activation threshold or starts a connection gesture, releasing the pointer MUST NOT fire Process click or pin behavior even when snapping or pointer movement leaves the final X-Y position unchanged; only a press and release that remains a click gesture may select the Process and pin its data card.
-128. Every transient or pinned Process data card MUST show the same complete 31-slice Quality tracker and 31-slice Delivery tracker, in the same day order and from the same canonical Q/D values used by that exact Process's editor; Process Map placement rows, React Flow node/rendering state, and browser state MUST NOT become another Q/D authority.
+128. Every transient or pinned Process data card MUST show the same complete 31-slice Quality tracker and 31-slice Delivery tracker, in the same day order and from the same canonical Q/D values used by that exact Process's editor; Process Map placement rows, deck.gl layer/tile state, and browser state MUST NOT become another Q/D authority.
 129. Only the slices matching the current `America/Los_Angeles` business date MAY be changed from a pinned Process data card by a user with Edit access to that Process; every other slice and every slice in a transient hover card MUST remain visible and read-only.
 130. Every Process data card MUST show the canonical Q/D row's final-editor display-name snapshot when present and MUST NOT expose the stored user ID.
 131. The bottom of every Process data card MUST show the same resolved Responsible and Accountable user or group labels presented by that exact Process's current canonical RACI view, using the established role colors; it MUST NOT expose internal principal IDs, copy or rewrite an assignment, grant access, or become another RACI authority.
 132. At most one Process data card may be pinned; clicking another accessible Process MUST replace the pin, an explicit close action or click on empty map canvas MUST dismiss it, and a placement drag, connection gesture, viewport change, or Hover mode change MUST NOT dismiss or replace it.
+133. The deck.gl camera MUST use a flat Cartesian `OrthographicView` centered on Mango company-world coordinates and MUST disable geographic map, pitch, and rotation behavior.
+134. One deck.gl `TileLayer` MUST supply spatial viewport selection, request scheduling, bounded caching, a per-tile abort signal, and the parent-to-child refinement hook, while Mango MUST own settled generations, authoritative cancellation, permission-safe cache disposal, and stale-completion rejection; the z/x/y pyramid MUST be derived transport only and MUST NOT become Explorer hierarchy, Process Map parentage, operational truth, or stored tile membership.
+135. Each tile MUST render through a small stable sublayer stack for Folder fences, traces, placement bodies, labels, and restricted placeholders, while the selected or actively edited geometry MUST be hoisted into one untiled edit overlay.
+136. LOD MUST be chosen from each object's projected screen size and MAY differ for two objects at the same camera zoom; it MUST NOT be chosen from Explorer depth, map-parent depth, selected Folder, or a semantic route.
+137. Whole-company LOD MUST keep every displayable placement perceptible as a cheap mark, normal LOD MUST add readable shapes and labels, and editing LOD MUST expose the current cards, anchors, Q/D overlay, trace waypoints, and editing affordances without inventing new operational summary facts.
+138. The live camera and deck.gl internal viewport bookkeeping MAY update continuously, but every `onViewStateChange` MUST restart one application-owned quiet-period timer and `onInteractionStateChange` MUST update and complete the gate when release produces no view event; expiry MAY commit a settled generation and start scene or tile HTTP reads only while deck.gl reports no camera dragging, panning, zooming, or transition, while an expiry during interaction MUST settle on the later all-inactive callback after any remaining quiet time, `TileLayer.debounceTime` MUST NOT be the authority for settlement, and individual wheel events MUST NOT issue business reads.
+139. A transparent-vector-safe refinement function MUST keep suitable loaded coarse coverage visible until complete finer coverage for that region is ready, MUST then replace that coverage without duplicate drawing or picking of one business identity, and MUST keep valid coarse coverage on a finer-load failure; stale or aborted completions MUST NOT blank or replace a newer settled viewport.
+140. The initial scene read MUST fit the camera once around the permission-safe bounds of the whole mapped company, with no selected resource, and later tile arrivals MUST NOT refit it.
+141. Wheel zoom MUST target the current camera center through controlled view state, a custom OrthographicController, or an application wheel handler that keeps the camera target fixed; the default pointer-anchored controller behavior MUST NOT silently change semantic focus or navigation.
+142. Folder fences and traces crossing tile boundaries MUST use deterministic clipping or stable deterministic deduplication, and duplicated tile fragments MUST never produce duplicate picks, edits, mutations, or business identities.
+143. Mango MUST combine its settled-generation AbortController with deck.gl's per-tile abort signal, propagate request cancellation through browser fetch, HTTP handler, repository, and database, reject stale completions even when TileLayer does not abort them, and use viewer-safe ETags, identical-read sharing, bounded caches, and generation checks.
+144. An inaccessible Folder's tile representation MUST be one sealed restricted placeholder and MUST NOT disclose its real perimeter, stable identity, descendants, contents, or incident traces.
+145. The V3 cutover MUST delete the obsolete exact-layer read, Folder Process Map routes, React Flow Process Map renderer, and incompatible tests in the same complete change and MUST NOT retain a dual renderer, compatibility read, fallback, or unfinished feature-flag path.
+146. Dropping or finishing a drag over mapped Folder fences MUST visibly highlight and choose the deepest eligible accessible fence containing the final placement; dropping outside every eligible fence MUST choose the company root, and Explorer parentage MUST NOT affect that choice.
+147. Moving a mapped Folder MUST translate that Folder and every recursively map-contained placement by the same snapped company-world delta exactly once in one atomic committed operation without scaling, relayout, or changing any Explorer or operational relationship; a saved trace with both endpoints in the moved set MUST translate every intermediate route point by that delta exactly once, while a trace with only one moved endpoint MUST keep its global intermediate route points and reconnect through the moved endpoint's newly derived anchor.
+148. Resizing a mapped Folder MUST change only that Folder's saved dimensions and MUST NOT scale, translate, or rearrange its contents; the resize MUST NOT commit when any recursively map-contained placement would finish outside the Folder fence.
+149. A Folder group move MUST require current Edit access to the Folder and every recursively contained placement whose geometry changes, MUST lock and revalidate the complete moved set and permission fence in the transaction, and MUST change nothing when any required access or validation fails.
+150. The camera zoom range MUST fit the entire permission-safe mapped company and reach editing detail for the smallest supported placement, MUST be verified against safe numeric coordinate bounds, and MUST NOT preserve the old static `0.2` to `2.5` range as an arbitrary product limit.
+151. A permission, membership, actor, or permission-generation invalidation MUST synchronously remove affected protected geometry from rendering and dispose the old permission-scoped scene and tile cache before replacement reads; coarse visual continuity MAY survive an ordinary same-permission content refresh but MUST NOT retain newly forbidden geometry.
+152. The V3 migration MUST deterministically flatten legacy Process Map layers using only saved map parentage: Processes and empty Folders start at seven-by-five migration defaults, every nonempty Folder receives one grid square of padding around the bottom-up bounds of its immediate migrated children, root anchors remain unchanged, descendants and legacy same-layer route points receive the same recursively calculated layer-to-global offset, transformed revisions and update timestamps advance exactly once, and sibling overlap remains allowed.
+153. The V3 migration MUST preflight and atomically reject cycles, missing or cross-company map parents, traces whose endpoints do not share their legacy layer, coordinate overflow, or any row it cannot convert deterministically; after success, the exact-layer coordinate meaning and reader MUST be deleted with no fallback or partial company conversion.
+154. A successful Folder group move MUST advance every changed placement revision and every translated trace revision and update timestamp exactly once, and its committed HTTP response MUST contain every changed placement and trace row plus the new company Process Map read version so the initiating client can reconcile without guessing or waiting for its own realtime echo.
+155. User-initiated removal of a mapped Folder with direct map children MUST require Edit access to the Folder, every direct child whose map parent changes, and the destination Folder when one exists, MUST lock and revalidate the complete affected set, and MUST change nothing on denial; authorized permanent source-Folder deletion MAY perform the same reparenting as system lifecycle cleanup without granting access or disclosing hidden identities.
+156. A tile's z/x/y, company read version, actor, and permission generation MUST fully identify its server payload: the server MUST return a conservative permission-safe presentation superset for the whole integer-z interval, and the client MUST choose each object's exact settled LOD from projected screen size without issuing another request merely because fractional zoom crossed a visual threshold.
 
 Last updated: 2026-08-25
 
-# Process Story: A mapped Process reveals its shared daily Q/D card
+# Process Story: One company canvas moves from overview to editing
 
-A user optionally enables Hover mode and receives a transient read-only card while pointing at an accessible Process
+An authorized user opens `/process-map`, and one plain deck.gl OrthographicView fits the permission-safe bounds of the entire mapped company without selecting anything
 ↓
-A single click that never becomes a placement drag or connection gesture pins the card to the Process's right, while those gestures leave pin state unchanged
+The user pans or zooms while already loaded coarse Folder fences, placement marks, and traces remain drawn; only after camera movement ends does Mango select and request the final screen-space detail tiles
 ↓
-The pinned card reads the Process's shared 31-slice Quality and Delivery values, shows the final editor's display name, and permits only the current `America/Los_Angeles` business-day slices when the user has Edit access
+The user drags exact Explorer resources into manually chosen Folder fences, moves or resizes placements, and draws operational traces without changing Explorer hierarchy or navigating to another map
 ↓
-Responsible and Accountable appear at the bottom through the Process's current canonical RACI presentation, and no Process Map record becomes another Q/D or RACI authority
+At editing detail the same canonical Process exposes its current anchors and hover or pinned Q/D card, while deck.gl tiles, viewport state, and visual containment remain presentation rather than business authorities

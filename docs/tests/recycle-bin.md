@@ -52,15 +52,15 @@ RB31 - A new Logic Gate recycle payload stores `logic_gate_textboxes` and `logic
 RB32 - Recycle Bin object kinds include `kpi`, `huddle_logic_gate`, `huddle_node`, `huddle_explorer_folder`, and `huddle_explorer_item` in addition to the existing kinds.
 RB33 - A KPI restore payload preserves its exact Logic Gate owner, name, and `body_json`. A Huddle Logic Gate restore payload preserves its exact source row, direct policies, and typed Huddle Explorer placement. A Huddle Node restore payload preserves its exact source row, owning Huddle Logic Gate, and direct policies without an Explorer placement. A Huddle Explorer item or empty folder restore payload preserves only that exact organization row. Every restore reuses the original literal IDs.
 RB34 - Converting a normal Logic Gate into a Huddle Logic Gate is not a deletion and creates no Recycle Bin row.
-RB35 - Before deleting a Company Explorer Folder or Process, its recycle payload must capture the exact Process Map placements, incident operational relationships, and dependent traces promised for restoration. Deleting a Folder also captures placements directly parented by that Folder whose live cleanup will remove or invalidate geometry.
-RB36 - Permanently deleting a Process Map endpoint removes its exact placement and every incident operational relationship and trace. Removing or reparenting only a placement removes now-invalid incident trace geometry while preserving the operational relationships and endpoint resources.
+RB35 - Before deleting a Company Explorer Folder or Process, its recycle payload must capture each promised exact Process Map placement's map parent, global integer position, positive integer dimensions, revision, and timestamps plus the incident operational relationships and dependent global trace geometry promised for restoration. Deleting a mapped Folder also captures each directly parented surviving placement's original map parent and the exact placement revision produced when lifecycle cleanup reparents it while preserving its global geometry.
+RB36 - Permanently deleting a Process Map endpoint removes its exact placement and every incident operational relationship and trace. Removing only a placement may remove its dependent incident trace geometry while preserving the operational relationships and endpoint resources; moving, resizing, or changing the map parent of a still-mapped placement preserves its operational relationships and traces.
 RB37 - Process Map restore uses the exact original IDs and dependency order: source Folders and Processes, operational relationships, placements, then traces. A trace is never restored without its canonical operational relationship.
 RB38 - Restoring Process Map state advances the shared `process-map` read version and enqueues one compact company Process Map invalidation in the same committed transaction. The hint contains no endpoint identities, hidden placement facts, relationships, or route geometry.
 RB39 - Company Explorer moves and reorders never delete, move, restore, or rewrite Process Map placements, operational relationships, or traces because the two hierarchies are independent.
 RB40 - Company Explorer Folder deletion is available only through the canonical delete-targets command after company access, exact-target Edit access, and actor display-name confirmation are checked. The direct Folder `DELETE` route is unavailable.
 RB41 - Each independently selected delete root gets one exact recycle payload. Restoring one root must not restore another selected root; an incident Process Map relationship returns only after both exact endpoints exist, and its trace returns only with that relationship, so a later endpoint restore can recover both from its own payload.
-RB42 - A recycled Process Map placement returns only when its exact typed resource and optional map parent Folder exist. A skipped placement can return from a later independently selected root payload after both dependencies exist.
-RB43 - Process Map restore inserts only missing placements, operational relationships, and traces. It must not overwrite a newer live placement or rerouted trace when a later independent recycle payload is restored.
+RB42 - A recycled Process Map placement returns with its captured global integer position and positive integer dimensions only when its exact typed resource and optional exact mapped parent Folder exist. A skipped placement can return from a later independently selected root payload after both dependencies exist. A surviving child that lifecycle cleanup reparented may return under the restored Folder only when its current revision and geometry still exactly match the cleanup-produced state captured in the payload; that conditional reparent advances its revision.
+RB43 - Process Map restore inserts only missing placements, operational relationships, and traces except for the revision-fenced cleanup-child reparent allowed by RB42. It must not overwrite a newer live placement, map parent, dimensions, geometry, or rerouted trace when a later independent recycle payload is restored.
 
 ## Scenarios
 
@@ -140,6 +140,8 @@ Business logic covered:
 - RB37
 - RB38
 - RB39
+- RB42
+- RB43
 
 Given:
 - A user deletes a folder or logic gate with contained resources.
@@ -152,11 +154,12 @@ Expected:
 - The project row does not list its related nodes or Logic Gates as contained, and those resources and their node-to-gate assignments remain available after project deletion.
 - Restore rebuilds the captured underlying objects and relationships.
 - Folder and Process deletion captures exact Process Map state before cleanup; restore recreates sources, operational relationships, placements, then traces with their original IDs.
-- Placement-only removal or reparenting preserves operational relationships while removing invalid incident trace geometry, and an ordinary Company Explorer move changes no Process Map state.
+- Placement-only removal preserves operational relationships while it may remove dependent incident trace geometry; moving, resizing, or reparenting a still-mapped placement preserves its relationships and traces, and an ordinary Company Explorer move changes no Process Map state.
 - Restored Process Map state advances `process-map` and enqueues only its compact company invalidation in the restore transaction.
 - Restoring only one of two independently deleted Process Map endpoints leaves their shared relationship and trace absent; restoring the other endpoint later recovers both.
 - Restoring a Process before its independently deleted map parent Folder leaves the placement absent; restoring the Folder later recovers the placement.
 - If the Process is manually placed again before that Folder restore, the newer live placement wins and the recycled placement is skipped.
+- A surviving child reparented only by Folder-deletion cleanup returns under the restored Folder when its cleanup revision and geometry are unchanged; any later child edit makes newer live placement state win.
 - Restore succeeds when a captured table has generated columns by restoring only writable stored columns and allowing PostgreSQL to recompute generated values.
 
 ### Scenario RB-S5: Selection And Bulk Actions
