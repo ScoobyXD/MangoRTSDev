@@ -69,6 +69,11 @@ func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID st
 	delete(r.logicGateInfo, key(companyID, logicGateID))
 	delete(r.logicGateText, key(companyID, logicGateID))
 	delete(r.logicGateRACI, key(companyID, logicGateID))
+	for ratingKey, rating := range r.qdRatings {
+		if rating.CompanyID == companyID && rating.LogicGateID == logicGateID {
+			delete(r.qdRatings, ratingKey)
+		}
+	}
 	r.deleteMemoryHuddleRelationshipsForLogicGateLocked(companyID, logicGateID)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeLogicGate, logicGateID)
 	for k, board := range r.kanbanBoards {

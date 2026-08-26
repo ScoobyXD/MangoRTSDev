@@ -573,6 +573,8 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	logicGateRACISnapshot := cloneMemorySliceMap(r.logicGateRACI)
 	sharedInboxRACISnapshot := cloneMemorySliceMap(r.sharedInboxRACI)
 	usersSnapshot := cloneMemoryMap(r.users)
+	qdRatingsSnapshot := cloneMemoryMap(r.qdRatings)
+	recycleBinSnapshot := cloneMemoryMap(r.recycleBin)
 	invitationsSnapshot := cloneMemoryMap(r.invitations)
 	folderSharesSnapshot := cloneMemoryMap(r.folderShares)
 	emailConnectionsSnapshot := cloneMemoryMap(r.emailConnections)
@@ -593,6 +595,8 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		r.logicGateRACI = logicGateRACISnapshot
 		r.sharedInboxRACI = sharedInboxRACISnapshot
 		r.users = usersSnapshot
+		r.qdRatings = qdRatingsSnapshot
+		r.recycleBin = recycleBinSnapshot
 		r.invitations = invitationsSnapshot
 		r.folderShares = folderSharesSnapshot
 		r.emailConnections = emailConnectionsSnapshot
@@ -794,6 +798,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 			delete(r.raciTabItems, itemKey)
 		}
 	}
+	r.clearQDRatingUserReferencesLocked(userID)
 	delete(r.users, user.CognitoSubject)
 	affectedCompanyIDs := originalMembershipCompanyIDs
 	if hadGlobalAccess != memoryUserHasDevAdminMembershipLocked(r.memberships, userID) {

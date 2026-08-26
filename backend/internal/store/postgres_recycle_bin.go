@@ -249,6 +249,7 @@ var recycleSnapshotTables = map[string]bool{
 	"company_explorer_folders": true,
 	"nodes":                    true,
 	"logic_gates":              true,
+	"qd_ratings":               true,
 	"projects":                 true,
 	"huddle_logic_gates":       true,
 	"huddle_nodes":             true,
@@ -296,6 +297,7 @@ var recycleRestoreTableOrder = []string{
 	"company_explorer_folders",
 	"nodes",
 	"logic_gates",
+	"qd_ratings",
 	"resource_operational_relationships",
 	"process_map_placements",
 	"process_map_traces",
@@ -514,6 +516,19 @@ on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
 		return err
 	}
 	selectColumns := columnList
+	if tableName == "qd_ratings" {
+		selected := make([]string, len(columns))
+		for index, column := range columns {
+			if column == `"rated_by_user_id"` {
+				selected[index] = `case when exists (
+  select 1 from users where users.user_id=restored_row."rated_by_user_id"
+) then restored_row."rated_by_user_id" else null end`
+			} else {
+				selected[index] = "restored_row." + column
+			}
+		}
+		selectColumns = strings.Join(selected, ", ")
+	}
 	if tableName == "email_drafts" {
 		selected := make([]string, len(columns))
 		for index, column := range columns {
@@ -650,7 +665,7 @@ func postgresSnapshotRecyclePayloadWithCacheTx(ctx context.Context, tx *sql.Tx, 
 		}
 	}
 	if len(logicGateIDs) > 0 {
-		for _, tableName := range []string{"logic_gates", "logic_gate_textboxes", "logic_gate_textboxes_history"} {
+		for _, tableName := range []string{"logic_gates", "qd_ratings", "logic_gate_textboxes", "logic_gate_textboxes_history"} {
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 				return nil, err
 			}

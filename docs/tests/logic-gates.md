@@ -25,17 +25,21 @@ Last updated: 2026-08-08
 11. Removing a Huddle card removes only that exact edge and does not delete either Logic Gate, any KPI, or any Huddle Node snapshot.
 12. The normal Logic Gate editor MUST place one full-width daily Quality and Delivery row directly below the combined Huddle/KPI row and above the editor document.
 13. The Quality tracker and Delivery tracker MUST each always render exactly 31 fixed slices numbered 1 through 31; calendar month length MUST NOT add, remove, hide, or renumber a slice.
-14. The trackers MUST show and label the viewing device's current local month and year; slice number N represents day N when that calendar day exists, while every remaining fixed slice stays blank and read-only without introducing another state.
+14. The trackers MUST show and label the current month and year in Mango's fixed `America/Los_Angeles` business clock; slice number N represents day N, and Mango MUST NOT add special month-length behavior for slices 29, 30, or 31.
 15. Each exact Logic Gate and calendar date MUST have one company-shared Quality value and one company-shared Delivery value; neither value may be personal, per-worker, per-browser, or specific to one UI surface.
 16. Quality and Delivery MUST be independent values, and changing one MUST NOT change the other.
 17. Each Quality or Delivery value MUST be blank, green, yellow, or red; an authorized user chooses the color manually, and Mango MUST NOT infer or redefine it from KPIs, speed, RACI, or other Process data.
 18. Blank MUST mean that no rating was recorded and MUST NOT mean green, yellow, red, failure, zero, or a separate no-work state.
-19. The supported UI MUST allow a permitted user to change only the slice matching the viewing device's current local calendar date; every earlier, later, or nonexistent calendar-day slice MUST remain visible and read-only.
-20. Current-day eligibility MUST follow the viewing device's local calendar date for the complete local day, with no company timezone setting, user timezone setting, or timezone conversion in this version; when that local date changes, the mounted UI MUST lock the prior slice, show the new local month and year when required, and enable only the new current-day slice.
-21. Existing Logic Gate permissions MUST govern Q/D access: View permits reading the shared values, Edit permits changing today's values, and a Q/D value MUST NOT grant access or create another permission relationship.
+19. The supported UI MUST allow a permitted user to change only the slice matching the current `America/Los_Angeles` business date; every other slice MUST remain visible and read-only.
+20. Current-day eligibility MUST use the fixed `America/Los_Angeles` clock for the complete business day, with no company or user timezone setting in this version; when that date changes, every mounted UI MUST lock the prior slice, show the new business month and year when required, and enable only the new current-day slice.
+21. Existing Logic Gate `edit` and `no_access` permissions MUST govern Q/D access: Edit permits reading and changing today's values, no-access reveals no Q/D value or attribution, and a Q/D value MUST NOT grant access or create another permission relationship.
 22. The Logic Gate editor and every Process Map data card MUST read the same canonical Q/D values; the editor and pinned Process Map card MUST use the same canonical write path, while a transient hover card MUST remain read-only and no surface may own a copied list, browser-only saved value, or second write authority.
-23. A successful manual choice MUST atomically change only the chosen date and metric, and every mounted Process or Process Map surface MUST reconcile to the committed value; a failed save MUST leave the prior canonical value unchanged.
-24. Recycling and restoring a Logic Gate MUST preserve its exact saved Q/D values, while permanent deletion MUST remove those values without affecting another Logic Gate.
+23. A successful manual choice MUST atomically change only the chosen business day and metric, and every mounted Process or Process Map surface MUST reconcile to the committed value; a failed save MUST leave the prior canonical value unchanged.
+24. One Logic Gate MUST have at most one canonical Q/D row for the `America/Los_Angeles` calendar day derived from that row's immutable rated-created timestamp; Q/D storage MUST NOT add a separate rating-date or rating-timestamp authority.
+25. A canonical Q/D row MUST store nullable independent Quality and Delivery colors, the authenticated last editor's user ID while that user exists, the last editor's durable display-name snapshot, an immutable rated-created timestamp, and a rated-updated timestamp that changes only after a real same-day edit; deleting that user MUST null only the stored user ID in active or recycled Q/D data, and supported UI MUST retain the display name without exposing the ID.
+26. Setting one metric MUST preserve the other metric, clearing a metric MUST make only that metric blank, and clearing both metrics MUST remove the empty Q/D row.
+27. The backend Q/D write command MUST target only the current `America/Los_Angeles` business day, MUST NOT accept a caller-supplied target date, and therefore MUST provide no write path for a past or future day.
+28. Recycling and restoring a Logic Gate MUST preserve its exact saved Q/D values and attribution, while permanent deletion MUST remove those values without affecting another Logic Gate.
 
 Last updated: 2026-08-25
 
@@ -43,11 +47,11 @@ Last updated: 2026-08-25
 
 A user opens a Process and sees the full-width Q/D row below Huddles and KPIs
 ↓
-Both letters always show slices 1 through 31, while only the viewing device's local current-day slice is editable
+Both letters always show slices 1 through 31, while only the current `America/Los_Angeles` business-day slice is editable
 ↓
-An authorized user manually sets Quality or Delivery to green, yellow, or red without changing the other metric
+An edit-authorized user manually sets Quality or Delivery to blank, green, yellow, or red without changing the other metric, and Mango records that final editor's display-name snapshot
 ↓
-The same company-shared value appears in the Process Map data card, and the slice becomes read-only after the local date changes
+The same company-shared value appears in the Process Map data card, and the backend permanently locks the slice after the business date changes
 
 # Process Story: A Logic Gate assigns live RACI responsibility
 

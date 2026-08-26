@@ -109,6 +109,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTextBlockChatHighlights.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/nodeTimelineActivity.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorDates.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/logic-gates/qdRatingsApi.test.js"),
 ];
 const componentTests = [
   {
@@ -127,6 +128,10 @@ const componentTests = [
   {
     source: resolve(repoRoot, "tests/frontend/modules/huddles/logicGateKPISection.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/huddles/logicGateKPISection.test.js"),
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/logic-gates/logicGateQDTracker.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/logic-gates/logicGateQDTracker.test.js"),
   },
   {
     source: resolve(repoRoot, "tests/frontend/modules/editor/mangoTiptapEditorIntegration.test.tsx"),

@@ -17,6 +17,7 @@ type MemoryRepo struct {
 	accountFolders                   map[string]domain.AccountFolder
 	nodeAccountAssignments           map[string]domain.NodeAccountAssignment
 	logicGates                       map[string]domain.LogicGate
+	qdRatings                        map[string]domain.QDRating
 	huddleLogicGates                 map[string]domain.HuddleLogicGate
 	huddleNodes                      map[string]domain.HuddleNode
 	kpis                             map[string]domain.KPI
@@ -131,6 +132,7 @@ func NewMemoryRepo() *MemoryRepo {
 		accountFolders:                   map[string]domain.AccountFolder{},
 		nodeAccountAssignments:           map[string]domain.NodeAccountAssignment{},
 		logicGates:                       map[string]domain.LogicGate{},
+		qdRatings:                        map[string]domain.QDRating{},
 		huddleLogicGates:                 map[string]domain.HuddleLogicGate{},
 		huddleNodes:                      map[string]domain.HuddleNode{},
 		kpis:                             map[string]domain.KPI{},

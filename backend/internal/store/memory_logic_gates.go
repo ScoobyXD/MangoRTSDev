@@ -583,6 +583,11 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
 	delete(r.logicGateRACI, k)
+	for ratingKey, rating := range r.qdRatings {
+		if rating.CompanyID == companyID && rating.LogicGateID == logicGateID {
+			delete(r.qdRatings, ratingKey)
+		}
+	}
 	r.deleteMemoryHuddleRelationshipsForLogicGateLocked(companyID, logicGateID)
 	for permissionKey, permission := range r.entityPermissions {
 		if permission.CompanyID == companyID && permission.EntityType == EntityTypeLogicGate && permission.EntityID == logicGateID {

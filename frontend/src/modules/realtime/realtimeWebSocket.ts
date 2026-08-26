@@ -25,6 +25,7 @@ type RealtimeMessageType =
   | "chat.message.deleted"
   | "kanban.changed"
   | "process_map.changed"
+  | "logic_gate_qd_rating_updated"
   | "raci_tabs.changed"
   | "mailbox.message.changed"
   | "mailbox.folder.changed"
@@ -132,6 +133,14 @@ export type RealtimeProcessMapChangedMessage = RealtimeBaseMessage & {
   ts?: string;
 };
 
+export type RealtimeLogicGateQDRatingUpdatedMessage = RealtimeBaseMessage & {
+  type: "logic_gate_qd_rating_updated";
+  company_id: string;
+  scope: string;
+  logic_gate_id: string;
+  ts?: string;
+};
+
 export type RealtimeRACITabsChangedMessage = RealtimeBaseMessage & {
   type: "raci_tabs.changed";
   company_id: string;
@@ -215,6 +224,7 @@ type RealtimeInboundMessage =
   | RealtimeChatMessageDeletedMessage
   | RealtimeKanbanChangedMessage
   | RealtimeProcessMapChangedMessage
+  | RealtimeLogicGateQDRatingUpdatedMessage
   | RealtimeRACITabsChangedMessage
   | RealtimeMailboxMessageChangedMessage
   | RealtimeMailboxFolderChangedMessage
@@ -235,6 +245,7 @@ export type RealtimeSubscriptionHandlers = {
   onChatMessageDeleted?: (message: RealtimeChatMessageDeletedMessage) => void;
   onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
   onProcessMapChanged?: (message: RealtimeProcessMapChangedMessage) => void;
+  onLogicGateQDRatingUpdated?: (message: RealtimeLogicGateQDRatingUpdatedMessage) => void;
   onRACITabsChanged?: (message: RealtimeRACITabsChangedMessage) => void;
   onMailboxMessageChanged?: (message: RealtimeMailboxMessageChangedMessage) => void;
   onMailboxFolderChanged?: (message: RealtimeMailboxFolderChangedMessage) => void;
@@ -383,6 +394,12 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         origin_connection_id: stringValue(payload.origin_connection_id) || undefined,
         ts: stringValue(payload.ts) || undefined,
       };
+    }
+    case "logic_gate_qd_rating_updated": {
+      const scoped = scopedMessageBase(payload, type);
+      const logicGateID = stringValue(payload.logic_gate_id);
+      if (!logicGateID) throw new Error("realtime_logic_gate_id_required");
+      return { ...scoped, type, logic_gate_id: logicGateID, ts: stringValue(payload.ts) || undefined };
     }
     case "raci_tabs.changed": {
       const scoped = scopedMessageBase(payload, type);
@@ -812,6 +829,9 @@ export class MangoRealtimeClient {
           break;
         case "process_map.changed":
           sub.onProcessMapChanged?.(message);
+          break;
+        case "logic_gate_qd_rating_updated":
+          sub.onLogicGateQDRatingUpdated?.(message);
           break;
         case "raci_tabs.changed":
           sub.onRACITabsChanged?.(message);

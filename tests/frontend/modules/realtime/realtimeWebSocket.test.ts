@@ -20,6 +20,7 @@ import {
   type RealtimeChatMessageUpdatedMessage,
   type RealtimeChatMessageDeletedMessage,
   type RealtimeKanbanChangedMessage,
+  type RealtimeLogicGateQDRatingUpdatedMessage,
   type RealtimeMailboxFolderChangedMessage,
   type RealtimeMailboxMessageChangedMessage,
   type RealtimeNotificationCreatedMessage,
@@ -107,6 +108,14 @@ test("parses retained product and scoped mailbox message families", () => {
   assert.equal(processMap.company_id, "company-1");
   assert.equal(processMap.scope, "process-map:company");
   assert.equal(processMap.origin_connection_id, "connection-1");
+
+  const qdRating = parseRealtimeMessage(JSON.stringify({
+    type: "logic_gate_qd_rating_updated",
+    company_id: "company-1",
+    scope: "editor-json:logic_gate:gate-1:qd-ratings",
+    logic_gate_id: " gate-1 ",
+  })) as RealtimeLogicGateQDRatingUpdatedMessage;
+  assert.equal(qdRating.logic_gate_id, "gate-1");
 
   const raciTabs = parseRealtimeMessage(JSON.stringify({
     type: "raci_tabs.changed",
@@ -678,7 +687,7 @@ test("frontend source inventory contains only retained narrow scope families", (
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-	assert.equal(subscriptionSources.length, 11);
+	assert.equal(subscriptionSources.length, 12);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/AppSidebarChrome.tsx",
     "app/AppSidebarRACITabsSection.tsx",
@@ -687,6 +696,7 @@ test("frontend source inventory contains only retained narrow scope families", (
 		"modules/editor/NodeWorkspaceSurfaceParts.tsx",
     "modules/editor/tiptap/MangoTiptapEditor.tsx",
     "modules/kanban/KanbanContent.tsx",
+    "modules/logic-gates/qdRatingsApi.ts",
     "modules/process-map/ProcessMapSurface.tsx",
     "pages/home/EmailCollaborationChatSurface.tsx",
     "pages/home/EmailReferencePreviewHost.tsx",

@@ -96,6 +96,8 @@ import { setNodeAccountAssignments, type Account } from "../accounts/accountsApi
 import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { LogicGateTiptapEditorSurface } from "./LogicGateTiptapEditorSurface.js";
 import { LogicGateKPISection } from "../huddles/LogicGateKPISection";
+import { LogicGateQDTracker } from "../logic-gates/LogicGateQDTracker";
+import { logicGateDisplayRACIAssignments, type LogicGateResourceRACIPayload } from "../logic-gates/raciPresentation.js";
 import { scheduleTransientInformationFocus } from "./transientInformationFocus.js";
 import { parseMangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 import type { EditorEntityLink } from "./editorEntityLinks.js";
@@ -243,39 +245,6 @@ type EditorRACIAssignmentInput = {
   principal_id?: string;
   user_id?: string;
 };
-
-type ResourceRACIPayload = {
-  assignment_mode: "inherited" | "customized";
-  effective_assignment_mode: "inherited" | "customized";
-  effective_source: { resource_type: string; resource_id: string; resource_name?: string };
-  overwritten_by_ancestor?: { resource_type: string; resource_id: string; sequence: number } | null;
-  gvic_assignments?: LogicGateRACIAssignment[];
-  effective_assignments?: Array<{
-    role: LogicGateRACIRole;
-    user_id: string;
-    source_principal_type: LogicGateRACIPrincipalType;
-    source_principal_id: string;
-  }>;
-  parent_policy?: {
-    source: { resource_type: string; resource_id: string; resource_name?: string };
-    gvic_assignments?: LogicGateRACIAssignment[];
-  };
-  has_descendants?: boolean;
-  revision: string;
-};
-
-function displayRACIAssignments(payload: ResourceRACIPayload): LogicGateRACIAssignment[] {
-  if (payload.effective_assignment_mode === "customized") return payload.gvic_assignments ?? [];
-  if (payload.parent_policy) return payload.parent_policy.gvic_assignments ?? [];
-  return (payload.effective_assignments ?? []).map((assignment) => ({
-    company_id: "",
-    created_timestamp: "",
-    role: assignment.role,
-    principal_type: "user",
-    principal_id: assignment.user_id,
-    user_id: assignment.user_id,
-  }));
-}
 
 function toResourceRACIAssignmentInput(assignment: EditorRACIAssignmentInput): {
   role: LogicGateRACIRole;
@@ -585,7 +554,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   const [logicGateRACIAssignments, setLogicGateRACIAssignments] = useState<LogicGateRACIAssignment[]>([]);
   const [gvicPolicyMode, setRACIPolicyMode] = useState<"inherited" | "customized">("customized");
   const [gvicPolicyHasDescendants, setRACIPolicyHasDescendants] = useState(false);
-  const [gvicPolicyOverwrittenByAncestor, setRACIPolicyOverwrittenByAncestor] = useState<ResourceRACIPayload["overwritten_by_ancestor"]>(null);
+  const [gvicPolicyOverwrittenByAncestor, setRACIPolicyOverwrittenByAncestor] = useState<LogicGateResourceRACIPayload["overwritten_by_ancestor"]>(null);
   const [gvicPolicyRevision, setRACIPolicyRevision] = useState("");
   const [logicGateRACIApplyToAssignedNodesBusy, setLogicGateRACIApplyToAssignedNodesBusy] = useState(false);
   const [logicGateRACIApplyConfirmationOpen, setLogicGateRACIApplyConfirmationOpen] = useState(false);
@@ -1408,7 +1377,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
   ) => {
     const cleanResourceID = resourceID.trim();
     if (!cleanResourceID) return null;
-    const payload = await requestJSON<ResourceRACIPayload>(`/v1/resources/${resourceType}/${cleanResourceID}/gvic`, {
+    const payload = await requestJSON<LogicGateResourceRACIPayload>(`/v1/resources/${resourceType}/${cleanResourceID}/gvic`, {
       method: "PUT",
       headers: gvicPolicyRevision ? { "If-Match": gvicPolicyRevision } : undefined,
       body: JSON.stringify({
@@ -1451,7 +1420,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     try {
       const policy = await saveResourceRACIAssignments("node", linkedNodeID, nextAssignments, "inherited_only", "customized");
       if (!policy) return;
-      setNodeRACIAssignments(displayRACIAssignments(policy));
+      setNodeRACIAssignments(logicGateDisplayRACIAssignments(policy));
       invalidateNodeRecordStoreCaches(apiBase, companyID, linkedNodeID);
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed_to_update_node_gvic");
@@ -1473,7 +1442,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const currentTarget = linkedEditorTargetRef.current;
       if (logicGateRACIMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
       if (!policy) return;
-      const assignments = displayRACIAssignments(policy);
+      const assignments = logicGateDisplayRACIAssignments(policy);
       applyLogicGateRACIAssignments(assignments, logicGateID);
       patchLogicGateRecordStoreRACIAssignments(apiBase, companyID, logicGateID, assignments);
       patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
@@ -1498,7 +1467,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       const currentTarget = linkedEditorTargetRef.current;
       if (logicGateRACIMutationSequenceRef.current !== mutationSequence || currentTarget.kind !== "logic_gate" || currentTarget.id !== logicGateID) return;
       if (!policy) return;
-      const assignments = displayRACIAssignments(policy);
+      const assignments = logicGateDisplayRACIAssignments(policy);
       applyLogicGateRACIAssignments(assignments, logicGateID);
       patchLogicGateRecordStoreRACIAssignments(apiBase, companyID, logicGateID, assignments);
       patchLogicGateRACIAssignmentsInCommunicationsWorkspaceCache(companyID, logicGateID, assignments);
@@ -1525,7 +1494,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       gvicPolicyMode,
     ).then((policy) => {
       if (!policy) return;
-      applyLogicGateRACIAssignments(displayRACIAssignments(policy), logicGateID);
+      applyLogicGateRACIAssignments(logicGateDisplayRACIAssignments(policy), logicGateID);
     }).catch((err) => {
       setError(err instanceof Error ? err.message : "failed_to_apply_inherited_gvic");
     }).finally(() => {
@@ -2078,7 +2047,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           const [details, projections, gvicPolicy] = await Promise.all([
             getLogicGateRecordSingleFlight(apiBase, companyID, linkedNodeID),
             getLogicGateInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
-            requestJSON<ResourceRACIPayload>(`/v1/resources/logic_gate/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
+            requestJSON<LogicGateResourceRACIPayload>(`/v1/resources/logic_gate/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
           ]);
           const snapshotScope = editorSnapshotScope("logic_gate", linkedNodeID);
           if (!isCurrentLinkedLoad()) return;
@@ -2099,7 +2068,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           setNodeLogicGateIDs([]);
           setNodeAccounts([]);
           setNodeRACIAssignments([]);
-          applyLogicGateRACIAssignments(displayRACIAssignments(gvicPolicy), linkedNodeID);
+          applyLogicGateRACIAssignments(logicGateDisplayRACIAssignments(gvicPolicy), linkedNodeID);
           setRACIPolicyMode(gvicPolicy.effective_assignment_mode);
           setRACIPolicyHasDescendants(gvicPolicy.has_descendants === true);
           setRACIPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
@@ -2141,7 +2110,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           getNodeRecordSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeInformationProjectionSingleFlight(apiBase, companyID, linkedNodeID),
           getNodeTimelineEventsSingleFlight(apiBase, companyID, linkedNodeID),
-          requestJSON<ResourceRACIPayload>(`/v1/resources/node/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
+          requestJSON<LogicGateResourceRACIPayload>(`/v1/resources/node/${linkedNodeID}/gvic?company_id=${encodeURIComponent(companyID)}`),
         ]);
         if (!isCurrentLinkedLoad()) return;
         const snapshotScope = editorSnapshotScope("node", linkedNodeID);
@@ -2160,7 +2129,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
         setNodeDueDateDraft(formatNodeDueDateForEditor(details.node.due_date));
         setNodeLogicGateIDs(details.node.logic_gate_ids ?? []);
         setNodeAccounts(details.node.accounts ?? []);
-        setNodeRACIAssignments(displayRACIAssignments(gvicPolicy));
+        setNodeRACIAssignments(logicGateDisplayRACIAssignments(gvicPolicy));
         setRACIPolicyMode(gvicPolicy.effective_assignment_mode);
         setRACIPolicyHasDescendants(gvicPolicy.has_descendants === true);
         setRACIPolicyOverwrittenByAncestor(gvicPolicy.overwritten_by_ancestor ?? null);
@@ -2362,7 +2331,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     >
       <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0, cursor: "text" }}>
         {hasLinkedDocument && (
-          <div ref={editorHeaderRef} style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gap: 8, zIndex: 60, pointerEvents: "none" }}>
+          <div ref={editorHeaderRef} style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gridTemplateColumns: "minmax(0,1fr)", gap: 8, zIndex: 60, pointerEvents: "none" }}>
           <EditorTabBar
             activeTab={activeTab}
             outlineStyle={outlineStyle}
@@ -2475,7 +2444,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
           />
 
           {linkedEntityKind === "logic_gate" && activeTab === "editor" && (
-            <LogicGateKPISection companyID={companyID} logicGateID={linkedNodeID} canEdit={linkedEntityCanEdit} currentUserID={currentUserID} requestJSON={requestJSON} />
+            <>
+              <LogicGateKPISection companyID={companyID} logicGateID={linkedNodeID} canEdit={linkedEntityCanEdit} currentUserID={currentUserID} requestJSON={requestJSON} />
+              <LogicGateQDTracker apiBase={apiBase} companyID={companyID} logicGateID={linkedNodeID} canEdit={linkedEntityCanEdit} requestJSON={requestJSON} />
+            </>
           )}
 
           </div>

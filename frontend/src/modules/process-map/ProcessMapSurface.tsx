@@ -5,6 +5,7 @@ import {
   BaseEdge,
   EdgeLabelRenderer,
   Handle,
+  NodeToolbar,
   Position,
   ReactFlow,
   ReactFlowProvider,
@@ -35,7 +36,8 @@ import {
 } from "../company-explorer/companyExplorerLazyApi.js";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh.js";
 import { getCurrentRealtimeConnectionID, subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
-import { isAbortError } from "../api/requestJSON.js";
+import { createRequestJSON, isAbortError } from "../api/requestJSON.js";
+import { ProcessMapQDCard } from "./ProcessMapQDCard.js";
 import {
   deleteProcessMapPlacement,
   deleteProcessMapRelationship,
@@ -135,9 +137,24 @@ export type ProcessMapSurfaceProps = {
   apiBase: string;
   companyID: string;
   folderID?: string;
+  hoverModeEnabled?: boolean;
   onOpenFolder: (folderID: string) => void;
   onLayerChange?: (layer: ProcessMapLayerResponse["layer"] | null) => void;
 };
+
+type ProcessMapQDOverlayContextValue = {
+  apiBase: string;
+  companyID: string;
+  hoverModeEnabled: boolean;
+  hoveredProcessID: string | null;
+  pinnedProcessID: string | null;
+  requestJSON: ReturnType<typeof createRequestJSON>;
+  showHoverCard: (logicGateID: string) => void;
+  scheduleHoverCardClose: (logicGateID: string) => void;
+  closePinnedCard: () => void;
+};
+
+const ProcessMapQDOverlayContext = React.createContext<ProcessMapQDOverlayContextValue | null>(null);
 
 function resourceFromNode(node: ProcessMapNode | undefined): ProcessMapResourceRef | null {
   if (!node || node.data.restricted) return null;
@@ -187,6 +204,7 @@ function processMapNodeFromPlacement(placement: ProcessMapPlacement, index: numb
 
 function ProcessMapCard({ data, selected, isConnectable }: NodeProps<ProcessMapNode>) {
   const connectionInProgress = useConnection((connection) => connection.inProgress);
+  const qdOverlay = React.useContext(ProcessMapQDOverlayContext);
   if (data.restricted) {
     return (
       <div className="process-map-card process-map-card--restricted" aria-label="?">
@@ -195,10 +213,18 @@ function ProcessMapCard({ data, selected, isConnectable }: NodeProps<ProcessMapN
     );
   }
   const isFolder = data.resourceType === "company_explorer_folder";
+  const qdCardPinned = !isFolder && qdOverlay?.pinnedProcessID === data.resourceID;
+  const qdCardVisible = qdCardPinned || (
+    !isFolder
+    && qdOverlay?.hoverModeEnabled === true
+    && qdOverlay.hoveredProcessID === data.resourceID
+  );
   return (
     <div
       className={`process-map-card process-map-card--${isFolder ? "folder" : "process"}${selected ? " is-selected" : ""}${connectionInProgress ? " is-connecting" : ""}`}
       aria-label={`${isFolder ? "Folder" : "Process"}: ${data.label}`}
+      onMouseEnter={!isFolder ? () => qdOverlay?.showHoverCard(data.resourceID) : undefined}
+      onMouseLeave={!isFolder ? () => qdOverlay?.scheduleHoverCardClose(data.resourceID) : undefined}
     >
       <Handle
         id="input"
@@ -218,6 +244,28 @@ function ProcessMapCard({ data, selected, isConnectable }: NodeProps<ProcessMapN
         position={Position.Right}
         isConnectable={isConnectable}
       />
+      {!isFolder && qdOverlay && (
+        <NodeToolbar
+          className="process-map-qd-toolbar"
+          position={Position.Right}
+          align="start"
+          offset={24}
+          isVisible={qdCardVisible}
+          style={{ zIndex: 30 }}
+        >
+          <ProcessMapQDCard
+            apiBase={qdOverlay.apiBase}
+            companyID={qdOverlay.companyID}
+            logicGateID={data.resourceID}
+            processName={data.label}
+            pinned={qdCardPinned}
+            requestJSON={qdOverlay.requestJSON}
+            onClose={qdOverlay.closePinnedCard}
+            onPointerEnter={() => qdOverlay.showHoverCard(data.resourceID)}
+            onPointerLeave={() => qdOverlay.scheduleHoverCardClose(data.resourceID)}
+          />
+        </NodeToolbar>
+      )}
     </div>
   );
 }
@@ -373,10 +421,19 @@ function processMapErrorMessage(cause: unknown, fallback: string): string {
   return fallback;
 }
 
-function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, onLayerChange }: ProcessMapSurfaceProps) {
+function ProcessMapSurfaceInner({
+  apiBase,
+  companyID,
+  folderID,
+  hoverModeEnabled = false,
+  onOpenFolder,
+  onLayerChange,
+}: ProcessMapSurfaceProps) {
   const [nodes, setNodes] = useState<ProcessMapNode[]>([]);
   const [edges, setEdges] = useState<ProcessMapEdge[]>([]);
   const [selection, setSelection] = useState<ProcessMapSelection>(null);
+  const [hoveredProcessID, setHoveredProcessID] = useState<string | null>(null);
+  const [pinnedProcessID, setPinnedProcessID] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -386,8 +443,12 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
   const [trayError, setTrayError] = useState("");
   const [trayCollapsed, setTrayCollapsed] = useState(readProcessMapTrayCollapsed);
   const reactFlow = useReactFlow<ProcessMapNode, ProcessMapEdge>();
+  const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const trayListID = React.useId();
   const dragStartRef = useRef<{ id: string; position: ProcessMapGridPoint } | null>(null);
+  const suppressedNodeClickRef = useRef<string | null>(null);
+  const suppressedNodeClickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layerRequestGenerationRef = useRef(0);
   const activeLayerReadRef = useRef<number | null>(null);
   const localMutationGenerationRef = useRef(0);
@@ -402,6 +463,79 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     position: ProcessMapGridPoint;
     data: ProcessMapVisibleNodeData;
   }>());
+
+  const clearHoverCloseTimer = useCallback(() => {
+    if (hoverCloseTimerRef.current === null) return;
+    clearTimeout(hoverCloseTimerRef.current);
+    hoverCloseTimerRef.current = null;
+  }, []);
+
+  const showHoverCard = useCallback((logicGateID: string) => {
+    clearHoverCloseTimer();
+    if (hoverModeEnabled) setHoveredProcessID(logicGateID);
+  }, [clearHoverCloseTimer, hoverModeEnabled]);
+
+  const scheduleHoverCardClose = useCallback((logicGateID: string) => {
+    clearHoverCloseTimer();
+    hoverCloseTimerRef.current = setTimeout(() => {
+      hoverCloseTimerRef.current = null;
+      setHoveredProcessID((current) => current === logicGateID ? null : current);
+    }, 80);
+  }, [clearHoverCloseTimer]);
+
+  const closePinnedCard = useCallback(() => {
+    clearHoverCloseTimer();
+    setPinnedProcessID(null);
+    setHoveredProcessID(null);
+  }, [clearHoverCloseTimer]);
+
+  const scheduleSuppressedNodeClickClear = useCallback(() => {
+    if (suppressedNodeClickTimerRef.current !== null) clearTimeout(suppressedNodeClickTimerRef.current);
+    suppressedNodeClickTimerRef.current = setTimeout(() => {
+      suppressedNodeClickTimerRef.current = null;
+      suppressedNodeClickRef.current = null;
+    }, 0);
+  }, []);
+
+  useEffect(() => {
+    if (!hoverModeEnabled) {
+      clearHoverCloseTimer();
+      setHoveredProcessID(null);
+    }
+  }, [clearHoverCloseTimer, hoverModeEnabled]);
+
+  useEffect(() => {
+    clearHoverCloseTimer();
+    setHoveredProcessID(null);
+    setPinnedProcessID(null);
+  }, [clearHoverCloseTimer, folderID]);
+
+  useEffect(() => () => {
+    clearHoverCloseTimer();
+    if (suppressedNodeClickTimerRef.current !== null) clearTimeout(suppressedNodeClickTimerRef.current);
+  }, [clearHoverCloseTimer]);
+
+  const qdOverlayContext = useMemo<ProcessMapQDOverlayContextValue>(() => ({
+    apiBase,
+    companyID,
+    hoverModeEnabled,
+    hoveredProcessID,
+    pinnedProcessID,
+    requestJSON,
+    showHoverCard,
+    scheduleHoverCardClose,
+    closePinnedCard,
+  }), [
+    apiBase,
+    companyID,
+    closePinnedCard,
+    hoverModeEnabled,
+    hoveredProcessID,
+    pinnedProcessID,
+    requestJSON,
+    scheduleHoverCardClose,
+    showHoverCard,
+  ]);
 
   useEffect(() => {
     if (trayCollapsed) {
@@ -687,6 +821,7 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
 
   const handleNodeDragStart = useCallback((_: MouseEvent | TouchEvent, node: ProcessMapNode) => {
     if (node.data.restricted) return;
+    suppressedNodeClickRef.current = node.id;
     dragStartRef.current = {
       id: node.id,
       position: { x: node.data.gridX, y: node.data.gridY },
@@ -695,6 +830,7 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
 
   const handleNodeDragStop = useCallback((_: MouseEvent | TouchEvent, node: ProcessMapNode) => {
     if (node.data.restricted) return;
+    scheduleSuppressedNodeClickClear();
     const original = dragStartRef.current?.id === node.id ? dragStartRef.current : null;
     dragStartRef.current = null;
     const gridPosition = processMapFlowToGridPosition(node.position);
@@ -768,7 +904,7 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
       setError(processMapErrorMessage(cause, "Failed to save placement"));
       void requestRefresh();
     });
-  }, [apiBase, companyID, folderID, markLocalMutationCommitted, requestRefresh]);
+  }, [apiBase, companyID, folderID, markLocalMutationCommitted, requestRefresh, scheduleSuppressedNodeClickClear]);
 
   const handleConnect = useCallback((connection: Connection) => {
     if (!connection.source || !connection.target || connection.source === connection.target) return;
@@ -874,6 +1010,10 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
     const removed = nodes.find((node) => node.id === selection.id);
     const resource = resourceFromNode(removed);
     if (!removed || !resource) return;
+    if (resource.resource_type === "logic_gate") {
+      setPinnedProcessID((current) => current === resource.resource_id ? null : current);
+      setHoveredProcessID((current) => current === resource.resource_id ? null : current);
+    }
     setNodes((current) => current.filter((node) => node.id !== removed.id));
     setEdges((current) => current.filter((edge) => edge.source !== removed.id && edge.target !== removed.id));
     setSelection(null);
@@ -1003,6 +1143,7 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
   }, [folderID, nodes, trayRows]);
 
   return (
+    <ProcessMapQDOverlayContext.Provider value={qdOverlayContext}>
     <section
       className="process-map-surface"
       aria-label="Process Map canvas"
@@ -1107,9 +1248,18 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
         onNodeDragStop={handleNodeDragStop}
         onNodeClick={(_, node) => {
           if (node.data.restricted) return;
+          if (suppressedNodeClickRef.current === node.id) {
+            suppressedNodeClickRef.current = null;
+            if (suppressedNodeClickTimerRef.current !== null) {
+              clearTimeout(suppressedNodeClickTimerRef.current);
+              suppressedNodeClickTimerRef.current = null;
+            }
+            return;
+          }
           setSelection({ kind: "placement", id: node.id });
           setNodes((current) => current.map((item) => ({ ...item, selected: item.id === node.id })));
           setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
+          if (node.data.resourceType === "logic_gate") setPinnedProcessID(node.data.resourceID);
         }}
         onNodeDoubleClick={(_, node) => {
           const folderTarget = processMapFolderDrillTarget(resourceFromNode(node));
@@ -1145,11 +1295,18 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
         }}
         onPaneClick={() => {
           setSelection(null);
+          setPinnedProcessID(null);
+          setHoveredProcessID(null);
+          clearHoverCloseTimer();
           setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node));
           setEdges((current) => current.map((edge) => edge.selected ? { ...edge, selected: false } : edge));
         }}
+        onConnectStart={(_, params) => {
+          if (params.nodeId) suppressedNodeClickRef.current = params.nodeId;
+        }}
         onConnect={handleConnect}
         onConnectEnd={() => {
+          scheduleSuppressedNodeClickClear();
           setSelection((current) => current?.kind === "placement" ? null : current);
           setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node));
         }}
@@ -1181,6 +1338,7 @@ function ProcessMapSurfaceInner({ apiBase, companyID, folderID, onOpenFolder, on
         />
       </ReactFlow>
     </section>
+    </ProcessMapQDOverlayContext.Provider>
   );
 }
 

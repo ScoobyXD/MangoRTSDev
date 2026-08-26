@@ -128,9 +128,10 @@
 126. Every transient or pinned Process data card MUST stay immediately to the right of its Process without covering or disabling the Process's fixed output anchor or its connection hit area, and moving the placement or viewport MUST keep a pinned card attached to that Process.
 127. Once a pointer gesture crosses the placement-drag activation threshold or starts a connection gesture, releasing the pointer MUST NOT fire Process click or pin behavior even when snapping or pointer movement leaves the final X-Y position unchanged; only a press and release that remains a click gesture may select the Process and pin its data card.
 128. Every transient or pinned Process data card MUST show the same complete 31-slice Quality tracker and 31-slice Delivery tracker, in the same day order and from the same canonical Q/D values used by that exact Process's editor; Process Map placement rows, React Flow node/rendering state, and browser state MUST NOT become another Q/D authority.
-129. Only the slices matching the viewing device's current local calendar date MAY be changed from a pinned Process data card by a user with Edit access to that Process; every other slice and every slice in a transient hover card MUST remain visible and read-only.
-130. The bottom of every Process data card MUST show the same resolved Responsible and Accountable user or group labels presented by that exact Process's current canonical RACI view, using the established role colors; it MUST NOT expose internal principal IDs, copy or rewrite an assignment, grant access, or become another RACI authority.
-131. At most one Process data card may be pinned; clicking another accessible Process MUST replace the pin, an explicit close action or click on empty map canvas MUST dismiss it, and a placement drag, connection gesture, viewport change, or Hover mode change MUST NOT dismiss or replace it.
+129. Only the slices matching the current `America/Los_Angeles` business date MAY be changed from a pinned Process data card by a user with Edit access to that Process; every other slice and every slice in a transient hover card MUST remain visible and read-only.
+130. Every Process data card MUST show the canonical Q/D row's final-editor display-name snapshot when present and MUST NOT expose the stored user ID.
+131. The bottom of every Process data card MUST show the same resolved Responsible and Accountable user or group labels presented by that exact Process's current canonical RACI view, using the established role colors; it MUST NOT expose internal principal IDs, copy or rewrite an assignment, grant access, or become another RACI authority.
+132. At most one Process data card may be pinned; clicking another accessible Process MUST replace the pin, an explicit close action or click on empty map canvas MUST dismiss it, and a placement drag, connection gesture, viewport change, or Hover mode change MUST NOT dismiss or replace it.
 
 Last updated: 2026-08-25
 
@@ -140,6 +141,6 @@ A user optionally enables Hover mode and receives a transient read-only card whi
 ↓
 A single click that never becomes a placement drag or connection gesture pins the card to the Process's right, while those gestures leave pin state unchanged
 ↓
-The pinned card reads the Process's shared 31-slice Quality and Delivery values and permits only today's local slices when the user has Edit access
+The pinned card reads the Process's shared 31-slice Quality and Delivery values, shows the final editor's display name, and permits only the current `America/Los_Angeles` business-day slices when the user has Edit access
 ↓
 Responsible and Accountable appear at the bottom through the Process's current canonical RACI presentation, and no Process Map record becomes another Q/D or RACI authority

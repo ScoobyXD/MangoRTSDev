@@ -5,7 +5,48 @@ import {
   KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
   KANBAN_LOGIC_GATE_REVIEW_COLOR,
 } from "../kanban/shared.js";
-import type { LogicGateRACIRole } from "./types.js";
+import type {
+  LogicGateRACIAssignment,
+  LogicGateRACIPrincipalType,
+  LogicGateRACIRole,
+} from "./types.js";
+
+export type LogicGateResourceRACIPayload = {
+  assignment_mode: "inherited" | "customized";
+  effective_assignment_mode: "inherited" | "customized";
+  effective_source: { resource_type: string; resource_id: string; resource_name?: string };
+  overwritten_by_ancestor?: { resource_type: string; resource_id: string; sequence: number } | null;
+  gvic_assignments?: LogicGateRACIAssignment[];
+  effective_assignments?: Array<{
+    role: LogicGateRACIRole;
+    user_id: string;
+    user_display_name?: string;
+    user_email?: string;
+    source_principal_type: LogicGateRACIPrincipalType;
+    source_principal_id: string;
+  }>;
+  parent_policy?: {
+    source: { resource_type: string; resource_id: string; resource_name?: string };
+    gvic_assignments?: LogicGateRACIAssignment[];
+  };
+  has_descendants?: boolean;
+  revision: string;
+};
+
+export function logicGateDisplayRACIAssignments(payload: LogicGateResourceRACIPayload): LogicGateRACIAssignment[] {
+  if (payload.effective_assignment_mode === "customized") return payload.gvic_assignments ?? [];
+  if (payload.parent_policy) return payload.parent_policy.gvic_assignments ?? [];
+  return (payload.effective_assignments ?? []).map((assignment) => ({
+    company_id: "",
+    created_timestamp: "",
+    role: assignment.role,
+    principal_type: "user",
+    principal_id: assignment.user_id,
+    user_id: assignment.user_id,
+    user_display_name: assignment.user_display_name,
+    user_email: assignment.user_email,
+  }));
+}
 
 export type LogicGateRACIRolePresentation = {
   role: LogicGateRACIRole;
