@@ -54,7 +54,7 @@ func TestLogicGateQDRatingHTTPContract(t *testing.T) {
 	if err := json.NewDecoder(quality.Body).Decode(&qualityPayload); err != nil || qualityPayload.QDRating == nil {
 		t.Fatalf("PUT quality payload=%+v err=%v", qualityPayload, err)
 	}
-	if qualityPayload.QDRating.QualityRating == nil || *qualityPayload.QDRating.QualityRating != "green" || qualityPayload.QDRating.DeliveryRating != nil {
+	if qualityPayload.QDRating.QualityRating == nil || *qualityPayload.QDRating.QualityRating != "green" || qualityPayload.QDRating.CostRating != nil || qualityPayload.QDRating.DeliveryRating != nil {
 		t.Fatalf("PUT quality row=%+v", qualityPayload.QDRating)
 	}
 	if qualityPayload.QDRating.RatedByUserID == nil || *qualityPayload.QDRating.RatedByUserID != user.UserID || qualityPayload.QDRating.RatedByDisplayName != user.DisplayName {
@@ -64,6 +64,10 @@ func TestLogicGateQDRatingHTTPContract(t *testing.T) {
 	delivery := put("delivery", `{"company_id":"`+companyID+`","rating":"yellow"}`)
 	if delivery.Code != http.StatusOK {
 		t.Fatalf("PUT delivery status=%d body=%s", delivery.Code, delivery.Body.String())
+	}
+	cost := put("cost", `{"company_id":"`+companyID+`","rating":"red"}`)
+	if cost.Code != http.StatusOK {
+		t.Fatalf("PUT cost status=%d body=%s", cost.Code, cost.Body.String())
 	}
 
 	location, err := time.LoadLocation(store.QDRatingBusinessTimeZone)
@@ -84,7 +88,7 @@ func TestLogicGateQDRatingHTTPContract(t *testing.T) {
 	if err := json.NewDecoder(getResponse.Body).Decode(&listPayload); err != nil || len(listPayload.QDRatings) != 1 {
 		t.Fatalf("GET payload=%+v err=%v", listPayload, err)
 	}
-	if listPayload.QDRatings[0].QualityRating == nil || listPayload.QDRatings[0].DeliveryRating == nil {
+	if listPayload.QDRatings[0].QualityRating == nil || listPayload.QDRatings[0].CostRating == nil || listPayload.QDRatings[0].DeliveryRating == nil {
 		t.Fatalf("GET combined row=%+v", listPayload.QDRatings[0])
 	}
 
@@ -94,6 +98,10 @@ func TestLogicGateQDRatingHTTPContract(t *testing.T) {
 	cleared := put("delivery", `{"company_id":"`+companyID+`","rating":null}`)
 	if cleared.Code != http.StatusOK {
 		t.Fatalf("clear delivery status=%d body=%s", cleared.Code, cleared.Body.String())
+	}
+	cleared = put("cost", `{"company_id":"`+companyID+`","rating":null}`)
+	if cleared.Code != http.StatusOK {
+		t.Fatalf("clear cost status=%d body=%s", cleared.Code, cleared.Body.String())
 	}
 	var clearedPayload struct {
 		QDRating *domain.QDRating `json:"qd_rating"`

@@ -31,7 +31,7 @@ The implementation starts from a working Process Map, not a blank canvas:
 - `frontend/src/modules/process-map/processMapGeometry.ts` currently mandates one seven-by-five footprint for both supported resource types.
 - Existing placement storage already keeps `map_parent_folder_id`, `grid_x`, and `grid_y` independently from Company Explorer parentage, but it does not yet store width or height.
 - Existing Company Explorer rows already emit one exact typed drag payload. Process Map must reuse it.
-- Existing Process Map behavior already includes selection, drag rollback, all four Folder/Process operational endpoint combinations, trace routing and waypoint editing, reduced-motion handling, and the Process Q/D hover and pinned card.
+- Existing Process Map behavior already includes selection, drag rollback, all four Folder/Process operational endpoint combinations, trace routing and waypoint editing, reduced-motion handling, the Process QDC hover and pinned card, and the shared full-page Logic Gate overlay opened from a Process.
 - Existing HTTP and realtime behavior already uses committed mutation responses, request cancellation, viewer-safe conditional reads, compact company invalidations, and no polling. Those mechanisms are extended to scene and tile reads rather than replaced by another cache or event system.
 
 The replacement keeps those product abilities and existing Mango authorities. It changes the camera, renderer, saved dimensions, containment gestures, and bounded read shape required for one continuous canvas.
@@ -62,7 +62,8 @@ The supported editing behavior remains deliberately small:
 - use a Folder placement as a colored perimeter fence;
 - place other mapped resources inside a Folder fence;
 - draw, select, reroute, and delete explicit operational traces;
-- select a Process and use its existing hover or pinned Q/D card;
+- select a Process and use its existing hover or pinned QDC card;
+- double-click a Process, or press Enter or Space while it is focused, to open its canonical Logic Gate editor and Kanban page in the existing blocking overlay;
 - zoom very far out and very far in while staying on the same canvas.
 
 Do not add textboxes, annotations, dashboards, automatic layout, inferred flow, operational summaries, minimaps, geographic imagery, terrain, streets, buildings, or another resource type as part of this replacement.
@@ -128,7 +129,9 @@ When the map first opens:
 
 Wheel zoom targets the current camera center. This is not the deck.gl controller default: Mango must use controlled view state, a small custom OrthographicController, or its own wheel handler so wheel input changes scale while keeping the camera `target` fixed rather than anchoring to the pointer. Folder double-click may remain only as an optional camera convenience that fits that Folder fence; it must not navigate, load a different semantic map, or create a history entry.
 
-Viewport position, zoom, selection, hover, open Q/D card, loaded tiles, and deck.gl internal state remain browser runtime state and are not persisted as Process Map business facts.
+Viewport position, zoom, selection, hover, open QDC card, open Process overlay, loaded tiles, and deck.gl internal state remain browser runtime state and are not persisted as Process Map business facts.
+
+Opening the Process overlay does not navigate or change browser history. Closing it by its red close action, Escape, or backdrop returns to the still-mounted company canvas with the same camera, placements, and traces.
 
 ## deck.gl Is a Flat Renderer, Not a Geographic Map
 
@@ -138,7 +141,7 @@ The visible background remains a very white plain canvas with the existing subtl
 
 The deck.gl canvas owns the camera, drawing, picking, and pointer interaction. React Flow is removed from the Process Map renderer. Do not run React Flow and deck.gl together, because that would create two cameras, two hit-test systems, two selection models, and two coordinate conversions.
 
-React remains responsible for ordinary application chrome and sparse rich DOM overlays such as the one transient or pinned Q/D card. A rich overlay is positioned from deck.gl projection but is not a second canvas or map authority.
+React remains responsible for ordinary application chrome and sparse rich DOM overlays such as the one transient or pinned QDC card and the existing full Process Logic Gate modal. A placement-attached card is positioned from deck.gl projection, while the full modal stays in the shared modal layer; neither is a second canvas or map authority.
 
 ## Required deck.gl Layer Stack
 
@@ -182,7 +185,7 @@ The required settled bands are:
 
 - Whole-company detail: every displayable placement contributes a visible cheap mark; Folder fences and operational traces remain perceptible.
 - Normal map detail: Folder and Process shapes and readable names appear.
-- Editing detail: current full cards, input/output anchors, trace route points, hover behavior, pinned Q/D card behavior, and editing affordances appear.
+- Editing detail: current full cards, input/output anchors, trace route points, hover behavior, pinned QDC card behavior, Process modal launch behavior, and editing affordances appear.
 
 Do not invent extra operational summary data merely to fill a zoom band. Current source names and existing UI facts are enough until a separate product requirement adds another canonical fact.
 
@@ -219,7 +222,7 @@ GET /v1/process-map/tiles/{z}/{x}/{y}?company_id={company_id}
 
 The scene response contains only permission-safe camera and tile metadata required to initialize the canvas, including the current display bounds and tile/read version. It is not a whole-company business graph or copied Explorer tree.
 
-The tile response contains only the placements, clipped trace geometry, labels, and presentation fields needed for that tile's LOD. It must never return full Process documents, Node data, Q/D history, email data, tasks, attachments, the complete Company Explorer tree, or generic relationship graphs.
+The tile response contains only the placements, clipped trace geometry, labels, and presentation fields needed for that tile's LOD. It must never return full Process documents, Node data, QDC history, email data, tasks, attachments, the complete Company Explorer tree, or generic relationship graphs.
 
 Existing exact mutation meanings remain:
 
@@ -349,7 +352,7 @@ The implementation branch must deliver all of the following together:
 - Folder fences, Processes, restricted placeholders, traces, labels, and edit overlay;
 - placement drag, group move, resize, reparent, remove, and rollback;
 - cross-Folder operational trace creation and route editing;
-- existing Q/D hover and pinned card behavior;
+- existing QDC hover and pinned card behavior plus the existing shared Process Logic Gate modal behavior;
 - permission, recycle, restore, realtime, ETag, and request cancellation correctness;
 - removal of unused React Flow Process Map code and dependency when nothing else uses it;
 - updated numbered laws and focused tests;
@@ -385,7 +388,7 @@ Frontend coverage must prove:
 - every displayable placement remains represented at whole-company detail;
 - Folder fences are transparent, colored, resizable, and valid drop targets;
 - candidate Explorer hierarchy does not choose map containment;
-- drag, move, group move, resize, reparent, selection, anchors, traces, waypoints, Q/D cards, and failure rollback work;
+- drag, move, group move, resize, reparent, selection, anchors, traces, waypoints, QDC cards, Process modal open/close, and failure rollback work;
 - every group-move response contains all committed placement and trace revisions required for immediate reconciliation;
 - restricted placeholders leak nothing and are noninteractive;
 - Folder removal authorizes every user-mutated child while lifecycle cleanup remains permission-safe, and recycle restore reclaims only cleanup-unchanged children;

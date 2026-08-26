@@ -25,7 +25,7 @@ async function flushUI(): Promise<void> {
   await Promise.resolve();
 }
 
-test("Process Map renders one exact lazy layer and keeps navigation on Folder double-click only", async () => {
+test("Process Map keeps Folder navigation and opens Process Logic Gates on double-click", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/process-map/folders/parent-1",
@@ -478,6 +478,8 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
 
   let mountedRoot: { unmount(): void } | null = null;
   const openedFolders: string[] = [];
+  const openedLogicGates: Array<{ logicGateID: string; label: string }> = [];
+  const openLogicGate = (logicGateID: string, label: string) => openedLogicGates.push({ logicGateID, label });
   try {
     const [{ createRoot }, { ProcessMapSurface }] = await Promise.all([
       import("react-dom/client"),
@@ -494,6 +496,7 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
           companyID="company-1"
           folderID="parent-1"
           onOpenFolder={(folderID) => openedFolders.push(folderID)}
+          onOpenLogicGate={openLogicGate}
         />,
       );
       await flushUI();
@@ -659,7 +662,7 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       processCard.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
       await flushUI();
     });
-    assert.equal(container.querySelector('[aria-label="Review Q and D"]'), null, "hover is off by default");
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "hover is off by default");
     await act(async () => {
       root.render(
         <ProcessMapSurface
@@ -668,6 +671,7 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
           folderID="parent-1"
           hoverModeEnabled
           onOpenFolder={(folderID) => openedFolders.push(folderID)}
+          onOpenLogicGate={openLogicGate}
         />,
       );
       await flushUI();
@@ -678,8 +682,8 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       hoverProcessCard.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true }));
       await flushUI();
     });
-    assert.ok(container.querySelector('[aria-label="Review Q and D"]'), "enabled hover shows the transient Q/D card");
-    assert.equal(container.querySelector('[aria-label="Close Review Q and D"]'), null, "the transient card is not pinned");
+    assert.ok(container.querySelector('[aria-label="Review Q, C and D"]'), "enabled hover shows the transient QDC card");
+    assert.equal(container.querySelector('[aria-label="Close Review Q, C and D"]'), null, "the transient card is not pinned");
     await act(async () => {
       container.querySelector<HTMLElement>('[aria-label="Process: Review"]')
         ?.dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true }));
@@ -690,11 +694,12 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
           companyID="company-1"
           folderID="parent-1"
           onOpenFolder={(folderID) => openedFolders.push(folderID)}
+          onOpenLogicGate={openLogicGate}
         />,
       );
       await flushUI();
     });
-    assert.equal(container.querySelector('[aria-label="Review Q and D"]'), null, "leaving removes the transient card");
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "leaving removes the transient card");
     const readsBeforeAdmission = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
     await act(async () => {
       realtimeSocket?.onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "process-map:company" }) });
@@ -906,8 +911,29 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
     assert.equal(refreshedProcessCard.classList.contains("is-connecting"), false);
     assert.equal(refreshedFolderCard.classList.contains("is-selected"), false, "finishing or canceling a connection hides every handle");
 
+    const refreshedProcessNode = refreshedProcessCard.closest<HTMLElement>(".react-flow__node");
+    assert.ok(refreshedProcessNode);
+    await act(async () => {
+      refreshedProcessNode.dispatchEvent(new dom.window.KeyboardEvent("keydown", { bubbles: true, key: "Enter" }));
+      await flushUI();
+    });
+    assert.deepEqual(openedLogicGates, [{ logicGateID: "gate-1", label: "Review" }], "Enter on a focused Process opens its exact Logic Gate page");
+    openedLogicGates.length = 0;
+
+    await act(async () => {
+      refreshedProcessNode.dispatchEvent(new dom.window.MouseEvent("mousedown", { bubbles: true, cancelable: true, button: 0, buttons: 1, clientX: 454, clientY: 154, view: dom.window }));
+      dom.window.document.dispatchEvent(new dom.window.MouseEvent("mousemove", { bubbles: true, cancelable: true, buttons: 1, clientX: 466, clientY: 166, view: dom.window }));
+      dom.window.document.dispatchEvent(new dom.window.MouseEvent("mouseup", { bubbles: true, cancelable: true, button: 0, clientX: 466, clientY: 166, view: dom.window }));
+      refreshedProcessNode.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, view: dom.window }));
+      await flushUI();
+    });
+    assert.deepEqual(openedLogicGates, [], "dragging and releasing a Process never opens its Logic Gate page");
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "the click emitted after a placement drag does not pin its QDC card");
+
     await act(async () => {
       refreshedFolderCard.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true }));
+      refreshedProcessCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+      refreshedProcessCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
       refreshedProcessCard.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true }));
       const pane = container.querySelector<HTMLElement>(".react-flow__pane");
       assert.ok(pane);
@@ -915,7 +941,9 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       pane.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true }));
       await flushUI();
     });
-    assert.deepEqual(openedFolders, ["child-1"], "only Folder double-click drills in; Process and viewport gestures do not");
+    assert.deepEqual(openedFolders, ["child-1"], "only Folder double-click drills into a map layer");
+    assert.deepEqual(openedLogicGates, [{ logicGateID: "gate-1", label: "Review" }], "Process double-click opens its exact Logic Gate page");
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "Process double-click does not leave a pinned data card behind");
 
     const readsBeforeSuccessfulDrop = requests.filter((request) => request.url.pathname === "/v1/process-map/layer").length;
     const drop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
@@ -1024,8 +1052,14 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
       reviewCard.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
       await flushUI();
     });
-    assert.ok(container.querySelector('[aria-label="Review Q and D"]'), "a Process click always pins its Q/D card");
-    assert.ok(container.querySelector('[aria-label="Close Review Q and D"]'), "a pinned Q/D card has an explicit close action");
+    assert.ok(container.querySelector('[aria-label="Review Q, C and D"]'), "a Process click always pins its QDC card");
+    const qdClose = container.querySelector<HTMLButtonElement>('[aria-label="Close Review Q, C and D"]');
+    assert.ok(qdClose, "a pinned QDC card has an explicit close action");
+    await act(async () => {
+      qdClose.click();
+      await flushUI();
+    });
+    assert.equal(container.querySelector('[aria-label="Review Q, C and D"]'), null, "the explicit close action dismisses the pinned card");
     const removeButton = [...container.querySelectorAll<HTMLButtonElement>(".process-map-toolbar button")]
       .find((button) => button.textContent === "Remove Review");
     assert.ok(removeButton);
@@ -1149,6 +1183,7 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
           companyID="company-1"
           folderID="navigation-folder"
           onOpenFolder={(folderID) => openedFolders.push(folderID)}
+          onOpenLogicGate={openLogicGate}
         />,
       );
       await flushUI();
@@ -1188,6 +1223,7 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
           companyID="company-1"
           folderID="catchup-folder"
           onOpenFolder={(folderID) => openedFolders.push(folderID)}
+          onOpenLogicGate={openLogicGate}
         />,
       );
       await flushUI();
@@ -1277,6 +1313,7 @@ test("Process Map renders one exact lazy layer and keeps navigation on Folder do
           companyID="company-1"
           folderID="permission-hint-folder"
           onOpenFolder={(folderID) => openedFolders.push(folderID)}
+          onOpenLogicGate={openLogicGate}
         />,
       );
       await flushUI();

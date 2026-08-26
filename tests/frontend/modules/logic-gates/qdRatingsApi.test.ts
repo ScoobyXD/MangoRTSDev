@@ -16,6 +16,7 @@ const rating = (overrides: Partial<QDRating> = {}): QDRating => ({
   qd_rating_id: "rating-1",
   logic_gate_id: "gate-1",
   quality_rating: "green",
+  cost_rating: null,
   delivery_rating: null,
   rated_by_user_id: "user-1",
   rated_by_display_name: "Avery Stone",
@@ -24,7 +25,7 @@ const rating = (overrides: Partial<QDRating> = {}): QDRating => ({
   ...overrides,
 });
 
-test("Q/D business dates use the fixed Los Angeles day", () => {
+test("QDC business dates use the fixed Los Angeles day", () => {
   assert.deepEqual(getQDBusinessDate(new Date("2026-08-25T06:59:59Z")), {
     year: 2026,
     month: 8,
@@ -36,7 +37,7 @@ test("Q/D business dates use the fixed Los Angeles day", () => {
   assert.equal(millisecondsUntilNextQDBusinessDay(new Date("2026-08-25T06:59:59Z")), 2_000);
 });
 
-test("Q/D reads share one request and committed writes reconcile every subscriber", async () => {
+test("QDC reads share one request and committed writes reconcile every subscriber", async () => {
   clearQDRatingsCache();
   let getCount = 0;
   const requests: Array<{ path: string; method: string; json?: unknown }> = [];
@@ -80,6 +81,22 @@ test("Q/D reads share one request and committed writes reconcile every subscribe
   });
   assert.equal(readQDRatingsSnapshot(input.apiBase, input.companyID, input.logicGateID, input.month).ratings[0]?.rated_by_display_name, "Avery Stone");
 
+  committed = rating({ cost_rating: "yellow" });
+  await setQDRating({
+    apiBase: input.apiBase,
+    companyID: input.companyID,
+    logicGateID: input.logicGateID,
+    metric: "cost",
+    rating: "yellow",
+    requestJSON,
+  });
+  assert.deepEqual(requests[requests.length - 1], {
+    path: "/v1/logic-gates/gate-1/qd-ratings/cost",
+    method: "PUT",
+    json: { company_id: "company-1", rating: "yellow" },
+  });
+  assert.equal(readQDRatingsSnapshot(input.apiBase, input.companyID, input.logicGateID, input.month).ratings[0]?.cost_rating, "yellow");
+
   committed = null;
   await setQDRating({
     apiBase: input.apiBase,
@@ -95,7 +112,7 @@ test("Q/D reads share one request and committed writes reconcile every subscribe
   unsubscribe();
 });
 
-test("an older Q/D read cannot erase a newer committed choice", async () => {
+test("an older QDC read cannot erase a newer committed choice", async () => {
   clearQDRatingsCache();
   let finishRead: ((value: { qd_ratings: QDRating[] }) => void) | undefined;
   const requestJSON = <T,>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
@@ -109,7 +126,7 @@ test("an older Q/D read cannot erase a newer committed choice", async () => {
   assert.equal(readQDRatingsSnapshot("", "company-1", "gate-1", "2026-08").ratings[0]?.quality_rating, "green");
 });
 
-test("Q/D cache is discarded after its final mounted tracker leaves", async () => {
+test("QDC cache is discarded after its final mounted tracker leaves", async () => {
   clearQDRatingsCache();
   let getCount = 0;
   const requestJSON = async <T,>(): Promise<T> => {

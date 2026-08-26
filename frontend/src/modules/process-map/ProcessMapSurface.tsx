@@ -139,6 +139,7 @@ export type ProcessMapSurfaceProps = {
   folderID?: string;
   hoverModeEnabled?: boolean;
   onOpenFolder: (folderID: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string) => void;
   onLayerChange?: (layer: ProcessMapLayerResponse["layer"] | null) => void;
 };
 
@@ -427,6 +428,7 @@ function ProcessMapSurfaceInner({
   folderID,
   hoverModeEnabled = false,
   onOpenFolder,
+  onOpenLogicGate,
   onLayerChange,
 }: ProcessMapSurfaceProps) {
   const [nodes, setNodes] = useState<ProcessMapNode[]>([]);
@@ -488,6 +490,19 @@ function ProcessMapSurfaceInner({
     setPinnedProcessID(null);
     setHoveredProcessID(null);
   }, [clearHoverCloseTimer]);
+
+  const openPlacement = useCallback((node: ProcessMapNode) => {
+    const folderTarget = processMapFolderDrillTarget(resourceFromNode(node));
+    if (folderTarget) {
+      onOpenFolder(folderTarget);
+      return;
+    }
+    if (node.data.restricted || node.data.resourceType !== "logic_gate") return;
+    clearHoverCloseTimer();
+    setHoveredProcessID(null);
+    setPinnedProcessID(null);
+    onOpenLogicGate(node.data.resourceID, node.data.label);
+  }, [clearHoverCloseTimer, onOpenFolder, onOpenLogicGate]);
 
   const scheduleSuppressedNodeClickClear = useCallback(() => {
     if (suppressedNodeClickTimerRef.current !== null) clearTimeout(suppressedNodeClickTimerRef.current);
@@ -1262,8 +1277,17 @@ function ProcessMapSurfaceInner({
           if (node.data.resourceType === "logic_gate") setPinnedProcessID(node.data.resourceID);
         }}
         onNodeDoubleClick={(_, node) => {
-          const folderTarget = processMapFolderDrillTarget(resourceFromNode(node));
-          if (folderTarget) onOpenFolder(folderTarget);
+          openPlacement(node);
+        }}
+        onKeyDownCapture={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          const target = event.target as HTMLElement;
+          if (!target.classList.contains("react-flow__node")) return;
+          const node = nodes.find((item) => item.id === target.dataset.id);
+          if (!node || node.data.restricted) return;
+          event.preventDefault();
+          event.stopPropagation();
+          openPlacement(node);
         }}
         onEdgeClick={(_, edge) => {
           setSelection({ kind: "trace", id: edge.id });

@@ -95,6 +95,8 @@ import {
   reconcileAppTimelineTitles,
 } from "./appCommittedTitleState";
 import { EmailReferencePreviewHost } from "../pages/home/EmailReferencePreviewHost";
+import { AppModalPortal } from "./AppModalPortal";
+import { UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE } from "../modules/editor/UnifiedNodeShell";
 
 const DEFAULT_FRAME_KIND = FRAME_MODULE_LIBRARY[0]?.kind ?? "editor";
 const fullPageFallback = <div aria-busy="true" style={{ width: "100%", height: "100%", background: "#ffffff" }} />;
@@ -374,6 +376,43 @@ const appResizeHandleStyle: React.CSSProperties = {
   touchAction: "none",
 };
 
+const processMapLogicGateOverlayBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  zIndex: 1,
+  display: "grid",
+  placeItems: "center",
+  padding: 6,
+  background: "rgba(15, 23, 42, 0.62)",
+};
+
+const processMapLogicGateOverlayStyle: React.CSSProperties = {
+  width: "calc(100vw - 12px)",
+  height: "calc(100vh - 12px)",
+  minWidth: 0,
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "42px minmax(0, 1fr)",
+  overflow: "hidden",
+  border: "1px solid rgba(148, 163, 184, 0.32)",
+  borderRadius: 12,
+  background: "#ffffff",
+  boxShadow: "0 26px 80px rgba(15, 23, 42, 0.34)",
+};
+
+const processMapLogicGateOverlayHeaderStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  padding: "6px 8px 6px 14px",
+  borderBottom: "1px solid rgba(148, 163, 184, 0.2)",
+  color: "#1e293b",
+  fontSize: 13,
+  fontWeight: 800,
+};
+
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onNavigate, overrideContent }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const activeCompanyID = getActiveCompanyID();
@@ -434,6 +473,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const [activeDockTabID, setActiveDockTabID] = useState<string | null>(null);
   const [taskbarExpanded] = useState(false);
   const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(() => logicGateTargetFromRoute(deepLink));
+  const [processMapLogicGateOverlay, setProcessMapLogicGateOverlay] = useState<LogicGateArenaTarget | null>(null);
+  const [processMapLogicGateOverlayFrames, setProcessMapLogicGateOverlayFrames] = useState<FrameDataModel[]>(createLogicGateArenaFrames);
   const [projectManagementTarget, setProjectManagementTarget] = useState<ProjectManagementTarget | null>(() => projectTargetFromRoute(deepLink));
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
@@ -535,6 +576,10 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     }
     preloadVisibleFrameModules(frames);
   }, [frames, isAccountManagerView, isFieldsView, isHomeView, isLogicGateArenaView, isProcessMapView, isProjectManagementView, isTeamsView]);
+  useEffect(() => {
+    if (!isProcessMapView) setProcessMapLogicGateOverlay(null);
+  }, [isProcessMapView]);
+  useEffect(() => setProcessMapLogicGateOverlay(null), [activeCompanyID, processMapFolderID]);
   const childrenByParent = useMemo(() => {
     const grouped = new Map<string, FrameDataModel[]>();
     for (const frame of frames) {
@@ -1480,6 +1525,26 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     )));
   }, [setDockTabs]);
 
+  const openProcessMapLogicGateOverlay = useCallback((logicGateID: string, label: string) => {
+    const cleanLogicGateID = logicGateID.trim();
+    if (!cleanLogicGateID) return;
+    preloadLogicGateArenaSurface();
+    setProcessMapLogicGateOverlayFrames(createLogicGateArenaFrames());
+    setProcessMapLogicGateOverlay({
+      logicGateID: cleanLogicGateID,
+      label: label.trim() || "Process",
+      requestID: Date.now(),
+    });
+  }, []);
+
+  const handleProcessMapLogicGateOverlayTitleChange = useCallback((update: { logicGateID: string; label: string }) => {
+    const label = update.label.trim();
+    if (!label) return;
+    setProcessMapLogicGateOverlay((current) => (
+      current?.logicGateID === update.logicGateID && current.label !== label ? { ...current, label } : current
+    ));
+  }, []);
+
   const openLogicGateArenaNodeRoute = useCallback((selection: { logicGateID: string; nodeID: string }) => {
     if (!onNavigate) return;
     onNavigate(buildLogicGateRoute(selection.logicGateID, selection.nodeID));
@@ -2056,6 +2121,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               companyID={activeCompanyID}
               folderID={processMapFolderID}
               onNavigate={onNavigate}
+              onOpenLogicGate={openProcessMapLogicGateOverlay}
             />
           </React.Suspense>
         ) : isAccountManagerView ? (
@@ -2234,6 +2300,50 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         onTimelineChange={setTimelineState}
         onOpenTimelineEntity={openTimelineEntity}
       />
+
+      {isProcessMapView && processMapLogicGateOverlay && (
+        <AppModalPortal onRequestClose={() => setProcessMapLogicGateOverlay(null)}>
+          <div
+            style={processMapLogicGateOverlayBackdropStyle}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setProcessMapLogicGateOverlay(null);
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-label={`${processMapLogicGateOverlay.label} Logic Gate`}
+              style={processMapLogicGateOverlayStyle}
+              onMouseDown={(event) => event.stopPropagation()}
+            >
+              <header style={processMapLogicGateOverlayHeaderStyle}>
+                <span style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {processMapLogicGateOverlay.label}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Close ${processMapLogicGateOverlay.label} Logic Gate`}
+                  title="Close Logic Gate"
+                  onClick={() => setProcessMapLogicGateOverlay(null)}
+                  style={{ ...UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE, width: 28, height: 28, flex: "0 0 28px", fontSize: 18 }}
+                >
+                  X
+                </button>
+              </header>
+              <div style={{ minWidth: 0, minHeight: 0, overflow: "hidden" }}>
+                <React.Suspense fallback={fullPageFallback}>
+                  <LazyLogicGateArenaPage
+                    frames={processMapLogicGateOverlayFrames}
+                    updateFrames={setProcessMapLogicGateOverlayFrames}
+                    targetLogicGate={processMapLogicGateOverlay}
+                    onLogicGateTitleChange={handleProcessMapLogicGateOverlayTitleChange}
+                  />
+                </React.Suspense>
+              </div>
+            </section>
+          </div>
+        </AppModalPortal>
+      )}
 
       {dockTabMenu && (
         <FrameRightClickMenu x={dockTabMenu.x} y={dockTabMenu.y} onClose={closeMenus}>

@@ -3,13 +3,14 @@ import { realtimeEditorJSONScope, subscribeRealtimeScope } from "../realtime/rea
 export const QD_BUSINESS_TIME_ZONE = "America/Los_Angeles";
 
 export type QDRatingValue = "green" | "yellow" | "red";
-export type QDRatingMetric = "quality" | "delivery";
+export type QDRatingMetric = "quality" | "cost" | "delivery";
 
 export type QDRating = {
   company_id: string;
   qd_rating_id: string;
   logic_gate_id: string;
   quality_rating: QDRatingValue | null;
+  cost_rating: QDRatingValue | null;
   delivery_rating: QDRatingValue | null;
   rated_by_user_id: string | null;
   rated_by_display_name: string;
@@ -108,13 +109,14 @@ function publish(entry: CacheEntry, snapshot: QDRatingsSnapshot): void {
 }
 
 function messageFromError(cause: unknown): string {
-  return cause instanceof Error && cause.message.trim() ? cause.message : "Could not load Q/D ratings";
+  return cause instanceof Error && cause.message.trim() ? cause.message : "Could not load QDC ratings";
 }
 
 function normalizedRating(value: QDRating): QDRating {
   return {
     ...value,
     quality_rating: value.quality_rating ?? null,
+    cost_rating: value.cost_rating ?? null,
     delivery_rating: value.delivery_rating ?? null,
     rated_by_display_name: value.rated_by_display_name?.trim() ?? "",
   };

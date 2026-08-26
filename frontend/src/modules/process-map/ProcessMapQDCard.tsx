@@ -72,7 +72,7 @@ export function ProcessMapQDCard({
   return (
     <article
       className="nodrag nopan nowheel process-map-qd-card"
-      aria-label={`${processName} Q and D`}
+      aria-label={`${processName} Q, C and D`}
       onClick={(event) => event.stopPropagation()}
       onMouseEnter={onPointerEnter}
       onMouseLeave={onPointerLeave}
@@ -83,7 +83,7 @@ export function ProcessMapQDCard({
           <h2>{processName}</h2>
         </div>
         {pinned && (
-          <button type="button" aria-label={`Close ${processName} Q and D`} onClick={onClose}>×</button>
+          <button type="button" aria-label={`Close ${processName} Q, C and D`} onClick={onClose}>×</button>
         )}
       </header>
       <LogicGateQDTracker
