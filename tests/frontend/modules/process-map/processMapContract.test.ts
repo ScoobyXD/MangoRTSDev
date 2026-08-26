@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 function source(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), "utf8");
+  return readFileSync(resolve(process.cwd(), path), "utf8").replace(/\r\n?/g, "\n");
 }
 
 test("V3 Process Map is one deck.gl canvas with no layer-reader or React Flow compatibility path", () => {
