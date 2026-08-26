@@ -8,7 +8,7 @@ Old recycle payloads created before the six-table cutover are converted in place
 Their HTML-era textboxes and manual saves must pass the same text-preserving
 HTML-to-Tiptap converter before legacy editor tables can be removed.
 
-Last updated: 2026-08-24
+Last updated: 2026-08-26
 
 # Recycle Bin Tests
 
@@ -61,6 +61,7 @@ RB40 - Company Explorer Folder deletion is available only through the canonical 
 RB41 - Each independently selected delete root gets one exact recycle payload. Restoring one root must not restore another selected root; an incident Process Map relationship returns only after both exact endpoints exist, and its trace returns only with that relationship, so a later endpoint restore can recover both from its own payload.
 RB42 - A recycled Process Map placement returns with its captured global integer position and positive integer dimensions only when its exact typed resource and optional exact mapped parent Folder exist. A skipped placement can return from a later independently selected root payload after both dependencies exist. A surviving child that lifecycle cleanup reparented may return under the restored Folder only when its current revision and geometry still exactly match the cleanup-produced state captured in the payload; that conditional reparent advances its revision.
 RB43 - Process Map restore inserts only missing placements, operational relationships, and traces except for the revision-fenced cleanup-child reparent allowed by RB42. It must not overwrite a newer live placement, map parent, dimensions, geometry, or rerouted trace when a later independent recycle payload is restored.
+RB44 - The one-time Process Map geometry compaction must transform captured placement edges, trace route points, and matching cleanup-comparison geometry with the same deterministic per-company coordinate mapping as live geometry. It may advance a cleanup claim to the transformed revision and geometry only when the exact live cleanup-produced state still matches; a stale claim must remain stale, and restore must still reject overwriting newer live work.
 
 ## Scenarios
 

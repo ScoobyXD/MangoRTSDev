@@ -12,6 +12,7 @@ import { TileLayer, type TileLayerProps } from "@deck.gl/geo-layers";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import DeckGL, { type DeckGLRef } from "@deck.gl/react";
 import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
+import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { createRequestJSON, isAbortError } from "../api/requestJSON.js";
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
 import {
@@ -135,7 +136,7 @@ export type ProcessMapEditOverlayModel = {
   selectedTraceID: string | null;
   connectionPreview: { source: ProcessMapVisiblePlacement; point: ProcessMapGridPoint } | null;
   highlightedFolderKey: string | null;
-  showAllAnchors: boolean;
+  connectionSourceKey: string | null;
 };
 
 export type ProcessMapTileLoadRequest = {
@@ -155,8 +156,6 @@ export type ProcessMapLayerBuildOptions = {
   presentation: ProcessMapPresentationState;
   editedPlacementKeys: ReadonlySet<string>;
   editedTraceIDs: ReadonlySet<string>;
-  reducedMotion: boolean;
-  flowPhase: number;
   editOverlay: ProcessMapEditOverlayModel;
   getTileData: (request: ProcessMapTileLoadRequest) => Promise<ProcessMapTileResponse | null>;
   onTileLoad: (tileID: string, data: ProcessMapTileResponse, settledGeneration: number) => void;
@@ -521,37 +520,27 @@ function segmentColor(index: number, count: number): [number, number, number, nu
   ];
 }
 
-function traceSegments(trace: ProcessMapTrace): PathDatum[] {
-  const pairs = trace.path_fragments.flatMap((fragment) => fragment.slice(1).map((point, index) => [fragment[index], point] as const));
-  const pick: TracePick = { kind: "trace", id: trace.resource_operational_relationship_id, trace };
-  return pairs.map((pair, index) => ({
+function staticTraceSegments(
+  fragments: readonly ProcessMapGridPoint[][],
+  width: number,
+  pick?: ProcessMapPick,
+): PathDatum[] {
+  const pairs = fragments.flatMap((fragment) => fragment.slice(1).map((point, index) => [fragment[index], point] as const));
+  const halves = pairs.flatMap(([start, end]) => {
+    const midpoint = { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 };
+    return [[start, midpoint], [midpoint, end]] as const;
+  });
+  return halves.map((pair, index) => ({
     path: pair.map((point) => [point.x, point.y]),
-    color: segmentColor(index, pairs.length),
-    width: 3,
+    color: segmentColor(index, halves.length),
+    width,
     pick,
   }));
 }
 
-function pointAtPhase(fragments: readonly ProcessMapGridPoint[][], phase: number): [number, number] | null {
-  const segments = fragments.flatMap((fragment) => fragment.slice(1).map((end, index) => {
-    const start = fragment[index];
-    return { start, end, length: Math.hypot(end.x - start.x, end.y - start.y) };
-  })).filter((segment) => segment.length > 0);
-  const total = segments.reduce((sum, segment) => sum + segment.length, 0);
-  if (!total) return null;
-  let offset = Math.max(0, Math.min(1, phase)) * total;
-  for (const segment of segments) {
-    if (offset > segment.length) {
-      offset -= segment.length;
-      continue;
-    }
-    const ratio = offset / segment.length;
-    return [
-      segment.start.x + (segment.end.x - segment.start.x) * ratio,
-      segment.start.y + (segment.end.y - segment.start.y) * ratio,
-    ];
-  }
-  return [segments[segments.length - 1].end.x, segments[segments.length - 1].end.y];
+function traceSegments(trace: ProcessMapTrace, width = 3): PathDatum[] {
+  const pick: TracePick = { kind: "trace", id: trace.resource_operational_relationship_id, trace };
+  return staticTraceSegments(trace.path_fragments, width, pick);
 }
 
 function placementBounds(placement: ProcessMapPlacement): ProcessMapBounds {
@@ -593,7 +582,6 @@ function renderTileSubLayers(
     const lod = processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit);
     if (placement.resource_type === "company_explorer_folder") {
       for (const path of processMapPerimeterSegments(bounds, tile)) fences.push({ path, color: COLOR_FOLDER, width: lod === "editing" ? 2.5 : 1.5, pick });
-      bodies.push({ polygon: boundsPolygon(clipped), fill: [255, 255, 255, 1], line: [255, 255, 255, 0], lineWidth: 0, pick });
     } else {
       bodies.push({
         polygon: boundsPolygon(clipped),
@@ -605,23 +593,28 @@ function renderTileSubLayers(
       for (const path of processMapPerimeterSegments(bounds, tile)) processPerimeters.push({ path, color: COLOR_PROCESS, width: lod === "editing" ? 2.5 : 1.5, pick });
     }
     const center = { x: (bounds.min_x + bounds.max_x) / 2, y: (bounds.min_y + bounds.max_y) / 2 };
-    if (lod !== "whole" && ownsCoordinate(center, tile)) labels.push({
-      position: [center.x, center.y],
-      text: lod === "editing" ? `${placement.resource_type === "company_explorer_folder" ? "Folder" : "Process"}\n${placement.name}` : placement.name,
-      size: lod === "editing" ? 13 : 11,
-    });
+    if (lod !== "whole") {
+      const labelPosition: [number, number] = placement.resource_type === "company_explorer_folder"
+        ? [center.x, bounds.min_y + (lod === "editing" ? 18 : 10) / options.settledPixelsPerGridUnit]
+        : [center.x, center.y];
+      if (ownsCoordinate({ x: labelPosition[0], y: labelPosition[1] }, tile)) labels.push({
+        position: labelPosition,
+        text: lod === "editing" ? `${placement.resource_type === "company_explorer_folder" ? "Folder" : "Process"}\n${placement.name}` : placement.name,
+        size: lod === "editing" ? 13 : 11,
+      });
+    }
   }
   for (const trace of props.data.traces) {
     const id = trace.resource_operational_relationship_id;
     if (!options.editedTraceIDs.has(id) && options.editOverlay.selectedTraceID !== id) traces.push(...traceSegments(trace));
   }
   return [
-    new PathLayer<PathDatum>({ id: `${props.id}-traces`, data: traces, pickable: true, widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
-    new PathLayer<PathDatum>({ id: `${props.id}-folder-fences`, data: fences, pickable: true, widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PathLayer<PathDatum>({ id: `${props.id}-traces`, data: traces, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PathLayer<PathDatum>({ id: `${props.id}-folder-fences`, data: fences, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
     new PolygonLayer<PolygonDatum>({ id: `${props.id}-placements`, data: bodies, pickable: true, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
     new PolygonLayer<PolygonDatum>({ id: `${props.id}-restricted`, data: restricted, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
-    new PathLayer<PathDatum>({ id: `${props.id}-process-perimeters`, data: processPerimeters, pickable: true, widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
-    new PathLayer<PathDatum>({ id: `${props.id}-restricted-perimeters`, data: restrictedPerimeters, pickable: false, widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PathLayer<PathDatum>({ id: `${props.id}-process-perimeters`, data: processPerimeters, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PathLayer<PathDatum>({ id: `${props.id}-restricted-perimeters`, data: restrictedPerimeters, pickable: false, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
     new TextLayer<TextDatum>({ id: `${props.id}-labels`, data: labels, pickable: false, billboard: true, sizeUnits: "pixels", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", fontWeight: 700, getPosition: (item) => item.position, getText: (item) => item.text, getSize: (item) => item.size, getColor: COLOR_TEXT, getTextAnchor: "middle", getAlignmentBaseline: "center" }),
   ];
 }
@@ -632,8 +625,16 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
   for (const trace of options.editOverlay.traces) {
     const fullPath = tracePath(trace, options.presentation.placements);
     const pathFragments = fullPath ? [fullPath] : trace.path_fragments;
-    paths.push(...traceSegments({ ...trace, path_fragments: pathFragments }).map((item) => ({ ...item, width: 4 })));
+    paths.push(...traceSegments({ ...trace, path_fragments: pathFragments }, 4));
     if (trace.presentation !== "editing" || options.editOverlay.selectedTraceID !== trace.resource_operational_relationship_id) continue;
+    const source = options.presentation.placements.get(placementKey(trace.source));
+    const target = options.presentation.placements.get(placementKey(trace.target));
+    if (
+      !source
+      || !target
+      || processMapPlacementDisplayLOD(source, options.settledPixelsPerGridUnit) !== "editing"
+      || processMapPlacementDisplayLOD(target, options.settledPixelsPerGridUnit) !== "editing"
+    ) continue;
     trace.route_points.forEach((point, index) => waypoints.push({
       position: [point.x, point.y],
       radius: 5,
@@ -645,10 +646,10 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
   if (options.editOverlay.connectionPreview) {
     const start = processMapOutputAnchor(options.editOverlay.connectionPreview.source);
     const end = options.editOverlay.connectionPreview.point;
-    paths.push({ path: processMapOrthogonalPathPoints(start, [], end).map((point) => [point.x, point.y]), color: COLOR_TRACE_START, width: 3 });
+    paths.push(...staticTraceSegments([processMapOrthogonalPathPoints(start, [], end)], 3));
   }
   return {
-    path: new PathLayer<PathDatum>({ id: "process-map-edit-traces", data: paths, pickable: true, widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    path: new PathLayer<PathDatum>({ id: "process-map-edit-traces", data: paths, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
     waypoints: new ScatterplotLayer<PointDatum>({ id: "process-map-edit-waypoints", data: waypoints, pickable: true, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 2 }),
   };
 }
@@ -672,13 +673,17 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
         [[bounds.min_x, bounds.max_y], [bounds.min_x, bounds.min_y]],
       ];
       for (const path of perimeter) fences.push({ path, color: [...color], width: options.editOverlay.highlightedFolderKey === key ? 4 : 3, pick });
-      bodies.push({ polygon: boundsPolygon(bounds), fill: [255, 255, 255, 1], line: [255, 255, 255, 0], lineWidth: 0, pick });
     } else {
       bodies.push({ polygon: boundsPolygon(bounds), fill: [255, 255, 255, 244], line: COLOR_PROCESS, lineWidth: 3, pick });
     }
     const lod = processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit);
     if (lod !== "whole") labels.push({
-      position: [(bounds.min_x + bounds.max_x) / 2, (bounds.min_y + bounds.max_y) / 2],
+      position: [
+        (bounds.min_x + bounds.max_x) / 2,
+        placement.resource_type === "company_explorer_folder"
+          ? bounds.min_y + (lod === "editing" ? 18 : 10) / options.settledPixelsPerGridUnit
+          : (bounds.min_y + bounds.max_y) / 2,
+      ],
       text: lod === "editing" ? `${placement.resource_type === "company_explorer_folder" ? "Folder" : "Process"}\n${placement.name}` : placement.name,
       size: 13,
     });
@@ -692,16 +697,24 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
   if (options.settled) {
     for (const placement of options.presentation.placements.values()) {
       const key = placementKey(placement);
-      if (!options.editOverlay.showAllAnchors && options.editOverlay.selectedPlacementKey !== key) continue;
       if (processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit) !== "editing") continue;
       const input = processMapInputAnchor(placement);
       const output = processMapOutputAnchor(placement);
+      if (options.editOverlay.connectionSourceKey) {
+        if (key === options.editOverlay.connectionSourceKey) {
+          anchors.push({ position: [output.x, output.y], radius: 7, fill: [14, 165, 233, 255], line: [255, 255, 255, 255], pick: { kind: "anchor", anchor: "output", key, placement } });
+        } else {
+          anchors.push({ position: [input.x, input.y], radius: 8, fill: [236, 254, 255, 255], line: [25, 168, 255, 255], pick: { kind: "anchor", anchor: "input", key, placement } });
+        }
+        continue;
+      }
+      if (options.editOverlay.selectedPlacementKey !== key) continue;
       anchors.push({ position: [input.x, input.y], radius: 6, fill: [255, 255, 255, 255], line: [14, 165, 233, 255], pick: { kind: "anchor", anchor: "input", key, placement } });
       anchors.push({ position: [output.x, output.y], radius: 6, fill: [14, 165, 233, 255], line: [255, 255, 255, 255], pick: { kind: "anchor", anchor: "output", key, placement } });
     }
   }
   return [
-    new PathLayer<PathDatum>({ id: "process-map-edit-folder-fences", data: fences, pickable: true, widthUnits: "pixels", getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    new PathLayer<PathDatum>({ id: "process-map-edit-folder-fences", data: fences, pickable: true, positionFormat: "XY", widthUnits: "pixels", getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
     new PolygonLayer<PolygonDatum>({ id: "process-map-edit-placement-bodies", data: bodies, pickable: true, filled: true, stroked: true, lineWidthUnits: "pixels", getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: (item) => item.lineWidth }),
     new TextLayer<TextDatum>({ id: "process-map-edit-labels", data: labels, pickable: false, billboard: true, sizeUnits: "pixels", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", fontWeight: 700, getPosition: (item) => item.position, getText: (item) => item.text, getSize: (item) => item.size, getColor: COLOR_TEXT, getTextAnchor: "middle", getAlignmentBaseline: "center" }),
     new ScatterplotLayer<PointDatum>({ id: "process-map-edit-resize-handles", data: handles, pickable: true, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 2 }),
@@ -757,23 +770,6 @@ export function buildProcessMapLayers(options: ProcessMapLayerBuildOptions): Lay
   }) : null;
   const editTraces = editTraceLayers(options);
   return [background, editTraces.path, ...(tiles ? [tiles] : []), editTraces.waypoints, ...editPlacementLayers(options)];
-}
-
-export function buildProcessMapFlowLayer(
-  presentation: ProcessMapPresentationState,
-  reducedMotion: boolean,
-  flowPhase: number,
-): Layer {
-  const data: PointDatum[] = [];
-  for (const trace of presentation.traces.values()) {
-    const fullPath = trace.presentation === "editing" ? tracePath(trace, presentation.placements) : null;
-    const paths = fullPath ? [fullPath] : trace.path_fragments;
-    for (const path of paths) {
-      const point = pointAtPhase([path], reducedMotion ? 0.5 : flowPhase);
-      if (point) data.push({ position: point, radius: 3, fill: [255, 255, 255, 230], line: COLOR_TRACE_START });
-    }
-  }
-  return new ScatterplotLayer<PointDatum>({ id: "process-map-trace-flow-markers", data, pickable: false, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 1 });
 }
 
 function readTrayCollapsed(): boolean {
@@ -882,8 +878,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const [trayPath, setTrayPath] = useState<Array<{ id: string; label: string }>>([]);
   const [trayLoading, setTrayLoading] = useState(false);
   const [trayError, setTrayError] = useState("");
-  const [reducedMotion, setReducedMotion] = useState(false);
-  const [flowPhase, setFlowPhase] = useState(0);
+  const trayListID = React.useId();
   const [knownMapped, setKnownMapped] = useState<{ scope: string; keys: Set<string> }>(() => ({ scope: knownMappedScope, keys: new Set() }));
   const protectedScopeCurrent = protectedScope === knownMappedScope;
   const activeScene = protectedScopeCurrent ? scene : null;
@@ -985,6 +980,9 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setPreviewPlacements(new Map());
       setPreviewTraces(new Map());
       setRemovedTraceIDs(new Set());
+      gestureRef.current = null;
+      setGesture(null);
+      setExternalDropPoint(null);
       setSelection(null);
       setHoveredProcessID(null);
       setPinnedProcessID(null);
@@ -1031,21 +1029,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [activeScene, markUnsettled, viewportSize]);
 
   useEffect(() => {
-    if (typeof matchMedia === "undefined") return undefined;
-    const query = matchMedia("(prefers-reduced-motion: reduce)");
-    const update = () => setReducedMotion(query.matches);
-    update();
-    query.addEventListener?.("change", update);
-    return () => query.removeEventListener?.("change", update);
-  }, []);
-
-  useEffect(() => {
-    if (reducedMotion || presentation.traces.size === 0) return undefined;
-    const timer = setInterval(() => setFlowPhase((phase) => (phase + 0.035) % 1), 50);
-    return () => clearInterval(timer);
-  }, [presentation.traces.size, reducedMotion]);
-
-  useEffect(() => {
     if (trayCollapsed) {
       setTrayRows([]);
       setTrayLoading(false);
@@ -1053,6 +1036,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       return undefined;
     }
     let active = true;
+    setTrayRows([]);
     setTrayLoading(true);
     setTrayError("");
     const folderID = trayPath[trayPath.length - 1]?.id;
@@ -1093,8 +1077,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         setPreviewTraces(new Map());
         setRemovedTraceIDs(new Set());
         setKnownMapped({ scope: knownMappedScope, keys: new Set() });
+        gestureRef.current = null;
         setSelection(null);
         setGesture(null);
+        setExternalDropPoint(null);
         setHoveredProcessID(null);
         setPinnedProcessID(null);
         setScene(null);
@@ -1333,10 +1319,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     selectedTraceID: selection?.kind === "trace" ? selection.id : null,
     connectionPreview: gesture?.kind === "connection" ? { source: gesture.source, point: gesture.point } : null,
     highlightedFolderKey: highlightedFolder ? placementKey(highlightedFolder) : null,
-    showAllAnchors: gesture?.kind === "connection",
+    connectionSourceKey: gesture?.kind === "connection" ? placementKey(gesture.source) : null,
   }), [gesture, highlightedFolder, overlayPlacements, overlayTraces, selection]);
 
-  const baseLayers = useMemo(() => activeScene ? buildProcessMapLayers({
+  const layers = useMemo(() => activeScene ? buildProcessMapLayers({
     scene: activeScene,
     protectedGeneration,
     settled,
@@ -1345,21 +1331,20 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     presentation,
     editedPlacementKeys,
     editedTraceIDs,
-    reducedMotion,
-    flowPhase: 0,
     editOverlay,
     getTileData: guardedGetTileData,
     onTileLoad: handleTileLoad,
     onTileUnload: handleTileUnload,
     onViewportLoad: handleViewportLoad,
     onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
-  }) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, reducedMotion, settled, settledGeneration, settledViewState.zoom]);
-  const flowLayer = useMemo(() => buildProcessMapFlowLayer(presentation, reducedMotion, flowPhase), [flowPhase, presentation, reducedMotion]);
-  const layers = useMemo(() => {
-    return [...baseLayers.slice(0, 1), flowLayer, ...baseLayers.slice(1)];
-  }, [baseLayers, flowLayer]);
+  }) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, settled, settledGeneration, settledViewState.zoom]);
 
   const handleViewStateChange = useCallback(<ViewStateT extends OrthographicViewState,>(params: ViewStateChangeParameters<ViewStateT>): ViewStateT => {
+    if (gestureRef.current?.kind === "connection") {
+      gestureRef.current = null;
+      setGesture(null);
+      setSelection(null);
+    }
     const proposed: ProcessMapViewState = {
       target: [params.viewState.target?.[0] ?? viewRef.current.target[0], params.viewState.target?.[1] ?? viewRef.current.target[1], 0],
       zoom: typeof params.viewState.zoom === "number" ? params.viewState.zoom : viewRef.current.zoom,
@@ -1472,16 +1457,35 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, []);
 
   const finishConnection = useCallback(async (current: ConnectionGesture, info: PickingInfo) => {
-    const picked = deckRef.current?.pickObject({ x: info.x, y: info.y, radius: 8 });
-    const target = pickFromObject(picked?.object);
+    const point = pointFromInfo(info);
+    const sourceKey = placementKey(current.source);
+    const settledPixelsPerGridUnit = 2 ** settledViewState.zoom;
+    let target: ProcessMapVisiblePlacement | null = null;
+    let targetKey = "";
+    let nearestDistancePixels = Number.POSITIVE_INFINITY;
+    if (point) {
+      for (const placement of presentationRef.current.placements.values()) {
+        const key = placementKey(placement);
+        if (key === sourceKey || processMapPlacementDisplayLOD(placement, settledPixelsPerGridUnit) !== "editing") continue;
+        const input = processMapInputAnchor(placement);
+        const distancePixels = Math.hypot(input.x - point.x, input.y - point.y) * settledPixelsPerGridUnit;
+        if (distancePixels > 14) continue;
+        if (distancePixels < nearestDistancePixels || (distancePixels === nearestDistancePixels && key.localeCompare(targetKey) < 0)) {
+          target = placement;
+          targetKey = key;
+          nearestDistancePixels = distancePixels;
+        }
+      }
+    }
+    gestureRef.current = null;
     setGesture(null);
     setSelection(null);
-    if (!target || target.kind !== "anchor" || target.anchor !== "input" || placementKey(current.source) === target.key) return;
-    const operationKey = `relationship:${placementKey(current.source)}:${target.key}`;
+    if (!target) return;
+    const operationKey = `relationship:${sourceKey}:${targetKey}`;
     const canonicalGeneration = canonicalGenerationRef.current;
     const operationGeneration = nextOperation(operationKey);
     try {
-      const envelope = await postProcessMapRelationship(apiBase, companyID, current.source, target.placement, []);
+      const envelope = await postProcessMapRelationship(apiBase, companyID, current.source, target, []);
       if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) return;
       applyEnvelope(envelope, new Map());
       if (envelope.relationship) setSelection({ kind: "trace", id: envelope.relationship.resource_operational_relationship_id });
@@ -1490,7 +1494,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) return;
       setNotice(errorMessage(cause, "Operational trace was not created."));
     }
-  }, [apiBase, applyEnvelope, companyID, nextOperation]);
+  }, [apiBase, applyEnvelope, companyID, nextOperation, settledViewState.zoom]);
 
   const handleDragEnd = useCallback((info: PickingInfo) => {
     const current = gestureRef.current;
@@ -1705,6 +1709,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), new Map()));
         setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, current.baseTraces.keys(), new Map()));
       }
+      gestureRef.current = null;
       setGesture(null);
       setSelection(null);
     }
@@ -1778,6 +1783,8 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       top: viewportSize.height / 2 + (qdPlacement.grid_y - viewState.target[1]) * scale,
     };
   }, [qdPlacement, qdVisible, viewState, viewportSize]);
+  const currentTrayFolder = trayPath[trayPath.length - 1] ?? null;
+  const trayBackLabel = trayPath.length > 1 ? trayPath[trayPath.length - 2].label : "Root Folders";
   const orthographicView = useMemo(() => new OrthographicView({
     id: "process-map",
     flipY: true,
@@ -1833,35 +1840,44 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       />
 
       <aside data-process-map-fixed-overlay="true" className={`process-map-placement-tray${trayCollapsed ? " is-collapsed" : ""}`} aria-label="Process Map placement tray" onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>
-        <button type="button" className="process-map-placement-tray__toggle" aria-expanded={!trayCollapsed} onClick={() => {
+        <button type="button" className="process-map-placement-tray__toggle" aria-expanded={!trayCollapsed} aria-controls={trayListID} title={trayCollapsed ? "Expand placement tray" : "Collapse placement tray"} onClick={() => {
           const next = !trayCollapsed;
           setTrayCollapsed(next);
           storeTrayCollapsed(next);
         }}>
-          <span className="process-map-placement-tray__heading">Place Folder or Process</span>
-          <span className="process-map-placement-tray__disclosure" aria-hidden="true">⌄</span>
+          {!trayCollapsed && <>
+            <span className="process-map-placement-tray__heading">{currentTrayFolder?.label ?? "Root Folders"}</span>
+            <span className="process-map-placement-tray__hint">Drag to place</span>
+          </>}
+          <span className="process-map-placement-tray__disclosure" aria-hidden="true"><ExplorerDisclosureIcon open={false} color="#64748b" /></span>
         </button>
-        {!trayCollapsed && <div className="process-map-placement-tray__body">
-          {trayPath.length > 0 && <button type="button" className="process-map-placement-tray__back" onClick={() => setTrayPath((current) => current.slice(0, -1))}>← {trayPath[trayPath.length - 1]?.label}</button>}
+        {!trayCollapsed && <div id={trayListID} className="process-map-placement-tray__body company-explorer-scroll">
+          {currentTrayFolder && <button type="button" className="process-map-placement-tray__back" onClick={() => setTrayPath((current) => current.slice(0, -1))}>← Back to {trayBackLabel}</button>}
           {trayLoading && <p className="process-map-placement-tray__status">Loading authorized choices…</p>}
-          {trayError && <p className="process-map-placement-tray__status is-error">{trayError}</p>}
+          {trayError && <p className="process-map-placement-tray__status is-error" role="alert">{trayError}</p>}
           {!trayLoading && !trayError && trayCandidates.length === 0 && <p className="process-map-placement-tray__status">No unplaced choices in this branch.</p>}
-          <div className="process-map-placement-tray__list">
+          {!trayLoading && !trayError && trayCandidates.length > 0 && <div className="process-map-placement-tray__list" role="list">
             {trayCandidates.map((candidate) => {
               const row = trayRows.find((item) => item.entity_id === candidate.resource.resource_id || item.resource_id === candidate.resource.resource_id);
               const folder = candidate.resource.resource_type === "company_explorer_folder";
-              return <div className={`process-map-placement-tray__row${folder ? " is-folder" : " is-process"}`} key={placementKey(candidate.resource)}>
-                <button type="button" draggable className="process-map-placement-tray__card" onDragStart={(event) => {
+              return <div className="process-map-placement-tray__row" role="listitem" key={placementKey(candidate.resource)}>
+                <button type="button" draggable className={`process-map-placement-tray__card is-${folder ? "folder" : "process"}`} aria-label={folder ? `Browse or drag Folder: ${candidate.label}` : `Drag Process: ${candidate.label}`} title={folder ? "Click to browse or drag onto the map" : "Drag onto the map to place"} onClick={() => {
+                  if (!folder) return;
+                  setTrayPath((current) => [...current, { id: row?.entity_id ?? candidate.resource.resource_id, label: candidate.label }]);
+                }} onDragStart={(event) => {
                   event.dataTransfer.effectAllowed = "copy";
                   event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(candidate.dragPayload));
                 }}>
-                  <span className="process-map-placement-tray__card-kind">{folder ? "Folder" : "Process"}</span>
-                  <span className="process-map-placement-tray__card-label">{candidate.label}</span>
+                  <span className="process-map-placement-tray__icon"><ExplorerRowIcon kind={folder ? "folder" : "logic_gate"} /></span>
+                  <span className="process-map-placement-tray__card-copy">
+                    <span className="process-map-placement-tray__card-kind">{folder ? "Folder" : "Process"}</span>
+                    <span className="process-map-placement-tray__card-label">{candidate.label}</span>
+                  </span>
+                  {folder && <span className="process-map-placement-tray__card-disclosure" aria-hidden="true"><ExplorerDisclosureIcon open={false} color="#64748b" /></span>}
                 </button>
-                {folder && row?.has_children && <button type="button" className="process-map-placement-tray__browse" aria-label={`Browse ${candidate.label}`} onClick={() => setTrayPath((current) => [...current, { id: row.entity_id, label: candidate.label }])}>›</button>}
               </div>;
             })}
-          </div>
+          </div>}
         </div>}
       </aside>
 

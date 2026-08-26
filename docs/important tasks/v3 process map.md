@@ -31,7 +31,7 @@ The implementation starts from a working Process Map, not a blank canvas:
 - `frontend/src/modules/process-map/processMapGeometry.ts` currently mandates one seven-by-five footprint for both supported resource types.
 - Existing placement storage already keeps `map_parent_folder_id`, `grid_x`, and `grid_y` independently from Company Explorer parentage, but it does not yet store width or height.
 - Existing Company Explorer rows already emit one exact typed drag payload. Process Map must reuse it.
-- Existing Process Map behavior already includes selection, drag rollback, all four Folder/Process operational endpoint combinations, trace routing and waypoint editing, reduced-motion handling, the Process QDC hover and pinned card, and the shared full-page Logic Gate overlay opened from a Process.
+- Existing Process Map behavior already includes selection, drag rollback, all four Folder/Process operational endpoint combinations, trace routing and waypoint editing, the Process QDC hover and pinned card, and the shared full-page Logic Gate overlay opened from a Process.
 - Existing HTTP and realtime behavior already uses committed mutation responses, request cancellation, viewer-safe conditional reads, compact company invalidations, and no polling. Those mechanisms are extended to scene and tile reads rather than replaced by another cache or event system.
 
 The replacement keeps those product abilities and existing Mango authorities. It changes the camera, renderer, saved dimensions, containment gestures, and bounded read shape required for one continuous canvas.
@@ -66,7 +66,7 @@ The supported editing behavior remains deliberately small:
 - double-click a Process, or press Enter or Space while it is focused, to open its canonical Logic Gate editor and Kanban page in the existing blocking overlay;
 - zoom very far out and very far in while staying on the same canvas.
 
-Do not add textboxes, annotations, dashboards, automatic layout, inferred flow, operational summaries, minimaps, geographic imagery, terrain, streets, buildings, or another resource type as part of this replacement.
+Do not add textboxes, annotations, dashboards, ongoing or user-invoked automatic layout, inferred flow, operational summaries, minimaps, geographic imagery, terrain, streets, buildings, or another resource type as part of this replacement. The append-only one-time forward geometry compaction below is the only layout correction.
 
 ## Three Meanings That Must Never Be Blended
 
@@ -108,7 +108,7 @@ Coordinates and dimensions are canonical manual map facts. They are not pixels, 
 
 Folders render as resizable transparent fences with a colored perimeter. Processes render as resizable neutral cards with the existing green Process outline. Initial drop sizes are defaults only; they are not permanent type-wide mandated dimensions. Restricted placements retain one uniform permission-safe placeholder size and never reveal their real type or dimensions.
 
-Moving a Folder moves its recursively contained placements by the same company-world delta as one committed map operation. A saved trace whose two endpoints are both in that moved set translates every intermediate route point by the same delta exactly once; a trace with only one moved endpoint keeps its global intermediate route points and reconnects through the endpoint's newly derived anchor. Resizing a Folder does not automatically scale, rearrange, or relayout its contents and may not finish with a recursively contained placement outside the fence. No automatic layout or collision repair runs.
+Moving a Folder moves its recursively contained placements by the same company-world delta as one committed map operation. A saved trace whose two endpoints are both in that moved set translates every intermediate route point by the same delta exactly once; a trace with only one moved endpoint keeps its global intermediate route points and reconnects through the endpoint's newly derived anchor. Resizing a Folder does not automatically scale, rearrange, or relayout its contents and may not finish with a recursively contained placement outside the fence. No ongoing automatic layout or collision repair runs.
 
 ## One Continuous Camera
 
@@ -149,10 +149,12 @@ Keep the layer count small and stable:
 
 1. A non-pickable plain background/grid presentation.
 2. Folder fence geometry using transparent polygon outlines.
-3. Operational trace geometry using path segments below placements.
+3. Static cyan-to-blue operational trace geometry using orthogonal path segments below placements.
 4. Folder, Process, and restricted placement bodies using cheap GPU geometry or icons.
 5. Labels using `TextLayer` only in detail bands that can display them legibly.
 6. One small untiled edit overlay for the selected or actively dragged placement, anchors, resize handles, connection preview, selected trace, and route waypoints.
+
+Every deck.gl `PathLayer` in this stack must explicitly declare two-coordinate Cartesian XY positions. Folder fences, Process and restricted outlines, saved and selected traces, connection previews, and selected Folder fences must never depend on deck.gl's default three-coordinate format or invent a business Z coordinate.
 
 The selected or edited entity is hoisted into the untiled edit overlay and suppressed from ordinary tiled picking while the edit is active. This prevents duplicated tile fragments from creating duplicate drag, resize, selection, or save behavior.
 
@@ -183,9 +185,9 @@ The same placement may use a different representation from another placement at 
 
 The required settled bands are:
 
-- Whole-company detail: every displayable placement contributes a visible cheap mark; Folder fences and operational traces remain perceptible.
-- Normal map detail: Folder and Process shapes and readable names appear.
-- Editing detail: current full cards, input/output anchors, trace route points, hover behavior, pinned QDC card behavior, Process modal launch behavior, and editing affordances appear.
+- Whole-company detail: every displayable Process contributes a stable green-cued cheap mark, every displayable Folder keeps a perceptible orange fence, and static operational traces remain perceptible. The initial fit has no selection, QDC card, anchors, resize grips, waypoints, or editing controls; retained pinned-card behavior remains governed by its existing law after user interaction.
+- Normal map detail: full neutral Process shapes with green outlines, transparent orange Folder fences, readable names, and static traces appear.
+- Editing detail: the same shapes remain visible and the selected placement adds its distinct input/output anchors or resize grips, trace route points, hover behavior, pinned QDC card behavior, Process modal launch behavior, and current editing affordances.
 
 Do not invent extra operational summary data merely to fill a zoom band. Current source names and existing UI facts are enough until a separate product requirement adds another canonical fact.
 
@@ -261,7 +263,9 @@ Tile boundaries, cache reuse, parent refinement, stable feature handling, and re
 
 Reuse the existing exact-resource Company Explorer drag payload. Do not create another resource identity or drag format.
 
-The fixed placement tray may continue to locate authorized Folders and Processes, while the one Process Map header's shared Universal picker remains locked to authorized Processes. Explorer branch membership is only candidate organization. It never chooses the map parent. Search and branch browsing must reuse existing bounded permission-safe reads and must not download the entire Explorer tree.
+The fixed left placement tray locates authorized Folders and Processes, while the one Process Map header's shared Universal picker remains locked to authorized Processes. Expanded, the tray shows `Root Folders` or the current Folder, a simple back treatment, `Drag to place`, one internally scrolling Explorer-style list, warm orange Folder cards, and green Process cards using the existing Explorer icons. A Folder card is one unified row: dragging emits the exact existing Explorer payload, while clicking browses that authorized branch without placing it. A Process card uses the existing Logic Gate identity under the product name Process and has no second category. The expanded control points left; the collapsed tray is one genuinely narrow tab whose control points right. The browser-local collapsed preference remains local, and a collapsed tray performs no candidate reads.
+
+Explorer branch membership is only candidate organization. It never chooses the map parent. Branch browsing must reuse existing bounded permission-safe root-or-child reads, clear stale rows while the next branch loads, and must not download the entire Explorer tree or add a candidate API.
 
 On drop or drag stop:
 
@@ -287,11 +291,13 @@ The existing four endpoint combinations remain valid:
 
 Every accessible placement has exactly one presentation-defined input anchor and output anchor derived from its current global bounds. Anchor locations are not saved columns.
 
+Selecting an accessible placement at editing detail reveals only its left input and right output. Starting at the output keeps that source output visible, reveals and clearly highlights only distinct eligible target inputs, and draws one static orthogonal cyan-to-blue preview. Dropping on or reasonably near a valid target input creates or selects the canonical directed operational relationship and trace. Completion, invalid drop, Escape, camera change, and permission change clear the connection gesture, temporary anchors, target highlights, and source selection.
+
 The trace route stores only ordered intermediate global integer grid points. Endpoint coordinates remain derived. Trace tiles clip the canonical route for rendering without rewriting it.
 
 Changing a placement's map parent, position, or dimensions preserves the operational relationship and its saved trace. Moving endpoints changes their derived anchor positions. Removing a placement may remove its saved incident trace geometry while preserving the underlying operational relationship. Permanently deleting an endpoint removes its placement, incident operational relationships, and dependent traces through the existing exact-identity lifecycle.
 
-The current trace creation, pairwise fan-out/fan-in, shared explicit route points, selection, waypoint editing, idempotence, revision, timestamp, reduced-motion, and relationship-delete behavior remain in force.
+The current trace creation, pairwise fan-out/fan-in, shared explicit route points, selection, waypoint editing, idempotence, revision, timestamp, and relationship-delete behavior remain in force. Saved traces and pending previews are static cyan-to-blue paths. The standalone moving flow markers, animation timer, and phase state are deleted and are not replaced by another animation.
 
 ## Realtime, Cache, and Mutation Reconciliation
 
@@ -322,25 +328,35 @@ Deleting a mapped Folder may leave its direct map children alive after cleanup r
 
 ## One-Time Forward Geometry Migration
 
-The complete V3 cutover must convert existing separate-layer coordinates into one global coordinate system before the new read model becomes live. This is a one-time forward data migration, not a runtime compatibility reader or automatic layout feature.
+The forward geometry work has two ordered append-only data steps. The existing V3 migration converts separate-layer coordinates into one global coordinate system. The approved correction then compacts the complete shared geometry so the initial company fit is not dominated by huge empty gaps, oversized migrated regions, or distant outliers. Neither step is a runtime compatibility reader, an ongoing layout feature, or a user command.
 
 Use only existing Process Map parentage. Do not consult Company Explorer hierarchy.
 
 1. Give every legacy Process a starting size of seven by five grid squares. Give every empty legacy Folder the same minimum starting size. These are migration defaults and remain manually resizable afterward.
 2. Compute Folder subtree bounds bottom-up. Each nonempty Folder gets exactly one grid square of interior padding on every side and a size of `max(7, child_span_width + 2)` by `max(5, child_span_height + 2)`, using each immediate child's migrated bounds at its legacy local coordinates.
-3. Keep every root placement's legacy `grid_x` and `grid_y` as its global top-left anchor.
+3. Use every root placement's legacy `grid_x` and `grid_y` only as the intermediate global top-left anchor for flattening. A widely spaced legacy root anchor is not protected final geometry.
 4. For a Folder layer whose immediate child bounds begin at legacy local `min_x, min_y`, map each child to `folder_global_x + 1 + child_legacy_x - min_x` and `folder_global_y + 1 + child_legacy_y - min_y`. Apply this recursively. This preserves the relative layout inside every old layer while fitting it inside the new Folder fence.
 5. Translate every legacy trace route point by the same layer-to-global offset as its endpoints' old layer. Root trace points keep their existing coordinates.
 6. Preserve canonical resource, placement, relationship, and trace IDs and creation timestamps. Advance every transformed placement or trace revision and update timestamp exactly once, then advance the company Process Map read version.
-7. Allow resulting sibling Folder fences and cards to overlap. The migration must not invent collision repair or rearrange root anchors merely to make the first view prettier.
+7. Allow resulting sibling Folder fences and cards to overlap. The flattening step does not invent collision repair.
 
 The migration preflight must reject cycles, missing or cross-company map parents, a trace whose endpoints do not share its legacy layer, coordinate overflow, or any other row that cannot be converted deterministically. It must not partially convert a company. After success, the legacy exact-layer interpretation and read route are deleted; there is no fallback.
+
+The append-only compaction applies one small deterministic transform per company after flattening:
+
+1. Build separate X and Y coordinate sets from every live placement edge, every saved trace route point, and the equivalent placement, trace, and cleanup-comparison geometry in that company's recycle payloads.
+2. Sort each unique coordinate set. Map its first coordinate to zero, then map every next coordinate by adding `min(old_gap, 12)`. The resulting mapping is strictly increasing and independent of row order.
+3. Apply that one company-axis mapping to both edges of every placement and derive its new positive position, width, and height. Apply it to every trace route point and equivalent recycle geometry. This preserves ordering, valid Folder containment, orthogonal route topology, shared route junctions, exact identities, map parentage, and company isolation while reconnecting routes to the moved endpoint bounds.
+4. Keep recycle cleanup compare-and-swap protection exact: transform a cleanup claim to the new expected revision and geometry only when the matching live cleanup-produced state is still exact; otherwise leave the claim stale so it cannot overwrite newer work.
+5. Preflight the complete company, including payload shape and numeric safety, then apply that company's live and recycled geometry atomically. Advance each transformed canonical placement or trace revision and update timestamp once and advance the company Process Map read version once. A failure changes nothing for that company.
+
+After this migration, new placements remain manually positioned and no layout engine, cleanup/reset UI, compatibility path, or reusable compaction command remains.
 
 ## Complete Replacement Requirements
 
 The implementation branch must deliver all of the following together:
 
-- canonical schema and the deterministic one-time forward geometry migration for global dimensions, coordinates, traces, and any required spatial indexes;
+- canonical schema plus the deterministic one-time forward flattening and append-only geometry compaction for global dimensions, coordinates, traces, recycle payloads, and any required spatial indexes;
 - memory and PostgreSQL repository parity;
 - company scene and permission-safe tile reads;
 - deletion of the obsolete exact-layer read and Folder Process Map routes;
@@ -365,7 +381,8 @@ There is no compatibility read, dual renderer, legacy Folder layer, temporary se
 Backend and database coverage must prove:
 
 - placement global position and dimensions round-trip and validate;
-- legacy root anchors, nested relative layout, Folder fence bounds, and trace routes convert deterministically to global geometry, while invalid legacy graphs fail without partial conversion;
+- legacy layers, nested relative layout, Folder fence bounds, and trace routes convert deterministically to global geometry, then strict coordinate-gap compaction produces the same compact result independent of row order while invalid input fails without partial conversion;
+- compaction preserves exact placement, parent, relationship, trace, and company identities, valid containment, orthogonal route topology, revision/read-version rules, and recycle cleanup compare-and-swap safety;
 - root accepts both supported resource types;
 - map parent uses only mapped Folders and remains independent from Explorer;
 - cycles, missing parents, and cross-company parents fail atomically;
@@ -380,20 +397,23 @@ Backend and database coverage must prove:
 
 Frontend coverage must prove:
 
-- the initial route opens one company canvas and fits all authorized map bounds;
+- the initial route opens one company canvas, fits all authorized map bounds once, and starts without selection, QDC cards, anchors, resize grips, waypoints, or editing controls;
 - the renderer uses OrthographicView with no geographic map or second camera;
 - zoom targets camera center and never navigates;
 - LOD and data work do not run on individual wheel updates and run once after settlement;
 - coarse geometry remains until detailed tiles are ready;
-- every displayable placement remains represented at whole-company detail;
+- every displayable Process keeps a green cue, every displayable Folder keeps an orange fence, and static traces remain visible at whole-company detail;
+- every Process Map `PathLayer` explicitly declares XY positions and supplies valid two-coordinate paths for Folder fences, Process and restricted outlines, saved and selected traces, connection previews, and selected Folder fences;
 - Folder fences are transparent, colored, resizable, and valid drop targets;
 - candidate Explorer hierarchy does not choose map containment;
-- drag, move, group move, resize, reparent, selection, anchors, traces, waypoints, QDC cards, Process modal open/close, and failure rollback work;
+- drag, move, group move, resize, reparent, selection, distinct anchors and resize grips, static traces, waypoints, QDC cards, Process modal open/close, and failure rollback work;
+- the expanded and collapsed Explorer-style tray, collapsed-read suppression, Folder browse-versus-drag behavior, exact Explorer payload, and internal scrolling work;
+- connection previews and eligible target inputs remain visible, near-target drops commit the canonical relationship and trace, and completion, invalid drop, cancellation, camera change, and permission change clear every temporary connection control;
 - every group-move response contains all committed placement and trace revisions required for immediate reconciliation;
 - restricted placeholders leak nothing and are noninteractive;
 - Folder removal authorizes every user-mutated child while lifecycle cleanup remains permission-safe, and recycle restore reclaims only cleanup-unchanged children;
 - stale tile, mutation, permission, realtime, and gesture results cannot replace newer state;
-- reduced-motion behavior remains correct;
+- moving trace markers, animation phase state, and trace animation timers are absent;
 - the old React Flow renderer, Folder routes, breadcrumbs, and exact-layer requests are absent.
 
 Performance verification must use representative large company fixtures and record initial scene bytes, tile bytes, request count, request cancellation, settled-load count, GPU frame behavior during pan/zoom, label cost, picking cost, cache size, and memory. Correctness cannot be traded away to hit a synthetic frame number.
@@ -407,7 +427,7 @@ LOD pixel thresholds, initial drop sizes, tile size, tile cache byte limit, maxi
 - Do not turn Company Explorer hierarchy into the tile pyramid or viewing hierarchy.
 - Do not force the company canvas into a semantic quadtree. The quadtree is only an invisible spatial transport index.
 - Do not route into a Folder or make selection trigger loading. Camera settlement and visible spatial detail trigger loading.
-- Do not add operational summaries, textboxes, annotations, automatic layout, a minimap, or speculative generic canvas infrastructure.
+- Do not add operational summaries, textboxes, annotations, ongoing or user-invoked automatic layout, a minimap, or speculative generic canvas infrastructure.
 
 There are no unresolved product choices blocking the implementation. Sensible numeric thresholds are benchmarked implementation details; changing the authorities or behaviors in this document requires a new explicit product decision and matching law updates.
 

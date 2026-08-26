@@ -4,7 +4,6 @@ import test from "node:test";
 import type { Layer } from "@deck.gl/core";
 import {
   applyProcessMapMutationEnvelope,
-  buildProcessMapFlowLayer,
   buildProcessMapLayers,
   mergeProcessMapPresentation,
   ProcessMapProtectedTileLayer,
@@ -104,11 +103,9 @@ function buildOptions(overrides: Partial<ProcessMapLayerBuildOptions> = {}): Pro
     presentation: emptyPresentation(),
     editedPlacementKeys: new Set(),
     editedTraceIDs: new Set(),
-    reducedMotion: false,
-    flowPhase: 0,
     editOverlay: {
       placements: [], traces: [], selectedPlacementKey: null, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: null, showAllAnchors: false,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null,
     },
     getTileData: async () => null,
     onTileLoad: () => undefined,
@@ -121,6 +118,16 @@ function layerByID(layers: Layer[], id: string): Layer {
   const layer = layers.find((candidate) => candidate.id === id);
   assert.ok(layer, `missing layer ${id}`);
   return layer;
+}
+
+function assertFlatXYPathLayer(layer: Layer): void {
+  assert.equal(layer.props.positionFormat, "XY", `${layer.id} must declare its flat coordinates as XY`);
+  const data = layer.props.data as Array<{ path: number[][] }>;
+  assert.ok(data.length > 0, `${layer.id} needs path data in this fixture`);
+  const getPath = layer.props.getPath as (item: { path: number[][] }) => number[];
+  const flatPath = getPath(data[0]);
+  assert.ok(flatPath.length >= 4 && flatPath.length % 2 === 0, `${layer.id} must yield complete XY pairs`);
+  assert.ok(flatPath.every(Number.isFinite), `${layer.id} must yield finite coordinates`);
 }
 
 test("one TileLayer owns non-geographic selection, bounded scheduling, and the settled read gate", async () => {
@@ -225,12 +232,90 @@ test("whole-company tile rendering keeps every placement perceptible without lea
   const fences = layerByID(sublayers, "tile-folder-fences");
   const restricted = layerByID(sublayers, "tile-restricted");
   const labels = layerByID(sublayers, "tile-labels");
-  assert.equal((bodies.props.data as unknown[]).length, 2, "Folder and Process remain perceptible at whole-company LOD");
+  assert.equal((bodies.props.data as unknown[]).length, 1, "only the Process needs a filled body at whole-company LOD");
   assert.ok((fences.props.data as unknown[]).length > 0, "transparent Folder perimeter remains visible");
   assert.equal((restricted.props.data as unknown[]).length, 1);
   assert.equal(restricted.props.pickable, false);
   const texts = (labels.props.data as Array<{ text: string }>).map((item) => item.text);
   assert.deepEqual(texts, ["?"], "whole LOD suppresses names but retains a permission-safe placeholder");
+});
+
+test("Folder labels use the inside top edge while Process labels remain centered", () => {
+  const folder = placement("folder-label", 0, 0, 80, 60, "company_explorer_folder");
+  const process = placement("process-label", 100, 0, 80, 60);
+  const tileData: ProcessMapTileResponse = {
+    z: 22, x: 0, y: 0, process_map_read_version: 11, byteLength: 1,
+    placements: [folder, process],
+    traces: [],
+  };
+  const tileLayer = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 0.5 })), "process-map-spatial-tiles");
+  const render = tileLayer.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
+  const sublayers = render({ id: "normal-labels", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
+  const labels = layerByID(sublayers, "normal-labels-labels").props.data as Array<{ position: [number, number]; text: string }>;
+  const folderLabel = labels.find((item) => item.text === folder.name);
+  const processLabel = labels.find((item) => item.text === process.name);
+  assert.ok(folderLabel && processLabel);
+  assert.ok(folderLabel.position[1] > folder.grid_y && folderLabel.position[1] < folder.grid_y + folder.grid_height / 2);
+  assert.equal(processLabel.position[1], process.grid_y + process.grid_height / 2);
+});
+
+test("every Process Map PathLayer declares and yields flat XY geometry", () => {
+  const source = placement("source", 10, 10);
+  const target = placement("target", 40, 10);
+  const folder = placement("folder", 0, 0, 80, 60, "company_explorer_folder");
+  const relationship = trace(source, target);
+  const tileData: ProcessMapTileResponse = {
+    z: 22,
+    x: 0,
+    y: 0,
+    process_map_read_version: 11,
+    byteLength: 1,
+    placements: [folder, source, target, { restricted: true, grid_x: 100, grid_y: 20 }],
+    traces: [relationship],
+  };
+  const tileLayer = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 24 })), "process-map-spatial-tiles");
+  const render = tileLayer.props.renderSubLayers as unknown as (props: {
+    id: string;
+    data: ProcessMapTileResponse;
+    tile: { boundingBox: [number[], number[]] };
+  }) => Layer[];
+  const tileLayers = render({ id: "xy-tile", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
+  for (const id of [
+    "xy-tile-traces",
+    "xy-tile-folder-fences",
+    "xy-tile-process-perimeters",
+    "xy-tile-restricted-perimeters",
+  ]) assertFlatXYPathLayer(layerByID(tileLayers, id));
+
+  const presentation: ProcessMapPresentationState = {
+    placements: new Map([
+      ["company_explorer_folder:folder", folder],
+      ["logic_gate:source", source],
+      ["logic_gate:target", target],
+    ]),
+    traces: new Map([[relationship.resource_operational_relationship_id, relationship]]),
+    removedPlacementKeys: new Set(),
+  };
+  const editLayers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 24,
+    presentation,
+    editedPlacementKeys: new Set(["company_explorer_folder:folder"]),
+    editedTraceIDs: new Set([relationship.resource_operational_relationship_id]),
+    editOverlay: {
+      placements: [folder],
+      traces: [relationship],
+      selectedPlacementKey: "company_explorer_folder:folder",
+      selectedTraceID: relationship.resource_operational_relationship_id,
+      connectionPreview: { source, point: { x: 35, y: 28 } },
+      highlightedFolderKey: "company_explorer_folder:folder",
+      connectionSourceKey: "logic_gate:source",
+    },
+  }));
+  const editTraceLayer = layerByID(editLayers, "process-map-edit-traces");
+  assertFlatXYPathLayer(editTraceLayer);
+  assertFlatXYPathLayer(layerByID(editLayers, "process-map-edit-folder-fences"));
+  const colors = (editTraceLayer.props.data as Array<{ color: number[] }>).map((item) => item.color);
+  assert.notDeepEqual(colors[0], colors[colors.length - 1], "saved and pending traces retain a static cyan-to-blue treatment");
 });
 
 test("declared presentation ceilings suppress labels and waypoints above authorized detail", () => {
@@ -264,12 +349,27 @@ test("declared presentation ceilings suppress labels and waypoints above authori
     editOverlay: {
       placements: [], traces: [normalTrace], selectedPlacementKey: null,
       selectedTraceID: normalTrace.resource_operational_relationship_id,
-      connectionPreview: null, highlightedFolderKey: null, showAllAnchors: false,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null,
     },
   }));
   assert.deepEqual(layerByID(normalLayers, "process-map-edit-waypoints").props.data, []);
 
   const editingTrace = { ...normalTrace, presentation: "editing" as const };
+  const zoomedOutEditingLayers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 1,
+    presentation: { ...normalPresentation, traces: new Map([[editingTrace.resource_operational_relationship_id, editingTrace]]) },
+    editedTraceIDs: new Set([editingTrace.resource_operational_relationship_id]),
+    editOverlay: {
+      placements: [], traces: [editingTrace], selectedPlacementKey: null,
+      selectedTraceID: editingTrace.resource_operational_relationship_id,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null,
+    },
+  }));
+  assert.deepEqual(
+    layerByID(zoomedOutEditingLayers, "process-map-edit-waypoints").props.data,
+    [],
+    "a previously detailed trace cannot leave route controls behind after zooming out",
+  );
   const editingLayers = buildProcessMapLayers(buildOptions({
     settledPixelsPerGridUnit: 100,
     presentation: { ...normalPresentation, traces: new Map([[editingTrace.resource_operational_relationship_id, editingTrace]]) },
@@ -277,7 +377,7 @@ test("declared presentation ceilings suppress labels and waypoints above authori
     editOverlay: {
       placements: [], traces: [editingTrace], selectedPlacementKey: null,
       selectedTraceID: editingTrace.resource_operational_relationship_id,
-      connectionPreview: null, highlightedFolderKey: null, showAllAnchors: false,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null,
     },
   }));
   assert.equal((layerByID(editingLayers, "process-map-edit-waypoints").props.data as unknown[]).length, 1);
@@ -340,9 +440,10 @@ test("Folder move and delete acknowledgements clear only previews from their own
 
 test("selected Folder editing stays transparent and exposes saved-geometry resize and connection handles", () => {
   const folder = placement("Folder", 10, 20, 80, 60, "company_explorer_folder");
+  const child = { ...placement("Child", 25, 35), map_parent_folder_id: folder.resource_id };
   const key = "company_explorer_folder:Folder";
   const presentation: ProcessMapPresentationState = {
-    placements: new Map([[key, folder]]), traces: new Map(), removedPlacementKeys: new Set(),
+    placements: new Map([[key, folder], ["logic_gate:Child", child]]), traces: new Map(), removedPlacementKeys: new Set(),
   };
   const layers = buildProcessMapLayers(buildOptions({
     settledPixelsPerGridUnit: 24,
@@ -350,17 +451,71 @@ test("selected Folder editing stays transparent and exposes saved-geometry resiz
     editedPlacementKeys: new Set([key]),
     editOverlay: {
       placements: [folder], traces: [], selectedPlacementKey: key, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: key, showAllAnchors: false,
+      connectionPreview: null, highlightedFolderKey: key, connectionSourceKey: null,
     },
   }));
   const fences = layerByID(layers, "process-map-edit-folder-fences").props.data as unknown[];
   const bodies = layerByID(layers, "process-map-edit-placement-bodies").props.data as Array<{ fill: number[] }>;
   const handles = layerByID(layers, "process-map-edit-resize-handles").props.data as unknown[];
   const anchors = layerByID(layers, "process-map-edit-anchors").props.data as unknown[];
+  const labels = layerByID(layers, "process-map-edit-labels").props.data as Array<{ position: [number, number] }>;
+  const tileLayer = layerByID(layers, "process-map-spatial-tiles");
+  const render = tileLayer.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
+  const tileLayers = render({
+    id: "selected-folder",
+    data: { z: 22, x: 0, y: 0, process_map_read_version: 11, byteLength: 1, placements: [folder, child], traces: [] },
+    tile: { boundingBox: [[0, 0], [256, 256]] },
+  });
+  const containedBodies = layerByID(tileLayers, "selected-folder-placements").props.data as Array<{ pick: { key: string } }>;
   assert.equal(fences.length, 4, "a Folder is a perimeter fence, not an opaque card");
-  assert.equal(bodies[0].fill[3], 1, "Folder interior remains transparent enough to see contained work");
+  assert.equal(bodies.length, 0, "the selected Folder has no invisible interior pick surface over its contents");
+  assert.deepEqual(containedBodies.map((item) => item.pick.key), ["logic_gate:Child"], "the contained Process body stays directly pickable");
+  assert.ok(labels[0].position[1] > folder.grid_y && labels[0].position[1] < folder.grid_y + folder.grid_height / 2, "the selected Folder label stays along the inside top edge");
   assert.equal(handles.length, 4, "all four corners resize the saved global bounds");
   assert.equal(anchors.length, 2, "physical input and output sides remain connectable while editing");
+});
+
+test("an active connection keeps only the source output and distinct eligible target inputs", () => {
+  const source = placement("source", 0, 0);
+  const target = placement("target", 20, 0, 12, 8, "company_explorer_folder");
+  const sourceKey = "logic_gate:source";
+  const targetKey = "company_explorer_folder:target";
+  const presentation: ProcessMapPresentationState = {
+    placements: new Map([[sourceKey, source], [targetKey, target]]),
+    traces: new Map(),
+    removedPlacementKeys: new Set(),
+  };
+  const layers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 24,
+    presentation,
+    editedPlacementKeys: new Set([sourceKey]),
+    editOverlay: {
+      placements: [source],
+      traces: [],
+      selectedPlacementKey: sourceKey,
+      selectedTraceID: null,
+      connectionPreview: { source, point: { x: target.grid_x, y: target.grid_y + target.grid_height / 2 } },
+      highlightedFolderKey: null,
+      connectionSourceKey: sourceKey,
+    },
+  }));
+  const anchors = layerByID(layers, "process-map-edit-anchors").props.data as Array<{
+    radius: number;
+    pick: { anchor: "input" | "output"; key: string };
+  }>;
+  assert.deepEqual(
+    anchors.map((item) => [item.pick.key, item.pick.anchor]),
+    [[sourceKey, "output"], [targetKey, "input"]],
+  );
+  assert.ok(anchors[1].radius > anchors[0].radius, "eligible inputs receive the clearer target treatment");
+  const preview = layerByID(layers, "process-map-edit-traces");
+  assertFlatXYPathLayer(preview);
+  const colors = (preview.props.data as Array<{ color: number[] }>).map((item) => item.color);
+  assert.notDeepEqual(colors[0], colors[colors.length - 1], "the pending orthogonal preview is a static cyan-to-blue path");
+  assert.ok(
+    layers.indexOf(preview) < layers.indexOf(layerByID(layers, "process-map-spatial-tiles")),
+    "the pending trace remains below placement bodies",
+  );
 });
 
 test("Folder perimeter ownership crosses tile boundaries once without internal stroke seams", () => {
@@ -539,45 +694,6 @@ test("one group-move envelope reconciles every moved placement and translated in
   );
   assert.deepEqual(next.traces.get("relationship-1")?.route_points, [{ x: 20, y: 10 }]);
   assert.equal(next.traces.get("relationship-1")?.revision, 5);
-});
-
-test("reduced motion freezes operational flow markers while ordinary motion follows phase", () => {
-  const source = placement("source", 0, 0);
-  const target = placement("target", 20, 0);
-  const relationship = trace(source, target);
-  const presentation: ProcessMapPresentationState = {
-    placements: new Map([["logic_gate:source", source], ["logic_gate:target", target]]),
-    traces: new Map([[relationship.resource_operational_relationship_id, relationship]]),
-    removedPlacementKeys: new Set(),
-  };
-  const marker = (reducedMotion: boolean, flowPhase: number): [number, number] => {
-    const layer = buildProcessMapFlowLayer(presentation, reducedMotion, flowPhase);
-    const data = layer.props.data as Array<{ position: [number, number] }>;
-    assert.equal(data.length, 1);
-    return data[0].position;
-  };
-  assert.deepEqual(marker(true, 0), marker(true, 1));
-  assert.notDeepEqual(marker(false, 0), marker(false, 1));
-
-  const normalTrace: ProcessMapTrace = {
-    ...relationship,
-    presentation: "normal",
-    route_points: [],
-    path_fragments: [
-      [{ x: 20, y: 0 }, { x: 30, y: 0 }],
-      [{ x: 0, y: 0 }, { x: 10, y: 0 }],
-    ],
-  };
-  const fragmentedLayer = buildProcessMapFlowLayer({
-    ...presentation,
-    traces: new Map([[normalTrace.resource_operational_relationship_id, normalTrace]]),
-  }, false, 0.25);
-  const fragmentedMarkers = fragmentedLayer.props.data as Array<{ position: [number, number] }>;
-  assert.deepEqual(
-    fragmentedMarkers.map((item) => item.position).sort((left, right) => left[0] - right[0]),
-    [[2.5, 0], [22.5, 0]],
-    "coarse cross-tile fragments animate in their own canonical source-to-target direction instead of tile-load order",
-  );
 });
 
 test("representative large-company transport and presentation stay byte-, request-, and datum-bounded", async (t) => {
@@ -842,11 +958,12 @@ test("representative large-company transport and presentation stay byte-, reques
       .filter((layer) => layer.props.pickable)
       .reduce((total, layer) => total + ((layer.props.data as unknown[])?.length ?? 0), 0);
     const visiblePlacementCount = representative.placements.filter((item) => !item.restricted).length;
+    const visibleFolderCount = representative.placements.filter((item) => !item.restricted && item.resource_type === "company_explorer_folder").length;
     assert.equal(labelData.length, representative.placements.length, "normal LOD contributes one bounded label datum per displayable placement");
     assert.equal(
       pickableDatumCount,
-      visiblePlacementCount * 5 + representative.traces.length,
-      "picking data grows by five bounded placement datums plus one datum per single-segment trace",
+      visiblePlacementCount * 5 - visibleFolderCount + representative.traces.length * 2,
+      "Folder interiors add no pick datum while visible fences, Process bodies, and static trace halves remain bounded",
     );
     const labelBytes = labelData.reduce((total, datum) => total + encodedBytes(datum.text), 0);
     assert.ok(labelBytes < 64 * 1024, "representative label text stays bounded before the shared font atlas");
