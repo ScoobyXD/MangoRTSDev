@@ -410,22 +410,6 @@ function abortReason(signal?: AbortSignal): unknown {
   return signal?.reason ?? new DOMException("The request was aborted.", "AbortError");
 }
 
-export function combineProcessMapAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal {
-  const controller = new AbortController();
-  const activeSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal));
-  const abort = (signal: AbortSignal) => {
-    if (!controller.signal.aborted) controller.abort(signal.reason);
-  };
-  for (const signal of activeSignals) {
-    if (signal.aborted) {
-      abort(signal);
-      break;
-    }
-    signal.addEventListener("abort", () => abort(signal), { once: true });
-  }
-  return controller.signal;
-}
-
 function subscribeInflight<T>(entry: InflightEntry<T>, signal: AbortSignal | undefined, clone: (response: T) => T): Promise<T> {
   const caller = Symbol("process-map-read-caller");
   if (entry.abortTimer !== undefined) {

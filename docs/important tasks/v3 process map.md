@@ -45,9 +45,9 @@ deck.gl supplies the reusable graphics machinery:
 - `TileLayer` supplies viewport-based z/x/y tile selection, request scheduling, bounded cache controls, a per-tile abort signal, request debouncing, and a refinement hook.
 - A Mango refinement rule built through that hook keeps suitable loaded coarse coverage visible until complete finer coverage is ready without making overlapping vector representations into duplicate picks.
 
-deck.gl does not understand Mango's Explorer tree, manual Folder containment, operational relationships, permissions, recycle rules, LOD thresholds, or editing commands. Mango must still own those rules, the scene/tile endpoints, and the settled-request gate. `TileLayer` is used properly as spatial transport and rendering infrastructure; it is not presented as a ready-made business hierarchy.
+deck.gl does not understand Mango's Explorer tree, manual Folder containment, operational relationships, permissions, recycle rules, LOD thresholds, or editing commands. Mango must still own those rules, the scene/tile endpoints, the settled LOD snapshot, and read-version and protected-permission invalidation. `TileLayer` is used properly as spatial transport and rendering infrastructure; it is not presented as a ready-made business hierarchy.
 
-`TileLayer.debounceTime` is only a secondary bandwidth optimization. It does not by itself prove that a camera gesture or transition has ended, and deck.gl may clear a wheel interaction flag between wheel ticks. The application must restart one explicit quiet-period timer after every `onViewStateChange` and track flags from `onInteractionStateChange` too. Timer expiry commits only when every drag, pan, zoom, and transition flag is inactive. If expiry occurs during interaction, the later all-inactive interaction callback must settle immediately when the quiet period has already elapsed or arm only its remaining time. Network-backed tile work is permitted only for that committed generation.
+`TileLayer.debounceTime` owns the bounded scheduling of genuinely missing selected tiles and prunes short-lived camera candidates before they issue business reads. A camera event does not itself issue a read; a missing selected candidate that survives the debounce may. The application still restarts one explicit quiet-period timer after every `onViewStateChange` and tracks flags from `onInteractionStateChange` so screen-space LOD changes only after every drag, pan, zoom, and transition flag is inactive. Camera settlement changes only the saved view and LOD snapshot; it does not invalidate tile data, abort valid same-version work, or reload cached tiles.
 
 ## The Exact Product Outcome
 
@@ -162,7 +162,7 @@ All accessible placements remain GPU-pickable when their current detail band pre
 
 ## Spatial Tiles Are Invisible Transport Only
 
-Use deck.gl `TileLayer` for the Google-Earth-style spatial selection, request scheduling, bounded caching, and parent-to-child refinement hook. Mango owns the authoritative settled generation and cancellation lifecycle; deck.gl's per-tile signal is one cancellation input, not the complete cancellation contract.
+Use deck.gl `TileLayer` for the Google-Earth-style spatial selection, debounced scheduling of genuinely missing tiles, bounded caching, per-tile cancellation, and parent-to-child refinement hook. Mango owns the settled LOD snapshot plus read-version and protected-permission invalidation; camera settlement is not a tile-data generation or cancellation authority.
 
 The tile pyramid is a derived spatial transport index over company-world coordinates. It is not stored Process Map hierarchy, not Folder containment, not Explorer hierarchy, not an operational relationship, and not a new business identity. Do not add a tile registry, copied resource record, translated resource identity, or tile-membership authority.
 
@@ -175,7 +175,7 @@ One tile request returns the permission-safe representation for its integer zoom
 - Folder fences and traces intersecting tile boundaries are clipped into deterministic tile fragments or returned with stable identities and deterministic deduplication.
 - Tile cache keys are viewer-, permission-, company-read-version-, and tile-coordinate-safe. Tile ETags additionally include the response-contract version. A code-only tile representation change must advance that response contract so an older cached body cannot be reused through `304`.
 
-Use a transparent-vector-safe refinement function through deck.gl's supported refinement hook. When suitable coarse coverage is already loaded, keep the nearest loaded covering ancestor visible until every selected replacement needed for that covered region is ready. Then hide the ancestor and reveal the complete replacement coverage together. A parent and child representation of the same business identity must never both be pickable or produce duplicate edits. Initial loading may show the plain canvas until the first coarse response exists, but after permission-safe coverage has rendered it remains visible and transforms through the first and every later zoom, pan, or placement drag; ordinary unsettled interaction must not replace the spatial `TileLayer` or flash the loaded canvas blank. Failed finer requests keep valid coarse coverage visible and expose the existing bounded error/retry treatment without polling.
+Use a transparent-vector-safe refinement function through deck.gl's supported refinement hook. When suitable coarse coverage is already loaded, keep the nearest loaded covering ancestor visible until every selected replacement needed for that covered region is ready. Then hide the ancestor and reveal the complete replacement coverage together. A parent and child representation of the same business identity must never both be pickable or produce duplicate edits. Initial loading may show the plain canvas until the first coarse response exists, but after permission-safe coverage has rendered it remains visible and transforms through the first and every later zoom, pan, placement drag, and LOD settlement; camera movement must not replace the spatial `TileLayer`, synthesize empty tiles, or flash the loaded canvas blank. Failed finer requests keep valid loaded coverage visible and expose the existing bounded error/retry treatment without polling.
 
 ## Detail Is Chosen by Screen Size
 
@@ -193,23 +193,21 @@ Do not invent extra operational summary data merely to fill a zoom band. Current
 
 Several placements occupying the exact same screen pixel cannot be individually distinguished by any renderer. They must still contribute to the rendered result and become individually distinguishable after zooming; do not silently discard one placement through collision filtering.
 
-## Camera Settlement Is a Hard Loading Boundary
+## Camera Settlement Controls LOD Only
 
-The live camera transforms already loaded GPU buffers on every animation frame, including during the first and later zoom, pan, and placement drag, but Mango must not evaluate a new business detail band or begin a new viewport/tile data load for every wheel event.
+The live camera transforms already loaded GPU buffers on every animation frame, including during the first and later zoom, pan, and placement drag. Mango must not evaluate a new business detail band for every wheel event, while deck.gl `TileLayer` debounces genuinely missing tile work and prunes queued candidates that stop being selected. Up to the bounded active-request limit may safely finish and enter the same-version cache.
 
-Use deck.gl view and interaction callbacks plus an application-owned quiet-period timer so new LOD and data work begins only after dragging, panning, zooming, and camera transition have all ended. Every view change restarts the timer. The interaction callback must also drive completion because pointer release may change interaction state without another view change. Timer expiry commits one settled generation only when all interaction flags remain inactive; otherwise the later all-inactive callback settles after any remaining quiet time. Wheel ticks therefore cannot each become a settled load, and a drag release cannot leave the final view permanently unsettled.
+Use deck.gl view and interaction callbacks plus an application-owned quiet-period timer so a new LOD snapshot commits only after dragging, panning, zooming, and camera transition have all ended. Every view change restarts the timer. The interaction callback must also drive completion because pointer release may change interaction state without another view change. Timer expiry commits the final view and LOD only when all interaction flags remain inactive; otherwise the later all-inactive callback settles after any remaining quiet time. A drag release therefore cannot leave LOD permanently unsettled.
 
-The camera may continuously update deck.gl's internal viewport and candidate bookkeeping. That internal graphics work is not permissioned business loading. Mango-owned detail-band changes and HTTP scene/tile reads remain behind the committed settled generation. Interim tile candidates are discarded or held without starting network reads, while the last permission-safe spatial `TileLayer` remains mounted and visible; `debounceTime` is not the authority for declaring settlement.
+The camera may continuously update deck.gl's internal viewport and candidate bookkeeping. `TileLayer` keeps missing candidates behind its bounded debounce, prunes queued candidates that stop being selected, and may let already-active same-version reads finish into its bounded cache. A moving-camera candidate must never complete as a synthetic empty or `null` tile merely because the camera is moving. The last permission-safe spatial `TileLayer` remains mounted and LOD settlement never changes the tile-data trigger or calls a global tile reload.
 
 On settlement:
 
 1. Capture the final view state.
-2. Determine the final visible tile set and screen-space detail needs.
-3. Abort obsolete requests that no longer have a consumer through Mango's generation AbortController and the tile's deck.gl signal.
-4. Reuse valid cached tiles and in-flight identical reads.
-5. Request only missing final tiles.
-6. Keep valid covering coarse tiles visible through the transparent-vector-safe refinement rule until complete replacements arrive.
-7. Ignore stale completions from an older settled viewport.
+2. Commit the screen-space LOD snapshot.
+3. Leave valid same-version cached tiles and in-flight work untouched.
+4. Let `TileLayer` continue its debounced queue pruning and bounded active scheduling independently.
+5. Keep valid cached covering tiles visible through the transparent-vector-safe refinement rule until complete replacements arrive.
 
 No polling is permitted.
 
@@ -241,7 +239,7 @@ Placement writes include map parent, global integer position, and integer dimens
 
 Every changed placement and translated trace advances its own revision and update timestamp exactly once. The one committed group-move response returns the complete changed placement and trace rows plus the new company Process Map read version. The initiating client patches those committed rows into the edit overlay and invalidates affected tile coverage; it does not guess the committed group result or wait for its own realtime echo.
 
-All HTTP and store calls must propagate the request context so abandoned tile and scene reads cancel through PostgreSQL. Mango combines its settled-generation cancellation with deck.gl's per-tile signal for browser fetches, rejects stale completions, and does not assume TileLayer will abort every obsolete visible request. Do not use `context.Background()` for request-owned reads.
+All HTTP and store calls must propagate the request context so canceled tile and scene reads cancel through PostgreSQL. deck.gl's per-tile signal propagates cancellation when deck.gl cancels a tile, while bounded active same-version reads may safely finish into cache. Read-version and protected-permission invalidation dispose stale caches and abort the protected request scope. Mango rejects completions outside the current read version or protected scope. Do not use `context.Background()` for request-owned reads.
 
 ## Permission Boundary
 
@@ -305,7 +303,7 @@ Continue using the one company `process-map:company` realtime doorbell and the o
 
 A successful mutation updates the initiating edit overlay from its committed HTTP response and does not echo a redundant reload to that exact originating connection. Every other current company connection receives one compact permission-safe `process_map.changed` invalidation.
 
-The invalidation contains no placement, identity, endpoint, relationship, trace, route, tile, or geometry payload. This scope-only doorbell exception does not weaken durable relationship events, which retain the exact typed source and target identities required for audit and projection consumers. The client advances its company scene/tile generation, invalidates affected cached reads, and performs one coalesced read for the currently settled viewport. It does not reload an obsolete Folder layer and does not poll.
+The invalidation contains no placement, identity, endpoint, relationship, trace, route, tile, or geometry payload. This scope-only doorbell exception does not weaken durable relationship events, which retain the exact typed source and target identities required for audit and projection consumers. The client performs one coalesced scene refresh, invalidates tile data only when the returned company read version or protected permission scope changes, and lets `TileLayer` schedule replacement data for its currently selected tiles. It does not reload an obsolete Folder layer and does not poll.
 
 Source-name, Explorer organization, permission, group, membership, recycle, restore, and permanent-delete changes continue to invalidate every affected viewer through the current validation fence and viewer-safe ETag rules.
 
@@ -363,8 +361,8 @@ The implementation branch must deliver all of the following together:
 - one deck.gl OrthographicView and TileLayer renderer;
 - plain white non-geographic background;
 - initial whole-company camera fit;
-- settled-only LOD and data loading;
-- stable permission-safe spatial `TileLayer` reuse through first and later zoom, pan, and placement drag, plus transparent-vector-safe coarse-to-fine refinement without blank flashes or duplicate picks;
+- settled-only LOD plus `TileLayer`-debounced loading of genuinely missing tiles;
+- stable permission-safe spatial `TileLayer` reuse through first and later zoom, pan, placement drag, and LOD settlement, with no synthetic empty candidates or camera-settlement reload, plus transparent-vector-safe coarse-to-fine refinement without blank flashes or duplicate picks;
 - Folder fences, Processes, restricted placeholders, traces, labels, and edit overlay;
 - placement drag, group move, resize, reparent, remove, and rollback;
 - cross-Folder operational trace creation and route editing;
@@ -400,8 +398,8 @@ Frontend coverage must prove:
 - the initial route opens one company canvas, fits all authorized map bounds once, and starts without selection, QDC cards, anchors, resize grips, waypoints, or editing controls;
 - the renderer uses OrthographicView with no geographic map or second camera;
 - wheel zoom preserves the company-world point beneath the pointer and never navigates;
-- LOD and data work do not run on individual wheel updates and run once after settlement;
-- permission-safe loaded coverage remains visible through first and later zoom, pan, and placement drag, and coarse geometry remains until detailed tiles are ready;
+- LOD does not run on individual wheel updates and commits once after settlement, while `TileLayer` debounces genuinely missing selected tiles without turning each wheel update into a read or globally reloading cached tiles;
+- permission-safe loaded coverage remains visible through first and later zoom, pan, placement drag, and LOD settlement, while coarse geometry remains until detailed tiles are ready;
 - every displayable Process keeps a green cue, every displayable Folder keeps an orange fence, and static traces remain visible at whole-company detail;
 - every Process Map `PathLayer` explicitly declares XY positions and supplies valid two-coordinate paths for Folder fences, Process and restricted outlines, saved and selected traces, connection previews, and selected Folder fences;
 - Folder fences are transparent, colored, resizable, and valid drop targets;
@@ -416,7 +414,7 @@ Frontend coverage must prove:
 - moving trace markers, animation phase state, and trace animation timers are absent;
 - the old React Flow renderer, Folder routes, breadcrumbs, and exact-layer requests are absent.
 
-Performance verification must use representative large company fixtures and record initial scene bytes, tile bytes, request count, request cancellation, settled-load count, GPU frame behavior during pan/zoom, label cost, picking cost, cache size, and memory. Correctness cannot be traded away to hit a synthetic frame number.
+Performance verification must use representative large company fixtures and record initial scene bytes, tile bytes, request count, request cancellation, debounced tile-load count, camera-settlement reload count, GPU frame behavior during pan/zoom, label cost, picking cost, cache size, and memory. Correctness cannot be traded away to hit a synthetic frame number.
 
 LOD pixel thresholds, initial drop sizes, tile size, tile cache byte limit, maximum concurrent reads, settlement delay, and safe company-world coordinate bounds are implementation constants, not product phases or new business authorities. The worker must choose one tested set from representative fixtures, keep the constants together near the Process Map implementation, and document why the chosen bounds cover whole-company fit through editing detail. The old static `0.2` to `2.5` camera range must not survive merely because it exists today.
 
@@ -426,7 +424,7 @@ LOD pixel thresholds, initial drop sizes, tile size, tile cache byte limit, maxi
 - Do not retain React Flow under or beside deck.gl. The explicit V3 decision is one deck.gl camera and renderer.
 - Do not turn Company Explorer hierarchy into the tile pyramid or viewing hierarchy.
 - Do not force the company canvas into a semantic quadtree. The quadtree is only an invisible spatial transport index.
-- Do not route into a Folder or make selection trigger loading. Camera settlement and visible spatial detail trigger loading.
+- Do not route into a Folder or make selection trigger loading. Visible spatial tile selection triggers debounced loading; camera settlement changes LOD only.
 - Do not add operational summaries, textboxes, annotations, ongoing or user-invoked automatic layout, a minimap, or speculative generic canvas infrastructure.
 
 There are no unresolved product choices blocking the implementation. Sensible numeric thresholds are benchmarked implementation details; changing the authorities or behaviors in this document requires a new explicit product decision and matching law updates.

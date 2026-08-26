@@ -84,7 +84,7 @@ test("camera settlement waits for one quiet, all-inactive generation", async () 
     gate.onViewStateChange();
     gate.onViewStateChange();
     await wait(20);
-    assert.equal(settled, 2, "a wheel burst produces one settled generation, not one per tick");
+    assert.equal(settled, 2, "a wheel burst produces one settled LOD snapshot, not one per tick");
   } finally {
     gate.dispose();
   }
