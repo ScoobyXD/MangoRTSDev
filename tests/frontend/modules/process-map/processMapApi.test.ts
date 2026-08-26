@@ -61,7 +61,7 @@ function tilePayload(readVersion = 11, z = 2, x = 3, y = -1) {
   };
 }
 
-test("tile presentation normalizes omitted whole names and coarse trace routes", async () => {
+test("tile presentation normalizes omitted names, routes, and trace width without discarding the tile", async () => {
   const apiBase = "https://process-map-presentation-normalization.test";
   invalidateProcessMapReadCaches(apiBase, "company-1");
   const originalFetch = globalThis.fetch;
@@ -90,7 +90,6 @@ test("tile presentation normalizes omitted whole names and coarse trace routes",
       resource_operational_relationship_id: "coarse-trace",
       source: { resource_type: "logic_gate", resource_id: "source" },
       target: { resource_type: "logic_gate", resource_id: "target" },
-      trace_width: 1.2,
       path_fragments: [[{ x: 16, y: 14.5 }, { x: 40, y: 14.5 }]],
       revision: 3,
       created_timestamp: "created",
@@ -104,6 +103,7 @@ test("tile presentation normalizes omitted whole names and coarse trace routes",
     assert.equal(visible.restricted ? undefined : visible.presentation, "whole");
     assert.equal(visible.restricted ? undefined : visible.name, "");
     assert.equal(tile.traces[0].presentation, "normal");
+    assert.equal(tile.traces[0].trace_width, 1);
     assert.deepEqual(tile.traces[0].route_points, []);
   } finally {
     invalidateProcessMapReadCaches(apiBase, "company-1");
