@@ -279,8 +279,24 @@ func TestMemoryProcessMapTileDerivesOrthogonalTraceFragments(t *testing.T) {
 				t.Fatalf("tile traces = %+v, err=%v", tile.Traces, err)
 			}
 			trace := tile.Traces[0]
+			if trace.Presentation != domain.ProcessMapPresentationEditing {
+				t.Fatalf("trace presentation=%q, want editing", trace.Presentation)
+			}
 			if len(trace.RoutePoints) != test.wantRouteSize {
 				t.Fatalf("stored route points changed: %+v", trace.RoutePoints)
+			}
+			if test.wantRouteSize == 0 {
+				wire, err := json.Marshal(trace)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var fields map[string]json.RawMessage
+				if err := json.Unmarshal(wire, &fields); err != nil {
+					t.Fatal(err)
+				}
+				if string(fields["route_points"]) != "[]" {
+					t.Fatalf("empty editing route_points=%s, want []", fields["route_points"])
+				}
 			}
 			if test.wantRouteSize == 1 && trace.RoutePoints[0] != test.route[0] {
 				t.Fatalf("stored waypoint changed: got=%+v want=%+v", trace.RoutePoints[0], test.route[0])

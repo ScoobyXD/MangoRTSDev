@@ -232,7 +232,7 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 			processMapPlacementPresentationAtTileZoom(source.GridWidth, source.GridHeight, input.Z),
 			processMapPlacementPresentationAtTileZoom(target.GridWidth, target.GridHeight, input.Z),
 		)
-		routePoints := []domain.ProcessMapRoutePoint(nil)
+		routePoints := []domain.ProcessMapRoutePoint{}
 		if presentation == domain.ProcessMapPresentationEditing {
 			routePoints = cloneProcessMapRoutePoints(trace.RoutePoints)
 		}
