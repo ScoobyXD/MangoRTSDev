@@ -245,7 +245,9 @@ function normalizeTrace(value: unknown): ProcessMapTrace {
     if (!Array.isArray(fragment)) throw new Error("invalid_process_map_path_fragment");
     return fragment.map((point) => normalizePoint(point, false));
   }).filter((fragment) => fragment.length >= 2);
-  const traceWidth = requiredFiniteNumber(value.trace_width, "invalid_process_map_trace_width");
+  const traceWidth = value.trace_width === undefined
+    ? 1
+    : requiredFiniteNumber(value.trace_width, "invalid_process_map_trace_width");
   if (traceWidth <= 0) throw new Error("invalid_process_map_trace_width");
   return {
     presentation: maxPresentation,
