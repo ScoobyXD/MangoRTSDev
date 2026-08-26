@@ -24,7 +24,6 @@ import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalR
 import { getCurrentRealtimeConnectionID, subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
 import { ProcessMapQDCard } from "./ProcessMapQDCard.js";
 import {
-  combineProcessMapAbortSignals,
   deleteProcessMapPlacement,
   deleteProcessMapRelationship,
   fetchProcessMapScene,
@@ -150,20 +149,19 @@ export type ProcessMapLayerBuildOptions = {
   scene: ProcessMapSceneResponse;
   protectedGeneration: number;
   settled: boolean;
-  settledGeneration: number;
   settledPixelsPerGridUnit: number;
   presentation: ProcessMapPresentationState;
   editedPlacementKeys: ReadonlySet<string>;
   editedTraceIDs: ReadonlySet<string>;
   editOverlay: ProcessMapEditOverlayModel;
   getTileData: (request: ProcessMapTileLoadRequest) => Promise<ProcessMapTileResponse | null>;
-  onTileLoad: (tileID: string, data: ProcessMapTileResponse, settledGeneration: number) => void;
-  onTileUnload: (tileID: string, settledGeneration: number) => void;
-  onViewportLoad?: (settledGeneration: number) => void;
+  onTileLoad: (tileID: string, data: ProcessMapTileResponse, protectedGeneration: number) => void;
+  onTileUnload: (tileID: string, readVersion: number, protectedGeneration: number) => void;
+  onViewportLoad?: (protectedGeneration: number) => void;
   onTileError?: (cause: unknown) => void;
 };
 
-type ProcessMapSpatialLayerBuildOptions = Omit<ProcessMapLayerBuildOptions, "presentation" | "editOverlay"> & {
+type ProcessMapSpatialLayerBuildOptions = Omit<ProcessMapLayerBuildOptions, "presentation" | "editOverlay" | "settled"> & {
   selectedPlacementKey: string | null;
   selectedTraceID: string | null;
 };
@@ -757,22 +755,15 @@ function buildProcessMapSpatialLayers(options: ProcessMapSpatialLayerBuildOption
     debounceTime: PROCESS_MAP_TILE_DEBOUNCE_MS,
     refinementStrategy: (headers) => transparentVectorRefinementStrategy(headers),
     updateTriggers: {
-      getTileData: [options.settledGeneration, options.scene.process_map_read_version, options.protectedGeneration],
       renderSubLayers: [options.settledPixelsPerGridUnit, options.editedPlacementKeys, options.editedTraceIDs, options.selectedPlacementKey, options.selectedTraceID],
     },
-    getTileData: ((props) => {
-      // Returning before a Promise is created keeps interim wheel/pan candidates
-      // from issuing delayed HTTP after the gesture has already moved on.
-      if (!options.settled) return null;
-      return options.getTileData({ tileID: props.id, z: props.index.z, x: props.index.x, y: props.index.y, signal: props.signal });
-    }) as TileLayerProps<ProcessMapTileResponse>["getTileData"],
-    onTileLoad: (tile) => { if (tile.content) options.onTileLoad(tile.id, tile.content, options.settledGeneration); },
-    onTileUnload: (tile) => options.onTileUnload(tile.id, options.settledGeneration),
+    getTileData: ((props) => options.getTileData({ tileID: props.id, z: props.index.z, x: props.index.x, y: props.index.y, signal: props.signal })) as TileLayerProps<ProcessMapTileResponse>["getTileData"],
+    onTileLoad: (tile) => { if (tile.content) options.onTileLoad(tile.id, tile.content, options.protectedGeneration); },
+    onTileUnload: (tile) => {
+      if (tile.content) options.onTileUnload(tile.id, tile.content.process_map_read_version, options.protectedGeneration);
+    },
     onViewportLoad: (headers) => {
-      if (
-        options.settled
-        && processMapViewportHasCompleteCoverage(headers, options.scene.process_map_read_version)
-      ) options.onViewportLoad?.(options.settledGeneration);
+      if (processMapViewportHasCompleteCoverage(headers, options.scene.process_map_read_version)) options.onViewportLoad?.(options.protectedGeneration);
     },
     onTileError: (cause) => options.onTileError?.(cause),
     renderSubLayers: (props) => renderTileSubLayers(props, options),
@@ -878,7 +869,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const [viewState, setViewState] = useState<ProcessMapViewState>(() => fitProcessMapViewState(null, { width: 1, height: 1 }));
   const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 });
   const [settled, setSettled] = useState(false);
-  const [settledGeneration, setSettledGeneration] = useState(0);
   const [protectedGeneration, setProtectedGeneration] = useState(0);
   const [protectedScope, setProtectedScope] = useState(knownMappedScope);
   const [settledViewState, setSettledViewState] = useState(viewState);
@@ -914,9 +904,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const removedTraceIDsRef = useRef(removedTraceIDs);
   const gestureRef = useRef<ProcessMapGesture | null>(null);
   const settlementGateRef = useRef<ReturnType<typeof createProcessMapSettlementGate> | null>(null);
-  const settledReadyRef = useRef(false);
-  const settledGenerationRef = useRef(0);
-  const settledAbortRef = useRef<AbortController | null>(null);
   const sceneAbortRef = useRef<AbortController | null>(null);
   const fittedSceneRef = useRef(false);
   const canonicalGenerationRef = useRef(0);
@@ -964,13 +951,8 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, []);
 
   const settleNow = useCallback(() => {
-    settledAbortRef.current?.abort();
-    settledAbortRef.current = new AbortController();
-    settledGenerationRef.current += 1;
-    settledReadyRef.current = true;
     setSettled(true);
     setSettledViewState({ ...viewRef.current, target: [...viewRef.current.target] as [number, number, number] });
-    setSettledGeneration(settledGenerationRef.current);
   }, []);
 
   useEffect(() => {
@@ -983,18 +965,16 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [settleNow]);
 
   const markUnsettled = useCallback(() => {
-    settledReadyRef.current = false;
     settlementGateRef.current?.onViewStateChange();
   }, []);
 
   const loadScene = useCallback(async (purgeProtectedGeometry: boolean) => {
     if (!companyID.trim()) return;
     if (purgeProtectedGeometry) {
+      setScene(null);
       setProtectedScope(knownMappedScope);
       advanceProtectedGeneration();
       invalidateProcessMapReadCaches(apiBase, companyID);
-      settledReadyRef.current = false;
-      settledAbortRef.current?.abort();
       setSettled(false);
       setLoadedTiles(new Map());
       setCommittedOverlay(emptyPresentation());
@@ -1032,7 +1012,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     void loadScene(true);
     return () => {
       sceneAbortRef.current?.abort();
-      settledAbortRef.current?.abort();
       invalidateProcessMapReadCaches(apiBase, companyID);
     };
   }, [apiBase, companyID, loadScene]);
@@ -1089,8 +1068,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         advanceProtectedGeneration();
         invalidateProcessMapReadCaches(apiBase, companyID);
         sceneAbortRef.current?.abort();
-        settledAbortRef.current?.abort();
-        settledReadyRef.current = false;
         setSettled(false);
         setLoadedTiles(new Map());
         setCommittedOverlay(emptyPresentation());
@@ -1115,18 +1092,11 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [advanceProtectedGeneration, apiBase, companyID, knownMappedScope, loadScene]);
 
   const guardedGetTileData = useCallback(async (request: ProcessMapTileLoadRequest): Promise<ProcessMapTileResponse | null> => {
-    const expectedGeneration = settledGenerationRef.current;
     const currentScene = sceneRef.current;
-    if (!settledReadyRef.current || !currentScene || request.z < currentScene.min_tile_zoom || request.z > currentScene.max_tile_zoom) return null;
-    const signal = combineProcessMapAbortSignals(settledAbortRef.current?.signal, request.signal);
+    if (!currentScene || request.z < currentScene.min_tile_zoom || request.z > currentScene.max_tile_zoom) return null;
     try {
-      const tile = await fetchProcessMapTile(apiBase, companyID, currentScene.process_map_read_version, request.z, request.x, request.y, signal);
-      if (
-        signal.aborted
-        || !settledReadyRef.current
-        || expectedGeneration !== settledGenerationRef.current
-        || tile.process_map_read_version !== sceneRef.current?.process_map_read_version
-      ) return null;
+      const tile = await fetchProcessMapTile(apiBase, companyID, currentScene.process_map_read_version, request.z, request.x, request.y, request.signal);
+      if (request.signal?.aborted || tile.process_map_read_version !== sceneRef.current?.process_map_read_version) return null;
       return tile;
     } catch (cause) {
       if (isAbortError(cause)) return null;
@@ -1135,16 +1105,16 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [apiBase, companyID]);
 
   const handleTileLoad = useCallback((tileID: string, data: ProcessMapTileResponse, generation: number) => {
-    if (!settledReadyRef.current || generation !== settledGenerationRef.current || data.process_map_read_version !== sceneRef.current?.process_map_read_version) return;
+    if (generation !== canonicalGenerationRef.current || data.process_map_read_version !== sceneRef.current?.process_map_read_version) return;
     setLoadedTiles((current) => new Map(current).set(tileID, data));
     updateKnownMapped(data.placements.filter((placement): placement is ProcessMapVisiblePlacement => !placement.restricted));
     setLoading(false);
   }, [updateKnownMapped]);
 
-  const handleTileUnload = useCallback((tileID: string, generation: number) => {
-    if (generation !== settledGenerationRef.current) return;
+  const handleTileUnload = useCallback((tileID: string, readVersion: number, generation: number) => {
+    if (generation !== canonicalGenerationRef.current) return;
     setLoadedTiles((current) => {
-      if (!current.has(tileID)) return current;
+      if (current.get(tileID)?.process_map_read_version !== readVersion) return current;
       const next = new Map(current);
       next.delete(tileID);
       return next;
@@ -1152,7 +1122,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, []);
 
   const handleViewportLoad = useCallback((generation: number) => {
-    if (!settledReadyRef.current || generation !== settledGenerationRef.current) return;
+    if (generation !== canonicalGenerationRef.current) return;
     const retired = retireProcessMapMutationMasks({
       committedOverlay: committedOverlayRef.current,
       removedTraceIDs: removedTraceIDsRef.current,
@@ -1359,8 +1329,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const spatialLayers = useMemo(() => activeScene ? buildProcessMapSpatialLayers({
     scene: activeScene,
     protectedGeneration,
-    settled,
-    settledGeneration,
     settledPixelsPerGridUnit: 2 ** settledViewState.zoom,
     editedPlacementKeys: spatialEditedPlacementKeys,
     editedTraceIDs: spatialEditedTraceIDs,
@@ -1371,13 +1339,12 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     onTileUnload: handleTileUnload,
     onViewportLoad: handleViewportLoad,
     onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
-  }) : null, [activeScene, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, protectedGeneration, selectedPlacementKey, selectedTraceID, settled, settledGeneration, settledViewState.zoom, spatialEditedPlacementKeys, spatialEditedTraceIDs]);
+  }) : null, [activeScene, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, protectedGeneration, selectedPlacementKey, selectedTraceID, settledViewState.zoom, spatialEditedPlacementKeys, spatialEditedTraceIDs]);
 
   const layers = useMemo(() => activeScene && spatialLayers ? composeProcessMapLayers({
     scene: activeScene,
     protectedGeneration,
     settled,
-    settledGeneration,
     settledPixelsPerGridUnit: 2 ** settledViewState.zoom,
     presentation,
     editedPlacementKeys,
@@ -1388,7 +1355,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     onTileUnload: handleTileUnload,
     onViewportLoad: handleViewportLoad,
     onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
-  }, spatialLayers) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, settled, settledGeneration, settledViewState.zoom, spatialLayers]);
+  }, spatialLayers) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, settled, settledViewState.zoom, spatialLayers]);
 
   const handleViewStateChange = useCallback(<ViewStateT extends OrthographicViewState,>(params: ViewStateChangeParameters<ViewStateT>): ViewStateT => {
     if (gestureRef.current?.kind === "connection") {
@@ -1404,7 +1371,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     };
     viewRef.current = proposed;
     setViewState(proposed);
-    settledReadyRef.current = false;
     settlementGateRef.current?.onViewStateChange();
     return proposed as ViewStateT;
   }, []);

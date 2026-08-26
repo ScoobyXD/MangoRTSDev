@@ -98,7 +98,6 @@ function buildOptions(overrides: Partial<ProcessMapLayerBuildOptions> = {}): Pro
     scene,
     protectedGeneration: 0,
     settled: true,
-    settledGeneration: 3,
     settledPixelsPerGridUnit: 0.25,
     presentation: emptyPresentation(),
     editedPlacementKeys: new Set(),
@@ -130,27 +129,23 @@ function assertFlatXYPathLayer(layer: Layer): void {
   assert.ok(flatPath.every(Number.isFinite), `${layer.id} must yield finite coordinates`);
 }
 
-test("one TileLayer owns non-geographic selection, bounded scheduling, and the settled read gate", async () => {
+test("one TileLayer configures non-geographic selection and debounced missing-tile scheduling", async () => {
   let reads = 0;
   const payload: ProcessMapTileResponse = { z: 22, x: 0, y: 0, process_map_read_version: 11, placements: [], traces: [], byteLength: 100 };
-  const unsettled = buildProcessMapLayers(buildOptions({
+  const layers = buildProcessMapLayers(buildOptions({
     settled: false,
     getTileData: async () => { reads += 1; return payload; },
   }));
-  const unsettledTiles = layerByID(unsettled, "process-map-spatial-tiles");
-  assert.equal(unsettled.filter((layer) => layer.id === "process-map-spatial-tiles").length, 1);
-  const getUnsettled = unsettledTiles.props.getTileData as unknown as (request: { id: string; index: { z: number; x: number; y: number }; signal: AbortSignal }) => Promise<ProcessMapTileResponse | null> | null;
-  assert.equal(getUnsettled({ id: "22-0-0", index: { z: 22, x: 0, y: 0 }, signal: new AbortController().signal }), null);
-  assert.equal(reads, 0, "interim wheel and pan candidates must not schedule business reads");
-
-  const settled = buildProcessMapLayers(buildOptions({ getTileData: async () => { reads += 1; return payload; } }));
-  const tiles = layerByID(settled, "process-map-spatial-tiles");
+  const tiles = layerByID(layers, "process-map-spatial-tiles");
+  assert.equal(layers.filter((layer) => layer.id === "process-map-spatial-tiles").length, 1);
   assert.equal(tiles.props.tileSize, processMapDeckTileSize(scene.tile_size, scene.max_tile_zoom));
   assert.equal(tiles.props.zoomOffset, scene.max_tile_zoom);
   assert.equal(tiles.props.maxCacheByteSize, PROCESS_MAP_TILE_CACHE_BYTES);
+  assert.equal(tiles.props.debounceTime, PROCESS_MAP_TILE_DEBOUNCE_MS);
   assert.ok(Number(tiles.props.maxRequests) > 0 && Number(tiles.props.maxRequests) <= 16);
-  const getSettled = tiles.props.getTileData as unknown as (request: { id: string; index: { z: number; x: number; y: number }; signal: AbortSignal }) => Promise<ProcessMapTileResponse | null>;
-  assert.equal(await getSettled({ id: "22-0-0", index: { z: 22, x: 0, y: 0 }, signal: new AbortController().signal }), payload);
+  assert.equal(tiles.props.updateTriggers?.getTileData, undefined, "camera settlement must not invalidate tile data");
+  const getTileData = tiles.props.getTileData as unknown as (request: { id: string; index: { z: number; x: number; y: number }; signal: AbortSignal }) => Promise<ProcessMapTileResponse | null>;
+  assert.equal(await getTileData({ id: "22-0-0", index: { z: 22, x: 0, y: 0 }, signal: new AbortController().signal }), payload);
   assert.equal(reads, 1);
 });
 
@@ -160,8 +155,8 @@ test("protected generations keep one logical TileLayer while replacing and dispo
   assert.equal(first.id, second.id, "the deck layer identity remains stable across protected generations");
   assert.equal(first.props.data, "11:0");
   assert.equal(second.props.data, "11:1");
-  assert.deepEqual(first.props.updateTriggers?.getTileData, [3, 11, 0]);
-  assert.deepEqual(second.props.updateTriggers?.getTileData, [3, 11, 1]);
+  assert.equal(first.props.updateTriggers?.getTileData, undefined);
+  assert.equal(second.props.updateTriggers?.getTileData, undefined);
 
   const parent = Object.getPrototypeOf(ProcessMapProtectedTileLayer.prototype) as { updateState: (params: unknown) => void };
   const originalParentUpdate = parent.updateState;
@@ -189,6 +184,46 @@ test("protected generations keep one logical TileLayer while replacing and dispo
   } finally {
     parent.updateState = originalParentUpdate;
   }
+});
+
+test("settled LOD changes regenerate sublayers without reloading cached tile data", () => {
+  let reloads = 0;
+  let optionUpdates = 0;
+  const cachedTile = { layers: [{}] as unknown[] | null };
+  const tileLayerPrototype = Object.getPrototypeOf(ProcessMapProtectedTileLayer.prototype) as {
+    updateState: (params: unknown) => void;
+  };
+  const fake = {
+    state: {
+      tileset: {
+        reloadAll: () => { reloads += 1; },
+        setOptions: () => { optionUpdates += 1; },
+        tiles: [cachedTile],
+      },
+    },
+    _getTilesetOptions: () => ({}),
+    _updateTileset: () => undefined,
+  };
+
+  tileLayerPrototype.updateState.call(fake, {
+    changeFlags: {
+      propsOrDataChanged: false,
+      updateTriggersChanged: { renderSubLayers: true },
+      dataChanged: false,
+    },
+  });
+  assert.equal(optionUpdates, 1);
+  assert.equal(reloads, 0, "a settled LOD change must not reload valid same-version tile data");
+  assert.equal(cachedTile.layers, null, "LOD changes may synchronously regenerate drawing sublayers");
+
+  tileLayerPrototype.updateState.call(fake, {
+    changeFlags: {
+      propsOrDataChanged: true,
+      updateTriggersChanged: false,
+      dataChanged: true,
+    },
+  });
+  assert.equal(reloads, 1, "a real tile data identity change still reloads stale payloads");
 });
 
 test("known mapped keys accumulate by exact identity and preview replacement preserves unrelated operations", () => {
@@ -570,16 +605,16 @@ test("only complete current-version viewport coverage retires mutation masks", (
   assert.equal(retired.committedOverlay.removedPlacementKeys.size, 0);
   assert.equal(retired.removedTraceIDs.size, 0);
 
-  const completedGenerations: number[] = [];
+  const completedProtectedGenerations: number[] = [];
   const tileLayer = layerByID(buildProcessMapLayers(buildOptions({
-    onViewportLoad: (generation) => completedGenerations.push(generation),
+    onViewportLoad: (generation) => completedProtectedGenerations.push(generation),
   })), "process-map-spatial-tiles");
   const onViewportLoad = tileLayer.props.onViewportLoad as unknown as (tiles: Array<{ isLoaded: boolean; content?: ProcessMapTileResponse | null }>) => void;
   onViewportLoad([{ isLoaded: true, content: null }]);
   onViewportLoad([{ isLoaded: true, content: { ...currentTile, process_map_read_version: 10 } }]);
-  assert.deepEqual(completedGenerations, []);
+  assert.deepEqual(completedProtectedGenerations, []);
   onViewportLoad([{ isLoaded: true, content: currentTile }]);
-  assert.deepEqual(completedGenerations, [3], "only the settled generation with current content may retire masks");
+  assert.deepEqual(completedProtectedGenerations, [0], "only complete current-version coverage in the current protected scope may retire masks");
 });
 
 test("delete masks win over every overlay and cleared previews cannot return after mask retirement", () => {
@@ -843,63 +878,32 @@ test("representative large-company transport and presentation stay byte-, reques
     const tileLoader = (request: Parameters<ProcessMapLayerBuildOptions["getTileData"]>[0]) => (
       fetchProcessMapTile(apiBase, companyID, readVersion, request.z, request.x, request.y, request.signal)
     );
-    const unsettledLayer = layerByID(buildProcessMapLayers(buildOptions({
+    const movingLayer = layerByID(buildProcessMapLayers(buildOptions({
       scene: largeScene,
       settled: false,
       getTileData: tileLoader,
     })), "process-map-spatial-tiles");
-    const readUnsettled = unsettledLayer.props.getTileData as unknown as (request: {
-      id: string;
-      index: { z: number; x: number; y: number };
-      signal: AbortSignal;
-    }) => Promise<ProcessMapTileResponse | null> | null;
-    for (let update = 0; update < 240; update += 1) {
-      assert.equal(readUnsettled({
-        id: `interim-${update}`,
-        index: { z: 22, x: update % companyTileCount, y: 0 },
-        signal: new AbortController().signal,
-      }), null);
-    }
-    assert.equal(tileRequests, 0, "240 wheel/pan candidates must schedule no business read before settlement");
-
     const settledLayer = layerByID(buildProcessMapLayers(buildOptions({
       scene: largeScene,
       settled: true,
       settledPixelsPerGridUnit: 8,
       getTileData: tileLoader,
     })), "process-map-spatial-tiles");
+    assert.equal(movingLayer.props.data, settledLayer.props.data, "camera settlement must not replace the tile-data identity");
+    assert.equal(movingLayer.props.updateTriggers?.getTileData, undefined);
+    assert.equal(settledLayer.props.updateTriggers?.getTileData, undefined);
     assert.equal(settledLayer.props.maxRequests, PROCESS_MAP_MAX_TILE_REQUESTS);
     assert.equal(settledLayer.props.maxCacheByteSize, PROCESS_MAP_TILE_CACHE_BYTES);
-    const readSettled = settledLayer.props.getTileData as unknown as (request: {
+    const readTile = settledLayer.props.getTileData as unknown as (request: {
       id: string;
       index: { z: number; x: number; y: number };
       signal: AbortSignal;
     }) => Promise<ProcessMapTileResponse>;
-    let settledLoadCount = 0;
-    let settleFailure: (cause: unknown) => void = () => undefined;
-    let settleSuccess: (tiles: ProcessMapTileResponse[]) => void = () => undefined;
-    const settledTiles = new Promise<ProcessMapTileResponse[]>((resolve, reject) => {
-      settleSuccess = resolve;
-      settleFailure = reject;
-    });
-    const settlementGate = createProcessMapSettlementGate({
-      delayMs: 0,
-      onSettle: () => {
-        settledLoadCount += 1;
-        void Promise.all(Array.from({ length: finalViewportTileCount }, (_, x) => readSettled({
-          id: `final-${x}`,
-          index: { z: 22, x, y: 0 },
-          signal: new AbortController().signal,
-        }))).then(settleSuccess, settleFailure);
-      },
-    });
-    settlementGate.onInteractionStateChange({ isZooming: true });
-    for (let update = 0; update < 240; update += 1) settlementGate.onViewStateChange();
-    assert.equal(settledLoadCount, 0);
-    settlementGate.onInteractionStateChange({});
-    const responses = await settledTiles;
-    settlementGate.dispose();
-    assert.equal(settledLoadCount, 1, "one wheel/pan burst must produce one final load generation");
+    const responses = await Promise.all(Array.from({ length: finalViewportTileCount }, (_, x) => readTile({
+      id: `viewport-${x}`,
+      index: { z: 22, x, y: 0 },
+      signal: new AbortController().signal,
+    })));
     assert.equal(tileRequests, finalViewportTileCount, "only missing tiles from the final viewport are requested");
 
     await Promise.all(Array.from({ length: finalViewportTileCount }, (_, x) => (
@@ -920,7 +924,7 @@ test("representative large-company transport and presentation stay byte-, reques
     await assert.rejects(canceled, (cause: unknown) => cause instanceof Error && cause.name === "AbortError");
     await canceledFetchObserved;
     await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.equal(canceledRequests, 1, "a settled request with no remaining consumer aborts its underlying fetch");
+    assert.equal(canceledRequests, 1, "a tile request with no remaining consumer aborts its underlying fetch");
     assert.equal(getProcessMapReadCacheStats().inflight_reads, 0);
 
     let placementVisits = 0;
@@ -976,9 +980,8 @@ test("representative large-company transport and presentation stay byte-, reques
       initial_scene_bytes: encodedBytes(largeScene),
       largest_tile_bytes: Math.max(...responses.map((response) => response.byteLength)),
       modeled_company_tile_bytes: modeledCompanyTileBytes,
-      settled_viewport_requests: finalViewportTileCount,
+      viewport_requests: finalViewportTileCount,
       canceled_requests: canceledRequests,
-      settled_load_count: settledLoadCount,
       label_datums: labelData.length,
       label_utf8_bytes: labelBytes,
       pickable_datums: pickableDatumCount,

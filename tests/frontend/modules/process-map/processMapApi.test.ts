@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  combineProcessMapAbortSignals,
   fetchProcessMapScene,
   fetchProcessMapTile,
   getProcessMapReadCacheStats,
@@ -257,33 +256,6 @@ test("tile cache identity includes read version and z/x/y while restricted rows 
     assert.equal(requests.length, 3, "new read versions and tile coordinates cannot reuse another payload");
   } finally {
     release();
-    invalidateProcessMapReadCaches(apiBase, "company-1");
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("generation and TileLayer cancellation combine into the browser fetch signal", async () => {
-  const apiBase = "https://process-map-cancel.test";
-  invalidateProcessMapReadCaches(apiBase, "company-1");
-  const originalFetch = globalThis.fetch;
-  let observedSignal: AbortSignal | null = null;
-  globalThis.fetch = ((_, init) => new Promise<Response>((_resolve, reject) => {
-    observedSignal = init?.signal ?? null;
-    observedSignal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
-  })) as typeof fetch;
-  const generation = new AbortController();
-  const tile = new AbortController();
-  const combined = combineProcessMapAbortSignals(generation.signal, tile.signal);
-  try {
-    const request = fetchProcessMapTile(apiBase, "company-1", 11, 2, 0, 0, combined);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    assert.ok(observedSignal);
-    assert.equal((observedSignal as AbortSignal).aborted, false);
-    tile.abort("tile superseded");
-    await assert.rejects(request, (cause: unknown) => cause === "tile superseded");
-    assert.equal(combined.aborted, true);
-    assert.equal(generation.signal.aborted, false, "tile cancellation does not abort the whole generation controller");
-  } finally {
     invalidateProcessMapReadCaches(apiBase, "company-1");
     globalThis.fetch = originalFetch;
   }

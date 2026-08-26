@@ -94,7 +94,6 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
   for (const required of [
     "invalidateProcessMapReadCaches(apiBase, companyID)",
     "sceneAbortRef.current?.abort()",
-    "settledAbortRef.current?.abort()",
     "setLoadedTiles(new Map())",
     "setCommittedOverlay(emptyPresentation())",
     "setPreviewPlacements(new Map())",
@@ -127,6 +126,7 @@ test("company or auth scope changes synchronously suppress protected geometry be
   assert.ok(purgeStart >= 0 && purgeEnd > purgeStart);
   const purge = surface.slice(purgeStart, purgeEnd);
   assert.ok(purge.indexOf("setProtectedScope(knownMappedScope)") < purge.indexOf("advanceProtectedGeneration()"));
+  assert.match(purge, /setScene\(null\)/);
   assert.match(purge, /setLoadedTiles\(new Map\(\)\)/);
   assert.match(purge, /setCommittedOverlay\(emptyPresentation\(\)\)/);
   assert.match(purge, /setPreviewPlacements\(new Map\(\)\)/);
@@ -166,7 +166,7 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
   assert.match(app, /aria-modal="true"/);
 });
 
-test("V3 Surface keeps loaded coverage visible and accepts deck cursor-anchored zoom", () => {
+test("V3 Surface keeps valid tile data through camera settlement and accepts deck cursor-anchored zoom", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const markStart = surface.indexOf("const markUnsettled = useCallback");
   const markEnd = surface.indexOf("const loadScene = useCallback", markStart);
@@ -185,10 +185,11 @@ test("V3 Surface keeps loaded coverage visible and accepts deck cursor-anchored 
   const spatialLayers = surface.slice(spatialStart, spatialEnd);
   const overlayLayers = surface.slice(spatialEnd, layersEnd);
   const handleViewStateChange = surface.slice(viewStart, viewEnd);
-  assert.match(markUnsettled, /settledReadyRef\.current = false/);
   assert.match(markUnsettled, /settlementGateRef\.current\?\.onViewStateChange\(\)/);
   assert.doesNotMatch(markUnsettled, /setSettled\(false\)/);
-  assert.match(guardedGetTileData, /if \(!settledReadyRef\.current \|\| !currentScene/);
+  assert.match(guardedGetTileData, /if \(!currentScene \|\| request\.z < currentScene\.min_tile_zoom/);
+  assert.match(guardedGetTileData, /request\.signal/);
+  assert.doesNotMatch(guardedGetTileData, /settled|combineProcessMapAbortSignals/);
   assert.match(spatialLayers, /const spatialEditedPlacementKeys = useMemo[\s\S]*?\[editedPlacementMembership\]/);
   assert.match(spatialLayers, /const spatialEditedTraceIDs = useMemo[\s\S]*?\[editedTraceMembership\]/);
   assert.match(spatialLayers, /const spatialLayers = useMemo\(\(\) => activeScene \? buildProcessMapSpatialLayers/);
@@ -200,8 +201,9 @@ test("V3 Surface keeps loaded coverage visible and accepts deck cursor-anchored 
   assert.match(handleViewStateChange, /target: \[params\.viewState\.target\?\.\[0\]/);
   assert.match(handleViewStateChange, /viewRef\.current = proposed/);
   assert.match(handleViewStateChange, /setViewState\(proposed\)/);
-  assert.match(handleViewStateChange, /settledReadyRef\.current = false/);
+  assert.match(handleViewStateChange, /settlementGateRef\.current\?\.onViewStateChange\(\)/);
   assert.doesNotMatch(handleViewStateChange, /setSettled\(false\)|centerProcessMapZoom|zoomChanged|const next/);
+  assert.doesNotMatch(surface, /settledGeneration|settledReadyRef|settledAbortRef|if \(!options\.settled\) return null/);
   assert.doesNotMatch(surface, /centerProcessMapZoom/);
   assert.match(surface, /onViewStateChange=\{handleViewStateChange\}/);
   assert.match(surface, /onInteractionStateChange=\{\(state: InteractionState\) => settlementGateRef\.current\?\.onInteractionStateChange\(state\)\}/);
