@@ -41,10 +41,10 @@
 39. Every accessible Folder and Process MUST keep a neutral elevated surface with one thin type outline matching Company Explorer: orange for a Folder and green for a Process; selection MUST preserve that type outline, and the first version MUST NOT add filled semantic item colors.
 40. A single click on an accessible Folder MUST select that Folder; a single click on an accessible Process MUST select that Process and pin its Process data card immediately to its right; completing a placement drag or connection gesture MUST perform only that gesture and MUST NOT be treated as a click or open, close, pin, or unpin a data card.
 41. A double click on an accessible Folder MUST navigate to that Folder's Process Map layer.
-42. A Process MUST be a leaf on Process Map and MUST NOT open a Process Map Node layer in the first version.
+42. A Process MUST remain a leaf on Process Map and MUST NOT open a Process Map child layer; double-clicking an accessible Process MUST instead open that exact Process's canonical Logic Gate page in a blocking overlay.
 43. Panning or zooming MUST change only the current map viewport and MUST NOT enter or leave a Folder or change saved placement coordinates.
 44. The root layer and every Folder layer MUST have a stable and directly openable URL.
-45. Every double-click drill-in MUST navigate to the destination Folder layer's URL and add that navigation to browser history.
+45. Every Folder double-click drill-in MUST navigate to the destination Folder layer's URL and add that navigation to browser history; opening a Process Logic Gate overlay MUST NOT change the Process Map URL or browser history.
 46. Copying and opening a Process Map URL MUST restore the same identified layer for an authorized recipient.
 47. Browser Back MUST return to the previously visited Process Map layer.
 48. The root route MUST load only placements whose saved map parent is root and the traces required for that root layer.
@@ -127,11 +127,12 @@
 125. A transient hover data card MUST be read-only; clicking an accessible Process MUST pin its data card regardless of Hover mode, and the pinned card MUST remain visible after the pointer leaves the Process.
 126. Every transient or pinned Process data card MUST stay immediately to the right of its Process without covering or disabling the Process's fixed output anchor or its connection hit area, and moving the placement or viewport MUST keep a pinned card attached to that Process.
 127. Once a pointer gesture crosses the placement-drag activation threshold or starts a connection gesture, releasing the pointer MUST NOT fire Process click or pin behavior even when snapping or pointer movement leaves the final X-Y position unchanged; only a press and release that remains a click gesture may select the Process and pin its data card.
-128. Every transient or pinned Process data card MUST show the same complete 31-slice Quality tracker and 31-slice Delivery tracker, in the same day order and from the same canonical Q/D values used by that exact Process's editor; Process Map placement rows, React Flow node/rendering state, and browser state MUST NOT become another Q/D authority.
+128. Every transient or pinned Process data card MUST reuse the same complete 31-slice Quality tracker and 31-slice Delivery tracker used by that exact Process's editor; each card letter grid MUST use seven responsive equal-square tracks capped at 154 pixels with one pixel between slices, preserve the same day order and canonical Q/D values, and MUST NOT make Process Map placement rows, React Flow node/rendering state, or browser state another Q/D authority.
 129. Only the slices matching the current `America/Los_Angeles` business date MAY be changed from a pinned Process data card by a user with Edit access to that Process; every other slice and every slice in a transient hover card MUST remain visible and read-only.
 130. Every Process data card MUST show the canonical Q/D row's final-editor display-name snapshot when present and MUST NOT expose the stored user ID.
 131. The bottom of every Process data card MUST show the same resolved Responsible and Accountable user or group labels presented by that exact Process's current canonical RACI view, using the established role colors; it MUST NOT expose internal principal IDs, copy or rewrite an assignment, grant access, or become another RACI authority.
-132. At most one Process data card may be pinned; clicking another accessible Process MUST replace the pin, an explicit close action or click on empty map canvas MUST dismiss it, and a placement drag, connection gesture, viewport change, or Hover mode change MUST NOT dismiss or replace it.
+132. At most one Process data card may be pinned; clicking another accessible Process MUST replace the pin, its explicit close action MUST be red, that close action or a click on empty map canvas MUST dismiss it, and a placement drag, connection gesture, viewport change, or Hover mode change MUST NOT dismiss or replace it.
+133. Double-clicking an accessible Process, or pressing Enter or Space while that Process is focused, MUST dismiss any pinned or transient data card and open only that exact Process's canonical Logic Gate editor and Kanban page through the shared modal layer; its accessible top-right close action MUST be red, and closing by that action, Escape, or the backdrop MUST preserve the underlying Process Map layer, URL, viewport, placements, and traces.
 
 Last updated: 2026-08-25
 
@@ -144,3 +145,5 @@ A single click that never becomes a placement drag or connection gesture pins th
 The pinned card reads the Process's shared 31-slice Quality and Delivery values, shows the final editor's display name, and permits only the current `America/Los_Angeles` business-day slices when the user has Edit access
 ↓
 Responsible and Accountable appear at the bottom through the Process's current canonical RACI presentation, and no Process Map record becomes another Q/D or RACI authority
+↓
+A double click closes the data card and opens that Process's canonical Logic Gate page over the still-mounted map, and the red close action returns to the unchanged map

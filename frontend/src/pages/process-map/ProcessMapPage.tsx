@@ -18,9 +18,10 @@ export type ProcessMapPageProps = {
   companyID: string;
   folderID?: string;
   onNavigate?: (path: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string) => void;
 };
 
-export function ProcessMapPage({ apiBase, companyID, folderID, onNavigate }: ProcessMapPageProps) {
+export function ProcessMapPage({ apiBase, companyID, folderID, onNavigate, onOpenLogicGate }: ProcessMapPageProps) {
   const [layer, setLayer] = useState<ProcessMapLayerResponse["layer"] | null>(null);
   const [pickerAnchor, setPickerAnchor] = useState<UniversalEntityPickerAnchor | null>(null);
   const [hoverModeEnabled, setHoverModeEnabled] = useState(false);
@@ -127,6 +128,7 @@ export function ProcessMapPage({ apiBase, companyID, folderID, onNavigate }: Pro
           folderID={folderID}
           hoverModeEnabled={hoverModeEnabled}
           onOpenFolder={openFolder}
+          onOpenLogicGate={onOpenLogicGate}
           onLayerChange={setLayer}
         />
       </div>
