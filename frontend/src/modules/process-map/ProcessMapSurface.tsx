@@ -1726,14 +1726,13 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, affectedTraceIDs, new Map()));
     setCommittedOverlay((current) => {
       const placements = new Map(current.placements);
-      for (const affectedKey of removalPlacementKeys) placements.delete(affectedKey);
-      return {
-        placements,
-        traces: new Map(current.traces),
-        removedPlacementKeys: new Set([...current.removedPlacementKeys, ...removalPlacementKeys]),
-      };
+      placements.delete(key);
+      return { placements, traces: new Map(current.traces), removedPlacementKeys: new Set(current.removedPlacementKeys).add(key) };
     });
-    setRemovedTraceIDs((current) => new Set([...current, ...affectedTraceIDs]));
+    const incident = [...presentationRef.current.traces.values()]
+      .filter((trace) => placementKey(trace.source) === key || placementKey(trace.target) === key)
+      .map((trace) => trace.resource_operational_relationship_id);
+    setRemovedTraceIDs((current) => new Set([...current, ...incident]));
     setSelection(null);
     if (placement.resource_type === "logic_gate") setPinnedProcessID((current) => current === placement.resource_id ? null : current);
     try {
@@ -1746,12 +1745,12 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
       setCommittedOverlay((current) => {
         const removedPlacementKeys = new Set(current.removedPlacementKeys);
-        for (const affectedKey of removalPlacementKeys) removedPlacementKeys.delete(affectedKey);
+        removedPlacementKeys.delete(key);
         return { ...current, removedPlacementKeys };
       });
       setRemovedTraceIDs((current) => {
         const next = new Set(current);
-        affectedTraceIDs.forEach((id) => next.delete(id));
+        incident.forEach((id) => next.delete(id));
         return next;
       });
       invalidateProcessMapReadCaches(apiBase, companyID);
