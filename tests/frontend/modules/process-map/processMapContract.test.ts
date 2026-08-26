@@ -82,7 +82,7 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
   assert.match(surface, /processMapDeepestContainingFolder\(processMapPlacementBounds\(placement\)/);
   assert.match(surface, /processMapDeepestContainingFolder\(processMapPlacementBounds\(pending\), folders\)/);
   assert.match(surface, /folderContainsItsChildren\(saved, presentationRef\.current\.placements\)/);
-  assert.match(surface, /postProcessMapRelationship\(apiBase, companyID, current\.source, target\.placement, \[\]\)/);
+  assert.match(surface, /postProcessMapRelationship\(apiBase, companyID, current\.source, target, \[\]\)/);
   assert.match(surface, /shouldApplyProcessMapMutationAck/);
   assert.match(surface, /Placement was restored because it could not be saved/);
   assert.match(surface, /Placement removal was rolled back/);
@@ -100,6 +100,9 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
     "setPreviewPlacements(new Map())",
     "setPreviewTraces(new Map())",
     "setRemovedTraceIDs(new Set())",
+    "gestureRef.current = null",
+    "setGesture(null)",
+    "setExternalDropPoint(null)",
     "setSelection(null)",
     "setHoveredProcessID(null)",
     "setPinnedProcessID(null)",
@@ -116,7 +119,7 @@ test("company or auth scope changes synchronously suppress protected geometry be
   assert.match(surface, /const activeScene = protectedScopeCurrent \? scene : null/);
   assert.match(surface, /\(\) => protectedScopeCurrent \? mergeTilePresentation\(loadedTiles\) : emptyPresentation\(\)/);
   assert.match(surface, /const presentation = useMemo\(\(\) => protectedScopeCurrent[\s\S]{0,240}: emptyPresentation\(\)/);
-  assert.match(surface, /const baseLayers = useMemo\(\(\) => activeScene \? buildProcessMapLayers/);
+  assert.match(surface, /const layers = useMemo\(\(\) => activeScene \? buildProcessMapLayers/);
 
   const purgeStart = surface.indexOf("if (purgeProtectedGeometry) {");
   const purgeEnd = surface.indexOf("\n    }", purgeStart);
@@ -127,6 +130,9 @@ test("company or auth scope changes synchronously suppress protected geometry be
   assert.match(purge, /setCommittedOverlay\(emptyPresentation\(\)\)/);
   assert.match(purge, /setPreviewPlacements\(new Map\(\)\)/);
   assert.match(purge, /setPreviewTraces\(new Map\(\)\)/);
+  assert.match(purge, /gestureRef\.current = null/);
+  assert.match(purge, /setGesture\(null\)/);
+  assert.match(purge, /setExternalDropPoint\(null\)/);
 });
 
 test("V3 Surface keeps QDC hover and pin controls plus the full Process modal entry points", () => {
@@ -167,9 +173,74 @@ test("V3 Surface explicitly keeps wheel zoom centered on the camera target", () 
   assert.match(surface, /onInteractionStateChange=\{\(state: InteractionState\) => settlementGateRef\.current\?\.onInteractionStateChange\(state\)\}/);
 });
 
-test("animated flow remains below tiled placements and above the plain background", () => {
+test("static XY traces remain below placements with no moving marker path", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
-  assert.match(surface, /return \[\.\.\.baseLayers\.slice\(0, 1\), flowLayer, \.\.\.baseLayers\.slice\(1\)\]/);
+  assert.match(surface, /return \[background, editTraces\.path, \.\.\.\(tiles \? \[tiles\] : \[\]\), editTraces\.waypoints, \.\.\.editPlacementLayers\(options\)\]/);
+  assert.equal((surface.match(/positionFormat:\s*"XY"/g) ?? []).length, 6, "all six Process Map PathLayers must opt into flat XY coordinates");
+  for (const removed of [
+    /buildProcessMapFlowLayer/,
+    /flowPhase/,
+    /process-map-trace-flow-markers/,
+    /prefers-reduced-motion/,
+    /setInterval/,
+  ]) assert.doesNotMatch(surface, removed);
+});
+
+test("placement tray reuses Explorer identity, one unified card, and suppresses collapsed reads", () => {
+  const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  const css = source("frontend/src/modules/process-map/processMap.css");
+
+  for (const required of [
+    "ExplorerRowIcon",
+    "ExplorerDisclosureIcon",
+    "Root Folders",
+    "Drag to place",
+    "company-explorer-scroll",
+    "process-map-placement-tray__card is-",
+    "EXPLORER_DRAG_MIME",
+  ]) assert.ok(surface.includes(required), `placement tray must retain ${required}`);
+  assert.doesNotMatch(surface, /process-map-placement-tray__browse/);
+
+  const readStart = surface.indexOf("useEffect(() => {\n    if (trayCollapsed) {");
+  const readEnd = surface.indexOf("\n  }, [apiBase, companyID, trayCollapsed, trayPath]);", readStart);
+  assert.ok(readStart >= 0 && readEnd > readStart, "tray branch read effect must remain explicit");
+  const readEffect = surface.slice(readStart, readEnd);
+  const collapsedGuardEnd = readEffect.indexOf("return undefined;");
+  const firstRead = readEffect.indexOf("fetchCompanyExplorer");
+  assert.ok(collapsedGuardEnd >= 0 && firstRead > collapsedGuardEnd, "collapsed tray must return before any Explorer request");
+  assert.ok((readEffect.match(/setTrayRows\(\[\]\)/g) ?? []).length >= 2, "collapse and every branch load clear stale rows");
+
+  const collapsedRule = css.match(/\.process-map-placement-tray\.is-collapsed\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  const expandedDisclosureRule = css.match(/\.process-map-placement-tray:not\(\.is-collapsed\) \.process-map-placement-tray__disclosure\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(collapsedRule, /width:\s*42px/);
+  assert.match(expandedDisclosureRule, /transform:\s*rotate\(180deg\)/);
+  assert.match(css, /\.process-map-placement-tray__card\.is-folder\s*\{[\s\S]*?linear-gradient/);
+  assert.match(css, /\.process-map-placement-tray__card\.is-process\s*\{[\s\S]*?linear-gradient/);
+});
+
+test("connection gestures use visible near-drop targeting and clear on camera or permission changes", () => {
+  const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  const finishStart = surface.indexOf("const finishConnection = useCallback");
+  const finishEnd = surface.indexOf("const handleDragEnd = useCallback", finishStart);
+  const cameraStart = surface.indexOf("const handleViewStateChange = useCallback");
+  const cameraEnd = surface.indexOf("const clearHoverTimer = useCallback", cameraStart);
+  assert.ok(finishStart >= 0 && finishEnd > finishStart && cameraStart >= 0 && cameraEnd > cameraStart);
+  const finish = surface.slice(finishStart, finishEnd);
+  const camera = surface.slice(cameraStart, cameraEnd);
+  assert.doesNotMatch(finish, /pickObject/);
+  assert.match(finish, /const point = pointFromInfo\(info\)/);
+  assert.match(finish, /presentationRef\.current\.placements\.values\(\)/);
+  assert.match(finish, /key === sourceKey \|\| processMapPlacementDisplayLOD\(placement, settledPixelsPerGridUnit\) !== "editing"/);
+  assert.match(finish, /const input = processMapInputAnchor\(placement\)/);
+  assert.match(finish, /Math\.hypot\(input\.x - point\.x, input\.y - point\.y\) \* settledPixelsPerGridUnit/);
+  assert.match(finish, /if \(distancePixels > 14\) continue/);
+  assert.match(finish, /distancePixels < nearestDistancePixels/);
+  assert.match(finish, /gestureRef\.current = null/);
+  assert.match(finish, /setGesture\(null\)/);
+  assert.match(camera, /gestureRef\.current\?\.kind === "connection"/);
+  assert.match(camera, /gestureRef\.current = null/);
+  assert.match(camera, /setGesture\(null\)/);
+  assert.match(camera, /setSelection\(null\)/);
 });
 
 test("relationship and delete outcomes cannot mutate state after a newer canonical generation", () => {
