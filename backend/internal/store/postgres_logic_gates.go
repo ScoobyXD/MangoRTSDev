@@ -229,7 +229,7 @@ func (r *PostgresRepo) CreateLogicGate(companyID, header string) (domain.LogicGa
 	if err != nil {
 		return domain.LogicGate{}, err
 	}
-	if _, _, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, item.CompanyID, EntityTypeLogicGate, item.LogicGateID, "", false); err != nil {
+	if _, _, err := r.placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, item.CompanyID, EntityTypeLogicGate, item.LogicGateID, "", false); err != nil {
 		return domain.LogicGate{}, err
 	}
 	if err := tx.Commit(); err != nil {

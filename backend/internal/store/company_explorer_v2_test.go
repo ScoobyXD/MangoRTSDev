@@ -738,8 +738,8 @@ func TestMemoryCompanyExplorerV2WritesMoveAndFolderPermissions(t *testing.T) {
 		t.Fatalf("moved logic gate not found under new parent")
 	}
 
-	if err := repo.DeleteCompanyExplorerV2Folder(companyID, privateFolder.EntityID); err != nil {
-		t.Fatalf("DeleteCompanyExplorerV2Folder: %v", err)
+	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: privateFolder.EntityID}}, admin.UserID); err != nil {
+		t.Fatalf("DeleteCompanyExplorerTargets: %v", err)
 	}
 	if _, err := repo.GetCompanyExplorerV2FolderDefaultAccess(companyID, privateFolder.EntityID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetCompanyExplorerV2FolderDefaultAccess after delete err = %v, want ErrNotFound", err)
@@ -951,9 +951,6 @@ func TestMemoryCompanyExplorerDefaultFoldersAreProtected(t *testing.T) {
 
 	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{{Kind: "folder", ID: defaults.UnfiledFolderID}}, user.UserID); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("DeleteCompanyExplorerTargets Unfiled err = %v, want ErrInvalid", err)
-	}
-	if err := repo.DeleteCompanyExplorerV2Folder(companyID, defaults.LogicGatesFolderID); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("DeleteCompanyExplorerV2Folder Logic Gates err = %v, want ErrInvalid", err)
 	}
 	if _, err := repo.RenameCompanyExplorerFolder(companyID, defaults.UnfiledFolderID, "Renamed", "", ""); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("RenameCompanyExplorerFolder Unfiled err = %v, want ErrInvalid", err)

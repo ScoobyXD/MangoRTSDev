@@ -53,6 +53,27 @@ func TestPostgresProcessMapTileLODMatchesMemoryProjection(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	accountabilityGroup, err := repo.CreateCompanyUserGroup(company.CompanyID, "", "Accountability Team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.PutResourceRACIPolicy(ResourceRACIPolicyUpdateInput{
+		CompanyID: company.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: processIDs["Large"],
+		AssignmentMode: PolicyModeCustomized, DescendantAction: PolicyDescendantActionInheritedOnly,
+		Assignments: []ResourceRACIAssignmentInput{
+			{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: admin.UserID},
+			{Role: domain.RACIRoleAccountable, PrincipalType: EntityPermissionSubjectGroup, PrincipalID: accountabilityGroup.GroupID},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	green := "green"
+	if _, err := repo.PutLogicGateQDRating(QDRatingPutInput{
+		CompanyID: company.CompanyID, LogicGateID: processIDs["Large"], Metric: QDRatingMetricQuality,
+		Rating: &green, RatedByUserID: admin.UserID, RatedByDisplayName: admin.DisplayName, Now: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	wholeRoute := []domain.ProcessMapRoutePoint{{X: 24, Y: 12}}
 	wholeRelationship, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
@@ -103,6 +124,12 @@ func TestPostgresProcessMapTileLODMatchesMemoryProjection(t *testing.T) {
 		if placement.Presentation != item.presentation || placement.Name != wantName {
 			t.Fatalf("PostgreSQL %s projection = %s/%q, want memory parity %s/%q", item.name, placement.Presentation, placement.Name, item.presentation, wantName)
 		}
+	}
+	large := placementsByID[processIDs["Large"]]
+	if large.ScoreCard == nil || large.ScoreCard.QualityRating == nil || *large.ScoreCard.QualityRating != green ||
+		!reflect.DeepEqual(large.ResponsibleNames, []string{admin.DisplayName}) ||
+		!reflect.DeepEqual(large.AccountableNames, []string{accountabilityGroup.Name}) {
+		t.Fatalf("PostgreSQL editing Process summary = %+v", large)
 	}
 
 	traceByID := map[string]domain.ProcessMapTileTrace{}

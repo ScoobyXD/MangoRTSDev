@@ -21,11 +21,12 @@ var (
 	ProcessMapWorkspaceEventTypes = []string{
 		"process_map_placement_saved", "process_map_placement_deleted",
 		"resource_operational_relationship_created", "resource_operational_relationship_deleted",
-		"process_map_trace_saved", "logic_gate_updated", "logic_gate_deleted", "logic_gate_permissions_updated",
-		"company_explorer_folder_updated", "company_explorer_folder_deleted", "company_explorer_folder_permissions_updated",
+		"process_map_trace_saved", "logic_gate_created", "logic_gate_updated", "logic_gate_deleted", "logic_gate_permissions_updated",
+		"logic_gate_gvic_updated", QDRatingRealtimeEventType,
+		"company_explorer_folder_created", "company_explorer_folder_updated", "company_explorer_folder_deleted", "company_explorer_folder_permissions_updated",
 		"company_explorer_item_placed", "company_explorer_item_removed",
 		"company_user_group_updated", "company_user_group_deleted", "company_user_group_members_updated",
-		CompanyMembershipSavedEventType, CompanyMembershipDeletedEventType,
+		CompanyMembershipSavedEventType, CompanyMembershipDeletedEventType, CompanyUserProfileUpdatedEventType,
 	}
 	ProjectListWorkspaceEventTypes = []string{
 		"project_created", "project_updated", "project_deleted", "project_information_created",
@@ -138,9 +139,7 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 	if eventType == "logic_gate_deleted" || eventType == "logic_gate_permissions_updated" {
 		addCompanyExplorer("")
 	}
-	if stringInList(eventType, ProcessMapWorkspaceEventTypes) ||
-		((eventType == "logic_gate_created" || eventType == "company_explorer_folder_created") &&
-			workspaceEventPayloadString(event.Payload, "realtime_change_type") == "resource_restored") {
+	if stringInList(eventType, ProcessMapWorkspaceEventTypes) {
 		add("process-map", "")
 	}
 	if stringInList(eventType, ProjectListWorkspaceEventTypes) {

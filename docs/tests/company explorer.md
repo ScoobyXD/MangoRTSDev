@@ -36,21 +36,19 @@ Hidden folder ancestry never leaks, and deleting an Explorer folder never treats
 
 Last updated: 2026-08-06
 
-# Process Story: Explorer hierarchy drives live V2 policy parentage
+# Process Story: Explorer hierarchy drives policy parentage and Process Map structure
 
-A user opens Home and selects a Node, Logic Gate, Project, Kanban board, folder, or communications row in Explorer
+A user creates, moves, reorders, or removes a Folder or Logic Gate in Company Explorer
 ↓
-Explorer resolves the exact accessible row through current folder hierarchy, V2 RACI, and V2 Edit permission, then publishes semantic selection only to directly linked surviving frames
+Mango commits the canonical Explorer hierarchy and synchronizes exactly one Process Map placement for every Folder and Explorer-placed Logic Gate under that same direct parent or root
 ↓
-Editor or Kanban consumes the entity context without reading browser geometry or position state
+Moving or resizing that placement within its current parent changes only snapped Process Map geometry
 ↓
-No Map frame, Map selection bridge, coordinate payload, or position-storage dependency exists
+Crossing a Process Map Folder boundary runs the canonical Explorer move, while removing a Process placement removes only its Explorer edge and Folder deletion keeps the normal protected/subtree rules
 ↓
-Folder ordering, inherited/customized policy, search, Find, rename, deletion, and drag/drop use canonical hierarchy and parent-link sequences
-↓
-A reload restores supported frames and discards any retired Map frame instead of translating it
+No automatic placement command creates, infers, changes, or deletes an operational relationship; trace geometry keeps its existing dependent lifecycle
 
-Last updated: 2026-08-05
+Last updated: 2026-08-26
 
 # Explorer Tests
 
@@ -77,11 +75,11 @@ E14 - Explorer folders can be created only under the company root or another fol
 E15 - Creating a folder under a non-folder resource is rejected.
 E16 - Renaming an Explorer folder requires edit access to that folder.
 E17 - Moving or placing an Explorer item requires resolving both the parent container and the target entity.
-E18 - Moving an Explorer item changes its parent and position without duplicating the target resource.
-E19 - Deleting an Explorer edge removes that placement without deleting the underlying target resource.
+E18 - Moving an Explorer item changes its parent and position without duplicating the target resource and atomically synchronizes the matching Process Map placement when the target is a Logic Gate.
+E19 - Deleting a Logic Gate Explorer edge removes its automatic Process Map placement without deleting the underlying Logic Gate; deleting a Project edge changes no Process Map placement.
 E20 - Protected or system Explorer folders cannot be renamed or deleted.
 E21 - Explorer target deletion removes the underlying target only through the explicit target deletion path, not by deleting a placement edge.
-E22 - Explorer placement, update, and removal mutations preserve the affected parent entity ID in independently required durable domain facts and committed responses; they do not publish a Company Explorer or workspace browser event.
+E22 - Explorer placement, update, and removal mutations preserve the affected parent entity ID in durable domain facts and committed responses and atomically advance the Process Map projection when a Folder or Logic Gate structure changes; they do not make Process Map another hierarchy authority.
 E23 - Company Explorer patches concrete mounted state from the initiating command response or the concrete same-window committed-title event; other changes reconcile when the relevant canonical branch is opened or explicitly refreshed.
 E24 - Company Explorer does not use event context or parent-entity fallback to drive background branch refreshes. Canonical branch identity and parent data are resolved by the explicit branch read.
 E25 - Every company has one default root folder named Unfiled.
@@ -101,9 +99,10 @@ E38 - The default Unfiled folder and its Projects and Logic Gates child folders 
 E39 - While the Explorer search box contains text, the left sidebar hides non-Explorer sections and uses the remaining column for Explorer search results; clearing the search restores the normal sidebar. Explorer/Search Explorer remains beneath the shared body-level blocking modal layer and cannot paint or receive interaction above a node/editor popup, dialog, preview, or expanded/fullscreen panel; closing that surface preserves the existing search query.
 E40 - Once a resource is visible anywhere in Company Explorer, no project relationship branch may create a second visible instance of that resource.
 E41 - Company Explorer has no cross-user realtime subscription. It patches the initiating browser from committed command results and otherwise reloads canonical branches on navigation or explicit refresh.
-E43 - Placing or moving a project or Logic Gate into an Explorer folder advances both parent-link sequences. Inherited policy follows the target folder immediately; customized policy remains independent.
-E44 - Reordering or re-saving a project or Logic Gate under the same Explorer folder preserves the resource's own permissions.
-E45 - Moving a project or Logic Gate to the company root converts an inherited effective policy to a complete customized root policy and preserves an existing customized policy.
+E42 - Logic Gate assignments and Project relationships remain their own typed relationships and are never reused as Company Explorer placement edges.
+E43 - Placing or moving a project or Logic Gate into an Explorer folder advances both parent-link sequences. Inherited policy follows the target folder immediately, customized policy remains independent, and only a Logic Gate synchronizes a Process Map placement.
+E44 - Reordering or re-saving a project or Logic Gate under the same Explorer folder preserves the resource's own permissions and, for a Logic Gate, preserves its existing same-parent Process Map geometry.
+E45 - Moving a project or Logic Gate to the company root converts an inherited effective policy to a complete customized root policy and preserves an existing customized policy; a Logic Gate's automatic Process Map placement becomes root.
 E46 - Editing an Explorer folder changes inherited descendants live but does not cross active customized boundaries. Apply to non-customized descendants adds no descendant state; Apply to every descendant records one reset sequence without walking or rewriting descendants.
 E47 - Dropping a My Triage or Shared Triage email onto a Company Explorer Logic Gate row uses the communications conversion path to create a Pending direct email-created node/card in that Logic Gate's Kanban/work path, not a Company Explorer placement. The created node/card must not appear as a Company Explorer row and must not be inserted into `company_explorer_items`.
 E48 - A successful Company Explorer email-to-Logic-Gate drop updates Home triage state once from the committed conversion result, keeps the source row visible, and patches its Logic Gate icon without a broad conversion/workspace WebSocket event, broad cache invalidation, stale prefetched-page reuse, post-removal fill, message-length prefetch, list blanking, or repeated mail GETs. A later exact-mailbox provider update may independently cause one canonical active-list reconciliation.
@@ -121,7 +120,7 @@ E59 - Concurrent collaboration retries and future provider messages reuse the sa
 E60 - Existing email-to-Logic-Gate conversion still creates Pending work under its established typed assignment path. Starting chat on an unconverted triage email creates a standalone creator-Responsible-RACI Node with no Company Explorer placement and no initial Logic Gate.
 E61 - Explorer policy reads explain inherited/customized mode, effective source, active reset, and inactive overwritten customization for folders, projects, and Logic Gates.
 E62 - Moving a subtree after an older force reset protects it through the new parent-link sequence; a later reset from its new ancestry may cross that link.
-E63 - Deleting an Explorer target removes both V2 settings rows and cascading policy edges; deleting only a placement follows root/detach materialization rules without deleting the target.
+E63 - Deleting an Explorer target removes both V2 settings rows and cascading policy edges; deleting only a Logic Gate Explorer edge preserves the target and removes its automatic Process Map placement, while Folder target deletion uses the canonical protected/subtree lifecycle.
 E64 - Company Explorer and Editor/Universal Picker entity ranking first read a bounded candidate batch directly from their requested source tables. Permission and location visibility checks run only for that batch, and later ranked batches are checked only when needed to fill the requested authorized result limit. Universal Picker keeps Node, Project, then Logic Gate ranking; Company Explorer keeps Logic Gate, Node, Project, then folder ranking.
 E65 - Company Explorer and Universal Picker location visibility use only each narrowed candidate's exact typed organization links and folder ancestors. Company Explorer placement tables provide those paths but store no permission or RACI assignment rows and are not source tables for entity names. A directly accessible candidate remains searchable when its location is restricted.
 E66 - A Company Explorer or Universal Picker search GET performs no default-folder creation, repair, transaction, upsert, or version-triggering write. Default-folder setup belongs to explicit initialization and repair paths.
@@ -129,13 +128,21 @@ E67 - Within one narrowed permission batch, the actor's nested group ancestry is
 E68 - Company Explorer waits 120 milliseconds before issuing search, aborts the superseded request when the query changes or the search view closes, and never reports an intentional abort as a search failure.
 E69 - Direct Edit permission on a matching Project, Logic Gate, Node, or folder is sufficient to return that item. Company Explorer includes its organizational path only when the location resource and every folder ancestor are also accessible; if any part is `no_access`, the entire path is omitted and only the matched item appears at the search root. Universal Picker likewise returns the directly accessible item without exposing organizational ancestry.
 E70 - Explorer root and child GETs are read-only. They perform no default-folder creation, repair, transaction, upsert, placement backfill, RACI recalculation, or version-triggering write.
-E71 - Company creation initializes Unfiled, Projects, and Logic Gates. Project and Logic Gate creation places only that new resource and may initialize missing defaults; ordinary reads never repair setup.
+E71 - Company creation initializes Unfiled, Projects, and Logic Gates. Project and Logic Gate creation places only that new resource and may initialize missing defaults; Folder structural writes and Logic Gate placement writes synchronize automatic Process Map placement, while ordinary reads never repair setup.
 E72 - Home, My Triage, RACI views, My Work, Project Management, and relationship graphs use their exact domain endpoints. They never preload a complete Explorer folder tree, call the retired Node-folder or Logic-Gate-folder categories, or fetch the retired full workspace browser snapshot.
 E73 - Simultaneous requests for the same Explorer root or exact parent share one in-flight HTTP request. Different parent IDs remain independent.
 E74 - Dropping an Explorer folder onto a Home or Project target loads only that selected folder branch through child reads. It never preloads the complete Explorer tree.
 E75 - Mango runs no workspace-derived projector, catch-up timer, or request-event producer. Historical projector request events and checkpoint rows are not runtime work queues.
 E76 - A Node, Logic Gate, or Project title surface derives its breadcrumb from the current canonical Company Explorer hierarchy and typed organization links when read; no database column, copied full path, or client cache becomes path authority. A Logic Gate or Project uses its exact folder ancestry. A Node uses its visible Logic Gate path first, otherwise its visible Project path, otherwise the Workspace root.
 E77 - A Company breadcrumb shows the clickable Workspace root followed by every fully visible ancestor, excludes the current item's editable title, and omits the whole hierarchy path when any required ancestor is missing, hidden, recycled, cyclic, or too deep to resolve safely. Clicking a folder reveals that exact Company Explorer branch, clicking a resource opens that exact resource, and a committed same-window hierarchy change refreshes mounted breadcrumbs without adding cross-browser realtime behavior.
+E78 - Company Explorer is the sole structural hierarchy authority for Process Map.
+E79 - Every Explorer Folder and every Explorer Logic Gate item has exactly one automatic Process Map placement under the same exact direct Folder or root; Projects and Nodes have none.
+E80 - Process Map placement rows own only snapped geometry, positive dimensions, revision, and timestamps and cannot be manually added or removed independently.
+E81 - Crossing a Process Map Folder boundary atomically uses the canonical Explorer move; same-parent x/y movement and resizing stay Process Map-only.
+E82 - Removing a Process from Process Map deletes only its Explorer edge and matching placement, while deleting a Folder invokes the canonical protected/subtree Explorer deletion command.
+E83 - Automatic placement and Explorer synchronization never create, infer, change, or delete an operational relationship; they never infer a trace, and dependent trace cleanup follows the Process Map placement-removal laws.
+E84 - One forward migration non-destructively backfills missing Process Map placements for supported Explorer sources and synchronizes their Explorer parent projection while preserving existing geometry, traces, and operational relationships.
+E85 - Process Map exposes no placement tray, header placement picker, candidate browser, or manual placement drop path.
 
 
 ## Bug History

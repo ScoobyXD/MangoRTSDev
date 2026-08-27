@@ -353,6 +353,7 @@ func (r *MemoryRepo) deleteCompanyExplorerRecycleScopeLocked(companyID string, s
 		r.deleteCompanyExplorerV2NativeEntityProjectionLocked(companyID, CompanyExplorerV2EntityNode, nodeID)
 	}
 	for _, folderID := range r.processMapFolderCleanupOrderLocked(companyID, scope.FolderIDs) {
+		r.deleteCompanyExplorerV2EntityProjectionLocked(companyID, folderID)
 		r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeFolder, folderID)
 		delete(r.folders, key(companyID, folderID))
 		delete(r.sharedInboxRACI, sharedInboxRACIKey(companyID, folderID))

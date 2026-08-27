@@ -31,17 +31,33 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 			CreatedTimestamp: now,
 			UpdatedTimestamp: now,
 		}
-	} else {
-		if email != "" {
-			user.Email = email
-		}
-		if updateDisplayName != "" {
-			user.DisplayName = updateDisplayName
-		}
-		user.UpdatedTimestamp = now
+		r.users[cognitoSubject] = user
+		return user, nil
 	}
-	r.users[cognitoSubject] = user
-	return user, nil
+
+	updated := user
+	if email != "" {
+		updated.Email = email
+	}
+	if updateDisplayName != "" {
+		updated.DisplayName = updateDisplayName
+	}
+	if updated.Email == user.Email && updated.DisplayName == user.DisplayName {
+		return user, nil
+	}
+	updated.UpdatedTimestamp = now
+	r.users[cognitoSubject] = updated
+	companyIDs := make([]string, 0)
+	for _, membership := range r.memberships {
+		if membership.UserID == user.UserID {
+			companyIDs = append(companyIDs, membership.CompanyID)
+		}
+	}
+	if _, err := r.appendDomainEventsLocked(companyMembershipEventInputs(companyIDs, CompanyUserProfileUpdatedEventType, user.UserID)); err != nil {
+		r.users[cognitoSubject] = user
+		return domain.User{}, err
+	}
+	return updated, nil
 }
 
 func (r *MemoryRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
@@ -155,7 +171,8 @@ func (r *MemoryRepo) CreateCompany(name string) (domain.Company, error) {
 	}
 	r.companies[company.CompanyID] = company
 	r.ensureCompanyExplorerV2CompanyGraphLocked(company.CompanyID)
-	r.ensureCompanyExplorerDefaultFoldersLocked(company.CompanyID)
+	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(company.CompanyID)
+	r.syncMemoryDefaultFolderProcessMapPlacementsLocked(company.CompanyID, defaultFolders)
 	return company, nil
 }
 
@@ -215,7 +232,8 @@ func (r *MemoryRepo) EnsureCompany(companyID, name string) domain.Company {
 	}
 	r.companies[companyID] = company
 	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
-	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	r.syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID, defaultFolders)
 	return company
 }
 

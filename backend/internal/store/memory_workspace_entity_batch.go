@@ -137,7 +137,8 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 
 	if syncDefaultFolderItems {
 		r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
-		r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
+		defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
+		r.syncMemoryDefaultFolderProcessMapPlacementsLocked(input.CompanyID, defaultFolders)
 		for _, mapping := range result.EntityMappings {
 			if !r.placeCompanyExplorerItemInDefaultFolderLocked(input.CompanyID, input.EntityKind, mapping.EntityID, true) {
 				continue
@@ -145,6 +146,16 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			if item, ok := r.folderItems[folderItemKey(input.CompanyID, input.EntityKind, mapping.EntityID)]; ok {
 				result.FolderItems = append(result.FolderItems, item)
 			}
+		}
+	}
+	if input.EntityKind == EntityTypeLogicGate {
+		for _, mapping := range result.EntityMappings {
+			folderItem, ok := r.folderItems[folderItemKey(input.CompanyID, EntityTypeLogicGate, mapping.EntityID)]
+			if !ok {
+				continue
+			}
+			parentID := folderItem.FolderID
+			r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, mapping.EntityID, &parentID)
 		}
 	}
 	if input.CreatorUserID != "" {

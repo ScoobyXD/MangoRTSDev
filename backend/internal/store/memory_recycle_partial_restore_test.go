@@ -34,11 +34,20 @@ func TestMemoryRecycleBatchRestoreKeepsRootsExactAndDefersSharedProcessMapEdge(t
 			admin.UserID,
 			domain.ProcessMapResourceTypeProcess,
 			process.LogicGateID,
-			&parentID,
+			nil,
 			index*4,
 			2,
 		)); err != nil {
 			t.Fatal(err)
+		}
+		// Seed the mismatched state this cleanup safety test exercises directly.
+		// Public Process Map writes now synchronize the Explorer parent and cannot create it.
+		placementKey := processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, process.LogicGateID)
+		placement := repo.processMapPlacements[placementKey]
+		placement.MapParentFolderID = &parentID
+		repo.processMapPlacements[placementKey] = placement
+		if item, exists := repo.folderItems[folderItemKey(companyID, EntityTypeLogicGate, process.LogicGateID)]; exists {
+			t.Fatalf("cleanup safety setup retained Explorer Folder item: %+v", item)
 		}
 	}
 	created, err := repo.CreateResourceOperationalRelationship(context.Background(), ResourceOperationalRelationshipCreateInput{
@@ -147,7 +156,7 @@ func TestMemoryRecycleFolderRestoreRecoversOnlyRemovedProcessMapGeometry(t *test
 			admin.UserID,
 			domain.ProcessMapResourceTypeProcess,
 			process.LogicGateID,
-			&parentID,
+			nil,
 			index*4,
 			2,
 		)); err != nil {
@@ -169,14 +178,26 @@ func TestMemoryRecycleFolderRestoreRecoversOnlyRemovedProcessMapGeometry(t *test
 		t.Fatal(err)
 	}
 	relationshipID := created.Relationship.ResourceOperationalRelationshipID
+	for _, process := range []domain.LogicGate{processA, processB} {
+		// Seed the mismatched state this cleanup safety test exercises directly.
+		// Public Process Map writes now synchronize the Explorer parent and cannot create it.
+		placementKey := processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, process.LogicGateID)
+		placement := repo.processMapPlacements[placementKey]
+		placement.MapParentFolderID = &parentID
+		repo.processMapPlacements[placementKey] = placement
+		if item, exists := repo.folderItems[folderItemKey(companyID, EntityTypeLogicGate, process.LogicGateID)]; exists {
+			t.Fatalf("cleanup safety setup retained Explorer Folder item: %+v", item)
+		}
+	}
 
-	if _, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{
+	deleted, err := repo.DeleteCompanyExplorerTargets(companyID, []CompanyExplorerDeleteTargetInput{
 		{Kind: "folder", ID: folder.FolderID},
-	}, admin.UserID); err != nil {
+	}, admin.UserID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repo.GetLogicGate(companyID, processA.LogicGateID); err != nil {
-		t.Fatalf("map Folder deletion removed a surviving Process: %v", err)
+		t.Fatalf("map Folder deletion removed a surviving Process: %v; deleted=%+v", err, deleted.Targets)
 	}
 	if _, ok := repo.resourceOperationalRelationships[key(companyID, relationshipID)]; !ok {
 		t.Fatal("map Folder deletion removed the surviving operational relationship")
@@ -341,12 +362,15 @@ func TestMemoryRecycleFolderRestoreDoesNotReclaimRecreatedCleanupChild(t *testin
 		t.Fatal(err)
 	}
 	if _, err := repo.PutProcessMapPlacement(context.Background(), processMapTestPlacementWithSize(
-		companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, &parentID, 11, 13, 9, 6,
+		companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, nil, 11, 13, 9, 6,
 	)); err != nil {
 		t.Fatal(err)
 	}
 
 	placementKey := processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, process.LogicGateID)
+	seededPlacement := repo.processMapPlacements[placementKey]
+	seededPlacement.MapParentFolderID = &parentID
+	repo.processMapPlacements[placementKey] = seededPlacement
 	originalToken := repo.processMapPlacements[placementKey].PlacementIncarnationToken
 	if originalToken == "" {
 		t.Fatal("new memory placement has no incarnation token")

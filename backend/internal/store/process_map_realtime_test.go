@@ -184,7 +184,7 @@ func TestProcessMapRealtimeOriginRequiresEveryRelevantEventToShareOneDirectConne
 	}
 }
 
-func TestProcessMapRealtimeFilterIncludesTraySourceCreationVisibilityAndRestoredProcesses(t *testing.T) {
+func TestProcessMapRealtimeFilterIncludesAutomaticPlacementSourcesAndVisibility(t *testing.T) {
 	companyID := "89898989-8989-4989-8989-898989898985"
 	event := func(eventType string, payload map[string]any) domain.DomainEvent {
 		return domain.DomainEvent{
@@ -196,14 +196,14 @@ func TestProcessMapRealtimeFilterIncludesTraySourceCreationVisibilityAndRestored
 		"company_explorer_folder_created",
 		"logic_gate_permissions_updated", "company_explorer_folder_permissions_updated",
 		"company_user_group_updated", "company_user_group_deleted", "company_user_group_members_updated",
-		CompanyMembershipSavedEventType, CompanyMembershipDeletedEventType,
+		CompanyMembershipSavedEventType, CompanyMembershipDeletedEventType, CompanyUserProfileUpdatedEventType,
 	} {
 		if !isProcessMapChangedDomainEvent(event(eventType, nil)) {
 			t.Errorf("Process Map realtime ignored visibility event %q", eventType)
 		}
 	}
-	if isProcessMapChangedDomainEvent(event("logic_gate_created", nil)) {
-		t.Error("ordinary source creation must not invalidate Process Map before manual placement")
+	if !isProcessMapChangedDomainEvent(event("logic_gate_created", nil)) {
+		t.Error("ordinary Process creation must invalidate its automatic Process Map placement")
 	}
 	if !isProcessMapChangedDomainEvent(event("logic_gate_created", map[string]any{"realtime_change_type": "resource_restored"})) {
 		t.Error("restored source creation must invalidate restored Process Map state")

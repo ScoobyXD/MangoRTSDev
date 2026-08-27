@@ -1,5 +1,6 @@
 import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import { requestJSON, requestJSONWithMeta } from "../api/requestJSON.js";
+import { getQDBusinessDate } from "../logic-gates/qdRatingsApi.js";
 import { getCurrentRealtimeConnectionCorrelation } from "../realtime/realtimeWebSocket.js";
 import {
   PROCESS_MAP_MAX_ROUTE_POINTS,
@@ -18,6 +19,14 @@ export type ProcessMapResourceRef = {
 
 export type ProcessMapPresentation = ProcessMapPlacementLOD;
 
+export type ProcessMapScoreCardRating = "green" | "yellow" | "red";
+
+export type ProcessMapScoreCardPresentation = {
+  quality_rating: ProcessMapScoreCardRating | null;
+  cost_rating: ProcessMapScoreCardRating | null;
+  delivery_rating: ProcessMapScoreCardRating | null;
+};
+
 export type ProcessMapVisiblePlacement = {
   restricted: false;
   presentation: ProcessMapPresentation;
@@ -33,6 +42,9 @@ export type ProcessMapVisiblePlacement = {
   revision: number;
   created_timestamp: string;
   updated_timestamp: string;
+  score_card?: ProcessMapScoreCardPresentation;
+  responsible_names?: string[];
+  accountable_names?: string[];
 };
 
 export type ProcessMapRestrictedPlacement = {
@@ -172,6 +184,25 @@ function presentation(value: unknown): ProcessMapPresentation {
   return value;
 }
 
+function scoreCardRating(value: unknown, code: string): ProcessMapScoreCardRating | null {
+  if (value === null || value === "green" || value === "yellow" || value === "red") return value;
+  throw new Error(code);
+}
+
+function scoreCardPresentation(value: unknown): ProcessMapScoreCardPresentation {
+  if (!isRecord(value) || Object.keys(value).length !== 3) throw new Error("invalid_process_map_score_card");
+  return {
+    quality_rating: scoreCardRating(value.quality_rating, "invalid_process_map_quality_rating"),
+    cost_rating: scoreCardRating(value.cost_rating, "invalid_process_map_cost_rating"),
+    delivery_rating: scoreCardRating(value.delivery_rating, "invalid_process_map_delivery_rating"),
+  };
+}
+
+function presentationNames(value: unknown, code: string): string[] {
+  if (!Array.isArray(value)) throw new Error(code);
+  return value.map((name) => requiredString(name, code));
+}
+
 function normalizePlacement(value: unknown): ProcessMapPlacement {
   if (!isRecord(value)) throw new Error("invalid_process_map_placement");
   const gridX = requiredInteger(value.grid_x, "invalid_process_map_grid_x");
@@ -183,7 +214,7 @@ function normalizePlacement(value: unknown): ProcessMapPlacement {
   const gridHeight = requiredInteger(value.grid_height, "invalid_process_map_grid_height");
   if (gridWidth <= 0 || gridHeight <= 0) throw new Error("invalid_process_map_dimensions");
   if (value.can_edit !== true) throw new Error("invalid_process_map_edit_capability");
-  return {
+  const normalized: ProcessMapVisiblePlacement = {
     restricted: false,
     presentation: maxPresentation,
     resource_type: resourceType(value.resource_type),
@@ -201,6 +232,11 @@ function normalizePlacement(value: unknown): ProcessMapPlacement {
     created_timestamp: requiredString(value.created_timestamp, "invalid_process_map_created_timestamp"),
     updated_timestamp: requiredString(value.updated_timestamp, "invalid_process_map_updated_timestamp"),
   };
+  if (normalized.resource_type !== "logic_gate" || maxPresentation !== "editing") return normalized;
+  if (value.score_card !== undefined) normalized.score_card = scoreCardPresentation(value.score_card);
+  if (value.responsible_names !== undefined) normalized.responsible_names = presentationNames(value.responsible_names, "invalid_process_map_responsible_names");
+  if (value.accountable_names !== undefined) normalized.accountable_names = presentationNames(value.accountable_names, "invalid_process_map_accountable_names");
+  return normalized;
 }
 
 function normalizeCommittedPlacement(value: unknown): ProcessMapCommittedPlacement {
@@ -354,7 +390,13 @@ function normalizeOperationalRelationship(value: unknown): ProcessMapOperational
 }
 
 function clonePlacement(placement: ProcessMapPlacement): ProcessMapPlacement {
-  return { ...placement };
+  if (placement.restricted) return { ...placement };
+  return {
+    ...placement,
+    ...(placement.score_card ? { score_card: { ...placement.score_card } } : {}),
+    ...(placement.responsible_names ? { responsible_names: [...placement.responsible_names] } : {}),
+    ...(placement.accountable_names ? { accountable_names: [...placement.accountable_names] } : {}),
+  };
 }
 
 function cloneTrace(trace: ProcessMapTrace): ProcessMapTrace {
@@ -402,8 +444,8 @@ function sceneKey(apiBase: string, companyID: string): string {
   return `${cachePrefix(apiBase, companyID)}scene`;
 }
 
-function tileKey(apiBase: string, companyID: string, readVersion: number, z: number, x: number, y: number): string {
-  return `${cachePrefix(apiBase, companyID)}${readVersion}\u0000${z}\u0000${x}\u0000${y}`;
+function tileKey(apiBase: string, companyID: string, readVersion: number, businessDate: string, z: number, x: number, y: number): string {
+  return `${cachePrefix(apiBase, companyID)}${readVersion}\u0000${businessDate}\u0000${z}\u0000${x}\u0000${y}`;
 }
 
 function abortReason(signal?: AbortSignal): unknown {
@@ -513,9 +555,10 @@ export function fetchProcessMapTile(
   x: number,
   y: number,
   signal?: AbortSignal,
+  businessDate = getQDBusinessDate().dateKey,
 ): Promise<ProcessMapTileResponse> {
   if (signal?.aborted) return Promise.reject(abortReason(signal));
-  const key = tileKey(apiBase, companyID, readVersion, z, x, y);
+  const key = tileKey(apiBase, companyID, readVersion, businessDate, z, x, y);
   const cached = tileCache.get(key);
   if (cached) {
     touchTileCache(key, cached);

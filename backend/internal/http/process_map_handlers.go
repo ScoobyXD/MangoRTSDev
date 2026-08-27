@@ -9,10 +9,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const processMapRealtimeConnectionIDHeader = "X-Mango-Realtime-Connection-ID"
-const processMapTileETagContract = "process-map-tile-v6"
+const processMapTileETagContract = "process-map-tile-v7"
 
 func decodeProcessMapJSON(r *http.Request, destination any) error {
 	decoder := json.NewDecoder(r.Body)
@@ -44,7 +45,14 @@ func (s *Server) processMapETag(r *http.Request, companyID, actorUserID, actorRo
 	if err != nil {
 		return "", err
 	}
-	return strongETagFromString(contract + ":" + companyID + ":" + actorUserID + ":" + actorRole + ":" + r.URL.Path + "?" + r.URL.Query().Encode() + ":" + strconv.FormatInt(processVersion, 10) + ":" + strconv.FormatInt(groupVersion, 10)), nil
+	businessDate := ""
+	if contract == processMapTileETagContract {
+		businessDate, err = store.QDRatingBusinessDate(time.Now().UTC())
+		if err != nil {
+			return "", err
+		}
+	}
+	return strongETagFromString(contract + ":" + companyID + ":" + actorUserID + ":" + actorRole + ":" + r.URL.Path + "?" + r.URL.Query().Encode() + ":" + strconv.FormatInt(processVersion, 10) + ":" + strconv.FormatInt(groupVersion, 10) + ":" + businessDate), nil
 }
 
 func (s *Server) authorizeProcessMapRead(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) (string, string, bool) {

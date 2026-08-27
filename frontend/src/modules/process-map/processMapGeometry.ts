@@ -2,10 +2,6 @@
 // whole-company fit through editing detail without turning camera or tile state
 // into business data. Tile/cache/request values are deliberately bounded.
 export const PROCESS_MAP_MAX_ROUTE_POINTS = 256;
-export const PROCESS_MAP_PROCESS_DROP_WIDTH_PX = 196;
-export const PROCESS_MAP_PROCESS_DROP_HEIGHT_PX = 140;
-export const PROCESS_MAP_FOLDER_DROP_WIDTH_PX = 196;
-export const PROCESS_MAP_FOLDER_DROP_HEIGHT_PX = 196;
 export const PROCESS_MAP_PROCESS_MIN_WIDTH = 2;
 export const PROCESS_MAP_PROCESS_MIN_HEIGHT = 1;
 export const PROCESS_MAP_FOLDER_MIN_WIDTH = 2;
@@ -76,21 +72,6 @@ export function processMapMinimumPlacementDimensions(resourceType: ProcessMapRes
   return resourceType === "company_explorer_folder"
     ? { width: PROCESS_MAP_FOLDER_MIN_WIDTH, height: PROCESS_MAP_FOLDER_MIN_HEIGHT }
     : { width: PROCESS_MAP_PROCESS_MIN_WIDTH, height: PROCESS_MAP_PROCESS_MIN_HEIGHT };
-}
-
-export function processMapInitialPlacementDimensions(
-  resourceType: ProcessMapResourceType,
-  pixelsPerGridUnit: number,
-): { width: number; height: number } {
-  const scale = Number.isFinite(pixelsPerGridUnit) && pixelsPerGridUnit > 0 ? pixelsPerGridUnit : 1;
-  const target = resourceType === "company_explorer_folder"
-    ? { width: PROCESS_MAP_FOLDER_DROP_WIDTH_PX, height: PROCESS_MAP_FOLDER_DROP_HEIGHT_PX }
-    : { width: PROCESS_MAP_PROCESS_DROP_WIDTH_PX, height: PROCESS_MAP_PROCESS_DROP_HEIGHT_PX };
-  const minimum = processMapMinimumPlacementDimensions(resourceType);
-  return {
-    width: Math.min(PROCESS_MAP_MAX_DIMENSION, Math.max(minimum.width, Math.round(target.width / scale))),
-    height: Math.min(PROCESS_MAP_MAX_DIMENSION, Math.max(minimum.height, Math.round(target.height / scale))),
-  };
 }
 
 export function resizeProcessMapPlacement(

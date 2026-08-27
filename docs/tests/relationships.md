@@ -220,17 +220,15 @@ Last updated: 2026-08-14
 
 # Process Story: Process Map keeps operational truth separate from trace geometry
 
-An editor maps an exact Company Explorer Folder or Process without changing its source resource or Company Explorer placement
+Company Explorer creates or moves one exact Folder row or Logic Gate placement edge
 ↓
-Mango stores that exact typed identity and its independent map parent, global grid position, and dimensions in `process_map_placements`
+Mango synchronizes exactly one Process Map placement under the same exact Folder or root, while `process_map_placements` owns only snapped geometry, dimensions, revision, and timestamps
 ↓
-Drawing a trace sends only the exact source and target `{resource_type, resource_id}` pairs, atomically creates or reuses that one directed `resource_operational_relationships` edge, and stores only its ordered route points in `process_map_traces`
+Moving within that Explorer parent changes only map geometry; crossing a Folder boundary uses the canonical Explorer move, and removing a Process from the map removes only its Explorer edge
 ↓
-Fan-out and fan-in remain several pairwise operational edges whose trace routes may overlap visually without creating a junction resource or another relationship meaning
+Automatic placement creates, infers, changes, and deletes no operational edge; the existing manual trace command alone creates or reuses an exact directed `resource_operational_relationships` edge and stores its route in `process_map_traces`
 ↓
-Scene and spatial tile reads join current source labels and permissions, while a restricted placement reveals only its saved existence and permission-safe position and exposes no real fence, descendants, identity, or incident relationship
-↓
-Moving, resizing, or reparenting a mapped placement preserves its operational edges and trace geometry across the one continuous canvas; the one authorized forward geometry compaction transforms placement edges and dependent route points together without changing any identity or relationship; removing a placement may remove its dependent trace geometry while preserving its operational edges, deleting a selected trace removes its operational edge and dependent geometry without deleting either endpoint, and permanent deletion or recycle follows the exact typed cleanup contract
+Deleting a selected trace still removes its exact operational edge and dependent geometry without deleting either endpoint, while endpoint deletion and recycle continue to follow their exact typed lifecycle contracts
 
 Last updated: 2026-08-26
 
@@ -507,9 +505,9 @@ Snapshot reads MUST resolve current data from `logic_gates` and `kpis` through t
 
 ### Law 34 — Process Map placement uses exact typed source identities
 
-`process_map_placements` MUST store only the exact same-company `company_explorer_folder` or `logic_gate` type and literal source ID, its independent exact mapped Folder parent or root, snapped global integer grid coordinates, positive integer grid dimensions, revision, and timestamps. A placement row makes that source resource visible on Process Map but MUST NOT copy its name, permissions, payload, Company Explorer parentage, spatial tile membership, or resource identity and MUST NOT become a permission or RACI parent.
+Company Explorer MUST be the sole structural authority for Process Map placement. Every exact same-company `company_explorer_folder` row and every exact `company_explorer_items` row with `target_type='logic_gate'` MUST have exactly one Process Map placement under the same direct Folder or root; Projects, Nodes, and every other type MUST have none. `process_map_placements` MUST store the exact typed source reference and Explorer-mirrored parent only to own snapped global integer geometry, positive dimensions, revision, and timestamps, and MUST NOT copy names, permissions, payloads, RACI assignments, score cards, spatial tile membership, or resource identity.
 
-One exact typed resource has at most one company Process Map placement. Company Explorer creation or movement MUST NOT create or move that placement, and placement creation, movement, resizing, reparenting, or removal MUST NOT mutate Company Explorer or the source resource. Moving, resizing, or changing a mapped placement's map parent MUST preserve every operational relationship and saved trace; removing the placement MAY remove its incident trace geometry while preserving every operational relationship. Moving a Folder MUST translate every recursively map-contained placement by the same snapped global delta atomically; every intermediate route point whose two endpoints are both in that moved set MUST receive the same translation exactly once, while route points with only one moved endpoint remain global. Every changed placement and translated trace MUST advance its own revision and update timestamp exactly once and be returned in the committed group response. Resizing a Folder MUST neither transform its contents nor leave a recursively contained placement outside its fence. The one append-only Process Map compaction migration MAY transform placement edges and dependent route points together through the same deterministic strictly increasing per-company coordinate mapping, but it MUST preserve exact placement, parent, resource, relationship, trace, and company identities and MUST NOT become a runtime movement or layout authority. Permanent deletion and recycle/restore MUST handle the exact typed placement through every required deletion path.
+Explorer structural create, move, removal, deletion, recycle, and restore commands MUST synchronize this projection atomically; same-parent Explorer reordering MUST preserve existing Process Map geometry. A same-parent map move or resize MUST change only geometry; crossing a Folder boundary MUST use the canonical Explorer move. Removing a Process from Process Map MUST remove only its Explorer edge and matching placement, while Folder deletion MUST use the canonical Company Explorer target-deletion command. Runtime placement synchronization MUST preserve every operational relationship and MUST never create, infer, change, or delete operational flow. Moving and resizing preserve saved traces, while placement removal MAY perform the existing dependent trace-geometry cleanup. Folder geometry moves and trace translations retain their existing exact revision rules. One append-only migration MUST non-destructively backfill missing supported placements from Explorer and synchronize their Explorer parent projection while preserving existing geometry, traces, and operational relationships.
 
 ### Law 35 — Resource operational relationships are exact directed pairwise edges
 

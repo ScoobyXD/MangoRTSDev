@@ -33,17 +33,17 @@ Last updated: 2026-08-08
 19. The supported UI MUST allow a permitted user to change only the slice matching the current `America/Los_Angeles` business date; every other slice MUST remain visible and read-only.
 20. Current-day eligibility MUST use the fixed `America/Los_Angeles` clock for the complete business day, with no company or user timezone setting in this version; when that date changes, every mounted UI MUST lock the prior slice, show the new business month and year when required, and enable only the new current-day slice.
 21. Existing Logic Gate `edit` and `no_access` permissions MUST govern QDC access: Edit permits reading and changing today's values, no-access reveals no QDC value or attribution, and a QDC value MUST NOT grant access or create another permission relationship.
-22. The Logic Gate editor and every Process Map data card MUST reuse the same QDC tracker rendering and read the same canonical QDC values; the editor and pinned Process Map card MUST use the same canonical write path, while a transient hover card MUST remain read-only and no surface may own a copied list, browser-only saved value, or second write authority.
-23. A successful manual choice MUST atomically change only the chosen business day and metric, and every mounted Process or Process Map surface MUST reconcile to the committed value; a failed save MUST leave the prior canonical value unchanged.
-24. One Logic Gate MUST have at most one canonical QDC row for the `America/Los_Angeles` calendar day derived from that row's immutable rated-created timestamp; QDC storage MUST NOT add a separate rating-date or rating-timestamp authority.
-25. A canonical QDC row MUST store nullable independent Quality, Cost, and Delivery colors, the authenticated last editor's user ID while that user exists, the last editor's durable display-name snapshot, an immutable rated-created timestamp, and a rated-updated timestamp that changes only after a real same-day edit; deleting that user MUST null only the stored user ID in active or recycled QDC data, and supported UI MUST retain the display name without exposing the ID.
-26. Setting one metric MUST preserve the other two metrics, clearing a metric MUST make only that metric blank, and clearing all three metrics MUST remove the empty QDC row.
+22. The Logic Gate editor and every Process Map data card MUST reuse the same QDC tracker rendering and read the same canonical `score_cards` values; each base Process Map card at editing detail MUST show only the current `America/Los_Angeles` business-day Q/C/D colors, and no surface may own copied score-card state or a second write authority.
+23. A successful manual choice MUST atomically change only the chosen business day and metric, and every mounted Process or Process Map surface MUST reconcile both its full tracker and compact current-day letters to the committed value; a failed save MUST leave the prior canonical value unchanged.
+24. `score_cards` MUST be the sole canonical QDC table, and one Logic Gate MUST have at most one row for the `America/Los_Angeles` calendar day derived from that row's immutable rated-created timestamp; QDC storage MUST NOT add a separate rating-date or rating-timestamp authority.
+25. A canonical score-card row MUST store nullable independent Quality, Cost, and Delivery colors, the authenticated last editor's user ID while that user exists, the last editor's durable display-name snapshot, an immutable rated-created timestamp, and a rated-updated timestamp that changes only after a real same-day edit; deleting that user MUST null only the stored user ID in active or recycled score-card data, and supported UI MUST retain the display name without exposing the ID.
+26. Setting one metric MUST preserve the other two metrics, clearing a metric MUST make only that metric blank, and clearing all three metrics MUST remove the empty score-card row.
 27. The backend QDC write command MUST target only the current `America/Los_Angeles` business day, MUST NOT accept a caller-supplied target date, and therefore MUST provide no write path for a past or future day.
-28. Recycling and restoring a Logic Gate MUST preserve its exact saved QDC values and attribution, while permanent deletion MUST remove those values without affecting another Logic Gate.
+28. Recycling and restoring a Logic Gate MUST preserve its exact saved `score_cards` values and attribution, while permanent deletion MUST remove those values without affecting another Logic Gate.
 29. A Logic Gate page opened from Process Map MUST use the canonical Logic Gate editor and Kanban page inside the shared blocking modal layer, fill the viewport except for a six-pixel outer inset, and expose an accessible red close action; closing it MUST return to the still-mounted Process Map without changing that map's layer, URL, viewport, placements, or traces.
 30. Choosing today's QDC slice MUST show only the Blank, Green, Yellow, and Red choices with no second close action; clicking elsewhere in that tracker or Process data card MUST dismiss those choices without saving.
 
-Last updated: 2026-08-25
+Last updated: 2026-08-26
 
 # Process Story: A Process receives one shared daily Quality, Cost, and Delivery rating
 
@@ -53,7 +53,7 @@ All three letters always show slices 1 through 31, while only the current `Ameri
 ↓
 An edit-authorized user manually sets Quality, Cost, or Delivery to blank, green, yellow, or red without changing the other metrics, and Mango records that final editor's display-name snapshot
 ↓
-The same company-shared value appears in the Process Map data card, and the backend permanently locks the slice after the business date changes
+The same company-shared value appears in the Process Map data card and as compact current-day Q/C/D colors on the base Process card, and the backend permanently locks the slice after the business date changes
 
 # Process Story: A Logic Gate assigns live RACI responsibility
 

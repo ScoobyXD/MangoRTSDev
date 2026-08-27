@@ -111,7 +111,14 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
+	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_explorer_folder_created", map[string]any{
+		"folder_id": item.FolderID, "parent_entity_id": parentFolderID,
+	})); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	r.folders[key(companyID, item.FolderID)] = item
+	r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID, now)
+	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID)
 	return item, nil
 }
 
@@ -507,6 +514,8 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 		return domain.CompanyExplorerFolder{}, err
 	}
 	r.folders[key(companyID, item.FolderID)] = item
+	r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID, item.UpdatedTimestamp)
+	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID)
 	return item, nil
 }
 
@@ -809,6 +818,14 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if err := r.validateCompanyExplorerFolderItemAssignmentLocked(companyID, folderID, itemType, itemID); err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_explorer_item_placed", map[string]any{
+		"parent_entity_id": folderID, "target_type": itemType, "target_id": itemID,
+	})); err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
 	return r.assignCompanyExplorerFolderItemLocked(companyID, folderID, itemType, itemID, position)
 }
 
@@ -823,6 +840,15 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItems(companyID string, assignme
 		if err := r.validateCompanyExplorerFolderItemAssignmentLocked(companyID, assignment.FolderID, assignment.ItemType, assignment.ItemID); err != nil {
 			return nil, nil, err
 		}
+	}
+	eventInputs := make([]DomainEventInput, 0, len(assignments))
+	for _, assignment := range assignments {
+		eventInputs = append(eventInputs, workspaceDomainEventInput(companyID, "company_explorer_item_placed", map[string]any{
+			"parent_entity_id": assignment.FolderID, "target_type": assignment.ItemType, "target_id": assignment.ItemID,
+		}))
+	}
+	if _, err := r.appendDomainEventsLocked(eventInputs); err != nil {
+		return nil, nil, err
 	}
 
 	items := make([]domain.CompanyExplorerFolderItem, 0, len(assignments))
@@ -892,6 +918,11 @@ func (r *MemoryRepo) assignCompanyExplorerFolderItemLocked(companyID, folderID, 
 		UpdatedTimestamp: now,
 	}
 	r.folderItems[k] = item
+	if itemType == EntityTypeLogicGate {
+		parentID := folderID
+		r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeProcess, itemID, &parentID, now)
+		r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, itemID, &parentID)
+	}
 
 	return item, []string{}, nil
 }
@@ -1271,9 +1302,23 @@ func (r *MemoryRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID
 	defer r.mu.Unlock()
 
 	k := folderItemKey(companyID, itemType, itemID)
-	if _, ok := r.folderItems[k]; !ok {
+	item, ok := r.folderItems[k]
+	if !ok {
 		return ErrNotFound
 	}
+	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_explorer_item_removed", map[string]any{
+		"parent_entity_id": item.FolderID, "target_type": itemType, "target_id": itemID,
+	})); err != nil {
+		return err
+	}
 	delete(r.folderItems, k)
+	if itemType == EntityTypeLogicGate {
+		for edgeKey, edge := range r.companyExplorerV2Edges {
+			if edge.CompanyID == companyID && edge.ChildEntityID == itemID {
+				delete(r.companyExplorerV2Edges, edgeKey)
+			}
+		}
+		r.deleteAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, itemID)
+	}
 	return nil
 }

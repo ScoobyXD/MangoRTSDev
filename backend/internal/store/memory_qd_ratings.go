@@ -94,6 +94,13 @@ func (r *MemoryRepo) PutLogicGateQDRating(input QDRatingPutInput) (QDRatingMutat
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	processMapSnapshot := r.snapshotProcessMapMutationLocked()
+	qdSnapshot := cloneMap(r.qdRatings)
+	restore := func(err error) (QDRatingMutationResult, error) {
+		r.qdRatings = qdSnapshot
+		r.restoreProcessMapMutationLocked(processMapSnapshot)
+		return QDRatingMutationResult{}, err
+	}
 	if _, ok := r.logicGates[key(input.CompanyID, input.LogicGateID)]; !ok {
 		return QDRatingMutationResult{}, ErrNotFound
 	}
@@ -141,7 +148,12 @@ func (r *MemoryRepo) PutLogicGateQDRating(input QDRatingPutInput) (QDRatingMutat
 		return QDRatingMutationResult{}, err
 	}
 	if _, err := r.enqueueRealtimeOutboxLocked(outbox); err != nil {
-		return QDRatingMutationResult{}, err
+		return restore(err)
+	}
+	eventInput := workspaceDomainEventInput(input.CompanyID, QDRatingRealtimeEventType, map[string]any{"logic_gate_id": input.LogicGateID})
+	eventInput.ActorUserID = input.RatedByUserID
+	if _, err := r.appendDomainEventLocked(eventInput); err != nil {
+		return restore(err)
 	}
 	if next.QualityRating == nil && next.CostRating == nil && next.DeliveryRating == nil {
 		delete(r.qdRatings, dayKey)

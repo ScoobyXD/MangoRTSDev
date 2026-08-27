@@ -241,7 +241,7 @@ from inserted project
 	}
 	var folderItem *domain.CompanyExplorerFolderItem
 	if input.CompanyExplorerDefaultPlacement {
-		item, inserted, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, input.CompanyID, EntityTypeProject, project.ProjectID, input.ActorUserID, true)
+		item, inserted, err := r.placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, input.CompanyID, EntityTypeProject, project.ProjectID, input.ActorUserID, true)
 		if err != nil {
 			return ProjectMutationResult{}, err
 		}

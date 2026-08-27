@@ -43,6 +43,9 @@ function tilePayload(readVersion = 11, z = 2, x = 3, y = -1) {
         revision: 3,
         created_timestamp: "created",
         updated_timestamp: "updated",
+        score_card: { quality_rating: "green", cost_rating: "yellow", delivery_rating: "red" },
+        responsible_names: ["Ada", "Lin"],
+        accountable_names: ["Grace"],
       },
       {
         restricted: true,
@@ -55,6 +58,9 @@ function tilePayload(readVersion = 11, z = 2, x = 3, y = -1) {
         grid_height: 99,
         can_edit: true,
         revision: 400,
+        score_card: { quality_rating: "red", cost_rating: "red", delivery_rating: "red" },
+        responsible_names: ["must-not-survive"],
+        accountable_names: ["must-not-survive"],
       },
     ],
     traces: [],
@@ -84,6 +90,9 @@ test("tile presentation normalizes omitted names and routes without discarding t
       revision: 2,
       created_timestamp: "created",
       updated_timestamp: "updated",
+      score_card: { quality_rating: "green", cost_rating: "yellow", delivery_rating: "red" },
+      responsible_names: ["must-not-survive"],
+      accountable_names: ["must-not-survive"],
     }],
     traces: [{
       presentation: "normal",
@@ -102,6 +111,9 @@ test("tile presentation normalizes omitted names and routes without discarding t
     assert.equal(visible.restricted, false);
     assert.equal(visible.restricted ? undefined : visible.presentation, "whole");
     assert.equal(visible.restricted ? undefined : visible.name, "");
+    assert.deepEqual(visible.restricted ? undefined : visible.score_card, undefined);
+    assert.deepEqual(visible.restricted ? undefined : visible.responsible_names, undefined);
+    assert.deepEqual(visible.restricted ? undefined : visible.accountable_names, undefined);
     assert.equal(tile.traces[0].presentation, "normal");
     assert.deepEqual(tile.traces[0].route_points, []);
   } finally {
@@ -163,6 +175,40 @@ test("tile parser rejects missing or invalid presentation ceilings", async () =>
         /invalid_process_map_presentation/,
         testCase.label,
       );
+      invalidateProcessMapReadCaches(apiBase, "company-1");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("editing Process card summaries reject invalid ratings and names", async () => {
+  const originalFetch = globalThis.fetch;
+  const base = tilePayload().placements[0];
+  const cases = [
+    {
+      value: { ...base, score_card: { quality_rating: "blue", cost_rating: "yellow", delivery_rating: "red" } },
+      error: /invalid_process_map_quality_rating/,
+    },
+    {
+      value: { ...base, score_card: { quality_rating: "green", cost_rating: "yellow" } },
+      error: /invalid_process_map_score_card/,
+    },
+    { value: { ...base, responsible_names: ["Ada", " "] }, error: /invalid_process_map_responsible_names/ },
+    { value: { ...base, accountable_names: "Grace" }, error: /invalid_process_map_accountable_names/ },
+  ];
+  try {
+    for (const [index, testCase] of cases.entries()) {
+      const apiBase = `https://process-map-invalid-card-summary-${index}.test`;
+      globalThis.fetch = (async () => new Response(JSON.stringify({
+        z: 2,
+        x: index,
+        y: 0,
+        process_map_read_version: 11,
+        placements: [testCase.value],
+        traces: [],
+      }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+      await assert.rejects(fetchProcessMapTile(apiBase, "company-1", 11, 2, index, 0), testCase.error);
       invalidateProcessMapReadCaches(apiBase, "company-1");
     }
   } finally {
@@ -250,6 +296,21 @@ test("tile cache identity includes read version and z/x/y while restricted rows 
     assert.equal(requests[0].searchParams.get("company_id"), "company-1");
     assert.deepEqual(left.placements[1], { restricted: true, grid_x: 14, grid_y: 8 });
     assert.deepEqual(Object.keys(left.placements[1]).sort(), ["grid_x", "grid_y", "restricted"]);
+    const leftProcess = left.placements[0];
+    const rightProcess = right.placements[0];
+    assert.equal(leftProcess.restricted, false);
+    assert.equal(rightProcess.restricted, false);
+    if (leftProcess.restricted || rightProcess.restricted) throw new Error("expected visible Process placements");
+    assert.deepEqual(leftProcess.score_card, { quality_rating: "green", cost_rating: "yellow", delivery_rating: "red" });
+    assert.deepEqual(leftProcess.responsible_names, ["Ada", "Lin"]);
+    assert.deepEqual(leftProcess.accountable_names, ["Grace"]);
+    assert.notEqual(leftProcess.score_card, rightProcess.score_card);
+    assert.notEqual(leftProcess.responsible_names, rightProcess.responsible_names);
+    assert.notEqual(leftProcess.accountable_names, rightProcess.accountable_names);
+    rightProcess.score_card!.quality_rating = "red";
+    rightProcess.responsible_names!.push("Changed");
+    assert.equal(leftProcess.score_card?.quality_rating, "green");
+    assert.deepEqual(leftProcess.responsible_names, ["Ada", "Lin"]);
 
     await fetchProcessMapTile(apiBase, "company-1", 12, 2, 3, -1);
     await fetchProcessMapTile(apiBase, "company-1", 12, 3, 3, -1);

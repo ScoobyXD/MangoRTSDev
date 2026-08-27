@@ -3,7 +3,6 @@ import test from "node:test";
 
 import {
   createProcessMapSettlementGate,
-  decideProcessMapExplorerDrop,
   isValidProcessMapConnection,
   shouldApplyProcessMapCommit,
   shouldApplyProcessMapMutationAck,
@@ -13,39 +12,6 @@ import {
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
-
-test("exact Explorer payloads may place Folders or Processes at root or in the deepest chosen map fence", () => {
-  assert.deepEqual(
-    decideProcessMapExplorerDrop({ kind: "folder", label: " Finance ", folderID: " folder-1 ", folderKind: "logic_gate" }),
-    {
-      kind: "place",
-      resource: { resource_type: "company_explorer_folder", resource_id: "folder-1" },
-      label: "Finance",
-    },
-  );
-  assert.deepEqual(
-    decideProcessMapExplorerDrop({ kind: "logic_gate", label: " Review ", itemID: " gate-1 ", itemType: "logic_gate" }),
-    {
-      kind: "place",
-      resource: { resource_type: "logic_gate", resource_id: "gate-1" },
-      label: "Review",
-    },
-    "Processes are valid company-root placements",
-  );
-  assert.deepEqual(
-    decideProcessMapExplorerDrop({ kind: "folder", label: "Finance", folderID: "folder-1", folderKind: "logic_gate" }),
-    {
-      kind: "place",
-      resource: { resource_type: "company_explorer_folder", resource_id: "folder-1" },
-      label: "Finance",
-    },
-    "the Explorer payload carries identity only; map containment is decided from final geometry",
-  );
-  assert.deepEqual(
-    decideProcessMapExplorerDrop({ kind: "project", itemID: "project-1", itemType: "project" }),
-    { kind: "ignore" },
-  );
-});
 
 test("connections keep exact directed endpoint identities", () => {
   assert.equal(isValidProcessMapConnection({ source: "folder-1", target: "gate-1", sourceHandle: "output", targetHandle: "input" }), true);

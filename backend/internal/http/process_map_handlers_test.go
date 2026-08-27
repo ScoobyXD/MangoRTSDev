@@ -139,7 +139,7 @@ func (fixture processMapHTTPFixture) putPlacement(t *testing.T, actor domain.Use
 	})
 	response := fixture.request(t, actor, http.MethodPut,
 		"/v1/process-map/placements/logic_gate/"+url.PathEscape(process.LogicGateID)+"?company_id="+url.QueryEscape(fixture.companyID), string(body), nil)
-	if response.Code != http.StatusCreated {
+	if response.Code != http.StatusOK {
 		t.Fatalf("PUT placement status=%d body=%s", response.Code, response.Body.String())
 	}
 	var envelope map[string]any
@@ -219,8 +219,11 @@ func TestProcessMapHTTPSceneTilePrivacyETagAndCutover(t *testing.T) {
 	if err := json.Unmarshal(scene.Body.Bytes(), &sceneWire); err != nil {
 		t.Fatal(err)
 	}
-	if sceneWire.Bounds == nil || *sceneWire.Bounds != (domain.ProcessMapBounds{MinX: 0, MinY: 0, MaxX: 104, MaxY: 23}) {
-		t.Fatalf("permission-safe scene = %+v", sceneWire)
+	if sceneWire.Bounds == nil {
+		t.Fatalf("permission-safe scene omitted bounds: %+v", sceneWire)
+	}
+	if *sceneWire.Bounds != (domain.ProcessMapBounds{MinX: 0, MinY: 0, MaxX: 256, MaxY: 122}) {
+		t.Fatalf("permission-safe scene bounds = %+v", *sceneWire.Bounds)
 	}
 	etag := scene.Header().Get("ETag")
 	if etag == "" {
@@ -244,7 +247,7 @@ func TestProcessMapHTTPSceneTilePrivacyETagAndCutover(t *testing.T) {
 	if err := json.Unmarshal(tile.Body.Bytes(), &tileWire); err != nil {
 		t.Fatal(err)
 	}
-	if len(tileWire.Placements) != 2 || len(tileWire.Traces) != 0 {
+	if len(tileWire.Placements) != 6 || len(tileWire.Traces) != 0 {
 		t.Fatalf("permission-safe tile = %+v", tileWire)
 	}
 	restricted := 0
@@ -472,7 +475,7 @@ func TestProcessMapHTTPAcceptsSignedRealtimeConnectionCorrelationAcrossServers(t
 	request.Header.Set(processMapRealtimeConnectionIDHeader, correlation)
 	response := httptest.NewRecorder()
 	receiver.Routes().ServeHTTP(response, request)
-	if response.Code != http.StatusCreated {
+	if response.Code != http.StatusOK {
 		t.Fatalf("cross-server placement status=%d body=%s", response.Code, response.Body.String())
 	}
 	if got := capture.placementPutConnections; len(got) != 1 || got[0] != connectionID {
