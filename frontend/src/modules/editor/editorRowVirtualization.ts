@@ -2,6 +2,31 @@ import { useCallback, useLayoutEffect, useMemo, useRef, useState, type RefObject
 
 export const EDITOR_ROW_OVERSCAN = 2;
 export const EDITOR_ROW_FALLBACK_VIEWPORT_HEIGHT = 900;
+export const TEXT_BLOCK_DEFAULT_BODY_HEIGHT = 660;
+export const TEXT_BLOCK_MIN_BODY_HEIGHT = 320;
+export const TEXT_BLOCK_HEADER_CHROME_HEIGHT = 38;
+export const TEXT_BLOCK_CARD_CHROME_HEIGHT = TEXT_BLOCK_HEADER_CHROME_HEIGHT + 2;
+export const TEXT_BLOCK_DEFAULT_ROW_HEIGHT = TEXT_BLOCK_DEFAULT_BODY_HEIGHT + TEXT_BLOCK_CARD_CHROME_HEIGHT;
+export const TEXT_BLOCK_ROW_GAP = 12;
+export const TEXT_BLOCK_NEXT_ROW_PREVIEW_HEIGHT = TEXT_BLOCK_HEADER_CHROME_HEIGHT + 1 + 20;
+
+export type TextBlockViewportGeometry = {
+  bodyHeight: number;
+  rowHeight: number;
+};
+
+export function resolveTextBlockViewportGeometry(availableHeight: number): TextBlockViewportGeometry {
+  const bodyHeight = Number.isFinite(availableHeight) && availableHeight > 0
+    ? Math.max(
+      TEXT_BLOCK_MIN_BODY_HEIGHT,
+      Math.floor(availableHeight) - TEXT_BLOCK_CARD_CHROME_HEIGHT - TEXT_BLOCK_ROW_GAP - TEXT_BLOCK_NEXT_ROW_PREVIEW_HEIGHT,
+    )
+    : TEXT_BLOCK_DEFAULT_BODY_HEIGHT;
+  return {
+    bodyHeight,
+    rowHeight: bodyHeight + TEXT_BLOCK_CARD_CHROME_HEIGHT,
+  };
+}
 
 export type BoundedEditorRowWindow = {
   startIndex: number;
@@ -155,6 +180,7 @@ export function useBoundedEditorRowVirtualization({
     if (element) setListReady(true);
   }, []);
   const listOffsetRef = useRef(0);
+  const previousSlotHeightRef = useRef(normalizedRowSlotHeight(rowHeight, rowGap));
   const scrollFrameRef = useRef<number | null>(null);
   const handledTargetRequestRef = useRef("");
   const pendingWindowScrollTopRef = useRef<number | null>(null);
@@ -191,6 +217,27 @@ export function useBoundedEditorRowVirtualization({
       return nextWindow;
     });
   }, [itemCount, overscan, rowGap, rowHeight, scrollElementRef]);
+
+  useLayoutEffect(() => {
+    const previousSlotHeight = previousSlotHeightRef.current;
+    const nextSlotHeight = normalizedRowSlotHeight(rowHeight, rowGap);
+    previousSlotHeightRef.current = nextSlotHeight;
+    if (previousSlotHeight === nextSlotHeight) return;
+
+    const scrollElement = scrollElementRef.current;
+    const listElement = listElementRef.current;
+    if (!scrollElement || !listElement) return;
+    const previousListOffset = listOffsetRef.current;
+    if (scrollElement.scrollTop <= previousListOffset) return;
+
+    const logicalRowOffset = (scrollElement.scrollTop - previousListOffset) / previousSlotHeight;
+    const nextListOffset = measureListOffset(scrollElement, listElement);
+    const nextScrollTop = Math.max(0, nextListOffset + logicalRowOffset * nextSlotHeight);
+    listOffsetRef.current = nextListOffset;
+    pendingWindowScrollTopRef.current = nextScrollTop;
+    scrollElement.scrollTop = nextScrollTop;
+    recalculateWindow();
+  }, [recalculateWindow, rowGap, rowHeight, scrollElementRef]);
 
   useLayoutEffect(() => {
     const desiredScrollTop = pendingWindowScrollTopRef.current;

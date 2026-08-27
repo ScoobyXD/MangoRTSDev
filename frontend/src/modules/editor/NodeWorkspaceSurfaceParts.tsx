@@ -55,6 +55,7 @@ import { EDITOR_DOCUMENT_FONT_SIZE_PX } from "./useEditorPreferences";
 import { UnifiedRichEditorSurface, type UnifiedRichEditorFormattingController } from "./UnifiedRichEditorSurface";
 import { createRequestJSON, isHTTPNotFoundError } from "../api/requestJSON.js";
 import { useMangoEditorDataFormat } from "./editorDataFormat.js";
+import { TEXT_BLOCK_DEFAULT_BODY_HEIGHT, TEXT_BLOCK_DEFAULT_ROW_HEIGHT } from "./editorRowVirtualization";
 import type { MangoTiptapAnnotation } from "./tiptap/mangoTiptapAnnotations.js";
 import {
   createStandaloneImageClipboardHTML,
@@ -103,8 +104,6 @@ import {
   EDITOR_NEU_SHADOW,
   EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
-  TEXT_BLOCK_MIN_HEIGHT,
-  TEXT_BLOCK_ROW_HEIGHT,
   type MentionableCompanyUser,
   type TextBlockImageDraft,
   type TextBlockSelectionAnchor,
@@ -159,7 +158,7 @@ type TimelineCellProps = {
   minHeight?: number;
 };
 
-export const TimelineCell: React.FC<TimelineCellProps> = ({ accent, muted, isLast, minHeight = TEXT_BLOCK_ROW_HEIGHT }) => (
+export const TimelineCell: React.FC<TimelineCellProps> = ({ accent, muted, isLast, minHeight = TEXT_BLOCK_DEFAULT_ROW_HEIGHT }) => (
   <div style={{ position: "relative", alignSelf: "stretch", minHeight, paddingTop: 9, color: "inherit", boxSizing: "border-box" }}>
     <div
       aria-hidden="true"
@@ -551,16 +550,16 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
     return null;
   }, [props.chatNavigationRequest]);
 
-  const editorHeight = props.fillHeight ? "100%" : TEXT_BLOCK_MIN_HEIGHT;
+  const editorHeight = props.fillHeight ? "100%" : TEXT_BLOCK_DEFAULT_BODY_HEIGHT;
   if (gate.loading) {
-    return <div aria-label="Preparing editor data format" style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_MIN_HEIGHT, height: editorHeight }} />;
+    return <div aria-label="Preparing editor data format" style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_DEFAULT_BODY_HEIGHT, height: editorHeight }} />;
   }
   if (gate.error || !gate.gate) {
-    return <div role="alert" style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_MIN_HEIGHT, height: editorHeight, padding: 12, color: "#b91c1c" }}>Unable to verify this workspace's editor format.</div>;
+    return <div role="alert" style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_DEFAULT_BODY_HEIGHT, height: editorHeight, padding: 12, color: "#b91c1c" }}>Unable to verify this workspace's editor format.</div>;
   }
 
   return (
-    <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_MIN_HEIGHT, height: editorHeight }} />}>
+    <React.Suspense fallback={<div aria-label="Loading JSON editor" style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_DEFAULT_BODY_HEIGHT, height: editorHeight }} />}>
       <MangoTiptapEditor
       key={`${props.companyID}:${props.surfaceKind}:${props.surfaceKind === "project" ? props.attachmentResourceID ?? props.nodeID : props.nodeID}:${props.blockID}`}
       value={props.documentValue}
@@ -571,7 +570,7 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
         "data-node-text-block-id": props.surfaceKind === "project" ? undefined : props.blockID,
         "data-project-text-block-id": props.surfaceKind === "project" ? props.blockID : undefined,
       }}
-      style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_MIN_HEIGHT, height: editorHeight, overflowY: "auto", color: props.surfaceText }}
+      style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_DEFAULT_BODY_HEIGHT, height: editorHeight, overflowY: "auto", color: props.surfaceText }}
       companyID={props.companyID}
       resourceType={props.surfaceKind === "project" ? "project" : "node"}
       resourceID={props.surfaceKind === "project" ? props.attachmentResourceID ?? props.nodeID : props.nodeID}

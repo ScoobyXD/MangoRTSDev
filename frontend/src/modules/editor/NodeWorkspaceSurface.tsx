@@ -64,7 +64,12 @@ import { resolveEditorTextBlockChatAnchorMessageID } from "./editorTextBlockChat
 import { createEditorImageFrame } from "./editorImages";
 import { serializeEditorDocumentHTML } from "./richTextEditing";
 import { createEditorScrollMemory } from "./editorScroll";
-import { useBoundedEditorRowVirtualization } from "./editorRowVirtualization";
+import {
+  resolveTextBlockViewportGeometry,
+  TEXT_BLOCK_HEADER_CHROME_HEIGHT,
+  TEXT_BLOCK_ROW_GAP,
+  useBoundedEditorRowVirtualization,
+} from "./editorRowVirtualization";
 import { useMangoEditorDataFormat } from "./editorDataFormat";
 import { markEditorHistoryChanged } from "./editorExitHistory.js";
 import {
@@ -106,10 +111,6 @@ import {
   parseDraggedEmail,
   PlusIcon,
   TextEditorIcon,
-  TEXT_BLOCK_HEADER_CHROME_HEIGHT,
-  TEXT_BLOCK_MIN_HEIGHT,
-  TEXT_BLOCK_ROW_GAP,
-  TEXT_BLOCK_ROW_HEIGHT,
   projectionsKey,
   uploadEditorAttachment,
   type NodeWorkspaceSurfaceProps,
@@ -722,9 +723,12 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     return Array.from(indices);
   }, [activeChatBlockID, activeRowBlockID, blocks, expandedLinkedEmailBlockIDs, focusedTextBlockID, tiptapPinnedBlockIDs]);
+  const textBlockViewport = resolveTextBlockViewportGeometry(
+    Math.max(0, Math.floor(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT - TEXT_BLOCK_ROW_GAP)),
+  );
   const rowVirtualizer = useBoundedEditorRowVirtualization({
     itemCount: blocks.length,
-    rowHeight: TEXT_BLOCK_ROW_HEIGHT,
+    rowHeight: textBlockViewport.rowHeight,
     rowGap: TEXT_BLOCK_ROW_GAP,
     scrollElementRef: rootRef,
     targetIndex: focusTargetIndex >= 0 ? focusTargetIndex : null,
@@ -2626,7 +2630,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
   const nodeTextSurfaceVisible = maximumVisibleTextPaneCount > 0;
   const nodeEmailOnly = nodeEmailColumnVisible && !nodeTextSurfaceVisible;
   const nodeWorkspaceViewportHeight = Math.max(
-    TEXT_BLOCK_ROW_HEIGHT,
+    textBlockViewport.rowHeight,
     Math.floor(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT - NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX),
   );
   const minimumNodeTextWorkspaceWidth = maximumVisibleTextPaneCount > 1
@@ -3228,8 +3232,8 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                 ? "chat-only"
                 : "none";
           const textBlockIsFocused = focusedTextBlockID === block.id;
-          const editorPaneHeight = editorPaneIsVisible ? TEXT_BLOCK_MIN_HEIGHT : 0;
-          const chatPaneHeight = TEXT_BLOCK_MIN_HEIGHT;
+          const editorPaneHeight = editorPaneIsVisible ? textBlockViewport.bodyHeight : 0;
+          const chatPaneHeight = textBlockViewport.bodyHeight;
           const selectionAnchor = chatSelectionAnchors[chatBlockID];
           const activeChatMessageID = activeChatMessageIDs[chatBlockID] ?? "";
           const activeChatAnchorMessageID = resolveEditorTextBlockChatAnchorMessageID(messages, activeChatMessageID);
@@ -3384,17 +3388,17 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
           return (
             <React.Fragment key={block.id}>
               {timelineEventsByBlockIndex[index]?.map(renderNodeTimelineEvent)}
-              <div style={{ height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, minHeight: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: linkedEmailExpanded ? "visible" : "hidden" }}>
-                <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} />
+              <div style={{ height: linkedEmailExpanded ? "auto" : textBlockViewport.rowHeight + TEXT_BLOCK_ROW_GAP, minHeight: textBlockViewport.rowHeight + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: linkedEmailExpanded ? "visible" : "hidden" }}>
+                <TimelineCell accent={accent} muted={false} isLast={index === blocks.length - 1} minHeight={textBlockViewport.rowHeight} />
               </div>
-              <div style={{ minWidth: 0, height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, minHeight: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: linkedEmailExpanded ? "visible" : "hidden" }}>
+              <div style={{ minWidth: 0, height: linkedEmailExpanded ? "auto" : textBlockViewport.rowHeight + TEXT_BLOCK_ROW_GAP, minHeight: textBlockViewport.rowHeight + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: linkedEmailExpanded ? "visible" : "hidden" }}>
                 <div
                   data-node-text-box-row={block.id}
                   data-email-chat-destination-candidate={pendingEmailChatSelection && !block.temporaryEmailChat ? "true" : undefined}
                   data-email-chat-destination-authoritative={pendingEmailChatSelection && textBoxHasLinkedEmailMessage(block, pendingEmailChatSelection.messageID ?? "") ? "true" : undefined}
                   data-chat-destination-flash={flashedEmailChatDestinationBlockID === block.id ? "true" : undefined}
                   className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`}
-                  style={{ height: linkedEmailExpanded ? "auto" : TEXT_BLOCK_ROW_HEIGHT, minHeight: TEXT_BLOCK_ROW_HEIGHT, minWidth: 0, display: "grid", gridTemplateRows: linkedEmailExpanded ? "38px auto" : "38px minmax(0, 1fr)", borderTop: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderRight: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderBottom: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderLeft: `${blockColor ? 4 : 1}px solid ${blockColor || (textBlockIsFocused ? "transparent" : EDITOR_NEU_SOFT_BORDER)}`, borderRadius: 14, background: blockColor ? "#ffffff" : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: linkedEmailExpanded ? "visible" : "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
+                  style={{ height: linkedEmailExpanded ? "auto" : textBlockViewport.rowHeight, minHeight: textBlockViewport.rowHeight, minWidth: 0, display: "grid", gridTemplateRows: linkedEmailExpanded ? "38px auto" : "38px minmax(0, 1fr)", borderTop: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderRight: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderBottom: `1px solid ${textBlockIsFocused ? "transparent" : blockColor || EDITOR_NEU_SOFT_BORDER}`, borderLeft: `${blockColor ? 4 : 1}px solid ${blockColor || (textBlockIsFocused ? "transparent" : EDITOR_NEU_SOFT_BORDER)}`, borderRadius: 14, background: blockColor ? "#ffffff" : `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${textBlockIsFocused ? EDITOR_NEU_EDGE_FRAME : "linear-gradient(135deg, rgba(255,255,255,0.76), rgba(255,255,255,0.76))"} border-box`, overflow: linkedEmailExpanded ? "visible" : "hidden", boxShadow: textBlockIsFocused ? "8px 8px 20px rgba(174,174,192,0.26), -7px -7px 16px rgba(255,255,255,0.92), 0 0 18px rgba(183,124,255,0.16), inset 1px 1px 0 rgba(255,255,255,0.88)" : EDITOR_NEU_SHADOW }}
                 >
                   <div
                     data-node-text-box-header="true"
@@ -3498,10 +3502,11 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                             <div
                               data-node-text-block-id={block.id}
                               aria-label="Pending email chat text box"
-                              style={{ minHeight: TEXT_BLOCK_MIN_HEIGHT, height: TEXT_BLOCK_MIN_HEIGHT, background: "rgba(255,255,255,0.72)" }}
+                              style={{ minHeight: textBlockViewport.bodyHeight, height: textBlockViewport.bodyHeight, background: "rgba(255,255,255,0.72)" }}
                             />
                           ) : (
                           <NodeTextBlockEditor
+                            fillHeight
                             blockID={block.id}
                             editable={editorTextCanEdit}
                             nodeID={nodeID}
