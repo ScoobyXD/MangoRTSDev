@@ -122,6 +122,110 @@ test("tile presentation normalizes omitted names and routes without discarding t
   }
 });
 
+test("tile parsing preserves varied square-layout rectangles and exact Folder parentage", async () => {
+  const apiBase = "https://process-map-square-layout.test";
+  invalidateProcessMapReadCaches(apiBase, "company-1");
+  const originalFetch = globalThis.fetch;
+  const rectangles = [
+    {
+      restricted: false,
+      presentation: "normal",
+      resource_type: "company_explorer_folder",
+      resource_id: "root-folder",
+      name: "Root",
+      map_parent_folder_id: null,
+      grid_x: 0,
+      grid_y: 0,
+      grid_width: 120,
+      grid_height: 90,
+      can_edit: true,
+      revision: 2,
+      created_timestamp: "created",
+      updated_timestamp: "updated",
+    },
+    {
+      restricted: false,
+      presentation: "normal",
+      resource_type: "company_explorer_folder",
+      resource_id: "nested-folder",
+      name: "Nested",
+      map_parent_folder_id: "root-folder",
+      grid_x: 2,
+      grid_y: 6,
+      grid_width: 48,
+      grid_height: 40,
+      can_edit: true,
+      revision: 3,
+      created_timestamp: "created",
+      updated_timestamp: "updated",
+    },
+    {
+      restricted: false,
+      presentation: "normal",
+      resource_type: "logic_gate",
+      resource_id: "root-process",
+      name: "Receive",
+      map_parent_folder_id: "root-folder",
+      grid_x: 56,
+      grid_y: 6,
+      grid_width: 14,
+      grid_height: 8,
+      can_edit: true,
+      revision: 4,
+      created_timestamp: "created",
+      updated_timestamp: "updated",
+    },
+    {
+      restricted: false,
+      presentation: "normal",
+      resource_type: "logic_gate",
+      resource_id: "nested-process",
+      name: "Pack",
+      map_parent_folder_id: "nested-folder",
+      grid_x: 28,
+      grid_y: 16,
+      grid_width: 18,
+      grid_height: 10,
+      can_edit: true,
+      revision: 5,
+      created_timestamp: "created",
+      updated_timestamp: "updated",
+    },
+  ];
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    z: 3,
+    x: 0,
+    y: 0,
+    process_map_read_version: 22,
+    placements: rectangles,
+    traces: [],
+  }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
+  try {
+    const tile = await fetchProcessMapTile(apiBase, "company-1", 22, 3, 0, 0);
+    assert.deepEqual(
+      tile.placements.map((placement) => placement.restricted ? placement : ({
+        resource_id: placement.resource_id,
+        map_parent_folder_id: placement.map_parent_folder_id,
+        grid_x: placement.grid_x,
+        grid_y: placement.grid_y,
+        grid_width: placement.grid_width,
+        grid_height: placement.grid_height,
+      })),
+      rectangles.map((placement) => ({
+        resource_id: placement.resource_id,
+        map_parent_folder_id: placement.map_parent_folder_id,
+        grid_x: placement.grid_x,
+        grid_y: placement.grid_y,
+        grid_width: placement.grid_width,
+        grid_height: placement.grid_height,
+      })),
+    );
+  } finally {
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("tile parser rejects missing or invalid presentation ceilings", async () => {
   const originalFetch = globalThis.fetch;
   const visiblePlacement = {
