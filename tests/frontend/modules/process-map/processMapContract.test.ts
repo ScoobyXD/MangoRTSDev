@@ -83,7 +83,7 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
 
   assert.match(surface, /processMapDeepestContainingFolder\(processMapPlacementBounds\(placement\)/);
-  assert.match(surface, /folderContainsItsChildren\(saved, presentationRef\.current\.placements\)/);
+  assert.match(surface, /folderContainsItsChildren\(saved, current\.containedPlacements\)/);
   assert.match(surface, /const routePoints = defaultProcessMapRoutePoints\([\s\S]{0,220}postProcessMapRelationship\(apiBase, companyID, current\.source, target, routePoints\)/);
   assert.match(surface, /shouldApplyProcessMapMutationAck/);
   assert.match(surface, /Placement was restored because it could not be saved/);
@@ -111,6 +111,34 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
   ]) {
     assert.ok(rejected.includes(required), `permission rejection must clear protected state with ${required}`);
   }
+});
+
+test("Folder drag frames update only a delta over one stable subtree plan", () => {
+  const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  const startGesture = surface.slice(
+    surface.indexOf("const startPlacementGesture"),
+    surface.indexOf("const handleDragStart"),
+  );
+  assert.match(startGesture, /const subtree = processMapPlacementSubtree/);
+  assert.match(startGesture, /processMapInternalTracesForMove/);
+  assert.match(startGesture, /basePlacementKeys/);
+  assert.match(startGesture, /baseTraceIDs/);
+
+  const dragFrame = surface.slice(
+    surface.indexOf("const handleDrag ="),
+    surface.indexOf("const finishConnection"),
+  );
+  const placementDragFrame = dragFrame.slice(dragFrame.indexOf("const dx = snapProcessMapGridCoordinate"));
+  assert.match(placementDragFrame, /deltaX: dx/);
+  assert.match(placementDragFrame, /deltaY: dy/);
+  assert.doesNotMatch(placementDragFrame, /setPreviewPlacements|setPreviewTraces|translatedTraces|materializeProcessMapPlacementTransform/);
+
+  const dragEnd = surface.slice(
+    surface.indexOf("const handleDragEnd"),
+    surface.indexOf("const fitFolder"),
+  );
+  assert.match(dragEnd, /materializeProcessMapPlacementTransform\(current\.basePlacements, transform\)/);
+  assert.match(dragEnd, /translatedTraces\(current\.baseTraces, current\.deltaX, current\.deltaY\)/);
 });
 
 test("company or auth scope changes synchronously suppress protected geometry before replacement reads", () => {
@@ -245,6 +273,8 @@ test("V3 Surface keeps valid tile data through camera settlement and accepts dec
   assert.match(guardedGetTileData, /if \(!currentScene \|\| request\.z < currentScene\.min_tile_zoom/);
   assert.match(guardedGetTileData, /request\.signal/);
   assert.doesNotMatch(guardedGetTileData, /settled|combineProcessMapAbortSignals/);
+  assert.match(spatialLayers, /const editedPlacementMembership = useMemo\([\s\S]*?\[editedPlacementKeys\]\)/);
+  assert.match(spatialLayers, /const editedTraceMembership = useMemo\([\s\S]*?\[editedTraceIDs\]\)/);
   assert.match(spatialLayers, /const spatialEditedPlacementKeys = useMemo[\s\S]*?\[editedPlacementMembership\]/);
   assert.match(spatialLayers, /const spatialEditedTraceIDs = useMemo[\s\S]*?\[editedTraceMembership\]/);
   assert.match(spatialLayers, /const spatialLayers = useMemo\(\(\) => activeScene \? buildProcessMapSpatialLayers/);
@@ -356,5 +386,6 @@ test("Company Explorer deletion is explicit about Process and Folder effects", (
 
 test("QDC visibility is capped by the server-declared placement presentation", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
-  assert.match(surface, /const qdVisible = qdPlacement && processMapPlacementDisplayLOD\(qdPlacement, 2 \*\* settledViewState\.zoom\) === "editing"/);
+  assert.match(surface, /const qdGeometry = qdPlacement \? processMapPlacementGeometryForTransform\(qdPlacement, placementTransform\) : null/);
+  assert.match(surface, /const qdVisible = qdPlacement && qdGeometry && processMapPlacementDisplayLOD\(\{[\s\S]*?presentation: qdPlacement\.presentation,[\s\S]*?\}, 2 \*\* settledViewState\.zoom\) === "editing"/);
 });

@@ -397,6 +397,168 @@ func TestSelectPendingMigrationsSkipsAppliedAndHonorsAnchors(t *testing.T) {
 	}
 }
 
+func TestSQLForManagedTransactionRemovesOnlyOuterEnvelope(t *testing.T) {
+	raw := `-- preflight
+/*
+BEGIN;
+COMMIT;
+*/
+select 'BEGIN; COMMIT;' as quoted_control;
+do $$
+begin
+  perform 'COMMIT;';
+  /* BEGIN; */
+  perform 1;
+end
+$$;
+
+BEGIN;
+create table widgets(id bigint);
+COMMIT;
+
+select 'complete';`
+
+	got, err := sqlForManagedTransaction(raw)
+	if err != nil {
+		t.Fatalf("sqlForManagedTransaction: %v", err)
+	}
+	if controls, err := topLevelTransactionControls(got); err != nil || len(controls) != 0 {
+		t.Fatalf("managed SQL retained top-level transaction control %+v, err=%v:\n%s", controls, err, got)
+	}
+	for _, want := range []string{"/*\nBEGIN;\nCOMMIT;\n*/", "'BEGIN; COMMIT;'", "do $$", "begin\n  perform 'COMMIT;'", "create table widgets", "select 'complete'"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("managed SQL lost %q:\n%s", want, got)
+		}
+	}
+
+	plain := "create table plain_widget(id bigint);\n"
+	if got, err := sqlForManagedTransaction(plain); err != nil || got != plain {
+		t.Fatalf("plain SQL = %q, err=%v", got, err)
+	}
+}
+
+func TestSQLForManagedTransactionRecognizesCommentSeparatedControlsAndStandardStrings(t *testing.T) {
+	for name, raw := range map[string]string{
+		"comment separated controls": `BEGIN/* transaction boundary */TRANSACTION;
+create table comment_probe(id bigint);
+COMMIT/* transaction boundary */WORK;
+`,
+		"standard string backslash": `BEGIN;
+select '\' as one_backslash;
+create table backslash_probe(id bigint);
+COMMIT;
+`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := sqlForManagedTransaction(raw)
+			if err != nil {
+				t.Fatalf("sqlForManagedTransaction: %v", err)
+			}
+			if controls, err := topLevelTransactionControls(got); err != nil || len(controls) != 0 {
+				t.Fatalf("managed SQL retained top-level transaction control %+v, err=%v:\n%s", controls, err, got)
+			}
+		})
+	}
+}
+
+func TestSQLForManagedTransactionRejectsUnsafeControl(t *testing.T) {
+	for name, raw := range map[string]string{
+		"missing commit": "begin;\nselect 1;\n",
+		"commit first":   "commit;\nselect 1;\nbegin;\n",
+		"rollback":       "begin;\nselect 1;\nrollback;\n",
+		"abort":          "begin;\nselect 1;\nabort;\n",
+		"savepoint":      "begin;\nsavepoint nested;\ncommit;\n",
+		"release":        "begin;\nrelease savepoint nested;\ncommit;\n",
+		"rollback to":    "begin;\nrollback to savepoint nested;\ncommit;\n",
+		"prepared":       "begin;\nprepare transaction 'nested';\ncommit;\n",
+		"multiple":       "begin;\nbegin;\nselect 1;\ncommit;\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := sqlForManagedTransaction(raw); err == nil {
+				t.Fatal("expected unsafe transaction control error")
+			}
+		})
+	}
+	if got, err := sqlForManagedTransaction("begin;\nselect 1;\nend transaction;\n"); err != nil || strings.Contains(strings.ToLower(got), "end transaction") {
+		t.Fatalf("END TRANSACTION envelope = %q, err=%v", got, err)
+	}
+}
+
+func TestRepositoryMigrationsUseSupportedTransactionEnvelopes(t *testing.T) {
+	entries, err := os.ReadDir(filepath.Join("..", "..", "db", "migrations"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(entry.Name()), ".sql") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sqlForManagedTransaction(string(raw)); err != nil {
+			t.Errorf("%s: %v", entry.Name(), err)
+		}
+	}
+}
+
+func TestValidateProcessMapLayoutMigrationAnchor(t *testing.T) {
+	files := []migrationFile{
+		{Name: processMapActualSizeLayoutMigration},
+		{Name: "20260826_zzzz_process_map_tidy_initial_layout.sql"},
+		{Name: "20260826_zzzzz_process_map_rectangular_layout.sql"},
+		{Name: "20260826_zzzzzz_process_map_square_layout.sql"},
+	}
+
+	if err := validateProcessMapLayoutMigrationAnchor(files, files, map[string]bool{}); err != nil {
+		t.Fatalf("full ordered run rejected: %v", err)
+	}
+	if err := validateProcessMapLayoutMigrationAnchor(files, files[1:], map[string]bool{}); err == nil || !strings.Contains(err.Error(), processMapActualSizeLayoutMigration) {
+		t.Fatalf("unsafe anchored run error = %v", err)
+	}
+	if err := validateProcessMapLayoutMigrationAnchor(files, files[1:], map[string]bool{processMapActualSizeLayoutMigration: true}); err == nil || !strings.Contains(err.Error(), "supersession ledger row is missing") {
+		t.Fatalf("inconsistent supersession ledger error = %v", err)
+	}
+	pendingAfterObsolete, err := selectPendingMigrations(files, map[string]bool{}, "", files[len(files)-1].Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateProcessMapLayoutMigrationAnchor(files, pendingAfterObsolete, map[string]bool{}); err == nil || !strings.Contains(err.Error(), "omits unrecorded") {
+		t.Fatalf("anchor after obsolete migrations error = %v", err)
+	}
+	if err := validateProcessMapLayoutMigrationAnchor(files, pendingAfterObsolete, map[string]bool{processMapActualSizeLayoutMigration: true}); err != nil {
+		t.Fatalf("anchor after obsolete migrations rejected a recorded correction: %v", err)
+	}
+	later := append(append([]migrationFile{}, files...), migrationFile{Name: "20260827_later.sql"})
+	pendingAtLater, err := selectPendingMigrations(later, map[string]bool{}, later[len(later)-1].Name, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateProcessMapLayoutMigrationAnchor(later, pendingAtLater, map[string]bool{}); err == nil || !strings.Contains(err.Error(), "omits unrecorded") {
+		t.Fatalf("start-at later migration error = %v", err)
+	}
+}
+
+func TestMigrationScriptsDelegateToCanonicalRunner(t *testing.T) {
+	for _, name := range []string{"apply_db_migrations.ps1", "apply_db_migrations.sh"} {
+		raw, err := os.ReadFile(filepath.Join("..", "..", "..", "scripts", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		source := strings.ToLower(string(raw))
+		if !strings.Contains(source, "./cmd/miraeopus-migrate") {
+			t.Errorf("%s does not invoke the canonical runner", name)
+		}
+		if strings.Contains(source, "schema_migrations") || strings.Contains(source, "psql") {
+			t.Errorf("%s still contains a duplicate SQL/ledger pipeline", name)
+		}
+	}
+	if _, err := os.Stat(filepath.Join("..", "..", "..", "scripts", "apply_notifications_schema.ps1")); !os.IsNotExist(err) {
+		t.Fatalf("obsolete notification migration runner still exists or could not be checked: %v", err)
+	}
+}
+
 func writeTestFile(t *testing.T, path string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte("select 1;\n"), 0o644); err != nil {

@@ -250,6 +250,7 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 	if input.PermissionUserID != "" && !r.userHasCompanyMembershipLocked(input.CompanyID, input.PermissionUserID) {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
+	beforeMutation := r.snapshotProcessMapMutationLocked()
 	r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
 	parent, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.ParentEntityID)]
 	if !ok {
@@ -294,7 +295,10 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 		parentID := parent.EntityID
 		mapParentID = &parentID
 	}
-	r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, entity.EntityID, mapParentID)
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, entity.EntityID, mapParentID); err != nil {
+		r.restoreProcessMapMutationLocked(beforeMutation)
+		return CompanyExplorerV2Row{}, err
+	}
 	if parent.EntityType == CompanyExplorerV2EntityFolder {
 		entity = r.companyExplorerV2Entities[key(entity.CompanyID, entity.EntityID)]
 	}
@@ -312,6 +316,7 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 	if input.PermissionUserID != "" && !r.userHasCompanyMembershipLocked(input.CompanyID, input.PermissionUserID) {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
+	beforeMutation := r.snapshotProcessMapMutationLocked()
 	r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
 	parent, ok := r.companyExplorerV2Entities[key(input.CompanyID, input.ParentEntityID)]
 	if !ok {
@@ -373,6 +378,7 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 		})
 		eventInput.ActorUserID = input.ActorUserID
 		if _, err := r.appendDomainEventLocked(eventInput); err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
 			return CompanyExplorerV2Row{}, err
 		}
 	}
@@ -389,7 +395,10 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 			parentID := parent.EntityID
 			mapParentID = &parentID
 		}
-		r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID)
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID); err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
+			return CompanyExplorerV2Row{}, err
+		}
 	}
 	r.reconcileMemoryRACITabsCompanyLocked(input.CompanyID)
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
@@ -406,6 +415,7 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	if input.PermissionUserID != "" && !r.userHasCompanyMembershipLocked(input.CompanyID, input.PermissionUserID) {
 		return CompanyExplorerV2Row{}, ErrNotFound
 	}
+	beforeMutation := r.snapshotProcessMapMutationLocked()
 	r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
 	edge, ok := r.companyExplorerV2Edges[key(input.CompanyID, input.EdgeID)]
 	if !ok {
@@ -447,6 +457,7 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 		})
 		eventInput.ActorUserID = input.ActorUserID
 		if _, err := r.appendDomainEventLocked(eventInput); err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
 			return CompanyExplorerV2Row{}, err
 		}
 	}
@@ -460,9 +471,15 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	}
 	switch child.EntityType {
 	case CompanyExplorerV2EntityFolder:
-		r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, child.EntityID, mapParentID)
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, child.EntityID, mapParentID); err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
+			return CompanyExplorerV2Row{}, err
+		}
 	case CompanyExplorerV2EntityLogicGate:
-		r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID)
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID); err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
+			return CompanyExplorerV2Row{}, err
+		}
 	}
 	r.reconcileMemoryRACITabsCompanyLocked(input.CompanyID)
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil

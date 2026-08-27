@@ -231,6 +231,9 @@ function appendSimplifiedRenderedPoint(points: ProcessMapGridPoint[], point: Pro
     const middle = points[end - 1];
     const after = points[end];
     if (!((before.x === middle.x && middle.x === after.x) || (before.y === middle.y && middle.y === after.y))) return;
+    const directionContinues = (middle.x - before.x) * (after.x - middle.x)
+      + (middle.y - before.y) * (after.y - middle.y) >= 0;
+    if (!directionContinues) return;
     points.splice(end - 1, 1);
     if (points.length >= 2 && samePoint(points[points.length - 2], points[points.length - 1])) points.pop();
   }

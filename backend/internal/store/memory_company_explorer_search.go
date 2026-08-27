@@ -75,11 +75,19 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 	return folders
 }
 
-func (r *MemoryRepo) syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID string, folders companyExplorerDefaultFolders) {
-	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.UnfiledFolderID, nil)
+func (r *MemoryRepo) syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID string, folders companyExplorerDefaultFolders) error {
+	if strings.TrimSpace(companyID) == "" || folders.UnfiledFolderID == "" || folders.ProjectsFolderID == "" || folders.LogicGatesFolderID == "" {
+		return nil
+	}
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.UnfiledFolderID, nil); err != nil {
+		return err
+	}
 	parentID := folders.UnfiledFolderID
-	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.ProjectsFolderID, &parentID)
-	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.LogicGatesFolderID, &parentID)
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.ProjectsFolderID, &parentID); err != nil {
+		return err
+	}
+	_, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.LogicGatesFolderID, &parentID)
+	return err
 }
 
 func (r *MemoryRepo) placeCompanyExplorerItemInDefaultFolderLocked(companyID, targetType, targetID string, snapshotPolicy bool) bool {

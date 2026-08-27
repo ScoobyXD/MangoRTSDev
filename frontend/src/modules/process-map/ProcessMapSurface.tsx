@@ -59,6 +59,7 @@ import {
   snapProcessMapGridCoordinate,
   type ProcessMapBounds,
   type ProcessMapGridPoint,
+  type ProcessMapPlacementGeometry,
   type ProcessMapViewState,
 } from "./processMapGeometry.js";
 import {
@@ -147,6 +148,18 @@ export type ProcessMapEditOverlayModel = {
   connectionPreview: { source: ProcessMapVisiblePlacement; point: ProcessMapGridPoint } | null;
   highlightedFolderKey: string | null;
   connectionSourceKey: string | null;
+  placementTransform: ProcessMapPlacementTransform | null;
+};
+
+export type ProcessMapPlacementTransform = {
+  kind: "move" | "resize";
+  key: string;
+  placementKeys: ReadonlySet<string>;
+  traceIDs: ReadonlySet<string>;
+  deltaX: number;
+  deltaY: number;
+  horizontal?: "west" | "east";
+  vertical?: "north" | "south";
 };
 
 export type ProcessMapTileLoadRequest = {
@@ -196,7 +209,12 @@ type PlacementGesture = {
   key: string;
   start: ProcessMapGridPoint;
   basePlacements: Map<string, ProcessMapVisiblePlacement>;
+  basePlacementKeys: ReadonlySet<string>;
   baseTraces: Map<string, ProcessMapTrace>;
+  baseTraceIDs: ReadonlySet<string>;
+  containedPlacements: readonly ProcessMapVisiblePlacement[];
+  deltaX: number;
+  deltaY: number;
   horizontal?: "west" | "east";
   vertical?: "north" | "south";
   moved: boolean;
@@ -614,13 +632,18 @@ function processMapAssignmentSummary(names: string[] | undefined): string {
 
 function processCardTextDatums(
   placement: ProcessMapVisiblePlacement,
+  geometry: ProcessMapPlacementGeometry,
   bounds: ProcessMapBounds,
   pixelsPerGridUnit: number,
   pick: PlacementPick,
 ): TextDatum[] {
   if (
     placement.resource_type !== "logic_gate"
-    || processMapPlacementDisplayLOD(placement, pixelsPerGridUnit) !== "editing"
+    || processMapPlacementDisplayLOD({
+      grid_width: geometry.grid_width,
+      grid_height: geometry.grid_height,
+      presentation: placement.presentation,
+    }, pixelsPerGridUnit) !== "editing"
   ) return [];
   const scale = Math.max(Number.MIN_VALUE, pixelsPerGridUnit);
   const top = bounds.min_y + 7 / scale;
@@ -742,7 +765,7 @@ function renderTileSubLayers(
         });
       }
     }
-    processCardText.push(...processCardTextDatums(placement, bounds, options.settledPixelsPerGridUnit, pick).filter((item) => (
+    processCardText.push(...processCardTextDatums(placement, placement, bounds, options.settledPixelsPerGridUnit, pick).filter((item) => (
       ownsCoordinate({ x: item.position[0], y: item.position[1] }, tile)
     )));
   }
@@ -767,12 +790,23 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
   const paths: PathDatum[] = [];
   const waypoints: PointDatum[] = [];
   for (const trace of options.editOverlay.traces) {
+    const traceID = trace.resource_operational_relationship_id;
+    const offset = options.editOverlay.placementTransform?.kind === "move"
+      && options.editOverlay.placementTransform.traceIDs.has(traceID)
+      ? {
+          x: options.editOverlay.placementTransform.deltaX,
+          y: options.editOverlay.placementTransform.deltaY,
+        }
+      : { x: 0, y: 0 };
     const source = options.presentation.placements.get(placementKey(trace.source));
     const target = options.presentation.placements.get(placementKey(trace.target));
     const fullPath = tracePath(trace, options.presentation.placements);
-    const pathFragments = fullPath ? [fullPath] : trace.path_fragments;
+    const baseFragments = fullPath ? [fullPath] : trace.path_fragments;
+    const pathFragments = offset.x === 0 && offset.y === 0
+      ? baseFragments
+      : baseFragments.map((fragment) => fragment.map((point) => ({ x: point.x + offset.x, y: point.y + offset.y })));
     paths.push(...tracePaths({ ...trace, path_fragments: pathFragments }, PROCESS_MAP_SELECTED_TRACE_WIDTH_PX));
-    if (trace.presentation !== "editing" || options.editOverlay.selectedTraceID !== trace.resource_operational_relationship_id) continue;
+    if (trace.presentation !== "editing" || options.editOverlay.selectedTraceID !== traceID) continue;
     if (
       !source
       || !target
@@ -780,7 +814,7 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
       || processMapPlacementDisplayLOD(target, options.settledPixelsPerGridUnit) !== "editing"
     ) continue;
     trace.route_points.forEach((point, index) => waypoints.push({
-      position: [point.x, point.y],
+      position: [point.x + offset.x, point.y + offset.y],
       radius: 5,
       fill: [255, 255, 255, 255],
       line: [14, 165, 233, 255],
@@ -812,7 +846,8 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
   const anchors: PointDatum[] = [];
   for (const placement of options.editOverlay.placements) {
     const key = placementKey(placement);
-    const bounds = processMapPlacementBounds(placement);
+    const geometry = processMapPlacementGeometryForTransform(placement, options.editOverlay.placementTransform);
+    const bounds = processMapPlacementBounds(geometry);
     const pick: PlacementPick = { kind: "placement", key, placement };
     if (placement.resource_type === "company_explorer_folder") {
       const color = options.editOverlay.highlightedFolderKey === key ? [14, 165, 233, 250] as const : COLOR_FOLDER;
@@ -829,7 +864,11 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
       }
       bodies.push({ polygon: boundsPolygon(bounds), fill: COLOR_PROCESS_SURFACE, line: COLOR_PROCESS, lineWidth: 3, pick });
     }
-    const lod = processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit);
+    const lod = processMapPlacementDisplayLOD({
+      grid_width: geometry.grid_width,
+      grid_height: geometry.grid_height,
+      presentation: placement.presentation,
+    }, options.settledPixelsPerGridUnit);
     if (lod !== "whole") {
       const labelSize = lod === "editing" ? 13 : 11;
       const folderLabelY = placement.resource_type === "company_explorer_folder"
@@ -851,7 +890,7 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
         });
       }
     }
-    processCardText.push(...processCardTextDatums(placement, bounds, options.settledPixelsPerGridUnit, pick));
+    processCardText.push(...processCardTextDatums(placement, geometry, bounds, options.settledPixelsPerGridUnit, pick));
   }
   if (options.settled && !options.editOverlay.connectionSourceKey) {
     const handleKeys = new Set([
@@ -860,8 +899,14 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
     ].filter((key): key is string => Boolean(key)));
     for (const key of handleKeys) {
       const placement = options.presentation.placements.get(key);
-      if (!placement || processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit) !== "editing") continue;
-      const bounds = processMapPlacementBounds(placement);
+      if (!placement) continue;
+      const geometry = processMapPlacementGeometryForTransform(placement, options.editOverlay.placementTransform);
+      if (processMapPlacementDisplayLOD({
+        grid_width: geometry.grid_width,
+        grid_height: geometry.grid_height,
+        presentation: placement.presentation,
+      }, options.settledPixelsPerGridUnit) !== "editing") continue;
+      const bounds = processMapPlacementBounds(geometry);
       const corners: Array<[ResizePick["horizontal"], ResizePick["vertical"], [number, number]]> = [
         ["west", "north", [bounds.min_x, bounds.min_y]], ["east", "north", [bounds.max_x, bounds.min_y]],
         ["east", "south", [bounds.max_x, bounds.max_y]], ["west", "south", [bounds.min_x, bounds.max_y]],
@@ -872,9 +917,14 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
   if (options.settled) {
     for (const placement of options.presentation.placements.values()) {
       const key = placementKey(placement);
-      if (processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit) !== "editing") continue;
-      const input = processMapInputAnchor(placement);
-      const output = processMapOutputAnchor(placement);
+      const geometry = processMapPlacementGeometryForTransform(placement, options.editOverlay.placementTransform);
+      if (processMapPlacementDisplayLOD({
+        grid_width: geometry.grid_width,
+        grid_height: geometry.grid_height,
+        presentation: placement.presentation,
+      }, options.settledPixelsPerGridUnit) !== "editing") continue;
+      const input = processMapInputAnchor(geometry);
+      const output = processMapOutputAnchor(geometry);
       if (options.editOverlay.connectionSourceKey) {
         if (key === options.editOverlay.connectionSourceKey) {
           anchors.push({ position: [output.x, output.y], radius: 7, fill: [14, 165, 233, 255], line: [255, 255, 255, 255], pick: { kind: "anchor", anchor: "output", key, placement } });
@@ -966,23 +1016,27 @@ function pointFromInfo(info: PickingInfo): ProcessMapGridPoint | null {
   return info.coordinate && info.coordinate.length >= 2 ? { x: info.coordinate[0], y: info.coordinate[1] } : null;
 }
 
-function descendantsForMove(
+export function processMapPlacementSubtree(
   root: ProcessMapVisiblePlacement,
   placements: ReadonlyMap<string, ProcessMapVisiblePlacement>,
 ): Map<string, ProcessMapVisiblePlacement> {
-  const result = new Map<string, ProcessMapVisiblePlacement>([[placementKey(root), clonePlacement(root)]]);
+  const result = new Map<string, ProcessMapVisiblePlacement>([[placementKey(root), root]]);
   if (root.resource_type !== "company_explorer_folder") return result;
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const placement of placements.values()) {
+
+  const childrenByParent = new Map<string, ProcessMapVisiblePlacement[]>();
+  for (const placement of placements.values()) {
+    if (!placement.map_parent_folder_id) continue;
+    const children = childrenByParent.get(placement.map_parent_folder_id) ?? [];
+    children.push(placement);
+    childrenByParent.set(placement.map_parent_folder_id, children);
+  }
+  const pendingFolderIDs = [root.resource_id];
+  for (let index = 0; index < pendingFolderIDs.length; index += 1) {
+    for (const placement of childrenByParent.get(pendingFolderIDs[index]) ?? []) {
       const key = placementKey(placement);
-      if (result.has(key) || !placement.map_parent_folder_id) continue;
-      const hasParent = [...result.values()].some((parent) => (
-        parent.resource_type === "company_explorer_folder" && parent.resource_id === placement.map_parent_folder_id
-      ));
-      if (!hasParent) continue;
-      result.set(key, clonePlacement(placement));
-      changed = true;
+      if (result.has(key)) continue;
+      result.set(key, placement);
+      if (placement.resource_type === "company_explorer_folder") pendingFolderIDs.push(placement.resource_id);
     }
   }
   return result;
@@ -990,29 +1044,73 @@ function descendantsForMove(
 
 function folderContainsItsChildren(
   folder: ProcessMapVisiblePlacement,
-  placements: ReadonlyMap<string, ProcessMapVisiblePlacement>,
+  descendants: readonly ProcessMapVisiblePlacement[],
 ): boolean {
-  const descendants = descendantsForMove(folder, placements);
-  descendants.delete(placementKey(folder));
-  return [...descendants.values()].every((placement) => (
+  return descendants.every((placement) => (
     processMapBoundsContain(processMapPlacementBounds(folder), processMapPlacementBounds(placement))
   ));
 }
 
 function translatedTraces(
   traces: ReadonlyMap<string, ProcessMapTrace>,
-  movedKeys: ReadonlySet<string>,
   dx: number,
   dy: number,
 ): Map<string, ProcessMapTrace> {
   const result = new Map<string, ProcessMapTrace>();
   for (const trace of traces.values()) {
-    if (!movedKeys.has(placementKey(trace.source)) || !movedKeys.has(placementKey(trace.target))) continue;
     result.set(trace.resource_operational_relationship_id, {
       ...cloneTrace(trace),
       route_points: trace.route_points.map((point) => ({ x: point.x + dx, y: point.y + dy })),
       path_fragments: trace.path_fragments.map((fragment) => fragment.map((point) => ({ x: point.x + dx, y: point.y + dy }))),
     });
+  }
+  return result;
+}
+
+export function processMapInternalTracesForMove(
+  traces: ReadonlyMap<string, ProcessMapTrace>,
+  movedKeys: ReadonlySet<string>,
+): Map<string, ProcessMapTrace> {
+  const result = new Map<string, ProcessMapTrace>();
+  for (const trace of traces.values()) {
+    if (!movedKeys.has(placementKey(trace.source)) || !movedKeys.has(placementKey(trace.target))) continue;
+    result.set(trace.resource_operational_relationship_id, trace);
+  }
+  return result;
+}
+
+function processMapPlacementGeometryForTransform(
+  placement: ProcessMapVisiblePlacement,
+  transform: ProcessMapPlacementTransform | null,
+): ProcessMapPlacementGeometry {
+  const key = placementKey(placement);
+  if (!transform?.placementKeys.has(key)) return placement;
+  if (transform.kind === "move") {
+    return {
+      grid_x: placement.grid_x + transform.deltaX,
+      grid_y: placement.grid_y + transform.deltaY,
+      grid_width: placement.grid_width,
+      grid_height: placement.grid_height,
+    };
+  }
+  if (key !== transform.key) return placement;
+  return resizeProcessMapPlacement(
+    placement,
+    placement.resource_type,
+    transform.deltaX,
+    transform.deltaY,
+    transform.horizontal!,
+    transform.vertical!,
+  );
+}
+
+export function materializeProcessMapPlacementTransform(
+  placements: ReadonlyMap<string, ProcessMapVisiblePlacement>,
+  transform: ProcessMapPlacementTransform,
+): Map<string, ProcessMapVisiblePlacement> {
+  const result = new Map<string, ProcessMapVisiblePlacement>();
+  for (const [key, placement] of placements) {
+    result.set(key, { ...placement, ...processMapPlacementGeometryForTransform(placement, transform) });
   }
   return result;
 }
@@ -1403,31 +1501,46 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     }
   }, [apiBase, applyEnvelope, companyID, nextOperation]);
 
+  const placementGesture = gesture && (gesture.kind === "move" || gesture.kind === "resize") ? gesture : null;
+  const placementTransform = useMemo<ProcessMapPlacementTransform | null>(() => placementGesture ? {
+    kind: placementGesture.kind,
+    key: placementGesture.key,
+    placementKeys: placementGesture.basePlacementKeys,
+    traceIDs: placementGesture.baseTraceIDs,
+    deltaX: placementGesture.deltaX,
+    deltaY: placementGesture.deltaY,
+    horizontal: placementGesture.horizontal,
+    vertical: placementGesture.vertical,
+  } : null, [placementGesture]);
   const folders = useMemo(() => [...presentation.placements.values()].filter((placement) => placement.resource_type === "company_explorer_folder"), [presentation.placements]);
   const highlightedFolder = useMemo(() => {
     let bounds: ProcessMapBounds | null = null;
     let excludedFolderID: string | undefined;
-    const activePlacement = gesture && (gesture.kind === "move" || gesture.kind === "resize") ? previewPlacements.get(gesture.key) : null;
+    const activePlacement = placementGesture?.basePlacements.get(placementGesture.key) ?? null;
     if (activePlacement) {
-      bounds = processMapPlacementBounds(activePlacement);
+      bounds = processMapPlacementBounds(processMapPlacementGeometryForTransform(activePlacement, placementTransform));
       if (activePlacement.resource_type === "company_explorer_folder") excludedFolderID = activePlacement.resource_id;
     }
     return bounds ? processMapDeepestContainingFolder(bounds, folders, excludedFolderID) : null;
-  }, [folders, gesture, previewPlacements]);
+  }, [folders, placementGesture, placementTransform]);
 
   const selectedPlacement = selection?.kind === "placement" ? presentation.placements.get(selection.id) ?? null : null;
+  const gesturePlacementKeys = placementGesture?.basePlacementKeys ?? null;
+  const gestureTraceIDs = placementGesture?.baseTraceIDs ?? null;
   const editedPlacementKeys = useMemo(() => new Set([
     ...committedOverlay.placements.keys(),
     ...committedOverlay.removedPlacementKeys,
     ...previewPlacements.keys(),
+    ...(gesturePlacementKeys ?? []),
     ...(selection?.kind === "placement" ? [selection.id] : []),
-  ]), [committedOverlay.placements, committedOverlay.removedPlacementKeys, previewPlacements, selection]);
+  ]), [committedOverlay.placements, committedOverlay.removedPlacementKeys, gesturePlacementKeys, previewPlacements, selection]);
   const editedTraceIDs = useMemo(() => new Set([
     ...committedOverlay.traces.keys(),
     ...previewTraces.keys(),
     ...removedTraceIDs,
+    ...(gestureTraceIDs ?? []),
     ...(selection?.kind === "trace" ? [selection.id] : []),
-  ]), [committedOverlay.traces, previewTraces, removedTraceIDs, selection]);
+  ]), [committedOverlay.traces, gestureTraceIDs, previewTraces, removedTraceIDs, selection]);
   const overlayPlacements = useMemo(() => {
     const result = new Map<string, ProcessMapVisiblePlacement>();
     for (const key of editedPlacementKeys) {
@@ -1454,10 +1567,11 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     connectionPreview: gesture?.kind === "connection" ? { source: gesture.source, point: gesture.point } : null,
     highlightedFolderKey: highlightedFolder ? placementKey(highlightedFolder) : null,
     connectionSourceKey: gesture?.kind === "connection" ? placementKey(gesture.source) : null,
-  }), [gesture, highlightedFolder, hoveredPlacementKey, overlayPlacements, overlayTraces, selection]);
+    placementTransform,
+  }), [gesture, highlightedFolder, hoveredPlacementKey, overlayPlacements, overlayTraces, placementTransform, selection]);
 
-  const editedPlacementMembership = [...editedPlacementKeys].sort().join("\0");
-  const editedTraceMembership = [...editedTraceIDs].sort().join("\0");
+  const editedPlacementMembership = useMemo(() => [...editedPlacementKeys].sort().join("\0"), [editedPlacementKeys]);
+  const editedTraceMembership = useMemo(() => [...editedTraceIDs].sort().join("\0"), [editedTraceIDs]);
   const spatialEditedPlacementKeys = useMemo(
     () => new Set(editedPlacementMembership ? editedPlacementMembership.split("\0") : []),
     [editedPlacementMembership],
@@ -1548,26 +1662,29 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const startPlacementGesture = useCallback((pick: PlacementPick | ResizePick, point: ProcessMapGridPoint) => {
     if (processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) !== "editing") return;
-    const basePlacements = pick.kind === "placement" ? descendantsForMove(pick.placement, presentationRef.current.placements) : new Map([[pick.key, clonePlacement(pick.placement)]]);
-    const baseTraces = translatedTraces(presentationRef.current.traces, new Set(basePlacements.keys()), 0, 0);
+    const subtree = processMapPlacementSubtree(pick.placement, presentationRef.current.placements);
+    const basePlacements = pick.kind === "placement" ? subtree : new Map([[pick.key, pick.placement]]);
+    const basePlacementKeys = new Set(basePlacements.keys());
+    const baseTraces = pick.kind === "placement" && basePlacements.size > 1
+      ? processMapInternalTracesForMove(presentationRef.current.traces, basePlacementKeys)
+      : new Map<string, ProcessMapTrace>();
     const next: PlacementGesture = {
       kind: pick.kind === "resize" ? "resize" : "move",
       key: pick.key,
       start: point,
       basePlacements,
+      basePlacementKeys,
       baseTraces,
+      baseTraceIDs: new Set(baseTraces.keys()),
+      containedPlacements: [...subtree].filter(([key]) => key !== pick.key).map(([, placement]) => placement),
+      deltaX: 0,
+      deltaY: 0,
       ...(pick.kind === "resize" ? { horizontal: pick.horizontal, vertical: pick.vertical } : {}),
       moved: false,
     };
     gestureRef.current = next;
     setSelection({ kind: "placement", id: pick.key });
     setGesture(next);
-    const nextPlacements = replaceProcessMapPreviewEntries(previewPlacementsRef.current, basePlacements.keys(), basePlacements);
-    const nextTraces = replaceProcessMapPreviewEntries(previewTracesRef.current, baseTraces.keys(), baseTraces);
-    previewPlacementsRef.current = nextPlacements;
-    previewTracesRef.current = nextTraces;
-    setPreviewPlacements(nextPlacements);
-    setPreviewTraces(nextTraces);
   }, [settledViewState.zoom]);
 
   const handleDragStart = useCallback((info: PickingInfo, event: { stopPropagation: () => void }) => {
@@ -1618,26 +1735,12 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     }
     const dx = snapProcessMapGridCoordinate(point.x - current.start.x);
     const dy = snapProcessMapGridCoordinate(point.y - current.start.y);
-    if (current.kind === "move") {
-      const next = new Map<string, ProcessMapVisiblePlacement>();
-      for (const [key, placement] of current.basePlacements) next.set(key, { ...placement, grid_x: placement.grid_x + dx, grid_y: placement.grid_y + dy });
-      const nextTraces = translatedTraces(current.baseTraces, new Set(next.keys()), dx, dy);
-      const nextPlacementPreviews = replaceProcessMapPreviewEntries(previewPlacementsRef.current, current.basePlacements.keys(), next);
-      const nextTracePreviews = replaceProcessMapPreviewEntries(previewTracesRef.current, current.baseTraces.keys(), nextTraces);
-      previewPlacementsRef.current = nextPlacementPreviews;
-      previewTracesRef.current = nextTracePreviews;
-      setPreviewPlacements(nextPlacementPreviews);
-      setPreviewTraces(nextTracePreviews);
-    } else {
-      const base = current.basePlacements.get(current.key);
-      if (!base) return;
-      const resized = resizeProcessMapPlacement(base, base.resource_type, dx, dy, current.horizontal!, current.vertical!);
-      const next = new Map([[current.key, { ...base, ...resized }]]);
-      const nextPreviews = replaceProcessMapPreviewEntries(previewPlacementsRef.current, current.basePlacements.keys(), next);
-      previewPlacementsRef.current = nextPreviews;
-      setPreviewPlacements(nextPreviews);
-    }
-    const next = { ...current, moved: current.moved || dx !== 0 || dy !== 0 };
+    const next = {
+      ...current,
+      deltaX: dx,
+      deltaY: dy,
+      moved: current.moved || dx !== 0 || dy !== 0,
+    };
     gestureRef.current = next;
     setGesture(next);
   }, []);
@@ -1702,30 +1805,39 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       else setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, [current.trace.resource_operational_relationship_id], new Map()));
       return;
     }
-    const placement = previewPlacementsRef.current.get(current.key);
     setGesture(null);
-    if (!placement || !current.moved) {
-      setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), new Map()));
-      setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, current.baseTraces.keys(), new Map()));
-      return;
-    }
+    if (!current.moved) return;
+    const transform: ProcessMapPlacementTransform = {
+      kind: current.kind,
+      key: current.key,
+      placementKeys: current.basePlacementKeys,
+      traceIDs: current.baseTraceIDs,
+      deltaX: current.deltaX,
+      deltaY: current.deltaY,
+      horizontal: current.horizontal,
+      vertical: current.vertical,
+    };
+    const pending = materializeProcessMapPlacementTransform(current.basePlacements, transform);
+    const placement = pending.get(current.key);
+    if (!placement) return;
     const parent = processMapDeepestContainingFolder(processMapPlacementBounds(placement), folders, placement.resource_type === "company_explorer_folder" ? placement.resource_id : undefined);
     const saved = { ...placement, map_parent_folder_id: parent?.resource_id ?? null };
-    const pending = new Map<string, ProcessMapVisiblePlacement>();
-    for (const key of current.basePlacements.keys()) {
-      const preview = previewPlacementsRef.current.get(key);
-      if (preview) pending.set(key, preview);
-    }
     pending.set(current.key, saved);
-    if (current.kind === "resize" && saved.resource_type === "company_explorer_folder" && !folderContainsItsChildren(saved, presentationRef.current.placements)) {
-      setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), new Map()));
-      setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, current.baseTraces.keys(), new Map()));
+    if (current.kind === "resize" && saved.resource_type === "company_explorer_folder" && !folderContainsItsChildren(saved, current.containedPlacements)) {
       setNotice("Folder resize was restored because every contained placement must remain inside its fence.");
       return;
     }
-    setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), pending));
-    void savePlacement(saved, pending, new Set(current.baseTraces.keys()));
-  }, [finishConnection, folders, previewPlacements, previewTraces, savePlacement, saveTrace]);
+    const nextPlacementPreviews = replaceProcessMapPreviewEntries(previewPlacementsRef.current, current.basePlacementKeys, pending);
+    previewPlacementsRef.current = nextPlacementPreviews;
+    setPreviewPlacements(nextPlacementPreviews);
+    if (current.baseTraces.size > 0) {
+      const translated = translatedTraces(current.baseTraces, current.deltaX, current.deltaY);
+      const nextTracePreviews = replaceProcessMapPreviewEntries(previewTracesRef.current, current.baseTraceIDs, translated);
+      previewTracesRef.current = nextTracePreviews;
+      setPreviewTraces(nextTracePreviews);
+    }
+    void savePlacement(saved, pending, current.baseTraceIDs);
+  }, [finishConnection, folders, savePlacement, saveTrace]);
 
   const fitFolder = useCallback((placement: ProcessMapVisiblePlacement) => {
     const next = fitProcessMapViewState(processMapPlacementBounds(placement), viewportSize, { padding: 80 });
@@ -1852,7 +1964,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     };
     const operationGeneration = reserveOperation(key);
     const removalPlacementKeys = placement.resource_type === "company_explorer_folder"
-      ? new Set(descendantsForMove(placement, presentationRef.current.placements).keys())
+      ? new Set(processMapPlacementSubtree(placement, presentationRef.current.placements).keys())
       : new Set([key]);
     for (const affectedKey of removalPlacementKeys) {
       if (affectedKey !== key) reserveOperation(affectedKey);
@@ -1904,6 +2016,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [apiBase, applyEnvelope, companyID, loadScene, markUnsettled, nextOperation, refreshAfterMutation, selection]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
     if (event.key === "Delete" || event.key === "Backspace") {
       if (!selection) return;
       event.preventDefault();
@@ -1915,9 +2028,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       const current = gestureRef.current;
       if (current?.kind === "waypoint") {
         setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, [current.trace.resource_operational_relationship_id], new Map()));
-      } else if (current && current.kind !== "connection") {
-        setPreviewPlacements((previews) => replaceProcessMapPreviewEntries(previews, current.basePlacements.keys(), new Map()));
-        setPreviewTraces((previews) => replaceProcessMapPreviewEntries(previews, current.baseTraces.keys(), new Map()));
       }
       gestureRef.current = null;
       setGesture(null);
@@ -1931,15 +2041,20 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     const id = pinnedProcessID ?? (hoverModeEnabled ? hoveredProcessID : null);
     return id ? [...presentation.placements.values()].find((placement) => placement.resource_type === "logic_gate" && placement.resource_id === id) ?? null : null;
   }, [hoverModeEnabled, hoveredProcessID, pinnedProcessID, presentation.placements]);
-  const qdVisible = qdPlacement && processMapPlacementDisplayLOD(qdPlacement, 2 ** settledViewState.zoom) === "editing";
+  const qdGeometry = qdPlacement ? processMapPlacementGeometryForTransform(qdPlacement, placementTransform) : null;
+  const qdVisible = qdPlacement && qdGeometry && processMapPlacementDisplayLOD({
+    grid_width: qdGeometry.grid_width,
+    grid_height: qdGeometry.grid_height,
+    presentation: qdPlacement.presentation,
+  }, 2 ** settledViewState.zoom) === "editing";
   const qdPosition = useMemo(() => {
-    if (!qdVisible || !qdPlacement) return null;
+    if (!qdVisible || !qdGeometry) return null;
     const scale = 2 ** viewState.zoom;
     return {
-      left: viewportSize.width / 2 + (qdPlacement.grid_x + qdPlacement.grid_width - viewState.target[0]) * scale + 22,
-      top: viewportSize.height / 2 + (qdPlacement.grid_y - viewState.target[1]) * scale,
+      left: viewportSize.width / 2 + (qdGeometry.grid_x + qdGeometry.grid_width - viewState.target[0]) * scale + 22,
+      top: viewportSize.height / 2 + (qdGeometry.grid_y - viewState.target[1]) * scale,
     };
-  }, [qdPlacement, qdVisible, viewState, viewportSize]);
+  }, [qdGeometry, qdVisible, viewState, viewportSize]);
   const cameraDragEnabled = gesture === null;
   const resizeCursor = gesture?.kind === "resize"
     ? processMapResizeCursor(gesture.horizontal!, gesture.vertical!)

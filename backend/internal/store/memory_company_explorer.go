@@ -111,6 +111,7 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
+	beforeMutation := r.snapshotProcessMapMutationLocked()
 	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_explorer_folder_created", map[string]any{
 		"folder_id": item.FolderID, "parent_entity_id": parentFolderID,
 	})); err != nil {
@@ -118,7 +119,10 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 	}
 	r.folders[key(companyID, item.FolderID)] = item
 	r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID, now)
-	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID)
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID); err != nil {
+		r.restoreProcessMapMutationLocked(beforeMutation)
+		return domain.CompanyExplorerFolder{}, err
+	}
 	return item, nil
 }
 
@@ -503,6 +507,7 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 		}
 	}
 
+	beforeMutation := r.snapshotProcessMapMutationLocked()
 	item.ParentFolderID = parent
 	item.Position = position
 	item.UpdatedTimestamp = time.Now().UTC()
@@ -515,7 +520,10 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	}
 	r.folders[key(companyID, item.FolderID)] = item
 	r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID, item.UpdatedTimestamp)
-	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID)
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID); err != nil {
+		r.restoreProcessMapMutationLocked(beforeMutation)
+		return domain.CompanyExplorerFolder{}, err
+	}
 	return item, nil
 }
 
@@ -821,12 +829,18 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 	if err := r.validateCompanyExplorerFolderItemAssignmentLocked(companyID, folderID, itemType, itemID); err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
+	beforeMutation := r.snapshotProcessMapMutationLocked()
 	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_explorer_item_placed", map[string]any{
 		"parent_entity_id": folderID, "target_type": itemType, "target_id": itemID,
 	})); err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
-	return r.assignCompanyExplorerFolderItemLocked(companyID, folderID, itemType, itemID, position)
+	item, deletedRelationshipIDs, err := r.assignCompanyExplorerFolderItemLocked(companyID, folderID, itemType, itemID, position)
+	if err != nil {
+		r.restoreProcessMapMutationLocked(beforeMutation)
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	return item, deletedRelationshipIDs, nil
 }
 
 func (r *MemoryRepo) AssignCompanyExplorerFolderItems(companyID string, assignments []CompanyExplorerFolderItemAssignmentInput) ([]domain.CompanyExplorerFolderItem, []CompanyExplorerRelationshipDeleteResult, error) {
@@ -841,6 +855,7 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItems(companyID string, assignme
 			return nil, nil, err
 		}
 	}
+	beforeMutation := r.snapshotProcessMapMutationLocked()
 	eventInputs := make([]DomainEventInput, 0, len(assignments))
 	for _, assignment := range assignments {
 		eventInputs = append(eventInputs, workspaceDomainEventInput(companyID, "company_explorer_item_placed", map[string]any{
@@ -856,6 +871,7 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItems(companyID string, assignme
 	for _, assignment := range assignments {
 		item, deletedRelationshipIDs, err := r.assignCompanyExplorerFolderItemLocked(companyID, assignment.FolderID, assignment.ItemType, assignment.ItemID, assignment.Position)
 		if err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
 			return nil, nil, err
 		}
 		items = append(items, item)
@@ -921,7 +937,9 @@ func (r *MemoryRepo) assignCompanyExplorerFolderItemLocked(companyID, folderID, 
 	if itemType == EntityTypeLogicGate {
 		parentID := folderID
 		r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeProcess, itemID, &parentID, now)
-		r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, itemID, &parentID)
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, itemID, &parentID); err != nil {
+			return domain.CompanyExplorerFolderItem{}, nil, err
+		}
 	}
 
 	return item, []string{}, nil

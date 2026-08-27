@@ -116,9 +116,12 @@ func TestAutomaticProcessMapPlacementUsesActualSizesForSquareBiasedRoots(t *test
 	build := func() []domain.ProcessMapPlacement {
 		placements := make([]domain.ProcessMapPlacement, 0, len(sizes))
 		for index, size := range sizes {
-			x, y := processMapSquareBiasedPosition(
-				placements, placements, 0, 0, memoryProcessMapRootGap, size[0], size[1],
+			x, y, ok := processMapSquareBiasedPosition(
+				placements, 0, 0, memoryProcessMapRootGap, size[0], size[1],
 			)
+			if !ok {
+				t.Fatalf("root %d has no valid placement", index)
+			}
 			placement := domain.ProcessMapPlacement{
 				ResourceType: domain.ProcessMapResourceTypeFolder,
 				ResourceID:   fmt.Sprintf("root-%02d", index),
@@ -160,7 +163,10 @@ func TestAutomaticProcessMapPlacementPrefersSquarenessWhenMaximumSideTies(t *tes
 	sizes := [][2]int{{18, 13}, {58, 11}, {29, 32}, {74, 22}, {14, 53}, {77, 67}}
 	placements := make([]domain.ProcessMapPlacement, 0, len(sizes))
 	for index, size := range sizes {
-		x, y := processMapSquareBiasedPosition(placements, placements, 0, 0, 2, size[0], size[1])
+		x, y, ok := processMapSquareBiasedPosition(placements, 0, 0, 2, size[0], size[1])
+		if !ok {
+			t.Fatalf("root %d has no valid placement", index)
+		}
 		placements = append(placements, domain.ProcessMapPlacement{
 			ResourceType: domain.ProcessMapResourceTypeFolder,
 			ResourceID:   fmt.Sprintf("tie-root-%02d", index),

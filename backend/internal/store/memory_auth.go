@@ -162,6 +162,7 @@ func (r *MemoryRepo) CreateCompany(name string) (domain.Company, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	snapshot := r.snapshotProcessMapMutationLocked()
 	now := time.Now().UTC()
 	company := domain.Company{
 		CompanyID:        newUUIDv7String(),
@@ -172,7 +173,10 @@ func (r *MemoryRepo) CreateCompany(name string) (domain.Company, error) {
 	r.companies[company.CompanyID] = company
 	r.ensureCompanyExplorerV2CompanyGraphLocked(company.CompanyID)
 	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(company.CompanyID)
-	r.syncMemoryDefaultFolderProcessMapPlacementsLocked(company.CompanyID, defaultFolders)
+	if err := r.syncMemoryDefaultFolderProcessMapPlacementsLocked(company.CompanyID, defaultFolders); err != nil {
+		r.restoreProcessMapMutationLocked(snapshot)
+		return domain.Company{}, err
+	}
 	return company, nil
 }
 
@@ -217,6 +221,7 @@ func (r *MemoryRepo) EnsureCompany(companyID, name string) domain.Company {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	snapshot := r.snapshotProcessMapMutationLocked()
 	now := time.Now().UTC()
 	company, ok := r.companies[companyID]
 	if !ok {
@@ -233,7 +238,13 @@ func (r *MemoryRepo) EnsureCompany(companyID, name string) domain.Company {
 	r.companies[companyID] = company
 	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
 	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
-	r.syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID, defaultFolders)
+	if err := r.syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID, defaultFolders); err != nil {
+		// EnsureCompany predates repository error returns and is used only by
+		// deterministic bootstrap/test setup. Return an unmistakable empty value
+		// after restoring every mutation if existing malformed map state blocks it.
+		r.restoreProcessMapMutationLocked(snapshot)
+		return domain.Company{}
+	}
 	return company
 }
 
