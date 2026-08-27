@@ -77,13 +77,16 @@ const COLOR_PROCESS: [number, number, number, number] = [25, 240, 122, 235];
 const COLOR_TRACE: [number, number, number, number] = [38, 195, 234, 220];
 const PROCESS_MAP_TRACE_WIDTH_PX = 3;
 const PROCESS_MAP_SELECTED_TRACE_WIDTH_PX = 4;
-const COLOR_TEXT: [number, number, number, number] = [30, 41, 59, 245];
-const COLOR_PROCESS_SURFACE: [number, number, number, number] = [248, 250, 252, 252];
-const COLOR_PROCESS_SHADOW: [number, number, number, number] = [100, 116, 139, 42];
+const COLOR_MAP_BACKGROUND: [number, number, number, number] = [2, 6, 23, 255];
+const COLOR_TEXT: [number, number, number, number] = [248, 250, 252, 255];
+const COLOR_PROCESS_SURFACE: [number, number, number, number] = [15, 23, 42, 252];
+const COLOR_PROCESS_SHADOW: [number, number, number, number] = [0, 0, 0, 115];
+const COLOR_RESTRICTED_SURFACE: [number, number, number, number] = [30, 41, 59, 245];
+const COLOR_RESTRICTED_BORDER: [number, number, number, number] = [148, 163, 184, 210];
 const COLOR_SCORE_GREEN: [number, number, number, number] = [104, 184, 78, 255];
 const COLOR_SCORE_YELLOW: [number, number, number, number] = [242, 193, 79, 255];
 const COLOR_SCORE_RED: [number, number, number, number] = [223, 83, 83, 255];
-const COLOR_SCORE_NEUTRAL: [number, number, number, number] = [100, 116, 139, 255];
+const COLOR_SCORE_NEUTRAL: [number, number, number, number] = [148, 163, 184, 255];
 const COLOR_RESPONSIBLE: [number, number, number, number] = [240, 138, 36, 255];
 const COLOR_ACCOUNTABLE: [number, number, number, number] = [25, 200, 121, 255];
 
@@ -752,8 +755,8 @@ function renderTileSubLayers(
     const clipped = clipRectangle(bounds, tile);
     if (!clipped) continue;
     if (placement.restricted) {
-      restricted.push({ polygon: boundsPolygon(clipped), fill: [226, 232, 240, 245], line: [100, 116, 139, 210], lineWidth: 0 });
-      for (const path of processMapPerimeterSegments(bounds, tile)) restrictedPerimeters.push({ path, color: [100, 116, 139, 210], width: 1 });
+      restricted.push({ polygon: boundsPolygon(clipped), fill: COLOR_RESTRICTED_SURFACE, line: COLOR_RESTRICTED_BORDER, lineWidth: 0 });
+      for (const path of processMapPerimeterSegments(bounds, tile)) restrictedPerimeters.push({ path, color: COLOR_RESTRICTED_BORDER, width: 1 });
       const center = { x: (bounds.min_x + bounds.max_x) / 2, y: (bounds.min_y + bounds.max_y) / 2 };
       if (ownsCoordinate(center, tile)) labels.push({ position: [center.x, center.y], text: "?", size: 13 });
       continue;
@@ -771,7 +774,7 @@ function renderTileSubLayers(
       }
       bodies.push({
         polygon: boundsPolygon(clipped),
-        fill: lod === "whole" ? [226, 232, 240, 238] : COLOR_PROCESS_SURFACE,
+        fill: COLOR_PROCESS_SURFACE,
         line: COLOR_PROCESS,
         lineWidth: 0,
         pick,
@@ -937,7 +940,7 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
         grid_width: geometry.grid_width,
         grid_height: geometry.grid_height,
         presentation: placement.presentation,
-      }, options.settledPixelsPerGridUnit) !== "editing") continue;
+      }, options.settledPixelsPerGridUnit) === "whole") continue;
       const bounds = processMapPlacementBounds(geometry);
       const corners: Array<[ResizePick["horizontal"], ResizePick["vertical"], [number, number]]> = [
         ["west", "north", [bounds.min_x, bounds.min_y]], ["east", "north", [bounds.max_x, bounds.min_y]],
@@ -954,7 +957,7 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
         grid_width: geometry.grid_width,
         grid_height: geometry.grid_height,
         presentation: placement.presentation,
-      }, options.settledPixelsPerGridUnit) !== "editing") continue;
+      }, options.settledPixelsPerGridUnit) === "whole") continue;
       const input = processMapInputAnchor(geometry);
       const output = processMapOutputAnchor(geometry);
       if (options.editOverlay.connectionSourceKey) {
@@ -989,7 +992,7 @@ function buildProcessMapSpatialLayers(options: ProcessMapSpatialLayerBuildOption
   const backgroundBounds = sceneBounds ?? { min_x: -1, min_y: -1, max_x: 1, max_y: 1 };
   const background = new PolygonLayer<PolygonDatum>({
     id: "process-map-background",
-    data: [{ polygon: boundsPolygon(backgroundBounds), fill: [255, 255, 255, 255], line: [255, 255, 255, 0], lineWidth: 0 }],
+    data: [{ polygon: boundsPolygon(backgroundBounds), fill: COLOR_MAP_BACKGROUND, line: COLOR_MAP_BACKGROUND, lineWidth: 0 }],
     pickable: false,
     filled: true,
     stroked: false,
@@ -1728,7 +1731,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
 
   const startPlacementGesture = useCallback((pick: PlacementPick | ResizePick, point: ProcessMapGridPoint) => {
-    if (processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) !== "editing") return;
+    if (processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "whole") return;
     const subtree = processMapPlacementSubtree(pick.placement, presentationRef.current.placements);
     const basePlacements = pick.kind === "placement" ? subtree : new Map([[pick.key, pick.placement]]);
     const basePlacementKeys = new Set(basePlacements.keys());
@@ -1822,7 +1825,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     if (point) {
       for (const placement of presentationRef.current.placements.values()) {
         const key = placementKey(placement);
-        if (key === sourceKey || processMapPlacementDisplayLOD(placement, settledPixelsPerGridUnit) !== "editing") continue;
+        if (key === sourceKey || processMapPlacementDisplayLOD(placement, settledPixelsPerGridUnit) === "whole") continue;
         const input = processMapInputAnchor(placement);
         const distancePixels = Math.hypot(input.x - point.x, input.y - point.y) * settledPixelsPerGridUnit;
         if (distancePixels > 14) continue;
@@ -1941,7 +1944,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       if (doubleClick) {
         if (pick.placement.resource_type === "company_explorer_folder") fitFolder(pick.placement);
         else openProcess(pick.placement);
-      } else if (pick.placement.resource_type === "logic_gate" && processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "editing") {
+      } else if (pick.placement.resource_type === "logic_gate" && processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) !== "whole") {
         setPinnedProcessID(pick.placement.resource_id);
         setHoveredProcessID(null);
       }
@@ -1965,14 +1968,14 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     const anchorPlacement = pick && (pick.kind === "placement" || pick.kind === "anchor" || pick.kind === "resize")
       ? pick.placement
       : null;
-    if (!gestureRef.current && anchorPlacement && processMapPlacementDisplayLOD(anchorPlacement, 2 ** settledViewState.zoom) === "editing") {
+    if (!gestureRef.current && anchorPlacement && processMapPlacementDisplayLOD(anchorPlacement, 2 ** settledViewState.zoom) !== "whole") {
       setHoveredPlacementKey(placementKey(anchorPlacement));
       setHoveredResizePick(pick?.kind === "resize" ? pick : null);
     } else if (!gestureRef.current) {
       setHoveredPlacementKey(null);
       setHoveredResizePick(null);
     }
-    if (pick?.kind === "placement" && pick.placement.resource_type === "logic_gate" && processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "editing") {
+    if (pick?.kind === "placement" && pick.placement.resource_type === "logic_gate" && processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) !== "whole") {
       showHoverCard(pick.placement.resource_id);
     } else if (hoveredProcessID) {
       scheduleHoverClose(hoveredProcessID);
@@ -2113,7 +2116,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     grid_width: qdGeometry.grid_width,
     grid_height: qdGeometry.grid_height,
     presentation: qdPlacement.presentation,
-  }, 2 ** settledViewState.zoom) === "editing";
+  }, 2 ** settledViewState.zoom) !== "whole";
   const qdPosition = useMemo(() => {
     if (!qdVisible || !qdGeometry) return null;
     const scale = 2 ** viewState.zoom;
