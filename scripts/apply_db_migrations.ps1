@@ -132,11 +132,6 @@ function Get-SecretStringValue {
   return $secret.Trim()
 }
 
-function ConvertTo-SqlLiteral {
-  param([string]$Value)
-  return "'" + $Value.Replace("'", "''") + "'"
-}
-
 $dbHost = First-NonBlank @($env:DB_HOST)
 $dbPort = First-NonBlank @($env:DB_PORT, "5432")
 $dbName = First-NonBlank @($env:DB_NAME)
@@ -174,17 +169,15 @@ if ($dbHost.StartsWith("host=")) {
 }
 $env:PGPASSWORD = $dbPassword.Trim()
 $env:PGSSLMODE = First-NonBlank @($env:PGSSLMODE, $env:DB_SSLMODE, "require")
+$env:DB_HOST = $dbHost
+$env:DB_PORT = $dbPort
+$env:DB_NAME = $dbName
+$env:DB_USER = $dbUser
+$env:DB_PASSWORD = $dbPassword.Trim()
+$env:DB_SSLMODE = $env:PGSSLMODE
 
 $startAt = if ($StartAt) { $StartAt.Trim() } else { "" }
 $startAfter = if ($StartAfter) { $StartAfter.Trim() } else { "" }
-
-function Invoke-Psql {
-  param([string[]]$Arguments)
-  & psql -h $dbHost -p $dbPort -U $dbUser -d $dbName @Arguments
-  if ($LASTEXITCODE -ne 0) {
-    throw "psql failed with exit code $LASTEXITCODE"
-  }
-}
 
 Write-Host "Target DB host: $dbHost"
 Write-Host "Target DB name: $dbName"
@@ -193,60 +186,18 @@ if ($AwsProfile) {
   Write-Host "AWS profile: $AwsProfile"
 }
 
-Invoke-Psql -Arguments @(
-  "-v", "ON_ERROR_STOP=1",
-  "-c", "create table if not exists schema_migrations (version text primary key, applied_at timestamptz not null default now());"
-)
+$runnerArguments = @("run", "./cmd/miraeopus-migrate", "-migrations", $migrationsDir)
+if ($DryRun) { $runnerArguments += "-dry-run" }
+if ($startAt -ne "") { $runnerArguments += @("-start-at", $startAt) }
+if ($startAfter -ne "") { $runnerArguments += @("-start-after", $startAfter) }
 
-$appliedRaw = & psql -h $dbHost -p $dbPort -U $dbUser -d $dbName -At -c "select version from schema_migrations;"
-if ($LASTEXITCODE -ne 0) {
-  throw "psql failed with exit code $LASTEXITCODE"
-}
-$applied = @{}
-foreach ($version in $appliedRaw) {
-  if ($version) { $applied[$version.Trim()] = $true }
-}
-
-$migrations = Get-ChildItem -Path $migrationsDir -Filter "*.sql" | Sort-Object Name
-$shouldApply = $startAt -eq "" -and $startAfter -eq ""
-$pending = @()
-
-foreach ($migration in $migrations) {
-  if ($startAfter -ne "" -and -not $shouldApply) {
-    if ($migration.Name -eq $startAfter) { $shouldApply = $true }
-    continue
+$backendDir = Join-Path $repoRoot "backend"
+Push-Location $backendDir
+try {
+  & go @runnerArguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "miraeopus-migrate failed with exit code $LASTEXITCODE"
   }
-  if ($startAt -ne "" -and -not $shouldApply) {
-    if ($migration.Name -eq $startAt) { $shouldApply = $true }
-    else { continue }
-  }
-  if ($applied.ContainsKey($migration.Name)) { continue }
-  $pending += $migration
+} finally {
+  Pop-Location
 }
-
-if ($pending.Count -eq 0) {
-  Write-Host "No pending migrations."
-  exit 0
-}
-
-Write-Host "Pending migrations:"
-foreach ($migration in $pending) {
-  Write-Host " - $($migration.Name)"
-}
-
-if ($DryRun) {
-  Write-Host "Dry run only; no migrations applied."
-  exit 0
-}
-
-foreach ($migration in $pending) {
-  Write-Host "Applying $($migration.Name)..."
-  Invoke-Psql -Arguments @("-v", "ON_ERROR_STOP=1", "--single-transaction", "-f", $migration.FullName)
-  $versionLiteral = ConvertTo-SqlLiteral -Value $migration.Name
-  Invoke-Psql -Arguments @(
-    "-v", "ON_ERROR_STOP=1",
-    "-c", "insert into schema_migrations(version) values ($versionLiteral) on conflict (version) do nothing;"
-  )
-}
-
-Write-Host "Database migrations applied."

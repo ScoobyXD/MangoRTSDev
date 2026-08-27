@@ -162,6 +162,24 @@ test("trace route helpers keep one bounded ordered integer geometry without diag
   );
 });
 
+test("trace rendering removes only monotonic collinear points and preserves reversals", () => {
+  assert.deepEqual(
+    processMapOrthogonalPathPoints({ x: 0, y: 0 }, [{ x: 5, y: 0 }], { x: 10, y: 0 }),
+    [{ x: 0, y: 0 }, { x: 10, y: 0 }],
+    "a middle point between its neighbors is redundant",
+  );
+  assert.deepEqual(
+    processMapOrthogonalPathPoints({ x: 0, y: 0 }, [{ x: 10, y: 0 }], { x: 5, y: 0 }),
+    [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 5, y: 0 }],
+    "a horizontal backtracking waypoint remains visible",
+  );
+  assert.deepEqual(
+    processMapOrthogonalPathPoints({ x: 3, y: 8 }, [{ x: 3, y: -4 }], { x: 3, y: 2 }),
+    [{ x: 3, y: 8 }, { x: 3, y: -4 }, { x: 3, y: 2 }],
+    "a vertical backtracking waypoint remains visible",
+  );
+});
+
 test("new trace routes leave the output before bending and approach the input horizontally", () => {
   const source = { x: 7, y: 2.5 };
   const target = { x: 20, y: 11 };

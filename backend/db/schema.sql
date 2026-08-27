@@ -4376,6 +4376,60 @@ CREATE TABLE public.pins (
 
 
 --
+-- Name: process_map_actual_size_layout_recovery_placements; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.process_map_actual_size_layout_recovery_placements (
+    company_id uuid NOT NULL,
+    resource_type text NOT NULL,
+    resource_id uuid NOT NULL,
+    placement_incarnation_token uuid NOT NULL,
+    map_parent_folder_id uuid,
+    before_grid_x integer NOT NULL,
+    before_grid_y integer NOT NULL,
+    before_grid_width integer NOT NULL,
+    before_grid_height integer NOT NULL,
+    before_revision bigint NOT NULL,
+    before_created_timestamp timestamp with time zone NOT NULL,
+    before_updated_timestamp timestamp with time zone NOT NULL,
+    expected_grid_x integer NOT NULL,
+    expected_grid_y integer NOT NULL,
+    expected_grid_width integer NOT NULL,
+    expected_grid_height integer NOT NULL,
+    expected_revision bigint NOT NULL,
+    expected_created_timestamp timestamp with time zone NOT NULL,
+    expected_updated_timestamp timestamp with time zone NOT NULL,
+    changed_by_migration boolean NOT NULL
+);
+
+
+--
+-- Name: process_map_actual_size_layout_recovery_runs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.process_map_actual_size_layout_recovery_runs (
+    company_id uuid NOT NULL,
+    recovery_key text NOT NULL,
+    format_version integer NOT NULL,
+    status text NOT NULL,
+    marker_event_id uuid NOT NULL,
+    marker_sequence bigint NOT NULL,
+    marker_created_timestamp timestamp with time zone NOT NULL,
+    placement_count bigint NOT NULL,
+    changed_placement_count bigint NOT NULL,
+    placement_checksum text NOT NULL,
+    created_timestamp timestamp with time zone NOT NULL,
+    rollback_event_id uuid,
+    rollback_sequence bigint,
+    rolled_back_timestamp timestamp with time zone,
+    CONSTRAINT pm_actual_size_recovery_runs_counts_chk CHECK (((placement_count >= 0) AND (changed_placement_count >= 0) AND (changed_placement_count <= placement_count))),
+    CONSTRAINT pm_actual_size_recovery_runs_format_chk CHECK ((format_version = 1)),
+    CONSTRAINT pm_actual_size_recovery_runs_rollback_state_chk CHECK ((((status = 'applied'::text) AND (rollback_event_id IS NULL) AND (rollback_sequence IS NULL) AND (rolled_back_timestamp IS NULL)) OR ((status = 'rolled_back'::text) AND (rollback_event_id IS NOT NULL) AND (rollback_sequence IS NOT NULL) AND (rolled_back_timestamp IS NOT NULL)))),
+    CONSTRAINT pm_actual_size_recovery_runs_status_chk CHECK ((status = ANY (ARRAY['applied'::text, 'rolled_back'::text])))
+);
+
+
+--
 -- Name: process_map_placements; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5622,6 +5676,22 @@ ALTER TABLE ONLY public.pins
 
 ALTER TABLE ONLY public.pins
     ADD CONSTRAINT pins_pkey PRIMARY KEY (pin_id);
+
+
+--
+-- Name: process_map_actual_size_layout_recovery_placements process_map_actual_size_layout_recovery_placements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.process_map_actual_size_layout_recovery_placements
+    ADD CONSTRAINT process_map_actual_size_layout_recovery_placements_pkey PRIMARY KEY (company_id, resource_type, resource_id);
+
+
+--
+-- Name: process_map_actual_size_layout_recovery_runs process_map_actual_size_layout_recovery_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.process_map_actual_size_layout_recovery_runs
+    ADD CONSTRAINT process_map_actual_size_layout_recovery_runs_pkey PRIMARY KEY (company_id);
 
 
 --

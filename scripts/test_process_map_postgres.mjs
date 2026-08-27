@@ -93,12 +93,31 @@ try {
       "--distribution", "Ubuntu",
       "--cd", backendDir,
       "--exec", "/usr/bin/env",
+      `MANGORTS_MIGRATION_RUNNER_TEST_DATABASE_URL=${dsn}`,
+      "MANGORTS_MIGRATION_RUNNER_TEST_RESET_ACK=DROP_DISPOSABLE_SCHEMA",
+      `MANGORTS_MIGRATION_RUNNER_TEST_PRIVATE_HOST_ACK=${testHost}`,
+      "/usr/local/go/bin/go", "test", "./cmd/miraeopus-migrate", "-run", "^TestMigrationRunnerPostgresAtomicityAndSupersession$", "-count=1",
+    ], { cwd: repoRoot, stdio: "inherit" });
+    execFileSync("wsl.exe", [
+      "--distribution", "Ubuntu",
+      "--cd", backendDir,
+      "--exec", "/usr/bin/env",
       `MANGORTS_PROCESS_MAP_TEST_DATABASE_URL=${dsn}`,
       "MANGORTS_PROCESS_MAP_TEST_RESET_ACK=DROP_DISPOSABLE_SCHEMA",
       `MANGORTS_PROCESS_MAP_TEST_PRIVATE_HOST_ACK=${testHost}`,
       "/usr/local/go/bin/go", "test", "./internal/store", "-run", testPattern, "-count=1",
     ], { cwd: repoRoot, stdio: "inherit" });
   } else {
+    execFileSync("go", ["test", "./cmd/miraeopus-migrate", "-run", "^TestMigrationRunnerPostgresAtomicityAndSupersession$", "-count=1"], {
+      cwd: backendDir,
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        MANGORTS_MIGRATION_RUNNER_TEST_DATABASE_URL: dsn,
+        MANGORTS_MIGRATION_RUNNER_TEST_RESET_ACK: "DROP_DISPOSABLE_SCHEMA",
+        MANGORTS_MIGRATION_RUNNER_TEST_PRIVATE_HOST_ACK: testHost,
+      },
+    });
     execFileSync("go", ["test", "./internal/store", "-run", testPattern, "-count=1"], {
       cwd: backendDir,
       stdio: "inherit",

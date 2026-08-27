@@ -36,7 +36,15 @@ const (
 );`
 
 	migrationLockID int64 = 4855156563379734401
+
+	processMapActualSizeLayoutMigration = "20260826_zzzy_process_map_actual_size_square_layout.sql"
 )
+
+var obsoleteProcessMapLayoutMigrations = map[string]bool{
+	"20260826_zzzz_process_map_tidy_initial_layout.sql": true,
+	"20260826_zzzzz_process_map_rectangular_layout.sql": true,
+	"20260826_zzzzzz_process_map_square_layout.sql":     true,
+}
 
 type commandConfig struct {
 	SchemaPath         string
@@ -613,6 +621,9 @@ func runMigrateMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) erro
 	if err != nil {
 		return err
 	}
+	if err := validateProcessMapLayoutMigrationAnchor(files, pending, applied); err != nil {
+		return err
+	}
 	if len(pending) == 0 {
 		log.Printf("no pending migrations")
 		return nil
@@ -628,6 +639,14 @@ func runMigrateMode(ctx context.Context, conn *sql.Conn, cfg commandConfig) erro
 	}
 
 	for _, migration := range pending {
+		alreadyApplied, err := migrationApplied(ctx, conn, migration.Name)
+		if err != nil {
+			return err
+		}
+		if alreadyApplied {
+			log.Printf("skipping %s; it was recorded by an earlier migration in this run", migration.Name)
+			continue
+		}
 		log.Printf("applying %s", migration.Name)
 		if err := execSQLFileInTransaction(ctx, conn, migration.Path, nil, func(tx *sql.Tx) error {
 			_, err := tx.ExecContext(ctx, `insert into schema_migrations(version) values ($1) on conflict (version) do nothing`, migration.Name)
@@ -645,6 +664,10 @@ func execSQLFileInTransaction(ctx context.Context, conn *sql.Conn, path string, 
 	if err != nil {
 		return err
 	}
+	statements, err := sqlForManagedTransaction(string(raw))
+	if err != nil {
+		return fmt.Errorf("prepare managed transaction: %w", err)
+	}
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -656,7 +679,7 @@ func execSQLFileInTransaction(ctx context.Context, conn *sql.Conn, path string, 
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, string(raw)); err != nil {
+	if _, err := tx.ExecContext(ctx, statements); err != nil {
 		return err
 	}
 	if beforeCommit != nil {
@@ -665,6 +688,256 @@ func execSQLFileInTransaction(ctx context.Context, conn *sql.Conn, path string, 
 		}
 	}
 	return tx.Commit()
+}
+
+func sqlForManagedTransaction(raw string) (string, error) {
+	controls, err := topLevelTransactionControls(raw)
+	if err != nil {
+		return "", err
+	}
+	beginControl := -1
+	commitControl := -1
+	for index, control := range controls {
+		switch control.kind {
+		case "begin":
+			if beginControl >= 0 {
+				return "", errors.New("multiple BEGIN statements are not supported")
+			}
+			beginControl = index
+		case "commit":
+			if commitControl >= 0 {
+				return "", errors.New("multiple COMMIT statements are not supported")
+			}
+			commitControl = index
+		default:
+			return "", errors.New("ROLLBACK is not supported inside a managed migration")
+		}
+	}
+
+	if beginControl < 0 && commitControl < 0 {
+		return raw, nil
+	}
+	if beginControl < 0 || commitControl < 0 || beginControl >= commitControl {
+		return "", errors.New("migration transaction envelope must contain one BEGIN before one COMMIT")
+	}
+	result := []byte(raw)
+	for _, control := range []sqlTransactionControl{controls[beginControl], controls[commitControl]} {
+		for index := control.start; index < control.end; index++ {
+			if result[index] != '\r' && result[index] != '\n' {
+				result[index] = ' '
+			}
+		}
+	}
+	return string(result), nil
+}
+
+type sqlTransactionControl struct {
+	kind       string
+	start, end int
+}
+
+func topLevelTransactionControls(raw string) ([]sqlTransactionControl, error) {
+	controls := []sqlTransactionControl{}
+	statementStart := -1
+	var statement strings.Builder
+
+	finishStatement := func(end int) error {
+		fields := strings.Fields(strings.ToLower(statement.String()))
+		statement.Reset()
+		start := statementStart
+		statementStart = -1
+		if len(fields) == 0 {
+			return nil
+		}
+		kind := ""
+		switch fields[0] {
+		case "begin":
+			if len(fields) > 2 || (len(fields) == 2 && fields[1] != "work" && fields[1] != "transaction") {
+				return errors.New("only a standalone BEGIN/COMMIT migration envelope is supported")
+			}
+			kind = "begin"
+		case "start":
+			if len(fields) != 2 || fields[1] != "transaction" {
+				return errors.New("unsupported START transaction control")
+			}
+			kind = "begin"
+		case "commit":
+			if len(fields) > 2 || (len(fields) == 2 && fields[1] != "work") {
+				return errors.New("only a standalone BEGIN/COMMIT migration envelope is supported")
+			}
+			kind = "commit"
+		case "end":
+			if len(fields) > 2 || (len(fields) == 2 && fields[1] != "work" && fields[1] != "transaction") {
+				return errors.New("only a standalone BEGIN/COMMIT migration envelope is supported")
+			}
+			kind = "commit"
+		case "rollback", "abort":
+			kind = "rollback"
+		case "savepoint", "release":
+			return errors.New("savepoints are not supported inside a managed migration")
+		case "prepare":
+			if len(fields) > 1 && fields[1] == "transaction" {
+				return errors.New("PREPARE TRANSACTION is not supported inside a managed migration")
+			}
+		}
+		if kind != "" {
+			controls = append(controls, sqlTransactionControl{kind: kind, start: start, end: end})
+		}
+		return nil
+	}
+
+	for index := 0; index < len(raw); {
+		if raw[index] == '-' && index+1 < len(raw) && raw[index+1] == '-' {
+			index += 2
+			for index < len(raw) && raw[index] != '\n' {
+				index++
+			}
+			continue
+		}
+		if raw[index] == '/' && index+1 < len(raw) && raw[index+1] == '*' {
+			// PostgreSQL treats a block comment as whitespace. Preserve that token
+			// boundary in the lightweight control scanner so BEGIN/*...*/WORK
+			// cannot be mistaken for one ordinary identifier.
+			statement.WriteByte(' ')
+			depth := 1
+			index += 2
+			for index < len(raw) && depth > 0 {
+				switch {
+				case raw[index] == '/' && index+1 < len(raw) && raw[index+1] == '*':
+					depth++
+					index += 2
+				case raw[index] == '*' && index+1 < len(raw) && raw[index+1] == '/':
+					depth--
+					index += 2
+				default:
+					index++
+				}
+			}
+			if depth != 0 {
+				return nil, errors.New("unterminated block comment")
+			}
+			continue
+		}
+		if raw[index] == '\'' || raw[index] == '"' {
+			quote := raw[index]
+			backslashEscapes := quote == '\'' && postgresEscapeStringPrefix(raw, index)
+			if statementStart < 0 {
+				statementStart = index
+			}
+			statement.WriteString(" ? ")
+			index++
+			closed := false
+			for index < len(raw) {
+				if backslashEscapes && raw[index] == '\\' && index+1 < len(raw) {
+					index += 2
+					continue
+				}
+				if raw[index] == quote {
+					if index+1 < len(raw) && raw[index+1] == quote {
+						index += 2
+						continue
+					}
+					index++
+					closed = true
+					break
+				}
+				index++
+			}
+			if !closed {
+				return nil, errors.New("unterminated quoted SQL value")
+			}
+			continue
+		}
+		if raw[index] == '$' {
+			endTag := index + 1
+			for endTag < len(raw) && ((raw[endTag] >= 'a' && raw[endTag] <= 'z') || (raw[endTag] >= 'A' && raw[endTag] <= 'Z') || (raw[endTag] >= '0' && raw[endTag] <= '9') || raw[endTag] == '_') {
+				endTag++
+			}
+			if endTag < len(raw) && raw[endTag] == '$' {
+				delimiter := raw[index : endTag+1]
+				if statementStart < 0 {
+					statementStart = index
+				}
+				statement.WriteString(" ? ")
+				contentEnd := strings.Index(raw[endTag+1:], delimiter)
+				if contentEnd < 0 {
+					return nil, errors.New("unterminated dollar-quoted SQL value")
+				}
+				index = endTag + 1 + contentEnd + len(delimiter)
+				continue
+			}
+		}
+		if raw[index] == ';' {
+			if err := finishStatement(index + 1); err != nil {
+				return nil, err
+			}
+			index++
+			continue
+		}
+		if statementStart < 0 && !strings.ContainsRune(" \t\r\n", rune(raw[index])) {
+			statementStart = index
+		}
+		statement.WriteByte(raw[index])
+		index++
+	}
+	if err := finishStatement(len(raw)); err != nil {
+		return nil, err
+	}
+	return controls, nil
+}
+
+func postgresEscapeStringPrefix(raw string, quoteIndex int) bool {
+	if quoteIndex < 1 || raw[quoteIndex-1] != 'e' && raw[quoteIndex-1] != 'E' {
+		return false
+	}
+	if quoteIndex == 1 {
+		return true
+	}
+	previous := raw[quoteIndex-2]
+	return !(previous >= 'a' && previous <= 'z' || previous >= 'A' && previous <= 'Z' ||
+		previous >= '0' && previous <= '9' || previous == '_' || previous == '$')
+}
+
+func migrationApplied(ctx context.Context, conn *sql.Conn, name string) (bool, error) {
+	var applied bool
+	if err := conn.QueryRowContext(ctx, `select exists(select 1 from schema_migrations where version=$1)`, name).Scan(&applied); err != nil {
+		return false, fmt.Errorf("check migration %s: %w", name, err)
+	}
+	return applied, nil
+}
+
+func validateProcessMapLayoutMigrationAnchor(files, pending []migrationFile, applied map[string]bool) error {
+	hasCorrectedFile := false
+	for _, migration := range files {
+		if migration.Name == processMapActualSizeLayoutMigration {
+			hasCorrectedFile = true
+			break
+		}
+	}
+	if !hasCorrectedFile {
+		return nil
+	}
+	correctedSelected := false
+	selectedObsolete := ""
+	for _, migration := range pending {
+		if migration.Name == processMapActualSizeLayoutMigration {
+			correctedSelected = true
+		}
+		if obsoleteProcessMapLayoutMigrations[migration.Name] && selectedObsolete == "" {
+			selectedObsolete = migration.Name
+		}
+	}
+	correctedApplied := applied[processMapActualSizeLayoutMigration]
+	if !correctedApplied && !correctedSelected {
+		if selectedObsolete == "" {
+			return fmt.Errorf("refusing migration selection that omits unrecorded corrected Process Map layout migration %s; include it or remove the migration anchor", processMapActualSizeLayoutMigration)
+		}
+		return fmt.Errorf("refusing to select obsolete Process Map layout migration %s while %s is unrecorded; include the corrected migration or remove the migration anchor", selectedObsolete, processMapActualSizeLayoutMigration)
+	}
+	if selectedObsolete != "" && correctedApplied && !correctedSelected {
+		return fmt.Errorf("refusing obsolete Process Map layout migration %s because the corrected migration is recorded but its supersession ledger row is missing", selectedObsolete)
+	}
+	return nil
 }
 
 func readAppliedMigrationsIfTableExists(ctx context.Context, conn *sql.Conn) (map[string]bool, error) {

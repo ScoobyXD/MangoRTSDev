@@ -78,6 +78,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		}
 	}
 
+	beforeMutation := r.snapshotProcessMapMutationLocked()
 	clientToEntityID := make(map[string]string, len(input.Items))
 	for _, item := range input.Items {
 		if input.EntityKind == "node" {
@@ -138,7 +139,10 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 	if syncDefaultFolderItems {
 		r.ensureCompanyExplorerV2CompanyGraphLocked(input.CompanyID)
 		defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(input.CompanyID)
-		r.syncMemoryDefaultFolderProcessMapPlacementsLocked(input.CompanyID, defaultFolders)
+		if err := r.syncMemoryDefaultFolderProcessMapPlacementsLocked(input.CompanyID, defaultFolders); err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
+			return WorkspaceEntityBatchResult{}, err
+		}
 		for _, mapping := range result.EntityMappings {
 			if !r.placeCompanyExplorerItemInDefaultFolderLocked(input.CompanyID, input.EntityKind, mapping.EntityID, true) {
 				continue
@@ -155,7 +159,10 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				continue
 			}
 			parentID := folderItem.FolderID
-			r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, mapping.EntityID, &parentID)
+			if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, mapping.EntityID, &parentID); err != nil {
+				r.restoreProcessMapMutationLocked(beforeMutation)
+				return WorkspaceEntityBatchResult{}, err
+			}
 		}
 	}
 	if input.CreatorUserID != "" {

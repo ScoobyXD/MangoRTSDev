@@ -10,17 +10,17 @@ import (
 )
 
 const (
-	memoryProcessMapRootFolderWidth    = 32
-	memoryProcessMapRootFolderHeight   = 24
-	memoryProcessMapNestedFolderWidth  = 24
-	memoryProcessMapNestedFolderHeight = 16
-	memoryProcessMapProcessWidth       = 14
-	memoryProcessMapProcessHeight      = 8
-	memoryProcessMapRootGap            = 8
-	memoryProcessMapChildGap           = 2
-	memoryProcessMapFolderPadding      = 2
-	memoryProcessMapFolderHeaderHeight = 6
-	memoryProcessMapSectionGap         = 4
+	memoryProcessMapRootFolderWidth    = processMapAutomaticRootFolderWidth
+	memoryProcessMapRootFolderHeight   = processMapAutomaticRootFolderHeight
+	memoryProcessMapNestedFolderWidth  = processMapAutomaticNestedFolderWidth
+	memoryProcessMapNestedFolderHeight = processMapAutomaticNestedFolderHeight
+	memoryProcessMapProcessWidth       = processMapAutomaticProcessWidth
+	memoryProcessMapProcessHeight      = processMapAutomaticProcessHeight
+	memoryProcessMapRootGap            = processMapAutomaticRootGap
+	memoryProcessMapChildGap           = processMapAutomaticChildGap
+	memoryProcessMapFolderPadding      = processMapAutomaticFolderPadding
+	memoryProcessMapFolderHeaderHeight = processMapAutomaticFolderHeaderHeight
+	memoryProcessMapSectionGap         = processMapAutomaticSectionGap
 )
 
 func processMapPlacementMemoryKey(companyID, resourceType, resourceID string) string {
@@ -59,281 +59,79 @@ func processMapParentPointer(value string) *string {
 	return &value
 }
 
-func (r *MemoryRepo) nextMemoryProcessMapPositionLocked(companyID, resourceType, resourceID string, parentID *string, width, height int) (int, int) {
-	if parentID == nil {
-		roots := []domain.ProcessMapPlacement{}
-		for placementKey, placement := range r.processMapPlacements {
-			if placement.CompanyID != companyID || placementKey == processMapPlacementMemoryKey(companyID, resourceType, resourceID) || placement.MapParentFolderID != nil {
-				continue
-			}
-			roots = append(roots, placement)
-		}
-		if len(roots) == 0 {
-			return 0, 0
-		}
-		return processMapSquareBiasedPosition(roots, roots, 0, 0, memoryProcessMapRootGap, width, height)
-	}
-	parent, ok := r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, *parentID)]
-	if !ok {
-		return 0, 0
-	}
-	folders := []domain.ProcessMapPlacement{}
-	processes := []domain.ProcessMapPlacement{}
-	for placementKey, placement := range r.processMapPlacements {
-		if placement.CompanyID != companyID || placementKey == processMapPlacementMemoryKey(companyID, resourceType, resourceID) ||
-			placement.MapParentFolderID == nil || *placement.MapParentFolderID != *parentID {
-			continue
-		}
-		if placement.ResourceType == domain.ProcessMapResourceTypeFolder {
-			folders = append(folders, placement)
-		} else if placement.ResourceType == domain.ProcessMapResourceTypeProcess {
-			processes = append(processes, placement)
-		}
-	}
-	childStartX := parent.GridX + memoryProcessMapFolderPadding
-	childStartY := parent.GridY + memoryProcessMapFolderHeaderHeight
-	if resourceType == domain.ProcessMapResourceTypeFolder {
-		return processMapSquareBiasedPosition(folders, folders, childStartX, childStartY, memoryProcessMapChildGap, width, height)
-	}
-	folderLaneWidth := 0
-	for _, folder := range folders {
-		folderLaneWidth = max(folderLaneWidth, folder.GridX+folder.GridWidth-childStartX)
-	}
-	processStartX := childStartX
-	if len(folders) > 0 {
-		processStartX += folderLaneWidth + memoryProcessMapSectionGap
-	}
-	if len(processes) > 0 {
-		minimumProcessX := processes[0].GridX
-		for _, process := range processes[1:] {
-			minimumProcessX = min(minimumProcessX, process.GridX)
-		}
-		processStartX = max(processStartX, minimumProcessX)
-	}
-	return processMapSquareBiasedPosition(processes, processes, processStartX, childStartY, memoryProcessMapChildGap, width, height)
-}
-
-func (r *MemoryRepo) relocateOverlappingAutomaticMemoryProcessMapChildLocked(
-	companyID string,
-	parent domain.ProcessMapPlacement,
-	child domain.ProcessMapPlacement,
-	now time.Time,
-) domain.ProcessMapPlacement {
-	section := []domain.ProcessMapPlacement{}
-	conflicts := false
+// syncAutomaticMemoryProcessMapPlacementLocked applies the same validated pure
+// plan as PostgreSQL. Nothing is mutated until every placement and translated
+// reparent trace has passed the shared coordinate checks.
+func (r *MemoryRepo) syncAutomaticMemoryProcessMapPlacementLocked(companyID, resourceType, resourceID string, parentID *string) (bool, error) {
+	parentValue := strings.TrimSpace(pointerString(parentID))
+	placements := make([]domain.ProcessMapPlacement, 0, len(r.processMapPlacements))
 	for _, placement := range r.processMapPlacements {
-		if placement.CompanyID != companyID || placement.ResourceType == child.ResourceType && placement.ResourceID == child.ResourceID ||
-			placement.MapParentFolderID == nil || *placement.MapParentFolderID != parent.ResourceID {
-			continue
-		}
-		if placement.ResourceType == child.ResourceType {
-			section = append(section, placement)
-			conflicts = conflicts || processMapPlacementsConflictWithGap(child, placement, memoryProcessMapChildGap)
+		if placement.CompanyID == companyID {
+			placements = append(placements, cloneProcessMapPlacement(placement))
 		}
 	}
-	if !conflicts {
-		return child
+	plan, err := planAutomaticProcessMapPlacement(companyID, resourceType, resourceID, parentValue, placements)
+	if err != nil {
+		return false, err
 	}
-	childStartX := parent.GridX + memoryProcessMapFolderPadding
-	childStartY := parent.GridY + memoryProcessMapFolderHeaderHeight
-	nextX := childStartX
-	if child.ResourceType == domain.ProcessMapResourceTypeProcess {
-		folderLaneWidth := 0
-		hasFolders := false
-		for _, sibling := range r.processMapPlacements {
-			if sibling.CompanyID == companyID && sibling.ResourceType == domain.ProcessMapResourceTypeFolder &&
-				sibling.MapParentFolderID != nil && *sibling.MapParentFolderID == parent.ResourceID {
-				hasFolders = true
-				folderLaneWidth = max(folderLaneWidth, sibling.GridX+sibling.GridWidth-childStartX)
-			}
-		}
-		if hasFolders {
-			nextX += folderLaneWidth + memoryProcessMapSectionGap
-		}
+	if len(plan.Placements) == 0 {
+		return false, nil
 	}
-	nextX, nextY := processMapSquareBiasedPosition(
-		section, section, nextX, childStartY, memoryProcessMapChildGap, child.GridWidth, child.GridHeight,
-	)
-	deltaX, deltaY := nextX-child.GridX, nextY-child.GridY
-	if child.ResourceType == domain.ProcessMapResourceTypeFolder {
-		r.translateMemoryProcessMapFolderLocked(companyID, child.ResourceID, deltaX, deltaY, now)
-	}
-	child.GridX, child.GridY = nextX, nextY
-	child.Revision++
-	child.UpdatedTimestamp = now
-	r.processMapPlacements[processMapPlacementMemoryKey(companyID, child.ResourceType, child.ResourceID)] = child
-	return child
-}
 
-func (r *MemoryRepo) separateAutomaticMemoryProcessMapSectionsLocked(companyID, parentID string, now time.Time) {
-	folderRight, processLeft := 0, 0
-	hasFolders, hasProcesses := false, false
-	processKeys := []string{}
-	for placementKey, placement := range r.processMapPlacements {
-		if placement.CompanyID != companyID || placement.MapParentFolderID == nil || *placement.MapParentFolderID != parentID {
-			continue
-		}
-		if placement.ResourceType == domain.ProcessMapResourceTypeFolder {
-			hasFolders = true
-			folderRight = max(folderRight, placement.GridX+placement.GridWidth)
-		} else if placement.ResourceType == domain.ProcessMapResourceTypeProcess {
-			processKeys = append(processKeys, placementKey)
-			if !hasProcesses || placement.GridX < processLeft {
-				processLeft = placement.GridX
-			}
-			hasProcesses = true
-		}
+	moved := make(map[string]bool, len(plan.ReparentedFolderMembers))
+	for _, member := range plan.ReparentedFolderMembers {
+		moved[processMapPlacementMemoryKey(companyID, member.ResourceType, member.ResourceID)] = true
 	}
-	if !hasFolders || !hasProcesses || processLeft >= folderRight+memoryProcessMapSectionGap {
-		return
-	}
-	deltaX := folderRight + memoryProcessMapSectionGap - processLeft
-	for _, placementKey := range processKeys {
-		placement := r.processMapPlacements[placementKey]
-		placement.GridX += deltaX
-		placement.Revision++
-		placement.UpdatedTimestamp = now
-		r.processMapPlacements[placementKey] = placement
-	}
-}
-
-func (r *MemoryRepo) expandMemoryProcessMapAncestorsLocked(companyID string, placement domain.ProcessMapPlacement, now time.Time) {
-	for placement.MapParentFolderID != nil {
-		parentKey := processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, *placement.MapParentFolderID)
-		parent, ok := r.processMapPlacements[parentKey]
-		if !ok {
-			return
-		}
-		placement = r.relocateOverlappingAutomaticMemoryProcessMapChildLocked(companyID, parent, placement, now)
-		r.separateAutomaticMemoryProcessMapSectionsLocked(companyID, parent.ResourceID, now)
-		width, height := parent.GridWidth, parent.GridHeight
-		for _, child := range r.processMapPlacements {
-			if child.CompanyID != companyID || child.MapParentFolderID == nil || *child.MapParentFolderID != parent.ResourceID {
+	translatedTraces := map[string]domain.ProcessMapTrace{}
+	if (plan.ReparentedFolderDeltaX != 0 || plan.ReparentedFolderDeltaY != 0) && len(moved) > 0 {
+		for traceKey, trace := range r.processMapTraces {
+			if trace.CompanyID != companyID {
 				continue
 			}
-			width = max(width, child.GridX+child.GridWidth-parent.GridX+memoryProcessMapFolderPadding)
-			height = max(height, child.GridY+child.GridHeight-parent.GridY+memoryProcessMapFolderPadding)
-		}
-		if width == parent.GridWidth && height == parent.GridHeight {
-			return
-		}
-		parent.GridWidth, parent.GridHeight = width, height
-		parent.Revision++
-		parent.UpdatedTimestamp = now
-		r.processMapPlacements[parentKey] = parent
-		placement = parent
-	}
-}
-
-func (r *MemoryRepo) translateMemoryProcessMapFolderLocked(companyID, folderID string, deltaX, deltaY int, now time.Time) {
-	if deltaX == 0 && deltaY == 0 {
-		return
-	}
-	for placementKey, descendant := range r.processMapPlacements {
-		if descendant.CompanyID != companyID || placementKey == processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folderID) {
-			continue
-		}
-		for parentID := descendant.MapParentFolderID; parentID != nil; {
-			if *parentID == folderID {
-				descendant.GridX += deltaX
-				descendant.GridY += deltaY
-				descendant.Revision++
-				descendant.UpdatedTimestamp = now
-				r.processMapPlacements[placementKey] = descendant
-				break
-			}
-			parent, ok := r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, *parentID)]
+			relationship, ok := r.resourceOperationalRelationships[traceKey]
 			if !ok {
-				break
+				relationship, ok = r.resourceOperationalRelationships[key(companyID, trace.ResourceOperationalRelationshipID)]
 			}
-			parentID = parent.MapParentFolderID
-		}
-	}
-}
-
-func (r *MemoryRepo) spaceAutomaticMemoryProcessMapRootsLocked(companyID string, now time.Time) {
-	roots := []domain.ProcessMapPlacement{}
-	for _, placement := range r.processMapPlacements {
-		if placement.CompanyID == companyID && placement.MapParentFolderID == nil {
-			roots = append(roots, placement)
-		}
-	}
-	slices.SortFunc(roots, compareProcessMapPlacements)
-	placed := []domain.ProcessMapPlacement{}
-	for _, root := range roots {
-		conflicts := false
-		for _, previous := range placed {
-			if processMapPlacementsConflictWithGap(root, previous, memoryProcessMapRootGap) {
-				conflicts = true
-				break
+			if !ok || !moved[processMapPlacementMemoryKey(companyID, relationship.Source.ResourceType, relationship.Source.ResourceID)] ||
+				!moved[processMapPlacementMemoryKey(companyID, relationship.Target.ResourceType, relationship.Target.ResourceID)] {
+				continue
 			}
-		}
-		if conflicts {
-			nextX, nextY := processMapSquareBiasedPosition(
-				placed, placed, 0, 0, memoryProcessMapRootGap, root.GridWidth, root.GridHeight,
-			)
-			deltaX, deltaY := nextX-root.GridX, nextY-root.GridY
-			if root.ResourceType == domain.ProcessMapResourceTypeFolder {
-				r.translateMemoryProcessMapFolderLocked(companyID, root.ResourceID, deltaX, deltaY, now)
+			trace = cloneProcessMapTrace(trace)
+			for index := range trace.RoutePoints {
+				x := trace.RoutePoints[index].X + plan.ReparentedFolderDeltaX
+				y := trace.RoutePoints[index].Y + plan.ReparentedFolderDeltaY
+				if !validProcessMapCoordinate(x) || !validProcessMapCoordinate(y) {
+					return false, ErrInvalid
+				}
+				trace.RoutePoints[index].X = x
+				trace.RoutePoints[index].Y = y
 			}
-			root.GridX, root.GridY = nextX, nextY
-			root.Revision++
-			root.UpdatedTimestamp = now
-			r.processMapPlacements[processMapPlacementMemoryKey(companyID, root.ResourceType, root.ResourceID)] = root
+			translatedTraces[traceKey] = trace
 		}
-		placed = append(placed, root)
-	}
-}
-
-// syncAutomaticMemoryProcessMapPlacementLocked updates one Process Map
-// projection at the Company Explorer write boundary. Reads never repair state.
-func (r *MemoryRepo) syncAutomaticMemoryProcessMapPlacementLocked(companyID, resourceType, resourceID string, parentID *string) bool {
-	parentID = processMapParentPointer(pointerString(parentID))
-	if parentID != nil {
-		if _, ok := r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, *parentID)]; !ok {
-			return false
-		}
-	}
-	placementKey := processMapPlacementMemoryKey(companyID, resourceType, resourceID)
-	placement, exists := r.processMapPlacements[placementKey]
-	if exists && sameProcessMapParent(placement.MapParentFolderID, parentID) {
-		return false
 	}
 
 	now := time.Now().UTC()
-	width, height := memoryProcessMapProcessWidth, memoryProcessMapProcessHeight
-	if resourceType == domain.ProcessMapResourceTypeFolder {
-		width, height = memoryProcessMapNestedFolderWidth, memoryProcessMapNestedFolderHeight
-		if parentID == nil {
-			width, height = memoryProcessMapRootFolderWidth, memoryProcessMapRootFolderHeight
+	for _, placement := range plan.Placements {
+		placementKey := processMapPlacementMemoryKey(companyID, placement.ResourceType, placement.ResourceID)
+		current, exists := r.processMapPlacements[placementKey]
+		if exists {
+			placement.PlacementIncarnationToken = current.PlacementIncarnationToken
+			placement.CreatedTimestamp = current.CreatedTimestamp
+			placement.Revision = current.Revision + 1
+		} else {
+			placement.PlacementIncarnationToken = newUUIDv7String()
+			placement.CreatedTimestamp = now
+			placement.Revision = 1
 		}
+		placement.UpdatedTimestamp = now
+		r.processMapPlacements[placementKey] = cloneProcessMapPlacement(placement)
 	}
-	if exists {
-		width, height = placement.GridWidth, placement.GridHeight
-		if resourceType == domain.ProcessMapResourceTypeFolder && parentID == nil {
-			width = max(width, memoryProcessMapRootFolderWidth)
-			height = max(height, memoryProcessMapRootFolderHeight)
-		}
+	for traceKey, trace := range translatedTraces {
+		trace.Revision++
+		trace.UpdatedTimestamp = now
+		r.processMapTraces[traceKey] = trace
 	}
-	x, y := r.nextMemoryProcessMapPositionLocked(companyID, resourceType, resourceID, parentID, width, height)
-	if exists && resourceType == domain.ProcessMapResourceTypeFolder {
-		r.translateMemoryProcessMapFolderLocked(companyID, resourceID, x-placement.GridX, y-placement.GridY, now)
-	}
-	if !exists {
-		placement = domain.ProcessMapPlacement{
-			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
-			PlacementIncarnationToken: newUUIDv7String(), Revision: 1, CreatedTimestamp: now,
-		}
-	} else {
-		placement.Revision++
-	}
-	placement.MapParentFolderID = processMapParentPointer(pointerString(parentID))
-	placement.GridX, placement.GridY, placement.GridWidth, placement.GridHeight = x, y, width, height
-	placement.UpdatedTimestamp = now
-	r.processMapPlacements[placementKey] = placement
-	r.expandMemoryProcessMapAncestorsLocked(companyID, placement, now)
-	r.spaceAutomaticMemoryProcessMapRootsLocked(companyID, now)
-	return true
+	return true, nil
 }
 
 // deleteAutomaticMemoryProcessMapPlacementLocked detaches map geometry while
@@ -702,25 +500,6 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 	return result, nil
 }
 
-func compareProcessMapPlacements(a, b domain.ProcessMapPlacement) int {
-	if a.GridY != b.GridY {
-		if a.GridY < b.GridY {
-			return -1
-		}
-		return 1
-	}
-	if a.GridX != b.GridX {
-		if a.GridX < b.GridX {
-			return -1
-		}
-		return 1
-	}
-	if byType := strings.Compare(a.ResourceType, b.ResourceType); byType != 0 {
-		return byType
-	}
-	return strings.Compare(a.ResourceID, b.ResourceID)
-}
-
 func (r *MemoryRepo) ListResourceOperationalRelationshipsForResource(ctx context.Context, input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.ResourceID = strings.TrimSpace(input.ResourceID)
@@ -762,16 +541,22 @@ func (r *MemoryRepo) ListResourceOperationalRelationshipsForResource(ctx context
 }
 
 type memoryProcessMapMutationSnapshot struct {
-	placements     map[string]domain.ProcessMapPlacement
-	relationships  map[string]domain.ResourceOperationalRelationship
-	traces         map[string]domain.ProcessMapTrace
-	folders        map[string]domain.CompanyExplorerFolder
-	folderItems    map[string]domain.CompanyExplorerFolderItem
-	explorerEdges  map[string]memoryCompanyExplorerV2Edge
-	events         map[string]domain.DomainEvent
-	versions       map[string]int64
-	outbox         map[string]RealtimeOutboxEvent
-	outboxSequence int64
+	companies             map[string]domain.Company
+	placements            map[string]domain.ProcessMapPlacement
+	relationships         map[string]domain.ResourceOperationalRelationship
+	traces                map[string]domain.ProcessMapTrace
+	folders               map[string]domain.CompanyExplorerFolder
+	folderItems           map[string]domain.CompanyExplorerFolderItem
+	logicGates            map[string]domain.LogicGate
+	kanbanBoards          map[string]domain.KanbanBoard
+	kanbanColumns         map[string][]domain.KanbanColumn
+	explorerEntities      map[string]memoryCompanyExplorerV2Entity
+	explorerEdges         map[string]memoryCompanyExplorerV2Edge
+	explorerSubscriptions map[string]memoryCompanyExplorerV2Subscription
+	events                map[string]domain.DomainEvent
+	versions              map[string]int64
+	outbox                map[string]RealtimeOutboxEvent
+	outboxSequence        int64
 }
 
 func (r *MemoryRepo) snapshotProcessMapMutationLocked() memoryProcessMapMutationSnapshot {
@@ -784,20 +569,29 @@ func (r *MemoryRepo) snapshotProcessMapMutationLocked() memoryProcessMapMutation
 		traces[itemKey] = cloneProcessMapTrace(item)
 	}
 	return memoryProcessMapMutationSnapshot{
-		placements: placements, relationships: maps.Clone(r.resourceOperationalRelationships),
-		traces: traces, folders: maps.Clone(r.folders), folderItems: maps.Clone(r.folderItems), explorerEdges: maps.Clone(r.companyExplorerV2Edges),
-		events: maps.Clone(r.domainEvents), versions: maps.Clone(r.workspaceReadVersions),
+		companies: maps.Clone(r.companies), placements: placements, relationships: maps.Clone(r.resourceOperationalRelationships),
+		traces: traces, folders: maps.Clone(r.folders), folderItems: maps.Clone(r.folderItems),
+		logicGates: maps.Clone(r.logicGates), kanbanBoards: maps.Clone(r.kanbanBoards), kanbanColumns: cloneSliceMap(r.kanbanColumns),
+		explorerEntities: maps.Clone(r.companyExplorerV2Entities), explorerEdges: maps.Clone(r.companyExplorerV2Edges),
+		explorerSubscriptions: maps.Clone(r.companyExplorerV2Subscriptions),
+		events:                maps.Clone(r.domainEvents), versions: maps.Clone(r.workspaceReadVersions),
 		outbox: maps.Clone(r.realtimeOutbox), outboxSequence: r.realtimeOutboxSequence,
 	}
 }
 
 func (r *MemoryRepo) restoreProcessMapMutationLocked(snapshot memoryProcessMapMutationSnapshot) {
+	r.companies = snapshot.companies
 	r.processMapPlacements = snapshot.placements
 	r.resourceOperationalRelationships = snapshot.relationships
 	r.processMapTraces = snapshot.traces
 	r.folders = snapshot.folders
 	r.folderItems = snapshot.folderItems
+	r.logicGates = snapshot.logicGates
+	r.kanbanBoards = snapshot.kanbanBoards
+	r.kanbanColumns = snapshot.kanbanColumns
+	r.companyExplorerV2Entities = snapshot.explorerEntities
 	r.companyExplorerV2Edges = snapshot.explorerEdges
+	r.companyExplorerV2Subscriptions = snapshot.explorerSubscriptions
 	r.domainEvents = snapshot.events
 	r.workspaceReadVersions = snapshot.versions
 	r.realtimeOutbox = snapshot.outbox

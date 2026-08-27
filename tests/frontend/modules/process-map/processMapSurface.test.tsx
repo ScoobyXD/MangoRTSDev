@@ -8,11 +8,14 @@ import { JSDOM } from "jsdom";
 import {
   applyProcessMapMutationEnvelope,
   buildProcessMapLayers,
+  materializeProcessMapPlacementTransform,
   mergeProcessMapPresentation,
   ProcessMapProtectedTileLayer,
   ProcessMapSurface,
   processMapCurrentOperationKeys,
+  processMapInternalTracesForMove,
   processMapPerimeterSegments,
+  processMapPlacementSubtree,
   processMapViewportHasCompleteCoverage,
   replaceProcessMapPreviewEntries,
   retireProcessMapMutationMasks,
@@ -114,7 +117,7 @@ function buildOptions(overrides: Partial<ProcessMapLayerBuildOptions> = {}): Pro
     editedTraceIDs: new Set(),
     editOverlay: {
       placements: [], traces: [], selectedPlacementKey: null, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
     getTileData: async () => null,
     onTileLoad: () => undefined,
@@ -295,6 +298,50 @@ test("a real Deck double-click opens the Process instead of pinning its scorecar
     assert.deepEqual(opened, [[mounted.process.resource_id, mounted.process.name]]);
     assert.equal(mounted.container.querySelector(".process-map-qd-card"), null, "double-click must not leave the QDC card pinned");
   } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("child-control keyboard events stay native instead of becoming canvas commands", async () => {
+  const opened: Array<[string, string]> = [];
+  const mounted = await mountProcessMapForBehavior((logicGateID, name) => { opened.push([logicGateID, name]); });
+  let confirmCalls = 0;
+  const originalConfirm = window.confirm;
+  window.confirm = () => {
+    confirmCalls += 1;
+    return false;
+  };
+  try {
+    await act(async () => {
+      readProcessMapDeckGLTestProps().onClick({
+        object: { kind: "placement", key: `logic_gate:${mounted.process.resource_id}`, placement: mounted.process },
+      }, { type: "click" });
+    });
+    const toolbarDelete = [...mounted.container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Delete from Company Explorer");
+    const cardClose = mounted.container.querySelector<HTMLButtonElement>(`[aria-label="Close ${mounted.process.name} Q, C and D"]`);
+    const surface = mounted.container.querySelector<HTMLDivElement>(".process-map-surface");
+    assert.ok(toolbarDelete && cardClose && surface);
+
+    for (const key of ["Delete", "Backspace"]) {
+      const event = new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => { toolbarDelete.dispatchEvent(event); });
+      assert.equal(event.defaultPrevented, false, `${key} remains available to the focused toolbar button`);
+    }
+    for (const key of ["Enter", " "]) {
+      const event = new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => { cardClose.dispatchEvent(event); });
+      assert.equal(event.defaultPrevented, false, `${JSON.stringify(key)} remains available to the focused scorecard button`);
+    }
+    assert.equal(confirmCalls, 0, "child Delete and Backspace never prompt for map deletion");
+    assert.deepEqual(opened, [], "child Enter and Space never open the selected Process");
+
+    const canvasEnter = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    await act(async () => { surface.dispatchEvent(canvasEnter); });
+    assert.equal(canvasEnter.defaultPrevented, true, "the focused canvas still owns its Process activation key");
+    assert.deepEqual(opened, [[mounted.process.resource_id, mounted.process.name]]);
+  } finally {
+    window.confirm = originalConfirm;
     await mounted.cleanup();
   }
 });
@@ -520,7 +567,7 @@ test("large Folder labels stay in their six-unit title band while Process labels
     editedPlacementKeys: new Set(presentation.placements.keys()),
     editOverlay: {
       placements: [folder], traces: [], selectedPlacementKey: `company_explorer_folder:${folder.resource_id}`, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
   const editFolderLabel = (layerByID(editLayers, "process-map-edit-labels").props.data as Array<{ position: [number, number] }>)[0];
@@ -551,7 +598,7 @@ test("large Folder labels stay in their six-unit title band while Process labels
     editedPlacementKeys: new Set(normalPresentation.placements.keys()),
     editOverlay: {
       placements: [normalFolder], traces: [], selectedPlacementKey: `company_explorer_folder:${normalFolder.resource_id}`, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
   const normalEditLabels = layerByID(normalEditLayers, "process-map-edit-labels").props.data as Array<{ text: string; size: number }>;
@@ -575,7 +622,7 @@ test("large Folder labels stay in their six-unit title band while Process labels
     editedPlacementKeys: new Set(presentation.placements.keys()),
     editOverlay: {
       placements: [folder], traces: [], selectedPlacementKey: `company_explorer_folder:${folder.resource_id}`, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
   assert.deepEqual(layerByID(lowZoomEditLayers, "process-map-edit-labels").props.data, [], "the selected overlay also hides a Folder title that cannot fit its band");
@@ -637,6 +684,7 @@ test("every Process Map PathLayer declares and yields flat XY geometry", () => {
       highlightedFolderKey: "company_explorer_folder:folder",
       connectionSourceKey: "logic_gate:source",
       hoveredPlacementKey: null,
+      placementTransform: null,
     },
   }));
   const editTraceLayer = layerByID(editLayers, "process-map-edit-traces");
@@ -709,6 +757,7 @@ test("placement and Process-card text stay horizontally clipped inside their rec
       connectionPreview: null,
       highlightedFolderKey: null,
       connectionSourceKey: null,
+      placementTransform: null,
     },
   }));
   const editLabelLayer = layerByID(editLayers, "process-map-edit-labels");
@@ -762,7 +811,7 @@ test("declared presentation ceilings suppress labels and waypoints above authori
     editOverlay: {
       placements: [], traces: [normalTrace], selectedPlacementKey: null,
       selectedTraceID: normalTrace.resource_operational_relationship_id,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
   assert.deepEqual(layerByID(normalLayers, "process-map-edit-waypoints").props.data, []);
@@ -775,7 +824,7 @@ test("declared presentation ceilings suppress labels and waypoints above authori
     editOverlay: {
       placements: [], traces: [editingTrace], selectedPlacementKey: null,
       selectedTraceID: editingTrace.resource_operational_relationship_id,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
   assert.deepEqual(
@@ -790,7 +839,7 @@ test("declared presentation ceilings suppress labels and waypoints above authori
     editOverlay: {
       placements: [], traces: [editingTrace], selectedPlacementKey: null,
       selectedTraceID: editingTrace.resource_operational_relationship_id,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
   assert.equal((layerByID(editingLayers, "process-map-edit-waypoints").props.data as unknown[]).length, 1);
@@ -864,7 +913,7 @@ test("selected Folder editing stays transparent and exposes saved-geometry resiz
     editedPlacementKeys: new Set([key]),
     editOverlay: {
       placements: [folder], traces: [], selectedPlacementKey: key, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: key, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: key, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
   const fences = layerByID(layers, "process-map-edit-folder-fences").props.data as unknown[];
@@ -902,7 +951,7 @@ test("selected Process editing retains the elevated surface and exposes four res
     editedPlacementKeys: new Set([key]),
     editOverlay: {
       placements: [process], traces: [], selectedPlacementKey: key, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
   const shadows = layerByID(layers, "process-map-edit-placement-shadows");
@@ -985,7 +1034,7 @@ test("editing Process cards show bounded QCD and RACI summaries in tiled and sel
     editedPlacementKeys: new Set([key]),
     editOverlay: {
       placements: [process], traces: [], selectedPlacementKey: key, selectedTraceID: null,
-      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
   assert.deepEqual(
@@ -1015,7 +1064,7 @@ test("hovering an accessible Process or Folder reveals anchors and all four resi
       presentation,
       editOverlay: {
         placements: [], traces: [], selectedPlacementKey: null, selectedTraceID: null,
-        connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey,
+        connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey, placementTransform: null,
       },
     }));
     return {
@@ -1076,6 +1125,7 @@ test("an active connection keeps only the source output and distinct eligible ta
       highlightedFolderKey: null,
       connectionSourceKey: sourceKey,
       hoveredPlacementKey: null,
+      placementTransform: null,
     },
   }));
   const anchors = layerByID(layers, "process-map-edit-anchors").props.data as Array<{
@@ -1284,6 +1334,85 @@ test("one group-move envelope reconciles every moved placement and translated in
   );
   assert.deepEqual(next.traces.get("relationship-1")?.route_points, [{ x: 20, y: 10 }]);
   assert.equal(next.traces.get("relationship-1")?.revision, 5);
+});
+
+test("large deep Folder move planning indexes and traverses each stable member once", () => {
+  class SingleValuesPassMap<K, V> extends Map<K, V> {
+    valuesCalls = 0;
+    valueVisits = 0;
+
+    override values(): ReturnType<Map<K, V>["values"]> {
+      this.valuesCalls += 1;
+      assert.equal(this.valuesCalls, 1, "one operation must not rescan the complete placement or trace map");
+      const values = super.values();
+      const owner = this;
+      return (function* countedValues() {
+        for (const value of values) {
+          owner.valueVisits += 1;
+          yield value;
+        }
+      })() as ReturnType<Map<K, V>["values"]>;
+    }
+  }
+
+  const root = placement("deep-root", -50, -40, 20_000, 20_000, "company_explorer_folder");
+  const sourcePlacements: ProcessMapVisiblePlacement[] = [root];
+  let parentID = root.resource_id;
+  for (let depth = 1; depth <= 1_000; depth += 1) {
+    const folder = {
+      ...placement(`folder-${depth}`, depth * 2, depth * 2, 20_000 - depth * 4, 20_000 - depth * 4, "company_explorer_folder"),
+      map_parent_folder_id: parentID,
+    };
+    const process = {
+      ...placement(`process-${depth}`, depth * 2 + 2, depth * 2 + 2),
+      map_parent_folder_id: folder.resource_id,
+    };
+    sourcePlacements.push(folder, process);
+    parentID = folder.resource_id;
+  }
+  const reversedPlacements = new SingleValuesPassMap<string, ProcessMapVisiblePlacement>(
+    [...sourcePlacements].reverse().map((item) => [`${item.resource_type}:${item.resource_id}`, item]),
+  );
+  const subtree = processMapPlacementSubtree(root, reversedPlacements);
+  assert.equal(reversedPlacements.valuesCalls, 1);
+  assert.equal(reversedPlacements.valueVisits, sourcePlacements.length);
+  assert.equal(subtree.size, sourcePlacements.length);
+  for (const item of sourcePlacements) {
+    assert.equal(subtree.get(`${item.resource_type}:${item.resource_id}`), item, "move planning retains the canonical placement reference");
+  }
+
+  const sourceTraces: ProcessMapTrace[] = sourcePlacements.slice(1, 101).map((target, index) => ({
+    ...trace(root, target),
+    resource_operational_relationship_id: `deep-trace-${index}`,
+    target: { resource_type: target.resource_type, resource_id: target.resource_id },
+  }));
+  const outside = placement("outside", 30_000, 30_000);
+  sourceTraces.push({
+    ...trace(root, outside),
+    resource_operational_relationship_id: "external-trace",
+    target: { resource_type: outside.resource_type, resource_id: outside.resource_id },
+  });
+  const countedTraces = new SingleValuesPassMap(sourceTraces.map((item) => [item.resource_operational_relationship_id, item]));
+  const movedKeys = new Set(subtree.keys());
+  const internalTraces = processMapInternalTracesForMove(countedTraces, movedKeys);
+  assert.equal(countedTraces.valuesCalls, 1);
+  assert.equal(countedTraces.valueVisits, sourceTraces.length);
+  assert.equal(internalTraces.size, sourceTraces.length - 1);
+  for (const item of sourceTraces.slice(0, -1)) {
+    assert.equal(internalTraces.get(item.resource_operational_relationship_id), item, "move planning retains the canonical trace reference");
+  }
+
+  const transformed = materializeProcessMapPlacementTransform(subtree, {
+    kind: "move",
+    key: `company_explorer_folder:${root.resource_id}`,
+    placementKeys: movedKeys,
+    traceIDs: new Set(internalTraces.keys()),
+    deltaX: 17,
+    deltaY: -9,
+  });
+  assert.equal(root.grid_x, -50, "planning and preview deltas never mutate the stable source placement");
+  assert.equal(transformed.get(`company_explorer_folder:${root.resource_id}`)?.grid_x, -33);
+  assert.equal(transformed.get("logic_gate:process-1000")?.grid_y, sourcePlacements.at(-1)!.grid_y - 9);
 });
 
 test("representative large-company transport and presentation stay byte-, request-, and datum-bounded", async (t) => {
