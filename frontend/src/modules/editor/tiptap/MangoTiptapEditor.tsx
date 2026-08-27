@@ -166,6 +166,7 @@ export type MangoTiptapEditorProps = {
   dataAttributes?: Record<string, string | undefined>;
   className?: string;
   style?: React.CSSProperties;
+  leadingContent?: React.ReactNode;
   companyID: string;
   resourceType: MangoTiptapResourceType;
   resourceID: string;
@@ -792,6 +793,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   dataAttributes,
   className,
   style,
+  leadingContent,
   companyID,
   resourceType,
   resourceID,
@@ -1205,6 +1207,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const activateFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-mango-tiptap-leading-content="true"]')) return;
     if (target?.closest('[data-mango-entity-link="true"]')) return;
     event.preventDefault();
     pointerActivationPendingRef.current = true;
@@ -1251,6 +1254,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       };
       window.requestAnimationFrame(focusAtPointer);
     });
+  }, [activate]);
+  const activateFromNonLeadingContent = useCallback((event: React.SyntheticEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-mango-tiptap-leading-content="true"]')) return;
+    void activate();
   }, [activate]);
 
   useEffect(() => registerMangoTiptapFlusher({
@@ -1970,9 +1978,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       data-mango-editor-sync-mode="revisioned-json"
       data-mango-tiptap-live-ready={isActive && activeEditor && liveSurfaceReady ? "true" : undefined}
       onPointerDown={!isActive ? activateFromPointer : undefined}
-      onFocusCapture={!isActive ? activate : undefined}
-      onDoubleClick={!isActive ? activate : undefined}
+      onFocusCapture={!isActive ? activateFromNonLeadingContent : undefined}
+      onDoubleClick={!isActive ? activateFromNonLeadingContent : undefined}
     >
+      {leadingContent && <div data-mango-tiptap-leading-content="true">{leadingContent}</div>}
       {isActive && activeEditor && (
         <EditorContent
           editor={activeEditor}

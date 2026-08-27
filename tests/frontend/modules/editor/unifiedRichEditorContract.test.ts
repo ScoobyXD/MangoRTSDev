@@ -828,6 +828,43 @@ test("editor header keeps primary controls visible and preserves all secondary o
   }
 });
 
+test("Logic Gate metadata scrolls with the document while the toolbar and Process title stay pinned", () => {
+  const editorContent = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/EditorContent.tsx"), "utf8");
+  const tiptapEditor = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
+  const pinnedHeader = sourceSliceBetween(
+    editorContent,
+    'data-editor-pinned-header="true"',
+    "{logicGateRACIApplyConfirmationOpen",
+    "pinned editor header",
+  );
+  const scrollableMetadata = sourceSliceBetween(
+    editorContent,
+    "const logicGateScrollableMetadata =",
+    ") : null;",
+    "Logic Gate scrollable metadata",
+  );
+
+  assert.match(pinnedHeader, /position: "absolute"/);
+  assert.match(pinnedHeader, /<EditorTabBar/);
+  assert.match(pinnedHeader, /<EditorLinkedDocumentPanels/);
+  assert.match(pinnedHeader, /gvicFields=\{linkedEntityKind === "node" \? \{[\s\S]*\} : null\}/);
+  assert.doesNotMatch(pinnedHeader, /logicGateRACIAssignments|<LogicGateKPISection|<LogicGateQDTracker/);
+
+  const scrollOrder = ["<RACIAssignmentBoard", "<LogicGateKPISection", "<LogicGateQDTracker"];
+  let previousIndex = -1;
+  for (const marker of scrollOrder) {
+    const markerIndex = scrollableMetadata.indexOf(marker);
+    assert.ok(markerIndex > previousIndex, `${marker} must remain in the shared Process scroll order`);
+    previousIndex = markerIndex;
+  }
+  assert.match(scrollableMetadata, /data-logic-gate-scrollable-metadata="true"/);
+  assert.match(editorContent, /<LogicGateTiptapEditorSurface[\s\S]*leadingContent=\{logicGateScrollableMetadata\}/);
+  assert.match(tiptapEditor, /leadingContent\?: React\.ReactNode/);
+  assert.match(tiptapEditor, /\{leadingContent && <div data-mango-tiptap-leading-content="true">\{leadingContent\}<\/div>\}\s*\{isActive/);
+  assert.match(tiptapEditor, /target\?\.closest\('\[data-mango-tiptap-leading-content="true"\]'\)\) return/);
+  assert.match(tiptapEditor, /onFocusCapture=\{!isActive \? activateFromNonLeadingContent : undefined\}[\s\S]*onDoubleClick=\{!isActive \? activateFromNonLeadingContent : undefined\}/);
+});
+
 test("blocking editor and node overlays use the app modal layer above feature stacking contexts", () => {
   const modalPortal = readFileSync(resolve(process.cwd(), "frontend/src/app/AppModalPortal.tsx"), "utf8");
   const editorSurfaceHandlers = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/useEditorDocumentSurfaceHandlers.ts"), "utf8");

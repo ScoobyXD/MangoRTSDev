@@ -538,6 +538,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
 
   let mountedRoot: { unmount(): void } | null = null;
   let pageHostRoot: { unmount(): void } | null = null;
+  let leadingContentClicks = 0;
   let setHostVisible: React.Dispatch<React.SetStateAction<boolean>> = () => undefined;
   let forceHostRerender: () => void = () => undefined;
   resetEditorRuntimeMetricsForTests();
@@ -571,6 +572,7 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
           resourceID="node-1"
           documentID="document-1"
           requestJSON={requestJSON}
+          leadingContent={<button type="button" data-test-leading-content="true" onClick={() => { leadingContentClicks += 1; }}>Process metadata</button>}
           attachmentContext={{
             requestJSON,
             apiBase: "http://localhost",
@@ -617,6 +619,20 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     await waitFor(() => editorRoot.dataset.mangoEditorState === "sleeping", "canonical preparation should finish before visibility changes");
     assert.equal(editorRoot.dataset.mangoEditorEditable, "true", "editable sleeping JSON documents must advertise their text cursor state");
     assert.equal(subscriptions, 0, "the 600px preparation margin must not create a realtime document scope");
+    const leadingContentButton = editorRoot.querySelector<HTMLButtonElement>('[data-test-leading-content="true"]');
+    assert.ok(leadingContentButton);
+    const leadingPointerDown = new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 });
+    await act(async () => {
+      leadingContentButton.dispatchEvent(leadingPointerDown);
+      leadingContentButton.focus();
+      leadingContentButton.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, button: 0 }));
+      leadingContentButton.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await flushAsyncWork(2);
+    assert.equal(leadingPointerDown.defaultPrevented, false, "interactive leading content must keep its native pointer action");
+    assert.equal(leadingContentClicks, 1, "interactive leading content must receive its click");
+    assert.equal(controllerRef.current, null, "leading-content pointer, focus, and double-click actions must not activate the sleeping text editor");
+    assert.equal(editorRoot.dataset.mangoEditorState, "sleeping");
     for (const annotation of ownerAnnotations) {
       assert.ok(editorRoot.querySelector(`[data-mango-annotation-id="${annotation.id}"]`), `sleeping renderer should paint ${annotation.id}`);
     }
