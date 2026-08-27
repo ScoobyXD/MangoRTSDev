@@ -403,7 +403,7 @@ where placement.company_id=$1::uuid and placement.resource_type='logic_gate'
 	}
 }
 
-func TestPostgresAutomaticProcessMapPlacementKeepsRootGapAfterDeepGrowth(t *testing.T) {
+func TestPostgresProcessMapAutomaticPlacementKeepsRootGapAfterDeepGrowth(t *testing.T) {
 	ctx := context.Background()
 	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Process Map runtime root spacing")
@@ -511,28 +511,31 @@ where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
 	afterProcessB := readGeometry(domain.ProcessMapResourceTypeProcess, processB.LogicGateID)
 	afterGrowingFolder := readGeometry(domain.ProcessMapResourceTypeFolder, growingFolder.FolderID)
 	afterLaterFolder := readGeometry(domain.ProcessMapResourceTypeFolder, laterFolder.FolderID)
-	if afterRootB.x < afterRootA.x+afterRootA.width+postgresAutomaticProcessMapRootGap {
-		t.Fatalf("automatic roots overlap after growth: A=%+v B=%+v", afterRootA, afterRootB)
+	conflictsWithGap := func(left, right geometry, gap int) bool {
+		return left.x < right.x+right.width+gap && left.x+left.width+gap > right.x &&
+			left.y < right.y+right.height+gap && left.y+left.height+gap > right.y
 	}
-	if afterRootB.x <= beforeRootB.x {
-		t.Fatalf("later root did not move after earlier root growth: before=%+v after=%+v", beforeRootB, afterRootB)
+	if conflictsWithGap(afterRootA, afterRootB, postgresAutomaticProcessMapRootGap) {
+		t.Fatalf("automatic roots lack the required gap after growth: A=%+v B=%+v", afterRootA, afterRootB)
 	}
-	processSectionOffset := postgresAutomaticProcessMapPadding + postgresAutomaticProcessMapNestedFolderWidth + postgresAutomaticProcessMapSectionGap
-	if afterProcessB.x-beforeProcessB.x != afterRootB.x-beforeRootB.x || afterProcessB.x != afterRootB.x+processSectionOffset {
+	if afterProcessB.x-beforeProcessB.x != afterRootB.x-beforeRootB.x ||
+		afterProcessB.y-beforeProcessB.y != afterRootB.y-beforeRootB.y {
 		t.Fatalf("later root descendants did not keep their relative geometry: root=%+v Process=%+v", afterRootB, afterProcessB)
 	}
 	if afterLaterFolder != beforeLaterFolder {
 		t.Fatalf("deep growth changed manual sibling geometry or revision: before=%+v after=%+v", beforeLaterFolder, afterLaterFolder)
 	}
-	if afterProcessA != beforeProcessA {
-		t.Fatalf("deep growth changed unrelated Process geometry or revision: before=%+v after=%+v", beforeProcessA, afterProcessA)
+	if afterProcessA.x <= beforeProcessA.x || afterProcessA.y != beforeProcessA.y ||
+		afterProcessA.width != beforeProcessA.width || afterProcessA.height != beforeProcessA.height {
+		t.Fatalf("deep growth did not make the minimal horizontal Process-section shift: before=%+v after=%+v", beforeProcessA, afterProcessA)
 	}
-	overlaps := func(left, right geometry) bool {
-		return left.x < right.x+right.width && left.x+left.width > right.x &&
-			left.y < right.y+right.height && left.y+left.height > right.y
-	}
-	if afterGrowingFolder.y <= beforeGrowingFolder.y || overlaps(afterGrowingFolder, afterLaterFolder) || overlaps(afterGrowingFolder, afterProcessA) {
+	if afterGrowingFolder.x == beforeGrowingFolder.x && afterGrowingFolder.y == beforeGrowingFolder.y ||
+		conflictsWithGap(afterGrowingFolder, afterLaterFolder, postgresAutomaticProcessMapGap) {
 		t.Fatalf("affected growing Folder was not relocated safely: before=%+v after=%+v sibling=%+v Process=%+v", beforeGrowingFolder, afterGrowingFolder, afterLaterFolder, afterProcessA)
+	}
+	folderRight := max(afterGrowingFolder.x+afterGrowingFolder.width, afterLaterFolder.x+afterLaterFolder.width)
+	if afterProcessA.x < folderRight+postgresAutomaticProcessMapSectionGap {
+		t.Fatalf("deep growth did not preserve the Folder/Process section gap: Folder right=%d Process=%+v", folderRight, afterProcessA)
 	}
 	var traceAfter string
 	var traceRevisionAfter int64

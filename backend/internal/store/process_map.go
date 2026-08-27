@@ -4,6 +4,7 @@ import (
 	"context"
 	"math"
 	"miraeopus/backend/internal/domain"
+	"sort"
 	"strings"
 )
 
@@ -240,6 +241,102 @@ func processMapPlacementBounds(item domain.ProcessMapPlacement) domain.ProcessMa
 
 func processMapBoundsContain(outer, inner domain.ProcessMapBounds) bool {
 	return inner.MinX >= outer.MinX && inner.MinY >= outer.MinY && inner.MaxX <= outer.MaxX && inner.MaxY <= outer.MaxY
+}
+
+func processMapPlacementsConflictWithGap(left, right domain.ProcessMapPlacement, gap int) bool {
+	return int64(left.GridX) < int64(right.GridX)+int64(right.GridWidth)+int64(gap) &&
+		int64(left.GridX)+int64(left.GridWidth)+int64(gap) > int64(right.GridX) &&
+		int64(left.GridY) < int64(right.GridY)+int64(right.GridHeight)+int64(gap) &&
+		int64(left.GridY)+int64(left.GridHeight)+int64(gap) > int64(right.GridY)
+}
+
+// processMapSquareBiasedPosition finds the smallest practical square footprint
+// for one new or displaced rectangle without rewriting any existing geometry.
+// Candidate edges come from the actual rectangle sizes, so no row or column
+// count is fixed. Horizontal candidates follow the requested section while
+// vertical candidates also account for obstacles in the neighboring section.
+func processMapSquareBiasedPosition(
+	section, obstacles []domain.ProcessMapPlacement,
+	startX, startY, gap, width, height int,
+) (int, int) {
+	xValues := map[int]struct{}{startX: {}}
+	yValues := map[int]struct{}{startY: {}}
+	for _, placement := range section {
+		xValues[placement.GridX] = struct{}{}
+		xValues[placement.GridX+placement.GridWidth+gap] = struct{}{}
+	}
+	for _, placement := range obstacles {
+		yValues[placement.GridY] = struct{}{}
+		yValues[placement.GridY+placement.GridHeight+gap] = struct{}{}
+	}
+	xCandidates := make([]int, 0, len(xValues))
+	for value := range xValues {
+		if value >= startX {
+			xCandidates = append(xCandidates, value)
+		}
+	}
+	yCandidates := make([]int, 0, len(yValues))
+	for value := range yValues {
+		if value >= startY {
+			yCandidates = append(yCandidates, value)
+		}
+	}
+	sort.Ints(xCandidates)
+	sort.Ints(yCandidates)
+
+	bestX, bestY := startX, startY
+	bestSide, bestImbalance, bestArea := int64(math.MaxInt64), int64(math.MaxInt64), int64(math.MaxInt64)
+	found := false
+	for _, y := range yCandidates {
+		for _, x := range xCandidates {
+			candidate := domain.ProcessMapPlacement{GridX: x, GridY: y, GridWidth: width, GridHeight: height}
+			blocked := false
+			for _, obstacle := range obstacles {
+				if processMapPlacementsConflictWithGap(candidate, obstacle, gap) {
+					blocked = true
+					break
+				}
+			}
+			if blocked {
+				continue
+			}
+
+			minX, minY := int64(startX), int64(startY)
+			maxX, maxY := int64(x)+int64(width), int64(y)+int64(height)
+			for _, placement := range section {
+				minX = min(minX, int64(placement.GridX))
+				minY = min(minY, int64(placement.GridY))
+				maxX = max(maxX, int64(placement.GridX)+int64(placement.GridWidth))
+				maxY = max(maxY, int64(placement.GridY)+int64(placement.GridHeight))
+			}
+			footprintWidth, footprintHeight := maxX-minX, maxY-minY
+			side := max(footprintWidth, footprintHeight)
+			area := footprintWidth * footprintHeight
+			imbalance := footprintWidth - footprintHeight
+			if imbalance < 0 {
+				imbalance = -imbalance
+			}
+			if !found || side < bestSide ||
+				side == bestSide && imbalance < bestImbalance ||
+				side == bestSide && imbalance == bestImbalance && area < bestArea ||
+				side == bestSide && imbalance == bestImbalance && area == bestArea && (y < bestY || y == bestY && x < bestX) {
+				bestX, bestY = x, y
+				bestSide, bestImbalance, bestArea = side, imbalance, area
+				found = true
+			}
+		}
+	}
+	if found {
+		return bestX, bestY
+	}
+
+	// Irregular manual geometry can occupy every compact candidate. In that
+	// case, append below the obstacles without moving them.
+	nextY := startY
+	for _, obstacle := range obstacles {
+		nextY = max(nextY, obstacle.GridY+obstacle.GridHeight+gap)
+	}
+	return startX, nextY
 }
 
 func processMapTracePath(source, target domain.ProcessMapPlacement, route []domain.ProcessMapRoutePoint) []domain.ProcessMapPathPoint {

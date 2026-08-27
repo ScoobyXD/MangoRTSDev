@@ -62,7 +62,6 @@ func TestAutomaticProcessMapPlacementConstantsStayCompactAndAligned(t *testing.T
 		{"Folder padding", memoryProcessMapFolderPadding, postgresAutomaticProcessMapPadding, 2},
 		{"Folder header", memoryProcessMapFolderHeaderHeight, postgresAutomaticProcessMapFolderHeaderHeight, 6},
 		{"section gap", memoryProcessMapSectionGap, postgresAutomaticProcessMapSectionGap, 4},
-		{"root columns", memoryProcessMapRootColumns, postgresAutomaticProcessMapRootColumns, 4},
 	}
 	for _, check := range checks {
 		if check.memory != check.want || check.postgres != check.want {
@@ -103,83 +102,100 @@ func TestMemoryAutomaticProcessMapPlacementKeepsRootGapAfterDeepGrowth(t *testin
 	afterRootA := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, rootA.FolderID)]
 	afterRootB := repo.processMapPlacements[rootBKey]
 	afterProcess := repo.processMapPlacements[processKey]
-	if afterRootB.GridX < afterRootA.GridX+afterRootA.GridWidth+memoryProcessMapRootGap {
-		t.Fatalf("automatic roots overlap after growth: A=%+v B=%+v", afterRootA, afterRootB)
+	if processMapPlacementsConflictWithGap(afterRootA, afterRootB, memoryProcessMapRootGap) {
+		t.Fatalf("automatic roots lack the required gap after growth: A=%+v B=%+v", afterRootA, afterRootB)
 	}
-	if afterRootB.GridX <= beforeRootB.GridX {
-		t.Fatalf("later root did not move after earlier root growth: before=%+v after=%+v", beforeRootB, afterRootB)
-	}
-	processSectionOffset := memoryProcessMapFolderPadding + memoryProcessMapNestedFolderWidth + memoryProcessMapSectionGap
-	if afterProcess.GridX-beforeProcess.GridX != afterRootB.GridX-beforeRootB.GridX || afterProcess.GridX != afterRootB.GridX+processSectionOffset {
+	if afterProcess.GridX-beforeProcess.GridX != afterRootB.GridX-beforeRootB.GridX ||
+		afterProcess.GridY-beforeProcess.GridY != afterRootB.GridY-beforeRootB.GridY {
 		t.Fatalf("later root descendants did not keep their relative geometry: root=%+v Process=%+v", afterRootB, afterProcess)
 	}
 }
 
-func TestMemoryAutomaticProcessMapPlacementUsesFourRootColumns(t *testing.T) {
-	repo, companyID, _, _, _ := newV2PolicyTestRepo(t)
-	lastY := 0
-	lastRowCount := 0
-	hasRoots := false
-	for _, placement := range repo.processMapPlacements {
-		if placement.CompanyID != companyID || placement.MapParentFolderID != nil {
-			continue
-		}
-		if !hasRoots || placement.GridY > lastY {
-			lastY = placement.GridY
-			lastRowCount = 1
-			hasRoots = true
-		} else if placement.GridY == lastY {
-			lastRowCount++
-		}
-	}
-	if hasRoots && lastRowCount < memoryProcessMapRootColumns {
-		for index := lastRowCount; index < memoryProcessMapRootColumns; index++ {
-			if _, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", fmt.Sprintf("Row filler %d", index)); err != nil {
-				t.Fatal(err)
+func TestAutomaticProcessMapPlacementUsesActualSizesForSquareBiasedRoots(t *testing.T) {
+	sizes := [][2]int{{32, 24}, {70, 18}, {24, 55}, {45, 28}, {28, 42}, {62, 20}, {36, 30}, {26, 48}, {50, 25}}
+	build := func() []domain.ProcessMapPlacement {
+		placements := make([]domain.ProcessMapPlacement, 0, len(sizes))
+		for index, size := range sizes {
+			x, y := processMapSquareBiasedPosition(
+				placements, placements, 0, 0, memoryProcessMapRootGap, size[0], size[1],
+			)
+			placement := domain.ProcessMapPlacement{
+				ResourceType: domain.ProcessMapResourceTypeFolder,
+				ResourceID:   fmt.Sprintf("root-%02d", index),
+				GridX:        x,
+				GridY:        y,
+				GridWidth:    size[0],
+				GridHeight:   size[1],
 			}
+			for _, existing := range placements {
+				if processMapPlacementsConflictWithGap(placement, existing, memoryProcessMapRootGap) {
+					t.Fatalf("root %d overlaps existing geometry: new=%+v existing=%+v", index, placement, existing)
+				}
+			}
+			placements = append(placements, placement)
 		}
+		return placements
 	}
-	roots := make([]domain.CompanyExplorerFolder, 0, 5)
-	for index := 0; index < 5; index++ {
-		root, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", fmt.Sprintf("Root %d", index+1))
-		if err != nil {
-			t.Fatal(err)
-		}
-		roots = append(roots, root)
+	first, second := build(), build()
+	if fmt.Sprint(first) != fmt.Sprint(second) {
+		t.Fatalf("square-biased placement is not deterministic:\nfirst=%+v\nsecond=%+v", first, second)
 	}
-	placements := make([]domain.ProcessMapPlacement, 0, len(roots))
-	for _, root := range roots {
-		placements = append(placements, repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, root.FolderID)])
+	maxX, maxY := 0, 0
+	xCoordinates, yCoordinates := map[int]bool{}, map[int]bool{}
+	for _, placement := range first {
+		maxX = max(maxX, placement.GridX+placement.GridWidth)
+		maxY = max(maxY, placement.GridY+placement.GridHeight)
+		xCoordinates[placement.GridX] = true
+		yCoordinates[placement.GridY] = true
 	}
-	for index := 1; index < 4; index++ {
-		previous := placements[index-1]
-		current := placements[index]
-		if current.GridY != placements[0].GridY || current.GridX != previous.GridX+previous.GridWidth+memoryProcessMapRootGap {
-			t.Fatalf("root row %d geometry = %+v after %+v", index, current, previous)
-		}
+	if len(xCoordinates) < 2 || len(yCoordinates) < 2 {
+		t.Fatalf("varied roots did not grow in both directions: %+v", first)
 	}
-	fifth := placements[4]
-	if fifth.GridX != 0 || fifth.GridY != placements[0].GridY+placements[0].GridHeight+memoryProcessMapRootGap {
-		t.Fatalf("fifth root geometry = %+v, want first column of second row", fifth)
+	if max(maxX, maxY) > 2*min(maxX, maxY) {
+		t.Fatalf("varied root footprint is too biased: width=%d height=%d placements=%+v", maxX, maxY, first)
 	}
 }
 
-func TestMemoryAutomaticProcessMapPlacementSeparatesFoldersAndFiveProcesses(t *testing.T) {
+func TestAutomaticProcessMapPlacementPrefersSquarenessWhenMaximumSideTies(t *testing.T) {
+	sizes := [][2]int{{18, 13}, {58, 11}, {29, 32}, {74, 22}, {14, 53}, {77, 67}}
+	placements := make([]domain.ProcessMapPlacement, 0, len(sizes))
+	for index, size := range sizes {
+		x, y := processMapSquareBiasedPosition(placements, placements, 0, 0, 2, size[0], size[1])
+		placements = append(placements, domain.ProcessMapPlacement{
+			ResourceType: domain.ProcessMapResourceTypeFolder,
+			ResourceID:   fmt.Sprintf("tie-root-%02d", index),
+			GridX:        x,
+			GridY:        y,
+			GridWidth:    size[0],
+			GridHeight:   size[1],
+		})
+	}
+	maxX, maxY := 0, 0
+	for _, placement := range placements {
+		maxX = max(maxX, placement.GridX+placement.GridWidth)
+		maxY = max(maxY, placement.GridY+placement.GridHeight)
+	}
+	if max(maxX, maxY)*4 > min(maxX, maxY)*5 {
+		t.Fatalf("equal-maximum-side choice stayed rectangular: width=%d height=%d placements=%+v", maxX, maxY, placements)
+	}
+}
+
+func TestMemoryAutomaticProcessMapPlacementBalancesFolderAndProcessSections(t *testing.T) {
 	repo, companyID, _, _, _ := newV2PolicyTestRepo(t)
 	root, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Operations")
 	if err != nil {
 		t.Fatal(err)
 	}
-	folders := make([]domain.CompanyExplorerFolder, 0, 3)
-	for index := 0; index < 3; index++ {
+	folders := make([]domain.CompanyExplorerFolder, 0, 6)
+	for index := 0; index < 6; index++ {
 		folder, err := repo.CreateCompanyExplorerFolder(companyID, root.FolderID, "logic_gate", fmt.Sprintf("Folder %d", index+1))
 		if err != nil {
 			t.Fatal(err)
 		}
 		folders = append(folders, folder)
 	}
-	processes := make([]domain.LogicGate, 0, 5)
-	for index := 0; index < 5; index++ {
+	processes := make([]domain.LogicGate, 0, 9)
+	for index := 0; index < 9; index++ {
 		process, err := repo.CreateLogicGate(companyID, fmt.Sprintf("Process %d", index+1))
 		if err != nil {
 			t.Fatal(err)
@@ -210,17 +226,94 @@ func TestMemoryAutomaticProcessMapPlacementSeparatesFoldersAndFiveProcesses(t *t
 			t.Fatalf("Process is outside root: root=%+v Process=%+v", rootPlacement, process)
 		}
 	}
-	first, second, third, fourth, fifth := processPlacements[0], processPlacements[1], processPlacements[2], processPlacements[3], processPlacements[4]
-	if first.GridY != rootPlacement.GridY+memoryProcessMapFolderHeaderHeight ||
-		second.GridY != first.GridY || second.GridX != first.GridX+first.GridWidth+memoryProcessMapChildGap ||
-		third.GridX != first.GridX || third.GridY != first.GridY+first.GridHeight+memoryProcessMapChildGap ||
-		fourth.GridX != second.GridX || fourth.GridY != third.GridY ||
-		fifth.GridX != first.GridX || fifth.GridY != third.GridY+third.GridHeight+memoryProcessMapChildGap {
-		t.Fatalf("five-Process two-column layout = %+v", processPlacements)
+	assertCompactSection := func(name string, placements []domain.ProcessMapPlacement) {
+		t.Helper()
+		minX, minY := placements[0].GridX, placements[0].GridY
+		maxX, maxY := minX, minY
+		xCoordinates, yCoordinates := map[int]bool{}, map[int]bool{}
+		for index, placement := range placements {
+			minX = min(minX, placement.GridX)
+			minY = min(minY, placement.GridY)
+			maxX = max(maxX, placement.GridX+placement.GridWidth)
+			maxY = max(maxY, placement.GridY+placement.GridHeight)
+			xCoordinates[placement.GridX] = true
+			yCoordinates[placement.GridY] = true
+			for prior := 0; prior < index; prior++ {
+				if processMapPlacementsConflictWithGap(placement, placements[prior], memoryProcessMapChildGap) {
+					t.Fatalf("%s placements lack the required gap: %+v and %+v", name, placement, placements[prior])
+				}
+			}
+		}
+		width, height := maxX-minX, maxY-minY
+		if len(xCoordinates) < 2 || len(yCoordinates) < 2 {
+			t.Fatalf("%s did not grow in both directions: %+v", name, placements)
+		}
+		if max(width, height) > 2*min(width, height) {
+			t.Fatalf("%s footprint is too biased: width=%d height=%d placements=%+v", name, width, height, placements)
+		}
+	}
+	assertCompactSection("Folder section", folderPlacements)
+	assertCompactSection("Process section", processPlacements)
+	if rootPlacement.GridWidth > 2*rootPlacement.GridHeight || rootPlacement.GridHeight > 2*rootPlacement.GridWidth {
+		t.Fatalf("combined Folder/Process parent is too biased: %+v", rootPlacement)
 	}
 }
 
-func TestMemoryAutomaticProcessMapPlacementKeepsNestedFoldersInOneLeftColumn(t *testing.T) {
+func TestMemoryAutomaticProcessMapPlacementKeepsFoldersLeftWhenProcessesExistFirst(t *testing.T) {
+	repo, companyID, _, _, _ := newV2PolicyTestRepo(t)
+	root, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Processes first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processes := make([]domain.LogicGate, 0, 9)
+	for index := 0; index < 9; index++ {
+		process, err := repo.CreateLogicGate(companyID, fmt.Sprintf("Early Process %d", index+1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, root.FolderID, EntityTypeLogicGate, process.LogicGateID, index*1000); err != nil {
+			t.Fatal(err)
+		}
+		processes = append(processes, process)
+	}
+	beforeProcesses := make([]domain.ProcessMapPlacement, 0, len(processes))
+	for _, process := range processes {
+		beforeProcesses = append(beforeProcesses, repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, process.LogicGateID)])
+	}
+	folders := make([]domain.CompanyExplorerFolder, 0, 6)
+	for index := 0; index < 6; index++ {
+		folder, err := repo.CreateCompanyExplorerFolder(companyID, root.FolderID, "logic_gate", fmt.Sprintf("Later Folder %d", index+1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		folders = append(folders, folder)
+	}
+
+	folderRight := 0
+	for _, folder := range folders {
+		placement := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folder.FolderID)]
+		folderRight = max(folderRight, placement.GridX+placement.GridWidth)
+	}
+	processDeltaX := 0
+	for index, process := range processes {
+		after := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, process.LogicGateID)]
+		if after.GridX < folderRight+memoryProcessMapSectionGap {
+			t.Fatalf("Process section interleaved with later Folders: Folder right=%d Process=%+v", folderRight, after)
+		}
+		deltaX := after.GridX - beforeProcesses[index].GridX
+		if index == 0 {
+			processDeltaX = deltaX
+		}
+		if deltaX != processDeltaX || after.GridY != beforeProcesses[index].GridY {
+			t.Fatalf("Process section did not move as one minimal horizontal group: before=%+v after=%+v", beforeProcesses[index], after)
+		}
+	}
+	if processDeltaX <= 0 {
+		t.Fatalf("Process section did not make room for later Folders: before=%+v", beforeProcesses)
+	}
+}
+
+func TestMemoryAutomaticProcessMapPlacementBalancesNestedFolderAndProcessSections(t *testing.T) {
 	repo, companyID, _, _, _ := newV2PolicyTestRepo(t)
 	root, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Root")
 	if err != nil {
@@ -230,16 +323,16 @@ func TestMemoryAutomaticProcessMapPlacementKeepsNestedFoldersInOneLeftColumn(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	children := make([]domain.CompanyExplorerFolder, 0, 3)
-	for index := 0; index < 3; index++ {
+	children := make([]domain.CompanyExplorerFolder, 0, 7)
+	for index := 0; index < 7; index++ {
 		child, err := repo.CreateCompanyExplorerFolder(companyID, nested.FolderID, "logic_gate", fmt.Sprintf("Nested Folder %d", index+1))
 		if err != nil {
 			t.Fatal(err)
 		}
 		children = append(children, child)
 	}
-	processes := make([]domain.LogicGate, 0, 4)
-	for index := 0; index < 4; index++ {
+	processes := make([]domain.LogicGate, 0, 8)
+	for index := 0; index < 8; index++ {
 		process, err := repo.CreateLogicGate(companyID, fmt.Sprintf("Nested Process %d", index+1))
 		if err != nil {
 			t.Fatal(err)
@@ -255,40 +348,52 @@ func TestMemoryAutomaticProcessMapPlacementKeepsNestedFoldersInOneLeftColumn(t *
 	for _, child := range children {
 		childPlacements = append(childPlacements, repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, child.FolderID)])
 	}
+	folderXs, folderYs := map[int]bool{}, map[int]bool{}
 	for index, child := range childPlacements {
-		if child.GridX != nestedPlacement.GridX+memoryProcessMapFolderPadding {
-			t.Fatalf("nested Folder %d left-column x = %d, want %d", index, child.GridX, nestedPlacement.GridX+memoryProcessMapFolderPadding)
-		}
-		if index == 0 {
-			if child.GridY != nestedPlacement.GridY+memoryProcessMapFolderHeaderHeight {
-				t.Fatalf("first nested Folder y = %d", child.GridY)
-			}
-		} else if child.GridY != childPlacements[index-1].GridY+childPlacements[index-1].GridHeight+memoryProcessMapChildGap {
-			t.Fatalf("nested Folder %d is not below prior Folder: %+v", index, childPlacements)
-		}
 		if !processMapBoundsContain(processMapPlacementBounds(nestedPlacement), processMapPlacementBounds(child)) {
 			t.Fatalf("nested Folder is outside parent: parent=%+v child=%+v", nestedPlacement, child)
 		}
+		folderXs[child.GridX] = true
+		folderYs[child.GridY] = true
+		for prior := 0; prior < index; prior++ {
+			if processMapPlacementsConflictWithGap(child, childPlacements[prior], memoryProcessMapChildGap) {
+				t.Fatalf("nested Folders lack the required gap: %+v and %+v", child, childPlacements[prior])
+			}
+		}
+	}
+	if len(folderXs) < 2 || len(folderYs) < 2 {
+		t.Fatalf("nested Folders formed a tower instead of a compact grid: %+v", childPlacements)
 	}
 	processPlacements := make([]domain.ProcessMapPlacement, 0, len(processes))
 	for _, process := range processes {
 		processPlacements = append(processPlacements, repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, process.LogicGateID)])
 	}
 	leftLaneRight := nestedPlacement.GridX + memoryProcessMapFolderPadding + memoryProcessMapNestedFolderWidth
-	for _, process := range processPlacements {
+	for _, child := range childPlacements {
+		leftLaneRight = max(leftLaneRight, child.GridX+child.GridWidth)
+	}
+	processXs, processYs := map[int]bool{}, map[int]bool{}
+	for index, process := range processPlacements {
 		if process.GridX < leftLaneRight+memoryProcessMapSectionGap ||
 			!processMapBoundsContain(processMapPlacementBounds(nestedPlacement), processMapPlacementBounds(process)) {
 			t.Fatalf("nested Process is not in the contained right section: parent=%+v Process=%+v", nestedPlacement, process)
 		}
+		processXs[process.GridX] = true
+		processYs[process.GridY] = true
+		for prior := 0; prior < index; prior++ {
+			if processMapPlacementsConflictWithGap(process, processPlacements[prior], memoryProcessMapChildGap) {
+				t.Fatalf("nested Processes lack the required gap: %+v and %+v", process, processPlacements[prior])
+			}
+		}
 	}
-	if processPlacements[0].GridY != processPlacements[1].GridY ||
-		processPlacements[0].GridX != processPlacements[2].GridX ||
-		processPlacements[1].GridX != processPlacements[3].GridX ||
-		processPlacements[2].GridY <= processPlacements[0].GridY {
-		t.Fatalf("nested Processes are not a two-column grid: %+v", processPlacements)
+	if len(processXs) < 2 || len(processYs) < 2 {
+		t.Fatalf("nested Processes formed a tower instead of a compact grid: %+v", processPlacements)
 	}
 	if !processMapBoundsContain(processMapPlacementBounds(rootPlacement), processMapPlacementBounds(nestedPlacement)) {
 		t.Fatalf("expanded nested Folder is outside root: root=%+v nested=%+v", rootPlacement, nestedPlacement)
+	}
+	if nestedPlacement.GridWidth > 2*nestedPlacement.GridHeight || nestedPlacement.GridHeight > 2*nestedPlacement.GridWidth {
+		t.Fatalf("nested Folder footprint is too biased: %+v", nestedPlacement)
 	}
 }
 
@@ -352,11 +457,18 @@ func TestMemoryAutomaticProcessMapPlacementRelocatesOnlyAffectedChildAfterDeepGr
 	if !sameGeometryAndRevision(siblingAfter, siblingBefore) {
 		t.Fatalf("deep growth changed manual sibling geometry or revision: before=%+v after=%+v", siblingBefore, siblingAfter)
 	}
-	if !sameGeometryAndRevision(processAfter, processBefore) {
-		t.Fatalf("deep growth changed unrelated Process geometry or revision: before=%+v after=%+v", processBefore, processAfter)
+	if processAfter.GridX <= processBefore.GridX || processAfter.GridY != processBefore.GridY ||
+		processAfter.GridWidth != processBefore.GridWidth || processAfter.GridHeight != processBefore.GridHeight ||
+		!sameProcessMapParent(processAfter.MapParentFolderID, processBefore.MapParentFolderID) {
+		t.Fatalf("deep growth did not make the minimal horizontal Process-section shift: before=%+v after=%+v", processBefore, processAfter)
 	}
-	if growingAfter.GridY <= growingBefore.GridY || processMapPlacementsOverlap(growingAfter, siblingAfter) || processMapPlacementsOverlap(growingAfter, processAfter) {
+	if growingAfter.GridX == growingBefore.GridX && growingAfter.GridY == growingBefore.GridY ||
+		processMapPlacementsConflictWithGap(growingAfter, siblingAfter, memoryProcessMapChildGap) {
 		t.Fatalf("affected growing Folder was not relocated safely: before=%+v after=%+v sibling=%+v Process=%+v", growingBefore, growingAfter, siblingAfter, processAfter)
+	}
+	folderRight := max(growingAfter.GridX+growingAfter.GridWidth, siblingAfter.GridX+siblingAfter.GridWidth)
+	if processAfter.GridX < folderRight+memoryProcessMapSectionGap {
+		t.Fatalf("deep growth did not preserve the Folder/Process section gap: Folder right=%d Process=%+v", folderRight, processAfter)
 	}
 	if !processMapBoundsContain(processMapPlacementBounds(rootPlacement), processMapPlacementBounds(growingAfter)) ||
 		!processMapBoundsContain(processMapPlacementBounds(rootPlacement), processMapPlacementBounds(siblingAfter)) ||

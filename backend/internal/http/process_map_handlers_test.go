@@ -222,7 +222,7 @@ func TestProcessMapHTTPSceneTilePrivacyETagAndCutover(t *testing.T) {
 	if sceneWire.Bounds == nil {
 		t.Fatalf("permission-safe scene omitted bounds: %+v", sceneWire)
 	}
-	if *sceneWire.Bounds != (domain.ProcessMapBounds{MinX: 0, MinY: 0, MaxX: 132, MaxY: 24}) {
+	if *sceneWire.Bounds != (domain.ProcessMapBounds{MinX: 0, MinY: 0, MaxX: 104, MaxY: 52}) {
 		t.Fatalf("permission-safe scene bounds = %+v", *sceneWire.Bounds)
 	}
 	etag := scene.Header().Get("ETag")
