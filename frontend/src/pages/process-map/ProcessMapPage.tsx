@@ -12,13 +12,6 @@ export function ProcessMapPage({ apiBase, companyID, onOpenLogicGate }: ProcessM
 
   return (
     <main className="process-map-page" aria-label="Process Map">
-      <header className="process-map-page__header">
-        <h1>Process Map</h1>
-        <label className="process-map-page__hover-mode">
-          <input type="checkbox" checked={hoverModeEnabled} onChange={(event) => setHoverModeEnabled(event.currentTarget.checked)} />
-          <span>Hover mode</span>
-        </label>
-      </header>
       <div className="process-map-page__canvas">
         <ProcessMapSurface
           apiBase={apiBase}
@@ -26,6 +19,10 @@ export function ProcessMapPage({ apiBase, companyID, onOpenLogicGate }: ProcessM
           hoverModeEnabled={hoverModeEnabled}
           onOpenLogicGate={onOpenLogicGate}
         />
+        <label className="process-map-page__hover-mode">
+          <input type="checkbox" checked={hoverModeEnabled} onChange={(event) => setHoverModeEnabled(event.currentTarget.checked)} />
+          <span>Hover mode</span>
+        </label>
       </div>
     </main>
   );

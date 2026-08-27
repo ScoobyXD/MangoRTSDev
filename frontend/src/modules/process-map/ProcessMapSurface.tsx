@@ -2173,11 +2173,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         getCursor={({ isDragging, isHovering }) => resizeCursor ?? (isDragging ? "grabbing" : isHovering ? "pointer" : "grab")}
       />
 
-      {visibleSelection && <div data-process-map-fixed-overlay="true" className="process-map-toolbar" onPointerDown={(event) => event.stopPropagation()}>
-        <span>{visibleSelection.kind === "placement" ? "Company Explorer item selected" : "Operational trace selected"}</span>
-        <button type="button" onClick={() => void removeSelection()}>{visibleSelection.kind === "placement" ? "Delete from Company Explorer" : "Delete relationship"}</button>
-      </div>}
-
       {qdPosition && qdPlacement && <div data-process-map-fixed-overlay="true" className="process-map-qd-overlay" style={qdPosition}>
         <ProcessMapQDCard
           apiBase={apiBase}

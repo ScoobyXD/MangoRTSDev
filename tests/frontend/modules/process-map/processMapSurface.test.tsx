@@ -475,16 +475,14 @@ test("child-control keyboard events stay native instead of becoming canvas comma
         object: { kind: "placement", key: `logic_gate:${mounted.process.resource_id}`, placement: mounted.process },
       }, { type: "click" });
     });
-    const toolbarDelete = [...mounted.container.querySelectorAll("button")]
-      .find((button) => button.textContent === "Delete from Company Explorer");
     const cardClose = mounted.container.querySelector<HTMLButtonElement>(`[aria-label="Close ${mounted.process.name} Q, C and D"]`);
     const surface = mounted.container.querySelector<HTMLDivElement>(".process-map-surface");
-    assert.ok(toolbarDelete && cardClose && surface);
+    assert.ok(cardClose && surface);
 
     for (const key of ["Delete", "Backspace"]) {
       const event = new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
-      await act(async () => { toolbarDelete.dispatchEvent(event); });
-      assert.equal(event.defaultPrevented, false, `${key} remains available to the focused toolbar button`);
+      await act(async () => { cardClose.dispatchEvent(event); });
+      assert.equal(event.defaultPrevented, false, `${key} remains available to the focused scorecard button`);
     }
     for (const key of ["Enter", " "]) {
       const event = new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
@@ -493,6 +491,11 @@ test("child-control keyboard events stay native instead of becoming canvas comma
     }
     assert.equal(confirmCalls, 0, "child Delete and Backspace never prompt for map deletion");
     assert.deepEqual(opened, [], "child Enter and Space never open the selected Process");
+
+    const canvasDelete = new window.KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true });
+    await act(async () => { surface.dispatchEvent(canvasDelete); });
+    assert.equal(canvasDelete.defaultPrevented, true, "the focused canvas retains its confirmed deletion shortcut without a banner button");
+    assert.equal(confirmCalls, 1);
 
     const canvasEnter = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
     await act(async () => { surface.dispatchEvent(canvasEnter); });
@@ -528,9 +531,9 @@ test("Explorer Logic Gate creation keeps the mounted scene until canonical autom
     const existingKey = `logic_gate:${existing.resource_id}`;
     const createdKey = `logic_gate:${created.resource_id}`;
     const pinnedCard = mounted.container.querySelector(".process-map-qd-card");
-    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
     const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
-    assert.ok(pinnedCard && selectionToolbar);
+    assert.ok(pinnedCard);
+    assert.equal(mountedPlacementBodies(existingKey).length, 1);
 
     const heldScene = mounted.holdNextSceneRead();
     await emitMountedProcessMapChange(mounted, false);
@@ -539,7 +542,6 @@ test("Explorer Logic Gate creation keeps the mounted scene until canonical autom
     assert.equal(mounted.readTileLayer().id, "process-map-spatial-tiles", "the last valid TileLayer must remain mounted while the scene read is pending");
     assert.equal(mountedPlacementBodies(existingKey).length, 1, "the selected existing Process must not disappear during refresh");
     assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
     assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
 
     await resolveMountedScene(heldScene, 2, bounds);
@@ -584,36 +586,28 @@ test("Explorer Folder deletion stays visible while pending and cannot resurrect 
     await mounted.clickPlacement(deletedFolder);
     const folderKey = `company_explorer_folder:${deletedFolder.resource_id}`;
     const staleOnTileLoad = mounted.readTileLayer().props.onTileLoad as (header: { id: string; content: ProcessMapTileResponse }) => void;
-    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
     const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
     assert.equal(mountedFolderFences(folderKey).length, 4);
-    assert.ok(selectionToolbar);
 
     const heldScene = mounted.holdNextSceneRead();
     await emitMountedProcessMapChange(mounted, false);
     assert.equal(mountedFolderFences(folderKey).length, 4, "the selected Folder fence remains until canonical deletion is available");
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
     assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
 
     await resolveMountedScene(heldScene, 2, bounds);
     assert.equal(mountedFolderFences(folderKey).length, 4, "scene settlement alone must not empty valid version-1 coverage");
     await mounted.loadTile(behaviorTile(2, [survivor]));
     assert.equal(mountedFolderFences(folderKey).length, 0, "canonical coverage removes the deleted Folder exactly once");
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null, "complete canonical coverage retires the deleted Folder selection");
 
     await act(async () => { staleOnTileLoad({ id: "22-0-0", content: mounted.initialTile }); });
     assert.equal(mountedFolderFences(folderKey).length, 0, "a late version-1 tile cannot resurrect the deleted Folder");
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null);
 
     const laterScene = mounted.holdNextSceneRead();
     await emitMountedProcessMapChange(mounted, false);
     assert.equal(mountedFolderFences(folderKey).length, 0, "a later ordinary refresh cannot revive deleted edit geometry");
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null, "a confirmed-missing selection stays retired during later scene settlement");
     await resolveMountedScene(laterScene, 3, bounds);
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null, "the deleted selection stays retired while later tiles are pending");
     await mounted.loadTile(behaviorTile(3, [survivor]));
     assert.equal(mountedFolderFences(folderKey).length, 0);
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null);
     assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
   } finally {
     await mounted.cleanup();
@@ -633,24 +627,19 @@ test("an unrelated refresh preserves an offscreen selection until its canonical 
     const selectedKey = `company_explorer_folder:${selectedFolder.resource_id}`;
     await mounted.loadTile({ ...behaviorTile(1, [viewportProcess]), x: 1 }, false, "22-1-0");
     await mounted.clickPlacement(selectedFolder);
-    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
     const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
-    assert.ok(selectionToolbar);
     assert.equal(mountedFolderFences(selectedKey).length, 4);
 
     const heldScene = mounted.holdNextSceneRead();
     await emitMountedProcessMapChange(mounted, false);
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
     await resolveMountedScene(heldScene, 2, bounds);
 
     await mounted.loadTile({ ...behaviorTile(2, [viewportProcess]), x: 1 }, true, "22-1-0");
     assert.equal(mountedFolderFences(selectedKey).length, 0, "current viewport settlement may retire the offscreen tile geometry");
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar, "another tile cannot prove that the selected Folder was deleted");
     assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
 
     await mounted.loadTile(behaviorTile(2, [selectedFolder]), false, "22-0-0");
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar, "the still-existing selection remains active when its canonical tile returns");
-    assert.equal(mountedFolderFences(selectedKey).length, 4, "the returning canonical Folder renders exactly once");
+    assert.equal(mountedFolderFences(selectedKey).length, 4, "the selected edit fence returns when the still-existing Folder's canonical tile returns");
   } finally {
     await mounted.cleanup();
   }
@@ -685,9 +674,9 @@ test("Explorer PUT reparent and geometry settlement preserves selection, pin, an
     const key = `logic_gate:${original.resource_id}`;
     const staleOnTileLoad = mounted.readTileLayer().props.onTileLoad as (header: { id: string; content: ProcessMapTileResponse }) => void;
     const pinnedCard = mounted.container.querySelector(".process-map-qd-card");
-    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
     const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
-    assert.ok(pinnedCard && selectionToolbar);
+    assert.ok(pinnedCard);
+    assert.equal(mountedPlacementBodies(key).length, 1);
 
     const heldScene = mounted.holdNextSceneRead();
     await emitMountedProcessMapChange(mounted, false);
@@ -695,7 +684,6 @@ test("Explorer PUT reparent and geometry settlement preserves selection, pin, an
     assert.equal(pendingBody.length, 1);
     assert.deepEqual([pendingBody[0].pick?.placement.map_parent_folder_id, pendingBody[0].pick?.placement.grid_x], [sourceFolder.resource_id, 8]);
     assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
     assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
 
     await resolveMountedScene(heldScene, 2, bounds);
@@ -712,7 +700,6 @@ test("Explorer PUT reparent and geometry settlement preserves selection, pin, an
       revision: settledBodies[0].pick.placement.revision,
     }, { parent: targetFolder.resource_id, x: 68, y: 18, width: 22, height: 14, revision: 6 });
     assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
 
     await act(async () => { staleOnTileLoad({ id: "22-0-0", content: mounted.initialTile }); });
     const afterStaleBodies = mountedPlacementBodies(key);
@@ -731,9 +718,9 @@ test("a remote-client ordinary mutation retains mounted state and settles its ca
     await mounted.clickPlacement(mounted.process);
     const key = `logic_gate:${mounted.process.resource_id}`;
     const pinnedCard = mounted.container.querySelector(".process-map-qd-card");
-    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
     const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
-    assert.ok(pinnedCard && selectionToolbar);
+    assert.ok(pinnedCard);
+    assert.equal(mountedPlacementBodies(key).length, 1);
 
     await emitMountedProcessMapChange(mounted, false, "local-connection");
     assert.equal(mounted.readSceneCount(), 1, "the initiating connection's direct echo remains ignored");
@@ -743,7 +730,6 @@ test("a remote-client ordinary mutation retains mounted state and settles its ca
     assert.equal(mounted.readSceneCount(), 2);
     assert.equal(mountedPlacementBodies(key).length, 1);
     assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
     assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
 
     const remote = { ...mounted.process, grid_x: 2, grid_y: 1, grid_width: 12, grid_height: 7, revision: 6, updated_timestamp: "remote" };
@@ -770,7 +756,7 @@ test("protected geometry invalidation interrupts an ordinary refresh and cannot 
     setCurrentRealtimeConnectionIDForTest("local-connection");
     await mounted.clickPlacement(mounted.process);
     assert.ok(mounted.container.querySelector(".process-map-qd-card"));
-    assert.ok(mounted.container.querySelector(".process-map-toolbar"));
+    assert.equal(mountedPlacementBodies(`logic_gate:${mounted.process.resource_id}`).length, 1);
     const ordinaryScene = mounted.holdNextSceneRead();
     await emitMountedProcessMapChange(mounted, false, "remote-connection");
     assert.equal(mounted.readSceneCount(), 2);
@@ -782,7 +768,6 @@ test("protected geometry invalidation interrupts an ordinary refresh and cannot 
     assert.equal(mounted.readSceneCount(), 3, "aborting the ordinary read immediately starts one coalesced protected replacement");
     assert.equal(readProcessMapDeckGLTestProps().layers.length, 0, "protected geometry must disappear synchronously while replacement is pending");
     assert.equal(mounted.container.querySelector(".process-map-qd-card"), null);
-    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null);
     assert.ok(mounted.container.querySelector(".process-map-loading"));
 
     await resolveMountedScene(ordinaryScene, 2, { min_x: 0, min_y: 0, max_x: 14, max_y: 8 });
