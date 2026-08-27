@@ -32,8 +32,8 @@ func TestMemoryLogicGateWorkspaceEventsAreAtomic(t *testing.T) {
 		if err != nil {
 			t.Fatalf("CreateLogicGateWithWorkspaceEvent: %v", err)
 		}
-		if event.Type != "logic_gate_created" || len(repo.realtimeOutbox) != 1 {
-			t.Fatalf("create event=%q outbox=%d, want mapped board event", event.Type, len(repo.realtimeOutbox))
+		if event.Type != "logic_gate_created" || len(repo.realtimeOutbox) != 2 {
+			t.Fatalf("create event=%q outbox=%d, want Logic Gate and Process Map invalidations", event.Type, len(repo.realtimeOutbox))
 		}
 		repo.domainEventAppendErr = forced
 		if _, _, err := repo.UpdateLogicGateHeaderWithWorkspaceEvent(companyID, gate.LogicGateID, "not committed"); !errors.Is(err, forced) {
@@ -47,8 +47,8 @@ func TestMemoryLogicGateWorkspaceEventsAreAtomic(t *testing.T) {
 		if err != nil || len(boards) != 1 || boards[0].Title != "original" {
 			t.Fatalf("mounted board after failed update = %+v err=%v", boards, err)
 		}
-		if len(repo.domainEvents) != 1 || len(repo.realtimeOutbox) != 1 {
-			t.Fatalf("failed update domain_events=%d outbox=%d, want 1/1", len(repo.domainEvents), len(repo.realtimeOutbox))
+		if len(repo.domainEvents) != 1 || len(repo.realtimeOutbox) != 2 {
+			t.Fatalf("failed update domain_events=%d outbox=%d, want 1/2", len(repo.domainEvents), len(repo.realtimeOutbox))
 		}
 
 		repo.domainEventAppendErr = nil
@@ -63,7 +63,7 @@ func TestMemoryLogicGateWorkspaceEventsAreAtomic(t *testing.T) {
 		if err != nil || len(boards) != 1 || boards[0].Title != "committed" {
 			t.Fatalf("mounted board after commit = %+v err=%v", boards, err)
 		}
-		if len(repo.domainEvents) != 2 || len(repo.realtimeOutbox) != 3 {
+		if len(repo.domainEvents) != 2 || len(repo.realtimeOutbox) != 4 {
 			t.Fatalf("committed update domain_events=%d outbox=%d, want 2 events and board plus Process Map invalidations", len(repo.domainEvents), len(repo.realtimeOutbox))
 		}
 	})

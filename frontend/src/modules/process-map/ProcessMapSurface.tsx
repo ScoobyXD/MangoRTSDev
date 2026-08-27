@@ -12,14 +12,8 @@ import { TileLayer, type TileLayerProps } from "@deck.gl/geo-layers";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import DeckGL, { type DeckGLRef } from "@deck.gl/react";
 import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
-import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { createRequestJSON, isAbortError } from "../api/requestJSON.js";
-import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../company-explorer/companyExplorerDragDrop.js";
-import {
-  fetchCompanyExplorerChildren,
-  fetchCompanyExplorerRoots,
-  type CompanyExplorerV2Row,
-} from "../company-explorer/companyExplorerLazyApi.js";
+import { getQDBusinessDate, millisecondsUntilNextQDBusinessDay } from "../logic-gates/qdRatingsApi.js";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh.js";
 import { getCurrentRealtimeConnectionID, subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
 import { ProcessMapQDCard } from "./ProcessMapQDCard.js";
@@ -57,7 +51,6 @@ import {
   processMapDeckTileSize,
   processMapDeepestContainingFolder,
   processMapInputAnchor,
-  processMapInitialPlacementDimensions,
   processMapOrthogonalPathPoints,
   processMapOutputAnchor,
   processMapPlacementBounds,
@@ -70,9 +63,7 @@ import {
 } from "./processMapGeometry.js";
 import {
   createProcessMapSettlementGate,
-  decideProcessMapExplorerDrop,
   processMapResourceNodeID,
-  processMapTrayCandidates,
   shouldApplyProcessMapCommit,
   shouldApplyProcessMapMutationAck,
   transparentVectorRefinementStrategy,
@@ -80,7 +71,6 @@ import {
 import "./processMap.css";
 
 const PROCESS_MAP_REALTIME_SCOPE = "process-map:company";
-const PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY = "mangorts.process-map.placement-tray-collapsed.v1";
 const PROCESS_MAP_DOUBLE_CLICK_MS = 300;
 const COLOR_FOLDER: [number, number, number, number] = [249, 115, 22, 230];
 const COLOR_PROCESS: [number, number, number, number] = [25, 240, 122, 235];
@@ -90,6 +80,12 @@ const PROCESS_MAP_SELECTED_TRACE_WIDTH_PX = 4;
 const COLOR_TEXT: [number, number, number, number] = [30, 41, 59, 245];
 const COLOR_PROCESS_SURFACE: [number, number, number, number] = [248, 250, 252, 252];
 const COLOR_PROCESS_SHADOW: [number, number, number, number] = [100, 116, 139, 42];
+const COLOR_SCORE_GREEN: [number, number, number, number] = [104, 184, 78, 255];
+const COLOR_SCORE_YELLOW: [number, number, number, number] = [242, 193, 79, 255];
+const COLOR_SCORE_RED: [number, number, number, number] = [223, 83, 83, 255];
+const COLOR_SCORE_NEUTRAL: [number, number, number, number] = [100, 116, 139, 255];
+const COLOR_RESPONSIBLE: [number, number, number, number] = [240, 138, 36, 255];
+const COLOR_ACCOUNTABLE: [number, number, number, number] = [25, 200, 121, 255];
 
 export class ProcessMapProtectedTileLayer extends TileLayer<ProcessMapTileResponse, { protectedGeneration: number }> {
   static override layerName = "ProcessMapProtectedTileLayer";
@@ -133,6 +129,10 @@ type ResizePick = {
 type WaypointPick = { kind: "waypoint"; id: string; index: number; trace: ProcessMapTrace };
 type ProcessMapPick = PlacementPick | TracePick | AnchorPick | ResizePick | WaypointPick;
 
+function processMapResizeCursor(horizontal: ResizePick["horizontal"], vertical: ResizePick["vertical"]): "nwse-resize" | "nesw-resize" {
+  return (horizontal === "west") === (vertical === "north") ? "nwse-resize" : "nesw-resize";
+}
+
 export type ProcessMapPresentationState = {
   placements: Map<string, ProcessMapVisiblePlacement>;
   traces: Map<string, ProcessMapTrace>;
@@ -161,6 +161,7 @@ export type ProcessMapTileLoadRequest = {
 export type ProcessMapLayerBuildOptions = {
   scene: ProcessMapSceneResponse;
   protectedGeneration: number;
+  scoreCardBusinessDate: string;
   settled: boolean;
   settledPixelsPerGridUnit: number;
   presentation: ProcessMapPresentationState;
@@ -229,7 +230,15 @@ type PathDatum = {
   width: number;
   pick?: ProcessMapPick;
 };
-type TextDatum = { position: [number, number]; text: string; size: number; pick?: ProcessMapPick };
+type TextDatum = {
+  position: [number, number];
+  text: string;
+  size: number;
+  color?: [number, number, number, number];
+  textAnchor?: "start" | "middle" | "end";
+  alignmentBaseline?: "top" | "center" | "bottom";
+  pick?: ProcessMapPick;
+};
 type PointDatum = {
   position: [number, number];
   radius: number;
@@ -385,17 +394,6 @@ export function processMapCurrentOperationKeys(
     if (expected !== undefined && currentGenerations.get(operationKey) === expected) currentKeys.add(key);
   }
   return currentKeys;
-}
-
-export function reconcileProcessMapKnownMappedKeys(
-  current: ReadonlySet<string>,
-  additions: readonly ProcessMapResourceRef[],
-  removals: readonly ProcessMapResourceRef[] = [],
-): Set<string> {
-  const next = new Set(current);
-  for (const resource of additions) next.add(placementKey(resource));
-  for (const resource of removals) next.delete(placementKey(resource));
-  return next;
 }
 
 export function replaceProcessMapPreviewEntries<T>(
@@ -557,6 +555,80 @@ function placementBounds(placement: ProcessMapPlacement): ProcessMapBounds {
   } : processMapPlacementBounds(placement);
 }
 
+function scoreCardTextColor(rating: "green" | "yellow" | "red" | null | undefined): [number, number, number, number] {
+  if (rating === "green") return COLOR_SCORE_GREEN;
+  if (rating === "yellow") return COLOR_SCORE_YELLOW;
+  if (rating === "red") return COLOR_SCORE_RED;
+  return COLOR_SCORE_NEUTRAL;
+}
+
+const PROCESS_MAP_ASSIGNMENT_SUMMARY_MAX_CHARS = 20;
+
+function processMapAssignmentSummary(names: string[] | undefined): string {
+  if (!names?.length) return "Unassigned";
+  let summary = "";
+  for (let index = 0; index < names.length; index += 1) {
+    const candidate = summary ? `${summary}, ${names[index]}` : names[index];
+    const remaining = names.length - index - 1;
+    const suffix = remaining > 0 ? ` +${remaining}` : "";
+    if (candidate.length + suffix.length <= PROCESS_MAP_ASSIGNMENT_SUMMARY_MAX_CHARS) {
+      summary = candidate;
+      continue;
+    }
+    if (summary) return `${summary} +${names.length - index}`;
+    const visibleLength = Math.max(1, PROCESS_MAP_ASSIGNMENT_SUMMARY_MAX_CHARS - suffix.length - 1);
+    return `${names[index].slice(0, visibleLength)}…${suffix}`;
+  }
+  return summary;
+}
+
+function processCardTextDatums(
+  placement: ProcessMapVisiblePlacement,
+  bounds: ProcessMapBounds,
+  pixelsPerGridUnit: number,
+  pick: PlacementPick,
+): TextDatum[] {
+  if (
+    placement.resource_type !== "logic_gate"
+    || processMapPlacementDisplayLOD(placement, pixelsPerGridUnit) !== "editing"
+  ) return [];
+  const scale = Math.max(Number.MIN_VALUE, pixelsPerGridUnit);
+  const top = bounds.min_y + 7 / scale;
+  const left = bounds.min_x + 8 / scale;
+  const right = bounds.max_x - 8 / scale;
+  const nameRight = bounds.max_x - 20 / scale;
+  const responsibleNames = processMapAssignmentSummary(placement.responsible_names);
+  const accountableNames = processMapAssignmentSummary(placement.accountable_names);
+  const scoreCard = placement.score_card;
+  return [
+    { position: [left, top], text: "Q", size: 11, color: scoreCardTextColor(scoreCard?.quality_rating), textAnchor: "start", alignmentBaseline: "top", pick },
+    { position: [left + 13 / scale, top], text: "C", size: 11, color: scoreCardTextColor(scoreCard?.cost_rating), textAnchor: "start", alignmentBaseline: "top", pick },
+    { position: [left + 26 / scale, top], text: "D", size: 11, color: scoreCardTextColor(scoreCard?.delivery_rating), textAnchor: "start", alignmentBaseline: "top", pick },
+    { position: [nameRight, top], text: responsibleNames, size: 9, color: COLOR_TEXT, textAnchor: "end", alignmentBaseline: "top", pick },
+    { position: [right, top], text: "R", size: 10, color: COLOR_RESPONSIBLE, textAnchor: "end", alignmentBaseline: "top", pick },
+    { position: [nameRight, top + 13 / scale], text: accountableNames, size: 9, color: COLOR_TEXT, textAnchor: "end", alignmentBaseline: "top", pick },
+    { position: [right, top + 13 / scale], text: "A", size: 10, color: COLOR_ACCOUNTABLE, textAnchor: "end", alignmentBaseline: "top", pick },
+  ];
+}
+
+function processMapTextLayer(id: string, data: TextDatum[]): TextLayer<TextDatum> {
+  return new TextLayer<TextDatum>({
+    id,
+    data,
+    pickable: true,
+    billboard: true,
+    sizeUnits: "pixels",
+    fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+    fontWeight: 700,
+    getPosition: (item) => item.position,
+    getText: (item) => item.text,
+    getSize: (item) => item.size,
+    getColor: (item) => item.color ?? COLOR_TEXT,
+    getTextAnchor: (item) => item.textAnchor ?? "middle",
+    getAlignmentBaseline: (item) => item.alignmentBaseline ?? "center",
+  });
+}
+
 function processShadowBounds(bounds: ProcessMapBounds, pixelsPerGridUnit: number): ProcessMapBounds {
   const scale = Math.max(Number.MIN_VALUE, pixelsPerGridUnit);
   const spread = 1 / scale;
@@ -583,6 +655,7 @@ function renderTileSubLayers(
   const processPerimeters: PathDatum[] = [];
   const restrictedPerimeters: PathDatum[] = [];
   const labels: TextDatum[] = [];
+  const processCardText: TextDatum[] = [];
   for (const placement of props.data.placements) {
     const bounds = placementBounds(placement);
     const clipped = clipRectangle(bounds, tile);
@@ -626,6 +699,9 @@ function renderTileSubLayers(
         pick,
       });
     }
+    processCardText.push(...processCardTextDatums(placement, bounds, options.settledPixelsPerGridUnit, pick).filter((item) => (
+      ownsCoordinate({ x: item.position[0], y: item.position[1] }, tile)
+    )));
   }
   for (const trace of props.data.traces) {
     const id = trace.resource_operational_relationship_id;
@@ -639,7 +715,8 @@ function renderTileSubLayers(
     new PolygonLayer<PolygonDatum>({ id: `${props.id}-restricted`, data: restricted, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
     new PathLayer<PathDatum>({ id: `${props.id}-process-perimeters`, data: processPerimeters, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
     new PathLayer<PathDatum>({ id: `${props.id}-restricted-perimeters`, data: restrictedPerimeters, pickable: false, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
-    new TextLayer<TextDatum>({ id: `${props.id}-labels`, data: labels, pickable: true, billboard: true, sizeUnits: "pixels", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", fontWeight: 700, getPosition: (item) => item.position, getText: (item) => item.text, getSize: (item) => item.size, getColor: COLOR_TEXT, getTextAnchor: "middle", getAlignmentBaseline: "center" }),
+    processMapTextLayer(`${props.id}-labels`, labels),
+    processMapTextLayer(`${props.id}-process-card-text`, processCardText),
   ];
 }
 
@@ -687,6 +764,7 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
   const bodies: PolygonDatum[] = [];
   const fences: PathDatum[] = [];
   const labels: TextDatum[] = [];
+  const processCardText: TextDatum[] = [];
   const handles: PointDatum[] = [];
   const anchors: PointDatum[] = [];
   for (const placement of options.editOverlay.placements) {
@@ -720,17 +798,23 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
       size: 13,
       pick,
     });
-    if (
-      !options.settled
-      || options.editOverlay.connectionSourceKey
-      || options.editOverlay.selectedPlacementKey !== key
-      || lod !== "editing"
-    ) continue;
-    const corners: Array<[ResizePick["horizontal"], ResizePick["vertical"], [number, number]]> = [
-      ["west", "north", [bounds.min_x, bounds.min_y]], ["east", "north", [bounds.max_x, bounds.min_y]],
-      ["east", "south", [bounds.max_x, bounds.max_y]], ["west", "south", [bounds.min_x, bounds.max_y]],
-    ];
-    for (const [horizontal, vertical, position] of corners) handles.push({ position, radius: 5, fill: [255, 255, 255, 255], line: placement.resource_type === "company_explorer_folder" ? COLOR_FOLDER : COLOR_PROCESS, pick: { kind: "resize", horizontal, vertical, key, placement } });
+    processCardText.push(...processCardTextDatums(placement, bounds, options.settledPixelsPerGridUnit, pick));
+  }
+  if (options.settled && !options.editOverlay.connectionSourceKey) {
+    const handleKeys = new Set([
+      options.editOverlay.selectedPlacementKey,
+      options.editOverlay.hoveredPlacementKey,
+    ].filter((key): key is string => Boolean(key)));
+    for (const key of handleKeys) {
+      const placement = options.presentation.placements.get(key);
+      if (!placement || processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit) !== "editing") continue;
+      const bounds = processMapPlacementBounds(placement);
+      const corners: Array<[ResizePick["horizontal"], ResizePick["vertical"], [number, number]]> = [
+        ["west", "north", [bounds.min_x, bounds.min_y]], ["east", "north", [bounds.max_x, bounds.min_y]],
+        ["east", "south", [bounds.max_x, bounds.max_y]], ["west", "south", [bounds.min_x, bounds.max_y]],
+      ];
+      for (const [horizontal, vertical, position] of corners) handles.push({ position, radius: 5, fill: [255, 255, 255, 255], line: placement.resource_type === "company_explorer_folder" ? COLOR_FOLDER : COLOR_PROCESS, pick: { kind: "resize", horizontal, vertical, key, placement } });
+    }
   }
   if (options.settled) {
     for (const placement of options.presentation.placements.values()) {
@@ -758,7 +842,8 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
     new PathLayer<PathDatum>({ id: "process-map-edit-folder-fences", data: fences, pickable: true, positionFormat: "XY", widthUnits: "pixels", getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
     new PolygonLayer<PolygonDatum>({ id: "process-map-edit-placement-shadows", data: shadows, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
     new PolygonLayer<PolygonDatum>({ id: "process-map-edit-placement-bodies", data: bodies, pickable: true, filled: true, stroked: true, lineWidthUnits: "pixels", getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: (item) => item.lineWidth }),
-    new TextLayer<TextDatum>({ id: "process-map-edit-labels", data: labels, pickable: true, billboard: true, sizeUnits: "pixels", fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif", fontWeight: 700, getPosition: (item) => item.position, getText: (item) => item.text, getSize: (item) => item.size, getColor: COLOR_TEXT, getTextAnchor: "middle", getAlignmentBaseline: "center" }),
+    processMapTextLayer("process-map-edit-labels", labels),
+    processMapTextLayer("process-map-edit-process-card-text", processCardText),
     new ScatterplotLayer<PointDatum>({ id: "process-map-edit-resize-handles", data: handles, pickable: true, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 2 }),
     new ScatterplotLayer<PointDatum>({ id: "process-map-edit-anchors", data: anchors, pickable: true, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 2 }),
   ];
@@ -779,7 +864,7 @@ function buildProcessMapSpatialLayers(options: ProcessMapSpatialLayerBuildOption
   const tile = sceneBounds ? new ProcessMapProtectedTileLayer({
     id: "process-map-spatial-tiles",
     protectedGeneration: options.protectedGeneration,
-    data: `${options.scene.process_map_read_version}:${options.protectedGeneration}`,
+    data: `${options.scene.process_map_read_version}:${options.protectedGeneration}:${options.scoreCardBusinessDate}`,
     extent: [sceneBounds.min_x, sceneBounds.min_y, sceneBounds.max_x, sceneBounds.max_y],
     tileSize: processMapDeckTileSize(options.scene.tile_size, options.scene.max_tile_zoom),
     minZoom: options.scene.min_tile_zoom,
@@ -818,22 +903,6 @@ export function buildProcessMapLayers(options: ProcessMapLayerBuildOptions): Lay
     selectedTraceID: options.editOverlay.selectedTraceID,
   });
   return composeProcessMapLayers(options, spatial);
-}
-
-function readTrayCollapsed(): boolean {
-  try {
-    return typeof localStorage !== "undefined" && localStorage.getItem(PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function storeTrayCollapsed(collapsed: boolean): void {
-  try {
-    localStorage.setItem(PROCESS_MAP_TRAY_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
-  } catch {
-    // Browser storage is only a view preference.
-  }
 }
 
 function errorMessage(cause: unknown, fallback: string): string {
@@ -897,7 +966,7 @@ function translatedTraces(
 
 export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false, onOpenLogicGate }: ProcessMapSurfaceProps) {
   const authGeneration = getAuthSessionCacheGeneration();
-  const knownMappedScope = `${apiBase.trim()}\u0000${companyID.trim()}\u0000${authGeneration}`;
+  const protectedScopeKey = `${apiBase.trim()}\u0000${companyID.trim()}\u0000${authGeneration}`;
   const surfaceRef = useRef<HTMLDivElement | null>(null);
   const deckRef = useRef<DeckGLRef<OrthographicView> | null>(null);
   const [scene, setScene] = useState<ProcessMapSceneResponse | null>(null);
@@ -905,7 +974,8 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const [viewportSize, setViewportSize] = useState({ width: 1, height: 1 });
   const [settled, setSettled] = useState(false);
   const [protectedGeneration, setProtectedGeneration] = useState(0);
-  const [protectedScope, setProtectedScope] = useState(knownMappedScope);
+  const [scoreCardBusinessDate, setScoreCardBusinessDate] = useState(() => getQDBusinessDate().dateKey);
+  const [protectedScope, setProtectedScope] = useState(protectedScopeKey);
   const [settledViewState, setSettledViewState] = useState(viewState);
   const [loadedTiles, setLoadedTiles] = useState<Map<string, ProcessMapTileResponse>>(new Map());
   const [committedOverlay, setCommittedOverlay] = useState<ProcessMapPresentationState>(emptyPresentation);
@@ -914,26 +984,15 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const [removedTraceIDs, setRemovedTraceIDs] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<ProcessMapSelection>(null);
   const [hoveredPlacementKey, setHoveredPlacementKey] = useState<string | null>(null);
+  const [hoveredResizePick, setHoveredResizePick] = useState<ResizePick | null>(null);
   const [hoveredProcessID, setHoveredProcessID] = useState<string | null>(null);
   const [pinnedProcessID, setPinnedProcessID] = useState<string | null>(null);
   const [gesture, setGesture] = useState<ProcessMapGesture | null>(null);
-  const [externalDropPoint, setExternalDropPoint] = useState<{
-    point: ProcessMapGridPoint;
-    resourceType: ProcessMapResourceRef["resource_type"];
-  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [trayCollapsed, setTrayCollapsed] = useState(readTrayCollapsed);
-  const [trayRows, setTrayRows] = useState<CompanyExplorerV2Row[]>([]);
-  const [trayPath, setTrayPath] = useState<Array<{ id: string; label: string }>>([]);
-  const [trayLoading, setTrayLoading] = useState(false);
-  const [trayError, setTrayError] = useState("");
-  const trayListID = React.useId();
-  const [knownMapped, setKnownMapped] = useState<{ scope: string; keys: Set<string> }>(() => ({ scope: knownMappedScope, keys: new Set() }));
-  const protectedScopeCurrent = protectedScope === knownMappedScope;
+  const protectedScopeCurrent = protectedScope === protectedScopeKey;
   const activeScene = protectedScopeCurrent ? scene : null;
-  const knownMappedPlacementKeys = knownMapped.scope === knownMappedScope ? knownMapped.keys : new Set<string>();
 
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const viewRef = useRef(viewState);
@@ -976,17 +1035,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   ]);
   presentationRef.current = presentation;
 
-  useEffect(() => {
-    setKnownMapped((current) => current.scope === knownMappedScope ? current : { scope: knownMappedScope, keys: new Set() });
-  }, [knownMappedScope]);
-
-  const updateKnownMapped = useCallback((additions: readonly ProcessMapResourceRef[], removals: readonly ProcessMapResourceRef[] = []) => {
-    setKnownMapped((current) => ({
-      scope: knownMappedScope,
-      keys: reconcileProcessMapKnownMappedKeys(current.scope === knownMappedScope ? current.keys : new Set(), additions, removals),
-    }));
-  }, [knownMappedScope]);
-
   const advanceProtectedGeneration = useCallback(() => {
     const next = canonicalGenerationRef.current + 1;
     canonicalGenerationRef.current = next;
@@ -1015,7 +1063,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     if (!companyID.trim()) return;
     if (purgeProtectedGeometry) {
       setScene(null);
-      setProtectedScope(knownMappedScope);
+      setProtectedScope(protectedScopeKey);
       advanceProtectedGeneration();
       invalidateProcessMapReadCaches(apiBase, companyID);
       setSettled(false);
@@ -1026,9 +1074,9 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setRemovedTraceIDs(new Set());
       gestureRef.current = null;
       setGesture(null);
-      setExternalDropPoint(null);
       setSelection(null);
       setHoveredPlacementKey(null);
+      setHoveredResizePick(null);
       setHoveredProcessID(null);
       setPinnedProcessID(null);
     }
@@ -1048,7 +1096,18 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setLoading(false);
       setError(errorMessage(cause, "Process Map could not be loaded."));
     }
-  }, [advanceProtectedGeneration, apiBase, companyID, knownMappedScope, markUnsettled]);
+  }, [advanceProtectedGeneration, apiBase, companyID, markUnsettled, protectedScopeKey]);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const refreshBusinessDate = () => {
+      setScoreCardBusinessDate(getQDBusinessDate().dateKey);
+      void loadScene(true);
+      timer = setTimeout(refreshBusinessDate, millisecondsUntilNextQDBusinessDay());
+    };
+    timer = setTimeout(refreshBusinessDate, millisecondsUntilNextQDBusinessDay());
+    return () => { if (timer !== undefined) clearTimeout(timer); };
+  }, [loadScene]);
 
   useEffect(() => {
     fittedSceneRef.current = false;
@@ -1068,35 +1127,11 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setViewState(fitted);
     setSelection(null);
     setHoveredPlacementKey(null);
+    setHoveredResizePick(null);
     setHoveredProcessID(null);
     setPinnedProcessID(null);
     markUnsettled();
   }, [activeScene, markUnsettled, viewportSize]);
-
-  useEffect(() => {
-    if (trayCollapsed) {
-      setTrayRows([]);
-      setTrayLoading(false);
-      setTrayError("");
-      return undefined;
-    }
-    let active = true;
-    setTrayRows([]);
-    setTrayLoading(true);
-    setTrayError("");
-    const folderID = trayPath[trayPath.length - 1]?.id;
-    const read = folderID
-      ? fetchCompanyExplorerChildren(apiBase, companyID, "all", folderID)
-      : fetchCompanyExplorerRoots(apiBase, companyID, "all");
-    void read.then((snapshot) => {
-      if (active) setTrayRows(snapshot.rows ?? []);
-    }).catch((cause) => {
-      if (active) setTrayError(errorMessage(cause, "Placement choices are unavailable."));
-    }).finally(() => {
-      if (active) setTrayLoading(false);
-    });
-    return () => { active = false; };
-  }, [apiBase, companyID, trayCollapsed, trayPath]);
 
   useEffect(() => {
     const coalesced = createCoalescedCanonicalRefresh(
@@ -1119,12 +1154,11 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         setPreviewPlacements(new Map());
         setPreviewTraces(new Map());
         setRemovedTraceIDs(new Set());
-        setKnownMapped({ scope: knownMappedScope, keys: new Set() });
         gestureRef.current = null;
         setSelection(null);
         setGesture(null);
-        setExternalDropPoint(null);
         setHoveredPlacementKey(null);
+        setHoveredResizePick(null);
         setHoveredProcessID(null);
         setPinnedProcessID(null);
         setScene(null);
@@ -1135,27 +1169,26 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       coalesced.dispose();
       unsubscribe();
     };
-  }, [advanceProtectedGeneration, apiBase, companyID, knownMappedScope, loadScene]);
+  }, [advanceProtectedGeneration, apiBase, companyID, loadScene]);
 
   const guardedGetTileData = useCallback(async (request: ProcessMapTileLoadRequest): Promise<ProcessMapTileResponse | null> => {
     const currentScene = sceneRef.current;
     if (!currentScene || request.z < currentScene.min_tile_zoom || request.z > currentScene.max_tile_zoom) return null;
     try {
-      const tile = await fetchProcessMapTile(apiBase, companyID, currentScene.process_map_read_version, request.z, request.x, request.y, request.signal);
+      const tile = await fetchProcessMapTile(apiBase, companyID, currentScene.process_map_read_version, request.z, request.x, request.y, request.signal, scoreCardBusinessDate);
       if (request.signal?.aborted || tile.process_map_read_version !== sceneRef.current?.process_map_read_version) return null;
       return tile;
     } catch (cause) {
       if (isAbortError(cause)) return null;
       throw cause;
     }
-  }, [apiBase, companyID]);
+  }, [apiBase, companyID, scoreCardBusinessDate]);
 
   const handleTileLoad = useCallback((tileID: string, data: ProcessMapTileResponse, generation: number) => {
     if (generation !== canonicalGenerationRef.current || data.process_map_read_version !== sceneRef.current?.process_map_read_version) return;
     setLoadedTiles((current) => new Map(current).set(tileID, data));
-    updateKnownMapped(data.placements.filter((placement): placement is ProcessMapVisiblePlacement => !placement.restricted));
     setLoading(false);
-  }, [updateKnownMapped]);
+  }, []);
 
   const handleTileUnload = useCallback((tileID: string, readVersion: number, generation: number) => {
     if (generation !== canonicalGenerationRef.current) return;
@@ -1235,9 +1268,8 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     );
     setPreviewPlacements((current) => replaceProcessMapPreviewEntries(current, currentPlacementKeys, new Map()));
     setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, currentTraceIDs, new Map()));
-    updateKnownMapped(envelope.placements);
     refreshAfterMutation(envelope.process_map_read_version);
-  }, [refreshAfterMutation, updateKnownMapped]);
+  }, [refreshAfterMutation]);
 
   const nextOperation = useCallback((key: string) => {
     const next = (operationGenerationRef.current.get(key) ?? 0) + 1;
@@ -1318,14 +1350,9 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     if (activePlacement) {
       bounds = processMapPlacementBounds(activePlacement);
       if (activePlacement.resource_type === "company_explorer_folder") excludedFolderID = activePlacement.resource_id;
-    } else if (externalDropPoint) {
-      const dimensions = processMapInitialPlacementDimensions(externalDropPoint.resourceType, 2 ** viewState.zoom);
-      const x = snapProcessMapGridCoordinate(externalDropPoint.point.x);
-      const y = snapProcessMapGridCoordinate(externalDropPoint.point.y);
-      bounds = { min_x: x, min_y: y, max_x: x + dimensions.width, max_y: y + dimensions.height };
     }
     return bounds ? processMapDeepestContainingFolder(bounds, folders, excludedFolderID) : null;
-  }, [externalDropPoint, folders, gesture, previewPlacements, viewState.zoom]);
+  }, [folders, gesture, previewPlacements]);
 
   const selectedPlacement = selection?.kind === "placement" ? presentation.placements.get(selection.id) ?? null : null;
   const editedPlacementKeys = useMemo(() => new Set([
@@ -1384,6 +1411,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const spatialLayers = useMemo(() => activeScene ? buildProcessMapSpatialLayers({
     scene: activeScene,
     protectedGeneration,
+    scoreCardBusinessDate,
     settledPixelsPerGridUnit: 2 ** settledViewState.zoom,
     editedPlacementKeys: spatialEditedPlacementKeys,
     editedTraceIDs: spatialEditedTraceIDs,
@@ -1394,11 +1422,12 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     onTileUnload: handleTileUnload,
     onViewportLoad: handleViewportLoad,
     onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
-  }) : null, [activeScene, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, protectedGeneration, selectedPlacementKey, selectedTraceID, settledViewState.zoom, spatialEditedPlacementKeys, spatialEditedTraceIDs]);
+  }) : null, [activeScene, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, protectedGeneration, scoreCardBusinessDate, selectedPlacementKey, selectedTraceID, settledViewState.zoom, spatialEditedPlacementKeys, spatialEditedTraceIDs]);
 
   const layers = useMemo(() => activeScene && spatialLayers ? composeProcessMapLayers({
     scene: activeScene,
     protectedGeneration,
+    scoreCardBusinessDate,
     settled,
     settledPixelsPerGridUnit: 2 ** settledViewState.zoom,
     presentation,
@@ -1410,7 +1439,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     onTileUnload: handleTileUnload,
     onViewportLoad: handleViewportLoad,
     onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
-  }, spatialLayers) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, settled, settledViewState.zoom, spatialLayers]);
+  }, spatialLayers) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, scoreCardBusinessDate, settled, settledViewState.zoom, spatialLayers]);
 
   const handleViewStateChange = useCallback(<ViewStateT extends OrthographicViewState,>(params: ViewStateChangeParameters<ViewStateT>): ViewStateT => {
     if (gestureRef.current?.kind === "connection") {
@@ -1419,6 +1448,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setSelection(null);
     }
     setHoveredPlacementKey(null);
+    setHoveredResizePick(null);
     const proposed: ProcessMapViewState = {
       target: [params.viewState.target?.[0] ?? viewRef.current.target[0], params.viewState.target?.[1] ?? viewRef.current.target[1], 0],
       zoom: typeof params.viewState.zoom === "number" ? params.viewState.zoom : viewRef.current.zoom,
@@ -1485,11 +1515,15 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     if (!point || !pick) return;
     event.stopPropagation();
     suppressClickRef.current = true;
-    if (pick.kind === "placement" || pick.kind === "resize") startPlacementGesture(pick, point);
+    if (pick.kind === "placement" || pick.kind === "resize") {
+      if (pick.kind === "resize") setHoveredResizePick(pick);
+      startPlacementGesture(pick, point);
+    }
     else if (pick.kind === "anchor" && pick.anchor === "output") {
       const next: ConnectionGesture = { kind: "connection", source: pick.placement, point, moved: false };
       gestureRef.current = next;
       setHoveredPlacementKey(null);
+      setHoveredResizePick(null);
       setSelection({ kind: "placement", id: pick.key });
       setGesture(next);
     } else if (pick.kind === "waypoint") {
@@ -1643,6 +1677,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     if (placement.resource_type !== "logic_gate") return;
     clearHoverTimer();
     setHoveredPlacementKey(null);
+    setHoveredResizePick(null);
     setHoveredProcessID(null);
     setPinnedProcessID(null);
     onOpenLogicGate(placement.resource_id, placement.name);
@@ -1655,6 +1690,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     if (!pick) {
       setSelection(null);
       setHoveredPlacementKey(null);
+      setHoveredResizePick(null);
       setPinnedProcessID(null);
       setHoveredProcessID(null);
       return;
@@ -1696,8 +1732,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       : null;
     if (!gestureRef.current && anchorPlacement && processMapPlacementDisplayLOD(anchorPlacement, 2 ** settledViewState.zoom) === "editing") {
       setHoveredPlacementKey(placementKey(anchorPlacement));
+      setHoveredResizePick(pick?.kind === "resize" ? pick : null);
     } else if (!gestureRef.current) {
       setHoveredPlacementKey(null);
+      setHoveredResizePick(null);
     }
     if (pick?.kind === "placement" && pick.placement.resource_type === "logic_gate" && processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "editing") {
       showHoverCard(pick.placement.resource_id);
@@ -1708,10 +1746,11 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const removeSelection = useCallback(async () => {
     if (!selection) return;
-    gestureRef.current = null;
-    setGesture(null);
-    setHoveredPlacementKey(null);
     if (selection.kind === "trace") {
+      gestureRef.current = null;
+      setGesture(null);
+      setHoveredPlacementKey(null);
+      setHoveredResizePick(null);
       const trace = presentationRef.current.traces.get(selection.id);
       if (!trace) return;
       const id = trace.resource_operational_relationship_id;
@@ -1739,6 +1778,14 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     }
     const placement = presentationRef.current.placements.get(selection.id);
     if (!placement) return;
+    const confirmed = window.confirm(placement.resource_type === "logic_gate"
+      ? `Delete \"${placement.name}\" from Company Explorer? This removes only its Company Explorer placement. The Process and its data will remain.`
+      : `Delete Company Explorer Folder \"${placement.name}\" and its subtree? Existing Company Explorer deletion rules apply.`);
+    if (!confirmed) return;
+    gestureRef.current = null;
+    setGesture(null);
+    setHoveredPlacementKey(null);
+    setHoveredResizePick(null);
     const key = placementKey(placement);
     const canonicalGeneration = canonicalGenerationRef.current;
     const expectedOperationGenerations = new Map<string, number>();
@@ -1764,39 +1811,41 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, affectedTraceIDs, new Map()));
     setCommittedOverlay((current) => {
       const placements = new Map(current.placements);
-      placements.delete(key);
-      return { placements, traces: new Map(current.traces), removedPlacementKeys: new Set(current.removedPlacementKeys).add(key) };
+      const removedPlacementKeys = new Set(current.removedPlacementKeys);
+      for (const affectedKey of removalPlacementKeys) {
+        placements.delete(affectedKey);
+        removedPlacementKeys.add(affectedKey);
+      }
+      return { placements, traces: new Map(current.traces), removedPlacementKeys };
     });
-    const incident = [...presentationRef.current.traces.values()]
-      .filter((trace) => placementKey(trace.source) === key || placementKey(trace.target) === key)
-      .map((trace) => trace.resource_operational_relationship_id);
-    setRemovedTraceIDs((current) => new Set([...current, ...incident]));
+    setRemovedTraceIDs((current) => new Set([...current, ...affectedTraceIDs]));
     setSelection(null);
     if (placement.resource_type === "logic_gate") setPinnedProcessID((current) => current === placement.resource_id ? null : current);
     try {
       const envelope = await deleteProcessMapPlacement(apiBase, companyID, placement);
       if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
-      updateKnownMapped([], [placement]);
       applyEnvelope(envelope, new Map(), affectedTraceIDs, expectedOperationGenerations);
-      setNotice("Placement removed. Its source resource is unchanged.");
+      setNotice(placement.resource_type === "logic_gate"
+        ? "Company Explorer placement removed. The Process and its data remain."
+        : "Company Explorer Folder and its subtree were removed.");
     } catch (cause) {
       if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
       setCommittedOverlay((current) => {
         const removedPlacementKeys = new Set(current.removedPlacementKeys);
-        removedPlacementKeys.delete(key);
+        for (const affectedKey of removalPlacementKeys) removedPlacementKeys.delete(affectedKey);
         return { ...current, removedPlacementKeys };
       });
       setRemovedTraceIDs((current) => {
         const next = new Set(current);
-        incident.forEach((id) => next.delete(id));
+        affectedTraceIDs.forEach((id) => next.delete(id));
         return next;
       });
       invalidateProcessMapReadCaches(apiBase, companyID);
       markUnsettled();
       void loadScene(false);
-      setNotice(errorMessage(cause, "Placement removal was rolled back."));
+      setNotice(errorMessage(cause, "Company Explorer deletion was rolled back."));
     }
-  }, [apiBase, applyEnvelope, companyID, loadScene, markUnsettled, nextOperation, refreshAfterMutation, selection, updateKnownMapped]);
+  }, [apiBase, applyEnvelope, companyID, loadScene, markUnsettled, nextOperation, refreshAfterMutation, selection]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Delete" || event.key === "Backspace") {
@@ -1818,65 +1867,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setGesture(null);
       setSelection(null);
       setHoveredPlacementKey(null);
+      setHoveredResizePick(null);
     }
   }, [openProcess, removeSelection, selectedPlacement, selection]);
 
-  const worldPointFromClient = useCallback((clientX: number, clientY: number): ProcessMapGridPoint | null => {
-    const rect = surfaceRef.current?.getBoundingClientRect();
-    const viewport = deckRef.current?.deck?.getViewports()[0];
-    if (!rect || !viewport) return null;
-    const point = viewport.unproject([clientX - rect.left, clientY - rect.top]);
-    return point.length >= 2 ? { x: point[0], y: point[1] } : null;
-  }, []);
-
-  const handleExternalDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    const hit = typeof document === "undefined" ? null : document.elementFromPoint(event.clientX, event.clientY);
-    if (loading || error || hit?.closest("[data-process-map-fixed-overlay='true']")) {
-      setExternalDropPoint(null);
-      return;
-    }
-    const decision = decideProcessMapExplorerDrop(readExplorerDragPayload(event.dataTransfer));
-    const point = worldPointFromClient(event.clientX, event.clientY);
-    setExternalDropPoint(null);
-    if (decision.kind !== "place" || !point) return;
-    const key = placementKey(decision.resource);
-    if (knownMappedPlacementKeys.has(key) || presentationRef.current.placements.has(key)) {
-      setNotice("That authorized resource is already placed on the Process Map.");
-      return;
-    }
-    const dimensions = processMapInitialPlacementDimensions(decision.resource.resource_type, 2 ** viewRef.current.zoom);
-    const now = new Date().toISOString();
-    const pending: ProcessMapVisiblePlacement = {
-      restricted: false,
-      presentation: "editing",
-      ...decision.resource,
-      name: decision.label,
-      map_parent_folder_id: null,
-      grid_x: snapProcessMapGridCoordinate(point.x),
-      grid_y: snapProcessMapGridCoordinate(point.y),
-      grid_width: dimensions.width,
-      grid_height: dimensions.height,
-      can_edit: true,
-      revision: 0,
-      created_timestamp: now,
-      updated_timestamp: now,
-    };
-    pending.map_parent_folder_id = processMapDeepestContainingFolder(processMapPlacementBounds(pending), folders)?.resource_id ?? null;
-    const pendingMap = new Map([[placementKey(pending), pending]]);
-    setPreviewPlacements((current) => replaceProcessMapPreviewEntries(current, [placementKey(pending)], pendingMap));
-    setSelection({ kind: "placement", id: placementKey(pending) });
-    void savePlacement(pending, pendingMap);
-  }, [error, folders, knownMappedPlacementKeys, loading, savePlacement, worldPointFromClient]);
-
-  const guardFixedOverlayDrop = useCallback((event: React.DragEvent<HTMLElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setExternalDropPoint(null);
-  }, []);
-
-  const unavailableTrayIDs = useMemo(() => new Set([...knownMappedPlacementKeys, ...presentation.placements.keys()]), [knownMappedPlacementKeys, presentation.placements]);
-  const trayCandidates = useMemo(() => processMapTrayCandidates(trayRows, unavailableTrayIDs), [trayRows, unavailableTrayIDs]);
   const qdPlacement = useMemo(() => {
     const id = pinnedProcessID ?? (hoverModeEnabled ? hoveredProcessID : null);
     return id ? [...presentation.placements.values()].find((placement) => placement.resource_type === "logic_gate" && placement.resource_id === id) ?? null : null;
@@ -1890,9 +1884,12 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       top: viewportSize.height / 2 + (qdPlacement.grid_y - viewState.target[1]) * scale,
     };
   }, [qdPlacement, qdVisible, viewState, viewportSize]);
-  const currentTrayFolder = trayPath[trayPath.length - 1] ?? null;
-  const trayBackLabel = trayPath.length > 1 ? trayPath[trayPath.length - 2].label : "Root Folders";
   const cameraDragEnabled = gesture === null;
+  const resizeCursor = gesture?.kind === "resize"
+    ? processMapResizeCursor(gesture.horizontal!, gesture.vertical!)
+    : hoveredResizePick
+      ? processMapResizeCursor(hoveredResizePick.horizontal, hoveredResizePick.vertical)
+      : null;
   const orthographicView = useMemo(() => new OrthographicView({
     id: "process-map",
     flipY: true,
@@ -1915,21 +1912,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       role="application"
       aria-label={selectedPlacement ? `Process Map. Selected ${selectedPlacement.name}.` : "Process Map company canvas"}
       onKeyDown={handleKeyDown}
-      onDragOver={(event) => {
-        if (!event.dataTransfer.types.includes(EXPLORER_DRAG_MIME)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = "copy";
-        const point = worldPointFromClient(event.clientX, event.clientY);
-        const decision = decideProcessMapExplorerDrop(readExplorerDragPayload(event.dataTransfer));
-        if (point && decision.kind === "place") {
-          setExternalDropPoint({ point, resourceType: decision.resource.resource_type });
-        }
-      }}
-      onDragLeave={(event) => {
-        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
-        setExternalDropPoint(null);
-      }}
-      onDrop={handleExternalDrop}
     >
       <DeckGL
         ref={deckRef}
@@ -1947,56 +1929,15 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         onDrag={handleDrag}
         onDragEnd={handleDragEnd}
         onError={(cause) => setNotice(errorMessage(cause, "Process Map drawing failed."))}
-        getCursor={({ isDragging, isHovering }) => isDragging ? "grabbing" : isHovering ? "pointer" : "grab"}
+        getCursor={({ isDragging, isHovering }) => resizeCursor ?? (isDragging ? "grabbing" : isHovering ? "pointer" : "grab")}
       />
 
-      <aside data-process-map-fixed-overlay="true" className={`process-map-placement-tray${trayCollapsed ? " is-collapsed" : ""}`} aria-label="Process Map placement tray" onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>
-        <button type="button" className="process-map-placement-tray__toggle" aria-expanded={!trayCollapsed} aria-controls={trayListID} title={trayCollapsed ? "Expand placement tray" : "Collapse placement tray"} onClick={() => {
-          const next = !trayCollapsed;
-          setTrayCollapsed(next);
-          storeTrayCollapsed(next);
-        }}>
-          {!trayCollapsed && <>
-            <span className="process-map-placement-tray__heading">{currentTrayFolder?.label ?? "Root Folders"}</span>
-            <span className="process-map-placement-tray__hint">Drag to place</span>
-          </>}
-          <span className="process-map-placement-tray__disclosure" aria-hidden="true"><ExplorerDisclosureIcon open={false} color="#64748b" /></span>
-        </button>
-        {!trayCollapsed && <div id={trayListID} className="process-map-placement-tray__body company-explorer-scroll">
-          {currentTrayFolder && <button type="button" className="process-map-placement-tray__back" onClick={() => setTrayPath((current) => current.slice(0, -1))}>← Back to {trayBackLabel}</button>}
-          {trayLoading && <p className="process-map-placement-tray__status">Loading authorized choices…</p>}
-          {trayError && <p className="process-map-placement-tray__status is-error" role="alert">{trayError}</p>}
-          {!trayLoading && !trayError && trayCandidates.length === 0 && <p className="process-map-placement-tray__status">No unplaced choices in this branch.</p>}
-          {!trayLoading && !trayError && trayCandidates.length > 0 && <div className="process-map-placement-tray__list" role="list">
-            {trayCandidates.map((candidate) => {
-              const row = trayRows.find((item) => item.entity_id === candidate.resource.resource_id || item.resource_id === candidate.resource.resource_id);
-              const folder = candidate.resource.resource_type === "company_explorer_folder";
-              return <div className="process-map-placement-tray__row" role="listitem" key={placementKey(candidate.resource)}>
-                <button type="button" draggable className={`process-map-placement-tray__card is-${folder ? "folder" : "process"}`} aria-label={folder ? `Browse or drag Folder: ${candidate.label}` : `Drag Process: ${candidate.label}`} title={folder ? "Click to browse or drag onto the map" : "Drag onto the map to place"} onClick={() => {
-                  if (!folder) return;
-                  setTrayPath((current) => [...current, { id: row?.entity_id ?? candidate.resource.resource_id, label: candidate.label }]);
-                }} onDragStart={(event) => {
-                  event.dataTransfer.effectAllowed = "copy";
-                  event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify(candidate.dragPayload));
-                }}>
-                  <span className="process-map-placement-tray__icon"><ExplorerRowIcon kind={folder ? "folder" : "logic_gate"} /></span>
-                  <span className="process-map-placement-tray__card-copy">
-                    <span className="process-map-placement-tray__card-label">{candidate.label}</span>
-                  </span>
-                  {folder && <span className="process-map-placement-tray__card-disclosure" aria-hidden="true"><ExplorerDisclosureIcon open={false} color="#64748b" /></span>}
-                </button>
-              </div>;
-            })}
-          </div>}
-        </div>}
-      </aside>
-
-      {selection && <div data-process-map-fixed-overlay="true" className="process-map-toolbar" onPointerDown={(event) => event.stopPropagation()} onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>
-        <span>{selection.kind === "placement" ? "Placement selected" : "Operational trace selected"}</span>
-        <button type="button" onClick={() => void removeSelection()}>{selection.kind === "placement" ? "Remove from map" : "Delete relationship"}</button>
+      {selection && <div data-process-map-fixed-overlay="true" className="process-map-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+        <span>{selection.kind === "placement" ? "Company Explorer item selected" : "Operational trace selected"}</span>
+        <button type="button" onClick={() => void removeSelection()}>{selection.kind === "placement" ? "Delete from Company Explorer" : "Delete relationship"}</button>
       </div>}
 
-      {qdPosition && qdPlacement && <div data-process-map-fixed-overlay="true" className="process-map-qd-overlay" style={qdPosition} onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>
+      {qdPosition && qdPlacement && <div data-process-map-fixed-overlay="true" className="process-map-qd-overlay" style={qdPosition}>
         <ProcessMapQDCard
           apiBase={apiBase}
           companyID={companyID}
@@ -2012,9 +1953,9 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
           onPointerLeave={() => scheduleHoverClose(qdPlacement.resource_id)}
         />
       </div>}
-      {loading && <div data-process-map-fixed-overlay="true" className="process-map-loading" role="status" onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>Loading Process Map…</div>}
-      {error && <div data-process-map-fixed-overlay="true" className="process-map-message is-error" role="alert" onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}><span>{error}</span><button type="button" onClick={() => void loadScene(true)}>Retry</button></div>}
-      {!error && notice && <div data-process-map-fixed-overlay="true" className="process-map-message" role="status" onDragOver={guardFixedOverlayDrop} onDrop={guardFixedOverlayDrop}>{notice}</div>}
+      {loading && <div data-process-map-fixed-overlay="true" className="process-map-loading" role="status">Loading Process Map…</div>}
+      {error && <div data-process-map-fixed-overlay="true" className="process-map-message is-error" role="alert"><span>{error}</span><button type="button" onClick={() => void loadScene(true)}>Retry</button></div>}
+      {!error && notice && <div data-process-map-fixed-overlay="true" className="process-map-message" role="status">{notice}</div>}
     </div>
   );
 }

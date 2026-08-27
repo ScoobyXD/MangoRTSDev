@@ -168,6 +168,9 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 		return domain.CompanyExplorerFolder{}, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, "", true); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 
 	var parent any
 	scopeType := CompanyExplorerFolderScopeCompany
@@ -210,6 +213,9 @@ func (r *PostgresRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fo
 		item.CompanyID, item.FolderID, parent, item.Name, item.Position,
 	))
 	if err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
+	if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, parentFolderID, ""); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -573,7 +579,12 @@ select exists(select 1 from descendants where folder_id=$3::uuid)`, companyID, f
 			parent = targetParentID
 		}
 	}
-	if position <= 0 {
+	targetParentID := ""
+	if value, ok := parent.(string); ok {
+		targetParentID = value
+	}
+	parentChanged := currentParent.Valid != (targetParentID != "") || currentParent.String != targetParentID
+	if position <= 0 && !parentChanged {
 		position = currentPosition
 	}
 	if position <= 0 {
@@ -608,6 +619,9 @@ returning company_id::text, folder_id::text, parent_folder_id::text, name, defau
 	}
 	if parentOut.Valid {
 		item.ParentFolderID = &parentOut.String
+	}
+	if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, folderID, parentOut.String, actorUserID); err != nil {
+		return domain.CompanyExplorerFolder{}, err
 	}
 	eventInput := workspaceDomainEventInput(companyID, "company_explorer_folder_updated", map[string]any{
 		"folder_id": folderID, "parent_entity_id": parentOut.String,
@@ -730,6 +744,9 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 		return CompanyExplorerDeleteResult{}, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, deletedByUserID, true); err != nil {
+		return CompanyExplorerDeleteResult{}, err
+	}
 
 	folderRootIDs := map[string]bool{}
 	folderIDs := map[string]bool{}
@@ -745,6 +762,13 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 
 	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.resolve_targets")
 	for _, target := range targets {
+		resourceType := target.Kind
+		if resourceType == "folder" {
+			resourceType = EntityTypeCompanyExplorerFolder
+		}
+		if err := lockPostgresCompanyExplorerResourceEditTx(ctx, tx, companyID, deletedByUserID, resourceType, target.ID); err != nil {
+			return CompanyExplorerDeleteResult{}, err
+		}
 		targetScope := newCompanyExplorerRecycleScope()
 		switch target.Kind {
 		case "folder":
@@ -1376,10 +1400,18 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, "", true); err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
 
 	item, deletedRelationshipIDs, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, folderID, itemType, itemID, position)
 	if err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	if itemType == EntityTypeLogicGate {
+		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, itemID, item.FolderID, ""); err != nil {
+			return domain.CompanyExplorerFolderItem{}, nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err
@@ -1397,6 +1429,9 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItems(companyID string, assign
 		return nil, nil, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, "", true); err != nil {
+		return nil, nil, err
+	}
 
 	items := make([]domain.CompanyExplorerFolderItem, 0, len(assignments))
 	deleted := make([]CompanyExplorerRelationshipDeleteResult, 0)
@@ -1404,6 +1439,11 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItems(companyID string, assign
 		item, deletedRelationshipIDs, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, assignment.FolderID, assignment.ItemType, assignment.ItemID, assignment.Position)
 		if err != nil {
 			return nil, nil, err
+		}
+		if assignment.ItemType == EntityTypeLogicGate {
+			if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, assignment.ItemID, item.FolderID, ""); err != nil {
+				return nil, nil, err
+			}
 		}
 		items = append(items, item)
 		if len(deletedRelationshipIDs) > 0 {
@@ -1868,7 +1908,15 @@ order by gate.created_timestamp asc, gate.logic_gate_id::text asc`, companyID, f
 
 func (r *PostgresRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, itemID string) error {
 	ctx := context.Background()
-	deleted, err := r.db.ExecContext(ctx,
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, "", true); err != nil {
+		return err
+	}
+	deleted, err := tx.ExecContext(ctx,
 		`delete from company_explorer_items
 		 where company_id=$1::uuid and target_type=$2 and target_id=$3::uuid`,
 		companyID, itemType, itemID,
@@ -1883,5 +1931,21 @@ func (r *PostgresRepo) RemoveCompanyExplorerFolderItem(companyID, itemType, item
 	if affected == 0 {
 		return ErrNotFound
 	}
-	return nil
+	if itemType == EntityTypeLogicGate {
+		_, changed, err := postgresDeleteAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, itemID)
+		if err != nil {
+			return err
+		}
+		if changed {
+			if _, err := r.appendDomainEventTx(ctx, tx, processMapEventInput(
+				companyID,
+				"",
+				ProcessMapPlacementDeletedEvent,
+				processMapResourceEventPayload(domain.ProcessMapResourceTypeProcess, itemID),
+			)); err != nil {
+				return err
+			}
+		}
+	}
+	return tx.Commit()
 }

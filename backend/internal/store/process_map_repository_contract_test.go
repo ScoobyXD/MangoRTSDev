@@ -213,7 +213,7 @@ func TestPostgresCompanyExplorerMutationAuthorizationContract(t *testing.T) {
 	move := processMapFunctionBodyForContractTest(t, v2,
 		"func (r *PostgresRepo) MoveCompanyExplorerV2Edge", "func (r *PostgresRepo) DeleteCompanyExplorerV2Edge")
 	remove := processMapFunctionBodyForContractTest(t, v2,
-		"func (r *PostgresRepo) DeleteCompanyExplorerV2Edges", "func (r *PostgresRepo) DeleteCompanyExplorerV2Folder")
+		"func (r *PostgresRepo) DeleteCompanyExplorerV2Edges", "func (r *PostgresRepo) GetCompanyExplorerV2EntityWithParent")
 	for name, body := range map[string]string{"upsert": upsert, "move": move, "remove": remove} {
 		if !strings.Contains(body, "lockPostgresCompanyExplorerMutationTx") ||
 			!strings.Contains(body, "lockPostgresCompanyExplorerResourceEditTx") {
@@ -296,6 +296,10 @@ func TestPostgresPermissionValidationFenceContract(t *testing.T) {
 	for _, function := range processMapFunctions {
 		body := processMapFunctionBodyForContractTest(t, processMap, function.signature, function.next)
 		fence := strings.Index(body, "lockPostgresPolicyGroupMembershipVersionTx(ctx, tx, companyID, false)")
+		explorerFence := strings.Index(body, "lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID")
+		if fence < 0 || (explorerFence >= 0 && explorerFence < fence) {
+			fence = explorerFence
+		}
 		permission := strings.Index(body, "postgresRequireProcessMap")
 		if fence < 0 || permission < 0 || fence >= permission {
 			t.Fatalf("%s does not hold the shared validation fence before capability evaluation", function.signature)

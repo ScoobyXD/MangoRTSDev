@@ -7,7 +7,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func ensureCompanyExplorerDefaultFoldersTx(ctx context.Context, tx *sql.Tx, companyID, actorUserID string) (companyExplorerDefaultFolders, error) {
+func (r *PostgresRepo) ensureCompanyExplorerDefaultFoldersTx(ctx context.Context, tx *sql.Tx, companyID, actorUserID string) (companyExplorerDefaultFolders, error) {
 	companyID = cleanUUIDText(companyID)
 	actorUserID = cleanUUIDText(actorUserID)
 	if companyID == "" {
@@ -16,6 +16,12 @@ func ensureCompanyExplorerDefaultFoldersTx(ctx context.Context, tx *sql.Tx, comp
 	folders := companyExplorerDefaultFolderIDs(companyID)
 	if folders.UnfiledFolderID == "" || folders.ProjectsFolderID == "" || folders.LogicGatesFolderID == "" {
 		return companyExplorerDefaultFolders{}, ErrInvalid
+	}
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, "", true); err != nil {
+		return companyExplorerDefaultFolders{}, err
+	}
+	if err := postgresLockProcessMapCompanyTx(ctx, tx, companyID); err != nil {
+		return companyExplorerDefaultFolders{}, err
 	}
 	upsert := func(folderID string, parentFolderID any, name string, position int) error {
 		_, err := tx.ExecContext(ctx, `
@@ -38,7 +44,14 @@ on conflict (company_id, folder_id) do update set
 where (company_explorer_folders.parent_folder_id, company_explorer_folders.name, company_explorer_folders.position)
       is distinct from
       (excluded.parent_folder_id, excluded.name, excluded.position)`, companyID, folderID, parentFolderID, name, position, actorUserID)
-		return err
+		if err != nil {
+			return err
+		}
+		parentID := ""
+		if value, ok := parentFolderID.(string); ok {
+			parentID = value
+		}
+		return r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, folderID, parentID, actorUserID)
 	}
 	if err := upsert(folders.UnfiledFolderID, nil, CompanyExplorerDefaultRootFolderName, 1000); err != nil {
 		return companyExplorerDefaultFolders{}, err
@@ -52,7 +65,7 @@ where (company_explorer_folders.parent_folder_id, company_explorer_folders.name,
 	return folders, nil
 }
 
-func placeCompanyExplorerItemInDefaultFolderTx(ctx context.Context, tx *sql.Tx, companyID, targetType, targetID, actorUserID string, snapshotPolicy bool) (domain.CompanyExplorerFolderItem, bool, error) {
+func (r *PostgresRepo) placeCompanyExplorerItemInDefaultFolderTx(ctx context.Context, tx *sql.Tx, companyID, targetType, targetID, actorUserID string, snapshotPolicy bool) (domain.CompanyExplorerFolderItem, bool, error) {
 	companyID = cleanUUIDText(companyID)
 	targetID = cleanUUIDText(targetID)
 	actorUserID = cleanUUIDText(actorUserID)
@@ -60,7 +73,7 @@ func placeCompanyExplorerItemInDefaultFolderTx(ctx context.Context, tx *sql.Tx, 
 	if companyID == "" || targetID == "" || !ok {
 		return domain.CompanyExplorerFolderItem{}, false, ErrInvalid
 	}
-	if _, err := ensureCompanyExplorerDefaultFoldersTx(ctx, tx, companyID, actorUserID); err != nil {
+	if _, err := r.ensureCompanyExplorerDefaultFoldersTx(ctx, tx, companyID, actorUserID); err != nil {
 		return domain.CompanyExplorerFolderItem{}, false, err
 	}
 	position, err := nextCompanyExplorerFinalPositionSQL(ctx, tx, companyID, folderID)
@@ -91,10 +104,20 @@ returning company_id::text, coalesce(parent_folder_id::text, '') as folder_id, t
 		&item.UpdatedTimestamp,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
+		if targetType == EntityTypeLogicGate {
+			if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, targetID, folderID, actorUserID); err != nil {
+				return domain.CompanyExplorerFolderItem{}, false, err
+			}
+		}
 		return domain.CompanyExplorerFolderItem{}, false, nil
 	}
 	if err != nil {
 		return domain.CompanyExplorerFolderItem{}, false, err
+	}
+	if targetType == EntityTypeLogicGate {
+		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, targetID, folderID, actorUserID); err != nil {
+			return domain.CompanyExplorerFolderItem{}, false, err
+		}
 	}
 	_ = snapshotPolicy // V2 child policy mode is initialized by the database trigger.
 	return item, true, nil

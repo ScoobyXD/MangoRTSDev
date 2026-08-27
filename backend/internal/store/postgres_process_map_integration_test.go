@@ -162,11 +162,11 @@ func TestPostgresProcessMapRepositoryLifecycle(t *testing.T) {
 	}
 
 	scene, err := repo.GetProcessMapScene(ctx, ProcessMapSceneQuery{CompanyID: company.CompanyID, PermissionUserID: admin.UserID})
-	if err != nil || scene.Bounds == nil || *scene.Bounds != (domain.ProcessMapBounds{MinX: 0, MinY: 0, MaxX: 80, MaxY: 40}) {
+	if err != nil || scene.Bounds == nil || scene.Bounds.MinX > 0 || scene.Bounds.MinY > 0 || scene.Bounds.MaxX < 80 || scene.Bounds.MaxY < 40 {
 		t.Fatalf("global scene = %+v err=%v", scene, err)
 	}
 	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{CompanyID: company.CompanyID, PermissionUserID: admin.UserID, Z: 0, X: 0, Y: 0})
-	if err != nil || len(tile.Placements) != 3 || len(tile.Traces) != 1 || len(tile.Traces[0].PathFragments) == 0 {
+	if err != nil || len(tile.Placements) != 6 || len(tile.Traces) != 1 || len(tile.Traces[0].PathFragments) == 0 {
 		t.Fatalf("global tile = %+v err=%v", tile, err)
 	}
 	if _, err := repo.GetProcessMapScene(ctx, ProcessMapSceneQuery{CompanyID: company.CompanyID, PermissionUserID: outsider.UserID}); !errors.Is(err, ErrNotFound) {
@@ -216,8 +216,210 @@ func TestPostgresProcessMapRepositoryLifecycle(t *testing.T) {
 	if err := db.QueryRow(`select count(*) from process_map_placements where company_id=$1::uuid`, company.CompanyID).Scan(&placementCount); err != nil {
 		t.Fatal(err)
 	}
-	if relationshipCount != 0 || traceCount != 0 || placementCount != 2 {
-		t.Fatalf("delete counts relationships=%d traces=%d placements=%d, want 0/0/2", relationshipCount, traceCount, placementCount)
+	if relationshipCount != 0 || traceCount != 0 || placementCount != 5 {
+		t.Fatalf("delete counts relationships=%d traces=%d placements=%d, want 0/0/5", relationshipCount, traceCount, placementCount)
+	}
+}
+
+func TestPostgresProcessMapAutomaticPlacementMigrationCanonicalizesExplorerProjection(t *testing.T) {
+	ctx := context.Background()
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map automatic projection migration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("process-map-projection-admin", "process-map-projection@example.com", "Projection Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	rootA, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootA.FolderID, "logic_gate", "Nested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := repo.CreateLogicGate(company.CompanyID, "Kept Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	keptSecond, err := repo.CreateLogicGate(company.CompanyID, "Second Kept Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orphan, err := repo.CreateLogicGate(company.CompanyID, "Old map-only Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(company.CompanyID, nested.FolderID, EntityTypeLogicGate, kept.LogicGateID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(company.CompanyID, nested.FolderID, EntityTypeLogicGate, keptSecond.LogicGateID, 1000); err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
+		CompanyID: company.CompanyID,
+		Source:    processMapTestRef(domain.ProcessMapResourceTypeProcess, kept.LogicGateID),
+		Target:    processMapTestRef(domain.ProcessMapResourceTypeProcess, orphan.LogicGateID),
+		Trace: &ProcessMapTraceInput{RoutePoints: []domain.ProcessMapRoutePoint{
+			{X: 5, Y: 5}, {X: 10, Y: 5},
+		}},
+		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+	})
+	if err != nil || created.Relationship == nil {
+		t.Fatalf("create migration relationship = %+v, err=%v", created, err)
+	}
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_x=-50,grid_y=-25,grid_width=150,grid_height=90
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`, company.CompanyID, rootA.FolderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_height=70
+where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, kept.LogicGateID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+update company_explorer_folders
+set parent_folder_id=$3::uuid,updated_timestamp=statement_timestamp()
+where company_id=$1::uuid and folder_id=$2::uuid`, company.CompanyID, nested.FolderID, rootB.FolderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+delete from company_explorer_items
+where company_id=$1::uuid and target_type='logic_gate' and target_id=$2::uuid`, company.CompanyID, orphan.LogicGateID); err != nil {
+		t.Fatal(err)
+	}
+	versionBefore := postgresProcessMapVersionForTest(t, repo, company.CompanyID)
+
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_zz_process_map_automatic_placement.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("apply automatic placement migration: %v", err)
+	}
+	versionAfter := postgresProcessMapVersionForTest(t, repo, company.CompanyID)
+	if versionAfter <= versionBefore {
+		t.Fatalf("automatic placement migration Process Map version = %d, want > %d", versionAfter, versionBefore)
+	}
+	var migrationSequence int64
+	if err := db.QueryRow(`
+select sequence
+from domain_events
+where company_id=$1::uuid and idempotency_key='migration:20260826-process-map-automatic-placement'`, company.CompanyID).Scan(&migrationSequence); err != nil {
+		t.Fatal(err)
+	}
+	if versionAfter != migrationSequence {
+		t.Fatalf("automatic placement migration Process Map version = %d, want migration event sequence %d", versionAfter, migrationSequence)
+	}
+	nextEvent, err := repo.AppendDomainEvent(workspaceDomainEventInput(company.CompanyID, ProcessMapPlacementSavedEvent, map[string]any{
+		"resource_type": domain.ProcessMapResourceTypeProcess,
+		"resource_id":   kept.LogicGateID,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextEvent.Sequence != migrationSequence+1 {
+		t.Fatalf("next workspace event sequence = %d, want %d", nextEvent.Sequence, migrationSequence+1)
+	}
+	if nextVersion := postgresProcessMapVersionForTest(t, repo, company.CompanyID); nextVersion != nextEvent.Sequence {
+		t.Fatalf("next Process Map version = %d, want event sequence %d", nextVersion, nextEvent.Sequence)
+	}
+
+	var rootX, rootY, rootWidth, rootHeight int
+	if err := db.QueryRow(`
+select grid_x,grid_y,grid_width,grid_height
+from process_map_placements
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`, company.CompanyID, rootA.FolderID).Scan(&rootX, &rootY, &rootWidth, &rootHeight); err != nil {
+		t.Fatal(err)
+	}
+	if rootX != -50 || rootY != -25 || rootWidth != 150 || rootHeight != 90 {
+		t.Fatalf("unchanged-parent root geometry = (%d,%d %dx%d), want (-50,-25 150x90)", rootX, rootY, rootWidth, rootHeight)
+	}
+	var nestedParent string
+	if err := db.QueryRow(`
+select map_parent_folder_id::text
+from process_map_placements
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`, company.CompanyID, nested.FolderID).Scan(&nestedParent); err != nil {
+		t.Fatal(err)
+	}
+	if nestedParent != rootB.FolderID {
+		t.Fatalf("nested map parent = %q, want %q", nestedParent, rootB.FolderID)
+	}
+	var keptY, keptHeight, keptSecondY int
+	if err := db.QueryRow(`
+select first.grid_y,first.grid_height,second.grid_y
+from process_map_placements first
+join process_map_placements second
+  on second.company_id=first.company_id
+where first.company_id=$1::uuid
+  and first.resource_type='logic_gate' and first.resource_id=$2::uuid
+  and second.resource_type='logic_gate' and second.resource_id=$3::uuid`, company.CompanyID, kept.LogicGateID, keptSecond.LogicGateID).Scan(&keptY, &keptHeight, &keptSecondY); err != nil {
+		t.Fatal(err)
+	}
+	if keptSecondY < keptY+keptHeight+2 {
+		t.Fatalf("second moved Process y = %d, want at least %d after oversized sibling", keptSecondY, keptY+keptHeight+2)
+	}
+	var missingPlacementCount, stalePlacementCount, traceCount, relationshipCount int
+	if err := db.QueryRow(`
+select count(*)
+from company_explorer_items item
+where item.company_id=$1::uuid and item.target_type='logic_gate'
+  and not exists (
+    select 1 from process_map_placements placement
+    where placement.company_id=item.company_id and placement.resource_type='logic_gate' and placement.resource_id=item.target_id
+  )`, company.CompanyID).Scan(&missingPlacementCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`
+select count(*)
+from process_map_placements placement
+where placement.company_id=$1::uuid and placement.resource_type='logic_gate'
+  and not exists (
+    select 1 from company_explorer_items item
+    where item.company_id=placement.company_id and item.target_type='logic_gate' and item.target_id=placement.resource_id
+  )`, company.CompanyID).Scan(&stalePlacementCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`select count(*) from process_map_traces where company_id=$1::uuid`, company.CompanyID).Scan(&traceCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`select count(*) from resource_operational_relationships where company_id=$1::uuid`, company.CompanyID).Scan(&relationshipCount); err != nil {
+		t.Fatal(err)
+	}
+	if missingPlacementCount != 0 || stalePlacementCount != 0 || traceCount != 1 || relationshipCount != 1 {
+		t.Fatalf("projection counts missing=%d stale=%d traces=%d relationships=%d, want 0/0/1/1", missingPlacementCount, stalePlacementCount, traceCount, relationshipCount)
+	}
+}
+
+func TestPostgresProcessMapScoreCardRenameMigrationIsRestartSafe(t *testing.T) {
+	db, _ := openPostgresProcessMapIntegration(t)
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_z_score_cards.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, err := db.Exec(string(migration)); err != nil {
+			t.Fatalf("apply Score Cards migration attempt %d: %v", attempt, err)
+		}
+	}
+	var oldTable, newTable *string
+	if err := db.QueryRow(`select to_regclass('public.qd_ratings')::text,to_regclass('public.score_cards')::text`).Scan(&oldTable, &newTable); err != nil {
+		t.Fatal(err)
+	}
+	if oldTable != nil || newTable == nil || *newTable != "score_cards" {
+		t.Fatalf("Score Cards migration tables old=%v new=%v, want nil/score_cards", oldTable, newTable)
 	}
 }
 
@@ -361,11 +563,11 @@ func TestPostgresProcessMapSceneTilePrivacyMatchesMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	scene, err := repo.GetProcessMapScene(ctx, ProcessMapSceneQuery{CompanyID: company.CompanyID, PermissionUserID: viewer.UserID})
-	if err != nil || scene.Bounds == nil || *scene.Bounds != (domain.ProcessMapBounds{MinX: 0, MinY: 0, MaxX: 104, MaxY: 23}) {
+	if err != nil || scene.Bounds == nil || scene.Bounds.MinX > 0 || scene.Bounds.MinY > 0 || scene.Bounds.MaxX < 104 || scene.Bounds.MaxY < 23 {
 		t.Fatalf("permission-safe scene = %+v err=%v", scene, err)
 	}
 	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{CompanyID: company.CompanyID, PermissionUserID: viewer.UserID, Z: 0, X: 0, Y: 0})
-	if err != nil || len(tile.Placements) != 2 || len(tile.Traces) != 0 {
+	if err != nil || len(tile.Placements) != 5 || len(tile.Traces) != 0 {
 		t.Fatalf("permission-safe tile = %+v err=%v", tile, err)
 	}
 	wire, err := json.Marshal(tile)
@@ -572,11 +774,31 @@ func TestPostgresProcessMapRecycleFolderRestoreDoesNotReclaimRecreatedCleanupChi
 	parentID := folder.FolderID
 	for _, input := range []ProcessMapPlacementPutInput{
 		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 80, 60),
-		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, &parentID, 11, 13, 9, 6),
+		processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, nil, 11, 13, 9, 6),
 	} {
 		if _, err := repo.PutProcessMapPlacement(ctx, input); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// Seed the mismatched state this cleanup safety test exercises directly.
+	// Public Process Map writes now synchronize the Explorer parent and cannot create it.
+	if _, err := db.Exec(`
+update process_map_placements
+set map_parent_folder_id=$3::uuid
+where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
+		company.CompanyID, process.LogicGateID, parentID); err != nil {
+		t.Fatal(err)
+	}
+	var explorerParent string
+	if err := db.QueryRow(`
+select coalesce(parent_folder_id::text,'')
+from company_explorer_items
+where company_id=$1::uuid and target_type='logic_gate' and target_id=$2::uuid`,
+		company.CompanyID, process.LogicGateID).Scan(&explorerParent); err != nil {
+		t.Fatal(err)
+	}
+	if explorerParent != "" {
+		t.Fatalf("cleanup safety setup retained Explorer Folder parent %s", explorerParent)
 	}
 
 	placementState := func() (string, string) {

@@ -9,7 +9,6 @@ import {
   processMapDeepestContainingFolder,
   processMapDeckTileSize,
   processMapInputAnchor,
-  processMapInitialPlacementDimensions,
   processMapOrthogonalPathPoints,
   processMapOutputAnchor,
   processMapPlacementBounds,
@@ -176,15 +175,6 @@ test("new trace routes leave the output before bending and approach the input ho
   const reversePath = processMapOrthogonalPathPoints(source, defaultProcessMapRoutePoints(source, reverseTarget), reverseTarget);
   assert.ok(reversePath[1].x > source.x && reversePath[1].y === source.y, "reverse routes also clear the source before turning");
   assert.ok(reversePath.slice(1).every((point, index) => point.x === reversePath[index].x || point.y === reversePath[index].y));
-});
-
-test("drop dimensions stay screen-sized while Process remains shorter than Folder", () => {
-  assert.deepEqual(processMapInitialPlacementDimensions("logic_gate", 28), { width: 7, height: 5 });
-  assert.deepEqual(processMapInitialPlacementDimensions("company_explorer_folder", 28), { width: 7, height: 7 });
-  assert.deepEqual(processMapInitialPlacementDimensions("logic_gate", 14), { width: 14, height: 10 });
-  assert.deepEqual(processMapInitialPlacementDimensions("company_explorer_folder", 14), { width: 14, height: 14 });
-  assert.deepEqual(processMapInitialPlacementDimensions("logic_gate", 1_000), { width: 2, height: 1 });
-  assert.deepEqual(processMapInitialPlacementDimensions("company_explorer_folder", 1_000), { width: 2, height: 2 });
 });
 
 test("manual resize keeps distinct minimum dimensions", () => {

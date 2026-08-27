@@ -75,6 +75,13 @@ func (r *MemoryRepo) ensureCompanyExplorerDefaultFoldersLocked(companyID string)
 	return folders
 }
 
+func (r *MemoryRepo) syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID string, folders companyExplorerDefaultFolders) {
+	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.UnfiledFolderID, nil)
+	parentID := folders.UnfiledFolderID
+	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.ProjectsFolderID, &parentID)
+	r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.LogicGatesFolderID, &parentID)
+}
+
 func (r *MemoryRepo) placeCompanyExplorerItemInDefaultFolderLocked(companyID, targetType, targetID string, snapshotPolicy bool) bool {
 	folderID, ok := companyExplorerDefaultFolderIDForTargetType(companyID, targetType)
 	if !ok || r.companyExplorerV2HasManualEdgeLocked(companyID, targetType, targetID) {

@@ -872,7 +872,6 @@ type CompanyExplorerRepository interface {
 	MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeInput) (CompanyExplorerV2Row, error)
 	DeleteCompanyExplorerV2Edge(companyID, edgeID, actorUserID, permissionUserID string) error
 	DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []string, actorUserID, permissionUserID string) error
-	DeleteCompanyExplorerV2Folder(companyID, entityID string) error
 	UpsertCompanyExplorerV2Subscription(input CompanyExplorerV2SubscriptionInput) (CompanyExplorerV2Subscription, error)
 	DeleteCompanyExplorerV2Subscription(companyID, subscriptionID, actorUserID string) error
 	ListCompanyExplorerRootRows(query CompanyExplorerLazyRowsQuery) (CompanyExplorerLazyRows, error)

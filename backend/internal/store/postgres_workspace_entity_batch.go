@@ -43,6 +43,11 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 
 	syncFolderItems := input.EntityKind != EntityTypeNode && strings.TrimSpace(input.FolderID) != "" && MutationOriginNeedsCompanyExplorerFolderItem(input.MutationOrigin)
 	syncDefaultFolderItems := input.EntityKind != EntityTypeNode && strings.TrimSpace(input.FolderID) == "" && MutationOriginNeedsCompanyExplorerDefaultPlacement(input.MutationOrigin)
+	if input.EntityKind == EntityTypeLogicGate && (syncFolderItems || syncDefaultFolderItems) {
+		if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, input.CompanyID, input.CreatorUserID, true); err != nil {
+			return WorkspaceEntityBatchResult{}, err
+		}
+	}
 
 	targetFolderID := input.FolderID
 	targetFolderKind := input.EntityKind
@@ -148,6 +153,11 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 				return WorkspaceEntityBatchResult{}, err
 			}
 			stop()
+			if input.EntityKind == EntityTypeLogicGate {
+				if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, input.CompanyID, domain.ProcessMapResourceTypeProcess, mapping.EntityID, item.FolderID, input.CreatorUserID); err != nil {
+					return WorkspaceEntityBatchResult{}, err
+				}
+			}
 			if itemPosition >= position {
 				position = itemPosition + 1000
 			} else {
@@ -160,7 +170,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	if syncDefaultFolderItems {
 		for _, mapping := range result.EntityMappings {
 			stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.default_folder_item_writes")
-			item, inserted, err := placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, input.CompanyID, input.EntityKind, mapping.EntityID, input.CreatorUserID, true)
+			item, inserted, err := r.placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, input.CompanyID, input.EntityKind, mapping.EntityID, input.CreatorUserID, true)
 			stop()
 			if err != nil {
 				return WorkspaceEntityBatchResult{}, err

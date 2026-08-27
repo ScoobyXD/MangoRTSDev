@@ -49,10 +49,13 @@ test("V3 Process Map is one deck.gl canvas with no layer-reader or React Flow co
   assert.doesNotMatch(surface, /\b(?:PerspectiveView|MapView|GlobeView)\b/);
 });
 
-test("Process Map tile state does not copy relationship, QDC, RACI, picker, or camera authorities", () => {
+test("Process Map tile state carries only the bounded Process card summary, not broader authorities", () => {
   const api = source("frontend/src/modules/process-map/processMapApi.ts");
 
-  assert.doesNotMatch(api, /qd_rating|quality_rating|cost_rating|delivery_rating|rated_by_|raci_assignments|picker_candidates/);
+  for (const field of ["score_card", "quality_rating", "cost_rating", "delivery_rating", "responsible_names", "accountable_names"]) {
+    assert.match(api, new RegExp(`\\b${field}\\b`));
+  }
+  assert.doesNotMatch(api, /qd_rating|rated_by_|raci_assignments|picker_candidates/);
   assert.doesNotMatch(api, /export async function deleteProcessMapTrace/);
   assert.doesNotMatch(api, /method:\s*["']DELETE["'][\s\S]{0,180}\/trace/);
   assert.doesNotMatch(api, /viewport|viewState|camera|selectedResource|tileMembership/);
@@ -80,12 +83,11 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
 
   assert.match(surface, /processMapDeepestContainingFolder\(processMapPlacementBounds\(placement\)/);
-  assert.match(surface, /processMapDeepestContainingFolder\(processMapPlacementBounds\(pending\), folders\)/);
   assert.match(surface, /folderContainsItsChildren\(saved, presentationRef\.current\.placements\)/);
   assert.match(surface, /const routePoints = defaultProcessMapRoutePoints\([\s\S]{0,220}postProcessMapRelationship\(apiBase, companyID, current\.source, target, routePoints\)/);
   assert.match(surface, /shouldApplyProcessMapMutationAck/);
   assert.match(surface, /Placement was restored because it could not be saved/);
-  assert.match(surface, /Placement removal was rolled back/);
+  assert.match(surface, /Company Explorer deletion was rolled back/);
 
   const rejectedStart = surface.indexOf("onRejected: () => {");
   const rejectedEnd = surface.indexOf("\n      },\n    });", rejectedStart);
@@ -101,8 +103,8 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
     "setRemovedTraceIDs(new Set())",
     "gestureRef.current = null",
     "setGesture(null)",
-    "setExternalDropPoint(null)",
     "setSelection(null)",
+    "setHoveredResizePick(null)",
     "setHoveredProcessID(null)",
     "setPinnedProcessID(null)",
     "setScene(null)",
@@ -113,8 +115,8 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
 
 test("company or auth scope changes synchronously suppress protected geometry before replacement reads", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
-  assert.match(surface, /const knownMappedScope = `\$\{apiBase\.trim\(\)\}\\u0000\$\{companyID\.trim\(\)\}\\u0000\$\{authGeneration\}`/);
-  assert.match(surface, /const protectedScopeCurrent = protectedScope === knownMappedScope/);
+  assert.match(surface, /const protectedScopeKey = `\$\{apiBase\.trim\(\)\}\\u0000\$\{companyID\.trim\(\)\}\\u0000\$\{authGeneration\}`/);
+  assert.match(surface, /const protectedScopeCurrent = protectedScope === protectedScopeKey/);
   assert.match(surface, /const activeScene = protectedScopeCurrent \? scene : null/);
   assert.match(surface, /\(\) => protectedScopeCurrent \? mergeTilePresentation\(loadedTiles\) : emptyPresentation\(\)/);
   assert.match(surface, /const presentation = useMemo\(\(\) => protectedScopeCurrent[\s\S]{0,240}: emptyPresentation\(\)/);
@@ -125,7 +127,7 @@ test("company or auth scope changes synchronously suppress protected geometry be
   const purgeEnd = surface.indexOf("\n    }", purgeStart);
   assert.ok(purgeStart >= 0 && purgeEnd > purgeStart);
   const purge = surface.slice(purgeStart, purgeEnd);
-  assert.ok(purge.indexOf("setProtectedScope(knownMappedScope)") < purge.indexOf("advanceProtectedGeneration()"));
+  assert.ok(purge.indexOf("setProtectedScope(protectedScopeKey)") < purge.indexOf("advanceProtectedGeneration()"));
   assert.match(purge, /setScene\(null\)/);
   assert.match(purge, /setLoadedTiles\(new Map\(\)\)/);
   assert.match(purge, /setCommittedOverlay\(emptyPresentation\(\)\)/);
@@ -133,7 +135,7 @@ test("company or auth scope changes synchronously suppress protected geometry be
   assert.match(purge, /setPreviewTraces\(new Map\(\)\)/);
   assert.match(purge, /gestureRef\.current = null/);
   assert.match(purge, /setGesture\(null\)/);
-  assert.match(purge, /setExternalDropPoint\(null\)/);
+  assert.match(purge, /setHoveredResizePick\(null\)/);
 });
 
 test("same-permission mutation reconciliation keeps loaded coverage and refreshes masked tile layers", () => {
@@ -148,12 +150,13 @@ test("same-permission mutation reconciliation keeps loaded coverage and refreshe
   assert.match(surface, /committedOverlay\.removedPlacementKeys/);
   assert.match(surface, /tile\.layers = null/);
   assert.match(surface, /tile\.process_map_read_version === readVersion/);
-  assert.match(surface, /removedPlacementKeys: new Set\(current\.removedPlacementKeys\)\.add\(key\)/);
-  assert.match(surface, /placementKey\(trace\.source\) === key \|\| placementKey\(trace\.target\) === key/);
-  assert.match(surface, /setRemovedTraceIDs\(\(current\) => new Set\(\[\.\.\.current, \.\.\.incident\]\)\)/);
+  assert.match(surface, /for \(const affectedKey of removalPlacementKeys\) \{/);
+  assert.match(surface, /removedPlacementKeys\.add\(affectedKey\)/);
+  assert.match(surface, /new Set\(\[\.\.\.current, \.\.\.affectedTraceIDs\]\)/);
+  assert.match(surface, /affectedTraceIDs\.forEach\(\(id\) => next\.delete\(id\)\)/);
 });
 
-test("editing hover reveals anchors and connection drag starts synchronously", () => {
+test("editing hover reveals anchors and resize grips while connection drag starts synchronously", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const hoverStart = surface.indexOf("const handleHover = useCallback");
   const hoverEnd = surface.indexOf("\n\n  const removeSelection", hoverStart);
@@ -164,6 +167,12 @@ test("editing hover reveals anchors and connection drag starts synchronously", (
   const drag = surface.slice(dragStart, dragEnd);
   assert.match(hover, /pick\.kind === "placement" \|\| pick\.kind === "anchor" \|\| pick\.kind === "resize"/);
   assert.match(hover, /setHoveredPlacementKey\(placementKey\(anchorPlacement\)\)/);
+  assert.match(hover, /setHoveredResizePick\(pick\?\.kind === "resize" \? pick : null\)/);
+  assert.match(surface, /options\.editOverlay\.selectedPlacementKey,[\s\S]{0,120}options\.editOverlay\.hoveredPlacementKey/);
+  assert.match(surface, /!options\.editOverlay\.connectionSourceKey/);
+  assert.match(surface, /processMapResizeCursor\(gesture\.horizontal!, gesture\.vertical!\)/);
+  assert.match(surface, /"nwse-resize" \| "nesw-resize"/);
+  assert.match(surface, /getCursor=\{\(\{ isDragging, isHovering \}\) => resizeCursor \?\?/);
   assert.match(drag, /pick\.kind === "anchor" && pick\.anchor === "output"/);
   assert.ok(drag.indexOf("gestureRef.current = next") < drag.indexOf("setGesture(next)"));
 });
@@ -207,6 +216,8 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
   assert.match(app, /width: "calc\(100vw - 12px\)"/);
   assert.match(app, /height: "calc\(100vh - 12px\)"/);
   assert.match(app, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
+  assert.match(app, /aria-label=\{`\$\{processMapLogicGateOverlay\.label\} Process`\}/);
+  assert.match(app, /title="Close Process"/);
   assert.match(shell, /background: "linear-gradient\(135deg, #ff5a6b, #ef334e\)"/);
 });
 
@@ -266,38 +277,26 @@ test("static XY traces remain below placements with no moving marker path", () =
   ]) assert.doesNotMatch(surface, removed);
 });
 
-test("placement tray reuses Explorer identity, one unified card, and suppresses collapsed reads", () => {
+test("automatic placement leaves no manual picker, tray, or Explorer drop path", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  const page = source("frontend/src/pages/process-map/ProcessMapPage.tsx");
   const css = source("frontend/src/modules/process-map/processMap.css");
+  const interaction = source("frontend/src/modules/process-map/processMapInteraction.ts");
+  const geometry = source("frontend/src/modules/process-map/processMapGeometry.ts");
 
-  for (const required of [
-    "ExplorerRowIcon",
-    "ExplorerDisclosureIcon",
-    "Root Folders",
-    "Drag to place",
-    "company-explorer-scroll",
-    "process-map-placement-tray__card is-",
-    "EXPLORER_DRAG_MIME",
-  ]) assert.ok(surface.includes(required), `placement tray must retain ${required}`);
-  assert.doesNotMatch(surface, /process-map-placement-tray__browse/);
-  assert.doesNotMatch(surface, /process-map-placement-tray__card-kind/);
-  assert.doesNotMatch(css, /process-map-placement-tray__card-kind/);
-
-  const readStart = surface.indexOf("useEffect(() => {\n    if (trayCollapsed) {");
-  const readEnd = surface.indexOf("\n  }, [apiBase, companyID, trayCollapsed, trayPath]);", readStart);
-  assert.ok(readStart >= 0 && readEnd > readStart, "tray branch read effect must remain explicit");
-  const readEffect = surface.slice(readStart, readEnd);
-  const collapsedGuardEnd = readEffect.indexOf("return undefined;");
-  const firstRead = readEffect.indexOf("fetchCompanyExplorer");
-  assert.ok(collapsedGuardEnd >= 0 && firstRead > collapsedGuardEnd, "collapsed tray must return before any Explorer request");
-  assert.ok((readEffect.match(/setTrayRows\(\[\]\)/g) ?? []).length >= 2, "collapse and every branch load clear stale rows");
-
-  const collapsedRule = css.match(/\.process-map-placement-tray\.is-collapsed\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
-  const expandedDisclosureRule = css.match(/\.process-map-placement-tray:not\(\.is-collapsed\) \.process-map-placement-tray__disclosure\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
-  assert.match(collapsedRule, /width:\s*42px/);
-  assert.match(expandedDisclosureRule, /transform:\s*rotate\(180deg\)/);
-  assert.match(css, /\.process-map-placement-tray__card\.is-folder\s*\{[\s\S]*?linear-gradient/);
-  assert.match(css, /\.process-map-placement-tray__card\.is-process\s*\{[\s\S]*?linear-gradient/);
+  const retired = `${surface}\n${page}\n${css}\n${interaction}\n${geometry}`;
+  for (const forbidden of [
+    /process-map-placement-tray/,
+    /EXPLORER_DRAG_MIME/,
+    /fetchCompanyExplorer(?:Roots|Children)/,
+    /handleExternalDrop/,
+    /decideProcessMapExplorerDrop/,
+    /processMapTrayCandidates/,
+    /processMapInitialPlacementDimensions/,
+    /UniversalEntityPicker/,
+    /UniversalLinkerControls/,
+    /Drag to place/,
+  ]) assert.doesNotMatch(retired, forbidden);
 });
 
 test("connection gestures use visible near-drop targeting and clear on camera or permission changes", () => {
@@ -344,37 +343,15 @@ test("relationship and delete outcomes cannot mutate state after a newer canonic
   assert.ok((removal.match(/shouldApplyProcessMapMutationAck/g) ?? []).length >= 4, "both delete success and rollback paths must reject stale outcomes");
 });
 
-test("every fixed overlay owns drop events and unavailable canvas states reject placement drops", () => {
+test("Company Explorer deletion is explicit about Process and Folder effects", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
-  const overlayTags = surface.split(/\r?\n/).filter((line) => line.includes('data-process-map-fixed-overlay="true"'));
-  assert.equal(overlayTags.length, 6, "tray, toolbar, QDC, loading, error, and notice overlays must all be guarded");
-  for (const tag of overlayTags) {
-    assert.match(tag, /onDragOver=\{guardFixedOverlayDrop\}/);
-    assert.match(tag, /onDrop=\{guardFixedOverlayDrop\}/);
-  }
-  for (const marker of [
-    "process-map-placement-tray",
-    "process-map-toolbar",
-    "process-map-qd-overlay",
-    "process-map-loading",
-    "process-map-message is-error",
-    'className="process-map-message" role="status"',
-  ]) {
-    assert.ok(overlayTags.some((tag) => tag.includes(marker)), `missing guarded overlay ${marker}`);
-  }
-
-  const guardStart = surface.indexOf("const guardFixedOverlayDrop = useCallback");
-  const guardEnd = surface.indexOf("const unavailableTrayIDs", guardStart);
-  const dropStart = surface.indexOf("const handleExternalDrop = useCallback");
-  const dropEnd = surface.indexOf("const guardFixedOverlayDrop", dropStart);
-  assert.ok(guardStart >= 0 && guardEnd > guardStart && dropStart >= 0 && dropEnd > dropStart);
-  const guard = surface.slice(guardStart, guardEnd);
-  const drop = surface.slice(dropStart, dropEnd);
-  assert.match(guard, /event\.preventDefault\(\)/);
-  assert.match(guard, /event\.stopPropagation\(\)/);
-  assert.match(guard, /setExternalDropPoint\(null\)/);
-  assert.match(drop, /loading \|\| error \|\| hit\?\.closest\("\[data-process-map-fixed-overlay='true'\]"\)/);
-  assert.match(drop, /setExternalDropPoint\(null\);[\s\S]{0,40}return/);
+  assert.match(surface, /window\.confirm\(placement\.resource_type === "logic_gate"/);
+  assert.match(surface, /This removes only its Company Explorer placement\. The Process and its data will remain\./);
+  assert.match(surface, /Delete Company Explorer Folder [\s\S]{0,120}and its subtree\?/);
+  assert.match(surface, /Company Explorer item selected/);
+  assert.match(surface, /Delete from Company Explorer/);
+  assert.match(surface, /Company Explorer placement removed\. The Process and its data remain\./);
+  assert.match(surface, /Company Explorer Folder and its subtree were removed\./);
 });
 
 test("QDC visibility is capped by the server-declared placement presentation", () => {

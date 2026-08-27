@@ -63,7 +63,7 @@ func (r *PostgresRepo) ListLogicGateQDRatings(input QDRatingMonthQuery) ([]domai
 		return nil, ErrNotFound
 	}
 	rows, err := r.db.QueryContext(ctx, `select `+qdRatingSelectColumns+`
-from qd_ratings
+from score_cards
 where company_id=$1::uuid and logic_gate_id=$2::uuid
   and (rated_created_timestamp at time zone 'America/Los_Angeles')::date >= $3::date
   and (rated_created_timestamp at time zone 'America/Los_Angeles')::date < $4::date
@@ -120,7 +120,7 @@ func (r *PostgresRepo) clearPostgresLogicGateQDRating(ctx context.Context, tx *s
 		column = "delivery_rating"
 	}
 	current, err := scanQDRating(tx.QueryRowContext(ctx, `select `+qdRatingSelectColumns+`
-from qd_ratings where company_id=$1::uuid and logic_gate_id=$2::uuid
+from score_cards where company_id=$1::uuid and logic_gate_id=$2::uuid
 and (rated_created_timestamp at time zone 'America/Los_Angeles')::date=$3::date
 for update`, input.CompanyID, input.LogicGateID, businessDate))
 	if errors.Is(err, ErrNotFound) {
@@ -149,11 +149,11 @@ for update`, input.CompanyID, input.LogicGateID, businessDate))
 		(input.Metric != QDRatingMetricCost && current.CostRating != nil) ||
 		(input.Metric != QDRatingMetricDelivery && current.DeliveryRating != nil)
 	if !hasOtherRating {
-		if _, err := tx.ExecContext(ctx, `delete from qd_ratings where company_id=$1::uuid and qd_rating_id=$2::uuid`, input.CompanyID, current.QDRatingID); err != nil {
+		if _, err := tx.ExecContext(ctx, `delete from score_cards where company_id=$1::uuid and qd_rating_id=$2::uuid`, input.CompanyID, current.QDRatingID); err != nil {
 			return QDRatingMutationResult{}, err
 		}
 	} else {
-		item, err := scanQDRating(tx.QueryRowContext(ctx, `update qd_ratings
+		item, err := scanQDRating(tx.QueryRowContext(ctx, `update score_cards
 set `+column+`=null,rated_by_user_id=$3::uuid,rated_by_display_name=$4,rated_updated_timestamp=$5
 where company_id=$1::uuid and qd_rating_id=$2::uuid
 returning `+qdRatingSelectColumns, input.CompanyID, current.QDRatingID, input.RatedByUserID, input.RatedByDisplayName, input.Now))
@@ -178,13 +178,13 @@ func (r *PostgresRepo) setPostgresLogicGateQDRating(ctx context.Context, tx *sql
 	} else if input.Metric == QDRatingMetricDelivery {
 		column = "delivery_rating"
 	}
-	item, err := scanQDRating(tx.QueryRowContext(ctx, `insert into qd_ratings(
+	item, err := scanQDRating(tx.QueryRowContext(ctx, `insert into score_cards(
 company_id,qd_rating_id,logic_gate_id,`+column+`,rated_by_user_id,rated_by_display_name,rated_created_timestamp,rated_updated_timestamp)
 values($1::uuid,$2::uuid,$3::uuid,$4,$5::uuid,$6,$7,$7)
 on conflict (company_id,logic_gate_id,((rated_created_timestamp at time zone 'America/Los_Angeles')::date))
 do update set `+column+`=excluded.`+column+`,rated_by_user_id=excluded.rated_by_user_id,
   rated_by_display_name=excluded.rated_by_display_name,rated_updated_timestamp=excluded.rated_updated_timestamp
-where qd_ratings.`+column+` is distinct from excluded.`+column+`
+where score_cards.`+column+` is distinct from excluded.`+column+`
 returning `+qdRatingSelectColumns, input.CompanyID, newUUIDv7String(), input.LogicGateID, *input.Rating, input.RatedByUserID, input.RatedByDisplayName, input.Now))
 	if errors.Is(err, ErrNotFound) {
 		current, currentErr := getPostgresQDRatingForBusinessDate(ctx, tx, input.CompanyID, input.LogicGateID, businessDate)
@@ -212,11 +212,19 @@ func getPostgresQDRatingForBusinessDate(ctx context.Context, queryer interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, companyID, logicGateID, businessDate string) (domain.QDRating, error) {
 	return scanQDRating(queryer.QueryRowContext(ctx, `select `+qdRatingSelectColumns+`
-from qd_ratings where company_id=$1::uuid and logic_gate_id=$2::uuid
+from score_cards where company_id=$1::uuid and logic_gate_id=$2::uuid
 and (rated_created_timestamp at time zone 'America/Los_Angeles')::date=$3::date`, companyID, logicGateID, businessDate))
 }
 
 func (r *PostgresRepo) enqueueQDRatingRealtimeOutboxTx(ctx context.Context, tx *sql.Tx, input QDRatingPutInput) error {
+	eventInput := workspaceDomainEventInput(input.CompanyID, QDRatingRealtimeEventType, map[string]any{
+		"logic_gate_id": input.LogicGateID,
+		"metric":        input.Metric,
+	})
+	eventInput.ActorUserID = input.RatedByUserID
+	if _, err := r.appendDomainEventTx(ctx, tx, eventInput); err != nil {
+		return err
+	}
 	outbox, err := qdRatingRealtimeOutboxInput(input, newUUIDv7String())
 	if err != nil {
 		return err

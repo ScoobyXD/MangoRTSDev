@@ -2309,7 +2309,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
             <section
               role="dialog"
               aria-modal="true"
-              aria-label={`${processMapLogicGateOverlay.label} Logic Gate`}
+              aria-label={`${processMapLogicGateOverlay.label} Process`}
               style={processMapLogicGateOverlayStyle}
               onMouseDown={(event) => event.stopPropagation()}
             >
@@ -2319,8 +2319,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
                 </span>
                 <button
                   type="button"
-                  aria-label={`Close ${processMapLogicGateOverlay.label} Logic Gate`}
-                  title="Close Logic Gate"
+                  aria-label={`Close ${processMapLogicGateOverlay.label} Process`}
+                  title="Close Process"
                   onClick={() => setProcessMapLogicGateOverlay(null)}
                   style={{ ...UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE, width: 28, height: 28, flex: "0 0 28px", fontSize: 18 }}
                 >

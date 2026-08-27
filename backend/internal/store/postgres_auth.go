@@ -38,6 +38,23 @@ func postgresMembershipAffectedCompanyIDsTx(ctx context.Context, tx *sql.Tx, fal
 	return companyIDs, rows.Err()
 }
 
+func postgresUserMembershipCompanyIDsTx(ctx context.Context, tx *sql.Tx, userID string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `select company_id::text from company_memberships where user_id=$1::uuid order by company_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	companyIDs := []string{}
+	for rows.Next() {
+		var companyID string
+		if err := rows.Scan(&companyID); err != nil {
+			return nil, err
+		}
+		companyIDs = append(companyIDs, companyID)
+	}
+	return companyIDs, rows.Err()
+}
+
 func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
@@ -47,36 +64,82 @@ func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string)
 	insertDisplayName := authInsertDisplayName(cognitoSubject, email, displayName)
 	updateDisplayName := authoritativeAuthDisplayName(displayName, email)
 
-	var user domain.User
-	err := r.db.QueryRow(
-		`with input(cognito_subject, email, display_name) as (
-		   values ($2::text, $3::text, $4::text)
-		 ), upsert as (
-		   insert into users (user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp)
-		   select $1, cognito_subject, email, display_name, now(), now()
-		   from input
-		   on conflict (cognito_subject) do update set
-		     email = case when excluded.email <> '' then excluded.email else users.email end,
-		     display_name = case when $5::text <> '' then $5::text else users.display_name end,
-		     updated_timestamp = now()
-		   where users.email is distinct from case when excluded.email <> '' then excluded.email else users.email end
-		      or users.display_name is distinct from case when $5::text <> '' then $5::text else users.display_name end
-		   returning user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
-		 )
-		 select user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
-		 from upsert
-		 union all
-		 select u.user_id, u.cognito_subject, u.email, u.display_name, u.created_timestamp, u.updated_timestamp
-		 from users u
-		 join input i on i.cognito_subject = u.cognito_subject
-		 where not exists (select 1 from upsert)`,
-		newUUIDv7String(),
-		cognitoSubject,
-		email,
-		insertDisplayName,
-		updateDisplayName,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
+		return domain.User{}, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended('auth-user:' || $1, 0))`, cognitoSubject); err != nil {
+		return domain.User{}, err
+	}
+
+	var user domain.User
+	err = tx.QueryRowContext(ctx, `
+select user_id::text, cognito_subject, email, display_name, created_timestamp, updated_timestamp
+from users
+where cognito_subject=$1
+for update`, cognitoSubject).Scan(
+		&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName,
+		&user.CreatedTimestamp, &user.UpdatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = tx.QueryRowContext(ctx, `
+insert into users (user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp)
+values ($1::uuid, $2, $3, $4, now(), now())
+returning user_id::text, cognito_subject, email, display_name, created_timestamp, updated_timestamp`,
+			newUUIDv7String(), cognitoSubject, email, insertDisplayName,
+		).Scan(
+			&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName,
+			&user.CreatedTimestamp, &user.UpdatedTimestamp,
+		)
+		if err != nil {
+			return domain.User{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return domain.User{}, err
+		}
+		return user, nil
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+
+	updatedEmail := user.Email
+	if email != "" {
+		updatedEmail = email
+	}
+	updatedDisplayName := user.DisplayName
+	if updateDisplayName != "" {
+		updatedDisplayName = updateDisplayName
+	}
+	if updatedEmail == user.Email && updatedDisplayName == user.DisplayName {
+		if err := tx.Commit(); err != nil {
+			return domain.User{}, err
+		}
+		return user, nil
+	}
+	err = tx.QueryRowContext(ctx, `
+update users
+set email=$2, display_name=$3, updated_timestamp=now()
+where user_id=$1::uuid
+returning user_id::text, cognito_subject, email, display_name, created_timestamp, updated_timestamp`,
+		user.UserID, updatedEmail, updatedDisplayName,
+	).Scan(
+		&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName,
+		&user.CreatedTimestamp, &user.UpdatedTimestamp,
+	)
+	if err != nil {
+		return domain.User{}, err
+	}
+	companyIDs, err := postgresUserMembershipCompanyIDsTx(ctx, tx, user.UserID)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if _, err := r.appendDomainEventsTx(ctx, tx, companyMembershipEventInputs(companyIDs, CompanyUserProfileUpdatedEventType, user.UserID)); err != nil {
+		return domain.User{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return domain.User{}, err
 	}
 	return user, nil
@@ -317,7 +380,7 @@ func (r *PostgresRepo) CreateCompany(name string) (domain.Company, error) {
 	if err != nil {
 		return domain.Company{}, err
 	}
-	if _, err := ensureCompanyExplorerDefaultFoldersTx(ctx, tx, company.CompanyID, ""); err != nil {
+	if _, err := r.ensureCompanyExplorerDefaultFoldersTx(ctx, tx, company.CompanyID, ""); err != nil {
 		return domain.Company{}, err
 	}
 	if err := tx.Commit(); err != nil {

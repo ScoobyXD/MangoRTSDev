@@ -2,11 +2,11 @@
 
 Date: August 25, 2026
 
-Status: V1 is implemented. The placement tray, type outlines, and animated trace direction pass focused frontend, frontend build, and WSL backend verification.
+Status: Historical V1 ledger. V3 automatic placement superseded the manual tray, layer navigation, React Flow renderer, and every other current-state statement below.
 
 ## Purpose
 
-This file is the implementation ledger for Process Map. It records the shipped contract, canonical implementation files, migration, verification, and rollout state.
+This file preserves the former V1 design for history only. Current implementation and rollout state live in [`v3 process map.md`](v3%20process%20map.md) and the numbered business-law documents.
 
 This file is not a separate source of business logic. If this ledger conflicts with a numbered law, the numbered law wins and this ledger must be corrected.
 

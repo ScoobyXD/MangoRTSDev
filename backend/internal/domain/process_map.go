@@ -66,21 +66,30 @@ const (
 	ProcessMapPresentationEditing ProcessMapPresentation = "editing"
 )
 
+type ProcessMapScoreCardSummary struct {
+	QualityRating  *string `json:"quality_rating"`
+	CostRating     *string `json:"cost_rating"`
+	DeliveryRating *string `json:"delivery_rating"`
+}
+
 type ProcessMapVisiblePlacement struct {
-	Restricted        bool                   `json:"restricted"`
-	Presentation      ProcessMapPresentation `json:"presentation"`
-	ResourceType      string                 `json:"resource_type"`
-	ResourceID        string                 `json:"resource_id"`
-	Name              string                 `json:"name,omitempty"`
-	MapParentFolderID *string                `json:"map_parent_folder_id"`
-	GridX             int                    `json:"grid_x"`
-	GridY             int                    `json:"grid_y"`
-	GridWidth         int                    `json:"grid_width"`
-	GridHeight        int                    `json:"grid_height"`
-	Revision          int64                  `json:"revision"`
-	CreatedTimestamp  time.Time              `json:"created_timestamp"`
-	UpdatedTimestamp  time.Time              `json:"updated_timestamp"`
-	CanEdit           bool                   `json:"can_edit"`
+	Restricted        bool                        `json:"restricted"`
+	Presentation      ProcessMapPresentation      `json:"presentation"`
+	ResourceType      string                      `json:"resource_type"`
+	ResourceID        string                      `json:"resource_id"`
+	Name              string                      `json:"name,omitempty"`
+	MapParentFolderID *string                     `json:"map_parent_folder_id"`
+	GridX             int                         `json:"grid_x"`
+	GridY             int                         `json:"grid_y"`
+	GridWidth         int                         `json:"grid_width"`
+	GridHeight        int                         `json:"grid_height"`
+	Revision          int64                       `json:"revision"`
+	CreatedTimestamp  time.Time                   `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time                   `json:"updated_timestamp"`
+	CanEdit           bool                        `json:"can_edit"`
+	ScoreCard         *ProcessMapScoreCardSummary `json:"score_card,omitempty"`
+	ResponsibleNames  []string                    `json:"responsible_names,omitempty"`
+	AccountableNames  []string                    `json:"accountable_names,omitempty"`
 }
 
 func (ProcessMapVisiblePlacement) isProcessMapTilePlacement() {}

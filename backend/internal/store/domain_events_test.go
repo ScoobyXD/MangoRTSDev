@@ -259,7 +259,7 @@ func TestMemoryWorkspaceReadVersionsTrackProcessMapWithoutRetiredScope(t *testin
 	}); err != nil {
 		t.Fatalf("AppendDomainEvent ordinary logic_gate_created: %v", err)
 	}
-	assertWorkspaceReadVersion(t, repo, companyID, "process-map", "", int64(len(events)), true)
+	assertWorkspaceReadVersion(t, repo, companyID, "process-map", "", int64(len(events)+1), true)
 
 	if _, err := repo.AppendDomainEvent(DomainEventInput{
 		CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "logic_gate_created",

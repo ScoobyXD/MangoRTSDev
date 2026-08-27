@@ -10,7 +10,6 @@ import {
   processMapCurrentOperationKeys,
   processMapPerimeterSegments,
   processMapViewportHasCompleteCoverage,
-  reconcileProcessMapKnownMappedKeys,
   replaceProcessMapPreviewEntries,
   retireProcessMapMutationMasks,
   type ProcessMapLayerBuildOptions,
@@ -31,14 +30,10 @@ import {
 } from "../../../../frontend/src/modules/process-map/processMapApi.js";
 import {
   PROCESS_MAP_EDITING_LOD_MIN_PX,
-  PROCESS_MAP_FOLDER_DROP_HEIGHT_PX,
-  PROCESS_MAP_FOLDER_DROP_WIDTH_PX,
   PROCESS_MAP_MAX_CAMERA_ZOOM,
   PROCESS_MAP_MAX_TILE_REQUESTS,
   PROCESS_MAP_MIN_CAMERA_ZOOM,
   PROCESS_MAP_NORMAL_LOD_MIN_PX,
-  PROCESS_MAP_PROCESS_DROP_HEIGHT_PX,
-  PROCESS_MAP_PROCESS_DROP_WIDTH_PX,
   PROCESS_MAP_SAFE_WORLD_COORDINATE,
   PROCESS_MAP_SETTLE_DELAY_MS,
   PROCESS_MAP_TILE_CACHE_BYTES,
@@ -99,6 +94,7 @@ function buildOptions(overrides: Partial<ProcessMapLayerBuildOptions> = {}): Pro
   return {
     scene,
     protectedGeneration: 0,
+    scoreCardBusinessDate: "2026-08-26",
     settled: true,
     settledPixelsPerGridUnit: 0.25,
     presentation: emptyPresentation(),
@@ -154,9 +150,11 @@ test("one TileLayer configures non-geographic selection and debounced missing-ti
 test("protected generations keep one logical TileLayer while replacing and disposing protected Tilesets", () => {
   const first = layerByID(buildProcessMapLayers(buildOptions({ protectedGeneration: 0 })), "process-map-spatial-tiles");
   const second = layerByID(buildProcessMapLayers(buildOptions({ protectedGeneration: 1 })), "process-map-spatial-tiles");
+  const nextBusinessDay = layerByID(buildProcessMapLayers(buildOptions({ protectedGeneration: 1, scoreCardBusinessDate: "2026-08-27" })), "process-map-spatial-tiles");
   assert.equal(first.id, second.id, "the deck layer identity remains stable across protected generations");
-  assert.equal(first.props.data, "11:0");
-  assert.equal(second.props.data, "11:1");
+  assert.equal(first.props.data, "11:0:2026-08-26");
+  assert.equal(second.props.data, "11:1:2026-08-26");
+  assert.equal(nextBusinessDay.props.data, "11:1:2026-08-27", "the LA business day must replace stale QCD tile data");
   assert.equal(first.props.updateTriggers?.getTileData, undefined);
   assert.equal(second.props.updateTriggers?.getTileData, undefined);
 
@@ -248,26 +246,7 @@ test("settled LOD changes regenerate sublayers without reloading cached tile dat
   assert.equal(reloads, 1, "a real tile data identity change still reloads stale payloads");
 });
 
-test("known mapped keys accumulate by exact identity and preview replacement preserves unrelated operations", () => {
-  const folder = { resource_type: "company_explorer_folder" as const, resource_id: "folder-1" };
-  const process = { resource_type: "logic_gate" as const, resource_id: "process-1" };
-  const another = { resource_type: "logic_gate" as const, resource_id: "process-2" };
-  const empty = new Set<string>();
-  const first = reconcileProcessMapKnownMappedKeys(empty, [folder]);
-  const accumulated = reconcileProcessMapKnownMappedKeys(first, [process, another]);
-  assert.deepEqual([...accumulated].sort(), [
-    "company_explorer_folder:folder-1",
-    "logic_gate:process-1",
-    "logic_gate:process-2",
-  ]);
-  const removed = reconcileProcessMapKnownMappedKeys(accumulated, [], [folder, another]);
-  assert.deepEqual([...removed], ["logic_gate:process-1"]);
-  assert.deepEqual([...accumulated].sort(), [
-    "company_explorer_folder:folder-1",
-    "logic_gate:process-1",
-    "logic_gate:process-2",
-  ], "reconciliation returns a new scoped set");
-
+test("preview replacement preserves unrelated operations", () => {
   const previews = new Map([["unrelated", "keep"], ["owned-a", "old-a"], ["owned-b", "old-b"]]);
   const replaced = replaceProcessMapPreviewEntries(previews, ["owned-a", "owned-b"], new Map([["owned-a", "new-a"]]));
   assert.deepEqual([...replaced], [["unrelated", "keep"], ["owned-a", "new-a"]]);
@@ -583,7 +562,75 @@ test("selected Process editing retains the elevated surface and exposes four res
   assert.ok(layers.indexOf(shadows) < layers.indexOf(bodies));
 });
 
-test("hovering an accessible Process or Folder reveals its physical input and output anchors", () => {
+test("editing Process cards show bounded QCD and RACI summaries in tiled and selected layers", () => {
+  const process: ProcessMapVisiblePlacement = {
+    ...placement("process-internal-id", 10, 20, 14, 10),
+    name: "Review",
+    score_card: { quality_rating: "green", cost_rating: "yellow", delivery_rating: "red" },
+    responsible_names: ["Ada", "Lin"],
+    accountable_names: ["Grace"],
+  };
+  const key = "logic_gate:process-internal-id";
+  const presentation: ProcessMapPresentationState = {
+    placements: new Map([[key, process]]), traces: new Map(), removedPlacementKeys: new Set(),
+  };
+  const tileLayer = layerByID(buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 24,
+    presentation,
+  })), "process-map-spatial-tiles");
+  const render = tileLayer.props.renderSubLayers as unknown as (props: {
+    id: string;
+    data: ProcessMapTileResponse;
+    tile: { boundingBox: [number[], number[]] };
+  }) => Layer[];
+  const renderCardText = (id: string, candidate: ProcessMapTileResponse["placements"][number], pixelsPerGridUnit = 24) => {
+    const layer = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: pixelsPerGridUnit })), "process-map-spatial-tiles");
+    const renderCandidate = layer.props.renderSubLayers as typeof render;
+    const layers = renderCandidate({
+      id,
+      data: { z: 22, x: 0, y: 0, process_map_read_version: 11, byteLength: 1, placements: [candidate], traces: [] },
+      tile: { boundingBox: [[0, 0], [256, 256]] },
+    });
+    return layerByID(layers, `${id}-process-card-text`).props.data as Array<{ text: string; color: number[] }>;
+  };
+
+  const tiledText = renderCardText("editing-card", process);
+  assert.deepEqual(tiledText.map((datum) => datum.text), ["Q", "C", "D", "Ada, Lin", "R", "Grace", "A"]);
+  assert.deepEqual(tiledText.slice(0, 3).map((datum) => datum.color), [
+    [104, 184, 78, 255],
+    [242, 193, 79, 255],
+    [223, 83, 83, 255],
+  ]);
+  assert.ok(tiledText.every((datum) => datum.text !== process.resource_id), "presentation text never exposes resource IDs");
+  const boundedText = renderCardText("bounded-card", {
+    ...process,
+    responsible_names: ["Extremely Long Person Name", "Second Person", "Third Person"],
+    accountable_names: ["Accountable Name That Is Too Long"],
+  });
+  assert.ok(boundedText[3].text.length <= 20 && boundedText[3].text.endsWith("+2"));
+  assert.ok(boundedText[5].text.length <= 20 && boundedText[5].text.includes("…"));
+
+  const selectedLayers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 24,
+    presentation,
+    editedPlacementKeys: new Set([key]),
+    editOverlay: {
+      placements: [process], traces: [], selectedPlacementKey: key, selectedTraceID: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+    },
+  }));
+  assert.deepEqual(
+    (layerByID(selectedLayers, "process-map-edit-process-card-text").props.data as Array<{ text: string }>).map((datum) => datum.text),
+    tiledText.map((datum) => datum.text),
+  );
+
+  assert.deepEqual(renderCardText("normal-card", { ...process, presentation: "normal" }), []);
+  assert.deepEqual(renderCardText("whole-card", process, 1), []);
+  assert.deepEqual(renderCardText("folder-card", { ...process, resource_type: "company_explorer_folder" }), []);
+  assert.deepEqual(renderCardText("restricted-card", { restricted: true, grid_x: 10, grid_y: 20 }), []);
+});
+
+test("hovering an accessible Process or Folder reveals anchors and all four resize grips", () => {
   const process = placement("process", 0, 0);
   const folder = placement("folder", 20, 0, 12, 8, "company_explorer_folder");
   const processKey = "logic_gate:process";
@@ -593,7 +640,7 @@ test("hovering an accessible Process or Folder reveals its physical input and ou
     traces: new Map(),
     removedPlacementKeys: new Set(),
   };
-  const anchorsFor = (hoveredPlacementKey: string) => {
+  const controlsFor = (hoveredPlacementKey: string) => {
     const layers = buildProcessMapLayers(buildOptions({
       settledPixelsPerGridUnit: 24,
       presentation,
@@ -602,19 +649,37 @@ test("hovering an accessible Process or Folder reveals its physical input and ou
         connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey,
       },
     }));
-    return layerByID(layers, "process-map-edit-anchors").props.data as Array<{
-      pick: { anchor: "input" | "output"; key: string };
-    }>;
+    return {
+      anchors: layerByID(layers, "process-map-edit-anchors").props.data as Array<{
+        pick: { anchor: "input" | "output"; key: string };
+      }>,
+      grips: layerByID(layers, "process-map-edit-resize-handles").props.data as Array<{
+        pick: { horizontal: "west" | "east"; vertical: "north" | "south"; key: string };
+      }>,
+    };
   };
 
+  const processControls = controlsFor(processKey);
   assert.deepEqual(
-    anchorsFor(processKey).map((item) => [item.pick.key, item.pick.anchor]),
+    processControls.anchors.map((item) => [item.pick.key, item.pick.anchor]),
     [[processKey, "input"], [processKey, "output"]],
   );
   assert.deepEqual(
-    anchorsFor(folderKey).map((item) => [item.pick.key, item.pick.anchor]),
+    processControls.grips.map((item) => [item.pick.key, item.pick.horizontal, item.pick.vertical]),
+    [
+      [processKey, "west", "north"],
+      [processKey, "east", "north"],
+      [processKey, "east", "south"],
+      [processKey, "west", "south"],
+    ],
+  );
+  const folderControls = controlsFor(folderKey);
+  assert.deepEqual(
+    folderControls.anchors.map((item) => [item.pick.key, item.pick.anchor]),
     [[folderKey, "input"], [folderKey, "output"]],
   );
+  assert.equal(folderControls.grips.length, 4);
+  assert.ok(folderControls.grips.every((item) => item.pick.key === folderKey));
 });
 
 test("an active connection keeps only the source output and distinct eligible target inputs", () => {
@@ -926,8 +991,6 @@ test("representative large-company transport and presentation stay byte-, reques
     settlement_ms: PROCESS_MAP_SETTLE_DELAY_MS,
     normal_lod_px: PROCESS_MAP_NORMAL_LOD_MIN_PX,
     editing_lod_px: PROCESS_MAP_EDITING_LOD_MIN_PX,
-    process_drop_px: [PROCESS_MAP_PROCESS_DROP_WIDTH_PX, PROCESS_MAP_PROCESS_DROP_HEIGHT_PX],
-    folder_drop_px: [PROCESS_MAP_FOLDER_DROP_WIDTH_PX, PROCESS_MAP_FOLDER_DROP_HEIGHT_PX],
     min_camera_zoom: PROCESS_MAP_MIN_CAMERA_ZOOM,
     max_camera_zoom: PROCESS_MAP_MAX_CAMERA_ZOOM,
     safe_world_coordinate: PROCESS_MAP_SAFE_WORLD_COORDINATE,
@@ -939,8 +1002,6 @@ test("representative large-company transport and presentation stay byte-, reques
     settlement_ms: 180,
     normal_lod_px: 24,
     editing_lod_px: 96,
-    process_drop_px: [196, 140],
-    folder_drop_px: [196, 196],
     min_camera_zoom: -24,
     max_camera_zoom: 20,
     safe_world_coordinate: 1_000_000_000,

@@ -289,6 +289,12 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 	r.companyExplorerV2Edges[key(edge.CompanyID, edge.EdgeID)] = edge
 
 	r.shadowCompanyExplorerV2FolderToLegacyLocked(parent, entity, edge)
+	var mapParentID *string
+	if parent.EntityType == CompanyExplorerV2EntityFolder {
+		parentID := parent.EntityID
+		mapParentID = &parentID
+	}
+	r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, entity.EntityID, mapParentID)
 	if parent.EntityType == CompanyExplorerV2EntityFolder {
 		entity = r.companyExplorerV2Entities[key(entity.CompanyID, entity.EntityID)]
 	}
@@ -377,6 +383,14 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 	}
 	r.companyExplorerV2Edges[key(edge.CompanyID, edge.EdgeID)] = edge
 	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
+	if child.EntityType == CompanyExplorerV2EntityLogicGate {
+		var mapParentID *string
+		if parent.EntityType == CompanyExplorerV2EntityFolder {
+			parentID := parent.EntityID
+			mapParentID = &parentID
+		}
+		r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID)
+	}
 	r.reconcileMemoryRACITabsCompanyLocked(input.CompanyID)
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
 }
@@ -439,6 +453,17 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	delete(r.companyExplorerV2Edges, oldEdgeKey)
 	r.companyExplorerV2Edges[key(input.CompanyID, edge.EdgeID)] = edge
 	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
+	var mapParentID *string
+	if parent.EntityType == CompanyExplorerV2EntityFolder {
+		parentID := parent.EntityID
+		mapParentID = &parentID
+	}
+	switch child.EntityType {
+	case CompanyExplorerV2EntityFolder:
+		r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, child.EntityID, mapParentID)
+	case CompanyExplorerV2EntityLogicGate:
+		r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID)
+	}
 	r.reconcileMemoryRACITabsCompanyLocked(input.CompanyID)
 	return r.companyExplorerV2RowLocked(CompanyExplorerV2RowsQuery{CompanyID: input.CompanyID, PermissionUserID: input.PermissionUserID}, child, &edge), nil
 }
@@ -498,12 +523,15 @@ func (r *MemoryRepo) DeleteCompanyExplorerV2Edges(companyID string, edgeIDs []st
 	}
 	for _, edgeID := range edgeIDs {
 		edge := r.companyExplorerV2Edges[key(companyID, edgeID)]
-		if parent, ok := r.companyExplorerV2Entities[key(companyID, edge.ParentEntityID)]; ok && parent.EntityType == CompanyExplorerV2EntityFolder {
-			if child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]; ok {
-				switch child.EntityType {
-				case CompanyExplorerV2EntityLogicGate, CompanyExplorerV2EntityProject:
-					delete(r.folderItems, folderItemKey(companyID, child.EntityType, child.ResourceID))
-				}
+		if child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]; ok {
+			switch child.EntityType {
+			case CompanyExplorerV2EntityLogicGate:
+				delete(r.folderItems, folderItemKey(companyID, child.EntityType, child.ResourceID))
+				r.deleteAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, child.ResourceID)
+			case CompanyExplorerV2EntityProject:
+				delete(r.folderItems, folderItemKey(companyID, child.EntityType, child.ResourceID))
+			case CompanyExplorerV2EntityFolder:
+				r.deleteAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, child.EntityID)
 			}
 		}
 		delete(r.companyExplorerV2Edges, key(companyID, edgeID))
@@ -617,74 +645,6 @@ func companyExplorerV2SubscriptionFromMemory(item memoryCompanyExplorerV2Subscri
 		UpdatedTimestamp: item.UpdatedTimestamp,
 	}
 }
-func (r *MemoryRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) error {
-	companyID = strings.TrimSpace(companyID)
-	entityID = strings.TrimSpace(entityID)
-	if companyID == "" || entityID == "" {
-		return ErrInvalid
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
-	entity, ok := r.companyExplorerV2Entities[key(companyID, entityID)]
-	if !ok || entity.EntityType != CompanyExplorerV2EntityFolder {
-		return ErrNotFound
-	}
-	if err := protectCompanyExplorerDefaultFolderMutation(companyID, entityID); err != nil {
-		return err
-	}
-	folderIDs := map[string]bool{entityID: true}
-	changed := true
-	for changed {
-		changed = false
-		for _, edge := range r.companyExplorerV2Edges {
-			if edge.CompanyID != companyID || !folderIDs[edge.ParentEntityID] || folderIDs[edge.ChildEntityID] {
-				continue
-			}
-			child, ok := r.companyExplorerV2Entities[key(companyID, edge.ChildEntityID)]
-			if !ok || child.EntityType != CompanyExplorerV2EntityFolder {
-				continue
-			}
-			folderIDs[child.EntityID] = true
-			changed = true
-		}
-	}
-	for id := range folderIDs {
-		r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeFolder, id)
-		delete(r.companyExplorerV2Entities, key(companyID, id))
-
-		delete(r.folders, key(companyID, id))
-		delete(r.sharedInboxRACI, sharedInboxRACIKey(companyID, id))
-	}
-	for subscriptionKey, subscription := range r.companyExplorerV2Subscriptions {
-		if subscription.CompanyID == companyID && folderIDs[subscription.AnchorEntityID] {
-			delete(r.companyExplorerV2Subscriptions, subscriptionKey)
-		}
-	}
-	for edgeKey, edge := range r.companyExplorerV2Edges {
-		if edge.CompanyID == companyID && (folderIDs[edge.ParentEntityID] || folderIDs[edge.ChildEntityID]) {
-			delete(r.companyExplorerV2Edges, edgeKey)
-		}
-	}
-	for itemKey, item := range r.folderItems {
-		if item.CompanyID == companyID && folderIDs[item.FolderID] {
-			delete(r.folderItems, itemKey)
-		}
-	}
-	for shareKey, share := range r.folderShares {
-		if share.CompanyID == companyID && folderIDs[share.FolderID] {
-			delete(r.folderShares, shareKey)
-		}
-	}
-	for permissionKey, permission := range r.entityPermissions {
-		if permission.CompanyID == companyID && permission.EntityType == EntityTypeCompanyExplorerFolder && folderIDs[permission.EntityID] {
-			delete(r.entityPermissions, permissionKey)
-		}
-	}
-	r.reconcileMemoryRACITabsCompanyLocked(companyID)
-	return nil
-}
-
 func (r *MemoryRepo) ensureCompanyExplorerV2CompanyGraphLocked(companyID string) {
 	now := time.Now().UTC()
 	for _, company := range r.companies {
@@ -1097,22 +1057,31 @@ func (r *MemoryRepo) shadowCompanyExplorerV2FolderToLegacyLocked(parent memoryCo
 }
 
 func (r *MemoryRepo) shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child memoryCompanyExplorerV2Entity, edge memoryCompanyExplorerV2Edge) {
-	if parent.EntityType != CompanyExplorerV2EntityFolder {
-		return
-	}
 	if child.EntityType == CompanyExplorerV2EntityFolder {
 		folder, ok := r.folders[key(child.CompanyID, child.EntityID)]
 		if !ok {
 			return
 		}
-		parentID := parent.EntityID
-		folder.ParentFolderID = &parentID
+		switch parent.EntityType {
+		case CompanyExplorerV2EntityCompany:
+			folder.ParentFolderID = nil
+		case CompanyExplorerV2EntityFolder:
+			parentID := parent.EntityID
+			folder.ParentFolderID = &parentID
+		default:
+			return
+		}
 		folder.Position = edge.Position
 		folder.UpdatedTimestamp = edge.UpdatedTimestamp
 		r.folders[key(child.CompanyID, child.EntityID)] = folder
 		return
 	}
 	if child.EntityType != CompanyExplorerV2EntityLogicGate && child.EntityType != CompanyExplorerV2EntityProject && child.EntityType != CompanyExplorerV2EntityNode {
+		return
+	}
+	itemKey := folderItemKey(edge.CompanyID, child.EntityType, child.ResourceID)
+	if parent.EntityType != CompanyExplorerV2EntityFolder {
+		delete(r.folderItems, itemKey)
 		return
 	}
 	item := domain.CompanyExplorerFolderItem{
@@ -1124,7 +1093,7 @@ func (r *MemoryRepo) shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child mem
 		CreatedTimestamp: edge.CreatedTimestamp,
 		UpdatedTimestamp: edge.UpdatedTimestamp,
 	}
-	r.folderItems[folderItemKey(item.CompanyID, item.ItemType, item.ItemID)] = item
+	r.folderItems[itemKey] = item
 }
 
 func (r *MemoryRepo) memoryUserByIDLocked(userID string) (domain.User, bool) {

@@ -2924,15 +2924,20 @@ begin
     'process_map_placement_saved', 'process_map_placement_deleted',
     'resource_operational_relationship_created', 'resource_operational_relationship_deleted',
     'process_map_trace_saved', 'logic_gate_updated', 'logic_gate_deleted',
+    'logic_gate_gvic_updated', 'logic_gate_qd_rating_updated',
     'logic_gate_permissions_updated', 'company_explorer_folder_updated',
-    'company_explorer_folder_deleted', 'company_explorer_folder_permissions_updated',
+    'company_explorer_folder_created', 'company_explorer_folder_deleted', 'company_explorer_folder_permissions_updated',
 	'company_explorer_item_placed', 'company_explorer_item_removed',
     'company_user_group_updated', 'company_user_group_deleted', 'company_user_group_members_updated',
-    'company_membership_saved', 'company_membership_deleted'
+    'company_membership_saved', 'company_membership_deleted', 'company_user_profile_updated'
   ]::text[])
   or (
-    p_event_type in ('logic_gate_created', 'company_explorer_folder_created')
-    and btrim(coalesce(p_payload->>'realtime_change_type', '')) = 'resource_restored'
+    p_event_type='logic_gate_created'
+    and btrim(coalesce(p_payload->>'realtime_change_type', ''))='resource_restored'
+  )
+  or (
+    p_event_type='resource_gvic_policy_updated'
+    and btrim(coalesce(p_payload->>'resource_type', ''))='company_explorer_folder'
   ) then
     return query select v.scope, v.resource_key from (values ('process-map', '')) as v(scope, resource_key);
   end if;
@@ -4002,10 +4007,10 @@ CREATE TABLE public.kpis (
 
 
 --
--- Name: qd_ratings; Type: TABLE; Schema: public; Owner: -
+-- Name: score_cards; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.qd_ratings (
+CREATE TABLE public.score_cards (
     company_id uuid NOT NULL,
     qd_rating_id uuid NOT NULL,
     logic_gate_id uuid NOT NULL,
@@ -4016,12 +4021,12 @@ CREATE TABLE public.qd_ratings (
     rated_by_display_name text NOT NULL,
     rated_created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     rated_updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT qd_ratings_cost_rating_chk CHECK (((cost_rating IS NULL) OR (cost_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
-    CONSTRAINT qd_ratings_delivery_rating_chk CHECK (((delivery_rating IS NULL) OR (delivery_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
-    CONSTRAINT qd_ratings_display_name_chk CHECK ((btrim(rated_by_display_name) <> ''::text)),
-    CONSTRAINT qd_ratings_has_rating_chk CHECK (((quality_rating IS NOT NULL) OR (cost_rating IS NOT NULL) OR (delivery_rating IS NOT NULL))),
-    CONSTRAINT qd_ratings_quality_rating_chk CHECK (((quality_rating IS NULL) OR (quality_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
-    CONSTRAINT qd_ratings_timestamps_chk CHECK ((rated_updated_timestamp >= rated_created_timestamp))
+    CONSTRAINT score_cards_cost_rating_chk CHECK (((cost_rating IS NULL) OR (cost_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
+    CONSTRAINT score_cards_delivery_rating_chk CHECK (((delivery_rating IS NULL) OR (delivery_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
+    CONSTRAINT score_cards_display_name_chk CHECK ((btrim(rated_by_display_name) <> ''::text)),
+    CONSTRAINT score_cards_has_rating_chk CHECK (((quality_rating IS NOT NULL) OR (cost_rating IS NOT NULL) OR (delivery_rating IS NOT NULL))),
+    CONSTRAINT score_cards_quality_rating_chk CHECK (((quality_rating IS NULL) OR (quality_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
+    CONSTRAINT score_cards_timestamps_chk CHECK ((rated_updated_timestamp >= rated_created_timestamp))
 );
 
 
@@ -5428,11 +5433,11 @@ ALTER TABLE ONLY public.kpis
 
 
 --
--- Name: qd_ratings qd_ratings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: score_cards score_cards_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.qd_ratings
-    ADD CONSTRAINT qd_ratings_pkey PRIMARY KEY (company_id, qd_rating_id);
+ALTER TABLE ONLY public.score_cards
+    ADD CONSTRAINT score_cards_pkey PRIMARY KEY (company_id, qd_rating_id);
 
 
 --
@@ -6355,10 +6360,10 @@ CREATE INDEX idx_kpis_logic_gate ON public.kpis USING btree (company_id, logic_g
 
 
 --
--- Name: uq_qd_ratings_logic_gate_business_day; Type: INDEX; Schema: public; Owner: -
+-- Name: uq_score_cards_logic_gate_business_day; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_qd_ratings_logic_gate_business_day ON public.qd_ratings USING btree (company_id, logic_gate_id, (((rated_created_timestamp AT TIME ZONE 'America/Los_Angeles'::text))::date));
+CREATE UNIQUE INDEX uq_score_cards_logic_gate_business_day ON public.score_cards USING btree (company_id, logic_gate_id, (((rated_created_timestamp AT TIME ZONE 'America/Los_Angeles'::text))::date));
 
 
 --
@@ -8106,19 +8111,19 @@ ALTER TABLE ONLY public.kpis
 
 
 --
--- Name: qd_ratings qd_ratings_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: score_cards score_cards_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.qd_ratings
-    ADD CONSTRAINT qd_ratings_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.score_cards
+    ADD CONSTRAINT score_cards_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
 
 
 --
--- Name: qd_ratings qd_ratings_rated_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: score_cards score_cards_rated_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.qd_ratings
-    ADD CONSTRAINT qd_ratings_rated_by_user_id_fkey FOREIGN KEY (rated_by_user_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
+ALTER TABLE ONLY public.score_cards
+    ADD CONSTRAINT score_cards_rated_by_user_id_fkey FOREIGN KEY (rated_by_user_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
 
 
 --

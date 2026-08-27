@@ -160,6 +160,9 @@ func (r *PostgresRepo) RestoreRecycleBinItems(companyID, deletedByUserID string,
 		return RecycleBinRestoreResult{}, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, "", true); err != nil {
+		return RecycleBinRestoreResult{}, err
+	}
 
 	rows, err := tx.QueryContext(ctx, `
 select company_id::text,
@@ -231,7 +234,20 @@ for update`, companyID, deletedByUserID, strings.Join(itemIDs, ","))
 	if err := reconcileRestoredProjectTextboxColorsTx(ctx, tx, mergedPayload["project_textboxes"]); err != nil {
 		return RecycleBinRestoreResult{}, err
 	}
-	events, err := r.appendDomainEventsTx(ctx, tx, companyExplorerTargetWorkspaceEventInputs(companyID, targets, true))
+	processMapEvents, err := reconcileRestoredAutomaticProcessMapPlacementsTx(
+		ctx,
+		tx,
+		companyID,
+		deletedByUserID,
+		mergedPayload["company_explorer_folders"],
+		mergedPayload["logic_gates"],
+	)
+	if err != nil {
+		return RecycleBinRestoreResult{}, err
+	}
+	eventInputs := companyExplorerTargetWorkspaceEventInputs(companyID, targets, true)
+	eventInputs = append(eventInputs, processMapEvents...)
+	events, err := r.appendDomainEventsTx(ctx, tx, eventInputs)
 	if err != nil {
 		return RecycleBinRestoreResult{}, err
 	}
@@ -248,11 +264,145 @@ where company_id=$1::uuid
 	return RecycleBinRestoreResult{Items: items, Targets: targets, Events: events}, nil
 }
 
+func recyclePayloadUUIDs(rows json.RawMessage, fieldName string) ([]string, error) {
+	if len(rows) == 0 || string(rows) == "null" {
+		return nil, nil
+	}
+	var records []map[string]json.RawMessage
+	if err := json.Unmarshal(rows, &records); err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(records))
+	for _, record := range records {
+		var value string
+		if err := json.Unmarshal(record[fieldName], &value); err != nil {
+			return nil, err
+		}
+		value = strings.TrimSpace(value)
+		if value != "" {
+			seen[value] = true
+		}
+	}
+	return sortedMapKeys(seen), nil
+}
+
+func reconcileRestoredAutomaticProcessMapPlacementsTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	companyID, actorUserID string,
+	folderRows, logicGateRows json.RawMessage,
+) ([]DomainEventInput, error) {
+	folderIDs, err := recyclePayloadUUIDs(folderRows, "folder_id")
+	if err != nil {
+		return nil, err
+	}
+	logicGateIDs, err := recyclePayloadUUIDs(logicGateRows, "logic_gate_id")
+	if err != nil {
+		return nil, err
+	}
+
+	type sourcePlacement struct {
+		resourceType string
+		resourceID   string
+		parentID     string
+	}
+	placements := make([]sourcePlacement, 0, len(folderIDs)+len(logicGateIDs))
+	if len(folderIDs) > 0 {
+		rows, err := tx.QueryContext(ctx, `
+with recursive selected(folder_id) as (
+  select unnest(string_to_array($2, ',')::uuid[])
+), ordered(folder_id,parent_folder_id,position,depth,path) as (
+  select folder.folder_id,folder.parent_folder_id,folder.position,0,array[folder.folder_id]
+  from company_explorer_folders folder
+  join selected on selected.folder_id=folder.folder_id
+  where folder.company_id=$1::uuid
+    and (folder.parent_folder_id is null or not exists (
+      select 1 from selected parent where parent.folder_id=folder.parent_folder_id
+    ))
+  union all
+  select child.folder_id,child.parent_folder_id,child.position,parent.depth+1,parent.path||child.folder_id
+  from company_explorer_folders child
+  join selected on selected.folder_id=child.folder_id
+  join ordered parent on parent.folder_id=child.parent_folder_id
+  where child.company_id=$1::uuid and not child.folder_id=any(parent.path)
+)
+select folder_id::text,coalesce(parent_folder_id::text,'')
+from ordered
+order by depth,position,folder_id`, companyID, strings.Join(folderIDs, ","))
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var placement sourcePlacement
+			placement.resourceType = domain.ProcessMapResourceTypeFolder
+			if err := rows.Scan(&placement.resourceID, &placement.parentID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			placements = append(placements, placement)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	if len(logicGateIDs) > 0 {
+		rows, err := tx.QueryContext(ctx, `
+select item.target_id::text,item.parent_folder_id::text
+from company_explorer_items item
+where item.company_id=$1::uuid and item.target_type='logic_gate'
+  and item.target_id=any(string_to_array($2, ',')::uuid[])
+order by item.position,item.target_id`, companyID, strings.Join(logicGateIDs, ","))
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var placement sourcePlacement
+			placement.resourceType = domain.ProcessMapResourceTypeProcess
+			if err := rows.Scan(&placement.resourceID, &placement.parentID); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			placements = append(placements, placement)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+
+	events := make([]DomainEventInput, 0, len(placements))
+	for _, placement := range placements {
+		changed, err := postgresSyncAutomaticProcessMapPlacementTx(
+			ctx,
+			tx,
+			companyID,
+			placement.resourceType,
+			placement.resourceID,
+			placement.parentID,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			events = append(events, processMapEventInput(
+				companyID,
+				actorUserID,
+				ProcessMapPlacementSavedEvent,
+				processMapResourceEventPayload(placement.resourceType, placement.resourceID),
+			))
+		}
+	}
+	return events, nil
+}
+
 var recycleSnapshotTables = map[string]bool{
 	"company_explorer_folders": true,
 	"nodes":                    true,
 	"logic_gates":              true,
-	"qd_ratings":               true,
+	"score_cards":              true,
 	"projects":                 true,
 	"huddle_logic_gates":       true,
 	"huddle_nodes":             true,
@@ -302,7 +452,7 @@ var recycleRestoreTableOrder = []string{
 	"company_explorer_folders",
 	"nodes",
 	"logic_gates",
-	"qd_ratings",
+	"score_cards",
 	"resource_operational_relationships",
 	"process_map_placements",
 	"process_map_traces",
@@ -617,7 +767,7 @@ on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
 		return err
 	}
 	selectColumns := columnList
-	if tableName == "qd_ratings" {
+	if tableName == "score_cards" {
 		selected := make([]string, len(columns))
 		for index, column := range columns {
 			if column == `"rated_by_user_id"` {
@@ -830,7 +980,7 @@ func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *s
 		}
 	}
 	if len(logicGateIDs) > 0 {
-		for _, tableName := range []string{"logic_gates", "qd_ratings", "logic_gate_textboxes", "logic_gate_textboxes_history"} {
+		for _, tableName := range []string{"logic_gates", "score_cards", "logic_gate_textboxes", "logic_gate_textboxes_history"} {
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 				return nil, err
 			}

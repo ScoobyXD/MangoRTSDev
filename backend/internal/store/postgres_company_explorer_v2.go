@@ -557,6 +557,9 @@ func (r *PostgresRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Fold
 		return CompanyExplorerV2Row{}, err
 	}
 	defer tx.Rollback()
+	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, input.CompanyID, input.PermissionUserID, true); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
 
 	parentFolderID := any(nil)
 	parentEntityID := input.CompanyID
@@ -589,6 +592,13 @@ insert into company_explorer_folders (
   updated_timestamp
 ) values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, nullif($7, '')::uuid, now(), now())`,
 		input.CompanyID, folderID, parentFolderID, input.Name, defaultAccess, position, input.ActorUserID); err != nil {
+		return CompanyExplorerV2Row{}, err
+	}
+	mapParentID := ""
+	if input.ParentEntityID != input.CompanyID {
+		mapParentID = input.ParentEntityID
+	}
+	if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, input.CompanyID, domain.ProcessMapResourceTypeFolder, folderID, mapParentID, input.ActorUserID); err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -700,6 +710,11 @@ returning item_id::text, created_timestamp, updated_timestamp`,
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
+	if targetType == EntityTypeLogicGate {
+		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, input.CompanyID, domain.ProcessMapResourceTypeProcess, targetID, targetParentID, input.ActorUserID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	if !hadPreviousEdge || previousParentID.Valid != (targetParentID != "") || previousParentID.String != targetParentID {
 		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
 			"item_id": itemID, "parent_entity_id": parentEntityID,
@@ -786,6 +801,11 @@ returning target_type, target_id::text`, input.CompanyID, input.EdgeID, parentFo
 	targetParentID := ""
 	if parentEntityID != input.CompanyID {
 		targetParentID = parentEntityID
+	}
+	if targetType == EntityTypeLogicGate {
+		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, input.CompanyID, domain.ProcessMapResourceTypeProcess, targetID, targetParentID, input.ActorUserID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
 	}
 	if previousParentID.Valid != (targetParentID != "") || previousParentID.String != targetParentID {
 		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
@@ -893,47 +913,29 @@ where company_id=$1::uuid
 	} else if affected != int64(len(cleanEdgeIDs)) {
 		return ErrNotFound
 	}
+	for _, resource := range resources {
+		if resource.resourceType != EntityTypeLogicGate {
+			continue
+		}
+		_, changed, err := postgresDeleteAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, resource.resourceID)
+		if err != nil {
+			return err
+		}
+		if changed {
+			eventInputs = append(eventInputs, processMapEventInput(
+				companyID,
+				actorUserID,
+				ProcessMapPlacementDeletedEvent,
+				processMapResourceEventPayload(domain.ProcessMapResourceTypeProcess, resource.resourceID),
+			))
+		}
+	}
 	if _, err := r.appendDomainEventsTx(ctx, tx, eventInputs); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (r *PostgresRepo) DeleteCompanyExplorerV2Folder(companyID, entityID string) error {
-	companyID = cleanUUIDText(companyID)
-	entityID = cleanUUIDText(entityID)
-	if companyID == "" || entityID == "" {
-		return ErrInvalid
-	}
-	if err := protectCompanyExplorerDefaultFolderMutation(companyID, entityID); err != nil {
-		return err
-	}
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if err := postgresDeleteProcessMapResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, entityID); err != nil {
-		return err
-	}
-	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, "company_explorer_folder", entityID); err != nil {
-		return err
-	}
-	result, err := tx.ExecContext(ctx, `
-delete from company_explorer_folders
-where company_id=$1::uuid
-  and folder_id=$2::uuid`, companyID, entityID)
-	if err != nil {
-		return err
-	}
-	if affected, err := result.RowsAffected(); err != nil {
-		return err
-	} else if affected == 0 {
-		return ErrNotFound
-	}
-	return tx.Commit()
-}
 func (r *PostgresRepo) GetCompanyExplorerV2EntityWithParent(companyID, entityID, parentEntityID, edgeID, permissionUserID string) (CompanyExplorerV2Row, error) {
 	row, err := r.GetCompanyExplorerV2Entity(companyID, entityID, permissionUserID)
 	if err != nil {
@@ -1000,6 +1002,11 @@ func lockPostgresCompanyExplorerResourceEditTx(ctx context.Context, tx *sql.Tx, 
 		query = `select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid`
 		if permissionUserID != "" {
 			query += ` and mangorts_user_can_access_resource(company_id,'logic_gate',logic_gate_id,$3::uuid,'edit')`
+		}
+	case EntityTypeNode:
+		query = `select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid`
+		if permissionUserID != "" {
+			query += ` and mangorts_user_can_access_resource(company_id,'node',node_id,$3::uuid,'edit')`
 		}
 	case EntityTypeProject:
 		query = `select 1 from projects where company_id=$1::uuid and project_id=$2::uuid`

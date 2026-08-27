@@ -243,8 +243,13 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	r.logicGates[key(companyID, item.LogicGateID)] = item
 	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
 	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
-	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	r.syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID, defaultFolders)
 	r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, item.LogicGateID, false)
+	if folderItem, ok := r.folderItems[folderItemKey(companyID, EntityTypeLogicGate, item.LogicGateID)]; ok {
+		parentID := folderItem.FolderID
+		r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, item.LogicGateID, &parentID)
+	}
 	return r.withLogicGateRACILocked(item), nil
 }
 
@@ -806,8 +811,13 @@ func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header string)
 		return domain.LogicGate{}, domain.DomainEvent{}, err
 	}
 	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
-	r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
+	r.syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID, defaultFolders)
 	r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, item.LogicGateID, false)
+	if folderItem, ok := r.folderItems[folderItemKey(companyID, EntityTypeLogicGate, item.LogicGateID)]; ok {
+		parentID := folderItem.FolderID
+		r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, item.LogicGateID, &parentID)
+	}
 	return item, event, nil
 }
 

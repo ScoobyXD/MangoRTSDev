@@ -7,13 +7,14 @@ import (
 )
 
 const (
-	CompanyMembershipSavedEventType   = "company_membership_saved"
-	CompanyMembershipDeletedEventType = "company_membership_deleted"
+	CompanyMembershipSavedEventType    = "company_membership_saved"
+	CompanyMembershipDeletedEventType  = "company_membership_deleted"
+	CompanyUserProfileUpdatedEventType = "company_user_profile_updated"
 )
 
 func companyMembershipEventInputs(companyIDs []string, eventType, userID string) []DomainEventInput {
 	userID = strings.TrimSpace(userID)
-	if userID == "" || (eventType != CompanyMembershipSavedEventType && eventType != CompanyMembershipDeletedEventType) {
+	if userID == "" || (eventType != CompanyMembershipSavedEventType && eventType != CompanyMembershipDeletedEventType && eventType != CompanyUserProfileUpdatedEventType) {
 		return nil
 	}
 	cleanCompanyIDs := make([]string, 0, len(companyIDs))
