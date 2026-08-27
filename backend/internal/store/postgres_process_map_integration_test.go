@@ -405,7 +405,7 @@ where placement.company_id=$1::uuid and placement.resource_type='logic_gate'
 
 func TestPostgresProcessMapScoreCardRenameMigrationIsRestartSafe(t *testing.T) {
 	db, _ := openPostgresProcessMapIntegration(t)
-	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_z_score_cards.sql"))
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_z_scorecards.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,11 +415,11 @@ func TestPostgresProcessMapScoreCardRenameMigrationIsRestartSafe(t *testing.T) {
 		}
 	}
 	var oldTable, newTable *string
-	if err := db.QueryRow(`select to_regclass('public.qd_ratings')::text,to_regclass('public.score_cards')::text`).Scan(&oldTable, &newTable); err != nil {
+	if err := db.QueryRow(`select to_regclass('public.qd_ratings')::text,to_regclass('public.scorecards')::text`).Scan(&oldTable, &newTable); err != nil {
 		t.Fatal(err)
 	}
-	if oldTable != nil || newTable == nil || *newTable != "score_cards" {
-		t.Fatalf("Score Cards migration tables old=%v new=%v, want nil/score_cards", oldTable, newTable)
+	if oldTable != nil || newTable == nil || *newTable != "scorecards" {
+		t.Fatalf("Score Cards migration tables old=%v new=%v, want nil/scorecards", oldTable, newTable)
 	}
 }
 

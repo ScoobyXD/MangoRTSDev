@@ -289,7 +289,7 @@ with base as (
          coalesce(raci.responsible_names,'[]'::jsonb)::text responsible_names,
          coalesce(raci.accountable_names,'[]'::jsonb)::text accountable_names
   from candidate
-  left join score_cards score_card
+  left join scorecards score_card
     on candidate.allowed and candidate.resource_type='logic_gate'
    and least(candidate.grid_width,candidate.grid_height)::double precision
        * power(2::double precision,$9::integer) >= $10::double precision
