@@ -360,7 +360,7 @@ func raciTabsChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []str
 	})
 }
 
-func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []string, originConnectionID string) (RealtimeOutboxInput, error) {
+func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []string, originConnectionID string, presentationOnly bool) (RealtimeOutboxInput, error) {
 	companyID = strings.TrimSpace(companyID)
 	eventIDs = append([]string(nil), eventIDs...)
 	for index := range eventIDs {
@@ -377,6 +377,9 @@ func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []s
 	}
 	if originConnectionID = strings.TrimSpace(originConnectionID); originConnectionID != "" {
 		payloadFields["origin_connection_id"] = originConnectionID
+	}
+	if presentationOnly {
+		payloadFields["presentation_only"] = true
 	}
 	payload, err := json.Marshal(payloadFields)
 	if err != nil {
@@ -453,6 +456,26 @@ func processMapChangedEventIDsByCompany(events []domain.DomainEvent) map[string]
 	return byCompany
 }
 
+func processMapChangedPresentationOnlyByCompany(events []domain.DomainEvent) map[string]bool {
+	byCompany := map[string]bool{}
+	for _, event := range events {
+		if !isProcessMapChangedDomainEvent(event) {
+			continue
+		}
+		companyID := strings.TrimSpace(event.CompanyID)
+		if companyID == "" {
+			continue
+		}
+		if _, exists := byCompany[companyID]; !exists {
+			byCompany[companyID] = true
+		}
+		if strings.TrimSpace(event.Type) != QDRatingRealtimeEventType {
+			byCompany[companyID] = false
+		}
+	}
+	return byCompany
+}
+
 func processMapChangedAffectedUserIDsByCompany(events []domain.DomainEvent) map[string][]string {
 	byCompany := map[string][]string{}
 	for _, event := range events {
@@ -477,6 +500,7 @@ func processMapChangedAffectedUserIDsByCompany(events []domain.DomainEvent) map[
 func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []domain.DomainEvent) error {
 	affectedUserIDs := processMapChangedAffectedUserIDsByCompany(events)
 	originConnectionIDs := processMapChangedOriginConnectionIDsByCompany(events)
+	presentationOnly := processMapChangedPresentationOnlyByCompany(events)
 	for companyID, eventIDs := range processMapChangedEventIDsByCompany(events) {
 		allowed := []string{}
 		for _, membership := range r.memberships {
@@ -486,7 +510,7 @@ func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []dom
 		}
 		allowed = append(allowed, affectedUserIDs[companyID]...)
 		slices.Sort(allowed)
-		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID])
+		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID], presentationOnly[companyID])
 		if err != nil {
 			return err
 		}
@@ -500,6 +524,7 @@ func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []dom
 func (r *PostgresRepo) enqueueProcessMapRealtimeForDomainEventsTx(ctx context.Context, tx *sql.Tx, events []domain.DomainEvent) error {
 	affectedUserIDs := processMapChangedAffectedUserIDsByCompany(events)
 	originConnectionIDs := processMapChangedOriginConnectionIDsByCompany(events)
+	presentationOnly := processMapChangedPresentationOnlyByCompany(events)
 	for companyID, eventIDs := range processMapChangedEventIDsByCompany(events) {
 		rows, err := tx.QueryContext(ctx, `
 select distinct user_id::text
@@ -524,7 +549,7 @@ order by user_id::text`, companyID)
 			return err
 		}
 		allowed = append(allowed, affectedUserIDs[companyID]...)
-		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID])
+		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID], presentationOnly[companyID])
 		if err != nil {
 			return err
 		}

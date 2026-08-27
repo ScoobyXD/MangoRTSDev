@@ -71,7 +71,6 @@ import {
 import "./processMap.css";
 
 const PROCESS_MAP_REALTIME_SCOPE = "process-map:company";
-const PROCESS_MAP_DOUBLE_CLICK_MS = 300;
 const COLOR_FOLDER: [number, number, number, number] = [249, 115, 22, 230];
 const COLOR_PROCESS: [number, number, number, number] = [25, 240, 122, 235];
 const COLOR_TRACE: [number, number, number, number] = [38, 195, 234, 220];
@@ -562,7 +561,7 @@ function scoreCardTextColor(rating: "green" | "yellow" | "red" | null | undefine
   return COLOR_SCORE_NEUTRAL;
 }
 
-const PROCESS_MAP_ASSIGNMENT_SUMMARY_MAX_CHARS = 20;
+const PROCESS_MAP_ASSIGNMENT_SUMMARY_MAX_CHARS = 13;
 
 function processMapAssignmentSummary(names: string[] | undefined): string {
   if (!names?.length) return "Unassigned";
@@ -596,18 +595,19 @@ function processCardTextDatums(
   const top = bounds.min_y + 7 / scale;
   const left = bounds.min_x + 8 / scale;
   const right = bounds.max_x - 8 / scale;
-  const nameRight = bounds.max_x - 20 / scale;
+  const roleLeft = Math.max(left + 48 / scale, right - 104 / scale);
+  const roleNameLeft = roleLeft + 16 / scale;
   const responsibleNames = processMapAssignmentSummary(placement.responsible_names);
   const accountableNames = processMapAssignmentSummary(placement.accountable_names);
   const scoreCard = placement.score_card;
   return [
-    { position: [left, top], text: "Q", size: 11, color: scoreCardTextColor(scoreCard?.quality_rating), textAnchor: "start", alignmentBaseline: "top", pick },
-    { position: [left + 13 / scale, top], text: "C", size: 11, color: scoreCardTextColor(scoreCard?.cost_rating), textAnchor: "start", alignmentBaseline: "top", pick },
-    { position: [left + 26 / scale, top], text: "D", size: 11, color: scoreCardTextColor(scoreCard?.delivery_rating), textAnchor: "start", alignmentBaseline: "top", pick },
-    { position: [nameRight, top], text: responsibleNames, size: 9, color: COLOR_TEXT, textAnchor: "end", alignmentBaseline: "top", pick },
-    { position: [right, top], text: "R", size: 10, color: COLOR_RESPONSIBLE, textAnchor: "end", alignmentBaseline: "top", pick },
-    { position: [nameRight, top + 13 / scale], text: accountableNames, size: 9, color: COLOR_TEXT, textAnchor: "end", alignmentBaseline: "top", pick },
-    { position: [right, top + 13 / scale], text: "A", size: 10, color: COLOR_ACCOUNTABLE, textAnchor: "end", alignmentBaseline: "top", pick },
+    { position: [left, top], text: "Q", size: 14, color: scoreCardTextColor(scoreCard?.quality_rating), textAnchor: "start", alignmentBaseline: "top", pick },
+    { position: [left + 17 / scale, top], text: "C", size: 14, color: scoreCardTextColor(scoreCard?.cost_rating), textAnchor: "start", alignmentBaseline: "top", pick },
+    { position: [left + 34 / scale, top], text: "D", size: 14, color: scoreCardTextColor(scoreCard?.delivery_rating), textAnchor: "start", alignmentBaseline: "top", pick },
+    { position: [roleLeft, top], text: "R", size: 13, color: COLOR_RESPONSIBLE, textAnchor: "start", alignmentBaseline: "top", pick },
+    { position: [roleNameLeft, top], text: responsibleNames, size: 11, color: COLOR_TEXT, textAnchor: "start", alignmentBaseline: "top", pick },
+    { position: [roleLeft, top + 15 / scale], text: "A", size: 13, color: COLOR_ACCOUNTABLE, textAnchor: "start", alignmentBaseline: "top", pick },
+    { position: [roleNameLeft, top + 15 / scale], text: accountableNames, size: 11, color: COLOR_TEXT, textAnchor: "start", alignmentBaseline: "top", pick },
   ];
 }
 
@@ -1010,7 +1010,6 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const operationGenerationRef = useRef(new Map<string, number>());
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressClickRef = useRef(false);
-  const lastClickRef = useRef<{ id: string; at: number } | null>(null);
   viewRef.current = viewState;
   sceneRef.current = activeScene;
   gestureRef.current = gesture;
@@ -1134,16 +1133,25 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [activeScene, markUnsettled, viewportSize]);
 
   useEffect(() => {
+    let purgeProtectedGeometry = false;
     const coalesced = createCoalescedCanonicalRefresh(
-      () => loadScene(true),
+      () => {
+        const purge = purgeProtectedGeometry;
+        purgeProtectedGeometry = false;
+        return loadScene(purge);
+      },
       (cause) => setError(errorMessage(cause, "Process Map could not refresh.")),
     );
+    const requestRefresh = (purge: boolean) => {
+      purgeProtectedGeometry ||= purge;
+      coalesced.request();
+    };
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, PROCESS_MAP_REALTIME_SCOPE, {
       onProcessMapChanged: (message) => {
         if (message.origin_connection_id && message.origin_connection_id === getCurrentRealtimeConnectionID(apiBase, companyID)) return;
-        coalesced.request();
+        requestRefresh(message.presentation_only !== true);
       },
-      onRecover: () => { coalesced.request(); },
+      onRecover: () => { requestRefresh(true); },
       onRejected: () => {
         advanceProtectedGeneration();
         invalidateProcessMapReadCaches(apiBase, companyID);
@@ -1683,7 +1691,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     onOpenLogicGate(placement.resource_id, placement.name);
   }, [clearHoverTimer, onOpenLogicGate]);
 
-  const handleClick = useCallback((info: PickingInfo) => {
+  const handleClick = useCallback((info: PickingInfo, event: { type: string }) => {
     surfaceRef.current?.focus();
     if (suppressClickRef.current) return;
     const pick = pickFromObject(info.object);
@@ -1695,12 +1703,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setHoveredProcessID(null);
       return;
     }
-    const now = Date.now();
-    const clickID = pick.kind === "placement" || pick.kind === "anchor" || pick.kind === "resize"
-      ? `placement:${pick.key}`
-      : `trace:${pick.id}${pick.kind === "waypoint" ? `:${pick.index}` : ""}`;
-    const doubleClick = lastClickRef.current?.id === clickID && now - lastClickRef.current.at <= PROCESS_MAP_DOUBLE_CLICK_MS;
-    lastClickRef.current = { id: clickID, at: now };
+    const doubleClick = event.type === "dblclick";
     if (pick.kind === "placement") {
       setSelection({ kind: "placement", id: pick.key });
       if (doubleClick) {

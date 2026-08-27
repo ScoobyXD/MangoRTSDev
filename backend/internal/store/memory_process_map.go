@@ -10,15 +10,15 @@ import (
 )
 
 const (
-	memoryProcessMapRootFolderWidth    = 120
-	memoryProcessMapRootFolderHeight   = 80
-	memoryProcessMapNestedFolderWidth  = 80
-	memoryProcessMapNestedFolderHeight = 50
+	memoryProcessMapRootFolderWidth    = 32
+	memoryProcessMapRootFolderHeight   = 24
+	memoryProcessMapNestedFolderWidth  = 24
+	memoryProcessMapNestedFolderHeight = 16
 	memoryProcessMapProcessWidth       = 14
 	memoryProcessMapProcessHeight      = 8
-	memoryProcessMapRootGap            = 16
-	memoryProcessMapChildGap           = 4
-	memoryProcessMapFolderPadding      = 6
+	memoryProcessMapRootGap            = 8
+	memoryProcessMapChildGap           = 2
+	memoryProcessMapFolderPadding      = 2
 )
 
 func processMapPlacementMemoryKey(companyID, resourceType, resourceID string) string {
@@ -73,7 +73,7 @@ func (r *MemoryRepo) nextMemoryProcessMapPositionLocked(companyID, resourceType,
 		return 0, 0
 	}
 	x := parent.GridX + memoryProcessMapFolderPadding
-	y := parent.GridY + memoryProcessMapFolderPadding*2
+	y := parent.GridY + memoryProcessMapFolderPadding
 	for placementKey, placement := range r.processMapPlacements {
 		if placement.CompanyID != companyID || placementKey == processMapPlacementMemoryKey(companyID, resourceType, resourceID) ||
 			placement.MapParentFolderID == nil || *placement.MapParentFolderID != *parentID {
@@ -130,6 +130,45 @@ func (r *MemoryRepo) translateMemoryProcessMapFolderLocked(companyID, folderID s
 	}
 }
 
+func (r *MemoryRepo) spaceAutomaticMemoryProcessMapRootsLocked(companyID string, now time.Time) {
+	roots := []domain.ProcessMapPlacement{}
+	for _, placement := range r.processMapPlacements {
+		if placement.CompanyID == companyID && placement.MapParentFolderID == nil {
+			roots = append(roots, placement)
+		}
+	}
+	slices.SortFunc(roots, func(left, right domain.ProcessMapPlacement) int {
+		if left.GridX != right.GridX {
+			return left.GridX - right.GridX
+		}
+		if compared := strings.Compare(left.ResourceType, right.ResourceType); compared != 0 {
+			return compared
+		}
+		return strings.Compare(left.ResourceID, right.ResourceID)
+	})
+	placed := []domain.ProcessMapPlacement{}
+	for _, root := range roots {
+		requiredX := root.GridX
+		for _, previous := range placed {
+			verticalOverlap := root.GridY < previous.GridY+previous.GridHeight && previous.GridY < root.GridY+root.GridHeight
+			if verticalOverlap {
+				requiredX = max(requiredX, previous.GridX+previous.GridWidth+memoryProcessMapRootGap)
+			}
+		}
+		if root.GridX < requiredX {
+			deltaX := requiredX - root.GridX
+			if root.ResourceType == domain.ProcessMapResourceTypeFolder {
+				r.translateMemoryProcessMapFolderLocked(companyID, root.ResourceID, deltaX, 0, now)
+			}
+			root.GridX += deltaX
+			root.Revision++
+			root.UpdatedTimestamp = now
+			r.processMapPlacements[processMapPlacementMemoryKey(companyID, root.ResourceType, root.ResourceID)] = root
+		}
+		placed = append(placed, root)
+	}
+}
+
 // syncAutomaticMemoryProcessMapPlacementLocked updates one Process Map
 // projection at the Company Explorer write boundary. Reads never repair state.
 func (r *MemoryRepo) syncAutomaticMemoryProcessMapPlacementLocked(companyID, resourceType, resourceID string, parentID *string) bool {
@@ -177,6 +216,7 @@ func (r *MemoryRepo) syncAutomaticMemoryProcessMapPlacementLocked(companyID, res
 	placement.UpdatedTimestamp = now
 	r.processMapPlacements[placementKey] = placement
 	r.expandMemoryProcessMapAncestorsLocked(companyID, placement, now)
+	r.spaceAutomaticMemoryProcessMapRootsLocked(companyID, now)
 	return true
 }
 
