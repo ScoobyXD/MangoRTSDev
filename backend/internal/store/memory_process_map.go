@@ -19,6 +19,9 @@ const (
 	memoryProcessMapRootGap            = 8
 	memoryProcessMapChildGap           = 2
 	memoryProcessMapFolderPadding      = 2
+	memoryProcessMapFolderHeaderHeight = 6
+	memoryProcessMapSectionGap         = 4
+	memoryProcessMapRootColumns        = 4
 )
 
 func processMapPlacementMemoryKey(companyID, resourceType, resourceID string) string {
@@ -57,31 +60,161 @@ func processMapParentPointer(value string) *string {
 	return &value
 }
 
+func nextMemoryProcessMapSectionPosition(placements []domain.ProcessMapPlacement, startX, startY, columns int) (int, int) {
+	if len(placements) == 0 {
+		return startX, startY
+	}
+	slices.SortFunc(placements, compareProcessMapPlacements)
+	if columns <= 1 {
+		nextY := startY
+		for _, placement := range placements {
+			nextY = max(nextY, placement.GridY+placement.GridHeight+memoryProcessMapChildGap)
+		}
+		return startX, nextY
+	}
+	lastY := placements[len(placements)-1].GridY
+	lastRow := []domain.ProcessMapPlacement{}
+	for _, placement := range placements {
+		if placement.GridY == lastY {
+			lastRow = append(lastRow, placement)
+		}
+	}
+	if len(lastRow) < columns {
+		nextX := startX
+		for _, placement := range lastRow {
+			nextX = max(nextX, placement.GridX+placement.GridWidth+memoryProcessMapChildGap)
+		}
+		return nextX, lastY
+	}
+	nextY := startY
+	for _, placement := range placements {
+		nextY = max(nextY, placement.GridY+placement.GridHeight+memoryProcessMapChildGap)
+	}
+	return startX, nextY
+}
+
 func (r *MemoryRepo) nextMemoryProcessMapPositionLocked(companyID, resourceType, resourceID string, parentID *string, width, height int) (int, int) {
 	if parentID == nil {
-		nextX := 0
+		roots := []domain.ProcessMapPlacement{}
 		for placementKey, placement := range r.processMapPlacements {
 			if placement.CompanyID != companyID || placementKey == processMapPlacementMemoryKey(companyID, resourceType, resourceID) || placement.MapParentFolderID != nil {
 				continue
 			}
-			nextX = max(nextX, placement.GridX+placement.GridWidth+memoryProcessMapRootGap)
+			roots = append(roots, placement)
 		}
-		return nextX, 0
+		if len(roots) == 0 {
+			return 0, 0
+		}
+		slices.SortFunc(roots, compareProcessMapPlacements)
+		lastY := roots[len(roots)-1].GridY
+		lastRow := []domain.ProcessMapPlacement{}
+		for _, root := range roots {
+			if root.GridY == lastY {
+				lastRow = append(lastRow, root)
+			}
+		}
+		if len(lastRow) < memoryProcessMapRootColumns {
+			nextX := 0
+			for _, root := range lastRow {
+				nextX = max(nextX, root.GridX+root.GridWidth+memoryProcessMapRootGap)
+			}
+			return nextX, lastY
+		}
+		nextY := 0
+		for _, root := range roots {
+			nextY = max(nextY, root.GridY+root.GridHeight+memoryProcessMapRootGap)
+		}
+		return 0, nextY
 	}
 	parent, ok := r.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, *parentID)]
 	if !ok {
 		return 0, 0
 	}
-	x := parent.GridX + memoryProcessMapFolderPadding
-	y := parent.GridY + memoryProcessMapFolderPadding
+	folders := []domain.ProcessMapPlacement{}
+	processes := []domain.ProcessMapPlacement{}
 	for placementKey, placement := range r.processMapPlacements {
 		if placement.CompanyID != companyID || placementKey == processMapPlacementMemoryKey(companyID, resourceType, resourceID) ||
 			placement.MapParentFolderID == nil || *placement.MapParentFolderID != *parentID {
 			continue
 		}
-		y = max(y, placement.GridY+placement.GridHeight+memoryProcessMapChildGap)
+		if placement.ResourceType == domain.ProcessMapResourceTypeFolder {
+			folders = append(folders, placement)
+		} else if placement.ResourceType == domain.ProcessMapResourceTypeProcess {
+			processes = append(processes, placement)
+		}
 	}
-	return x, y
+	childStartX := parent.GridX + memoryProcessMapFolderPadding
+	childStartY := parent.GridY + memoryProcessMapFolderHeaderHeight
+	if resourceType == domain.ProcessMapResourceTypeFolder {
+		columns := 1
+		if parent.MapParentFolderID == nil && len(processes) == 0 {
+			columns = 2
+		}
+		return nextMemoryProcessMapSectionPosition(folders, childStartX, childStartY, columns)
+	}
+	folderLaneWidth := memoryProcessMapNestedFolderWidth
+	for _, folder := range folders {
+		folderLaneWidth = max(folderLaneWidth, folder.GridX+folder.GridWidth-childStartX)
+	}
+	processStartX := childStartX + folderLaneWidth + memoryProcessMapSectionGap
+	if len(processes) > 0 {
+		minimumProcessX := processes[0].GridX
+		for _, process := range processes[1:] {
+			minimumProcessX = min(minimumProcessX, process.GridX)
+		}
+		processStartX = max(processStartX, minimumProcessX)
+	}
+	return nextMemoryProcessMapSectionPosition(processes, processStartX, childStartY, 2)
+}
+
+func processMapPlacementsOverlap(left, right domain.ProcessMapPlacement) bool {
+	return left.GridX < right.GridX+right.GridWidth && left.GridX+left.GridWidth > right.GridX &&
+		left.GridY < right.GridY+right.GridHeight && left.GridY+left.GridHeight > right.GridY
+}
+
+func (r *MemoryRepo) relocateOverlappingAutomaticMemoryProcessMapChildLocked(
+	companyID string,
+	parent domain.ProcessMapPlacement,
+	child domain.ProcessMapPlacement,
+	now time.Time,
+) domain.ProcessMapPlacement {
+	siblings := []domain.ProcessMapPlacement{}
+	overlaps := false
+	for _, placement := range r.processMapPlacements {
+		if placement.CompanyID != companyID || placement.ResourceType == child.ResourceType && placement.ResourceID == child.ResourceID ||
+			placement.MapParentFolderID == nil || *placement.MapParentFolderID != parent.ResourceID {
+			continue
+		}
+		siblings = append(siblings, placement)
+		overlaps = overlaps || processMapPlacementsOverlap(child, placement)
+	}
+	if !overlaps {
+		return child
+	}
+	childStartX := parent.GridX + memoryProcessMapFolderPadding
+	nextX := childStartX
+	if child.ResourceType == domain.ProcessMapResourceTypeProcess {
+		folderLaneWidth := memoryProcessMapNestedFolderWidth
+		for _, sibling := range siblings {
+			if sibling.ResourceType == domain.ProcessMapResourceTypeFolder {
+				folderLaneWidth = max(folderLaneWidth, sibling.GridX+sibling.GridWidth-childStartX)
+			}
+		}
+		nextX += folderLaneWidth + memoryProcessMapSectionGap
+	}
+	nextY := parent.GridY + memoryProcessMapFolderHeaderHeight
+	for _, sibling := range siblings {
+		nextY = max(nextY, sibling.GridY+sibling.GridHeight+memoryProcessMapChildGap)
+	}
+	deltaX, deltaY := nextX-child.GridX, nextY-child.GridY
+	if child.ResourceType == domain.ProcessMapResourceTypeFolder {
+		r.translateMemoryProcessMapFolderLocked(companyID, child.ResourceID, deltaX, deltaY, now)
+	}
+	child.GridX, child.GridY = nextX, nextY
+	child.Revision++
+	child.UpdatedTimestamp = now
+	r.processMapPlacements[processMapPlacementMemoryKey(companyID, child.ResourceType, child.ResourceID)] = child
+	return child
 }
 
 func (r *MemoryRepo) expandMemoryProcessMapAncestorsLocked(companyID string, placement domain.ProcessMapPlacement, now time.Time) {
@@ -91,6 +224,7 @@ func (r *MemoryRepo) expandMemoryProcessMapAncestorsLocked(companyID string, pla
 		if !ok {
 			return
 		}
+		placement = r.relocateOverlappingAutomaticMemoryProcessMapChildLocked(companyID, parent, placement, now)
 		width := max(parent.GridWidth, placement.GridX+placement.GridWidth-parent.GridX+memoryProcessMapFolderPadding)
 		height := max(parent.GridHeight, placement.GridY+placement.GridHeight-parent.GridY+memoryProcessMapFolderPadding)
 		if width == parent.GridWidth && height == parent.GridHeight {
@@ -137,35 +271,49 @@ func (r *MemoryRepo) spaceAutomaticMemoryProcessMapRootsLocked(companyID string,
 			roots = append(roots, placement)
 		}
 	}
-	slices.SortFunc(roots, func(left, right domain.ProcessMapPlacement) int {
-		if left.GridX != right.GridX {
-			return left.GridX - right.GridX
-		}
-		if compared := strings.Compare(left.ResourceType, right.ResourceType); compared != 0 {
-			return compared
-		}
-		return strings.Compare(left.ResourceID, right.ResourceID)
-	})
+	slices.SortFunc(roots, compareProcessMapPlacements)
 	placed := []domain.ProcessMapPlacement{}
-	for _, root := range roots {
-		requiredX := root.GridX
-		for _, previous := range placed {
-			verticalOverlap := root.GridY < previous.GridY+previous.GridHeight && previous.GridY < root.GridY+root.GridHeight
-			if verticalOverlap {
-				requiredX = max(requiredX, previous.GridX+previous.GridWidth+memoryProcessMapRootGap)
+	for start := 0; start < len(roots); {
+		end := start + 1
+		for end < len(roots) && roots[end].GridY == roots[start].GridY {
+			end++
+		}
+		row := roots[start:end]
+		rowY := row[0].GridY
+		previousRight := 0
+		planned := append([]domain.ProcessMapPlacement{}, row...)
+		for index := range planned {
+			if index > 0 && planned[index].GridX < previousRight+memoryProcessMapRootGap {
+				planned[index].GridX = previousRight + memoryProcessMapRootGap
+			}
+			previousRight = planned[index].GridX + planned[index].GridWidth
+		}
+		requiredY := rowY
+		for _, root := range planned {
+			for _, previous := range placed {
+				horizontalGapConflict := root.GridX < previous.GridX+previous.GridWidth+memoryProcessMapRootGap &&
+					previous.GridX < root.GridX+root.GridWidth+memoryProcessMapRootGap
+				if horizontalGapConflict && requiredY < previous.GridY+previous.GridHeight+memoryProcessMapRootGap {
+					requiredY = previous.GridY + previous.GridHeight + memoryProcessMapRootGap
+				}
 			}
 		}
-		if root.GridX < requiredX {
-			deltaX := requiredX - root.GridX
-			if root.ResourceType == domain.ProcessMapResourceTypeFolder {
-				r.translateMemoryProcessMapFolderLocked(companyID, root.ResourceID, deltaX, 0, now)
+		deltaY := requiredY - rowY
+		for index, root := range row {
+			deltaX := planned[index].GridX - root.GridX
+			if root.ResourceType == domain.ProcessMapResourceTypeFolder && (deltaX != 0 || deltaY != 0) {
+				r.translateMemoryProcessMapFolderLocked(companyID, root.ResourceID, deltaX, deltaY, now)
 			}
-			root.GridX += deltaX
-			root.Revision++
-			root.UpdatedTimestamp = now
-			r.processMapPlacements[processMapPlacementMemoryKey(companyID, root.ResourceType, root.ResourceID)] = root
+			if deltaX != 0 || deltaY != 0 {
+				root.GridX += deltaX
+				root.GridY += deltaY
+				root.Revision++
+				root.UpdatedTimestamp = now
+				r.processMapPlacements[processMapPlacementMemoryKey(companyID, root.ResourceType, root.ResourceID)] = root
+			}
+			placed = append(placed, root)
 		}
-		placed = append(placed, root)
+		start = end
 	}
 }
 

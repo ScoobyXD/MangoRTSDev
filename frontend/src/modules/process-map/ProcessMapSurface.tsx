@@ -233,6 +233,7 @@ type TextDatum = {
   position: [number, number];
   text: string;
   size: number;
+  contentBox?: [number, number, number, number];
   color?: [number, number, number, number];
   textAnchor?: "start" | "middle" | "end";
   alignmentBaseline?: "top" | "center" | "bottom";
@@ -554,6 +555,36 @@ function placementBounds(placement: ProcessMapPlacement): ProcessMapBounds {
   } : processMapPlacementBounds(placement);
 }
 
+const PROCESS_MAP_LABEL_INSET_PX = 6;
+const PROCESS_MAP_FOLDER_TITLE_BAND_HEIGHT = 6;
+const PROCESS_MAP_UNCLIPPED_TEXT_BOX: [number, number, number, number] = [0, 0, -1, -1];
+
+function processMapPlacementLabelContentBox(
+  bounds: ProcessMapBounds,
+  position: [number, number],
+  pixelsPerGridUnit: number,
+): [number, number, number, number] {
+  const inset = PROCESS_MAP_LABEL_INSET_PX / Math.max(Number.MIN_VALUE, pixelsPerGridUnit);
+  return [
+    bounds.min_x + inset - position[0],
+    0,
+    Math.max(0, bounds.max_x - bounds.min_x - inset * 2),
+    -1,
+  ];
+}
+
+function processMapFolderLabelY(
+  bounds: ProcessMapBounds,
+  pixelsPerGridUnit: number,
+  editing: boolean,
+  labelSize: number,
+): number | null {
+  const scale = Math.max(Number.MIN_VALUE, pixelsPerGridUnit);
+  if (PROCESS_MAP_FOLDER_TITLE_BAND_HEIGHT * scale < labelSize) return null;
+  const preferredOffset = (editing ? 18 : 10) / scale;
+  return bounds.min_y + Math.min(PROCESS_MAP_FOLDER_TITLE_BAND_HEIGHT / 2, preferredOffset);
+}
+
 function scoreCardTextColor(rating: "green" | "yellow" | "red" | null | undefined): [number, number, number, number] {
   if (rating === "green") return COLOR_SCORE_GREEN;
   if (rating === "yellow") return COLOR_SCORE_YELLOW;
@@ -600,7 +631,7 @@ function processCardTextDatums(
   const responsibleNames = processMapAssignmentSummary(placement.responsible_names);
   const accountableNames = processMapAssignmentSummary(placement.accountable_names);
   const scoreCard = placement.score_card;
-  return [
+  const cardText: TextDatum[] = [
     { position: [left, top], text: "Q", size: 14, color: scoreCardTextColor(scoreCard?.quality_rating), textAnchor: "start", alignmentBaseline: "top", pick },
     { position: [left + 17 / scale, top], text: "C", size: 14, color: scoreCardTextColor(scoreCard?.cost_rating), textAnchor: "start", alignmentBaseline: "top", pick },
     { position: [left + 34 / scale, top], text: "D", size: 14, color: scoreCardTextColor(scoreCard?.delivery_rating), textAnchor: "start", alignmentBaseline: "top", pick },
@@ -609,6 +640,10 @@ function processCardTextDatums(
     { position: [roleLeft, top + 15 / scale], text: "A", size: 13, color: COLOR_ACCOUNTABLE, textAnchor: "start", alignmentBaseline: "top", pick },
     { position: [roleNameLeft, top + 15 / scale], text: accountableNames, size: 11, color: COLOR_TEXT, textAnchor: "start", alignmentBaseline: "top", pick },
   ];
+  return cardText.map((item) => ({
+    ...item,
+    contentBox: processMapPlacementLabelContentBox(bounds, item.position, pixelsPerGridUnit),
+  }));
 }
 
 function processMapTextLayer(id: string, data: TextDatum[]): TextLayer<TextDatum> {
@@ -623,6 +658,7 @@ function processMapTextLayer(id: string, data: TextDatum[]): TextLayer<TextDatum
     getPosition: (item) => item.position,
     getText: (item) => item.text,
     getSize: (item) => item.size,
+    getContentBox: (item) => item.contentBox ?? PROCESS_MAP_UNCLIPPED_TEXT_BOX,
     getColor: (item) => item.color ?? COLOR_TEXT,
     getTextAnchor: (item) => item.textAnchor ?? "middle",
     getAlignmentBaseline: (item) => item.alignmentBaseline ?? "center",
@@ -689,15 +725,22 @@ function renderTileSubLayers(
     }
     const center = { x: (bounds.min_x + bounds.max_x) / 2, y: (bounds.min_y + bounds.max_y) / 2 };
     if (lod !== "whole") {
-      const labelPosition: [number, number] = placement.resource_type === "company_explorer_folder"
-        ? [center.x, bounds.min_y + (lod === "editing" ? 18 : 10) / options.settledPixelsPerGridUnit]
-        : [center.x, center.y];
-      if (ownsCoordinate({ x: labelPosition[0], y: labelPosition[1] }, tile)) labels.push({
-        position: labelPosition,
-        text: placement.name,
-        size: lod === "editing" ? 13 : 11,
-        pick,
-      });
+      const labelSize = lod === "editing" ? 13 : 11;
+      const folderLabelY = placement.resource_type === "company_explorer_folder"
+        ? processMapFolderLabelY(bounds, options.settledPixelsPerGridUnit, lod === "editing", labelSize)
+        : null;
+      if (placement.resource_type !== "company_explorer_folder" || folderLabelY !== null) {
+        const labelPosition: [number, number] = placement.resource_type === "company_explorer_folder"
+          ? [center.x, folderLabelY!]
+          : [center.x, center.y];
+        if (ownsCoordinate({ x: labelPosition[0], y: labelPosition[1] }, tile)) labels.push({
+          position: labelPosition,
+          text: placement.name,
+          size: labelSize,
+          contentBox: processMapPlacementLabelContentBox(bounds, labelPosition, options.settledPixelsPerGridUnit),
+          pick,
+        });
+      }
     }
     processCardText.push(...processCardTextDatums(placement, bounds, options.settledPixelsPerGridUnit, pick).filter((item) => (
       ownsCoordinate({ x: item.position[0], y: item.position[1] }, tile)
@@ -787,17 +830,27 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): Layer[] {
       bodies.push({ polygon: boundsPolygon(bounds), fill: COLOR_PROCESS_SURFACE, line: COLOR_PROCESS, lineWidth: 3, pick });
     }
     const lod = processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit);
-    if (lod !== "whole") labels.push({
-      position: [
-        (bounds.min_x + bounds.max_x) / 2,
-        placement.resource_type === "company_explorer_folder"
-          ? bounds.min_y + (lod === "editing" ? 18 : 10) / options.settledPixelsPerGridUnit
-          : (bounds.min_y + bounds.max_y) / 2,
-      ],
-      text: placement.name,
-      size: 13,
-      pick,
-    });
+    if (lod !== "whole") {
+      const labelSize = lod === "editing" ? 13 : 11;
+      const folderLabelY = placement.resource_type === "company_explorer_folder"
+        ? processMapFolderLabelY(bounds, options.settledPixelsPerGridUnit, lod === "editing", labelSize)
+        : null;
+      if (placement.resource_type !== "company_explorer_folder" || folderLabelY !== null) {
+        const labelPosition: [number, number] = [
+          (bounds.min_x + bounds.max_x) / 2,
+          placement.resource_type === "company_explorer_folder"
+            ? folderLabelY!
+            : (bounds.min_y + bounds.max_y) / 2,
+        ];
+        labels.push({
+          position: labelPosition,
+          text: placement.name,
+          size: labelSize,
+          contentBox: processMapPlacementLabelContentBox(bounds, labelPosition, options.settledPixelsPerGridUnit),
+          pick,
+        });
+      }
+    }
     processCardText.push(...processCardTextDatums(placement, bounds, options.settledPixelsPerGridUnit, pick));
   }
   if (options.settled && !options.editOverlay.connectionSourceKey) {

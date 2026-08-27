@@ -139,6 +139,23 @@ function assertFlatXYPathLayer(layer: Layer): void {
   assert.ok(flatPath.every(Number.isFinite), `${layer.id} must yield finite coordinates`);
 }
 
+type PlacementLabelDatum = {
+  position: [number, number];
+  text: string;
+  contentBox?: [number, number, number, number];
+};
+
+function assertPlacementLabelHorizontalContentBox(placement: ProcessMapVisiblePlacement, datum: PlacementLabelDatum): void {
+  assert.ok(datum.contentBox, `${datum.text} must have a clipping box`);
+  const [offsetX, offsetY, width, height] = datum.contentBox;
+  const minX = datum.position[0] + offsetX;
+  assert.ok(width > 0, `${datum.text} horizontal clipping box must remain visible`);
+  assert.ok(minX > placement.grid_x, `${datum.text} clipping box must be inset from the left edge`);
+  assert.ok(minX + width < placement.grid_x + placement.grid_width, `${datum.text} clipping box must be inset from the right edge`);
+  assert.equal(offsetY, 0, `${datum.text} clipping box must not shift vertical content`);
+  assert.equal(height, -1, `${datum.text} clipping box must disable DeckGL vertical glyph clipping`);
+}
+
 function installProcessMapTestDOM(): () => void {
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://process-map.test" });
   const values: Record<string, unknown> = {
@@ -463,7 +480,7 @@ test("whole-company tile rendering keeps every placement perceptible without lea
   assert.deepEqual(texts, ["?"], "whole LOD suppresses names but retains a permission-safe placeholder");
 });
 
-test("Folder labels use the inside top edge while Process labels remain centered", () => {
+test("large Folder labels stay in their six-unit title band while Process labels remain centered", () => {
   const folder = placement("folder-label", 0, 0, 80, 60, "company_explorer_folder");
   const process = placement("process-label", 100, 0, 80, 60);
   const tileData: ProcessMapTileResponse = {
@@ -471,7 +488,7 @@ test("Folder labels use the inside top edge while Process labels remain centered
     placements: [folder, process],
     traces: [],
   };
-  const tileLayer = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 0.5 })), "process-map-spatial-tiles");
+  const tileLayer = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 2.5 })), "process-map-spatial-tiles");
   const render = tileLayer.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
   const sublayers = render({ id: "normal-labels", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
   const labelsLayer = layerByID(sublayers, "normal-labels-labels");
@@ -479,7 +496,7 @@ test("Folder labels use the inside top edge while Process labels remain centered
   const folderLabel = labels.find((item) => item.text === folder.name);
   const processLabel = labels.find((item) => item.text === process.name);
   assert.ok(folderLabel && processLabel);
-  assert.ok(folderLabel.position[1] > folder.grid_y && folderLabel.position[1] < folder.grid_y + folder.grid_height / 2);
+  assert.equal(folderLabel.position[1], folder.grid_y + 3, "the fitted editing label stays centered in the six-unit title band");
   assert.equal(processLabel.position[1], process.grid_y + process.grid_height / 2);
   assert.deepEqual(labels.map((item) => item.text), [folder.name, process.name], "labels show source names without redundant type captions");
   assert.equal(labelsLayer.props.pickable, true, "a Folder name is a direct selection and move target");
@@ -491,6 +508,77 @@ test("Folder labels use the inside top edge while Process labels remain centered
   assert.equal(shadows.props.pickable, false, "the shadow never becomes another interaction target");
   assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [248, 250, 252, 252]);
   assert.ok(sublayers.indexOf(shadows) < sublayers.indexOf(bodies), "the Process surface stays above its shadow");
+
+  const presentation: ProcessMapPresentationState = {
+    placements: new Map([[`company_explorer_folder:${folder.resource_id}`, folder]]),
+    traces: new Map(),
+    removedPlacementKeys: new Set(),
+  };
+  const editLayers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 2.5,
+    presentation,
+    editedPlacementKeys: new Set(presentation.placements.keys()),
+    editOverlay: {
+      placements: [folder], traces: [], selectedPlacementKey: `company_explorer_folder:${folder.resource_id}`, selectedTraceID: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+    },
+  }));
+  const editFolderLabel = (layerByID(editLayers, "process-map-edit-labels").props.data as Array<{ position: [number, number] }>)[0];
+  assert.equal(editFolderLabel.position[1], folder.grid_y + 3, "the selected overlay uses the same six-unit title band");
+
+  const normalFolder = placement("normal-folder-label", 0, 0, 80, 40, "company_explorer_folder");
+  const normalTileData: ProcessMapTileResponse = {
+    z: 22, x: 0, y: 0, process_map_read_version: 11, byteLength: 1,
+    placements: [normalFolder],
+    traces: [],
+  };
+  const normalTile = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 2 })), "process-map-spatial-tiles");
+  const normalTileLayers = (normalTile.props.renderSubLayers as typeof render)({
+    id: "normal-selected-label",
+    data: normalTileData,
+    tile: { boundingBox: [[0, 0], [256, 256]] },
+  });
+  const normalTileLabels = layerByID(normalTileLayers, "normal-selected-label-labels").props.data as Array<{ text: string; size: number }>;
+  assert.deepEqual(normalTileLabels.map((item) => [item.text, item.size]), [[normalFolder.name, 11]]);
+  const normalPresentation: ProcessMapPresentationState = {
+    placements: new Map([[`company_explorer_folder:${normalFolder.resource_id}`, normalFolder]]),
+    traces: new Map(),
+    removedPlacementKeys: new Set(),
+  };
+  const normalEditLayers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 2,
+    presentation: normalPresentation,
+    editedPlacementKeys: new Set(normalPresentation.placements.keys()),
+    editOverlay: {
+      placements: [normalFolder], traces: [], selectedPlacementKey: `company_explorer_folder:${normalFolder.resource_id}`, selectedTraceID: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+    },
+  }));
+  const normalEditLabels = layerByID(normalEditLayers, "process-map-edit-labels").props.data as Array<{ text: string; size: number }>;
+  assert.deepEqual(normalEditLabels.map((item) => [item.text, item.size]), [[normalFolder.name, 11]], "selection preserves a normal-LOD Folder title");
+
+  const highZoomTile = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 24 })), "process-map-spatial-tiles");
+  const renderHighZoom = highZoomTile.props.renderSubLayers as typeof render;
+  const highZoomLayers = renderHighZoom({ id: "high-zoom-labels", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
+  const highZoomFolderLabel = (layerByID(highZoomLayers, "high-zoom-labels-labels").props.data as Array<{ position: [number, number]; text: string }>).find((item) => item.text === folder.name);
+  assert.equal(highZoomFolderLabel?.position[1], folder.grid_y + 18 / 24, "higher zoom retains the established 18px editing offset");
+
+  const lowZoomTile = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 0.5 })), "process-map-spatial-tiles");
+  const renderLowZoom = lowZoomTile.props.renderSubLayers as typeof render;
+  const lowZoomLayers = renderLowZoom({ id: "low-zoom-labels", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
+  const lowZoomTexts = (layerByID(lowZoomLayers, "low-zoom-labels-labels").props.data as Array<{ text: string }>).map((item) => item.text);
+  assert.deepEqual(lowZoomTexts, [process.name], "a title band shorter than the Folder font hides only the Folder title");
+
+  const lowZoomEditLayers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 0.5,
+    presentation,
+    editedPlacementKeys: new Set(presentation.placements.keys()),
+    editOverlay: {
+      placements: [folder], traces: [], selectedPlacementKey: `company_explorer_folder:${folder.resource_id}`, selectedTraceID: null,
+      connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null,
+    },
+  }));
+  assert.deepEqual(layerByID(lowZoomEditLayers, "process-map-edit-labels").props.data, [], "the selected overlay also hides a Folder title that cannot fit its band");
 });
 
 test("every Process Map PathLayer declares and yields flat XY geometry", () => {
@@ -559,6 +647,88 @@ test("every Process Map PathLayer declares and yields flat XY geometry", () => {
   assert.ok(editTraceData.every((item) => item.path.slice(1).every((point, index) => point[0] === item.path[index][0] || point[1] === item.path[index][1])), "saved and pending traces contain only horizontal or vertical segments");
   assert.equal(editTraceData[0].width, 4, "the selected trace keeps the established fixed edit width");
   assert.equal(editTraceData[editTraceData.length - 1]?.width, 3, "the connection preview keeps the established fixed width");
+});
+
+test("placement and Process-card text stay horizontally clipped inside their rectangles", () => {
+  const folder: ProcessMapVisiblePlacement = {
+    ...placement("clip-folder", 10, 10, 80, 60, "company_explorer_folder"),
+    name: "A very long Folder name that must never cross into a neighboring rectangle",
+  };
+  const process: ProcessMapVisiblePlacement = {
+    ...placement("clip-process", 100, 20, 14, 10),
+    name: "A very long Process name that must stay inside this card",
+  };
+  const placements = [folder, process];
+  const placementByText = new Map(placements.map((item) => [item.name, item]));
+  const tileLayer = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 24 })), "process-map-spatial-tiles");
+  const render = tileLayer.props.renderSubLayers as unknown as (props: {
+    id: string;
+    data: ProcessMapTileResponse;
+    tile: { boundingBox: [number[], number[]] };
+  }) => Layer[];
+  const tileLayers = render({
+    id: "clipped-labels",
+    data: { z: 22, x: 0, y: 0, process_map_read_version: 11, byteLength: 1, placements, traces: [] },
+    tile: { boundingBox: [[0, 0], [256, 256]] },
+  });
+  const tiledLabelLayer = layerByID(tileLayers, "clipped-labels-labels");
+  const tiledLabels = tiledLabelLayer.props.data as PlacementLabelDatum[];
+  const getTiledContentBox = tiledLabelLayer.props.getContentBox as (datum: PlacementLabelDatum) => [number, number, number, number];
+  assert.deepEqual(tiledLabels.map((datum) => datum.text), placements.map((item) => item.name));
+  for (const datum of tiledLabels) {
+    const candidate = placementByText.get(datum.text);
+    assert.ok(candidate);
+    assertPlacementLabelHorizontalContentBox(candidate, datum);
+    assert.deepEqual(getTiledContentBox(datum), datum.contentBox);
+  }
+
+  const processCardTextLayer = layerByID(tileLayers, "clipped-labels-process-card-text");
+  const processCardText = processCardTextLayer.props.data as PlacementLabelDatum[];
+  const getCardContentBox = processCardTextLayer.props.getContentBox as (datum: PlacementLabelDatum) => [number, number, number, number];
+  assert.ok(processCardText.length > 0, "the editing Process fixture must expose QCD and RACI text");
+  for (const datum of processCardText) {
+    assertPlacementLabelHorizontalContentBox(process, datum);
+    assert.deepEqual(getCardContentBox(datum), datum.contentBox);
+  }
+
+  const presentation: ProcessMapPresentationState = {
+    placements: new Map(placements.map((item) => [`${item.resource_type}:${item.resource_id}`, item])),
+    traces: new Map(),
+    removedPlacementKeys: new Set(),
+  };
+  const editLayers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 24,
+    presentation,
+    editedPlacementKeys: new Set(presentation.placements.keys()),
+    editOverlay: {
+      placements,
+      traces: [],
+      selectedPlacementKey: null,
+      hoveredPlacementKey: null,
+      selectedTraceID: null,
+      connectionPreview: null,
+      highlightedFolderKey: null,
+      connectionSourceKey: null,
+    },
+  }));
+  const editLabelLayer = layerByID(editLayers, "process-map-edit-labels");
+  const editLabels = editLabelLayer.props.data as PlacementLabelDatum[];
+  const getEditContentBox = editLabelLayer.props.getContentBox as (datum: PlacementLabelDatum) => [number, number, number, number];
+  assert.deepEqual(editLabels.map((datum) => datum.text), placements.map((item) => item.name));
+  for (const datum of editLabels) {
+    const candidate = placementByText.get(datum.text);
+    assert.ok(candidate);
+    assertPlacementLabelHorizontalContentBox(candidate, datum);
+    assert.deepEqual(getEditContentBox(datum), datum.contentBox);
+  }
+  const editProcessCardTextLayer = layerByID(editLayers, "process-map-edit-process-card-text");
+  const editProcessCardText = editProcessCardTextLayer.props.data as PlacementLabelDatum[];
+  const getEditCardContentBox = editProcessCardTextLayer.props.getContentBox as (datum: PlacementLabelDatum) => [number, number, number, number];
+  assert.equal(editProcessCardText.length, processCardText.length);
+  for (const datum of editProcessCardText) {
+    assertPlacementLabelHorizontalContentBox(process, datum);
+    assert.deepEqual(getEditCardContentBox(datum), datum.contentBox);
+  }
 });
 
 test("declared presentation ceilings suppress labels and waypoints above authorized detail", () => {
