@@ -383,13 +383,18 @@ test("relationship and delete outcomes cannot mutate state after a newer canonic
   assert.ok((removal.match(/shouldApplyProcessMapMutationAck/g) ?? []).length >= 4, "both delete success and rollback paths must reject stale outcomes");
 });
 
-test("Company Explorer deletion is explicit about Process and Folder effects", () => {
+test("keyboard Company Explorer deletion stays explicit without a selection toolbar", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  const keyStart = surface.indexOf("const handleKeyDown = useCallback");
+  const keyEnd = surface.indexOf("const qdPlacement = useMemo", keyStart);
+  assert.ok(keyStart >= 0 && keyEnd > keyStart);
+  const keyboard = surface.slice(keyStart, keyEnd);
   assert.match(surface, /window\.confirm\(placement\.resource_type === "logic_gate"/);
   assert.match(surface, /This removes only its Company Explorer placement\. The Process and its data will remain\./);
   assert.match(surface, /Delete Company Explorer Folder [\s\S]{0,120}and its subtree\?/);
-  assert.match(surface, /Company Explorer item selected/);
-  assert.match(surface, /Delete from Company Explorer/);
+  assert.match(keyboard, /event\.key === "Delete" \|\| event\.key === "Backspace"/);
+  assert.match(keyboard, /void removeSelection\(\)/);
+  assert.doesNotMatch(surface, /process-map-toolbar|Company Explorer item selected|Delete from Company Explorer|Operational trace selected/);
   assert.match(surface, /Company Explorer placement removed\. The Process and its data remain\./);
   assert.match(surface, /Company Explorer Folder and its subtree were removed\./);
 });
@@ -402,16 +407,25 @@ test("QDC visibility starts with the server-capped name-visible presentation", (
 
 test("dark mode is scoped to the Process Map canvas and map content", () => {
   const css = source("frontend/src/modules/process-map/processMap.css");
+  const page = source("frontend/src/pages/process-map/ProcessMapPage.tsx");
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const pageRule = css.match(/\.process-map-page\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
-  const headerRule = css.match(/\.process-map-page__header\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  const hoverModeRule = css.match(/\.process-map-page__hover-mode\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
   const canvasRule = css.match(/\.process-map-page__canvas\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
   const surfaceRule = css.match(/\.process-map-surface\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
 
-  assert.match(pageRule, /background:\s*#fff/);
-  assert.match(headerRule, /background:\s*rgba\(255, 255, 255, 0\.97\)/);
+  assert.match(pageRule, /grid-template-rows:\s*minmax\(0, 1fr\)/);
+  assert.match(pageRule, /background:\s*#020617/);
   assert.match(canvasRule, /background:\s*#020617/);
   assert.match(surfaceRule, /background:\s*#020617/);
+  assert.match(hoverModeRule, /position:\s*absolute/);
+  assert.match(hoverModeRule, /top:\s*20px/);
+  assert.match(hoverModeRule, /right:\s*22px/);
+  assert.match(hoverModeRule, /color:\s*#f8fafc/);
+  assert.match(hoverModeRule, /background:\s*rgba\(15, 23, 42, 0\.88\)/);
+  assert.doesNotMatch(page, /<header|<h1>/);
+  assert.match(page, /<div className="process-map-page__canvas">[\s\S]*<ProcessMapSurface[\s\S]*<label className="process-map-page__hover-mode">/);
+  assert.doesNotMatch(css, /\.process-map-page__header|\.process-map-toolbar/);
   assert.match(surface, /const COLOR_MAP_BACKGROUND:[^=]*= \[2, 6, 23, 255\]/);
   assert.match(surface, /const COLOR_TEXT:[^=]*= \[248, 250, 252, 255\]/);
   assert.match(surface, /fill: COLOR_MAP_BACKGROUND, line: COLOR_MAP_BACKGROUND/);
