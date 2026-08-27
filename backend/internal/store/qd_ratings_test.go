@@ -257,7 +257,7 @@ func TestQDRatingSchemaKeepsThePrototypeColumnsAndBusinessDayUniqueness(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	renameMigration, err := os.ReadFile("../../db/migrations/20260826_z_score_cards.sql")
+	renameMigration, err := os.ReadFile("../../db/migrations/20260826_z_scorecards.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,9 +276,9 @@ func TestQDRatingSchemaKeepsThePrototypeColumnsAndBusinessDayUniqueness(t *testi
 	for name, raw := range map[string][]byte{"schema": schema} {
 		text := strings.ToLower(string(raw))
 		for _, required := range []string{
-			"create table", "score_cards", "qd_rating_id", "logic_gate_id", "quality_rating", "delivery_rating",
+			"create table", "scorecards", "qd_rating_id", "logic_gate_id", "quality_rating", "delivery_rating",
 			"rated_by_user_id", "rated_by_display_name", "rated_created_timestamp", "rated_updated_timestamp",
-			"america/los_angeles", "on delete cascade", "score_cards_has_rating_chk",
+			"america/los_angeles", "on delete cascade", "scorecards_has_rating_chk",
 			"users(user_id)", "on delete set null",
 		} {
 			if !strings.Contains(text, required) {
@@ -288,11 +288,11 @@ func TestQDRatingSchemaKeepsThePrototypeColumnsAndBusinessDayUniqueness(t *testi
 	}
 	renameText := strings.ToLower(string(renameMigration))
 	for _, required := range []string{
-		"alter table qd_ratings rename to score_cards",
-		"rename constraint qd_ratings_pkey to score_cards_pkey",
-		"alter index uq_qd_ratings_logic_gate_business_day rename to uq_score_cards_logic_gate_business_day",
+		"alter table qd_ratings rename to scorecards",
+		"rename constraint qd_ratings_pkey to scorecards_pkey",
+		"alter index uq_qd_ratings_logic_gate_business_day rename to uq_scorecards_logic_gate_business_day",
 		"restore_payload ? 'qd_ratings'",
-		"jsonb_build_object('score_cards'",
+		"jsonb_build_object('scorecards'",
 	} {
 		if !strings.Contains(renameText, required) {
 			t.Fatalf("score card rename migration missing %q", required)
@@ -348,14 +348,14 @@ func TestPostgresQDRatingRepositoryLifecycle(t *testing.T) {
 		t.Fatalf("second Postgres rating=%+v err=%v", second, err)
 	}
 	var rowCount int
-	if err := db.QueryRow(`select count(*) from score_cards where company_id=$1::uuid and logic_gate_id=$2::uuid`, company.CompanyID, gate.LogicGateID).Scan(&rowCount); err != nil || rowCount != 1 {
+	if err := db.QueryRow(`select count(*) from scorecards where company_id=$1::uuid and logic_gate_id=$2::uuid`, company.CompanyID, gate.LogicGateID).Scan(&rowCount); err != nil || rowCount != 1 {
 		t.Fatalf("Postgres QDC row count=%d err=%v", rowCount, err)
 	}
-	if _, err := db.Exec(`insert into score_cards(company_id,qd_rating_id,logic_gate_id,rated_by_display_name,rated_created_timestamp,rated_updated_timestamp)
+	if _, err := db.Exec(`insert into scorecards(company_id,qd_rating_id,logic_gate_id,rated_by_display_name,rated_created_timestamp,rated_updated_timestamp)
 values($1::uuid,$2::uuid,$3::uuid,'Invalid empty row',$4,$4)`, company.CompanyID, newUUIDv7String(), gate.LogicGateID, created.AddDate(0, 0, 1)); err == nil {
 		t.Fatal("Postgres accepted a QDC row with all ratings null")
 	}
-	if _, err := db.Exec(`update score_cards set cost_rating='blue' where company_id=$1::uuid and logic_gate_id=$2::uuid`, company.CompanyID, gate.LogicGateID); err == nil {
+	if _, err := db.Exec(`update scorecards set cost_rating='blue' where company_id=$1::uuid and logic_gate_id=$2::uuid`, company.CompanyID, gate.LogicGateID); err == nil {
 		t.Fatal("Postgres accepted an invalid Cost rating")
 	}
 	if _, err := db.Exec(`delete from users where user_id=$1::uuid`, user.UserID); err != nil {

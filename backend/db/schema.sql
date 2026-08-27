@@ -4007,10 +4007,10 @@ CREATE TABLE public.kpis (
 
 
 --
--- Name: score_cards; Type: TABLE; Schema: public; Owner: -
+-- Name: scorecards; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.score_cards (
+CREATE TABLE public.scorecards (
     company_id uuid NOT NULL,
     qd_rating_id uuid NOT NULL,
     logic_gate_id uuid NOT NULL,
@@ -4021,12 +4021,12 @@ CREATE TABLE public.score_cards (
     rated_by_display_name text NOT NULL,
     rated_created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     rated_updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT score_cards_cost_rating_chk CHECK (((cost_rating IS NULL) OR (cost_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
-    CONSTRAINT score_cards_delivery_rating_chk CHECK (((delivery_rating IS NULL) OR (delivery_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
-    CONSTRAINT score_cards_display_name_chk CHECK ((btrim(rated_by_display_name) <> ''::text)),
-    CONSTRAINT score_cards_has_rating_chk CHECK (((quality_rating IS NOT NULL) OR (cost_rating IS NOT NULL) OR (delivery_rating IS NOT NULL))),
-    CONSTRAINT score_cards_quality_rating_chk CHECK (((quality_rating IS NULL) OR (quality_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
-    CONSTRAINT score_cards_timestamps_chk CHECK ((rated_updated_timestamp >= rated_created_timestamp))
+    CONSTRAINT scorecards_cost_rating_chk CHECK (((cost_rating IS NULL) OR (cost_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
+    CONSTRAINT scorecards_delivery_rating_chk CHECK (((delivery_rating IS NULL) OR (delivery_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
+    CONSTRAINT scorecards_display_name_chk CHECK ((btrim(rated_by_display_name) <> ''::text)),
+    CONSTRAINT scorecards_has_rating_chk CHECK (((quality_rating IS NOT NULL) OR (cost_rating IS NOT NULL) OR (delivery_rating IS NOT NULL))),
+    CONSTRAINT scorecards_quality_rating_chk CHECK (((quality_rating IS NULL) OR (quality_rating = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text])))),
+    CONSTRAINT scorecards_timestamps_chk CHECK ((rated_updated_timestamp >= rated_created_timestamp))
 );
 
 
@@ -5433,11 +5433,11 @@ ALTER TABLE ONLY public.kpis
 
 
 --
--- Name: score_cards score_cards_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: scorecards scorecards_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.score_cards
-    ADD CONSTRAINT score_cards_pkey PRIMARY KEY (company_id, qd_rating_id);
+ALTER TABLE ONLY public.scorecards
+    ADD CONSTRAINT scorecards_pkey PRIMARY KEY (company_id, qd_rating_id);
 
 
 --
@@ -6360,10 +6360,10 @@ CREATE INDEX idx_kpis_logic_gate ON public.kpis USING btree (company_id, logic_g
 
 
 --
--- Name: uq_score_cards_logic_gate_business_day; Type: INDEX; Schema: public; Owner: -
+-- Name: uq_scorecards_logic_gate_business_day; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX uq_score_cards_logic_gate_business_day ON public.score_cards USING btree (company_id, logic_gate_id, (((rated_created_timestamp AT TIME ZONE 'America/Los_Angeles'::text))::date));
+CREATE UNIQUE INDEX uq_scorecards_logic_gate_business_day ON public.scorecards USING btree (company_id, logic_gate_id, (((rated_created_timestamp AT TIME ZONE 'America/Los_Angeles'::text))::date));
 
 
 --
@@ -8111,19 +8111,19 @@ ALTER TABLE ONLY public.kpis
 
 
 --
--- Name: score_cards score_cards_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: scorecards scorecards_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.score_cards
-    ADD CONSTRAINT score_cards_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.scorecards
+    ADD CONSTRAINT scorecards_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
 
 
 --
--- Name: score_cards score_cards_rated_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: scorecards scorecards_rated_by_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.score_cards
-    ADD CONSTRAINT score_cards_rated_by_user_id_fkey FOREIGN KEY (rated_by_user_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
+ALTER TABLE ONLY public.scorecards
+    ADD CONSTRAINT scorecards_rated_by_user_id_fkey FOREIGN KEY (rated_by_user_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
 
 
 --

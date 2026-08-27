@@ -18,7 +18,7 @@ The replacement contract is:
 - Runtime automatic placement never creates, infers, changes, or deletes operational relationships; it never infers traces, and existing manual and dependent trace behavior remains.
 - One forward migration non-destructively backfills missing supported placements from Explorer and synchronizes their parent projection; it preserves existing geometry, traces, and operational relationships.
 - Hovering at editing detail reveals anchors and four corner resize grips with diagonal cursors.
-- Editing-detail Process cards show only current `America/Los_Angeles` business-day Q/C/D colors and resolved Responsible and Accountable labels from canonical `score_cards` and RACI data.
+- Editing-detail Process cards show only current `America/Los_Angeles` business-day Q/C/D colors and resolved Responsible and Accountable labels from canonical `scorecards` and RACI data.
 - The existing full-screen Process popup behavior remains authoritative.
 
 The continuous deck.gl canvas, permission, spatial tile, manual trace, recycle, and popup requirements in this file remain applicable where they do not conflict with the current numbered laws.
