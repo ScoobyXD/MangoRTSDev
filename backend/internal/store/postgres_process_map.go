@@ -723,10 +723,10 @@ returning company_id::text,resource_type,resource_id::text,map_parent_folder_id:
 }
 
 const (
-	postgresAutomaticProcessMapRootFolderWidth    = 120
-	postgresAutomaticProcessMapRootFolderHeight   = 80
-	postgresAutomaticProcessMapNestedFolderWidth  = 80
-	postgresAutomaticProcessMapNestedFolderHeight = 50
+	postgresAutomaticProcessMapRootFolderWidth    = 32
+	postgresAutomaticProcessMapRootFolderHeight   = 24
+	postgresAutomaticProcessMapNestedFolderWidth  = 24
+	postgresAutomaticProcessMapNestedFolderHeight = 16
 	postgresAutomaticProcessMapProcessWidth       = 14
 	postgresAutomaticProcessMapProcessHeight      = 8
 	postgresAutomaticProcessMapPadding            = 2
@@ -821,6 +821,78 @@ func postgresExpandAutomaticProcessMapAncestorsTx(
 		} else {
 			parentID = *parent.MapParentFolderID
 		}
+	}
+	return nil
+}
+
+func postgresSpaceAutomaticProcessMapRootsTx(ctx context.Context, tx *sql.Tx, companyID string) error {
+	rows, err := tx.QueryContext(ctx, `
+select company_id::text,resource_type,resource_id::text,map_parent_folder_id::text,
+       grid_x,grid_y,grid_width,grid_height,revision,created_timestamp,updated_timestamp
+from process_map_placements
+where company_id=$1::uuid and map_parent_folder_id is null
+order by grid_x,resource_type,resource_id
+for update`, companyID)
+	if err != nil {
+		return err
+	}
+	roots := []domain.ProcessMapPlacement{}
+	for rows.Next() {
+		root, scanErr := scanProcessMapPlacement(rows)
+		if scanErr != nil {
+			rows.Close()
+			return scanErr
+		}
+		roots = append(roots, root)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	placed := []domain.ProcessMapPlacement{}
+	for _, root := range roots {
+		requiredX := int64(root.GridX)
+		for _, previous := range placed {
+			verticalOverlap := root.GridY < previous.GridY+previous.GridHeight && previous.GridY < root.GridY+root.GridHeight
+			if verticalOverlap {
+				requiredX = max(requiredX, int64(previous.GridX)+int64(previous.GridWidth)+postgresAutomaticProcessMapRootGap)
+			}
+		}
+		if int64(root.GridX) < requiredX {
+			deltaX := requiredX - int64(root.GridX)
+			if deltaX > ProcessMapMaxCoordinate {
+				return ErrInvalid
+			}
+			descendants := []domain.ProcessMapPlacement{}
+			if root.ResourceType == domain.ProcessMapResourceTypeFolder {
+				descendants, err = postgresProcessMapDescendantsTx(ctx, tx, companyID, root.ResourceID, true)
+				if err != nil {
+					return err
+				}
+			}
+			root.GridX += int(deltaX)
+			if !validProcessMapGeometry(root.GridX, root.GridY, root.GridWidth, root.GridHeight) {
+				return ErrInvalid
+			}
+			for index := range descendants {
+				descendants[index].GridX += int(deltaX)
+				if !validProcessMapGeometry(descendants[index].GridX, descendants[index].GridY, descendants[index].GridWidth, descendants[index].GridHeight) {
+					return ErrInvalid
+				}
+			}
+			if _, err := postgresUpdateProcessMapPlacementTx(ctx, tx, root); err != nil {
+				return err
+			}
+			for _, descendant := range descendants {
+				if _, err := postgresUpdateProcessMapPlacementTx(ctx, tx, descendant); err != nil {
+					return err
+				}
+			}
+		}
+		placed = append(placed, root)
 	}
 	return nil
 }
@@ -932,6 +1004,9 @@ func postgresSyncAutomaticProcessMapPlacementTx(
 		}
 	}
 	if err := postgresExpandAutomaticProcessMapAncestorsTx(ctx, tx, companyID, parentID, saved); err != nil {
+		return false, err
+	}
+	if err := postgresSpaceAutomaticProcessMapRootsTx(ctx, tx, companyID); err != nil {
 		return false, err
 	}
 	return true, nil

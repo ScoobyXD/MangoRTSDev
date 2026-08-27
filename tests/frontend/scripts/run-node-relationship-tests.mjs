@@ -120,6 +120,7 @@ const componentTests = [
     source: resolve(repoRoot, "tests/frontend/modules/process-map/processMapSurface.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/process-map/processMapSurface.test.cjs"),
     bundleDependencies: true,
+    processMapComponentHarness: true,
   },
   {
     source: resolve(repoRoot, "tests/frontend/modules/communications/EmailQuotedHistory.test.tsx"),
@@ -189,7 +190,7 @@ const componentTests = [
 const packageFile = resolve(frontendRoot, ".test-dist/package.json");
 const tscEntrypoint = resolve(frontendRoot, "node_modules/typescript/bin/tsc");
 const frontendRequire = createRequire(resolve(frontendRoot, "package.json"));
-const { buildSync } = frontendRequire("esbuild");
+const { build, buildSync } = frontendRequire("esbuild");
 
 function run(command, extraEnv = {}) {
   execSync(command, {
@@ -225,7 +226,18 @@ for (const testFile of testFiles) {
 mkdirSync(resolve(frontendRoot, ".test-dist"), { recursive: true });
 writeFileSync(packageFile, '{"type":"module"}\n', "utf8");
 for (const componentTest of componentTests) {
-  buildSync({
+  const plugins = componentTest.processMapComponentHarness ? [{
+    name: "process-map-component-harness",
+    setup(esbuild) {
+      esbuild.onResolve({ filter: /^@deck\.gl\/react$/ }, () => ({
+        path: resolve(repoRoot, "tests/frontend/modules/process-map/processMapDeckGLTestStub.tsx"),
+      }));
+      esbuild.onResolve({ filter: /realtimeWebSocket\.js$/ }, () => ({
+        path: resolve(repoRoot, "tests/frontend/modules/process-map/processMapRealtimeTestStub.ts"),
+      }));
+    },
+  }] : undefined;
+  const options = {
     absWorkingDir: repoRoot,
     entryPoints: [componentTest.source],
     bundle: true,
@@ -236,7 +248,9 @@ for (const componentTest of componentTests) {
       : { packages: "external" }),
     define: { "import.meta.env": "{}" },
     outfile: componentTest.file,
-  });
+  };
+  if (plugins) await build({ ...options, plugins });
+  else buildSync({ ...options });
 }
 
 const componentTestFiles = new Set(componentTests.map((componentTest) => componentTest.file));

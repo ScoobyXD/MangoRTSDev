@@ -403,6 +403,467 @@ where placement.company_id=$1::uuid and placement.resource_type='logic_gate'
 	}
 }
 
+func TestPostgresAutomaticProcessMapPlacementKeepsRootGapAfterDeepGrowth(t *testing.T) {
+	ctx := context.Background()
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map runtime root spacing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("process-map-root-spacing-admin", "process-map-root-spacing@example.com", "Root Spacing Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	rootA, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processA, err := repo.CreateLogicGate(company.CompanyID, "Root A Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processB, err := repo.CreateLogicGate(company.CompanyID, "Root B Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(company.CompanyID, rootA.FolderID, EntityTypeLogicGate, processA.LogicGateID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(company.CompanyID, rootB.FolderID, EntityTypeLogicGate, processB.LogicGateID, 0); err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
+		CompanyID:   company.CompanyID,
+		Source:      processMapTestRef(domain.ProcessMapResourceTypeProcess, processA.LogicGateID),
+		Target:      processMapTestRef(domain.ProcessMapResourceTypeProcess, processB.LogicGateID),
+		Trace:       &ProcessMapTraceInput{RoutePoints: []domain.ProcessMapRoutePoint{{X: 10, Y: 10}, {X: 30, Y: 10}}},
+		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+	})
+	if err != nil || created.Relationship == nil {
+		t.Fatalf("create relationship before automatic growth = %+v, err=%v", created, err)
+	}
+
+	type geometry struct{ x, y, width, height int }
+	readGeometry := func(resourceType, resourceID string) geometry {
+		t.Helper()
+		var result geometry
+		if err := db.QueryRow(`
+select grid_x,grid_y,grid_width,grid_height
+from process_map_placements
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`,
+			company.CompanyID, resourceType, resourceID).Scan(&result.x, &result.y, &result.width, &result.height); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	beforeRootB := readGeometry(domain.ProcessMapResourceTypeFolder, rootB.FolderID)
+	beforeProcessB := readGeometry(domain.ProcessMapResourceTypeProcess, processB.LogicGateID)
+	var traceBefore string
+	var traceRevisionBefore int64
+	if err := db.QueryRow(`
+select route_points::text,revision
+from process_map_traces
+where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
+		company.CompanyID, created.Relationship.ResourceOperationalRelationshipID).Scan(&traceBefore, &traceRevisionBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	parentID := rootA.FolderID
+	for depth := 0; depth < 4; depth++ {
+		child, err := repo.CreateCompanyExplorerFolder(company.CompanyID, parentID, "logic_gate", "Nested")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parentID = child.FolderID
+	}
+	afterRootA := readGeometry(domain.ProcessMapResourceTypeFolder, rootA.FolderID)
+	afterRootB := readGeometry(domain.ProcessMapResourceTypeFolder, rootB.FolderID)
+	afterProcessB := readGeometry(domain.ProcessMapResourceTypeProcess, processB.LogicGateID)
+	if afterRootB.x < afterRootA.x+afterRootA.width+postgresAutomaticProcessMapRootGap {
+		t.Fatalf("automatic roots overlap after growth: A=%+v B=%+v", afterRootA, afterRootB)
+	}
+	if afterRootB.x <= beforeRootB.x {
+		t.Fatalf("later root did not move after earlier root growth: before=%+v after=%+v", beforeRootB, afterRootB)
+	}
+	if afterProcessB.x-beforeProcessB.x != afterRootB.x-beforeRootB.x || afterProcessB.x != afterRootB.x+postgresAutomaticProcessMapPadding {
+		t.Fatalf("later root descendants did not keep their relative geometry: root=%+v Process=%+v", afterRootB, afterProcessB)
+	}
+	var traceAfter string
+	var traceRevisionAfter int64
+	var relationshipCount int
+	if err := db.QueryRow(`
+select route_points::text,revision
+from process_map_traces
+where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
+		company.CompanyID, created.Relationship.ResourceOperationalRelationshipID).Scan(&traceAfter, &traceRevisionAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`select count(*) from resource_operational_relationships where company_id=$1::uuid`, company.CompanyID).Scan(&relationshipCount); err != nil {
+		t.Fatal(err)
+	}
+	if traceAfter != traceBefore || traceRevisionAfter != traceRevisionBefore || relationshipCount != 1 {
+		t.Fatalf("automatic root spacing changed relationship data: trace=%q/%d before=%q/%d relationships=%d", traceAfter, traceRevisionAfter, traceBefore, traceRevisionBefore, relationshipCount)
+	}
+}
+
+func TestPostgresAutomaticProcessMapPlacementPreservesVerticallySeparatedRoot(t *testing.T) {
+	ctx := context.Background()
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map vertical root preservation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("process-map-vertical-root-admin", "process-map-vertical-root@example.com", "Vertical Root Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	rootA, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type geometry struct {
+		x, y, width, height int
+		revision            int64
+	}
+	readGeometry := func(resourceID string) geometry {
+		t.Helper()
+		var result geometry
+		if err := db.QueryRow(`
+select grid_x,grid_y,grid_width,grid_height,revision
+from process_map_placements
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`,
+			company.CompanyID, resourceID).Scan(&result.x, &result.y, &result.width, &result.height, &result.revision); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	rootBGeometry := readGeometry(rootB.FolderID)
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, rootB.FolderID, nil,
+		1, 100, rootBGeometry.width, rootBGeometry.height,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	manualRootB := readGeometry(rootB.FolderID)
+	parentID := rootA.FolderID
+	for depth := 0; depth < 4; depth++ {
+		child, err := repo.CreateCompanyExplorerFolder(company.CompanyID, parentID, "logic_gate", "Nested")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parentID = child.FolderID
+	}
+	afterRootA := readGeometry(rootA.FolderID)
+	afterRootB := readGeometry(rootB.FolderID)
+	if afterRootB != manualRootB {
+		t.Fatalf("vertical separation did not preserve manual root geometry: before=%+v after=%+v", manualRootB, afterRootB)
+	}
+	if afterRootA.x+afterRootA.width <= afterRootB.x || afterRootA.y+afterRootA.height > afterRootB.y {
+		t.Fatalf("preservation fixture does not overlap only on X: A=%+v B=%+v", afterRootA, afterRootB)
+	}
+}
+
+func TestPostgresProcessMapTidyInitialLayoutMigrationSeparatesRootsAndIsRestartSafe(t *testing.T) {
+	ctx := context.Background()
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map tidy initial layout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("process-map-tidy-admin", "process-map-tidy@example.com", "Tidy Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	rootA, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootA.FolderID, "logic_gate", "Nested")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processA, err := repo.CreateLogicGate(company.CompanyID, "First nested Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processB, err := repo.CreateLogicGate(company.CompanyID, "Second nested Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processC, err := repo.CreateLogicGate(company.CompanyID, "Root B Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(company.CompanyID, nested.FolderID, EntityTypeLogicGate, processA.LogicGateID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(company.CompanyID, nested.FolderID, EntityTypeLogicGate, processB.LogicGateID, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(company.CompanyID, rootB.FolderID, EntityTypeLogicGate, processC.LogicGateID, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	route := []domain.ProcessMapRoutePoint{{X: 5, Y: 5}, {X: 25, Y: 5}}
+	created, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
+		CompanyID:   company.CompanyID,
+		Source:      processMapTestRef(domain.ProcessMapResourceTypeProcess, processA.LogicGateID),
+		Target:      processMapTestRef(domain.ProcessMapResourceTypeProcess, processC.LogicGateID),
+		Trace:       &ProcessMapTraceInput{RoutePoints: route},
+		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+	})
+	if err != nil || created.Relationship == nil {
+		t.Fatalf("create relationship before tidy = %+v, err=%v", created, err)
+	}
+
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_x=case
+      when resource_type='company_explorer_folder' and resource_id=$2::uuid then -400
+      when resource_type='company_explorer_folder' and resource_id=$3::uuid then 5
+      else 6
+    end,
+    grid_y=case when resource_type='company_explorer_folder' then 10 else 11 end,
+    grid_width=case when resource_type='company_explorer_folder' then 300 else 14 end,
+    grid_height=case when resource_type='company_explorer_folder' then 200 else 70 end
+where company_id=$1::uuid`, company.CompanyID, rootA.FolderID, rootB.FolderID); err != nil {
+		t.Fatal(err)
+	}
+
+	var traceBefore string
+	var traceRevisionBefore int64
+	if err := db.QueryRow(`
+select route_points::text,revision
+from process_map_traces
+where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
+		company.CompanyID, created.Relationship.ResourceOperationalRelationshipID).Scan(&traceBefore, &traceRevisionBefore); err != nil {
+		t.Fatal(err)
+	}
+	versionBefore := postgresProcessMapVersionForTest(t, repo, company.CompanyID)
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_zzzz_process_map_tidy_initial_layout.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("apply tidy initial layout migration: %v", err)
+	}
+	versionAfter := postgresProcessMapVersionForTest(t, repo, company.CompanyID)
+	if versionAfter <= versionBefore {
+		t.Fatalf("tidy layout Process Map version = %d, want > %d", versionAfter, versionBefore)
+	}
+
+	type geometry struct{ x, y, width, height int }
+	readGeometry := func(resourceType, resourceID string) geometry {
+		t.Helper()
+		var result geometry
+		if err := db.QueryRow(`
+select grid_x,grid_y,grid_width,grid_height
+from process_map_placements
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`,
+			company.CompanyID, resourceType, resourceID).Scan(&result.x, &result.y, &result.width, &result.height); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	rootAGeometry := readGeometry(domain.ProcessMapResourceTypeFolder, rootA.FolderID)
+	rootBGeometry := readGeometry(domain.ProcessMapResourceTypeFolder, rootB.FolderID)
+	if rootAGeometry.y != 0 || rootBGeometry.y != 0 || rootAGeometry.width != 32 || rootAGeometry.height != 26 || rootBGeometry.width != 32 || rootBGeometry.height != 24 {
+		t.Fatalf("tidy roots A=%+v B=%+v, want y=0 and sizes 32x26/32x24", rootAGeometry, rootBGeometry)
+	}
+	left, right := rootAGeometry, rootBGeometry
+	if right.x < left.x {
+		left, right = right, left
+	}
+	if right.x < left.x+left.width+8 {
+		t.Fatalf("root shelf overlap left=%+v right=%+v", left, right)
+	}
+	nestedGeometry := readGeometry(domain.ProcessMapResourceTypeFolder, nested.FolderID)
+	firstGeometry := readGeometry(domain.ProcessMapResourceTypeProcess, processA.LogicGateID)
+	secondGeometry := readGeometry(domain.ProcessMapResourceTypeProcess, processB.LogicGateID)
+	rootProcessGeometry := readGeometry(domain.ProcessMapResourceTypeProcess, processC.LogicGateID)
+	if nestedGeometry != (geometry{x: rootAGeometry.x + 2, y: 2, width: 24, height: 22}) {
+		t.Fatalf("nested tidy geometry = %+v", nestedGeometry)
+	}
+	if firstGeometry != (geometry{x: nestedGeometry.x + 2, y: nestedGeometry.y + 2, width: 14, height: 8}) ||
+		secondGeometry != (geometry{x: nestedGeometry.x + 2, y: nestedGeometry.y + 12, width: 14, height: 8}) {
+		t.Fatalf("nested Process tidy geometry first=%+v second=%+v", firstGeometry, secondGeometry)
+	}
+	if rootProcessGeometry != (geometry{x: rootBGeometry.x + 2, y: 2, width: 14, height: 8}) {
+		t.Fatalf("Root B Process tidy geometry = %+v", rootProcessGeometry)
+	}
+
+	var traceAfter string
+	var traceRevisionAfter int64
+	var relationshipCount int
+	if err := db.QueryRow(`
+select route_points::text,revision
+from process_map_traces
+where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
+		company.CompanyID, created.Relationship.ResourceOperationalRelationshipID).Scan(&traceAfter, &traceRevisionAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`select count(*) from resource_operational_relationships where company_id=$1::uuid`, company.CompanyID).Scan(&relationshipCount); err != nil {
+		t.Fatal(err)
+	}
+	if traceAfter != traceBefore || traceRevisionAfter != traceRevisionBefore || relationshipCount != 1 {
+		t.Fatalf("tidy changed relationship data: trace=%q/%d before=%q/%d relationships=%d", traceAfter, traceRevisionAfter, traceBefore, traceRevisionBefore, relationshipCount)
+	}
+
+	var placementSnapshotBeforeRestart string
+	if err := db.QueryRow(`
+select coalesce(jsonb_agg(jsonb_build_array(resource_type,resource_id,grid_x,grid_y,grid_width,grid_height,revision)
+                          order by resource_type,resource_id),'[]'::jsonb)::text
+from process_map_placements
+where company_id=$1::uuid`, company.CompanyID).Scan(&placementSnapshotBeforeRestart); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("restart tidy initial layout migration: %v", err)
+	}
+	var placementSnapshotAfterRestart string
+	if err := db.QueryRow(`
+select coalesce(jsonb_agg(jsonb_build_array(resource_type,resource_id,grid_x,grid_y,grid_width,grid_height,revision)
+                          order by resource_type,resource_id),'[]'::jsonb)::text
+from process_map_placements
+where company_id=$1::uuid`, company.CompanyID).Scan(&placementSnapshotAfterRestart); err != nil {
+		t.Fatal(err)
+	}
+	if placementSnapshotAfterRestart != placementSnapshotBeforeRestart {
+		t.Fatalf("tidy restart changed placements: before=%s after=%s", placementSnapshotBeforeRestart, placementSnapshotAfterRestart)
+	}
+	if versionRestart := postgresProcessMapVersionForTest(t, repo, company.CompanyID); versionRestart != versionAfter {
+		t.Fatalf("tidy restart Process Map version = %d, want %d", versionRestart, versionAfter)
+	}
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_x=grid_x+1,revision=revision+1,updated_timestamp=statement_timestamp()
+where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, processA.LogicGateID); err != nil {
+		t.Fatal(err)
+	}
+	manualGeometry := readGeometry(domain.ProcessMapResourceTypeProcess, processA.LogicGateID)
+	connection, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, migrationErr := connection.ExecContext(ctx, string(migration))
+	if _, rollbackErr := connection.ExecContext(ctx, "rollback"); rollbackErr != nil {
+		connection.Close()
+		t.Fatalf("rollback refused tidy rerun: %v", rollbackErr)
+	}
+	connection.Close()
+	if migrationErr == nil || !strings.Contains(migrationErr.Error(), "already ran") {
+		t.Fatalf("tidy rerun after manual geometry error = %v, want already-ran refusal", migrationErr)
+	}
+	if afterRefusal := readGeometry(domain.ProcessMapResourceTypeProcess, processA.LogicGateID); afterRefusal != manualGeometry {
+		t.Fatalf("tidy rerun refusal changed manual geometry: before=%+v after=%+v", manualGeometry, afterRefusal)
+	}
+}
+
+func TestPostgresProcessMapTidyInitialLayoutMarksNoOpFirstRun(t *testing.T) {
+	ctx := context.Background()
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map tidy no-op marker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Already Tidy Root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var xBefore int
+	if err := db.QueryRow(`
+select grid_x
+from process_map_placements
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`,
+		company.CompanyID, root.FolderID).Scan(&xBefore); err != nil {
+		t.Fatal(err)
+	}
+	var placementSnapshotBefore string
+	if err := db.QueryRow(`
+select coalesce(jsonb_agg(jsonb_build_array(resource_type,resource_id,grid_x,grid_y,grid_width,grid_height,revision)
+                          order by resource_type,resource_id),'[]'::jsonb)::text
+from process_map_placements
+where company_id=$1::uuid`, company.CompanyID).Scan(&placementSnapshotBefore); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_zzzz_process_map_tidy_initial_layout.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("apply no-op tidy initial layout migration: %v", err)
+	}
+	var placementSnapshotAfter string
+	if err := db.QueryRow(`
+	select coalesce(jsonb_agg(jsonb_build_array(resource_type,resource_id,grid_x,grid_y,grid_width,grid_height,revision)
+	                          order by resource_type,resource_id),'[]'::jsonb)::text
+	from process_map_placements
+	where company_id=$1::uuid`, company.CompanyID).Scan(&placementSnapshotAfter); err != nil {
+		t.Fatal(err)
+	}
+	var markerCount int
+	if err := db.QueryRow(`
+select count(*)
+from domain_events
+where company_id=$1::uuid and idempotency_key='migration:20260826-process-map-tidy-initial-layout'`, company.CompanyID).Scan(&markerCount); err != nil {
+		t.Fatal(err)
+	}
+	if placementSnapshotAfter != placementSnapshotBefore || markerCount != 1 {
+		t.Fatalf("no-op tidy first run placements/marker changed: before=%s after=%s marker=%d", placementSnapshotBefore, placementSnapshotAfter, markerCount)
+	}
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_x=grid_x+1,revision=revision+1,updated_timestamp=statement_timestamp()
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`, company.CompanyID, root.FolderID); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, migrationErr := connection.ExecContext(ctx, string(migration))
+	if _, rollbackErr := connection.ExecContext(ctx, "rollback"); rollbackErr != nil {
+		connection.Close()
+		t.Fatalf("rollback refused no-op tidy rerun: %v", rollbackErr)
+	}
+	connection.Close()
+	if migrationErr == nil || !strings.Contains(migrationErr.Error(), "already ran") {
+		t.Fatalf("no-op tidy rerun after manual geometry error = %v, want already-ran refusal", migrationErr)
+	}
+	var xAfterRefusal int
+	if err := db.QueryRow(`
+select grid_x
+from process_map_placements
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`,
+		company.CompanyID, root.FolderID).Scan(&xAfterRefusal); err != nil {
+		t.Fatal(err)
+	}
+	if xAfterRefusal != xBefore+1 {
+		t.Fatalf("no-op tidy rerun changed manual root x = %d, want %d", xAfterRefusal, xBefore+1)
+	}
+}
+
 func TestPostgresProcessMapScoreCardRenameMigrationIsRestartSafe(t *testing.T) {
 	db, _ := openPostgresProcessMapIntegration(t)
 	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_z_scorecards.sql"))

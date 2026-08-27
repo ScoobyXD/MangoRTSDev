@@ -2,11 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type { Layer } from "@deck.gl/core";
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { JSDOM } from "jsdom";
 import {
   applyProcessMapMutationEnvelope,
   buildProcessMapLayers,
   mergeProcessMapPresentation,
   ProcessMapProtectedTileLayer,
+  ProcessMapSurface,
   processMapCurrentOperationKeys,
   processMapPerimeterSegments,
   processMapViewportHasCompleteCoverage,
@@ -44,6 +48,14 @@ import {
   processMapPlacementLOD,
 } from "../../../../frontend/src/modules/process-map/processMapGeometry.js";
 import { createProcessMapSettlementGate } from "../../../../frontend/src/modules/process-map/processMapInteraction.js";
+import {
+  readProcessMapDeckGLTestProps,
+  resetProcessMapDeckGLTestStub,
+} from "./processMapDeckGLTestStub.js";
+import {
+  emitProcessMapChangedForTest,
+  resetProcessMapRealtimeTestStub,
+} from "./processMapRealtimeTestStub.js";
 
 function placement(id: string, x: number, y: number, width = 10, height = 6, resourceType: "logic_gate" | "company_explorer_folder" = "logic_gate"): ProcessMapVisiblePlacement {
   return {
@@ -126,6 +138,181 @@ function assertFlatXYPathLayer(layer: Layer): void {
   assert.ok(flatPath.length >= 4 && flatPath.length % 2 === 0, `${layer.id} must yield complete XY pairs`);
   assert.ok(flatPath.every(Number.isFinite), `${layer.id} must yield finite coordinates`);
 }
+
+function installProcessMapTestDOM(): () => void {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://process-map.test" });
+  const values: Record<string, unknown> = {
+    window: dom.window,
+    document: dom.window.document,
+    navigator: dom.window.navigator,
+    Node: dom.window.Node,
+    Text: dom.window.Text,
+    Element: dom.window.Element,
+    HTMLElement: dom.window.HTMLElement,
+    Event: dom.window.Event,
+    MouseEvent: dom.window.MouseEvent,
+    MutationObserver: dom.window.MutationObserver,
+    getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    IS_REACT_ACT_ENVIRONMENT: true,
+  };
+  const previous = new Map<string, PropertyDescriptor | undefined>();
+  for (const [key, value] of Object.entries(values)) {
+    previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
+    Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+  }
+  return () => {
+    dom.window.close();
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete (globalThis as Record<string, unknown>)[key];
+    }
+  };
+}
+
+type MountedProcessMap = {
+  companyID: string;
+  container: HTMLDivElement;
+  process: ProcessMapVisiblePlacement;
+  readSceneCount: () => number;
+  root: Root;
+  cleanup: () => Promise<void>;
+};
+
+let processMapBehaviorTestSequence = 0;
+
+async function mountProcessMapForBehavior(onOpenLogicGate: (logicGateID: string, name: string) => void): Promise<MountedProcessMap> {
+  const restoreDOM = installProcessMapTestDOM();
+  const originalFetch = globalThis.fetch;
+  resetProcessMapDeckGLTestStub();
+  resetProcessMapRealtimeTestStub();
+  processMapBehaviorTestSequence += 1;
+  const apiBase = `https://process-map-behavior-${processMapBehaviorTestSequence}.test`;
+  const companyID = `company-${processMapBehaviorTestSequence}`;
+  let sceneReads = 0;
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.includes("/v1/process-map/scene?")) {
+      sceneReads += 1;
+      const version = sceneReads;
+      return new Response(JSON.stringify({
+        bounds: { min_x: 0, min_y: 0, max_x: 14, max_y: 8 },
+        process_map_read_version: version,
+        tile_size: 256,
+        min_tile_zoom: 0,
+        max_tile_zoom: 22,
+      }), { status: 200, headers: { "Content-Type": "application/json", ETag: `"scene-${version}"` } });
+    }
+    if (url.includes("/qd-ratings?")) {
+      return new Response(JSON.stringify({ qd_ratings: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    if (url.includes("/gvic?")) {
+      return new Response(JSON.stringify({
+        assignment_mode: "customized",
+        effective_assignment_mode: "customized",
+        effective_source: { resource_type: "logic_gate", resource_id: "behavior-process" },
+        gvic_assignments: [],
+        revision: "1",
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    throw new Error(`unexpected_process_map_test_request:${url}`);
+  }) as typeof fetch;
+
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const process: ProcessMapVisiblePlacement = {
+    ...placement("behavior-process", 0, 0, 14, 8),
+    name: "Behavior Process",
+  };
+  await act(async () => {
+    root.render(<ProcessMapSurface apiBase={apiBase} companyID={companyID} onOpenLogicGate={onOpenLogicGate} />);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+  });
+  for (let attempt = 0; attempt < 10 && !readProcessMapDeckGLTestProps().layers.some((layer) => layer.id === "process-map-spatial-tiles"); attempt += 1) {
+    await act(async () => { await new Promise((resolvePromise) => setTimeout(resolvePromise, 0)); });
+  }
+  let deck = readProcessMapDeckGLTestProps();
+  const tileLayer = deck.layers.find((layer) => layer.id === "process-map-spatial-tiles");
+  assert.ok(tileLayer, "scene load must create the spatial TileLayer");
+  await act(async () => { deck.onResize({ width: 1_000, height: 700 }); });
+  await act(async () => {
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, PROCESS_MAP_SETTLE_DELAY_MS + 20));
+  });
+  deck = readProcessMapDeckGLTestProps();
+  const currentTileLayer = deck.layers.find((layer) => layer.id === "process-map-spatial-tiles");
+  assert.ok(currentTileLayer);
+  const onTileLoad = currentTileLayer.props.onTileLoad as (tile: { id: string; content: ProcessMapTileResponse }) => void;
+  await act(async () => {
+    onTileLoad({
+      id: "22-0-0",
+      content: { z: 22, x: 0, y: 0, process_map_read_version: 1, byteLength: 1, placements: [process], traces: [] },
+    });
+  });
+
+  return {
+    companyID,
+    container,
+    process,
+    readSceneCount: () => sceneReads,
+    root,
+    cleanup: async () => {
+      await act(async () => { root.unmount(); });
+      container.remove();
+      resetProcessMapDeckGLTestStub();
+      resetProcessMapRealtimeTestStub();
+      globalThis.fetch = originalFetch;
+      restoreDOM();
+    },
+  };
+}
+
+test("a real Deck double-click opens the Process instead of pinning its scorecard", async () => {
+  const opened: Array<[string, string]> = [];
+  const mounted = await mountProcessMapForBehavior((logicGateID, name) => { opened.push([logicGateID, name]); });
+  try {
+    await act(async () => {
+      readProcessMapDeckGLTestProps().onClick({
+        object: { kind: "placement", key: `logic_gate:${mounted.process.resource_id}`, placement: mounted.process },
+      }, { type: "dblclick" });
+    });
+    assert.deepEqual(opened, [[mounted.process.resource_id, mounted.process.name]]);
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), null, "double-click must not leave the QDC card pinned");
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("a presentation-only realtime refresh preserves the pinned scorecard and camera", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  try {
+    await act(async () => {
+      readProcessMapDeckGLTestProps().onClick({
+        object: { kind: "placement", key: `logic_gate:${mounted.process.resource_id}`, placement: mounted.process },
+      }, { type: "click" });
+    });
+    const pinnedCard = mounted.container.querySelector(".process-map-qd-card");
+    assert.ok(pinnedCard, "single-click must pin the Process scorecard");
+    const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
+
+    await act(async () => {
+      emitProcessMapChangedForTest({
+        type: "process_map.changed",
+        company_id: mounted.companyID,
+        scope: "process-map:company",
+        presentation_only: true,
+      });
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+
+    assert.equal(mounted.readSceneCount(), 2, "presentation refresh must read the new scorecard version");
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard, "the same pinned card must stay mounted");
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore, "scorecard refresh must preserve the camera");
+    const refreshedTileLayer = readProcessMapDeckGLTestProps().layers.find((layer) => layer.id === "process-map-spatial-tiles");
+    assert.match(String(refreshedTileLayer?.props.data), /^2:\d+:/, "tile presentation must advance to the refreshed read version");
+  } finally {
+    await mounted.cleanup();
+  }
+});
 
 test("one TileLayer configures non-geographic selection and debounced missing-tile scheduling", async () => {
   let reads = 0;
@@ -591,24 +778,36 @@ test("editing Process cards show bounded QCD and RACI summaries in tiled and sel
       data: { z: 22, x: 0, y: 0, process_map_read_version: 11, byteLength: 1, placements: [candidate], traces: [] },
       tile: { boundingBox: [[0, 0], [256, 256]] },
     });
-    return layerByID(layers, `${id}-process-card-text`).props.data as Array<{ text: string; color: number[] }>;
+    return layerByID(layers, `${id}-process-card-text`).props.data as Array<{
+      text: string;
+      color: number[];
+      position: [number, number];
+      size: number;
+      textAnchor: string;
+    }>;
   };
 
   const tiledText = renderCardText("editing-card", process);
-  assert.deepEqual(tiledText.map((datum) => datum.text), ["Q", "C", "D", "Ada, Lin", "R", "Grace", "A"]);
+  assert.deepEqual(tiledText.map((datum) => datum.text), ["Q", "C", "D", "R", "Ada, Lin", "A", "Grace"]);
   assert.deepEqual(tiledText.slice(0, 3).map((datum) => datum.color), [
     [104, 184, 78, 255],
     [242, 193, 79, 255],
     [223, 83, 83, 255],
   ]);
+  assert.deepEqual(tiledText.slice(0, 3).map((datum) => datum.size), [14, 14, 14]);
+  assert.deepEqual([tiledText[3].size, tiledText[5].size], [13, 13]);
+  assert.deepEqual([tiledText[4].size, tiledText[6].size], [11, 11]);
+  assert.ok(tiledText[3].position[0] < tiledText[4].position[0], "R icon is left of its names");
+  assert.ok(tiledText[5].position[0] < tiledText[6].position[0], "A icon is left of its names");
+  assert.deepEqual(tiledText.slice(3).map((datum) => datum.textAnchor), ["start", "start", "start", "start"]);
   assert.ok(tiledText.every((datum) => datum.text !== process.resource_id), "presentation text never exposes resource IDs");
   const boundedText = renderCardText("bounded-card", {
     ...process,
     responsible_names: ["Extremely Long Person Name", "Second Person", "Third Person"],
     accountable_names: ["Accountable Name That Is Too Long"],
   });
-  assert.ok(boundedText[3].text.length <= 20 && boundedText[3].text.endsWith("+2"));
-  assert.ok(boundedText[5].text.length <= 20 && boundedText[5].text.includes("…"));
+  assert.ok(boundedText[4].text.length <= 13 && boundedText[4].text.endsWith("+2"));
+  assert.ok(boundedText[6].text.length <= 13 && boundedText[6].text.includes("…"));
 
   const selectedLayers = buildProcessMapLayers(buildOptions({
     settledPixelsPerGridUnit: 24,

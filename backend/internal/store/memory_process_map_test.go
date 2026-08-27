@@ -45,6 +45,109 @@ func requireProcessMapRelationshipEventIdentities(t *testing.T, events []domain.
 	}
 }
 
+func TestAutomaticProcessMapPlacementConstantsStayCompactAndAligned(t *testing.T) {
+	checks := []struct {
+		name                   string
+		memory, postgres, want int
+	}{
+		{"root Folder width", memoryProcessMapRootFolderWidth, postgresAutomaticProcessMapRootFolderWidth, 32},
+		{"root Folder height", memoryProcessMapRootFolderHeight, postgresAutomaticProcessMapRootFolderHeight, 24},
+		{"nested Folder width", memoryProcessMapNestedFolderWidth, postgresAutomaticProcessMapNestedFolderWidth, 24},
+		{"nested Folder height", memoryProcessMapNestedFolderHeight, postgresAutomaticProcessMapNestedFolderHeight, 16},
+		{"Process width", memoryProcessMapProcessWidth, postgresAutomaticProcessMapProcessWidth, 14},
+		{"Process height", memoryProcessMapProcessHeight, postgresAutomaticProcessMapProcessHeight, 8},
+		{"root gap", memoryProcessMapRootGap, postgresAutomaticProcessMapRootGap, 8},
+		{"child gap", memoryProcessMapChildGap, postgresAutomaticProcessMapGap, 2},
+		{"Folder padding", memoryProcessMapFolderPadding, postgresAutomaticProcessMapPadding, 2},
+	}
+	for _, check := range checks {
+		if check.memory != check.want || check.postgres != check.want {
+			t.Errorf("%s memory/Postgres = %d/%d, want %d/%d", check.name, check.memory, check.postgres, check.want, check.want)
+		}
+	}
+}
+
+func TestMemoryAutomaticProcessMapPlacementKeepsRootGapAfterDeepGrowth(t *testing.T) {
+	repo, companyID, _, _, _ := newV2PolicyTestRepo(t)
+	rootA, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Root A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Root B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := repo.CreateLogicGate(companyID, "Root B Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, rootB.FolderID, EntityTypeLogicGate, process.LogicGateID, 0); err != nil {
+		t.Fatal(err)
+	}
+	rootBKey := processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, rootB.FolderID)
+	processKey := processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, process.LogicGateID)
+	beforeRootB := repo.processMapPlacements[rootBKey]
+	beforeProcess := repo.processMapPlacements[processKey]
+	parentID := rootA.FolderID
+	for depth := 0; depth < 4; depth++ {
+		child, err := repo.CreateCompanyExplorerFolder(companyID, parentID, "logic_gate", "Nested")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parentID = child.FolderID
+	}
+	afterRootA := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, rootA.FolderID)]
+	afterRootB := repo.processMapPlacements[rootBKey]
+	afterProcess := repo.processMapPlacements[processKey]
+	if afterRootB.GridX < afterRootA.GridX+afterRootA.GridWidth+memoryProcessMapRootGap {
+		t.Fatalf("automatic roots overlap after growth: A=%+v B=%+v", afterRootA, afterRootB)
+	}
+	if afterRootB.GridX <= beforeRootB.GridX {
+		t.Fatalf("later root did not move after earlier root growth: before=%+v after=%+v", beforeRootB, afterRootB)
+	}
+	if afterProcess.GridX-beforeProcess.GridX != afterRootB.GridX-beforeRootB.GridX || afterProcess.GridX != afterRootB.GridX+memoryProcessMapFolderPadding {
+		t.Fatalf("later root descendants did not keep their relative geometry: root=%+v Process=%+v", afterRootB, afterProcess)
+	}
+}
+
+func TestMemoryAutomaticProcessMapPlacementPreservesVerticallySeparatedRoot(t *testing.T) {
+	ctx := context.Background()
+	repo, companyID, admin, _, _ := newV2PolicyTestRepo(t)
+	rootA, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Root A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Root B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootBKey := processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, rootB.FolderID)
+	rootBPlacement := repo.processMapPlacements[rootBKey]
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, rootB.FolderID, nil,
+		1, 100, rootBPlacement.GridWidth, rootBPlacement.GridHeight,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	manualRootB := cloneProcessMapPlacement(repo.processMapPlacements[rootBKey])
+	parentID := rootA.FolderID
+	for depth := 0; depth < 4; depth++ {
+		child, err := repo.CreateCompanyExplorerFolder(companyID, parentID, "logic_gate", "Nested")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parentID = child.FolderID
+	}
+	afterRootA := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, rootA.FolderID)]
+	afterRootB := repo.processMapPlacements[rootBKey]
+	if afterRootB.GridX != manualRootB.GridX || afterRootB.GridY != manualRootB.GridY || afterRootB.Revision != manualRootB.Revision {
+		t.Fatalf("vertical separation did not preserve manual root geometry: before=%+v after=%+v", manualRootB, afterRootB)
+	}
+	if afterRootA.GridX+afterRootA.GridWidth <= afterRootB.GridX || afterRootA.GridY+afterRootA.GridHeight > afterRootB.GridY {
+		t.Fatalf("preservation fixture does not overlap only on X: A=%+v B=%+v", afterRootA, afterRootB)
+	}
+}
+
 func TestMemoryProcessMapAutomaticallyMirrorsExplorerStructure(t *testing.T) {
 	ctx := context.Background()
 	repo, companyID, admin, _, _ := newV2PolicyTestRepo(t)
@@ -85,7 +188,8 @@ func TestMemoryProcessMapAutomaticallyMirrorsExplorerStructure(t *testing.T) {
 
 	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
 		companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, &root.FolderID,
-		rootPlacement.GridX+10, rootPlacement.GridY+20, processPlacement.GridWidth, processPlacement.GridHeight,
+		rootPlacement.GridX+memoryProcessMapFolderPadding, rootPlacement.GridY+memoryProcessMapFolderPadding,
+		processPlacement.GridWidth, processPlacement.GridHeight,
 	)); err != nil {
 		t.Fatal(err)
 	}
