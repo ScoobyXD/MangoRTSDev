@@ -107,6 +107,7 @@ Last updated: 2026-08-08
 29. When a clipboard payload contains a usable HTML or tab-separated table and an unreferenced bitmap preview, every unified Tiptap editor must paste only the complete table, discard the bitmap preview and Office metadata, and retain every source row and column even when the table is wider than the editor viewport.
 30. A Node or Logic Gate header shows its live-derived clickable hierarchy breadcrumb inside the same rounded title container, directly above the existing resource icon and independently editable title, instead of adding a separate breadcrumb surface or a fixed **Node:** or **Process:** label. The current item name remains the independently editable `nodes.name` or `logic_gates.header` value and is never copied into or saved through the breadcrumb.
 31. A Node or Project timeline textbox must size from its own visible timeline container, keep the shared safety minimum, leave the shared next-row circle, header, and editor preview visible whenever space permits, and keep its editor, linked email, chat, timeline, virtual spacing, and logical scroll position aligned after every container resize.
+32. Dragging an editor table's bottom-right resize handle must add or remove whole trailing rows and columns, never reduce the table below one row or column, stop each axis before deleting a cell with content, and commit the allowed resize in one document transaction only when the pointer is released.
 
 Last updated: 2026-08-27
 
@@ -210,7 +211,7 @@ Pasted or previously stored ASCII pairs are not silently rewritten, and code blo
 
 Last updated: 2026-08-06
 
-# Process Story: editor activation and table growth stay visually stable
+# Process Story: editor activation and table resize stay visually stable
 
 A user clicks the exact place they want to type in a sleeping Node, Project, or Logic Gate editor
 ↓
@@ -224,11 +225,11 @@ A loaded table first paints at its stored column widths, or equal 112-pixel base
 ↓
 Right-clicking a cell opens the shared elevated menu above editor clipping, with grouped create actions and a red delete section
 ↓
-Dragging the table's bottom-right handle previews whole equal rows and columns, then commits those additions once when the pointer is released
+Dragging the table's bottom-right handle previews whole rows and columns using equal cell geometry, then adds or removes only the safe trailing dimensions once when the pointer is released
 ↓
 Every committed text, Checkbox, or table change follows the existing revisioned JSON recovery, autosave, history, and realtime rules
 
-Last updated: 2026-08-06
+Last updated: 2026-08-27
 
 # Process Story: a copied editor image pastes outside Mango
 
@@ -272,7 +273,7 @@ Nested numbering rotates through `1.`, `a.`, `1)`, and `a)`; bullets rotate thro
 ↓
 Vertical indentation lines paint only in Indent Guides mode
 ↓
-An attachment image can be dragged from its visible frame, while a table has an elevated shared right-click menu and a bottom-right handle that grows equal rows and columns
+An attachment image can be dragged from its visible frame, while a table has an elevated shared right-click menu and a bottom-right handle that adds or safely removes rows and columns using equal cell geometry
 ↓
 Every real document mutation follows the existing revisioned JSON recovery, autosave, history, and realtime rules
 
@@ -522,7 +523,7 @@ Coverage Status:
 - Conversion occurs only as the user completes a pair. Loading, pasting, canonical refresh, and sleeping rendering do not scan or rewrite existing ASCII text.
 - Unicode arrows are document text. JSON persistence, history, recovery, realtime refresh, HTML sanitization, and rich clipboard output must preserve them instead of converting them back to ASCII pairs.
 
-### 2026-08-06 Stable Activation, Checkbox, And Table Growth
+### 2026-08-27 Stable Activation, Checkbox, And Table Resize
 
 - The sleeping JSON renderer remains visible until the attached live Tiptap DOM has accepted the requested pointer caret and focus. Activation preserves editor scroll and selection, performs no document mutation or save, and never creates an empty block. A canonical refresh whose parsed ProseMirror document equals the live document updates revision authority without dispatching `setContent`.
 - Automatic Numbering uses the repeating four-depth cycle `1.`, `a.`, `1)`, `a)`. Alphabetic markers are lowercase at every repeated alphabetic depth.
@@ -530,8 +531,8 @@ Coverage Status:
 - The active and sleeping Checkbox DOM structures must have matching label, input, and content wrappers so activating an editor cannot change row geometry.
 - A loaded table uses its stored column widths in both the sleeping and active renderers. A table without stored widths uses intrinsic equal 112-pixel columns and 36-pixel rows instead of filling the editor width.
 - The table-cell context menu uses the shared elevated right-click surface, is portaled to viewport coordinates outside editor overflow clipping, and follows the shared grouped pattern: column actions, a separator, row actions, a separator, then red delete actions at the bottom.
-- Selecting a table exposes one bottom-right growth handle and no detached top-right command strip. Pointer movement previews only whole nonnegative row and column additions using the table's equal cell geometry. Pointer cancel makes no change; pointer release commits all previewed additions in one ProseMirror transaction and clears stored column widths so every resulting column remains equal.
-- Table menu and growth mutations use the normal revisioned document save path. Neither interaction creates a separate table persistence path.
+- Selecting a table exposes one bottom-right resize handle and no detached top-right command strip. Pointer movement previews whole signed row and column changes using the table's 36-pixel row unit and equal column geometry. Shrinking removes only trailing rows and columns, stops independently on each axis before any cell content would be deleted, and never reduces the table below one row or column. Pointer cancel and fully blocked movement make no change; pointer release commits the allowed resize in one ProseMirror transaction, stores the previewed equal width on the resized table's own cells, and leaves nested-table widths unchanged.
+- Table menu and resize mutations use the normal revisioned document save path. Neither interaction creates a separate table persistence path.
 
 ### 2026-08-06 Portable Tiptap Image Copy
 
@@ -548,7 +549,7 @@ Coverage Status:
 - Active JSON ordered-list markers rotate by nesting depth as `1.`, `a.`, `1)`, `a)`, then repeat. Bullet markers rotate solid circle, hollow circle, solid square, hollow square, then repeat. Nested Checkbox items retain the checkbox marker.
 - Thin nested-list and block-indent guide lines are conditional presentation. They paint only when the current outline preference is Indent Guides and never leak into Automatic Numbering, Bullet Points, or Checkbox mode.
 - The visible attachment-image frame is a real Tiptap drag handle. Dragging it moves the existing durable image node; it does not upload, duplicate, or change attachment ownership.
-- Right-clicking an active table cell selects that cell and opens the shared elevated table menu for row/column creation and deletion plus table deletion. Dragging the selected table's bottom-right handle previews and commits equal rows and columns. These commands mutate the same Tiptap document and use normal recovery/autosave/revision handling.
+- Right-clicking an active table cell selects that cell and opens the shared elevated table menu for row/column creation and deletion plus table deletion. Dragging the selected table's bottom-right handle previews and commits rows and columns using equal cell geometry while refusing to remove any row or column whose deletion would discard cell content. These commands mutate the same Tiptap document and use normal recovery/autosave/revision handling.
 
 ### 2026-08-02 Project Entity Links And Logic Gate Image Paste
 
@@ -708,7 +709,7 @@ ED120 - Copying a selected attachment image in an active Node, Project, or Logic
 ED121 - Editor activation is selection-only. The sleeping document remains painted until the live Tiptap DOM and requested caret are ready; the reveal must not blink, change scroll, save, create a block, or add an empty row. A canonical document that is structurally equal under the active ProseMirror schema updates canonical authority without a replacement transaction.
 ED122 - Automatic Numbering repeats `1.`, `a.`, `1)`, `a)` by nesting depth. The user-facing option is Checkbox. Empty-row Checkbox Enter produces one unchecked Checkbox row with its caret in that row; nonempty ordinary-row Enter performs the split and conversion atomically; existing Checkbox Enter produces the next adjacent unchecked item. Checkbox nesting changes depth without changing its symbol or inserting an ordinary row.
 ED123 - The table-cell context menu uses the shared portaled right-click surface at viewport coordinates, outside editor overflow clipping. Column actions and row actions are grouped by separators, and the bottom delete row, delete column, and delete table actions use destructive red text.
-ED124 - A table without stored widths begins at intrinsic content size with equal 112-pixel columns and equal 36-pixel rows instead of filling available editor width. A loaded table paints its stored column widths identically before and after activation. A selected table exposes a bottom-right growth handle without a detached top-right command strip; its drag previews whole nonnegative row and column additions, cancel changes nothing, and release commits the preview once while preserving equal column widths and row heights.
+ED124 - A table without stored widths begins at intrinsic content size with equal 112-pixel columns and equal 36-pixel rows instead of filling available editor width. A loaded table paints its stored column widths identically before and after activation. A selected table exposes a bottom-right resize handle without a detached top-right command strip; its drag previews whole row and column changes using a 36-pixel row unit and the rendered equal column width, adds on right/down movement, removes trailing dimensions on left/up movement only when doing so cannot discard content, stops each axis independently, and never reduces the table below one row or column. Cancel and fully blocked movement change nothing; release commits the allowed preview once while preserving the previewed equal column width, row geometry, and every nested table's own widths.
 ED125 - Completing `->` or `<-` by typing in an ordinary Node, Project, or Logic Gate Tiptap text position replaces that pair with one durable Unicode `U+2192` or `U+2190` and keeps the caret after it. This shared input rule applies to paragraphs, headings, list items, Checkbox items, and table cells, but not code blocks. It does not rewrite loaded or pasted ASCII pairs, and no sanitizer, clipboard path, history path, recovery path, or realtime path may convert a stored Unicode arrow back into ASCII.
 ED126 - History snapshot creation is action-triggered, never timer-triggered. A changed Node, Logic Gate, or Project requests one history snapshot when its owning editor surface unmounts because the user closes its window, panel, Project/Updates preview, switches to another resource, changes Mango routes, or uses browser Back or Forward. The browser `pagehide` event makes the same best-effort request for refresh, external navigation, and tab/window close. No interval, background scan, inactive-resource loop, unload prompt, crash recovery, OS-kill handling, or discarded-tab service may create history snapshots.
 ED127 - A resource becomes changed for exit history only after a local editable history-visible mutation: a Tiptap document transaction; a user-created Node or Project textbox or successful deletion; Node or Project textbox title/attachment metadata change; or a confirmed saved-version restore. Loading canonical data, automatically ensuring an initial empty textbox, receiving a remote refresh, focusing, selecting, scrolling, opening tabs/panes, or closing an unchanged view does not mark the resource and must create no exit-history row.
@@ -2528,7 +2529,7 @@ These laws record current production behavior; they do not approve behavior that
 27. [08/10/2026] Backspace or Delete on a noncollapsed mail-editor list selection must use native selected-range deletion instead of the empty-item exit command.
 28. [08/10/2026] Inserting a document-editor table must create a 3-by-3 table with a header row, resizable 112-pixel base columns, and 36-pixel base cell height.
 29. [08/10/2026] A document-editor table’s cell context menu must add or delete rows and columns and must delete the table on explicit request.
-30. [08/10/2026] Dragging a document table’s bottom-right growth handle must add whole rows or columns and reset the table to equal column widths in one document transaction.
+30. [08/27/2026] Dragging a document table’s bottom-right resize handle must add or remove whole trailing rows and columns, stop before deleting cell content, keep at least one row and column, preserve nested-table widths, and store the previewed equal column width in one document transaction.
 31. [08/10/2026] Tab and Shift+Tab inside a document table cell must run the same active-block or active-list indentation commands as outside a table and must not navigate to another cell.
 32. [08/10/2026] Inserting a mail-editor table must create a 3-by-3 table whose first row and first column are headers, with a maximum normalized size of 20 rows by 8 columns.
 33. [08/10/2026] Enter in an ordinary mail-editor table cell must insert a line break and must not navigate to another cell.

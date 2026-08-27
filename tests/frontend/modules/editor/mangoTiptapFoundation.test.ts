@@ -45,9 +45,10 @@ import {
   normalizeMangoTiptapImagePlacement,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapImagePlacement.js";
 import {
-  calculateMangoTiptapTableGrowth,
-  growMangoTiptapTable,
+  calculateMangoTiptapTableResize,
   handleMangoTiptapTableClipboardPaste,
+  readActiveMangoTiptapTableFrame,
+  resizeMangoTiptapTable,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapTable.js";
 import {
   captureMangoTiptapPointerBookmark,
@@ -667,14 +668,66 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     assert.equal(editor.commands.undo(), true);
     assert.deepEqual(editor.getJSON(), beforeTable);
     assert.equal(editor.commands.redo(), true);
-    assert.deepEqual(calculateMangoTiptapTableGrowth({
+    assert.deepEqual(calculateMangoTiptapTableResize({
       startX: 100,
       startY: 100,
       currentX: 225,
       currentY: 175,
+      rows: 2,
+      columns: 2,
+      minimumRows: 1,
+      minimumColumns: 1,
       rowHeight: 36,
       columnWidth: 112,
     }), { rows: 2, columns: 1 }, "table drag distance becomes whole equal-sized row and column additions");
+    assert.deepEqual(calculateMangoTiptapTableResize({
+      startX: 0,
+      startY: 0,
+      currentX: 112 * 30,
+      currentY: 36 * 30,
+      rows: 2,
+      columns: 2,
+      minimumRows: 1,
+      minimumColumns: 1,
+      rowHeight: 36,
+      columnWidth: 112,
+    }), { rows: 30, columns: 30 }, "safe shrinking does not cap the existing large expansion gesture");
+    assert.deepEqual(calculateMangoTiptapTableResize({
+      startX: 100,
+      startY: 100,
+      currentX: 44,
+      currentY: 82,
+      rows: 5,
+      columns: 3,
+      minimumRows: 2,
+      minimumColumns: 2,
+      rowHeight: 36,
+      columnWidth: 112,
+    }), { rows: -1, columns: -1 }, "half-cell left and up drags remove whole trailing dimensions symmetrically");
+    assert.deepEqual(calculateMangoTiptapTableResize({
+      startX: 100,
+      startY: 100,
+      currentX: -1_000,
+      currentY: -1_000,
+      rows: 5,
+      columns: 3,
+      minimumRows: 2,
+      minimumColumns: 2,
+      rowHeight: 36,
+      columnWidth: 112,
+    }), { rows: -3, columns: -1 }, "table shrink preview stops at the last occupied row and column");
+    assert.deepEqual(calculateMangoTiptapTableResize({
+      startX: 100,
+      startY: 100,
+      currentX: 45,
+      currentY: 83,
+      rows: 2,
+      columns: 2,
+      minimumRows: 1,
+      minimumColumns: 1,
+      rowHeight: 36,
+      columnWidth: 112,
+    }), { rows: 0, columns: 0 }, "sub-half-cell movement leaves the table unchanged");
     let firstTableCellPosition: number | null = null;
     editor.state.doc.descendants((node, position) => {
       if (firstTableCellPosition != null || (node.type.name !== "tableCell" && node.type.name !== "tableHeader")) return;
@@ -682,25 +735,255 @@ test("Tiptap owns commands, history, tables, positions, and annotation mapping",
     });
     assert.notEqual(firstTableCellPosition, null);
     editor.commands.setTextSelection(firstTableCellPosition!);
-    assert.equal(editor.isActive("table"), true, "table growth starts from a selected table cell");
-    const tableBeforeGrowth = Array.from({ length: editor.state.doc.childCount }, (_, index) => editor.state.doc.child(index))
+    assert.equal(editor.isActive("table"), true, "table resize starts from a selected table cell");
+    const readTable = () => Array.from({ length: editor.state.doc.childCount }, (_, index) => editor.state.doc.child(index))
       .find((node) => node.type.name === "table")
       ?? null;
-    const rowsBeforeGrowth = tableBeforeGrowth?.childCount ?? 0;
-    const columnsBeforeGrowth = tableBeforeGrowth?.firstChild?.childCount ?? 0;
-    let tableGrowthTransactions = 0;
-    const countTableGrowthTransaction = () => { tableGrowthTransactions += 1; };
-    editor.on("transaction", countTableGrowthTransaction);
-    assert.equal(growMangoTiptapTable(editor, { rows: 2, columns: 1 }), true);
-    editor.off("transaction", countTableGrowthTransaction);
-    assert.equal(tableGrowthTransactions, 1, "releasing a table growth drag commits one document transaction");
-    const grownTable = Array.from({ length: editor.state.doc.childCount }, (_, index) => editor.state.doc.child(index))
-      .find((node) => node.type.name === "table")
-      ?? null;
-    assert.equal(grownTable?.type.name, "table");
-    assert.equal(grownTable?.childCount, rowsBeforeGrowth + 2, "table growth appends the requested rows");
-    for (let rowIndex = 0; rowIndex < (grownTable?.childCount ?? 0); rowIndex += 1) {
-      assert.equal(grownTable?.child(rowIndex).childCount, columnsBeforeGrowth + 1, "every grown row has the same column count");
+    const tableBeforeResize = readTable();
+    const rowsBeforeResize = tableBeforeResize?.childCount ?? 0;
+    const columnsBeforeResize = tableBeforeResize?.firstChild?.childCount ?? 0;
+    let tableResizeTransactions = 0;
+    const countTableResizeTransaction = () => { tableResizeTransactions += 1; };
+    editor.on("transaction", countTableResizeTransaction);
+    assert.equal(resizeMangoTiptapTable(editor, { rows: 2, columns: 1 }, 160), true);
+    editor.off("transaction", countTableResizeTransaction);
+    assert.equal(tableResizeTransactions, 1, "releasing a table resize drag commits one document transaction");
+    const expandedTable = readTable();
+    assert.equal(expandedTable?.type.name, "table");
+    assert.equal(expandedTable?.childCount, rowsBeforeResize + 2, "table resize appends the requested rows");
+    for (let rowIndex = 0; rowIndex < (expandedTable?.childCount ?? 0); rowIndex += 1) {
+      assert.equal(expandedTable?.child(rowIndex).childCount, columnsBeforeResize + 1, "every resized row has the same column count");
+    }
+    tableResizeTransactions = 0;
+    editor.on("transaction", countTableResizeTransaction);
+    assert.equal(resizeMangoTiptapTable(editor, { rows: -2, columns: -1 }, 160), true);
+    editor.off("transaction", countTableResizeTransaction);
+    assert.equal(tableResizeTransactions, 1, "removing empty trailing rows and columns is one document transaction");
+    assert.equal(readTable()?.childCount, rowsBeforeResize);
+    assert.equal(readTable()?.firstChild?.childCount, columnsBeforeResize);
+
+    const tableCellPositions: number[] = [];
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name === "tableCell" || node.type.name === "tableHeader") tableCellPositions.push(position + 2);
+    });
+    editor.commands.setTextSelection(tableCellPositions[(rowsBeforeResize * columnsBeforeResize) - 1]);
+    editor.commands.insertContent("protected table text");
+    assert.equal(resizeMangoTiptapTable(editor, { rows: 2, columns: 2 }, 160), true);
+    tableResizeTransactions = 0;
+    editor.on("transaction", countTableResizeTransaction);
+    assert.equal(resizeMangoTiptapTable(editor, { rows: -99, columns: -99 }, 160), true);
+    editor.off("transaction", countTableResizeTransaction);
+    assert.equal(tableResizeTransactions, 1, "an oversized shrink removes the empty suffix once and stops before text");
+    assert.equal(readTable()?.childCount, rowsBeforeResize, "text in the last original row blocks vertical deletion");
+    assert.equal(readTable()?.firstChild?.childCount, columnsBeforeResize, "text in the last original column blocks horizontal deletion");
+    assert.match(readTable()?.textContent ?? "", /protected table text/, "safe table shrinking never deletes cell content");
+    tableResizeTransactions = 0;
+    editor.on("transaction", countTableResizeTransaction);
+    assert.equal(resizeMangoTiptapTable(editor, { rows: -1, columns: -1 }, 160), false, "a fully blocked shrink is a no-op");
+    editor.off("transaction", countTableResizeTransaction);
+    assert.equal(tableResizeTransactions, 0, "a blocked shrink dispatches no document transaction");
+
+    const tableSafetyHost = dom.window.document.createElement("div");
+    dom.window.document.body.append(tableSafetyHost);
+    const tableSafetyEditor = new MangoTiptapEditorEngine({
+      element: tableSafetyHost,
+      extensions: createMangoTiptapExtensions({ editable: true }),
+      content: { type: "doc", content: [{ type: "paragraph" }] },
+    });
+    const selectTableCell = (text?: string) => {
+      let position: number | null = null;
+      tableSafetyEditor.state.doc.descendants((node, nodePosition) => {
+        if (position != null || (node.type.name !== "tableCell" && node.type.name !== "tableHeader")) return;
+        if (text != null && node.textContent !== text) return;
+        position = nodePosition + 2;
+      });
+      assert.notEqual(position, null);
+      tableSafetyEditor.commands.setTextSelection(position!);
+    };
+    try {
+      const emptyCell = () => ({
+        type: "tableCell",
+        attrs: { colspan: 1, rowspan: 1, colwidth: [160] },
+        content: [{ type: "paragraph" }],
+      });
+      tableSafetyEditor.commands.setContent({
+        type: "doc",
+        content: [{
+          type: "table",
+          content: Array.from({ length: 3 }, () => ({
+            type: "tableRow",
+            content: Array.from({ length: 3 }, emptyCell),
+          })),
+        }],
+      });
+      selectTableCell();
+      const tableElement = tableSafetyEditor.view.dom.querySelector("table");
+      assert.ok(tableElement);
+      Object.defineProperty(tableElement, "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({ x: 0, y: 0, left: 0, top: 0, right: 481, bottom: 108, width: 481, height: 108, toJSON: () => ({}) }),
+      });
+      const frame = readActiveMangoTiptapTableFrame(tableSafetyEditor, tableSafetyHost);
+      assert.equal(frame?.columnWidth, 160, "resize preview rounds the loaded table width once for persistence");
+      assert.equal(frame?.rowHeight, 36);
+      assert.equal((frame!.columns - 2) * frame!.columnWidth, 160, "fractional source geometry previews the exact committed width");
+      let floorTransactions = 0;
+      const countFloorTransaction = () => { floorTransactions += 1; };
+      tableSafetyEditor.on("transaction", countFloorTransaction);
+      assert.equal(resizeMangoTiptapTable(tableSafetyEditor, { rows: -99, columns: -99 }, frame!.columnWidth), true);
+      tableSafetyEditor.off("transaction", countFloorTransaction);
+      assert.equal(floorTransactions, 1, "shrinking an all-empty table to its floor is one transaction");
+      const floorTable = tableSafetyEditor.state.doc.firstChild;
+      assert.equal(floorTable?.childCount, 1, "an all-empty table may shrink to one row");
+      assert.equal(floorTable?.firstChild?.childCount, 1, "an all-empty table may shrink to one column");
+      assert.deepEqual(floorTable?.firstChild?.firstChild?.attrs.colwidth, [160], "the committed column width matches the preview geometry");
+      assert.equal(tableElement.style.width, "160px", "the table does not jump to the default width after release");
+      assert.equal(resizeMangoTiptapTable(tableSafetyEditor, { rows: -1, columns: -1 }, 160), false, "the one-by-one floor cannot shrink further");
+
+      tableSafetyEditor.commands.setContent({
+        type: "doc",
+        content: [{
+          type: "table",
+          content: [
+            { type: "tableRow", content: [{
+              type: "tableCell",
+              attrs: { colspan: 1, rowspan: 1, colwidth: [160] },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "tall occupied row" }] }],
+            }] },
+            { type: "tableRow", content: [{
+              type: "tableCell",
+              attrs: { colspan: 1, rowspan: 1, colwidth: [160] },
+              content: [{ type: "paragraph" }],
+            }] },
+          ],
+        }],
+      });
+      selectTableCell("tall occupied row");
+      const tallTableElement = tableSafetyEditor.view.dom.querySelector("table");
+      assert.ok(tallTableElement);
+      Object.defineProperty(tallTableElement, "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({ x: 0, y: 0, left: 0, top: 0, right: 160, bottom: 108, width: 160, height: 108, toJSON: () => ({}) }),
+      });
+      const tallFrame = readActiveMangoTiptapTableFrame(tableSafetyEditor, tableSafetyHost);
+      assert.equal(tallFrame?.rowHeight, 36, "tall content does not inflate the empty-row resize unit");
+      const tallShrink = calculateMangoTiptapTableResize({
+        startX: 100,
+        startY: 100,
+        currentX: 100,
+        currentY: 82,
+        rows: tallFrame!.rows,
+        columns: tallFrame!.columns,
+        minimumRows: tallFrame!.minimumRows,
+        minimumColumns: tallFrame!.minimumColumns,
+        rowHeight: tallFrame!.rowHeight,
+        columnWidth: tallFrame!.columnWidth,
+      });
+      assert.deepEqual(tallShrink, { rows: -1, columns: 0 }, "half of one visible empty row previews its removal");
+      assert.equal(tallFrame!.height + tallShrink.rows * tallFrame!.rowHeight, 72, "the preview removes only the empty row's height");
+      assert.equal(resizeMangoTiptapTable(tableSafetyEditor, tallShrink, tallFrame!.columnWidth), true);
+      assert.equal(tableSafetyEditor.state.doc.firstChild?.childCount, 1);
+      assert.equal(tableSafetyEditor.state.doc.firstChild?.textContent, "tall occupied row", "vertical shrink keeps the tall occupied row");
+
+      tableSafetyEditor.commands.setContent({
+        type: "doc",
+        content: [{
+          type: "table",
+          content: [
+            { type: "tableRow", content: [
+              { type: "tableCell", attrs: { colspan: 1, rowspan: 1, colwidth: [180] }, content: [{ type: "paragraph" }] },
+              { type: "tableCell", attrs: { colspan: 2, rowspan: 2, colwidth: [180, 180] }, content: [{ type: "paragraph", content: [{ type: "text", text: "merged content" }] }] },
+            ] },
+            { type: "tableRow", content: [
+              { type: "tableCell", attrs: { colspan: 1, rowspan: 1, colwidth: [180] }, content: [{ type: "paragraph" }] },
+            ] },
+            { type: "tableRow", content: Array.from({ length: 3 }, () => ({
+              type: "tableCell",
+              attrs: { colspan: 1, rowspan: 1, colwidth: [180] },
+              content: [{ type: "paragraph" }],
+            })) },
+          ],
+        }],
+      });
+      selectTableCell("merged content");
+      assert.equal(resizeMangoTiptapTable(tableSafetyEditor, { rows: -99, columns: -99 }, 180), true);
+      const mergedTable = tableSafetyEditor.state.doc.firstChild;
+      const mergedCell = mergedTable?.firstChild?.child(1);
+      assert.equal(mergedTable?.childCount, 1, "an empty row covered by a rowspan may be removed");
+      assert.equal(mergedTable?.firstChild?.childCount, 2, "an empty column covered by a colspan may be removed");
+      assert.equal(mergedCell?.attrs.rowspan, 1);
+      assert.equal(mergedCell?.attrs.colspan, 1);
+      assert.equal(mergedCell?.textContent, "merged content", "shrinking a merged span preserves its content");
+      assert.equal(resizeMangoTiptapTable(tableSafetyEditor, { rows: -1, columns: -1 }, 180), false, "a merged cell's occupied origin blocks further shrink");
+
+      tableSafetyEditor.commands.setContent({
+        type: "doc",
+        content: [{
+          type: "table",
+          content: [{ type: "tableRow", content: [
+            { type: "tableCell", attrs: { colspan: 1, rowspan: 1, colwidth: [190] }, content: [{ type: "paragraph", content: [{ type: "text", text: "outer target" }] }] },
+            { type: "tableCell", attrs: { colspan: 1, rowspan: 1, colwidth: [190] }, content: [
+              { type: "paragraph" },
+              { type: "table", content: [{ type: "tableRow", content: [
+                { type: "tableCell", attrs: { colspan: 1, rowspan: 1, colwidth: [77] }, content: [{ type: "paragraph", content: [{ type: "text", text: "nested content" }] }] },
+              ] }] },
+            ] },
+          ] }],
+        }],
+      });
+      selectTableCell("outer target");
+      assert.equal(resizeMangoTiptapTable(tableSafetyEditor, { rows: 1, columns: 1 }, 190), true);
+      const outerTable = tableSafetyEditor.state.doc.firstChild;
+      for (let rowIndex = 0; rowIndex < (outerTable?.childCount ?? 0); rowIndex += 1) {
+        const row = outerTable!.child(rowIndex);
+        for (let cellIndex = 0; cellIndex < row.childCount; cellIndex += 1) {
+          assert.deepEqual(row.child(cellIndex).attrs.colwidth, [190], "only the resized table's direct cells receive its equal width");
+        }
+      }
+      let nestedCellWidth: unknown = null;
+      outerTable?.descendants((node) => {
+        if (node.type.name === "tableCell" && node.textContent === "nested content") nestedCellWidth = node.attrs.colwidth;
+      });
+      assert.deepEqual(nestedCellWidth, [77], "resizing an outer table does not rewrite a nested table's widths");
+
+      let nestedTablePosition: number | null = null;
+      tableSafetyEditor.state.doc.descendants((node, nodePosition) => {
+        if (nestedTablePosition == null && node.type.name === "table" && node.textContent === "nested content") nestedTablePosition = nodePosition;
+      });
+      assert.notEqual(nestedTablePosition, null);
+      tableSafetyEditor.commands.setNodeSelection(nestedTablePosition!);
+      const outerRowsBeforeNestedResize = tableSafetyEditor.state.doc.firstChild?.childCount;
+      const outerColumnsBeforeNestedResize = tableSafetyEditor.state.doc.firstChild?.firstChild?.childCount;
+      const renderedTables = tableSafetyEditor.view.dom.querySelectorAll("table");
+      assert.equal(renderedTables.length, 2);
+      Object.defineProperty(renderedTables[0], "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({ x: 0, y: 0, left: 0, top: 0, right: 570, bottom: 72, width: 570, height: 72, toJSON: () => ({}) }),
+      });
+      Object.defineProperty(renderedTables[1], "getBoundingClientRect", {
+        configurable: true,
+        value: () => ({ x: 190, y: 36, left: 190, top: 36, right: 414, bottom: 72, width: 224, height: 36, toJSON: () => ({}) }),
+      });
+      const nestedFrame = readActiveMangoTiptapTableFrame(tableSafetyEditor, tableSafetyHost);
+      assert.equal(nestedFrame?.width, 224, "a node-selected nested table handle measures the nested table, not its outer table");
+      assert.equal(nestedFrame?.rows, 1);
+      assert.equal(nestedFrame?.columns, 1);
+      assert.equal(resizeMangoTiptapTable(tableSafetyEditor, { rows: 1, columns: 1 }, nestedFrame!.columnWidth), true);
+      const outerAfterNestedResize = tableSafetyEditor.state.doc.firstChild;
+      assert.equal(outerAfterNestedResize?.childCount, outerRowsBeforeNestedResize, "node-selecting a nested table does not add an outer row");
+      assert.equal(outerAfterNestedResize?.firstChild?.childCount, outerColumnsBeforeNestedResize, "node-selecting a nested table does not add an outer column");
+      let resizedNestedRows = 0;
+      let resizedNestedColumns = 0;
+      outerAfterNestedResize?.descendants((node) => {
+        if (node.type.name !== "table" || node.textContent !== "nested content") return;
+        resizedNestedRows = node.childCount;
+        resizedNestedColumns = node.firstChild?.childCount ?? 0;
+      });
+      assert.equal(resizedNestedRows, 2, "the selected nested table receives the new row");
+      assert.equal(resizedNestedColumns, 2, "the selected nested table receives the new column");
+    } finally {
+      tableSafetyEditor.destroy();
+      tableSafetyHost.remove();
     }
 
     let annotationTransactions = 0;

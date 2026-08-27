@@ -998,31 +998,114 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     postedDocument = null;
     releasePost = undefined;
 
-    await waitFor(() => Boolean(editorRoot.querySelector('[data-mango-tiptap-table-growth-handle="true"]')), "a selected table exposes its bottom-right growth handle");
-    const tableGrowthHandle = editorRoot.querySelector<HTMLButtonElement>('[data-mango-tiptap-table-growth-handle="true"]');
-    assert.ok(tableGrowthHandle);
-    const rowsBeforeGrowth = activeProseMirror.querySelectorAll("table tr").length;
-    const columnsBeforeGrowth = activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length;
+    await waitFor(() => Boolean(editorRoot.querySelector('[data-mango-tiptap-table-resize-handle="true"]')), "a selected table exposes its bottom-right resize handle");
+    let tableResizeHandle = editorRoot.querySelector<HTMLButtonElement>('[data-mango-tiptap-table-resize-handle="true"]');
+    assert.equal(tableResizeHandle?.getAttribute("aria-label"), "Drag to resize table rows and columns");
+    const rowsBeforeResize = activeProseMirror.querySelectorAll("table tr").length;
+    const columnsBeforeResize = activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length;
     await act(async () => {
-      tableGrowthHandle.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 100, clientY: 100 }));
-      tableGrowthHandle.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, cancelable: true, buttons: 1, clientX: 225, clientY: 175 }));
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 100, clientY: 100 }));
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, cancelable: true, buttons: 1, clientX: 225, clientY: 175 }));
     });
-    await waitFor(() => Boolean(editorRoot.querySelector('[data-mango-tiptap-table-growth-preview="true"]')), "dragging previews equal-sized table additions");
-    const growthPreview = editorRoot.querySelector<HTMLElement>('[data-mango-tiptap-table-growth-preview="true"]');
-    assert.equal(growthPreview?.dataset.previewRows, String(rowsBeforeGrowth + 2));
-    assert.equal(growthPreview?.dataset.previewColumns, String(columnsBeforeGrowth + 1));
+    await waitFor(() => Boolean(editorRoot.querySelector('[data-mango-tiptap-table-resize-preview="true"]')), "dragging previews equal-sized table additions");
+    let resizePreview = editorRoot.querySelector<HTMLElement>('[data-mango-tiptap-table-resize-preview="true"]');
+    assert.equal(resizePreview?.dataset.previewRows, String(rowsBeforeResize + 2));
+    assert.equal(resizePreview?.dataset.previewColumns, String(columnsBeforeResize + 1));
+    assert.equal(resizePreview?.style.width, `${(columnsBeforeResize + 1) * 112}px`, "the preview uses the width that will be stored on release");
     await act(async () => {
-      tableGrowthHandle.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, cancelable: true, button: 0, clientX: 225, clientY: 175 }));
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, cancelable: true, button: 0, clientX: 225, clientY: 175 }));
     });
-    await waitFor(() => activeProseMirror.querySelectorAll("table tr").length === rowsBeforeGrowth + 2, "releasing the handle creates the previewed rows");
-    assert.equal(activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length, columnsBeforeGrowth + 1, "releasing the handle creates the previewed columns");
-    assert.equal(editorRoot.querySelector('[data-mango-tiptap-table-growth-preview="true"]'), null, "the preview clears after its one committed change");
-    await waitFor(() => postStarted, "table growth uses the normal durable document save");
+    await waitFor(() => activeProseMirror.querySelectorAll("table tr").length === rowsBeforeResize + 2, "releasing the handle creates the previewed rows");
+    assert.equal(activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length, columnsBeforeResize + 1, "releasing the handle creates the previewed columns");
+    assert.equal(editorRoot.querySelector('[data-mango-tiptap-table-resize-preview="true"]'), null, "the preview clears after its one committed change");
+    await waitFor(() => postStarted, "table expansion uses the normal durable document save");
+    const expandedPostedTable = postedDocument?.document.content?.find((node) => node.type === "table");
+    assert.ok(expandedPostedTable);
+    for (const row of expandedPostedTable.content ?? []) {
+      for (const cell of row.content ?? []) assert.deepEqual(cell.attrs?.colwidth, [112], "the committed table stores its previewed equal column width");
+    }
+    assert.equal(activeProseMirror.querySelector("table")?.style.width, resizePreview?.style.width, "the table outline does not jump horizontally after release");
     releasePost?.();
-    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the table growth save receives its backend acknowledgement");
+    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the table expansion save receives its backend acknowledgement");
     postStarted = false;
     postedDocument = null;
     releasePost = undefined;
+
+    tableResizeHandle = editorRoot.querySelector<HTMLButtonElement>('[data-mango-tiptap-table-resize-handle="true"]');
+    assert.ok(tableResizeHandle);
+    await act(async () => {
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 100, clientY: 100 }));
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, cancelable: true, buttons: 1, clientX: -12, clientY: 28 }));
+    });
+    await waitFor(() => Boolean(editorRoot.querySelector('[data-mango-tiptap-table-resize-preview="true"]')), "dragging left and up previews removal of empty trailing cells");
+    resizePreview = editorRoot.querySelector<HTMLElement>('[data-mango-tiptap-table-resize-preview="true"]');
+    assert.equal(resizePreview?.dataset.previewRows, String(rowsBeforeResize));
+    assert.equal(resizePreview?.dataset.previewColumns, String(columnsBeforeResize));
+    await act(async () => {
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, cancelable: true, button: 0, clientX: -12, clientY: 28 }));
+    });
+    await waitFor(() => activeProseMirror.querySelectorAll("table tr").length === rowsBeforeResize, "upward dragging removes only empty trailing rows");
+    assert.equal(activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length, columnsBeforeResize, "left dragging removes only the previewed trailing column");
+    await waitFor(() => postStarted, "table shrink uses the normal durable document save");
+    releasePost?.();
+    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the table shrink save receives its backend acknowledgement");
+    postStarted = false;
+    postedDocument = null;
+    releasePost = undefined;
+
+    tableResizeHandle = editorRoot.querySelector<HTMLButtonElement>('[data-mango-tiptap-table-resize-handle="true"]');
+    assert.ok(tableResizeHandle);
+    await act(async () => {
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 100, clientY: 100 }));
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, cancelable: true, buttons: 1, clientX: -12, clientY: -1_000 }));
+    });
+    await waitFor(() => Boolean(editorRoot.querySelector('[data-mango-tiptap-table-resize-preview="true"]')), "a content-blocked axis still previews a safe shrink on the other axis");
+    resizePreview = editorRoot.querySelector<HTMLElement>('[data-mango-tiptap-table-resize-preview="true"]');
+    assert.equal(resizePreview?.dataset.previewRows, String(rowsBeforeResize), "text blocks deletion of either occupied row");
+    assert.equal(resizePreview?.dataset.previewColumns, "1", "the remaining empty trailing column may still be removed");
+    await act(async () => {
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, cancelable: true, button: 0, clientX: -12, clientY: -1_000 }));
+    });
+    await waitFor(() => activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length === 1, "the handle stops at the occupied column");
+    assert.equal(activeProseMirror.querySelectorAll("table tr").length, rowsBeforeResize, "the handle does not delete rows containing text");
+    assert.match(activeProseMirror.querySelector("table")?.textContent ?? "", /Heading[\s\S]*Cell/, "the protected table text remains intact");
+    await waitFor(() => postStarted, "the independently safe table shrink is saved normally");
+    releasePost?.();
+    await waitFor(() => editorRoot.dataset.mangoEditorPinned !== "true", "the safe shrink save receives its backend acknowledgement");
+    postStarted = false;
+    postedDocument = null;
+    releasePost = undefined;
+
+    tableResizeHandle = editorRoot.querySelector<HTMLButtonElement>('[data-mango-tiptap-table-resize-handle="true"]');
+    assert.ok(tableResizeHandle);
+    const rowsBeforeCancelledResize = activeProseMirror.querySelectorAll("table tr").length;
+    const columnsBeforeCancelledResize = activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length;
+    await act(async () => {
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 100, clientY: 100 }));
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, cancelable: true, buttons: 1, clientX: 225, clientY: 175 }));
+    });
+    await waitFor(() => Boolean(editorRoot.querySelector('[data-mango-tiptap-table-resize-preview="true"]')), "a cancellable table resize first paints its preview");
+    await act(async () => {
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointercancel", { bubbles: true, cancelable: true, button: 0, clientX: 225, clientY: 175 }));
+    });
+    await waitFor(() => !editorRoot.querySelector('[data-mango-tiptap-table-resize-preview="true"]'), "pointer cancel clears the table resize preview");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
+    assert.equal(activeProseMirror.querySelectorAll("table tr").length, rowsBeforeCancelledResize, "pointer cancel adds no rows");
+    assert.equal(activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length, columnsBeforeCancelledResize, "pointer cancel adds no columns");
+    assert.equal(postStarted, false, "pointer cancel starts no durable save");
+
+    tableResizeHandle = editorRoot.querySelector<HTMLButtonElement>('[data-mango-tiptap-table-resize-handle="true"]');
+    assert.ok(tableResizeHandle);
+    await act(async () => {
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 100, clientY: 100 }));
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointermove", { bubbles: true, cancelable: true, buttons: 1, clientX: -1_000, clientY: -1_000 }));
+      tableResizeHandle!.dispatchEvent(new dom.window.MouseEvent("pointerup", { bubbles: true, cancelable: true, button: 0, clientX: -1_000, clientY: -1_000 }));
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
+    assert.equal(editorRoot.querySelector('[data-mango-tiptap-table-resize-preview="true"]'), null, "a fully content-blocked shrink has no preview or mutation");
+    assert.equal(activeProseMirror.querySelectorAll("table tr").length, rowsBeforeResize);
+    assert.equal(activeProseMirror.querySelectorAll("table tr:first-child td, table tr:first-child th").length, 1);
+    assert.equal(postStarted, false, "a fully blocked shrink starts no durable save");
     await act(async () => {
       activeImageFrame.dispatchEvent(new dom.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, button: 0 }));
     });
