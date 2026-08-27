@@ -210,7 +210,8 @@ test("node email and linked text boxes use exact canonical message lists and tex
   assert.match(nodeSurface, /aria-label=\{linkedEmailExpanded \? "Hide linked email" : "Show linked email"\}/);
   assert.match(nodeSurface, /data-node-email-column="true"/);
   assert.match(nodeSurface, /data-node-email-workspace-mode=\{nodeEmailWorkspaceMode\}/);
-  assert.match(nodeSurface, /Math\.max\([\s\S]*TEXT_BLOCK_ROW_HEIGHT,[\s\S]*Math\.floor\(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT - NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX\)/);
+  assert.match(nodeSurface, /resolveTextBlockViewportGeometry\([\s\S]*height - TEXT_BLOCK_HEADER_CHROME_HEIGHT - TEXT_BLOCK_ROW_GAP/);
+  assert.match(nodeSurface, /Math\.max\([\s\S]*textBlockViewport\.rowHeight,[\s\S]*Math\.floor\(height - TEXT_BLOCK_HEADER_CHROME_HEIGHT - NODE_EMAIL_COLUMN_BOTTOM_GUTTER_PX\)/);
   assert.doesNotMatch(nodeSurface, /min\(720px, calc\(100vh - 170px\)\)/);
   assert.match(nodeSurface, /const nodeEmailWorkspaceGridTemplateColumns = nodeEmailColumnVisible/);
   assert.match(nodeSurface, /"minmax\(0, 1fr\) 0px 0px"[\s\S]*"0px 0px minmax\(0, 1fr\)"/);
@@ -232,7 +233,7 @@ test("node email and linked text boxes use exact canonical message lists and tex
   assert.match(nodeSurface, /data-node-linked-email-layout=\{linkedEmailExpanded \? "content-column" : "closed"\}/);
   assert.match(nodeSurface, /data-node-text-box-content-column="true"/);
   assert.match(nodeSurface, /data-node-linked-email-content="true"/);
-  assert.match(nodeSurface, /const chatPaneHeight = TEXT_BLOCK_MIN_HEIGHT/);
+  assert.match(nodeSurface, /const chatPaneHeight = textBlockViewport\.bodyHeight/);
   assert.match(nodeSurface, /fixedHeight=\{chatPaneHeight\}/);
   assert.doesNotMatch(nodeSurface, /fixedHeight=\{communicationPaneHeight\}/);
   assert.match(nodeParts, /height: replyComposerOpen \? "clamp\(420px, calc\(100vh - 300px\), 760px\)" : "auto"/);

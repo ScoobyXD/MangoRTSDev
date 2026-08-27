@@ -7,7 +7,12 @@ import { IDBKeyRange, indexedDB as fakeIndexedDB } from "fake-indexeddb";
 import type { NodeProjectionItem } from "../../../../frontend/src/modules/nodes/nodeRecordStore.ts";
 import { buildEditorAttachedEmailPayload, buildEditorTextBlockChatPayload } from "../../../../frontend/src/modules/editor/editorProjection.ts";
 import { applyEmailBodyHighlights } from "../../../../frontend/src/modules/editor/emailBodyHighlights.ts";
-import { EMAIL_DRAG_MIME, messageAttachmentPayload, parseDraggedEmail } from "../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceShared.tsx";
+import {
+  EMAIL_DRAG_MIME,
+  messageAttachmentPayload,
+  parseDraggedEmail,
+} from "../../../../frontend/src/modules/editor/NodeWorkspaceSurfaceShared.tsx";
+import { resolveTextBlockViewportGeometry } from "../../../../frontend/src/modules/editor/editorRowVirtualization.ts";
 import type { ProjectProjection, ProjectView } from "../../../../frontend/src/modules/project-management/projectManagementApi.ts";
 
 type Restore = () => void;
@@ -337,10 +342,19 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
   installGlobal("requestAnimationFrame", requestFrame, restores);
   installGlobal("cancelAnimationFrame", cancelFrame, restores);
 
+  const resizeObservers: TestResizeObserver[] = [];
   class TestResizeObserver {
-    observe() { return undefined; }
-    unobserve() { return undefined; }
-    disconnect() { return undefined; }
+    private readonly targets = new Set<Element>();
+    constructor(private readonly callback: ResizeObserverCallback) {
+      resizeObservers.push(this);
+    }
+    observe(target: Element) { this.targets.add(target); }
+    unobserve(target: Element) { this.targets.delete(target); }
+    disconnect() { this.targets.clear(); }
+    trigger(target: Element) {
+      if (!this.targets.has(target)) return;
+      this.callback([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this as unknown as ResizeObserver);
+    }
   }
   class TestIntersectionObserver {
     readonly root = null;
@@ -597,6 +611,26 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     element.dispatchEvent(new dom.window.Event("scroll"));
     await flushWork();
   };
+  const resizeElement = async (element: HTMLElement, height: number, width = 1_200) => {
+    Object.defineProperty(element, "clientHeight", { configurable: true, value: height });
+    Object.defineProperty(element, "getBoundingClientRect", {
+      configurable: true,
+      value: () => new dom.window.DOMRect(0, 0, width, height),
+    });
+    const virtualList = element.querySelector<HTMLElement>('[data-mango-bounded-editor-rows]');
+    if (virtualList) {
+      const listOffset = virtualList.dataset.mangoBoundedEditorRows === "node" ? 50 : 0;
+      Object.defineProperty(virtualList, "getBoundingClientRect", {
+        configurable: true,
+        value: () => new dom.window.DOMRect(0, listOffset - element.scrollTop, width, 0),
+      });
+    }
+    await act(async () => {
+      resizeObservers.forEach((observer) => observer.trigger(element));
+      await Promise.resolve();
+    });
+    await flushWork();
+  };
 
   let nodeRoot: { render(value: React.ReactNode): void; unmount(): void } | null = null;
   let projectRoot: { render(value: React.ReactNode): void; unmount(): void } | null = null;
@@ -815,7 +849,23 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     assert.ok(nodeScrollElement);
     assert.equal(nodeScrollElement.style.overflowAnchor, "none");
     assert.equal(nodeScrollElement.style.overscrollBehaviorY, "contain");
-    Object.defineProperty(nodeScrollElement, "clientHeight", { configurable: true, value: 900 });
+    const responsiveNodeRowID = initialNodeRows[0];
+    const assertNodeHeight = (containerHeight: number) => {
+      const geometry = resolveTextBlockViewportGeometry(containerHeight - 50);
+      const row = nodeContainer.querySelector<HTMLElement>(`[data-node-text-box-row="${responsiveNodeRowID}"]`);
+      const panes = row?.querySelector<HTMLElement>('[data-node-text-box-columns="editor-chat"]');
+      const editor = row?.querySelector<HTMLElement>(`[data-node-text-block-id="${responsiveNodeRowID}"]`);
+      assert.ok(row && panes && editor);
+      assert.equal(row.style.height, `${geometry.rowHeight}px`);
+      assert.equal(panes.style.height, `${geometry.bodyHeight}px`);
+      assert.equal(editor.style.height, "100%");
+    };
+    await resizeElement(nodeScrollElement, 700);
+    assertNodeHeight(700);
+    await resizeElement(nodeScrollElement, 900);
+    assertNodeHeight(900);
+    await resizeElement(nodeScrollElement, 821);
+    assertNodeHeight(821);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
     await flushWork();
     const editedBlockID = initialNodeRows[0];
@@ -1652,10 +1702,30 @@ test("real Node and Project surfaces keep rows bounded through load, edits, scro
     const projectScrollElement = projectList?.parentElement;
     assert.ok(projectScrollElement);
     assert.equal(projectScrollElement.style.overflowAnchor, "none");
-    Object.defineProperty(projectScrollElement, "clientHeight", { configurable: true, value: 900 });
+    const responsiveProjectRowID = initialProjectRows[0];
+    const assertProjectHeight = (containerHeight: number) => {
+      const geometry = resolveTextBlockViewportGeometry(containerHeight);
+      const row = projectContainer.querySelector<HTMLElement>(`[data-project-text-box-row="${responsiveProjectRowID}"]`);
+      const panes = row?.querySelector<HTMLElement>('[data-project-text-box-columns="email-editor-chat"]');
+      const editor = row?.querySelector<HTMLElement>(`[data-project-text-block-id="${responsiveProjectRowID}"]`);
+      assert.ok(row && panes && editor);
+      assert.equal(row.style.height, `${geometry.rowHeight}px`);
+      assert.equal(panes.style.height, `${geometry.bodyHeight}px`);
+      assert.equal(editor.style.height, "100%");
+    };
+    await resizeElement(projectScrollElement, 700);
+    assertProjectHeight(700);
+    await resizeElement(projectScrollElement, 900);
+    assertProjectHeight(900);
     await scroll(projectScrollElement, 45_000);
     const distantProjectRows = assertBoundedRows(projectContainer, "project");
     assert.notDeepEqual(distantProjectRows, initialProjectRows, "Project scrolling should move the mounted window");
+    await resizeElement(projectScrollElement, 1_100);
+    assert.deepEqual(
+      assertBoundedRows(projectContainer, "project"),
+      distantProjectRows,
+      "resizing a deep virtualized list should preserve its logical row position",
+    );
 
     const projectTargetID = "project-block-8";
     await act(async () => { projectRoot?.render(renderProject(projectTargetID, 1)); });

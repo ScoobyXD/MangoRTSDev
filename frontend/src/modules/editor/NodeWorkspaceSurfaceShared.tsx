@@ -15,6 +15,7 @@ import type { EditorChatAttachment, EditorTextBlockChatMessage } from "./editorP
 import type { EditorOutlineStyleID } from "./plainTextEditing";
 import type { EditorHighlightColor } from "./richTextEditing";
 import type { EditorDocumentFormattingController, EditorSelectionInlineFormatState, EditorTextAlignment } from "./useEditorDocumentSurfaceHandlers";
+import { TEXT_BLOCK_DEFAULT_BODY_HEIGHT, TEXT_BLOCK_HEADER_CHROME_HEIGHT } from "./editorRowVirtualization";
 export type { MentionableCompanyUser } from "./editorMentions";
 export type RequestJSON = <T,>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -124,8 +125,6 @@ export type ChatThreadNode = {
 export const EMAIL_DRAG_MIME = "application/x-mango-email-message";
 export const CHAT_PANE_MIN_HEIGHT = 440;
 export const CHAT_PANE_MAX_HEIGHT = 900;
-export const TEXT_BLOCK_MIN_HEIGHT = 660;
-export const TEXT_BLOCK_MAX_HEIGHT = 1200;
 export const TEXT_BLOCK_FONT_SIZE = 14;
 export const TEXT_BLOCK_LINE_HEIGHT = 1.45;
 export const TEXT_BLOCK_PADDING_TOP = 12;
@@ -133,10 +132,7 @@ export const TEXT_BLOCK_PADDING_RIGHT = 13;
 export const TEXT_BLOCK_PADDING_BOTTOM = 12;
 export const TEXT_BLOCK_PADDING_LEFT = 13;
 export const TEXT_BLOCK_BOTTOM_BUFFER_ROWS = 10;
-export const TEXT_BLOCK_HEADER_CHROME_HEIGHT = 38;
-export const TEXT_BLOCK_DEFAULT_CARD_HEIGHT = TEXT_BLOCK_MIN_HEIGHT + TEXT_BLOCK_HEADER_CHROME_HEIGHT;
-export const TEXT_BLOCK_ROW_HEIGHT = TEXT_BLOCK_DEFAULT_CARD_HEIGHT + 2;
-export const TEXT_BLOCK_ROW_GAP = 12;
+export const TEXT_BLOCK_DEFAULT_CARD_HEIGHT = TEXT_BLOCK_DEFAULT_BODY_HEIGHT + TEXT_BLOCK_HEADER_CHROME_HEIGHT;
 export const CHAT_PANE_DEFAULT_HEIGHT = TEXT_BLOCK_DEFAULT_CARD_HEIGHT;
 export const DEFAULT_TEXT_BLOCK_TITLE = "Hello I am a title";
 export const EDITOR_NEU_PANEL_BACKGROUND = "linear-gradient(180deg, #fbfbfd 0%, #eef4f8 54%, #f5f0fb 100%)";

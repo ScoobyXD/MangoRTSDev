@@ -69,7 +69,11 @@ import { prepareTextBlockImageFile } from "../editor/nodeTextBlockImageFiles.js"
 import { generateStableInformationID } from "../editor/editorTypes.js";
 import { createEditorScrollMemory } from "../editor/editorScroll.js";
 import { scheduleTransientInformationFocus } from "../editor/transientInformationFocus.js";
-import { useBoundedEditorRowVirtualization } from "../editor/editorRowVirtualization.js";
+import {
+  resolveTextBlockViewportGeometry,
+  TEXT_BLOCK_ROW_GAP,
+  useBoundedEditorRowVirtualization,
+} from "../editor/editorRowVirtualization.js";
 import {
   UnifiedNodeShell,
   UnifiedNodeShellFullscreenIcon,
@@ -104,9 +108,6 @@ import {
   PaperclipIcon,
   ChatIcon,
   TextEditorIcon,
-  TEXT_BLOCK_MIN_HEIGHT,
-  TEXT_BLOCK_ROW_GAP,
-  TEXT_BLOCK_ROW_HEIGHT,
   TEXT_BLOCK_FONT_SIZE,
   uploadEditorAttachment,
   type TextBlockImageDraft,
@@ -539,6 +540,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   const [projectInlineFormat, setProjectInlineFormat] = useState<EditorSelectionInlineFormatState>({ bold: false, underline: false, italic: false, strikethrough: false });
   const [projectHighlightColor, setProjectHighlightColor] = useState<EditorHighlightColor | null>(null);
   const [projectTextAlignment, setProjectTextAlignment] = useState<EditorTextAlignment>("left");
+  const [textBlocksViewportHeight, setTextBlocksViewportHeight] = useState(0);
   const { outlineStyle, setOutlineStyle } = useEditorPreferences(`project-summary-outline-style-v1:${companyID}:${projectID}`);
   const blocksRef = useRef(blocks);
   const projectRef = useRef(project);
@@ -996,15 +998,35 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
     return Array.from(indices);
   }, [activeRichTextBlockID, activeRowBlockID, focusedTextBlockID, timelineBlocks, tiptapPinnedBlockIDs]);
+  const textBlockViewport = resolveTextBlockViewportGeometry(textBlocksViewportHeight);
   const projectRowVirtualizer = useBoundedEditorRowVirtualization({
     itemCount: timelineBlocks.length,
-    rowHeight: TEXT_BLOCK_ROW_HEIGHT,
+    rowHeight: textBlockViewport.rowHeight,
     rowGap: TEXT_BLOCK_ROW_GAP,
     scrollElementRef: textBlocksScrollRef,
     targetIndex: focusTargetIndex >= 0 ? focusTargetIndex : null,
     targetRequestKey: `${projectID}:${focusInformationID ?? ""}:${focusRequestID ?? 0}`,
     pinnedIndices: pinnedProjectRowIndices,
   });
+
+  useLayoutEffect(() => {
+    const element = textBlocksScrollRef.current;
+    if (!element) return undefined;
+    const measure = () => {
+      const nextHeight = Math.floor(element.clientHeight);
+      if (nextHeight <= 0) return;
+      setTextBlocksViewportHeight((current) => current === nextHeight ? current : nextHeight);
+    };
+    measure();
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(measure);
+      observer.observe(element);
+      return () => observer.disconnect();
+    }
+    const ownerWindow = element.ownerDocument.defaultView;
+    ownerWindow?.addEventListener("resize", measure);
+    return () => ownerWindow?.removeEventListener("resize", measure);
+  }, [loading]);
 
   useEffect(() => {
     const targetID = focusInformationID?.trim() ?? "";
@@ -3425,13 +3447,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                 const blockSaveFallback = savingID === block.id ? { status: "saving" as const } : { status: "saved" as const, updatedTimestamp: block.updatedTimestamp };
                 const blockSaveNeedsFailureAttention = Boolean(textBlockSaveFailures[block.id]);
                 return (
-                  <div key={block.id} style={{ ...projectTimelineRowStyle, height: TEXT_BLOCK_ROW_HEIGHT + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
-                    <TimelineCell accent={accent} muted={false} isLast={index === timelineBlocks.length - 1} />
+                  <div key={block.id} style={{ ...projectTimelineRowStyle, height: textBlockViewport.rowHeight + TEXT_BLOCK_ROW_GAP, paddingBottom: TEXT_BLOCK_ROW_GAP, boxSizing: "border-box", overflow: "hidden" }}>
+                    <TimelineCell accent={accent} muted={false} isLast={index === timelineBlocks.length - 1} minHeight={textBlockViewport.rowHeight} />
                     <div
                       className={`mango-fixed-editor-row${blockSaveNeedsFailureAttention ? " mango-editor-save-failed-frame" : ""}`}
                       data-project-text-box-row={block.id}
                       data-email-chat-destination={projectEmailChatDestinationBlockID === block.id ? "true" : undefined}
-                      style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id, block.color), height: TEXT_BLOCK_ROW_HEIGHT, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)", outline: projectEmailChatDestinationBlockID === block.id ? `3px solid ${accent}` : undefined, outlineOffset: -2 }}
+                      style={{ ...projectTextBlockCardStyle(focusedTextBlockID === block.id, block.color), height: textBlockViewport.rowHeight, display: "grid", gridTemplateRows: "38px minmax(0, 1fr)", outline: projectEmailChatDestinationBlockID === block.id ? `3px solid ${accent}` : undefined, outlineOffset: -2 }}
                     >
                       <div
                         className="mango-editor-header-scroll"
@@ -3515,9 +3537,9 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                         </div>
                       </div>
                       <div style={{ minWidth: 0, minHeight: 0, overflowX: "auto", overflowY: "hidden" }}>
-                        <div data-project-text-box-columns="email-editor-chat" style={{ minWidth: Math.max(1, minimumWidth), height: TEXT_BLOCK_MIN_HEIGHT, display: "grid", gridTemplateColumns: bodyColumns }}>
+                        <div data-project-text-box-columns="email-editor-chat" style={{ minWidth: Math.max(1, minimumWidth), height: textBlockViewport.bodyHeight, display: "grid", gridTemplateColumns: bodyColumns }}>
                           {contentOpen && (
-                            <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, display: "grid", gridTemplateRows: linkedEmailOpen && editorOpen ? "minmax(100px, 0.8fr) minmax(120px, 1fr)" : "minmax(0, 1fr)", overflow: "hidden" }}>
+                            <div style={{ minWidth: 0, height: textBlockViewport.bodyHeight, display: "grid", gridTemplateRows: linkedEmailOpen && editorOpen ? "minmax(100px, 0.8fr) minmax(120px, 1fr)" : "minmax(0, 1fr)", overflow: "hidden" }}>
                               {linkedEmailOpen ? (
                                 <div data-project-linked-email-content="true" style={{ minWidth: 0, minHeight: 0, overflow: "auto", borderBottom: editorOpen ? `1px solid ${EDITOR_NEU_SOFT_BORDER}` : undefined }}>
                                   <LinkedEmailPreviewPane
@@ -3551,6 +3573,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 ) : (
                               <NodeTextBlockEditor
                                 key={`${block.id}:${projectDocumentRemountRevision}`}
+                                fillHeight
                                 blockID={block.id}
                                 surfaceKind="project"
                                 editable
@@ -3625,7 +3648,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                           )}
                           {chatOpen && <div role="separator" aria-label="Resize chat column" aria-orientation="vertical" onPointerDown={(event) => beginProjectColumnResize("chat", event)} style={projectColumnResizeHandleStyle} />}
                           {chatOpen && (
-                            <div style={{ minWidth: 0, height: TEXT_BLOCK_MIN_HEIGHT, overflow: "hidden", borderLeft: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
+                            <div style={{ minWidth: 0, height: textBlockViewport.bodyHeight, overflow: "hidden", borderLeft: `1px solid ${EDITOR_NEU_SOFT_BORDER}` }}>
                               <ChatPane
                                 blockID={block.id}
                                 editable
@@ -3646,7 +3669,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 attachmentsEnabled={!block.temporaryEmailChat}
                                 replyTargetID={chatReplyTargets[block.id] ?? ""}
                                 heightStorageKey={`project-summary-chat-pane-height:${companyID}:${projectID}:${block.id}`}
-                                fixedHeight={TEXT_BLOCK_MIN_HEIGHT}
+                                fixedHeight={textBlockViewport.bodyHeight}
                                 active={focusedTextBlockID === block.id}
                                 currentUserID={currentUserID || "local-user"}
                                 activeMessageID={activeChatMessageIDs[block.id] ?? ""}

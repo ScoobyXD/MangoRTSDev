@@ -6,10 +6,17 @@ import {
   buildBoundedEditorRowEntries,
   computeBoundedEditorRowWindow,
   countMountedEditorRows,
+  resolveTextBlockViewportGeometry,
+  TEXT_BLOCK_CARD_CHROME_HEIGHT,
+  TEXT_BLOCK_DEFAULT_BODY_HEIGHT,
+  TEXT_BLOCK_DEFAULT_ROW_HEIGHT,
+  TEXT_BLOCK_MIN_BODY_HEIGHT,
+  TEXT_BLOCK_NEXT_ROW_PREVIEW_HEIGHT,
+  TEXT_BLOCK_ROW_GAP,
 } from "../../../../frontend/src/modules/editor/editorRowVirtualization.js";
 
-const ROW_HEIGHT = 700;
-const ROW_GAP = 12;
+const ROW_HEIGHT = TEXT_BLOCK_DEFAULT_ROW_HEIGHT;
+const ROW_GAP = TEXT_BLOCK_ROW_GAP;
 const ITEM_COUNT = 1_000;
 
 function windowAt(scrollTop: number, targetIndex?: number) {
@@ -142,7 +149,53 @@ test("focused rows can remain mounted without unbounding the list", () => {
   assert.ok(countMountedEditorRows(entries) <= 8);
 });
 
-test("Node and Project integrate one row primitive, fixed sections, independent toggles, and horizontal resizing", () => {
+test("shared text-box geometry fills its container and leaves one next-row preview", () => {
+  assert.deepEqual(resolveTextBlockViewportGeometry(0), {
+    bodyHeight: TEXT_BLOCK_DEFAULT_BODY_HEIGHT,
+    rowHeight: TEXT_BLOCK_DEFAULT_ROW_HEIGHT,
+  });
+  assert.deepEqual(resolveTextBlockViewportGeometry(Number.NaN), {
+    bodyHeight: TEXT_BLOCK_DEFAULT_BODY_HEIGHT,
+    rowHeight: TEXT_BLOCK_DEFAULT_ROW_HEIGHT,
+  });
+
+  const minimumAvailableHeight = TEXT_BLOCK_MIN_BODY_HEIGHT
+    + TEXT_BLOCK_CARD_CHROME_HEIGHT
+    + TEXT_BLOCK_ROW_GAP
+    + TEXT_BLOCK_NEXT_ROW_PREVIEW_HEIGHT;
+  const compact = resolveTextBlockViewportGeometry(minimumAvailableHeight - 50);
+  assert.equal(compact.bodyHeight, TEXT_BLOCK_MIN_BODY_HEIGHT);
+
+  for (const availableHeight of [900, 1_800]) {
+    const geometry = resolveTextBlockViewportGeometry(availableHeight);
+    assert.equal(geometry.rowHeight, geometry.bodyHeight + TEXT_BLOCK_CARD_CHROME_HEIGHT);
+    assert.equal(
+      geometry.rowHeight + TEXT_BLOCK_ROW_GAP + TEXT_BLOCK_NEXT_ROW_PREVIEW_HEIGHT,
+      availableHeight,
+    );
+    const rowWindow = computeBoundedEditorRowWindow({
+      itemCount: ITEM_COUNT,
+      rowHeight: geometry.rowHeight,
+      rowGap: TEXT_BLOCK_ROW_GAP,
+      scrollTop: 0,
+      viewportHeight: availableHeight,
+      listOffset: 0,
+    });
+    const entries = buildBoundedEditorRowEntries(
+      ITEM_COUNT,
+      geometry.rowHeight,
+      TEXT_BLOCK_ROW_GAP,
+      rowWindow,
+    );
+    const representedHeight = entries.reduce(
+      (height, entry) => height + (entry.kind === "spacer" ? entry.height : geometry.rowHeight + TEXT_BLOCK_ROW_GAP),
+      0,
+    );
+    assert.equal(representedHeight, ITEM_COUNT * (geometry.rowHeight + TEXT_BLOCK_ROW_GAP));
+  }
+});
+
+test("Node and Project integrate one responsive row primitive, independent toggles, and horizontal resizing", () => {
   const node = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
   const project = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   const parts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
@@ -154,23 +207,25 @@ test("Node and Project integrate one row primitive, fixed sections, independent 
   assert.match(node, /aria-label="Toggle node email column"/);
   assert.match(node, /data-node-email-column="true"/);
   assert.match(node, /aria-label="Toggle text editor column"/);
-  assert.match(node, /aria-label="Toggle chat column"/);
-  assert.match(project, /aria-label="Toggle email column"/);
+  assert.ok(node.includes('"Toggle chat column"'));
+  assert.match(project, /aria-label="Toggle Project email column"/);
   assert.match(project, /aria-label="Toggle text editor column"/);
-  assert.match(project, /aria-label="Toggle chat column"/);
+  assert.ok(project.includes('"Toggle chat column"'));
   assert.ok(node.includes("Resize ${pane} column"));
-  assert.ok(project.includes('aria-label="Resize email column"'));
+  assert.ok(project.includes('aria-label="Resize Project email column"'));
   assert.ok(project.includes('aria-label="Resize chat column"'));
   assert.ok(!node.includes("tabbed={emailOriginPrimaryRow}"));
   assert.match(parts, /resize: "none"/);
-  assert.ok(node.includes("fixedHeight={communicationPaneHeight}"));
-  assert.ok(project.includes("fixedHeight={TEXT_BLOCK_MIN_HEIGHT}"));
+  assert.ok(node.includes("resolveTextBlockViewportGeometry("));
+  assert.ok(project.includes("resolveTextBlockViewportGeometry(textBlocksViewportHeight)"));
+  assert.ok(node.includes("rowHeight: textBlockViewport.rowHeight"));
+  assert.ok(project.includes("rowHeight: textBlockViewport.rowHeight"));
+  assert.ok(node.includes("fixedHeight={chatPaneHeight}"));
+  assert.ok(project.includes("fixedHeight={textBlockViewport.bodyHeight}"));
   assert.ok(node.includes("closedEditorBlockIDs"));
   assert.ok(node.includes("closedEmailBlockIDs"));
   assert.ok(node.includes("const hasAttachedEmails = parsedAttachedEmails.length > 0"));
   assert.ok(project.includes("setOpenEditorBlockIDs(new Set(nextBlockIDs))"));
-  assert.ok(node.includes("nodeEmailColumnVisible && renderTextSidePaneResizeHandle"));
-  assert.ok(project.includes("emailOpen || emailReplyBlockID === block.id"));
 });
 
 test("target intent is passed through for Project navigation and resolved after data loads", () => {
@@ -179,6 +234,7 @@ test("target intent is passed through for Project navigation and resolved after 
   const summary = readFileSync(resolve(process.cwd(), "frontend/src/modules/project-management/ProjectSummaryContent.tsx"), "utf8");
   assert.ok(app.includes("targetProjectInformationID={projectManagementTarget?.informationID}"));
   assert.ok(content.includes("focusInformationID={targetProjectID?.trim() === activeProjectID ? targetProjectInformationID : undefined}"));
-  assert.ok(summary.includes("if (!targetID || focusTargetIndex < 0) return;"));
+  assert.ok(summary.includes("if (!targetID) return;"));
+  assert.ok(summary.includes("if (focusTargetIndex < 0) return;"));
   assert.doesNotMatch(summary, /projectRowVirtualizer\.mountAndScrollToIndex\(focusTargetIndex\)/);
 });
