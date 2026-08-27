@@ -42,8 +42,9 @@ Last updated: 2026-08-08
 28. Recycling and restoring a Logic Gate MUST preserve its exact saved `scorecards` values and attribution, while permanent deletion MUST remove those values without affecting another Logic Gate.
 29. A Logic Gate page opened from Process Map MUST use the canonical Logic Gate editor and Kanban page inside the shared blocking modal layer, fill the viewport except for a six-pixel outer inset, and expose an accessible red close action; closing it MUST return to the still-mounted Process Map without changing that map's layer, URL, viewport, placements, or traces.
 30. Choosing today's QDC slice MUST show only the Blank, Green, Yellow, and Red choices with no second close action; clicking elsewhere in that tracker or Process data card MUST dismiss those choices without saving.
+31. In the normal Logic Gate editor, only the shared editor toolbar and Process title remain pinned; RACI, the combined Huddle/KPI row, QDC, and the editor document MUST share one vertical scroll flow in that order.
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 # Process Story: A Process receives one shared daily Quality, Cost, and Delivery rating
 

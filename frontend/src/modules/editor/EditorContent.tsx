@@ -25,7 +25,7 @@ import {
   parseEditorTextBlockContent,
   selectCurrentEditorTextProjection,
 } from "./editorProjection";
-import { EditorLinkedDocumentPanels } from "./EditorLinkedDocumentPanels";
+import { EditorLinkedDocumentPanels, RACIAssignmentBoard } from "./EditorLinkedDocumentPanels";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "./editorDates";
 import { EditorTabBar } from "./EditorTabBar";
 import { editorSaveNeedsFailureAttention } from "./EditorSaveStatusIcon.js";
@@ -2318,6 +2318,32 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
       }).catch((cause) => setError(logicGateConversionErrorMessage(cause)));
     },
   };
+  const logicGateScrollableMetadata = linkedEntityKind === "logic_gate" && (activeTab === "editor" || activeTab === "outline-styles") ? (
+    <div
+      data-logic-gate-scrollable-metadata="true"
+      style={{ minWidth: 0, display: "grid", gap: 8, padding: "0 12px 8px 8px" }}
+    >
+      <RACIAssignmentBoard
+        assignments={logicGateRACIAssignments}
+        overwrittenByAncestor={gvicPolicyOverwrittenByAncestor}
+        companyUsers={companyUsers}
+        companyUserGroups={companyUserGroups}
+        companyUserGroupMembers={companyUserGroupMembers}
+        accent={accent}
+        panelBackground={panelBackground}
+        ruleColor={ruleColor}
+        canEdit={Boolean(linkedNodeID) && linkedEntityCanEdit}
+        onAddPrincipal={addLogicGateRACIPrincipal}
+        onRemovePrincipal={removeLogicGateRACIPrincipal}
+      />
+      {activeTab === "editor" && (
+        <>
+          <LogicGateKPISection companyID={companyID} logicGateID={linkedNodeID} canEdit={linkedEntityCanEdit} currentUserID={currentUserID} requestJSON={requestJSON} />
+          <LogicGateQDTracker apiBase={apiBase} companyID={companyID} logicGateID={linkedNodeID} canEdit={linkedEntityCanEdit} requestJSON={requestJSON} />
+        </>
+      )}
+    </div>
+  ) : null;
 
   return (
     <div
@@ -2331,7 +2357,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
     >
       <div style={{ position: "relative", width: "100%", height: "100%", minHeight: 0, cursor: "text" }}>
         {hasLinkedDocument && (
-          <div ref={editorHeaderRef} style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gridTemplateColumns: "minmax(0,1fr)", gap: 8, zIndex: 60, pointerEvents: "none" }}>
+          <div data-editor-pinned-header="true" ref={editorHeaderRef} style={{ position: "absolute", top: 4, left: 8, right: 12, display: "grid", gridTemplateColumns: "minmax(0,1fr)", gap: 8, zIndex: 60, pointerEvents: "none" }}>
           <EditorTabBar
             activeTab={activeTab}
             outlineStyle={outlineStyle}
@@ -2417,9 +2443,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               assignments: nodeRACIAssignments,
               inherited: nodeRACIIsInherited,
               overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
-            } : linkedEntityKind === "logic_gate" ? {
-              assignments: logicGateRACIAssignments,
-              overwrittenByAncestor: gvicPolicyOverwrittenByAncestor,
             } : null}
             companyUsers={companyUsers}
             companyUserGroups={companyUserGroups}
@@ -2442,13 +2465,6 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
             onAddRACIPrincipal={linkedEntityKind === "node" ? addNodeRACIPrincipal : addLogicGateRACIPrincipal}
             onRemoveRACIPrincipal={linkedEntityKind === "node" ? removeNodeRACIPrincipal : removeLogicGateRACIPrincipal}
           />
-
-          {linkedEntityKind === "logic_gate" && activeTab === "editor" && (
-            <>
-              <LogicGateKPISection companyID={companyID} logicGateID={linkedNodeID} canEdit={linkedEntityCanEdit} currentUserID={currentUserID} requestJSON={requestJSON} />
-              <LogicGateQDTracker apiBase={apiBase} companyID={companyID} logicGateID={linkedNodeID} canEdit={linkedEntityCanEdit} requestJSON={requestJSON} />
-            </>
-          )}
 
           </div>
         )}
@@ -2594,6 +2610,7 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
               className={logicGateSaveFailed ? "mango-editor-save-failed-frame" : undefined}
               dataAttributes={{ "data-logic-gate-information-id": documentInformationID }}
               value={documentDraftRef.current}
+              leadingContent={logicGateScrollableMetadata}
               editable={editorWriteEnabled}
               outlineStyle={outlineStyle}
               style={{ position: "absolute", top: documentTopPx, right: 0, bottom: 0, left: 0, overflowY: "auto", color: editorPrimaryText, fontFamily: documentFontFamily, fontSize: documentFontSize, lineHeight: EDITOR_DOCUMENT_LINE_HEIGHT }}
