@@ -147,6 +147,22 @@ where placement.company_id=ranked.company_id
   and placement.resource_id=ranked.resource_id`, companyID); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(`
+update workspace_read_versions
+set version=version+case scope when 'process-map' then 1000000 else 2000000 end
+where company_id=$1::uuid
+  and scope in ('process-map','workspace-snapshot:full')
+  and resource_key=''`, companyID); err != nil {
+		t.Fatal(err)
+	}
+	var processReadVersionBefore, fullReadVersionBefore int64
+	if err := db.QueryRow(`
+select max(version) filter(where scope='process-map'),
+       max(version) filter(where scope='workspace-snapshot:full')
+from workspace_read_versions
+where company_id=$1::uuid and resource_key=''`, companyID).Scan(&processReadVersionBefore, &fullReadVersionBefore); err != nil {
+		t.Fatal(err)
+	}
 
 	beforeDimensions := readProcessMapActualSizeDimensions(t, repo, companyID)
 	before := readProcessMapSquareMigrationSnapshot(t, repo, companyID)
@@ -162,6 +178,26 @@ where placement.company_id=ranked.company_id
 	}
 	if after.relationships != before.relationships || after.traces != before.traces {
 		t.Fatalf("actual-size layout changed relationships or traces:\nrelationships before=%s after=%s\ntraces before=%s after=%s", before.relationships, after.relationships, before.traces, after.traces)
+	}
+	var markerSequence, processReadVersionAfter, fullReadVersionAfter int64
+	if err := db.QueryRow(`
+select marker.sequence,process_read.version,full_read.version
+from domain_events marker
+join workspace_read_versions process_read
+  on process_read.company_id=marker.company_id
+ and process_read.scope='process-map' and process_read.resource_key=''
+join workspace_read_versions full_read
+  on full_read.company_id=marker.company_id
+ and full_read.scope='workspace-snapshot:full' and full_read.resource_key=''
+where marker.company_id=$1::uuid
+  and marker.idempotency_key='migration:20260826-process-map-actual-size-square-layout'`, companyID).Scan(
+		&markerSequence, &processReadVersionAfter, &fullReadVersionAfter,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if markerSequence <= processReadVersionBefore || markerSequence <= fullReadVersionBefore ||
+		processReadVersionAfter != markerSequence || fullReadVersionAfter != markerSequence {
+		t.Fatalf("actual-size marker/read versions before=%d/%d marker=%d after=%d/%d", processReadVersionBefore, fullReadVersionBefore, markerSequence, processReadVersionAfter, fullReadVersionAfter)
 	}
 	for key, wanted := range beforeDimensions {
 		got := afterDimensions[key]
@@ -219,12 +255,13 @@ where company_id=$1::uuid
 		t.Fatalf("actual-size root footprint %dx%d has aspect %.3f, want <= 2.5", bounds.width(), bounds.height(), aspect)
 	}
 
-	legacyNames := []string{
+	recordedNames := []string{
+		"20260826_zzzy_process_map_actual_size_square_layout.sql",
 		"20260826_zzzz_process_map_tidy_initial_layout.sql",
 		"20260826_zzzzz_process_map_rectangular_layout.sql",
 		"20260826_zzzzzz_process_map_square_layout.sql",
 	}
-	sort.Strings(legacyNames)
+	sort.Strings(recordedNames)
 	rows, err := db.Query(`select version from schema_migrations order by version`)
 	if err != nil {
 		t.Fatal(err)
@@ -239,8 +276,8 @@ where company_id=$1::uuid
 		recorded = append(recorded, name)
 	}
 	rows.Close()
-	if fmt.Sprint(recorded) != fmt.Sprint(legacyNames) {
-		t.Fatalf("superseded migration ledger rows = %v, want %v", recorded, legacyNames)
+	if fmt.Sprint(recorded) != fmt.Sprint(recordedNames) {
+		t.Fatalf("replay-safe migration ledger rows = %v, want %v", recorded, recordedNames)
 	}
 
 	restart := readProcessMapSquareMigrationSnapshot(t, repo, companyID)
@@ -249,6 +286,21 @@ where company_id=$1::uuid
 	}
 	if replayed := readProcessMapSquareMigrationSnapshot(t, repo, companyID); replayed != restart {
 		t.Fatalf("actual-size migration replay changed data:\nbefore=%+v\nafter=%+v", restart, replayed)
+	}
+	if _, err := db.Exec(`
+insert into domain_events(event_id,company_id,stream_type,stream_id,sequence,event_type,idempotency_key,payload)
+select gen_random_uuid(),$1::uuid,'workspace',$1::text,coalesce(max(sequence),0)+1,
+       'unrelated_test_event','test:actual-size-unrelated-replay','{}'::jsonb
+from domain_events
+where company_id=$1::uuid and stream_type='workspace' and stream_id=$1::text`, companyID); err != nil {
+		t.Fatal(err)
+	}
+	unrelatedActivity := readProcessMapSquareMigrationSnapshot(t, repo, companyID)
+	if _, err := db.Exec(migration); err != nil {
+		t.Fatalf("restart actual-size layout after unrelated workspace activity: %v", err)
+	}
+	if replayed := readProcessMapSquareMigrationSnapshot(t, repo, companyID); replayed != unrelatedActivity {
+		t.Fatalf("actual-size replay after unrelated activity changed data:\nbefore=%+v\nafter=%+v", unrelatedActivity, replayed)
 	}
 
 	var changedProcessID string
@@ -275,7 +327,7 @@ where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uui
 		t.Fatalf("rollback actual-size manual-geometry refusal: %v", rollbackErr)
 	}
 	connection.Close()
-	if migrationErr == nil || !strings.Contains(migrationErr.Error(), "already ran") {
+	if migrationErr == nil || !strings.Contains(migrationErr.Error(), "expected placement state changed") {
 		t.Fatalf("actual-size manual-geometry rerun error = %v", migrationErr)
 	}
 	if refused := readProcessMapSquareMigrationSnapshot(t, repo, companyID); refused != manualSnapshot {
@@ -302,7 +354,7 @@ delete from process_map_placements
 where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`, company.CompanyID, folder.FolderID); err != nil {
 			t.Fatal(err)
 		}
-		assertProcessMapActualSizeMissingPlacementRefusal(t, repo, company.CompanyID, "Folder is missing its Process Map placement")
+		assertProcessMapActualSizeMigrationRefusal(t, repo, company.CompanyID, "Folder is missing its Process Map placement")
 	})
 
 	t.Run("Process", func(t *testing.T) {
@@ -323,15 +375,20 @@ delete from process_map_placements
 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, process.LogicGateID); err != nil {
 			t.Fatal(err)
 		}
-		assertProcessMapActualSizeMissingPlacementRefusal(t, repo, company.CompanyID, "Process is missing its Process Map placement")
+		assertProcessMapActualSizeMigrationRefusal(t, repo, company.CompanyID, "Process is missing its Process Map placement")
 	})
 }
 
-func assertProcessMapActualSizeMissingPlacementRefusal(t *testing.T, repo *PostgresRepo, companyID, wantedError string) {
+func assertProcessMapActualSizeMigrationRefusal(t *testing.T, repo *PostgresRepo, companyID, wantedError string) {
 	t.Helper()
 	before := readProcessMapSquareMigrationSnapshot(t, repo, companyID)
-	var eventsBefore int
+	var eventsBefore, recoveryRowsBefore int
 	if err := repo.db.QueryRow(`select count(*) from domain_events where company_id=$1::uuid`, companyID).Scan(&eventsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.QueryRow(`
+select (select count(*) from process_map_actual_size_layout_recovery_placements)
+     + (select count(*) from process_map_actual_size_layout_recovery_runs)`).Scan(&recoveryRowsBefore); err != nil {
 		t.Fatal(err)
 	}
 	migration := readProcessMapSquareMigrationFile(t, "20260826_zzzy_process_map_actual_size_square_layout.sql")
@@ -351,15 +408,71 @@ func assertProcessMapActualSizeMissingPlacementRefusal(t *testing.T, repo *Postg
 	if after := readProcessMapSquareMigrationSnapshot(t, repo, companyID); after != before {
 		t.Fatalf("actual-size missing-placement refusal changed data:\nbefore=%+v\nafter=%+v", before, after)
 	}
-	var ledgerRows, eventsAfter int
+	var ledgerRows, eventsAfter, recoveryRowsAfter int
 	if err := repo.db.QueryRow(`select count(*) from schema_migrations`).Scan(&ledgerRows); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.db.QueryRow(`select count(*) from domain_events where company_id=$1::uuid`, companyID).Scan(&eventsAfter); err != nil {
 		t.Fatal(err)
 	}
-	if ledgerRows != 0 || eventsAfter != eventsBefore {
-		t.Fatalf("missing-placement refusal recorded %d migration rows and changed domain event count from %d to %d", ledgerRows, eventsBefore, eventsAfter)
+	if err := repo.db.QueryRow(`
+select (select count(*) from process_map_actual_size_layout_recovery_placements)
+     + (select count(*) from process_map_actual_size_layout_recovery_runs)`).Scan(&recoveryRowsAfter); err != nil {
+		t.Fatal(err)
+	}
+	if ledgerRows != 0 || eventsAfter != eventsBefore || recoveryRowsAfter != recoveryRowsBefore {
+		t.Fatalf("actual-size refusal recorded %d migration rows, changed domain events %d->%d, recovery rows %d->%d", ledgerRows, eventsBefore, eventsAfter, recoveryRowsBefore, recoveryRowsAfter)
+	}
+}
+
+func TestPostgresProcessMapActualSizeLayoutMigrationRejectsUnsafeRecoveryAndReadVersionStructure(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		wanted string
+		mutate func(t *testing.T, repo *PostgresRepo, companyID string)
+	}{
+		{name: "disabled read-version trigger", wanted: "enabled read-version trigger", mutate: func(t *testing.T, repo *PostgresRepo, _ string) {
+			if _, err := repo.db.Exec(`alter table domain_events disable trigger trg_update_workspace_read_versions`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "maximum read version", wanted: "maximum workspace event sequence", mutate: func(t *testing.T, repo *PostgresRepo, companyID string) {
+			if _, err := repo.db.Exec(`
+update workspace_read_versions set version=9223372036854775807
+where company_id=$1::uuid and scope='process-map' and resource_key=''`, companyID); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "recovery column drift", wanted: "recovery table structure is unsafe", mutate: func(t *testing.T, repo *PostgresRepo, _ string) {
+			if _, err := repo.db.Exec(`
+alter table process_map_actual_size_layout_recovery_placements
+alter column changed_by_migration drop not null`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "recovery constraint drift", wanted: "recovery table structure is unsafe", mutate: func(t *testing.T, repo *PostgresRepo, _ string) {
+			if _, err := repo.db.Exec(`
+alter table process_map_actual_size_layout_recovery_runs
+drop constraint pm_actual_size_recovery_runs_counts_chk`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, repo := openPostgresProcessMapIntegration(t)
+			company, err := repo.CreateCompany("Process Map actual-size unsafe structure")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Unsafe structure root"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := repo.db.Exec(schemaMigrationsTableSQLForProcessMapTest()); err != nil {
+				t.Fatal(err)
+			}
+			testCase.mutate(t, repo, company.CompanyID)
+			assertProcessMapActualSizeMigrationRefusal(t, repo, company.CompanyID, testCase.wanted)
+		})
 	}
 }
 

@@ -169,9 +169,10 @@ create table company_explorer_items(
 );
 create table logic_gates(company_id uuid not null,logic_gate_id uuid not null,primary key(company_id,logic_gate_id));
 create table process_map_placements(
-  company_id uuid not null,resource_type text not null,resource_id uuid not null,map_parent_folder_id uuid,
+  company_id uuid not null,resource_type text not null,resource_id uuid not null,
+  placement_incarnation_token uuid not null default gen_random_uuid(),map_parent_folder_id uuid,
   grid_x integer not null,grid_y integer not null,grid_width integer not null,grid_height integer not null,
-  revision bigint not null,updated_timestamp timestamptz not null,
+  revision bigint not null,created_timestamp timestamptz not null default now(),updated_timestamp timestamptz not null,
   primary key(company_id,resource_type,resource_id)
 );
 create table domain_events(
@@ -179,6 +180,30 @@ create table domain_events(
   sequence bigint not null,event_type text not null,actor_user_id uuid,idempotency_key text,payload jsonb not null,
   created_timestamp timestamptz not null
 );
+create table workspace_read_versions(
+  company_id uuid not null,scope text not null,resource_key text not null default '',
+  version bigint not null,updated_timestamp timestamptz not null,
+  primary key(company_id,scope,resource_key)
+);
+create function workspace_read_version_keys_for_domain_event(text,jsonb)
+returns table(scope text,resource_key text)
+language sql immutable as $$
+  select * from (values ('workspace-snapshot:full',''),('process-map','')) keys(scope,resource_key)
+$$;
+create function trg_update_workspace_read_versions()
+returns trigger language plpgsql as $$
+begin
+  insert into workspace_read_versions(company_id,scope,resource_key,version,updated_timestamp)
+  select new.company_id,keys.scope,keys.resource_key,new.sequence,new.created_timestamp
+  from workspace_read_version_keys_for_domain_event(new.event_type,new.payload) keys
+  on conflict(company_id,scope,resource_key) do update
+  set version=greatest(workspace_read_versions.version,excluded.version),
+      updated_timestamp=greatest(workspace_read_versions.updated_timestamp,excluded.updated_timestamp);
+  return new;
+end;
+$$;
+create trigger trg_update_workspace_read_versions after insert on domain_events
+for each row execute function trg_update_workspace_read_versions();
 insert into company_explorer_folders(company_id,folder_id,parent_folder_id,position,created_timestamp) values
   ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222221',null,1000,now()),
   ('11111111-1111-4111-8111-111111111111','22222222-2222-4222-8222-222222222222','22222222-2222-4222-8222-222222222221',1000,now());
@@ -202,7 +227,7 @@ insert into process_map_placements(company_id,resource_type,resource_id,map_pare
 		defer conn.Close()
 		migrationPath := filepath.Join("..", "..", "db", "migrations", processMapActualSizeLayoutMigration)
 		if err := execSQLFileInTransaction(context.Background(), conn, migrationPath, nil, func(tx *sql.Tx) error {
-			_, err := tx.Exec(`insert into schema_migrations(version) values ($1)`, processMapActualSizeLayoutMigration)
+			_, err := tx.Exec(`insert into schema_migrations(version) values ($1) on conflict (version) do nothing`, processMapActualSizeLayoutMigration)
 			return err
 		}); err != nil {
 			t.Fatal(err)

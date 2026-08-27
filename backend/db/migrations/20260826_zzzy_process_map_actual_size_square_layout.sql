@@ -1,11 +1,15 @@
 -- Supersede the three historical Process Map layout migrations without
 -- rewriting them. This migration runs first, keeps every persisted dimension,
--- and records the obsolete filenames only after the corrected layout succeeds.
+-- captures exact recovery evidence, and records itself plus the obsolete
+-- filenames only after the corrected layout succeeds.
 
 begin;
 
+set local timezone='UTC';
+
 lock table schema_migrations, company_explorer_folders, company_explorer_items,
-  logic_gates, process_map_placements, domain_events in share row exclusive mode;
+  logic_gates, process_map_placements, domain_events, workspace_read_versions
+  in share row exclusive mode;
 
 do $$
 begin
@@ -13,6 +17,19 @@ begin
     current_setting('server_version'),current_setting('server_version_num');
   if current_setting('server_version_num')::integer < 170000 then
     raise exception 'STOP: Process Map actual-size layout requires PostgreSQL 17 or newer';
+  end if;
+  if to_regprocedure('public.workspace_read_version_keys_for_domain_event(text,jsonb)') is null
+     or to_regprocedure('public.trg_update_workspace_read_versions()') is null
+     or not exists (
+       select 1
+       from pg_trigger trigger_row
+       where trigger_row.tgrelid='public.domain_events'::regclass
+         and trigger_row.tgname='trg_update_workspace_read_versions'
+         and trigger_row.tgfoid=to_regprocedure('public.trg_update_workspace_read_versions()')
+         and trigger_row.tgenabled in ('O','A')
+         and not trigger_row.tgisinternal
+     ) then
+    raise exception 'STOP: Process Map actual-size layout requires the enabled read-version trigger';
   end if;
 end $$;
 
@@ -774,6 +791,365 @@ where placement.grid_x::bigint is distinct from layout.grid_x
    or placement.grid_width::bigint is distinct from layout.grid_width
    or placement.grid_height::bigint is distinct from layout.grid_height;
 
+-- Keep one durable exact placement before-image plus one per-company
+-- recovery record. A successful compensating rollback retains both as audit
+-- evidence and marks the company rolled back.
+create table if not exists process_map_actual_size_layout_recovery_placements (
+  company_id uuid not null,
+  resource_type text not null,
+  resource_id uuid not null,
+  placement_incarnation_token uuid not null,
+  map_parent_folder_id uuid,
+  before_grid_x integer not null,
+  before_grid_y integer not null,
+  before_grid_width integer not null,
+  before_grid_height integer not null,
+  before_revision bigint not null,
+  before_created_timestamp timestamp with time zone not null,
+  before_updated_timestamp timestamp with time zone not null,
+  expected_grid_x integer not null,
+  expected_grid_y integer not null,
+  expected_grid_width integer not null,
+  expected_grid_height integer not null,
+  expected_revision bigint not null,
+  expected_created_timestamp timestamp with time zone not null,
+  expected_updated_timestamp timestamp with time zone not null,
+  changed_by_migration boolean not null,
+  constraint process_map_actual_size_layout_recovery_placements_pkey
+    primary key(company_id,resource_type,resource_id)
+);
+
+create table if not exists process_map_actual_size_layout_recovery_runs (
+  company_id uuid primary key,
+  recovery_key text not null,
+  format_version integer not null,
+  status text not null,
+  marker_event_id uuid not null,
+  marker_sequence bigint not null,
+  marker_created_timestamp timestamp with time zone not null,
+  placement_count bigint not null,
+  changed_placement_count bigint not null,
+  placement_checksum text not null,
+  created_timestamp timestamp with time zone not null,
+  rollback_event_id uuid,
+  rollback_sequence bigint,
+  rolled_back_timestamp timestamp with time zone,
+  constraint pm_actual_size_recovery_runs_format_chk check(format_version=1),
+  constraint pm_actual_size_recovery_runs_status_chk check(status in ('applied','rolled_back')),
+  constraint pm_actual_size_recovery_runs_counts_chk
+    check(placement_count>=0 and changed_placement_count>=0 and changed_placement_count<=placement_count),
+  constraint pm_actual_size_recovery_runs_rollback_state_chk
+    check((status='applied' and rollback_event_id is null and rollback_sequence is null and rolled_back_timestamp is null)
+       or (status='rolled_back' and rollback_event_id is not null and rollback_sequence is not null and rolled_back_timestamp is not null))
+);
+
+lock table process_map_actual_size_layout_recovery_placements,
+  process_map_actual_size_layout_recovery_runs in share row exclusive mode;
+
+do $$
+begin
+  if (select count(*) from pg_attribute
+      where attrelid='process_map_actual_size_layout_recovery_placements'::regclass
+        and attnum>0 and not attisdropped)<>20
+     or exists (
+       with expected(column_name,data_type,is_not_null) as (values
+         ('company_id','uuid',true),('resource_type','text',true),('resource_id','uuid',true),
+         ('placement_incarnation_token','uuid',true),('map_parent_folder_id','uuid',false),
+         ('before_grid_x','integer',true),('before_grid_y','integer',true),
+         ('before_grid_width','integer',true),('before_grid_height','integer',true),
+         ('before_revision','bigint',true),
+         ('before_created_timestamp','timestamp with time zone',true),
+         ('before_updated_timestamp','timestamp with time zone',true),
+         ('expected_grid_x','integer',true),('expected_grid_y','integer',true),
+         ('expected_grid_width','integer',true),('expected_grid_height','integer',true),
+         ('expected_revision','bigint',true),
+         ('expected_created_timestamp','timestamp with time zone',true),
+         ('expected_updated_timestamp','timestamp with time zone',true),
+         ('changed_by_migration','boolean',true)
+       ), actual as (
+         select attribute.attname::text column_name,
+                format_type(attribute.atttypid,attribute.atttypmod) data_type,
+                attribute.attnotnull is_not_null
+         from pg_attribute attribute
+         where attribute.attrelid='process_map_actual_size_layout_recovery_placements'::regclass
+           and attribute.attnum>0 and not attribute.attisdropped
+       )
+       (select * from expected except select * from actual)
+       union all
+       (select * from actual except select * from expected)
+     )
+     or (select count(*) from pg_attribute
+         where attrelid='process_map_actual_size_layout_recovery_runs'::regclass
+           and attnum>0 and not attisdropped)<>14
+     or exists (
+       with expected(column_name,data_type,is_not_null) as (values
+         ('company_id','uuid',true),('recovery_key','text',true),
+         ('format_version','integer',true),('status','text',true),
+         ('marker_event_id','uuid',true),('marker_sequence','bigint',true),
+         ('marker_created_timestamp','timestamp with time zone',true),
+         ('placement_count','bigint',true),('changed_placement_count','bigint',true),
+         ('placement_checksum','text',true),
+         ('created_timestamp','timestamp with time zone',true),
+         ('rollback_event_id','uuid',false),('rollback_sequence','bigint',false),
+         ('rolled_back_timestamp','timestamp with time zone',false)
+       ), actual as (
+         select attribute.attname::text column_name,
+                format_type(attribute.atttypid,attribute.atttypmod) data_type,
+                attribute.attnotnull is_not_null
+         from pg_attribute attribute
+         where attribute.attrelid='process_map_actual_size_layout_recovery_runs'::regclass
+           and attribute.attnum>0 and not attribute.attisdropped
+       )
+       (select * from expected except select * from actual)
+       union all
+       (select * from actual except select * from expected)
+     )
+     or not exists (
+       select 1 from pg_constraint constraint_row
+       where constraint_row.conrelid='process_map_actual_size_layout_recovery_placements'::regclass
+         and constraint_row.conname='process_map_actual_size_layout_recovery_placements_pkey'
+         and constraint_row.contype='p' and constraint_row.convalidated
+         and pg_get_constraintdef(constraint_row.oid)='PRIMARY KEY (company_id, resource_type, resource_id)'
+     )
+     or not exists (
+       select 1 from pg_constraint constraint_row
+       where constraint_row.conrelid='process_map_actual_size_layout_recovery_runs'::regclass
+         and constraint_row.conname='process_map_actual_size_layout_recovery_runs_pkey'
+         and constraint_row.contype='p' and constraint_row.convalidated
+         and pg_get_constraintdef(constraint_row.oid)='PRIMARY KEY (company_id)'
+     )
+     or (select count(*)
+         from pg_constraint constraint_row
+         where constraint_row.conrelid='process_map_actual_size_layout_recovery_runs'::regclass
+           and constraint_row.contype='c' and constraint_row.convalidated
+           and (constraint_row.conname,pg_get_constraintdef(constraint_row.oid)) in (values
+             ('pm_actual_size_recovery_runs_format_chk','CHECK ((format_version = 1))'),
+             ('pm_actual_size_recovery_runs_status_chk','CHECK ((status = ANY (ARRAY[''applied''::text, ''rolled_back''::text])))'),
+             ('pm_actual_size_recovery_runs_counts_chk','CHECK (((placement_count >= 0) AND (changed_placement_count >= 0) AND (changed_placement_count <= placement_count)))'),
+             ('pm_actual_size_recovery_runs_rollback_state_chk','CHECK ((((status = ''applied''::text) AND (rollback_event_id IS NULL) AND (rollback_sequence IS NULL) AND (rolled_back_timestamp IS NULL)) OR ((status = ''rolled_back''::text) AND (rollback_event_id IS NOT NULL) AND (rollback_sequence IS NOT NULL) AND (rolled_back_timestamp IS NOT NULL))))')
+           ))<>4 then
+    raise exception 'STOP: Process Map actual-size recovery table structure is unsafe';
+  end if;
+end $$;
+
+create temporary table process_map_actual_recovery_mode (
+  first_run boolean not null
+) on commit drop;
+
+insert into process_map_actual_recovery_mode(first_run)
+select not exists(select 1 from process_map_actual_size_layout_recovery_runs);
+
+do $$
+declare
+  first_run boolean;
+begin
+  select mode.first_run into strict first_run
+  from process_map_actual_recovery_mode mode;
+
+  if first_run then
+    if exists(select 1 from process_map_actual_size_layout_recovery_placements) then
+      raise exception 'STOP: Process Map actual-size recovery snapshot exists without run metadata';
+    end if;
+    if exists (
+      select 1 from domain_events
+      where idempotency_key='migration:20260826-process-map-actual-size-square-layout'
+    ) then
+      raise exception 'STOP: Process Map actual-size marker exists without required recovery metadata';
+    end if;
+    if exists (
+      select 1 from schema_migrations
+      where version='20260826_zzzy_process_map_actual_size_square_layout.sql'
+    ) then
+      raise exception 'STOP: Process Map actual-size migration is already recorded without recovery metadata; refusing direct replay after rollback';
+    end if;
+  else
+    if exists (
+      select 1 from process_map_actual_size_layout_recovery_runs
+      where format_version<>1 or status='rolled_back'
+    ) then
+      raise exception 'STOP: Process Map actual-size migration was already rolled back; refusing direct replay';
+    end if;
+    if exists (
+      (select company_id from process_map_actual_eligible_companies
+       except
+       select company_id from process_map_actual_size_layout_recovery_runs)
+      union all
+      (select company_id from process_map_actual_size_layout_recovery_runs
+       except
+       select company_id from process_map_actual_eligible_companies)
+    ) then
+      raise exception 'STOP: Process Map actual-size recovery company membership is missing or corrupt';
+    end if;
+    if exists (
+      select 1
+      from process_map_actual_size_layout_recovery_runs run
+      where run.status<>'applied'
+         or run.placement_count<>(
+           select count(*) from process_map_actual_size_layout_recovery_placements snapshot
+           where snapshot.company_id=run.company_id
+         )
+         or run.changed_placement_count<>(
+           select count(*) from process_map_actual_size_layout_recovery_placements snapshot
+           where snapshot.company_id=run.company_id and snapshot.changed_by_migration
+         )
+         or run.placement_checksum is distinct from (
+           select md5(coalesce(jsonb_agg(to_jsonb(snapshot) order by resource_type,resource_id)::text,'[]'))
+           from process_map_actual_size_layout_recovery_placements snapshot
+           where snapshot.company_id=run.company_id
+         )
+    ) then
+      raise exception 'STOP: Process Map actual-size recovery snapshot is missing or corrupt';
+    end if;
+    if exists (
+      select 1
+      from process_map_actual_size_layout_recovery_placements snapshot
+      left join process_map_placements placement
+        on placement.company_id=snapshot.company_id
+       and placement.resource_type=snapshot.resource_type
+       and placement.resource_id=snapshot.resource_id
+      where placement.resource_id is null
+         or placement.placement_incarnation_token is distinct from snapshot.placement_incarnation_token
+         or placement.map_parent_folder_id is distinct from snapshot.map_parent_folder_id
+         or placement.grid_x is distinct from snapshot.expected_grid_x
+         or placement.grid_y is distinct from snapshot.expected_grid_y
+         or placement.grid_width is distinct from snapshot.expected_grid_width
+         or placement.grid_height is distinct from snapshot.expected_grid_height
+         or placement.revision is distinct from snapshot.expected_revision
+         or placement.created_timestamp is distinct from snapshot.expected_created_timestamp
+         or placement.updated_timestamp is distinct from snapshot.expected_updated_timestamp
+    ) or exists (
+      select 1
+      from process_map_placements placement
+      where placement.company_id in (select company_id from process_map_actual_size_layout_recovery_runs)
+        and not exists (
+          select 1 from process_map_actual_size_layout_recovery_placements snapshot
+          where snapshot.company_id=placement.company_id
+            and snapshot.resource_type=placement.resource_type
+            and snapshot.resource_id=placement.resource_id
+        )
+    ) then
+      raise exception 'STOP: Process Map actual-size expected placement state changed after migration';
+    end if;
+    if exists (
+      select 1
+      from process_map_actual_size_layout_recovery_placements snapshot
+      where (snapshot.resource_type='company_explorer_folder' and not exists (
+        select 1 from company_explorer_folders folder
+        where folder.company_id=snapshot.company_id
+          and folder.folder_id=snapshot.resource_id
+          and folder.parent_folder_id is not distinct from snapshot.map_parent_folder_id
+      )) or (snapshot.resource_type='logic_gate' and not exists (
+        select 1 from company_explorer_items item
+        where item.company_id=snapshot.company_id
+          and item.target_type='logic_gate'
+          and item.target_id=snapshot.resource_id
+          and item.parent_folder_id is not distinct from snapshot.map_parent_folder_id
+      ))
+    ) or exists (
+      select 1
+      from company_explorer_folders folder
+      where folder.company_id in (select company_id from process_map_actual_size_layout_recovery_runs)
+        and not exists (
+          select 1 from process_map_actual_size_layout_recovery_placements snapshot
+          where snapshot.company_id=folder.company_id
+            and snapshot.resource_type='company_explorer_folder'
+            and snapshot.resource_id=folder.folder_id
+        )
+    ) or exists (
+      select 1
+      from company_explorer_items item
+      where item.target_type='logic_gate'
+        and item.company_id in (select company_id from process_map_actual_size_layout_recovery_runs)
+        and not exists (
+          select 1 from process_map_actual_size_layout_recovery_placements snapshot
+          where snapshot.company_id=item.company_id
+            and snapshot.resource_type='logic_gate'
+            and snapshot.resource_id=item.target_id
+        )
+    ) then
+      raise exception 'STOP: Process Map actual-size Explorer membership or parentage changed after migration';
+    end if;
+    if exists (
+      select 1
+      from process_map_actual_size_layout_recovery_runs run
+      left join domain_events marker
+        on marker.company_id=run.company_id and marker.event_id=run.marker_event_id
+      where marker.event_id is null
+         or marker.stream_type is distinct from 'workspace'
+         or marker.stream_id is distinct from run.company_id::text
+         or marker.sequence is distinct from run.marker_sequence
+         or marker.event_type is distinct from 'process_map_placement_saved'
+         or marker.actor_user_id is not null
+         or marker.idempotency_key is distinct from 'migration:20260826-process-map-actual-size-square-layout'
+         or marker.payload is distinct from jsonb_build_object('realtime_change_type','process_map_actual_size_square_layout_applied')
+         or marker.created_timestamp is distinct from run.marker_created_timestamp
+         or exists (
+           select 1
+           from domain_events later
+           where later.company_id=run.company_id
+             and later.stream_type='workspace'
+             and later.stream_id=run.company_id::text
+             and later.sequence>run.marker_sequence
+             and exists (
+               select 1
+               from workspace_read_version_keys_for_domain_event(later.event_type,later.payload) key
+               where key.scope='process-map'
+             )
+         )
+    ) or exists (
+      select 1
+      from domain_events marker
+      where marker.idempotency_key='migration:20260826-process-map-actual-size-square-layout'
+        and not exists (
+          select 1 from process_map_actual_size_layout_recovery_runs run
+          where run.company_id=marker.company_id and run.marker_event_id=marker.event_id
+        )
+    ) then
+      raise exception 'STOP: Process Map relevant event state changed after actual-size migration';
+    end if;
+    if exists (
+      select 1
+      from process_map_actual_size_layout_recovery_runs run
+      where not exists (
+        select 1 from workspace_read_versions read_version
+        where read_version.company_id=run.company_id
+          and read_version.scope='process-map' and read_version.resource_key=''
+          and read_version.version=run.marker_sequence
+      )
+    ) then
+      raise exception 'STOP: Process Map actual-size read-version state changed after migration';
+    end if;
+    if (
+      select count(*) from schema_migrations
+      where version in (
+        '20260826_zzzy_process_map_actual_size_square_layout.sql',
+        '20260826_zzzz_process_map_tidy_initial_layout.sql',
+        '20260826_zzzzz_process_map_rectangular_layout.sql',
+        '20260826_zzzzzz_process_map_square_layout.sql'
+      )
+    )<>4 then
+      raise exception 'STOP: Process Map actual-size replay-safety ledger state changed after migration';
+    end if;
+  end if;
+end $$;
+
+insert into process_map_actual_size_layout_recovery_placements(
+  company_id,resource_type,resource_id,placement_incarnation_token,map_parent_folder_id,
+  before_grid_x,before_grid_y,before_grid_width,before_grid_height,before_revision,
+  before_created_timestamp,before_updated_timestamp,
+  expected_grid_x,expected_grid_y,expected_grid_width,expected_grid_height,expected_revision,
+  expected_created_timestamp,expected_updated_timestamp,changed_by_migration
+)
+select placement.company_id,placement.resource_type,placement.resource_id,
+       placement.placement_incarnation_token,placement.map_parent_folder_id,
+       placement.grid_x,placement.grid_y,placement.grid_width,placement.grid_height,placement.revision,
+       placement.created_timestamp,placement.updated_timestamp,
+       placement.grid_x,placement.grid_y,placement.grid_width,placement.grid_height,placement.revision,
+       placement.created_timestamp,placement.updated_timestamp,false
+from process_map_placements placement
+join process_map_actual_eligible_companies company using(company_id)
+join process_map_actual_recovery_mode mode on mode.first_run;
+
 do $$
 begin
   if exists (
@@ -823,12 +1199,24 @@ begin
   if exists (
     select 1
     from process_map_actual_eligible_companies company
-    where coalesce((
-      select max(event.sequence) from domain_events event
-      where event.company_id=company.company_id
-        and event.stream_type='workspace'
-        and event.stream_id=company.company_id::text
-    ),0)=9223372036854775807
+    where greatest(
+      coalesce((
+        select max(event.sequence) from domain_events event
+        where event.company_id=company.company_id
+          and event.stream_type='workspace'
+          and event.stream_id=company.company_id::text
+      ),0),
+      coalesce((
+        select read_version.version from workspace_read_versions read_version
+        where read_version.company_id=company.company_id
+          and read_version.scope='process-map' and read_version.resource_key=''
+      ),0),
+      coalesce((
+        select read_version.version from workspace_read_versions read_version
+        where read_version.company_id=company.company_id
+          and read_version.scope='workspace-snapshot:full' and read_version.resource_key=''
+      ),0)
+    )=9223372036854775807
       and not exists (
         select 1 from domain_events marker
         where marker.company_id=company.company_id
@@ -855,14 +1243,47 @@ where placement.company_id=layout.company_id
     or placement.grid_width::bigint is distinct from layout.grid_width
     or placement.grid_height::bigint is distinct from layout.grid_height);
 
+update process_map_actual_size_layout_recovery_placements snapshot
+set expected_grid_x=placement.grid_x,
+    expected_grid_y=placement.grid_y,
+    expected_grid_width=placement.grid_width,
+    expected_grid_height=placement.grid_height,
+    expected_revision=placement.revision,
+    expected_created_timestamp=placement.created_timestamp,
+    expected_updated_timestamp=placement.updated_timestamp,
+    changed_by_migration=(
+      placement.grid_x is distinct from snapshot.before_grid_x
+      or placement.grid_y is distinct from snapshot.before_grid_y
+      or placement.grid_width is distinct from snapshot.before_grid_width
+      or placement.grid_height is distinct from snapshot.before_grid_height
+    )
+from process_map_placements placement,process_map_actual_recovery_mode mode
+where mode.first_run
+  and placement.company_id=snapshot.company_id
+  and placement.resource_type=snapshot.resource_type
+  and placement.resource_id=snapshot.resource_id;
+
 with company_sequence as (
-  select company.company_id,coalesce(max(event.sequence),0) maximum_sequence
+  select company.company_id,
+         greatest(
+           coalesce((
+             select max(event.sequence) from domain_events event
+             where event.company_id=company.company_id
+               and event.stream_type='workspace'
+               and event.stream_id=company.company_id::text
+           ),0),
+           coalesce((
+             select read_version.version from workspace_read_versions read_version
+             where read_version.company_id=company.company_id
+               and read_version.scope='process-map' and read_version.resource_key=''
+           ),0),
+           coalesce((
+             select read_version.version from workspace_read_versions read_version
+             where read_version.company_id=company.company_id
+               and read_version.scope='workspace-snapshot:full' and read_version.resource_key=''
+           ),0)
+         ) maximum_sequence
   from process_map_actual_eligible_companies company
-  left join domain_events event
-    on event.company_id=company.company_id
-   and event.stream_type='workspace'
-   and event.stream_id=company.company_id::text
-  group by company.company_id
 )
 insert into domain_events(
   event_id,company_id,stream_type,stream_id,sequence,event_type,
@@ -874,19 +1295,74 @@ select gen_random_uuid(),company.company_id,'workspace',company.company_id::text
        jsonb_build_object('realtime_change_type','process_map_actual_size_square_layout_applied'),
        statement_timestamp()
 from company_sequence company
-where not exists (
+cross join process_map_actual_recovery_mode mode
+where mode.first_run and not exists (
   select 1 from domain_events marker
   where marker.company_id=company.company_id
     and marker.idempotency_key='migration:20260826-process-map-actual-size-square-layout'
 );
 
--- The corrected layout is now durable. Mark only the three obsolete data-layout
--- migrations so a runner that rechecks the ledger skips their destructive work.
+do $$
+begin
+  if exists (
+    select 1
+    from process_map_actual_eligible_companies company
+    cross join process_map_actual_recovery_mode mode
+    left join domain_events marker
+      on marker.company_id=company.company_id
+     and marker.idempotency_key='migration:20260826-process-map-actual-size-square-layout'
+    where mode.first_run
+      and (marker.event_id is null
+       or not exists (
+         select 1 from workspace_read_versions read_version
+         where read_version.company_id=company.company_id
+           and read_version.scope='process-map' and read_version.resource_key=''
+           and read_version.version=marker.sequence
+       )
+       or not exists (
+         select 1 from workspace_read_versions read_version
+         where read_version.company_id=company.company_id
+           and read_version.scope='workspace-snapshot:full' and read_version.resource_key=''
+           and read_version.version=marker.sequence
+       ))
+  ) then
+    raise exception 'STOP: Process Map actual-size marker did not advance required read versions';
+  end if;
+end $$;
+
+-- Keep the corrected row and all three obsolete-layout tombstones permanently.
+-- The canonical runner's duplicate insert is harmless, while direct DBeaver
+-- execution is now equally replay-safe.
 insert into schema_migrations(version)
 values
+  ('20260826_zzzy_process_map_actual_size_square_layout.sql'),
   ('20260826_zzzz_process_map_tidy_initial_layout.sql'),
   ('20260826_zzzzz_process_map_rectangular_layout.sql'),
   ('20260826_zzzzzz_process_map_square_layout.sql')
 on conflict(version) do nothing;
+
+insert into process_map_actual_size_layout_recovery_runs(
+  company_id,recovery_key,format_version,status,
+  marker_event_id,marker_sequence,marker_created_timestamp,
+  placement_count,changed_placement_count,placement_checksum,
+  created_timestamp,rollback_event_id,rollback_sequence,rolled_back_timestamp
+)
+select company.company_id,
+       'migration:20260826-process-map-actual-size-square-layout',1,'applied',
+       marker.event_id,marker.sequence,marker.created_timestamp,
+       (select count(*) from process_map_actual_size_layout_recovery_placements snapshot
+        where snapshot.company_id=company.company_id),
+       (select count(*) from process_map_actual_size_layout_recovery_placements snapshot
+        where snapshot.company_id=company.company_id and snapshot.changed_by_migration),
+       (select md5(coalesce(jsonb_agg(to_jsonb(snapshot) order by resource_type,resource_id)::text,'[]'))
+        from process_map_actual_size_layout_recovery_placements snapshot
+        where snapshot.company_id=company.company_id),
+       statement_timestamp(),null,null,null
+from process_map_actual_eligible_companies company
+join process_map_actual_recovery_mode mode on mode.first_run
+join domain_events marker
+  on marker.company_id=company.company_id
+ and marker.idempotency_key='migration:20260826-process-map-actual-size-square-layout';
+
 
 commit;
