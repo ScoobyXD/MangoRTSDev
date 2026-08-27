@@ -139,9 +139,9 @@ variable "backend_desired_count" {
 }
 
 variable "email_worker_enabled" {
-  description = "Run the QA email worker after QA Nylas and the fresh database schema are configured. Disable only for the guarded infrastructure/bootstrap phases."
+  description = "Run the QA email worker only after QA Nylas and controlled mailboxes are configured."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "email_sqs_database_migration_complete" {

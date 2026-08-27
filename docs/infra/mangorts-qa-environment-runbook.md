@@ -1,454 +1,744 @@
 # MangoRTS QA Environment Runbook
 
-## Outcome
+QA is the isolated application at `https://qa.mangorts.com`. It reuses the
+existing QA CloudFront, ALB, ECS, Cognito, S3, SQS, Valkey, WAF, monitoring, and
+private PostgreSQL 17 RDS resources. It does not create another permanent
+environment.
 
-QA is an isolated, production-shaped environment at `qa.mangorts.com`. It starts with a fresh PostgreSQL database, a separate Cognito pool, and no copied dev or production data. Jonat's first authenticated request creates one company and the normal protected `Unfiled`, `Projects`, and `Logic Gates` folders. It creates no Nodes, Logic Gates, Projects, chats, permissions, GVIC assignments, or email connections. Its final steady state includes the API, one email worker, Valkey, WAF, Container Insights, and the full existing email/Valkey alarm set.
+The first QA dataset is a one-time cleaned Dev copy. The binding rules are in
+`docs/tests/qa-database-copy.md`. The copy omits every attachment and removes the
+listed private explorer trees plus their owned content. A non-owning edge is
+removed without deleting its unrelated allowed endpoint.
 
-The QA stack reuses the current development AWS account, VPC, private subnets, NAT path, and deployment patterns. It owns a delegated public Route 53 hosted zone for `qa.mangorts.com`. It must not reuse a dev or production database, Cognito pool, attachment bucket, secret, Nylas application, provider grant, or Terraform state key.
+## Verified Starting State On 2026-08-27
 
-## Inputs Still Needed
+- DNS delegation and certificates for `qa.mangorts.com`,
+  `api.qa.mangorts.com`, and `origin.qa.mangorts.com` are valid.
+- Private RDS `mangorts-qa-postgres` is PostgreSQL 17.7, Single-AZ, encrypted,
+  and available.
+- The API desired/running count is zero, the frontend bucket is empty, the QA
+  Cognito pool has no users, and all three QA email queues are empty.
+- The public frontend currently returns 403 and API paths return 503 because no
+  application has been published or started.
+- The last QA images and schema bootstrap came from commit `371695f4` with 215
+  baselined migrations. Current `main` has more migrations.
+- `20260825_canonical_schema_reconciliation.sql` is a historical repository
+  migration. Do not run its retired one-missing-migration recovery path against
+  QA. Build a fresh same-commit next database instead.
+- The email worker stays disabled until separate QA Nylas staging credentials
+  and controlled mailboxes exist.
 
-Collect these values before an apply or account creation:
+## Safety Boundary
 
-1. Jonat's lowercase QA login email.
-2. The final company display name. The current default is `Mango QA`.
-3. The approved 12-digit AWS account ID and region. The expected local SSO profile defaults to `mangorts-dev` and remains overrideable.
-4. The reviewed monthly QA cost estimate.
-5. Andy's and Rohan's lowercase login emails and Mango roles. These are not needed for infrastructure creation.
-6. Access to create a separate application in the Nylas **Staging** environment and complete any provider OAuth or MFA prompts.
-7. A verified SES sender for QA invitations, or an explicit decision to leave Mango invitation email disabled until one exists.
-8. Optional existing SNS or incident-response action ARNs if CloudWatch alarms should notify someone. The alarms still exist without action ARNs.
-9. A GitHub `qa` Environment restricted to `main`, with Jonat as the required deployment reviewer when the repository plan supports it. Andy and Rohan need only read access to clone the repository; do not grant them QA Environment secrets or an AWS deploy role.
-10. A reachable, designated database-enforced read-only dev connection for a fresh PostgreSQL 17.x schema export from the same commit as the QA migration image. Do not use the dev writer secret.
-11. Explicit approval for one production Route 53 change: an `NS` delegation for `qa.mangorts.com` in the authoritative `mangorts.com` parent zone. QA automation never receives production credentials.
+1. Agents may inspect only through database-enforced read-only access. Only a
+   human may use the QA writer or start a hosted task that receives its secret.
+2. Never write Dev or production, reveal a writer password, or make QA RDS
+   public.
+3. Keep the QA API, email worker, Scheduler, and all one-off ECS tasks stopped
+   from the raw copy through cutover.
+4. Use PostgreSQL 17 clients from an approved private operator host. Keep
+   credentials only in the human operator's libpq password source.
+5. Keep dumps on an encrypted, access-restricted temporary volume outside the
+   repository. Remove them at the exact cleanup points below.
+6. Dev `schema_migrations`, Cognito subjects, provider grants/cursors, jobs,
+   queue state, invitation/reset state, and attachment state never enter active
+   QA.
+7. Stop on every failed native command, account/host mismatch, unexpected row
+   count, missing root, schema mismatch, orphan, or storage shortfall.
 
-Do not put passwords, provider keys, OAuth state secrets, webhook secrets, AWS session credentials, or invitation tokens in this file, Terraform variables, GitHub variables, command history, or task output.
+## Required Human Inputs
 
-## Fixed Names
+- Restored `gh` authentication for `ScoobyXD/MangoRTSDev`.
+- AWS SSO access to account `686458136219` in `us-west-1`.
+- An approved private route to Dev and QA PostgreSQL.
+- A Dev database-enforced read-only credential and a separate human-only QA
+  admin credential, both in an approved libpq password file.
+- An out-of-repository Terraform backend config for the existing QA state.
+- An encrypted, access-restricted temporary directory outside this repository.
+- PostgreSQL 17 `psql`, `createdb`, `dropdb`, `pg_dump`, and `pg_restore`.
+- Jonat's exact QA email: `jonathankim829@gmail.com`.
+- Andy and Rohan's exact emails remain pending. Do not guess them.
+- A separate Nylas Staging application and controlled QA mailboxes are a later
+  human provider step.
 
-- Terraform root: `infra/aws-qa`
-- App: `https://qa.mangorts.com`
-- API: `https://api.qa.mangorts.com`
-- Origin: `https://origin.qa.mangorts.com`
-- Nylas callback: `https://api.qa.mangorts.com/nylas/oauth/callback`
-- Nylas webhook: `https://api.qa.mangorts.com/nylas/webhook`
-- QA DNS zone: `qa.mangorts.com`
+## Phase 0: Start One Fail-Closed Human Session
 
-Use QA-marked names for the database instance, database, ECS cluster, migration task definition, buckets, queues, logs, Cognito pool, Secrets Manager entries, and Terraform state key. The operator guards reject production-marked resources.
-
-## Cost And Apply Boundary
-
-Keep the first rollout small:
-
-- reuse the existing VPC, private subnets, and NAT gateway;
-- create only one QA-owned child hosted zone and no new root domain;
-- use one small Single-AZ PostgreSQL 17.x instance;
-- run only the minimum API and worker task counts needed for testing;
-- do not create another VPC, NAT gateway, bastion, database replica, or Multi-AZ database;
-- keep the worker temporarily disabled only while its image, schema, and Nylas dependencies do not yet exist;
-- keep Valkey, WAF, Container Insights, and the alarm set enabled throughout the rollout.
-
-The new database, load balancer, two running Fargate tasks, Valkey, WAF, Container Insights, CloudFront traffic, logs, storage, and alarms are the main added costs. Compared with the earlier stripped QA plan, the small worker plus minimum Valkey and three Nylas secrets add about `$18.35/month`; this four-rule WAF adds about `$9/month` before request charges; eleven standard metric alarms add up to about `$1.10/month` before any account free tier; and Container Insights adds usage-based metric/log charges. The delegated public QA hosted zone adds `$0.50/month` at the current first-25-zone rate, plus normal DNS query charges. See [Route 53 pricing](https://aws.amazon.com/route53/pricing/). Terraform does not produce a reliable bill by itself, so re-price the complete saved plan with current AWS pricing before applying it.
-
-WAF means AWS Web Application Firewall. It sits at CloudFront and filters common malicious or malformed public requests before they reach Mango. The current policy deliberately allows the application API and Nylas webhook paths to reach Mango's own authentication and validation, then applies AWS common and known-bad-input managed rules to the other paths.
-
-**STOP:** `terraform apply`, a database bootstrap task, and a database replacement/reset each require Jonat's separate approval. Approval of this runbook is not approval of an unknown plan or monthly cost.
-
-Stop the plan if it creates a VPC, NAT gateway, public database, Multi-AZ database, replica, always-on tunnel host, or any resource outside the QA stack.
-
-## Phase 1: Local And AWS Preflight
-
-First obtain the AWS account ID with a read-only call and have Jonat confirm that it is the intended account:
+Use PowerShell 7 for the whole procedure. Do not run isolated later blocks in a
+fresh shell without rerunning this phase.
 
 ```powershell
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
+
+function Assert-NativeSuccess([string]$Operation) {
+  if ($LASTEXITCODE -ne 0) {
+    throw "$Operation failed with native exit code $LASTEXITCODE"
+  }
+}
+
+$repoRoot = (git rev-parse --show-toplevel).Trim()
+Assert-NativeSuccess "locate MangoRTS repository"
+Set-Location $repoRoot
+
+$pgBin = (Resolve-Path -LiteralPath $env:MANGORTS_PG17_BIN).Path
+$psql = Join-Path $pgBin "psql.exe"
+$createdb = Join-Path $pgBin "createdb.exe"
+$dropdb = Join-Path $pgBin "dropdb.exe"
+$pgDump = Join-Path $pgBin "pg_dump.exe"
+$pgRestore = Join-Path $pgBin "pg_restore.exe"
+foreach ($tool in @($psql, $createdb, $dropdb, $pgDump, $pgRestore)) {
+  if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) {
+    throw "Missing PostgreSQL 17 tool: $tool"
+  }
+  $version = (& $tool --version).Trim()
+  Assert-NativeSuccess "read $tool version"
+  if ($version -notmatch 'PostgreSQL\) 17\.') {
+    throw "PostgreSQL 17.x is required; got: $version"
+  }
+}
+
+if (-not (Test-Path -LiteralPath $env:PGPASSFILE -PathType Leaf)) {
+  throw "PGPASSFILE must name the human operator's approved credential file"
+}
+$env:PGSSLMODE = "require"
+
+$temporaryRoot = (Resolve-Path -LiteralPath $env:MANGORTS_QA_TEMP).Path
+if ($temporaryRoot.StartsWith($repoRoot, [StringComparison]::OrdinalIgnoreCase)) {
+  throw "MANGORTS_QA_TEMP must be an encrypted directory outside the repository"
+}
+$rawDump = Join-Path $temporaryRoot "dev-raw.dump"
+$sanitizedDump = Join-Path $temporaryRoot "qa-sanitized-data.dump"
+```
+
+## Phase 1: Pin Main, Read Existing QA State, And Park Writers
+
+Merge the reviewed worker commit into `main` first. Do not deploy from a feature
+branch.
+
+```powershell
+git fetch origin
+Assert-NativeSuccess "git fetch origin"
+git switch main
+Assert-NativeSuccess "git switch main"
+git pull --ff-only
+Assert-NativeSuccess "fast-forward main"
+$releaseCommit = (git rev-parse HEAD).Trim()
+Assert-NativeSuccess "read release commit"
+if ($releaseCommit -cnotmatch '^[0-9a-f]{40}$') { throw "Invalid release SHA" }
+
+gh auth status
+Assert-NativeSuccess "GitHub authentication"
+$repository = (gh repo view --json nameWithOwner --jq .nameWithOwner).Trim()
+Assert-NativeSuccess "read GitHub repository identity"
+if ($repository -cne "ScoobyXD/MangoRTSDev") { throw "Wrong GitHub repository: $repository" }
+
 aws sso login --profile mangorts-dev
-aws sts get-caller-identity --profile mangorts-dev --query Account --output text
-```
+Assert-NativeSuccess "AWS SSO login"
+$awsAccount = (aws sts get-caller-identity --profile mangorts-dev --region us-west-1 --query Account --output text).Trim()
+Assert-NativeSuccess "read AWS account"
+if ($awsAccount -cne "686458136219") { throw "Wrong AWS account: $awsAccount" }
 
-Then run the repository preflight.
-
-```powershell
 .\scripts\qa_environment_preflight.ps1 `
-  -ExpectedAwsAccountID "<approved-12-digit-account-id>" `
-  -BootstrapAdminEmail "<jonat-qa-login>" `
-  -CompanyName "Mango QA"
+  -ExpectedAwsAccountID 686458136219 `
+  -PostgresBin $pgBin `
+  -JonatQaEmail jonathankim829@gmail.com
 ```
 
-The preflight is read-only. It checks the AWS identity, QA domains, repository paths, bootstrap email, and required local tools.
+The repository preflight now rechecks the authenticated AWS account, GitHub
+session, required files, exact email, and PostgreSQL client major version.
 
-## Phase 2: Plan The Base Stack
-
-Use a QA-only Terraform backend key. Do not copy a dev or production state file.
-
-First create only the QA child hosted zone from a separately reviewed saved plan:
+Initialize the existing remote QA state with the human-supplied config. Never
+invent a bucket or state key:
 
 ```powershell
-Set-Location infra/aws-qa
-terraform init -backend-config=backend.hcl
-terraform plan -target=aws_route53_zone.qa -out=qa-dns-zone.tfplan
-terraform show qa-dns-zone.tfplan
-```
+$qaBackendConfig = (Resolve-Path -LiteralPath $env:MANGORTS_QA_BACKEND_CONFIG).Path
+terraform -chdir=infra/aws-qa init -reconfigure "-backend-config=$qaBackendConfig"
+Assert-NativeSuccess "initialize existing QA Terraform state"
+$qaOutputs = terraform -chdir=infra/aws-qa output -json | ConvertFrom-Json
+Assert-NativeSuccess "read QA Terraform outputs"
 
-The targeted plan itself requires explicit approval and must contain exactly one new `aws_route53_zone.qa` resource with no changes or destroys. Discard every older saved plan after changing this DNS design. After approval:
-
-```powershell
-terraform apply qa-dns-zone.tfplan
-terraform output qa_dns_name_servers
-```
-
-An explicitly authorized production DNS operator must then produce a targeted saved plan for the checked-in `aws_route53_record.qa_delegation`, which manages one `NS` record named `qa.mangorts.com` in the authoritative `mangorts.com` parent using exactly the four output name servers:
-
-```powershell
-Set-Location ..\aws-prod
-terraform init -backend-config=backend.hcl
-terraform plan -target=aws_route53_record.qa_delegation -out=tfplan-qa-delegation -input=false
-terraform show tfplan-qa-delegation
-```
-
-The saved production plan must contain exactly one addition and no changes or destroys. Do not use a full production plan or apply. After separate explicit approval for this exact production DNS change, apply only the saved targeted plan:
-
-```powershell
-terraform apply tfplan-qa-delegation
-```
-
-Do not leave a manually created delegation as the final state or give the QA GitHub role production access. Verify public delegation before continuing:
-
-```powershell
-Resolve-DnsName qa.mangorts.com -Type NS
-```
-
-The returned name servers must be the same exact set as `qa_dns_name_servers`. Stop if they differ or the public lookup returns no record.
-
-When recovering from records previously written to the wrong parent zone, the next full QA plan must relocate exactly the two CloudFront certificate-validation records, one ALB certificate-validation record, and the `origin.qa.mangorts.com` alias. It must not replace either ACM certificate or any non-DNS QA resource. Do not remove those old records from Terraform state or delete them manually; the reviewed replacement plan owns their cleanup.
-
-Then create and review the complete base plan:
-
-```powershell
-terraform fmt -check
-terraform validate
-terraform plan -out=tfplan `
-  -var='backend_image_uri=' `
-  -var='migration_image_uri=' `
-  -var='backend_desired_count=0' `
-  -var='email_worker_enabled=false' `
-  -var='email_sqs_database_migration_complete=false'
-terraform show tfplan
-```
-
-The final QA defaults enable the worker, Valkey, WAF, Container Insights, and alarms. The explicit first-plan overrides above are the one exception: they prevent an API or worker from starting against the empty database while leaving Valkey, WAF, Container Insights, and alarms enabled. Use a new random placeholder frontend company UUID for this first build; do not reuse the known dev UUID.
-
-```powershell
-$qaPlaceholderCompanyID = [guid]::NewGuid().ToString()
-Write-Host $qaPlaceholderCompanyID
-```
-
-Record the following from the reviewed plan:
-
-- added monthly cost estimate;
-- QA RDS identifier, database name, engine version, Single-AZ setting, and `PubliclyAccessible=false`;
-- QA Cognito pool and SPA client;
-- QA attachment bucket;
-- QA ECR repository, ECS cluster, private subnets, security group, Valkey, WAF, Container Insights setting, and alarm set;
-- QA app/API/origin DNS names;
-- exact count and type of every new resource.
-
-**STOP:** send the saved-plan summary and monthly estimate to Jonat. Do not apply until he approves both. If the approved plan changes, produce a new plan and repeat the approval.
-
-After Jonat explicitly approves the exact saved plan and cost, an authorized operator or Codex may apply that plan:
-
-```powershell
-terraform apply tfplan
-```
-
-The foundation intentionally has no application or migration image yet. Put the
-same reviewed non-secret QA inputs in the GitHub `qa` Environment, keep
-`TF_EMAIL_SCHEMA_MIGRATED=false`, and run the image-registration stage from the
-exact commit whose schema will be bootstrapped:
-
-```powershell
-Set-Location ../..
-gh workflow run deploy-qa.yml --ref main -f stage=bootstrap-images
-```
-
-This stage builds and pushes immutable `<commit>` and `<commit>-migrations`
-images, then applies Terraform with API desired count `0`, the email worker
-disabled, and schema confirmation `false`. It registers the backend and one-off
-migration task definitions, but it does not publish the frontend, start an API
-or worker task, run the migration task, or execute application smoke tests.
-
-Review the workflow summary and record the migration task ARN. **STOP** if the
-summary does not say API desired count `0`, worker disabled, and schema
-confirmation false. Do not change `main` between this stage, the fresh dev
-inventory, database bootstrap/parity, and the first application deploy. If the
-commit changes, repeat preparation and the applicable schema checks for that
-new commit.
-
-## Phase 3: Fresh Database Bootstrap
-
-The database remains private. Do not expose it publicly and do not fetch its writer password to a laptop or agent session.
-
-The completed `bootstrap-images` stage already built and pushed both immutable images and registered the dedicated QA migration task while the API desired count stayed `0` and the worker/schema confirmation stayed false. Its migration image tag must be exactly `<validated-git-commit>-migrations`; mutable or different-commit tags are rejected. The task definition must use the QA database environment, receive `DB_PASSWORD` from its QA Secrets Manager ARN, use `DB_SSLMODE=require`, and run in the QA database VPC path. The repository-native migration command is `backend/cmd/miraeopus-migrate`.
-
-Only a human operator may use `-Execute` below. Agents must not launch a task that receives the hosted database writer secret.
-
-First create a fresh stamped dev inventory using the designated database-enforced read-only credential and `scripts/export_schema_inventory.ps1`, following `docs/infra/mangorts-schema-audit.md`. The export must be from PostgreSQL 17.x, the current commit/files, and no more than 24 hours old. Historical `tmp/schema-audit-*.json` files are invalid for this gate.
-
-Mechanically validate the stamped environment/version/freshness/current files, then read the two safe hashes and Git commit from the envelope:
-
-```powershell
-python scripts\compare_schema_inventory.py `
-  --expected .\tmp\schema-audit-dev-fresh.json `
-  --actual .\tmp\schema-audit-dev-fresh.json `
-  --expected-label fresh-dev `
-  --actual-label fresh-dev `
-  --require-postgres-major 17 `
-  --require-same-commit `
-  --require-current-repository `
-  --require-expected-environment dev `
-  --require-actual-environment dev `
-  --max-export-age-hours 24 `
-  --max-details 0
-if ($LASTEXITCODE -ne 0) {
-  throw "Fresh dev schema export failed its metadata and repository gate."
+$qaCluster = [string]$qaOutputs.ecs_cluster_name.value
+$qaApiService = [string]$qaOutputs.ecs_service_name.value
+$qaWorkerService = [string]$qaOutputs.email_worker_service_name.value
+$qaRdsIdentifier = [string]$qaOutputs.database_instance_identifier.value
+$qaHost = [string]$qaOutputs.database_endpoint.value
+$qaPort = 5432
+$qaCognitoPool = [string]$qaOutputs.cognito_user_pool_id.value
+$qaCognitoRegion = [string]$qaOutputs.cognito_region.value
+if ($qaRdsIdentifier -cne "mangorts-qa-postgres" -or
+    $qaHost -notmatch '(^|[-.])qa([-.]|$)' -or
+    $qaHost -match '(^|[-.])(dev|prod)([-.]|$)' -or
+    $qaCognitoRegion -cne "us-west-1") {
+  throw "Reviewed QA Terraform outputs do not identify the exact QA targets"
 }
 
-$freshDevInventory = Get-Content .\tmp\schema-audit-dev-fresh.json -Raw | ConvertFrom-Json
-$devSchemaInventorySHA256 = [string]$freshDevInventory.metadata.schema_inventory_sha256
-$devRepositorySchemaSHA256 = [string]$freshDevInventory.metadata.repository_schema_sha256
-$devGitCommit = [string]$freshDevInventory.metadata.git_commit
-if ($devSchemaInventorySHA256 -notmatch '^[0-9a-f]{64}$' -or $devRepositorySchemaSHA256 -notmatch '^[0-9a-f]{64}$' -or $devGitCommit -notmatch '^[0-9a-f]{40}$') {
-  throw "Fresh dev schema audit hashes or Git commit are missing."
+$qaRds = aws rds describe-db-instances --profile mangorts-dev --region us-west-1 `
+  --db-instance-identifier $qaRdsIdentifier --output json | ConvertFrom-Json
+Assert-NativeSuccess "read exact QA RDS identity"
+$qaInstances = @($qaRds.DBInstances)
+if ($qaInstances.Count -ne 1) { throw "Expected exactly one QA RDS instance" }
+$qaDb = $qaInstances[0]
+if ($qaDb.Endpoint.Address -cne $qaHost -or $qaDb.DBName -cne "mangorts_qa" -or
+    $qaDb.Engine -cne "postgres" -or $qaDb.EngineVersion -notmatch '^17\.') {
+  throw "Live RDS identity differs from reviewed QA Terraform state"
+}
+$qaUser = [string]$qaDb.MasterUsername
+```
+
+Dispatch only the exact pinned commit. The workflow independently fails if
+`main` moved:
+
+```powershell
+gh variable set TF_EMAIL_SCHEMA_MIGRATED --env qa --body false
+Assert-NativeSuccess "park QA schema gate"
+gh variable set TF_EMAIL_WORKER_ENABLED --env qa --body false
+Assert-NativeSuccess "park QA worker"
+gh variable set TF_EMAIL_SCHEDULE_ENABLED --env qa --body false
+Assert-NativeSuccess "park QA Scheduler"
+gh workflow run deploy-qa.yml --ref main `
+  -f stage=bootstrap-images `
+  -f "expected_git_commit=$releaseCommit"
+Assert-NativeSuccess "dispatch exact QA bootstrap-images run"
+```
+
+Wait for that run and inspect its summary. It must report the exact revision,
+the matching `<sha>` and `<sha>-migrations` images, API desired zero, worker
+disabled, and schema confirmation false. Refresh the outputs after the workflow
+applies the new revision:
+
+```powershell
+$qaOutputs = terraform -chdir=infra/aws-qa output -json | ConvertFrom-Json
+Assert-NativeSuccess "refresh applied QA Terraform outputs"
+$qaWorkerService = [string]$qaOutputs.email_worker_service_name.value
+```
+
+Define and run the live writer gate after the workflow, immediately before each
+database restore, and immediately before cutover:
+
+```powershell
+function Assert-QaWritersStopped {
+  $serviceNames = @($qaApiService, $qaWorkerService) | Where-Object { $_ }
+  if ($serviceNames.Count -gt 0) {
+    $services = aws ecs describe-services --profile mangorts-dev --region us-west-1 `
+      --cluster $qaCluster --services $serviceNames --output json | ConvertFrom-Json
+    Assert-NativeSuccess "read exact QA ECS services"
+    $activeService = $services.services | Where-Object {
+      $_.desiredCount -ne 0 -or $_.runningCount -ne 0 -or $_.pendingCount -ne 0
+    }
+    if ($activeService) { throw "QA API or worker service is not fully stopped" }
+  }
+  foreach ($status in @("RUNNING", "PENDING")) {
+    $taskArns = @(aws ecs list-tasks --profile mangorts-dev --region us-west-1 `
+      --cluster $qaCluster --desired-status $status --query taskArns --output text)
+    Assert-NativeSuccess "list $status QA ECS tasks"
+    if (($taskArns -join '').Trim()) { throw "A $status QA ECS task remains" }
+  }
+  $schedules = aws scheduler list-schedules --profile mangorts-dev --region us-west-1 `
+    --group-name mangorts-qa-email-reconciliation --output json | ConvertFrom-Json
+  Assert-NativeSuccess "read exact QA Scheduler group"
+  if ($schedules.Schedules | Where-Object { $_.State -eq "ENABLED" }) {
+    throw "The QA reconciliation Scheduler is enabled"
+  }
+}
+Assert-QaWritersStopped
+```
+
+Create and wait for a QA-only manual snapshot:
+
+```powershell
+$snapshotID = "mangorts-qa-before-clean-copy-$(Get-Date -Format yyyyMMddHHmmss)"
+aws rds create-db-snapshot --profile mangorts-dev --region us-west-1 `
+  --db-instance-identifier $qaRdsIdentifier `
+  --db-snapshot-identifier $snapshotID
+Assert-NativeSuccess "create QA snapshot"
+aws rds wait db-snapshot-completed --profile mangorts-dev --region us-west-1 `
+  --db-snapshot-identifier $snapshotID
+Assert-NativeSuccess "wait for QA snapshot"
+```
+
+Check the three exact QA queues. All visible and in-flight counts must be zero.
+If any count is nonzero, stop. Purging an exact QA queue is a separate human
+decision after reviewing its messages.
+
+```powershell
+$qaQueueUrls = @(
+  [string]$qaOutputs.email_work_queue_url.value,
+  [string]$qaOutputs.email_work_dlq_url.value,
+  [string]$qaOutputs.email_scheduler_dlq_url.value
+)
+foreach ($queueUrl in $qaQueueUrls) {
+  if (-not $queueUrl -or $queueUrl -notmatch 'mangorts-qa') { throw "Unexpected QA queue URL" }
+  $queueState = aws sqs get-queue-attributes --profile mangorts-dev --region us-west-1 `
+    --queue-url $queueUrl --attribute-names `
+    ApproximateNumberOfMessages ApproximateNumberOfMessagesNotVisible ApproximateNumberOfMessagesDelayed `
+    --output json | ConvertFrom-Json
+  Assert-NativeSuccess "read exact QA queue depth"
+  foreach ($value in $queueState.Attributes.PSObject.Properties.Value) {
+    if ([int64]$value -ne 0) { throw "QA queue is not empty: $queueUrl" }
+  }
 }
 ```
 
-If the designated dev read-only network path is unavailable, stop and have a human create or expose only the approved database-enforced read-only path. Do not fall back to a writer-backed task, create a QA bastion, or expose either database for this step.
-
-Prepare the common parameters from reviewed Terraform outputs while still in `infra/aws-qa`:
+Valkey is already a separate QA cache. Prove the exact cache and Pub/Sub-only
+user ACL. Mango cannot create persistent keys under this ACL; do not widen it or
+invent a `FLUSHALL` path.
 
 ```powershell
+$qaValkeyName = [string]$qaOutputs.realtime_valkey_cache_name.value
+$qaValkeyUser = [string]$qaOutputs.realtime_valkey_user_id.value
+if ($qaValkeyName -notmatch '^mangorts-qa-' -or $qaValkeyUser -notmatch '^mangorts-qa-') {
+  throw "Valkey output is not QA-owned"
+}
+aws elasticache describe-serverless-caches --profile mangorts-dev --region us-west-1 `
+  --serverless-cache-name $qaValkeyName --output json | Out-Null
+Assert-NativeSuccess "verify exact QA Valkey cache"
+$valkeyAcl = (aws elasticache describe-users --profile mangorts-dev --region us-west-1 `
+  --user-id $qaValkeyUser --query 'Users[0].AccessString' --output text).Trim()
+Assert-NativeSuccess "verify exact QA Valkey user"
+foreach ($requiredAclTerm in @('-@all', '+@connection', '+@pubsub')) {
+  if ($valkeyAcl -notlike "*$requiredAclTerm*") { throw "Unexpected QA Valkey ACL" }
+}
+```
+
+## Phase 2: Prove The Exact Dev Source And Storage Headroom
+
+Use the same explicit read-only tuple for inventory and dump. The host must be
+Dev-marked and must not be QA/prod-marked.
+
+```powershell
+$devHost = [string]$env:DB_HOST
+$devPort = [string]$env:DB_PORT
+$devDatabase = [string]$env:DB_NAME
+$devUser = [string]$env:DB_USER
+if (-not $devHost -or $devHost -notmatch '(^|[-.])dev(cluster)?([-.]|$)' -or
+    $devHost -match '(^|[-.])(qa|prod)([-.]|$)') {
+  throw "DB_HOST is not the reviewed Dev endpoint"
+}
+
+.\scripts\export_schema_inventory.ps1 `
+  -EnvironmentLabel dev `
+  -ExpectedHost $devHost `
+  -ExpectedDatabase $devDatabase `
+  -ExpectedReadOnlyUser $devUser `
+  -OutputPath .\tmp\schema-audit-dev-fresh.json `
+  -ConfirmDatabaseEnforcedReadOnlyCredential
+
+$devInventory = Get-Content .\tmp\schema-audit-dev-fresh.json -Raw | ConvertFrom-Json
+$schemaSHA = [string]$devInventory.metadata.schema_inventory_sha256
+$repositorySHA = [string]$devInventory.metadata.repository_schema_sha256
+$inventoryCommit = [string]$devInventory.metadata.git_commit
+if ($inventoryCommit -cne $releaseCommit) { throw "Dev inventory commit mismatch" }
+```
+
+Stop if the export is older than 24 hours, is not PostgreSQL 17.x, has different
+migration filenames, or differs from the canonical same-commit inventory.
+
+Measure the source through the same read-only tuple and compare it to current QA
+free storage. The raw database is dropped before the next database is built, so
+only one extra full copy exists at a time. Require at least 1.5 times the source
+size free for copy and restore workspace:
+
+```powershell
+$sourceDatabaseBytes = [int64](& $psql --host $devHost --port $devPort `
+  --username $devUser --dbname $devDatabase --no-password --no-psqlrc `
+  --tuples-only --no-align --command "select pg_database_size(current_database());").Trim()
+Assert-NativeSuccess "measure Dev through the exact read-only tuple"
+
+$metricEnd = (Get-Date).ToUniversalTime()
+$metricStart = $metricEnd.AddMinutes(-20)
+$freeStorageText = (aws cloudwatch get-metric-statistics --profile mangorts-dev `
+  --region us-west-1 --namespace AWS/RDS --metric-name FreeStorageSpace `
+  --dimensions "Name=DBInstanceIdentifier,Value=$qaRdsIdentifier" `
+  --start-time $metricStart.ToString('o') --end-time $metricEnd.ToString('o') `
+  --period 300 --statistics Minimum `
+  --query 'sort_by(Datapoints,&Timestamp)[-1].Minimum' --output text).Trim()
+Assert-NativeSuccess "read QA RDS free storage"
+if ($freeStorageText -notmatch '^\d+(\.\d+)?$') { throw "No current QA storage metric" }
+$requiredFreeBytes = [int64][Math]::Ceiling($sourceDatabaseBytes * 1.5)
+if ([double]$freeStorageText -lt $requiredFreeBytes) {
+  throw "QA lacks storage headroom; review a QA-only storage increase and cost"
+}
+```
+
+## Phase 3: Create, Sanitize, And Remove The Raw Scratch Database
+
+Bind every QA client directly to the reviewed Terraform host, port, and user.
+Do not use a service-name alias for writes.
+
+```powershell
+$qaIdentity = (& $psql --host $qaHost --port $qaPort --username $qaUser `
+  --dbname postgres --no-password --no-psqlrc --tuples-only --no-align `
+  --command "select current_database() || '|' || current_user || '|' || current_setting('server_version_num') || '|' || pg_is_in_recovery();").Trim()
+Assert-NativeSuccess "verify exact QA writer target"
+if ($qaIdentity -notmatch "^postgres\|$([regex]::Escape($qaUser))\|17\d{4}\|f$") {
+  throw "QA writer identity/version mismatch: $qaIdentity"
+}
+
+$rawDatabase = "mangorts_qa_raw_$(Get-Date -Format yyyyMMdd_HHmmss)"
+$nextDatabase = "mangorts_qa_next_$(Get-Date -Format yyyyMMddHHmmss)"
+if ($rawDatabase -cnotmatch '^mangorts_qa_raw_[0-9]{8}_[0-9]{6}$' -or
+    $nextDatabase -cnotmatch '^mangorts_qa_next_[0-9]{14}$') {
+  throw "Generated database name failed its guard"
+}
+
+Assert-QaWritersStopped
+& $createdb --host $qaHost --port $qaPort --username $qaUser `
+  --maintenance-db postgres --no-password $rawDatabase
+Assert-NativeSuccess "create exact QA raw database"
+
+& $pgDump --host $devHost --port $devPort --username $devUser `
+  --dbname $devDatabase --no-password --format custom --no-owner --no-privileges `
+  --file $rawDump
+Assert-NativeSuccess "dump Dev through the exact read-only tuple"
+
+Assert-QaWritersStopped
+& $pgRestore --host $qaHost --port $qaPort --username $qaUser `
+  --dbname $rawDatabase --no-password --exit-on-error --no-owner --no-privileges `
+  $rawDump
+Assert-NativeSuccess "restore into exact QA raw database"
+```
+
+Run the read-only preflight, one-transaction sanitizer, and read-only verifier:
+
+```powershell
+foreach ($sqlFile in @(
+  ".\scripts\qa_dev_copy_preflight.sql",
+  ".\scripts\qa_dev_copy_sanitize.sql",
+  ".\scripts\qa_dev_copy_verify.sql"
+)) {
+  & $psql --host $qaHost --port $qaPort --username $qaUser `
+    --dbname $rawDatabase --no-password --no-psqlrc `
+    --set ON_ERROR_STOP=on --file $sqlFile
+  Assert-NativeSuccess "run $sqlFile against exact QA raw database"
+}
+```
+
+Stop on any error or unexpected count. Export data only, excluding the Dev
+migration ledger. Validate the custom archive and record its SHA-256:
+
+```powershell
+& $pgDump --host $qaHost --port $qaPort --username $qaUser `
+  --dbname $rawDatabase --no-password --data-only --format custom `
+  --no-owner --no-privileges --exclude-table-data public.schema_migrations `
+  --file $sanitizedDump
+Assert-NativeSuccess "export sanitized QA data"
+& $pgRestore --list $sanitizedDump | Out-Null
+Assert-NativeSuccess "validate sanitized dump archive"
+$sanitizedDumpSHA256 = (Get-FileHash -LiteralPath $sanitizedDump -Algorithm SHA256).Hash
+```
+
+The raw dump and raw database are no longer needed. Type the exact generated
+database name before deleting either exact raw target:
+
+```powershell
+if ((Read-Host "Type the exact raw database name to remove") -cne $rawDatabase) {
+  throw "Raw database cleanup not confirmed"
+}
+& $dropdb --host $qaHost --port $qaPort --username $qaUser `
+  --maintenance-db postgres --no-password $rawDatabase
+Assert-NativeSuccess "drop exact QA raw database"
+Remove-Item -LiteralPath $rawDump -Force
+```
+
+## Phase 4: Build And Verify The Same-Commit Next Database
+
+```powershell
+& $createdb --host $qaHost --port $qaPort --username $qaUser `
+  --maintenance-db postgres --no-password $nextDatabase
+Assert-NativeSuccess "create exact QA next database"
+
 $qaDatabaseTask = @{
-  ExpectedAwsAccountID       = "<approved-12-digit-account-id>"
-  Cluster                    = terraform output -raw ecs_cluster_name
-  TaskDefinition             = terraform output -raw database_migration_task_definition_arn
-  ContainerName              = "database-migration"
-  DatabaseInstanceIdentifier = "mangorts-qa-postgres"
-  SubnetIDs                  = @(terraform output -json ecs_private_subnet_ids | ConvertFrom-Json)
-  SecurityGroupIDs           = @(terraform output -raw ecs_security_group_id)
-  ExpectedRepositorySchemaSHA256 = $devRepositorySchemaSHA256
-  ExpectedGitCommit          = $devGitCommit
+  ExpectedAwsAccountID       = "686458136219"
+  Cluster                    = $qaCluster
+  TaskDefinition             = [string]$qaOutputs.database_migration_task_definition_arn.value
+  ContainerName              = [string]$qaOutputs.database_migration_container_name.value
+  DatabaseInstanceIdentifier = $qaRdsIdentifier
+  SubnetIDs                  = @($qaOutputs.ecs_private_subnet_ids.value)
+  SecurityGroupIDs           = @([string]$qaOutputs.ecs_security_group_id.value)
+  ExpectedRepositorySchemaSHA256 = $repositorySHA
+  ExpectedGitCommit          = $releaseCommit
+  DatabaseNameOverride       = $nextDatabase
 }
-Set-Location ../..
 ```
 
-Run the read-only migration audit first:
+Only a human may use the following switches. Audit the empty target and copy its
+completed task ARN into the bootstrap command:
 
 ```powershell
 .\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
-  -Action Audit `
-  -AuditPurpose EmptyPreflight `
-  -Execute `
-  -HumanOperatorApproval
-```
+  -Action Audit -AuditPurpose EmptyPreflight `
+  -Execute -HumanOperatorApproval
 
-Before launch, the guard checks the RDS engine version, private flag, task, database, network, and AWS identity. The read-only audit then reports the connected PostgreSQL version and repository fingerprint; the helper stops unless `server_version_num` is 17.x and the fingerprint matches fresh dev. Save the printed audit task ARN.
-
-**STOP:** the audit log must contain `public_tables=0`. Any existing public table means this is not the approved fresh database.
-
-After reviewing that result, bootstrap the canonical schema and baseline the current migration filenames:
-
-```powershell
 .\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
   -Action Bootstrap `
   -EmptyDatabaseAuditTaskArn "<completed-empty-audit-task-arn>" `
-  -Execute `
-  -HumanOperatorApproval
-```
+  -Execute -HumanOperatorApproval
 
-The helper verifies the earlier audit task and its `public_tables=0` log before it permits the schema command. It also binds every audit/bootstrap task to the immutable `<validated-git-commit>-migrations` image tag. Its exact write command is:
-
-```text
--mode schema -baseline-migrations -require-empty-database
-```
-
-`-require-empty-database` reruns the material-object inventory inside the same transaction that executes `schema.sql` and records the baseline. It permits only the default `public` schema, `plpgsql` extension, and grants. Any existing table—including `schema_migrations`—or other application schema object aborts and rolls back before `schema.sql` executes. The earlier audit remains defense-in-depth; it is not the atomic write guard.
-
-Run another audit afterward:
-
-```powershell
 .\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
-  -Action Audit `
-  -AuditPurpose Parity `
-  -ExpectedSchemaInventorySHA256 $devSchemaInventorySHA256 `
-  -Execute `
-  -HumanOperatorApproval
+  -Action Audit -AuditPurpose Parity `
+  -ExpectedSchemaInventorySHA256 $schemaSHA `
+  -Execute -HumanOperatorApproval
 ```
 
-The helper requires `schema_inventory_sha256` to equal the fresh dev hash, the repository fingerprint to match, and both `missing_from_ledger=0` and `unknown_to_repository=0`. This is the physical catalog parity gate. It covers exact unordered column names/counts and the other material objects defined in `schema_inventory.sql`; it deliberately ignores physical column order, grants, row data, and the `schema_migrations` table itself. Stop on any nonzero task exit code, hash mismatch, or migration-ledger mismatch. Do not deploy the API, create Jonat, or add synthetic data before it passes.
+The parity audit must report PostgreSQL 17.x, exact schema/repository hashes,
+and zero missing or unknown migration filenames.
 
-If this final audit fails after bootstrap, do not rerun bootstrap and do not patch
-QA by hand. The empty-database guard will correctly reject the now-populated
-catalog. Keep the API and email worker stopped and align dev and the canonical
-snapshot first.
-
-The one approved recovery for the original empty QA bootstrap is
-`20260825_canonical_schema_reconciliation.sql`. Build a new immutable migration
-image from the reviewed commit. Its read-only preflight must report the exact
-approved current QA inventory hash, exactly one repository migration missing
-from the ledger, and zero unknown ledger rows:
+Restore with all constraints active, then run real foreign-key and exact typed
+reference checks:
 
 ```powershell
+Assert-QaWritersStopped
+& $pgRestore --host $qaHost --port $qaPort --username $qaUser `
+  --dbname $nextDatabase --no-password --single-transaction --exit-on-error `
+  --no-owner --no-privileges $sanitizedDump
+Assert-NativeSuccess "restore sanitized data into exact QA next database"
+
+& $psql --host $qaHost --port $qaPort --username $qaUser `
+  --dbname $nextDatabase --no-password --no-psqlrc `
+  --set ON_ERROR_STOP=on --file .\scripts\qa_dev_copy_verify.sql
+Assert-NativeSuccess "verify exact QA next database"
+
 .\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
-  -Action Audit `
-  -AuditPurpose ReconciliationPreflight `
-  -ExpectedSchemaInventorySHA256 "d95d43d17b274a440c0a28f6a68050650be60fd765af9b2841ae113716fcbbfc" `
-  -Execute `
-  -HumanOperatorApproval
+  -Action Audit -AuditPurpose Parity `
+  -ExpectedSchemaInventorySHA256 $schemaSHA `
+  -Execute -HumanOperatorApproval
 ```
 
-Save the audit task ARN. A human may then run only that migration through the
-guarded action:
+The second parity audit is mandatory before identity binding or cutover.
+
+## Phase 5: Create Jonat's QA Identity And Select His Company
+
+Use the reviewed Terraform Cognito pool, not a hardcoded pool ID:
 
 ```powershell
+aws cognito-idp describe-user-pool --profile mangorts-dev --region $qaCognitoRegion `
+  --user-pool-id $qaCognitoPool --output json | Out-Null
+Assert-NativeSuccess "verify exact QA Cognito pool"
+aws cognito-idp admin-create-user --profile mangorts-dev --region $qaCognitoRegion `
+  --user-pool-id $qaCognitoPool --username jonathankim829@gmail.com `
+  --user-attributes Name=email,Value=jonathankim829@gmail.com Name=email_verified,Value=true
+Assert-NativeSuccess "create Jonat QA Cognito user"
+$jonatSub = (aws cognito-idp admin-get-user --profile mangorts-dev `
+  --region $qaCognitoRegion --user-pool-id $qaCognitoPool `
+  --username jonathankim829@gmail.com `
+  --query "UserAttributes[?Name=='sub'].Value | [0]" --output text).Trim()
+Assert-NativeSuccess "read Jonat QA Cognito subject"
+if ($jonatSub -notmatch '^[0-9a-f-]{36}$') { throw "Unexpected Cognito subject" }
+```
+
+In DBeaver or `psql`, connect to the exact next database and bind exactly one
+normalized copied user. Replace only the subject placeholder:
+
+```sql
+BEGIN;
+DO $qa_identity$
+DECLARE
+  qa_email constant text := 'jonathankim829@gmail.com';
+  qa_subject constant text := 'REPLACE_WITH_JONATS_QA_COGNITO_SUB';
+  matched integer;
+BEGIN
+  IF qa_subject = 'REPLACE_WITH_JONATS_QA_COGNITO_SUB' OR btrim(qa_subject) = '' THEN
+    RAISE EXCEPTION 'STOP: set Jonat''s exact QA Cognito subject';
+  END IF;
+  SELECT count(*) INTO matched FROM users
+  WHERE lower(btrim(email)) = qa_email;
+  IF matched <> 1 THEN
+    RAISE EXCEPTION 'STOP: expected exactly one copied Jonat user, found %', matched;
+  END IF;
+  IF EXISTS (SELECT 1 FROM users WHERE cognito_subject = qa_subject) THEN
+    RAISE EXCEPTION 'STOP: QA Cognito subject is already bound';
+  END IF;
+  UPDATE users
+  SET cognito_subject = qa_subject, updated_timestamp = now()
+  WHERE lower(btrim(email)) = qa_email
+    AND cognito_subject = 'qa-disabled:' || user_id::text;
+  GET DIAGNOSTICS matched = ROW_COUNT;
+  IF matched <> 1 THEN
+    RAISE EXCEPTION 'STOP: Jonat row was not in the expected inert state';
+  END IF;
+END
+$qa_identity$;
+COMMIT;
+```
+
+List Jonat's surviving company memberships using the same normalized email:
+
+```sql
+SELECT membership.company_id, company.name, membership.role
+FROM users actor
+JOIN company_memberships membership ON membership.user_id = actor.user_id
+JOIN companies company ON company.company_id = membership.company_id
+WHERE lower(btrim(actor.email)) = 'jonathankim829@gmail.com'
+ORDER BY membership.company_id;
+```
+
+If there is exactly one row, run
+`$jonatCompanyID = '<that-exact-company-uuid>'`. If there are multiple, Jonat
+must explicitly choose the QA default from this exact list. Zero rows is a hard
+stop. Run `qa_dev_copy_verify.sql` again after binding.
+
+Andy and Rohan remain inert until their exact emails and separate QA Cognito
+subjects are supplied.
+
+## Phase 6: Controlled Database Cutover
+
+This two-rename operation is not transactionally atomic. Connect to the
+`postgres` maintenance database, rerun `Assert-QaWritersStopped`, replace the two
+timestamp placeholders with the exact generated names, and execute one
+statement at a time. Do not use patterns or wildcards.
+
+```sql
+ALTER DATABASE mangorts_qa WITH ALLOW_CONNECTIONS false;
+ALTER DATABASE mangorts_qa_next_YYYYMMDDHHMMSS WITH ALLOW_CONNECTIONS false;
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname IN ('mangorts_qa', 'mangorts_qa_next_YYYYMMDDHHMMSS')
+  AND pid <> pg_backend_pid();
+ALTER DATABASE mangorts_qa RENAME TO mangorts_qa_rollback_YYYYMMDDHHMMSS;
+ALTER DATABASE mangorts_qa_next_YYYYMMDDHHMMSS RENAME TO mangorts_qa;
+ALTER DATABASE mangorts_qa WITH ALLOW_CONNECTIONS true;
+```
+
+If the second rename fails after the old database was renamed, immediately run
+this exact recovery before doing anything else:
+
+```sql
+ALTER DATABASE mangorts_qa_rollback_YYYYMMDDHHMMSS RENAME TO mangorts_qa;
+ALTER DATABASE mangorts_qa WITH ALLOW_CONNECTIONS true;
+```
+
+If the first rename fails, both original names still exist but connections are
+parked. Recover them with these exact names:
+
+```sql
+ALTER DATABASE mangorts_qa WITH ALLOW_CONNECTIONS true;
+ALTER DATABASE mangorts_qa_next_YYYYMMDDHHMMSS WITH ALLOW_CONNECTIONS true;
+```
+
+After successful cutover, remove the stale next-name override before auditing
+the stable database:
+
+```powershell
+if (-not $qaDatabaseTask.Remove("DatabaseNameOverride")) {
+  throw "DatabaseNameOverride was unexpectedly absent"
+}
 .\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
-  -Action Reconcile `
-  -ExpectedSchemaInventorySHA256 "d95d43d17b274a440c0a28f6a68050650be60fd765af9b2841ae113716fcbbfc" `
-  -ReconciliationAuditTaskArn "<completed-reconciliation-audit-task-arn>" `
-  -Execute `
-  -HumanOperatorApproval
+  -Action Audit -AuditPurpose Parity `
+  -ExpectedSchemaInventorySHA256 $schemaSHA `
+  -Execute -HumanOperatorApproval
+& $psql --host $qaHost --port $qaPort --username $qaUser `
+  --dbname mangorts_qa --no-password --no-psqlrc `
+  --set ON_ERROR_STOP=on --file .\scripts\qa_dev_copy_verify.sql
+Assert-NativeSuccess "verify cut-over QA database"
 ```
 
-The migration refuses partial or populated retired V2 storage, uses no
-`CASCADE`, and is recorded in the ledger in the same transaction. Run the normal
-Parity audit immediately afterward with the fresh aligned-dev hash. If the
-preflight shape differs, the migration stops, or parity still fails, use the
-QA-only RDS replacement procedure under **Reset** after its separate approval.
+If either post-cutover check fails, park writers and connect to `postgres`. Use
+the exact retained names to restore rollback before investigating:
 
-## Phase 4: Deploy The Base App
+```sql
+ALTER DATABASE mangorts_qa WITH ALLOW_CONNECTIONS false;
+ALTER DATABASE mangorts_qa_rollback_YYYYMMDDHHMMSS WITH ALLOW_CONNECTIONS false;
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname IN ('mangorts_qa', 'mangorts_qa_rollback_YYYYMMDDHHMMSS')
+  AND pid <> pg_backend_pid();
+ALTER DATABASE mangorts_qa RENAME TO mangorts_qa_failed_YYYYMMDDHHMMSS;
+ALTER DATABASE mangorts_qa_rollback_YYYYMMDDHHMMSS RENAME TO mangorts_qa;
+ALTER DATABASE mangorts_qa WITH ALLOW_CONNECTIONS true;
+```
 
-Deploy the QA backend and frontend using the same reviewed image/build patterns as dev, but with only QA variables, roles, buckets, secrets, domains, Cognito IDs, and Terraform state. The API must use `AUTH_MODE=cognito`. Keep `TF_REALTIME_VALKEY_ENABLED=true`, `TF_ECS_CONTAINER_INSIGHTS_ENABLED=true`, `TF_CLOUDWATCH_ALARMS_ENABLED=true`, and `TF_WAF_ENABLED=true`.
+## Phase 7: Deploy And Smoke-Test The Base Site
 
-Because Nylas is configured after the base app is reachable, set `TF_EMAIL_WORKER_ENABLED=false` only for this first healthy base deployment. Keep these features temporarily off:
-
-- Nylas client, API key, state secret, and webhook secret;
-- mailbox connections and ingestion;
-- Nylas sending;
-- any copied company or business seed data.
-
-After the Phase 3 parity gate passes, set
-`TF_EMAIL_SCHEMA_MIGRATED=true` in the GitHub `qa` Environment and run the
-normal stage from the same prepared commit:
+Set the exact company selected in Phase 5, make every mail switch explicitly
+false, clear the bootstrap allowlist idempotently, and enable the schema gate:
 
 ```powershell
-gh workflow run deploy-qa.yml --ref main -f stage=deploy
+gh variable set TF_QA_COMPANY_ID --env qa --body $jonatCompanyID
+Assert-NativeSuccess "set exact QA company"
+gh variable set TF_BOOTSTRAP_ADMIN_EMAILS --env qa --body ""
+Assert-NativeSuccess "clear QA bootstrap allowlist"
+gh variable set TF_EMAIL_WORKER_ENABLED --env qa --body false
+Assert-NativeSuccess "keep QA email worker off"
+gh variable set TF_EMAIL_SCHEDULE_ENABLED --env qa --body false
+Assert-NativeSuccess "keep QA email Scheduler off"
+gh variable set TF_EMAIL_SCHEMA_MIGRATED --env qa --body true
+Assert-NativeSuccess "enable QA schema deployment gate"
+
+gh workflow run deploy-qa.yml --ref main `
+  -f stage=deploy `
+  -f "expected_git_commit=$releaseCommit"
+Assert-NativeSuccess "dispatch exact QA deploy"
 ```
 
-Only `deploy` accepts schema confirmation true, raises API desired count to
-one, publishes the frontend, and runs the application smoke tests. The later
-Nylas stage removes the temporary worker override; normal QA defaults keep the
-worker and all other production-shaped services enabled.
+The workflow starts one API task, keeps mail processing disabled, publishes the
+frontend, invalidates CloudFront, and performs revision and HTTP checks. Then
+confirm:
 
-Smoke-test:
+1. `https://qa.mangorts.com/deploy-info.json` reports `$releaseCommit`.
+2. `https://qa.mangorts.com/healthz` returns 200 and the same revision.
+3. Unauthenticated `https://qa.mangorts.com/v1/me` returns 401.
+4. The Nylas challenge route returns 200 without enabling mailbox processing.
+5. ECS shows exactly one API task, zero worker tasks, and no enabled
+   reconciliation Scheduler.
+6. Jonat completes the QA Cognito password flow and sees the selected company,
+   allowed users, assignments, chats, permissions, and business data.
 
-1. `https://qa.mangorts.com/deploy-info.json` reports the deployed QA revision and app origin.
-2. `https://qa.mangorts.com/healthz` returns HTTP 200.
-3. An unauthenticated `/v1/me` request returns HTTP 401.
-4. The invite-accept frontend route loads.
-5. The frontend bundle contains QA URLs and no dev/production URLs or known dev/production company UUIDs.
+## Cleanup And Rollback Ownership
 
-## Phase 5: Bootstrap Jonat And The Empty Company
+Jonat owns the acceptance decision. Until he accepts the site, retain only the
+exact `mangorts_qa_rollback_<timestamp>` database, exact manual snapshot, and
+sanitized dump plus its SHA-256. The raw database and raw Dev dump were removed
+in Phase 3.
 
-1. Create Jonat's lowercase email as the first user in the QA Cognito pool. This is an AWS/Cognito account only; do not insert a Mango user or membership directly.
-2. Temporarily set `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` to that one exact email and `MANGORTS_BOOTSTRAP_DEV_COMPANY_NAME` to the approved company name.
-3. Deploy the backend configuration.
-4. Jonat signs in and completes Cognito's password flow.
-5. Jonat's first authenticated backend request creates the Mango user, one company, one `dev_admin` membership, and the three protected folders.
-6. Capture the generated company UUID from the authenticated app/API response. Do not query it with a database writer credential.
-7. Replace the first-build placeholder company UUID in QA configuration with the generated UUID and redeploy the frontend.
-8. Clear `MANGORTS_BOOTSTRAP_DEV_ADMIN_EMAILS` and redeploy the backend. Never leave the bootstrap allowlist enabled.
-
-Verify in the app:
-
-- exactly one company exists with the approved name;
-- Jonat is its only Mango member and is `dev_admin`;
-- Explorer contains only protected `Unfiled`, with protected `Projects` and `Logic Gates` beneath it;
-- there are no Nodes, Logic Gates, Projects, chats, invitations, GVIC assignments, permission assignments, email connections, or imported messages.
-
-The company UUID is generated by Mango. Do not manually insert a company row or create custom seed SQL.
-
-## Phase 6: Separate Nylas Staging Setup
-
-Do this only after the base app and company work.
-
-### Stage A: OAuth And Public Routes
-
-1. Create a separate Nylas application in the **Staging** environment. Do not reuse the dev or production application.
-2. Store its API key directly in a QA Secrets Manager secret.
-3. Generate a new QA OAuth state secret and store it directly in a separate QA Secrets Manager secret.
-4. Configure the callback URL as `https://api.qa.mangorts.com/nylas/oauth/callback`.
-5. Set `TF_EMAIL_WORKER_ENABLED=true` and keep `TF_REALTIME_VALKEY_ENABLED=true`. Deploy the Nylas client ID, API base URL, API-key secret ARN, state-secret ARN, callback, and frontend redirect through the QA-only `TF_QA_NYLAS_*` GitHub Environment variables. Leave the webhook secret unset. The QA workflow deliberately ignores repository-level `TF_NYLAS_*` values so dev credentials cannot enter QA. The workflow rejects this worker stage unless the immutable image, reviewed schema, complete Nylas core, and Valkey are all present.
-6. Verify that this challenge returns HTTP 200 with the exact raw body `qa-smoke`:
+After acceptance, type each exact retained name and remove it separately:
 
 ```powershell
-curl.exe -sS "https://api.qa.mangorts.com/nylas/webhook?challenge=qa-smoke"
+if ((Read-Host "Type the exact rollback database name") -cne $rollbackDatabase) {
+  throw "Rollback database cleanup not confirmed"
+}
+& $dropdb --host $qaHost --port $qaPort --username $qaUser `
+  --maintenance-db postgres --no-password $rollbackDatabase
+Assert-NativeSuccess "drop exact accepted QA rollback database"
+if ((Read-Host "Type the exact snapshot ID") -cne $snapshotID) {
+  throw "Snapshot cleanup not confirmed"
+}
+aws rds delete-db-snapshot --profile mangorts-dev --region us-west-1 `
+  --db-snapshot-identifier $snapshotID
+Assert-NativeSuccess "delete exact accepted QA snapshot"
+Remove-Item -LiteralPath $sanitizedDump -Force
 ```
 
-QA deliberately uses Mango's normal outbound behavior: an authorized user can send a real message to any syntactically valid address. Treat every QA send as externally delivered mail.
+Before cleanup, set `$rollbackDatabase` to the exact name used in Phase 6. If
+acceptance fails, park the API and mail writers, rename the failed database
+aside, restore that exact rollback database to `mangorts_qa`, and rerun parity
+and data verification.
 
-### Stage B: Webhook Secret
+## Remaining Provider And Account Handoffs
 
-1. In the same Nylas Staging application, create the webhook destination `https://api.qa.mangorts.com/nylas/webhook`.
-2. Subscribe only to the events Mango currently handles: `message.created`, `message.updated`, `message.deleted`, `message.opened`, `folder.created`, `folder.updated`, `folder.deleted`, `grant.updated`, and `grant.expired`.
-3. Store the returned webhook secret directly in a QA Secrets Manager secret.
-4. Configure only that secret's ARN for QA and redeploy.
-5. Connect only controlled QA mailboxes through the QA Hosted OAuth flow. Never copy a dev or production `grant_id`, provider token, archive cursor, connection row, or webhook secret.
-6. Test ingestion first. Then send one outbound message to an external mailbox you can verify and confirm delivery.
+- Jonat supplies Andy and Rohan's exact emails. Create separate QA Cognito users
+  and bind exactly one normalized copied row per subject.
+- Jonat configures a separate Nylas Staging app and controlled QA mailboxes.
+  Store those values only in QA Secrets Manager/GitHub Environment settings.
+  Run a fresh schema/provider audit before deliberately enabling the worker.
+- Arch's existing GitHub contributor access is sufficient. Do not give Arch AWS
+  or database admin credentials. If direct inspection is later required, create
+  a database-enforced QA read-only role with no Dev/prod access.
 
-## Phase 7: Invite Testers And Build Synthetic Data
+## Hard Stops
 
-After the bootstrap allowlist is removed and base QA is healthy:
+Stop immediately if:
 
-1. Jonat invites Andy and Rohan through Mango's normal invitation UI using their real QA login emails and approved roles.
-2. They accept through the normal Cognito/Mango flow.
-3. Mailbox OAuth remains separate and optional.
-4. Jonat manually creates the synthetic folders, Nodes, Logic Gates, Projects, chats, permissions, GVIC assignments, and email examples.
-
-Do not copy any dev or production user, company, folder, attachment, chat, email, relationship, permission, GVIC assignment, Nylas grant, or business record into QA.
-
-After the synthetic dataset is approved, create a QA-only recovery snapshot. That snapshot can become the later reset baseline; it must never contain copied dev or production data.
-
-## Reset
-
-Reset means replacing only the QA database or restoring the approved QA-only synthetic baseline. Do not rebuild the shared VPC/NAT/hosted-zone resources.
-
-1. Announce QA downtime and stop the QA API and email worker so no write can race the reset.
-2. Decide whether to keep a recovery snapshot. Record explicit approval if the current synthetic data is disposable.
-3. Produce a Terraform plan that replaces only the QA RDS resource or restores the approved QA-only snapshot.
-4. Verify the plan names only QA resources, keeps PostgreSQL 17.x, remains Single-AZ/private, and does not change shared, dev, or production infrastructure.
-5. **STOP:** obtain separate approval for the destructive reset plan and any snapshot storage cost.
-6. A human applies the exact saved reset plan.
-7. Run the Phase 3 Audit, Bootstrap, and final Audit steps against the new empty database. A snapshot restore uses its reviewed baseline procedure instead of schema bootstrap.
-8. Temporarily re-enable Jonat's one-address bootstrap allowlist, sign in, capture the newly generated company UUID, update QA configuration, and clear the bootstrap allowlist again.
-9. Revoke orphaned QA Nylas grants if their database connection rows were discarded. Reconnect only controlled mailboxes.
-10. Clear unreferenced objects only from the exact QA attachment bucket after a separate reviewed deletion confirmation.
-11. Reinvite testers normally and reopen QA.
-
-The database task helper does not reset or delete a database. That destructive boundary stays in a reviewed Terraform replacement plan.
-
-## Hard Stop Conditions
-
-Stop immediately when any of these is true:
-
-- the Terraform plan or AWS identity does not match the approved QA account and names;
-- the plan creates a new VPC/NAT, a public database, Multi-AZ, a replica, or an always-on tunnel;
-- the PostgreSQL server version is not 17.x;
-- the pre-bootstrap audit does not report `public_tables=0`;
-- the fresh dev audit is stale, not from the same commit/files, lacks PostgreSQL 17.x, or uses an unverified writer credential in an agent session;
-- the final QA inventory or repository SHA-256 does not match the fresh dev values;
-- a hosted database write is being launched by an agent instead of a human;
-- any writer password or provider secret would be retrieved, printed, copied, or stored outside Secrets Manager/ECS task secrets;
-- the app references a dev/production Cognito pool, database, bucket, secret, URL, Terraform state, Nylas application, or grant;
-- the bootstrap admin allowlist contains anyone except Jonat or remains enabled after bootstrap;
-- a mailbox is connected without its owner's consent;
-- the email worker is enabled without the immutable backend image, verified final schema, complete QA Nylas core, and Valkey;
-- full alarms are enabled while Container Insights is disabled;
-- the cost or saved apply/reset plan has not been explicitly approved.
+- AWS account, repository, release SHA, RDS host, database name, Cognito pool,
+  image, or Terraform state differs from the reviewed QA value;
+- any API, worker, Scheduler, or one-off task is active during copy or cutover;
+- a PostgreSQL client/server is not 17.x;
+- source size lacks the required QA free-storage margin;
+- a required excluded root is absent/duplicated or remains after sanitize;
+- an attachment, provider state, active imported identity, job, orphan, or
+  unknown typed reference survives;
+- schema inventory or migration filenames differ from the exact release;
+- a queue is nonempty or the Valkey cache/user is not QA-owned and Pub/Sub-only;
+- the next database cannot pass data verification and a second parity audit;
+- a native command fails; or
+- the email worker would start without separate QA Nylas staging configuration.

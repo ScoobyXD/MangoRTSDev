@@ -98,6 +98,31 @@ output "email_worker_service_name" {
   value       = module.platform.email_worker_service_name
 }
 
+output "email_work_queue_url" {
+  description = "QA FIFO email work queue URL for exact operator depth checks."
+  value       = module.platform.email_work_queue_url
+}
+
+output "email_work_dlq_url" {
+  description = "QA FIFO email work DLQ URL for exact operator depth checks."
+  value       = module.platform.email_work_dlq_url
+}
+
+output "email_scheduler_dlq_url" {
+  description = "QA Scheduler delivery DLQ URL for exact operator depth checks."
+  value       = module.platform.email_scheduler_dlq_url
+}
+
+output "realtime_valkey_cache_name" {
+  description = "QA-owned Pub/Sub-only Valkey cache name."
+  value       = module.platform.realtime_valkey_cache_name
+}
+
+output "realtime_valkey_user_id" {
+  description = "QA-owned Pub/Sub-only Valkey user ID."
+  value       = module.platform.realtime_valkey_user_id
+}
+
 output "cognito_user_pool_id" {
   description = "QA Cognito User Pool ID."
   value       = module.platform.cognito_user_pool_id
@@ -131,6 +156,11 @@ output "database_instance_identifier" {
 output "database_name" {
   description = "Fresh QA PostgreSQL database name."
   value       = aws_db_instance.qa.db_name
+}
+
+output "database_user" {
+  description = "Non-secret QA PostgreSQL username used for exact operator target binding."
+  value       = aws_db_instance.qa.username
 }
 
 output "database_master_user_secret_arn" {

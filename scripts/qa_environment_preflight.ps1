@@ -6,15 +6,15 @@ param(
   [ValidatePattern('^\d{12}$')]
   [string]$ExpectedAwsAccountID,
   [string]$TerraformDirectory = "",
-  [string]$AppDomain = "qa.mangorts.com",
-  [string]$ApiDomain = "api.qa.mangorts.com",
-  [string]$OriginDomain = "origin.qa.mangorts.com",
   [Parameter(Mandatory = $true)]
-  [string]$BootstrapAdminEmail,
-  [string]$CompanyName = "Mango QA"
+  [string]$PostgresBin,
+  [Parameter(Mandatory = $true)]
+  [string]$JonatQaEmail
 )
 
+Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $true
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($TerraformDirectory)) {
@@ -22,21 +22,29 @@ if ([string]::IsNullOrWhiteSpace($TerraformDirectory)) {
 }
 
 function Assert-CommandExists {
-  param([string]$Name)
+  param([Parameter(Mandatory = $true)][string]$Name)
 
   if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
     throw "Missing required command: $Name"
   }
 }
 
+function Assert-NativeSuccess {
+  param([Parameter(Mandatory = $true)][string]$Operation)
+
+  if ($LASTEXITCODE -ne 0) {
+    throw "$Operation failed with native exit code $LASTEXITCODE"
+  }
+}
+
 function Assert-ExactEmailAddress {
   param(
-    [string]$Value,
-    [string]$Label
+    [Parameter(Mandatory = $true)][string]$Value,
+    [Parameter(Mandatory = $true)][string]$Label
   )
 
   $candidate = $Value.Trim()
-  if ($candidate -eq "" -or $candidate -ne $candidate.ToLowerInvariant()) {
+  if ($candidate -eq "" -or $candidate -cne $candidate.ToLowerInvariant()) {
     throw "$Label must be a nonblank lowercase email address."
   }
   if ($candidate.Contains("*") -or $candidate.StartsWith("@")) {
@@ -52,52 +60,22 @@ function Assert-ExactEmailAddress {
   }
 }
 
-function Assert-QaDomain {
-  param(
-    [string]$Value,
-    [string]$Label
-  )
-
-  $candidate = $Value.Trim().ToLowerInvariant()
-  if ($candidate -notmatch '(^|\.)qa\.mangorts\.com$') {
-    throw "$Label must be a qa.mangorts.com hostname; got '$Value'."
-  }
-  if ($candidate -match '(^|\.)(dev|prod)(\.|$)') {
-    throw "$Label must not contain a dev or prod environment label."
-  }
-  return $candidate
-}
-
-if ([string]::IsNullOrWhiteSpace($AwsProfile)) {
-  throw "AwsProfile is required."
-}
-if ($AwsProfile -match '(?i)prod') {
-  throw "Refusing an AWS profile whose name contains 'prod': $AwsProfile"
+if ([string]::IsNullOrWhiteSpace($AwsProfile) -or $AwsProfile -match '(?i)prod') {
+  throw "Refusing a blank or production-named AWS profile: $AwsProfile"
 }
 if ($AwsRegion -notmatch '^[a-z]{2}-[a-z]+-\d$') {
   throw "AwsRegion is invalid: $AwsRegion"
 }
-if ([string]::IsNullOrWhiteSpace($CompanyName)) {
-  throw "CompanyName is required."
+Assert-ExactEmailAddress -Value $JonatQaEmail -Label "JonatQaEmail"
+if ($JonatQaEmail -cne "jonathankim829@gmail.com") {
+  throw "JonatQaEmail must be Jonat's approved normalized QA address."
 }
-
-$normalizedAppDomain = Assert-QaDomain -Value $AppDomain -Label "AppDomain"
-$normalizedApiDomain = Assert-QaDomain -Value $ApiDomain -Label "ApiDomain"
-$normalizedOriginDomain = Assert-QaDomain -Value $OriginDomain -Label "OriginDomain"
-if (@(@($normalizedAppDomain, $normalizedApiDomain, $normalizedOriginDomain) | Sort-Object -Unique).Count -ne 3) {
-  throw "AppDomain, ApiDomain, and OriginDomain must be distinct."
-}
-
-$BootstrapAdminEmail = $BootstrapAdminEmail.Trim()
-Assert-ExactEmailAddress -Value $BootstrapAdminEmail -Label "BootstrapAdminEmail"
 
 $terraformPath = (Resolve-Path -LiteralPath $TerraformDirectory).Path
 $repoPrefix = $repoRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-if (-not $terraformPath.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-  throw "TerraformDirectory must remain inside the MangoRTS repository: $terraformPath"
-}
-if ((Split-Path -Leaf $terraformPath) -ne "aws-qa") {
-  throw "TerraformDirectory must point to infra/aws-qa: $terraformPath"
+if (-not $terraformPath.StartsWith($repoPrefix, [StringComparison]::OrdinalIgnoreCase) -or
+    (Split-Path -Leaf $terraformPath) -ne "aws-qa") {
+  throw "TerraformDirectory must be this repository's infra/aws-qa: $terraformPath"
 }
 
 $requiredPaths = @(
@@ -105,7 +83,11 @@ $requiredPaths = @(
   (Join-Path $repoRoot "backend/db/migrations"),
   (Join-Path $repoRoot "backend/Dockerfile.migrations"),
   (Join-Path $repoRoot "backend/cmd/miraeopus-migrate"),
-  (Join-Path $repoRoot "scripts/qa_run_database_task.ps1")
+  (Join-Path $repoRoot "scripts/export_schema_inventory.ps1"),
+  (Join-Path $repoRoot "scripts/qa_run_database_task.ps1"),
+  (Join-Path $repoRoot "scripts/qa_dev_copy_preflight.sql"),
+  (Join-Path $repoRoot "scripts/qa_dev_copy_sanitize.sql"),
+  (Join-Path $repoRoot "scripts/qa_dev_copy_verify.sql")
 )
 foreach ($path in $requiredPaths) {
   if (-not (Test-Path -LiteralPath $path)) {
@@ -113,29 +95,46 @@ foreach ($path in $requiredPaths) {
   }
 }
 
-Assert-CommandExists -Name "aws"
-Assert-CommandExists -Name "terraform"
-Assert-CommandExists -Name "git"
+foreach ($command in @("aws", "gh", "git", "terraform")) {
+  Assert-CommandExists -Name $command
+}
+
+$resolvedPostgresBin = (Resolve-Path -LiteralPath $PostgresBin).Path
+foreach ($toolName in @("psql.exe", "createdb.exe", "dropdb.exe", "pg_dump.exe", "pg_restore.exe")) {
+  $toolPath = Join-Path $resolvedPostgresBin $toolName
+  if (-not (Test-Path -LiteralPath $toolPath -PathType Leaf)) {
+    throw "Missing PostgreSQL 17 tool: $toolPath"
+  }
+  $version = (& $toolPath --version).Trim()
+  Assert-NativeSuccess -Operation "read $toolName version"
+  if ($version -notmatch 'PostgreSQL\) 17\.') {
+    throw "PostgreSQL 17.x is required; got: $version"
+  }
+}
 
 $identityRaw = & aws sts get-caller-identity `
   --profile $AwsProfile `
   --region $AwsRegion `
   --output json
-if ($LASTEXITCODE -ne 0) {
-  throw "Unable to read the AWS identity for profile '$AwsProfile'. Run aws sso login --profile $AwsProfile and retry."
-}
+Assert-NativeSuccess -Operation "read AWS identity"
 $identity = $identityRaw | ConvertFrom-Json
 if ([string]$identity.Account -cne $ExpectedAwsAccountID) {
-  throw "AWS account mismatch. Expected $ExpectedAwsAccountID but profile '$AwsProfile' resolved to $($identity.Account)."
+  throw "AWS account mismatch. Expected $ExpectedAwsAccountID but got $($identity.Account)."
+}
+
+& gh auth status
+Assert-NativeSuccess -Operation "verify GitHub authentication"
+$repository = (& gh repo view --json nameWithOwner --jq .nameWithOwner).Trim()
+Assert-NativeSuccess -Operation "read GitHub repository identity"
+if ($repository -cne "ScoobyXD/MangoRTSDev") {
+  throw "GitHub repository mismatch: $repository"
 }
 
 Write-Host "QA environment preflight passed."
 Write-Host "AWS account: $($identity.Account)"
 Write-Host "AWS principal: $($identity.Arn)"
 Write-Host "AWS region: $AwsRegion"
+Write-Host "GitHub repository: $repository"
 Write-Host "Terraform root: $terraformPath"
-Write-Host "App/API/origin: $normalizedAppDomain / $normalizedApiDomain / $normalizedOriginDomain"
-Write-Host "Bootstrap company: $($CompanyName.Trim())"
-Write-Host "Bootstrap admin: $BootstrapAdminEmail"
-
-Write-Host "STOP before terraform apply. Review the saved plan and current monthly cost estimate with Jonat first."
+Write-Host "PostgreSQL client root: $resolvedPostgresBin"
+Write-Host "Jonat QA email: $JonatQaEmail"

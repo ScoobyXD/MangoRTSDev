@@ -85,12 +85,9 @@ The QA sequence is then:
 logs. It never reads or prints the ECS database secret. The hosted bootstrap
 switch remains human-only because that task receives a writer credential.
 
-An already-bootstrapped but still empty QA catalog may use the guarded one-time
-`Reconcile` action only when its same-image read-only preflight proves the exact
-approved source inventory, exactly one missing migration ledger row, and zero
-unknown rows. The action starts at the fixed reconciliation migration; it is not
-a general hosted repair command. Any other mismatch follows the reviewed QA reset
-procedure.
+An already-bootstrapped QA catalog that fails parity must remain offline and use
+the reviewed QA reset procedure. The old one-migration reconciliation shortcut
+is not valid after later repository migrations.
 
 ## Create A Stamped Read-Only Export
 
