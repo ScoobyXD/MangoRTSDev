@@ -553,6 +553,12 @@ type memoryProcessMapMutationSnapshot struct {
 	explorerEntities      map[string]memoryCompanyExplorerV2Entity
 	explorerEdges         map[string]memoryCompanyExplorerV2Edge
 	explorerSubscriptions map[string]memoryCompanyExplorerV2Subscription
+	gvicAssignments       map[string]domain.ResourceRACIAssignment
+	entityPermissions     map[string]domain.EntityPermission
+	gvicV2Settings        map[string]memoryV2PolicySetting
+	permissionV2Settings  map[string]memoryV2PolicySetting
+	gvicV2Sequence        int64
+	permissionV2Sequence  int64
 	events                map[string]domain.DomainEvent
 	versions              map[string]int64
 	outbox                map[string]RealtimeOutboxEvent
@@ -574,7 +580,10 @@ func (r *MemoryRepo) snapshotProcessMapMutationLocked() memoryProcessMapMutation
 		logicGates: maps.Clone(r.logicGates), kanbanBoards: maps.Clone(r.kanbanBoards), kanbanColumns: cloneSliceMap(r.kanbanColumns),
 		explorerEntities: maps.Clone(r.companyExplorerV2Entities), explorerEdges: maps.Clone(r.companyExplorerV2Edges),
 		explorerSubscriptions: maps.Clone(r.companyExplorerV2Subscriptions),
-		events:                maps.Clone(r.domainEvents), versions: maps.Clone(r.workspaceReadVersions),
+		gvicAssignments:       maps.Clone(r.gvicAssignments), entityPermissions: maps.Clone(r.entityPermissions),
+		gvicV2Settings: maps.Clone(r.gvicV2Settings), permissionV2Settings: maps.Clone(r.permissionV2Settings),
+		gvicV2Sequence: r.gvicV2Sequence, permissionV2Sequence: r.permissionV2Sequence,
+		events: maps.Clone(r.domainEvents), versions: maps.Clone(r.workspaceReadVersions),
 		outbox: maps.Clone(r.realtimeOutbox), outboxSequence: r.realtimeOutboxSequence,
 	}
 }
@@ -592,6 +601,12 @@ func (r *MemoryRepo) restoreProcessMapMutationLocked(snapshot memoryProcessMapMu
 	r.companyExplorerV2Entities = snapshot.explorerEntities
 	r.companyExplorerV2Edges = snapshot.explorerEdges
 	r.companyExplorerV2Subscriptions = snapshot.explorerSubscriptions
+	r.gvicAssignments = snapshot.gvicAssignments
+	r.entityPermissions = snapshot.entityPermissions
+	r.gvicV2Settings = snapshot.gvicV2Settings
+	r.permissionV2Settings = snapshot.permissionV2Settings
+	r.gvicV2Sequence = snapshot.gvicV2Sequence
+	r.permissionV2Sequence = snapshot.permissionV2Sequence
 	r.domainEvents = snapshot.events
 	r.workspaceReadVersions = snapshot.versions
 	r.realtimeOutbox = snapshot.outbox
@@ -730,6 +745,12 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 	current, exists := r.processMapPlacements[placementKey]
 	desiredParent := processMapParentPointer(parentID)
 	parentChanged := !exists || !sameProcessMapParent(current.MapParentFolderID, desiredParent)
+	audienceResources := []domain.ProcessMapResourceRef(nil)
+	beforeAudience := processMapAccessAudience(nil)
+	if parentChanged {
+		audienceResources = r.processMapAccessResourcesLocked(input.CompanyID, resourceType, input.ResourceID)
+		beforeAudience = r.processMapAccessAudienceLocked(input.CompanyID, audienceResources)
+	}
 	now := time.Now().UTC()
 	deltaX, deltaY := 0, 0
 	if exists {
@@ -790,8 +811,10 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 		}
 	}
 	r.processMapPlacements[placementKey] = current
+	protectedGeometryChanged := false
 	if parentChanged {
 		r.syncMemoryProcessMapParentToExplorerLocked(input.CompanyID, resourceType, input.ResourceID, desiredParent, now)
+		protectedGeometryChanged = processMapAccessAudienceChanged(beforeAudience, r.processMapAccessAudienceLocked(input.CompanyID, audienceResources))
 	}
 	movedKeys[placementKey] = true
 	changedPlacements = append(changedPlacements, cloneProcessMapPlacement(current))
@@ -843,6 +866,9 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 		} else {
 			payload["target_type"] = "logic_gate"
 			payload["target_id"] = input.ResourceID
+		}
+		if protectedGeometryChanged {
+			payload[processMapProtectedGeometryChangedPayloadKey] = true
 		}
 		eventInput := workspaceDomainEventInput(input.CompanyID, eventType, payload)
 		eventInput.ActorUserID = input.ActorUserID

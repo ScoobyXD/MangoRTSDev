@@ -111,6 +111,11 @@ export class ProcessMapProtectedTileLayer extends TileLayer<ProcessMapTileRespon
 }
 
 type ProcessMapSelection = { kind: "placement" | "trace"; id: string } | null;
+type ProcessMapSelectionTileCoverage = {
+  identity: string;
+  readVersion: number;
+  tileIDs: Set<string>;
+};
 type PlacementPick = { kind: "placement"; key: string; placement: ProcessMapVisiblePlacement };
 type TracePick = { kind: "trace"; id: string; trace: ProcessMapTrace };
 type AnchorPick = {
@@ -267,6 +272,33 @@ type PointDatum = {
 
 function placementKey(resource: ProcessMapResourceRef): string {
   return processMapResourceNodeID(resource);
+}
+
+function processMapSelectionIdentity(selection: NonNullable<ProcessMapSelection>): string {
+  return `${selection.kind}\u0000${selection.id}`;
+}
+
+function processMapTileContainsSelection(tile: ProcessMapTileResponse, selection: NonNullable<ProcessMapSelection>): boolean {
+  return selection.kind === "placement"
+    ? tile.placements.some((placement) => !placement.restricted && placementKey(placement) === selection.id)
+    : tile.traces.some((trace) => trace.resource_operational_relationship_id === selection.id);
+}
+
+function processMapSelectionTileCoverage(
+  tiles: ReadonlyMap<string, ProcessMapTileResponse>,
+  selection: NonNullable<ProcessMapSelection>,
+): ProcessMapSelectionTileCoverage | null {
+  let readVersion = -1;
+  const tileIDs = new Set<string>();
+  for (const [tileID, tile] of tiles) {
+    if (!processMapTileContainsSelection(tile, selection)) continue;
+    if (tile.process_map_read_version > readVersion) {
+      readVersion = tile.process_map_read_version;
+      tileIDs.clear();
+    }
+    if (tile.process_map_read_version === readVersion) tileIDs.add(tileID);
+  }
+  return tileIDs.size > 0 ? { identity: processMapSelectionIdentity(selection), readVersion, tileIDs } : null;
 }
 
 function isProcessMapPick(value: unknown): value is ProcessMapPick {
@@ -1134,6 +1166,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const [previewTraces, setPreviewTraces] = useState<Map<string, ProcessMapTrace>>(new Map());
   const [removedTraceIDs, setRemovedTraceIDs] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<ProcessMapSelection>(null);
+  const [confirmedMissingSelectionIdentity, setConfirmedMissingSelectionIdentity] = useState<string | null>(null);
   const [hoveredPlacementKey, setHoveredPlacementKey] = useState<string | null>(null);
   const [hoveredResizePick, setHoveredResizePick] = useState<ResizePick | null>(null);
   const [hoveredProcessID, setHoveredProcessID] = useState<string | null>(null);
@@ -1148,11 +1181,14 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const viewRef = useRef(viewState);
   const sceneRef = useRef(activeScene);
+  const loadedTilesRef = useRef(loadedTiles);
   const presentationRef = useRef<ProcessMapPresentationState>(emptyPresentation());
   const committedOverlayRef = useRef(committedOverlay);
   const previewPlacementsRef = useRef(previewPlacements);
   const previewTracesRef = useRef(previewTraces);
   const removedTraceIDsRef = useRef(removedTraceIDs);
+  const selectionRef = useRef(selection);
+  const selectionTileCoverageRef = useRef<ProcessMapSelectionTileCoverage | null>(null);
   const gestureRef = useRef<ProcessMapGesture | null>(null);
   const settlementGateRef = useRef<ReturnType<typeof createProcessMapSettlementGate> | null>(null);
   const sceneAbortRef = useRef<AbortController | null>(null);
@@ -1163,11 +1199,13 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const suppressClickRef = useRef(false);
   viewRef.current = viewState;
   sceneRef.current = activeScene;
+  loadedTilesRef.current = loadedTiles;
   gestureRef.current = gesture;
   committedOverlayRef.current = committedOverlay;
   previewPlacementsRef.current = previewPlacements;
   previewTracesRef.current = previewTraces;
   removedTraceIDsRef.current = removedTraceIDs;
+  selectionRef.current = selection;
 
   const tilePresentation = useMemo(
     () => protectedScopeCurrent ? mergeTilePresentation(loadedTiles) : emptyPresentation(),
@@ -1209,31 +1247,36 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     settlementGateRef.current?.onViewStateChange();
   }, []);
 
+  const purgeProtectedScene = useCallback(() => {
+    sceneAbortRef.current?.abort();
+    setScene(null);
+    setProtectedScope(protectedScopeKey);
+    advanceProtectedGeneration();
+    invalidateProcessMapReadCaches(apiBase, companyID);
+    setSettled(false);
+    setLoadedTiles(new Map());
+    setCommittedOverlay(emptyPresentation());
+    setPreviewPlacements(new Map());
+    setPreviewTraces(new Map());
+    setRemovedTraceIDs(new Set());
+    gestureRef.current = null;
+    setGesture(null);
+    setSelection(null);
+    setConfirmedMissingSelectionIdentity(null);
+    selectionTileCoverageRef.current = null;
+    setHoveredPlacementKey(null);
+    setHoveredResizePick(null);
+    setHoveredProcessID(null);
+    setPinnedProcessID(null);
+    setLoading(true);
+  }, [advanceProtectedGeneration, apiBase, companyID, protectedScopeKey]);
+
   const loadScene = useCallback(async (purgeProtectedGeometry: boolean) => {
     if (!companyID.trim()) return;
-    if (purgeProtectedGeometry) {
-      setScene(null);
-      setProtectedScope(protectedScopeKey);
-      advanceProtectedGeneration();
-      invalidateProcessMapReadCaches(apiBase, companyID);
-      setSettled(false);
-      setLoadedTiles(new Map());
-      setCommittedOverlay(emptyPresentation());
-      setPreviewPlacements(new Map());
-      setPreviewTraces(new Map());
-      setRemovedTraceIDs(new Set());
-      gestureRef.current = null;
-      setGesture(null);
-      setSelection(null);
-      setHoveredPlacementKey(null);
-      setHoveredResizePick(null);
-      setHoveredProcessID(null);
-      setPinnedProcessID(null);
-    }
+    if (purgeProtectedGeometry) purgeProtectedScene();
     sceneAbortRef.current?.abort();
     const controller = new AbortController();
     sceneAbortRef.current = controller;
-    if (purgeProtectedGeometry) setLoading(true);
     setError("");
     try {
       const nextScene = await fetchProcessMapScene(apiBase, companyID, controller.signal);
@@ -1246,7 +1289,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setLoading(false);
       setError(errorMessage(cause, "Process Map could not be loaded."));
     }
-  }, [advanceProtectedGeneration, apiBase, companyID, markUnsettled, protectedScopeKey]);
+  }, [companyID, markUnsettled, purgeProtectedScene]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1284,43 +1327,23 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [activeScene, markUnsettled, viewportSize]);
 
   useEffect(() => {
-    let purgeProtectedGeometry = false;
     const coalesced = createCoalescedCanonicalRefresh(
-      () => {
-        const purge = purgeProtectedGeometry;
-        purgeProtectedGeometry = false;
-        return loadScene(purge);
-      },
+      () => loadScene(false),
       (cause) => setError(errorMessage(cause, "Process Map could not refresh.")),
     );
     const requestRefresh = (purge: boolean) => {
-      purgeProtectedGeometry ||= purge;
+      if (purge) purgeProtectedScene();
       coalesced.request();
     };
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, PROCESS_MAP_REALTIME_SCOPE, {
       onProcessMapChanged: (message) => {
-        if (message.origin_connection_id && message.origin_connection_id === getCurrentRealtimeConnectionID(apiBase, companyID)) return;
-        requestRefresh(message.presentation_only !== true);
+        if (!message.protected_geometry_changed && message.origin_connection_id && message.origin_connection_id === getCurrentRealtimeConnectionID(apiBase, companyID)) return;
+        requestRefresh(message.protected_geometry_changed);
       },
       onRecover: () => { requestRefresh(true); },
       onRejected: () => {
-        advanceProtectedGeneration();
-        invalidateProcessMapReadCaches(apiBase, companyID);
-        sceneAbortRef.current?.abort();
-        setSettled(false);
-        setLoadedTiles(new Map());
-        setCommittedOverlay(emptyPresentation());
-        setPreviewPlacements(new Map());
-        setPreviewTraces(new Map());
-        setRemovedTraceIDs(new Set());
-        gestureRef.current = null;
-        setSelection(null);
-        setGesture(null);
-        setHoveredPlacementKey(null);
-        setHoveredResizePick(null);
-        setHoveredProcessID(null);
-        setPinnedProcessID(null);
-        setScene(null);
+        purgeProtectedScene();
+        setLoading(false);
         setError("Process Map access changed. Refresh after your permissions are restored.");
       },
     });
@@ -1328,7 +1351,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       coalesced.dispose();
       unsubscribe();
     };
-  }, [advanceProtectedGeneration, apiBase, companyID, loadScene]);
+  }, [apiBase, companyID, loadScene, purgeProtectedScene]);
 
   const guardedGetTileData = useCallback(async (request: ProcessMapTileLoadRequest): Promise<ProcessMapTileResponse | null> => {
     const currentScene = sceneRef.current;
@@ -1345,6 +1368,16 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const handleTileLoad = useCallback((tileID: string, data: ProcessMapTileResponse, generation: number) => {
     if (generation !== canonicalGenerationRef.current || data.process_map_read_version !== sceneRef.current?.process_map_read_version) return;
+    const currentSelection = selectionRef.current;
+    if (currentSelection && processMapTileContainsSelection(data, currentSelection)) {
+      const identity = processMapSelectionIdentity(currentSelection);
+      const currentCoverage = selectionTileCoverageRef.current;
+      if (!currentCoverage || currentCoverage.identity !== identity || data.process_map_read_version > currentCoverage.readVersion) {
+        selectionTileCoverageRef.current = { identity, readVersion: data.process_map_read_version, tileIDs: new Set([tileID]) };
+      } else if (data.process_map_read_version === currentCoverage.readVersion) {
+        currentCoverage.tileIDs.add(tileID);
+      }
+    }
     setLoadedTiles((current) => new Map(current).set(tileID, data));
     setLoading(false);
   }, []);
@@ -1524,7 +1557,41 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     return bounds ? processMapDeepestContainingFolder(bounds, folders, excludedFolderID) : null;
   }, [folders, placementGesture, placementTransform]);
 
+  const selectionIdentity = selection ? processMapSelectionIdentity(selection) : null;
+  useEffect(() => {
+    if (!selection) {
+      selectionTileCoverageRef.current = null;
+      return;
+    }
+    if (selectionTileCoverageRef.current?.identity !== processMapSelectionIdentity(selection)) {
+      selectionTileCoverageRef.current = processMapSelectionTileCoverage(loadedTilesRef.current, selection);
+    }
+  }, [selection]);
   const selectedPlacement = selection?.kind === "placement" ? presentation.placements.get(selection.id) ?? null : null;
+  const selectedTrace = selection?.kind === "trace" ? presentation.traces.get(selection.id) ?? null : null;
+  const selectionExists = selectedPlacement !== null || selectedTrace !== null;
+  const selectionConfirmedMissing = selectionIdentity !== null && confirmedMissingSelectionIdentity === selectionIdentity;
+  const selectionHasCanonicalCoverage = selectionIdentity !== null
+    && selectionTileCoverageRef.current?.identity === selectionIdentity
+    && selectionTileCoverageRef.current.tileIDs.size > 0
+    && [...selectionTileCoverageRef.current.tileIDs].every((tileID) => (
+      loadedTiles.get(tileID)?.process_map_read_version === activeScene?.process_map_read_version
+    ));
+  const selectionVisible = selection !== null && (selectionExists || !selectionConfirmedMissing);
+  const visibleSelection = selectionVisible ? selection : null;
+  useEffect(() => {
+    if (!selectionIdentity) {
+      setConfirmedMissingSelectionIdentity(null);
+      return;
+    }
+    if (selectionExists) {
+      setConfirmedMissingSelectionIdentity((current) => current === selectionIdentity ? null : current);
+      return;
+    }
+    if (selectionHasCanonicalCoverage) {
+      setConfirmedMissingSelectionIdentity(selectionIdentity);
+    }
+  }, [selectionExists, selectionHasCanonicalCoverage, selectionIdentity]);
   const gesturePlacementKeys = placementGesture?.basePlacementKeys ?? null;
   const gestureTraceIDs = placementGesture?.baseTraceIDs ?? null;
   const editedPlacementKeys = useMemo(() => new Set([
@@ -1532,15 +1599,15 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     ...committedOverlay.removedPlacementKeys,
     ...previewPlacements.keys(),
     ...(gesturePlacementKeys ?? []),
-    ...(selection?.kind === "placement" ? [selection.id] : []),
-  ]), [committedOverlay.placements, committedOverlay.removedPlacementKeys, gesturePlacementKeys, previewPlacements, selection]);
+    ...(visibleSelection?.kind === "placement" ? [visibleSelection.id] : []),
+  ]), [committedOverlay.placements, committedOverlay.removedPlacementKeys, gesturePlacementKeys, previewPlacements, visibleSelection]);
   const editedTraceIDs = useMemo(() => new Set([
     ...committedOverlay.traces.keys(),
     ...previewTraces.keys(),
     ...removedTraceIDs,
     ...(gestureTraceIDs ?? []),
-    ...(selection?.kind === "trace" ? [selection.id] : []),
-  ]), [committedOverlay.traces, gestureTraceIDs, previewTraces, removedTraceIDs, selection]);
+    ...(visibleSelection?.kind === "trace" ? [visibleSelection.id] : []),
+  ]), [committedOverlay.traces, gestureTraceIDs, previewTraces, removedTraceIDs, visibleSelection]);
   const overlayPlacements = useMemo(() => {
     const result = new Map<string, ProcessMapVisiblePlacement>();
     for (const key of editedPlacementKeys) {
@@ -1561,14 +1628,14 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const editOverlay = useMemo<ProcessMapEditOverlayModel>(() => ({
     placements: overlayPlacements,
     traces: overlayTraces,
-    selectedPlacementKey: selection?.kind === "placement" ? selection.id : null,
+    selectedPlacementKey: visibleSelection?.kind === "placement" ? visibleSelection.id : null,
     hoveredPlacementKey,
-    selectedTraceID: selection?.kind === "trace" ? selection.id : null,
+    selectedTraceID: visibleSelection?.kind === "trace" ? visibleSelection.id : null,
     connectionPreview: gesture?.kind === "connection" ? { source: gesture.source, point: gesture.point } : null,
     highlightedFolderKey: highlightedFolder ? placementKey(highlightedFolder) : null,
     connectionSourceKey: gesture?.kind === "connection" ? placementKey(gesture.source) : null,
     placementTransform,
-  }), [gesture, highlightedFolder, hoveredPlacementKey, overlayPlacements, overlayTraces, placementTransform, selection]);
+  }), [gesture, highlightedFolder, hoveredPlacementKey, overlayPlacements, overlayTraces, placementTransform, visibleSelection]);
 
   const editedPlacementMembership = useMemo(() => [...editedPlacementKeys].sort().join("\0"), [editedPlacementKeys]);
   const editedTraceMembership = useMemo(() => [...editedTraceIDs].sort().join("\0"), [editedTraceIDs]);
@@ -1580,8 +1647,8 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     () => new Set(editedTraceMembership ? editedTraceMembership.split("\0") : []),
     [editedTraceMembership],
   );
-  const selectedPlacementKey = selection?.kind === "placement" ? selection.id : null;
-  const selectedTraceID = selection?.kind === "trace" ? selection.id : null;
+  const selectedPlacementKey = visibleSelection?.kind === "placement" ? visibleSelection.id : null;
+  const selectedTraceID = visibleSelection?.kind === "trace" ? visibleSelection.id : null;
 
   const spatialLayers = useMemo(() => activeScene ? buildProcessMapSpatialLayers({
     scene: activeScene,
@@ -1913,13 +1980,13 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [hoveredProcessID, scheduleHoverClose, settledViewState.zoom, showHoverCard]);
 
   const removeSelection = useCallback(async () => {
-    if (!selection) return;
-    if (selection.kind === "trace") {
+    if (!visibleSelection) return;
+    if (visibleSelection.kind === "trace") {
       gestureRef.current = null;
       setGesture(null);
       setHoveredPlacementKey(null);
       setHoveredResizePick(null);
-      const trace = presentationRef.current.traces.get(selection.id);
+      const trace = presentationRef.current.traces.get(visibleSelection.id);
       if (!trace) return;
       const id = trace.resource_operational_relationship_id;
       const operationKey = `trace:${id}`;
@@ -1944,7 +2011,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       }
       return;
     }
-    const placement = presentationRef.current.placements.get(selection.id);
+    const placement = presentationRef.current.placements.get(visibleSelection.id);
     if (!placement) return;
     const confirmed = window.confirm(placement.resource_type === "logic_gate"
       ? `Delete \"${placement.name}\" from Company Explorer? This removes only its Company Explorer placement. The Process and its data will remain.`
@@ -2013,12 +2080,12 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       void loadScene(false);
       setNotice(errorMessage(cause, "Company Explorer deletion was rolled back."));
     }
-  }, [apiBase, applyEnvelope, companyID, loadScene, markUnsettled, nextOperation, refreshAfterMutation, selection]);
+  }, [apiBase, applyEnvelope, companyID, loadScene, markUnsettled, nextOperation, refreshAfterMutation, visibleSelection]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) return;
     if (event.key === "Delete" || event.key === "Backspace") {
-      if (!selection) return;
+      if (!selectionVisible) return;
       event.preventDefault();
       void removeSelection();
     } else if ((event.key === "Enter" || event.key === " ") && selectedPlacement?.resource_type === "logic_gate") {
@@ -2035,11 +2102,11 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setHoveredPlacementKey(null);
       setHoveredResizePick(null);
     }
-  }, [openProcess, removeSelection, selectedPlacement, selection]);
+  }, [openProcess, removeSelection, selectedPlacement, selectionVisible]);
 
   const qdPlacement = useMemo(() => {
     const id = pinnedProcessID ?? (hoverModeEnabled ? hoveredProcessID : null);
-    return id ? [...presentation.placements.values()].find((placement) => placement.resource_type === "logic_gate" && placement.resource_id === id) ?? null : null;
+    return id ? presentation.placements.get(`logic_gate:${id}`) ?? null : null;
   }, [hoverModeEnabled, hoveredProcessID, pinnedProcessID, presentation.placements]);
   const qdGeometry = qdPlacement ? processMapPlacementGeometryForTransform(qdPlacement, placementTransform) : null;
   const qdVisible = qdPlacement && qdGeometry && processMapPlacementDisplayLOD({
@@ -2103,9 +2170,9 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         getCursor={({ isDragging, isHovering }) => resizeCursor ?? (isDragging ? "grabbing" : isHovering ? "pointer" : "grab")}
       />
 
-      {selection && <div data-process-map-fixed-overlay="true" className="process-map-toolbar" onPointerDown={(event) => event.stopPropagation()}>
-        <span>{selection.kind === "placement" ? "Company Explorer item selected" : "Operational trace selected"}</span>
-        <button type="button" onClick={() => void removeSelection()}>{selection.kind === "placement" ? "Delete from Company Explorer" : "Delete relationship"}</button>
+      {visibleSelection && <div data-process-map-fixed-overlay="true" className="process-map-toolbar" onPointerDown={(event) => event.stopPropagation()}>
+        <span>{visibleSelection.kind === "placement" ? "Company Explorer item selected" : "Operational trace selected"}</span>
+        <button type="button" onClick={() => void removeSelection()}>{visibleSelection.kind === "placement" ? "Delete from Company Explorer" : "Delete relationship"}</button>
       </div>}
 
       {qdPosition && qdPlacement && <div data-process-map-fixed-overlay="true" className="process-map-qd-overlay" style={qdPosition}>

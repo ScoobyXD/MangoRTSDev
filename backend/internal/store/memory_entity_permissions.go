@@ -164,7 +164,11 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 		r.syncRACIGroupDependentResourcesForGroupSetLocked(companyID, oldAffectedGroupIDs)
 		r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	}
-	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_user_group_updated", map[string]any{"group_id": groupID})); err != nil {
+	payload := map[string]any{"group_id": groupID}
+	if parentChanged {
+		payload[processMapProtectedGeometryChangedPayloadKey] = true
+	}
+	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_user_group_updated", payload)); err != nil {
 		r.restoreCompanyUserGroupMutationLocked(before)
 		return domain.CompanyUserGroup{}, err
 	}

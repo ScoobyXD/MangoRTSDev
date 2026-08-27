@@ -1309,9 +1309,27 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 			return ProcessMapMutationEnvelope{}, ErrProcessMapCycle
 		}
 	}
+	desiredParent := processMapParentPointer(parentID)
+	parentChanged := exists && !sameProcessMapParent(current.MapParentFolderID, desiredParent)
+	audienceResources := []domain.ProcessMapResourceRef(nil)
+	beforeAudience := processMapAccessAudience(nil)
+	if parentChanged {
+		audienceResources = processMapAccessResourcesFromPlacements(current, descendants)
+		beforeAudience, err = postgresProcessMapAccessAudienceTx(ctx, tx, companyID, audienceResources)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+	}
 	explorerEvent, err := r.syncCompanyExplorerParentFromProcessMapTx(ctx, tx, companyID, resourceType, resourceID, parentID, actorUserID)
 	if err != nil {
 		return ProcessMapMutationEnvelope{}, err
+	}
+	if explorerEvent != nil && parentChanged {
+		afterAudience, err := postgresProcessMapAccessAudienceTx(ctx, tx, companyID, audienceResources)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+		markProcessMapProtectedGeometryChanged(explorerEvent.Payload, beforeAudience, afterAudience)
 	}
 
 	deltaX, deltaY := 0, 0

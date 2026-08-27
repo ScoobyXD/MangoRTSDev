@@ -584,6 +584,18 @@ select exists(select 1 from descendants where folder_id=$3::uuid)`, companyID, f
 		targetParentID = value
 	}
 	parentChanged := currentParent.Valid != (targetParentID != "") || currentParent.String != targetParentID
+	audienceResources := []domain.ProcessMapResourceRef(nil)
+	beforeAudience := processMapAccessAudience(nil)
+	if parentChanged {
+		audienceResources, err = postgresProcessMapAccessResourcesTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, folderID)
+		if err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
+		beforeAudience, err = postgresProcessMapAccessAudienceTx(ctx, tx, companyID, audienceResources)
+		if err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
+	}
 	if position <= 0 && !parentChanged {
 		position = currentPosition
 	}
@@ -623,9 +635,15 @@ returning company_id::text, folder_id::text, parent_folder_id::text, name, defau
 	if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, folderID, parentOut.String, actorUserID); err != nil {
 		return domain.CompanyExplorerFolder{}, err
 	}
-	eventInput := workspaceDomainEventInput(companyID, "company_explorer_folder_updated", map[string]any{
-		"folder_id": folderID, "parent_entity_id": parentOut.String,
-	})
+	payload := map[string]any{"folder_id": folderID, "parent_entity_id": parentOut.String}
+	if parentChanged {
+		afterAudience, err := postgresProcessMapAccessAudienceTx(ctx, tx, companyID, audienceResources)
+		if err != nil {
+			return domain.CompanyExplorerFolder{}, err
+		}
+		markProcessMapProtectedGeometryChanged(payload, beforeAudience, afterAudience)
+	}
+	eventInput := workspaceDomainEventInput(companyID, "company_explorer_folder_updated", payload)
 	eventInput.ActorUserID = actorUserID
 	if _, err := r.appendDomainEventTx(ctx, tx, eventInput); err != nil {
 		return domain.CompanyExplorerFolder{}, err
@@ -1403,6 +1421,14 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 	if err := lockPostgresCompanyExplorerMutationTx(ctx, tx, companyID, "", true); err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
+	audienceResources, err := postgresProcessMapAccessResourcesTx(ctx, tx, companyID, itemType, itemID)
+	if err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	beforeAudience, err := postgresProcessMapAccessAudienceTx(ctx, tx, companyID, audienceResources)
+	if err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
 
 	item, deletedRelationshipIDs, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, folderID, itemType, itemID, position)
 	if err != nil {
@@ -1412,6 +1438,15 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItem(companyID, folderID, item
 		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, itemID, item.FolderID, ""); err != nil {
 			return domain.CompanyExplorerFolderItem{}, nil, err
 		}
+	}
+	payload := map[string]any{"parent_entity_id": folderID, "target_type": itemType, "target_id": itemID}
+	afterAudience, err := postgresProcessMapAccessAudienceTx(ctx, tx, companyID, audienceResources)
+	if err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	markProcessMapProtectedGeometryChanged(payload, beforeAudience, afterAudience)
+	if _, err := r.appendDomainEventTx(ctx, tx, workspaceDomainEventInput(companyID, "company_explorer_item_placed", payload)); err != nil {
+		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.CompanyExplorerFolderItem{}, nil, err
@@ -1435,7 +1470,16 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItems(companyID string, assign
 
 	items := make([]domain.CompanyExplorerFolderItem, 0, len(assignments))
 	deleted := make([]CompanyExplorerRelationshipDeleteResult, 0)
+	eventInputs := make([]DomainEventInput, 0, len(assignments))
 	for _, assignment := range assignments {
+		audienceResources, err := postgresProcessMapAccessResourcesTx(ctx, tx, companyID, assignment.ItemType, assignment.ItemID)
+		if err != nil {
+			return nil, nil, err
+		}
+		beforeAudience, err := postgresProcessMapAccessAudienceTx(ctx, tx, companyID, audienceResources)
+		if err != nil {
+			return nil, nil, err
+		}
 		item, deletedRelationshipIDs, err := assignCompanyExplorerFolderItemSQL(ctx, tx, companyID, assignment.FolderID, assignment.ItemType, assignment.ItemID, assignment.Position)
 		if err != nil {
 			return nil, nil, err
@@ -1445,6 +1489,13 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItems(companyID string, assign
 				return nil, nil, err
 			}
 		}
+		payload := map[string]any{"parent_entity_id": assignment.FolderID, "target_type": assignment.ItemType, "target_id": assignment.ItemID}
+		afterAudience, err := postgresProcessMapAccessAudienceTx(ctx, tx, companyID, audienceResources)
+		if err != nil {
+			return nil, nil, err
+		}
+		markProcessMapProtectedGeometryChanged(payload, beforeAudience, afterAudience)
+		eventInputs = append(eventInputs, workspaceDomainEventInput(companyID, "company_explorer_item_placed", payload))
 		items = append(items, item)
 		if len(deletedRelationshipIDs) > 0 {
 			deleted = append(deleted, CompanyExplorerRelationshipDeleteResult{
@@ -1453,6 +1504,9 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItems(companyID string, assign
 				RelationshipIDs: deletedRelationshipIDs,
 			})
 		}
+	}
+	if _, err := r.appendDomainEventsTx(ctx, tx, eventInputs); err != nil {
+		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err

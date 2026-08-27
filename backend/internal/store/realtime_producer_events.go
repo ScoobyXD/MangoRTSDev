@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"maps"
 	"miraeopus/backend/internal/domain"
 	"slices"
 	"strings"
@@ -13,10 +15,11 @@ import (
 )
 
 const (
-	NotificationRealtimeDeleteEach = "deleted"
-	NotificationRealtimeClear      = "cleared"
-	raciTabsRealtimeScope          = "raci-tabs:company"
-	processMapRealtimeScope        = "process-map:company"
+	NotificationRealtimeDeleteEach               = "deleted"
+	NotificationRealtimeClear                    = "cleared"
+	raciTabsRealtimeScope                        = "raci-tabs:company"
+	processMapRealtimeScope                      = "process-map:company"
+	processMapProtectedGeometryChangedPayloadKey = "protected_geometry_changed"
 )
 
 func stableRealtimeEventID(parts ...string) string {
@@ -360,7 +363,7 @@ func raciTabsChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []str
 	})
 }
 
-func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []string, originConnectionID string, presentationOnly bool) (RealtimeOutboxInput, error) {
+func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []string, originConnectionID string, protectedGeometryChanged bool) (RealtimeOutboxInput, error) {
 	companyID = strings.TrimSpace(companyID)
 	eventIDs = append([]string(nil), eventIDs...)
 	for index := range eventIDs {
@@ -374,12 +377,10 @@ func processMapChangedOutboxInput(companyID string, eventIDs, allowedUserIDs []s
 	}
 	payloadFields := map[string]any{
 		"type": "process_map.changed", "company_id": companyID, "scope": processMapRealtimeScope,
+		"protected_geometry_changed": protectedGeometryChanged,
 	}
 	if originConnectionID = strings.TrimSpace(originConnectionID); originConnectionID != "" {
 		payloadFields["origin_connection_id"] = originConnectionID
-	}
-	if presentationOnly {
-		payloadFields["presentation_only"] = true
 	}
 	payload, err := json.Marshal(payloadFields)
 	if err != nil {
@@ -456,7 +457,7 @@ func processMapChangedEventIDsByCompany(events []domain.DomainEvent) map[string]
 	return byCompany
 }
 
-func processMapChangedPresentationOnlyByCompany(events []domain.DomainEvent) map[string]bool {
+func processMapChangedProtectedGeometryChangedByCompany(events []domain.DomainEvent) map[string]bool {
 	byCompany := map[string]bool{}
 	for _, event := range events {
 		if !isProcessMapChangedDomainEvent(event) {
@@ -467,13 +468,286 @@ func processMapChangedPresentationOnlyByCompany(events []domain.DomainEvent) map
 			continue
 		}
 		if _, exists := byCompany[companyID]; !exists {
+			byCompany[companyID] = false
+		}
+		if changed, ok := event.Payload[processMapProtectedGeometryChangedPayloadKey].(bool); ok && changed {
 			byCompany[companyID] = true
 		}
-		if strings.TrimSpace(event.Type) != QDRatingRealtimeEventType {
-			byCompany[companyID] = false
+		switch strings.TrimSpace(event.Type) {
+		case "logic_gate_permissions_updated", "company_explorer_folder_permissions_updated",
+			"company_user_group_deleted", "company_user_group_members_updated",
+			CompanyMembershipSavedEventType, CompanyMembershipDeletedEventType:
+			byCompany[companyID] = true
 		}
 	}
 	return byCompany
+}
+
+type processMapAccessAudience map[string]map[string]bool
+
+func processMapAccessAudienceKey(resourceType, resourceID string) string {
+	return strings.TrimSpace(resourceType) + "\x00" + strings.TrimSpace(resourceID)
+}
+
+func processMapAccessAudienceChanged(before, after processMapAccessAudience) bool {
+	return !maps.EqualFunc(before, after, func(beforeUsers, afterUsers map[string]bool) bool {
+		return maps.Equal(beforeUsers, afterUsers)
+	})
+}
+
+func processMapAccessResourcesFromPlacements(root domain.ProcessMapPlacement, descendants []domain.ProcessMapPlacement) []domain.ProcessMapResourceRef {
+	resources := make([]domain.ProcessMapResourceRef, 0, len(descendants)+1)
+	resources = append(resources, domain.ProcessMapResourceRef{ResourceType: root.ResourceType, ResourceID: root.ResourceID})
+	for _, item := range descendants {
+		resources = append(resources, domain.ProcessMapResourceRef{ResourceType: item.ResourceType, ResourceID: item.ResourceID})
+	}
+	return resources
+}
+
+func (r *MemoryRepo) processMapAccessResourcesLocked(companyID, resourceType, resourceID string) []domain.ProcessMapResourceRef {
+	root, exists := r.processMapPlacements[processMapPlacementMemoryKey(companyID, resourceType, resourceID)]
+	if !exists {
+		return nil
+	}
+	resources := []domain.ProcessMapResourceRef{{ResourceType: root.ResourceType, ResourceID: root.ResourceID}}
+	if resourceType != domain.ProcessMapResourceTypeFolder {
+		return resources
+	}
+	childrenByParent := map[string][]domain.ProcessMapPlacement{}
+	for _, placement := range r.processMapPlacements {
+		if placement.CompanyID != companyID || placement.MapParentFolderID == nil {
+			continue
+		}
+		parentID := strings.TrimSpace(*placement.MapParentFolderID)
+		if parentID != "" {
+			childrenByParent[parentID] = append(childrenByParent[parentID], placement)
+		}
+	}
+	queue := []string{resourceID}
+	seen := map[string]bool{processMapAccessAudienceKey(root.ResourceType, root.ResourceID): true}
+	for len(queue) > 0 {
+		parentID := queue[0]
+		queue = queue[1:]
+		for _, child := range childrenByParent[parentID] {
+			resourceKey := processMapAccessAudienceKey(child.ResourceType, child.ResourceID)
+			if seen[resourceKey] {
+				continue
+			}
+			seen[resourceKey] = true
+			resources = append(resources, domain.ProcessMapResourceRef{ResourceType: child.ResourceType, ResourceID: child.ResourceID})
+			if child.ResourceType == domain.ProcessMapResourceTypeFolder {
+				queue = append(queue, child.ResourceID)
+			}
+		}
+	}
+	return resources
+}
+
+func (r *MemoryRepo) processMapAccessAudienceLocked(companyID string, resources []domain.ProcessMapResourceRef) processMapAccessAudience {
+	audience := processMapAccessAudience{}
+	type resolvedResource struct {
+		resourceKey string
+		sourceKey   string
+	}
+	resolvedResources := make([]resolvedResource, 0, len(resources))
+	sourceDefaults := map[string]string{}
+	for _, resource := range resources {
+		resourceKey := processMapAccessAudienceKey(resource.ResourceType, resource.ResourceID)
+		if _, exists := audience[resourceKey]; exists {
+			continue
+		}
+		audience[resourceKey] = map[string]bool{}
+		if !r.ensureV2PolicySettingsLocked(companyID, resource.ResourceType, resource.ResourceID) {
+			continue
+		}
+		resolved := r.resolveV2PolicyLocked(companyID, resource.ResourceType, resource.ResourceID, false)
+		if resolved.SourceID == "" {
+			continue
+		}
+		sourceKey := resourcePolicyKey(companyID, resolved.SourceType, resolved.SourceID)
+		resolvedResources = append(resolvedResources, resolvedResource{
+			resourceKey: resourceKey, sourceKey: sourceKey,
+		})
+		sourceDefaults[sourceKey] = r.permissionV2Settings[sourceKey].DefaultAccess
+	}
+
+	userIDs := map[string]bool{}
+	adminUserIDs := map[string]bool{}
+	for _, membership := range r.memberships {
+		userID := strings.TrimSpace(membership.UserID)
+		if userID == "" || (membership.CompanyID != companyID && membership.Role != domain.RoleDevAdmin) {
+			continue
+		}
+		userIDs[userID] = true
+		if membership.Role == domain.RoleDevAdmin || (membership.CompanyID == companyID && membership.Role == domain.RoleCompanyAdmin) {
+			adminUserIDs[userID] = true
+		}
+	}
+	for resourceKey := range audience {
+		for userID := range adminUserIDs {
+			audience[resourceKey][userID] = true
+		}
+	}
+
+	assignmentsBySource := map[string][]resourcePermissionAssignment{}
+	for _, permission := range r.entityPermissions {
+		if permission.CompanyID != companyID {
+			continue
+		}
+		sourceKey := resourcePolicyKey(companyID, permission.EntityType, permission.EntityID)
+		if _, exists := sourceDefaults[sourceKey]; !exists {
+			continue
+		}
+		assignmentsBySource[sourceKey] = append(assignmentsBySource[sourceKey], resourcePermissionAssignment{
+			SubjectType: permission.SubjectType, SubjectID: permission.SubjectID, AccessLevel: permission.AccessLevel,
+		})
+	}
+
+	groupParents := map[string]string{}
+	validGroupIDs := map[string]bool{}
+	for _, group := range r.userGroups {
+		if group.CompanyID != companyID {
+			continue
+		}
+		groupID := strings.TrimSpace(group.GroupID)
+		validGroupIDs[groupID] = true
+		groupParents[groupID] = companyUserGroupParentID(group)
+	}
+	groupUserDepths := map[string]map[string]int{}
+	for _, member := range r.userGroupMembers {
+		userID := strings.TrimSpace(member.UserID)
+		groupID := strings.TrimSpace(member.GroupID)
+		if member.CompanyID != companyID || !userIDs[userID] || adminUserIDs[userID] || !validGroupIDs[groupID] {
+			continue
+		}
+		seen := map[string]bool{}
+		for depth := 0; groupID != "" && validGroupIDs[groupID] && !seen[groupID]; depth++ {
+			seen[groupID] = true
+			if groupUserDepths[groupID] == nil {
+				groupUserDepths[groupID] = map[string]int{}
+			}
+			previousDepth, exists := groupUserDepths[groupID][userID]
+			if !exists || depth < previousDepth {
+				groupUserDepths[groupID][userID] = depth
+			}
+			groupID = groupParents[groupID]
+		}
+	}
+
+	sourceAudiences := map[string]map[string]bool{}
+	for sourceKey, defaultAccess := range sourceDefaults {
+		allowedUserIDs := maps.Clone(adminUserIDs)
+		assignments := assignmentsBySource[sourceKey]
+		for userID := range userIDs {
+			if adminUserIDs[userID] {
+				continue
+			}
+			accessLevel := defaultAccess
+			directMatch := false
+			for _, assignment := range assignments {
+				if assignment.SubjectType == EntityPermissionSubjectUser && assignment.SubjectID == userID {
+					accessLevel = assignment.AccessLevel
+					directMatch = true
+					break
+				}
+			}
+			if !directMatch {
+				bestDepth, bestRank := int(^uint(0)>>1), int(^uint(0)>>1)
+				for _, assignment := range assignments {
+					if assignment.SubjectType != EntityPermissionSubjectGroup {
+						continue
+					}
+					depth, exists := groupUserDepths[strings.TrimSpace(assignment.SubjectID)][userID]
+					rank := EntityPermissionRank(assignment.AccessLevel)
+					if exists && (depth < bestDepth || (depth == bestDepth && rank < bestRank)) {
+						accessLevel, bestDepth, bestRank = assignment.AccessLevel, depth, rank
+					}
+				}
+			}
+			if EntityPermissionSatisfies(accessLevel, EntityPermissionEdit) {
+				allowedUserIDs[userID] = true
+			}
+		}
+		sourceAudiences[sourceKey] = allowedUserIDs
+	}
+	for _, resource := range resolvedResources {
+		audience[resource.resourceKey] = maps.Clone(sourceAudiences[resource.sourceKey])
+	}
+	return audience
+}
+
+func postgresProcessMapAccessResourcesTx(ctx context.Context, tx *sql.Tx, companyID, resourceType, resourceID string) ([]domain.ProcessMapResourceRef, error) {
+	if resourceType != domain.ProcessMapResourceTypeFolder && resourceType != domain.ProcessMapResourceTypeProcess {
+		return nil, nil
+	}
+	root, err := processMapPlacementByResourceTx(ctx, tx, companyID, resourceType, resourceID, true)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	descendants := []domain.ProcessMapPlacement{}
+	if resourceType == domain.ProcessMapResourceTypeFolder {
+		descendants, err = postgresProcessMapDescendantsTx(ctx, tx, companyID, resourceID, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return processMapAccessResourcesFromPlacements(root, descendants), nil
+}
+
+func postgresProcessMapAccessAudienceTx(ctx context.Context, tx *sql.Tx, companyID string, resources []domain.ProcessMapResourceRef) (processMapAccessAudience, error) {
+	audience := processMapAccessAudience{}
+	uniqueResources := make([]domain.ProcessMapResourceRef, 0, len(resources))
+	for _, resource := range resources {
+		resourceKey := processMapAccessAudienceKey(resource.ResourceType, resource.ResourceID)
+		if _, exists := audience[resourceKey]; exists {
+			continue
+		}
+		audience[resourceKey] = map[string]bool{}
+		uniqueResources = append(uniqueResources, resource)
+	}
+	if len(uniqueResources) == 0 {
+		return audience, nil
+	}
+	resourcesJSON, err := json.Marshal(uniqueResources)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+with requested as (
+  select distinct item.resource_type,item.resource_id
+  from jsonb_to_recordset($2::jsonb) item(resource_type text,resource_id uuid)
+), eligible_users as (
+  select distinct membership.user_id
+  from company_memberships membership
+  where membership.company_id=$1::uuid or membership.role='dev_admin'
+)
+select requested.resource_type,requested.resource_id::text,eligible_users.user_id::text
+from requested
+cross join eligible_users
+where mangorts_user_can_access_resource(
+  $1::uuid,requested.resource_type,requested.resource_id,eligible_users.user_id,$3::text
+)`, companyID, string(resourcesJSON), EntityPermissionEdit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var resourceType, resourceID, userID string
+		if err := rows.Scan(&resourceType, &resourceID, &userID); err != nil {
+			return nil, err
+		}
+		audience[processMapAccessAudienceKey(resourceType, resourceID)][userID] = true
+	}
+	return audience, rows.Err()
+}
+
+func markProcessMapProtectedGeometryChanged(payload map[string]any, before, after processMapAccessAudience) {
+	if processMapAccessAudienceChanged(before, after) {
+		payload[processMapProtectedGeometryChangedPayloadKey] = true
+	}
 }
 
 func processMapChangedAffectedUserIDsByCompany(events []domain.DomainEvent) map[string][]string {
@@ -500,7 +774,7 @@ func processMapChangedAffectedUserIDsByCompany(events []domain.DomainEvent) map[
 func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []domain.DomainEvent) error {
 	affectedUserIDs := processMapChangedAffectedUserIDsByCompany(events)
 	originConnectionIDs := processMapChangedOriginConnectionIDsByCompany(events)
-	presentationOnly := processMapChangedPresentationOnlyByCompany(events)
+	protectedGeometryChanged := processMapChangedProtectedGeometryChangedByCompany(events)
 	for companyID, eventIDs := range processMapChangedEventIDsByCompany(events) {
 		allowed := []string{}
 		for _, membership := range r.memberships {
@@ -510,7 +784,7 @@ func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []dom
 		}
 		allowed = append(allowed, affectedUserIDs[companyID]...)
 		slices.Sort(allowed)
-		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID], presentationOnly[companyID])
+		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID], protectedGeometryChanged[companyID])
 		if err != nil {
 			return err
 		}
@@ -524,7 +798,7 @@ func (r *MemoryRepo) enqueueProcessMapRealtimeForDomainEventsLocked(events []dom
 func (r *PostgresRepo) enqueueProcessMapRealtimeForDomainEventsTx(ctx context.Context, tx *sql.Tx, events []domain.DomainEvent) error {
 	affectedUserIDs := processMapChangedAffectedUserIDsByCompany(events)
 	originConnectionIDs := processMapChangedOriginConnectionIDsByCompany(events)
-	presentationOnly := processMapChangedPresentationOnlyByCompany(events)
+	protectedGeometryChanged := processMapChangedProtectedGeometryChangedByCompany(events)
 	for companyID, eventIDs := range processMapChangedEventIDsByCompany(events) {
 		rows, err := tx.QueryContext(ctx, `
 select distinct user_id::text
@@ -549,7 +823,7 @@ order by user_id::text`, companyID)
 			return err
 		}
 		allowed = append(allowed, affectedUserIDs[companyID]...)
-		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID], presentationOnly[companyID])
+		input, err := processMapChangedOutboxInput(companyID, eventIDs, allowed, originConnectionIDs[companyID], protectedGeometryChanged[companyID])
 		if err != nil {
 			return err
 		}
