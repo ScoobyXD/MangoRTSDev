@@ -449,21 +449,43 @@ func TestPostgresAutomaticProcessMapPlacementKeepsRootGapAfterDeepGrowth(t *test
 	if err != nil || created.Relationship == nil {
 		t.Fatalf("create relationship before automatic growth = %+v, err=%v", created, err)
 	}
+	growingFolder, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootA.FolderID, "logic_gate", "Growing Folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	laterFolder, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootA.FolderID, "logic_gate", "Later Folder")
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	type geometry struct{ x, y, width, height int }
+	type geometry struct {
+		x, y, width, height int
+		revision            int64
+	}
 	readGeometry := func(resourceType, resourceID string) geometry {
 		t.Helper()
 		var result geometry
 		if err := db.QueryRow(`
-select grid_x,grid_y,grid_width,grid_height
+select grid_x,grid_y,grid_width,grid_height,revision
 from process_map_placements
 where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`,
-			company.CompanyID, resourceType, resourceID).Scan(&result.x, &result.y, &result.width, &result.height); err != nil {
+			company.CompanyID, resourceType, resourceID).Scan(&result.x, &result.y, &result.width, &result.height, &result.revision); err != nil {
 			t.Fatal(err)
 		}
 		return result
 	}
+	laterPlacement := readGeometry(domain.ProcessMapResourceTypeFolder, laterFolder.FolderID)
+	rootAID := rootA.FolderID
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, laterFolder.FolderID, &rootAID,
+		laterPlacement.x, laterPlacement.y, laterPlacement.width, laterPlacement.height,
+	)); err != nil {
+		t.Fatal(err)
+	}
 	beforeRootB := readGeometry(domain.ProcessMapResourceTypeFolder, rootB.FolderID)
+	beforeGrowingFolder := readGeometry(domain.ProcessMapResourceTypeFolder, growingFolder.FolderID)
+	beforeLaterFolder := readGeometry(domain.ProcessMapResourceTypeFolder, laterFolder.FolderID)
+	beforeProcessA := readGeometry(domain.ProcessMapResourceTypeProcess, processA.LogicGateID)
 	beforeProcessB := readGeometry(domain.ProcessMapResourceTypeProcess, processB.LogicGateID)
 	var traceBefore string
 	var traceRevisionBefore int64
@@ -475,7 +497,7 @@ where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
 		t.Fatal(err)
 	}
 
-	parentID := rootA.FolderID
+	parentID := growingFolder.FolderID
 	for depth := 0; depth < 4; depth++ {
 		child, err := repo.CreateCompanyExplorerFolder(company.CompanyID, parentID, "logic_gate", "Nested")
 		if err != nil {
@@ -485,15 +507,32 @@ where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
 	}
 	afterRootA := readGeometry(domain.ProcessMapResourceTypeFolder, rootA.FolderID)
 	afterRootB := readGeometry(domain.ProcessMapResourceTypeFolder, rootB.FolderID)
+	afterProcessA := readGeometry(domain.ProcessMapResourceTypeProcess, processA.LogicGateID)
 	afterProcessB := readGeometry(domain.ProcessMapResourceTypeProcess, processB.LogicGateID)
+	afterGrowingFolder := readGeometry(domain.ProcessMapResourceTypeFolder, growingFolder.FolderID)
+	afterLaterFolder := readGeometry(domain.ProcessMapResourceTypeFolder, laterFolder.FolderID)
 	if afterRootB.x < afterRootA.x+afterRootA.width+postgresAutomaticProcessMapRootGap {
 		t.Fatalf("automatic roots overlap after growth: A=%+v B=%+v", afterRootA, afterRootB)
 	}
 	if afterRootB.x <= beforeRootB.x {
 		t.Fatalf("later root did not move after earlier root growth: before=%+v after=%+v", beforeRootB, afterRootB)
 	}
-	if afterProcessB.x-beforeProcessB.x != afterRootB.x-beforeRootB.x || afterProcessB.x != afterRootB.x+postgresAutomaticProcessMapPadding {
+	processSectionOffset := postgresAutomaticProcessMapPadding + postgresAutomaticProcessMapNestedFolderWidth + postgresAutomaticProcessMapSectionGap
+	if afterProcessB.x-beforeProcessB.x != afterRootB.x-beforeRootB.x || afterProcessB.x != afterRootB.x+processSectionOffset {
 		t.Fatalf("later root descendants did not keep their relative geometry: root=%+v Process=%+v", afterRootB, afterProcessB)
+	}
+	if afterLaterFolder != beforeLaterFolder {
+		t.Fatalf("deep growth changed manual sibling geometry or revision: before=%+v after=%+v", beforeLaterFolder, afterLaterFolder)
+	}
+	if afterProcessA != beforeProcessA {
+		t.Fatalf("deep growth changed unrelated Process geometry or revision: before=%+v after=%+v", beforeProcessA, afterProcessA)
+	}
+	overlaps := func(left, right geometry) bool {
+		return left.x < right.x+right.width && left.x+left.width > right.x &&
+			left.y < right.y+right.height && left.y+left.height > right.y
+	}
+	if afterGrowingFolder.y <= beforeGrowingFolder.y || overlaps(afterGrowingFolder, afterLaterFolder) || overlaps(afterGrowingFolder, afterProcessA) {
+		t.Fatalf("affected growing Folder was not relocated safely: before=%+v after=%+v sibling=%+v Process=%+v", beforeGrowingFolder, afterGrowingFolder, afterLaterFolder, afterProcessA)
 	}
 	var traceAfter string
 	var traceRevisionAfter int64
@@ -510,6 +549,75 @@ where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
 	}
 	if traceAfter != traceBefore || traceRevisionAfter != traceRevisionBefore || relationshipCount != 1 {
 		t.Fatalf("automatic root spacing changed relationship data: trace=%q/%d before=%q/%d relationships=%d", traceAfter, traceRevisionAfter, traceBefore, traceRevisionBefore, relationshipCount)
+	}
+}
+
+func TestPostgresAutomaticProcessMapPlacementStopsAtUnchangedParent(t *testing.T) {
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map unchanged parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := repo.CreateCompanyExplorerFolder(company.CompanyID, root.FolderID, "logic_gate", "Parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := repo.CreateCompanyExplorerFolder(company.CompanyID, root.FolderID, "logic_gate", "Sibling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := repo.CreateLogicGate(company.CompanyID, "New Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_x=0,grid_y=0,grid_width=500,grid_height=500,revision=revision+1,updated_timestamp=statement_timestamp()
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`, company.CompanyID, root.FolderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_x=10,grid_y=10,grid_width=200,grid_height=200,revision=revision+1,updated_timestamp=statement_timestamp()
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`, company.CompanyID, parent.FolderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_x=20,grid_y=20,grid_width=24,grid_height=16,revision=revision+1,updated_timestamp=statement_timestamp()
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`, company.CompanyID, sibling.FolderID); err != nil {
+		t.Fatal(err)
+	}
+	type geometry struct {
+		x, y, width, height int
+		revision            int64
+	}
+	readGeometry := func(resourceID string) geometry {
+		t.Helper()
+		var result geometry
+		if err := db.QueryRow(`
+select grid_x,grid_y,grid_width,grid_height,revision
+from process_map_placements
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`,
+			company.CompanyID, resourceID).Scan(&result.x, &result.y, &result.width, &result.height, &result.revision); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	parentBefore := readGeometry(parent.FolderID)
+	siblingBefore := readGeometry(sibling.FolderID)
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(company.CompanyID, parent.FolderID, EntityTypeLogicGate, process.LogicGateID, 0); err != nil {
+		t.Fatal(err)
+	}
+	if parentAfter := readGeometry(parent.FolderID); parentAfter != parentBefore {
+		t.Fatalf("contained Process changed its already-large parent: before=%+v after=%+v", parentBefore, parentAfter)
+	}
+	if siblingAfter := readGeometry(sibling.FolderID); siblingAfter != siblingBefore {
+		t.Fatalf("contained Process changed an unrelated overlapping sibling: before=%+v after=%+v", siblingBefore, siblingAfter)
 	}
 }
 
@@ -574,6 +682,79 @@ where company_id=$1::uuid and resource_type='company_explorer_folder' and resour
 	}
 	if afterRootA.x+afterRootA.width <= afterRootB.x || afterRootA.y+afterRootA.height > afterRootB.y {
 		t.Fatalf("preservation fixture does not overlap only on X: A=%+v B=%+v", afterRootA, afterRootB)
+	}
+}
+
+func TestPostgresAutomaticProcessMapPlacementPreservesStaggeredSeparatedRoot(t *testing.T) {
+	ctx := context.Background()
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map staggered root preservation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("process-map-staggered-root-admin", "process-map-staggered-root@example.com", "Staggered Root Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	rootA, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootB, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type geometry struct {
+		x, y, width, height int
+		revision            int64
+	}
+	readGeometry := func(resourceID string) geometry {
+		t.Helper()
+		var result geometry
+		if err := db.QueryRow(`
+select grid_x,grid_y,grid_width,grid_height,revision
+from process_map_placements
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`,
+			company.CompanyID, resourceID).Scan(&result.x, &result.y, &result.width, &result.height, &result.revision); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	rootAGeometry := readGeometry(rootA.FolderID)
+	rootBGeometry := readGeometry(rootB.FolderID)
+	var farX int
+	if err := db.QueryRow(`
+select coalesce(max(grid_x+grid_width),0)+1000
+from process_map_placements
+where company_id=$1::uuid and map_parent_folder_id is null
+  and not (resource_type='company_explorer_folder' and resource_id=$2::uuid)`, company.CompanyID, rootB.FolderID).Scan(&farX); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, rootB.FolderID, nil,
+		farX, rootAGeometry.y+10, rootBGeometry.width, rootBGeometry.height,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	manualRootB := readGeometry(rootB.FolderID)
+	parentID := rootA.FolderID
+	for depth := 0; depth < 4; depth++ {
+		child, err := repo.CreateCompanyExplorerFolder(company.CompanyID, parentID, "logic_gate", "Nested")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parentID = child.FolderID
+	}
+	afterRootA := readGeometry(rootA.FolderID)
+	afterRootB := readGeometry(rootB.FolderID)
+	if afterRootB != manualRootB {
+		t.Fatalf("staggered horizontal separation did not preserve manual root: before=%+v after=%+v", manualRootB, afterRootB)
+	}
+	if afterRootA.y+afterRootA.height <= afterRootB.y || afterRootA.x+afterRootA.width+postgresAutomaticProcessMapRootGap >= afterRootB.x {
+		t.Fatalf("staggered fixture is not vertically close and horizontally separated: A=%+v B=%+v", afterRootA, afterRootB)
 	}
 }
 
@@ -791,6 +972,21 @@ func TestPostgresProcessMapTidyInitialLayoutMarksNoOpFirstRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_zzzz_process_map_tidy_initial_layout.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Runtime now uses the later rectangular layout. Seed the exact historical
+	// tidy geometry, then remove only its disposable-test marker so this fixture
+	// still proves that a first no-op run records its one marker.
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("seed historical tidy layout: %v", err)
+	}
+	if _, err := db.Exec(`
+delete from domain_events
+where company_id=$1::uuid and idempotency_key='migration:20260826-process-map-tidy-initial-layout'`, company.CompanyID); err != nil {
+		t.Fatal(err)
+	}
 	var xBefore int
 	if err := db.QueryRow(`
 select grid_x
@@ -805,10 +1001,6 @@ select coalesce(jsonb_agg(jsonb_build_array(resource_type,resource_id,grid_x,gri
                           order by resource_type,resource_id),'[]'::jsonb)::text
 from process_map_placements
 where company_id=$1::uuid`, company.CompanyID).Scan(&placementSnapshotBefore); err != nil {
-		t.Fatal(err)
-	}
-	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_zzzz_process_map_tidy_initial_layout.sql"))
-	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(string(migration)); err != nil {
@@ -861,6 +1053,484 @@ where company_id=$1::uuid and resource_type='company_explorer_folder' and resour
 	}
 	if xAfterRefusal != xBefore+1 {
 		t.Fatalf("no-op tidy rerun changed manual root x = %d, want %d", xAfterRefusal, xBefore+1)
+	}
+}
+
+func TestPostgresProcessMapRectangularLayoutMigrationUsesContainedSectionsAndIsRestartSafe(t *testing.T) {
+	ctx := context.Background()
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Process Map rectangular layout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("process-map-rectangular-admin", "process-map-rectangular@example.com", "Rectangular Admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+
+	rootIDs := make([]string, 0, 5)
+	for index := 0; index < 5; index++ {
+		root, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Root "+string(rune('A'+index)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rootIDs = append(rootIDs, root.FolderID)
+	}
+	rootA, rootB := rootIDs[0], rootIDs[1]
+	leftA, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootA, "logic_gate", "Left A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leftB, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootA, "logic_gate", "Left B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandA, err := repo.CreateCompanyExplorerFolder(company.CompanyID, leftA.FolderID, "logic_gate", "Grand A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandB, err := repo.CreateCompanyExplorerFolder(company.CompanyID, leftA.FolderID, "logic_gate", "Grand B")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootBChildren := make([]string, 0, 3)
+	for index := 0; index < 3; index++ {
+		child, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootB, "logic_gate", "Folder Only "+string(rune('A'+index)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rootBChildren = append(rootBChildren, child.FolderID)
+	}
+
+	createProcess := func(parentFolderID, name string, position int) string {
+		t.Helper()
+		process, err := repo.CreateLogicGate(company.CompanyID, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := repo.AssignCompanyExplorerFolderItem(company.CompanyID, parentFolderID, EntityTypeLogicGate, process.LogicGateID, position); err != nil {
+			t.Fatal(err)
+		}
+		return process.LogicGateID
+	}
+	rootProcesses := []string{
+		createProcess(rootA, "Root Process A", 0),
+		createProcess(rootA, "Root Process B", 1000),
+		createProcess(rootA, "Root Process C", 2000),
+		createProcess(rootA, "Root Process D", 3000),
+	}
+	nestedProcesses := []string{
+		createProcess(leftA.FolderID, "Nested Process A", 0),
+		createProcess(leftA.FolderID, "Nested Process B", 1000),
+	}
+
+	route := []domain.ProcessMapRoutePoint{{X: 5, Y: 5}, {X: 25, Y: 5}}
+	created, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
+		CompanyID:   company.CompanyID,
+		Source:      processMapTestRef(domain.ProcessMapResourceTypeProcess, rootProcesses[0]),
+		Target:      processMapTestRef(domain.ProcessMapResourceTypeProcess, nestedProcesses[0]),
+		Trace:       &ProcessMapTraceInput{RoutePoints: route},
+		ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+	})
+	if err != nil || created.Relationship == nil {
+		t.Fatalf("create relationship before rectangular layout = %+v, err=%v", created, err)
+	}
+
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_x=7,
+    grid_y=9,
+    grid_width=case when resource_type='company_explorer_folder' then 300 else 14 end,
+    grid_height=case when resource_type='company_explorer_folder' then 200 else 70 end
+where company_id=$1::uuid`, company.CompanyID); err != nil {
+		t.Fatal(err)
+	}
+
+	readPlacementSnapshot := func() string {
+		t.Helper()
+		var snapshot string
+		if err := db.QueryRow(`
+select coalesce(jsonb_agg(jsonb_build_array(resource_type,resource_id,map_parent_folder_id,grid_x,grid_y,grid_width,grid_height,revision)
+                          order by resource_type,resource_id),'[]'::jsonb)::text
+from process_map_placements
+where company_id=$1::uuid`, company.CompanyID).Scan(&snapshot); err != nil {
+			t.Fatal(err)
+		}
+		return snapshot
+	}
+	readRevisions := func() map[string]int64 {
+		t.Helper()
+		rows, err := db.Query(`
+select resource_type,resource_id::text,revision
+from process_map_placements
+where company_id=$1::uuid`, company.CompanyID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		result := map[string]int64{}
+		for rows.Next() {
+			var resourceType, resourceID string
+			var revision int64
+			if err := rows.Scan(&resourceType, &resourceID, &revision); err != nil {
+				t.Fatal(err)
+			}
+			result[resourceType+":"+resourceID] = revision
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260826_zzzzz_process_map_rectangular_layout.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflictSnapshot := readPlacementSnapshot()
+	if _, err := db.Exec(`
+insert into domain_events(
+  event_id,company_id,stream_type,stream_id,sequence,event_type,
+  actor_user_id,idempotency_key,payload,created_timestamp
+)
+values (
+  gen_random_uuid(),$1::uuid,'test','rectangular-layout-marker-conflict',1,'test_marker',
+  null,'migration:20260826-process-map-rectangular-layout','{}'::jsonb,statement_timestamp()
+)`, company.CompanyID); err != nil {
+		t.Fatal(err)
+	}
+	connection, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, migrationErr := connection.ExecContext(ctx, string(migration))
+	if _, rollbackErr := connection.ExecContext(ctx, "rollback"); rollbackErr != nil {
+		connection.Close()
+		t.Fatalf("rollback rectangular layout marker-conflict refusal: %v", rollbackErr)
+	}
+	connection.Close()
+	if migrationErr == nil || !strings.Contains(migrationErr.Error(), "marker key is already used by another event") {
+		t.Fatalf("rectangular layout marker-conflict error = %v", migrationErr)
+	}
+	if afterConflict := readPlacementSnapshot(); afterConflict != conflictSnapshot {
+		t.Fatalf("marker-conflict refusal changed placements: before=%s after=%s", conflictSnapshot, afterConflict)
+	}
+	if _, err := db.Exec(`
+delete from domain_events
+where company_id=$1::uuid and idempotency_key='migration:20260826-process-map-rectangular-layout'`, company.CompanyID); err != nil {
+		t.Fatal(err)
+	}
+	versionBeforeRejectedRun := postgresProcessMapVersionForTest(t, repo, company.CompanyID)
+	rejectedSnapshot := readPlacementSnapshot()
+	if _, err := db.Exec(`
+update process_map_placements
+set map_parent_folder_id=$3::uuid
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`,
+		company.CompanyID, leftB.FolderID, rootB); err != nil {
+		t.Fatal(err)
+	}
+	connection, err = db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, migrationErr = connection.ExecContext(ctx, string(migration))
+	if _, rollbackErr := connection.ExecContext(ctx, "rollback"); rollbackErr != nil {
+		connection.Close()
+		t.Fatalf("rollback rectangular layout parentage refusal: %v", rollbackErr)
+	}
+	connection.Close()
+	if migrationErr == nil || !strings.Contains(migrationErr.Error(), "parentage is not synchronized") {
+		t.Fatalf("rectangular layout mismatched parent error = %v", migrationErr)
+	}
+	if versionAfterRejectedRun := postgresProcessMapVersionForTest(t, repo, company.CompanyID); versionAfterRejectedRun != versionBeforeRejectedRun {
+		t.Fatalf("rejected rectangular layout version = %d, want %d", versionAfterRejectedRun, versionBeforeRejectedRun)
+	}
+	if _, err := db.Exec(`
+update process_map_placements
+set map_parent_folder_id=$3::uuid
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`,
+		company.CompanyID, leftB.FolderID, rootA); err != nil {
+		t.Fatal(err)
+	}
+	if restoredSnapshot := readPlacementSnapshot(); restoredSnapshot != rejectedSnapshot {
+		t.Fatalf("parentage refusal or restoration changed placement geometry: before=%s after=%s", rejectedSnapshot, restoredSnapshot)
+	}
+
+	revisionsBefore := readRevisions()
+	var parentSnapshotBefore string
+	if err := db.QueryRow(`
+select coalesce(jsonb_agg(jsonb_build_array(resource_type,resource_id,map_parent_folder_id)
+                          order by resource_type,resource_id),'[]'::jsonb)::text
+from process_map_placements
+where company_id=$1::uuid`, company.CompanyID).Scan(&parentSnapshotBefore); err != nil {
+		t.Fatal(err)
+	}
+	var traceBefore string
+	var traceRevisionBefore int64
+	if err := db.QueryRow(`
+select route_points::text,revision
+from process_map_traces
+where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
+		company.CompanyID, created.Relationship.ResourceOperationalRelationshipID).Scan(&traceBefore, &traceRevisionBefore); err != nil {
+		t.Fatal(err)
+	}
+	versionBefore := postgresProcessMapVersionForTest(t, repo, company.CompanyID)
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("apply rectangular layout migration: %v", err)
+	}
+	versionAfter := postgresProcessMapVersionForTest(t, repo, company.CompanyID)
+	if versionAfter <= versionBefore {
+		t.Fatalf("rectangular layout Process Map version = %d, want > %d", versionAfter, versionBefore)
+	}
+
+	type rectangle struct{ x, y, width, height int }
+	readRectangle := func(resourceType, resourceID string) rectangle {
+		t.Helper()
+		var result rectangle
+		if err := db.QueryRow(`
+select grid_x,grid_y,grid_width,grid_height
+from process_map_placements
+where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`,
+			company.CompanyID, resourceType, resourceID).Scan(&result.x, &result.y, &result.width, &result.height); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	contains := func(parent, child rectangle) bool {
+		return child.x >= parent.x+2 && child.y >= parent.y+6 &&
+			child.x+child.width <= parent.x+parent.width-2 &&
+			child.y+child.height <= parent.y+parent.height-2
+	}
+	overlaps := func(first, second rectangle) bool {
+		return first.x < second.x+second.width && first.x+first.width > second.x &&
+			first.y < second.y+second.height && first.y+first.height > second.y
+	}
+
+	for index, rootID := range rootIDs {
+		rootRectangle := readRectangle(domain.ProcessMapResourceTypeFolder, rootID)
+		if rootRectangle.width < 32 || rootRectangle.height < 24 {
+			t.Fatalf("created root %d geometry = %+v, want minimum 32x24", index, rootRectangle)
+		}
+	}
+	rootRows, err := db.Query(`
+select placement.grid_x,placement.grid_y,placement.grid_width,placement.grid_height
+from process_map_placements placement
+join company_explorer_folders folder
+  on folder.company_id=placement.company_id and folder.folder_id=placement.resource_id
+where placement.company_id=$1::uuid
+  and placement.resource_type='company_explorer_folder'
+  and placement.map_parent_folder_id is null
+order by folder.position,folder.created_timestamp,placement.resource_type,folder.folder_id`, company.CompanyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allRootRectangles := []rectangle{}
+	for rootRows.Next() {
+		var rootRectangle rectangle
+		if err := rootRows.Scan(&rootRectangle.x, &rootRectangle.y, &rootRectangle.width, &rootRectangle.height); err != nil {
+			rootRows.Close()
+			t.Fatal(err)
+		}
+		allRootRectangles = append(allRootRectangles, rootRectangle)
+	}
+	if err := rootRows.Err(); err != nil {
+		rootRows.Close()
+		t.Fatal(err)
+	}
+	rootRows.Close()
+	if len(allRootRectangles) < 5 {
+		t.Fatalf("root count = %d, want at least 5", len(allRootRectangles))
+	}
+	for index, rootRectangle := range allRootRectangles {
+		rowStart := index - index%4
+		if rootRectangle.y != allRootRectangles[rowStart].y {
+			t.Fatalf("root %d y=%d differs from row start y=%d", index, rootRectangle.y, allRootRectangles[rowStart].y)
+		}
+		if index >= 4 && rootRectangle.x != allRootRectangles[index%4].x {
+			t.Fatalf("root %d x=%d differs from aligned column x=%d", index, rootRectangle.x, allRootRectangles[index%4].x)
+		}
+		if index >= 4 && index%4 == 0 && rootRectangle.y <= allRootRectangles[index-4].y {
+			t.Fatalf("root row %d y=%d does not follow prior row y=%d", index/4, rootRectangle.y, allRootRectangles[index-4].y)
+		}
+	}
+	for first := range allRootRectangles {
+		for second := first + 1; second < len(allRootRectangles); second++ {
+			if overlaps(allRootRectangles[first], allRootRectangles[second]) {
+				t.Fatalf("root rectangles overlap: %d=%+v %d=%+v", first, allRootRectangles[first], second, allRootRectangles[second])
+			}
+		}
+	}
+
+	rootARectangle := readRectangle(domain.ProcessMapResourceTypeFolder, rootA)
+	leftARectangle := readRectangle(domain.ProcessMapResourceTypeFolder, leftA.FolderID)
+	leftBRectangle := readRectangle(domain.ProcessMapResourceTypeFolder, leftB.FolderID)
+	if !contains(rootARectangle, leftARectangle) || !contains(rootARectangle, leftBRectangle) || leftARectangle.x != leftBRectangle.x || leftBRectangle.y == leftARectangle.y {
+		t.Fatalf("root Folder lane geometry root=%+v first=%+v second=%+v", rootARectangle, leftARectangle, leftBRectangle)
+	}
+	rootProcessRectangles := make([]rectangle, len(rootProcesses))
+	for index, processID := range rootProcesses {
+		rootProcessRectangles[index] = readRectangle(domain.ProcessMapResourceTypeProcess, processID)
+		if rootProcessRectangles[index].width != 14 || rootProcessRectangles[index].height != 8 || !contains(rootARectangle, rootProcessRectangles[index]) {
+			t.Fatalf("root Process %d geometry = %+v under root %+v", index, rootProcessRectangles[index], rootARectangle)
+		}
+	}
+	processXCounts, processYCounts := map[int]int{}, map[int]int{}
+	for _, processRectangle := range rootProcessRectangles {
+		processXCounts[processRectangle.x]++
+		processYCounts[processRectangle.y]++
+	}
+	processXs, processYs := []int{}, []int{}
+	for coordinate, count := range processXCounts {
+		processXs = append(processXs, coordinate)
+		if count != 2 {
+			t.Fatalf("root Process x=%d count=%d, want 2", coordinate, count)
+		}
+	}
+	for coordinate, count := range processYCounts {
+		processYs = append(processYs, coordinate)
+		if count != 2 {
+			t.Fatalf("root Process y=%d count=%d, want 2", coordinate, count)
+		}
+	}
+	slices.Sort(processXs)
+	slices.Sort(processYs)
+	if len(processXs) != 2 || len(processYs) != 2 || processXs[1]-processXs[0] != 16 || processYs[1]-processYs[0] != 10 {
+		t.Fatalf("root Process two-column geometry = %+v", rootProcessRectangles)
+	}
+	folderLaneRight := leftARectangle.x + leftARectangle.width
+	if right := leftBRectangle.x + leftBRectangle.width; right > folderLaneRight {
+		folderLaneRight = right
+	}
+	if rootProcessRectangles[0].x < folderLaneRight+4 {
+		t.Fatalf("root sections lack gap: Folders end %d, Processes start %d", folderLaneRight, rootProcessRectangles[0].x)
+	}
+
+	grandARectangle := readRectangle(domain.ProcessMapResourceTypeFolder, grandA.FolderID)
+	grandBRectangle := readRectangle(domain.ProcessMapResourceTypeFolder, grandB.FolderID)
+	if !contains(leftARectangle, grandARectangle) || !contains(leftARectangle, grandBRectangle) || grandARectangle.x != grandBRectangle.x || grandBRectangle.y == grandARectangle.y {
+		t.Fatalf("nested Folder lane geometry parent=%+v first=%+v second=%+v", leftARectangle, grandARectangle, grandBRectangle)
+	}
+	for index, processID := range nestedProcesses {
+		processRectangle := readRectangle(domain.ProcessMapResourceTypeProcess, processID)
+		if !contains(leftARectangle, processRectangle) || processRectangle.x < grandARectangle.x+grandARectangle.width+4 {
+			t.Fatalf("nested Process %d geometry=%+v parent=%+v Folder=%+v", index, processRectangle, leftARectangle, grandARectangle)
+		}
+	}
+
+	rootBRectangle := readRectangle(domain.ProcessMapResourceTypeFolder, rootB)
+	rootBChildRectangles := make([]rectangle, len(rootBChildren))
+	for index, childID := range rootBChildren {
+		rootBChildRectangles[index] = readRectangle(domain.ProcessMapResourceTypeFolder, childID)
+		if !contains(rootBRectangle, rootBChildRectangles[index]) {
+			t.Fatalf("Folder-only child %d=%+v is outside root %+v", index, rootBChildRectangles[index], rootBRectangle)
+		}
+	}
+	folderXCounts, folderYCounts := map[int]int{}, map[int]int{}
+	for _, childRectangle := range rootBChildRectangles {
+		folderXCounts[childRectangle.x]++
+		folderYCounts[childRectangle.y]++
+	}
+	folderXs, folderYs := []int{}, []int{}
+	for coordinate := range folderXCounts {
+		folderXs = append(folderXs, coordinate)
+	}
+	for coordinate := range folderYCounts {
+		folderYs = append(folderYs, coordinate)
+	}
+	slices.Sort(folderXs)
+	slices.Sort(folderYs)
+	if len(folderXs) != 2 || len(folderYs) != 2 || folderXCounts[folderXs[0]] != 2 || folderXCounts[folderXs[1]] != 1 ||
+		folderYCounts[folderYs[0]] != 2 || folderYCounts[folderYs[1]] != 1 {
+		t.Fatalf("root Folder-only two-column geometry = %+v", rootBChildRectangles)
+	}
+
+	revisionsAfter := readRevisions()
+	if len(revisionsAfter) != len(revisionsBefore) {
+		t.Fatalf("placement revision count before=%d after=%d", len(revisionsBefore), len(revisionsAfter))
+	}
+	for key, revisionBefore := range revisionsBefore {
+		if revisionsAfter[key] != revisionBefore+1 {
+			t.Fatalf("placement %s revision = %d, want %d", key, revisionsAfter[key], revisionBefore+1)
+		}
+	}
+	var parentSnapshotAfter string
+	if err := db.QueryRow(`
+select coalesce(jsonb_agg(jsonb_build_array(resource_type,resource_id,map_parent_folder_id)
+                          order by resource_type,resource_id),'[]'::jsonb)::text
+from process_map_placements
+where company_id=$1::uuid`, company.CompanyID).Scan(&parentSnapshotAfter); err != nil {
+		t.Fatal(err)
+	}
+	if parentSnapshotAfter != parentSnapshotBefore {
+		t.Fatalf("rectangular layout changed Explorer parent projection: before=%s after=%s", parentSnapshotBefore, parentSnapshotAfter)
+	}
+	var traceAfter string
+	var traceRevisionAfter int64
+	var relationshipCount int
+	if err := db.QueryRow(`
+select route_points::text,revision
+from process_map_traces
+where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
+		company.CompanyID, created.Relationship.ResourceOperationalRelationshipID).Scan(&traceAfter, &traceRevisionAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`select count(*) from resource_operational_relationships where company_id=$1::uuid`, company.CompanyID).Scan(&relationshipCount); err != nil {
+		t.Fatal(err)
+	}
+	if traceAfter != traceBefore || traceRevisionAfter != traceRevisionBefore || relationshipCount != 1 {
+		t.Fatalf("rectangular layout changed relationship data: trace=%q/%d before=%q/%d relationships=%d", traceAfter, traceRevisionAfter, traceBefore, traceRevisionBefore, relationshipCount)
+	}
+
+	var markerCount int
+	if err := db.QueryRow(`
+select count(*)
+from domain_events
+where company_id=$1::uuid and idempotency_key='migration:20260826-process-map-rectangular-layout'`, company.CompanyID).Scan(&markerCount); err != nil {
+		t.Fatal(err)
+	}
+	if markerCount != 1 {
+		t.Fatalf("rectangular layout marker count = %d, want 1", markerCount)
+	}
+	placementSnapshotBeforeRestart := readPlacementSnapshot()
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("restart rectangular layout migration: %v", err)
+	}
+	if placementSnapshotAfterRestart := readPlacementSnapshot(); placementSnapshotAfterRestart != placementSnapshotBeforeRestart {
+		t.Fatalf("rectangular layout restart changed placements: before=%s after=%s", placementSnapshotBeforeRestart, placementSnapshotAfterRestart)
+	}
+	if versionRestart := postgresProcessMapVersionForTest(t, repo, company.CompanyID); versionRestart != versionAfter {
+		t.Fatalf("rectangular layout restart version = %d, want %d", versionRestart, versionAfter)
+	}
+
+	if _, err := db.Exec(`
+update process_map_placements
+set grid_x=grid_x+1,revision=revision+1,updated_timestamp=statement_timestamp()
+where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, rootProcesses[0]); err != nil {
+		t.Fatal(err)
+	}
+	manualGeometry := readRectangle(domain.ProcessMapResourceTypeProcess, rootProcesses[0])
+	manualRevision := readRevisions()[domain.ProcessMapResourceTypeProcess+":"+rootProcesses[0]]
+	connection, err = db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, migrationErr = connection.ExecContext(ctx, string(migration))
+	if _, rollbackErr := connection.ExecContext(ctx, "rollback"); rollbackErr != nil {
+		connection.Close()
+		t.Fatalf("rollback rectangular layout rerun refusal: %v", rollbackErr)
+	}
+	connection.Close()
+	if migrationErr == nil || !strings.Contains(migrationErr.Error(), "already ran") {
+		t.Fatalf("rectangular layout rerun after manual geometry error = %v", migrationErr)
+	}
+	if afterRefusal := readRectangle(domain.ProcessMapResourceTypeProcess, rootProcesses[0]); afterRefusal != manualGeometry {
+		t.Fatalf("rectangular layout refusal changed manual geometry: before=%+v after=%+v", manualGeometry, afterRefusal)
+	}
+	if revisionAfterRefusal := readRevisions()[domain.ProcessMapResourceTypeProcess+":"+rootProcesses[0]]; revisionAfterRefusal != manualRevision {
+		t.Fatalf("rectangular layout refusal changed manual revision: before=%d after=%d", manualRevision, revisionAfterRefusal)
 	}
 }
 
