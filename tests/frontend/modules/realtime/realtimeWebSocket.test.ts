@@ -103,21 +103,30 @@ test("parses retained product and scoped mailbox message families", () => {
     company_id: "company-1",
     scope: "process-map:company",
     origin_connection_id: " connection-1 ",
-    presentation_only: true,
+    protected_geometry_changed: false,
     ts: "2026-08-24T12:00:00Z",
   })) as RealtimeProcessMapChangedMessage;
   assert.equal(processMap.company_id, "company-1");
   assert.equal(processMap.scope, "process-map:company");
   assert.equal(processMap.origin_connection_id, "connection-1");
-  assert.equal(processMap.presentation_only, true);
+  assert.equal(processMap.protected_geometry_changed, false);
 
-  const unsafeProcessMapFlag = parseRealtimeMessage(JSON.stringify({
+  const protectedProcessMap = parseRealtimeMessage(JSON.stringify({
     type: "process_map.changed",
     company_id: "company-1",
     scope: "process-map:company",
-    presentation_only: "true",
+    protected_geometry_changed: true,
   })) as RealtimeProcessMapChangedMessage;
-  assert.equal(unsafeProcessMapFlag.presentation_only, undefined, "only a literal backend boolean can suppress the protected purge");
+  assert.equal(protectedProcessMap.protected_geometry_changed, true);
+  for (const protectedGeometryChanged of [undefined, "true", 1, null]) {
+    const conservativelyProtected = parseRealtimeMessage(JSON.stringify({
+      type: "process_map.changed",
+      company_id: "company-1",
+      scope: "process-map:company",
+      ...(protectedGeometryChanged === undefined ? {} : { protected_geometry_changed: protectedGeometryChanged }),
+    })) as RealtimeProcessMapChangedMessage;
+    assert.equal(conservativelyProtected.protected_geometry_changed, true, "missing or invalid protection metadata must conservatively purge geometry");
+  }
 
   const qdRating = parseRealtimeMessage(JSON.stringify({
     type: "logic_gate_qd_rating_updated",

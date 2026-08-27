@@ -508,19 +508,28 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	}
 
 	beforeMutation := r.snapshotProcessMapMutationLocked()
+	audienceResources := []domain.ProcessMapResourceRef(nil)
+	beforeAudience := processMapAccessAudience(nil)
+	if parentChanged {
+		audienceResources = r.processMapAccessResourcesLocked(companyID, domain.ProcessMapResourceTypeFolder, folderID)
+		beforeAudience = r.processMapAccessAudienceLocked(companyID, audienceResources)
+	}
 	item.ParentFolderID = parent
 	item.Position = position
 	item.UpdatedTimestamp = time.Now().UTC()
-	eventInput := workspaceDomainEventInput(companyID, "company_explorer_folder_updated", map[string]any{
-		"folder_id": folderID, "parent_entity_id": targetParentID,
-	})
-	eventInput.ActorUserID = strings.TrimSpace(actorUserID)
-	if _, err := r.appendDomainEventLocked(eventInput); err != nil {
-		return domain.CompanyExplorerFolder{}, err
-	}
 	r.folders[key(companyID, item.FolderID)] = item
 	r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID, item.UpdatedTimestamp)
 	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID); err != nil {
+		r.restoreProcessMapMutationLocked(beforeMutation)
+		return domain.CompanyExplorerFolder{}, err
+	}
+	payload := map[string]any{"folder_id": folderID, "parent_entity_id": targetParentID}
+	if parentChanged {
+		markProcessMapProtectedGeometryChanged(payload, beforeAudience, r.processMapAccessAudienceLocked(companyID, audienceResources))
+	}
+	eventInput := workspaceDomainEventInput(companyID, "company_explorer_folder_updated", payload)
+	eventInput.ActorUserID = strings.TrimSpace(actorUserID)
+	if _, err := r.appendDomainEventLocked(eventInput); err != nil {
 		r.restoreProcessMapMutationLocked(beforeMutation)
 		return domain.CompanyExplorerFolder{}, err
 	}
@@ -830,13 +839,16 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItem(companyID, folderID, itemTy
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
 	beforeMutation := r.snapshotProcessMapMutationLocked()
-	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_explorer_item_placed", map[string]any{
-		"parent_entity_id": folderID, "target_type": itemType, "target_id": itemID,
-	})); err != nil {
-		return domain.CompanyExplorerFolderItem{}, nil, err
-	}
+	audienceResources := r.processMapAccessResourcesLocked(companyID, itemType, itemID)
+	beforeAudience := r.processMapAccessAudienceLocked(companyID, audienceResources)
 	item, deletedRelationshipIDs, err := r.assignCompanyExplorerFolderItemLocked(companyID, folderID, itemType, itemID, position)
 	if err != nil {
+		r.restoreProcessMapMutationLocked(beforeMutation)
+		return domain.CompanyExplorerFolderItem{}, nil, err
+	}
+	payload := map[string]any{"parent_entity_id": folderID, "target_type": itemType, "target_id": itemID}
+	markProcessMapProtectedGeometryChanged(payload, beforeAudience, r.processMapAccessAudienceLocked(companyID, audienceResources))
+	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_explorer_item_placed", payload)); err != nil {
 		r.restoreProcessMapMutationLocked(beforeMutation)
 		return domain.CompanyExplorerFolderItem{}, nil, err
 	}
@@ -856,14 +868,11 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItems(companyID string, assignme
 		}
 	}
 	beforeMutation := r.snapshotProcessMapMutationLocked()
-	eventInputs := make([]DomainEventInput, 0, len(assignments))
-	for _, assignment := range assignments {
-		eventInputs = append(eventInputs, workspaceDomainEventInput(companyID, "company_explorer_item_placed", map[string]any{
-			"parent_entity_id": assignment.FolderID, "target_type": assignment.ItemType, "target_id": assignment.ItemID,
-		}))
-	}
-	if _, err := r.appendDomainEventsLocked(eventInputs); err != nil {
-		return nil, nil, err
+	audienceResources := make([][]domain.ProcessMapResourceRef, len(assignments))
+	beforeAudiences := make([]processMapAccessAudience, len(assignments))
+	for index, assignment := range assignments {
+		audienceResources[index] = r.processMapAccessResourcesLocked(companyID, assignment.ItemType, assignment.ItemID)
+		beforeAudiences[index] = r.processMapAccessAudienceLocked(companyID, audienceResources[index])
 	}
 
 	items := make([]domain.CompanyExplorerFolderItem, 0, len(assignments))
@@ -882,6 +891,16 @@ func (r *MemoryRepo) AssignCompanyExplorerFolderItems(companyID string, assignme
 				RelationshipIDs: deletedRelationshipIDs,
 			})
 		}
+	}
+	eventInputs := make([]DomainEventInput, 0, len(assignments))
+	for index, assignment := range assignments {
+		payload := map[string]any{"parent_entity_id": assignment.FolderID, "target_type": assignment.ItemType, "target_id": assignment.ItemID}
+		markProcessMapProtectedGeometryChanged(payload, beforeAudiences[index], r.processMapAccessAudienceLocked(companyID, audienceResources[index]))
+		eventInputs = append(eventInputs, workspaceDomainEventInput(companyID, "company_explorer_item_placed", payload))
+	}
+	if _, err := r.appendDomainEventsLocked(eventInputs); err != nil {
+		r.restoreProcessMapMutationLocked(beforeMutation)
+		return nil, nil, err
 	}
 	return items, deleted, nil
 }

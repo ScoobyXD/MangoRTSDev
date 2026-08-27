@@ -3,7 +3,7 @@ type ProcessMapChangedMessage = {
   company_id: string;
   scope: string;
   origin_connection_id?: string;
-  presentation_only?: boolean;
+  protected_geometry_changed: boolean;
 };
 
 type RealtimeCallbacks = {
@@ -11,6 +11,7 @@ type RealtimeCallbacks = {
 };
 
 const processMapSubscribers = new Set<RealtimeCallbacks>();
+let currentRealtimeConnectionID: string | undefined;
 
 export function subscribeRealtimeScope(
   _apiBase: string,
@@ -28,10 +29,15 @@ export function emitProcessMapChangedForTest(message: ProcessMapChangedMessage):
 
 export function resetProcessMapRealtimeTestStub(): void {
   processMapSubscribers.clear();
+  currentRealtimeConnectionID = undefined;
 }
 
-export function getCurrentRealtimeConnectionID(): undefined {
-  return undefined;
+export function setCurrentRealtimeConnectionIDForTest(connectionID: string | undefined): void {
+  currentRealtimeConnectionID = connectionID;
+}
+
+export function getCurrentRealtimeConnectionID(): string | undefined {
+  return currentRealtimeConnectionID;
 }
 
 export function getCurrentRealtimeConnectionCorrelation(): undefined {

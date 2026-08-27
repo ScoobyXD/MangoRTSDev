@@ -58,6 +58,7 @@ import {
 import {
   emitProcessMapChangedForTest,
   resetProcessMapRealtimeTestStub,
+  setCurrentRealtimeConnectionIDForTest,
 } from "./processMapRealtimeTestStub.js";
 
 function placement(id: string, x: number, y: number, width = 10, height = 6, resourceType: "logic_gate" | "company_explorer_folder" = "logic_gate"): ProcessMapVisiblePlacement {
@@ -77,6 +78,22 @@ function placement(id: string, x: number, y: number, width = 10, height = 6, res
     created_timestamp: "created",
     updated_timestamp: "updated",
   };
+}
+
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (cause: unknown) => void;
+};
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (cause: unknown) => void;
+  const promise = new Promise<T>((complete, fail) => {
+    resolve = complete;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
 }
 
 function trace(source: ProcessMapVisiblePlacement, target: ProcessMapVisiblePlacement): ProcessMapTrace {
@@ -189,18 +206,61 @@ function installProcessMapTestDOM(): () => void {
   };
 }
 
+type DeckTestLayer = ReturnType<typeof readProcessMapDeckGLTestProps>["layers"][number];
+
+function currentDeckLayer(id: string): DeckTestLayer {
+  const layer = readProcessMapDeckGLTestProps().layers.find((candidate) => candidate.id === id);
+  assert.ok(layer, `missing mounted layer ${id}`);
+  return layer;
+}
+
+function behaviorSceneResponse(
+  readVersion: number,
+  bounds: ProcessMapSceneResponse["bounds"],
+): Response {
+  return new Response(JSON.stringify({
+    bounds,
+    process_map_read_version: readVersion,
+    tile_size: 256,
+    min_tile_zoom: 0,
+    max_tile_zoom: 22,
+  }), { status: 200, headers: { "Content-Type": "application/json", ETag: `"scene-${readVersion}"` } });
+}
+
+function behaviorTile(
+  readVersion: number,
+  placements: ProcessMapTileResponse["placements"],
+  traces: ProcessMapTrace[] = [],
+): ProcessMapTileResponse {
+  return { z: 22, x: 0, y: 0, process_map_read_version: readVersion, byteLength: 1, placements, traces };
+}
+
 type MountedProcessMap = {
   companyID: string;
   container: HTMLDivElement;
+  initialTile: ProcessMapTileResponse;
   process: ProcessMapVisiblePlacement;
   readSceneCount: () => number;
+  holdNextSceneRead: () => Deferred<Response>;
+  loadTile: (tile: ProcessMapTileResponse, completeViewport?: boolean, tileID?: string) => Promise<void>;
+  clickPlacement: (candidate: ProcessMapVisiblePlacement) => Promise<void>;
+  readTileLayer: () => DeckTestLayer;
   root: Root;
   cleanup: () => Promise<void>;
 };
 
+type ProcessMapBehaviorMountOptions = {
+  process?: ProcessMapVisiblePlacement;
+  initialPlacements?: ProcessMapTileResponse["placements"];
+  sceneBounds?: ProcessMapSceneResponse["bounds"];
+};
+
 let processMapBehaviorTestSequence = 0;
 
-async function mountProcessMapForBehavior(onOpenLogicGate: (logicGateID: string, name: string) => void): Promise<MountedProcessMap> {
+async function mountProcessMapForBehavior(
+  onOpenLogicGate: (logicGateID: string, name: string) => void,
+  options: ProcessMapBehaviorMountOptions = {},
+): Promise<MountedProcessMap> {
   const restoreDOM = installProcessMapTestDOM();
   const originalFetch = globalThis.fetch;
   resetProcessMapDeckGLTestStub();
@@ -208,19 +268,20 @@ async function mountProcessMapForBehavior(onOpenLogicGate: (logicGateID: string,
   processMapBehaviorTestSequence += 1;
   const apiBase = `https://process-map-behavior-${processMapBehaviorTestSequence}.test`;
   const companyID = `company-${processMapBehaviorTestSequence}`;
+  const sceneBounds = options.sceneBounds ?? { min_x: 0, min_y: 0, max_x: 14, max_y: 8 };
+  const process: ProcessMapVisiblePlacement = options.process ?? {
+    ...placement("behavior-process", 0, 0, 14, 8),
+    name: "Behavior Process",
+  };
+  const initialTile = behaviorTile(1, options.initialPlacements ?? [process]);
+  const heldSceneReads: Array<Deferred<Response>> = [];
   let sceneReads = 0;
   globalThis.fetch = (async (input: string | URL | Request) => {
     const url = String(input instanceof Request ? input.url : input);
     if (url.includes("/v1/process-map/scene?")) {
       sceneReads += 1;
-      const version = sceneReads;
-      return new Response(JSON.stringify({
-        bounds: { min_x: 0, min_y: 0, max_x: 14, max_y: 8 },
-        process_map_read_version: version,
-        tile_size: 256,
-        min_tile_zoom: 0,
-        max_tile_zoom: 22,
-      }), { status: 200, headers: { "Content-Type": "application/json", ETag: `"scene-${version}"` } });
+      const held = heldSceneReads.shift();
+      return held ? held.promise : behaviorSceneResponse(sceneReads, sceneBounds);
     }
     if (url.includes("/qd-ratings?")) {
       return new Response(JSON.stringify({ qd_ratings: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -240,10 +301,6 @@ async function mountProcessMapForBehavior(onOpenLogicGate: (logicGateID: string,
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  const process: ProcessMapVisiblePlacement = {
-    ...placement("behavior-process", 0, 0, 14, 8),
-    name: "Behavior Process",
-  };
   await act(async () => {
     root.render(<ProcessMapSurface apiBase={apiBase} companyID={companyID} onOpenLogicGate={onOpenLogicGate} />);
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
@@ -265,15 +322,37 @@ async function mountProcessMapForBehavior(onOpenLogicGate: (logicGateID: string,
   await act(async () => {
     onTileLoad({
       id: "22-0-0",
-      content: { z: 22, x: 0, y: 0, process_map_read_version: 1, byteLength: 1, placements: [process], traces: [] },
+      content: initialTile,
     });
   });
 
   return {
     companyID,
     container,
+    initialTile,
     process,
     readSceneCount: () => sceneReads,
+    holdNextSceneRead: () => {
+      const held = deferred<Response>();
+      heldSceneReads.push(held);
+      return held;
+    },
+    loadTile: async (tile, completeViewport = true, tileID = "22-0-0") => {
+      const onTileLoad = currentDeckLayer("process-map-spatial-tiles").props.onTileLoad as (header: { id: string; content: ProcessMapTileResponse }) => void;
+      await act(async () => { onTileLoad({ id: tileID, content: tile }); });
+      if (!completeViewport) return;
+      const onViewportLoad = currentDeckLayer("process-map-spatial-tiles").props.onViewportLoad as (headers: Array<{ isLoaded: boolean; content: ProcessMapTileResponse }>) => void;
+      await act(async () => { onViewportLoad([{ isLoaded: true, content: tile }]); });
+    },
+    clickPlacement: async (candidate) => {
+      await act(async () => {
+        readProcessMapDeckGLTestProps().onClick({
+          object: { kind: "placement", key: `${candidate.resource_type}:${candidate.resource_id}`, placement: candidate },
+        }, { type: "click" });
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+      });
+    },
+    readTileLayer: () => currentDeckLayer("process-map-spatial-tiles"),
     root,
     cleanup: async () => {
       await act(async () => { root.unmount(); });
@@ -284,6 +363,50 @@ async function mountProcessMapForBehavior(onOpenLogicGate: (logicGateID: string,
       restoreDOM();
     },
   };
+}
+
+type MountedPlacementDatum = {
+  pick?: { key: string; placement: ProcessMapVisiblePlacement };
+};
+
+function mountedPlacementDatums(layerID: string): MountedPlacementDatum[] {
+  return currentDeckLayer(layerID).props.data as MountedPlacementDatum[];
+}
+
+function mountedPlacementBodies(key: string): MountedPlacementDatum[] {
+  return mountedPlacementDatums("process-map-edit-placement-bodies").filter((datum) => datum.pick?.key === key);
+}
+
+function mountedFolderFences(key: string): MountedPlacementDatum[] {
+  return mountedPlacementDatums("process-map-edit-folder-fences").filter((datum) => datum.pick?.key === key);
+}
+
+async function emitMountedProcessMapChange(
+  mounted: MountedProcessMap,
+  protectedGeometryChanged: boolean,
+  originConnectionID?: string,
+): Promise<void> {
+  await act(async () => {
+    emitProcessMapChangedForTest({
+      type: "process_map.changed",
+      company_id: mounted.companyID,
+      scope: "process-map:company",
+      origin_connection_id: originConnectionID,
+      protected_geometry_changed: protectedGeometryChanged,
+    });
+    await Promise.resolve();
+  });
+}
+
+async function resolveMountedScene(
+  held: Deferred<Response>,
+  readVersion: number,
+  bounds: ProcessMapSceneResponse["bounds"],
+): Promise<void> {
+  await act(async () => {
+    held.resolve(behaviorSceneResponse(readVersion, bounds));
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+  });
 }
 
 test("a real Deck double-click opens the Process instead of pinning its scorecard", async () => {
@@ -346,33 +469,293 @@ test("child-control keyboard events stay native instead of becoming canvas comma
   }
 });
 
-test("a presentation-only realtime refresh preserves the pinned scorecard and camera", async () => {
+test("Explorer Logic Gate creation keeps the mounted scene until canonical automatic placement arrives", async () => {
+  const bounds = { min_x: 0, min_y: 0, max_x: 48, max_y: 32 };
+  const folder = { ...placement("create-folder", 0, 0, 44, 32, "company_explorer_folder"), name: "Create Folder" };
+  const existing = {
+    ...placement("create-existing", 4, 10, 14, 8),
+    name: "Existing Process",
+    map_parent_folder_id: folder.resource_id,
+  };
+  const created = {
+    ...placement("create-new", 24, 10, 14, 8),
+    name: "Created Process",
+    map_parent_folder_id: folder.resource_id,
+    revision: 1,
+  };
+  const mounted = await mountProcessMapForBehavior(() => undefined, {
+    process: existing,
+    initialPlacements: [folder, existing],
+    sceneBounds: bounds,
+  });
+  try {
+    await mounted.clickPlacement(existing);
+    const existingKey = `logic_gate:${existing.resource_id}`;
+    const createdKey = `logic_gate:${created.resource_id}`;
+    const pinnedCard = mounted.container.querySelector(".process-map-qd-card");
+    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
+    const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
+    assert.ok(pinnedCard && selectionToolbar);
+
+    const heldScene = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false);
+
+    assert.equal(mounted.readSceneCount(), 2);
+    assert.equal(mounted.readTileLayer().id, "process-map-spatial-tiles", "the last valid TileLayer must remain mounted while the scene read is pending");
+    assert.equal(mountedPlacementBodies(existingKey).length, 1, "the selected existing Process must not disappear during refresh");
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
+
+    await resolveMountedScene(heldScene, 2, bounds);
+    assert.match(String(mounted.readTileLayer().props.data), /^2:\d+:/);
+    assert.equal(mountedPlacementBodies(existingKey).length, 1, "old coverage remains visible while version-2 tiles are pending");
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
+
+    await mounted.loadTile(behaviorTile(2, [folder, existing, created]));
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard, "canonical replacement must not remount the existing pinned card");
+    await mounted.clickPlacement(created);
+    const createdBodies = mountedPlacementBodies(createdKey);
+    assert.equal(createdBodies.length, 1, "automatic placement settles one exact Process identity");
+    assert.deepEqual(createdBodies[0].pick?.placement && {
+      parent: createdBodies[0].pick.placement.map_parent_folder_id,
+      x: createdBodies[0].pick.placement.grid_x,
+      y: createdBodies[0].pick.placement.grid_y,
+      width: createdBodies[0].pick.placement.grid_width,
+      height: createdBodies[0].pick.placement.grid_height,
+    }, { parent: folder.resource_id, x: 24, y: 10, width: 14, height: 8 });
+    assert.equal(mounted.container.querySelectorAll(".process-map-qd-card").length, 1);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("Explorer Folder deletion stays visible while pending and cannot resurrect from a stale tile", async () => {
+  const bounds = { min_x: 0, min_y: 0, max_x: 72, max_y: 36 };
+  const deletedFolder = { ...placement("delete-folder", 0, 0, 40, 32, "company_explorer_folder"), name: "Deleted Folder" };
+  const deletedChild = {
+    ...placement("delete-child", 6, 12, 14, 8),
+    name: "Deleted Child",
+    map_parent_folder_id: deletedFolder.resource_id,
+  };
+  const survivor = { ...placement("delete-survivor", 52, 12, 14, 8), name: "Survivor" };
+  const mounted = await mountProcessMapForBehavior(() => undefined, {
+    process: deletedChild,
+    initialPlacements: [deletedFolder, deletedChild, survivor],
+    sceneBounds: bounds,
+  });
+  try {
+    await mounted.clickPlacement(deletedFolder);
+    const folderKey = `company_explorer_folder:${deletedFolder.resource_id}`;
+    const staleOnTileLoad = mounted.readTileLayer().props.onTileLoad as (header: { id: string; content: ProcessMapTileResponse }) => void;
+    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
+    const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
+    assert.equal(mountedFolderFences(folderKey).length, 4);
+    assert.ok(selectionToolbar);
+
+    const heldScene = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false);
+    assert.equal(mountedFolderFences(folderKey).length, 4, "the selected Folder fence remains until canonical deletion is available");
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
+
+    await resolveMountedScene(heldScene, 2, bounds);
+    assert.equal(mountedFolderFences(folderKey).length, 4, "scene settlement alone must not empty valid version-1 coverage");
+    await mounted.loadTile(behaviorTile(2, [survivor]));
+    assert.equal(mountedFolderFences(folderKey).length, 0, "canonical coverage removes the deleted Folder exactly once");
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null, "complete canonical coverage retires the deleted Folder selection");
+
+    await act(async () => { staleOnTileLoad({ id: "22-0-0", content: mounted.initialTile }); });
+    assert.equal(mountedFolderFences(folderKey).length, 0, "a late version-1 tile cannot resurrect the deleted Folder");
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null);
+
+    const laterScene = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false);
+    assert.equal(mountedFolderFences(folderKey).length, 0, "a later ordinary refresh cannot revive deleted edit geometry");
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null, "a confirmed-missing selection stays retired during later scene settlement");
+    await resolveMountedScene(laterScene, 3, bounds);
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null, "the deleted selection stays retired while later tiles are pending");
+    await mounted.loadTile(behaviorTile(3, [survivor]));
+    assert.equal(mountedFolderFences(folderKey).length, 0);
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("an unrelated refresh preserves an offscreen selection until its canonical tile returns", async () => {
+  const bounds = { min_x: 0, min_y: 0, max_x: 600, max_y: 80 };
+  const selectedFolder = { ...placement("offscreen-folder", 0, 0, 40, 32, "company_explorer_folder"), name: "Offscreen Folder" };
+  const viewportProcess = { ...placement("viewport-process", 320, 12, 14, 8), name: "Viewport Process" };
+  const mounted = await mountProcessMapForBehavior(() => undefined, {
+    process: viewportProcess,
+    initialPlacements: [selectedFolder],
+    sceneBounds: bounds,
+  });
+  try {
+    const selectedKey = `company_explorer_folder:${selectedFolder.resource_id}`;
+    await mounted.loadTile({ ...behaviorTile(1, [viewportProcess]), x: 1 }, false, "22-1-0");
+    await mounted.clickPlacement(selectedFolder);
+    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
+    const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
+    assert.ok(selectionToolbar);
+    assert.equal(mountedFolderFences(selectedKey).length, 4);
+
+    const heldScene = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false);
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
+    await resolveMountedScene(heldScene, 2, bounds);
+
+    await mounted.loadTile({ ...behaviorTile(2, [viewportProcess]), x: 1 }, true, "22-1-0");
+    assert.equal(mountedFolderFences(selectedKey).length, 0, "current viewport settlement may retire the offscreen tile geometry");
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar, "another tile cannot prove that the selected Folder was deleted");
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
+
+    await mounted.loadTile(behaviorTile(2, [selectedFolder]), false, "22-0-0");
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar, "the still-existing selection remains active when its canonical tile returns");
+    assert.equal(mountedFolderFences(selectedKey).length, 4, "the returning canonical Folder renders exactly once");
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("Explorer PUT reparent and geometry settlement preserves selection, pin, and one latest placement", async () => {
+  const bounds = { min_x: 0, min_y: 0, max_x: 96, max_y: 44 };
+  const sourceFolder = { ...placement("move-source", 0, 0, 42, 40, "company_explorer_folder"), name: "Source Folder" };
+  const targetFolder = { ...placement("move-target", 50, 0, 46, 44, "company_explorer_folder"), name: "Target Folder" };
+  const original = {
+    ...placement("move-process", 8, 14, 20, 12),
+    name: "Moved Process",
+    map_parent_folder_id: sourceFolder.resource_id,
+  };
+  const moved = {
+    ...original,
+    map_parent_folder_id: targetFolder.resource_id,
+    grid_x: 68,
+    grid_y: 18,
+    grid_width: 22,
+    grid_height: 14,
+    revision: original.revision + 1,
+    updated_timestamp: "moved",
+  };
+  const mounted = await mountProcessMapForBehavior(() => undefined, {
+    process: original,
+    initialPlacements: [sourceFolder, targetFolder, original],
+    sceneBounds: bounds,
+  });
+  try {
+    await mounted.clickPlacement(original);
+    const key = `logic_gate:${original.resource_id}`;
+    const staleOnTileLoad = mounted.readTileLayer().props.onTileLoad as (header: { id: string; content: ProcessMapTileResponse }) => void;
+    const pinnedCard = mounted.container.querySelector(".process-map-qd-card");
+    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
+    const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
+    assert.ok(pinnedCard && selectionToolbar);
+
+    const heldScene = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false);
+    const pendingBody = mountedPlacementBodies(key);
+    assert.equal(pendingBody.length, 1);
+    assert.deepEqual([pendingBody[0].pick?.placement.map_parent_folder_id, pendingBody[0].pick?.placement.grid_x], [sourceFolder.resource_id, 8]);
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
+
+    await resolveMountedScene(heldScene, 2, bounds);
+    assert.equal(mountedPlacementBodies(key)[0].pick?.placement.grid_x, 8, "version-1 geometry remains until the version-2 tile arrives");
+    await mounted.loadTile(behaviorTile(2, [sourceFolder, targetFolder, moved]));
+    const settledBodies = mountedPlacementBodies(key);
+    assert.equal(settledBodies.length, 1, "reparent settlement must not duplicate the Process");
+    assert.deepEqual(settledBodies[0].pick?.placement && {
+      parent: settledBodies[0].pick.placement.map_parent_folder_id,
+      x: settledBodies[0].pick.placement.grid_x,
+      y: settledBodies[0].pick.placement.grid_y,
+      width: settledBodies[0].pick.placement.grid_width,
+      height: settledBodies[0].pick.placement.grid_height,
+      revision: settledBodies[0].pick.placement.revision,
+    }, { parent: targetFolder.resource_id, x: 68, y: 18, width: 22, height: 14, revision: 6 });
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
+
+    await act(async () => { staleOnTileLoad({ id: "22-0-0", content: mounted.initialTile }); });
+    const afterStaleBodies = mountedPlacementBodies(key);
+    assert.equal(afterStaleBodies.length, 1);
+    assert.deepEqual([afterStaleBodies[0].pick?.placement.map_parent_folder_id, afterStaleBodies[0].pick?.placement.grid_x], [targetFolder.resource_id, 68]);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("a remote-client ordinary mutation retains mounted state and settles its canonical geometry", async () => {
   const mounted = await mountProcessMapForBehavior(() => undefined);
   try {
-    await act(async () => {
-      readProcessMapDeckGLTestProps().onClick({
-        object: { kind: "placement", key: `logic_gate:${mounted.process.resource_id}`, placement: mounted.process },
-      }, { type: "click" });
-    });
+    setCurrentRealtimeConnectionIDForTest("local-connection");
+    await mounted.clickPlacement(mounted.process);
+    const key = `logic_gate:${mounted.process.resource_id}`;
     const pinnedCard = mounted.container.querySelector(".process-map-qd-card");
-    assert.ok(pinnedCard, "single-click must pin the Process scorecard");
+    const selectionToolbar = mounted.container.querySelector(".process-map-toolbar");
     const cameraBefore = structuredClone(readProcessMapDeckGLTestProps().viewState);
+    assert.ok(pinnedCard && selectionToolbar);
 
-    await act(async () => {
-      emitProcessMapChangedForTest({
-        type: "process_map.changed",
-        company_id: mounted.companyID,
-        scope: "process-map:company",
-        presentation_only: true,
-      });
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
-    });
+    await emitMountedProcessMapChange(mounted, false, "local-connection");
+    assert.equal(mounted.readSceneCount(), 1, "the initiating connection's direct echo remains ignored");
 
-    assert.equal(mounted.readSceneCount(), 2, "presentation refresh must read the new scorecard version");
-    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard, "the same pinned card must stay mounted");
-    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore, "scorecard refresh must preserve the camera");
-    const refreshedTileLayer = readProcessMapDeckGLTestProps().layers.find((layer) => layer.id === "process-map-spatial-tiles");
-    assert.match(String(refreshedTileLayer?.props.data), /^2:\d+:/, "tile presentation must advance to the refreshed read version");
+    const heldScene = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false, "remote-connection");
+    assert.equal(mounted.readSceneCount(), 2);
+    assert.equal(mountedPlacementBodies(key).length, 1);
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), selectionToolbar);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
+
+    const remote = { ...mounted.process, grid_x: 2, grid_y: 1, grid_width: 12, grid_height: 7, revision: 6, updated_timestamp: "remote" };
+    await resolveMountedScene(heldScene, 2, { min_x: 0, min_y: 0, max_x: 14, max_y: 8 });
+    await mounted.loadTile(behaviorTile(2, [remote]));
+    const settled = mountedPlacementBodies(key);
+    assert.equal(settled.length, 1);
+    assert.deepEqual(settled[0].pick?.placement && [
+      settled[0].pick.placement.grid_x,
+      settled[0].pick.placement.grid_y,
+      settled[0].pick.placement.grid_width,
+      settled[0].pick.placement.grid_height,
+    ], [2, 1, 12, 7]);
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinnedCard);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, cameraBefore);
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("protected geometry invalidation interrupts an ordinary refresh and cannot be origin-suppressed", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  try {
+    setCurrentRealtimeConnectionIDForTest("local-connection");
+    await mounted.clickPlacement(mounted.process);
+    assert.ok(mounted.container.querySelector(".process-map-qd-card"));
+    assert.ok(mounted.container.querySelector(".process-map-toolbar"));
+    const ordinaryScene = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false, "remote-connection");
+    assert.equal(mounted.readSceneCount(), 2);
+    assert.ok(readProcessMapDeckGLTestProps().layers.length > 0, "an ordinary refresh retains the mounted scene");
+
+    const protectedReplacementScene = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, true, "local-connection");
+
+    assert.equal(mounted.readSceneCount(), 3, "aborting the ordinary read immediately starts one coalesced protected replacement");
+    assert.equal(readProcessMapDeckGLTestProps().layers.length, 0, "protected geometry must disappear synchronously while replacement is pending");
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), null);
+    assert.equal(mounted.container.querySelector(".process-map-toolbar"), null);
+    assert.ok(mounted.container.querySelector(".process-map-loading"));
+
+    await resolveMountedScene(ordinaryScene, 2, { min_x: 0, min_y: 0, max_x: 14, max_y: 8 });
+    assert.equal(mounted.readSceneCount(), 3, "the aborted ordinary response is ignored and one protected replacement read starts");
+    assert.equal(readProcessMapDeckGLTestProps().layers.length, 0);
+
+    await resolveMountedScene(protectedReplacementScene, 3, { min_x: 0, min_y: 0, max_x: 14, max_y: 8 });
+    assert.equal(mounted.readTileLayer().id, "process-map-spatial-tiles");
   } finally {
     await mounted.cleanup();
   }

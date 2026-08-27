@@ -677,6 +677,19 @@ for update`, input.CompanyID, targetType, targetID).Scan(&previousParentID); err
 	} else if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
+	parentChanged := !hadPreviousEdge || previousParentID.Valid != (targetParentID != "") || previousParentID.String != targetParentID
+	audienceResources := []domain.ProcessMapResourceRef(nil)
+	beforeAudience := processMapAccessAudience(nil)
+	if parentChanged {
+		audienceResources, err = postgresProcessMapAccessResourcesTx(ctx, tx, input.CompanyID, targetType, targetID)
+		if err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+		beforeAudience, err = postgresProcessMapAccessAudienceTx(ctx, tx, input.CompanyID, audienceResources)
+		if err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	position := input.Position
 	if position <= 0 {
 		position, err = nextCompanyExplorerFinalPositionSQL(ctx, tx, input.CompanyID, parentFolderID)
@@ -715,11 +728,17 @@ returning item_id::text, created_timestamp, updated_timestamp`,
 			return CompanyExplorerV2Row{}, err
 		}
 	}
-	if !hadPreviousEdge || previousParentID.Valid != (targetParentID != "") || previousParentID.String != targetParentID {
-		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
+	if parentChanged {
+		payload := map[string]any{
 			"item_id": itemID, "parent_entity_id": parentEntityID,
 			"target_type": targetType, "target_id": targetID,
-		})
+		}
+		afterAudience, err := postgresProcessMapAccessAudienceTx(ctx, tx, input.CompanyID, audienceResources)
+		if err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+		markProcessMapProtectedGeometryChanged(payload, beforeAudience, afterAudience)
+		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", payload)
 		eventInput.ActorUserID = input.ActorUserID
 		if _, err := r.appendDomainEventTx(ctx, tx, eventInput); err != nil {
 			return CompanyExplorerV2Row{}, err
@@ -776,6 +795,23 @@ for update`, input.CompanyID, input.EdgeID).Scan(&targetType, &targetID, &previo
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
+	targetParentID := ""
+	if parentEntityID != input.CompanyID {
+		targetParentID = parentEntityID
+	}
+	parentChanged := previousParentID.Valid != (targetParentID != "") || previousParentID.String != targetParentID
+	audienceResources := []domain.ProcessMapResourceRef(nil)
+	beforeAudience := processMapAccessAudience(nil)
+	if parentChanged {
+		audienceResources, err = postgresProcessMapAccessResourcesTx(ctx, tx, input.CompanyID, targetType, targetID)
+		if err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+		beforeAudience, err = postgresProcessMapAccessAudienceTx(ctx, tx, input.CompanyID, audienceResources)
+		if err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	position := input.Position
 	if position <= 0 {
 		position, err = nextCompanyExplorerFinalPositionSQL(ctx, tx, input.CompanyID, parentFolderID)
@@ -798,20 +834,22 @@ returning target_type, target_id::text`, input.CompanyID, input.EdgeID, parentFo
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
 	}
-	targetParentID := ""
-	if parentEntityID != input.CompanyID {
-		targetParentID = parentEntityID
-	}
 	if targetType == EntityTypeLogicGate {
 		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, input.CompanyID, domain.ProcessMapResourceTypeProcess, targetID, targetParentID, input.ActorUserID); err != nil {
 			return CompanyExplorerV2Row{}, err
 		}
 	}
-	if previousParentID.Valid != (targetParentID != "") || previousParentID.String != targetParentID {
-		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
+	if parentChanged {
+		payload := map[string]any{
 			"item_id": input.EdgeID, "parent_entity_id": parentEntityID,
 			"target_type": targetType, "target_id": targetID,
-		})
+		}
+		afterAudience, err := postgresProcessMapAccessAudienceTx(ctx, tx, input.CompanyID, audienceResources)
+		if err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+		markProcessMapProtectedGeometryChanged(payload, beforeAudience, afterAudience)
+		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", payload)
 		eventInput.ActorUserID = input.ActorUserID
 		if _, err := r.appendDomainEventTx(ctx, tx, eventInput); err != nil {
 			return CompanyExplorerV2Row{}, err

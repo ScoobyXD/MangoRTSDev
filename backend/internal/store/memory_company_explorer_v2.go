@@ -367,20 +367,16 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 			edge.CreatedTimestamp = existing.CreatedTimestamp
 		}
 	}
-	if !hadPreviousEdge || previousParentEntityID != input.ParentEntityID {
-		childResourceID := child.ResourceID
-		if childResourceID == "" {
-			childResourceID = child.EntityID
+	parentChanged := !hadPreviousEdge || previousParentEntityID != input.ParentEntityID
+	audienceResources := []domain.ProcessMapResourceRef(nil)
+	beforeAudience := processMapAccessAudience(nil)
+	if parentChanged {
+		resourceType, resourceID := child.EntityType, child.ResourceID
+		if child.EntityType == CompanyExplorerV2EntityFolder {
+			resourceType, resourceID = domain.ProcessMapResourceTypeFolder, child.EntityID
 		}
-		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
-			"item_id": edge.EdgeID, "parent_entity_id": input.ParentEntityID,
-			"target_type": child.EntityType, "target_id": childResourceID,
-		})
-		eventInput.ActorUserID = input.ActorUserID
-		if _, err := r.appendDomainEventLocked(eventInput); err != nil {
-			r.restoreProcessMapMutationLocked(beforeMutation)
-			return CompanyExplorerV2Row{}, err
-		}
+		audienceResources = r.processMapAccessResourcesLocked(input.CompanyID, resourceType, resourceID)
+		beforeAudience = r.processMapAccessAudienceLocked(input.CompanyID, audienceResources)
 	}
 	for edgeKey, existing := range r.companyExplorerV2Edges {
 		if existing.CompanyID == input.CompanyID && existing.ChildEntityID == child.EntityID {
@@ -396,6 +392,23 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 			mapParentID = &parentID
 		}
 		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID); err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
+			return CompanyExplorerV2Row{}, err
+		}
+	}
+	if parentChanged {
+		childResourceID := child.ResourceID
+		if childResourceID == "" {
+			childResourceID = child.EntityID
+		}
+		payload := map[string]any{
+			"item_id": edge.EdgeID, "parent_entity_id": input.ParentEntityID,
+			"target_type": child.EntityType, "target_id": childResourceID,
+		}
+		markProcessMapProtectedGeometryChanged(payload, beforeAudience, r.processMapAccessAudienceLocked(input.CompanyID, audienceResources))
+		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", payload)
+		eventInput.ActorUserID = input.ActorUserID
+		if _, err := r.appendDomainEventLocked(eventInput); err != nil {
 			r.restoreProcessMapMutationLocked(beforeMutation)
 			return CompanyExplorerV2Row{}, err
 		}
@@ -442,25 +455,21 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 		edge.Position = input.Position
 	}
 	previousParentEntityID := edge.ParentEntityID
+	parentChanged := previousParentEntityID != input.ParentEntityID
+	audienceResources := []domain.ProcessMapResourceRef(nil)
+	beforeAudience := processMapAccessAudience(nil)
+	if parentChanged {
+		resourceType, resourceID := child.EntityType, child.ResourceID
+		if child.EntityType == CompanyExplorerV2EntityFolder {
+			resourceType, resourceID = domain.ProcessMapResourceTypeFolder, child.EntityID
+		}
+		audienceResources = r.processMapAccessResourcesLocked(input.CompanyID, resourceType, resourceID)
+		beforeAudience = r.processMapAccessAudienceLocked(input.CompanyID, audienceResources)
+	}
 	oldEdgeKey := key(input.CompanyID, edge.EdgeID)
 	edge.ParentEntityID = input.ParentEntityID
 	edge.EdgeID = companyExplorerV2EdgeID(input.CompanyID, input.ParentEntityID, child.EntityID)
 	edge.UpdatedTimestamp = time.Now().UTC()
-	if previousParentEntityID != input.ParentEntityID {
-		childResourceID := child.ResourceID
-		if childResourceID == "" {
-			childResourceID = child.EntityID
-		}
-		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", map[string]any{
-			"item_id": edge.EdgeID, "parent_entity_id": input.ParentEntityID,
-			"target_type": child.EntityType, "target_id": childResourceID,
-		})
-		eventInput.ActorUserID = input.ActorUserID
-		if _, err := r.appendDomainEventLocked(eventInput); err != nil {
-			r.restoreProcessMapMutationLocked(beforeMutation)
-			return CompanyExplorerV2Row{}, err
-		}
-	}
 	delete(r.companyExplorerV2Edges, oldEdgeKey)
 	r.companyExplorerV2Edges[key(input.CompanyID, edge.EdgeID)] = edge
 	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
@@ -477,6 +486,23 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 		}
 	case CompanyExplorerV2EntityLogicGate:
 		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID); err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
+			return CompanyExplorerV2Row{}, err
+		}
+	}
+	if parentChanged {
+		childResourceID := child.ResourceID
+		if childResourceID == "" {
+			childResourceID = child.EntityID
+		}
+		payload := map[string]any{
+			"item_id": edge.EdgeID, "parent_entity_id": input.ParentEntityID,
+			"target_type": child.EntityType, "target_id": childResourceID,
+		}
+		markProcessMapProtectedGeometryChanged(payload, beforeAudience, r.processMapAccessAudienceLocked(input.CompanyID, audienceResources))
+		eventInput := workspaceDomainEventInput(input.CompanyID, "company_explorer_item_placed", payload)
+		eventInput.ActorUserID = input.ActorUserID
+		if _, err := r.appendDomainEventLocked(eventInput); err != nil {
 			r.restoreProcessMapMutationLocked(beforeMutation)
 			return CompanyExplorerV2Row{}, err
 		}

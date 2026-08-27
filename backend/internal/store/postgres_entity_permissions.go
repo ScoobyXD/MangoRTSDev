@@ -255,7 +255,11 @@ returning company_id::text, group_id::text, parent_group_id::text, name, positio
 	if err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
-	if _, err := r.appendDomainEventTx(ctx, tx, workspaceDomainEventInput(companyID, "company_user_group_updated", map[string]any{"group_id": groupID})); err != nil {
+	payload := map[string]any{"group_id": groupID}
+	if parentChanged {
+		payload[processMapProtectedGeometryChangedPayloadKey] = true
+	}
+	if _, err := r.appendDomainEventTx(ctx, tx, workspaceDomainEventInput(companyID, "company_user_group_updated", payload)); err != nil {
 		return domain.CompanyUserGroup{}, err
 	}
 	if err := tx.Commit(); err != nil {

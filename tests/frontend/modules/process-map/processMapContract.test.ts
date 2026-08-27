@@ -93,6 +93,12 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
   const rejectedEnd = surface.indexOf("\n      },\n    });", rejectedStart);
   assert.ok(rejectedStart >= 0 && rejectedEnd > rejectedStart, "permission rejection handler must remain explicit");
   const rejected = surface.slice(rejectedStart, rejectedEnd);
+  assert.match(rejected, /purgeProtectedScene\(\)/);
+
+  const purgeStart = surface.indexOf("const purgeProtectedScene = useCallback");
+  const purgeEnd = surface.indexOf("\n\n  const loadScene = useCallback", purgeStart);
+  assert.ok(purgeStart >= 0 && purgeEnd > purgeStart, "protected-state disposal must remain explicit");
+  const purge = surface.slice(purgeStart, purgeEnd);
   for (const required of [
     "invalidateProcessMapReadCaches(apiBase, companyID)",
     "sceneAbortRef.current?.abort()",
@@ -109,7 +115,7 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
     "setPinnedProcessID(null)",
     "setScene(null)",
   ]) {
-    assert.ok(rejected.includes(required), `permission rejection must clear protected state with ${required}`);
+    assert.ok(purge.includes(required), `permission rejection must clear protected state with ${required}`);
   }
 });
 
@@ -151,8 +157,8 @@ test("company or auth scope changes synchronously suppress protected geometry be
   assert.match(surface, /const spatialLayers = useMemo\(\(\) => activeScene \? buildProcessMapSpatialLayers/);
   assert.match(surface, /const layers = useMemo\(\(\) => activeScene && spatialLayers \? composeProcessMapLayers/);
 
-  const purgeStart = surface.indexOf("if (purgeProtectedGeometry) {");
-  const purgeEnd = surface.indexOf("\n    }", purgeStart);
+  const purgeStart = surface.indexOf("const purgeProtectedScene = useCallback");
+  const purgeEnd = surface.indexOf("\n\n  const loadScene = useCallback", purgeStart);
   assert.ok(purgeStart >= 0 && purgeEnd > purgeStart);
   const purge = surface.slice(purgeStart, purgeEnd);
   assert.ok(purge.indexOf("setProtectedScope(protectedScopeKey)") < purge.indexOf("advanceProtectedGeneration()"));
@@ -252,7 +258,7 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
 test("V3 Surface keeps valid tile data through camera settlement and accepts deck cursor-anchored zoom", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const markStart = surface.indexOf("const markUnsettled = useCallback");
-  const markEnd = surface.indexOf("const loadScene = useCallback", markStart);
+  const markEnd = surface.indexOf("const purgeProtectedScene = useCallback", markStart);
   const tileReadStart = surface.indexOf("const guardedGetTileData = useCallback");
   const tileReadEnd = surface.indexOf("const handleTileLoad = useCallback", tileReadStart);
   const spatialStart = surface.indexOf("const editedPlacementMembership =");

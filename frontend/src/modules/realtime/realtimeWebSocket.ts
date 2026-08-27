@@ -130,7 +130,7 @@ export type RealtimeProcessMapChangedMessage = RealtimeBaseMessage & {
   company_id: string;
   scope: string;
   origin_connection_id?: string;
-  presentation_only?: boolean;
+  protected_geometry_changed: boolean;
   ts?: string;
 };
 
@@ -393,7 +393,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
         ...scoped,
         type,
         origin_connection_id: stringValue(payload.origin_connection_id) || undefined,
-        presentation_only: payload.presentation_only === true || undefined,
+        protected_geometry_changed: payload.protected_geometry_changed !== false,
         ts: stringValue(payload.ts) || undefined,
       };
     }
