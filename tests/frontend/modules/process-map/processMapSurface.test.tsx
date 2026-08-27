@@ -425,6 +425,41 @@ test("a real Deck double-click opens the Process instead of pinning its scorecar
   }
 });
 
+test("name-visible normal LOD keeps Process scorecards, controls, and drag movement active", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined, {
+    sceneBounds: { min_x: 0, min_y: 0, max_x: 218, max_y: 143 },
+  });
+  try {
+    const key = `logic_gate:${mounted.process.resource_id}`;
+    const zoom = readProcessMapDeckGLTestProps().viewState.zoom as number;
+    assert.equal(2 ** zoom, 4, "the fixture must settle exactly at the normal-LOD scale");
+    assert.equal(processMapPlacementLOD(mounted.process, 2 ** zoom), "normal");
+
+    await mounted.clickPlacement(mounted.process);
+    assert.ok(mounted.container.querySelector(".process-map-qd-card"), "a name-visible Process click pins its QCD card");
+    assert.equal((currentDeckLayer("process-map-edit-resize-handles").props.data as unknown[]).length, 4);
+    assert.equal((currentDeckLayer("process-map-edit-anchors").props.data as unknown[]).length, 2);
+
+    const pick = { kind: "placement", key, placement: mounted.process };
+    let propagationStopped = false;
+    await act(async () => {
+      readProcessMapDeckGLTestProps().onDragStart(
+        { object: pick, coordinate: [1, 1] },
+        { stopPropagation: () => { propagationStopped = true; } },
+      );
+    });
+    await act(async () => {
+      readProcessMapDeckGLTestProps().onDrag({ coordinate: [4, 3] });
+    });
+    const movedBody = mountedPlacementBodies(key)[0] as MountedPlacementDatum & { polygon: number[][] };
+    assert.equal(propagationStopped, true);
+    assert.deepEqual(movedBody.polygon, [[3, 2], [17, 2], [17, 10], [3, 10]], "dragging moves the selected Process through the existing snapped transform");
+    assert.ok(mounted.container.querySelector(".process-map-qd-card"), "dragging keeps the pinned scorecard attached");
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
 test("child-control keyboard events stay native instead of becoming canvas commands", async () => {
   const opened: Array<[string, string]> = [];
   const mounted = await mountProcessMapForBehavior((logicGateID, name) => { opened.push([logicGateID, name]); });
@@ -895,19 +930,26 @@ test("whole-company tile rendering keeps every placement perceptible without lea
     placements: [folder, process, { restricted: true, grid_x: 100, grid_y: 20 }],
     traces: [],
   };
-  const tileLayer = layerByID(buildProcessMapLayers(buildOptions()), "process-map-spatial-tiles");
+  const layers = buildProcessMapLayers(buildOptions());
+  const background = layerByID(layers, "process-map-background");
+  const tileLayer = layerByID(layers, "process-map-spatial-tiles");
   const render = tileLayer.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
   const sublayers = render({ id: "tile", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
   const bodies = layerByID(sublayers, "tile-placements");
   const fences = layerByID(sublayers, "tile-folder-fences");
   const restricted = layerByID(sublayers, "tile-restricted");
   const labels = layerByID(sublayers, "tile-labels");
+  assert.deepEqual((background.props.data as Array<{ fill: number[] }>)[0].fill, [2, 6, 23, 255], "the Deck canvas matches the dark navy map surface");
   assert.equal((bodies.props.data as unknown[]).length, 1, "only the Process needs a filled body at whole-company LOD");
+  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [15, 23, 42, 252]);
   assert.ok((fences.props.data as unknown[]).length > 0, "transparent Folder perimeter remains visible");
   assert.equal((restricted.props.data as unknown[]).length, 1);
+  assert.deepEqual((restricted.props.data as Array<{ fill: number[] }>)[0].fill, [30, 41, 59, 245]);
   assert.equal(restricted.props.pickable, false);
   const texts = (labels.props.data as Array<{ text: string }>).map((item) => item.text);
   assert.deepEqual(texts, ["?"], "whole LOD suppresses names but retains a permission-safe placeholder");
+  const getLabelColor = labels.props.getColor as (item: { color?: number[] }) => number[];
+  assert.deepEqual(getLabelColor((labels.props.data as Array<{ color?: number[] }>)[0]), [248, 250, 252, 255]);
 });
 
 test("large Folder labels stay in their six-unit title band while Process labels remain centered", () => {
@@ -931,12 +973,18 @@ test("large Folder labels stay in their six-unit title band while Process labels
   assert.deepEqual(labels.map((item) => item.text), [folder.name, process.name], "labels show source names without redundant type captions");
   assert.equal(labelsLayer.props.pickable, true, "a Folder name is a direct selection and move target");
   assert.equal(folderLabel.pick.key, `company_explorer_folder:${folder.resource_id}`);
+  const getLabelColor = labelsLayer.props.getColor as (item: { color?: number[] }) => number[];
+  assert.ok(labels.every((item) => getLabelColor(item).join(",") === "248,250,252,255"), "entity names stay white on the dark map");
 
   const shadows = layerByID(sublayers, "normal-labels-process-shadows");
   const bodies = layerByID(sublayers, "normal-labels-placements");
+  const fences = layerByID(sublayers, "normal-labels-folder-fences");
+  const processPerimeters = layerByID(sublayers, "normal-labels-process-perimeters");
   assert.equal((shadows.props.data as unknown[]).length, 1, "only the Process receives an elevation shadow");
   assert.equal(shadows.props.pickable, false, "the shadow never becomes another interaction target");
-  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [248, 250, 252, 252]);
+  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [15, 23, 42, 252]);
+  assert.ok((fences.props.data as Array<{ color: number[] }>).every((item) => item.color.join(",") === "249,115,22,230"));
+  assert.ok((processPerimeters.props.data as Array<{ color: number[] }>).every((item) => item.color.join(",") === "25,240,122,235"));
   assert.ok(sublayers.indexOf(shadows) < sublayers.indexOf(bodies), "the Process surface stays above its shadow");
 
   const presentation: ProcessMapPresentationState = {
@@ -1283,15 +1331,15 @@ test("Folder move and delete acknowledgements clear only previews from their own
   );
 });
 
-test("selected Folder editing stays transparent and exposes saved-geometry resize and connection handles", () => {
-  const folder = placement("Folder", 10, 20, 80, 60, "company_explorer_folder");
-  const child = { ...placement("Child", 25, 35), map_parent_folder_id: folder.resource_id };
+test("selected name-visible Folder stays transparent and exposes saved-geometry resize and connection handles", () => {
+  const folder = placement("Folder", 10, 20, 12, 8, "company_explorer_folder");
+  const child = { ...placement("Child", 12, 22, 4, 2), map_parent_folder_id: folder.resource_id };
   const key = "company_explorer_folder:Folder";
   const presentation: ProcessMapPresentationState = {
     placements: new Map([[key, folder], ["logic_gate:Child", child]]), traces: new Map(), removedPlacementKeys: new Set(),
   };
   const layers = buildProcessMapLayers(buildOptions({
-    settledPixelsPerGridUnit: 24,
+    settledPixelsPerGridUnit: 4,
     presentation,
     editedPlacementKeys: new Set([key]),
     editOverlay: {
@@ -1319,17 +1367,17 @@ test("selected Folder editing stays transparent and exposes saved-geometry resiz
   assert.deepEqual(containedBodies.map((item) => item.pick.key), ["logic_gate:Child"], "the contained Process body stays directly pickable");
   assert.ok(labels[0].position[1] > folder.grid_y && labels[0].position[1] < folder.grid_y + folder.grid_height / 2, "the selected Folder label stays along the inside top edge");
   assert.equal(handles.length, 4, "all four corners resize the saved global bounds");
-  assert.equal(anchors.length, 2, "physical input and output sides remain connectable while editing");
+  assert.equal(anchors.length, 2, "physical input and output sides remain connectable when the Folder name is visible");
 });
 
-test("selected Process editing retains the elevated surface and exposes four resize corners", () => {
+test("selected name-visible Process retains the elevated surface and exposes four resize corners", () => {
   const process = placement("Resizable Process", 10, 20, 14, 10);
   const key = "logic_gate:Resizable Process";
   const presentation: ProcessMapPresentationState = {
     placements: new Map([[key, process]]), traces: new Map(), removedPlacementKeys: new Set(),
   };
   const layers = buildProcessMapLayers(buildOptions({
-    settledPixelsPerGridUnit: 24,
+    settledPixelsPerGridUnit: 4,
     presentation,
     editedPlacementKeys: new Set([key]),
     editOverlay: {
@@ -1344,7 +1392,7 @@ test("selected Process editing retains the elevated surface and exposes four res
   const anchors = layerByID(layers, "process-map-edit-anchors").props.data as unknown[];
   assert.equal((shadows.props.data as unknown[]).length, 1);
   assert.equal(shadows.props.pickable, false);
-  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [248, 250, 252, 252]);
+  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [15, 23, 42, 252]);
   assert.deepEqual(labels.map((item) => [item.text, item.pick.key]), [[process.name, key]]);
   assert.equal(handles.length, 4, "all four corners resize the Process bounds");
   assert.equal(anchors.length, 2, "selected Process input and output anchors remain distinct from resize corners");
@@ -1396,6 +1444,7 @@ test("editing Process cards show bounded QCD and RACI summaries in tiled and sel
     [242, 193, 79, 255],
     [223, 83, 83, 255],
   ]);
+  assert.deepEqual([tiledText[4].color, tiledText[6].color], [[248, 250, 252, 255], [248, 250, 252, 255]], "assignment names stay white on the dark Process surface");
   assert.deepEqual(tiledText.slice(0, 3).map((datum) => datum.size), [14, 14, 14]);
   assert.deepEqual([tiledText[3].size, tiledText[5].size], [13, 13]);
   assert.deepEqual([tiledText[4].size, tiledText[6].size], [11, 11]);
@@ -1443,7 +1492,7 @@ test("hovering an accessible Process or Folder reveals anchors and all four resi
   };
   const controlsFor = (hoveredPlacementKey: string) => {
     const layers = buildProcessMapLayers(buildOptions({
-      settledPixelsPerGridUnit: 24,
+      settledPixelsPerGridUnit: 4,
       presentation,
       editOverlay: {
         placements: [], traces: [], selectedPlacementKey: null, selectedTraceID: null,
@@ -1496,7 +1545,7 @@ test("an active connection keeps only the source output and distinct eligible ta
     removedPlacementKeys: new Set(),
   };
   const layers = buildProcessMapLayers(buildOptions({
-    settledPixelsPerGridUnit: 24,
+    settledPixelsPerGridUnit: 4,
     presentation,
     editedPlacementKeys: new Set([sourceKey]),
     editOverlay: {

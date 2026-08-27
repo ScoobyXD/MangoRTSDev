@@ -91,6 +91,8 @@ test("LOD follows each placement's projected screen size", () => {
 
 test("one tile zoom carries conservative size-specific ceilings while fractional client LOD stays exact", () => {
   const boundaryPlacement = { grid_width: 8, grid_height: 8, presentation: "normal" as const };
+  assert.equal(processMapPlacementLOD(boundaryPlacement, 2.999), "whole");
+  assert.equal(processMapPlacementLOD(boundaryPlacement, 3), "normal", "the 24px name-visible boundary is inclusive");
   assert.equal(processMapPlacementLOD(boundaryPlacement, 2.9), "whole");
   assert.equal(processMapPlacementDisplayLOD(boundaryPlacement, 2.9), "whole");
   assert.equal(processMapPlacementLOD(boundaryPlacement, 3.1), "normal");

@@ -190,7 +190,7 @@ test("same-permission mutation reconciliation keeps loaded coverage and refreshe
   assert.match(surface, /affectedTraceIDs\.forEach\(\(id\) => next\.delete\(id\)\)/);
 });
 
-test("editing hover reveals anchors and resize grips while connection drag starts synchronously", () => {
+test("name-visible hover reveals anchors and resize grips while connection drag starts synchronously", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const hoverStart = surface.indexOf("const handleHover = useCallback");
   const hoverEnd = surface.indexOf("\n\n  const removeSelection", hoverStart);
@@ -199,9 +199,13 @@ test("editing hover reveals anchors and resize grips while connection drag start
   assert.ok(hoverStart >= 0 && hoverEnd > hoverStart && dragStart >= 0 && dragEnd > dragStart);
   const hover = surface.slice(hoverStart, hoverEnd);
   const drag = surface.slice(dragStart, dragEnd);
+  const gestureStart = surface.slice(surface.indexOf("const startPlacementGesture"), dragStart);
   assert.match(hover, /pick\.kind === "placement" \|\| pick\.kind === "anchor" \|\| pick\.kind === "resize"/);
   assert.match(hover, /setHoveredPlacementKey\(placementKey\(anchorPlacement\)\)/);
   assert.match(hover, /setHoveredResizePick\(pick\?\.kind === "resize" \? pick : null\)/);
+  assert.match(hover, /processMapPlacementDisplayLOD\(anchorPlacement, 2 \*\* settledViewState\.zoom\) !== "whole"/);
+  assert.match(gestureStart, /processMapPlacementDisplayLOD\(pick\.placement, 2 \*\* settledViewState\.zoom\) === "whole"\) return/);
+  assert.doesNotMatch(gestureStart, /PROCESS_MAP_(?:NORMAL|EDITING)_LOD_MIN_PX|\b(?:24|96)\b/);
   assert.match(surface, /options\.editOverlay\.selectedPlacementKey,[\s\S]{0,120}options\.editOverlay\.hoveredPlacementKey/);
   assert.match(surface, /!options\.editOverlay\.connectionSourceKey/);
   assert.match(surface, /processMapResizeCursor\(gesture\.horizontal!, gesture\.vertical!\)/);
@@ -241,7 +245,7 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
   assert.match(openProcess, /placement\.resource_type !== "logic_gate"/);
   assert.doesNotMatch(openProcess, /processMapPlacementDisplayLOD/);
   assert.match(openProcess, /onOpenLogicGate\(placement\.resource_id, placement\.name\)/);
-  assert.match(click, /processMapPlacementDisplayLOD\(pick\.placement, 2 \*\* settledViewState\.zoom\) === "editing"[\s\S]*setPinnedProcessID/);
+  assert.match(click, /processMapPlacementDisplayLOD\(pick\.placement, 2 \*\* settledViewState\.zoom\) !== "whole"[\s\S]*setPinnedProcessID/);
   assert.match(surface, /event\.key === "Enter" \|\| event\.key === " "/);
   assert.match(surface, /openProcess\(selectedPlacement\)/);
   assert.match(app, /onOpenLogicGate=\{openProcessMapLogicGateOverlay\}/);
@@ -347,7 +351,7 @@ test("connection gestures use visible near-drop targeting and clear on camera or
   assert.doesNotMatch(finish, /pickObject/);
   assert.match(finish, /const point = pointFromInfo\(info\)/);
   assert.match(finish, /presentationRef\.current\.placements\.values\(\)/);
-  assert.match(finish, /key === sourceKey \|\| processMapPlacementDisplayLOD\(placement, settledPixelsPerGridUnit\) !== "editing"/);
+  assert.match(finish, /key === sourceKey \|\| processMapPlacementDisplayLOD\(placement, settledPixelsPerGridUnit\) === "whole"/);
   assert.match(finish, /const input = processMapInputAnchor\(placement\)/);
   assert.match(finish, /Math\.hypot\(input\.x - point\.x, input\.y - point\.y\) \* settledPixelsPerGridUnit/);
   assert.match(finish, /if \(distancePixels > 14\) continue/);
@@ -390,8 +394,25 @@ test("Company Explorer deletion is explicit about Process and Folder effects", (
   assert.match(surface, /Company Explorer Folder and its subtree were removed\./);
 });
 
-test("QDC visibility is capped by the server-declared placement presentation", () => {
+test("QDC visibility starts with the server-capped name-visible presentation", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   assert.match(surface, /const qdGeometry = qdPlacement \? processMapPlacementGeometryForTransform\(qdPlacement, placementTransform\) : null/);
-  assert.match(surface, /const qdVisible = qdPlacement && qdGeometry && processMapPlacementDisplayLOD\(\{[\s\S]*?presentation: qdPlacement\.presentation,[\s\S]*?\}, 2 \*\* settledViewState\.zoom\) === "editing"/);
+  assert.match(surface, /const qdVisible = qdPlacement && qdGeometry && processMapPlacementDisplayLOD\(\{[\s\S]*?presentation: qdPlacement\.presentation,[\s\S]*?\}, 2 \*\* settledViewState\.zoom\) !== "whole"/);
+});
+
+test("dark mode is scoped to the Process Map canvas and map content", () => {
+  const css = source("frontend/src/modules/process-map/processMap.css");
+  const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
+  const pageRule = css.match(/\.process-map-page\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  const headerRule = css.match(/\.process-map-page__header\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  const canvasRule = css.match(/\.process-map-page__canvas\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+  const surfaceRule = css.match(/\.process-map-surface\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
+
+  assert.match(pageRule, /background:\s*#fff/);
+  assert.match(headerRule, /background:\s*rgba\(255, 255, 255, 0\.97\)/);
+  assert.match(canvasRule, /background:\s*#020617/);
+  assert.match(surfaceRule, /background:\s*#020617/);
+  assert.match(surface, /const COLOR_MAP_BACKGROUND:[^=]*= \[2, 6, 23, 255\]/);
+  assert.match(surface, /const COLOR_TEXT:[^=]*= \[248, 250, 252, 255\]/);
+  assert.match(surface, /fill: COLOR_MAP_BACKGROUND, line: COLOR_MAP_BACKGROUND/);
 });

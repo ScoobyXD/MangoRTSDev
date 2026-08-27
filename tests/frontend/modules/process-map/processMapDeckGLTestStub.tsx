@@ -3,7 +3,11 @@ import React, { forwardRef } from "react";
 export type ProcessMapDeckGLTestProps = {
   layers: Array<{ id: string; props: Record<string, unknown> }>;
   viewState: Record<string, unknown>;
-  onClick: (info: { object?: unknown }, event: { type: string }) => void;
+  onClick: (info: { object?: unknown; coordinate?: number[] }, event: { type: string }) => void;
+  onHover: (info: { object?: unknown; coordinate?: number[] }) => void;
+  onDragStart: (info: { object?: unknown; coordinate?: number[] }, event: { stopPropagation: () => void }) => void;
+  onDrag: (info: { object?: unknown; coordinate?: number[] }) => void;
+  onDragEnd: (info: { object?: unknown; coordinate?: number[] }) => void;
   onResize: (size: { width: number; height: number }) => void;
 };
 
