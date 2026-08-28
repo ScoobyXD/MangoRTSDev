@@ -1020,17 +1020,38 @@ func TestMemoryProcessMapPermissionSafeSceneAndTile(t *testing.T) {
 	}
 }
 
+func TestProcessMapScaleCoordinateMatchesJavaScriptMathRound(t *testing.T) {
+	tests := []struct {
+		value int
+		want  int
+	}{
+		{value: -3, want: -1},
+		{value: -1, want: 0},
+		{value: 1, want: 1},
+		{value: 3, want: 2},
+	}
+	for _, test := range tests {
+		if got := processMapScaleCoordinate(test.value, 0, 2, 0, 1); got != test.want {
+			t.Fatalf("scale coordinate %d = %d, want JavaScript Math.round result %d", test.value, got, test.want)
+		}
+	}
+}
+
 func TestMemoryProcessMapFolderGroupMoveResizeAndEnvelopes(t *testing.T) {
 	ctx := context.Background()
 	repo, companyID, admin, _, _ := newV2PolicyTestRepo(t)
 	folder, _ := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Group")
+	nestedFolder, _ := repo.CreateCompanyExplorerFolder(companyID, folder.FolderID, "logic_gate", "Nested")
 	insideA, _ := repo.CreateLogicGate(companyID, "A")
 	insideB, _ := repo.CreateLogicGate(companyID, "B")
+	insideNested, _ := repo.CreateLogicGate(companyID, "Nested Process")
 	outside, _ := repo.CreateLogicGate(companyID, "Outside")
 	for _, input := range []ProcessMapPlacementPutInput{
 		processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 100, 80),
 		processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, insideA.LogicGateID, &folder.FolderID, 10, 10, 10, 6),
 		processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, insideB.LogicGateID, &folder.FolderID, 40, 10, 10, 6),
+		processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, nestedFolder.FolderID, &folder.FolderID, 10, 40, 40, 30),
+		processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, insideNested.LogicGateID, &nestedFolder.FolderID, 20, 50, 10, 6),
 		processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, outside.LogicGateID, nil, 180, 10, 10, 6),
 	} {
 		if _, err := repo.PutProcessMapPlacement(ctx, input); err != nil {
@@ -1049,9 +1070,10 @@ func TestMemoryProcessMapFolderGroupMoveResizeAndEnvelopes(t *testing.T) {
 		return result
 	}
 	internal := makeRelationship(insideA.LogicGateID, insideB.LogicGateID, []domain.ProcessMapRoutePoint{{X: 25, Y: 13}, {X: 35, Y: 13}})
+	nestedInternal := makeRelationship(insideA.LogicGateID, insideNested.LogicGateID, []domain.ProcessMapRoutePoint{{X: 22, Y: 30}, {X: 22, Y: 45}})
 	external := makeRelationship(insideA.LogicGateID, outside.LogicGateID, []domain.ProcessMapRoutePoint{{X: 80, Y: 13}, {X: 150, Y: 13}})
 	moved, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 5, 7, 100, 80))
-	if err != nil || len(moved.Placements) != 3 || len(moved.Traces) != 1 || moved.Traces[0].ResourceOperationalRelationshipID != internal.Relationship.ResourceOperationalRelationshipID {
+	if err != nil || len(moved.Placements) != 5 || len(moved.Traces) != 2 {
 		t.Fatalf("group move envelope = %+v, err=%v", moved, err)
 	}
 	child := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, insideA.LogicGateID)]
@@ -1063,25 +1085,57 @@ func TestMemoryProcessMapFolderGroupMoveResizeAndEnvelopes(t *testing.T) {
 	if internalRoute[0] != (domain.ProcessMapRoutePoint{X: 30, Y: 20}) || externalRoute[0] != (domain.ProcessMapRoutePoint{X: 80, Y: 13}) {
 		t.Fatalf("route movement internal=%+v external=%+v", internalRoute, externalRoute)
 	}
-	resizedFromNorthWest, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 105, 87))
-	if err != nil || len(resizedFromNorthWest.Placements) != 1 || len(resizedFromNorthWest.Traces) != 0 {
-		t.Fatalf("north-west resize envelope = %+v, err=%v", resizedFromNorthWest, err)
+
+	resizedFromNorthWest, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 200, 160))
+	if err != nil || len(resizedFromNorthWest.Placements) != 5 || len(resizedFromNorthWest.Traces) != 2 {
+		t.Fatalf("north-west grow envelope = %+v, err=%v", resizedFromNorthWest, err)
 	}
 	childAfterResize := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, insideA.LogicGateID)]
+	nestedAfterResize := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, nestedFolder.FolderID)]
+	nestedProcessAfterResize := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, insideNested.LogicGateID)]
 	internalRouteAfterResize := repo.processMapTraces[key(companyID, internal.Relationship.ResourceOperationalRelationshipID)].RoutePoints
-	if childAfterResize.GridX != 15 || childAfterResize.GridY != 17 || internalRouteAfterResize[0] != (domain.ProcessMapRoutePoint{X: 30, Y: 20}) {
-		t.Fatalf("north-west resize moved contents: child=%+v route=%+v", childAfterResize, internalRouteAfterResize)
+	nestedRouteAfterResize := repo.processMapTraces[key(companyID, nestedInternal.Relationship.ResourceOperationalRelationshipID)].RoutePoints
+	if childAfterResize.GridX != 20 || childAfterResize.GridY != 20 || childAfterResize.GridWidth != 20 || childAfterResize.GridHeight != 12 ||
+		nestedAfterResize.GridX != 20 || nestedAfterResize.GridY != 80 || nestedAfterResize.GridWidth != 80 || nestedAfterResize.GridHeight != 60 ||
+		nestedProcessAfterResize.GridX != 40 || nestedProcessAfterResize.GridY != 100 || nestedProcessAfterResize.GridWidth != 20 || nestedProcessAfterResize.GridHeight != 12 ||
+		internalRouteAfterResize[0] != (domain.ProcessMapRoutePoint{X: 50, Y: 26}) ||
+		nestedRouteAfterResize[1] != (domain.ProcessMapRoutePoint{X: 44, Y: 90}) {
+		t.Fatalf("north-west grow did not scale subtree: child=%+v nested=%+v nested process=%+v routes=%+v/%+v", childAfterResize, nestedAfterResize, nestedProcessAfterResize, internalRouteAfterResize, nestedRouteAfterResize)
 	}
-	before := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folder.FolderID)]
-	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 20, 20)); !errors.Is(err, ErrProcessMapContainment) {
-		t.Fatalf("invalid resize error = %v", err)
+	if got := repo.processMapTraces[key(companyID, external.Relationship.ResourceOperationalRelationshipID)].RoutePoints; got[0] != (domain.ProcessMapRoutePoint{X: 80, Y: 13}) {
+		t.Fatalf("external route changed during grow: %+v", got)
 	}
-	if after := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folder.FolderID)]; after != before {
-		t.Fatalf("failed resize was not atomic: before=%+v after=%+v", before, after)
+
+	shrunk, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 100, 80))
+	if err != nil || len(shrunk.Placements) != 5 || len(shrunk.Traces) != 2 {
+		t.Fatalf("shrink envelope = %+v, err=%v", shrunk, err)
 	}
-	resized, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 120, 90))
-	if err != nil || len(resized.Placements) != 1 || len(resized.Traces) != 0 || resized.Placements[0].GridWidth != 120 {
-		t.Fatalf("resize envelope = %+v, err=%v", resized, err)
+	childAfterShrink := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, insideA.LogicGateID)]
+	nestedAfterShrink := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, nestedFolder.FolderID)]
+	nestedProcessAfterShrink := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, insideNested.LogicGateID)]
+	internalRouteAfterShrink := repo.processMapTraces[key(companyID, internal.Relationship.ResourceOperationalRelationshipID)].RoutePoints
+	if childAfterShrink.GridX != 10 || childAfterShrink.GridY != 10 || childAfterShrink.GridWidth != 10 || childAfterShrink.GridHeight != 6 ||
+		nestedAfterShrink.GridX != 10 || nestedAfterShrink.GridY != 40 || nestedAfterShrink.GridWidth != 40 || nestedAfterShrink.GridHeight != 30 ||
+		nestedProcessAfterShrink.GridX != 20 || nestedProcessAfterShrink.GridY != 50 || nestedProcessAfterShrink.GridWidth != 10 || nestedProcessAfterShrink.GridHeight != 6 ||
+		internalRouteAfterShrink[0] != (domain.ProcessMapRoutePoint{X: 25, Y: 13}) {
+		t.Fatalf("shrink did not restore proportional subtree: child=%+v nested=%+v nested process=%+v route=%+v", childAfterShrink, nestedAfterShrink, nestedProcessAfterShrink, internalRouteAfterShrink)
+	}
+
+	beforeRoot := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folder.FolderID)]
+	beforeChild := childAfterShrink
+	beforeRoute := append([]domain.ProcessMapRoutePoint(nil), internalRouteAfterShrink...)
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 0, 2, 2)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid collapsing resize error = %v", err)
+	}
+	afterRoot := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeFolder, folder.FolderID)]
+	afterChild := repo.processMapPlacements[processMapPlacementMemoryKey(companyID, domain.ProcessMapResourceTypeProcess, insideA.LogicGateID)]
+	afterRoute := repo.processMapTraces[key(companyID, internal.Relationship.ResourceOperationalRelationshipID)].RoutePoints
+	rootUnchanged := processMapAutomaticGeometryEqual(beforeRoot, afterRoot) && beforeRoot.PlacementIncarnationToken == afterRoot.PlacementIncarnationToken &&
+		beforeRoot.Revision == afterRoot.Revision && beforeRoot.CreatedTimestamp.Equal(afterRoot.CreatedTimestamp) && beforeRoot.UpdatedTimestamp.Equal(afterRoot.UpdatedTimestamp)
+	childUnchanged := processMapAutomaticGeometryEqual(beforeChild, afterChild) && beforeChild.PlacementIncarnationToken == afterChild.PlacementIncarnationToken &&
+		beforeChild.Revision == afterChild.Revision && beforeChild.CreatedTimestamp.Equal(afterChild.CreatedTimestamp) && beforeChild.UpdatedTimestamp.Equal(afterChild.UpdatedTimestamp)
+	if !rootUnchanged || !childUnchanged || len(afterRoute) != len(beforeRoute) || afterRoute[0] != beforeRoute[0] || afterRoute[1] != beforeRoute[1] {
+		t.Fatalf("failed resize was not atomic: root=%+v/%+v child=%+v/%+v route=%+v/%+v", beforeRoot, afterRoot, beforeChild, afterChild, beforeRoute, afterRoute)
 	}
 }
 

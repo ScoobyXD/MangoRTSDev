@@ -115,6 +115,39 @@ export function processMapBoundsContain(outer: ProcessMapBounds, inner: ProcessM
     && inner.max_y <= outer.max_y;
 }
 
+function scaleProcessMapCoordinate(value: number, sourceMin: number, sourceSize: number, targetMin: number, targetSize: number): number {
+  return snapProcessMapGridCoordinate(targetMin + ((value - sourceMin) * targetSize) / sourceSize);
+}
+
+export function scaleProcessMapGridPoint(
+  point: ProcessMapGridPoint,
+  source: ProcessMapBounds,
+  target: ProcessMapBounds,
+): ProcessMapGridPoint {
+  return {
+    x: scaleProcessMapCoordinate(point.x, source.min_x, source.max_x - source.min_x, target.min_x, target.max_x - target.min_x),
+    y: scaleProcessMapCoordinate(point.y, source.min_y, source.max_y - source.min_y, target.min_y, target.max_y - target.min_y),
+  };
+}
+
+export function scaleProcessMapPlacement(
+  placement: ProcessMapPlacementGeometry,
+  source: ProcessMapBounds,
+  target: ProcessMapBounds,
+): ProcessMapPlacementGeometry {
+  const minimum = scaleProcessMapGridPoint({ x: placement.grid_x, y: placement.grid_y }, source, target);
+  const maximum = scaleProcessMapGridPoint({
+    x: placement.grid_x + placement.grid_width,
+    y: placement.grid_y + placement.grid_height,
+  }, source, target);
+  return {
+    grid_x: minimum.x,
+    grid_y: minimum.y,
+    grid_width: maximum.x - minimum.x,
+    grid_height: maximum.y - minimum.y,
+  };
+}
+
 function folderDepth(folder: ProcessMapFolderGeometry, byID: ReadonlyMap<string, ProcessMapFolderGeometry>): number {
   let depth = 0;
   let current: ProcessMapFolderGeometry | undefined = folder;
