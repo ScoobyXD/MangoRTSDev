@@ -538,6 +538,48 @@ test("legacy Project JSON repairs repeated block IDs and keeps required Node lin
   }
 });
 
+test("Action Item presentation is optional but remains durable when present", () => {
+  const editor = new MangoTiptapEditorEngine({
+    extensions: createMangoTiptapExtensions({ editable: false }),
+    content: createEmptyMangoTiptapDocument().document,
+  });
+  try {
+    const expanded: MangoTiptapDocument = {
+      format: "mango-tiptap-json",
+      schema_version: 1,
+      document: editor.schema.nodeFromJSON({
+        type: "doc",
+        content: [{
+          type: "paragraph",
+          content: [{
+            type: "mangoEntityLink",
+            attrs: {
+              entityType: "entity",
+              entityId: "action-item-1",
+              label: "Escalate delayed shipment",
+              actionItemColor: "red",
+            },
+          }, {
+            type: "mangoEntityLink",
+            attrs: {
+              entityType: "entity",
+              entityId: "ordinary-entity-1",
+              label: "Ordinary Entity",
+            },
+          }],
+        }],
+      }).toJSON(),
+    };
+    const compact = compactMangoTiptapDocument(expanded, editor.schema);
+    const [actionItem, ordinaryEntity] = compact.document.content?.[0]?.content ?? [];
+    assert.equal(actionItem?.attrs?.actionItemColor, "red");
+    assert.equal(Object.prototype.hasOwnProperty.call(ordinaryEntity?.attrs ?? {}, "actionItemColor"), false);
+    assert.deepEqual(editor.schema.nodeFromJSON(compact.document).toJSON(), expanded.document);
+  } finally {
+    editor.destroy();
+  }
+});
+
 test("block ID normalization preserves the first ID and repairs missing or repeated IDs", () => {
   const source: MangoTiptapDocument["document"] = {
     type: "doc",

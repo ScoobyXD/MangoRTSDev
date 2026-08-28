@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getActiveCompanyID } from "../../auth/currentCompany.js";
+import { listCompanyUsers, type CompanyUser } from "../communications/communicationsApi.js";
 import {
   createEntity,
   createEntityField,
@@ -30,6 +31,7 @@ import {
   type EntitySummary,
   type EntityType,
 } from "./entitiesApi.js";
+import { buildChoiceFieldConfig, type FieldConfig, type FieldConfigOption } from "./entitiesChoiceConfig.js";
 import { buildEntityTreeRows, entityFolderDescendantIDs } from "./entitiesPageModel.js";
 
 export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
@@ -42,6 +44,7 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
   const [selectedFolderID, setSelectedFolderID] = useState<string | null>(null);
   const [selectedEntityID, setSelectedEntityID] = useState("");
   const [entityDetail, setEntityDetail] = useState<Entity | null>(null);
+  const [companyUsers, setCompanyUsers] = useState<CompanyUser[]>([]);
   const [newFieldType, setNewFieldType] = useState<EntityFieldDataType>("text");
   const [newEntityFieldType, setNewEntityFieldType] = useState<EntityFieldDataType>("text");
   const [loadingTypes, setLoadingTypes] = useState(true);
@@ -138,6 +141,14 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
   }, [loadTypes]);
 
   useEffect(() => {
+    if (!companyID) {
+      setCompanyUsers([]);
+      return;
+    }
+    void listCompanyUsers(companyID).then(setCompanyUsers).catch(() => setCompanyUsers([]));
+  }, [companyID]);
+
+  useEffect(() => {
     setSelectedFolderID(null);
     setSelectedEntityID("");
     setEntityDetail(null);
@@ -152,6 +163,8 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
   }, [loadDetail, selectedEntityID]);
 
   const selectedType = entityTypes.find((item) => item.entity_type_id === selectedTypeID) ?? null;
+  const selectedTypeIsSystem = Boolean(selectedType?.system_key?.trim());
+  const selectedTypeIsActionItem = selectedType?.system_key === "action_item";
   const selectedFolder = folders.find((item) => item.entity_folder_id === selectedFolderID) ?? null;
   const treeRows = useMemo(() => buildEntityTreeRows(folders, entities), [folders, entities]);
   const folderOptions = useMemo(() => {
@@ -269,13 +282,14 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                 }, "Failed to update entity type");
               }}
             >
-              <label style={labelStyle}>Type name<input name="name" defaultValue={selectedType.name} maxLength={100} style={inputStyle} /></label>
+              <label style={labelStyle}>Type name<input name="name" defaultValue={selectedType.name} maxLength={100} style={inputStyle} disabled={selectedTypeIsSystem} /></label>
+              {selectedTypeIsSystem ? <span style={systemFieldNoteStyle}>Required company Entity Type</span> : null}
               <div style={actionsStyle}>
-                <button type="submit" style={saveButtonStyle(accent)} disabled={busy}>Save</button>
+                <button type="submit" style={saveButtonStyle(accent)} disabled={busy || selectedTypeIsSystem}>Save</button>
                 <button
                   type="button"
                   style={dangerButtonStyle}
-                  disabled={busy}
+                  disabled={busy || selectedTypeIsSystem}
                   onClick={() => {
                     if (!window.confirm(`Delete entity type “${selectedType.name}”? It must contain no entities.`)) return;
                     void runMutation(async () => {
@@ -321,7 +335,13 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                     const name = formText(form, "name");
                     if (!name) return;
                     void runMutation(async () => {
-                      const created = await createEntity({ companyID, entityTypeID: selectedTypeID, entityFolderID: selectedFolderID, name });
+                      const created = await createEntity({
+                        companyID,
+                        entityTypeID: selectedTypeID,
+                        entityFolderID: selectedFolderID,
+                        name,
+                        ...(selectedTypeIsActionItem ? { bodyJSON: entityBodyFromText(name) } : {}),
+                      });
                       form.reset();
                       await loadCatalog(selectedTypeID);
                       setSelectedEntityID(created.entity_id);
@@ -422,11 +442,22 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                     onSubmit={(event) => {
                       event.preventDefault();
                       const name = formText(event.currentTarget, "name");
+                      const details = selectedTypeIsActionItem ? formValue(event.currentTarget, "details") : "";
                       const entityFolderID = formText(event.currentTarget, "entity_folder_id") || null;
                       const position = formPosition(event.currentTarget, "position", entityDetail.position);
                       if (!name) return;
                       void runMutation(async () => {
-                        const saved = await updateEntity({ companyID, entityID: entityDetail.entity_id, name, entityFolderID, position });
+                        const saved = await updateEntity({
+                          companyID,
+                          entityID: entityDetail.entity_id,
+                          name,
+                          entityFolderID,
+                          position,
+                          ...(selectedTypeIsActionItem ? {
+                            bodyJSON: entityBodyFromText(details),
+                            baseRevision: entityDetail.revision,
+                          } : {}),
+                        });
                         setEntityDetail(saved);
                         setSelectedFolderID(saved.entity_folder_id?.trim() || null);
                         await loadCatalog(selectedTypeID);
@@ -434,6 +465,9 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                     }}
                   >
                     <label style={labelStyle}>Name<input name="name" defaultValue={entityDetail.name} maxLength={200} style={inputStyle} /></label>
+                    {selectedTypeIsActionItem ? <label style={labelStyle}>Details<textarea name="details" defaultValue={entityBodyText(entityDetail.body_json)} rows={5} style={detailsInputStyle} /></label> : null}
+                    <label style={labelStyle}>Created by<span style={readOnlyValueStyle}>{companyUserLabel(entityDetail.created_by_user_id, companyUsers)}</span></label>
+                    <label style={labelStyle}>Created date<span style={readOnlyValueStyle}>{formatActionItemTimestamp(entityDetail.created_timestamp)}</span></label>
                     <label style={labelStyle}>Folder<select name="entity_folder_id" defaultValue={entityDetail.entity_folder_id ?? ""} style={inputStyle}>
                       <option value="">Type root</option>
                       {folderOptions.map(({ folder, label }) => <option key={folder.entity_folder_id} value={folder.entity_folder_id}>{label}</option>)}
@@ -444,7 +478,8 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                       <button
                         type="button"
                         style={dangerButtonStyle}
-                        disabled={busy}
+                        disabled={busy || selectedType?.system_key === "action_item"}
+                        title={selectedType?.system_key === "action_item" ? "Action Item archiving will be added separately." : undefined}
                         onClick={() => {
                           if (!window.confirm(`Delete entity “${entityDetail.name}”?`)) return;
                           void runMutation(async () => {
@@ -475,7 +510,7 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                     }}
                   >
                     <input name="name" maxLength={100} placeholder="New field" aria-label="New entity field name" style={inputStyle} />
-                    <FieldTypeSelect value={newEntityFieldType} onChange={setNewEntityFieldType} />
+                    <FieldTypeSelect value={newEntityFieldType} onChange={setNewEntityFieldType} fieldTypes={DIRECT_ENTITY_FIELD_TYPES} />
                     <AddButton disabled={busy} label="Add field" />
                   </form>
                   <div style={fieldListStyle}>
@@ -485,14 +520,15 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                         field={field}
                         busy={busy}
                         accent={accent}
+                        companyUsers={companyUsers}
                         onSave={(form) => runMutation(async () => {
-                          const nextType = fieldDataType(formText(form, "field_type"));
+                          const systemField = Boolean(field.system_key?.trim());
+                          const nextType = systemField ? field.field_type : fieldDataType(formText(form, "field_type"));
                           await updateEntityField({
                             companyID,
                             entityID: entityDetail.entity_id,
                             entityFieldID: field.entity_field_id,
-                            name: formText(form, "name"),
-                            fieldType: nextType,
+                            ...(systemField ? {} : { name: formText(form, "name"), fieldType: nextType }),
                             position: formPosition(form, "position", field.position),
                             ...(nextType === field.field_type ? { value: parseFieldValue(nextType, formText(form, "value")) } : {}),
                           });
@@ -524,7 +560,14 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                   const name = formText(form, "name");
                   if (!name) return;
                   void runMutation(async () => {
-                    await createEntityFieldType({ companyID, entityTypeID: selectedTypeID, entityFolderID: selectedFolderID, name, fieldType: newFieldType });
+                    await createEntityFieldType({
+                      companyID,
+                      entityTypeID: selectedTypeID,
+                      entityFolderID: selectedFolderID,
+                      name,
+                      fieldType: newFieldType,
+                      config: fieldConfigFromForm(form, newFieldType),
+                    });
                     form.reset();
                     setNewFieldType("text");
                     await loadCatalog(selectedTypeID);
@@ -534,6 +577,7 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                 <input name="name" maxLength={100} placeholder="New default field" aria-label="New default field name" style={inputStyle} />
                 <FieldTypeSelect value={newFieldType} onChange={setNewFieldType} />
                 <AddButton disabled={busy} label="Add default" />
+                <FieldConfigEditor fieldType={newFieldType} config={{}} />
               </form>
               <div style={fieldListStyle}>
                 {selectedLocationFieldTypes.length === 0 ? <EmptyState>No defaults at this location.</EmptyState> : selectedLocationFieldTypes.map((field) => (
@@ -543,22 +587,26 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                     onSubmit={(event) => {
                       event.preventDefault();
                       const form = event.currentTarget;
+                      const systemField = Boolean(field.system_key?.trim());
                       void runMutation(async () => {
                         await updateEntityFieldType({
                           companyID,
                           entityFieldTypeID: field.entity_field_type_id,
-                          name: formText(form, "name"),
-                          fieldType: fieldDataType(formText(form, "field_type")),
-                          entityFolderID: formText(form, "entity_folder_id") || null,
+                          ...(systemField ? {} : {
+                            name: formText(form, "name"),
+                            fieldType: fieldDataType(formText(form, "field_type")),
+                            entityFolderID: formText(form, "entity_folder_id") || null,
+                          }),
                           position: formPosition(form, "position", field.position),
+                          config: fieldConfigFromForm(form, field.field_type, fieldConfig(field.config), field.system_key),
                         });
                         await loadCatalog(selectedTypeID);
                       }, "Failed to update default field");
                     }}
                   >
-                    <input name="name" defaultValue={field.name} maxLength={100} aria-label={`Default field name ${field.name}`} style={inputStyle} />
-                    <select name="field_type" defaultValue={field.field_type} aria-label={`Default field type ${field.name}`} style={inputStyle}>{fieldTypeOptions()}</select>
-                    <select name="entity_folder_id" defaultValue={field.entity_folder_id ?? ""} aria-label={`Default field location ${field.name}`} style={inputStyle}>
+                    <input name="name" defaultValue={field.name} maxLength={100} aria-label={`Default field name ${field.name}`} style={inputStyle} disabled={Boolean(field.system_key?.trim())} />
+                    <select name="field_type" defaultValue={field.field_type} aria-label={`Default field type ${field.name}`} style={inputStyle} disabled={Boolean(field.system_key?.trim())}>{fieldTypeOptions()}</select>
+                    <select name="entity_folder_id" defaultValue={field.entity_folder_id ?? ""} aria-label={`Default field location ${field.name}`} style={inputStyle} disabled={Boolean(field.system_key?.trim())}>
                       <option value="">Type root</option>
                       {folderOptions.map(({ folder, label }) => <option key={folder.entity_folder_id} value={folder.entity_folder_id}>{label}</option>)}
                     </select>
@@ -567,12 +615,14 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                     <button
                       type="button"
                       style={dangerButtonStyle}
-                      disabled={busy}
+                      disabled={busy || Boolean(field.system_key?.trim())}
                       onClick={() => void runMutation(async () => {
                         await deleteEntityFieldType(companyID, field.entity_field_type_id);
                         await loadCatalog(selectedTypeID);
                       }, "Failed to delete default field")}
                     >Delete</button>
+                    <FieldConfigEditor fieldType={field.field_type} config={fieldConfig(field.config)} systemKey={field.system_key} />
+                    {field.system_key?.trim() ? <span style={systemFieldNoteStyle}>Required field label and type</span> : null}
                   </form>
                 ))}
               </div>
@@ -596,40 +646,68 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   return <div style={emptyStyle}>{children}</div>;
 }
 
-function FieldTypeSelect({ value, onChange }: { value: EntityFieldDataType; onChange: (value: EntityFieldDataType) => void }) {
-  return <select value={value} aria-label="Field type" style={inputStyle} onChange={(event) => onChange(fieldDataType(event.currentTarget.value))}>{fieldTypeOptions()}</select>;
+function FieldTypeSelect({ value, onChange, fieldTypes = ENTITY_FIELD_TYPES }: { value: EntityFieldDataType; onChange: (value: EntityFieldDataType) => void; fieldTypes?: readonly EntityFieldDataType[] }) {
+  return <select value={value} aria-label="Field type" style={inputStyle} onChange={(event) => onChange(fieldDataType(event.currentTarget.value))}>{fieldTypeOptions(fieldTypes)}</select>;
 }
 
-function EntityFieldEditor({ field, busy, accent, onSave, onDelete }: {
+function EntityFieldEditor({ field, busy, accent, companyUsers, onSave, onDelete }: {
   field: EntityField;
   busy: boolean;
   accent: string;
+  companyUsers: CompanyUser[];
   onSave: (form: HTMLFormElement) => void;
   onDelete: () => void;
 }) {
+  const systemField = Boolean(field.system_key?.trim());
   return (
     <form key={`${field.entity_field_id}:${field.updated_timestamp}`} style={entityFieldEditorStyle} onSubmit={(event) => { event.preventDefault(); onSave(event.currentTarget); }}>
-      <input name="name" defaultValue={field.name} maxLength={100} aria-label={`Entity field name ${field.name}`} style={inputStyle} />
-      <select name="field_type" defaultValue={field.field_type} aria-label={`Entity field type ${field.name}`} style={inputStyle}>{fieldTypeOptions()}</select>
-      <FieldValueInput field={field} />
+      <input name="name" defaultValue={field.name} maxLength={100} aria-label={`Entity field name ${field.name}`} style={inputStyle} disabled={systemField} />
+      <select name="field_type" defaultValue={field.field_type} aria-label={`Entity field type ${field.name}`} style={inputStyle} disabled={systemField}>{fieldTypeOptions(directEntityFieldTypes(field.field_type))}</select>
+      <FieldValueInput field={field} companyUsers={companyUsers} />
       <input name="position" type="number" min={0} step={1} required defaultValue={field.position} aria-label={`Entity field position ${field.name}`} style={inputStyle} />
       <div style={actionsStyle}>
         <button type="submit" style={saveButtonStyle(accent)} disabled={busy}>Save</button>
-        <button type="button" style={dangerButtonStyle} disabled={busy} onClick={onDelete}>Delete</button>
+        <button type="button" style={dangerButtonStyle} disabled={busy || systemField} onClick={onDelete}>Delete</button>
       </div>
+      {systemField ? <span style={systemFieldNoteStyle}>Required field</span> : null}
     </form>
   );
 }
 
-function FieldValueInput({ field }: { field: EntityField }) {
+function FieldValueInput({ field, companyUsers }: { field: EntityField; companyUsers: CompanyUser[] }) {
   if (field.field_type === "boolean") {
     return <select name="value" defaultValue={field.value === true ? "true" : field.value === false ? "false" : ""} aria-label={`Value for ${field.name}`} style={inputStyle}>
       <option value="">Not set</option><option value="true">True</option><option value="false">False</option>
     </select>;
   }
+  if (field.field_type === "choice" || field.field_type === "color") {
+    const options = fieldConfig(field.config).options ?? [];
+    return <select name="value" defaultValue={field.value === null ? "" : String(field.value)} aria-label={`Value for ${field.name}`} style={inputStyle}>
+      <option value="">{field.field_type === "color" ? "No color" : "Not set"}</option>
+      {options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+    </select>;
+  }
+  if (field.field_type === "person") {
+    return <select name="value" defaultValue={field.value === null ? "" : String(field.value)} aria-label={`Value for ${field.name}`} style={inputStyle}>
+      <option value="">Unassigned</option>
+      {companyUsers.map((user) => <option key={user.user_id} value={user.user_id}>{user.display_name?.trim() || user.email?.trim() || user.user_id}</option>)}
+    </select>;
+  }
+  if (field.field_type === "date") {
+    return <input
+      name="value"
+      type="text"
+      inputMode="numeric"
+      pattern="(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12][0-9]|3[01])/\d{4}"
+      placeholder="MM/DD/YYYY"
+      defaultValue={field.value === null ? "" : formatDateForEntityField(String(field.value))}
+      aria-label={`Value for ${field.name}`}
+      style={inputStyle}
+    />;
+  }
   return <input
     name="value"
-    type={field.field_type === "number" ? "number" : field.field_type === "date" ? "date" : "text"}
+    type={field.field_type === "number" ? "number" : "text"}
     step={field.field_type === "number" ? "any" : undefined}
     defaultValue={field.value === null ? "" : String(field.value)}
     aria-label={`Value for ${field.name}`}
@@ -637,8 +715,213 @@ function FieldValueInput({ field }: { field: EntityField }) {
   />;
 }
 
-function fieldTypeOptions() {
-  return ENTITY_FIELD_TYPES.map((fieldType) => <option key={fieldType} value={fieldType}>{fieldType}</option>);
+const COLOR_FIELD_PRESETS: ReadonlyArray<FieldConfigOption> = [
+  { key: "yellow", label: "Yellow", color: "#facc15" },
+  { key: "red", label: "Red", color: "#ef4444" },
+  { key: "orange", label: "Orange", color: "#f97316" },
+  { key: "green", label: "Green", color: "#22c55e" },
+  { key: "blue", label: "Blue", color: "#3b82f6" },
+  { key: "purple", label: "Purple", color: "#a855f7" },
+];
+
+const DIRECT_ENTITY_FIELD_TYPES = ENTITY_FIELD_TYPES.filter((fieldType) => fieldType !== "choice" && fieldType !== "color");
+
+function FieldConfigEditor({ fieldType, config, systemKey = "" }: { fieldType: EntityFieldDataType; config: FieldConfig; systemKey?: string }) {
+  if (fieldType === "choice") {
+    const options = config.options ?? [];
+    const requiredStatus = systemKey === "status";
+    return <fieldset style={fieldConfigEditorStyle}>
+      <legend style={fieldConfigLegendStyle}>Choices</legend>
+      <span style={colorPresetGridStyle}>
+        {options.map((option) => <label key={option.key} style={colorPresetStyle}>
+          {requiredStatus ? <input type="hidden" name="config_choice" value={option.key} /> : null}
+          <input
+            name="config_choice"
+            type="checkbox"
+            value={option.key}
+            defaultChecked
+            disabled={requiredStatus}
+            aria-label={`Use ${option.label}`}
+          />
+          <input
+            name={`config_choice_label:${option.key}`}
+            defaultValue={option.label}
+            maxLength={100}
+            aria-label={`${option.key} choice label`}
+            style={colorLabelInputStyle}
+          />
+        </label>)}
+      </span>
+      {!requiredStatus ? <input
+        name="config_choice_additions"
+        placeholder={options.length === 0 ? "Pending, In progress, Done" : "Add choices, separated by commas"}
+        aria-label="Add choice options"
+        style={inputStyle}
+      /> : null}
+      <span style={helperStyle}>{requiredStatus
+        ? "The three required status choices can be relabeled."
+        : "Relabeling keeps existing values. Uncheck a choice to remove it; new choices are added at the end."}</span>
+    </fieldset>;
+  }
+  if (fieldType === "color") {
+    const configuredOptions = config.options ?? [];
+    const selected = new Set(configuredOptions.map((option) => option.key));
+    const isNew = !config.options;
+    const options = [
+      ...configuredOptions,
+      ...COLOR_FIELD_PRESETS.filter((preset) => !selected.has(preset.key)),
+    ];
+    return <fieldset style={fieldConfigEditorStyle}>
+      <legend style={fieldConfigLegendStyle}>Available colors</legend>
+      <span style={colorPresetGridStyle}>
+        {options.map((option) => {
+          const required = systemKey === "color" && (option.key === "yellow" || option.key === "red");
+          const checked = isNew ? option.key === "yellow" || option.key === "red" : selected.has(option.key);
+          const color = validColorHex(option.color) ? option.color!.toLowerCase() : "#64748b";
+          return <span key={option.key} style={colorPresetStyle}>
+            {required ? <input type="hidden" name="config_color" value={option.key} /> : null}
+            <input
+              name="config_color"
+              type="checkbox"
+              value={option.key}
+              defaultChecked={checked}
+              disabled={required}
+              aria-label={`Use ${option.label}`}
+            />
+            <input name={`config_color_hex:${option.key}`} type="color" defaultValue={color} aria-label={`${option.label} color`} style={colorPickerStyle} />
+            <input name={`config_color_label:${option.key}`} defaultValue={option.label} maxLength={100} aria-label={`${option.key} color label`} style={colorLabelInputStyle} />
+          </span>;
+        })}
+      </span>
+      <span style={helperStyle}>No color is always available. Selected labels and colors update every linked Entity.</span>
+    </fieldset>;
+  }
+  return null;
+}
+
+function fieldConfig(value: unknown): FieldConfig {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const raw = value as { default?: unknown; options?: unknown };
+  const options = Array.isArray(raw.options) ? raw.options.flatMap((candidate) => {
+    if (!candidate || typeof candidate !== "object") return [];
+    const option = candidate as { key?: unknown; label?: unknown; color?: unknown };
+    if (typeof option.key !== "string" || typeof option.label !== "string") return [];
+    return [{
+      key: option.key,
+      label: option.label,
+      ...(typeof option.color === "string" ? { color: option.color } : {}),
+    }];
+  }) : undefined;
+  return {
+    ...(typeof raw.default === "string" || raw.default === null ? { default: raw.default } : {}),
+    ...(options ? { options } : {}),
+  };
+}
+
+function fieldConfigFromForm(form: HTMLFormElement, fieldType: EntityFieldDataType, current: FieldConfig = {}, systemKey = ""): FieldConfig {
+  if (fieldType === "color") {
+    const formData = new FormData(form);
+    const seen = new Set<string>();
+    const selectedKeys = formData.getAll("config_color").map(String).filter((key) => {
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const selected = new Set(selectedKeys);
+    const options = selectedKeys.map((key) => {
+      const label = String(formData.get(`config_color_label:${key}`) ?? "").trim();
+      const color = String(formData.get(`config_color_hex:${key}`) ?? "").trim().toLowerCase();
+      if (!label || !validColorHex(color)) throw new Error("Every selected color needs a label and valid color.");
+      return { key, label, color };
+    });
+    if (options.length === 0) throw new Error("Select at least one available color.");
+    const defaultKey = typeof current.default === "string" && selected.has(current.default) ? current.default : null;
+    return { default: defaultKey, options };
+  }
+  if (fieldType === "choice") {
+    const formData = new FormData(form);
+    const existing = new Map((current.options ?? []).map((option) => [option.key, option]));
+    const selectedChoices = formData.getAll("config_choice").map(String).flatMap((key) => {
+      const option = existing.get(key);
+      if (!option) return [];
+      const label = String(formData.get(`config_choice_label:${key}`) ?? "").trim();
+      return [{ key, label }];
+    });
+    const additions = String(formData.get("config_choice_additions") ?? "").split(",").map((label) => label.trim()).filter(Boolean);
+    return buildChoiceFieldConfig(current, selectedChoices, additions, systemKey);
+  }
+  return {};
+}
+
+function formatDateForEntityField(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  return match ? `${match[2]}/${match[3]}/${match[1]}` : value;
+}
+
+function formatActionItemTimestamp(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  return match ? `${match[2]}/${match[3]}/${match[1]}` : value;
+}
+
+function companyUserLabel(userID: string | null | undefined, companyUsers: CompanyUser[]): string {
+  const clean = userID?.trim() ?? "";
+  if (!clean) return "Not recorded";
+  const user = companyUsers.find((candidate) => candidate.user_id === clean);
+  return user?.display_name?.trim() || user?.email?.trim() || clean;
+}
+
+function parseEntityFieldDate(value: string): string {
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
+  if (!match) throw new Error("Use month/day/year for dates.");
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) throw new Error("Use a valid month/day/year date.");
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function entityBodyFromText(value: string): object {
+  const lines = value.replace(/\r\n?/g, "\n").split("\n");
+  return {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    annotations: [],
+    document: {
+      type: "doc",
+      content: lines.map((line) => ({
+        type: "paragraph",
+        ...(line ? { content: [{ type: "text", text: line }] } : {}),
+      })),
+    },
+  };
+}
+
+function entityBodyText(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  const root = value as { document?: unknown };
+  const document = root.document && typeof root.document === "object" ? root.document : value;
+  const read = (node: unknown): string => {
+    if (!node || typeof node !== "object") return "";
+    const item = node as { type?: unknown; text?: unknown; content?: unknown };
+    if (item.type === "text" && typeof item.text === "string") return item.text;
+    if (!Array.isArray(item.content)) return "";
+    const separator = item.type === "doc" ? "\n" : item.type === "paragraph" ? "" : "";
+    return item.content.map(read).join(separator);
+  };
+  return read(document).trim();
+}
+
+function directEntityFieldTypes(current: EntityFieldDataType): readonly EntityFieldDataType[] {
+  return ENTITY_FIELD_TYPES.filter((fieldType) => (fieldType !== "choice" && fieldType !== "color") || fieldType === current);
+}
+
+function fieldTypeOptions(fieldTypes: readonly EntityFieldDataType[] = ENTITY_FIELD_TYPES) {
+  return fieldTypes.map((fieldType) => <option key={fieldType} value={fieldType}>{fieldType}</option>);
+}
+
+function validColorHex(value: unknown): value is string {
+  return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
 }
 
 function fieldDataType(value: string): EntityFieldDataType {
@@ -649,11 +932,16 @@ function parseFieldValue(fieldType: EntityFieldDataType, value: string) {
   if (!value.trim()) return null;
   if (fieldType === "boolean") return value === "true";
   if (fieldType === "number") return Number(value);
+  if (fieldType === "date") return parseEntityFieldDate(value);
   return value;
 }
 
 function formText(form: HTMLFormElement, name: string): string {
-  return String(new FormData(form).get(name) ?? "").trim();
+  return formValue(form, name).trim();
+}
+
+function formValue(form: HTMLFormElement, name: string): string {
+  return String(new FormData(form).get(name) ?? "");
 }
 
 function formPosition(form: HTMLFormElement, name: string, fallback: number): number {
@@ -689,6 +977,8 @@ const inlineCreateStyle: React.CSSProperties = { display: "grid", gridTemplateCo
 const createGridStyle: React.CSSProperties = { display: "grid", gap: 8 };
 const fieldCreateStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(100px,1fr) minmax(88px,.55fr) 34px", gap: 7 };
 const inputStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 34, boxSizing: "border-box", border: "1px solid rgba(148,163,184,.32)", borderRadius: 8, background: "rgba(255,255,255,.95)", color: "#0f172a", padding: "0 9px", font: "inherit", fontSize: 12, fontWeight: 700, outline: "none" };
+const detailsInputStyle: React.CSSProperties = { ...inputStyle, minHeight: 94, resize: "vertical", padding: "8px 9px", lineHeight: 1.45 };
+const readOnlyValueStyle: React.CSSProperties = { minHeight: 34, display: "flex", alignItems: "center", border: "1px solid rgba(148,163,184,.2)", borderRadius: 8, background: "rgba(241,245,249,.8)", color: "#475569", padding: "0 9px", fontSize: 12, fontWeight: 750, textTransform: "none", letterSpacing: 0 };
 const addButtonStyle = (disabled: boolean): React.CSSProperties => ({ width: 34, height: 34, border: 0, borderRadius: 9, background: disabled ? "#cbd5e1" : "linear-gradient(135deg,#0f766e,#0d9488)", color: "#fff", font: "inherit", fontSize: 19, fontWeight: 900, cursor: disabled ? "default" : "pointer" });
 const listStyle: React.CSSProperties = { minHeight: 80, display: "grid", alignContent: "start", gap: 5 };
 const listButtonStyle = (active: boolean, accent: string): React.CSSProperties => ({ minWidth: 0, minHeight: 36, display: "grid", gridTemplateColumns: "18px minmax(0,1fr)", alignItems: "center", gap: 7, border: active ? `1px solid ${accent}40` : "1px solid transparent", borderRadius: 9, background: active ? `${accent}12` : "transparent", color: active ? accent : "#334155", padding: "0 9px", textAlign: "left", font: "inherit", fontSize: 12, fontWeight: 850, cursor: "pointer" });
@@ -706,6 +996,13 @@ const dividerStyle: React.CSSProperties = { height: 1, background: "rgba(148,163
 const fieldListStyle: React.CSSProperties = { display: "grid", gap: 8 };
 const fieldEditorStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(90px,1fr) 92px minmax(100px,.8fr) 70px auto auto", alignItems: "center", gap: 6, padding: 8, border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "rgba(248,250,252,.75)" };
 const entityFieldEditorStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(90px,1fr) 92px", gap: 7, padding: 9, border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "rgba(248,250,252,.75)" };
+const fieldConfigEditorStyle: React.CSSProperties = { gridColumn: "1 / -1", minWidth: 0, display: "grid", gap: 6, margin: 0, padding: "7px 8px", border: "1px solid rgba(148,163,184,.18)", borderRadius: 8, color: "#475569", fontSize: 10, fontWeight: 850 };
+const fieldConfigLegendStyle: React.CSSProperties = { padding: "0 4px", color: "#475569", fontSize: 10, fontWeight: 900 };
+const colorPresetGridStyle: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 7 };
+const colorPresetStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, minHeight: 24, color: "#334155", fontSize: 10, fontWeight: 750 };
+const colorPickerStyle: React.CSSProperties = { width: 26, height: 24, boxSizing: "border-box", border: "1px solid rgba(15,23,42,.14)", borderRadius: 5, background: "transparent", padding: 1, cursor: "pointer" };
+const colorLabelInputStyle: React.CSSProperties = { ...inputStyle, width: 116, minHeight: 26, height: 26, padding: "0 6px", fontSize: 10 };
+const systemFieldNoteStyle: React.CSSProperties = { gridColumn: "1 / -1", color: "#0f766e", fontSize: 10, fontWeight: 850 };
 const emptyStyle: React.CSSProperties = { minHeight: 54, display: "grid", placeItems: "center", color: "#64748b", fontSize: 11, fontWeight: 750, textAlign: "center" };
 const errorStyle: React.CSSProperties = { marginBottom: 12, padding: "9px 12px", border: "1px solid rgba(239,68,68,.24)", borderRadius: 9, background: "#fef2f2", color: "#b91c1c", fontSize: 12, fontWeight: 800 };
 const detailErrorStyle: React.CSSProperties = { ...errorStyle, marginBottom: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 };

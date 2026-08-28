@@ -46,6 +46,7 @@ type MemoryRepo struct {
 	entityFieldTypes                 map[string]domain.EntityFieldType
 	entities                         map[string]domain.Entity
 	entityFields                     map[string]domain.EntityField
+	actionItemHuddleRelationships    map[string]domain.ActionItemHuddleRelationship
 	projectInfo                      map[string][]domain.ProjectInformation
 	projectText                      map[string]map[string]domain.ProjectProjection
 	projectRelationships             map[string]domain.ProjectRelationship
@@ -162,6 +163,7 @@ func NewMemoryRepo() *MemoryRepo {
 		entityFieldTypes:                 map[string]domain.EntityFieldType{},
 		entities:                         map[string]domain.Entity{},
 		entityFields:                     map[string]domain.EntityField{},
+		actionItemHuddleRelationships:    map[string]domain.ActionItemHuddleRelationship{},
 		projectInfo:                      map[string][]domain.ProjectInformation{},
 		projectText:                      map[string]map[string]domain.ProjectProjection{},
 		projectRelationships:             map[string]domain.ProjectRelationship{},

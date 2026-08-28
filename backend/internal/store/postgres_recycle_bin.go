@@ -402,13 +402,14 @@ var recycleSnapshotTables = map[string]bool{
 	"company_explorer_folders": true,
 	"nodes":                    true,
 	"logic_gates":              true,
-	"scorecards":              true,
+	"scorecards":               true,
 	"projects":                 true,
 	"huddle_logic_gates":       true,
 	"huddle_nodes":             true,
 	"kpis":                     true,
 
 	"huddle_logic_gate_relationships":      true,
+	"action_item_huddle_relationships":     true,
 	"huddle_node_logic_gate_relationships": true,
 	"huddle_node_kpi_relationships":        true,
 
@@ -461,6 +462,7 @@ var recycleRestoreTableOrder = []string{
 	"huddle_nodes",
 	"kpis",
 	"huddle_logic_gate_relationships",
+	"action_item_huddle_relationships",
 	"huddle_node_logic_gate_relationships",
 	"huddle_node_kpi_relationships",
 	"node_textboxes",

@@ -96,6 +96,7 @@ type Account struct {
 type EntityType struct {
 	CompanyID        string    `json:"company_id"`
 	EntityTypeID     string    `json:"entity_type_id"`
+	SystemKey        string    `json:"system_key,omitempty"`
 	Name             string    `json:"name"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
@@ -113,27 +114,32 @@ type EntityFolder struct {
 }
 
 type EntityFieldType struct {
-	CompanyID         string    `json:"company_id"`
-	EntityFieldTypeID string    `json:"entity_field_type_id"`
-	EntityTypeID      string    `json:"entity_type_id"`
-	EntityFolderID    *string   `json:"entity_folder_id,omitempty"`
-	Name              string    `json:"name"`
-	FieldType         string    `json:"field_type"`
-	Position          int       `json:"position"`
-	CreatedTimestamp  time.Time `json:"created_timestamp"`
-	UpdatedTimestamp  time.Time `json:"updated_timestamp"`
+	CompanyID         string          `json:"company_id"`
+	EntityFieldTypeID string          `json:"entity_field_type_id"`
+	EntityTypeID      string          `json:"entity_type_id"`
+	EntityFolderID    *string         `json:"entity_folder_id,omitempty"`
+	SystemKey         string          `json:"system_key,omitempty"`
+	Name              string          `json:"name"`
+	FieldType         string          `json:"field_type"`
+	Config            json.RawMessage `json:"config"`
+	Position          int             `json:"position"`
+	CreatedTimestamp  time.Time       `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time       `json:"updated_timestamp"`
 }
 
 type EntityField struct {
-	CompanyID        string          `json:"company_id"`
-	EntityFieldID    string          `json:"entity_field_id"`
-	EntityID         string          `json:"entity_id"`
-	Name             string          `json:"name"`
-	FieldType        string          `json:"field_type"`
-	Value            json.RawMessage `json:"value"`
-	Position         int             `json:"position"`
-	CreatedTimestamp time.Time       `json:"created_timestamp"`
-	UpdatedTimestamp time.Time       `json:"updated_timestamp"`
+	CompanyID         string          `json:"company_id"`
+	EntityFieldID     string          `json:"entity_field_id"`
+	EntityID          string          `json:"entity_id"`
+	EntityFieldTypeID *string         `json:"entity_field_type_id,omitempty"`
+	SystemKey         string          `json:"system_key,omitempty"`
+	Name              string          `json:"name"`
+	FieldType         string          `json:"field_type"`
+	Config            json.RawMessage `json:"config"`
+	Value             json.RawMessage `json:"value"`
+	Position          int             `json:"position"`
+	CreatedTimestamp  time.Time       `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time       `json:"updated_timestamp"`
 }
 
 type Entity struct {
@@ -146,6 +152,7 @@ type Entity struct {
 	Position         int             `json:"position"`
 	BodyJSON         json.RawMessage `json:"body_json"`
 	Revision         int64           `json:"revision"`
+	CreatedByUserID  string          `json:"created_by_user_id,omitempty"`
 	EntityFields     []EntityField   `json:"entity_fields"`
 	CreatedTimestamp time.Time       `json:"created_timestamp"`
 	UpdatedTimestamp time.Time       `json:"updated_timestamp"`
@@ -160,6 +167,7 @@ type EntitySummary struct {
 	Name             string    `json:"name"`
 	Position         int       `json:"position"`
 	Revision         int64     `json:"revision"`
+	CreatedByUserID  string    `json:"created_by_user_id,omitempty"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
@@ -994,6 +1002,13 @@ type HuddleNodeKPIRelationship struct {
 	LogicGateID      string    `json:"logic_gate_id"`
 	KPIID            string    `json:"kpi_id"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
+}
+
+type ActionItemHuddleRelationship struct {
+	CompanyID         string    `json:"company_id"`
+	EntityID          string    `json:"entity_id"`
+	HuddleLogicGateID string    `json:"huddle_logic_gate_id"`
+	CreatedTimestamp  time.Time `json:"created_timestamp"`
 }
 
 type HuddleLogicGateCard struct {

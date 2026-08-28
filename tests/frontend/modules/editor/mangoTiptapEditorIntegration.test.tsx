@@ -165,6 +165,33 @@ function structuredAnnotations(document: MangoTiptapDocument): MangoTiptapAnnota
   return annotations;
 }
 
+test("static JSON rendering keeps Action Item color, non-color severity text, and accessible identity", () => {
+  const value: MangoTiptapDocument = {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: {
+      type: "doc",
+      content: [{
+        type: "paragraph",
+        content: [{
+          type: "mangoEntityLink",
+          attrs: {
+            entityType: "entity",
+            entityId: "action-item-red",
+            label: "Call the delayed customer",
+            actionItemColor: "red",
+          },
+        }],
+      }],
+    },
+  };
+  const html = renderToStaticMarkup(<MangoTiptapStaticRenderer value={value} />);
+  assert.match(html, /data-mango-action-item-color="red"/);
+  assert.match(html, /mango-editor-action-item--red/);
+  assert.match(html, /aria-label="Open Red Action Item Call the delayed customer"/);
+  assert.match(html, />Red<\/span>/);
+});
+
 test("static JSON renderer paints true ProseMirror ranges across blocks, lists, tables, and images", () => {
   const document = structuredDocument();
   const annotations = structuredAnnotations(document);

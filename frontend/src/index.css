@@ -1158,15 +1158,72 @@ button, input, textarea, select {
   white-space: nowrap;
 }
 
+@keyframes mango-editor-action-item-pulse {
+  0%, 100% {
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.84), 0 2px 7px var(--mango-entity-chip-shadow), 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.84), 0 2px 7px var(--mango-entity-chip-shadow), 0 0 0 4px var(--mango-action-item-pulse-ring);
+  }
+}
+
+.mango-editor-action-item--yellow {
+  --mango-entity-chip-border: rgba(202, 138, 4, 0.72);
+  --mango-entity-chip-background: linear-gradient(135deg, #fef9c3, #fde047);
+  --mango-entity-chip-shadow: rgba(161, 98, 7, 0.24);
+  --mango-action-item-pulse-ring: rgba(250, 204, 21, 0.34);
+  color: #422006;
+  animation: mango-editor-action-item-pulse 2s ease-in-out infinite;
+}
+
+.mango-editor-action-item--red {
+  --mango-entity-chip-border: rgba(185, 28, 28, 0.74);
+  --mango-entity-chip-background: linear-gradient(135deg, #fee2e2, #f87171);
+  --mango-entity-chip-shadow: rgba(153, 27, 27, 0.24);
+  --mango-action-item-pulse-ring: rgba(239, 68, 68, 0.32);
+  color: #450a0a;
+  animation: mango-editor-action-item-pulse 1s ease-in-out infinite;
+}
+
+.mango-editor-action-item-severity {
+  flex: 0 0 auto;
+  padding-left: 4px;
+  border-left: 1px solid currentColor;
+  font-size: 0.66em;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  opacity: 0.78;
+  text-transform: uppercase;
+}
+
 .mango-editor-entity-link:hover {
   border-color: rgba(14, 116, 144, 0.62);
   background: #ecfeff;
   color: #155e75;
 }
 
+.mango-editor-entity-link.mango-editor-action-item--yellow:hover {
+  border-color: rgba(161, 98, 7, 0.86);
+  background: #fde047;
+  color: #422006;
+}
+
+.mango-editor-entity-link.mango-editor-action-item--red:hover {
+  border-color: rgba(153, 27, 27, 0.9);
+  background: #f87171;
+  color: #450a0a;
+}
+
 .mango-editor-entity-link:focus-visible {
   outline: 2px solid #0284c7;
   outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mango-editor-action-item--yellow,
+  .mango-editor-action-item--red {
+    animation: none;
+  }
 }
 @media (max-width: 1100px) {
   .mango-project-management-header {

@@ -27,6 +27,7 @@ import {
   useBareMangoEditorControls,
 } from "./BareMangoEditor";
 import { HuddleResourceIcon } from "./HuddleResourceIcon";
+import { HuddleActionItemsPanel } from "./HuddleActionItemsPanel";
 import { HuddleLogicGateCards, type HuddleLogicGateCardItem, type HuddleLogicGateKPIItem } from "./HuddleLogicGateCards";
 import { KPIEditorPopup, type KPIEditorItem } from "./LogicGateKPISection";
 import { DEFAULT_HUDDLE_COLUMN_LAYOUT, resizeHuddleColumns, type HuddleColumnLayout } from "./huddleColumnLayout";
@@ -422,7 +423,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
             />
           </section>
         )}
-        <div role="separator" aria-label={isGate ? "Resize Huddle editor and Process columns" : "Resize Huddle Node snapshot and chat columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
+        <div role="separator" aria-label={isGate ? "Resize Huddle editor and Process columns" : "Resize Huddle Node snapshot and Action Item columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
         {isGate ? (
           <section aria-label="Huddle Processes" style={relationshipColumnStyle}>
             <div style={relationshipColumnHeaderStyle}>
@@ -438,7 +439,13 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
             />
           </section>
         ) : (
-          <div aria-label="Reserved Huddle Node chat column" style={emptyColumnStyle} />
+          <HuddleActionItemsPanel
+            companyID={companyID}
+            currentUserID={currentUserID}
+            huddleNodeID={resource.resourceID}
+            companyUsers={companyUsers}
+            requestJSON={requestJSON}
+          />
         )}
         {isGate && (
           <>
@@ -581,7 +588,6 @@ const errorStyle: React.CSSProperties = { margin: "0 12px 5px", padding: "6px 9p
 const errorPlaceholderStyle: React.CSSProperties = { height: 0, minHeight: 0, overflow: "hidden" };
 const bodyStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gap: 0, padding: "4px 10px 10px", overflowX: "auto", overflowY: "hidden" };
 const editorColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, overflow: "hidden", border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: "rgba(255,255,255,.72)", boxShadow: EDITOR_NEU_SHADOW };
-const emptyColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, border: "1px solid rgba(255,255,255,.72)", borderRadius: 12, background: "linear-gradient(145deg,rgba(246,249,252,.76),rgba(236,241,247,.62))", boxShadow: "inset 4px 4px 12px rgba(148,163,184,.12), inset -4px -4px 12px rgba(255,255,255,.72)" };
 const relationshipColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px minmax(0,1fr)", overflow: "hidden", padding: 9, border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };
 const relationshipColumnHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0 3px 6px", color: "#243047", fontSize: 14 };
 const columnResizeHandleStyle: React.CSSProperties = { minWidth: 8, height: "100%", display: "grid", placeItems: "center", cursor: "col-resize", touchAction: "none" };

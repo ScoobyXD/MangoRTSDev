@@ -17,6 +17,9 @@ const (
 	EntityFieldTypeNumber  = "number"
 	EntityFieldTypeDate    = "date"
 	EntityFieldTypeBoolean = "boolean"
+	EntityFieldTypeChoice  = "choice"
+	EntityFieldTypeColor   = "color"
+	EntityFieldTypePerson  = "person"
 	EntityNameMaxLength    = 200
 	EntitySearchMaxLength  = 200
 	EntitySearchMaxLimit   = 50
@@ -51,6 +54,8 @@ type EntityFieldTypeInput struct {
 	NameSet           bool
 	FieldType         string
 	FieldTypeSet      bool
+	Config            json.RawMessage
+	ConfigSet         bool
 	Position          int
 	PositionSet       bool
 }
@@ -79,6 +84,7 @@ type EntityInput struct {
 	BodySet         bool
 	BaseRevision    int64
 	BaseRevisionSet bool
+	CreatedByUserID string
 }
 
 type EntityFieldInput struct {
@@ -144,7 +150,7 @@ func normalizeEntityFieldTypeInput(input EntityFieldTypeInput, update bool) (Ent
 	if input.CompanyID == "" || (update && input.EntityFieldTypeID == "") || (!update && (input.EntityTypeID == "" || input.Name == "" || !validEntityFieldType(input.FieldType))) || len(input.Name) > EntityNameMaxLength || (input.PositionSet && input.Position < 0) {
 		return EntityFieldTypeInput{}, ErrInvalid
 	}
-	if update && !input.NameSet && !input.EntityFolderSet && !input.FieldTypeSet && !input.PositionSet {
+	if update && !input.NameSet && !input.EntityFolderSet && !input.FieldTypeSet && !input.ConfigSet && !input.PositionSet {
 		return EntityFieldTypeInput{}, ErrInvalid
 	}
 	if input.NameSet && input.Name == "" {
@@ -152,6 +158,13 @@ func normalizeEntityFieldTypeInput(input EntityFieldTypeInput, update bool) (Ent
 	}
 	if input.FieldTypeSet && !validEntityFieldType(input.FieldType) {
 		return EntityFieldTypeInput{}, ErrInvalid
+	}
+	if !update || (input.ConfigSet && input.FieldTypeSet) {
+		config, err := normalizeEntityFieldTypeConfig(input.FieldType, input.Config)
+		if err != nil {
+			return EntityFieldTypeInput{}, err
+		}
+		input.Config = config
 	}
 	return input, nil
 }
@@ -197,12 +210,14 @@ func normalizeEntityInput(input EntityInput, update bool) (EntityInput, error) {
 	input.EntityID = cleanUUIDText(input.EntityID)
 	input.EntityTypeID = cleanUUIDText(input.EntityTypeID)
 	input.Name = strings.TrimSpace(input.Name)
+	rawCreatedByUserID := strings.TrimSpace(input.CreatedByUserID)
+	input.CreatedByUserID = cleanUUIDText(rawCreatedByUserID)
 	folder, err := normalizeOptionalEntityID(input.EntityFolderID)
 	if err != nil {
 		return EntityInput{}, err
 	}
 	input.EntityFolderID = folder
-	if input.CompanyID == "" || (update && input.EntityID == "") || (!update && (input.EntityTypeID == "" || input.Name == "")) || len(input.Name) > EntityNameMaxLength || (input.PositionSet && input.Position < 0) || input.BaseRevision < 0 {
+	if input.CompanyID == "" || (update && input.EntityID == "") || (!update && (input.EntityTypeID == "" || input.Name == "")) || (rawCreatedByUserID != "" && input.CreatedByUserID == "") || len(input.Name) > EntityNameMaxLength || (input.PositionSet && input.Position < 0) || input.BaseRevision < 0 {
 		return EntityInput{}, ErrInvalid
 	}
 	if update && !input.NameSet && !input.EntityFolderSet && !input.PositionSet && !input.BodySet {
@@ -274,7 +289,7 @@ func normalizeOptionalEntityID(value *string) (*string, error) {
 
 func validEntityFieldType(value string) bool {
 	switch value {
-	case EntityFieldTypeText, EntityFieldTypeNumber, EntityFieldTypeDate, EntityFieldTypeBoolean:
+	case EntityFieldTypeText, EntityFieldTypeNumber, EntityFieldTypeDate, EntityFieldTypeBoolean, EntityFieldTypeChoice, EntityFieldTypeColor, EntityFieldTypePerson:
 		return true
 	default:
 		return false
@@ -297,7 +312,7 @@ func normalizeEntityFieldValue(fieldType string, raw json.RawMessage) (json.RawM
 	}
 	var valid bool
 	switch fieldType {
-	case EntityFieldTypeText:
+	case EntityFieldTypeText, EntityFieldTypeChoice, EntityFieldTypeColor:
 		_, valid = value.(string)
 	case EntityFieldTypeNumber:
 		number, ok := value.(json.Number)
@@ -309,10 +324,13 @@ func normalizeEntityFieldValue(fieldType string, raw json.RawMessage) (json.RawM
 		text, ok := value.(string)
 		if ok {
 			parsed, err := time.Parse("2006-01-02", text)
-			valid = err == nil && parsed.Format("2006-01-02") == text
+			valid = err == nil && parsed.Year() >= 1 && parsed.Format("2006-01-02") == text
 		}
 	case EntityFieldTypeBoolean:
 		_, valid = value.(bool)
+	case EntityFieldTypePerson:
+		text, ok := value.(string)
+		valid = ok && cleanUUIDText(text) != ""
 	}
 	if !valid {
 		return nil, ErrInvalid
@@ -322,6 +340,144 @@ func normalizeEntityFieldValue(fieldType string, raw json.RawMessage) (json.RawM
 		return nil, ErrInvalid
 	}
 	return canonical, nil
+}
+
+type entityFieldTypeOption struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Color string `json:"color,omitempty"`
+}
+
+type entityFieldTypeConfig struct {
+	Default json.RawMessage         `json:"default,omitempty"`
+	Options []entityFieldTypeOption `json:"options,omitempty"`
+}
+
+func normalizeEntityFieldTypeConfig(fieldType string, raw json.RawMessage) (json.RawMessage, error) {
+	if len(bytes.TrimSpace(raw)) == 0 || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		raw = json.RawMessage(`{}`)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var config entityFieldTypeConfig
+	if err := decoder.Decode(&config); err != nil {
+		return nil, ErrInvalid
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return nil, ErrInvalid
+	}
+	if fieldType != EntityFieldTypeChoice && fieldType != EntityFieldTypeColor {
+		if len(config.Default) != 0 || len(config.Options) != 0 {
+			return nil, ErrInvalid
+		}
+		return json.RawMessage(`{}`), nil
+	}
+	seen := map[string]bool{}
+	keys := map[string]bool{}
+	if len(config.Options) == 0 {
+		return nil, ErrInvalid
+	}
+	for index := range config.Options {
+		option := &config.Options[index]
+		option.Key = strings.TrimSpace(option.Key)
+		option.Label = strings.TrimSpace(option.Label)
+		option.Color = strings.ToLower(strings.TrimSpace(option.Color))
+		if !validEntityOptionKey(option.Key) || option.Label == "" || len(option.Label) > EntityNameMaxLength || seen[option.Key] {
+			return nil, ErrInvalid
+		}
+		seen[option.Key] = true
+		keys[option.Key] = true
+		if fieldType == EntityFieldTypeColor {
+			if !validEntityColorHex(option.Color) {
+				return nil, ErrInvalid
+			}
+		} else if option.Color != "" {
+			return nil, ErrInvalid
+		}
+	}
+	if len(config.Default) != 0 && !bytes.Equal(bytes.TrimSpace(config.Default), []byte("null")) {
+		var defaultKey string
+		if err := json.Unmarshal(config.Default, &defaultKey); err != nil || !keys[defaultKey] {
+			return nil, ErrInvalid
+		}
+		config.Default, _ = json.Marshal(defaultKey)
+	} else if len(config.Default) != 0 {
+		config.Default = json.RawMessage("null")
+	}
+	canonical, err := json.Marshal(config)
+	if err != nil {
+		return nil, ErrInvalid
+	}
+	return canonical, nil
+}
+
+func normalizeEntityFieldValueForConfig(fieldType string, raw, configJSON json.RawMessage) (json.RawMessage, error) {
+	value, err := normalizeEntityFieldValue(fieldType, raw)
+	if err != nil || value == nil || (fieldType != EntityFieldTypeChoice && fieldType != EntityFieldTypeColor) {
+		return value, err
+	}
+	configJSON, err = normalizeEntityFieldTypeConfig(fieldType, configJSON)
+	if err != nil {
+		return nil, err
+	}
+	var config entityFieldTypeConfig
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		return nil, ErrInvalid
+	}
+	var selected string
+	if err := json.Unmarshal(value, &selected); err != nil {
+		return nil, ErrInvalid
+	}
+	for _, option := range config.Options {
+		if option.Key == selected {
+			return value, nil
+		}
+	}
+	return nil, ErrInvalid
+}
+
+func entityFieldTypeDefaultValue(fieldType string, configJSON json.RawMessage) (json.RawMessage, error) {
+	if fieldType != EntityFieldTypeChoice && fieldType != EntityFieldTypeColor {
+		return nil, nil
+	}
+	configJSON, err := normalizeEntityFieldTypeConfig(fieldType, configJSON)
+	if err != nil {
+		return nil, err
+	}
+	var config entityFieldTypeConfig
+	if err := json.Unmarshal(configJSON, &config); err != nil {
+		return nil, ErrInvalid
+	}
+	if len(config.Default) == 0 || bytes.Equal(bytes.TrimSpace(config.Default), []byte("null")) {
+		return nil, nil
+	}
+	return normalizeEntityFieldValueForConfig(fieldType, config.Default, configJSON)
+}
+
+func validEntityColorHex(value string) bool {
+	if len(value) != 7 || value[0] != '#' {
+		return false
+	}
+	for _, character := range value[1:] {
+		if (character < '0' || character > '9') && (character < 'a' || character > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func validEntityOptionKey(value string) bool {
+	if len(value) == 0 || len(value) > EntityNameMaxLength || value[0] < 'a' || value[0] > 'z' {
+		return false
+	}
+	for index := 1; index < len(value); index++ {
+		character := value[index]
+		if (character < 'a' || character > 'z') && (character < '0' || character > '9') && character != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func resolveEntityFieldTypeLayers(layers [][]domain.EntityFieldType) []domain.EntityFieldType {
@@ -411,10 +567,13 @@ func cloneEntityFolder(item domain.EntityFolder) domain.EntityFolder {
 
 func cloneEntityFieldType(item domain.EntityFieldType) domain.EntityFieldType {
 	item.EntityFolderID = cloneStringPointer(item.EntityFolderID)
+	item.Config = append(json.RawMessage(nil), item.Config...)
 	return item
 }
 
 func cloneEntityField(item domain.EntityField) domain.EntityField {
+	item.EntityFieldTypeID = cloneStringPointer(item.EntityFieldTypeID)
+	item.Config = append(json.RawMessage(nil), item.Config...)
 	item.Value = append(json.RawMessage(nil), item.Value...)
 	return item
 }

@@ -5,6 +5,7 @@ import { Editor, type AnyExtension, type JSONContent } from "@tiptap/core";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from "@tiptap/react";
 import { NodeSelection, TextSelection, type Transaction } from "@tiptap/pm/state";
+import type { ActionItemColor } from "../../entities/entitiesApi.js";
 import {
   downloadMangoAttachment,
   fetchMangoAttachmentBlob,
@@ -19,7 +20,9 @@ import { EditorSelectionNodeIcon } from "../../../icons/index.js";
 import { ChatIcon } from "../NodeWorkspaceSurfaceShared.js";
 import { withPreparedEditorAttachmentResource } from "../editorAttachmentPreparation.js";
 import {
+  createActionItemEntityFromSelection,
   createNodeEntityFromSelection,
+  normalizeEditorSelectionActionItemName,
   normalizeEditorSelectionNodeTitle,
   openEditorEntityLink,
   type EditorEntityLink,
@@ -211,7 +214,7 @@ const LOGIC_GATE_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["project"];
 const PROJECT_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["email_message"];
 const EMPTY_LINK_TARGET_TYPES: readonly EditorEntityType[] = [];
 
-function mangoEntityLinkAttributes(entity: EditorEntityLink): Record<string, string | null> {
+function mangoEntityLinkAttributes(entity: EditorEntityLink, actionItemColor: ActionItemColor | null = null): Record<string, string | null> {
   return {
     entityType: entity.entityType,
     entityId: entity.entityID,
@@ -220,6 +223,7 @@ function mangoEntityLinkAttributes(entity: EditorEntityLink): Record<string, str
     emailThreadId: entity.emailThreadID ?? null,
     emailAccountEmail: entity.emailAccountEmail ?? null,
     emailSharedInboxId: entity.emailSharedInboxID ?? null,
+    actionItemColor,
   };
 }
 
@@ -876,6 +880,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [resolvingConflict, setResolvingConflict] = useState(false);
   const [selectionAction, setSelectionAction] = useState<MangoTiptapSelectionAction | null>(null);
   const [creatingSelectionNode, setCreatingSelectionNode] = useState(false);
+  const [creatingSelectionActionItem, setCreatingSelectionActionItem] = useState<ActionItemColor | null>(null);
   const [renderedAnnotations, setRenderedAnnotations] = useState<readonly MangoTiptapAnnotation[]>(annotations);
   const [tableActive, setTableActive] = useState(false);
   const [activeTableFrame, setActiveTableFrame] = useState<MangoTiptapTableFrame | null>(null);
@@ -1016,7 +1021,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       boundaryWidth: root?.clientWidth || rootRect?.width || 0,
       containerLeft: rootRect?.left,
       containerTop: rootRect?.top,
-      rightInset: 44,
+      rightInset: callbacksRef.current.onSelectionChatRequest ? 116 : 82,
       scrollLeft: root?.scrollLeft,
       scrollTop: root?.scrollTop,
     });
@@ -1849,6 +1854,41 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     }
   }, [companyID, creatingSelectionNode, requestJSON, selectionAction]);
 
+  const createActionItemFromSelection = useCallback(async (color: ActionItemColor) => {
+    const editor = editorRef.current;
+    const action = selectionAction;
+    if (!editor || !action || creatingSelectionNode || creatingSelectionActionItem) return;
+    const name = normalizeEditorSelectionActionItemName(action.quote);
+    if (!name) {
+      const message = "Highlight text before creating an Action Item.";
+      setError(message);
+      callbacksRef.current.onError?.(message);
+      return;
+    }
+    setCreatingSelectionActionItem(color);
+    setError("");
+    try {
+      const entity = await createActionItemEntityFromSelection({ companyID, requestJSON }, action.quote, color);
+      const currentSelection = editor.state.selection;
+      const currentText = editor.state.doc.textBetween(action.from, action.to, "\n", "\n");
+      if (currentSelection.from !== action.from || currentSelection.to !== action.to || currentText !== action.quote) {
+        throw new Error("The Action Item was created, but the highlighted text changed before its link could be inserted. Select the text again and link the existing Action Item with #.");
+      }
+      editor.chain().focus().insertContentAt(
+        { from: action.from, to: action.to },
+        { type: "mangoEntityLink", attrs: mangoEntityLinkAttributes(entity, color) },
+      ).run();
+      setSelectionAction(null);
+      setError("");
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Unable to create an Action Item from the highlighted text";
+      setError(message);
+      callbacksRef.current.onError?.(message);
+    } finally {
+      setCreatingSelectionActionItem(null);
+    }
+  }, [companyID, creatingSelectionActionItem, creatingSelectionNode, requestJSON, selectionAction]);
+
   const runTableContextCommand = useCallback((command: "add-row-before" | "add-row-after" | "add-column-before" | "add-column-after" | "delete-row" | "delete-column" | "delete-table") => {
     const editor = editorRef.current;
     setTableContextMenu(null);
@@ -2135,12 +2175,38 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
             type="button"
             aria-label="Create node from this highlighted piece of text."
             title="Create node from this highlighted piece of text."
-            disabled={creatingSelectionNode || !normalizeEditorSelectionNodeTitle(selectionAction.quote)}
+            disabled={creatingSelectionNode || Boolean(creatingSelectionActionItem) || !normalizeEditorSelectionNodeTitle(selectionAction.quote)}
             onClick={() => void createNodeFromSelection()}
-            style={{ display: "inline-grid", placeItems: "center", width: 30, height: 30, borderRadius: 7, border: 0, background: "transparent", color: "#0f766e", cursor: creatingSelectionNode ? "wait" : "pointer" }}
+            style={{ display: "inline-grid", placeItems: "center", width: 30, height: 30, borderRadius: 7, border: 0, background: "transparent", color: "#0f766e", cursor: creatingSelectionNode || creatingSelectionActionItem ? "wait" : "pointer" }}
           >
             <EditorSelectionNodeIcon />
           </button>
+          <div
+            role="group"
+            aria-label="Create an Action Item from highlighted text"
+            aria-busy={creatingSelectionActionItem ? "true" : undefined}
+            data-mango-tiptap-selection-action-item="true"
+            style={{ display: "inline-flex", height: 30, overflow: "hidden", border: "1px solid rgba(100,116,139,0.28)", borderRadius: 7, boxShadow: "inset 0 1px 0 rgba(255,255,255,0.72)" }}
+          >
+            {(["yellow", "red"] as const).map((color) => {
+              const label = color === "yellow" ? "Yellow" : "Red";
+              const busy = creatingSelectionActionItem === color;
+              return (
+                <button
+                  key={color}
+                  type="button"
+                  aria-label={`Create ${color} Action Item from highlighted text.`}
+                  title={`Create ${color} Action Item from highlighted text.`}
+                  data-mango-tiptap-selection-action-item-color={color}
+                  disabled={creatingSelectionNode || Boolean(creatingSelectionActionItem) || !normalizeEditorSelectionActionItemName(selectionAction.quote)}
+                  onClick={() => void createActionItemFromSelection(color)}
+                  style={{ width: 34, height: 28, display: "inline-grid", placeItems: "center", padding: 0, border: 0, borderLeft: color === "red" ? "1px solid rgba(100,116,139,0.25)" : 0, background: color === "yellow" ? "#facc15" : "#dc2626", color: color === "yellow" ? "#422006" : "#fff", cursor: creatingSelectionActionItem ? "wait" : "pointer", fontSize: 10, fontWeight: 900, lineHeight: 1 }}
+                >
+                  {busy ? "…" : label.slice(0, 1)}
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
