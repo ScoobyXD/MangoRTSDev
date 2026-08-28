@@ -1023,8 +1023,10 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             """
         )
         entity_edge_error = self.run_sql_failure(verifier)
-        self.assertIn("entity_relationships_huddle_node_fkey", entity_edge_error)
-        self.assertIn("orphaned child data", entity_edge_error)
+        self.assertIn(
+            "an entity relationship has a missing entity or unsupported or missing exact resource",
+            entity_edge_error,
+        )
         self.run_sql(
             f"""
             delete from public.entity_relationships
