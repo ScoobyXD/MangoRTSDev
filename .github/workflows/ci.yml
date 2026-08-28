@@ -57,6 +57,11 @@ jobs:
       HUDDLE_EXPLORER_POSTGRES17_DATABASE: mangorts_huddle_explorer_test
       HUDDLE_EXPLORER_POSTGRES17_USER: postgres
       HUDDLE_EXPLORER_POSTGRES17_PASSWORD: postgres
+      PROCESS_MAP_POSTGRES17_HOST: 127.0.0.1
+      PROCESS_MAP_POSTGRES17_PORT: "5432"
+      PROCESS_MAP_POSTGRES17_DATABASE: mangorts_process_map_test_gate
+      PROCESS_MAP_POSTGRES17_USER: postgres
+      PROCESS_MAP_POSTGRES17_PASSWORD: postgres
       MANGORTS_EMAIL_SQS_TEST_DSN: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
       MANGORTS_REALTIME_PLAN_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/mangorts_realtime_plan_test?sslmode=disable
 
@@ -90,6 +95,7 @@ jobs:
           createdb --host=127.0.0.1 --port=5432 --username=postgres mangorts_email_draft_test
           createdb --host=127.0.0.1 --port=5432 --username=postgres mangorts_raci_tabs_test
           createdb --host=127.0.0.1 --port=5432 --username=postgres mangorts_huddle_explorer_test
+          createdb --host=127.0.0.1 --port=5432 --username=postgres mangorts_process_map_test_gate
 
       - name: Install frontend dependencies
         working-directory: frontend

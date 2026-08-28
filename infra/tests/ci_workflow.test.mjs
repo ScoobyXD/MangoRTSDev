@@ -13,6 +13,7 @@ test("GitHub CI gives each database contract an isolated database on pinned Post
   assert.match(workflow, /EMAIL_DRAFT_POSTGRES17_DATABASE: mangorts_email_draft_test/);
   assert.match(workflow, /RACI_TABS_POSTGRES17_DATABASE: mangorts_raci_tabs_test/);
   assert.match(workflow, /HUDDLE_EXPLORER_POSTGRES17_DATABASE: mangorts_huddle_explorer_test/);
+  assert.match(workflow, /PROCESS_MAP_POSTGRES17_DATABASE: mangorts_process_map_test_gate/);
   assert.match(workflow, /MANGORTS_EMAIL_SQS_TEST_DSN: postgres:\/\/postgres:postgres@127\.0\.0\.1:5432\/postgres\?sslmode=disable/);
   assert.match(workflow, /MANGORTS_REALTIME_PLAN_DATABASE_URL: postgres:\/\/postgres:postgres@127\.0\.0\.1:5432\/mangorts_realtime_plan_test\?sslmode=disable/);
   assert.match(workflow, /apt-get install --yes postgresql-client/);
@@ -21,6 +22,7 @@ test("GitHub CI gives each database contract an isolated database on pinned Post
   assert.match(workflow, /createdb --host=127\.0\.0\.1 --port=5432 --username=postgres mangorts_email_draft_test/);
   assert.match(workflow, /createdb --host=127\.0\.0\.1 --port=5432 --username=postgres mangorts_raci_tabs_test/);
   assert.match(workflow, /createdb --host=127\.0\.0\.1 --port=5432 --username=postgres mangorts_huddle_explorer_test/);
+  assert.match(workflow, /createdb --host=127\.0\.0\.1 --port=5432 --username=postgres mangorts_process_map_test_gate/);
   assert.doesNotMatch(workflow, /POSTGRES_BIN/);
   assert.notEqual(
     workflow.match(/MANGORTS_EMAIL_SQS_TEST_DSN: [^\n]+\/([^/?\s]+)\?/)?.[1],

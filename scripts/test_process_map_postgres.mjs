@@ -7,9 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const backendDir = join(repoRoot, "backend");
-const database = "mangorts_process_map_test_gate";
 const adminHost = "127.0.0.1";
-const user = "postgres";
 const testPattern = "^TestPostgres(ProcessMap|CompanyMembershipProcessMap|PendingInvitationDowngradeInvalidatesGlobalDevAdmin)";
 
 function postgresBinary(name) {
@@ -53,39 +51,51 @@ function runPostgresCommand(binary, args, options = {}) {
   return execFileSync(binary, args, { encoding: "utf8", ...options });
 }
 
-const initdb = postgresBinary("initdb");
-const pgCtl = postgresBinary("pg_ctl");
 const psql = postgresBinary("psql");
-const root = mkdtempSync(join(tmpdir(), "mangorts-process-map-pg-"));
-const data = join(root, "data");
-const log = join(root, "postgres.log");
-const port = await unusedLocalPort();
-const wslNetwork = windowsWSLNetwork();
-const testHost = wslNetwork?.gateway ?? adminHost;
+const external = Boolean(process.env.PROCESS_MAP_POSTGRES17_HOST?.trim());
+const initdb = external ? null : postgresBinary("initdb");
+const pgCtl = external ? null : postgresBinary("pg_ctl");
+const root = external ? null : mkdtempSync(join(tmpdir(), "mangorts-process-map-pg-"));
+const data = root && join(root, "data");
+const log = root && join(root, "postgres.log");
+const host = process.env.PROCESS_MAP_POSTGRES17_HOST?.trim() || adminHost;
+const port = external ? Number(process.env.PROCESS_MAP_POSTGRES17_PORT || 5432) : await unusedLocalPort();
+const database = process.env.PROCESS_MAP_POSTGRES17_DATABASE?.trim() || "mangorts_process_map_test_gate";
+const user = process.env.PROCESS_MAP_POSTGRES17_USER?.trim() || "postgres";
+const password = process.env.PROCESS_MAP_POSTGRES17_PASSWORD || process.env.PGPASSWORD || "";
+const wslNetwork = external ? null : windowsWSLNetwork();
+const testHost = external ? host : wslNetwork?.gateway ?? host;
 const listenAddresses = wslNetwork ? `${adminHost},${wslNetwork.gateway}` : adminHost;
-const postgresEnv = { ...process.env, PGCONNECT_TIMEOUT: "5", PGPASSWORD: "" };
-const dsn = `postgresql://${user}@${testHost}:${port}/${database}?sslmode=disable`;
+const postgresEnv = { ...process.env, PGCONNECT_TIMEOUT: "5", PGPASSWORD: password };
+const credentials = password
+  ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}`
+  : encodeURIComponent(user);
+const dsn = `postgresql://${credentials}@${testHost}:${port}/${database}?sslmode=disable`;
 let started = false;
 
 try {
-  runPostgresCommand(initdb, ["-D", data, "-A", "trust", "-U", user, "--no-locale"], { stdio: "pipe" });
-  if (wslNetwork) {
-    appendFileSync(join(data, "pg_hba.conf"), `\nhost all all ${wslNetwork.client}/32 trust\n`, "utf8");
+  if (!external) {
+    runPostgresCommand(initdb, ["-D", data, "-A", "trust", "-U", user, "--no-locale"], { stdio: "pipe" });
+    if (wslNetwork) {
+      appendFileSync(join(data, "pg_hba.conf"), `\nhost all all ${wslNetwork.client}/32 trust\n`, "utf8");
+    }
+    runPostgresCommand(pgCtl, ["-D", data, "-l", log, "-o", `-p ${port} -h ${listenAddresses}`, "-w", "start"], { stdio: "ignore" });
+    started = true;
   }
-  runPostgresCommand(pgCtl, ["-D", data, "-l", log, "-o", `-p ${port} -h ${listenAddresses}`, "-w", "start"], { stdio: "ignore" });
-  started = true;
 
   const version = Number(runPostgresCommand(psql, [
-    "-X", "-t", "-A", "-h", adminHost, "-p", String(port), "-U", user, "-d", "postgres",
+    "-X", "-t", "-A", "-h", host, "-p", String(port), "-U", user, "-d", external ? database : "postgres",
     "-v", "ON_ERROR_STOP=1", "-c", "show server_version_num",
   ], { env: postgresEnv }).trim());
   if (version < 170000 || version >= 190000) {
     throw new Error(`unsupported disposable PostgreSQL version ${version}`);
   }
-  runPostgresCommand(psql, [
-    "-X", "-h", adminHost, "-p", String(port), "-U", user, "-d", "postgres",
-    "-v", "ON_ERROR_STOP=1", "-c", `create database ${database}`,
-  ], { env: postgresEnv, stdio: "pipe" });
+  if (!external) {
+    runPostgresCommand(psql, [
+      "-X", "-h", host, "-p", String(port), "-U", user, "-d", "postgres",
+      "-v", "ON_ERROR_STOP=1", "-c", `create database ${database}`,
+    ], { env: postgresEnv, stdio: "pipe" });
+  }
 
   console.log(`Running Process Map PostgreSQL integration tests on isolated PostgreSQL ${version}`);
   if (process.platform === "win32") {
@@ -134,5 +144,5 @@ try {
   if (started) {
     spawnSync(pgCtl, ["-D", data, "-m", "fast", "-w", "stop"], { encoding: "utf8" });
   }
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  if (root) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
