@@ -5,7 +5,7 @@ let homePagePromise: Promise<typeof import("./home/HomePage")> | null = null;
 let projectManagementPagePromise: Promise<typeof import("./project-management")> | null = null;
 let accountManagerPagePromise: Promise<typeof import("./account-manager")> | null = null;
 let teamsPagePromise: Promise<typeof import("./teams")> | null = null;
-let fieldsPagePromise: Promise<typeof import("./fields")> | null = null;
+let entitiesPagePromise: Promise<typeof import("./entities")> | null = null;
 let processMapPagePromise: Promise<typeof import("./process-map/ProcessMapPage")> | null = null;
 
 function loadLogicGateArenaPage() {
@@ -33,9 +33,9 @@ function loadTeamsPage() {
   return teamsPagePromise;
 }
 
-function loadFieldsPage() {
-  fieldsPagePromise ??= import("./fields");
-  return fieldsPagePromise;
+function loadEntitiesPage() {
+  entitiesPagePromise ??= import("./entities");
+  return entitiesPagePromise;
 }
 
 function loadProcessMapPage() {
@@ -66,8 +66,8 @@ export function preloadTeamsPage(): void {
 export const LazyLogicGateArenaPage = React.lazy(() => loadLogicGateArenaPage().then((module) => ({ default: module.LogicGateArenaPage })));
 export const LazyHomePage = React.lazy(() => loadHomePage().then((module) => ({ default: module.HomePage })));
 
-export function preloadFieldsPage(): void {
-  void loadFieldsPage();
+export function preloadEntitiesPage(): void {
+  void loadEntitiesPage();
 }
 export function preloadProcessMapPage(): void {
   void loadProcessMapPage();
@@ -75,5 +75,5 @@ export function preloadProcessMapPage(): void {
 export const LazyProjectManagementPage = React.lazy(() => loadProjectManagementPage().then((module) => ({ default: module.ProjectManagementPage })));
 export const LazyAccountManagerPage = React.lazy(() => loadAccountManagerPage().then((module) => ({ default: module.AccountManagerPage })));
 export const LazyTeamsPage = React.lazy(() => loadTeamsPage().then((module) => ({ default: module.TeamsPage })));
-export const LazyFieldsPage = React.lazy(() => loadFieldsPage().then((module) => ({ default: module.FieldsPage })));
+export const LazyEntitiesPage = React.lazy(() => loadEntitiesPage().then((module) => ({ default: module.EntitiesPage })));
 export const LazyProcessMapPage = React.lazy(() => loadProcessMapPage().then((module) => ({ default: module.ProcessMapPage })));

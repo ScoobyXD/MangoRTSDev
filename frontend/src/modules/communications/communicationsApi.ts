@@ -9,6 +9,7 @@ import { invalidateResourcePolicyDependentCaches } from "../permissions/resource
 import { isHTTPNotFoundError, requestJSONWithMeta } from "../api/requestJSON.js";
 import { scheduleOutboundEmailDispatch } from "./outboundEmailUndo.js";
 import type { EditorProjectionItem } from "../editor/editorProjection.js";
+import { emailBodyWithoutEntityReferences } from "../editor/emailSignatureBody.js";
 
 export type EmailProvider = "google" | "microsoft";
 
@@ -1427,6 +1428,7 @@ export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): 
   if (!resourceScope && !cleanSharedInboxID && !cleanAccountEmail) throw new Error("email_draft_scope_required");
   if (resourceScope && (!Number.isInteger(input.expectedRevision) || (input.expectedRevision ?? 0) < 1)) throw new Error("email_draft_revision_required");
   const scheduledSendTimestamp = normalizeDraftTimestampForAPI(input.scheduledSendTimestamp);
+  const bodyEditorHTML = emailBodyWithoutEntityReferences(input.bodyEditorHTML);
   const payload = await apiFetchJSON<{ draft: CommunicationsEmailDraft }>(`/v1/communications/drafts/${encodeURIComponent(cleanDraftID)}`, {
     method: "PUT",
     body: JSON.stringify({
@@ -1441,7 +1443,7 @@ export async function saveEmailDraft(input: SaveCommunicationsEmailDraftInput): 
       cc_recipients: input.cc,
       bcc_recipients: input.bcc,
       subject: input.subject,
-      body_editor_html: input.bodyEditorHTML,
+      body_editor_html: bodyEditorHTML,
       reply_to_message: input.kind === "reply" ? undefined : input.replyToMessage ?? null,
       scheduled_send_timestamp: scheduledSendTimestamp,
     }),
@@ -1489,6 +1491,7 @@ export async function saveEmailSignature(input: {
 }): Promise<CommunicationsEmailSignature> {
   const cleanCompanyID = input.companyID.trim();
   if (!cleanCompanyID) throw new Error("company_id_required");
+  const bodyEditorHTML = emailBodyWithoutEntityReferences(input.bodyEditorHTML);
   const payload = await apiFetchJSON<{ signature: CommunicationsEmailSignature }>("/v1/communications/signature", {
     method: "PUT",
     body: JSON.stringify({
@@ -1496,7 +1499,7 @@ export async function saveEmailSignature(input: {
       shared_inbox_id: input.sharedInboxID?.trim() || undefined,
       account_email: input.sharedInboxID?.trim() ? undefined : input.accountEmail?.trim() || undefined,
       name: input.name?.trim() || undefined,
-      body_editor_html: input.bodyEditorHTML,
+      body_editor_html: bodyEditorHTML,
       is_default: input.isDefault ?? true,
     }),
   });

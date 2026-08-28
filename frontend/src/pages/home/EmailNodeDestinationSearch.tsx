@@ -30,6 +30,7 @@ type EmailNodeDestinationSearchProps = {
 };
 
 const EMAIL_PICKER_LINK_TARGET_TYPES = ["node", "project", "logic_gate"] as const;
+type PendingEmailProjectLink = EditorEntityLink & { entityType: "project" };
 
 const choiceGroupStyle: React.CSSProperties = {
   minWidth: 0,
@@ -85,7 +86,7 @@ export function EmailNodeDestinationSearch({
   const launcherRef = React.useRef<HTMLButtonElement | null>(null);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const [pickerAnchor, setPickerAnchor] = React.useState<UniversalEntityPickerAnchor>({ left: 24, top: 56 });
-  const [pendingLink, setPendingLink] = React.useState<EditorEntityLink | null>(null);
+  const [pendingLink, setPendingLink] = React.useState<PendingEmailProjectLink | null>(null);
   const [projectLogicGateID, setProjectLogicGateID] = React.useState("");
 
   const closePicker = React.useCallback(() => setPickerOpen(false), []);
@@ -139,8 +140,12 @@ export function EmailNodeDestinationSearch({
       onSubmit({ kind: "logic_gate", logicGateID: entity.entityID });
       return;
     }
+    if (entity.entityType !== "project") {
+      onError("This resource cannot be used as an email destination.");
+      return;
+    }
     setProjectLogicGateID("");
-    setPendingLink(entity);
+    setPendingLink({ ...entity, entityType: "project" });
   }, [onError, onOpenEntity, onSubmit]);
 
   const submitPendingLink = React.useCallback((overrides: { projectLogicGateID?: string } = {}) => {
@@ -210,7 +215,7 @@ export function EmailNodeDestinationSearch({
             <ExplorerEntityIcon kind={pendingLink.entityType} />
             <span style={{ minWidth: 0 }}>
               <strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5 }}>{pendingLink.label}</strong>
-              <span style={{ color: "#64748b", fontSize: 9.5 }}>{pendingLink.entityType === "logic_gate" ? "Create a new email Node in this Process" : "Create a new email Node in this Project"}</span>
+              <span style={{ color: "#64748b", fontSize: 9.5 }}>Create a new email Node in this Project</span>
             </span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 7, alignItems: "start" }}>

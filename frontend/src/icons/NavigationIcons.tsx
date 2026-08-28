@@ -48,14 +48,6 @@ export const HeaderTeamsIcon: React.FC<{ color?: string }> = ({ color = "current
   </svg>
 );
 
-export const HeaderFieldsIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
-  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
-    <path d="M2.2 3.3h6.25l5.25 4.75-5.25 4.65H2.2Z" fill="none" stroke={color} strokeWidth="1.25" strokeLinejoin="round" />
-    <circle cx="5.05" cy="8" r="1.15" fill="none" stroke={color} strokeWidth="1.15" />
-    <path d="M9.2 5.45 12 8l-2.8 2.5" fill="none" stroke={color} strokeWidth="1.05" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
 export const HeaderTriageIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <path d="M2.3 3.4h11.4v9.2H2.3Z" fill="none" stroke={color} strokeWidth="1.2" strokeLinejoin="round" />

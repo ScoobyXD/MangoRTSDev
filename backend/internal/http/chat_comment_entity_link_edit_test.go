@@ -24,3 +24,45 @@ func TestEditChatCommentInformationPreservesEntityLinksWhenOmitted(t *testing.T)
 		t.Fatalf("entity_links=%+v", payload["entity_links"])
 	}
 }
+
+func TestEditChatCommentInformationPreservesEntityReferenceMetadata(t *testing.T) {
+	authorID := "author-1"
+	message := "Track #Thailand delivery tomorrow"
+	updated, _, err := editChatCommentInformation(
+		"Text block chat",
+		`{"block_id":"block-1","author_id":"author-1","message":"Original","attachments":[]}`,
+		authorID,
+		&message,
+		&[]chatCommentEntityLink{{
+			Start:      6,
+			End:        24,
+			EntityType: "entity",
+			EntityID:   "11111111-1111-4111-8111-111111111111",
+			Label:      "Thailand delivery",
+		}},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("editChatCommentInformation: %v", err)
+	}
+	var payload struct {
+		EntityLinks []chatCommentEntityLink `json:"entity_links"`
+	}
+	if err := json.Unmarshal([]byte(updated), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.EntityLinks) != 1 {
+		t.Fatalf("entity_links=%+v", payload.EntityLinks)
+	}
+	want := chatCommentEntityLink{
+		Start:      6,
+		End:        24,
+		EntityType: "entity",
+		EntityID:   "11111111-1111-4111-8111-111111111111",
+		Label:      "Thailand delivery",
+	}
+	if payload.EntityLinks[0] != want {
+		t.Fatalf("entity link=%+v, want %+v", payload.EntityLinks[0], want)
+	}
+}

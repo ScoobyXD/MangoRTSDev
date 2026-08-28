@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
-import { preloadAccountManagerSurface, preloadFieldsSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
 import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
@@ -78,8 +78,8 @@ function preloadRouteSurface(path: string): void {
     preloadTeamsSurface();
     return;
   }
-  if (path === "/fields") {
-    preloadFieldsSurface();
+  if (path === "/entities") {
+    preloadEntitiesSurface();
     return;
   }
   if (route?.kind === "node") preloadAppLayout();
@@ -97,7 +97,7 @@ const homePrefetch = prefetchHandlers(preloadHomeSurface);
 const projectManagementPrefetch = prefetchHandlers(preloadProjectManagementSurface);
 const accountManagerPrefetch = prefetchHandlers(preloadAccountManagerSurface);
 const teamsPrefetch = prefetchHandlers(preloadTeamsSurface);
-const fieldsPrefetch = prefetchHandlers(preloadFieldsSurface);
+const entitiesPrefetch = prefetchHandlers(preloadEntitiesSurface);
 const AUTH_RETURN_PATH_KEY = "mangorts:auth-return-path-v1";
 const AUTH_RETURN_STATIC_PATHS = new Set([
   "/",
@@ -108,7 +108,7 @@ const AUTH_RETURN_STATIC_PATHS = new Set([
   "/project-management",
   "/account-manager",
   "/teams",
-  "/fields",
+  "/entities",
   "/settings",
   "/admin/users",
   "/recycle-bin",
@@ -438,8 +438,8 @@ export default function AuthGate() {
             ? "account-manager"
             : normalizedPath === "/teams"
               ? "teams"
-              : normalizedPath === "/fields"
-                ? "fields"
+              : normalizedPath === "/entities"
+                ? "entities"
                 : undefined;
 
   if (!authEnabled) {
@@ -494,8 +494,8 @@ export default function AuthGate() {
   if (normalizedPath === "/teams") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="teams" /></React.Suspense>;
   }
-  if (normalizedPath === "/fields") {
-    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="fields" /></React.Suspense>;
+  if (normalizedPath === "/entities") {
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="entities" /></React.Suspense>;
   }
 
 
@@ -1259,7 +1259,7 @@ function SettingsPage({ me, onNavigate, onLogout, embedded = false }: { me: Curr
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/account-manager")} {...accountManagerPrefetch}>Accounts</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/teams")} {...teamsPrefetch}>Teams</button>
           <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/home")} {...homePrefetch}>Home</button>
-          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/fields")} {...fieldsPrefetch}>Fields</button>
+          <button className="mango-settings-action" style={smallButtonStyle} onClick={() => onNavigate("/entities")} {...entitiesPrefetch}>Entities</button>
         </div>}
       </div>
       {error && <div style={settingsErrorStyle}>{error}</div>}

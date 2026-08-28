@@ -24,7 +24,7 @@ Last updated: 2026-08-08
 
 A non-admin types a nonblank query in the Universal Picker
 ↓
-All searches Nodes, Projects, Logic Gates, then Emails, while a selected tab searches only its matching source
+All searches Nodes, Processes, Projects, Entities, then Emails, while a selected tab searches only its matching source
 ↓
 Mango ranks a bounded batch directly from those source tables before performing permission work
 ↓
@@ -40,7 +40,7 @@ Last updated: 2026-08-07
 
 A user opens the shared universal picker from a Node, Logic Gate, or Project editor, the Node header linker, the Project Logic Gates / Nodes relationship launcher, the Project Attach email action, or a selected My Triage/Shared Triage message
 ↓
-The picker opens above a transparent dismiss layer, focuses one search field, and shows Nodes, Projects, Logic Gates, and Emails as typed categories
+The picker opens above a transparent dismiss layer, focuses one search field, and shows Nodes, Processes, Projects, Entities, and Emails as typed categories
 ↓
 Single-hashtag reference mode inserts or opens the chosen exact resource without changing a business relationship
 ↓
@@ -54,7 +54,7 @@ Choosing an email may use its provider message identity only to ingest it when n
 ↓
 The picker creates no generic relationship, translated identity, compose surface, send path, draft path, or compatibility email picker
 
-Last updated: 2026-08-17
+Last updated: 2026-08-27
 
 # Universal Picker Business Logic Laws
 
@@ -68,23 +68,23 @@ UP4 - The picker has exactly two typed action meanings. `#` is reference mode an
 
 UP5 - While the focused search is empty, typing `#` in reference mode changes to link mode only when the host supplied at least one legal link target. While the focused search is empty, Backspace in link mode changes to reference mode. The footer mode control performs the same transition. Every mode transition returns to All, clears the query, and clears workspace results.
 
-UP6 - The ordinary category row is ordered Nodes, Projects, Logic Gates, Emails. A normal Logic Gate's Huddle relationship launcher adds one contextual Huddles category at the end. The matching single-letter shortcuts are N then Tab, A then Tab, L then Tab, E then Tab, and contextual H then Tab. A shortcut changes category and clears the shortcut text; it does not select a result.
+UP6 - The ordinary category row is ordered Nodes, Processes, Projects, Entities, Emails. A normal Logic Gate's Huddle relationship launcher adds one contextual Huddles category at the end. The matching single-letter shortcuts are N then Tab, L then Tab, A then Tab, E then Tab, and contextual H then Tab; Entities has no single-letter shortcut because E remains the established Emails shortcut. A shortcut changes category and clears the shortcut text; it does not select a result.
 
 UP7 - Clicking an active category selects that exact type and clears the query. Clicking the already active category returns to All. In link mode a category is enabled only if the source host supplied that type as a legal link destination; a disabled category cannot be selected by pointer or keyboard.
 
-UP8 - Reference mode permits the four ordinary exact types: Node, Logic Gate, Project, and email message. A Huddle Logic Gate is available only when a relationship host explicitly supplies `huddle_logic_gate` as a legal link target. Link mode permits only the host's typed destination list and never expands that list because a result happens to be visible or pinned.
+UP8 - Reference mode in supported non-email editors permits the five ordinary exact types: Node, Logic Gate, Project, Entity, and email message. Email compose, reply, and signature editors exclude Entity while preserving their existing non-Entity reference types. Entity is reference-only and is never a legal link target. A Huddle Logic Gate is available only when a relationship host explicitly supplies `huddle_logic_gate` as a legal link target. Link mode permits only the host's typed destination list and never expands that list because a result happens to be visible or pinned.
 
 UP9 - The legal `##` matrix is exact: Node may link to a Logic Gate, Project, or email message; a Logic Gate editor may link to a Project; the normal Logic Gate Huddle tray may link to a Huddle Logic Gate; Project may link to a Node from its Logic Gates / Nodes launcher or to an email message from Attach email; and a selected email may link to a Node, Logic Gate, or Project. Email-to-email linking is not supported.
 
-UP10 - A blank All, Nodes, Logic Gates, or Projects view reads the current user's complete company-scoped Pinned tree. A blank contextual Huddles view combines visible Huddle Logic Gate pins with the authorized company Huddle Logic Gate list. It preserves stored folder/pin sibling order and indentation, hides empty folders after type filtering, deduplicates exact Huddle identities, and does not invent recency or write recent-use state.
+UP10 - A blank All, Nodes, Processes, or Projects view reads the current user's complete company-scoped Pinned tree. A blank Entities view reads a bounded company Entity list because Entities are not pinnable in the MVP. A blank contextual Huddles view combines visible Huddle Logic Gate pins with the authorized company Huddle Logic Gate list. Pinned views preserve stored folder/pin sibling order and indentation, hide empty folders after type filtering, deduplicate exact identities, and do not invent recency or write recent-use state.
 
-UP11 - A nonblank All query searches allowed Nodes, Projects, Logic Gates, and personal email in that order. A selected Nodes, Projects, Logic Gates, or Emails tab searches only that exact source and does not scan the other resource tables. Matching pinned entities remain first. Results with the same canonical type and ID as a matching pin appear only once.
+UP11 - A nonblank All query searches allowed Nodes, Processes, Projects, Entities, and personal email in that order. A selected Nodes, Processes, Projects, Entities, or Emails tab searches only that exact source and does not scan the other resource tables. Matching pinned resources remain first. Results with the same canonical type and ID as a matching pin appear only once.
 
 UP12 - Workspace search waits 120 milliseconds after input and requests at most 30 authorized results. Changing category, mode, or query aborts the old network request, carries that cancellation through the HTTP request into the database query, and retains the response-sequence guard, so an already completed stale response still cannot replace current state. Keyboard selection resets to the first selectable result.
 
-UP13 - Workspace search and blank Pinned reads use the current host's authenticated request function and company ID. They must preserve effective-access and visible-location filtering and must not reveal a cross-company, hidden, unsupported, folder-only, or inaccessible resource.
+UP13 - Workspace search, Entity search, and blank Pinned reads use the current host's authenticated request function and company ID. Node, Process, and Project results preserve effective-access and visible-location filtering; company-wide Entity results require company membership. No search may reveal a cross-company, hidden, unsupported, folder-only, or inaccessible resource.
 
-UP14 - Workspace rows carry the canonical resource type, literal canonical resource ID, and display label. Folders are headings and are never selectable relationship endpoints.
+UP14 - Workspace and Entity rows carry the canonical resource type, literal canonical resource ID, and display label. Folders are headings and are never selectable relationship endpoints.
 
 UP15 - In selection hosts, Enter or plain Tab selects the highlighted result, pointer click performs the same selection, and Arrow Up and Arrow Down wrap among selectable results. In the Process Map drag host, click, Enter, and Tab MUST NOT select or place a result. Escape closes every picker without selecting.
 
@@ -126,9 +126,9 @@ UP33 - Linking an email to a Node through the Node header linker uses the existi
 
 UP34 - From a selected email, choosing an existing Node adds or reuses that exact Node-wide thread destination even when the thread already has another Node destination. Choosing a Logic Gate immediately creates the email Node there with priority **Not Assigned**. Choosing a Project requires only a Logic Gate choice and then uses the established typed Project/Logic Gate commands.
 
-UP35 - Reference-mode selection never creates a relationship. In an editor it inserts the typed entity atom; in a selected-email host it opens the exact target. A reference chip remains independent from any existing relationship represented by the same two resources.
+UP35 - Reference-mode selection never creates a relationship. In an editor it inserts the typed reference atom; in a selected-email host it opens the exact target. Entity selection is always reference mode. A reference chip remains independent from any existing relationship represented by the same two resources.
 
-UP36 - Removing, unwrapping, undoing, replacing, or deleting a reference chip edits only the source document. It never removes or changes a Node assignment, Project relationship, Logic Gate relationship, or attached-email relationship.
+UP36 - Removing, unwrapping, undoing, replacing, or deleting a reference chip edits only the source document. It never removes or changes a Node assignment, Project relationship, Logic Gate relationship, Entity, or attached-email relationship.
 
 UP37 - While a selection command is running, the search, category controls, folder controls, and result choices are busy and cannot submit a second command. A failed command leaves the picker open, shows its message, clears busy state, and returns focus to the search field for retry.
 
@@ -169,8 +169,8 @@ Given:
 
 Expected:
 - The picker focuses search and starts in reference mode.
-- Nodes, Projects, Logic Gates, and Emails appear in that order; N/A/L/E followed by Tab selects an enabled category.
-- Blank workspace categories show the filtered Pinned tree; nonblank workspace queries show authorized matching pins first and deduplicated workspace results after them.
+- Nodes, Processes, Projects, Entities, and Emails appear in that order; N/L/A/E followed by Tab selects its established enabled category while Entities has no shortcut.
+- Blank workspace categories show the filtered Pinned tree, blank Entities shows a bounded company Entity list, and nonblank queries show exact-source matches in the documented order.
 - Arrow keys, Enter, Tab, Escape, pointer selection, mode switching, and outside-click dismissal follow the same rules in every host.
 
 ## Scenario UP-S2: Search and choose an email

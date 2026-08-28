@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 import {
   addLogicGateRACIAssignments,
   addLocalEmailReply,
@@ -379,6 +380,57 @@ test("email signature helpers preserve exact personal and shared mailbox scope",
     ]);
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("email draft and signature writes downgrade only Entity reference chips", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const originalFetch = globalThis.fetch;
+  Object.defineProperty(globalThis, "document", { configurable: true, value: dom.window.document });
+  const bodies: string[] = [];
+  const editorBody = "<!-- mango-editor-html-v1 --><div><span data-mango-entity-link=\"true\" data-mango-entity-type=\"entity\" data-mango-entity-id=\"entity-1\" data-mango-entity-label=\"Thailand delivery\">Thailand delivery</span> <span data-mango-entity-link=\"true\" data-mango-entity-type=\"project\" data-mango-entity-id=\"project-1\" data-mango-entity-label=\"Costco order\">Costco order</span></div>";
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const payload = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as { body_editor_html?: string };
+    bodies.push(payload.body_editor_html ?? "");
+    if (input.toString().includes("/drafts/")) {
+      return jsonResponse({
+        draft: {
+          company_id: "company-1", draft_id: "draft-entity-reference", scope_type: "personal",
+          personal_user_id: "user-1", personal_account_email: "me@example.test", kind: "compose",
+          to_recipients: "", cc_recipients: "", bcc_recipients: "", subject: "Entity reference",
+          body_editor_html: payload.body_editor_html ?? "", created_timestamp: "2026-08-27T00:00:00Z", updated_timestamp: "2026-08-27T00:00:00Z",
+        },
+      });
+    }
+    return jsonResponse({
+      signature: {
+        company_id: "company-1", signature_id: "signature-entity-reference", scope_type: "personal",
+        name: "Default", body_editor_html: payload.body_editor_html ?? "", is_default: true,
+        created_timestamp: "2026-08-27T00:00:00Z", updated_timestamp: "2026-08-27T00:00:00Z",
+      },
+    });
+  };
+
+  try {
+    await saveEmailDraft({
+      companyID: "company-1", draftID: "draft-entity-reference", accountEmail: "me@example.test",
+      kind: "compose", to: "", cc: "", bcc: "", subject: "Entity reference", bodyEditorHTML: editorBody,
+    });
+    await saveEmailSignature({ companyID: "company-1", accountEmail: "me@example.test", bodyEditorHTML: editorBody });
+
+    assert.equal(bodies.length, 2);
+    for (const body of bodies) {
+      assert.match(body, /Thailand delivery/);
+      assert.doesNotMatch(body, /data-mango-entity-type="entity"|data-mango-entity-id="entity-1"/);
+      assert.match(body, /data-mango-entity-type="project"/);
+      assert.match(body, /data-mango-entity-id="project-1"/);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+    dom.window.close();
   }
 });
 

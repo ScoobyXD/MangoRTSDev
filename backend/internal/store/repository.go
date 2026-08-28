@@ -61,7 +61,7 @@ func (e *ProjectionRevisionConflictError) Unwrap() error { return ErrVersionConf
 type Repository interface {
 	IdentityRepository
 	AccountRepository
-	EntityFieldRepository
+	EntitiesRepository
 	CommunicationsRepository
 	AttachmentRepository
 	WorkGraphRepository
@@ -91,12 +91,27 @@ type Repository interface {
 	DomainEventRepository
 }
 
-type EntityFieldRepository interface {
-	ListEntityFields(companyID string) ([]domain.EntityField, error)
+type EntitiesRepository interface {
+	ListEntityTypes(companyID string) ([]domain.EntityType, error)
+	CreateEntityType(input EntityTypeInput) (domain.EntityType, error)
+	UpdateEntityType(input EntityTypeInput) (domain.EntityType, error)
+	DeleteEntityType(companyID, entityTypeID string) error
+	ListEntityFolders(companyID, entityTypeID string) ([]domain.EntityFolder, error)
+	CreateEntityFolder(input EntityFolderInput) (domain.EntityFolder, error)
+	UpdateEntityFolder(input EntityFolderInput) (domain.EntityFolder, error)
+	DeleteEntityFolder(companyID, entityFolderID string) error
+	ListEntityFieldTypes(companyID, entityTypeID string) ([]domain.EntityFieldType, error)
+	CreateEntityFieldType(input EntityFieldTypeInput) (domain.EntityFieldType, error)
+	UpdateEntityFieldType(input EntityFieldTypeInput) (domain.EntityFieldType, error)
+	DeleteEntityFieldType(companyID, entityFieldTypeID string) error
+	ListEntities(ctx context.Context, query EntityListQuery) ([]domain.EntitySummary, error)
+	CreateEntity(input EntityInput) (domain.Entity, error)
+	GetEntity(companyID, entityID string) (domain.Entity, error)
+	UpdateEntity(input EntityInput) (domain.Entity, error)
+	DeleteEntity(companyID, entityID string) error
 	CreateEntityField(input EntityFieldInput) (domain.EntityField, error)
 	UpdateEntityField(input EntityFieldInput) (domain.EntityField, error)
-	DeleteEntityField(companyID, fieldID, actorUserID string) error
-	SetEntityFieldAssignments(input EntityFieldAssignmentInput) ([]domain.EntityField, error)
+	DeleteEntityField(companyID, entityID, entityFieldID string) error
 }
 
 type AccountRepository interface {
@@ -1355,24 +1370,6 @@ type ProjectInput struct {
 	TeamIDsSet                      bool
 	ActorUserID                     string
 	CompanyExplorerDefaultPlacement bool
-}
-
-type EntityFieldInput struct {
-	CompanyID   string
-	FieldID     string
-	Name        string
-	Color       string
-	Position    int
-	PositionSet bool
-	ActorUserID string
-}
-
-type EntityFieldAssignmentInput struct {
-	CompanyID    string
-	ResourceType string
-	ResourceID   string
-	FieldIDs     []string
-	ActorUserID  string
 }
 
 type ResourceRACIAssignmentInput struct {

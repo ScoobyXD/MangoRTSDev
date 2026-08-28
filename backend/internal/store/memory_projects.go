@@ -643,7 +643,6 @@ func (r *MemoryRepo) ListProjectRelationshipsForResource(companyID, resourceType
 
 func (r *MemoryRepo) withProjectReadModelLocked(project domain.Project) domain.Project {
 	project = cloneProject(project)
-	project.Fields = r.entityFieldsForResourceLocked(project.CompanyID, EntityTypeProject, project.ProjectID)
 	accountIDs := r.projectAccountIDsLocked(project.CompanyID, project.ProjectID)
 	project.Accounts = make([]domain.Account, 0, len(accountIDs))
 	for _, accountID := range accountIDs {
@@ -921,7 +920,6 @@ func (r *MemoryRepo) deleteProjectLocked(companyID, projectID string) error {
 			delete(r.projectTeamAssignments, assignmentKey)
 		}
 	}
-	r.deleteEntityFieldAssignmentsForResourceLocked(companyID, EntityTypeProject, projectID)
 	delete(r.projectInfo, k)
 	delete(r.projectText, k)
 	for relationshipKey, relationship := range r.projectEmailRelationships {

@@ -459,8 +459,15 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     assert.deepEqual(mentionedPrincipals, ["ada", "ada"], "accepted composer entities keep the existing mentioned-principal model");
 
     const requestedEntityPaths: string[] = [];
-    const entityRequestJSON = async <T,>(path: string): Promise<T> => {
+    const requestedEntitySignals: Array<AbortSignal | null | undefined> = [];
+    const entityRequestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
       requestedEntityPaths.push(path);
+      requestedEntitySignals.push(init?.signal);
+      if (path.startsWith("/v1/entities?")) {
+        return {
+          entities: [{ entity_id: "entity exact/id", name: "Thailand delivery" }],
+        } as T;
+      }
       return {
         results: [
           { resource_type: "node", resource_id: "node-1", display_name: "Node One" },
@@ -495,28 +502,32 @@ test("annotated editor text reveals and accessibly focuses its exact chat commen
     await act(async () => entityComposer.dispatchEvent(new dom.window.KeyboardEvent("keyup", { key: "o", bubbles: true })));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
     await flushFrames();
-    assert.ok(requestedEntityPaths.some((path) => path.includes("resource_types=node%2Cproject%2Clogic_gate") && path.includes("ranking=editor_entities")));
+    assert.ok(requestedEntityPaths.some((path) => path.includes("resource_types=node%2Clogic_gate%2Cproject") && path.includes("ranking=editor_entities")));
+    assert.ok(requestedEntityPaths.some((path) => path.startsWith("/v1/entities?") && path.includes("q=Pro")));
+    assert.equal(requestedEntitySignals.length, 2);
+    assert.ok(requestedEntitySignals[0]);
+    assert.equal(requestedEntitySignals[0], requestedEntitySignals[1], "chat cancels both branches of one combined search through one signal");
     const entityMenu = container.querySelector<HTMLElement>('[data-mango-chat-entity-menu="true"]');
     assert.ok(entityMenu, "# opens the shared workspace entity picker in chat");
     assert.deepEqual(
       Array.from(entityMenu.querySelectorAll<HTMLElement>("[data-mango-chat-entity-type]")).map((option) => option.dataset.mangoChatEntityType),
-      ["node", "project", "logic_gate"],
-      "chat exposes Nodes, Projects, and Logic Gates in product order",
+      ["node", "logic_gate", "project", "entity"],
+      "chat exposes Nodes, Processes, Projects, and Entities in product order",
     );
-    const arrowDown = new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true });
-    await act(async () => entityComposer.dispatchEvent(arrowDown));
-    await act(async () => entityComposer.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+    for (let index = 0; index < 3; index += 1) {
+      await act(async () => entityComposer.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+    }
     const acceptEntity = new dom.window.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
     await act(async () => entityComposer.dispatchEvent(acceptEntity));
     await flushFrames();
     assert.equal(acceptEntity.defaultPrevented, true);
-    assert.equal(entityComposer.value, "#Gate One ");
-    assert.deepEqual(acceptedEntityLinks, [{ start: 0, end: 9, entityType: "logic_gate", entityID: "gate-1", label: "Gate One" }]);
+    assert.equal(entityComposer.value, "#Thailand delivery ");
+    assert.deepEqual(acceptedEntityLinks, [{ start: 0, end: 18, entityType: "entity", entityID: "entity exact/id", label: "Thailand delivery" }]);
     const draftEntityChip = container.querySelector<HTMLElement>('[data-mango-chat-composer-entity-link="true"]');
     assert.ok(draftEntityChip, "an accepted # entity is visibly rendered as a chip before the chat is sent");
-    assert.equal(draftEntityChip.textContent, "#Gate One");
-    assert.equal(draftEntityChip.dataset.mangoEntityType, "logic_gate");
-    assert.equal(draftEntityChip.dataset.mangoEntityId, "gate-1");
+    assert.equal(draftEntityChip.textContent, "#Thailand delivery");
+    assert.equal(draftEntityChip.dataset.mangoEntityType, "entity");
+    assert.equal(draftEntityChip.dataset.mangoEntityId, "entity exact/id");
     assert.equal(draftEntityChip.style.padding, "0px", "the draft entity chip keeps its glyph width aligned with the native caret");
     assert.equal(draftEntityChip.style.fontWeight, "inherit");
     assert.match(draftEntityChip.style.boxShadow, /0 0 0 2px/, "the unsent entity stays visibly outlined like an accepted mention");

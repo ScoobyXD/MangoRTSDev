@@ -633,6 +633,16 @@
   --mango-entity-option-accent: rgba(245,158,11,0.38);
 }
 
+.mango-editor-entity-link--entity {
+  --mango-entity-chip-border: rgba(13,148,136,0.42);
+  --mango-entity-chip-background: linear-gradient(135deg, rgba(255,255,255,0.98), rgba(204,251,241,0.9), rgba(219,234,254,0.82));
+  --mango-entity-chip-shadow: rgba(15,118,110,0.16);
+}
+
+.mango-tiptap-suggestion-option--entity[data-mango-editor-entity-type="entity"] {
+  --mango-entity-option-accent: rgba(13,148,136,0.38);
+}
+
 .mango-tiptap-suggestion-option--entity:hover,
 .mango-tiptap-suggestion-option--entity[aria-selected="true"] {
   border-color: var(--mango-entity-option-accent, rgba(139,92,246,0.34));

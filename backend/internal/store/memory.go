@@ -41,8 +41,11 @@ type MemoryRepo struct {
 	projects                         map[string]domain.Project
 	projectAccountAssignments        map[string]bool
 	projectTeamAssignments           map[string]bool
+	entityTypes                      map[string]domain.EntityType
+	entityFolders                    map[string]domain.EntityFolder
+	entityFieldTypes                 map[string]domain.EntityFieldType
+	entities                         map[string]domain.Entity
 	entityFields                     map[string]domain.EntityField
-	entityFieldAssignments           map[string]bool
 	projectInfo                      map[string][]domain.ProjectInformation
 	projectText                      map[string]map[string]domain.ProjectProjection
 	projectRelationships             map[string]domain.ProjectRelationship
@@ -154,8 +157,11 @@ func NewMemoryRepo() *MemoryRepo {
 		projects:                         map[string]domain.Project{},
 		projectAccountAssignments:        map[string]bool{},
 		projectTeamAssignments:           map[string]bool{},
+		entityTypes:                      map[string]domain.EntityType{},
+		entityFolders:                    map[string]domain.EntityFolder{},
+		entityFieldTypes:                 map[string]domain.EntityFieldType{},
+		entities:                         map[string]domain.Entity{},
 		entityFields:                     map[string]domain.EntityField{},
-		entityFieldAssignments:           map[string]bool{},
 		projectInfo:                      map[string][]domain.ProjectInformation{},
 		projectText:                      map[string]map[string]domain.ProjectProjection{},
 		projectRelationships:             map[string]domain.ProjectRelationship{},

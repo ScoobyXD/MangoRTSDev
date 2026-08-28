@@ -17,7 +17,7 @@ import {
   type EditorEntityLink,
   type EditorEntityLinkRequest,
   type EditorEntityType,
-  type EditorWorkspaceEntityType,
+  type EditorSearchableEntityType,
 } from "./editorEntityLinks.js";
 import {
   EDITOR_NEU_ACTIVE_SURFACE,
@@ -65,9 +65,9 @@ type PickerRow =
   | { kind: "folder"; key: string; depth: number; label: string }
   | { kind: "entity"; key: string; depth: number; entity: UniversalEntityPickerEntity; pinned: boolean };
 
-const ALL_ENTITY_TYPES: readonly EditorEntityType[] = ["node", "project", "logic_gate", "email_message"];
+const ALL_ENTITY_TYPES: readonly EditorEntityType[] = ["node", "logic_gate", "project", "entity", "email_message"];
 const PICKER_ENTITY_TYPES: readonly UniversalEntityPickerEntityType[] = [...ALL_ENTITY_TYPES, "huddle_logic_gate"];
-const WORKSPACE_ENTITY_TYPES: readonly EditorWorkspaceEntityType[] = ["node", "project", "logic_gate"];
+const SEARCHABLE_ENTITY_TYPES: readonly EditorSearchableEntityType[] = ["node", "logic_gate", "project", "entity"];
 const EMPTY_PIN_TREE: SidebarPinTree = { folders: [], pins: [] };
 
 export function universalPickerShortcutCategory(value: string): UniversalEntityPickerEntityType | null {
@@ -85,7 +85,9 @@ export function universalPickerAllowedTypes(
   linkTargetTypes: readonly UniversalEntityPickerEntityType[],
   category: UniversalEntityPickerCategory,
 ): UniversalEntityPickerEntityType[] {
-  const permitted = mode === "link" ? new Set(linkTargetTypes) : new Set<UniversalEntityPickerEntityType>(ALL_ENTITY_TYPES);
+  const permitted = mode === "link"
+    ? new Set(linkTargetTypes.filter((type) => type !== "entity"))
+    : new Set<UniversalEntityPickerEntityType>(ALL_ENTITY_TYPES);
   const ordered = PICKER_ENTITY_TYPES.filter((type) => permitted.has(type));
   return category === "all" ? ordered : ordered.includes(category) ? [category] : [];
 }
@@ -131,8 +133,9 @@ function pickerPanelPosition(anchor: UniversalEntityPickerAnchor, emailActive: b
 
 const categoryOptions: Array<{ type: UniversalEntityPickerEntityType; label: string }> = [
   { type: "node", label: "Nodes" },
-  { type: "project", label: "Projects" },
   { type: "logic_gate", label: "Processes" },
+  { type: "project", label: "Projects" },
+  { type: "entity", label: "Entities" },
   { type: "email_message", label: "Emails" },
   { type: "huddle_logic_gate", label: "Huddles" },
 ];
@@ -176,8 +179,8 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     () => props.linkTargetTypes.includes("huddle_logic_gate") ? categoryOptions : categoryOptions.filter((option) => option.type !== "huddle_logic_gate"),
     [props.linkTargetTypes],
   );
-  const workspaceAllowedTypes = useMemo(
-    () => allowedTypes.filter((type): type is EditorWorkspaceEntityType => WORKSPACE_ENTITY_TYPES.includes(type as EditorWorkspaceEntityType)),
+  const searchableAllowedTypes = useMemo(
+    () => allowedTypes.filter((type): type is EditorSearchableEntityType => SEARCHABLE_ENTITY_TYPES.includes(type as EditorSearchableEntityType)),
     [allowedTypes],
   );
   const allPinnedRows = useMemo(() => pinnedRows(pinTree, allowedTypes), [allowedTypes, pinTree]);
@@ -187,7 +190,11 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
       ? allPinnedRows.filter((row) => row.kind === "entity" && row.entity.label.toLocaleLowerCase().includes(cleanQuery))
       : allPinnedRows;
     const seen = new Set(matchingPins.map((row) => row.key));
-    const searchableResults = cleanQuery ? [...searchResults, ...emailSearchResults] : [];
+    const searchableResults = cleanQuery
+      ? [...searchResults, ...emailSearchResults]
+      : category === "entity"
+        ? searchResults
+        : [];
     const visibleHuddles = huddleLogicGates.filter((entity) => !cleanQuery || entity.label.toLocaleLowerCase().includes(cleanQuery));
     return [...matchingPins, ...[...searchableResults, ...visibleHuddles].flatMap<PickerRow>((entity) => {
       const key = `${entity.entityType}:${entity.entityID}`;
@@ -195,7 +202,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
       seen.add(key);
       return [{ kind: "entity", key, depth: 0, entity, pinned: false }];
     })];
-  }, [allPinnedRows, emailSearchResults, huddleLogicGates, query, searchResults]);
+  }, [allPinnedRows, category, emailSearchResults, huddleLogicGates, query, searchResults]);
   const selectableRows = useMemo(
     () => visibleRows.filter((row): row is Extract<PickerRow, { kind: "entity" }> => row.kind === "entity"),
     [visibleRows],
@@ -243,17 +250,18 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     const controller = new AbortController();
     setSelectedIndex(0);
     setError("");
-    if (!cleanQuery || workspaceAllowedTypes.length === 0 || category === "email_message") {
+    const listEntities = category === "entity" && searchableAllowedTypes.includes("entity");
+    if ((!cleanQuery && !listEntities) || searchableAllowedTypes.length === 0 || category === "email_message") {
       setSearchResults([]);
-      return;
+      return () => controller.abort();
     }
     const timer = window.setTimeout(() => {
       setLoading(true);
-      void searchEditorEntityLinks({ companyID: props.companyID, requestJSON: props.requestJSON }, cleanQuery, 30, workspaceAllowedTypes, controller.signal)
+      void searchEditorEntityLinks({ companyID: props.companyID, requestJSON: props.requestJSON }, cleanQuery, 30, searchableAllowedTypes, controller.signal)
         .then((results) => { if (searchSequenceRef.current === sequence) setSearchResults(results); })
         .catch((cause) => {
           if (cause instanceof DOMException && cause.name === "AbortError") return;
-          if (searchSequenceRef.current === sequence) setError(cause instanceof Error ? cause.message : "Unable to search workspace");
+          if (searchSequenceRef.current === sequence) setError(cause instanceof Error ? cause.message : "Unable to search resources");
         })
         .finally(() => { if (searchSequenceRef.current === sequence) setLoading(false); });
     }, 120);
@@ -261,7 +269,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [category, props.companyID, props.requestJSON, query, workspaceAllowedTypes]);
+  }, [category, props.companyID, props.requestJSON, query, searchableAllowedTypes]);
 
   const searchEmailInAll = category === "all" && allowedTypes.includes("email_message");
 
@@ -341,6 +349,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     setBusy(true);
     setError("");
     try {
+      if (mode === "link" && entity.entityType === "entity") throw new Error("Entities can be referenced with #, but cannot be linked with ##.");
       let selectedEntity: UniversalEntityPickerEntity = entity;
       if (entity.entityType === "email_message") {
         if (!entity.emailMessage) throw new Error("The selected email is no longer available. Search for it again.");
@@ -464,27 +473,27 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "auto minmax(0,1fr)", alignItems: "center", gap: 8, padding: "8px 11px", borderRadius: 13, background: EDITOR_NEU_ACTIVE_SURFACE, boxShadow: "inset 3px 3px 8px rgba(174,174,192,.18), inset -3px -3px 8px rgba(255,255,255,.92)" }}>
           <span aria-hidden="true" style={{ fontSize: 17, fontWeight: 900, color: mode === "link" ? "#7c3aed" : "#0891b2" }}>{mode === "link" ? "##" : "#"}</span>
-          <input ref={inputRef} value={query} disabled={busy} aria-label={dragOnly ? "Search Processes to drag" : mode === "link" ? "Search resources to link" : "Search resources to reference"} placeholder={dragOnly ? "Search Processes to place…" : category === "email_message" ? "Search Inbox, Starred, Sent, All, or Spam…" : mode === "link" ? "Search what to link…" : "Search pins or workspace…"} onChange={(event) => setQuery(event.target.value)} onKeyDown={onInputKeyDown} style={{ width: "100%", minWidth: 0, padding: 0, border: 0, outline: 0, background: "transparent", color: "#172033", font: "inherit", fontSize: 14 }} />
+          <input ref={inputRef} value={query} disabled={busy} aria-label={dragOnly ? "Search Processes to drag" : mode === "link" ? "Search resources to link" : "Search resources to reference"} placeholder={dragOnly ? "Search Processes to place…" : category === "email_message" ? "Search Inbox, Starred, Sent, All, or Spam…" : category === "entity" ? "Search Entities…" : mode === "link" ? "Search what to link…" : "Search pins or workspace…"} onChange={(event) => setQuery(event.target.value)} onKeyDown={onInputKeyDown} style={{ width: "100%", minWidth: 0, padding: 0, border: 0, outline: 0, background: "transparent", color: "#172033", font: "inherit", fontSize: 14 }} />
         </div>
       </div>
       <div data-mango-universal-picker-categories="true" style={{ width: "calc(100% - 28px)", maxWidth: 430, display: "grid", gridTemplateColumns: `repeat(${visibleCategoryOptions.length},minmax(0,1fr))`, gap: 6, margin: "0 auto 10px" }}>
         {visibleCategoryOptions.map((option) => {
-          const enabled = mode === "reference" || props.linkTargetTypes.includes(option.type);
+          const enabled = mode === "reference" || (option.type !== "entity" && props.linkTargetTypes.includes(option.type));
           const active = category === option.type;
           return <button key={option.type} type="button" disabled={!enabled || busy} aria-pressed={active} onClick={() => { setCategory(props.lockMode ? option.type : active ? "all" : option.type); setQuery(""); }} style={{ width: "100%", minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 6px", border: active ? "1px solid rgba(8,145,178,.30)" : "1px solid rgba(255,255,255,.72)", borderRadius: 11, background: active ? "linear-gradient(145deg,#e8fbff,#f5efff)" : EDITOR_NEU_ACTIVE_SURFACE, boxShadow: active ? "inset 2px 2px 5px rgba(174,174,192,.18)" : EDITOR_NEU_SHADOW, color: enabled ? "#263247" : "#94a3b8", cursor: enabled ? "pointer" : "not-allowed", fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>{option.type === "email_message" ? <HeaderTriageIcon color={enabled ? "#0ea5e9" : "#94a3b8"} /> : option.type === "huddle_logic_gate" ? <HuddleResourceIcon type="huddle_logic_gate" /> : <ExplorerRowIcon kind={option.type} />}{option.label}</button>;
         })}
       </div>
       {category === "email_message" ? (
         <UniversalPickerEmailPane ref={emailPaneRef} active busy={busy} companyID={props.companyID} query={query} requestJSON={props.requestJSON} onChoose={chooseEmail} />
-      ) : <div role="listbox" aria-label={query.trim() ? "Workspace search results" : "Pinned resources"} style={{ minHeight: 150, maxHeight: 310, overflowY: "auto", padding: "3px 9px 10px" }}>
-        <div style={{ padding: "2px 7px 7px", fontSize: 10, fontWeight: 900, letterSpacing: .7, textTransform: "uppercase", color: "#64748b" }}>{query.trim() ? "Results" : "Pinned"}</div>
+      ) : <div role="listbox" aria-label={query.trim() || category === "entity" ? "Resource search results" : "Pinned resources"} style={{ minHeight: 150, maxHeight: 310, overflowY: "auto", padding: "3px 9px 10px" }}>
+        <div style={{ padding: "2px 7px 7px", fontSize: 10, fontWeight: 900, letterSpacing: .7, textTransform: "uppercase", color: "#64748b" }}>{query.trim() || category === "entity" ? "Results" : "Pinned"}</div>
         {visibleRows.map((row) => {
           if (row.kind === "folder") return <div key={row.key} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 8px 4px", paddingLeft: 8 + row.depth * 14, color: "#64748b", fontSize: 11, fontWeight: 900 }}><ExplorerRowIcon kind="folder" />{row.label}</div>;
           const index = selectableRows.findIndex((item) => item.key === row.key);
           const active = index === selectedIndex;
           return <button key={row.key} type="button" role="option" aria-selected={active} disabled={busy} draggable={Boolean(props.onEntityDragStart) && !busy} onMouseEnter={() => setSelectedIndex(index)} onClick={() => props.onChoose ? void choose(row.entity) : setSelectedIndex(index)} onDragStart={(event) => { if (!props.onEntityDragStart) return; props.onEntityDragStart(event, row.entity); setDragActive(true); }} onDragEnd={() => setDragActive(false)} style={{ width: "100%", display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center", gap: 9, padding: "9px 10px", paddingLeft: 10 + row.depth * 14, border: active ? "1px solid rgba(8,145,178,.24)" : "1px solid transparent", borderRadius: 11, background: active ? "linear-gradient(145deg,rgba(232,251,255,.94),rgba(245,239,255,.92))" : "transparent", color: "#172033", cursor: busy ? "wait" : props.onEntityDragStart ? "grab" : "pointer", textAlign: "left" }}>{row.entity.entityType === "huddle_logic_gate" ? <HuddleResourceIcon type="huddle_logic_gate" /> : <ExplorerEntityIcon kind={row.entity.entityType} />}<span style={{ minWidth: 0 }}><span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 }}>{row.entity.label}</span><span style={{ display: "block", marginTop: 1, color: "#64748b", fontSize: 10 }}>{pickerEntityTypeLabel(row.entity.entityType)}</span></span>{row.pinned && <span aria-label="Pinned" title="Pinned" style={{ color: "#f59e0b", fontSize: 12 }}>◆</span>}</button>;
         })}
-        {!loading && !emailSearchLoading && visibleRows.length === 0 && <div style={{ padding: "28px 14px", textAlign: "center", color: "#64748b", fontSize: 12 }}>{query.trim() ? "No matching resources." : "Your Pinned section is empty."}</div>}
+        {!loading && !emailSearchLoading && visibleRows.length === 0 && <div style={{ padding: "28px 14px", textAlign: "center", color: "#64748b", fontSize: 12 }}>{query.trim() || category === "entity" ? "No matching resources." : "Your Pinned section is empty."}</div>}
         {(loading || emailSearchLoading || huddleLoading) && <div style={{ padding: 12, color: "#64748b", fontSize: 11 }}>Loading…</div>}
       </div>}
       <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 42, padding: "8px 14px", borderTop: "1px solid rgba(255,255,255,.72)", color: "#64748b", fontSize: 10 }}>

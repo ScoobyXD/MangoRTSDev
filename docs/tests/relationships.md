@@ -184,7 +184,7 @@ Last updated: 2026-08-06
 
 A user opens the universal picker from a resource editor, the Node header's default `##` linker, the Project Logic Gates / Nodes launcher, or a selected My Triage/Shared Triage email
 ↓
-Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, Project, or email message without creating a relationship; an email reference carries its exact internal message and thread identities plus one mailbox authorization scope, then opens the stored thread independently of surrounding resource relationships and without fallback lookup
+Single-hashtag reference mode opens or inserts the chosen exact Node, Logic Gate, Project, Entity, or email message without creating a relationship; an Entity reference opens only its exact current Entity by canonical ID, while an email reference carries its exact internal message and thread identities plus one mailbox authorization scope and opens the stored thread independently of surrounding resource relationships and without fallback lookup
 ↓
 Double-hashtag link mode keeps the source and chosen result's unchanged canonical types and IDs and permits only the documented pair
 ↓
@@ -194,7 +194,7 @@ Node-to-Logic-Gate uses the Logic Gate work-assignment command, while Node-to-Pr
 ↓
 Authorization, cardinality, idempotency, timeline stamps, projections, and events remain owned by those commands; the picker creates no generic edge or resource registry, and an editor chip remains only a reference
 
-Last updated: 2026-08-17
+Last updated: 2026-08-27
 
 # Process Story: Mango relates resources by their exact identities
 
@@ -230,7 +230,7 @@ Automatic placement creates, infers, changes, and deletes no operational edge; t
 ↓
 Deleting a selected trace still removes its exact operational edge and dependent geometry without deleting either endpoint, while endpoint deletion and recycle continue to follow their exact typed lifecycle contracts
 
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 
 # Relationship Business Logic Laws
 
@@ -238,7 +238,7 @@ These laws define how MangoRTS represents relationships. They apply to schema de
 
 ## What `resource` means
 
-A **resource** is an identifiable Mango business object that may own data or be one endpoint of a relationship. Resources include Nodes, Logic Gates, Huddle Logic Gates, Huddle Nodes, KPIs, Projects, email messages and threads, textboxes and chats where they have their own identity, attachments, Accounts, Company Explorer folders, Huddle Explorer folders, shared inboxes and folders, and any future business object explicitly added to a relationship contract.
+A **resource** is an identifiable Mango business object that may own data or be one endpoint of a relationship. Resources include Nodes, Logic Gates, Huddle Logic Gates, Huddle Nodes, KPIs, Projects, Entities, email messages and threads, textboxes and chats where they have their own identity, attachments, Accounts, Entity folders, Company Explorer folders, Huddle Explorer folders, shared inboxes and folders, and any future business object explicitly added to a relationship contract.
 
 A user or group is normally a **principal** when it receives a permission or RACI role. A relationship row and a derived projection row are records about resources; they are not automatically resources themselves.
 
@@ -277,6 +277,8 @@ Examples include:
 - `huddle_node_logic_gate_relationships` and `huddle_node_kpi_relationships` for one Huddle Node's creation-time relationship set.
 - `huddle_nodes.huddle_logic_gate_id` for one Huddle Node's fixed owning Huddle Logic Gate.
 - `kpis.logic_gate_id` for one KPI's fixed owning normal Logic Gate.
+- `entities.entity_type_id` and optional `entities.entity_folder_id` for one Entity's fixed type and current organizational folder.
+- `entity_folders.parent_entity_folder_id` for the same-Entity-Type folder tree; this organization never creates a generic edge or permission ancestor.
 - `huddle_explorer_items` for typed Huddle Logic Gate placement; Huddle Nodes use only their direct owning Huddle Logic Gate relationship.
 - Account assignment, permission, and RACI relationship tables for their own distinct meanings.
 
@@ -292,7 +294,7 @@ When a relationship table has a fixed endpoint by definition, that endpoint SHOU
 
 Same-type structural tables MAY use two explicit typed columns when both sides have one fixed type. `node_relationships.node_id_a/node_id_b` is valid because its relationship meaning and endpoint types are fixed. `huddle_nodes.huddle_logic_gate_id` and `kpis.logic_gate_id` are also valid direct owner columns because each relationship has one fixed owner type.
 
-`huddle_logic_gate_relationships.huddle_logic_gate_id/logic_gate_id`, `huddle_node_logic_gate_relationships.huddle_node_id/logic_gate_id`, and `huddle_node_kpi_relationships.huddle_node_id/logic_gate_id/kpi_id` are valid literal typed columns because every endpoint type and relationship meaning is fixed.
+`huddle_logic_gate_relationships.huddle_logic_gate_id/logic_gate_id`, `huddle_node_logic_gate_relationships.huddle_node_id/logic_gate_id`, and `huddle_node_kpi_relationships.huddle_node_id/logic_gate_id/kpi_id` are valid literal typed columns because every endpoint type and relationship meaning is fixed. Entity ownership and organization likewise use direct `entity_type_id`, `entity_folder_id`, and `parent_entity_folder_id` columns because their types and meanings are fixed.
 
 ### Law 7 — Fully generic edges type both endpoints
 

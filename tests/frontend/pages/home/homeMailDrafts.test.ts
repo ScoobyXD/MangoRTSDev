@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 import {
   deleteHomeMailDraft,
   deleteHomeMailDraftRemote,
@@ -653,6 +654,51 @@ test("navigation-time empty close queues behind attachment preparation and canno
     assert.deepEqual(methods, ["PUT", "DELETE"]);
     assert.deepEqual(storedDrafts(), []);
   });
+});
+
+test("navigation autosave downgrades a preloaded Entity chip and preserves other references", async () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: dom.window.document });
+  const body = "<!-- mango-editor-html-v1 --><div>Track <span data-mango-entity-link=\"true\" data-mango-entity-type=\"entity\" data-mango-entity-id=\"entity-1\" data-mango-entity-label=\"Thailand delivery\">Thailand delivery</span> for <span data-mango-entity-link=\"true\" data-mango-entity-type=\"project\" data-mango-entity-id=\"project-1\" data-mango-entity-label=\"Costco order\">Costco order</span></div>";
+  const preloaded = draft({
+    id: "draft-entity-reference",
+    accountEmail: "me@example.test",
+    body,
+  });
+
+  try {
+    await withDraftBrowserState([preloaded], async ({ storedDrafts }) => {
+      let outboundBody = "";
+      globalThis.fetch = async (_input, init) => {
+        const payload = JSON.parse(typeof init?.body === "string" ? init.body : "{}") as { body_editor_html?: string };
+        outboundBody = payload.body_editor_html ?? "";
+        return draftSaveResponse(remoteDraft({
+          id: preloaded.id,
+          accountEmail: preloaded.accountEmail,
+          body: outboundBody,
+        }));
+      };
+
+      const saved = await syncHomeMailDraftFromCompose(
+        "company-1",
+        "user-1",
+        homeMailDraftToCompose(preloaded),
+        "",
+      );
+
+      assert.match(outboundBody, /Track Thailand delivery for/);
+      assert.doesNotMatch(outboundBody, /data-mango-entity-type="entity"|data-mango-entity-id="entity-1"/);
+      assert.match(outboundBody, /data-mango-entity-type="project"/);
+      assert.match(outboundBody, /data-mango-entity-id="project-1"/);
+      assert.equal(saved[0]?.body, outboundBody);
+      assert.equal(storedDrafts()[0]?.body, outboundBody);
+    });
+  } finally {
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+    dom.window.close();
+  }
 });
 
 test("a delete queued behind a stalled load-time migration removes the remote draft and cannot resurrect local state", async () => {

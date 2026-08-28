@@ -27,11 +27,11 @@ Fresh databases must apply this snapshot only through the guarded migration
 runner with `-mode schema -baseline-migrations -require-empty-database`.
 
 
-### Entity field labels (2026-07-21)
+### Entities (2026-08-27)
 
-`entity_fields` stores company-scoped reusable label definitions with case-insensitively unique names, validated colors, and stable display positions. `entity_field_assignments` is the projection table for assigning those definitions to exactly one Project, Node, or Logic Gate. Its check constraint enforces the target type/column pairing, its generated `resource_id` supports one generic lookup path, and its composite foreign keys prevent cross-company assignments.
+The current Entity system uses five company-scoped tables: `entity_types`, `entity_folders`, `entity_field_types`, `entities`, and `entity_fields`. Folders form a same-company, same-type parent-child tree. Field types belong to an entity type and may be scoped to one folder; they are defaults copied from the type root through the selected folder path when an entity is created. The copied entity fields are independent and may then be added, edited, retyped, reordered, or deleted without changing the defaults.
 
-The additive migration is `backend/db/migrations/20260721_entity_fields.sql`. Apply it through the normal reviewed migration workflow before deploying an API version that reads or writes entity fields. No agent task should apply it to a live database. Deleting a field or target entity cascades only its assignment rows.
+Migration `backend/db/migrations/20260827_entities.sql` strictly removes the retired reusable-label `entity_fields` table and `entity_field_assignments`, then creates the new Entity schema. It is a destructive cutover with no compatibility layer or data conversion. Apply it only through the normal reviewed migration workflow before deploying the Entities API. No agent task should apply it to a live database.
 
 Incremental migrations:
 

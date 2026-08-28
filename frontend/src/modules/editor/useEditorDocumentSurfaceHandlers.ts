@@ -108,6 +108,7 @@ import {
   type ActiveEntityLinkDraft,
   type EditorEntityLink,
   type EditorEntityLinkContext,
+  type EditorSearchableEntityType,
 } from "./editorEntityLinks.js";
 import { EditorSelectionNodeIcon } from "../../icons/index.js";
 import { calculateEditorSelectionActionPosition } from "./editorSelectionActions.js";
@@ -233,6 +234,9 @@ export type EditorImageAttachmentContext = {
   mutationLifecycle?: EditorAttachmentMutationLifecycle;
   expectedResourceRevision?: () => number | undefined; onResourceRevision?: (revision: number) => void;
 };
+
+const LEGACY_EDITOR_ENTITY_TYPES_WITHOUT_ENTITIES: readonly EditorSearchableEntityType[] = ["node", "logic_gate", "project"];
+const LEGACY_EDITOR_ENTITY_TYPES_WITH_ENTITIES: readonly EditorSearchableEntityType[] = [...LEGACY_EDITOR_ENTITY_TYPES_WITHOUT_ENTITIES, "entity"];
 
 export type EditorInlineStyleCommand = "bold" | "underline" | "italic" | "strikethrough";
 
@@ -4459,21 +4463,29 @@ export function useEditorDocumentSurfaceHandlers({
       return undefined;
     }
     let current = true;
+    const controller = new AbortController();
     setEntitySearchState("loading");
     setEntityOptions([]);
     setEntitySearchError("");
-    void searchEditorEntityLinks(resolvedEntityLinkContext, activeEntityDraft.query).then((options) => {
+    const entityTypes = resolvedEntityLinkContext.includeEntityReferences === false
+      ? LEGACY_EDITOR_ENTITY_TYPES_WITHOUT_ENTITIES
+      : LEGACY_EDITOR_ENTITY_TYPES_WITH_ENTITIES;
+    void searchEditorEntityLinks(resolvedEntityLinkContext, activeEntityDraft.query, 20, entityTypes, controller.signal).then((options) => {
       if (!current) return;
       setEntityOptions(options);
       setEntitySearchState("idle");
     }).catch((cause) => {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
       if (!current) return;
       setEntityOptions([]);
       setEntitySearchState("error");
-      setEntitySearchError(cause instanceof Error ? cause.message : "Unable to search workspace entities");
+      setEntitySearchError(cause instanceof Error ? cause.message : "Unable to search resources");
     });
-    return () => { current = false; };
-  }, [activeEntityDraft?.query, activeEntityDraft?.start, resolvedEntityLinkContext?.companyID, resolvedEntityLinkContext?.requestJSON]);
+    return () => {
+      current = false;
+      controller.abort();
+    };
+  }, [activeEntityDraft?.query, activeEntityDraft?.start, resolvedEntityLinkContext?.companyID, resolvedEntityLinkContext?.includeEntityReferences, resolvedEntityLinkContext?.requestJSON]);
 
   useEffect(() => {
     const root = activeTableContextMenu?.root;
@@ -4841,7 +4853,7 @@ export function useEditorDocumentSurfaceHandlers({
       "div",
       {
         role: "listbox",
-        "aria-label": "Link a workspace entity",
+        "aria-label": "Reference a resource",
         style: {
           position: activeEntityDraft.position,
           left: activeEntityDraft.left,
@@ -4863,7 +4875,7 @@ export function useEditorDocumentSurfaceHandlers({
         } satisfies React.CSSProperties,
       },
       entitySearchState === "loading" && entityOptions.length === 0
-        ? React.createElement("div", { role: "status", style: { padding: "9px", fontSize: 11 } }, "Searching Nodes, Projects, and Processes…")
+        ? React.createElement("div", { role: "status", style: { padding: "9px", fontSize: 11 } }, resolvedEntityLinkContext?.includeEntityReferences === false ? "Searching Nodes, Processes, and Projects…" : "Searching Nodes, Processes, Projects, and Entities…")
         : entitySearchState === "error"
           ? React.createElement("div", { role: "alert", style: { padding: "9px", fontSize: 11, color: "#b91c1c" } }, entitySearchError)
           : entityOptions.length === 0

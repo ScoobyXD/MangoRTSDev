@@ -1,6 +1,6 @@
 import React from "react";
 
-export type ExplorerEntityIconKind = "node" | "logic_gate" | "project" | "email_message";
+export type ExplorerEntityIconKind = "node" | "logic_gate" | "project" | "entity" | "email_message";
 export type ExplorerEntityIconTone = "default" | "inverse" | "orange";
 export const NODE_ICON_GRADIENT_START = "#33ddd5";
 export const NODE_ICON_GRADIENT_END = "#19a8ff";
@@ -27,6 +27,7 @@ const NODE_DETAIL_PATH = "M9.15 1.7v3.15h3.15M5.55 7.25h4.9M5.55 9.55h4.9M5.55 1
 const PROJECT_BODY_PATH = "M2.3 3.1h11.4v9.8H2.3z";
 const PROJECT_DETAIL_PATH = "M4.1 5.25h3.2M4.1 7.85h5.7M4.1 10.45h3.9";
 const PROJECT_CHECKS_PATH = "M11.25 5.15h1.3v1.3h-1.3zM11.25 7.45h1.3v1.3h-1.3zM11.25 9.75h1.3v1.3h-1.3z";
+const ENTITY_DETAIL_PATH = "M5.1 5.35h5.8M5.1 8h5.8M5.1 10.65h3.65";
 const EMAIL_BODY_PATH = "M2.1 3.65h11.8v8.7H2.1z";
 const EMAIL_FLAP_PATH = "m2.55 5.1 3.35 2.65 3.35-2.65M2.75 11.75l3.4-3M13.25 11.75l-3.4-3";
 const LOGIC_GATE_CONNECTION_PATH = "M1.4 5.25h3.05M1.4 10.75h3.05M11.7 8h2.9";
@@ -59,6 +60,14 @@ function iconSpecs(kind: ExplorerEntityIconKind, tone: ExplorerEntityIconTone, i
       { tag: "path", attrs: { d: PROJECT_BODY_PATH, fill, stroke, strokeWidth: "1.25", strokeLinejoin: "round" } },
       { tag: "path", attrs: { d: PROJECT_DETAIL_PATH, fill: "none", stroke, strokeWidth: "1.05", strokeLinecap: "round" } },
       { tag: "path", attrs: { d: PROJECT_CHECKS_PATH, fill: stroke } },
+    ];
+  }
+  if (kind === "entity") {
+    const stroke = tone === "inverse" ? "#ffffff" : tone === "orange" ? "#ff9708" : "#0d9488";
+    const fill = tone === "inverse" ? "rgba(255,255,255,0.10)" : tone === "orange" ? "rgba(255,151,8,0.10)" : "rgba(13,148,136,0.10)";
+    return [
+      { tag: "rect", attrs: { x: "2.25", y: "2.25", width: "11.5", height: "11.5", rx: "2", fill, stroke, strokeWidth: "1.25" } },
+      { tag: "path", attrs: { d: ENTITY_DETAIL_PATH, fill: "none", stroke, strokeWidth: "1.15", strokeLinecap: "round" } },
     ];
   }
   if (kind === "email_message") {

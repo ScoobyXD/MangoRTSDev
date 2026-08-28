@@ -7,10 +7,10 @@ import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { AppSidebarPinnedSection } from "./AppSidebarPinnedSection";
 import { AppSidebarRACITabsSection } from "./AppSidebarRACITabsSection";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderFieldsIcon, HeaderMapIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMapIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
-import { preloadAccountManagerSurface, preloadFieldsSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
 import { requestProjectViewSettings } from "../modules/project-management/projectViewEvents";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../icons/index.js";
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
@@ -128,7 +128,7 @@ const SIDEBAR_ELEVATED_RADIUS = 11;
 const SIDEBAR_SCROLL_ACCENT = "rgba(203, 213, 225, 0.82)";
 const SIDEBAR_ACCOUNT_ICON_COLOR = "#14b8a6";
 const SIDEBAR_TEAMS_ICON_COLOR = "#6366f1";
-const SIDEBAR_FIELDS_ICON_COLOR = "#8b5cf6";
+const SIDEBAR_ENTITIES_ICON_COLOR = "#0f766e";
 const SIDEBAR_STATE_ACTIVE_BG = "rgba(15, 23, 42, 0.045)";
 const SIDEBAR_STATE_DROP_BG = "rgba(15, 23, 42, 0.055)";
 const SIDEBAR_STATE_HOVER_BG = "rgba(15, 23, 42, 0.055)";
@@ -150,7 +150,7 @@ type SidebarSectionID = "shared-triage";
 export type HomeKeyViewID = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
-type AppSidebarPrimaryPage = "home" | "logic-gate-arena" | "project-management" | "process-map" | "account-manager" | "teams" | "fields";
+type AppSidebarPrimaryPage = "home" | "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams";
 
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;
@@ -1406,6 +1406,16 @@ export function AppSidebar({
           onPointerDown={preloadProcessMapSurface}
           onClick={() => onPageSelect("process-map")}
         />
+        <AppSidebarButton
+          label="Entities"
+          active={activePage === "entities"}
+          icon={<HeaderExplorerIcon color={SIDEBAR_ENTITIES_ICON_COLOR} />}
+          elevated
+          onPointerEnter={preloadEntitiesSurface}
+          onFocus={preloadEntitiesSurface}
+          onPointerDown={preloadEntitiesSurface}
+          onClick={() => onPageSelect("entities")}
+        />
       </section>
 
         </>
@@ -1417,8 +1427,8 @@ export function AppSidebar({
 
       {!explorerSearchActive && (
         <>
-      <section style={appSidebarNavSectionStyle} aria-label="Entities">
-        <AppSidebarSectionHeader label="Entities" />
+      <section style={appSidebarNavSectionStyle} aria-label="Organization">
+        <AppSidebarSectionHeader label="Organization" />
         <AppSidebarButton
           label="Accounts"
           active={activePage === "account-manager"}
@@ -1438,16 +1448,6 @@ export function AppSidebar({
           onFocus={preloadTeamsSurface}
           onPointerDown={preloadTeamsSurface}
           onClick={() => onPageSelect("teams")}
-        />
-        <AppSidebarButton
-          label="Fields"
-          active={activePage === "fields"}
-          icon={<HeaderFieldsIcon color={SIDEBAR_FIELDS_ICON_COLOR} />}
-          elevated
-          onPointerEnter={preloadFieldsSurface}
-          onFocus={preloadFieldsSurface}
-          onPointerDown={preloadFieldsSurface}
-          onClick={() => onPageSelect("fields")}
         />
       </section>
 

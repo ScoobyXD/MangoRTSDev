@@ -11,7 +11,7 @@ import { ExplorerRowIcon, HeaderSettingsIcon } from "../../icons/index.js";
 Files:
 
 - `NavigationIcons.tsx`: application navigation and header icons.
-- `EntityIcons.tsx`: node, Logic Gate, and project icons.
+- `EntityIcons.tsx`: node, Logic Gate, project, Entity, and email icons.
 - `ExplorerIcons.tsx`: folders, entities, Kanban boards, and disclosure arrows.
 - `KanbanBoardIcon.tsx`: the Kanban board icon.
 - `MangoBrand.tsx`: the MangoRTS mark and wordmark.

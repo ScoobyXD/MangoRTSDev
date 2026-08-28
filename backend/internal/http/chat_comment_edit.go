@@ -59,7 +59,7 @@ func cleanChatCommentEntityLinks(values []chatCommentEntityLink) []chatCommentEn
 			continue
 		}
 		switch value.EntityType {
-		case "node", "logic_gate", "project":
+		case "node", "logic_gate", "project", "entity":
 		default:
 			continue
 		}

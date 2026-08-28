@@ -1393,6 +1393,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     if (!draft || !editor || editor.isDestroyed) throw new Error("The editor is no longer available.");
     let relationshipCompleted = false;
     if (mode === "link") {
+      if (entity.entityType === "entity") throw new Error("Entities can be referenced with #, but cannot be linked with ##.");
       const action = entityLinkActionRef.current;
       if (!action) throw new Error("Link mode is not available in this editor.");
       await action(entity);
@@ -1504,7 +1505,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
             const entityType = keyboardEntityElement.dataset.mangoEntityType;
             const entityID = keyboardEntityElement.dataset.mangoEntityId?.trim() ?? "";
             const label = keyboardEntityElement.dataset.mangoEntityLabel?.trim() ?? "";
-            if ((entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "email_message") && entityID && label) {
+            if ((entityType === "node" || entityType === "logic_gate" || entityType === "project" || entityType === "entity" || entityType === "email_message") && entityID && label) {
               event.preventDefault();
               openEntityLink({
                 entityType,
@@ -1569,7 +1570,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           const entityType = node.attrs.entityType;
           const entityID = typeof node.attrs.entityId === "string" ? node.attrs.entityId.trim() : "";
           const label = typeof node.attrs.label === "string" ? node.attrs.label.trim() : "";
-          if (!(["node", "logic_gate", "project", "email_message"] as const).includes(entityType) || !entityID || !label) return false;
+          if (!(["node", "logic_gate", "project", "entity", "email_message"] as const).includes(entityType) || !entityID || !label) return false;
           event.preventDefault();
           openEntityLink({ entityType, entityID, label, ...(entityType === "email_message" ? emailEntityMetadataFromRecord(node.attrs) : {}) });
           return true;

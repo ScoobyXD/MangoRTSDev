@@ -6,7 +6,7 @@ import type { ExplorerTreeNode } from "../modules/company-explorer/companyExplor
 type ExplorerRowIconTone = "default" | "inverse" | "orange";
 
 export const ExplorerRowIcon: React.FC<{
-  kind: ExplorerTreeNode["kind"];
+  kind: ExplorerTreeNode["kind"] | "entity";
   systemKey?: ExplorerTreeNode["systemKey"];
   mangoDefaultFolder?: boolean;
   tone?: ExplorerRowIconTone;
@@ -123,6 +123,9 @@ export const ExplorerRowIcon: React.FC<{
   }
   if (kind === "project") {
     return <ExplorerEntityIcon kind="project" tone={tone} />;
+  }
+  if (kind === "entity") {
+    return <ExplorerEntityIcon kind="entity" tone={tone} />;
   }
   if (kind === "kanban") {
     return <KanbanBoardIcon />;

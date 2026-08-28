@@ -27,7 +27,14 @@ import { EDITOR_DOCUMENT_FONT_SIZE_PX, EDITOR_DOCUMENT_LINE_HEIGHT, getEditorDoc
 import { UNIFIED_RICH_EDITOR_BEHAVIOR_SOURCE, type UnifiedRichEditorSurfaceID } from "./unifiedRichEditorContract";
 import { EditorDocumentSurface } from "./EditorDocumentSurface";
 import type { MentionableCompanyUser } from "./editorMentions";
-import type { EditorEntityLinkContext } from "./editorEntityLinks.js";
+import { replaceEditorEntityReferencesWithLabels, type EditorEntityLinkContext } from "./editorEntityLinks.js";
+
+const EMAIL_EDITOR_SURFACE_IDS = new Set<UnifiedRichEditorSurfaceID>([
+  "my-triage-compose",
+  "shared-triage-compose",
+  "attached-email-reply",
+  "email-signature",
+]);
 
 export type UnifiedRichEditorFormattingController = EditorDocumentFormattingController & {
   focus: () => void;
@@ -126,6 +133,11 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
   const documentIsEmpty = !editorBodyHasEmailContent(value);
   const showIndentGuides = outlineStyle === "indent-guides" && indentGuideSegments.length > 0;
   const imageHydrationContext = editorImageHydrationContext ?? editorImageAttachmentContext;
+  const excludesEntityReferences = EMAIL_EDITOR_SURFACE_IDS.has(surfaceID);
+  const resolvedEntityLinkContext = useMemo<EditorEntityLinkContext | undefined>(() => {
+    if (!entityLinkContext || !excludesEntityReferences) return entityLinkContext;
+    return { ...entityLinkContext, includeEntityReferences: false };
+  }, [entityLinkContext, excludesEntityReferences]);
   const attachmentHydrationContextKey = imageHydrationContext
     ? [
       imageHydrationContext.apiBase.trim(),
@@ -174,6 +186,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     attachmentHydrationCleanupRef.current?.();
     attachmentHydrationCleanupRef.current = null;
     editor.innerHTML = deserializeEditorDocumentHTML(value);
+    if (excludesEntityReferences) replaceEditorEntityReferencesWithLabels(editor);
     if (imageHydrationContext) {
       attachmentHydrationCleanupRef.current = hydrateEditorAttachmentImageFrames(editor, (attachmentID, variant, options) => (
         loadMangoAttachmentObjectURL(
@@ -200,7 +213,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     userEditedRef.current = false;
     if (outlineStyle === "indent-guides") scheduleIndentGuideUpdate(readEditorDocumentText(editor));
     if (selectionOffsets) setEditorSelectionByOffsets(editor, selectionOffsets.start, selectionOffsets.end);
-  }, [attachmentHydrationContextKey, eagerEditorImageHydration, scheduleIndentGuideUpdate, value]);
+  }, [attachmentHydrationContextKey, eagerEditorImageHydration, excludesEntityReferences, scheduleIndentGuideUpdate, value]);
 
   useLayoutEffect(() => () => {
     attachmentHydrationCleanupRef.current?.();
@@ -216,22 +229,31 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     scheduleIndentGuideUpdate(editor ? readEditorDocumentText(editor) : value);
   }, [outlineStyle, scheduleIndentGuideUpdate, value]);
 
+  const removeExcludedEntityReferences = useCallback((nextValue: string): string => {
+    const editor = editorRef.current;
+    if (!excludesEntityReferences || !editor || !replaceEditorEntityReferencesWithLabels(editor)) return nextValue;
+    return serializeEditorDocumentHTML(editor);
+  }, [excludesEntityReferences]);
+
   const scheduleDocumentSave = useCallback((nextValue: string) => {
     if (!editable) return;
+    nextValue = removeExcludedEntityReferences(nextValue);
     userEditedRef.current = true;
     lastAppliedValueRef.current = nextValue;
     onChange(nextValue);
-  }, [editable, onChange]);
+  }, [editable, onChange, removeExcludedEntityReferences]);
 
   const flushDocumentSave = useCallback((fallbackValue?: string) => {
-    const nextValue = fallbackValue ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedValueRef.current);
+    const nextValue = removeExcludedEntityReferences(
+      fallbackValue ?? (editorRef.current ? serializeEditorDocumentHTML(editorRef.current) : lastAppliedValueRef.current),
+    );
     if (!editable) return nextValue;
     lastAppliedValueRef.current = nextValue;
     if (userEditedRef.current) onChange(nextValue);
     onFlush?.(nextValue);
     userEditedRef.current = false;
     return nextValue;
-  }, [editable, onChange, onFlush]);
+  }, [editable, onChange, onFlush, removeExcludedEntityReferences]);
 
   const handleSelectionFontSizeChange = useCallback((fontSize: number) => {
     onSelectionFontSizeChange?.(fontSize);
@@ -261,7 +283,7 @@ export const UnifiedRichEditorSurface: React.FC<UnifiedRichEditorSurfaceProps> =
     mentionSurfaceText: surfaceText,
     mentionStrokeColor: indentGuideColor,
     mentionMenuPosition: "absolute",
-    entityLinkContext,
+    entityLinkContext: resolvedEntityLinkContext,
     editorImageAttachmentContext,
     onEditorImageAttachmentError,
   });

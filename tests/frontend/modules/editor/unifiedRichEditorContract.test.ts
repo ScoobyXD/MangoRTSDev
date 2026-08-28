@@ -1162,7 +1162,7 @@ test("signature hydration, empty remote rows, and attachment scope preserve the 
   assert.match(signatureEdits, /handleEmailSignatureChange[\s\S]*emailSignatureEditRevisionRef\.current \+= 1/);
   assert.match(signatureEdits, /handleSaveEmailSignature[\s\S]*emailSignatureEditRevisionRef\.current \+= 1/);
 
-  assert.match(signatureLoader, /if \(remoteSignature\) \{\s*const body = remoteSignature\.body_editor_html \?\? ""/);
+  assert.match(signatureLoader, /if \(remoteSignature\) \{\s*const body = emailBodyWithoutEntityReferences\(remoteSignature\.body_editor_html \?\? ""\)/);
   assert.match(signatureLoader, /saveHomeMailSignature\(companyID, userID, body, sharedInboxID, accountEmail\);\s*return body/);
   assert.ok(
     signatureLoader.indexOf("if (remoteSignature)") < signatureLoader.indexOf("if (localSignature.trim())"),
@@ -1187,7 +1187,7 @@ test("signature hydration, empty remote rows, and attachment scope preserve the 
   assert.match(signatureLoader, /await queueHomeMailSignatureRemoteSave\(scopeKey,[\s\S]*bodyEditorHTML: localSignature/);
 });
 
-test("signature Save persists the exact serialized editor HTML returned by flush", () => {
+test("signature Save persists flushed editor HTML after the Entity-only downgrade", () => {
   const unifiedRichEditorSurface = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"), "utf8");
   const nodeWorkspaceParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const homeParts = readFileSync(resolve(process.cwd(), "frontend/src/pages/home/HomeParts.tsx"), "utf8");
@@ -1210,7 +1210,7 @@ test("signature Save persists the exact serialized editor HTML returned by flush
   const remoteSave = sourceSliceBetween(
     homeMailDrafts,
     "export async function saveHomeMailSignatureRemote(",
-    "clearPendingHomeMailSignatureSync(companyID, userID, signature, sharedInboxID, accountEmail);",
+    "clearPendingHomeMailSignatureSync(companyID, userID, cleanSignature, sharedInboxID, accountEmail);",
     "remote signature save",
   );
 
@@ -1233,11 +1233,12 @@ test("signature Save persists the exact serialized editor HTML returned by flush
   assert.match(saveHandler, /saveHomeMailSignatureRemote\(companyID, currentUserID, signature, sharedInboxID, composeSignatureAccountEmail\)/);
   assert.match(saveHandler, /\.then\(\(\) => setNotice\("Signature saved\."\)\)/);
   assert.match(saveHandler, /\.catch\(\(\) => setNotice\("Signature save failed\. Mango will retry this mailbox-scoped edit; retry before leaving if it remains unsynced\."\)\)/);
-  assert.match(remoteSave, /saveHomeMailSignature\(companyID, userID, signature, sharedInboxID, accountEmail\)/);
-  assert.match(remoteSave, /markPendingHomeMailSignatureSync\(companyID, userID, signature, sharedInboxID, accountEmail\)/);
-  assert.match(remoteSave, /await queueHomeMailSignatureRemoteSave\(scopeKey,[\s\S]*saveEmailSignature\(\{ companyID, sharedInboxID, accountEmail, bodyEditorHTML: signature \}\)/);
+  assert.match(remoteSave, /const cleanSignature = emailBodyWithoutEntityReferences\(signature\)/);
+  assert.match(remoteSave, /saveHomeMailSignature\(companyID, userID, cleanSignature, sharedInboxID, accountEmail\)/);
+  assert.match(remoteSave, /markPendingHomeMailSignatureSync\(companyID, userID, cleanSignature, sharedInboxID, accountEmail\)/);
+  assert.match(remoteSave, /await queueHomeMailSignatureRemoteSave\(scopeKey,[\s\S]*saveEmailSignature\(\{ companyID, sharedInboxID, accountEmail, bodyEditorHTML: cleanSignature \}\)/);
   assert.match(homeMailDrafts, /const current = previous\.catch\(\(\) => undefined\)\.then\(async \(\) => \{\s*await save\(\)/);
-  assert.match(homeMailDrafts, /clearPendingHomeMailSignatureSync\(companyID, userID, signature, sharedInboxID, accountEmail\)/);
+  assert.match(homeMailDrafts, /clearPendingHomeMailSignatureSync\(companyID, userID, cleanSignature, sharedInboxID, accountEmail\)/);
 });
 
 test("My and Shared Triage submit the exact serialized editor HTML returned by flush", () => {
@@ -1307,8 +1308,10 @@ test("obsolete email pickers and the Node attach shortcut are removed while emai
   assert.match(nodeWorkspace, /linkTargetTypes=\{NODE_HEADER_LINK_TARGET_TYPES\}/);
   assert.doesNotMatch(nodeWorkspace, /emailPickerAnchor|emailPickerLauncherRef|aria-label="Attach email"|initialCategory="email_message"/);
   assert.match(projectSummary, /<UniversalEntityPicker[\s\S]*initialCategory="email_message"/);
-  assert.match(universalPicker, /ALL_ENTITY_TYPES[^\n]*\["node", "project", "logic_gate", "email_message"\]/);
-  assert.match(universalPicker, /label: "Nodes"[\s\S]*label: "Projects"[\s\S]*label: "Processes"[\s\S]*label: "Emails"/);
+  assert.match(universalPicker, /ALL_ENTITY_TYPES[^\n]*\["node", "logic_gate", "project", "entity", "email_message"\]/);
+  assert.match(universalPicker, /label: "Nodes"[\s\S]*label: "Processes"[\s\S]*label: "Projects"[\s\S]*label: "Entities"[\s\S]*label: "Emails"/);
+  assert.match(universalPicker, /linkTargetTypes\.filter\(\(type\) => type !== "entity"\)/);
+  assert.doesNotMatch(universalPicker, /if \(normalized === "r"\)/);
   assert.match(universalPicker, /searchEmailInAll = category === "all"[\s\S]*mailbox: "all"[\s\S]*requestJSON<MessagePage>\(path, \{ signal: controller\.signal \}\)/);
   assert.match(universalPicker, /controller\.abort\(\)/);
   assert.match(universalPicker, /emailSearchSequenceRef\.current !== sequence/);

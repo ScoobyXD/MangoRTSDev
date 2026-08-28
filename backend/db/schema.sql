@@ -3775,40 +3775,6 @@ CREATE TABLE public.email_threads (
 
 
 --
--- Name: entity_field_assignments; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.entity_field_assignments (
-    company_id uuid NOT NULL,
-    field_id uuid NOT NULL,
-    resource_type text NOT NULL,
-    project_id uuid,
-    node_id uuid,
-    logic_gate_id uuid,
-    resource_id uuid GENERATED ALWAYS AS (COALESCE(project_id, node_id, logic_gate_id)) STORED NOT NULL,
-    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT entity_field_assignments_target_chk CHECK ((((resource_type = 'project'::text) AND (project_id IS NOT NULL) AND (node_id IS NULL) AND (logic_gate_id IS NULL)) OR ((resource_type = 'node'::text) AND (project_id IS NULL) AND (node_id IS NOT NULL) AND (logic_gate_id IS NULL)) OR ((resource_type = 'logic_gate'::text) AND (project_id IS NULL) AND (node_id IS NULL) AND (logic_gate_id IS NOT NULL))))
-);
-
-
---
--- Name: entity_fields; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.entity_fields (
-    company_id uuid NOT NULL,
-    field_id uuid NOT NULL,
-    name character varying(64) NOT NULL,
-    color character varying(7) DEFAULT '#6366f1'::character varying NOT NULL,
-    "position" integer DEFAULT 0 NOT NULL,
-    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT entity_fields_color_chk CHECK (((color)::text ~ '^#[0-9a-f]{6}$'::text)),
-    CONSTRAINT entity_fields_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text))
-);
-
-
---
 -- Name: huddle_explorer_folders; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4736,6 +4702,102 @@ CREATE TABLE public.raci_tabs_items (
 
 
 --
+-- Name: entity_field_types; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.entity_field_types (
+    company_id uuid NOT NULL,
+    entity_field_type_id uuid NOT NULL,
+    entity_type_id uuid NOT NULL,
+    entity_folder_id uuid,
+    name character varying(200) NOT NULL,
+    field_type text NOT NULL,
+    "position" integer DEFAULT 0 NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT entity_field_types_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text]))),
+    CONSTRAINT entity_field_types_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text)),
+    CONSTRAINT entity_field_types_position_chk CHECK (("position" >= 0))
+);
+
+
+--
+-- Name: entity_fields; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.entity_fields (
+    company_id uuid NOT NULL,
+    entity_field_id uuid NOT NULL,
+    entity_id uuid NOT NULL,
+    name character varying(200) NOT NULL,
+    field_type text NOT NULL,
+    value_jsonb jsonb,
+    "position" integer DEFAULT 0 NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT entity_fields_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text]))),
+    CONSTRAINT entity_fields_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text)),
+    CONSTRAINT entity_fields_position_chk CHECK (("position" >= 0)),
+    CONSTRAINT entity_fields_value_shape_chk CHECK (((value_jsonb IS NULL) OR ((field_type = ANY (ARRAY['text'::text, 'date'::text])) AND (jsonb_typeof(value_jsonb) = 'string'::text)) OR ((field_type = 'number'::text) AND (jsonb_typeof(value_jsonb) = 'number'::text)) OR ((field_type = 'boolean'::text) AND (jsonb_typeof(value_jsonb) = 'boolean'::text))))
+);
+
+
+--
+-- Name: entity_folders; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.entity_folders (
+    company_id uuid NOT NULL,
+    entity_folder_id uuid NOT NULL,
+    entity_type_id uuid NOT NULL,
+    parent_entity_folder_id uuid,
+    name character varying(200) NOT NULL,
+    "position" integer DEFAULT 0 NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT entity_folders_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text)),
+    CONSTRAINT entity_folders_not_self_parent_chk CHECK (((parent_entity_folder_id IS NULL) OR (parent_entity_folder_id <> entity_folder_id))),
+    CONSTRAINT entity_folders_position_chk CHECK (("position" >= 0))
+);
+
+
+--
+-- Name: entity_types; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.entity_types (
+    company_id uuid NOT NULL,
+    entity_type_id uuid NOT NULL,
+    name character varying(200) NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT entity_types_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text))
+);
+
+
+--
+-- Name: entities; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.entities (
+    company_id uuid NOT NULL,
+    entity_id uuid NOT NULL,
+    entity_type_id uuid NOT NULL,
+    entity_folder_id uuid,
+    name character varying(200) NOT NULL,
+    "position" integer DEFAULT 0 NOT NULL,
+    body_json jsonb DEFAULT '{"format": "mango-tiptap-json", "document": {"type": "doc", "content": [{"type": "paragraph"}]}, "annotations": [], "schema_version": 1}'::jsonb NOT NULL,
+    revision bigint DEFAULT 0 NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT entities_body_json_chk CHECK ((((body_json ->> 'format'::text) = 'mango-tiptap-json'::text) AND ((body_json ->> 'schema_version'::text) = '1'::text) AND (((body_json -> 'document'::text) ->> 'type'::text) = 'doc'::text) AND (jsonb_typeof((body_json -> 'annotations'::text)) = 'array'::text))),
+    CONSTRAINT entities_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text)),
+    CONSTRAINT entities_position_chk CHECK (("position" >= 0)),
+    CONSTRAINT entities_revision_chk CHECK ((revision >= 0))
+);
+
+
+--
 -- Name: realtime_outbox; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5375,22 +5437,6 @@ ALTER TABLE ONLY public.email_threads
 
 
 --
--- Name: entity_field_assignments entity_field_assignments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.entity_field_assignments
-    ADD CONSTRAINT entity_field_assignments_pkey PRIMARY KEY (company_id, field_id, resource_type, resource_id);
-
-
---
--- Name: entity_fields entity_fields_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.entity_fields
-    ADD CONSTRAINT entity_fields_pkey PRIMARY KEY (company_id, field_id);
-
-
---
 -- Name: huddle_explorer_folders huddle_explorer_folders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -5836,6 +5882,54 @@ ALTER TABLE ONLY public.raci_tabs_folders
 
 ALTER TABLE ONLY public.raci_tabs_items
     ADD CONSTRAINT raci_tabs_items_pkey PRIMARY KEY (company_id, user_id, logic_gate_id);
+
+
+--
+-- Name: entity_field_types entity_field_types_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_field_types
+    ADD CONSTRAINT entity_field_types_pkey PRIMARY KEY (company_id, entity_field_type_id);
+
+
+--
+-- Name: entity_fields entity_fields_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_fields
+    ADD CONSTRAINT entity_fields_pkey PRIMARY KEY (company_id, entity_field_id);
+
+
+--
+-- Name: entity_folders entity_folders_company_id_entity_type_id_entity_folder_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_folders
+    ADD CONSTRAINT entity_folders_company_id_entity_type_id_entity_folder_id_key UNIQUE (company_id, entity_type_id, entity_folder_id);
+
+
+--
+-- Name: entity_folders entity_folders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_folders
+    ADD CONSTRAINT entity_folders_pkey PRIMARY KEY (company_id, entity_folder_id);
+
+
+--
+-- Name: entity_types entity_types_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_types
+    ADD CONSTRAINT entity_types_pkey PRIMARY KEY (company_id, entity_type_id);
+
+
+--
+-- Name: entities entities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entities
+    ADD CONSTRAINT entities_pkey PRIMARY KEY (company_id, entity_id);
 
 
 --
@@ -6308,34 +6402,6 @@ CREATE UNIQUE INDEX idx_email_signatures_shared_scope ON public.email_signatures
 --
 
 CREATE UNIQUE INDEX idx_email_threads_connection_provider ON public.email_threads USING btree (company_id, email_connection_id, provider_thread_key);
-
-
---
--- Name: idx_entity_field_assignments_field; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_entity_field_assignments_field ON public.entity_field_assignments USING btree (company_id, field_id, resource_type, resource_id);
-
-
---
--- Name: idx_entity_field_assignments_resource; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_entity_field_assignments_resource ON public.entity_field_assignments USING btree (company_id, resource_type, resource_id, field_id);
-
-
---
--- Name: idx_entity_fields_company_name_unique; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX idx_entity_fields_company_name_unique ON public.entity_fields USING btree (company_id, lower(btrim((name)::text)));
-
-
---
--- Name: idx_entity_fields_company_position; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_entity_fields_company_position ON public.entity_fields USING btree (company_id, "position", lower((name)::text), field_id);
 
 
 --
@@ -6840,6 +6906,69 @@ CREATE INDEX idx_raci_tabs_items_logic_gate ON public.raci_tabs_items USING btre
 --
 
 CREATE INDEX idx_raci_tabs_items_owner_role_folder_position ON public.raci_tabs_items USING btree (company_id, user_id, role, folder_id, "position", created_timestamp, name, logic_gate_id);
+
+
+--
+-- Name: idx_entity_field_types_folder_name_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_entity_field_types_folder_name_unique ON public.entity_field_types USING btree (company_id, entity_type_id, entity_folder_id, lower(btrim((name)::text))) WHERE (entity_folder_id IS NOT NULL);
+
+
+--
+-- Name: idx_entity_field_types_root_name_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_entity_field_types_root_name_unique ON public.entity_field_types USING btree (company_id, entity_type_id, lower(btrim((name)::text))) WHERE (entity_folder_id IS NULL);
+
+
+--
+-- Name: idx_entity_field_types_scope_position; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_entity_field_types_scope_position ON public.entity_field_types USING btree (company_id, entity_type_id, entity_folder_id, "position", lower((name)::text), entity_field_type_id);
+
+
+--
+-- Name: idx_entity_fields_entity_name_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_entity_fields_entity_name_unique ON public.entity_fields USING btree (company_id, entity_id, lower(btrim((name)::text)));
+
+
+--
+-- Name: idx_entity_fields_entity_position; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_entity_fields_entity_position ON public.entity_fields USING btree (company_id, entity_id, "position", lower((name)::text), entity_field_id);
+
+
+--
+-- Name: idx_entity_folders_type_parent_position; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_entity_folders_type_parent_position ON public.entity_folders USING btree (company_id, entity_type_id, parent_entity_folder_id, "position", lower((name)::text), entity_folder_id);
+
+
+--
+-- Name: idx_entity_types_company_name_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_entity_types_company_name_unique ON public.entity_types USING btree (company_id, lower(btrim((name)::text)));
+
+
+--
+-- Name: idx_entities_name_trgm; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_entities_name_trgm ON public.entities USING gin (lower((name)::text) public.gin_trgm_ops);
+
+
+--
+-- Name: idx_entities_type_folder_position; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_entities_type_folder_position ON public.entities USING btree (company_id, entity_type_id, entity_folder_id, "position", lower((name)::text), entity_id);
 
 
 --
@@ -7997,46 +8126,6 @@ ALTER TABLE ONLY public.email_threads
 
 
 --
--- Name: entity_field_assignments entity_field_assignments_company_id_field_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.entity_field_assignments
-    ADD CONSTRAINT entity_field_assignments_company_id_field_id_fkey FOREIGN KEY (company_id, field_id) REFERENCES public.entity_fields(company_id, field_id) ON DELETE CASCADE;
-
-
---
--- Name: entity_field_assignments entity_field_assignments_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.entity_field_assignments
-    ADD CONSTRAINT entity_field_assignments_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
-
-
---
--- Name: entity_field_assignments entity_field_assignments_company_id_node_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.entity_field_assignments
-    ADD CONSTRAINT entity_field_assignments_company_id_node_id_fkey FOREIGN KEY (company_id, node_id) REFERENCES public.nodes(company_id, node_id) ON DELETE CASCADE;
-
-
---
--- Name: entity_field_assignments entity_field_assignments_company_id_project_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.entity_field_assignments
-    ADD CONSTRAINT entity_field_assignments_company_id_project_id_fkey FOREIGN KEY (company_id, project_id) REFERENCES public.projects(company_id, project_id) ON DELETE CASCADE;
-
-
---
--- Name: entity_fields entity_fields_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.entity_fields
-    ADD CONSTRAINT entity_fields_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(company_id) ON DELETE CASCADE;
-
-
---
 -- Name: huddle_explorer_folders huddle_explorer_folders_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8706,6 +8795,70 @@ ALTER TABLE ONLY public.raci_tabs_items
 
 ALTER TABLE ONLY public.raci_tabs_items
     ADD CONSTRAINT raci_tabs_items_company_id_user_id_role_folder_id_fkey FOREIGN KEY (company_id, user_id, role, folder_id) REFERENCES public.raci_tabs_folders(company_id, user_id, role, folder_id) ON DELETE CASCADE;
+
+
+--
+-- Name: entity_field_types entity_field_types_company_id_entity_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_field_types
+    ADD CONSTRAINT entity_field_types_company_id_entity_type_id_fkey FOREIGN KEY (company_id, entity_type_id) REFERENCES public.entity_types(company_id, entity_type_id) ON DELETE CASCADE;
+
+
+--
+-- Name: entity_field_types entity_field_types_company_id_entity_type_id_entity_folder_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_field_types
+    ADD CONSTRAINT entity_field_types_company_id_entity_type_id_entity_folder_id_fkey FOREIGN KEY (company_id, entity_type_id, entity_folder_id) REFERENCES public.entity_folders(company_id, entity_type_id, entity_folder_id) ON DELETE CASCADE;
+
+
+--
+-- Name: entity_fields entity_fields_company_id_entity_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_fields
+    ADD CONSTRAINT entity_fields_company_id_entity_id_fkey FOREIGN KEY (company_id, entity_id) REFERENCES public.entities(company_id, entity_id) ON DELETE CASCADE;
+
+
+--
+-- Name: entity_folders entity_folders_company_id_entity_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_folders
+    ADD CONSTRAINT entity_folders_company_id_entity_type_id_fkey FOREIGN KEY (company_id, entity_type_id) REFERENCES public.entity_types(company_id, entity_type_id) ON DELETE CASCADE;
+
+
+--
+-- Name: entity_folders entity_folders_company_id_entity_type_id_parent_entity_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_folders
+    ADD CONSTRAINT entity_folders_company_id_entity_type_id_parent_entity_fkey FOREIGN KEY (company_id, entity_type_id, parent_entity_folder_id) REFERENCES public.entity_folders(company_id, entity_type_id, entity_folder_id);
+
+
+--
+-- Name: entity_types entity_types_company_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_types
+    ADD CONSTRAINT entity_types_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(company_id) ON DELETE CASCADE;
+
+
+--
+-- Name: entities entities_company_id_entity_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entities
+    ADD CONSTRAINT entities_company_id_entity_type_id_fkey FOREIGN KEY (company_id, entity_type_id) REFERENCES public.entity_types(company_id, entity_type_id);
+
+
+--
+-- Name: entities entities_company_id_entity_type_id_entity_folder_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entities
+    ADD CONSTRAINT entities_company_id_entity_type_id_entity_folder_id_fkey FOREIGN KEY (company_id, entity_type_id, entity_folder_id) REFERENCES public.entity_folders(company_id, entity_type_id, entity_folder_id);
 
 
 --
