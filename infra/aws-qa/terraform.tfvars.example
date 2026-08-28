@@ -29,9 +29,9 @@ backend_memory                        = 1024
 backend_desired_count                 = 1
 email_sqs_database_migration_complete = true
 
-# One small worker is part of normal QA. Reconciliation remains off unless
-# deliberately needed; normal webhook work already uses the worker.
-email_worker_enabled                  = true
+# Keep mail processing off until separate QA Nylas credentials and controlled
+# mailboxes are configured.
+email_worker_enabled                  = false
 email_reconciliation_schedule_enabled = false
 email_worker_concurrency              = 1
 email_worker_cpu                      = 256

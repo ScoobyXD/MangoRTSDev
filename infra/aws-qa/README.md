@@ -20,8 +20,10 @@ state object and its `.tflock` file.
 The QA identity is fixed in this root: project `mangorts`, environment `qa`, and
 the three hostnames `qa.mangorts.com`, `api.qa.mangorts.com`, and
 `origin.qa.mangorts.com`. GitHub variables cannot replace those values. The QA
-deploy role accepts only OIDC jobs running inside the protected GitHub `qa`
-Environment; a plain `main` branch job cannot assume it.
+deploy role accepts only OIDC jobs running inside the GitHub `qa` Environment,
+and the workflow itself accepts only `main`. Required reviewers and deployment
+branch restrictions are separate GitHub Environment settings; do not describe
+them as enabled until they are verified in GitHub.
 
 Before certificate validation, an explicitly authorized production DNS operator
 must apply one checked-in Terraform `NS` record for `qa.mangorts.com` to the
@@ -50,21 +52,22 @@ fixed Mango QA tags. Terraform keeps old task-definition revisions registered
 with `skip_destroy = true` because AWS does not support resource-scoped
 deregistration. Any old-revision cleanup is a separate reviewed local-SSO job.
 
-The checked-in defaults describe the final QA state, so the email worker,
-Valkey, WAF, Container Insights, and full alarm set are on. The first apply is
-the one guarded exception: explicitly set `backend_image_uri = ""`,
-`backend_desired_count = 0`, `email_worker_enabled = false`, and
-`email_sqs_database_migration_complete = false`. Keep Valkey, WAF, Container
-Insights, and alarms on in that plan. This creates the private database and
-deployment foundations without starting the API or worker. Agents and GitHub
-deployment automation do not receive a database writer password.
+The checked-in defaults keep the email worker off until a separate QA Nylas app
+and controlled mailboxes exist. Valkey, WAF, Container Insights, and the full
+alarm set stay on. For database preparation, also set `backend_image_uri = ""`,
+`backend_desired_count = 0`, and
+`email_sqs_database_migration_complete = false`. This keeps the API and worker
+stopped. Agents and GitHub deployment automation do not receive a database
+writer password.
 
 The root also defines a one-off Fargate migration task after
 `migration_image_uri` points at an immutable image built from
 `backend/Dockerfile.migrations`. Terraform never runs it. Its default command is
-read-only `-mode audit`; fresh initialization requires a human to start it with the
-explicit override `-mode schema -baseline-migrations`. The task uses the same
-private subnets, ECS security group, and RDS-managed password as the API.
+read-only `-mode audit`; fresh initialization requires a human to start it with
+the explicit override `-mode schema -baseline-migrations`. The guarded helper may
+target only the stable QA database or a timestamped `mangorts_qa_next_*` database
+on this same RDS instance. The task uses the same private subnets, ECS security
+group, and RDS-managed password as the API.
 After the infrastructure-only apply creates ECR, set
 `TF_EMAIL_SCHEMA_MIGRATED=false` and run `deploy-qa.yml` with stage
 `bootstrap-images`. That explicit stage builds and pushes immutable backend and
@@ -72,13 +75,19 @@ migration images, registers both task definitions, and forces API desired count
 zero, worker disabled, and schema confirmation false. It stops without publishing
 the frontend or running application smoke tests. A human can then run the guarded
 database audit/bootstrap/audit sequence with the reported migration task ARN.
+The current one-time setup sanitizes a private raw Dev copy, imports only its
+data into a fresh canonical next database, and swaps that verified database into
+the stable name. It never copies Dev `schema_migrations` or attachment rows; see
+`docs/infra/mangorts-qa-environment-runbook.md`.
 
-After schema verification, set `TF_EMAIL_SCHEMA_MIGRATED=true`, configure the
-separate QA Nylas app and secret ARNs, and run `deploy-qa.yml` with stage
-`deploy`. The normal deploy defaults all five production-shaped services to on
-and rejects a worker deploy unless the schema, image, Nylas core configuration,
-and Valkey dependencies are complete. QA uses Mango's normal outbound behavior,
-so authorized users can send real messages to any syntactically valid address.
+After schema and sanitized-data verification, set
+`TF_EMAIL_SCHEMA_MIGRATED=true`, explicitly keep
+`TF_EMAIL_WORKER_ENABLED=false`, and run `deploy-qa.yml` with stage `deploy` for
+the base site. Configure the separate QA Nylas app and secret ARNs later. The
+workflow rejects a worker deploy unless the schema, image, Nylas core
+configuration, and Valkey dependencies are complete. QA uses Mango's normal
+outbound behavior once the worker is deliberately enabled, so authorized users
+can send real messages to any syntactically valid address.
 
 WAF is AWS's request filter in front of CloudFront. This stack uses the same
 production-shaped policy: it explicitly allows Mango API and Nylas webhook
@@ -88,7 +97,7 @@ worker, SQS backlog/DLQs, and Valkey health. Empty alarm-action ARN lists still
 create visible alarms but send no notifications; point them at existing SNS or
 incident destinations when notifications are wanted.
 
-QA retains ECS logs for seven days, uses one small API task, one smaller worker,
-the minimum serverless Valkey limits, and a `db.t4g.micro` Single-AZ database.
-That keeps compute and database sizing low while retaining the production-shaped
-service behavior requested for testing.
+QA retains ECS logs for seven days, uses one small API task, the minimum
+serverless Valkey limits, and a `db.t4g.micro` Single-AZ database. The smaller
+email worker adds cost only after it is deliberately enabled. This keeps the
+base site low-cost while retaining the production-shaped services needed later.

@@ -11,6 +11,10 @@ on:
         options:
           - bootstrap-images
           - deploy
+      expected_git_commit:
+        description: Exact 40-character main commit approved for this run
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -32,6 +36,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Verify exact approved revision
+        env:
+          EXPECTED_GIT_COMMIT: ${{ inputs.expected_git_commit }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "expected_git_commit must be a lowercase 40-character Git SHA." >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_SHA" != "$EXPECTED_GIT_COMMIT" ]]; then
+            echo "Refusing moving main: requested ${EXPECTED_GIT_COMMIT}, checked out ${GITHUB_SHA}." >&2
+            exit 1
+          fi
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
@@ -81,7 +99,7 @@ jobs:
           TF_DATABASE_DELETION_PROTECTION: ${{ vars.TF_DATABASE_DELETION_PROTECTION || 'true' }}
           TF_QA_COMPANY_ID: ${{ vars.TF_QA_COMPANY_ID }}
           TF_EMAIL_SCHEMA_MIGRATED: ${{ vars.TF_EMAIL_SCHEMA_MIGRATED || 'false' }}
-          TF_EMAIL_WORKER_ENABLED: ${{ vars.TF_EMAIL_WORKER_ENABLED || 'true' }}
+          TF_EMAIL_WORKER_ENABLED: ${{ vars.TF_EMAIL_WORKER_ENABLED || 'false' }}
           TF_EMAIL_SCHEDULE_ENABLED: ${{ vars.TF_EMAIL_SCHEDULE_ENABLED || 'false' }}
           TF_REALTIME_VALKEY_ENABLED: ${{ vars.TF_REALTIME_VALKEY_ENABLED || 'true' }}
           TF_EMAIL_FROM_ADDRESS: ${{ vars.TF_QA_EMAIL_FROM_ADDRESS || '' }}
@@ -416,6 +434,9 @@ jobs:
           {
             echo "## MangoRTS QA deploy"
             echo ""
+            echo "- Revision: ${GITHUB_SHA}"
+            echo "- API image: ${IMAGE_URI}"
+            echo "- Migration image: ${MIGRATION_IMAGE_URI}"
             echo "- App: ${APP_URL}"
             echo "- API: ${API_URL}"
             echo "- Nylas callback: ${NYLAS_CALLBACK_URL}"
@@ -429,6 +450,9 @@ jobs:
           {
             echo "## MangoRTS QA bootstrap images registered"
             echo ""
+            echo "- Revision: ${GITHUB_SHA}"
+            echo "- API image: ${IMAGE_URI}"
+            echo "- Migration image: ${MIGRATION_IMAGE_URI}"
             echo "- API desired count: 0"
             echo "- Email worker: disabled"
             echo "- Database schema confirmation: false"

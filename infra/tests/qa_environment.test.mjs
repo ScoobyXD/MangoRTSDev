@@ -79,19 +79,19 @@ test("QA reuses the current network but owns a private low-cost PostgreSQL 17 da
   assert.match(qaMain, /depends_on\s*=\s*\[[\s\S]*?aws_cloudwatch_log_group\.ecs_container_insights_performance[\s\S]*?aws_s3_bucket\.attachments[\s\S]*?\]/);
 });
 
-test("QA defaults to the complete production-shaped service set", () => {
+test("QA defaults to the complete base service set with mail processing parked", () => {
   assert.match(qaMain, /email_sqs_enabled\s*=\s*true/);
   assert.match(qaVariables, /variable "realtime_valkey_enabled"[\s\S]*?default\s*=\s*true/);
-  assert.match(qaVariables, /variable "email_worker_enabled"[\s\S]*?default\s*=\s*true/);
+  assert.match(qaVariables, /variable "email_worker_enabled"[\s\S]*?default\s*=\s*false/);
   assert.match(qaVariables, /variable "ecs_container_insights_enabled"[\s\S]*?default\s*=\s*true/);
   assert.match(qaVariables, /variable "cloudwatch_alarms_enabled"[\s\S]*?default\s*=\s*true/);
   assert.match(qaVariables, /variable "waf_enabled"[\s\S]*?default\s*=\s*true/);
-  assert.match(qaTfvarsExample, /email_worker_enabled\s*=\s*true/);
+  assert.match(qaTfvarsExample, /email_worker_enabled\s*=\s*false/);
   assert.match(qaTfvarsExample, /realtime_valkey_enabled\s*=\s*true/);
   assert.match(qaTfvarsExample, /ecs_container_insights_enabled\s*=\s*true/);
   assert.match(qaTfvarsExample, /cloudwatch_alarms_enabled\s*=\s*true/);
   assert.match(qaTfvarsExample, /waf_enabled\s*=\s*true/);
-  assert.match(qaWorkflow, /TF_EMAIL_WORKER_ENABLED:.*\|\| 'true'/);
+  assert.match(qaWorkflow, /TF_EMAIL_WORKER_ENABLED:.*\|\| 'false'/);
   assert.match(qaWorkflow, /TF_REALTIME_VALKEY_ENABLED:.*\|\| 'true'/);
   assert.match(qaWorkflow, /TF_ECS_CONTAINER_INSIGHTS_ENABLED:.*\|\| 'true'/);
   assert.match(qaWorkflow, /TF_CLOUDWATCH_ALARMS_ENABLED:.*\|\| 'true'/);
@@ -152,7 +152,11 @@ test("QA project, environment, and DNS names cannot be changed by GitHub variabl
   assert.doesNotMatch(qaVariables, /variable "(?:project_name|root_domain_name|app_subdomain|api_subdomain|origin_subdomain)"/);
   assert.doesNotMatch(qaWorkflow, /TF_(?:ROOT_DOMAIN_NAME|APP_SUBDOMAIN|API_SUBDOMAIN|ORIGIN_SUBDOMAIN)/);
   assert.match(qaChecks, /check "qa_identity_is_hard_locked"/);
-  assert.match(qaPreflight, /\[string\]\$CompanyName = "Mango QA"/);
+  assert.match(qaPreflight, /\[string\]\$PostgresBin/);
+  assert.match(qaPreflight, /\[string\]\$JonatQaEmail/);
+  assert.match(qaPreflight, /jonathankim829@gmail\.com/);
+  assert.match(qaPreflight, /"aws", "gh", "git", "terraform"/);
+  assert.match(qaPreflight, /"psql\.exe", "createdb\.exe", "dropdb\.exe", "pg_dump\.exe", "pg_restore\.exe"/);
 });
 
 test("QA cannot inherit repository-level dev Nylas or sender variables", () => {
@@ -229,6 +233,8 @@ test("QA registers immutable migration images before schema bootstrap without st
     qaWorkflow,
     /workflow_dispatch:[\s\S]*?stage:[\s\S]*?type: choice[\s\S]*?- bootstrap-images[\s\S]*?- deploy/,
   );
+  assert.match(qaWorkflow, /expected_git_commit:[\s\S]*?required:\s*true[\s\S]*?type:\s*string/);
+  assert.match(qaWorkflow, /GITHUB_SHA" != "\$EXPECTED_GIT_COMMIT/);
   assert.match(
     qaWorkflow,
     /bootstrap-images\)[\s\S]*?TF_EMAIL_SCHEMA_MIGRATED" != "false"[\s\S]*?EFFECTIVE_BACKEND_DESIRED_COUNT=0[\s\S]*?EFFECTIVE_EMAIL_SCHEMA_MIGRATED=false[\s\S]*?EFFECTIVE_EMAIL_WORKER_ENABLED=false/,
@@ -247,7 +253,23 @@ test("QA registers immutable migration images before schema bootstrap without st
   assert.match(qaWorkflow, /- name: Bootstrap image summary\s+if: inputs\.stage == 'bootstrap-images'/);
   assert.match(qaWorkflow, /API desired count: 0/);
   assert.match(qaWorkflow, /Email worker: disabled/);
+  assert.match(qaWorkflow, /Revision: \$\{GITHUB_SHA\}/);
+  assert.match(qaWorkflow, /API image: \$\{IMAGE_URI\}/);
+  assert.match(qaWorkflow, /Migration image: \$\{MIGRATION_IMAGE_URI\}/);
   assert.match(qaWorkflow, /terraform plan -refresh=false -out=tfplan/);
+});
+
+test("QA exposes exact non-secret operator targets for the one-time copy", () => {
+  for (const outputName of [
+    "email_work_queue_url",
+    "email_work_dlq_url",
+    "email_scheduler_dlq_url",
+    "realtime_valkey_cache_name",
+    "realtime_valkey_user_id",
+    "database_user",
+  ]) {
+    assert.match(qaMain + read("infra/aws-qa/outputs.tf"), new RegExp(`output "${outputName}"`));
+  }
 });
 
 test("hosted schema exports use a noninteractive read-only libpq credential and TLS", () => {

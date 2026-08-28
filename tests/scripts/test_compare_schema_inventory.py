@@ -260,23 +260,26 @@ class SchemaInventoryComparatorTests(unittest.TestCase):
         )
         self.assertIn("ExpectedGitCommit", script)
         self.assertIn("$ExpectedGitCommit-migrations", script)
+        self.assertIn("DatabaseNameOverride", script)
+        self.assertIn("^mangorts_qa_next_[0-9]{14}$", script)
+        self.assertIn("ExpectedDatabaseName", script)
+        self.assertIn('name  = "DB_NAME"', script)
         self.assertIn('"--network-configuration", "file://$networkConfigurationPath"', script)
         self.assertIn('"--overrides", "file://$overridesPath"', script)
         self.assertIn("[Text.UTF8Encoding]::new($false)", script)
         self.assertIn("Remove-Item -LiteralPath $networkConfigurationPath", script)
         self.assertIn("Remove-Item -LiteralPath $overridesPath", script)
 
-    def test_qa_reconciliation_requires_read_only_evidence_and_one_exact_migration(self) -> None:
+    def test_qa_database_helper_has_no_stale_reconciliation_write_path(self) -> None:
         script = (REPO_ROOT / "scripts" / "qa_run_database_task.ps1").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn('[ValidateSet("Audit", "Bootstrap", "Reconcile")]', script)
-        self.assertIn("20260825_canonical_schema_reconciliation.sql", script)
-        self.assertIn('@("-mode", "migrate", "-start-at", $ReconciliationMigration)', script)
-        self.assertIn("ReconciliationAuditTaskArn", script)
-        self.assertIn("missing_from_ledger=1", script)
-        self.assertIn("unknown_to_repository=0", script)
+        self.assertIn('[ValidateSet("Audit", "Bootstrap")]', script)
+        self.assertIn('[ValidateSet("EmptyPreflight", "Parity")]', script)
+        self.assertNotIn("Reconcile", script)
+        self.assertNotIn("-mode\", \"migrate", script)
+        self.assertNotIn("missing_from_ledger=1", script)
 
     def test_generated_schema_audit_outputs_are_ignored(self) -> None:
         ignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-  [ValidateSet("Audit", "Bootstrap", "Reconcile")]
+  [ValidateSet("Audit", "Bootstrap")]
   [string]$Action = "Audit",
   [string]$AwsProfile = "mangorts-dev",
   [string]$AwsRegion = "us-west-1",
@@ -15,6 +15,7 @@ param(
   [string]$ContainerName,
   [Parameter(Mandatory = $true)]
   [string]$DatabaseInstanceIdentifier,
+  [string]$DatabaseNameOverride = "",
   [Parameter(Mandatory = $true)]
   [string[]]$SubnetIDs,
   [Parameter(Mandatory = $true)]
@@ -26,17 +27,14 @@ param(
   [ValidatePattern('^[0-9a-fA-F]{40}$')]
   [string]$ExpectedGitCommit,
   [string]$ExpectedSchemaInventorySHA256 = "",
-  [ValidateSet("EmptyPreflight", "ReconciliationPreflight", "Parity")]
+  [ValidateSet("EmptyPreflight", "Parity")]
   [string]$AuditPurpose = "Parity",
   [string]$EmptyDatabaseAuditTaskArn = "",
-  [string]$ReconciliationAuditTaskArn = "",
   [switch]$Execute,
   [switch]$HumanOperatorApproval
 )
 
 $ErrorActionPreference = "Stop"
-$ReconciliationMigration = "20260825_canonical_schema_reconciliation.sql"
-
 function Invoke-AwsJson {
   param([string[]]$Arguments)
 
@@ -78,14 +76,36 @@ function Get-QaTaskLogMessages {
   }
   $taskID = ([string]$TaskRecord.taskArn).Split('/')[-1]
   $streamName = "$streamPrefix/$ContainerName/$taskID"
-  $events = Invoke-AwsJson -Arguments @(
-    "logs", "get-log-events",
-    "--log-group-name", $logGroup,
-    "--log-stream-name", $streamName,
-    "--start-from-head",
-    "--limit", "10000"
-  )
-  return @($events.events | ForEach-Object { [string]$_.message })
+  $lastToken = ""
+  $lastMessages = @()
+  for ($attempt = 1; $attempt -le 10; $attempt++) {
+    try {
+      $events = Invoke-AwsJson -Arguments @(
+        "logs", "get-log-events",
+        "--log-group-name", $logGroup,
+        "--log-stream-name", $streamName,
+        "--start-from-head",
+        "--limit", "10000"
+      )
+      $messages = @($events.events | ForEach-Object { [string]$_.message })
+      $nextToken = [string]$events.nextForwardToken
+      if ($messages.Count -gt 0 -and $nextToken -ceq $lastToken -and
+          (@($messages) -join "`n") -ceq (@($lastMessages) -join "`n")) {
+        return $messages
+      }
+      $lastMessages = $messages
+      $lastToken = $nextToken
+    } catch {
+      if ($attempt -eq 10) {
+        throw
+      }
+    }
+    Start-Sleep -Seconds 2
+  }
+  if ($lastMessages.Count -eq 0) {
+    throw "The migration task CloudWatch log stream remained empty."
+  }
+  return $lastMessages
 }
 
 function Assert-EmptyDatabaseAudit {
@@ -94,7 +114,8 @@ function Assert-EmptyDatabaseAudit {
     [object]$ExpectedTaskDefinition,
     [object]$ExpectedContainerDefinition,
     [string]$ClusterArn,
-    [string]$ExpectedRepositoryDigest
+    [string]$ExpectedRepositoryDigest,
+    [string]$ExpectedDatabaseName
   )
 
   if ([string]::IsNullOrWhiteSpace($TaskArn)) {
@@ -122,6 +143,10 @@ function Assert-EmptyDatabaseAudit {
   if ($auditOverride.Count -ne 1 -or (@($auditOverride[0].command) -join ' ') -cne "-mode audit") {
     throw "The supplied task was not a read-only migration audit."
   }
+  $databaseOverride = @($auditOverride[0].environment | Where-Object { $_.name -ceq "DB_NAME" })
+  if ($databaseOverride.Count -ne 1 -or [string]$databaseOverride[0].value -cne $ExpectedDatabaseName) {
+    throw "The empty-database audit targeted a different database name."
+  }
   $messages = Get-QaTaskLogMessages -TaskRecord $auditTask -ContainerDefinition $ExpectedContainerDefinition
   if (-not ($messages | Where-Object { $_ -match 'server_version_num=17\d{4}(?:\s|$)' })) {
     throw "STOP: the connected PostgreSQL audit did not report a supported 17.x server_version_num."
@@ -134,53 +159,6 @@ function Assert-EmptyDatabaseAudit {
     -FieldName "repository_schema_sha256" `
     -ExpectedDigest $ExpectedRepositoryDigest
   Write-Host "Verified empty-database audit: $TaskArn"
-}
-
-function Assert-ReconciliationAudit {
-  param(
-    [string]$TaskArn,
-    [object]$ExpectedTaskDefinition,
-    [object]$ExpectedContainerDefinition,
-    [string]$ClusterArn,
-    [string]$ExpectedRepositoryDigest,
-    [string]$ExpectedInventoryDigest
-  )
-
-  if ([string]::IsNullOrWhiteSpace($TaskArn)) {
-    throw "Reconcile requires -ReconciliationAuditTaskArn from a completed ReconciliationPreflight Audit run."
-  }
-  $auditResult = Invoke-AwsJson -Arguments @("ecs", "describe-tasks", "--cluster", $ClusterArn, "--tasks", $TaskArn)
-  if ($auditResult.failures.Count -gt 0 -or $auditResult.tasks.Count -ne 1) {
-    throw "The reconciliation audit task was not found in the QA cluster."
-  }
-  $auditTask = $auditResult.tasks[0]
-  if ([string]$auditTask.taskDefinitionArn -cne [string]$ExpectedTaskDefinition.taskDefinitionArn) {
-    throw "The reconciliation audit used a different task definition."
-  }
-  if ([string]$auditTask.lastStatus -cne "STOPPED") {
-    throw "The reconciliation audit task has not stopped."
-  }
-  $auditContainer = @($auditTask.containers | Where-Object { $_.name -ceq $ContainerName })
-  if ($auditContainer.Count -ne 1 -or $null -eq $auditContainer[0].exitCode -or [int]$auditContainer[0].exitCode -ne 0) {
-    throw "The reconciliation audit task did not complete successfully."
-  }
-  $auditOverride = @($auditTask.overrides.containerOverrides | Where-Object { $_.name -ceq $ContainerName })
-  if ($auditOverride.Count -ne 1 -or (@($auditOverride[0].command) -join ' ') -cne "-mode audit") {
-    throw "The supplied reconciliation evidence was not a read-only migration audit."
-  }
-  $messages = Get-QaTaskLogMessages -TaskRecord $auditTask -ContainerDefinition $ExpectedContainerDefinition
-  if (-not ($messages | Where-Object { $_ -match 'server_version_num=17\d{4}(?:\s|$)' })) {
-    throw "STOP: the reconciliation audit did not report PostgreSQL 17.x."
-  }
-  Assert-AuditDigest -Messages $messages -FieldName "repository_schema_sha256" -ExpectedDigest $ExpectedRepositoryDigest
-  Assert-AuditDigest -Messages $messages -FieldName "schema_inventory_sha256" -ExpectedDigest $ExpectedInventoryDigest
-  if (-not ($messages | Where-Object { $_ -match 'missing_from_ledger=1(?:\s|$)' })) {
-    throw "STOP: reconciliation requires exactly one repository migration missing from the QA ledger."
-  }
-  if (-not ($messages | Where-Object { $_ -match 'unknown_to_repository=0(?:\s|$)' })) {
-    throw "STOP: reconciliation audit reported a migration ledger row unknown to the repository."
-  }
-  Write-Host "Verified reconciliation audit: $TaskArn"
 }
 
 function Assert-AuditDigest {
@@ -223,9 +201,6 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256) -and $Expe
 }
 if ($Action -eq "Audit" -and $AuditPurpose -ne "EmptyPreflight" -and [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256)) {
   throw "$AuditPurpose audit requires -ExpectedSchemaInventorySHA256."
-}
-if ($Action -eq "Reconcile" -and [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256)) {
-  throw "Reconcile requires the expected current QA schema inventory SHA-256."
 }
 if ($Action -ne "Audit" -and $AuditPurpose -ne "Parity") {
   throw "-AuditPurpose applies only to -Action Audit. Omit it for $Action."
@@ -304,6 +279,14 @@ if ([string]$database.Endpoint.Address -cne $environmentByName["DB_HOST"]) {
 if (-not [string]::IsNullOrWhiteSpace([string]$database.DBName) -and [string]$database.DBName -cne $environmentByName["DB_NAME"]) {
   throw "Migration DB_NAME does not match the database name reported by RDS."
 }
+$targetDatabaseName = $environmentByName["DB_NAME"]
+if (-not [string]::IsNullOrWhiteSpace($DatabaseNameOverride)) {
+  if ($DatabaseNameOverride -cnotmatch '^mangorts_qa_next_[0-9]{14}$') {
+    throw "DatabaseNameOverride must match mangorts_qa_next_YYYYMMDDHHMMSS."
+  }
+  $targetDatabaseName = $DatabaseNameOverride
+}
+Assert-QaName -Value $targetDatabaseName -Label "Target DB_NAME"
 
 $subnetResult = Invoke-AwsJson -Arguments (@("ec2", "describe-subnets", "--subnet-ids") + $SubnetIDs)
 if ($subnetResult.Subnets.Count -ne $SubnetIDs.Count) {
@@ -327,10 +310,8 @@ foreach ($securityGroup in $securityGroupResult.SecurityGroups) {
 
 $command = if ($Action -eq "Audit") {
   @("-mode", "audit")
-} elseif ($Action -eq "Bootstrap") {
-  @("-mode", "schema", "-baseline-migrations", "-require-empty-database")
 } else {
-  @("-mode", "migrate", "-start-at", $ReconciliationMigration)
+  @("-mode", "schema", "-baseline-migrations", "-require-empty-database")
 }
 $networkConfiguration = @{
   awsvpcConfiguration = @{
@@ -342,8 +323,14 @@ $networkConfiguration = @{
 $overrides = @{
   containerOverrides = @(
     @{
-      name    = $ContainerName
-      command = $command
+      name        = $ContainerName
+      command     = $command
+      environment = @(
+        @{
+          name  = "DB_NAME"
+          value = $targetDatabaseName
+        }
+      )
     }
   )
 } | ConvertTo-Json -Depth 5 -Compress
@@ -354,7 +341,7 @@ Write-Host "AWS principal: $($identity.Arn)"
 Write-Host "Cluster: $($clusterRecord.clusterArn)"
 Write-Host "Task definition: $($task.taskDefinitionArn)"
 Write-Host "Migration image: $($container.image)"
-Write-Host "Database: $DatabaseInstanceIdentifier / $($environmentByName['DB_NAME']) / PostgreSQL $($database.EngineVersion)"
+Write-Host "Database: $DatabaseInstanceIdentifier / $targetDatabaseName / PostgreSQL $($database.EngineVersion)"
 Write-Host "Command: $($command -join ' ')"
 
 if ($Action -eq "Bootstrap") {
@@ -363,15 +350,8 @@ if ($Action -eq "Bootstrap") {
     -ExpectedTaskDefinition $task `
     -ExpectedContainerDefinition $container `
     -ClusterArn ([string]$clusterRecord.clusterArn) `
-    -ExpectedRepositoryDigest $ExpectedRepositorySchemaSHA256
-} elseif ($Action -eq "Reconcile") {
-  Assert-ReconciliationAudit `
-    -TaskArn $ReconciliationAuditTaskArn `
-    -ExpectedTaskDefinition $task `
-    -ExpectedContainerDefinition $container `
-    -ClusterArn ([string]$clusterRecord.clusterArn) `
     -ExpectedRepositoryDigest $ExpectedRepositorySchemaSHA256 `
-    -ExpectedInventoryDigest $ExpectedSchemaInventorySHA256
+    -ExpectedDatabaseName $targetDatabaseName
 }
 
 if (-not $Execute) {
@@ -385,7 +365,7 @@ if (-not [Environment]::UserInteractive) {
   throw "Execution requires an interactive human operator."
 }
 
-$confirmation = "RUN $($Action.ToUpperInvariant()) ON QA $($environmentByName['DB_NAME'])"
+$confirmation = "RUN $($Action.ToUpperInvariant()) ON QA $targetDatabaseName"
 $typed = Read-Host "Type '$confirmation' to start the one-off ECS task"
 if ($typed -cne $confirmation) {
   throw "Confirmation did not match. No ECS task was started."
@@ -458,18 +438,6 @@ if ($Action -eq "Audit") {
       throw "STOP: empty-database audit did not report public_tables=0."
     }
     Write-Host "Empty database and repository fingerprint verified."
-  } elseif ($AuditPurpose -eq "ReconciliationPreflight") {
-    Assert-AuditDigest `
-      -Messages $messages `
-      -FieldName "schema_inventory_sha256" `
-      -ExpectedDigest $ExpectedSchemaInventorySHA256
-    if (-not ($messages | Where-Object { $_ -match 'missing_from_ledger=1(?:\s|$)' })) {
-      throw "STOP: reconciliation preflight requires exactly one migration missing from the ledger."
-    }
-    if (-not ($messages | Where-Object { $_ -match 'unknown_to_repository=0(?:\s|$)' })) {
-      throw "STOP: reconciliation preflight reported a migration ledger row unknown to the repository."
-    }
-    Write-Host "Current QA schema and one-migration reconciliation state verified."
   } else {
     Assert-AuditDigest `
       -Messages $messages `
@@ -486,6 +454,4 @@ if ($Action -eq "Audit") {
   Write-Host "Audit task ARN: $taskArn"
 } elseif ($Action -eq "Bootstrap") {
   Write-Host "Run a new Parity Audit with the fresh same-commit dev schema hash before deploying the API."
-} else {
-  Write-Host "Run a new Parity Audit with the fresh same-commit aligned-dev schema hash before deploying the API."
 }
