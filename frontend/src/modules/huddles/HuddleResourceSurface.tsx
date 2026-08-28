@@ -14,6 +14,7 @@ import {
   EDITOR_NEU_SURFACE,
 } from "../editor/NodeWorkspaceSurfaceShared";
 import type { EditorTabID } from "../editor/editorTabs";
+import { mangoTiptapPendingStorageKey } from "../editor/tiptap/mangoTiptapSync";
 import { UniversalEntityPicker, type UniversalEntityPickerAnchor } from "../editor/UniversalEntityPicker";
 import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordStore";
 import type { LogicGateRACIAssignment, LogicGateRACIPrincipalType, LogicGateRACIRole } from "../logic-gates/types";
@@ -87,10 +88,19 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const [permissions, setPermissions] = useState(false);
   const [columnLayout, setColumnLayout] = useState<HuddleColumnLayout>(DEFAULT_HUDDLE_COLUMN_LAYOUT);
   const [nodeLeftFraction, setNodeLeftFraction] = useState(0.62);
+  const [activeHuddleNodeTextBoxID, setActiveHuddleNodeTextBoxID] = useState("");
   const [actionItemsRefreshToken, setActionItemsRefreshToken] = useState(0);
+  const [gateMiddleView, setGateMiddleView] = useState<"action_items" | "processes">("action_items");
+  const [nodeRightView, setNodeRightView] = useState<"action_items" | "process_snapshot">("action_items");
   const [error, setError] = useState("");
   const isGate = resource.resourceType === "huddle_logic_gate";
   const refreshActionItems = useCallback(() => setActionItemsRefreshToken((current) => current + 1), []);
+  const saveStateStorageKey = isGate || activeHuddleNodeTextBoxID ? mangoTiptapPendingStorageKey({
+    companyID,
+    resourceType: isGate ? "huddle_logic_gate" : "huddle_node",
+    resourceID: resource.resourceID,
+    documentID: isGate ? resource.resourceID : activeHuddleNodeTextBoxID,
+  }) : undefined;
 
   const load = useCallback(async () => {
     setError("");
@@ -123,6 +133,11 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   }, [companyID, isGate, requestJSON, resource.resourceID, resource.resourceType]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    setGateMiddleView("action_items");
+    setNodeRightView("action_items");
+    setActiveHuddleNodeTextBoxID("");
+  }, [resource.resourceID, resource.resourceType]);
 
   const saveName = async () => {
     const clean = name.trim();
@@ -320,12 +335,8 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   };
 
   const selectToolbarTab = (tab: EditorTabID) => {
-    if (tab === "permissions") {
-      setActiveTab("permissions");
-      setPermissions(true);
-      return;
-    }
-    setActiveTab(tab === "editor" ? "editor" : activeTab);
+    setActiveTab(tab);
+    setPermissions(tab === "permissions");
   };
 
   const bodyTemplate = isGate
@@ -347,6 +358,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
             visibleTabIDs={["editor", "permissions", "format", "outline-styles"]}
             onSelectTab={selectToolbarTab}
             reserveHeaderOffset={false}
+            saveStateStorageKey={saveStateStorageKey}
           />
         </div>
         <div aria-label="Huddle actions" style={actionGroupStyle}>
@@ -411,58 +423,97 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
               currentUserID={currentUserID}
               requestJSON={requestJSON}
               ariaLabel={`${name} editor`}
+              attachmentContext={{
+                requestJSON,
+                apiBase,
+                companyID,
+                resourceType: "huddle_logic_gate",
+                resourceID: resource.resourceID,
+                informationID: resource.resourceID,
+                editorSurface: "huddle_logic_gate",
+              }}
+              mentionUsers={companyUsers}
               controls={editorControls}
               style={{ padding: "22px 26px", background: "rgba(255,255,255,.72)" }}
             />
           </div>
         ) : (
-          <div style={nodeWorkspaceColumnStyle}>
-            <HuddleNodeWorkspace
-              apiBase={apiBase}
-              companyID={companyID}
-              huddleNodeID={resource.resourceID}
-              currentUserID={currentUserID}
-              companyUsers={companyUsers}
-              requestJSON={requestJSON}
-              controls={editorControls}
-              onError={setError}
-              onActionItemsChanged={refreshActionItems}
-            />
-            <section aria-label={`${name} Process snapshot`} data-huddle-node-snapshot="true" style={relationshipColumnStyle}>
-              <div style={relationshipColumnHeaderStyle}><strong>Process snapshot</strong></div>
-              <HuddleLogicGateCards
-                items={logicGateCards}
-                emptyLabel="No Processes were linked when this Huddle Node was created."
-                onOpenLogicGate={openLogicGate}
-                onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
-              />
-            </section>
-          </div>
-        )}
-        <div role="separator" aria-label={isGate ? "Resize Huddle editor and Process columns" : "Resize Huddle Node workspace and Action Item columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
-        {isGate ? (
-          <section aria-label="Huddle Processes" style={relationshipColumnStyle}>
-            <div style={relationshipColumnHeaderStyle}>
-              <strong>Processes</strong>
-              <button type="button" aria-label="Add Process" title="Add Process" onClick={openLogicGatePicker} style={createNodeButtonStyle}>+</button>
-            </div>
-            <HuddleLogicGateCards
-              items={logicGateCards}
-              emptyLabel="No Processes linked yet."
-              onOpenLogicGate={openLogicGate}
-              onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
-              onRemove={(item) => void removeLogicGate(item)}
-            />
-          </section>
-        ) : (
-          <HuddleActionItemsPanel
+          <HuddleNodeWorkspace
+            apiBase={apiBase}
             companyID={companyID}
-            currentUserID={currentUserID}
             huddleNodeID={resource.resourceID}
+            currentUserID={currentUserID}
             companyUsers={companyUsers}
             requestJSON={requestJSON}
-            refreshToken={actionItemsRefreshToken}
+            controls={editorControls}
+            onError={setError}
+            onActionItemsChanged={refreshActionItems}
+            onActiveTextBoxIDChange={setActiveHuddleNodeTextBoxID}
           />
+        )}
+        <div role="separator" aria-label={isGate ? "Resize Huddle editor and middle columns" : "Resize Huddle Node workspace and detail columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
+        {isGate ? (
+          <div aria-label="Huddle Process middle view" style={viewColumnStyle}>
+            <HuddleViewToggle
+              ariaLabel="Huddle Process middle view"
+              value={gateMiddleView}
+              options={[{ id: "action_items", label: "Action Items" }, { id: "processes", label: "Processes" }]}
+              onChange={(value) => setGateMiddleView(value === "processes" ? "processes" : "action_items")}
+            />
+            {gateMiddleView === "action_items" ? (
+              <HuddleActionItemsPanel
+                companyID={companyID}
+                currentUserID={currentUserID}
+                scope={{ resourceType: "huddle_logic_gate", resourceID: resource.resourceID }}
+                companyUsers={companyUsers}
+                requestJSON={requestJSON}
+                refreshToken={actionItemsRefreshToken}
+              />
+            ) : (
+              <section aria-label="Huddle Processes" style={relationshipColumnStyle}>
+                <div style={relationshipColumnHeaderStyle}>
+                  <strong>Processes</strong>
+                  <button type="button" aria-label="Add Process" title="Add Process" onClick={openLogicGatePicker} style={createNodeButtonStyle}>+</button>
+                </div>
+                <HuddleLogicGateCards
+                  items={logicGateCards}
+                  emptyLabel="No Processes linked yet."
+                  onOpenLogicGate={openLogicGate}
+                  onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
+                  onRemove={(item) => void removeLogicGate(item)}
+                />
+              </section>
+            )}
+          </div>
+        ) : (
+          <div aria-label="Huddle Node detail view" style={viewColumnStyle}>
+            <HuddleViewToggle
+              ariaLabel="Huddle Node detail view"
+              value={nodeRightView}
+              options={[{ id: "action_items", label: "Action Items" }, { id: "process_snapshot", label: "Process Snapshot" }]}
+              onChange={(value) => setNodeRightView(value === "process_snapshot" ? "process_snapshot" : "action_items")}
+            />
+            {nodeRightView === "action_items" ? (
+              <HuddleActionItemsPanel
+                companyID={companyID}
+                currentUserID={currentUserID}
+                scope={{ resourceType: "huddle_node", resourceID: resource.resourceID }}
+                companyUsers={companyUsers}
+                requestJSON={requestJSON}
+                refreshToken={actionItemsRefreshToken}
+              />
+            ) : (
+              <section aria-label={`${name} Process snapshot`} data-huddle-node-snapshot="true" style={relationshipColumnStyle}>
+                <div style={relationshipColumnHeaderStyle}><strong>Process Snapshot</strong></div>
+                <HuddleLogicGateCards
+                  items={logicGateCards}
+                  emptyLabel="No Processes were linked when this Huddle Node was created."
+                  onOpenLogicGate={openLogicGate}
+                  onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
+                />
+              </section>
+            )}
+          </div>
         )}
         {isGate && (
           <>
@@ -591,12 +642,38 @@ const FullscreenIcon: React.FC<{ active: boolean }> = ({ active }) => (
   </svg>
 );
 
+type HuddlePanelView = "action_items" | "processes" | "process_snapshot";
+
+const HuddleViewToggle: React.FC<{
+  ariaLabel: string;
+  value: HuddlePanelView;
+  options: ReadonlyArray<{ id: HuddlePanelView; label: string }>;
+  onChange: (value: HuddlePanelView) => void;
+}> = ({ ariaLabel, value, options, onChange }) => (
+  <div role="group" aria-label={ariaLabel} style={viewToggleStyle}>
+    {options.map((option) => {
+      const active = value === option.id;
+      return (
+        <button
+          key={option.id}
+          type="button"
+          aria-pressed={active}
+          onClick={() => onChange(option.id)}
+          style={{ ...viewToggleButtonStyle, ...(active ? viewToggleButtonActiveStyle : {}) }}
+        >
+          {option.label}
+        </button>
+      );
+    })}
+  </div>
+);
+
 const surfaceStyle: React.CSSProperties = { width: "100%", height: "100%", minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px auto auto auto minmax(0,1fr)", overflow: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: EDITOR_NEU_PANEL_BACKGROUND, color: "#111827", boxShadow: EDITOR_NEU_PANEL_SHADOW };
 const toolbarHeaderStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: 8, padding: "6px 8px 4px 10px", borderBottom: "1px solid rgba(148,163,184,.16)", background: "linear-gradient(180deg,rgba(255,255,255,.8),rgba(248,250,252,.54))" };
 const actionGroupStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6 };
 const iconButtonStyle: React.CSSProperties = { width: 26, height: 26, display: "grid", placeItems: "center", border: "1px solid rgba(100,116,139,.25)", borderRadius: 7, background: EDITOR_NEU_SURFACE, color: "#334155", padding: 0, cursor: "pointer", boxShadow: "2px 2px 6px rgba(148,163,184,.2), -2px -2px 6px rgba(255,255,255,.86)" };
 const closeButtonStyle: React.CSSProperties = { ...iconButtonStyle, border: "1px solid transparent", background: "linear-gradient(135deg,#ff5a6b,#ef334e)", color: "#fff", fontSize: 15, fontWeight: 800, boxShadow: "0 8px 18px rgba(239,51,78,.26), inset 1px 1px 0 rgba(255,255,255,.38)" };
-const identityHeaderStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 4, margin: "5px 12px 2px", padding: "7px 12px 8px", border: "1px solid rgba(255,255,255,.82)", borderRadius: 11, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };
+const identityHeaderStyle: React.CSSProperties = { minWidth: 0, width: "min(780px, calc(100% - 24px))", boxSizing: "border-box", display: "grid", gap: 4, margin: "5px 12px 2px", padding: "7px 12px 8px", border: "1px solid rgba(255,255,255,.82)", borderRadius: 11, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };
 const identityTitleRowStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", gap: 7 };
 const identityLabelStyle: React.CSSProperties = { flex: "0 0 auto", display: "inline-flex", alignItems: "center", color: "#111827" };
 const titleInputStyle: React.CSSProperties = { minWidth: 0, flex: 1, border: 0, outline: 0, background: "transparent", color: "#111827", font: "inherit", fontSize: 18, fontWeight: 650, padding: 0 };
@@ -605,7 +682,10 @@ const errorStyle: React.CSSProperties = { margin: "0 12px 5px", padding: "6px 9p
 const errorPlaceholderStyle: React.CSSProperties = { height: 0, minHeight: 0, overflow: "hidden" };
 const bodyStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gap: 0, padding: "4px 10px 10px", overflowX: "auto", overflowY: "hidden" };
 const editorColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, overflow: "hidden", border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: "rgba(255,255,255,.72)", boxShadow: EDITOR_NEU_SHADOW };
-const nodeWorkspaceColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "minmax(360px, 1fr) minmax(150px, .38fr)", gap: 8, overflow: "hidden" };
+const viewColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "34px minmax(0,1fr)", gap: 5, overflow: "hidden" };
+const viewToggleStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridAutoFlow: "column", gridAutoColumns: "minmax(0,1fr)", alignItems: "center", gap: 4, padding: 3, border: "1px solid rgba(148,163,184,.2)", borderRadius: 9, background: "rgba(226,232,240,.55)" };
+const viewToggleButtonStyle: React.CSSProperties = { minWidth: 0, height: 26, border: "1px solid transparent", borderRadius: 7, background: "transparent", color: "#64748b", cursor: "pointer", padding: "0 7px", font: "inherit", fontSize: 10.5, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+const viewToggleButtonActiveStyle: React.CSSProperties = { borderColor: "rgba(148,163,184,.22)", background: EDITOR_NEU_SURFACE, color: "#1e293b", boxShadow: "2px 2px 6px rgba(148,163,184,.18), -2px -2px 6px rgba(255,255,255,.82)" };
 const relationshipColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px minmax(0,1fr)", overflow: "hidden", padding: 9, border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };
 const relationshipColumnHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0 3px 6px", color: "#243047", fontSize: 14 };
 const columnResizeHandleStyle: React.CSSProperties = { minWidth: 8, height: "100%", display: "grid", placeItems: "center", cursor: "col-resize", touchAction: "none" };

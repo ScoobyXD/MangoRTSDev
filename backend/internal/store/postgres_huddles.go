@@ -113,6 +113,40 @@ func (r *PostgresRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID 
 	return item, nil
 }
 
+func (r *PostgresRepo) CreateHuddleLogicGate(input HuddleCreateInput) (domain.HuddleLogicGate, error) {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.Name = strings.TrimSpace(input.Name)
+	if input.CompanyID == "" || input.Name == "" {
+		return domain.HuddleLogicGate{}, ErrInvalid
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	defer tx.Rollback()
+	id := newUUIDv7String()
+	item, err := scanHuddleLogicGate(tx.QueryRowContext(ctx, `
+insert into huddle_logic_gates(company_id,huddle_logic_gate_id,header)
+values($1::uuid,$2::uuid,$3)
+returning company_id::text,huddle_logic_gate_id::text,header,created_timestamp,updated_timestamp`, input.CompanyID, id, input.Name))
+	if err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	if _, err = tx.ExecContext(ctx, `
+insert into huddle_explorer_items(company_id,huddle_explorer_item_id,huddle_type,resource_huddle_resource_id)
+values($1::uuid,$2::uuid,'huddle_logic_gate',$3::uuid)`, input.CompanyID, newUUIDv7String(), id); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	if err = postgresCreateDirectPolicyTx(ctx, tx, input.CompanyID, EntityTypeHuddleLogicGate, id); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	return item, nil
+}
+
 func scanHuddleLogicGate(row interface{ Scan(...any) error }) (domain.HuddleLogicGate, error) {
 	var v domain.HuddleLogicGate
 	err := row.Scan(&v.CompanyID, &v.HuddleLogicGateID, &v.Header, &v.CreatedTimestamp, &v.UpdatedTimestamp)
@@ -611,13 +645,15 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 		if err = add("huddle_node_kpi_relationships", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
 			return err
 		}
-		attachmentWhere := `company_id=$1::uuid and resource_type='huddle_node' and resource_id=$2 and deleted_timestamp is null`
-		if err = add("attachment_relationships", attachmentWhere, companyID, id); err != nil {
+	}
+	if kind == "huddle_logic_gate" || kind == "huddle_node" {
+		attachmentWhere := `company_id=$1::uuid and resource_type=$2 and resource_id=$3 and deleted_timestamp is null`
+		if err = add("attachment_relationships", attachmentWhere, companyID, kind, id); err != nil {
 			return err
 		}
 		if err = add("attachments", `company_id=$1::uuid and attachment_id in (
   select attachment_id from attachment_relationships where `+attachmentWhere+`
-)`, companyID, id); err != nil {
+)`, companyID, kind, id); err != nil {
 			return err
 		}
 	}
@@ -652,8 +688,8 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 			return err
 		}
 	}
-	if kind == "huddle_node" {
-		if err = retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeHuddleNode, id); err != nil {
+	if kind == "huddle_logic_gate" || kind == "huddle_node" {
+		if err = retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, kind, id); err != nil {
 			return err
 		}
 	}

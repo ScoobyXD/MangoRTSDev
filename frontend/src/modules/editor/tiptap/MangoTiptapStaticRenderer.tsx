@@ -2,8 +2,8 @@ import React from "react";
 import type { JSONContent } from "@tiptap/core";
 import { needsMangoTiptapLegacyDateHeadingBreak, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
 import { isDormantMangoTiptapAnnotation, type MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
-import { ExplorerEntityIcon } from "../../../icons/index.js";
-import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
+import { ActionItemIcon, ExplorerEntityIcon } from "../../../icons/index.js";
+import { editorEntityLinkAnchorBounds, editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
 import "./mangoTiptap.css";
 import { mangoTiptapImagePlacementDOMAttributes } from "./mangoTiptapImagePlacement.js";
 
@@ -143,8 +143,7 @@ function renderNode(
       const actionItemColor = entityType === "entity" && (attrs.actionItemColor === "yellow" || attrs.actionItemColor === "red")
         ? attrs.actionItemColor
         : null;
-      const isActionItem = entityType === "entity" && attrs.actionItem === true;
-      const actionItemSeverity = actionItemColor === "yellow" ? "Yellow" : actionItemColor === "red" ? "Red" : "";
+      const isActionItem = entityType === "entity" && (attrs.actionItem === true || actionItemColor !== null);
       const emailEntity = entityType === "email_message" ? {
         emailMessageID: String(attrs.emailMessageId || "") || undefined,
         emailThreadID: String(attrs.emailThreadId || "") || undefined,
@@ -166,26 +165,35 @@ function renderNode(
           data-mango-email-thread-id={entityType === "email_message" ? emailEntity.emailThreadID : undefined}
           data-mango-email-account-email={entityType === "email_message" ? emailEntity.emailAccountEmail : undefined}
           data-mango-email-shared-inbox-id={entityType === "email_message" ? emailEntity.emailSharedInboxID : undefined}
-          aria-label={actionItemColor ? `Open ${actionItemSeverity} Action Item ${label}` : `Open ${isActionItem ? "Action Item" : editorEntityTypeLabel(entityType)} ${label}`}
-          title={actionItemColor ? `${actionItemSeverity} Action Item: ${label}` : isActionItem ? `Action Item: ${label}` : undefined}
+          aria-label={`Open ${isActionItem ? "Action Item" : editorEntityTypeLabel(entityType)} ${label}`}
+          title={isActionItem ? `Action Item: ${label}` : undefined}
           role={needsExplicitKeyboardActivation ? "link" : undefined}
           tabIndex={needsExplicitKeyboardActivation ? 0 : undefined}
           href={entityType === "email_message" || entityType === "entity" ? undefined : editorEntityRoute({ entityType, entityID })}
           onClick={(event) => {
             if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
             event.preventDefault();
-            openEditorEntityLink({ entityType, entityID, label, ...emailEntity });
+            openEditorEntityLink(
+              { entityType, entityID, label, isActionItem, ...(actionItemColor ? { actionItemColor } : {}), ...emailEntity },
+              undefined,
+              editorEntityLinkAnchorBounds(event.currentTarget),
+            );
           }}
           onKeyDown={(event) => {
             if (!needsExplicitKeyboardActivation || (event.key !== "Enter" && event.key !== " ")) return;
             event.preventDefault();
             event.stopPropagation();
-            openEditorEntityLink({ entityType, entityID, label, ...emailEntity });
+            openEditorEntityLink(
+              { entityType, entityID, label, isActionItem, ...(actionItemColor ? { actionItemColor } : {}), ...emailEntity },
+              undefined,
+              editorEntityLinkAnchorBounds(event.currentTarget),
+            );
           }}
         >
-          <ExplorerEntityIcon kind={entityType} className="mango-editor-entity-icon" />
+          {isActionItem
+            ? <ActionItemIcon className="mango-editor-entity-icon mango-editor-action-item-icon" size={15} />
+            : <ExplorerEntityIcon kind={entityType} className="mango-editor-entity-icon" />}
           <span className="mango-editor-entity-label">{label}</span>
-          {actionItemColor && <span className="mango-editor-action-item-severity" aria-hidden="true">{actionItemSeverity}</span>}
         </a>
       );
     }

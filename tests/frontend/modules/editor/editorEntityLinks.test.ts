@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
+import { ACTION_ITEM_TARGET_ARROW_PATH, createActionItemIconElement } from "../../../../frontend/src/icons/ActionItemIcon.js";
 import { createExplorerEntityIconElement } from "../../../../frontend/src/icons/EntityIcons.js";
 
 import {
@@ -31,6 +32,7 @@ import {
   searchEditorEntityLinks,
   updateRenderedEditorEntityReference,
   type EditorEntityLink,
+  type EditorEntityReferenceOpenDetail,
   type EditorEntityReferencePresentation,
 } from "../../../../frontend/src/modules/editor/editorEntityLinks.js";
 
@@ -255,10 +257,22 @@ test("the shared Tiptap selection toolbar exposes one keyboard-operable yellow/r
   assert.match(source, /role="group"[\s\S]*aria-label="Create an Action Item from highlighted text"/);
   assert.match(source, /\(\["yellow", "red"\] as const\)\.map/);
   assert.match(source, /aria-label=\{`Create \$\{color\} Action Item from highlighted text\.`\}/);
+  assert.match(source, /<ActionItemIcon size=\{16\} \/>/);
+  assert.doesNotMatch(source, /label\.slice\(0, 1\)/);
   assert.match(source, /createActionItemEntityFromSelection\(\{ companyID, requestJSON \}, action\.quote, color\)/);
   assert.match(css, /\.mango-editor-action-item--yellow[\s\S]*animation: mango-editor-action-item-pulse 2s/);
   assert.match(css, /\.mango-editor-action-item--red[\s\S]*animation: mango-editor-action-item-pulse 1s/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.mango-editor-action-item--yellow,[\s\S]*animation: none/);
+});
+
+test("the shared Tiptap selection toolbar stays hidden during primary-pointer selection and refreshes only after release", () => {
+  const source = readFileSync("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx", "utf8");
+  assert.match(source, /selectionPointerDownRef\.current = true;[\s\S]*setSelectionAction\(null\);/);
+  assert.match(source, /if \(selectionPointerDownRef\.current \|\| selection\.empty/);
+  assert.match(source, /addEventListener\("pointerup", finishSelectionPointerGesture\)/);
+  assert.match(source, /addEventListener\("pointercancel", finishSelectionPointerGesture\)/);
+  assert.match(source, /addEventListener\("mouseup", finishSelectionPointerGesture\)/);
+  assert.match(source, /selectionPointerDownRef\.current = false;[\s\S]*requestAnimationFrame\(\(\) => \{[\s\S]*updateSelectionState\(editor\)/);
 });
 
 test("selection Action Item creation sends the exact body, normalized name, and chosen color", async () => {
@@ -299,6 +313,7 @@ test("selection Action Item creation sends the exact body, normalized name, and 
     label: "Escalate delayed shipment",
     updatedTimestamp: "2026-08-28T12:00:01Z",
     isActionItem: true,
+    actionItemColor: "yellow",
   });
   assert.equal(normalizeEditorSelectionActionItemName(`  ${"x".repeat(240)}  `), "x".repeat(200));
 });
@@ -329,7 +344,7 @@ test("legacy entity chips preserve identity, type styling, and routes", () => {
   }
 });
 
-test("an authoritative Entity read refreshes rendered Action Item labels and severity without replacing chip identity", () => {
+test("an authoritative Entity read refreshes rendered Action Item labels, target icon, and color without replacing chip identity", () => {
   const dom = new JSDOM("<!doctype html><html><body></body></html>");
   const domGlobals = dom.window as unknown as typeof globalThis;
   const previousWindow = globalThis.window;
@@ -341,6 +356,7 @@ test("an authoritative Entity read refreshes rendered Action Item labels and sev
       entityType: "entity",
       entityID: "action-item-1",
       label: "Saved label",
+      isActionItem: true,
     });
     dom.window.document.body.append(chip);
     let presentation: EditorEntityReferencePresentation | null = null;
@@ -354,8 +370,10 @@ test("an authoritative Entity read refreshes rendered Action Item labels and sev
     assert.equal(chip.dataset.mangoActionItem, "true");
     assert.equal(chip.dataset.mangoActionItemColor, "red");
     assert.equal(chip.querySelector(".mango-editor-entity-label")?.textContent, "Current label");
-    assert.equal(chip.querySelector(".mango-editor-action-item-severity")?.textContent, "Red");
-    assert.equal(chip.getAttribute("aria-label"), "Open Red Action Item Current label");
+    assert.equal(chip.querySelector(".mango-editor-action-item-severity"), null);
+    assert.equal(chip.getAttribute("aria-label"), "Open Action Item Current label");
+    assert.equal(chip.getAttribute("title"), "Action Item: Current label");
+    assert.equal(chip.querySelector(".mango-editor-action-item-icon path:last-of-type")?.getAttribute("d"), ACTION_ITEM_TARGET_ARROW_PATH);
     assert.deepEqual(presentation, { entityID: "action-item-1", label: "Current label", isActionItem: true, actionItemColor: "red" });
 
     updateRenderedEditorEntityReference({ entityID: "action-item-1", label: "Resolved label", isActionItem: true, actionItemColor: null });
@@ -402,6 +420,18 @@ test("entity chips render the canonical Node, Logic Gate, Project, Entity, and E
   }
 });
 
+test("the shared Action Item DOM icon uses the target-and-arrow product shape", () => {
+  const dom = new JSDOM("<!doctype html>");
+  try {
+    const icon = createActionItemIconElement(dom.window.document);
+    assert.equal(icon.getAttribute("viewBox"), "0 0 16 16");
+    assert.equal(icon.querySelector("path:last-of-type")?.getAttribute("d"), ACTION_ITEM_TARGET_ARROW_PATH);
+    assert.ok(icon.querySelector("circle"), "the target center is present");
+  } finally {
+    dom.window.close();
+  }
+});
+
 test("the shared React and DOM Entity icon uses the same default, inverse, and orange tone specs", () => {
   const dom = new JSDOM("<!doctype html>");
   try {
@@ -432,13 +462,13 @@ test("entity clicks navigate inside the app and Node-to-Node links retain a safe
   let popStateCount = 0;
   let historyBackCount = 0;
   let openedEmail: EditorEntityLink | undefined;
-  let openedEntity: EditorEntityLink | undefined;
+  let openedEntity: EditorEntityReferenceOpenDetail | undefined;
   dom.window.addEventListener("popstate", () => { popStateCount += 1; });
   dom.window.addEventListener(EVENT_EDITOR_EMAIL_REFERENCE_OPEN, (event) => {
     openedEmail = (event as CustomEvent<EditorEntityLink>).detail;
   });
   dom.window.addEventListener(EVENT_EDITOR_ENTITY_REFERENCE_OPEN, (event) => {
-    openedEntity = (event as CustomEvent<EditorEntityLink>).detail;
+    openedEntity = (event as CustomEvent<EditorEntityReferenceOpenDetail>).detail;
   });
   Object.defineProperty(dom.window.history, "back", { configurable: true, value: () => { historyBackCount += 1; } });
   try {
@@ -474,9 +504,10 @@ test("entity clicks navigate inside the app and Node-to-Node links retain a safe
       emailAccountEmail: "owner@example.com",
     });
 
-    openEditorEntityLink({ entityType: "entity", entityID: "entity-1", label: "Thailand delivery" });
+    const anchor = { left: 900, top: 40, right: 940, bottom: 62 };
+    openEditorEntityLink({ entityType: "entity", entityID: "entity-1", label: "Thailand delivery" }, undefined, anchor);
     assert.equal(dom.window.location.pathname, "/projects/project-1", "an Entity reference opens through the detail-preview event without inventing an app route");
-    assert.deepEqual(openedEntity, { entityType: "entity", entityID: "entity-1", label: "Thailand delivery" });
+    assert.deepEqual(openedEntity, { entity: { entityType: "entity", entityID: "entity-1", label: "Thailand delivery" }, anchor });
     assert.throws(
       () => editorEntityRoute({ entityType: "entity", entityID: "entity-1" }),
       /detail preview/,
@@ -606,8 +637,9 @@ test("durable Tiptap entity nodes keep their identity through history and Backsp
     assert.match(actionItemHTML, /data-mango-action-item="true"/);
     assert.match(actionItemHTML, /data-mango-action-item-color="yellow"/);
     assert.match(actionItemHTML, /mango-editor-action-item--yellow/);
-    assert.match(actionItemHTML, /aria-label="Open Yellow Action Item Escalate delayed shipment"/);
-    assert.match(actionItemHTML, />Yellow<\/span>/);
+    assert.match(actionItemHTML, /aria-label="Open Action Item Escalate delayed shipment"/);
+    assert.match(actionItemHTML, /M8 8 14\.5 1\.5M11\.5 1\.5h3v3/);
+    assert.doesNotMatch(actionItemHTML, />Yellow<\/span>/);
     editor.commands.setContent(actionItemHTML);
     const actionItemNode = editor.getJSON().content?.[0]?.content?.[0] as { attrs?: Record<string, unknown> } | undefined;
     assert.equal(actionItemNode?.attrs?.actionItem, true, "HTML clipboard hydration preserves Action Item identity");

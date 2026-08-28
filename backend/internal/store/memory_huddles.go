@@ -84,6 +84,32 @@ func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID st
 	return huddle, nil
 }
 
+func (r *MemoryRepo) CreateHuddleLogicGate(input HuddleCreateInput) (domain.HuddleLogicGate, error) {
+	input.CompanyID = cleanUUIDText(input.CompanyID)
+	input.Name = strings.TrimSpace(input.Name)
+	if input.CompanyID == "" || input.Name == "" {
+		return domain.HuddleLogicGate{}, ErrInvalid
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.companies[input.CompanyID]; !exists {
+		return domain.HuddleLogicGate{}, ErrNotFound
+	}
+	now := time.Now().UTC()
+	item := domain.HuddleLogicGate{
+		CompanyID: input.CompanyID, HuddleLogicGateID: newUUIDv7String(), Header: input.Name,
+		CreatedTimestamp: now, UpdatedTimestamp: now,
+	}
+	r.huddleLogicGates[key(input.CompanyID, item.HuddleLogicGateID)] = item
+	r.ensureV2PolicySettingsLocked(input.CompanyID, EntityTypeHuddleLogicGate, item.HuddleLogicGateID)
+	placement := domain.HuddleExplorerItem{
+		CompanyID: input.CompanyID, ItemID: newUUIDv7String(), ResourceType: EntityTypeHuddleLogicGate,
+		ResourceID: item.HuddleLogicGateID, Name: item.Header, CreatedTimestamp: now, UpdatedTimestamp: now,
+	}
+	r.huddleExplorerItems[key(input.CompanyID, placement.ItemID)] = placement
+	return item, nil
+}
+
 func (r *MemoryRepo) ListHuddleLogicGates(companyID string) ([]domain.HuddleLogicGate, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -287,6 +313,7 @@ func (r *MemoryRepo) DeleteHuddleLogicGate(companyID, id, userID string) error {
 	}
 	r.addSimpleHuddleRecycleLocked(companyID, userID, "huddle_logic_gate", id, item.Header)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeHuddleLogicGate, id)
+	r.retireMemoryAttachmentOwnerLocked(companyID, EntityTypeHuddleLogicGate, id, time.Now().UTC())
 	delete(r.huddleLogicGates, k)
 	for relationshipKey, relationship := range r.huddleLogicGateRelationships {
 		if relationship.CompanyID == companyID && relationship.HuddleLogicGateID == id {

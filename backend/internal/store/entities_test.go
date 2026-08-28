@@ -189,6 +189,31 @@ func TestMemoryEntitiesStableBoundedPaging(t *testing.T) {
 	}
 }
 
+func TestMemoryEntitySearchMatchesEntityTypeName(t *testing.T) {
+	repo := NewMemoryRepo()
+	entityType, err := repo.CreateEntityType(EntityTypeInput{
+		CompanyID: entitiesTestCompanyID, EntityTypeID: entitiesTestTypeID, Name: "Action Item",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entity, err := repo.CreateEntity(EntityInput{
+		CompanyID: entitiesTestCompanyID, EntityTypeID: entityType.EntityTypeID, Name: "Call supplier",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := repo.ListEntities(context.Background(), EntityListQuery{
+		CompanyID: entitiesTestCompanyID, Query: "action item", Limit: 50,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].EntityID != entity.EntityID || items[0].EntityTypeName != "Action Item" {
+		t.Fatalf("Entity Type-name search results=%+v", items)
+	}
+}
+
 func TestEntitiesRejectMalformedOptionalAndFilterIDs(t *testing.T) {
 	blank := "  "
 	if _, err := normalizeOptionalEntityID(&blank); !errors.Is(err, ErrInvalid) {

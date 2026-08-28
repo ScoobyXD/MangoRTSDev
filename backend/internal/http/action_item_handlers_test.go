@@ -64,6 +64,7 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 	}
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&huddle_node_id="+secondNode.HuddleNodeID, nil)
+	processListRequest := httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&huddle_logic_gate_id="+process.HuddleLogicGateID, nil)
 	listResponse := httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, requestWithActorForTest(listRequest, user, company.CompanyID))
 	if listResponse.Code != http.StatusOK {
@@ -92,6 +93,18 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 	}
 	if len(listed.ActionItems) != 1 || listed.ActionItems[0].EntityID != created.ActionItem.EntityID {
 		t.Fatalf("saved reference rollup=%+v", listed.ActionItems)
+	}
+	processListResponse := httptest.NewRecorder()
+	handler.ServeHTTP(processListResponse, requestWithActorForTest(processListRequest, user, company.CompanyID))
+	if processListResponse.Code != http.StatusOK {
+		t.Fatalf("process list status=%d body=%s", processListResponse.Code, processListResponse.Body.String())
+	}
+	listed.ActionItems = nil
+	if err := json.NewDecoder(processListResponse.Body).Decode(&listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.ActionItems) != 1 || listed.ActionItems[0].EntityID != created.ActionItem.EntityID {
+		t.Fatalf("direct Process rollup=%+v", listed.ActionItems)
 	}
 	secondCreateBody, _ := json.Marshal(map[string]any{
 		"company_id": company.CompanyID, "body_text": "Confirm the revised ship date", "color": nil,
@@ -151,6 +164,12 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 	if missingNodeResponse.Code != http.StatusBadRequest {
 		t.Fatalf("missing huddle node status=%d body=%s", missingNodeResponse.Code, missingNodeResponse.Body.String())
 	}
+	bothScopesRequest := httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&huddle_node_id="+firstNode.HuddleNodeID+"&huddle_logic_gate_id="+process.HuddleLogicGateID, nil)
+	bothScopesResponse := httptest.NewRecorder()
+	handler.ServeHTTP(bothScopesResponse, requestWithActorForTest(bothScopesRequest, user, company.CompanyID))
+	if bothScopesResponse.Code != http.StatusBadRequest {
+		t.Fatalf("both Huddle scopes status=%d body=%s", bothScopesResponse.Code, bothScopesResponse.Body.String())
+	}
 }
 
 func TestActionItemHandlersRequireExactHuddleNodeAccess(t *testing.T) {
@@ -208,6 +227,11 @@ func TestActionItemHandlersRequireExactHuddleNodeAccess(t *testing.T) {
 	handler.ServeHTTP(listResponse, withActor(httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&huddle_node_id="+node.HuddleNodeID, nil)))
 	if listResponse.Code != http.StatusNotFound {
 		t.Fatalf("restricted list status=%d body=%s, want 404", listResponse.Code, listResponse.Body.String())
+	}
+	processListResponse := httptest.NewRecorder()
+	handler.ServeHTTP(processListResponse, withActor(httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&huddle_logic_gate_id="+process.HuddleLogicGateID, nil)))
+	if processListResponse.Code != http.StatusNotFound {
+		t.Fatalf("restricted Process list status=%d body=%s, want 404", processListResponse.Code, processListResponse.Body.String())
 	}
 	items, err := repo.ListHuddleNodeActionItems(company.CompanyID, node.HuddleNodeID)
 	if err != nil || len(items) != 0 {

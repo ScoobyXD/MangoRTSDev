@@ -1,8 +1,8 @@
 import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute, parseDeepLinkRoute } from "../../app/deepLinkRoutes.js";
-import { createExplorerEntityIconElement } from "../../icons/index.js";
+import { createActionItemIconElement, createExplorerEntityIconElement } from "../../icons/index.js";
 import type { BoundRequestJSON } from "../api/requestJSON.js";
 import type { EmailMessage } from "../communications/communicationsApi.js";
-import { createActionItem, searchEntities, type ActionItemColor } from "../entities/entitiesApi.js";
+import { createActionItem, searchEntities, type ActionItemColor, type Entity } from "../entities/entitiesApi.js";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle } from "../nodes/selectionNodeCreation.js";
 
 export type EditorWorkspaceEntityType = "node" | "logic_gate" | "project";
@@ -15,6 +15,7 @@ export type EditorEntityLink = {
   label: string;
   updatedTimestamp?: string;
   isActionItem?: boolean;
+  actionItemColor?: ActionItemColor;
   emailMessageID?: string;
   emailThreadID?: string;
   emailAccountEmail?: string;
@@ -23,6 +24,18 @@ export type EditorEntityLink = {
 };
 
 export type EditorEntityLinkRequest = BoundRequestJSON;
+
+export type EditorEntityLinkAnchorBounds = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+};
+
+export type EditorEntityReferenceOpenDetail = {
+  entity: EditorEntityLink;
+  anchor?: EditorEntityLinkAnchorBounds;
+};
 
 export type EditorEntityReferencePresentation = {
   entityID: string;
@@ -37,6 +50,17 @@ export type EditorEntityLinkContext = {
   onOpen?: (entity: EditorEntityLink) => void;
   includeEntityReferences?: boolean;
 };
+
+export function editorEntityActionItemColor(
+  entity: Pick<Entity, "entity_type_name" | "entity_fields">,
+): ActionItemColor | null {
+  if (entity.entity_type_name.trim().toLowerCase() !== "action item") return null;
+  const colorField = entity.entity_fields.find((field) => (
+    field.system_key?.trim().toLowerCase() === "color"
+    || field.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") === "color"
+  ));
+  return colorField?.value === "yellow" || colorField?.value === "red" ? colorField.value : null;
+}
 
 export type ActiveEntityLinkDraft = {
   start: number;
@@ -108,7 +132,18 @@ export function returnToEditorEntitySourceNode(targetNodeID: string): boolean {
   return true;
 }
 
-export function openEditorEntityLink(entity: EditorEntityLink, context?: Pick<EditorEntityLinkContext, "onOpen">): void {
+export function editorEntityLinkAnchorBounds(element: Element | null): EditorEntityLinkAnchorBounds | undefined {
+  if (!element) return undefined;
+  const rect = element.getBoundingClientRect();
+  if (![rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite)) return undefined;
+  return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+}
+
+export function openEditorEntityLink(
+  entity: EditorEntityLink,
+  context?: Pick<EditorEntityLinkContext, "onOpen">,
+  anchor?: EditorEntityLinkAnchorBounds,
+): void {
   if (context?.onOpen) {
     context.onOpen(entity);
     return;
@@ -119,7 +154,9 @@ export function openEditorEntityLink(entity: EditorEntityLink, context?: Pick<Ed
     return;
   }
   if (entity.entityType === "entity") {
-    window.dispatchEvent(new window.CustomEvent<EditorEntityLink>(EVENT_EDITOR_ENTITY_REFERENCE_OPEN, { detail: entity }));
+    window.dispatchEvent(new window.CustomEvent<EditorEntityReferenceOpenDetail>(EVENT_EDITOR_ENTITY_REFERENCE_OPEN, {
+      detail: { entity, ...(anchor ? { anchor } : {}) },
+    }));
     return;
   }
   const targetPath = editorEntityRoute(entity);
@@ -149,7 +186,6 @@ export function updateRenderedEditorEntityReference(presentation: EditorEntityRe
     ? presentation.actionItemColor
     : null;
   const isActionItem = presentation.isActionItem === true;
-  const severity = actionItemColor === "yellow" ? "Yellow" : actionItemColor === "red" ? "Red" : "";
   const elements = window.document.querySelectorAll<HTMLElement>(
     `[${EDITOR_ENTITY_LINK_ATTRIBUTE}="true"][${EDITOR_ENTITY_TYPE_ATTRIBUTE}="entity"]`,
   );
@@ -162,27 +198,23 @@ export function updateRenderedEditorEntityReference(presentation: EditorEntityRe
     element.classList.toggle("mango-editor-action-item--red", actionItemColor === "red");
     if (isActionItem) element.setAttribute("data-mango-action-item", "true");
     else element.removeAttribute("data-mango-action-item");
+    const currentIcon = element.querySelector<SVGSVGElement>(":scope > .mango-editor-entity-icon");
+    if (currentIcon?.classList.contains("mango-editor-action-item-icon") !== isActionItem) {
+      currentIcon?.replaceWith(createEditorEntityIconElement(element.ownerDocument, "entity", isActionItem));
+    }
+    element.querySelector<HTMLElement>(".mango-editor-action-item-severity")?.remove();
     if (actionItemColor) {
       element.setAttribute("data-mango-action-item-color", actionItemColor);
       element.style.removeProperty("--mango-entity-chip-border");
       element.style.removeProperty("--mango-entity-chip-background");
       element.style.removeProperty("--mango-entity-chip-shadow");
-      element.setAttribute("aria-label", `Open ${severity} Action Item ${label}`);
-      element.setAttribute("title", `${severity} Action Item: ${label}`);
-      let severityElement = element.querySelector<HTMLElement>(".mango-editor-action-item-severity");
-      if (!severityElement) {
-        severityElement = element.ownerDocument.createElement("span");
-        severityElement.className = "mango-editor-action-item-severity";
-        severityElement.setAttribute("aria-hidden", "true");
-        element.append(severityElement);
-      }
-      severityElement.textContent = severity;
+      element.setAttribute("aria-label", `Open Action Item ${label}`);
+      element.setAttribute("title", `Action Item: ${label}`);
     } else {
       element.removeAttribute("data-mango-action-item-color");
-      element.querySelector<HTMLElement>(".mango-editor-action-item-severity")?.remove();
       applyEditorEntityLinkStyle(element, "entity");
       element.setAttribute("aria-label", `Open ${isActionItem ? "Action Item" : "Entity"} ${label}`);
-      element.setAttribute("title", `Open ${isActionItem ? "Action Item" : "Entity"}: ${label}`);
+      element.setAttribute("title", isActionItem ? `Action Item: ${label}` : `Open Entity: ${label}`);
     }
   }
   window.dispatchEvent(new window.CustomEvent<EditorEntityReferencePresentation>(
@@ -315,6 +347,7 @@ export async function createActionItemEntityFromSelection(
     label: actionItem.name?.trim() || name,
     updatedTimestamp: actionItem.updated_timestamp || actionItem.created_timestamp,
     isActionItem: true,
+    actionItemColor: color,
   };
 }
 
@@ -332,28 +365,44 @@ export function applyEditorEntityLinkStyle(element: HTMLElement, entityType?: Ed
   }
 }
 
-export function createEditorEntityIconElement(ownerDocument: Document, entityType: EditorEntityType): SVGSVGElement {
-  const icon = createExplorerEntityIconElement(ownerDocument, entityType);
+export function createEditorEntityIconElement(ownerDocument: Document, entityType: EditorEntityType, isActionItem = false): SVGSVGElement {
+  const icon = entityType === "entity" && isActionItem
+    ? createActionItemIconElement(ownerDocument, 15)
+    : createExplorerEntityIconElement(ownerDocument, entityType);
   icon.classList.add("mango-editor-entity-icon", `mango-editor-entity-icon--${entityType}`);
+  if (entityType === "entity" && isActionItem) icon.classList.add("mango-editor-action-item-icon");
   return icon;
 }
 
 export function createEditorEntityLinkElement(ownerDocument: Document, entity: EditorEntityLink): HTMLSpanElement {
   const element = ownerDocument.createElement("span");
+  const actionItemColor = entity.entityType === "entity" && (entity.actionItemColor === "yellow" || entity.actionItemColor === "red")
+    ? entity.actionItemColor
+    : null;
+  const isActionItem = entity.entityType === "entity" && (entity.isActionItem === true || actionItemColor !== null);
   applyEditorEntityLinkStyle(element, entity.entityType);
   element.setAttribute(EDITOR_ENTITY_TYPE_ATTRIBUTE, entity.entityType);
   element.setAttribute(EDITOR_ENTITY_ID_ATTRIBUTE, entity.entityID.trim());
   element.setAttribute(EDITOR_ENTITY_LABEL_ATTRIBUTE, entity.label.trim());
+  if (isActionItem) element.setAttribute("data-mango-action-item", "true");
+  if (actionItemColor) {
+    element.setAttribute("data-mango-action-item-color", actionItemColor);
+    element.classList.add("mango-editor-action-item", `mango-editor-action-item--${actionItemColor}`);
+    element.style.removeProperty("--mango-entity-chip-border");
+    element.style.removeProperty("--mango-entity-chip-background");
+    element.style.removeProperty("--mango-entity-chip-shadow");
+  }
   if (entity.emailMessageID?.trim()) element.setAttribute("data-mango-email-message-id", entity.emailMessageID.trim());
   if (entity.emailThreadID?.trim()) element.setAttribute("data-mango-email-thread-id", entity.emailThreadID.trim());
   if (entity.emailAccountEmail?.trim()) element.setAttribute("data-mango-email-account-email", entity.emailAccountEmail.trim().toLowerCase());
   if (entity.emailSharedInboxID?.trim()) element.setAttribute("data-mango-email-shared-inbox-id", entity.emailSharedInboxID.trim());
-  element.setAttribute("aria-label", `Open ${editorEntityTypeLabel(entity.entityType)} ${entity.label.trim()}`);
-  element.setAttribute("title", `Open ${editorEntityTypeLabel(entity.entityType)}: ${entity.label.trim()}`);
+  const entityLabel = isActionItem ? "Action Item" : editorEntityTypeLabel(entity.entityType);
+  element.setAttribute("aria-label", `Open ${entityLabel} ${entity.label.trim()}`);
+  element.setAttribute("title", isActionItem ? `Action Item: ${entity.label.trim()}` : `Open ${entityLabel}: ${entity.label.trim()}`);
   const label = ownerDocument.createElement("span");
   label.className = "mango-editor-entity-label";
   label.textContent = entity.label.trim();
-  element.append(createEditorEntityIconElement(ownerDocument, entity.entityType), label);
+  element.append(createEditorEntityIconElement(ownerDocument, entity.entityType, isActionItem), label);
   return element;
 }
 
@@ -363,10 +412,15 @@ export function readEditorEntityLinkElement(element: Element | null): EditorEnti
   const entityID = element.getAttribute(EDITOR_ENTITY_ID_ATTRIBUTE)?.trim() ?? "";
   const label = element.getAttribute(EDITOR_ENTITY_LABEL_ATTRIBUTE)?.trim() || element.textContent?.trim() || "";
   if (!isEditorEntityType(entityType) || !entityID || !label) return null;
+  const actionItemColor = entityType === "entity" && (element.dataset.mangoActionItemColor === "yellow" || element.dataset.mangoActionItemColor === "red")
+    ? element.dataset.mangoActionItemColor
+    : null;
   return {
     entityType,
     entityID,
     label,
+    ...(entityType === "entity" && (element.dataset.mangoActionItem === "true" || actionItemColor) ? { isActionItem: true } : {}),
+    ...(actionItemColor ? { actionItemColor } : {}),
     ...(entityType === "email_message" ? {
       emailMessageID: element.dataset.mangoEmailMessageId?.trim() || undefined,
       emailThreadID: element.dataset.mangoEmailThreadId?.trim() || undefined,

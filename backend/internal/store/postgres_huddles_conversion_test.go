@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
+func TestPostgresDirectHuddleLogicGateCreationIsAtomic(t *testing.T) {
+	db, repo := openRealtimePostgresIntegration(t)
+	company, err := repo.CreateCompany("Direct Huddle creation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	huddle, err := repo.CreateHuddleLogicGate(HuddleCreateInput{CompanyID: company.CompanyID, Name: "Weekly operations"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var placements, gvicSettings, permissionSettings int
+	if err := db.QueryRow(`
+select
+  (select count(*) from huddle_explorer_items where company_id=$1::uuid and parent_folder_id is null and huddle_type='huddle_logic_gate' and resource_huddle_resource_id=$2::uuid),
+  (select count(*) from resource_gvic_settings where company_id=$1::uuid and resource_type='huddle_logic_gate' and resource_id=$2::uuid),
+  (select count(*) from resource_permission_settings where company_id=$1::uuid and resource_type='huddle_logic_gate' and resource_id=$2::uuid)`, company.CompanyID, huddle.HuddleLogicGateID).Scan(&placements, &gvicSettings, &permissionSettings); err != nil {
+		t.Fatal(err)
+	}
+	if placements != 1 || gvicSettings != 1 || permissionSettings != 1 {
+		t.Fatalf("direct Huddle placement/GVIC/permission counts=%d/%d/%d", placements, gvicSettings, permissionSettings)
+	}
+}
+
 func TestPostgresHuddleConversionRemovesExplorerPlacementBeforePolicySettings(t *testing.T) {
 	raw, err := os.ReadFile("postgres_huddles.go")
 	if err != nil {

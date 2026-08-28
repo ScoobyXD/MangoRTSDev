@@ -14,6 +14,7 @@ export type MangoAttachmentResourceType =
   | "node"
   | "huddle_node"
   | "logic_gate"
+  | "huddle_logic_gate"
   | "project"
   | "node_chat_message"
   | "logic_gate_chat_message"

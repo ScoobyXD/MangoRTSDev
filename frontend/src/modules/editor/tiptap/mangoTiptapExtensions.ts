@@ -1214,10 +1214,10 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
         const actionItemColor = entityType === "entity" && (node.attrs.actionItemColor === "yellow" || node.attrs.actionItemColor === "red")
           ? node.attrs.actionItemColor as "yellow" | "red"
           : null;
-        const actionItemSeverity = actionItemColor === "yellow" ? "Yellow" : actionItemColor === "red" ? "Red" : "";
+        const isActionItem = entityType === "entity" && (node.attrs.actionItem === true || actionItemColor !== null);
         const ownerDocument = globalThis.document;
         const icon = ownerDocument
-          ? createEditorEntityIconElement(ownerDocument, entityType)
+          ? createEditorEntityIconElement(ownerDocument, entityType, isActionItem)
           : ["span", { "aria-hidden": "true", class: `mango-editor-entity-icon mango-editor-entity-icon--${entityType}` }];
         return ["span", mergeAttributes(HTMLAttributes, {
           "data-mango-entity-link": "true",
@@ -1225,7 +1225,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           "data-mango-entity-id": node.attrs.entityId,
           "data-mango-entity-label": label,
           "data-mango-action-item-color": actionItemColor || undefined,
-          "data-mango-action-item": entityType === "entity" && node.attrs.actionItem === true ? "true" : undefined,
+          "data-mango-action-item": isActionItem ? "true" : undefined,
           ...(entityType === "email_message" ? {
             "data-mango-email-message-id": node.attrs.emailMessageId || undefined,
             "data-mango-email-thread-id": node.attrs.emailThreadId || undefined,
@@ -1234,16 +1234,10 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           } : {}),
           role: "link",
           tabindex: "0",
-          "aria-label": actionItemColor
-            ? `Open ${actionItemSeverity} Action Item ${label}`
-            : `Open ${entityType === "entity" && node.attrs.actionItem === true ? "Action Item" : editorEntityTypeLabel(entityType)} ${label}`,
-          title: actionItemColor
-            ? `${actionItemSeverity} Action Item: ${label}`
-            : entityType === "entity" && node.attrs.actionItem === true ? `Action Item: ${label}` : undefined,
+          "aria-label": `Open ${isActionItem ? "Action Item" : editorEntityTypeLabel(entityType)} ${label}`,
+          title: isActionItem ? `Action Item: ${label}` : undefined,
           class: `mango-editor-entity-link mango-editor-entity-link--${entityType}${actionItemColor ? ` mango-editor-action-item mango-editor-action-item--${actionItemColor}` : ""}`,
-        }), icon, ["span", { class: "mango-editor-entity-label" }, label], ...(actionItemColor
-          ? [["span", { class: "mango-editor-action-item-severity", "aria-hidden": "true" }, actionItemSeverity]]
-          : [])];
+        }), icon, ["span", { class: "mango-editor-entity-label" }, label]];
       },
     }),
     options.attachmentImageExtension ?? MangoAttachmentImage,

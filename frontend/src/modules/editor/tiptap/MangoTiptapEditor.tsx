@@ -16,12 +16,13 @@ import { realtimeEditorJSONScope, subscribeRealtimeScope } from "../../realtime/
 import type { MentionableCompanyUser } from "../editorMentions";
 import { createEditorImageClipboardHTML, writeEditorImageToSystemClipboard, writeImageClipboardData, type EditorImageData } from "../editorImages.js";
 import { EditorImagePreviewModal } from "../EditorImagePreviewModal.js";
-import { EditorSelectionNodeIcon } from "../../../icons/index.js";
+import { ActionItemIcon, EditorSelectionNodeIcon } from "../../../icons/index.js";
 import { ChatIcon } from "../NodeWorkspaceSurfaceShared.js";
 import { withPreparedEditorAttachmentResource } from "../editorAttachmentPreparation.js";
 import {
   createActionItemEntityFromSelection,
   createNodeEntityFromSelection,
+  editorEntityLinkAnchorBounds,
   EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION,
   normalizeEditorSelectionActionItemName,
   normalizeEditorSelectionNodeTitle,
@@ -218,7 +219,11 @@ const LOGIC_GATE_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["project"];
 const PROJECT_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["email_message"];
 const EMPTY_LINK_TARGET_TYPES: readonly EditorEntityType[] = [];
 
-function mangoEntityLinkAttributes(entity: EditorEntityLink, actionItemColor: ActionItemColor | null = null, actionItem = entity.isActionItem === true): Record<string, string | boolean | null> {
+function mangoEntityLinkAttributes(
+  entity: EditorEntityLink,
+  actionItemColor: ActionItemColor | null = entity.actionItemColor ?? null,
+  actionItem = entity.isActionItem === true || actionItemColor !== null,
+): Record<string, string | boolean | null> {
   return {
     entityType: entity.entityType,
     entityId: entity.entityID,
@@ -876,6 +881,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [editorActive, setEditorActive] = useState(false);
   const [liveSurfaceReady, setLiveSurfaceReady] = useState(false);
   const pointerActivationPendingRef = useRef(false);
+  const selectionPointerDownRef = useRef(false);
   const [document, setDocument] = useState(initial.document);
   const [error, setError] = useState(initial.error ?? "");
   const [recoveryStorageError, setRecoveryStorageError] = useState("");
@@ -1003,7 +1009,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       strikethrough: state.strikethrough,
     });
     const selection = editor.state.selection;
-    if (selection.empty || !(selection instanceof TextSelection)) {
+    if (selectionPointerDownRef.current || selection.empty || !(selection instanceof TextSelection)) {
       setSelectionAction(null);
       return;
     }
@@ -1040,6 +1046,27 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       y: actionPosition.top,
     });
   }), [traceContext]);
+
+  useEffect(() => {
+    const ownerWindow = rootRef.current?.ownerDocument.defaultView;
+    if (!ownerWindow) return undefined;
+    const finishSelectionPointerGesture = () => {
+      if (!selectionPointerDownRef.current) return;
+      selectionPointerDownRef.current = false;
+      ownerWindow.requestAnimationFrame(() => {
+        const editor = editorRef.current;
+        if (editor) updateSelectionState(editor);
+      });
+    };
+    ownerWindow.addEventListener("pointerup", finishSelectionPointerGesture);
+    ownerWindow.addEventListener("pointercancel", finishSelectionPointerGesture);
+    ownerWindow.addEventListener("mouseup", finishSelectionPointerGesture);
+    return () => {
+      ownerWindow.removeEventListener("pointerup", finishSelectionPointerGesture);
+      ownerWindow.removeEventListener("pointercancel", finishSelectionPointerGesture);
+      ownerWindow.removeEventListener("mouseup", finishSelectionPointerGesture);
+    };
+  }, [updateSelectionState]);
 
   const publishAnnotationPositions = useCallback((persisted: readonly MangoTiptapPersistedAnnotation[]) => {
     persistedAnnotationsRef.current = [...persisted];
@@ -1379,8 +1406,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     return true;
   }, []);
   const hasAttachmentContext = Boolean(attachmentContext);
-  const openEntityLink = useCallback((entity: EditorEntityLink) => {
-    openEditorEntityLink(entity, { onOpen: onEntityOpen });
+  const openEntityLink = useCallback((entity: EditorEntityLink, anchor?: ReturnType<typeof editorEntityLinkAnchorBounds>) => {
+    openEditorEntityLink(entity, { onOpen: onEntityOpen }, anchor);
   }, [onEntityOpen]);
 
   useEffect(() => {
@@ -1560,13 +1587,17 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
                 entityType,
                 entityID,
                 label,
+                ...(entityType === "entity" && keyboardEntityElement.dataset.mangoActionItem === "true" ? { isActionItem: true } : {}),
+                ...(entityType === "entity" && (keyboardEntityElement.dataset.mangoActionItemColor === "yellow" || keyboardEntityElement.dataset.mangoActionItemColor === "red")
+                  ? { actionItemColor: keyboardEntityElement.dataset.mangoActionItemColor }
+                  : {}),
                 ...(entityType === "email_message" ? {
                   emailMessageID: keyboardEntityElement.dataset.mangoEmailMessageId?.trim() || undefined,
                   emailThreadID: keyboardEntityElement.dataset.mangoEmailThreadId?.trim() || undefined,
                   emailAccountEmail: keyboardEntityElement.dataset.mangoEmailAccountEmail?.trim().toLowerCase() || undefined,
                   emailSharedInboxID: keyboardEntityElement.dataset.mangoEmailSharedInboxId?.trim() || undefined,
                 } : {}),
-              });
+              }, editorEntityLinkAnchorBounds(keyboardEntityElement));
               return true;
             }
           }
@@ -1589,6 +1620,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         handleDOMEvents: {
           mousedown: (_view, event) => {
             if ((event as MouseEvent).button !== 0) return false;
+            selectionPointerDownRef.current = true;
+            setSelectionAction(null);
             const root = rootRef.current;
             if (root) preserveMangoTiptapCaretScroll(root);
             return false;
@@ -1621,7 +1654,19 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           const label = typeof node.attrs.label === "string" ? node.attrs.label.trim() : "";
           if (!(["node", "logic_gate", "project", "entity", "email_message"] as const).includes(entityType) || !entityID || !label) return false;
           event.preventDefault();
-          openEntityLink({ entityType, entityID, label, ...(entityType === "email_message" ? emailEntityMetadataFromRecord(node.attrs) : {}) });
+          const entityElement = event.target instanceof Element
+            ? event.target.closest('[data-mango-entity-link="true"]')
+            : null;
+          openEntityLink({
+            entityType,
+            entityID,
+            label,
+            ...(entityType === "entity" && node.attrs.actionItem === true ? { isActionItem: true } : {}),
+            ...(entityType === "entity" && (node.attrs.actionItemColor === "yellow" || node.attrs.actionItemColor === "red")
+              ? { actionItemColor: node.attrs.actionItemColor }
+              : {}),
+            ...(entityType === "email_message" ? emailEntityMetadataFromRecord(node.attrs) : {}),
+          }, editorEntityLinkAnchorBounds(entityElement));
           return true;
         },
       },
@@ -2233,7 +2278,6 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
             style={{ display: "inline-flex", height: 30, overflow: "hidden", border: "1px solid rgba(100,116,139,0.28)", borderRadius: 7, boxShadow: "inset 0 1px 0 rgba(255,255,255,0.72)" }}
           >
             {(["yellow", "red"] as const).map((color) => {
-              const label = color === "yellow" ? "Yellow" : "Red";
               const busy = creatingSelectionActionItem === color;
               return (
                 <button
@@ -2244,9 +2288,9 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
                   data-mango-tiptap-selection-action-item-color={color}
                   disabled={creatingSelectionNode || Boolean(creatingSelectionActionItem) || !normalizeEditorSelectionActionItemName(selectionAction.quote)}
                   onClick={() => void createActionItemFromSelection(color)}
-                  style={{ width: 34, height: 28, display: "inline-grid", placeItems: "center", padding: 0, border: 0, borderLeft: color === "red" ? "1px solid rgba(100,116,139,0.25)" : 0, background: color === "yellow" ? "#facc15" : "#dc2626", color: color === "yellow" ? "#422006" : "#fff", cursor: creatingSelectionActionItem ? "wait" : "pointer", fontSize: 10, fontWeight: 900, lineHeight: 1 }}
+                  style={{ width: 34, height: 28, display: "inline-grid", placeItems: "center", padding: 0, border: 0, borderLeft: color === "red" ? "1px solid rgba(100,116,139,0.25)" : 0, background: color === "yellow" ? "#facc15" : "#ef4444", color: "#111827", cursor: creatingSelectionActionItem ? "wait" : "pointer", lineHeight: 1 }}
                 >
-                  {busy ? "…" : label.slice(0, 1)}
+                  {busy ? "…" : <ActionItemIcon size={16} />}
                 </button>
               );
             })}

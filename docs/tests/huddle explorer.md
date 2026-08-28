@@ -10,7 +10,7 @@
 8. The `huddle_type` column remains required for future Huddle resource types and currently accepts only `huddle_logic_gate`.
 9. One Huddle Logic Gate may have at most one live Huddle Explorer item in a company, and a Huddle Node may have none.
 10. A Huddle Explorer item may have a null parent for root placement or the exact `folder_id` of a Huddle Explorer folder in the same company.
-11. Converting a normal Logic Gate creates one root Huddle Explorer item for the new Huddle Logic Gate in the same transaction.
+11. Directly creating a Huddle Logic Gate or converting a normal Logic Gate creates one root Huddle Explorer item for that exact Huddle Logic Gate in the same transaction.
 12. Creating, updating, deleting, or restoring a Huddle Node never creates or restores a Huddle Explorer item.
 13. Huddle Explorer supports creating, renaming, nesting, moving, and deleting folders, and moving Huddle Logic Gate items between its folders and root.
 14. The left-sidebar Huddles section displays every Huddle Explorer item, and one click on a row opens that exact Huddle Logic Gate route.
@@ -25,5 +25,6 @@
 23. A visible Huddle Logic Gate row combines the normal Logic Gate icon with a Huddle people icon instead of using a separate replacement resource icon.
 24. A Huddle Logic Gate or Huddle Node title surface derives its breadcrumb from the current canonical Huddle Explorer placement and exact Huddle ownership when read; no database column, copied full path, or client cache becomes path authority. A Huddle Node follows its owning Huddle Logic Gate's visible placement and adds that Gate as its final ancestor.
 25. A Huddle breadcrumb shows the clickable Huddles root followed by every fully visible ancestor, excludes the current item's editable title, and omits the whole hierarchy path when any required ancestor is missing, hidden, recycled, cyclic, or too deep to resolve safely. Clicking a folder reveals that exact Huddle Explorer branch, clicking a Huddle Logic Gate opens that exact Gate, and a committed same-window hierarchy change refreshes mounted breadcrumbs.
+26. The Huddles section provides separate direct actions for creating a root Huddle Logic Gate and creating a folder; successful Huddle Logic Gate creation opens that exact new resource.
 
-Last updated: 2026-08-25
+Last updated: 2026-08-28

@@ -540,7 +540,7 @@ from entities entity
 join entity_types entity_type on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
 where entity.company_id=$1::uuid
   and ($2::text='' or entity.entity_type_id=nullif($2::text, '')::uuid)
-  and ($3::text='' or lower(entity.name) like '%' || lower($3::text) || '%')
+  and ($3::text='' or lower(entity.name) like '%' || lower($3::text) || '%' or lower(entity_type.name) like '%' || lower($3::text) || '%')
   and (not $4::boolean or entity.entity_folder_id is not distinct from nullif($5::text, '')::uuid)
 order by entity.position, lower(entity.name), entity.entity_id
 limit case when $8::boolean then null else $6::integer end offset $7::integer`, normalized.CompanyID, normalized.EntityTypeID, normalized.Query, folderFilter, optionalEntityIDValue(normalized.EntityFolderID), normalized.Limit, normalized.Offset, normalized.AllForType)

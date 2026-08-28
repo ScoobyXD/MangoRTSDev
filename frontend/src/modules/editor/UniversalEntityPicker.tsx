@@ -4,8 +4,9 @@ import { useAppOverlayPortalTarget } from "../../app/AppModalPortal.js";
 import { fetchSidebarPinTreeWithRequest } from "../../app/sidebarPinsApi.js";
 import { buildSidebarPinTreeRows, type SidebarPinTreeRow } from "../../app/sidebarPinTree.js";
 import type { SidebarPinTree } from "../../app/sidebarPins.js";
-import { ExplorerEntityIcon, ExplorerRowIcon, HeaderTriageIcon } from "../../icons/index.js";
+import { ActionItemIcon, ExplorerEntityIcon, ExplorerRowIcon, HeaderTriageIcon } from "../../icons/index.js";
 import { ensureEmailMessageIngested } from "../communications/communicationsApi.js";
+import { getEntityDetail } from "../entities/entitiesApi.js";
 import {
   createMessageQuery,
   fetchCommunicationsStatus,
@@ -13,6 +14,7 @@ import {
 } from "../communications/communicationsApi.js";
 import {
   editorEntityTypeLabel,
+  editorEntityActionItemColor,
   searchEditorEntityLinks,
   type EditorEntityLink,
   type EditorEntityLinkRequest,
@@ -351,7 +353,18 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     try {
       if (mode === "link" && entity.entityType === "entity") throw new Error("Entities can be referenced with #, but cannot be linked with ##.");
       let selectedEntity: UniversalEntityPickerEntity = entity;
-      if (entity.entityType === "email_message") {
+      if (entity.entityType === "entity" && entity.isActionItem === true) {
+        const detail = await getEntityDetail(props.requestJSON, {
+          companyID: props.companyID,
+          entityID: entity.entityID,
+        });
+        const actionItemColor = editorEntityActionItemColor(detail);
+        selectedEntity = {
+          ...entity,
+          isActionItem: true,
+          ...(actionItemColor ? { actionItemColor } : {}),
+        };
+      } else if (entity.entityType === "email_message") {
         if (!entity.emailMessage) throw new Error("The selected email is no longer available. Search for it again.");
         let storedMessage = entity.emailMessage;
         if (!storedMessage.email_message_id?.trim() || !storedMessage.email_thread_id?.trim()) {
@@ -491,7 +504,8 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
           if (row.kind === "folder") return <div key={row.key} style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 8px 4px", paddingLeft: 8 + row.depth * 14, color: "#64748b", fontSize: 11, fontWeight: 900 }}><ExplorerRowIcon kind="folder" />{row.label}</div>;
           const index = selectableRows.findIndex((item) => item.key === row.key);
           const active = index === selectedIndex;
-          return <button key={row.key} type="button" role="option" aria-selected={active} disabled={busy} draggable={Boolean(props.onEntityDragStart) && !busy} onMouseEnter={() => setSelectedIndex(index)} onClick={() => props.onChoose ? void choose(row.entity) : setSelectedIndex(index)} onDragStart={(event) => { if (!props.onEntityDragStart) return; props.onEntityDragStart(event, row.entity); setDragActive(true); }} onDragEnd={() => setDragActive(false)} style={{ width: "100%", display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center", gap: 9, padding: "9px 10px", paddingLeft: 10 + row.depth * 14, border: active ? "1px solid rgba(8,145,178,.24)" : "1px solid transparent", borderRadius: 11, background: active ? "linear-gradient(145deg,rgba(232,251,255,.94),rgba(245,239,255,.92))" : "transparent", color: "#172033", cursor: busy ? "wait" : props.onEntityDragStart ? "grab" : "pointer", textAlign: "left" }}>{row.entity.entityType === "huddle_logic_gate" ? <HuddleResourceIcon type="huddle_logic_gate" /> : <ExplorerEntityIcon kind={row.entity.entityType} />}<span style={{ minWidth: 0 }}><span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 }}>{row.entity.label}</span><span style={{ display: "block", marginTop: 1, color: "#64748b", fontSize: 10 }}>{pickerEntityTypeLabel(row.entity.entityType)}</span></span>{row.pinned && <span aria-label="Pinned" title="Pinned" style={{ color: "#f59e0b", fontSize: 12 }}>◆</span>}</button>;
+          const actionItem = row.entity.entityType === "entity" && row.entity.isActionItem === true;
+          return <button key={row.key} type="button" role="option" aria-selected={active} disabled={busy} draggable={Boolean(props.onEntityDragStart) && !busy} onMouseEnter={() => setSelectedIndex(index)} onClick={() => props.onChoose ? void choose(row.entity) : setSelectedIndex(index)} onDragStart={(event) => { if (!props.onEntityDragStart) return; props.onEntityDragStart(event, row.entity); setDragActive(true); }} onDragEnd={() => setDragActive(false)} style={{ width: "100%", display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center", gap: 9, padding: "9px 10px", paddingLeft: 10 + row.depth * 14, border: active ? "1px solid rgba(8,145,178,.24)" : "1px solid transparent", borderRadius: 11, background: active ? "linear-gradient(145deg,rgba(232,251,255,.94),rgba(245,239,255,.92))" : "transparent", color: "#172033", cursor: busy ? "wait" : props.onEntityDragStart ? "grab" : "pointer", textAlign: "left" }}>{row.entity.entityType === "huddle_logic_gate" ? <HuddleResourceIcon type="huddle_logic_gate" /> : actionItem ? <ActionItemIcon size={15} /> : <ExplorerEntityIcon kind={row.entity.entityType} />}<span style={{ minWidth: 0 }}><span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12, fontWeight: 800 }}>{row.entity.label}</span><span style={{ display: "block", marginTop: 1, color: "#64748b", fontSize: 10 }}>{actionItem ? "Action Item" : pickerEntityTypeLabel(row.entity.entityType)}</span></span>{row.pinned && <span aria-label="Pinned" title="Pinned" style={{ color: "#f59e0b", fontSize: 12 }}>◆</span>}</button>;
         })}
         {!loading && !emailSearchLoading && visibleRows.length === 0 && <div style={{ padding: "28px 14px", textAlign: "center", color: "#64748b", fontSize: 12 }}>{query.trim() || category === "entity" ? "No matching resources." : "Your Pinned section is empty."}</div>}
         {(loading || emailSearchLoading || huddleLoading) && <div style={{ padding: 12, color: "#64748b", fontSize: 11 }}>Loading…</div>}

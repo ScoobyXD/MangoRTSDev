@@ -48,6 +48,36 @@ func writeHuddleError(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) handleHuddleLogicGates(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var req struct {
+			CompanyID string `json:"company_id"`
+			Header    string `json:"header"`
+		}
+		decoder := json.NewDecoder(r.Body)
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&req) != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+		req.CompanyID = strings.TrimSpace(req.CompanyID)
+		if req.CompanyID == "" {
+			writeError(w, http.StatusBadRequest, "company_id_required")
+			return
+		}
+		actor, ok := huddleActor(w, r, req.CompanyID)
+		if !ok {
+			return
+		}
+		item, err := s.repo.CreateHuddleLogicGate(store.HuddleCreateInput{
+			CompanyID: req.CompanyID, Name: req.Header, ActorID: actor.User.UserID,
+		})
+		if err != nil {
+			writeHuddleError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"huddle_logic_gate": item})
+		return
+	}
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return

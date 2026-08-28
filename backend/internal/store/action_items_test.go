@@ -158,6 +158,10 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 			t.Fatalf("company-wide creation unexpectedly attached to Huddle Node %s: %+v", huddleNodeID, items)
 		}
 	}
+	processItems, err := repo.ListHuddleLogicGateActionItems(company.CompanyID, firstProcess.HuddleLogicGateID)
+	if err != nil || len(processItems) != 0 {
+		t.Fatalf("empty Huddle Process rollup=%+v err=%v", processItems, err)
+	}
 	ordinaryType, err := repo.CreateEntityType(EntityTypeInput{CompanyID: company.CompanyID, Name: "Decision"})
 	if err != nil {
 		t.Fatal(err)
@@ -212,6 +216,10 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 		if listErr != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
 			t.Fatalf("deduped sibling Huddle Node rollup for %s = %+v, err=%v", huddleNodeID, items, listErr)
 		}
+	}
+	processItems, err = repo.ListHuddleLogicGateActionItems(company.CompanyID, firstProcess.HuddleLogicGateID)
+	if err != nil || len(processItems) != 1 || processItems[0].EntityID != created.EntityID {
+		t.Fatalf("direct Huddle Process rollup=%+v err=%v", processItems, err)
 	}
 
 	secondGate, err := repo.CreateLogicGate(company.CompanyID, "Weekly Huddle")

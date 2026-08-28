@@ -16,15 +16,98 @@ export type ActionItemGrouping = UniversalGroupingSetting<ActionItemGroupingFiel
 
 export const DEFAULT_ACTION_ITEM_GROUPINGS: ActionItemGrouping[] = [
   { field: "person", direction: "asc" },
-  { field: "created_date", direction: "asc" },
+  { field: "completion_due_date", direction: "asc" },
 ];
+
+export type HuddleActionItemScope =
+  | { resourceType: "huddle_node"; resourceID: string }
+  | { resourceType: "huddle_logic_gate"; resourceID: string };
+
+type HuddleActionItemsRequest = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
 
 type ActionItemEntityField = EntityField & { system_key?: string | null };
 
 const GROUPING_FIELD_SET = new Set<ActionItemGroupingField>(ACTION_ITEM_GROUPING_FIELDS.map((field) => field.value));
 
 export function actionItemGroupingStorageKey(companyID: string, userID: string): string {
-  return `mangorts-huddle-action-item-groupings-v1:${companyID.trim()}:${userID.trim()}`;
+  return `mangorts-huddle-action-item-groupings-v2:${companyID.trim()}:${userID.trim()}`;
+}
+
+export async function listHuddleActionItems(
+  requestJSON: HuddleActionItemsRequest,
+  input: { companyID: string; scope: HuddleActionItemScope; signal?: AbortSignal },
+): Promise<Entity[]> {
+  const params = new URLSearchParams({ company_id: input.companyID });
+  params.set(
+    input.scope.resourceType === "huddle_node" ? "huddle_node_id" : "huddle_logic_gate_id",
+    input.scope.resourceID,
+  );
+  const response = await requestJSON<{ action_items?: Entity[] }>(`/v1/action-items?${params.toString()}`, {
+    cache: "no-store",
+    signal: input.signal,
+  });
+  return response.action_items ?? [];
+}
+
+export function actionItemReferenceIDs(document: unknown): string[] {
+  const ids = new Set<string>();
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== "object") return;
+    const node = value as { type?: unknown; attrs?: unknown; content?: unknown };
+    if (node.type === "mangoEntityLink" && node.attrs && typeof node.attrs === "object") {
+      const attrs = node.attrs as Record<string, unknown>;
+      const entityID = typeof attrs.entityId === "string" ? attrs.entityId.trim() : "";
+      const actionItem = attrs.actionItem === true || attrs.actionItemColor === "yellow" || attrs.actionItemColor === "red";
+      if (attrs.entityType === "entity" && actionItem && entityID) ids.add(entityID);
+    }
+    if (Array.isArray(node.content)) node.content.forEach(visit);
+  };
+  visit(document);
+  return [...ids].sort();
+}
+
+export type ActionItemReferenceRefreshState = {
+  signature: string;
+  notifiedSignature: string;
+  dirty: boolean;
+};
+
+export type ActionItemReferenceRefreshEvent =
+  | { type: "snapshot"; signature: string }
+  | { type: "saved" }
+  | { type: "canonical"; signature: string }
+  | { type: "removed" };
+
+export function transitionActionItemReferenceRefresh(
+  state: ActionItemReferenceRefreshState | undefined,
+  event: ActionItemReferenceRefreshEvent,
+): { state: ActionItemReferenceRefreshState | undefined; refresh: boolean } {
+  if (event.type === "removed") {
+    return { state: undefined, refresh: true };
+  }
+  if (event.type === "snapshot") {
+    if (!state) {
+      return { state: { signature: event.signature, notifiedSignature: event.signature, dirty: false }, refresh: false };
+    }
+    if (event.signature === state.signature) return { state, refresh: false };
+    return { state: { ...state, signature: event.signature, dirty: true }, refresh: false };
+  }
+  if (event.type === "canonical") {
+    if (!state) {
+      return { state: { signature: event.signature, notifiedSignature: event.signature, dirty: false }, refresh: false };
+    }
+    const refresh = state.notifiedSignature !== event.signature;
+    return {
+      state: { signature: event.signature, notifiedSignature: event.signature, dirty: false },
+      refresh,
+    };
+  }
+  if (!state?.dirty) return { state, refresh: false };
+  const refresh = state.notifiedSignature !== state.signature;
+  return {
+    state: { ...state, notifiedSignature: state.signature, dirty: false },
+    refresh,
+  };
 }
 
 export function normalizeActionItemGroupings(value: unknown): ActionItemGrouping[] {

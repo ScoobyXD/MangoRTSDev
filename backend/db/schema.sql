@@ -2351,6 +2351,12 @@ begin
                      and project_id=case when pg_input_is_valid(new.resource_id,'uuid') then new.resource_id::uuid end) then
       raise exception 'attachment Project owner does not exist' using errcode='23503';
     end if;
+  elsif new.resource_type='huddle_logic_gate' then
+    if not pg_input_is_valid(new.resource_id,'uuid')
+       or not exists(select 1 from huddle_logic_gates where company_id=new.company_id
+                     and huddle_logic_gate_id=case when pg_input_is_valid(new.resource_id,'uuid') then new.resource_id::uuid end) then
+      raise exception 'attachment Huddle Logic Gate owner does not exist' using errcode='23503';
+    end if;
   elsif new.resource_type='huddle_node' then
     if not pg_input_is_valid(new.resource_id,'uuid')
        or not exists(select 1 from huddle_nodes where company_id=new.company_id
@@ -3603,7 +3609,7 @@ CREATE TABLE public.attachment_relationships (
     deleted_timestamp timestamp with time zone,
     CONSTRAINT attachment_relationships_kind_chk CHECK ((relationship_kind = ANY (ARRAY['inline_image'::text, 'file_attachment'::text, 'chat_attachment'::text, 'email_attachment'::text, 'email_inline_attachment'::text, 'migrated_inline_image'::text]))),
     CONSTRAINT attachment_relationships_resource_id_chk CHECK ((btrim(resource_id) <> ''::text)),
-    CONSTRAINT attachment_relationships_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'huddle_node'::text, 'node_chat_message'::text, 'logic_gate_chat_message'::text, 'project_chat_message'::text, 'email_message'::text, 'email_draft'::text, 'email_signature'::text, 'shared_inbox'::text, 'company_explorer_folder'::text, 'shared_inbox_folder'::text])))
+    CONSTRAINT attachment_relationships_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'huddle_logic_gate'::text, 'huddle_node'::text, 'node_chat_message'::text, 'logic_gate_chat_message'::text, 'project_chat_message'::text, 'email_message'::text, 'email_draft'::text, 'email_signature'::text, 'shared_inbox'::text, 'company_explorer_folder'::text, 'shared_inbox_folder'::text])))
 );
 
 
@@ -3659,7 +3665,7 @@ CREATE TABLE public.attachment_upload_jobs (
     CONSTRAINT attachment_upload_jobs_relationship_chk CHECK ((relationship_kind = ANY (ARRAY['inline_image'::text, 'file_attachment'::text, 'chat_attachment'::text, 'email_attachment'::text, 'email_inline_attachment'::text, 'migrated_inline_image'::text]))),
     CONSTRAINT attachment_upload_jobs_resource_nonblank_chk CHECK (((btrim(resource_type) <> ''::text) AND (btrim(resource_id) <> ''::text))),
     CONSTRAINT attachment_upload_jobs_resource_revision_chk CHECK (((resource_expected_revision >= 0) AND (resource_revision >= 0))),
-    CONSTRAINT attachment_upload_jobs_resource_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'huddle_node'::text, 'node_chat_message'::text, 'logic_gate_chat_message'::text, 'project_chat_message'::text, 'email_message'::text, 'email_draft'::text, 'email_signature'::text, 'attached_email'::text, 'shared_inbox'::text, 'company_explorer_folder'::text, 'shared_inbox_folder'::text]))),
+    CONSTRAINT attachment_upload_jobs_resource_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'huddle_logic_gate'::text, 'huddle_node'::text, 'node_chat_message'::text, 'logic_gate_chat_message'::text, 'project_chat_message'::text, 'email_message'::text, 'email_draft'::text, 'email_signature'::text, 'attached_email'::text, 'shared_inbox'::text, 'company_explorer_folder'::text, 'shared_inbox_folder'::text]))),
     CONSTRAINT attachment_upload_jobs_sha256_chk CHECK ((sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT attachment_upload_jobs_sha256_method_chk CHECK ((sha256_verification_method = ANY (ARRAY['s3_full'::text, 'server_stream'::text, 'client_reported'::text]))),
     CONSTRAINT attachment_upload_jobs_size_chk CHECK ((size_bytes >= 0)),

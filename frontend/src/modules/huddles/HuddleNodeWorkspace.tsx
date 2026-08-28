@@ -26,6 +26,12 @@ import type { EditorSaveState } from "../editor/EditorSaveStatusIcon.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
 import type { BareMangoEditorControls } from "./BareMangoEditor.js";
 import {
+  actionItemReferenceIDs,
+  transitionActionItemReferenceRefresh,
+  type ActionItemReferenceRefreshEvent,
+  type ActionItemReferenceRefreshState,
+} from "./huddleActionItems.js";
+import {
   createHuddleNodeChat,
   createHuddleNodeTextBox,
   deleteHuddleNodeChat,
@@ -48,6 +54,7 @@ type HuddleNodeWorkspaceProps = {
   controls: BareMangoEditorControls;
   onError: (message: string) => void;
   onActionItemsChanged: () => void;
+  onActiveTextBoxIDChange?: (textBoxID: string) => void;
 };
 
 export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
@@ -60,6 +67,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
   controls,
   onError,
   onActionItemsChanged,
+  onActiveTextBoxIDChange,
 }) => {
   const [textBoxes, setTextBoxes] = useState<HuddleNodeTextBox[]>([]);
   const [chats, setChats] = useState<HuddleNodeChat[]>([]);
@@ -78,6 +86,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsError, setAttachmentsError] = useState("");
   const savedTitlesRef = useRef(new Map<string, string>());
+  const actionItemReferenceRefreshByTextBoxRef = useRef(new Map<string, ActionItemReferenceRefreshState>());
   const navigationRequestIDRef = useRef(0);
   const chatSubmissionsInProgressRef = useRef(new Set<string>());
 
@@ -91,6 +100,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
         : workspace.textboxes[0]?.textbox_id ?? "");
       setChats(workspace.chats);
       savedTitlesRef.current = new Map(workspace.textboxes.map((item) => [item.textbox_id, item.title]));
+      actionItemReferenceRefreshByTextBoxRef.current.clear();
     } catch (cause) {
       onError(errorMessage(cause, "Could not load the Huddle Node workspace"));
     } finally {
@@ -119,11 +129,22 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
 
   useEffect(() => { void loadWorkspace(); }, [loadWorkspace]);
   useEffect(() => { void loadAttachments(); }, [loadAttachments]);
+  useEffect(() => { onActiveTextBoxIDChange?.(activeTextBoxID); }, [activeTextBoxID, onActiveTextBoxIDChange]);
 
   const attachmentsByTextBox = useMemo(
     () => groupMangoResourceAttachmentsByInformationID(resourceAttachments),
     [resourceAttachments],
   );
+
+  const recordActionItemReferenceEvent = useCallback((textBoxID: string, event: ActionItemReferenceRefreshEvent) => {
+    const result = transitionActionItemReferenceRefresh(
+      actionItemReferenceRefreshByTextBoxRef.current.get(textBoxID),
+      event,
+    );
+    if (result.state) actionItemReferenceRefreshByTextBoxRef.current.set(textBoxID, result.state);
+    else actionItemReferenceRefreshByTextBoxRef.current.delete(textBoxID);
+    if (result.refresh) onActionItemsChanged();
+  }, [onActionItemsChanged]);
 
   const recordEditorSaveState = useCallback((textBoxID: string, state: EditorSaveState) => {
     if (state.status !== "saved") return;
@@ -132,8 +153,22 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
         ? { ...item, revision: state.revision ?? item.revision }
         : item));
     }
-    onActionItemsChanged();
-  }, [onActionItemsChanged]);
+    recordActionItemReferenceEvent(textBoxID, { type: "saved" });
+  }, [recordActionItemReferenceEvent]);
+
+  const recordActionItemReferenceSnapshot = useCallback((textBoxID: string, document: unknown) => {
+    recordActionItemReferenceEvent(textBoxID, {
+      type: "snapshot",
+      signature: actionItemReferenceIDs(document).join("\n"),
+    });
+  }, [recordActionItemReferenceEvent]);
+
+  const recordCanonicalActionItemReferences = useCallback((textBoxID: string, document: unknown) => {
+    recordActionItemReferenceEvent(textBoxID, {
+      type: "canonical",
+      signature: actionItemReferenceIDs(document).join("\n"),
+    });
+  }, [recordActionItemReferenceEvent]);
 
   const createTextBox = async () => {
     if (creating) return;
@@ -185,11 +220,11 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
       });
       const next = textBoxes.filter((item) => item.textbox_id !== textBox.textbox_id);
       savedTitlesRef.current.delete(textBox.textbox_id);
+      recordActionItemReferenceEvent(textBox.textbox_id, { type: "removed" });
       setTextBoxes(next);
       setChats((current) => current.filter((item) => item.textbox_id !== textBox.textbox_id));
       setOpenChatTextBoxIDs((current) => withoutSetValue(current, textBox.textbox_id));
       setActiveTextBoxID((current) => current === textBox.textbox_id ? next[0]?.textbox_id ?? "" : current);
-      onActionItemsChanged();
     } catch (cause) {
       onError(errorMessage(cause, "Could not delete the text box"));
     }
@@ -394,7 +429,8 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
                     onDocumentFlush={() => undefined}
                     onDocumentError={onError}
                     onSaveStateChange={(state) => recordEditorSaveState(textBoxID, state)}
-                    onCanonicalDocumentChange={onActionItemsChanged}
+                    onDocumentSnapshotChange={(document) => recordActionItemReferenceSnapshot(textBoxID, document)}
+                    onCanonicalDocumentChange={(document) => recordCanonicalActionItemReferences(textBoxID, document)}
                     onChatHighlightActivate={(messageID) => {
                       setActiveChatMessageIDs((current) => ({ ...current, [textBoxID]: messageID }));
                       setOpenChatTextBoxIDs((current) => new Set(current).add(textBoxID));
