@@ -1004,11 +1004,12 @@ type HuddleNodeKPIRelationship struct {
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
-type ActionItemHuddleRelationship struct {
-	CompanyID         string    `json:"company_id"`
-	EntityID          string    `json:"entity_id"`
-	HuddleLogicGateID string    `json:"huddle_logic_gate_id"`
-	CreatedTimestamp  time.Time `json:"created_timestamp"`
+type EntityRelationship struct {
+	CompanyID        string    `json:"company_id"`
+	EntityID         string    `json:"entity_id"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
 type HuddleLogicGateCard struct {

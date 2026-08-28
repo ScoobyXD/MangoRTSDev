@@ -534,6 +534,8 @@ func attachmentPermissionEntityType(resourceType string) (string, bool) {
 		return store.EntityTypeLogicGate, true
 	case "project":
 		return store.EntityTypeProject, true
+	case "huddle_node":
+		return store.EntityTypeHuddleNode, true
 	case "shared_inbox":
 		return store.EntityTypeSharedInbox, true
 	case "company_explorer_folder":

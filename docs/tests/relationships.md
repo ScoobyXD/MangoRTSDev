@@ -15,18 +15,19 @@
 13. The Huddle Logic Gate surface and the normal Logic Gate surface create, read, and remove the same `huddle_logic_gate_relationships` rows; neither surface owns a second relationship list.
 14. The normal Logic Gate relationship tray may change an edge only when the actor can edit that normal Logic Gate and view the selected Huddle Logic Gate.
 15. Reading relationships from a normal Logic Gate returns only related Huddle Logic Gates that the actor may currently view.
-16. `action_item_huddle_relationships` is the only authority that collects Action Item Entities under Huddle Processes.
-17. Each Action Item Huddle relationship stores the exact same-company `entities.entity_id` and owning `huddle_logic_gates.huddle_logic_gate_id`, and the Entity must have Entity Type system key `action_item`.
-18. One Action Item belongs to at most one Huddle Process collection, one Huddle Process may collect many Action Items, and repeated creation for the same Action Item and owner is idempotent.
-19. A create request may identify a Huddle Node only as input context; the server resolves that exact Node's owning Huddle Logic Gate and stores only the Huddle Logic Gate ID.
-20. Every Huddle Node reads the current Action Item collection of its owning Huddle Logic Gate. Action Items are a live owner-level collection and are not copied into the immutable Huddle Node Logic Gate or KPI snapshots.
-21. An Action Item Huddle relationship grants no permission, RACI role, policy parentage, Entity access, or Huddle access.
-22. Removing one Action Item Huddle relationship deletes only that edge. Permanently deleting either endpoint cascades the edge, and recycling an endpoint preserves every promised edge for exact restoration.
-23. Action Item Huddle relationships use no relationship ID, Huddle Node ID, resource type column, resource registry, copied label, or translated identity.
+16. `entity_relationships` is the only live authority that connects an Entity to a supported exact resource; the first supported resource type is `huddle_node`.
+17. Each row stores the exact same-company `entities.entity_id`, canonical `resource_type`, and exact source `resource_id`; `entity_id` already determines the Entity Type, so no `entity_type_id` is stored.
+18. One exact Entity and Huddle Node pair has one semantic edge. Repeating the relationship or placing the same Entity reference several times in one Huddle Node creates no duplicate row.
+19. Saving a Huddle Node editor document atomically derives that Node's Action Item edges from all of its live inline references in the same database transaction. Removing one of several saved references keeps the edge, while removing the final saved reference removes only that edge and preserves the Entity.
+20. A Huddle Process Action Item rollup joins `entity_relationships.resource_id` to its Huddle Nodes, filters Entities whose Entity Type system key is `action_item`, and deduplicates each Entity once per Huddle Logic Gate.
+21. A surviving reference in a sibling Huddle Node keeps the Action Item in that Process rollup. The same Action Item may have edges in several Huddle Nodes and several Huddle Processes.
+22. Every Huddle Node reads its owning Huddle Logic Gate's current live Action Item rollup. Action Item edges are never copied into the immutable Huddle Node Logic Gate or KPI snapshots.
+23. An Entity relationship grants no permission, RACI role, policy parentage, Entity access, or Huddle access. Reading or changing a Huddle Node's Action Item relationships requires Edit access to that Huddle Node.
+24. Permanent endpoint deletion leaves no stale edge, and recycle/restore preserves every promised exact edge. The table uses no relationship ID, resource registry, copied label, copied body, translated identity, or compatibility identity.
 
 Last updated: 2026-08-28
 
-# Process Story: Huddle membership snapshots and Action Item collections keep exact owner identity
+# Process Story: Huddle snapshots stay fixed while Action Item references roll up live
 
 An editor links an existing normal Logic Gate to one Huddle Logic Gate through either surface's locked typed picker
 ↓
@@ -36,9 +37,9 @@ Creating a Huddle Node atomically copies only those current Logic Gate and KPI i
 ↓
 Later membership changes do not rewrite that Huddle Node, while current source data is joined on each read and no generic edge or copied display payload is created
 ↓
-Creating an Action Item in Huddle context stores at most one exact edge from that Entity to the owning Huddle Logic Gate; a supplied Huddle Node is resolved to that owner and is never stored in the edge
+Saving an inline Action Item reference in a Huddle Node stores one exact `entity_relationships` edge to that Huddle Node in the same transaction as the editor document; repeated inline references in that Node share the same edge
 ↓
-Every Huddle Node under that owner reads the same current Action Item collection live, while its Logic Gate and KPI relationship sets remain immutable creation-time snapshots
+Removing the final reference removes that Node edge, and each Huddle Node reads the parent's current deduplicated Action Item rollup by joining those live Node edges while its Logic Gate and KPI relationship sets remain immutable creation-time snapshots
 
 # Current Email Relationship Business Logic Laws
 
@@ -287,7 +288,7 @@ Examples include:
 - `attachment_relationships` for stored files owned or used by supported Mango resources.
 - `huddle_logic_gate_relationships` for live Huddle Logic Gate-to-normal-Logic-Gate membership.
 - `huddle_node_logic_gate_relationships` and `huddle_node_kpi_relationships` for one Huddle Node's creation-time relationship set.
-- `action_item_huddle_relationships` for one Action Item Entity's optional owning Huddle Process collection.
+- `entity_relationships` for one exact Entity linked to a supported exact resource such as a Huddle Node.
 - `huddle_nodes.huddle_logic_gate_id` for one Huddle Node's fixed owning Huddle Logic Gate.
 - `kpis.logic_gate_id` for one KPI's fixed owning normal Logic Gate.
 - `entities.entity_type_id` and optional `entities.entity_folder_id` for one Entity's fixed type and current organizational folder.
@@ -307,7 +308,7 @@ When a relationship table has a fixed endpoint by definition, that endpoint SHOU
 
 Same-type structural tables MAY use two explicit typed columns when both sides have one fixed type. `node_relationships.node_id_a/node_id_b` is valid because its relationship meaning and endpoint types are fixed. `huddle_nodes.huddle_logic_gate_id` and `kpis.logic_gate_id` are also valid direct owner columns because each relationship has one fixed owner type.
 
-`huddle_logic_gate_relationships.huddle_logic_gate_id/logic_gate_id`, `huddle_node_logic_gate_relationships.huddle_node_id/logic_gate_id`, `huddle_node_kpi_relationships.huddle_node_id/logic_gate_id/kpi_id`, and `action_item_huddle_relationships.entity_id/huddle_logic_gate_id` are valid literal typed columns because every endpoint type and relationship meaning is fixed. Entity ownership and organization likewise use direct `entity_type_id`, `entity_folder_id`, `parent_entity_folder_id`, and `entity_field_type_id` columns because their types and meanings are fixed.
+`huddle_logic_gate_relationships.huddle_logic_gate_id/logic_gate_id`, `huddle_node_logic_gate_relationships.huddle_node_id/logic_gate_id`, and `huddle_node_kpi_relationships.huddle_node_id/logic_gate_id/kpi_id` are valid literal typed columns because every endpoint type and relationship meaning is fixed. `entity_relationships.entity_id` is the exact fixed Entity endpoint, while `resource_type + resource_id` identifies the supported related resource without an Entity Type ID. Entity ownership and organization likewise use direct `entity_type_id`, `entity_folder_id`, `parent_entity_folder_id`, and `entity_field_type_id` columns because their types and meanings are fixed.
 
 ### Law 7 — Fully generic edges type both endpoints
 
@@ -358,7 +359,7 @@ Current examples include:
 - A Huddle Logic Gate may own multiple Huddle Nodes, while each Huddle Node has exactly one Huddle Logic Gate.
 - A Huddle Logic Gate may link to multiple normal Logic Gates, a normal Logic Gate may link to multiple Huddle Logic Gates, and one exact pair has at most one live relationship.
 - A Huddle Node may capture multiple Logic Gates and KPIs at creation, and each exact captured tuple has at most one snapshot relationship.
-- An Action Item Entity may belong to at most one Huddle Process collection, a Huddle Logic Gate may collect many Action Items, and the exact Action Item is the semantic edge identity.
+- An Action Item Entity may be referenced by many Huddle Nodes and appear in many Huddle Process rollups; each exact Entity and Huddle Node pair has at most one live edge.
 - A normal Logic Gate may own multiple KPIs, while each KPI has exactly one normal Logic Gate.
 - One Huddle Logic Gate has at most one live `huddle_explorer_items` placement, and a Huddle Node has none.
 - One RACI resource/principal pair has exactly one direct role; Responsible, Accountable, Consulted, and Informed each permit multiple typed user or group principals, and group edges expand through live nested membership without copied per-user relationship rows.
@@ -376,7 +377,7 @@ A relationship row MUST NOT automatically bypass the normal authorization rules 
 For email and attachment links, knowing an email ID, attachment ID, object key, or relationship ID is never sufficient by itself. Access is checked through the exact owning resource and relationship scope.
 
 
-The only relationships that define V2 RACI and permission parentage are the exact hierarchy contracts in `docs/importanttasks/v2gvic&permissions.md`: Company Explorer folders parent contained folders, Projects, and Logic Gates; a Logic Gate parents its assigned Nodes; Shared Triage folders parent contained folders and shared inboxes. Project membership, Node-to-Node structure, email, attachment, Account, KPI ownership, Huddle Logic Gate membership, Huddle Node snapshots, Huddle Node ownership, Action Item Huddle collection, and Huddle Explorer placement do not become policy parents. Huddle Logic Gates and Huddle Nodes use direct typed policies in the first version.
+The only relationships that define V2 RACI and permission parentage are the exact hierarchy contracts in `docs/importanttasks/v2gvic&permissions.md`: Company Explorer folders parent contained folders, Projects, and Logic Gates; a Logic Gate parents its assigned Nodes; Shared Triage folders parent contained folders and shared inboxes. Project membership, Node-to-Node structure, email, attachment, Account, KPI ownership, Huddle Logic Gate membership, Huddle Node snapshots, Huddle Node ownership, Entity relationships, and Huddle Explorer placement do not become policy parents. Huddle Logic Gates and Huddle Nodes use direct typed policies in the first version.
 
 Creating or moving one of those parent links advances separate RACI and permission parent-link sequences. The relationship does not copy policy rows or grant access by itself; an inherited child resolves its current parent policy, while a customized child remains independent. Removing the only Node-to-Logic-Gate parent materializes an inherited Node's current effective policies before detach so a root never remains inherited.
 
@@ -537,13 +538,15 @@ The source and target of an operational relationship are immutable. Changing eit
 
 One operational relationship has at most one company-map trace, and a relationship may exist without a trace. Deleting a selected Process Map trace MUST delete its operational relationship and dependent geometry in one transaction while preserving both endpoint resources; Process Map exposes no user command that deletes only trace geometry. Fan-out and fan-in use several pairwise relationships whose routes may share points, traces MAY cross map parents and derived spatial tile boundaries, and hidden endpoints suppress every incident relationship and trace. Permanent deletion and recycle/restore MUST preserve or clean the exact dependent geometry through every required path.
 
-### Law 37 — Action Item Huddle collection uses one exact owner edge
+### Law 37 — Entity relationships use exact Entity-to-resource edges
 
-`action_item_huddle_relationships` MUST store the exact same-company `entities.entity_id` and `huddle_logic_gates.huddle_logic_gate_id`. The Entity MUST belong to the Entity Type whose stable system key is `action_item`; one Action Item may have at most one collection owner, one Huddle Logic Gate may collect many Action Items, and repeating the same create command MUST reuse the same semantic edge.
+`entity_relationships` MUST store the exact same-company `entities.entity_id`, canonical `resource_type`, and exact source `resource_id`. The Entity's own row determines its Entity Type, so the relationship MUST NOT store `entity_type_id`. The first supported resource type is `huddle_node`, whose `resource_id` MUST equal the exact `huddle_nodes.huddle_node_id`. One exact typed endpoint pair is one semantic edge, and repeating it MUST converge on that row.
 
-A request MAY carry an exact `huddle_node_id` as context, but the server MUST resolve `huddle_nodes.huddle_logic_gate_id` and persist only that owning Huddle Logic Gate ID. Every Huddle Node under that owner derives the current live collection from the same typed table; the collection MUST NOT be copied into Huddle Node snapshot tables, editor JSON, a projection, a generic edge, or a resource registry.
+Creating or referencing an Action Item in a Huddle Node MUST create that Node edge. Several inline references to the same Entity in the same Node MUST share it; removing one reference MUST retain it while another survives, and removing the final reference MUST remove only that Node edge. An Action Item MAY have edges in sibling Huddle Nodes or Huddle Nodes owned by different Huddle Logic Gates.
 
-Removing one edge MUST preserve both endpoints. Permanent deletion of either endpoint MUST cascade the edge, while recycling and restoring an endpoint MUST preserve and recreate every promised exact edge. The relationship grants no Entity, Huddle, permission, RACI, or policy-parent access.
+The Huddle Process rollup MUST join those exact Huddle Node edges through `huddle_nodes.huddle_logic_gate_id`, include only Entities whose Entity Type system key is `action_item`, and deduplicate each Entity once per Huddle Logic Gate. Every Huddle Node under that owner reads that current rollup live; no rollup edge is copied into Huddle Node snapshot tables, editor JSON, or another projection.
+
+Removing an edge MUST preserve both endpoints. Permanent deletion MUST leave no stale edge, while recycling and restoring an endpoint MUST preserve and recreate every promised exact edge. The relationship grants no Entity, Huddle, permission, RACI, or policy-parent access, and its storage MUST NOT add a relationship ID, resource registry, copied display data, translated identity, fallback, or second live authority.
 
 ### Law 38 — Entity person fields store exact company principals
 
@@ -587,9 +590,10 @@ Account assignment:
   resource_id   = exact logic_gates.logic_gate_id
 
 Action Item collected by a Huddle Process:
-  company_id             = C
-  entity_id              = exact action-item entities.entity_id
-  huddle_logic_gate_id   = exact huddle_logic_gates.huddle_logic_gate_id
+  company_id    = C
+  entity_id     = exact action-item entities.entity_id
+  resource_type = huddle_node
+  resource_id   = exact huddle_nodes.huddle_node_id
 
 Action Item person in charge:
   company_id    = C

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"sort"
 	"time"
 
@@ -83,14 +84,6 @@ func (r *MemoryRepo) CreateActionItem(input ActionItemInput) (domain.Entity, err
 	if err := r.verifyActionItemDefaultsLocked(normalized.CompanyID); err != nil {
 		return domain.Entity{}, err
 	}
-	var huddleLogicGateID string
-	if normalized.HuddleNodeID != "" {
-		node, exists := r.huddleNodes[key(normalized.CompanyID, normalized.HuddleNodeID)]
-		if !exists {
-			return domain.Entity{}, ErrNotFound
-		}
-		huddleLogicGateID = node.HuddleLogicGateID
-	}
 	now := time.Now().UTC()
 	entity := domain.Entity{
 		CompanyID: normalized.CompanyID, EntityID: newUUIDv7String(), EntityTypeID: ActionItemEntityTypeID,
@@ -127,11 +120,45 @@ func (r *MemoryRepo) CreateActionItem(input ActionItemInput) (domain.Entity, err
 	for _, field := range entity.EntityFields {
 		r.entityFields[key(field.CompanyID, field.EntityFieldID)] = field
 	}
-	if huddleLogicGateID != "" {
-		relationship := domain.ActionItemHuddleRelationship{CompanyID: entity.CompanyID, EntityID: entity.EntityID, HuddleLogicGateID: huddleLogicGateID, CreatedTimestamp: now}
-		r.actionItemHuddleRelationships[actionItemHuddleRelationshipKey(entity.CompanyID, entity.EntityID)] = relationship
-	}
 	return r.entityDetailLocked(entity), nil
+}
+
+func (r *MemoryRepo) syncHuddleNodeActionItemRelationshipsLocked(companyID, huddleNodeID string) {
+	documents := make([]json.RawMessage, 0)
+	for _, document := range r.editorJSONDocuments {
+		if document.Deleted || document.Ref.CompanyID != companyID || document.Ref.ResourceType != EntityTypeHuddleNode || document.Ref.ResourceID != huddleNodeID {
+			continue
+		}
+		documents = append(documents, document.JSONDocument)
+	}
+	desiredIDs := entityReferenceIDsFromEditorDocuments(documents)
+	desired := make(map[string]bool, len(desiredIDs))
+	for _, entityID := range desiredIDs {
+		entity, exists := r.entities[key(companyID, entityID)]
+		if exists && entity.EntityTypeID == ActionItemEntityTypeID {
+			desired[entityID] = true
+		}
+	}
+	for relationshipKey, relationship := range r.entityRelationships {
+		if relationship.CompanyID != companyID || relationship.ResourceType != EntityTypeHuddleNode || relationship.ResourceID != huddleNodeID || desired[relationship.EntityID] {
+			continue
+		}
+		entity, exists := r.entities[key(companyID, relationship.EntityID)]
+		if exists && entity.EntityTypeID == ActionItemEntityTypeID {
+			delete(r.entityRelationships, relationshipKey)
+		}
+	}
+	now := time.Now().UTC()
+	for entityID := range desired {
+		relationshipKey := entityRelationshipKey(companyID, entityID, EntityTypeHuddleNode, huddleNodeID)
+		if _, exists := r.entityRelationships[relationshipKey]; exists {
+			continue
+		}
+		r.entityRelationships[relationshipKey] = domain.EntityRelationship{
+			CompanyID: companyID, EntityID: entityID,
+			ResourceType: EntityTypeHuddleNode, ResourceID: huddleNodeID, CreatedTimestamp: now,
+		}
+	}
 }
 
 func (r *MemoryRepo) ListHuddleNodeActionItems(companyID, huddleNodeID string) ([]domain.Entity, error) {
@@ -147,8 +174,12 @@ func (r *MemoryRepo) ListHuddleNodeActionItems(companyID, huddleNodeID string) (
 	}
 	seen := map[string]bool{}
 	items := []domain.Entity{}
-	for _, relationship := range r.actionItemHuddleRelationships {
-		if relationship.CompanyID != companyID || relationship.HuddleLogicGateID != node.HuddleLogicGateID || seen[relationship.EntityID] {
+	for _, relationship := range r.entityRelationships {
+		if relationship.CompanyID != companyID || relationship.ResourceType != EntityTypeHuddleNode || seen[relationship.EntityID] {
+			continue
+		}
+		linkedNode, exists := r.huddleNodes[key(companyID, relationship.ResourceID)]
+		if !exists || linkedNode.HuddleLogicGateID != node.HuddleLogicGateID {
 			continue
 		}
 		entity, exists := r.entities[key(companyID, relationship.EntityID)]

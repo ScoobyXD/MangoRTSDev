@@ -3,12 +3,117 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryActionItemCreateAndHuddleProcessCollection(t *testing.T) {
+func TestEntityRelationshipMigrationUsesExactHuddleNodesWithoutCompatibilityBackfill(t *testing.T) {
+	historical, err := os.ReadFile("../../db/migrations/20260828_action_items.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizedHistorical := strings.ToLower(strings.Join(strings.Fields(string(historical)), " "))
+	if !strings.Contains(normalizedHistorical, "create table action_item_huddle_relationships") || strings.Contains(normalizedHistorical, "create table entity_relationships") {
+		t.Fatal("historical Action Item migration was rewritten instead of followed by a forward migration")
+	}
+
+	for _, path := range []string{"../../db/migrations/20260828_entity_relationships.sql", "../../db/schema.sql"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+		if strings.Contains(normalized, "create table action_item_huddle_relationships") || strings.Contains(normalized, "create table public.action_item_huddle_relationships") {
+			t.Fatalf("%s recreates the retired Action Item Huddle table", path)
+		}
+		tableStart := strings.Index(normalized, "create table entity_relationships (")
+		if tableStart < 0 {
+			tableStart = strings.Index(normalized, "create table public.entity_relationships (")
+		}
+		if tableStart < 0 {
+			t.Fatalf("%s is missing entity_relationships", path)
+		}
+		tableDefinition := normalized[tableStart:]
+		if tableEnd := strings.Index(tableDefinition, ");"); tableEnd >= 0 {
+			tableDefinition = tableDefinition[:tableEnd]
+		} else {
+			t.Fatalf("%s entity_relationships table definition is incomplete", path)
+		}
+		for _, required := range []string{"company_id", "entity_id", "resource_type", "resource_id", "huddle_node"} {
+			if !strings.Contains(tableDefinition, required) {
+				t.Fatalf("%s entity_relationships missing %q", path, required)
+			}
+		}
+		if strings.Contains(tableDefinition, "entity_type_id") {
+			t.Fatalf("%s entity_relationships must derive Entity Type from the exact Entity", path)
+		}
+	}
+	migration, err := os.ReadFile("../../db/migrations/20260828_entity_relationships.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizedMigration := strings.ToLower(strings.Join(strings.Fields(string(migration)), " "))
+	if !strings.Contains(normalizedMigration, "drop table action_item_huddle_relationships") {
+		t.Fatal("forward migration does not remove the retired Action Item Huddle table")
+	}
+	for _, forbidden := range []string{"insert into entity_relationships", "update entity_relationships"} {
+		if strings.Contains(normalizedMigration, forbidden) {
+			t.Fatalf("clean-database relationship migration retains compatibility DML %q", forbidden)
+		}
+	}
+}
+
+type actionItemEditorReference struct {
+	EntityID   string
+	ActionItem bool
+}
+
+func actionItemEditorTestDocument(t *testing.T, references ...actionItemEditorReference) json.RawMessage {
+	t.Helper()
+	content := make([]map[string]any, 0, len(references))
+	for _, reference := range references {
+		attrs := map[string]any{"entityType": "entity", "entityId": reference.EntityID, "label": "Entity", "actionItem": reference.ActionItem}
+		if reference.ActionItem {
+			attrs["actionItemColor"] = nil
+		}
+		content = append(content, map[string]any{"type": "mangoEntityLink", "attrs": attrs})
+	}
+	document, err := json.Marshal(map[string]any{
+		"format": MangoTiptapFormat, "schema_version": MangoTiptapSchemaVersion,
+		"document": map[string]any{"type": "doc", "content": []map[string]any{{"type": "paragraph", "content": content}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return document
+}
+
+func createActionItemEditorTestTextbox(t *testing.T, repo Repository, companyID, huddleNodeID, title string) EditorJSONDocumentRef {
+	t.Helper()
+	textbox, err := repo.CreateHuddleNodeTextbox(HuddleNodeTextboxCreateInput{CompanyID: companyID, HuddleNodeID: huddleNodeID, Title: title})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return EditorJSONDocumentRef{CompanyID: companyID, ResourceType: EntityTypeHuddleNode, ResourceID: huddleNodeID, DocumentID: textbox.TextboxID}
+}
+
+func commitActionItemEditorTestDocument(t *testing.T, repo Repository, ref EditorJSONDocumentRef, actorUserID string, baseRevision int64, operationID string, references ...actionItemEditorReference) EditorJSONCommit {
+	t.Helper()
+	commit, err := repo.CommitEditorJSONDocument(EditorJSONCommitInput{
+		Document: ref, OperationID: operationID, ClientID: "action-item-test", ActorUserID: actorUserID,
+		BaseRevision: baseRevision, SchemaVersion: MangoTiptapSchemaVersion,
+		JSONDocument: actionItemEditorTestDocument(t, references...),
+	})
+	if err != nil {
+		t.Fatalf("commit %s: %v", operationID, err)
+	}
+	return commit
+}
+
+func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 	repo := NewMemoryRepo()
 	user, company := createActionItemTestCompany(t, repo, "action-item-owner")
 
@@ -29,10 +134,8 @@ func TestMemoryActionItemCreateAndHuddleProcessCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	red := ActionItemColorRed
 	created, err := repo.CreateActionItem(ActionItemInput{
-		CompanyID: company.CompanyID, BodyText: "Call the supplier\nConfirm the ship date", Color: &red,
-		HuddleNodeID: firstNode.HuddleNodeID, CreatedByUserID: user.UserID,
+		CompanyID: company.CompanyID, BodyText: "Call the supplier\nConfirm the ship date", CreatedByUserID: user.UserID,
 	})
 	if err != nil {
 		t.Fatalf("CreateActionItem: %v", err)
@@ -41,7 +144,7 @@ func TestMemoryActionItemCreateAndHuddleProcessCollection(t *testing.T) {
 		t.Fatalf("created action item=%+v", created)
 	}
 	assertActionItemFieldValue(t, created, ActionItemStatusSystemKey, `"in_progress"`)
-	assertActionItemFieldValue(t, created, ActionItemColorSystemKey, `"red"`)
+	assertActionItemFieldValue(t, created, ActionItemColorSystemKey, "null")
 	if len(created.EntityFields) != 5 {
 		t.Fatalf("field count=%d, want 5", len(created.EntityFields))
 	}
@@ -51,8 +154,63 @@ func TestMemoryActionItemCreateAndHuddleProcessCollection(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(items) != 1 || items[0].EntityID != created.EntityID {
-			t.Fatalf("huddle node %s items=%+v", huddleNodeID, items)
+		if len(items) != 0 {
+			t.Fatalf("company-wide creation unexpectedly attached to Huddle Node %s: %+v", huddleNodeID, items)
+		}
+	}
+	ordinaryType, err := repo.CreateEntityType(EntityTypeInput{CompanyID: company.CompanyID, Name: "Decision"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary, err := repo.CreateEntity(EntityInput{CompanyID: company.CompanyID, EntityTypeID: ordinaryType.EntityTypeID, Name: "Ordinary Entity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinaryRelationshipKey := entityRelationshipKey(company.CompanyID, ordinary.EntityID, EntityTypeHuddleNode, firstNode.HuddleNodeID)
+	repo.entityRelationships[ordinaryRelationshipKey] = domain.EntityRelationship{CompanyID: company.CompanyID, EntityID: ordinary.EntityID, ResourceType: EntityTypeHuddleNode, ResourceID: firstNode.HuddleNodeID}
+
+	firstRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, firstNode.HuddleNodeID, "First notes")
+	firstCommit := commitActionItemEditorTestDocument(t, repo, firstRef, user.UserID, 0, "first-reference",
+		actionItemEditorReference{EntityID: created.EntityID, ActionItem: true},
+		actionItemEditorReference{EntityID: created.EntityID, ActionItem: false},
+		actionItemEditorReference{EntityID: ordinary.EntityID},
+	)
+	firstRelationshipKey := entityRelationshipKey(company.CompanyID, created.EntityID, EntityTypeHuddleNode, firstNode.HuddleNodeID)
+	if _, exists := repo.entityRelationships[firstRelationshipKey]; !exists {
+		t.Fatalf("saved editor relationship missing from %+v", repo.entityRelationships)
+	}
+	firstRelationship := repo.entityRelationships[firstRelationshipKey]
+	siblingRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, firstNode.HuddleNodeID, "Sibling notes")
+	siblingCommit := commitActionItemEditorTestDocument(t, repo, siblingRef, user.UserID, 0, "sibling-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
+	if current := repo.entityRelationships[firstRelationshipKey]; !current.CreatedTimestamp.Equal(firstRelationship.CreatedTimestamp) {
+		t.Fatalf("deduped saved references changed relationship timestamp from %s to %s", firstRelationship.CreatedTimestamp, current.CreatedTimestamp)
+	}
+	firstClear := commitActionItemEditorTestDocument(t, repo, firstRef, user.UserID, firstCommit.Revision, "remove-first-reference")
+	if _, exists := repo.entityRelationships[firstRelationshipKey]; !exists {
+		t.Fatal("removing one saved reference removed the surviving sibling relationship")
+	}
+	siblingClear := commitActionItemEditorTestDocument(t, repo, siblingRef, user.UserID, siblingCommit.Revision, "remove-final-reference")
+	if _, exists := repo.entityRelationships[firstRelationshipKey]; exists {
+		t.Fatal("removing the final saved reference retained the Action Item relationship")
+	}
+	if _, exists := repo.entityRelationships[ordinaryRelationshipKey]; !exists {
+		t.Fatal("Action Item recomputation removed an ordinary Entity relationship")
+	}
+	if _, err := repo.GetEntity(company.CompanyID, created.EntityID); err != nil {
+		t.Fatalf("removing the final saved reference removed the Action Item: %v", err)
+	}
+	firstReadd := commitActionItemEditorTestDocument(t, repo, firstRef, user.UserID, firstClear.Revision, "restore-first-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
+	_ = siblingClear
+	secondRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, secondNode.HuddleNodeID, "Tuesday notes")
+	secondCommit := commitActionItemEditorTestDocument(t, repo, secondRef, user.UserID, 0, "second-node-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
+	secondRelationshipKey := entityRelationshipKey(company.CompanyID, created.EntityID, EntityTypeHuddleNode, secondNode.HuddleNodeID)
+	if _, exists := repo.entityRelationships[secondRelationshipKey]; !exists {
+		t.Fatal("second Huddle Node saved reference did not create its exact edge")
+	}
+	for _, huddleNodeID := range []string{firstNode.HuddleNodeID, secondNode.HuddleNodeID} {
+		items, listErr := repo.ListHuddleNodeActionItems(company.CompanyID, huddleNodeID)
+		if listErr != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
+			t.Fatalf("deduped sibling Huddle Node rollup for %s = %+v, err=%v", huddleNodeID, items, listErr)
 		}
 	}
 
@@ -68,13 +226,58 @@ func TestMemoryActionItemCreateAndHuddleProcessCollection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	otherRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, otherNode.HuddleNodeID, "Weekly notes")
+	commitActionItemEditorTestDocument(t, repo, otherRef, user.UserID, 0, "other-process-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
 	items, err := repo.ListHuddleNodeActionItems(company.CompanyID, otherNode.HuddleNodeID)
-	if err != nil || len(items) != 0 {
-		t.Fatalf("unrelated huddle items=%+v err=%v", items, err)
+	if err != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
+		t.Fatalf("second Huddle Process items=%+v err=%v", items, err)
 	}
+	firstSecondClear := commitActionItemEditorTestDocument(t, repo, firstRef, user.UserID, firstReadd.Revision, "clear-first-node")
+	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	if err != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
+		t.Fatalf("second Node reference should keep first Process rollup=%+v err=%v", items, err)
+	}
+	commitActionItemEditorTestDocument(t, repo, secondRef, user.UserID, secondCommit.Revision, "clear-second-node")
+	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("removing final first Process reference items=%+v err=%v", items, err)
+	}
+	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, otherNode.HuddleNodeID)
+	if err != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
+		t.Fatalf("other Process reference changed=%+v err=%v", items, err)
+	}
+	commitActionItemEditorTestDocument(t, repo, firstRef, user.UserID, firstSecondClear.Revision, "reference-before-recycle", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
 
 	if _, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Invalid color", Color: actionItemTestStringPointer("blue"), CreatedByUserID: user.UserID}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid color error=%v, want ErrInvalid", err)
+	}
+
+	if err := repo.DeleteHuddleNode(company.CompanyID, firstNode.HuddleNodeID, user.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := repo.entityRelationships[firstRelationshipKey]; exists {
+		t.Fatalf("live relationship survived exact Huddle Node recycle: %+v", repo.entityRelationships)
+	}
+	recycleItems, err := repo.ListRecycleBinItems(company.CompanyID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstNodeRecycleID string
+	for _, recycleItem := range recycleItems {
+		if recycleItem.ObjectKind == "huddle_node" && recycleItem.ObjectID == firstNode.HuddleNodeID {
+			firstNodeRecycleID = recycleItem.RecycleBinItemID
+			break
+		}
+	}
+	if firstNodeRecycleID == "" {
+		t.Fatalf("Huddle Node recycle item missing from %+v", recycleItems)
+	}
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, user.UserID, []string{firstNodeRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	restoredItems, err := repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	if err != nil || len(restoredItems) != 1 || restoredItems[0].EntityID != created.EntityID {
+		t.Fatalf("restored Huddle Node action items=%+v err=%v", restoredItems, err)
 	}
 
 	if err := repo.DeleteHuddleNode(company.CompanyID, firstNode.HuddleNodeID, user.UserID); err != nil {
@@ -86,33 +289,75 @@ func TestMemoryActionItemCreateAndHuddleProcessCollection(t *testing.T) {
 	if err := repo.DeleteHuddleLogicGate(company.CompanyID, firstProcess.HuddleLogicGateID, user.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if len(repo.actionItemHuddleRelationships) != 0 {
-		t.Fatalf("live relationships after Huddle Process recycle=%+v, want none", repo.actionItemHuddleRelationships)
-	}
-	recycleItems, err := repo.ListRecycleBinItems(company.CompanyID, user.UserID)
+	recycleItems, err = repo.ListRecycleBinItems(company.CompanyID, user.UserID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var processRecycleID string
+	firstNodeRecycleID, processRecycleID := "", ""
 	for _, recycleItem := range recycleItems {
-		if recycleItem.ObjectKind == "huddle_logic_gate" && recycleItem.ObjectID == firstProcess.HuddleLogicGateID {
+		switch {
+		case recycleItem.ObjectKind == "huddle_node" && recycleItem.ObjectID == firstNode.HuddleNodeID:
+			firstNodeRecycleID = recycleItem.RecycleBinItemID
+		case recycleItem.ObjectKind == "huddle_logic_gate" && recycleItem.ObjectID == firstProcess.HuddleLogicGateID:
 			processRecycleID = recycleItem.RecycleBinItemID
-			break
 		}
 	}
-	if processRecycleID == "" {
-		t.Fatalf("Huddle Process recycle item missing from %+v", recycleItems)
+	if firstNodeRecycleID == "" || processRecycleID == "" {
+		t.Fatalf("Huddle Process/Node recycle items missing from %+v", recycleItems)
 	}
-	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, user.UserID, []string{processRecycleID}); err != nil {
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, user.UserID, []string{processRecycleID, firstNodeRecycleID}); err != nil {
 		t.Fatal(err)
 	}
-	restoredNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: firstProcess.HuddleLogicGateID, Name: "Restored", ActorID: user.UserID})
+	restoredItems, err = repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	if err != nil || len(restoredItems) != 1 || restoredItems[0].EntityID != created.EntityID {
+		t.Fatalf("restored Huddle Process and Node action items=%+v err=%v", restoredItems, err)
+	}
+}
+
+func TestMemorySavedHuddleReferencesUseCanonicalCompanyAndEntityType(t *testing.T) {
+	repo := NewMemoryRepo()
+	user, company := createActionItemTestCompany(t, repo, "action-item-sync-validation")
+	gate, err := repo.CreateLogicGate(company.CompanyID, "Daily")
 	if err != nil {
 		t.Fatal(err)
 	}
-	restoredItems, err := repo.ListHuddleNodeActionItems(company.CompanyID, restoredNode.HuddleNodeID)
-	if err != nil || len(restoredItems) != 1 || restoredItems[0].EntityID != created.EntityID {
-		t.Fatalf("restored Huddle Process action items=%+v err=%v", restoredItems, err)
+	process, err := repo.ConvertLogicGateToHuddle(company.CompanyID, gate.LogicGateID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: process.HuddleLogicGateID, Name: "Daily", ActorID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinaryType, err := repo.CreateEntityType(EntityTypeInput{CompanyID: company.CompanyID, Name: "Decision"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinaryEntity, err := repo.CreateEntity(EntityInput{CompanyID: company.CompanyID, EntityTypeID: ordinaryType.EntityTypeID, Name: "Ordinary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	localActionItem, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Local but unmarked", CreatedByUserID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherUser, otherCompany := createActionItemTestCompany(t, repo, "action-item-sync-other-company")
+	otherActionItem, err := repo.CreateActionItem(ActionItemInput{CompanyID: otherCompany.CompanyID, BodyText: "Other company", CreatedByUserID: otherUser.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := createActionItemEditorTestTextbox(t, repo, company.CompanyID, node.HuddleNodeID, "Validation")
+	commitActionItemEditorTestDocument(t, repo, ref, user.UserID, 0, "invalid-reference-types",
+		actionItemEditorReference{EntityID: ordinaryEntity.EntityID, ActionItem: true},
+		actionItemEditorReference{EntityID: otherActionItem.EntityID, ActionItem: true},
+		actionItemEditorReference{EntityID: localActionItem.EntityID},
+	)
+	expectedKey := entityRelationshipKey(company.CompanyID, localActionItem.EntityID, EntityTypeHuddleNode, node.HuddleNodeID)
+	if len(repo.entityRelationships) != 1 {
+		t.Fatalf("saved reference relationships=%+v, want only the exact local Action Item", repo.entityRelationships)
+	}
+	if _, exists := repo.entityRelationships[expectedKey]; !exists {
+		t.Fatalf("an Action Item reference with actionItem=false did not roll up: %+v", repo.entityRelationships)
 	}
 }
 

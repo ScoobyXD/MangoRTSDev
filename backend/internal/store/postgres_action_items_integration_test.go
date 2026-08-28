@@ -1,13 +1,12 @@
 package store
 
 import (
-	"errors"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
 )
 
-func TestPostgresActionItemHuddleRelationshipLifecycle(t *testing.T) {
+func TestPostgresEntityRelationshipHuddleLifecycle(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
 	actor, err := repo.UpsertAuthUser("postgres-action-item-owner", "postgres-action-item-owner@example.test", "Postgres Action Item Owner")
 	if err != nil {
@@ -30,32 +29,90 @@ func TestPostgresActionItemHuddleRelationshipLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	red := ActionItemColorRed
-	created, err := repo.CreateActionItem(ActionItemInput{
-		CompanyID: company.CompanyID, BodyText: "Call the supplier", Color: &red,
-		HuddleNodeID: firstNode.HuddleNodeID, CreatedByUserID: actor.UserID,
-	})
+	created, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Call the supplier", CreatedByUserID: actor.UserID})
 	if err != nil {
 		t.Fatalf("CreateActionItem: %v", err)
 	}
+	assertActionItemFieldValue(t, created, ActionItemColorSystemKey, "null")
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and entity_id=$2::uuid`, company.CompanyID, created.EntityID); got != 0 {
+		t.Fatalf("company-wide creation relationship count = %d, want 0", got)
+	}
+
+	ordinaryType, err := repo.CreateEntityType(EntityTypeInput{CompanyID: company.CompanyID, Name: "Decision"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ordinary, err := repo.CreateEntity(EntityInput{CompanyID: company.CompanyID, EntityTypeID: ordinaryType.EntityTypeID, Name: "Ordinary Entity"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`insert into entity_relationships(company_id,entity_id,resource_type,resource_id) values($1::uuid,$2::uuid,'huddle_node',$3::uuid)`, company.CompanyID, ordinary.EntityID, firstNode.HuddleNodeID); err != nil {
+		t.Fatal(err)
+	}
+
+	firstRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, firstNode.HuddleNodeID, "Monday notes")
+	firstCommit := commitActionItemEditorTestDocument(t, repo, firstRef, actor.UserID, 0, "postgres-first-reference",
+		actionItemEditorReference{EntityID: created.EntityID, ActionItem: true},
+		actionItemEditorReference{EntityID: created.EntityID, ActionItem: false},
+		actionItemEditorReference{EntityID: ordinary.EntityID, ActionItem: true},
+	)
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and entity_id=$2::uuid and resource_id=$3::uuid`, company.CompanyID, created.EntityID, firstNode.HuddleNodeID); got != 1 {
+		t.Fatalf("duplicate saved references relationship count = %d, want 1", got)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and entity_id=$2::uuid and resource_id=$3::uuid`, company.CompanyID, ordinary.EntityID, firstNode.HuddleNodeID); got != 1 {
+		t.Fatalf("ordinary Entity relationship count after save = %d, want 1", got)
+	}
+
+	siblingRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, firstNode.HuddleNodeID, "More Monday notes")
+	siblingCommit := commitActionItemEditorTestDocument(t, repo, siblingRef, actor.UserID, 0, "postgres-sibling-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: false})
+	firstClear := commitActionItemEditorTestDocument(t, repo, firstRef, actor.UserID, firstCommit.Revision, "postgres-remove-one-reference")
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and entity_id=$2::uuid and resource_id=$3::uuid`, company.CompanyID, created.EntityID, firstNode.HuddleNodeID); got != 1 {
+		t.Fatalf("surviving sibling reference relationship count = %d, want 1", got)
+	}
+	commitActionItemEditorTestDocument(t, repo, siblingRef, actor.UserID, siblingCommit.Revision, "postgres-remove-final-reference")
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and entity_id=$2::uuid and resource_id=$3::uuid`, company.CompanyID, created.EntityID, firstNode.HuddleNodeID); got != 0 {
+		t.Fatalf("final reference removal relationship count = %d, want 0", got)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and entity_id=$2::uuid and resource_id=$3::uuid`, company.CompanyID, ordinary.EntityID, firstNode.HuddleNodeID); got != 1 {
+		t.Fatalf("ordinary Entity relationship count after Action Item removal = %d, want 1", got)
+	}
+	if _, err := repo.GetEntity(company.CompanyID, created.EntityID); err != nil {
+		t.Fatalf("final reference removal deleted Action Item: %v", err)
+	}
+
+	firstReadd := commitActionItemEditorTestDocument(t, repo, firstRef, actor.UserID, firstClear.Revision, "postgres-readd-first-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: false})
+	secondRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, secondNode.HuddleNodeID, "Tuesday notes")
+	secondCommit := commitActionItemEditorTestDocument(t, repo, secondRef, actor.UserID, 0, "postgres-second-node-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and entity_id=$2::uuid`, company.CompanyID, created.EntityID); got != 2 {
+		t.Fatalf("two exact Huddle Node relationships = %d, want 2", got)
+	}
 	for _, huddleNodeID := range []string{firstNode.HuddleNodeID, secondNode.HuddleNodeID} {
-		items, err := repo.ListHuddleNodeActionItems(company.CompanyID, huddleNodeID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(items) != 1 || items[0].EntityID != created.EntityID {
-			t.Fatalf("Huddle Node %s action items = %+v, want %s", huddleNodeID, items, created.EntityID)
+		items, listErr := repo.ListHuddleNodeActionItems(company.CompanyID, huddleNodeID)
+		if listErr != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
+			t.Fatalf("deduped first Process items for %s = %+v, err=%v", huddleNodeID, items, listErr)
 		}
 	}
 
 	secondProcess := createPostgresActionItemHuddleProcess(t, repo, company.CompanyID, actor.UserID, "Weekly Huddle")
-	for label, huddleLogicGateID := range map[string]string{
-		"duplicate edge": firstProcess.HuddleLogicGateID,
-		"second owner":   secondProcess.HuddleLogicGateID,
-	} {
-		if _, err := db.Exec(`insert into action_item_huddle_relationships(company_id,entity_id,huddle_logic_gate_id) values($1::uuid,$2::uuid,$3::uuid)`, company.CompanyID, created.EntityID, huddleLogicGateID); err == nil {
-			t.Fatalf("%s insert succeeded; one Action Item must have at most one Huddle Process owner", label)
-		}
+	thirdNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: secondProcess.HuddleLogicGateID, Name: "Weekly", ActorID: actor.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thirdRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, thirdNode.HuddleNodeID, "Weekly notes")
+	commitActionItemEditorTestDocument(t, repo, thirdRef, actor.UserID, 0, "postgres-other-process-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
+	firstSecondClear := commitActionItemEditorTestDocument(t, repo, firstRef, actor.UserID, firstReadd.Revision, "postgres-clear-first-node")
+	items, err := repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("remaining same-Process reference items=%+v err=%v", items, err)
+	}
+	commitActionItemEditorTestDocument(t, repo, secondRef, actor.UserID, secondCommit.Revision, "postgres-clear-second-node")
+	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("removed final first Process reference items=%+v err=%v", items, err)
+	}
+	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, thirdNode.HuddleNodeID)
+	if err != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
+		t.Fatalf("second Process reference items=%+v err=%v", items, err)
 	}
 
 	otherCompany, err := repo.CreateCompany("Other Postgres Action Item Huddle")
@@ -70,17 +127,39 @@ func TestPostgresActionItemHuddleRelationshipLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.CreateActionItem(ActionItemInput{
-		CompanyID: company.CompanyID, BodyText: "Wrong company", HuddleNodeID: otherNode.HuddleNodeID, CreatedByUserID: actor.UserID,
-	}); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("cross-company Huddle Node error = %v, want ErrNotFound", err)
+	if _, err := db.Exec(`insert into entity_relationships(company_id,entity_id,resource_type,resource_id) values($1::uuid,$2::uuid,'huddle_node',$3::uuid)`, company.CompanyID, created.EntityID, otherNode.HuddleNodeID); err == nil {
+		t.Fatal("cross-company Action Item relationship insert succeeded")
 	}
-	unattached, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Unattached", CreatedByUserID: actor.UserID})
+	if _, err := db.Exec(`insert into entity_relationships(company_id,entity_id,resource_type,resource_id) values($1::uuid,$2::uuid,'logic_gate',$3::uuid)`, company.CompanyID, created.EntityID, firstNode.HuddleNodeID); err == nil {
+		t.Fatal("unsupported generic resource type insert succeeded")
+	}
+
+	commitActionItemEditorTestDocument(t, repo, firstRef, actor.UserID, firstSecondClear.Revision, "postgres-reference-before-recycle", actionItemEditorReference{EntityID: created.EntityID, ActionItem: false})
+	if err := repo.DeleteHuddleNode(company.CompanyID, firstNode.HuddleNodeID, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and resource_id=$2::uuid`, company.CompanyID, firstNode.HuddleNodeID); got != 0 {
+		t.Fatalf("live relationships after exact Huddle Node recycle = %d, want 0", got)
+	}
+	recycleItems, err := repo.ListRecycleBinItems(company.CompanyID, actor.UserID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`insert into action_item_huddle_relationships(company_id,entity_id,huddle_logic_gate_id) values($1::uuid,$2::uuid,$3::uuid)`, company.CompanyID, unattached.EntityID, otherProcess.HuddleLogicGateID); err == nil {
-		t.Fatal("cross-company Action Item relationship insert succeeded")
+	firstNodeRecycleID := ""
+	for _, recycleItem := range recycleItems {
+		if recycleItem.ObjectKind == "huddle_node" && recycleItem.ObjectID == firstNode.HuddleNodeID {
+			firstNodeRecycleID = recycleItem.RecycleBinItemID
+			break
+		}
+	}
+	if firstNodeRecycleID == "" {
+		t.Fatalf("Huddle Node recycle item missing from %+v", recycleItems)
+	}
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{firstNodeRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and resource_id=$2::uuid`, company.CompanyID, firstNode.HuddleNodeID); got != 2 {
+		t.Fatalf("restored exact Node relationships = %d, want 2", got)
 	}
 
 	if err := repo.DeleteHuddleNode(company.CompanyID, firstNode.HuddleNodeID, actor.UserID); err != nil {
@@ -92,36 +171,28 @@ func TestPostgresActionItemHuddleRelationshipLifecycle(t *testing.T) {
 	if err := repo.DeleteHuddleLogicGate(company.CompanyID, firstProcess.HuddleLogicGateID, actor.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if got := countPostgresRows(t, db, `select count(*) from action_item_huddle_relationships where company_id=$1::uuid and entity_id=$2::uuid`, company.CompanyID, created.EntityID); got != 0 {
-		t.Fatalf("live relationships after Huddle Process recycle = %d, want 0", got)
-	}
-	recycleItems, err := repo.ListRecycleBinItems(company.CompanyID, actor.UserID)
+	recycleItems, err = repo.ListRecycleBinItems(company.CompanyID, actor.UserID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	processRecycleID := ""
+	firstNodeRecycleID, processRecycleID := "", ""
 	for _, recycleItem := range recycleItems {
-		if recycleItem.ObjectKind == "huddle_logic_gate" && recycleItem.ObjectID == firstProcess.HuddleLogicGateID {
+		switch {
+		case recycleItem.ObjectKind == "huddle_node" && recycleItem.ObjectID == firstNode.HuddleNodeID:
+			firstNodeRecycleID = recycleItem.RecycleBinItemID
+		case recycleItem.ObjectKind == "huddle_logic_gate" && recycleItem.ObjectID == firstProcess.HuddleLogicGateID:
 			processRecycleID = recycleItem.RecycleBinItemID
-			break
 		}
 	}
-	if processRecycleID == "" {
-		t.Fatalf("Huddle Process recycle item missing from %+v", recycleItems)
+	if firstNodeRecycleID == "" || processRecycleID == "" {
+		t.Fatalf("Huddle Process/Node recycle items missing from %+v", recycleItems)
 	}
-	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{processRecycleID}); err != nil {
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{processRecycleID, firstNodeRecycleID}); err != nil {
 		t.Fatal(err)
 	}
-	if got := countPostgresRows(t, db, `select count(*) from action_item_huddle_relationships where company_id=$1::uuid and entity_id=$2::uuid and huddle_logic_gate_id=$3::uuid`, company.CompanyID, created.EntityID, firstProcess.HuddleLogicGateID); got != 1 {
-		t.Fatalf("restored relationships = %d, want 1", got)
-	}
-	restoredNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: firstProcess.HuddleLogicGateID, Name: "Restored", ActorID: actor.UserID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	restoredItems, err := repo.ListHuddleNodeActionItems(company.CompanyID, restoredNode.HuddleNodeID)
+	restoredItems, err := repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(restoredItems) != 1 || restoredItems[0].EntityID != created.EntityID {
-		t.Fatalf("restored Huddle Process action items = %+v, err = %v", restoredItems, err)
+		t.Fatalf("restored Huddle Process and Node action items = %+v, err = %v", restoredItems, err)
 	}
 }
 

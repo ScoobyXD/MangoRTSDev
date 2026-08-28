@@ -12,6 +12,7 @@ export type MangoAttachmentSourceKind = "user_upload" | "editor_paste" | "chat_u
 export type MangoAttachmentRelationshipKind = "inline_image" | "file_attachment" | "chat_attachment" | "email_attachment" | "email_inline_attachment" | "migrated_inline_image";
 export type MangoAttachmentResourceType =
   | "node"
+  | "huddle_node"
   | "logic_gate"
   | "project"
   | "node_chat_message"

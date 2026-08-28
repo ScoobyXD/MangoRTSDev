@@ -518,6 +518,8 @@ func NormalizeAttachmentResourceType(resourceType string) string {
 		return "logic_gate"
 	case "project":
 		return "project"
+	case "huddle_node", "huddle-node":
+		return EntityTypeHuddleNode
 	case "node_chat_message", "node-chat-message":
 		return "node_chat_message"
 	case "logic_gate_chat_message", "logic-gate-chat-message":
@@ -1650,6 +1652,10 @@ type HuddleRepository interface {
 	CreateHuddleNode(input HuddleCreateInput) (domain.HuddleNode, error)
 	GetHuddleNode(companyID, huddleNodeID string) (domain.HuddleNode, error)
 	ListHuddleNodeLogicGateCards(companyID, huddleNodeID string) ([]domain.HuddleLogicGateCard, error)
+	GetHuddleNodeWorkspace(companyID, huddleNodeID string) (HuddleNodeWorkspace, error)
+	CreateHuddleNodeTextbox(input HuddleNodeTextboxCreateInput) (HuddleNodeTextbox, error)
+	UpsertHuddleNodeTextboxChat(input HuddleNodeTextboxChatInput) (HuddleNodeTextboxChat, error)
+	DeleteHuddleNodeTextboxChat(input HuddleNodeTextboxChatDeleteInput) error
 	UpdateHuddleNode(input HuddleUpdateInput) (domain.HuddleNode, error)
 	DeleteHuddleNode(companyID, huddleNodeID, deletedByUserID string) error
 	ListKPIs(companyID, logicGateID string) ([]domain.KPI, error)

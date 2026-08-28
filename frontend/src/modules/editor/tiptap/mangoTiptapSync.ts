@@ -11,7 +11,7 @@ import {
 import type { MangoTiptapPersistedAnnotation } from "./mangoTiptapAnnotations.js";
 import { validateMangoTiptapDocument, type MangoTiptapDocument } from "./mangoTiptapDocument.js";
 
-export type MangoTiptapResourceType = "node" | "project" | "logic_gate" | "huddle_logic_gate" | "kpi";
+export type MangoTiptapResourceType = "node" | "project" | "logic_gate" | "huddle_logic_gate" | "huddle_node" | "kpi";
 export type MangoTiptapRequest = <T>(path: string, init?: RequestInit & {
   json?: unknown; editorTraceContext?: EditorTraceContext | null }) => Promise<T>;
 
@@ -133,7 +133,7 @@ function requiredString(value: unknown, error: string): string {
 }
 
 function recoveryResourceType(value: unknown): MangoTiptapResourceType {
-  if (value === "node" || value === "project" || value === "logic_gate" || value === "huddle_logic_gate" || value === "kpi") return value;
+  if (value === "node" || value === "project" || value === "logic_gate" || value === "huddle_logic_gate" || value === "huddle_node" || value === "kpi") return value;
   throw new Error("invalid_tiptap_pending_resource_type");
 }
 

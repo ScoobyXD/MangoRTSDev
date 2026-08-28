@@ -59,6 +59,7 @@ import { createRequestJSON, isHTTPNotFoundError } from "../api/requestJSON.js";
 import { useMangoEditorDataFormat } from "./editorDataFormat.js";
 import { TEXT_BLOCK_DEFAULT_BODY_HEIGHT, TEXT_BLOCK_DEFAULT_ROW_HEIGHT } from "./editorRowVirtualization";
 import type { MangoTiptapAnnotation } from "./tiptap/mangoTiptapAnnotations.js";
+import type { MangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
 import {
   createStandaloneImageClipboardHTML,
   writeImageClipboardData,
@@ -350,7 +351,7 @@ export const DeleteTextBlockConfirmationModal: React.FC<DeleteTextBlockConfirmat
 
 type NodeTextBlockEditorProps = {
   blockID: string;
-  surfaceKind?: "node" | "project";
+  surfaceKind?: "node" | "project" | "huddle_node";
   editable: boolean;
   nodeID: string;
   apiBase: string;
@@ -381,6 +382,8 @@ type NodeTextBlockEditorProps = {
   onDocumentConflict?: () => void;
   onDocumentError?: (message: string) => void;
   onSaveStateChange?: (state: EditorSaveState) => void;
+  onDocumentSnapshotChange?: (document: MangoTiptapDocument) => void;
+  onCanonicalDocumentChange?: (document: MangoTiptapDocument) => void;
   onRecoveryStorageError?: (message: string) => void;
   onRecoveryStorageRecovered?: () => void;
   onChatHighlightActivate?: (messageID: string) => void;
@@ -567,14 +570,15 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       value={props.documentValue}
       editable={props.editable}
       outlineStyle={props.outlineStyle}
-      ariaLabel={`${props.surfaceKind === "project" ? "Project" : "Node"} text box`}
+      ariaLabel={`${props.surfaceKind === "project" ? "Project" : props.surfaceKind === "huddle_node" ? "Huddle Node" : "Node"} text box`}
       dataAttributes={{
-        "data-node-text-block-id": props.surfaceKind === "project" ? undefined : props.blockID,
+        "data-node-text-block-id": props.surfaceKind === "project" || props.surfaceKind === "huddle_node" ? undefined : props.blockID,
         "data-project-text-block-id": props.surfaceKind === "project" ? props.blockID : undefined,
+        "data-huddle-node-textbox-id": props.surfaceKind === "huddle_node" ? props.blockID : undefined,
       }}
       style={{ minHeight: props.fillHeight ? 0 : TEXT_BLOCK_DEFAULT_BODY_HEIGHT, height: editorHeight, overflowY: "auto", color: props.surfaceText }}
       companyID={props.companyID}
-      resourceType={props.surfaceKind === "project" ? "project" : "node"}
+      resourceType={props.surfaceKind === "project" ? "project" : props.surfaceKind === "huddle_node" ? "huddle_node" : "node"}
       resourceID={props.surfaceKind === "project" ? props.attachmentResourceID ?? props.nodeID : props.nodeID}
       documentID={props.blockID}
       currentUserID={props.currentUserID}
@@ -600,6 +604,8 @@ export const NodeTextBlockEditor: React.FC<NodeTextBlockEditorProps> = (props) =
       onConflict={() => props.onDocumentConflict?.()}
       onError={(message) => props.onDocumentError?.(message)}
       onSaveStateChange={props.onSaveStateChange}
+      onDocumentSnapshotChange={props.onDocumentSnapshotChange}
+      onCanonicalDocumentChange={props.onCanonicalDocumentChange}
       onRecoveryStorageError={(message) => props.onRecoveryStorageError?.(message)}
       onRecoveryStorageRecovered={() => props.onRecoveryStorageRecovered?.()}
       onAnnotationActivate={(annotation) => {
@@ -665,6 +671,7 @@ export type ChatComposerDestination = {
 type ChatPaneProps = {
   blockID: string;
   editable: boolean;
+  submitting?: boolean;
   apiBase?: string;
   companyID?: string;
   entityRequestJSON?: EditorEntityLinkRequest;
@@ -748,6 +755,7 @@ type ChatComposerDraftSegment = {
 export const ChatPane: React.FC<ChatPaneProps> = ({
   blockID,
   editable,
+  submitting = false,
   apiBase,
   companyID,
   entityRequestJSON,
@@ -882,7 +890,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     return orderedNodes;
   }, [sectionKeysByMessageID, sectionLabelsByBlockID, sectionNodeIDsByBlockID, sectionNodeLabelsByNodeID, sectionNodeOrder, sectionedThreads]);
   const replyTarget = replyTargetID ? messages.find((message) => message.id === replyTargetID) : undefined;
-  const canSubmit = editable && editorChatAttachmentsReadyForSubmit(draftAttachments) && (draft.trim().length > 0 || draftAttachments.length > 0);
+  const composerEditable = editable && !submitting;
+  const canSubmit = composerEditable && editorChatAttachmentsReadyForSubmit(draftAttachments) && (draft.trim().length > 0 || draftAttachments.length > 0);
   const [storedHeight, setStoredHeight] = useState(() => readStoredChatPaneHeight(heightStorageKey));
   const height = fixedHeight ?? storedHeight;
   const resizableHeight = fixedHeight === undefined && !fillHeight;
@@ -1755,8 +1764,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               ref={textareaRef}
               value={draft}
               rows={1}
-              disabled={!editable}
-              readOnly={!editable}
+              disabled={!composerEditable}
+              readOnly={!composerEditable}
               placeholder={replyTarget ? `↖ Replying to ${replyTarget.authorName}` : ""}
               onFocus={() => {
                 if (!editable) return;
@@ -1863,10 +1872,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 }
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  onSubmit();
+                  if (canSubmit) onSubmit();
                 }
               }}
-              style={{ position: "relative", zIndex: 1, width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: composerHasInlineEntities ? "transparent" : surfaceText, WebkitTextFillColor: composerHasInlineEntities ? "transparent" : surfaceText, background: composerHasInlineEntities ? "transparent" : EDITOR_NEU_ACTIVE_SURFACE, ...CHAT_COMPOSER_TEXT_METRICS, caretColor: editable ? surfaceText : "transparent", cursor: editable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
+              style={{ position: "relative", zIndex: 1, width: "100%", height: composerSizing.height, minHeight: CHAT_COMPOSER_MIN_HEIGHT, maxHeight: composerMaxHeight, resize: "none", overflowY: composerSizing.scrolls ? "auto" : "hidden", boxSizing: "border-box", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, outline: "none", padding: "7px 8px", color: composerHasInlineEntities ? "transparent" : surfaceText, WebkitTextFillColor: composerHasInlineEntities ? "transparent" : surfaceText, background: composerHasInlineEntities ? "transparent" : EDITOR_NEU_ACTIVE_SURFACE, ...CHAT_COMPOSER_TEXT_METRICS, caretColor: composerEditable ? surfaceText : "transparent", cursor: composerEditable ? "text" : "default", boxShadow: "inset 2px 2px 6px rgba(174,174,192,0.18), inset -2px -2px 6px rgba(255,255,255,0.82)" }}
             />
             <button
               type="button"
@@ -1883,7 +1892,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               type="file"
               multiple
               tabIndex={-1}
-              disabled={!editable}
+              disabled={!composerEditable}
               style={{ display: "none" }}
               onChange={(event) => {
                 if (event.currentTarget.files) onAttachFiles(event.currentTarget.files);

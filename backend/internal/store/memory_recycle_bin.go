@@ -41,6 +41,8 @@ type memoryRecycleBinSnapshot struct {
 	qdRatings                        map[string]domain.QDRating
 	huddleLogicGates                 map[string]domain.HuddleLogicGate
 	huddleNodes                      map[string]domain.HuddleNode
+	huddleNodeTextboxes              map[string]map[string]HuddleNodeTextbox
+	huddleNodeTextboxChats           map[string]map[string]HuddleNodeTextboxChat
 	kpis                             map[string]domain.KPI
 	huddleExplorerFolders            map[string]domain.HuddleExplorerFolder
 	huddleExplorerItems              map[string]domain.HuddleExplorerItem
@@ -75,6 +77,8 @@ type memoryRecycleBinSnapshot struct {
 	gvicV2Settings                   map[string]memoryV2PolicySetting
 	permissionV2Settings             map[string]memoryV2PolicySetting
 	effectiveAccess                  map[string]domain.EffectiveResourceAccess
+	editorJSONDocuments              map[string]memoryEditorJSONDocument
+	editorJSONOperations             map[string][]memoryEditorJSONOperation
 	emailNodeLinks                   map[string]communicationsEmailNodeLink
 	nodeEmailThreads                 map[string]domain.CommunicationsNodeEmailThread
 	projectEmailRelationships        map[string]memoryProjectEmailRelationship
@@ -91,7 +95,7 @@ type memoryRecycleBinSnapshot struct {
 	huddleLogicGateRelationships     map[string]domain.HuddleLogicGateRelationship
 	huddleNodeLogicGateRelationships map[string]domain.HuddleNodeLogicGateRelationship
 	huddleNodeKPIRelationships       map[string]domain.HuddleNodeKPIRelationship
-	actionItemHuddleRelationships    map[string]domain.ActionItemHuddleRelationship
+	entityRelationships              map[string]domain.EntityRelationship
 }
 
 func (r *MemoryRepo) ListRecycleBinItems(companyID, deletedByUserID string) ([]domain.RecycleBinItem, error) {
@@ -406,6 +410,8 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		qdRatings:                        cloneMap(r.qdRatings),
 		huddleLogicGates:                 cloneMap(r.huddleLogicGates),
 		huddleNodes:                      cloneMap(r.huddleNodes),
+		huddleNodeTextboxes:              cloneNestedMap(r.huddleNodeTextboxes),
+		huddleNodeTextboxChats:           cloneNestedMap(r.huddleNodeTextboxChats),
 		kpis:                             cloneMap(r.kpis),
 		huddleExplorerFolders:            cloneMap(r.huddleExplorerFolders),
 		huddleExplorerItems:              cloneMap(r.huddleExplorerItems),
@@ -440,6 +446,8 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		gvicV2Settings:                   cloneMap(r.gvicV2Settings),
 		permissionV2Settings:             cloneMap(r.permissionV2Settings),
 		effectiveAccess:                  cloneMap(r.effectiveAccess),
+		editorJSONDocuments:              cloneMap(r.editorJSONDocuments),
+		editorJSONOperations:             cloneSliceMap(r.editorJSONOperations),
 		emailNodeLinks:                   cloneMap(r.emailNodeLinks),
 		nodeEmailThreads:                 cloneMap(r.nodeEmailThreads),
 		projectEmailRelationships:        cloneMap(r.projectEmailRelationships),
@@ -456,7 +464,7 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		huddleLogicGateRelationships:     cloneMap(r.huddleLogicGateRelationships),
 		huddleNodeLogicGateRelationships: cloneMap(r.huddleNodeLogicGateRelationships),
 		huddleNodeKPIRelationships:       cloneMap(r.huddleNodeKPIRelationships),
-		actionItemHuddleRelationships:    cloneMap(r.actionItemHuddleRelationships),
+		entityRelationships:              cloneMap(r.entityRelationships),
 	}
 }
 
@@ -470,11 +478,13 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.qdRatings = cloneMap(snapshot.qdRatings)
 	r.huddleLogicGates = cloneMap(snapshot.huddleLogicGates)
 	r.huddleNodes = cloneMap(snapshot.huddleNodes)
+	r.huddleNodeTextboxes = cloneNestedMap(snapshot.huddleNodeTextboxes)
+	r.huddleNodeTextboxChats = cloneNestedMap(snapshot.huddleNodeTextboxChats)
 	r.kpis = cloneMap(snapshot.kpis)
 	r.huddleLogicGateRelationships = cloneMap(snapshot.huddleLogicGateRelationships)
 	r.huddleNodeLogicGateRelationships = cloneMap(snapshot.huddleNodeLogicGateRelationships)
 	r.huddleNodeKPIRelationships = cloneMap(snapshot.huddleNodeKPIRelationships)
-	r.actionItemHuddleRelationships = cloneMap(snapshot.actionItemHuddleRelationships)
+	r.entityRelationships = cloneMap(snapshot.entityRelationships)
 	r.huddleExplorerFolders = cloneMap(snapshot.huddleExplorerFolders)
 	r.huddleExplorerItems = cloneMap(snapshot.huddleExplorerItems)
 	r.logicGateInfo = cloneSliceMap(snapshot.logicGateInfo)
@@ -507,6 +517,8 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.gvicV2Settings = cloneMap(snapshot.gvicV2Settings)
 	r.permissionV2Settings = cloneMap(snapshot.permissionV2Settings)
 	r.effectiveAccess = cloneMap(snapshot.effectiveAccess)
+	r.editorJSONDocuments = cloneMap(snapshot.editorJSONDocuments)
+	r.editorJSONOperations = cloneSliceMap(snapshot.editorJSONOperations)
 	r.emailNodeLinks = cloneMap(snapshot.emailNodeLinks)
 	r.nodeEmailThreads = cloneMap(snapshot.nodeEmailThreads)
 	r.projectEmailRelationships = cloneMap(snapshot.projectEmailRelationships)
@@ -532,6 +544,8 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		qdRatings:                        recycleMapDelta(before.qdRatings, after.qdRatings),
 		huddleLogicGates:                 recycleMapDelta(before.huddleLogicGates, after.huddleLogicGates),
 		huddleNodes:                      recycleMapDelta(before.huddleNodes, after.huddleNodes),
+		huddleNodeTextboxes:              recycleMapDelta(before.huddleNodeTextboxes, after.huddleNodeTextboxes),
+		huddleNodeTextboxChats:           recycleMapDelta(before.huddleNodeTextboxChats, after.huddleNodeTextboxChats),
 		kpis:                             recycleMapDelta(before.kpis, after.kpis),
 		huddleExplorerFolders:            recycleMapDelta(before.huddleExplorerFolders, after.huddleExplorerFolders),
 		huddleExplorerItems:              recycleMapDelta(before.huddleExplorerItems, after.huddleExplorerItems),
@@ -566,6 +580,8 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		gvicV2Settings:                   recycleMapDelta(before.gvicV2Settings, after.gvicV2Settings),
 		permissionV2Settings:             recycleMapDelta(before.permissionV2Settings, after.permissionV2Settings),
 		effectiveAccess:                  recycleMapDelta(before.effectiveAccess, after.effectiveAccess),
+		editorJSONDocuments:              recycleMapDelta(before.editorJSONDocuments, after.editorJSONDocuments),
+		editorJSONOperations:             recycleMapDelta(before.editorJSONOperations, after.editorJSONOperations),
 		emailNodeLinks:                   recycleMapDelta(before.emailNodeLinks, after.emailNodeLinks),
 		nodeEmailThreads:                 recycleMapDelta(before.nodeEmailThreads, after.nodeEmailThreads),
 		projectEmailRelationships:        recycleMapDelta(before.projectEmailRelationships, after.projectEmailRelationships),
@@ -581,7 +597,7 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		huddleLogicGateRelationships:     recycleMapDelta(before.huddleLogicGateRelationships, after.huddleLogicGateRelationships),
 		huddleNodeLogicGateRelationships: recycleMapDelta(before.huddleNodeLogicGateRelationships, after.huddleNodeLogicGateRelationships),
 		huddleNodeKPIRelationships:       recycleMapDelta(before.huddleNodeKPIRelationships, after.huddleNodeKPIRelationships),
-		actionItemHuddleRelationships:    recycleMapDelta(before.actionItemHuddleRelationships, after.actionItemHuddleRelationships),
+		entityRelationships:              recycleMapDelta(before.entityRelationships, after.entityRelationships),
 	}
 }
 
@@ -595,6 +611,8 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.qdRatings, delta.qdRatings)
 	mergeRecycleMap(destination.huddleLogicGates, delta.huddleLogicGates)
 	mergeRecycleMap(destination.huddleNodes, delta.huddleNodes)
+	mergeRecycleMap(destination.huddleNodeTextboxes, delta.huddleNodeTextboxes)
+	mergeRecycleMap(destination.huddleNodeTextboxChats, delta.huddleNodeTextboxChats)
 	mergeRecycleMap(destination.kpis, delta.kpis)
 	mergeRecycleMap(destination.huddleExplorerFolders, delta.huddleExplorerFolders)
 	mergeRecycleMap(destination.huddleExplorerItems, delta.huddleExplorerItems)
@@ -699,6 +717,8 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.gvicV2Settings, delta.gvicV2Settings)
 	mergeRecycleMap(destination.permissionV2Settings, delta.permissionV2Settings)
 	mergeRecycleMap(destination.effectiveAccess, delta.effectiveAccess)
+	mergeRecycleMap(destination.editorJSONDocuments, delta.editorJSONDocuments)
+	mergeRecycleMap(destination.editorJSONOperations, delta.editorJSONOperations)
 	mergeRecycleMap(destination.emailNodeLinks, delta.emailNodeLinks)
 	mergeRecycleMap(destination.nodeEmailThreads, delta.nodeEmailThreads)
 	mergeRecycleMap(destination.projectEmailRelationships, delta.projectEmailRelationships)
@@ -714,7 +734,7 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.huddleLogicGateRelationships, delta.huddleLogicGateRelationships)
 	mergeRecycleMap(destination.huddleNodeLogicGateRelationships, delta.huddleNodeLogicGateRelationships)
 	mergeRecycleMap(destination.huddleNodeKPIRelationships, delta.huddleNodeKPIRelationships)
-	mergeRecycleMap(destination.actionItemHuddleRelationships, delta.actionItemHuddleRelationships)
+	mergeRecycleMap(destination.entityRelationships, delta.entityRelationships)
 }
 
 func processMapParentIDsEqual(left, right *string) bool {

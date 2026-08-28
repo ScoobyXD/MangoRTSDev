@@ -28,6 +28,8 @@ func postgresEditorTextboxStorageFor(ref EditorJSONDocumentRef) (postgresEditorT
 		return postgresEditorTextboxStorage{"logic_gate_textboxes", "logic_gate_id", "textbox_id", false, false}, true
 	case EntityTypeHuddleLogicGate:
 		return postgresEditorTextboxStorage{"huddle_logic_gates", "huddle_logic_gate_id", "huddle_logic_gate_id", true, false}, true
+	case EntityTypeHuddleNode:
+		return postgresEditorTextboxStorage{"huddle_node_textboxes", "huddle_node_id", "textbox_id", true, true}, true
 	case EntityTypeKPI:
 		return postgresEditorTextboxStorage{"kpis", "kpi_id", "kpi_id", true, false}, true
 	default:
@@ -56,7 +58,7 @@ var mangoTiptapDefaultAttributes = func() map[string]map[string]any {
 		"tableHeader": {"colspan": float64(1), "rowspan": float64(1), "colwidth": nil, "align": nil, "backgroundColor": nil},
 		"mention":     {"userId": nil, "label": nil, "kind": "normal"},
 		// entityType is required durable identity even when the schema defaults it to node.
-		"mangoEntityLink": {"entityId": nil, "label": nil},
+		"mangoEntityLink": {"entityId": nil, "label": nil, "actionItem": false, "actionItemColor": nil},
 		"highlight":       {"color": nil},
 		"textStyle":       {"fontSize": nil, "color": nil},
 		"link":            {"href": nil, "target": "_blank", "rel": "noopener noreferrer nofollow", "class": nil, "title": nil},
@@ -438,6 +440,9 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}
+	if err := lockPostgresHuddleNodeActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
+		return EditorJSONCommit{}, err
+	}
 	if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, input.Document); err != nil {
 		return EditorJSONCommit{}, err
 	}
@@ -487,6 +492,11 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err := updatePostgresEditorTextboxTx(ctx, tx, storage, input.Document, nextBody, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
+	if input.Document.ResourceType == EntityTypeHuddleNode {
+		if err := syncPostgresHuddleNodeActionItemRelationshipsTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceID); err != nil {
+			return EditorJSONCommit{}, err
+		}
+	}
 	reason := "tiptap_json_committed"
 	if merged {
 		reason = "tiptap_json_conflict_merged"
@@ -531,6 +541,9 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}
+	if err := lockPostgresHuddleNodeActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
+		return EditorJSONCommit{}, err
+	}
 	query := fmt.Sprintf(`select revision,body_json,deleted_timestamp is not null,
 		greatest(clock_timestamp(),created_timestamp) from %s
 		where company_id=$1::uuid and %s=$2::uuid and %s=%s for update`, storage.table,
@@ -569,6 +582,11 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		input.Document.DocumentID, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
+	if input.Document.ResourceType == EntityTypeHuddleNode {
+		if err := syncPostgresHuddleNodeActionItemRelationshipsTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceID); err != nil {
+			return EditorJSONCommit{}, err
+		}
+	}
 	if input.Document.ResourceType == EntityTypeNode {
 		if err := retireNodeTextboxAttachmentRelationshipsTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID); err != nil {
 			return EditorJSONCommit{}, err
@@ -599,7 +617,7 @@ where company_id=$1::uuid and resource_type='project' and resource_id=$2::uuid a
 			return EditorJSONCommit{}, err
 		}
 	}
-	if input.Document.ResourceType == EntityTypeNode || input.Document.ResourceType == EntityTypeProject || input.Document.ResourceType == EntityTypeLogicGate {
+	if input.Document.ResourceType == EntityTypeNode || input.Document.ResourceType == EntityTypeProject || input.Document.ResourceType == EntityTypeLogicGate || input.Document.ResourceType == EntityTypeHuddleNode {
 		if err := deletePostgresEditorProjectionTx(ctx, tx, EditorDocumentRef{
 			CompanyID: input.Document.CompanyID, ResourceType: input.Document.ResourceType,
 			ResourceID: input.Document.ResourceID, DocumentID: input.Document.DocumentID,

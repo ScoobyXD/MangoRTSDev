@@ -17,7 +17,6 @@ export type ActionItemGrouping = UniversalGroupingSetting<ActionItemGroupingFiel
 export const DEFAULT_ACTION_ITEM_GROUPINGS: ActionItemGrouping[] = [
   { field: "person", direction: "asc" },
   { field: "created_date", direction: "asc" },
-  { field: "completion_due_date", direction: "asc" },
 ];
 
 type ActionItemEntityField = EntityField & { system_key?: string | null };

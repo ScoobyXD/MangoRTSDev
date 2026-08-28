@@ -22,10 +22,12 @@ import { withPreparedEditorAttachmentResource } from "../editorAttachmentPrepara
 import {
   createActionItemEntityFromSelection,
   createNodeEntityFromSelection,
+  EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION,
   normalizeEditorSelectionActionItemName,
   normalizeEditorSelectionNodeTitle,
   openEditorEntityLink,
   type EditorEntityLink,
+  type EditorEntityReferencePresentation,
   type EditorEntityType,
 } from "../editorEntityLinks.js";
 import { calculateEditorSelectionActionPosition } from "../editorSelectionActions.js";
@@ -193,6 +195,8 @@ export type MangoTiptapEditorProps = {
   onConflict?: (conflict: MangoTiptapConflict, resolve: (choice: "keep-local" | "use-canonical") => Promise<void>) => void;
   onError?: (message: string) => void;
   onSaveStateChange?: (state: MangoTiptapSaveState) => void;
+  onDocumentSnapshotChange?: (document: MangoTiptapDocument) => void;
+  onCanonicalDocumentChange?: (document: MangoTiptapDocument) => void;
   onRecoveryStorageError?: (message: string) => void;
   onRecoveryStorageRecovered?: () => void;
   onAnnotationActivate?: (annotation: { id: string; kind: string }) => void;
@@ -214,7 +218,7 @@ const LOGIC_GATE_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["project"];
 const PROJECT_LINK_TARGET_TYPES: readonly EditorEntityType[] = ["email_message"];
 const EMPTY_LINK_TARGET_TYPES: readonly EditorEntityType[] = [];
 
-function mangoEntityLinkAttributes(entity: EditorEntityLink, actionItemColor: ActionItemColor | null = null): Record<string, string | null> {
+function mangoEntityLinkAttributes(entity: EditorEntityLink, actionItemColor: ActionItemColor | null = null, actionItem = entity.isActionItem === true): Record<string, string | boolean | null> {
   return {
     entityType: entity.entityType,
     entityId: entity.entityID,
@@ -223,6 +227,7 @@ function mangoEntityLinkAttributes(entity: EditorEntityLink, actionItemColor: Ac
     emailThreadId: entity.emailThreadID ?? null,
     emailAccountEmail: entity.emailAccountEmail ?? null,
     emailSharedInboxId: entity.emailSharedInboxID ?? null,
+    actionItem,
     actionItemColor,
   };
 }
@@ -818,6 +823,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   onConflict,
   onError,
   onSaveStateChange,
+  onDocumentSnapshotChange,
+  onCanonicalDocumentChange,
   onRecoveryStorageError,
   onRecoveryStorageRecovered,
   onAnnotationActivate,
@@ -890,7 +897,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [tableContextMenu, setTableContextMenu] = useState<{ x: number; y: number } | null>(null);
   const latestTargetRequestRef = useRef(0);
   const callbacksRef = useRef({
-    onFocus, onBlur, onConflict, onError, onSaveStateChange,
+    onFocus, onBlur, onConflict, onError, onSaveStateChange, onDocumentSnapshotChange, onCanonicalDocumentChange,
     onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
@@ -898,7 +905,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     onTargetHandled,
   });
   callbacksRef.current = {
-    onFocus, onBlur, onConflict, onError, onSaveStateChange,
+    onFocus, onBlur, onConflict, onError, onSaveStateChange, onDocumentSnapshotChange, onCanonicalDocumentChange,
     onRecoveryStorageError, onRecoveryStorageRecovered,
     onSelectionFontSizeChange, onSelectionInlineFormatChange,
     onSelectionHighlightColorChange, onSelectionTextAlignmentChange,
@@ -1070,7 +1077,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           onRecover: recover,
         });
       }),
-      onDocument: (canonical) => {
+      onDocument: (canonical, source) => {
         const editor = editorRef.current;
         const stableCanonical = editor ? documentWithCurrentMissingBlockIDs(canonical, editor.state.doc) : canonical;
         const normalizedCanonical = documentWithUniqueBlockIDs(stableCanonical);
@@ -1078,6 +1085,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           const canonicalNode = editor.schema.nodeFromJSON(normalizedCanonical.document);
           if (editor.state.doc.eq(canonicalNode)) {
             currentDocumentRef.current = normalizedCanonical;
+            callbacksRef.current.onDocumentSnapshotChange?.(normalizedCanonical);
+            if (source === "canonical") callbacksRef.current.onCanonicalDocumentChange?.(normalizedCanonical);
             setError("");
             return;
           }
@@ -1085,6 +1094,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         }
         setDocument(normalizedCanonical);
         currentDocumentRef.current = normalizedCanonical;
+        callbacksRef.current.onDocumentSnapshotChange?.(normalizedCanonical);
+        if (source === "canonical") callbacksRef.current.onCanonicalDocumentChange?.(normalizedCanonical);
         setError("");
       },
       onAnnotations: (canonicalAnnotations) => publishAnnotationPositions(canonicalAnnotations),
@@ -1098,6 +1109,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       onSnapshot: (snapshot, snapshotAnnotations) => {
         currentDocumentRef.current = snapshot;
         persistedAnnotationsRef.current = [...snapshotAnnotations];
+        callbacksRef.current.onDocumentSnapshotChange?.(snapshot);
       },
       onConflict: (conflict) => {
         setError("This text box changed elsewhere. Choose which version to keep before editing.");
@@ -1370,6 +1382,38 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const openEntityLink = useCallback((entity: EditorEntityLink) => {
     openEditorEntityLink(entity, { onOpen: onEntityOpen });
   }, [onEntityOpen]);
+
+  useEffect(() => {
+    const updateEntityPresentation = (event: Event) => {
+      const presentation = (event as CustomEvent<EditorEntityReferencePresentation>).detail;
+      const entityID = presentation?.entityID?.trim();
+      const label = presentation?.label?.trim();
+      const activeEditor = editorRef.current;
+      if (!activeEditor || !entityID || !label) return;
+      let transaction = activeEditor.state.tr;
+      activeEditor.state.doc.descendants((node, position) => {
+        if (
+          node.type.name !== "mangoEntityLink"
+          || node.attrs.entityType !== "entity"
+          || String(node.attrs.entityId || "").trim() !== entityID
+        ) return;
+        const actionItemColor = presentation.actionItemColor === "yellow" || presentation.actionItemColor === "red"
+          ? presentation.actionItemColor
+          : null;
+        const actionItem = presentation.isActionItem === true;
+        if (node.attrs.label === label && node.attrs.actionItem === actionItem && node.attrs.actionItemColor === actionItemColor) return;
+        transaction = transaction.setNodeMarkup(position, undefined, {
+          ...node.attrs,
+          label,
+          actionItem,
+          actionItemColor,
+        });
+      });
+      if (transaction.docChanged) activeEditor.view.dispatch(transaction);
+    };
+    window.addEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, updateEntityPresentation);
+    return () => window.removeEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, updateEntityPresentation);
+  }, []);
   const updateUniversalPickerDraft = useCallback((draft: UniversalPickerDraft | null) => {
     universalPickerDraftRef.current = draft;
     setUniversalPickerDraft(draft);
@@ -1876,7 +1920,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       }
       editor.chain().focus().insertContentAt(
         { from: action.from, to: action.to },
-        { type: "mangoEntityLink", attrs: mangoEntityLinkAttributes(entity, color) },
+        { type: "mangoEntityLink", attrs: mangoEntityLinkAttributes(entity, color, true) },
       ).run();
       setSelectionAction(null);
       setError("");
@@ -2052,7 +2096,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         <UniversalEntityPicker
           companyID={companyID}
           requestJSON={requestJSON}
-          sourceType={resourceType === "huddle_logic_gate" || resourceType === "kpi" ? "logic_gate" : resourceType}
+          sourceType={resourceType === "huddle_logic_gate" || resourceType === "kpi" ? "logic_gate" : resourceType === "huddle_node" ? "node" : resourceType}
           linkTargetTypes={linkTargetTypes}
           anchor={universalPickerDraft.anchor}
           onChoose={chooseUniversalPickerEntity}

@@ -599,29 +599,7 @@ func (r *MemoryRepo) deleteCommunicationsResourceEmailDraft(input Communications
 }
 
 func (r *MemoryRepo) retireMemoryEmailDraftAttachmentsLocked(companyID, draftID string, now time.Time) {
-	retiredAttachmentIDs := map[string]bool{}
-	for id, link := range r.resourceAttachments {
-		if link.CompanyID == companyID && link.ResourceType == "email_draft" && link.ResourceID == draftID && link.DeletedTimestamp == nil {
-			link.DeletedTimestamp = &now
-			r.resourceAttachments[id] = link
-			retiredAttachmentIDs[link.AttachmentID] = true
-		}
-	}
-	for attachmentID := range retiredAttachmentIDs {
-		stillOwned := false
-		for _, link := range r.resourceAttachments {
-			if link.CompanyID == companyID && link.AttachmentID == attachmentID && link.DeletedTimestamp == nil {
-				stillOwned = true
-				break
-			}
-		}
-		if !stillOwned {
-			storedKey := attachmentKey(companyID, attachmentID)
-			attachment := r.attachments[storedKey]
-			attachment.DeletedTimestamp = &now
-			r.attachments[storedKey] = attachment
-		}
-	}
+	r.retireMemoryAttachmentOwnerLocked(companyID, "email_draft", draftID, now)
 }
 
 func (r *MemoryRepo) deleteMemoryResourceSharedEmailDraftsLocked(companyID, resourceType, resourceID string) {

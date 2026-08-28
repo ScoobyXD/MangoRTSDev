@@ -14,6 +14,7 @@ export type EditorEntityLink = {
   entityID: string;
   label: string;
   updatedTimestamp?: string;
+  isActionItem?: boolean;
   emailMessageID?: string;
   emailThreadID?: string;
   emailAccountEmail?: string;
@@ -22,6 +23,13 @@ export type EditorEntityLink = {
 };
 
 export type EditorEntityLinkRequest = BoundRequestJSON;
+
+export type EditorEntityReferencePresentation = {
+  entityID: string;
+  label: string;
+  isActionItem: boolean;
+  actionItemColor: ActionItemColor | null;
+};
 
 export type EditorEntityLinkContext = {
   companyID: string;
@@ -53,6 +61,7 @@ export const EDITOR_ENTITY_LABEL_ATTRIBUTE = "data-mango-entity-label";
 export const EDITOR_ENTITY_NAVIGATION_STATE_KEY = "mangoInlineEditorEntityNavigation";
 export const EVENT_EDITOR_EMAIL_REFERENCE_OPEN = "mangorts:editor-email-reference-open";
 export const EVENT_EDITOR_ENTITY_REFERENCE_OPEN = "mangorts:editor-entity-reference-open";
+export const EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION = "mangorts:editor-entity-reference-presentation";
 
 const ENTITY_DRAFT_BOUNDARY_PATTERN = /[A-Za-z0-9_#.-]/;
 const ENTITY_TYPES = new Set<EditorEntityType>(["node", "logic_gate", "project", "entity", "email_message"]);
@@ -131,6 +140,57 @@ export function openEditorEntityLink(entity: EditorEntityLink, context?: Pick<Ed
   window.dispatchEvent(popStateEvent);
 }
 
+export function updateRenderedEditorEntityReference(presentation: EditorEntityReferencePresentation): void {
+  if (typeof window === "undefined") return;
+  const entityID = presentation.entityID.trim();
+  const label = presentation.label.trim();
+  if (!entityID || !label) return;
+  const actionItemColor = presentation.actionItemColor === "yellow" || presentation.actionItemColor === "red"
+    ? presentation.actionItemColor
+    : null;
+  const isActionItem = presentation.isActionItem === true;
+  const severity = actionItemColor === "yellow" ? "Yellow" : actionItemColor === "red" ? "Red" : "";
+  const elements = window.document.querySelectorAll<HTMLElement>(
+    `[${EDITOR_ENTITY_LINK_ATTRIBUTE}="true"][${EDITOR_ENTITY_TYPE_ATTRIBUTE}="entity"]`,
+  );
+  for (const element of elements) {
+    if (element.getAttribute(EDITOR_ENTITY_ID_ATTRIBUTE)?.trim() !== entityID) continue;
+    element.setAttribute(EDITOR_ENTITY_LABEL_ATTRIBUTE, label);
+    element.querySelector<HTMLElement>(".mango-editor-entity-label")?.replaceChildren(label);
+    element.classList.toggle("mango-editor-action-item", Boolean(actionItemColor));
+    element.classList.toggle("mango-editor-action-item--yellow", actionItemColor === "yellow");
+    element.classList.toggle("mango-editor-action-item--red", actionItemColor === "red");
+    if (isActionItem) element.setAttribute("data-mango-action-item", "true");
+    else element.removeAttribute("data-mango-action-item");
+    if (actionItemColor) {
+      element.setAttribute("data-mango-action-item-color", actionItemColor);
+      element.style.removeProperty("--mango-entity-chip-border");
+      element.style.removeProperty("--mango-entity-chip-background");
+      element.style.removeProperty("--mango-entity-chip-shadow");
+      element.setAttribute("aria-label", `Open ${severity} Action Item ${label}`);
+      element.setAttribute("title", `${severity} Action Item: ${label}`);
+      let severityElement = element.querySelector<HTMLElement>(".mango-editor-action-item-severity");
+      if (!severityElement) {
+        severityElement = element.ownerDocument.createElement("span");
+        severityElement.className = "mango-editor-action-item-severity";
+        severityElement.setAttribute("aria-hidden", "true");
+        element.append(severityElement);
+      }
+      severityElement.textContent = severity;
+    } else {
+      element.removeAttribute("data-mango-action-item-color");
+      element.querySelector<HTMLElement>(".mango-editor-action-item-severity")?.remove();
+      applyEditorEntityLinkStyle(element, "entity");
+      element.setAttribute("aria-label", `Open ${isActionItem ? "Action Item" : "Entity"} ${label}`);
+      element.setAttribute("title", `Open ${isActionItem ? "Action Item" : "Entity"}: ${label}`);
+    }
+  }
+  window.dispatchEvent(new window.CustomEvent<EditorEntityReferencePresentation>(
+    EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION,
+    { detail: { entityID, label, isActionItem, actionItemColor } },
+  ));
+}
+
 export function normalizeEditorSelectionNodeTitle(value: string): string {
   return normalizeSelectedTextForNodeTitle(value);
 }
@@ -185,7 +245,7 @@ export async function searchEditorEntityLinks(
       : Promise.resolve([]),
   ]);
   const seen = new Set<string>();
-  const workspaceResults = (response.results ?? []).flatMap((result, responseIndex) => {
+  const workspaceResults: Array<EditorEntityLink & { responseIndex: number }> = (response.results ?? []).flatMap((result, responseIndex) => {
     const entityType = result.resource_type;
     const entityID = result.resource_id?.trim() ?? "";
     const label = result.display_name?.trim() ?? "";
@@ -195,19 +255,26 @@ export async function searchEditorEntityLinks(
     seen.add(key);
     return [{ entityType, entityID, label, updatedTimestamp: result.updated_timestamp, responseIndex }];
   });
-  const entityResults = entities.flatMap((entity, responseIndex) => {
+  const entityResults: Array<EditorEntityLink & { responseIndex: number }> = entities.flatMap((entity, responseIndex) => {
     const entityID = entity.entity_id.trim();
     const label = entity.name.trim();
     const key = `entity:${entityID}`;
     if (!entityID || !label || seen.has(key)) return [];
     seen.add(key);
-    return [{ entityType: "entity" as const, entityID, label, updatedTimestamp: entity.updated_timestamp, responseIndex }];
+    return [{
+      entityType: "entity" as const,
+      entityID,
+      label,
+      updatedTimestamp: entity.updated_timestamp,
+      ...(entity.entity_type_name?.trim().toLowerCase() === "action item" ? { isActionItem: true } : {}),
+      responseIndex,
+    }];
   });
   const typeOrder = new Map(requestedTypes.map((type, index) => [type, index]));
   return [...workspaceResults, ...entityResults]
     .sort((left, right) => (typeOrder.get(left.entityType as EditorSearchableEntityType) ?? requestedTypes.length) - (typeOrder.get(right.entityType as EditorSearchableEntityType) ?? requestedTypes.length) || left.responseIndex - right.responseIndex)
     .slice(0, boundedLimit)
-    .map(({ entityType, entityID, label, updatedTimestamp }) => ({ entityType, entityID, label, updatedTimestamp }));
+    .map(({ responseIndex: _responseIndex, ...entity }) => entity);
 }
 
 export async function createNodeEntityFromSelection(
@@ -247,6 +314,7 @@ export async function createActionItemEntityFromSelection(
     entityID: actionItem.entity_id,
     label: actionItem.name?.trim() || name,
     updatedTimestamp: actionItem.updated_timestamp || actionItem.created_timestamp,
+    isActionItem: true,
   };
 }
 

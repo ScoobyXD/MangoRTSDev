@@ -1,52 +1,50 @@
 # Current Huddle Node Business Logic Laws
 
-1. A Huddle Node is stored in `huddle_nodes` with `company_id`, `huddle_node_id`, `huddle_logic_gate_id`, `name`, `created_timestamp`, and `updated_timestamp`.
-2. A Huddle Node is a read-only relationship snapshot and has no `body_json`, TipTap editor document, or `huddle_node_textboxes` storage.
-3. Every Huddle Node belongs to exactly one Huddle Logic Gate in the same company through the literal `huddle_logic_gate_id`.
-4. A Huddle Node uses the exact resource type `huddle_node` and the exact `huddle_nodes.huddle_node_id` everywhere it is referenced.
-5. A Huddle Node can be created only from the **Create Huddle Node** action in a Huddle Logic Gate's right column.
-6. Clicking **Create Huddle Node** immediately creates one Huddle Node named **New Huddle Node** without asking for a name.
-7. `huddle_node_logic_gate_relationships` stores the exact normal Logic Gates linked to the owning Huddle Logic Gate when the Huddle Node is created.
-8. `huddle_node_kpi_relationships` stores the exact KPIs owned by those captured Logic Gates when the Huddle Node is created.
-9. Huddle Node creation, its owning `huddle_logic_gate_id`, its direct policies, its Logic Gate relationship rows, and its KPI relationship rows commit or roll back in one transaction.
-10. A Huddle Node's captured Logic Gate and KPI relationship sets are immutable after creation; later Huddle Logic Gate links and later KPIs do not enter an existing Huddle Node.
-11. The snapshot stores no copied Logic Gate header, KPI name, KPI document, preview, or presentation JSON.
-12. Opening or refreshing a Huddle Node joins its captured identities to the current Logic Gate and KPI rows, so edits to displayed source fields appear on the next read without a live stream.
-13. Removing a live Huddle Logic Gate relationship does not alter an existing Huddle Node snapshot.
-14. Recycling a captured Logic Gate or KPI removes its live snapshot edge through its typed foreign key, and restoring that source restores the exact captured edge from the Recycle Bin payload.
-15. Permanently deleting a captured Logic Gate or KPI permanently removes its Huddle Node snapshot edge; no stale placeholder or copied label remains.
-16. The owning Huddle Logic Gate's right column shows Huddle Nodes as a simple vertical list of cards.
-17. Clicking a Huddle Node card once opens that exact Huddle Node in a Huddle Node popup.
-18. The popup opens almost full screen by default while leaving the application's left sidebar visible.
-19. The popup header shows the existing Huddle Node icon and a separate live-derived clickable Huddle hierarchy breadcrumb instead of a fixed **Huddle Node:** label. The current editable `huddle_nodes.name` stays separate from the breadcrumb and keeps its existing save behavior; the popup still reuses the normal Node and Logic Gate RACI role cards, people-and-group picker, Permissions tab, and compact top-right actions.
-20. The popup has two horizontally resizable columns: the shared read-only Logic Gate and KPI card list on the left and the owning Huddle Logic Gate's live Action Item collection on the right.
-21. The Huddle Node left column uses the exact same two-section Logic Gate and KPI card component as the Huddle Logic Gate middle column.
-22. Pin, fullscreen, delete, and close are compact icon actions in the top-right header instead of text buttons.
-23. Huddle Nodes use the existing RACI and permission tables with direct typed ownership, but do not expose descendant policy actions.
-24. Deleting a Huddle Node moves the Node, its snapshot relationships, and its restorable direct policies to the Recycle Bin; restoring it reuses the same UUID and owning Huddle Logic Gate and creates no Huddle Explorer placement.
-25. A Huddle Node cannot exist without its owning Huddle Logic Gate.
-26. A Huddle Node has no editable body, copied KPI data, frequency, period, timeline events, background synchronization, or chat behavior.
-27. Realtime current-audience resolution recognizes `huddle_node` and resolves its users from that Huddle Node's direct typed permission policy.
-28. Single-clicking the normal Logic Gate section of a left-column snapshot card closes the Huddle Node popup and opens that exact Logic Gate on its normal full-page route.
-29. Single-clicking a KPI section of a left-column snapshot card opens that exact KPI in the shared KPI editor popup without changing the captured snapshot set.
-30. A Huddle Action Item is an exact Action Item Entity linked to one exact Huddle Logic Gate through the dedicated Huddle Action Item relationship table.
-31. Creating an Action Item from a Huddle Node links it to that Node's owning Huddle Logic Gate; creating one from a normal Node, Process, Project, KPI, or other editor creates no Huddle Action Item relationship.
-32. Every Huddle Node under one Huddle Logic Gate reads the same current Action Item collection, so a newly created Huddle Node immediately shows the Action Items already collected by that Huddle Logic Gate.
-33. Huddle Node creation does not snapshot Action Item IDs; later Action Item creation and field changes appear on the next Action Item collection read.
-34. The right column can create one yellow or red Action Item from entered text, and that text initializes both the Entity name and rich-text details body.
-35. The right column groups Action Items by personal browser settings, defaulting in order to Person in Charge, Created Date, and Completion Due Date.
-36. Action Item dates display as month/day/year, missing people and dates sort last, and clicking an Action Item opens the exact existing Entity preview.
+1. A Huddle Node is stored in `huddle_nodes` with its exact company, ID, owning Huddle Logic Gate ID, name, and timestamps.
+2. Every Huddle Node belongs to exactly one same-company Huddle Logic Gate through `huddle_nodes.huddle_logic_gate_id` and uses the exact resource type `huddle_node` everywhere.
+3. A Huddle Node is created only from its Huddle Logic Gate and starts with the name **New Huddle Node**.
+4. Creation atomically stores the Huddle Node, its direct policies, its current normal Logic Gate IDs, and the current KPI IDs under those Logic Gates.
+5. `huddle_node_logic_gate_relationships` and `huddle_node_kpi_relationships` are immutable creation-time snapshots.
+6. Snapshot reads join the captured IDs to current Logic Gate and KPI rows and never copy labels, editor documents, KPI documents, previews, or presentation JSON.
+7. Later Huddle membership or KPI ownership changes do not rewrite an existing Huddle Node snapshot, while later edits to already captured source rows appear on the next read.
+8. Recycling or permanently deleting a captured Logic Gate or KPI removes its live typed snapshot edge; restore recreates only an edge captured in the Recycle Bin payload.
+9. A Huddle Node has its own editable rich-text workspace in `huddle_node_textboxes`; the `huddle_nodes` row itself does not duplicate a body document.
+10. The workspace may contain several ordered text boxes, and each text box uses the existing canonical editor JSON save, revision, conflict, toolbar, and delete behavior.
+11. The Huddle Node left column shows its editable text boxes first and keeps the captured Process and KPI cards below them.
+12. Huddle Node text boxes support the Universal Linker, formatting toolbar, inline Entity references, attachments, selection comments, ordinary chats, and the existing Permissions tab.
+13. A Huddle Node has no attached-email column, email owner, due date, status, account, pass-to-Logic-Gate control, timeline events, frequency, or period.
+14. Huddle Node attachments use `attachment_relationships` with `resource_type='huddle_node'`, the exact Huddle Node ID, and the text box ID only as `information_id` origin metadata.
+15. Huddle Node text-box chats belong to one exact Huddle Node and text box, never create an email relationship, store the unambiguous mentioned user IDs derived from the current message on create and edit, and allow only one in-flight submit per text box.
+16. Reading or changing the Huddle Node workspace, attachments, chats, captured cards, or Action Items requires Edit access to that exact Huddle Node; there is no separate read-only Huddle Node permission.
+17. The popup opens almost full screen while leaving the application sidebar visible and provides compact pin, fullscreen, delete, and close actions.
+18. The popup header keeps the Huddle Node icon, live Huddle breadcrumb, editable Huddle Node name, RACI cards, and Permissions controls.
+19. Clicking a captured normal Logic Gate opens that Logic Gate, and clicking a captured KPI opens the shared KPI editor without changing the snapshot.
+20. The right column shows the owning Huddle Logic Gate's current live Action Item rollup, refreshes after local saves, canonical remote Huddle Node document changes, and inline edits to listed Action Items, and never lets an older overlapping response replace a newer one.
+21. Each Huddle Node editor save atomically derives `entity_relationships` from all live text boxes and stores one exact same-company Action Item Entity to Huddle Node edge for each Action Item that the Node currently references.
+22. Several inline references to the same Action Item in one Huddle Node share one relationship row.
+23. Removing one of several references keeps the row, while removing the final reference removes only that Node edge and preserves the company-wide Action Item Entity.
+24. The Process rollup joins `entity_relationships` through every Huddle Node owned by that Huddle Logic Gate and deduplicates each Action Item once.
+25. A surviving reference in a sibling Huddle Node keeps the Action Item in the rollup, and the same Action Item may appear in several Huddle Processes.
+26. Creating a new Huddle Node immediately shows the current parent rollup; no Action Item IDs are copied into the immutable Process or KPI snapshot tables.
+27. Highlighting text in a supported editor may create a yellow or red Action Item, seed its Details from that text, and replace the selection with one inline Entity label for the exact created Entity.
+28. A yellow inline Action Item label pulses once every two seconds and a red label once every second; reduced-motion preference disables that animation.
+29. Clicking an inline Action Item label opens its current Entity fields for editing, including name, Details, person, dates, status, color, and custom fields; creator and created date remain read-only.
+30. Action Item grouping settings are personal browser state. The default grouping is Person in charge and then Created Date; Completion Due Date is an optional grouping.
+31. Action Item dates display as month/day/year, missing people and dates sort last, and clicking a listed Action Item opens that exact editable Entity.
+32. Huddle Node deletion moves the Node, its text boxes, chats, snapshot edges, Entity relationships, attachments, and restorable direct policies to the Recycle Bin; restore reuses the same IDs and creates no Huddle Explorer placement.
+33. A Huddle Node cannot exist without its owning Huddle Logic Gate and never receives a Company Explorer or Huddle Explorer placement row.
+34. Realtime audience resolution recognizes `huddle_node` and follows only that Huddle Node's existing exact permission policy.
 
 Last updated: 2026-08-28
 
-# Process Story: A Huddle Node freezes relationships but reads current source data
+# Process Story: A Huddle Node edits current meeting work while fixed Process cards and live Action Items remain separate
 
 An editor creates a Huddle Node from one Huddle Logic Gate
 ↓
-Mango atomically stores that Huddle Node, its policies, every current linked Logic Gate ID, and every current KPI ID under those Logic Gates
+Mango atomically stores the Huddle Node, direct policy, current linked Logic Gate IDs, and current KPI IDs
 ↓
-The Huddle Node left column renders the same shared Logic Gate and KPI cards as the Huddle Logic Gate middle column
+The left column provides normal rich-text text boxes, attachments, chats, linker, toolbar, permissions, and the retained Process/KPI cards without email or pass-to-Process controls
 ↓
-Later membership additions stay out of the old Huddle Node, while later edits to already captured Logic Gates and KPIs appear on the next load
+Inline Action Item references create exact Entity-to-Huddle-Node edges, and removing the final reference removes only that Node edge
 ↓
-The right column reads the owning Huddle Logic Gate's live Action Item Entities, while the left Process and KPI snapshot remains unchanged
+The right column derives the owning Huddle Logic Gate's current deduplicated Action Items from every live Huddle Node edge, while the Process and KPI snapshot stays fixed

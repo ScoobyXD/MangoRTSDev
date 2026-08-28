@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	"miraeopus/backend/internal/domain"
@@ -116,19 +117,6 @@ select exists(select 1 from companies where company_id=$1::uuid),
 	if !creatorIsMember {
 		return domain.Entity{}, ErrPrincipalNotInCompany
 	}
-	var huddleLogicGateID string
-	if normalized.HuddleNodeID != "" {
-		err := tx.QueryRowContext(ctx, `
-select huddle_logic_gate_id::text
-from huddle_nodes
-where company_id=$1::uuid and huddle_node_id=$2::uuid`, normalized.CompanyID, normalized.HuddleNodeID).Scan(&huddleLogicGateID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.Entity{}, ErrNotFound
-		}
-		if err != nil {
-			return domain.Entity{}, err
-		}
-	}
 	requiredByID := map[string]domain.EntityFieldType{}
 	requiredIDs := make([]string, 0, len(actionItemFieldTypes(normalized.CompanyID)))
 	for _, required := range actionItemFieldTypes(normalized.CompanyID) {
@@ -236,13 +224,6 @@ join entity_field_types template
 	} else if count != int64(len(currentTemplates)) {
 		return domain.Entity{}, ErrConflict
 	}
-	if huddleLogicGateID != "" {
-		if _, err := tx.ExecContext(ctx, `
-insert into action_item_huddle_relationships (company_id, entity_id, huddle_logic_gate_id)
-values ($1::uuid, $2::uuid, $3::uuid)`, normalized.CompanyID, entityID, huddleLogicGateID); err != nil {
-			return domain.Entity{}, mapEntitiesPostgresError(err)
-		}
-	}
 	item, err := getPostgresEntity(ctx, tx, normalized.CompanyID, entityID)
 	if err != nil {
 		return domain.Entity{}, err
@@ -251,6 +232,77 @@ values ($1::uuid, $2::uuid, $3::uuid)`, normalized.CompanyID, entityID, huddleLo
 		return domain.Entity{}, err
 	}
 	return item, nil
+}
+
+func lockPostgresHuddleNodeActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {
+	if ref.ResourceType != EntityTypeHuddleNode {
+		return nil
+	}
+	var huddleNodeID string
+	err := tx.QueryRowContext(ctx, `
+select huddle_node_id::text
+from huddle_nodes
+where company_id=$1::uuid and huddle_node_id=$2::uuid
+for update`, ref.CompanyID, ref.ResourceID).Scan(&huddleNodeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	return err
+}
+
+func syncPostgresHuddleNodeActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, huddleNodeID string) error {
+	rows, err := tx.QueryContext(ctx, `
+select body_json
+from huddle_node_textboxes
+where company_id=$1::uuid and huddle_node_id=$2::uuid and deleted_timestamp is null`, companyID, huddleNodeID)
+	if err != nil {
+		return err
+	}
+	documents := make([]json.RawMessage, 0)
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			rows.Close()
+			return err
+		}
+		documents = append(documents, append(json.RawMessage(nil), body...))
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	actionItemIDs := entityReferenceIDsFromEditorDocuments(documents)
+	if _, err := tx.ExecContext(ctx, `
+delete from entity_relationships relationship
+using entities entity, entity_types entity_type
+where relationship.company_id=$1::uuid
+  and relationship.resource_type=$2::text
+  and relationship.resource_id=$3::uuid
+  and entity.company_id=relationship.company_id
+  and entity.entity_id=relationship.entity_id
+  and entity_type.company_id=entity.company_id
+  and entity_type.entity_type_id=entity.entity_type_id
+  and entity_type.system_key=$4::text
+  and not (relationship.entity_id::text=any($5::text[]))`, companyID, EntityTypeHuddleNode, huddleNodeID, ActionItemEntityTypeSystemKey, actionItemIDs); err != nil {
+		return mapEntitiesPostgresError(err)
+	}
+	if len(actionItemIDs) > 0 {
+		if _, err := tx.ExecContext(ctx, `
+insert into entity_relationships (company_id, entity_id, resource_type, resource_id)
+select $1::uuid, entity.entity_id, $2::text, $3::uuid
+from unnest($4::text[]) as input(entity_id)
+join entities entity
+  on entity.company_id=$1::uuid and entity.entity_id=input.entity_id::uuid
+join entity_types entity_type
+  on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
+where entity_type.system_key=$5::text
+on conflict (company_id, entity_id, resource_type, resource_id) do nothing`, companyID, EntityTypeHuddleNode, huddleNodeID, actionItemIDs, ActionItemEntityTypeSystemKey); err != nil {
+			return mapEntitiesPostgresError(err)
+		}
+	}
+	return nil
 }
 
 func (r *PostgresRepo) ListHuddleNodeActionItems(companyID, huddleNodeID string) ([]domain.Entity, error) {
@@ -279,15 +331,22 @@ where company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, huddleNodeID)
 select entity.company_id::text, entity.entity_id::text, entity.entity_type_id::text, entity_type.name,
        entity.entity_folder_id::text, entity.name, entity.position, entity.body_json, entity.revision,
        coalesce(entity.created_by_user_id::text, ''), entity.created_timestamp, entity.updated_timestamp
-from action_item_huddle_relationships relationship
+from (
+  select distinct relationship.entity_id
+  from entity_relationships relationship
+  join huddle_nodes linked_node
+    on linked_node.company_id=relationship.company_id
+   and linked_node.huddle_node_id=relationship.resource_id
+  where relationship.company_id=$1::uuid
+    and relationship.resource_type=$3::text
+    and linked_node.huddle_logic_gate_id=$2::uuid
+) relationship
 join entities entity
-  on entity.company_id=relationship.company_id and entity.entity_id=relationship.entity_id
+  on entity.company_id=$1::uuid and entity.entity_id=relationship.entity_id
 join entity_types entity_type
   on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
-where relationship.company_id=$1::uuid
-  and relationship.huddle_logic_gate_id=$2::uuid
-  and entity_type.system_key=$3::text
-order by entity.created_timestamp, entity.entity_id`, companyID, ownerID, ActionItemEntityTypeSystemKey)
+where entity_type.system_key=$4::text
+order by entity.created_timestamp, entity.entity_id`, companyID, ownerID, EntityTypeHuddleNode, ActionItemEntityTypeSystemKey)
 	if err != nil {
 		return nil, err
 	}

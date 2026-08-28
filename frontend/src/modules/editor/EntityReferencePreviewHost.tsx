@@ -2,14 +2,27 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppModalPortal } from "../../app/AppModalPortal.js";
 import { ExplorerEntityIcon } from "../../icons/index.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
-import { getEntityDetail, type Entity, type EntityField } from "../entities/entitiesApi.js";
+import {
+  getEntityDetail,
+  updateEntity,
+  updateEntityField,
+  type ActionItemColor,
+  type Entity,
+  type EntityField,
+  type EntityFieldValue,
+} from "../entities/entitiesApi.js";
 import {
   EVENT_EDITOR_ENTITY_REFERENCE_OPEN,
+  updateRenderedEditorEntityReference,
   type EditorEntityLink,
   type EditorEntityLinkRequest,
 } from "./editorEntityLinks.js";
-import { validateMangoTiptapDocument, type MangoTiptapDocument } from "./tiptap/mangoTiptapDocument.js";
-import { MangoTiptapStaticRenderer } from "./tiptap/MangoTiptapStaticRenderer.js";
+import { EntityDetailsRichEditor } from "./EntityDetailsRichEditor.js";
+import {
+  createEmptyMangoTiptapDocument,
+  validateMangoTiptapDocument,
+  type MangoTiptapDocument,
+} from "./tiptap/mangoTiptapDocument.js";
 
 export type EntityReferencePreviewHostProps = {
   companyID: string;
@@ -48,19 +61,59 @@ function formatCalendarDate(value: string): string {
   }).format(date);
 }
 
-function fieldValueLabel(field: EntityField, companyUsers: readonly CompanyUser[]): string {
-  if (field.value === null || field.value === "") return "Not set";
-  if (field.field_type === "boolean") return field.value === true ? "Yes" : "No";
-  if ((field.field_type === "choice" || field.field_type === "color") && typeof field.value === "string") {
-    return field.config?.options?.find((option) => option.key === field.value)?.label || readableOptionKey(field.value);
+function entityActionItemColor(entity: Entity): ActionItemColor | null {
+  if (!isActionItemEntity(entity)) return null;
+  const field = entity.entity_fields.find((candidate) => (
+    candidate.system_key?.trim().toLowerCase() === "color"
+    || candidate.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") === "color"
+  ));
+  return field?.value === "yellow" || field?.value === "red" ? field.value : null;
+}
+
+function isActionItemEntity(entity: Entity): boolean {
+  return entity.entity_type_name.trim().toLowerCase() === "action item";
+}
+
+function syncEntityReferencePresentation(entity: Entity): void {
+  updateRenderedEditorEntityReference({
+    entityID: entity.entity_id,
+    label: entity.name,
+    isActionItem: isActionItemEntity(entity),
+    actionItemColor: entityActionItemColor(entity),
+  });
+}
+
+function entityBodyJSONForSave(value: MangoTiptapDocument, currentBody: unknown): Record<string, unknown> {
+  const annotations = isRecord(currentBody) && Array.isArray(currentBody.annotations)
+    ? currentBody.annotations
+    : [];
+  return { ...value, annotations };
+}
+
+function parseEditableCalendarDate(value: string): string {
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
+  if (!match) throw new Error("Use month/day/year for dates.");
+  const month = Number(match[1]);
+  const day = Number(match[2]);
+  const year = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+    throw new Error("Use a valid month/day/year date.");
   }
-  if (field.field_type === "person" && typeof field.value === "string") {
-    return companyUserLabel(companyUsers, field.value);
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseEntityFieldInput(field: EntityField, rawValue: string): EntityFieldValue {
+  const value = rawValue.trim();
+  if (!value) return null;
+  if (field.field_type === "boolean") return value === "true";
+  if (field.field_type === "number") {
+    const number = Number(value);
+    if (!Number.isFinite(number)) throw new Error(`${field.name} must be a number.`);
+    return number;
   }
-  if (field.field_type === "date" && typeof field.value === "string") {
-    return formatCalendarDate(field.value);
-  }
-  return String(field.value);
+  if (field.field_type === "date") return parseEditableCalendarDate(value);
+  return value;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -77,13 +130,6 @@ function entityBodyDocument(value: unknown): MangoTiptapDocument | null {
   return result.valid ? result.value : null;
 }
 
-function entityBodyHasContent(value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  if (typeof value.text === "string" && value.text.trim()) return true;
-  if (["mention", "mangoEntityLink", "mangoAttachmentImage", "horizontalRule"].includes(String(value.type ?? ""))) return true;
-  return Array.isArray(value.content) && value.content.some(entityBodyHasContent);
-}
-
 function previewError(cause: unknown): string {
   const message = cause instanceof Error ? cause.message.trim() : "";
   return message || "This Entity is unavailable or you no longer have access to it.";
@@ -91,10 +137,14 @@ function previewError(cause: unknown): string {
 
 export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityReferencePreviewHostProps) {
   const [preview, setPreview] = useState<EntityReferencePreview | null>(null);
+  const [savingTarget, setSavingTarget] = useState("");
+  const [saveError, setSaveError] = useState("");
   const requestIDRef = useRef(0);
 
   const close = useCallback(() => {
     requestIDRef.current += 1;
+    setSavingTarget("");
+    setSaveError("");
     setPreview(null);
   }, []);
 
@@ -102,6 +152,8 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
     if (entity.entityType !== "entity") return;
     const requestID = requestIDRef.current + 1;
     requestIDRef.current = requestID;
+    setSavingTarget("");
+    setSaveError("");
     setPreview({ requestID, entity, detail: null, companyUsers: [], loading: true, error: "" });
   }, []);
 
@@ -137,6 +189,7 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
           }
         }
         if (controller.signal.aborted || requestIDRef.current !== requestID) return;
+        syncEntityReferencePresentation(detail);
         setPreview((current) => current?.requestID === requestID
           ? { ...current, detail, companyUsers, loading: false, error: "" }
           : current);
@@ -151,6 +204,7 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
   }, [companyID, entityID, requestID, requestJSON]);
 
   const retry = useCallback(() => {
+    setSaveError("");
     setPreview((current) => {
       if (!current) return null;
       const requestID = requestIDRef.current + 1;
@@ -159,11 +213,68 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
     });
   }, []);
 
+  const saveNameAndDetails = useCallback(async (name: string, body: MangoTiptapDocument) => {
+    const detail = preview?.detail;
+    if (!detail || savingTarget) return;
+    const cleanName = name.trim();
+    if (!cleanName) {
+      setSaveError("Entity name is required.");
+      return;
+    }
+    setSavingTarget("entity");
+    setSaveError("");
+    try {
+      const saved = await updateEntity({
+        companyID,
+        entityID: detail.entity_id,
+        name: cleanName,
+        bodyJSON: entityBodyJSONForSave(body, detail.body_json),
+        baseRevision: detail.revision,
+      }, requestJSON);
+      syncEntityReferencePresentation(saved);
+      setPreview((current) => current?.requestID === preview.requestID
+        ? { ...current, entity: { ...current.entity, label: saved.name }, detail: saved }
+        : current);
+    } catch (cause) {
+      setSaveError(previewError(cause));
+    } finally {
+      setSavingTarget("");
+    }
+  }, [companyID, preview, requestJSON, savingTarget]);
+
+  const saveFieldValue = useCallback(async (field: EntityField, rawValue: string) => {
+    const detail = preview?.detail;
+    if (!detail || savingTarget) return;
+    setSavingTarget(field.entity_field_id);
+    setSaveError("");
+    try {
+      const savedField = await updateEntityField({
+        companyID,
+        entityID: detail.entity_id,
+        entityFieldID: field.entity_field_id,
+        value: parseEntityFieldInput(field, rawValue),
+      }, requestJSON);
+      const nextDetail: Entity = {
+        ...detail,
+        entity_fields: detail.entity_fields.map((candidate) => (
+          candidate.entity_field_id === savedField.entity_field_id ? savedField : candidate
+        )),
+      };
+      syncEntityReferencePresentation(nextDetail);
+      setPreview((current) => current?.requestID === preview.requestID
+        ? { ...current, detail: nextDetail }
+        : current);
+    } catch (cause) {
+      setSaveError(previewError(cause));
+    } finally {
+      setSavingTarget("");
+    }
+  }, [companyID, preview, requestJSON, savingTarget]);
+
   if (!preview) return null;
   const title = preview.detail?.name.trim() || preview.entity.label.trim() || "Entity";
   const fields = [...(preview.detail?.entity_fields ?? [])].sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
-  const bodyDocument = entityBodyDocument(preview.detail?.body_json);
-  const hasBody = Boolean(bodyDocument && entityBodyHasContent(bodyDocument.document));
+  const bodyDocument = entityBodyDocument(preview.detail?.body_json) ?? createEmptyMangoTiptapDocument();
   const detailKind = preview.detail?.entity_type_name.trim().toLowerCase() === "action item" ? "Action Item" : "Entity";
   const createdBy = preview.detail?.created_by_user_id
     ? companyUserLabel(preview.companyUsers, preview.detail.created_by_user_id)
@@ -180,7 +291,7 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
         onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}
         style={{ position: "fixed", inset: 0, zIndex: 1, display: "grid", placeItems: "center", padding: 16, background: "rgba(15,23,42,.48)" }}
       >
-        <section style={{ width: "min(560px, calc(100vw - 32px))", maxHeight: "min(720px, calc(100vh - 32px))", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 18, background: "#fff", boxShadow: "0 28px 80px rgba(15,23,42,.30)" }}>
+        <section style={{ width: "min(680px, calc(100vw - 32px))", maxHeight: "min(780px, calc(100vh - 32px))", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 18, background: "#fff", boxShadow: "0 28px 80px rgba(15,23,42,.30)" }}>
           <header style={{ display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: "1px solid rgba(148,163,184,.22)", background: "linear-gradient(135deg,rgba(240,253,250,.96),rgba(239,246,255,.96))" }}>
             <ExplorerEntityIcon kind="entity" />
             <div style={{ minWidth: 0 }}>
@@ -197,63 +308,190 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
                 <span>{preview.error}</span>
                 <button type="button" onClick={retry} style={{ padding: "7px 13px", border: "1px solid rgba(153,27,27,.3)", borderRadius: 9, background: "#fff", color: "#991b1b", cursor: "pointer", fontWeight: 800 }}>Retry</button>
               </div>
-            ) : (
+            ) : preview.detail ? (
               <div style={{ display: "grid", gap: 18 }}>
-                <section aria-label="Entity details body">
-                  <h3 style={{ margin: "0 0 8px", color: "#334155", fontSize: 11, fontWeight: 900, letterSpacing: ".06em", textTransform: "uppercase" }}>Details</h3>
-                  {hasBody && bodyDocument ? (
-                    <MangoTiptapStaticRenderer
-                      value={bodyDocument}
-                      ariaLabel={`${title} details`}
-                      style={{ minHeight: 0, padding: "10px 12px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#fff" }}
-                    />
-                  ) : (
-                    <div style={{ padding: "10px 12px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc", color: "#94a3b8", fontSize: 12 }}>No details provided.</div>
-                  )}
-                </section>
+                {saveError && <div role="alert" data-mango-entity-save-error="true" style={saveErrorStyle}>{saveError}</div>}
+                <EntityNameAndDetailsEditor
+                  key={`${preview.detail.entity_id}:${preview.detail.revision}`}
+                  entity={preview.detail}
+                  body={bodyDocument}
+                  saving={savingTarget === "entity"}
+                  disabled={Boolean(savingTarget && savingTarget !== "entity")}
+                  onSave={saveNameAndDetails}
+                />
                 <section aria-label="Entity assigned fields">
-                  <h3 style={{ margin: "0 0 8px", color: "#334155", fontSize: 11, fontWeight: 900, letterSpacing: ".06em", textTransform: "uppercase" }}>Fields</h3>
-                  {fields.length > 0 ? (
-                    <dl style={{ display: "grid", gap: 9, margin: 0 }}>
-                      {detailKind === "Action Item" && (
-                        <>
-                          <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, .8fr) minmax(0, 1.2fr)", gap: 14, padding: "10px 12px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc" }}>
-                            <dt style={{ color: "#475569", fontSize: 11, fontWeight: 800 }}>Created by</dt>
-                            <dd style={{ minWidth: 0, margin: 0, overflowWrap: "anywhere", color: createdBy === "Not set" ? "#94a3b8" : "#0f172a", fontSize: 12 }}>{createdBy}</dd>
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, .8fr) minmax(0, 1.2fr)", gap: 14, padding: "10px 12px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc" }}>
-                            <dt style={{ color: "#475569", fontSize: 11, fontWeight: 800 }}>Created date</dt>
-                            <dd style={{ minWidth: 0, margin: 0, overflowWrap: "anywhere", color: createdDate === "Not set" ? "#94a3b8" : "#0f172a", fontSize: 12 }}>{createdDate}</dd>
-                          </div>
-                        </>
-                      )}
-                      {fields.map((field) => (
-                        <div key={field.entity_field_id} style={{ display: "grid", gridTemplateColumns: "minmax(120px, .8fr) minmax(0, 1.2fr)", gap: 14, padding: "10px 12px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc" }}>
-                          <dt style={{ color: "#475569", fontSize: 11, fontWeight: 800 }}>{field.name}</dt>
-                          <dd style={{ minWidth: 0, margin: 0, overflowWrap: "anywhere", color: field.value === null || field.value === "" ? "#94a3b8" : "#0f172a", fontSize: 12 }}>{fieldValueLabel(field, preview.companyUsers)}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  ) : (
-                    detailKind === "Action Item" ? (
-                      <dl style={{ display: "grid", gap: 9, margin: 0 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, .8fr) minmax(0, 1.2fr)", gap: 14, padding: "10px 12px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc" }}>
-                          <dt style={{ color: "#475569", fontSize: 11, fontWeight: 800 }}>Created by</dt>
-                          <dd style={{ minWidth: 0, margin: 0, overflowWrap: "anywhere", color: createdBy === "Not set" ? "#94a3b8" : "#0f172a", fontSize: 12 }}>{createdBy}</dd>
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "minmax(120px, .8fr) minmax(0, 1.2fr)", gap: 14, padding: "10px 12px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc" }}>
-                          <dt style={{ color: "#475569", fontSize: 11, fontWeight: 800 }}>Created date</dt>
-                          <dd style={{ minWidth: 0, margin: 0, overflowWrap: "anywhere", color: createdDate === "Not set" ? "#94a3b8" : "#0f172a", fontSize: 12 }}>{createdDate}</dd>
-                        </div>
-                      </dl>
-                    ) : <div style={{ padding: "10px 12px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc", color: "#94a3b8", fontSize: 12 }}>This Entity has no assigned fields yet.</div>
-                  )}
+                  <h3 style={sectionHeadingStyle}>Fields</h3>
+                  <div style={fieldListStyle}>
+                    <ReadOnlyEntityValue label="Created by" value={createdBy} />
+                    <ReadOnlyEntityValue label="Created date" value={createdDate} />
+                    {fields.map((field) => (
+                      <EntityFieldValueEditor
+                        key={`${field.entity_field_id}:${field.updated_timestamp}`}
+                        field={field}
+                        companyUsers={preview.companyUsers}
+                        saving={savingTarget === field.entity_field_id}
+                        disabled={Boolean(savingTarget && savingTarget !== field.entity_field_id)}
+                        onSave={saveFieldValue}
+                      />
+                    ))}
+                    {fields.length === 0 && <div style={emptyFieldsStyle}>This Entity has no assigned fields yet.</div>}
+                  </div>
                 </section>
               </div>
-            )}
+            ) : null}
           </div>
         </section>
       </div>
     </AppModalPortal>
   );
 }
+
+function EntityNameAndDetailsEditor({ entity, body, saving, disabled, onSave }: {
+  entity: Entity;
+  body: MangoTiptapDocument;
+  saving: boolean;
+  disabled: boolean;
+  onSave: (name: string, body: MangoTiptapDocument) => Promise<void>;
+}) {
+  const [name, setName] = useState(entity.name);
+  const [details, setDetails] = useState(body);
+  const locked = saving || disabled;
+  return (
+    <section aria-label="Entity name and details">
+      <h3 style={sectionHeadingStyle}>Name and details</h3>
+      <form
+        style={{ display: "grid", gap: 10 }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void onSave(name, details);
+        }}
+      >
+        <label style={editorLabelStyle}>
+          Name
+          <input
+            name="name"
+            value={name}
+            maxLength={200}
+            disabled={locked}
+            aria-label="Entity name"
+            onChange={(event) => setName(event.currentTarget.value)}
+            style={editorInputStyle}
+          />
+        </label>
+        <label style={editorLabelStyle}>Details</label>
+        <EntityDetailsRichEditor value={body} disabled={locked} onChange={setDetails} />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button type="submit" disabled={locked || !name.trim()} aria-label="Save Entity name and details" style={saveButtonStyle(locked || !name.trim())}>
+            {saving ? "Saving…" : "Save name and details"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function ReadOnlyEntityValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={readOnlyFieldStyle}>
+      <span style={fieldNameStyle}>{label}</span>
+      <span style={{ ...readOnlyTextStyle, color: value === "Not set" ? "#94a3b8" : "#0f172a" }}>{value}</span>
+    </div>
+  );
+}
+
+function EntityFieldValueEditor({ field, companyUsers, saving, disabled, onSave }: {
+  field: EntityField;
+  companyUsers: readonly CompanyUser[];
+  saving: boolean;
+  disabled: boolean;
+  onSave: (field: EntityField, rawValue: string) => Promise<void>;
+}) {
+  const locked = saving || disabled;
+  return (
+    <form
+      data-mango-entity-field-editor={field.entity_field_id}
+      style={editableFieldStyle}
+      onSubmit={(event) => {
+        event.preventDefault();
+        const rawValue = String(new FormData(event.currentTarget).get("value") ?? "");
+        void onSave(field, rawValue);
+      }}
+    >
+      <label htmlFor={`entity-reference-field-${field.entity_field_id}`} style={fieldNameStyle}>{field.name}</label>
+      <EntityFieldInput field={field} companyUsers={companyUsers} disabled={locked} />
+      <button type="submit" disabled={locked} aria-label={`Save ${field.name}`} style={fieldSaveButtonStyle(locked)}>
+        {saving ? "Saving…" : "Save"}
+      </button>
+    </form>
+  );
+}
+
+function EntityFieldInput({ field, companyUsers, disabled }: {
+  field: EntityField;
+  companyUsers: readonly CompanyUser[];
+  disabled: boolean;
+}) {
+  const id = `entity-reference-field-${field.entity_field_id}`;
+  const current = field.value === null ? "" : String(field.value);
+  if (field.field_type === "boolean") {
+    return <select id={id} name="value" defaultValue={current} disabled={disabled} aria-label={`Value for ${field.name}`} style={editorInputStyle}>
+      <option value="">Not set</option>
+      <option value="true">Yes</option>
+      <option value="false">No</option>
+    </select>;
+  }
+  if (field.field_type === "choice" || field.field_type === "color") {
+    const options = field.config?.options ?? [];
+    const currentConfigured = !current || options.some((option) => option.key === current);
+    return <select id={id} name="value" defaultValue={current} disabled={disabled} aria-label={`Value for ${field.name}`} style={editorInputStyle}>
+      <option value="">{field.field_type === "color" ? "No color" : "Not set"}</option>
+      {!currentConfigured && <option value={current}>{readableOptionKey(current)}</option>}
+      {options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+    </select>;
+  }
+  if (field.field_type === "person") {
+    const currentUserKnown = !current || companyUsers.some((user) => user.user_id === current);
+    return <select id={id} name="value" defaultValue={current} disabled={disabled} aria-label={`Value for ${field.name}`} style={editorInputStyle}>
+      <option value="">Unassigned</option>
+      {!currentUserKnown && <option value={current}>Company user unavailable</option>}
+      {companyUsers.map((user) => <option key={user.user_id} value={user.user_id}>{user.display_name?.trim() || user.email?.trim() || "Company user unavailable"}</option>)}
+    </select>;
+  }
+  if (field.field_type === "date") {
+    return <input
+      id={id}
+      name="value"
+      type="text"
+      inputMode="numeric"
+      pattern="(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12][0-9]|3[01])/\d{4}"
+      placeholder="MM/DD/YYYY"
+      defaultValue={current ? formatCalendarDate(current) : ""}
+      disabled={disabled}
+      aria-label={`Value for ${field.name}`}
+      style={editorInputStyle}
+    />;
+  }
+  return <input
+    id={id}
+    name="value"
+    type={field.field_type === "number" ? "number" : "text"}
+    step={field.field_type === "number" ? "any" : undefined}
+    defaultValue={current}
+    disabled={disabled}
+    aria-label={`Value for ${field.name}`}
+    style={editorInputStyle}
+  />;
+}
+
+const sectionHeadingStyle: React.CSSProperties = { margin: "0 0 8px", color: "#334155", fontSize: 11, fontWeight: 900, letterSpacing: ".06em", textTransform: "uppercase" };
+const editorLabelStyle: React.CSSProperties = { display: "grid", gap: 5, color: "#475569", fontSize: 11, fontWeight: 850 };
+const editorInputStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 34, boxSizing: "border-box", border: "1px solid rgba(148,163,184,.32)", borderRadius: 8, background: "#fff", color: "#0f172a", padding: "0 9px", font: "inherit", fontSize: 12 };
+const saveButtonStyle = (disabled: boolean): React.CSSProperties => ({ minHeight: 32, border: 0, borderRadius: 8, background: disabled ? "#cbd5e1" : "#0f766e", color: "#fff", padding: "0 12px", font: "inherit", fontSize: 11, fontWeight: 850, cursor: disabled ? "default" : "pointer" });
+const fieldListStyle: React.CSSProperties = { display: "grid", gap: 9 };
+const readOnlyFieldStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(120px,.8fr) minmax(0,1.2fr) 58px", alignItems: "center", gap: 10, padding: "9px 11px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc" };
+const editableFieldStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(120px,.8fr) minmax(0,1.2fr) 58px", alignItems: "center", gap: 10, padding: "9px 11px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc" };
+const fieldNameStyle: React.CSSProperties = { color: "#475569", fontSize: 11, fontWeight: 800 };
+const readOnlyTextStyle: React.CSSProperties = { minWidth: 0, overflowWrap: "anywhere", fontSize: 12 };
+const fieldSaveButtonStyle = (disabled: boolean): React.CSSProperties => ({ minHeight: 30, border: "1px solid rgba(15,118,110,.28)", borderRadius: 7, background: disabled ? "#e2e8f0" : "#fff", color: disabled ? "#94a3b8" : "#0f766e", padding: "0 8px", font: "inherit", fontSize: 10, fontWeight: 850, cursor: disabled ? "default" : "pointer" });
+const saveErrorStyle: React.CSSProperties = { padding: "8px 10px", border: "1px solid rgba(239,68,68,.24)", borderRadius: 9, background: "#fef2f2", color: "#991b1b", fontSize: 11, fontWeight: 750 };
+const emptyFieldsStyle: React.CSSProperties = { padding: "10px 12px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc", color: "#94a3b8", fontSize: 12 };

@@ -571,7 +571,7 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 		return ErrInvalid
 	}
 	var label string
-	if err = tx.QueryRowContext(ctx, `select `+labelExpression+` from `+table+` where `+where, companyID, id).Scan(&label); errors.Is(err, sql.ErrNoRows) {
+	if err = tx.QueryRowContext(ctx, `select `+labelExpression+` from `+table+` where `+where+` for update`, companyID, id).Scan(&label); errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	} else if err != nil {
 		return err
@@ -594,15 +594,30 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 		if err = add("huddle_logic_gate_relationships", `company_id=$1::uuid and huddle_logic_gate_id=$2::uuid`, companyID, id); err != nil {
 			return err
 		}
-		if err = add("action_item_huddle_relationships", `company_id=$1::uuid and huddle_logic_gate_id=$2::uuid`, companyID, id); err != nil {
-			return err
-		}
 	}
 	if kind == "huddle_node" {
+		if err = add("huddle_node_textboxes", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
+		if err = add("huddle_node_textbox_chats", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
+		if err = add("entity_relationships", `company_id=$1::uuid and resource_type='huddle_node' and resource_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
 		if err = add("huddle_node_logic_gate_relationships", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
 			return err
 		}
 		if err = add("huddle_node_kpi_relationships", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
+		attachmentWhere := `company_id=$1::uuid and resource_type='huddle_node' and resource_id=$2 and deleted_timestamp is null`
+		if err = add("attachment_relationships", attachmentWhere, companyID, id); err != nil {
+			return err
+		}
+		if err = add("attachments", `company_id=$1::uuid and attachment_id in (
+  select attachment_id from attachment_relationships where `+attachmentWhere+`
+)`, companyID, id); err != nil {
 			return err
 		}
 	}
@@ -634,6 +649,11 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 	}
 	if kind == "huddle_logic_gate" {
 		if _, err = tx.ExecContext(ctx, `delete from huddle_explorer_items where company_id=$1::uuid and huddle_type='huddle_logic_gate' and resource_huddle_resource_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
+	}
+	if kind == "huddle_node" {
+		if err = retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeHuddleNode, id); err != nil {
 			return err
 		}
 	}

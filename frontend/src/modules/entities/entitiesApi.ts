@@ -132,7 +132,6 @@ export async function createActionItem(
     bodyText: string;
     name?: string;
     color: ActionItemColor | null;
-    huddleNodeID?: string;
   },
 ): Promise<Entity> {
   const response = await requestJSON<{ action_item: Entity }>("/v1/action-items", {
@@ -142,7 +141,6 @@ export async function createActionItem(
       body_text: input.bodyText,
       ...(input.name?.trim() ? { name: input.name.trim() } : {}),
       color: input.color,
-      ...(input.huddleNodeID?.trim() ? { huddle_node_id: input.huddleNodeID.trim() } : {}),
     },
   });
   return response.action_item;
@@ -374,8 +372,8 @@ export async function updateEntity(input: {
   position?: number;
   bodyJSON?: unknown;
   baseRevision?: number;
-}): Promise<Entity> {
-  const response = await apiFetchJSON<{ entity: Entity }>(`/v1/entities/${encodeURIComponent(input.entityID)}`, {
+}, requestJSON: BoundRequestJSON = apiFetchJSON): Promise<Entity> {
+  const response = await requestJSON<{ entity: Entity }>(`/v1/entities/${encodeURIComponent(input.entityID)}`, {
     method: "PUT",
     body: JSON.stringify({
       company_id: input.companyID,
@@ -423,8 +421,8 @@ export async function updateEntityField(input: {
   fieldType?: EntityFieldDataType;
   value?: EntityFieldValue;
   position?: number;
-}): Promise<EntityField> {
-  const response = await apiFetchJSON<{ entity_field: EntityField }>(
+}, requestJSON: BoundRequestJSON = apiFetchJSON): Promise<EntityField> {
+  const response = await requestJSON<{ entity_field: EntityField }>(
     `/v1/entities/${encodeURIComponent(input.entityID)}/fields/${encodeURIComponent(input.entityFieldID)}`,
     {
       method: "PUT",

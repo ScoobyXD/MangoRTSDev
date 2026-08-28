@@ -75,11 +75,27 @@ func TestMemoryHuddleLifecycleKeepsTypedIdentityAndRecycleRestore(t *testing.T) 
 		t.Fatalf("Huddle Node creation changed Explorer placements: %+v, err=%v", tree, err)
 	}
 	repo.replaceMemoryRACIEdgesLocked(companyID, EntityTypeHuddleNode, node.HuddleNodeID, []domain.ResourceRACIAssignment{{Role: domain.RACIRoleAccountable, PrincipalType: "user", PrincipalID: userID}})
+	textbox, err := repo.CreateHuddleNodeTextbox(HuddleNodeTextboxCreateInput{
+		CompanyID: companyID, HuddleNodeID: node.HuddleNodeID, Title: "Meeting notes",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpsertHuddleNodeTextboxChat(HuddleNodeTextboxChatInput{
+		CompanyID: companyID, HuddleNodeID: node.HuddleNodeID, TextboxID: textbox.TextboxID,
+		ChatID: "66666666-6666-4666-8666-666666666666", AuthorUserID: userID,
+		AuthorDisplayName: "Owner", ActorUserID: userID, Message: "Follow up", EntityLinks: json.RawMessage(`[]`),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if err := repo.DeleteHuddleLogicGate(companyID, gateID, userID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("delete gate with node error = %v, want conflict", err)
 	}
 	if err := repo.DeleteHuddleNode(companyID, node.HuddleNodeID, userID); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := repo.GetHuddleNodeWorkspace(companyID, node.HuddleNodeID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted Huddle Node workspace error = %v, want ErrNotFound", err)
 	}
 	deleted, err := repo.ListRecycleBinItems(companyID, userID)
 	if err != nil || len(deleted) != 1 || deleted[0].ObjectKind != "huddle_node" {
@@ -90,6 +106,10 @@ func TestMemoryHuddleLifecycleKeepsTypedIdentityAndRecycleRestore(t *testing.T) 
 	}
 	if restored, err := repo.GetHuddleNode(companyID, node.HuddleNodeID); err != nil || restored.HuddleLogicGateID != gateID {
 		t.Fatalf("restored node = %+v, err=%v", restored, err)
+	}
+	workspace, err := repo.GetHuddleNodeWorkspace(companyID, node.HuddleNodeID)
+	if err != nil || len(workspace.Textboxes) != 1 || workspace.Textboxes[0].TextboxID != textbox.TextboxID || len(workspace.Chats) != 1 || workspace.Chats[0].Message != "Follow up" {
+		t.Fatalf("restored Huddle Node workspace = %+v, err=%v", workspace, err)
 	}
 	tree, err = repo.ListHuddleExplorer(companyID)
 	if err != nil || len(tree.Items) != 1 || tree.Items[0].ResourceType != EntityTypeHuddleLogicGate {

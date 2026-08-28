@@ -151,7 +151,7 @@ func editorJSONMentionDocumentFromPath(companyID, path string) (store.EditorJSON
 
 func (s *Server) authorizeEditorJSON(w http.ResponseWriter, r *http.Request, actor ActorContext, ref store.EditorJSONDocumentRef) bool {
 	switch ref.ResourceType {
-	case store.EntityTypeNode, store.EntityTypeLogicGate, store.EntityTypeProject, store.EntityTypeHuddleLogicGate:
+	case store.EntityTypeNode, store.EntityTypeLogicGate, store.EntityTypeProject, store.EntityTypeHuddleLogicGate, store.EntityTypeHuddleNode:
 		if !isCanonicalUUID(ref.ResourceID) {
 			writeError(w, http.StatusNotFound, "editor_document_route_not_found")
 			return false
@@ -207,7 +207,7 @@ func (s *Server) authorizeEditorJSONRealtime(actor ActorContext, ref store.Edito
 		return false, "company_access_denied", nil
 	}
 	switch ref.ResourceType {
-	case store.EntityTypeNode, store.EntityTypeLogicGate, store.EntityTypeProject, store.EntityTypeHuddleLogicGate:
+	case store.EntityTypeNode, store.EntityTypeLogicGate, store.EntityTypeProject, store.EntityTypeHuddleLogicGate, store.EntityTypeHuddleNode:
 		return s.authorizeRealtimeEntityScope(actor, ref.CompanyID, ref.ResourceType, ref.ResourceID, store.EntityPermissionEdit)
 	case store.EntityTypeKPI:
 		kpi, err := s.repo.GetKPI(ref.CompanyID, ref.ResourceID)
@@ -323,7 +323,7 @@ func (s *Server) handleEditorJSON(w http.ResponseWriter, r *http.Request) {
 			"deduplicated": commit.Deduplicated,
 		})
 	case http.MethodPatch:
-		if ref.ResourceType != store.EntityTypeNode && ref.ResourceType != store.EntityTypeLogicGate && ref.ResourceType != store.EntityTypeProject {
+		if ref.ResourceType != store.EntityTypeNode && ref.ResourceType != store.EntityTypeLogicGate && ref.ResourceType != store.EntityTypeProject && ref.ResourceType != store.EntityTypeHuddleNode {
 			writeError(w, http.StatusMethodNotAllowed, "editor_metadata_not_supported")
 			return
 		}

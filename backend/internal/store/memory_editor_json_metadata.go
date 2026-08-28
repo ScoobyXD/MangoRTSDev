@@ -139,6 +139,20 @@ func (r *MemoryRepo) updateEditorProjectionMetadataLocked(input EditorJSONMetada
 		item.Information, item.CreatedTimestamp, item.UpdatedTimestamp = information, created, now
 		r.projectText[bucketKey][input.Document.DocumentID] = item
 		revision = 1
+	case EntityTypeHuddleNode:
+		if r.huddleNodeTextboxes[bucketKey] == nil {
+			r.huddleNodeTextboxes[bucketKey] = map[string]HuddleNodeTextbox{}
+		}
+		item := r.huddleNodeTextboxes[bucketKey][input.Document.DocumentID]
+		created := item.CreatedTimestamp
+		if created.IsZero() {
+			created = now
+		}
+		revision = item.Revision + 1
+		item.CompanyID, item.HuddleNodeID, item.TextboxID = input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID
+		item.Title, item.Revision = input.Title, revision
+		item.CreatedTimestamp, item.UpdatedTimestamp = created, now
+		r.huddleNodeTextboxes[bucketKey][input.Document.DocumentID] = item
 	default:
 		return EditorJSONMetadataCommit{}, ErrInvalid
 	}
@@ -155,6 +169,9 @@ func (r *MemoryRepo) editorResourceExistsLocked(ref EditorDocumentRef) bool {
 		return ok
 	case EntityTypeProject:
 		_, ok := r.projects[key(ref.CompanyID, ref.ResourceID)]
+		return ok
+	case EntityTypeHuddleNode:
+		_, ok := r.huddleNodes[key(ref.CompanyID, ref.ResourceID)]
 		return ok
 	}
 	return false
@@ -225,5 +242,12 @@ func (r *MemoryRepo) deleteEditorProjectionLocked(ref EditorDocumentRef) {
 			}
 		}
 		delete(r.projectText[bucketKey], ref.DocumentID)
+	case EntityTypeHuddleNode:
+		delete(r.huddleNodeTextboxes[bucketKey], ref.DocumentID)
+		for chatID, chat := range r.huddleNodeTextboxChats[bucketKey] {
+			if chat.TextboxID == ref.DocumentID {
+				delete(r.huddleNodeTextboxChats[bucketKey], chatID)
+			}
+		}
 	}
 }
