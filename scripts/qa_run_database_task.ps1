@@ -27,9 +27,10 @@ param(
   [ValidatePattern('^[0-9a-fA-F]{40}$')]
   [string]$ExpectedGitCommit,
   [string]$ExpectedSchemaInventorySHA256 = "",
-  [ValidateSet("EmptyPreflight", "Parity")]
+  [ValidateSet("EmptyPreflight", "CanonicalBaseline", "Parity")]
   [string]$AuditPurpose = "Parity",
   [string]$EmptyDatabaseAuditTaskArn = "",
+  [string]$CanonicalBootstrapTaskArn = "",
   [switch]$Execute,
   [switch]$HumanOperatorApproval
 )
@@ -161,11 +162,56 @@ function Assert-EmptyDatabaseAudit {
   Write-Host "Verified empty-database audit: $TaskArn"
 }
 
-function Assert-AuditDigest {
+function Assert-CanonicalBootstrapTask {
+  param(
+    [string]$TaskArn,
+    [object]$ExpectedTaskDefinition,
+    [string]$ClusterArn,
+    [string]$ExpectedDatabaseName
+  )
+
+  if ([string]::IsNullOrWhiteSpace($TaskArn)) {
+    throw "CanonicalBaseline requires -CanonicalBootstrapTaskArn from the completed Bootstrap run."
+  }
+  $bootstrapResult = Invoke-AwsJson -Arguments @("ecs", "describe-tasks", "--cluster", $ClusterArn, "--tasks", $TaskArn)
+  if ($bootstrapResult.failures.Count -gt 0 -or $bootstrapResult.tasks.Count -ne 1) {
+    throw "The canonical bootstrap task was not found in the QA cluster."
+  }
+  $bootstrapTask = $bootstrapResult.tasks[0]
+  if ([string]$bootstrapTask.taskDefinitionArn -cne [string]$ExpectedTaskDefinition.taskDefinitionArn) {
+    throw "The canonical bootstrap used a different task definition."
+  }
+  if ([string]$bootstrapTask.lastStatus -cne "STOPPED") {
+    throw "The canonical bootstrap task has not stopped."
+  }
+  if ([string]$bootstrapTask.startedBy -cne "mangorts-qa-human-database-bootstrap") {
+    throw "The supplied task was not started by the guarded QA Bootstrap path."
+  }
+  $bootstrapContainer = @($bootstrapTask.containers | Where-Object { $_.name -ceq $ContainerName })
+  if ($bootstrapContainer.Count -ne 1 -or $null -eq $bootstrapContainer[0].exitCode -or [int]$bootstrapContainer[0].exitCode -ne 0) {
+    throw "The canonical bootstrap container did not complete successfully."
+  }
+  $bootstrapImageDigest = ([string]$bootstrapContainer[0].imageDigest).ToLowerInvariant()
+  if ($bootstrapImageDigest -notmatch '^sha256:[0-9a-f]{64}$') {
+    throw "The canonical bootstrap task did not report an immutable image digest."
+  }
+  $bootstrapOverride = @($bootstrapTask.overrides.containerOverrides | Where-Object { $_.name -ceq $ContainerName })
+  if ($bootstrapOverride.Count -ne 1 -or
+      (@($bootstrapOverride[0].command) -join ' ') -cne "-mode schema -baseline-migrations -require-empty-database") {
+    throw "The supplied task was not the guarded empty-database schema bootstrap."
+  }
+  $databaseOverride = @($bootstrapOverride[0].environment | Where-Object { $_.name -ceq "DB_NAME" })
+  if ($databaseOverride.Count -ne 1 -or [string]$databaseOverride[0].value -cne $ExpectedDatabaseName) {
+    throw "The canonical bootstrap targeted a different database name."
+  }
+  Write-Host "Verified canonical bootstrap task: $TaskArn"
+  return $bootstrapImageDigest
+}
+
+function Get-AuditDigest {
   param(
     [string[]]$Messages,
-    [string]$FieldName,
-    [string]$ExpectedDigest
+    [string]$FieldName
   )
 
   $pattern = "(?:^|\s)$([regex]::Escape($FieldName))=([0-9a-fA-F]{64})(?:\s|$)"
@@ -179,8 +225,19 @@ function Assert-AuditDigest {
   if ($values.Count -ne 1) {
     throw "STOP: audit log did not contain exactly one $FieldName digest."
   }
-  if ($values[0] -cne $ExpectedDigest.ToLowerInvariant()) {
-    throw "STOP: audit $FieldName did not match the approved fresh dev value."
+  return $values[0]
+}
+
+function Assert-AuditDigest {
+  param(
+    [string[]]$Messages,
+    [string]$FieldName,
+    [string]$ExpectedDigest
+  )
+
+  $actualDigest = Get-AuditDigest -Messages $Messages -FieldName $FieldName
+  if ($actualDigest -cne $ExpectedDigest.ToLowerInvariant()) {
+    throw "STOP: audit $FieldName did not match the approved expected value."
   }
 }
 
@@ -199,8 +256,20 @@ $ExpectedSchemaInventorySHA256 = $ExpectedSchemaInventorySHA256.ToLowerInvariant
 if (-not [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256) -and $ExpectedSchemaInventorySHA256 -notmatch '^[0-9a-f]{64}$') {
   throw "-ExpectedSchemaInventorySHA256 must be a 64-character hexadecimal SHA-256."
 }
-if ($Action -eq "Audit" -and $AuditPurpose -ne "EmptyPreflight" -and [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256)) {
-  throw "$AuditPurpose audit requires -ExpectedSchemaInventorySHA256."
+if ($Action -eq "Audit" -and $AuditPurpose -eq "Parity" -and [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256)) {
+  throw "Parity audit requires -ExpectedSchemaInventorySHA256."
+}
+if ($Action -eq "Audit" -and $AuditPurpose -eq "CanonicalBaseline" -and -not [string]::IsNullOrWhiteSpace($ExpectedSchemaInventorySHA256)) {
+  throw "CanonicalBaseline records the clean bootstrap hash; omit -ExpectedSchemaInventorySHA256."
+}
+if ($Action -eq "Audit" -and $AuditPurpose -eq "CanonicalBaseline" -and [string]::IsNullOrWhiteSpace($CanonicalBootstrapTaskArn)) {
+  throw "CanonicalBaseline requires -CanonicalBootstrapTaskArn."
+}
+if (($Action -ne "Audit" -or $AuditPurpose -ne "CanonicalBaseline") -and -not [string]::IsNullOrWhiteSpace($CanonicalBootstrapTaskArn)) {
+  throw "-CanonicalBootstrapTaskArn applies only to a CanonicalBaseline audit."
+}
+if ($Action -eq "Audit" -and $AuditPurpose -eq "CanonicalBaseline" -and [string]::IsNullOrWhiteSpace($DatabaseNameOverride)) {
+  throw "CanonicalBaseline requires an exact mangorts_qa_next_YYYYMMDDHHMMSS DatabaseNameOverride."
 }
 if ($Action -ne "Audit" -and $AuditPurpose -ne "Parity") {
   throw "-AuditPurpose applies only to -Action Audit. Omit it for $Action."
@@ -344,6 +413,7 @@ Write-Host "Migration image: $($container.image)"
 Write-Host "Database: $DatabaseInstanceIdentifier / $targetDatabaseName / PostgreSQL $($database.EngineVersion)"
 Write-Host "Command: $($command -join ' ')"
 
+$canonicalBootstrapImageDigest = ""
 if ($Action -eq "Bootstrap") {
   Assert-EmptyDatabaseAudit `
     -TaskArn $EmptyDatabaseAuditTaskArn `
@@ -351,6 +421,13 @@ if ($Action -eq "Bootstrap") {
     -ExpectedContainerDefinition $container `
     -ClusterArn ([string]$clusterRecord.clusterArn) `
     -ExpectedRepositoryDigest $ExpectedRepositorySchemaSHA256 `
+    -ExpectedDatabaseName $targetDatabaseName
+}
+if ($Action -eq "Audit" -and $AuditPurpose -eq "CanonicalBaseline") {
+  $canonicalBootstrapImageDigest = Assert-CanonicalBootstrapTask `
+    -TaskArn $CanonicalBootstrapTaskArn `
+    -ExpectedTaskDefinition $task `
+    -ClusterArn ([string]$clusterRecord.clusterArn) `
     -ExpectedDatabaseName $targetDatabaseName
 }
 
@@ -419,6 +496,12 @@ if ($null -eq $stoppedContainer[0].exitCode) {
 if ([int]$stoppedContainer[0].exitCode -ne 0) {
   throw "QA database task failed with exit code $($stoppedContainer[0].exitCode). Review its CloudWatch logs."
 }
+if ($Action -eq "Audit" -and $AuditPurpose -eq "CanonicalBaseline") {
+  $baselineImageDigest = ([string]$stoppedContainer[0].imageDigest).ToLowerInvariant()
+  if ($baselineImageDigest -cne $canonicalBootstrapImageDigest) {
+    throw "STOP: canonical baseline audit used a different image digest than the attested bootstrap task."
+  }
+}
 
 Write-Host "QA database task completed successfully."
 if ($Action -eq "Audit") {
@@ -439,19 +522,34 @@ if ($Action -eq "Audit") {
     }
     Write-Host "Empty database and repository fingerprint verified."
   } else {
-    Assert-AuditDigest `
-      -Messages $messages `
-      -FieldName "schema_inventory_sha256" `
-      -ExpectedDigest $ExpectedSchemaInventorySHA256
     if (-not ($messages | Where-Object { $_ -match 'missing_from_ledger=0(?:\s|$)' })) {
-      throw "STOP: final audit reported migrations missing from the ledger."
+      throw "STOP: canonical audit reported migrations missing from the ledger."
     }
     if (-not ($messages | Where-Object { $_ -match 'unknown_to_repository=0(?:\s|$)' })) {
-      throw "STOP: final audit reported migration ledger rows unknown to this repository."
+      throw "STOP: canonical audit reported migration ledger rows unknown to this repository."
     }
-    Write-Host "Final QA schema hash, repository fingerprint, and migration ledger verified."
+    if ($AuditPurpose -eq "CanonicalBaseline") {
+      if (-not ($messages | Where-Object { $_ -match 'public_tables=[1-9][0-9]*(?:\s|$)' })) {
+        throw "STOP: canonical baseline audit did not report a nonempty public catalog."
+      }
+      if (-not ($messages | Where-Object { $_ -match 'schema_inventory_objects=[1-9][0-9]*(?:\s|$)' })) {
+        throw "STOP: canonical baseline audit did not report a nonempty schema inventory."
+      }
+      $canonicalSchemaSHA = Get-AuditDigest `
+        -Messages $messages `
+        -FieldName "schema_inventory_sha256"
+      Write-Host "Clean same-commit bootstrap schema and migration ledger verified."
+      Write-Output "CANONICAL_SCHEMA_INVENTORY_SHA256=$canonicalSchemaSHA"
+    } else {
+      Assert-AuditDigest `
+        -Messages $messages `
+        -FieldName "schema_inventory_sha256" `
+        -ExpectedDigest $ExpectedSchemaInventorySHA256
+      Write-Host "Final QA schema hash, repository fingerprint, and migration ledger verified."
+    }
   }
   Write-Host "Audit task ARN: $taskArn"
 } elseif ($Action -eq "Bootstrap") {
-  Write-Host "Run a new Parity Audit with the fresh same-commit dev schema hash before deploying the API."
+  Write-Host "Run a CanonicalBaseline Audit before restoring data into this clean same-commit database."
 }
+Write-Output "QA_DATABASE_TASK_ARN=$taskArn"

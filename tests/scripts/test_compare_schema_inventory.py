@@ -276,10 +276,41 @@ class SchemaInventoryComparatorTests(unittest.TestCase):
         )
 
         self.assertIn('[ValidateSet("Audit", "Bootstrap")]', script)
-        self.assertIn('[ValidateSet("EmptyPreflight", "Parity")]', script)
+        self.assertIn(
+            '[ValidateSet("EmptyPreflight", "CanonicalBaseline", "Parity")]',
+            script,
+        )
         self.assertNotIn("Reconcile", script)
         self.assertNotIn("-mode\", \"migrate", script)
         self.assertNotIn("missing_from_ledger=1", script)
+
+    def test_qa_database_helper_captures_clean_canonical_baseline_before_parity(self) -> None:
+        script = (REPO_ROOT / "scripts" / "qa_run_database_task.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('AuditPurpose -eq "CanonicalBaseline"', script)
+        self.assertIn("CanonicalBootstrapTaskArn", script)
+        self.assertIn("Assert-CanonicalBootstrapTask", script)
+        self.assertIn("mangorts-qa-human-database-bootstrap", script)
+        self.assertIn("bootstrapImageDigest", script)
+        self.assertIn("baselineImageDigest", script)
+        self.assertIn("used a different image digest", script)
+        self.assertIn(
+            "-mode schema -baseline-migrations -require-empty-database",
+            script,
+        )
+        self.assertIn("canonical bootstrap targeted a different database name", script.lower())
+        self.assertIn("public_tables=[1-9][0-9]*", script)
+        self.assertIn("schema_inventory_objects=[1-9][0-9]*", script)
+        self.assertIn("CANONICAL_SCHEMA_INVENTORY_SHA256=", script)
+        self.assertIn("QA_DATABASE_TASK_ARN=", script)
+        self.assertIn("missing_from_ledger=0", script)
+        self.assertIn("unknown_to_repository=0", script)
+        self.assertIn(
+            'AuditPurpose -eq "Parity"',
+            script,
+        )
 
     def test_generated_schema_audit_outputs_are_ignored(self) -> None:
         ignore = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")

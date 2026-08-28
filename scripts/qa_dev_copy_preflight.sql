@@ -11,6 +11,7 @@ set local statement_timeout = '30min';
 do $guard$
 declare
   missing_root_count integer;
+  entity_schema_mismatch_count integer;
 begin
   if current_setting('server_version_num')::integer < 170000
      or current_setting('server_version_num')::integer >= 180000 then
@@ -33,8 +34,73 @@ begin
      or to_regclass('public.company_explorer_items') is null
      or to_regclass('public.huddle_explorer_items') is null
      or to_regclass('public.users') is null
-     or to_regclass('public.attachments') is null then
+     or to_regclass('public.attachments') is null
+     or to_regclass('public.entity_types') is null
+     or to_regclass('public.entity_folders') is null
+     or to_regclass('public.entity_field_types') is null
+     or to_regclass('public.entities') is null
+     or to_regclass('public.entity_fields') is null
+     or to_regclass('public.schema_migrations') is null then
     raise exception 'STOP: required Mango tables are missing from the raw QA copy';
+  end if;
+
+  -- The one-time source bridge is deliberately narrow. Dev currently has the
+  -- exact base Entity schema and no Entity data; the reviewed 20260828 migration
+  -- is applied only to this isolated raw QA database after sanitization.
+  with expected(table_name,column_name) as (
+    values
+      ('entity_types','company_id'),('entity_types','entity_type_id'),
+      ('entity_types','name'),('entity_types','created_timestamp'),
+      ('entity_types','updated_timestamp'),
+      ('entity_folders','company_id'),('entity_folders','entity_folder_id'),
+      ('entity_folders','entity_type_id'),('entity_folders','parent_entity_folder_id'),
+      ('entity_folders','name'),('entity_folders','position'),
+      ('entity_folders','created_timestamp'),('entity_folders','updated_timestamp'),
+      ('entity_field_types','company_id'),('entity_field_types','entity_field_type_id'),
+      ('entity_field_types','entity_type_id'),('entity_field_types','entity_folder_id'),
+      ('entity_field_types','name'),('entity_field_types','field_type'),
+      ('entity_field_types','position'),('entity_field_types','created_timestamp'),
+      ('entity_field_types','updated_timestamp'),
+      ('entities','company_id'),('entities','entity_id'),('entities','entity_type_id'),
+      ('entities','entity_folder_id'),('entities','name'),('entities','position'),
+      ('entities','body_json'),('entities','revision'),
+      ('entities','created_timestamp'),('entities','updated_timestamp'),
+      ('entity_fields','company_id'),('entity_fields','entity_field_id'),
+      ('entity_fields','entity_id'),('entity_fields','name'),
+      ('entity_fields','field_type'),('entity_fields','value_jsonb'),
+      ('entity_fields','position'),('entity_fields','created_timestamp'),
+      ('entity_fields','updated_timestamp')
+  ), actual(table_name,column_name) as (
+    select table_name::text,column_name::text
+    from information_schema.columns
+    where table_schema='public'
+      and table_name in ('entity_types','entity_folders','entity_field_types','entities','entity_fields')
+  ), mismatches as (
+    (select * from expected except select * from actual)
+    union all
+    (select * from actual except select * from expected)
+  )
+  select count(*) into entity_schema_mismatch_count from mismatches;
+
+  if entity_schema_mismatch_count <> 0
+     or to_regclass('public.action_item_huddle_relationships') is not null
+     or to_regclass('public.entity_field_assignments') is not null then
+    raise exception 'STOP: raw QA source is not the audited empty base Entity schema';
+  end if;
+
+  if (select count(*) from public.entity_types) <> 0
+     or (select count(*) from public.entity_folders) <> 0
+     or (select count(*) from public.entity_field_types) <> 0
+     or (select count(*) from public.entities) <> 0
+     or (select count(*) from public.entity_fields) <> 0 then
+    raise exception 'STOP: Dev Entity data changed after the approved read-only audit; reassess before copying';
+  end if;
+
+  if exists (
+    select 1 from public.schema_migrations
+    where version in ('20260827_entities.sql','20260828_action_items.sql')
+  ) then
+    raise exception 'STOP: Dev Entity migration ledger changed after the approved read-only audit';
   end if;
 
   with excluded_root_names(name) as (

@@ -38,7 +38,12 @@ begin
   if to_regclass('public.company_explorer_folders') is null
      or to_regclass('public.huddle_explorer_folders') is null
      or to_regclass('public.users') is null
-     or to_regclass('public.attachments') is null then
+     or to_regclass('public.attachments') is null
+     or to_regclass('public.entity_types') is null
+     or to_regclass('public.entity_folders') is null
+     or to_regclass('public.entity_field_types') is null
+     or to_regclass('public.entities') is null
+     or to_regclass('public.entity_fields') is null then
     raise exception 'STOP: required Mango tables are missing from the raw QA copy';
   end if;
 
@@ -248,6 +253,9 @@ with imported_json_sources(
   union all
   select company_id, 'huddle_logic_gate', huddle_logic_gate_id, 'editor', body_json
   from public.huddle_logic_gates
+  union all
+  select company_id, 'entity', entity_id, 'editor', body_json
+  from public.entities
   union all
   select company_id, 'node', node_id, 'chat', entity_links
   from public.node_textbox_chats
@@ -501,6 +509,12 @@ begin
           and endpoint.logic_gate_id::text = linked_id
       ) then
         return null;
+      elsif linked_type = 'entity' and not exists (
+        select 1 from public.entities endpoint
+        where endpoint.company_id = p_company_id
+          and endpoint.entity_id::text = linked_id
+      ) then
+        return null;
       elsif linked_type = 'email_message' then
         linked_message_id := coalesce(
           nullif(lower(btrim(p_input #>> '{attrs,emailMessageId}')), ''),
@@ -529,7 +543,7 @@ begin
            ) then
           return null;
         end if;
-      elsif linked_type not in ('node', 'project', 'logic_gate') then
+      elsif linked_type not in ('node', 'project', 'logic_gate', 'entity') then
         return null;
       end if;
     end if;
@@ -682,12 +696,6 @@ using qa_excluded_resources excluded
 where excluded.company_id = shortcut.company_id
   and excluded.resource_type = 'logic_gate'
   and excluded.resource_id = shortcut.logic_gate_id;
-
-delete from public.entity_field_assignments assignment
-using qa_excluded_resources excluded
-where excluded.company_id = assignment.company_id
-  and excluded.resource_type = assignment.resource_type
-  and excluded.resource_id = assignment.resource_id;
 
 delete from public.process_map_placements placement
 where exists (
@@ -936,6 +944,30 @@ set body_json = coalesce(
   '{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph"}]},"annotations":[]}'::jsonb
 );
 
+update public.entities
+set body_json = coalesce(
+  pg_temp.qa_clean_imported_json(company_id, body_json),
+  '{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph"}]},"annotations":[]}'::jsonb
+);
+
+-- Keep exact same-company person assignments and clear only imported values
+-- that cannot resolve to a current membership in the Entity's company.
+update public.entity_fields field
+set value_jsonb = null,
+    updated_timestamp = greatest(updated_timestamp, transaction_timestamp())
+where field.field_type = 'person'
+  and field.value_jsonb is not null
+  and case
+    when jsonb_typeof(field.value_jsonb) is distinct from 'string' then true
+    when (field.value_jsonb #>> '{}') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then true
+    else not exists (
+      select 1
+      from public.company_memberships membership
+      where membership.company_id = field.company_id
+        and membership.user_id::text = lower(field.value_jsonb #>> '{}')
+    )
+  end;
+
 -- Chat messages contain the visible labels for entity_links. If any link is
 -- rejected, delete the whole chat (and cascading replies) rather than leave a
 -- label behind or attempt to rebase every surviving start/end offset.
@@ -1044,7 +1076,8 @@ select
   (select count(*)::bigint from public.company_memberships membership where membership.company_id = company.company_id) as membership_count,
   (select count(*)::bigint from public.projects endpoint where endpoint.company_id = company.company_id) as project_count,
   (select count(*)::bigint from public.logic_gates endpoint where endpoint.company_id = company.company_id) as logic_gate_count,
-  (select count(*)::bigint from public.nodes endpoint where endpoint.company_id = company.company_id) as node_count
+  (select count(*)::bigint from public.nodes endpoint where endpoint.company_id = company.company_id) as node_count,
+  (select count(*)::bigint from public.entities endpoint where endpoint.company_id = company.company_id) as entity_count
 from public.companies company
 order by company.company_id;
 

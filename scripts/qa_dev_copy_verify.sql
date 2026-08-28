@@ -15,6 +15,8 @@ set local lock_timeout = '5s';
 set local statement_timeout = '30min';
 
 do $guard$
+declare
+  entity_schema_mismatch_count integer;
 begin
   if not exists (select 1 from public.companies) then
     raise exception 'STOP: QA copy contains no surviving company; do not invent TF_QA_COMPANY_ID';
@@ -40,8 +42,54 @@ begin
      or to_regclass('public.huddle_explorer_folders') is null
      or to_regclass('public.users') is null
      or to_regclass('public.attachments') is null
+     or to_regclass('public.entity_types') is null
+     or to_regclass('public.entity_folders') is null
+     or to_regclass('public.entity_field_types') is null
+     or to_regclass('public.entities') is null
+     or to_regclass('public.entity_fields') is null
+     or to_regclass('public.action_item_huddle_relationships') is null
      or to_regclass('public.schema_migrations') is null then
     raise exception 'STOP: required canonical Mango tables are missing';
+  end if;
+
+  with expected(table_name,column_name) as (
+    values
+      ('entity_types','company_id'),('entity_types','entity_type_id'),
+      ('entity_types','name'),('entity_types','system_key'),
+      ('entity_types','created_timestamp'),('entity_types','updated_timestamp'),
+      ('entity_folders','company_id'),('entity_folders','entity_folder_id'),
+      ('entity_folders','entity_type_id'),('entity_folders','parent_entity_folder_id'),
+      ('entity_folders','name'),('entity_folders','position'),
+      ('entity_folders','created_timestamp'),('entity_folders','updated_timestamp'),
+      ('entity_field_types','company_id'),('entity_field_types','entity_field_type_id'),
+      ('entity_field_types','entity_type_id'),('entity_field_types','entity_folder_id'),
+      ('entity_field_types','name'),('entity_field_types','field_type'),
+      ('entity_field_types','system_key'),('entity_field_types','config_jsonb'),
+      ('entity_field_types','position'),('entity_field_types','created_timestamp'),
+      ('entity_field_types','updated_timestamp'),
+      ('entities','company_id'),('entities','entity_id'),('entities','entity_type_id'),
+      ('entities','entity_folder_id'),('entities','name'),('entities','position'),
+      ('entities','body_json'),('entities','revision'),('entities','created_by_user_id'),
+      ('entities','created_timestamp'),('entities','updated_timestamp'),
+      ('entity_fields','company_id'),('entity_fields','entity_field_id'),
+      ('entity_fields','entity_id'),('entity_fields','entity_field_type_id'),
+      ('entity_fields','name'),('entity_fields','field_type'),
+      ('entity_fields','value_jsonb'),('entity_fields','position'),
+      ('entity_fields','created_timestamp'),('entity_fields','updated_timestamp')
+  ), actual(table_name,column_name) as (
+    select table_name::text,column_name::text
+    from information_schema.columns
+    where table_schema='public'
+      and table_name in ('entity_types','entity_folders','entity_field_types','entities','entity_fields')
+  ), mismatches as (
+    (select * from expected except select * from actual)
+    union all
+    (select * from actual except select * from expected)
+  )
+  select count(*) into entity_schema_mismatch_count from mismatches;
+
+  if entity_schema_mismatch_count <> 0 then
+    raise exception 'STOP: current Entity schema columns do not match the exact unordered canonical sets';
   end if;
 end
 $guard$;
@@ -94,6 +142,8 @@ begin
     select 1 from public.project_textboxes_history where body_json::text ~ 'mangoAttachmentImage|attachmentId|attachment_id'
     union all
     select 1 from public.huddle_logic_gates where body_json::text ~ 'mangoAttachmentImage|attachmentId|attachment_id'
+    union all
+    select 1 from public.entities where body_json::text ~ 'mangoAttachmentImage|attachmentId|attachment_id'
   ) then
     raise exception 'STOP: a durable editor document still references an omitted attachment';
   end if;
@@ -258,6 +308,164 @@ begin
   end if;
 
   if exists (
+    select 1
+    from public.entity_fields field
+    where field.field_type = 'person'
+      and field.value_jsonb is not null
+      and case
+        when jsonb_typeof(field.value_jsonb) is distinct from 'string' then true
+        when (field.value_jsonb #>> '{}') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' then true
+        else not exists (
+          select 1
+          from public.company_memberships membership
+          where membership.company_id = field.company_id
+            and membership.user_id::text = lower(field.value_jsonb #>> '{}')
+        )
+      end
+  ) then
+    raise exception 'STOP: an Entity person field has no exact same-company membership';
+  end if;
+
+  if exists (
+    select 1
+    from public.companies company
+    where not exists (
+      select 1
+      from public.entity_types entity_type
+      where entity_type.company_id = company.company_id
+        and entity_type.entity_type_id = 'a17e0000-0000-4000-8000-000000000001'::uuid
+        and entity_type.system_key = 'action_item'
+        and entity_type.name = 'Action Item'
+    )
+  ) or exists (
+    select 1
+    from public.entity_types entity_type
+    where entity_type.system_key = 'action_item'
+      and (
+        entity_type.entity_type_id <> 'a17e0000-0000-4000-8000-000000000001'::uuid
+        or entity_type.name <> 'Action Item'
+      )
+  ) then
+    raise exception 'STOP: a company is missing its exact required Action Item Entity Type';
+  end if;
+
+  if exists (
+    with required(entity_field_type_id,system_key,name,field_type) as (
+      values
+        ('a17e0000-0000-4000-8000-000000000101'::uuid,'person_in_charge','Person in charge','person'),
+        ('a17e0000-0000-4000-8000-000000000102'::uuid,'analysis_due_date','Analysis due date','date'),
+        ('a17e0000-0000-4000-8000-000000000103'::uuid,'completion_due_date','Completion due date','date'),
+        ('a17e0000-0000-4000-8000-000000000104'::uuid,'status','Status','choice'),
+        ('a17e0000-0000-4000-8000-000000000105'::uuid,'color','Color','color')
+    )
+    select 1
+    from public.companies company
+    cross join required
+    where not exists (
+      select 1
+      from public.entity_field_types field_type
+      where field_type.company_id = company.company_id
+        and field_type.entity_field_type_id = required.entity_field_type_id
+        and field_type.entity_type_id = 'a17e0000-0000-4000-8000-000000000001'::uuid
+        and field_type.entity_folder_id is null
+        and field_type.system_key = required.system_key
+        and field_type.name = required.name
+        and field_type.field_type = required.field_type
+        and case required.system_key
+          when 'status' then
+            field_type.config_jsonb ? 'default'
+            and field_type.config_jsonb->>'default' = 'in_progress'
+            and case
+              when jsonb_typeof(field_type.config_jsonb->'options') = 'array'
+              then jsonb_array_length(field_type.config_jsonb->'options')
+              else -1
+            end = 3
+            and not exists (
+              select 1
+              from jsonb_array_elements(
+                case when jsonb_typeof(field_type.config_jsonb->'options') = 'array'
+                  then field_type.config_jsonb->'options' else '[]'::jsonb end
+              ) option_value
+              where option_value->>'key' not in ('in_progress','pending','done')
+            )
+            and (
+              select count(distinct option_value->>'key')
+              from jsonb_array_elements(
+                case when jsonb_typeof(field_type.config_jsonb->'options') = 'array'
+                  then field_type.config_jsonb->'options' else '[]'::jsonb end
+              ) option_value
+              where option_value->>'key' in ('in_progress','pending','done')
+            ) = 3
+          when 'color' then
+            field_type.config_jsonb ? 'default'
+            and field_type.config_jsonb->'default' = 'null'::jsonb
+            and exists (
+              select 1
+              from jsonb_array_elements(
+                case when jsonb_typeof(field_type.config_jsonb->'options') = 'array'
+                  then field_type.config_jsonb->'options' else '[]'::jsonb end
+              ) option_value
+              where option_value->>'key' = 'yellow'
+            )
+            and exists (
+              select 1
+              from jsonb_array_elements(
+                case when jsonb_typeof(field_type.config_jsonb->'options') = 'array'
+                  then field_type.config_jsonb->'options' else '[]'::jsonb end
+              ) option_value
+              where option_value->>'key' = 'red'
+            )
+          else field_type.config_jsonb = '{}'::jsonb
+        end
+    )
+  ) then
+    raise exception 'STOP: a company is missing an exact required Action Item field template';
+  end if;
+
+  if exists (
+    with required(entity_field_type_id,name,field_type) as (
+      values
+        ('a17e0000-0000-4000-8000-000000000101'::uuid,'Person in charge','person'),
+        ('a17e0000-0000-4000-8000-000000000102'::uuid,'Analysis due date','date'),
+        ('a17e0000-0000-4000-8000-000000000103'::uuid,'Completion due date','date'),
+        ('a17e0000-0000-4000-8000-000000000104'::uuid,'Status','choice'),
+        ('a17e0000-0000-4000-8000-000000000105'::uuid,'Color','color')
+    )
+    select 1
+    from public.entities entity
+    join public.entity_types entity_type
+      on entity_type.company_id = entity.company_id
+     and entity_type.entity_type_id = entity.entity_type_id
+     and entity_type.system_key = 'action_item'
+    cross join required
+    where not exists (
+      select 1
+      from public.entity_fields field
+      where field.company_id = entity.company_id
+        and field.entity_id = entity.entity_id
+        and field.entity_field_type_id = required.entity_field_type_id
+        and field.name = required.name
+        and field.field_type = required.field_type
+    )
+  ) then
+    raise exception 'STOP: an Action Item Entity is missing a required linked field';
+  end if;
+
+  if exists (
+    select 1
+    from public.action_item_huddle_relationships relationship
+    join public.entities entity
+      on entity.company_id = relationship.company_id
+     and entity.entity_id = relationship.entity_id
+    join public.entity_types entity_type
+      on entity_type.company_id = entity.company_id
+     and entity_type.entity_type_id = entity.entity_type_id
+    where entity_type.system_key is distinct from 'action_item'
+  ) then
+    raise exception 'STOP: an Action Item Huddle relationship points to a non-Action-Item Entity';
+  end if;
+
+  if exists (
     with generic_references(reference_kind, company_id, resource_type, resource_id) as (
       select 'resource_gvic_assignment', company_id, resource_type, resource_id
       from public.resource_gvic_assignments
@@ -390,6 +598,8 @@ begin
       union all
       select company_id, 'editor', body_json from public.huddle_logic_gates
       union all
+      select company_id, 'editor', body_json from public.entities
+      union all
       select company_id, 'chat', entity_links from public.node_textbox_chats
       union all
       select company_id, 'chat', entity_links from public.project_textbox_chats
@@ -456,12 +666,17 @@ begin
            where endpoint.company_id = link.company_id
              and endpoint.logic_gate_id::text = link.entity_id
          )
-         when 'project' then not exists (
-           select 1 from public.projects endpoint
-           where endpoint.company_id = link.company_id
-             and endpoint.project_id::text = link.entity_id
-         )
-         when 'email_message' then
+          when 'project' then not exists (
+            select 1 from public.projects endpoint
+            where endpoint.company_id = link.company_id
+              and endpoint.project_id::text = link.entity_id
+          )
+          when 'entity' then not exists (
+            select 1 from public.entities endpoint
+            where endpoint.company_id = link.company_id
+              and endpoint.entity_id::text = link.entity_id
+          )
+          when 'email_message' then
            (link.email_message_id is not null and link.email_message_id <> link.entity_id)
            or (link.source_kind = 'editor' and (
              link.email_message_id is null or link.email_thread_id is null
@@ -596,7 +811,8 @@ select
   (select count(*)::bigint from public.company_memberships membership where membership.company_id = company.company_id) as membership_count,
   (select count(*)::bigint from public.projects endpoint where endpoint.company_id = company.company_id) as project_count,
   (select count(*)::bigint from public.logic_gates endpoint where endpoint.company_id = company.company_id) as logic_gate_count,
-  (select count(*)::bigint from public.nodes endpoint where endpoint.company_id = company.company_id) as node_count
+  (select count(*)::bigint from public.nodes endpoint where endpoint.company_id = company.company_id) as node_count,
+  (select count(*)::bigint from public.entities endpoint where endpoint.company_id = company.company_id) as entity_count
 from public.companies company
 order by company.company_id;
 
@@ -608,6 +824,7 @@ from (values
   ('projects', (select count(*)::bigint from public.projects)),
   ('logic_gates', (select count(*)::bigint from public.logic_gates)),
   ('nodes', (select count(*)::bigint from public.nodes)),
+  ('entities', (select count(*)::bigint from public.entities)),
   ('email_threads', (select count(*)::bigint from public.email_threads)),
   ('email_messages', (select count(*)::bigint from public.email_messages)),
   ('permissions', (select count(*)::bigint from public.resource_permissions)),

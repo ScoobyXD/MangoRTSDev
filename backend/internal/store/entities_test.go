@@ -335,11 +335,11 @@ func TestCanonicalSchemaKeepsPostgresRecordLoopVariables(t *testing.T) {
 
 func TestEntitySchemaReadinessUsesExactUnorderedColumnSets(t *testing.T) {
 	expected := map[string][]string{
-		"entity_types":       {"company_id", "entity_type_id", "name", "created_timestamp", "updated_timestamp"},
+		"entity_types":       {"company_id", "entity_type_id", "name", "system_key", "created_timestamp", "updated_timestamp"},
 		"entity_folders":     {"company_id", "entity_folder_id", "entity_type_id", "parent_entity_folder_id", "name", "position", "created_timestamp", "updated_timestamp"},
-		"entity_field_types": {"company_id", "entity_field_type_id", "entity_type_id", "entity_folder_id", "name", "field_type", "position", "created_timestamp", "updated_timestamp"},
-		"entities":           {"company_id", "entity_id", "entity_type_id", "entity_folder_id", "name", "position", "body_json", "revision", "created_timestamp", "updated_timestamp"},
-		"entity_fields":      {"company_id", "entity_field_id", "entity_id", "name", "field_type", "value_jsonb", "position", "created_timestamp", "updated_timestamp"},
+		"entity_field_types": {"company_id", "entity_field_type_id", "entity_type_id", "entity_folder_id", "name", "field_type", "system_key", "config_jsonb", "position", "created_timestamp", "updated_timestamp"},
+		"entities":           {"company_id", "entity_id", "entity_type_id", "entity_folder_id", "name", "position", "body_json", "revision", "created_by_user_id", "created_timestamp", "updated_timestamp"},
+		"entity_fields":      {"company_id", "entity_field_id", "entity_id", "entity_field_type_id", "name", "field_type", "value_jsonb", "position", "created_timestamp", "updated_timestamp"},
 	}
 	if len(exactEntityTableColumnContracts) != len(expected) {
 		t.Fatalf("Entity exact column contract count = %d, want %d", len(exactEntityTableColumnContracts), len(expected))
@@ -370,6 +370,15 @@ func TestEntitySchemaReadinessUsesExactUnorderedColumnSets(t *testing.T) {
 	if matchesExactUnorderedColumns(hybridEntityFields, expected["entity_fields"]) {
 		t.Fatal("Entity schema readiness accepted legacy Entity Field columns beside the new Entity Fields contract")
 	}
+}
+
+func TestActionItemSchemaReadinessRequiresHuddleRelationshipTable(t *testing.T) {
+	for _, table := range requiredApplicationTables {
+		if table == "action_item_huddle_relationships" {
+			return
+		}
+	}
+	t.Fatal("application schema readiness does not require action_item_huddle_relationships")
 }
 
 func TestEditorJSONAcceptsEntityEntityLink(t *testing.T) {

@@ -16,7 +16,11 @@
 14. QDC14 - Schema inventory, migration ledger, exclusion, identity, provider-state, attachment, and orphan checks must all pass before database cutover or API start.
 15. QDC15 - The QA email worker remains disabled until separate QA Nylas staging secrets and controlled mailbox grants are configured and verified.
 16. QDC16 - If any imported chat entity link is rejected, the whole chat and its replies are removed so its visible label cannot leak and no stored text offset is silently rebased.
+17. QDC17 - Surviving Entities keep their exact IDs and business data, while every Entity editor document receives the same attachment removal and exact same-company typed-link cleanup as other durable editor documents.
+18. QDC18 - Every retained Entity person value resolves to an exact current same-company membership, and every retained Action Item Huddle edge resolves to an exact Action Item Entity and Huddle Process without deleting either surviving endpoint.
+19. QDC19 - The approved empty base-Entity Dev source is upgraded only inside the isolated raw QA scratch database with the reviewed current Action Item migration before sanitized data export.
+20. QDC20 - Every retained company has the exact required Action Item Entity Type and five field templates, and every retained Action Item Entity has all five required linked fields.
 
 ## Process Story
 
-A human copies Dev into an offline QA-only scratch database, runs the reviewed sanitizer there, bootstraps a fresh same-commit QA target, imports only sanitized data, verifies every law above, and then swaps the verified target into the stable `mangorts_qa` name. The prior QA database and snapshot remain available for rollback until the site smoke checks pass.
+A human copies Dev into an offline QA-only scratch database, runs the reviewed sanitizer there, bootstraps a fresh same-commit QA target, imports only sanitized data, verifies every law above including current Entity and Action Item relationships, and then swaps the verified target into the stable `mangorts_qa` name. The prior QA database and snapshot remain available for rollback until the site smoke checks pass.
