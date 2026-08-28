@@ -325,14 +325,20 @@ if (-not $devHost -or $devHost -notmatch '(^|[-.])dev(cluster)?([-.]|$)' -or
   -ConfirmDatabaseEnforcedReadOnlyCredential
 
 $devInventory = Get-Content .\tmp\schema-audit-dev-fresh.json -Raw | ConvertFrom-Json
-$schemaSHA = [string]$devInventory.metadata.schema_inventory_sha256
+$sourceSchemaSHA = [string]$devInventory.metadata.schema_inventory_sha256
 $repositorySHA = [string]$devInventory.metadata.repository_schema_sha256
 $inventoryCommit = [string]$devInventory.metadata.git_commit
 if ($inventoryCommit -cne $releaseCommit) { throw "Dev inventory commit mismatch" }
 ```
 
-Stop if the export is older than 24 hours, is not PostgreSQL 17.x, has different
-migration filenames, or differs from the canonical same-commit inventory.
+Stop if the export is older than 24 hours, is not PostgreSQL 17.x, or its
+repository fingerprint/commit differs from the release. The Dev catalog hash is
+evidence about the read-only source; it is not the expected QA target hash.
+`qa_dev_copy_preflight.sql` permits only the audited base Entity tables, zero
+Entity rows, no Action Item table, and no 20260827/20260828 ledger rows. If that
+state changes, stop and reassess. Do not run
+`20260825_canonical_schema_reconciliation.sql` on Dev or use it to force a hash;
+the fresh next database is built from the release's canonical migrations.
 
 Measure the source through the same read-only tuple and compare it to current QA
 free storage. The raw database is dropped before the next database is built, so
@@ -399,19 +405,33 @@ Assert-QaWritersStopped
 Assert-NativeSuccess "restore into exact QA raw database"
 ```
 
-Run the read-only preflight, one-transaction sanitizer, and read-only verifier:
+Run the read-only preflight and one-transaction sanitizer first. Then apply the
+existing reviewed Action Item migration only to this exact isolated raw QA
+database. Dev has no Entity or Action Item rows, so this creates only the current
+required Entity Type and five field templates for each copied company; it does
+not recreate historical Action Items. Finally run the read-only verifier:
 
 ```powershell
 foreach ($sqlFile in @(
   ".\scripts\qa_dev_copy_preflight.sql",
-  ".\scripts\qa_dev_copy_sanitize.sql",
-  ".\scripts\qa_dev_copy_verify.sql"
+  ".\scripts\qa_dev_copy_sanitize.sql"
 )) {
   & $psql --host $qaHost --port $qaPort --username $qaUser `
     --dbname $rawDatabase --no-password --no-psqlrc `
     --set ON_ERROR_STOP=on --file $sqlFile
   Assert-NativeSuccess "run $sqlFile against exact QA raw database"
 }
+
+Assert-QaWritersStopped
+& $psql --host $qaHost --port $qaPort --username $qaUser `
+  --dbname $rawDatabase --no-password --no-psqlrc `
+  --set ON_ERROR_STOP=on --file .\backend\db\migrations\20260828_action_items.sql
+Assert-NativeSuccess "upgrade only the exact QA raw Entity schema and seed current defaults"
+
+& $psql --host $qaHost --port $qaPort --username $qaUser `
+  --dbname $rawDatabase --no-password --no-psqlrc `
+  --set ON_ERROR_STOP=on --file .\scripts\qa_dev_copy_verify.sql
+Assert-NativeSuccess "verify upgraded exact QA raw database"
 ```
 
 Stop on any error or unexpected count. Export data only, excluding the Dev
@@ -462,27 +482,55 @@ $qaDatabaseTask = @{
 }
 ```
 
-Only a human may use the following switches. Audit the empty target and copy its
-completed task ARN into the bootstrap command:
+Only a human may use the following switches. The helper returns each completed
+task ARN so the next guarded step uses that exact task without manual copying:
 
 ```powershell
-.\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
-  -Action Audit -AuditPurpose EmptyPreflight `
-  -Execute -HumanOperatorApproval
+$emptyAuditOutput = @(
+  .\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
+    -Action Audit -AuditPurpose EmptyPreflight `
+    -Execute -HumanOperatorApproval
+)
+$emptyAuditTaskLines = @($emptyAuditOutput | Where-Object {
+  [string]$_ -match '^QA_DATABASE_TASK_ARN=arn:aws:ecs:[^:]+:[0-9]{12}:task/.+$'
+})
+if ($emptyAuditTaskLines.Count -ne 1) {
+  throw "Empty audit did not return exactly one ECS task ARN"
+}
+$emptyAuditTaskArn = ([string]$emptyAuditTaskLines[0]).Split('=',2)[1]
 
-.\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
-  -Action Bootstrap `
-  -EmptyDatabaseAuditTaskArn "<completed-empty-audit-task-arn>" `
-  -Execute -HumanOperatorApproval
+$bootstrapOutput = @(
+  .\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
+    -Action Bootstrap `
+    -EmptyDatabaseAuditTaskArn $emptyAuditTaskArn `
+    -Execute -HumanOperatorApproval
+)
+$bootstrapTaskLines = @($bootstrapOutput | Where-Object {
+  [string]$_ -match '^QA_DATABASE_TASK_ARN=arn:aws:ecs:[^:]+:[0-9]{12}:task/.+$'
+})
+if ($bootstrapTaskLines.Count -ne 1) {
+  throw "Bootstrap did not return exactly one ECS task ARN"
+}
+$bootstrapTaskArn = ([string]$bootstrapTaskLines[0]).Split('=',2)[1]
 
-.\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
-  -Action Audit -AuditPurpose Parity `
-  -ExpectedSchemaInventorySHA256 $schemaSHA `
-  -Execute -HumanOperatorApproval
+$baselineOutput = @(
+  .\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
+    -Action Audit -AuditPurpose CanonicalBaseline `
+    -CanonicalBootstrapTaskArn $bootstrapTaskArn `
+    -Execute -HumanOperatorApproval
+)
+$baselineLines = @($baselineOutput | Where-Object {
+  [string]$_ -match '^CANONICAL_SCHEMA_INVENTORY_SHA256=[0-9a-f]{64}$'
+})
+if ($baselineLines.Count -ne 1) {
+  throw "Canonical baseline audit did not return exactly one schema hash"
+}
+$schemaSHA = ([string]$baselineLines[0]).Split('=',2)[1]
 ```
 
-The parity audit must report PostgreSQL 17.x, exact schema/repository hashes,
-and zero missing or unknown migration filenames.
+The canonical baseline audit must report PostgreSQL 17.x, the exact repository
+hash, and zero missing or unknown migration filenames. It records the clean
+same-commit target schema hash before imported data can affect the database.
 
 Restore with all constraints active, then run real foreign-key and exact typed
 reference checks:
@@ -505,7 +553,8 @@ Assert-NativeSuccess "verify exact QA next database"
   -Execute -HumanOperatorApproval
 ```
 
-The second parity audit is mandatory before identity binding or cutover.
+This parity audit is mandatory before identity binding or cutover. It proves the
+data restore did not change the clean canonical schema baseline.
 
 ## Phase 5: Create Jonat's QA Identity And Select His Company
 

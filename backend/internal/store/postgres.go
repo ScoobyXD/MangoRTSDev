@@ -15,11 +15,23 @@ type exactTableColumnContract struct {
 }
 
 var exactEntityTableColumnContracts = []exactTableColumnContract{
-	{table: "entity_types", columns: []string{"company_id", "entity_type_id", "name", "created_timestamp", "updated_timestamp"}},
+	{table: "entity_types", columns: []string{"company_id", "entity_type_id", "name", "system_key", "created_timestamp", "updated_timestamp"}},
 	{table: "entity_folders", columns: []string{"company_id", "entity_folder_id", "entity_type_id", "parent_entity_folder_id", "name", "position", "created_timestamp", "updated_timestamp"}},
-	{table: "entity_field_types", columns: []string{"company_id", "entity_field_type_id", "entity_type_id", "entity_folder_id", "name", "field_type", "position", "created_timestamp", "updated_timestamp"}},
-	{table: "entities", columns: []string{"company_id", "entity_id", "entity_type_id", "entity_folder_id", "name", "position", "body_json", "revision", "created_timestamp", "updated_timestamp"}},
-	{table: "entity_fields", columns: []string{"company_id", "entity_field_id", "entity_id", "name", "field_type", "value_jsonb", "position", "created_timestamp", "updated_timestamp"}},
+	{table: "entity_field_types", columns: []string{"company_id", "entity_field_type_id", "entity_type_id", "entity_folder_id", "name", "field_type", "system_key", "config_jsonb", "position", "created_timestamp", "updated_timestamp"}},
+	{table: "entities", columns: []string{"company_id", "entity_id", "entity_type_id", "entity_folder_id", "name", "position", "body_json", "revision", "created_by_user_id", "created_timestamp", "updated_timestamp"}},
+	{table: "entity_fields", columns: []string{"company_id", "entity_field_id", "entity_id", "entity_field_type_id", "name", "field_type", "value_jsonb", "position", "created_timestamp", "updated_timestamp"}},
+}
+
+var requiredApplicationTables = []string{
+	"email_connections",
+	"communications_message_read_receipt_summaries", "communications_message_read_receipt_signals",
+	"email_threads", "email_messages", "email_relationships", "email_drafts",
+	"email_signatures", "email_ingestion_jobs", "attachments", "attachment_relationships",
+	"node_textboxes", "node_textbox_chats", "node_textboxes_history",
+	"project_textboxes", "project_textbox_chats", "logic_gate_textboxes", "logic_gate_textboxes_history",
+	"scorecards",
+	"entity_types", "entity_folders", "entity_field_types", "entities", "entity_fields",
+	"action_item_huddle_relationships",
 }
 
 func NewPostgresRepo(db *sql.DB) *PostgresRepo {
@@ -32,17 +44,7 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 	if r == nil || r.db == nil {
 		return ErrInvalid
 	}
-	requiredTables := []string{
-		"email_connections",
-		"communications_message_read_receipt_summaries", "communications_message_read_receipt_signals",
-		"email_threads", "email_messages", "email_relationships", "email_drafts",
-		"email_signatures", "email_ingestion_jobs", "attachments", "attachment_relationships",
-		"node_textboxes", "node_textbox_chats", "node_textboxes_history",
-		"project_textboxes", "project_textbox_chats", "logic_gate_textboxes", "logic_gate_textboxes_history",
-		"scorecards",
-		"entity_types", "entity_folders", "entity_field_types", "entities", "entity_fields",
-	}
-	for _, table := range requiredTables {
+	for _, table := range requiredApplicationTables {
 		var exists bool
 		if err := r.db.QueryRow(`select to_regclass('public.' || $1) is not null`, table).Scan(&exists); err != nil {
 			return err
