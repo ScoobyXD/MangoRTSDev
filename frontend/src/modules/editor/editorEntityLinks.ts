@@ -2,7 +2,7 @@ import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute, parseDeepLinkRo
 import { createExplorerEntityIconElement } from "../../icons/index.js";
 import type { BoundRequestJSON } from "../api/requestJSON.js";
 import type { EmailMessage } from "../communications/communicationsApi.js";
-import { searchEntities } from "../entities/entitiesApi.js";
+import { createActionItem, searchEntities, type ActionItemColor } from "../entities/entitiesApi.js";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle } from "../nodes/selectionNodeCreation.js";
 
 export type EditorWorkspaceEntityType = "node" | "logic_gate" | "project";
@@ -135,6 +135,10 @@ export function normalizeEditorSelectionNodeTitle(value: string): string {
   return normalizeSelectedTextForNodeTitle(value);
 }
 
+export function normalizeEditorSelectionActionItemName(value: string): string {
+  return normalizeEditorSelectionNodeTitle(value).slice(0, 200).trim();
+}
+
 export function readActiveEntityLinkDraft(value: string, caretIndex: number | null): ActiveEntityLinkDraft | null {
   if (caretIndex === null || caretIndex < 0 || caretIndex > value.length) return null;
   const beforeCaret = value.slice(0, caretIndex);
@@ -222,6 +226,27 @@ export async function createNodeEntityFromSelection(
     entityID: node.node_id,
     label: node.name?.trim() || title,
     updatedTimestamp: node.created_timestamp,
+  };
+}
+
+export async function createActionItemEntityFromSelection(
+  context: Pick<EditorEntityLinkContext, "companyID" | "requestJSON">,
+  selectedText: string,
+  color: ActionItemColor,
+): Promise<EditorEntityLink> {
+  const name = normalizeEditorSelectionActionItemName(selectedText);
+  if (!name) throw new Error("selection_action_item_name_empty");
+  const actionItem = await createActionItem(context.requestJSON, {
+    companyID: context.companyID,
+    bodyText: selectedText,
+    name,
+    color,
+  });
+  return {
+    entityType: "entity",
+    entityID: actionItem.entity_id,
+    label: actionItem.name?.trim() || name,
+    updatedTimestamp: actionItem.updated_timestamp || actionItem.created_timestamp,
   };
 }
 

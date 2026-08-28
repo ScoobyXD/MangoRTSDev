@@ -140,6 +140,10 @@ function renderNode(
       const entityID = String(attrs.entityId || "");
       const label = String(attrs.label || "Entity");
       if (!isEditorEntityType(entityType) || !entityID) return <span key={key}>{label}</span>;
+      const actionItemColor = entityType === "entity" && (attrs.actionItemColor === "yellow" || attrs.actionItemColor === "red")
+        ? attrs.actionItemColor
+        : null;
+      const actionItemSeverity = actionItemColor === "yellow" ? "Yellow" : actionItemColor === "red" ? "Red" : "";
       const emailEntity = entityType === "email_message" ? {
         emailMessageID: String(attrs.emailMessageId || "") || undefined,
         emailThreadID: String(attrs.emailThreadId || "") || undefined,
@@ -150,16 +154,18 @@ function renderNode(
       return (
         <a
           key={key}
-          className={`mango-editor-entity-link mango-editor-entity-link--${entityType}`}
+          className={`mango-editor-entity-link mango-editor-entity-link--${entityType}${actionItemColor ? ` mango-editor-action-item mango-editor-action-item--${actionItemColor}` : ""}`}
           data-mango-entity-link="true"
           data-mango-entity-type={entityType}
           data-mango-entity-id={entityID}
           data-mango-entity-label={label}
+          data-mango-action-item-color={actionItemColor || undefined}
           data-mango-email-message-id={entityType === "email_message" ? emailEntity.emailMessageID : undefined}
           data-mango-email-thread-id={entityType === "email_message" ? emailEntity.emailThreadID : undefined}
           data-mango-email-account-email={entityType === "email_message" ? emailEntity.emailAccountEmail : undefined}
           data-mango-email-shared-inbox-id={entityType === "email_message" ? emailEntity.emailSharedInboxID : undefined}
-          aria-label={`Open ${editorEntityTypeLabel(entityType)} ${label}`}
+          aria-label={actionItemColor ? `Open ${actionItemSeverity} Action Item ${label}` : `Open ${editorEntityTypeLabel(entityType)} ${label}`}
+          title={actionItemColor ? `${actionItemSeverity} Action Item: ${label}` : undefined}
           role={needsExplicitKeyboardActivation ? "link" : undefined}
           tabIndex={needsExplicitKeyboardActivation ? 0 : undefined}
           href={entityType === "email_message" || entityType === "entity" ? undefined : editorEntityRoute({ entityType, entityID })}
@@ -177,6 +183,7 @@ function renderNode(
         >
           <ExplorerEntityIcon kind={entityType} className="mango-editor-entity-icon" />
           <span className="mango-editor-entity-label">{label}</span>
+          {actionItemColor && <span className="mango-editor-action-item-severity" aria-hidden="true">{actionItemSeverity}</span>}
         </a>
       );
     }

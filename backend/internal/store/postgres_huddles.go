@@ -594,6 +594,9 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 		if err = add("huddle_logic_gate_relationships", `company_id=$1::uuid and huddle_logic_gate_id=$2::uuid`, companyID, id); err != nil {
 			return err
 		}
+		if err = add("action_item_huddle_relationships", `company_id=$1::uuid and huddle_logic_gate_id=$2::uuid`, companyID, id); err != nil {
+			return err
+		}
 	}
 	if kind == "huddle_node" {
 		if err = add("huddle_node_logic_gate_relationships", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {

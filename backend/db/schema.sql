@@ -3056,6 +3056,438 @@ $$;
 
 
 --
+-- Name: mangorts_entity_field_type_config_valid(text, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_entity_field_type_config_valid(p_field_type text, p_config jsonb) RETURNS boolean
+    LANGUAGE plpgsql IMMUTABLE STRICT
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+declare
+  option_value jsonb;
+begin
+  if jsonb_typeof(p_config) <> 'object' then
+    return false;
+  end if;
+  if p_field_type not in ('choice','color') then
+    return p_config = '{}'::jsonb;
+  end if;
+  if (p_config - array['default','options']) <> '{}'::jsonb then
+    return false;
+  end if;
+  if jsonb_typeof(p_config->'options') is distinct from 'array' then
+    return false;
+  end if;
+  if jsonb_array_length(p_config->'options') = 0 then
+    return false;
+  end if;
+  for option_value in select value from jsonb_array_elements(p_config->'options') loop
+    if jsonb_typeof(option_value) is distinct from 'object'
+       or jsonb_typeof(option_value->'key') is distinct from 'string'
+       or (option_value->>'key') !~ '^[a-z][a-z0-9_]*$'
+       or length(option_value->>'key') > 200
+       or jsonb_typeof(option_value->'label') is distinct from 'string'
+       or btrim(option_value->>'label') = ''
+       or length(option_value->>'label') > 200 then
+      return false;
+    end if;
+    if p_field_type = 'choice' then
+      if (option_value - array['key','label']) <> '{}'::jsonb then
+        return false;
+      end if;
+    elsif (option_value - array['key','label','color']) <> '{}'::jsonb
+          or jsonb_typeof(option_value->'color') is distinct from 'string'
+          or (option_value->>'color') !~ '^#[0-9a-f]{6}$' then
+      return false;
+    end if;
+  end loop;
+  if exists (
+    select 1 from jsonb_array_elements(p_config->'options') item
+    group by item->>'key' having count(*) > 1
+  ) then
+    return false;
+  end if;
+  if p_config ? 'default' and p_config->'default' <> 'null'::jsonb then
+    if jsonb_typeof(p_config->'default') is distinct from 'string'
+       or not exists (
+         select 1 from jsonb_array_elements(p_config->'options') item
+         where item->>'key'=p_config->>'default'
+       ) then
+      return false;
+    end if;
+  end if;
+  return true;
+end;
+$$;
+
+
+--
+-- Name: mangorts_protect_action_item_entity_type(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_protect_action_item_entity_type() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+begin
+  if tg_op = 'DELETE' then
+    if old.system_key = 'action_item'
+       and exists (select 1 from companies where company_id=old.company_id) then
+      raise exception 'action_item_entity_type_required' using errcode='23514';
+    end if;
+    return old;
+  end if;
+  if tg_op = 'UPDATE' and old.system_key = 'action_item' and (
+    new.company_id is distinct from old.company_id
+    or new.entity_type_id is distinct from old.entity_type_id
+    or new.system_key is distinct from old.system_key
+    or new.name is distinct from old.name
+  ) then
+    raise exception 'action_item_entity_type_immutable' using errcode='23514';
+  end if;
+  if new.system_key = 'action_item' and (
+    new.entity_type_id <> 'a17e0000-0000-4000-8000-000000000001'::uuid
+    or new.name <> 'Action Item'
+  ) then
+    raise exception 'action_item_entity_type_invalid' using errcode='23514';
+  end if;
+  return new;
+end;
+$$;
+
+
+--
+-- Name: mangorts_protect_action_item_field_type(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_protect_action_item_field_type() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+declare
+  old_is_action_item boolean := false;
+  new_is_action_item boolean := false;
+  old_is_required boolean := false;
+  expected_id uuid;
+  expected_name text;
+  expected_field_type text;
+begin
+  if tg_op <> 'INSERT' then
+    select coalesce(entity_type.system_key='action_item',false)
+    into old_is_action_item
+    from entity_types entity_type
+    where entity_type.company_id=old.company_id
+      and entity_type.entity_type_id=old.entity_type_id;
+    old_is_required := coalesce(old_is_action_item,false)
+      and old.system_key in ('person_in_charge','analysis_due_date','completion_due_date','status','color');
+    if tg_op = 'DELETE' then
+      if old_is_required and exists (select 1 from companies where company_id=old.company_id) then
+        raise exception 'action_item_field_type_required:%',old.system_key using errcode='23514';
+      end if;
+      return old;
+    end if;
+    if old_is_required and (
+      new.company_id is distinct from old.company_id
+      or new.entity_field_type_id is distinct from old.entity_field_type_id
+      or new.entity_type_id is distinct from old.entity_type_id
+      or new.entity_folder_id is distinct from old.entity_folder_id
+      or new.system_key is distinct from old.system_key
+      or new.name is distinct from old.name
+      or new.field_type is distinct from old.field_type
+    ) then
+      raise exception 'action_item_field_type_immutable:%',old.system_key using errcode='23514';
+    end if;
+  end if;
+  select coalesce(entity_type.system_key='action_item',false)
+  into new_is_action_item
+  from entity_types entity_type
+  where entity_type.company_id=new.company_id
+    and entity_type.entity_type_id=new.entity_type_id;
+  if not coalesce(new_is_action_item,false) then
+    return new;
+  end if;
+  if new.system_key is null
+     or new.system_key not in ('person_in_charge','analysis_due_date','completion_due_date','status','color') then
+    if lower(btrim(new.name)) in ('person in charge','analysis due date','completion due date','status','color') then
+      raise exception 'action_item_field_type_name_reserved:%',new.name using errcode='23514';
+    end if;
+    return new;
+  end if;
+  select definition.expected_id,definition.expected_name,definition.expected_field_type
+  into expected_id,expected_name,expected_field_type
+  from (values
+    ('person_in_charge','a17e0000-0000-4000-8000-000000000101'::uuid,'Person in charge','person'),
+    ('analysis_due_date','a17e0000-0000-4000-8000-000000000102'::uuid,'Analysis due date','date'),
+    ('completion_due_date','a17e0000-0000-4000-8000-000000000103'::uuid,'Completion due date','date'),
+    ('status','a17e0000-0000-4000-8000-000000000104'::uuid,'Status','choice'),
+    ('color','a17e0000-0000-4000-8000-000000000105'::uuid,'Color','color')
+  ) as definition(system_key,expected_id,expected_name,expected_field_type)
+  where definition.system_key=new.system_key;
+  if new.entity_field_type_id <> expected_id
+     or new.entity_folder_id is not null
+     or new.name <> expected_name
+     or new.field_type <> expected_field_type then
+    raise exception 'action_item_field_type_invalid:%',new.system_key using errcode='23514';
+  end if;
+  if not mangorts_entity_field_type_config_valid(new.field_type,new.config_jsonb) then
+    raise exception 'action_item_field_type_config_invalid:%',new.system_key using errcode='23514';
+  end if;
+  if new.system_key='status' and (
+    not (new.config_jsonb ? 'default')
+    or new.config_jsonb->>'default' is distinct from 'in_progress'
+    or jsonb_array_length(new.config_jsonb->'options') <> 3
+    or not exists (select 1 from jsonb_array_elements(new.config_jsonb->'options') option_value where option_value->>'key'='in_progress')
+    or not exists (select 1 from jsonb_array_elements(new.config_jsonb->'options') option_value where option_value->>'key'='pending')
+    or not exists (select 1 from jsonb_array_elements(new.config_jsonb->'options') option_value where option_value->>'key'='done')
+  ) then
+    raise exception 'action_item_status_config_required' using errcode='23514';
+  end if;
+  if new.system_key='color' and (
+    not (new.config_jsonb ? 'default')
+    or new.config_jsonb->'default' is distinct from 'null'::jsonb
+    or not exists (select 1 from jsonb_array_elements(new.config_jsonb->'options') option_value where option_value->>'key'='yellow')
+    or not exists (select 1 from jsonb_array_elements(new.config_jsonb->'options') option_value where option_value->>'key'='red')
+  ) then
+    raise exception 'action_item_color_config_required' using errcode='23514';
+  end if;
+  return new;
+end;
+$$;
+
+
+--
+-- Name: mangorts_maintain_entity_field_template_link(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_maintain_entity_field_template_link() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+declare
+  template_field_type text;
+  template_config jsonb;
+  person_id text;
+  date_text text;
+  parsed_date date;
+begin
+  if tg_op = 'UPDATE'
+     and new.field_type is distinct from old.field_type
+     and new.entity_field_type_id is not distinct from old.entity_field_type_id then
+    new.entity_field_type_id := null;
+  end if;
+  if new.entity_field_type_id is not null then
+    select template.field_type,template.config_jsonb
+    into template_field_type,template_config
+    from entity_field_types template
+    join entities entity
+      on entity.company_id=new.company_id
+     and entity.entity_id=new.entity_id
+     and entity.entity_type_id=template.entity_type_id
+    where template.company_id=new.company_id
+      and template.entity_field_type_id=new.entity_field_type_id;
+    if not found then
+      raise exception 'entity_field_type_link_invalid' using errcode='23503';
+    end if;
+    if template_field_type <> new.field_type then
+      raise exception 'entity_field_type_link_kind_mismatch' using errcode='23514';
+    end if;
+    if new.value_jsonb is not null and new.field_type in ('choice','color')
+       and not exists (
+         select 1 from jsonb_array_elements(template_config->'options') option_value
+         where option_value->>'key' = (new.value_jsonb #>> '{}')
+       ) then
+      raise exception 'entity_field_option_invalid' using errcode='23514';
+    end if;
+  end if;
+  if new.value_jsonb is not null and new.field_type='date' then
+    date_text := new.value_jsonb #>> '{}';
+    if jsonb_typeof(new.value_jsonb) is distinct from 'string'
+       or date_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' then
+      raise exception 'entity_field_date_invalid' using errcode='23514';
+    end if;
+    begin
+      parsed_date := date_text::date;
+    exception when others then
+      raise exception 'entity_field_date_invalid' using errcode='23514';
+    end;
+    if to_char(parsed_date,'YYYY-MM-DD') <> date_text then
+      raise exception 'entity_field_date_invalid' using errcode='23514';
+    end if;
+  end if;
+  if new.value_jsonb is not null and new.field_type='person' then
+    person_id := new.value_jsonb #>> '{}';
+    if person_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+       or not exists (
+         select 1 from company_memberships membership
+         where membership.company_id=new.company_id
+           and membership.user_id=person_id::uuid
+       ) then
+      raise exception 'entity_field_person_not_company_member' using errcode='23503';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+
+--
+-- Name: mangorts_clear_entity_person_fields_for_membership(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_clear_entity_person_fields_for_membership() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+begin
+  if exists (select 1 from companies where company_id=old.company_id) then
+    update entity_fields
+    set value_jsonb=null,
+        updated_timestamp=now()
+    where company_id=old.company_id
+      and field_type='person'
+      and value_jsonb=to_jsonb(old.user_id::text);
+  end if;
+  return old;
+end;
+$$;
+
+
+--
+-- Name: mangorts_unlink_entity_fields_after_template_retype(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_unlink_entity_fields_after_template_retype() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+begin
+  update entity_fields
+  set entity_field_type_id=null,
+      updated_timestamp=now()
+  where company_id=new.company_id
+    and entity_field_type_id=new.entity_field_type_id;
+  return new;
+end;
+$$;
+
+
+--
+-- Name: mangorts_protect_action_item_entity_field(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_protect_action_item_entity_field() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+declare
+  old_system_key text;
+  old_is_required boolean := false;
+  new_system_key text;
+  new_expected_name text;
+  new_expected_field_type text;
+begin
+  if tg_op <> 'INSERT' and old.entity_field_type_id is not null then
+    select template.system_key
+    into old_system_key
+    from entity_field_types template
+    join entity_types entity_type
+      on entity_type.company_id=template.company_id
+     and entity_type.entity_type_id=template.entity_type_id
+     and entity_type.system_key='action_item'
+    where template.company_id=old.company_id
+      and template.entity_field_type_id=old.entity_field_type_id;
+    old_is_required := old_system_key in ('person_in_charge','analysis_due_date','completion_due_date','status','color');
+    if tg_op = 'DELETE' then
+      if old_is_required and exists (
+        select 1 from entities entity
+        where entity.company_id=old.company_id and entity.entity_id=old.entity_id
+      ) then
+        raise exception 'action_item_entity_field_required:%',old_system_key using errcode='23514';
+      end if;
+      return old;
+    end if;
+    if old_is_required and (
+      new.company_id is distinct from old.company_id
+      or new.entity_field_id is distinct from old.entity_field_id
+      or new.entity_id is distinct from old.entity_id
+      or new.entity_field_type_id is distinct from old.entity_field_type_id
+      or new.name is distinct from old.name
+      or new.field_type is distinct from old.field_type
+    ) then
+      raise exception 'action_item_entity_field_immutable:%',old_system_key using errcode='23514';
+    end if;
+  elsif tg_op = 'DELETE' then
+    return old;
+  end if;
+  if new.entity_field_type_id is null then
+    return new;
+  end if;
+  select template.system_key,
+         case template.system_key
+           when 'person_in_charge' then 'Person in charge'
+           when 'analysis_due_date' then 'Analysis due date'
+           when 'completion_due_date' then 'Completion due date'
+           when 'status' then 'Status'
+           when 'color' then 'Color'
+         end,
+         case template.system_key
+           when 'person_in_charge' then 'person'
+           when 'analysis_due_date' then 'date'
+           when 'completion_due_date' then 'date'
+           when 'status' then 'choice'
+           when 'color' then 'color'
+         end
+  into new_system_key,new_expected_name,new_expected_field_type
+  from entity_field_types template
+  join entity_types entity_type
+    on entity_type.company_id=template.company_id
+   and entity_type.entity_type_id=template.entity_type_id
+   and entity_type.system_key='action_item'
+  where template.company_id=new.company_id
+    and template.entity_field_type_id=new.entity_field_type_id
+    and template.system_key in ('person_in_charge','analysis_due_date','completion_due_date','status','color');
+  if found and (new.name <> new_expected_name or new.field_type <> new_expected_field_type) then
+    raise exception 'action_item_entity_field_invalid:%',new_system_key using errcode='23514';
+  end if;
+  return new;
+end;
+$$;
+
+
+--
+-- Name: mangorts_validate_action_item_huddle_relationship(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_validate_action_item_huddle_relationship() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+begin
+  if tg_op='UPDATE' and (
+    new.company_id is distinct from old.company_id
+    or new.entity_id is distinct from old.entity_id
+    or new.huddle_logic_gate_id is distinct from old.huddle_logic_gate_id
+  ) then
+    raise exception 'action_item_huddle_relationship_endpoints_immutable' using errcode='23514';
+  end if;
+  if not exists (
+    select 1
+    from entities entity
+    join entity_types entity_type
+      on entity_type.company_id=entity.company_id
+     and entity_type.entity_type_id=entity.entity_type_id
+    where entity.company_id=new.company_id
+      and entity.entity_id=new.entity_id
+      and entity_type.system_key='action_item'
+  ) then
+    raise exception 'action_item_huddle_relationship_requires_action_item' using errcode='23514';
+  end if;
+  return new;
+end;
+$$;
+
+
+--
 -- Name: account_folders; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4702,6 +5134,18 @@ CREATE TABLE public.raci_tabs_items (
 
 
 --
+-- Name: action_item_huddle_relationships; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.action_item_huddle_relationships (
+    company_id uuid NOT NULL,
+    entity_id uuid NOT NULL,
+    huddle_logic_gate_id uuid NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
 -- Name: entity_field_types; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4712,12 +5156,16 @@ CREATE TABLE public.entity_field_types (
     entity_folder_id uuid,
     name character varying(200) NOT NULL,
     field_type text NOT NULL,
+    system_key text,
+    config_jsonb jsonb DEFAULT '{}'::jsonb NOT NULL,
     "position" integer DEFAULT 0 NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT entity_field_types_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text]))),
+    CONSTRAINT entity_field_types_config_jsonb_chk CHECK (public.mangorts_entity_field_type_config_valid(field_type, config_jsonb)),
+    CONSTRAINT entity_field_types_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text, 'choice'::text, 'color'::text, 'person'::text]))),
     CONSTRAINT entity_field_types_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text)),
-    CONSTRAINT entity_field_types_position_chk CHECK (("position" >= 0))
+    CONSTRAINT entity_field_types_position_chk CHECK (("position" >= 0)),
+    CONSTRAINT entity_field_types_system_key_chk CHECK (((system_key IS NULL) OR (system_key ~ '^[a-z][a-z0-9_]*$'::text)))
 );
 
 
@@ -4729,16 +5177,17 @@ CREATE TABLE public.entity_fields (
     company_id uuid NOT NULL,
     entity_field_id uuid NOT NULL,
     entity_id uuid NOT NULL,
+    entity_field_type_id uuid,
     name character varying(200) NOT NULL,
     field_type text NOT NULL,
     value_jsonb jsonb,
     "position" integer DEFAULT 0 NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT entity_fields_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text]))),
+    CONSTRAINT entity_fields_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text, 'choice'::text, 'color'::text, 'person'::text]))),
     CONSTRAINT entity_fields_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text)),
     CONSTRAINT entity_fields_position_chk CHECK (("position" >= 0)),
-    CONSTRAINT entity_fields_value_shape_chk CHECK (((value_jsonb IS NULL) OR ((field_type = ANY (ARRAY['text'::text, 'date'::text])) AND (jsonb_typeof(value_jsonb) = 'string'::text)) OR ((field_type = 'number'::text) AND (jsonb_typeof(value_jsonb) = 'number'::text)) OR ((field_type = 'boolean'::text) AND (jsonb_typeof(value_jsonb) = 'boolean'::text))))
+    CONSTRAINT entity_fields_value_shape_chk CHECK (((value_jsonb IS NULL) OR ((field_type = ANY (ARRAY['text'::text, 'date'::text, 'choice'::text, 'color'::text])) AND (jsonb_typeof(value_jsonb) = 'string'::text)) OR ((field_type = 'person'::text) AND (jsonb_typeof(value_jsonb) = 'string'::text) AND ((value_jsonb #>> '{}'::text[]) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)) OR ((field_type = 'number'::text) AND (jsonb_typeof(value_jsonb) = 'number'::text)) OR ((field_type = 'boolean'::text) AND (jsonb_typeof(value_jsonb) = 'boolean'::text))))
 );
 
 
@@ -4769,9 +5218,11 @@ CREATE TABLE public.entity_types (
     company_id uuid NOT NULL,
     entity_type_id uuid NOT NULL,
     name character varying(200) NOT NULL,
+    system_key text,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT entity_types_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text))
+    CONSTRAINT entity_types_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text)),
+    CONSTRAINT entity_types_system_key_chk CHECK (((system_key IS NULL) OR (system_key ~ '^[a-z][a-z0-9_]*$'::text)))
 );
 
 
@@ -4788,6 +5239,7 @@ CREATE TABLE public.entities (
     "position" integer DEFAULT 0 NOT NULL,
     body_json jsonb DEFAULT '{"format": "mango-tiptap-json", "document": {"type": "doc", "content": [{"type": "paragraph"}]}, "annotations": [], "schema_version": 1}'::jsonb NOT NULL,
     revision bigint DEFAULT 0 NOT NULL,
+    created_by_user_id uuid,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT entities_body_json_chk CHECK ((((body_json ->> 'format'::text) = 'mango-tiptap-json'::text) AND ((body_json ->> 'schema_version'::text) = '1'::text) AND (((body_json -> 'document'::text) ->> 'type'::text) = 'doc'::text) AND (jsonb_typeof((body_json -> 'annotations'::text)) = 'array'::text))),
@@ -5885,6 +6337,14 @@ ALTER TABLE ONLY public.raci_tabs_items
 
 
 --
+-- Name: action_item_huddle_relationships action_item_huddle_relationships_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.action_item_huddle_relationships
+    ADD CONSTRAINT action_item_huddle_relationships_pkey PRIMARY KEY (company_id, entity_id);
+
+
+--
 -- Name: entity_field_types entity_field_types_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6909,6 +7369,13 @@ CREATE INDEX idx_raci_tabs_items_owner_role_folder_position ON public.raci_tabs_
 
 
 --
+-- Name: idx_action_item_huddle_relationships_huddle; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_action_item_huddle_relationships_huddle ON public.action_item_huddle_relationships USING btree (company_id, huddle_logic_gate_id, entity_id);
+
+
+--
 -- Name: idx_entity_field_types_folder_name_unique; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6930,6 +7397,13 @@ CREATE INDEX idx_entity_field_types_scope_position ON public.entity_field_types 
 
 
 --
+-- Name: idx_entity_field_types_type_system_key_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_entity_field_types_type_system_key_unique ON public.entity_field_types USING btree (company_id, entity_type_id, system_key) WHERE (system_key IS NOT NULL);
+
+
+--
 -- Name: idx_entity_fields_entity_name_unique; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6944,6 +7418,20 @@ CREATE INDEX idx_entity_fields_entity_position ON public.entity_fields USING btr
 
 
 --
+-- Name: idx_entity_fields_entity_field_type_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_entity_fields_entity_field_type_unique ON public.entity_fields USING btree (company_id, entity_id, entity_field_type_id) WHERE (entity_field_type_id IS NOT NULL);
+
+
+--
+-- Name: idx_entity_fields_field_type_link; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_entity_fields_field_type_link ON public.entity_fields USING btree (company_id, entity_field_type_id, entity_id) WHERE (entity_field_type_id IS NOT NULL);
+
+
+--
 -- Name: idx_entity_folders_type_parent_position; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6955,6 +7443,13 @@ CREATE INDEX idx_entity_folders_type_parent_position ON public.entity_folders US
 --
 
 CREATE UNIQUE INDEX idx_entity_types_company_name_unique ON public.entity_types USING btree (company_id, lower(btrim((name)::text)));
+
+
+--
+-- Name: idx_entity_types_company_system_key_unique; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_entity_types_company_system_key_unique ON public.entity_types USING btree (company_id, system_key) WHERE (system_key IS NOT NULL);
 
 
 --
@@ -7739,6 +8234,55 @@ CREATE TRIGGER trg_zz_raci_tabs_membership_changed AFTER INSERT ON public.compan
 --
 
 CREATE TRIGGER trg_zz_raci_tabs_setting_changed AFTER INSERT OR DELETE OR UPDATE ON public.resource_gvic_settings FOR EACH ROW EXECUTE FUNCTION public.mangorts_raci_tabs_policy_changed();
+
+
+--
+-- Name: entity_types trg_protect_action_item_entity_type; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_protect_action_item_entity_type BEFORE INSERT OR DELETE OR UPDATE ON public.entity_types FOR EACH ROW EXECUTE FUNCTION public.mangorts_protect_action_item_entity_type();
+
+
+--
+-- Name: entity_field_types trg_protect_action_item_field_type; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_protect_action_item_field_type BEFORE INSERT OR DELETE OR UPDATE ON public.entity_field_types FOR EACH ROW EXECUTE FUNCTION public.mangorts_protect_action_item_field_type();
+
+
+--
+-- Name: entity_fields trg_maintain_entity_field_template_link; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_maintain_entity_field_template_link BEFORE INSERT OR UPDATE OF company_id, entity_id, entity_field_type_id, field_type, value_jsonb ON public.entity_fields FOR EACH ROW EXECUTE FUNCTION public.mangorts_maintain_entity_field_template_link();
+
+
+--
+-- Name: company_memberships trg_clear_entity_person_fields_for_membership; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_clear_entity_person_fields_for_membership AFTER DELETE ON public.company_memberships FOR EACH ROW EXECUTE FUNCTION public.mangorts_clear_entity_person_fields_for_membership();
+
+
+--
+-- Name: entity_fields trg_protect_action_item_entity_field; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_protect_action_item_entity_field BEFORE INSERT OR DELETE OR UPDATE ON public.entity_fields FOR EACH ROW EXECUTE FUNCTION public.mangorts_protect_action_item_entity_field();
+
+
+--
+-- Name: entity_field_types trg_unlink_entity_fields_after_template_retype; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_unlink_entity_fields_after_template_retype AFTER UPDATE OF field_type ON public.entity_field_types FOR EACH ROW WHEN ((old.field_type IS DISTINCT FROM new.field_type)) EXECUTE FUNCTION public.mangorts_unlink_entity_fields_after_template_retype();
+
+
+--
+-- Name: action_item_huddle_relationships trg_validate_action_item_huddle_relationship; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_validate_action_item_huddle_relationship BEFORE INSERT OR UPDATE ON public.action_item_huddle_relationships FOR EACH ROW EXECUTE FUNCTION public.mangorts_validate_action_item_huddle_relationship();
 
 
 --
@@ -8798,6 +9342,22 @@ ALTER TABLE ONLY public.raci_tabs_items
 
 
 --
+-- Name: action_item_huddle_relationships action_item_huddle_relationships_entity_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.action_item_huddle_relationships
+    ADD CONSTRAINT action_item_huddle_relationships_entity_fkey FOREIGN KEY (company_id, entity_id) REFERENCES public.entities(company_id, entity_id) ON DELETE CASCADE;
+
+
+--
+-- Name: action_item_huddle_relationships action_item_huddle_relationships_huddle_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.action_item_huddle_relationships
+    ADD CONSTRAINT action_item_huddle_relationships_huddle_fkey FOREIGN KEY (company_id, huddle_logic_gate_id) REFERENCES public.huddle_logic_gates(company_id, huddle_logic_gate_id) ON DELETE CASCADE;
+
+
+--
 -- Name: entity_field_types entity_field_types_company_id_entity_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8819,6 +9379,14 @@ ALTER TABLE ONLY public.entity_field_types
 
 ALTER TABLE ONLY public.entity_fields
     ADD CONSTRAINT entity_fields_company_id_entity_id_fkey FOREIGN KEY (company_id, entity_id) REFERENCES public.entities(company_id, entity_id) ON DELETE CASCADE;
+
+
+--
+-- Name: entity_fields entity_fields_entity_field_type_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entity_fields
+    ADD CONSTRAINT entity_fields_entity_field_type_fkey FOREIGN KEY (company_id, entity_field_type_id) REFERENCES public.entity_field_types(company_id, entity_field_type_id) ON DELETE SET NULL (entity_field_type_id);
 
 
 --
@@ -8859,6 +9427,14 @@ ALTER TABLE ONLY public.entities
 
 ALTER TABLE ONLY public.entities
     ADD CONSTRAINT entities_company_id_entity_type_id_entity_folder_id_fkey FOREIGN KEY (company_id, entity_type_id, entity_folder_id) REFERENCES public.entity_folders(company_id, entity_type_id, entity_folder_id);
+
+
+--
+-- Name: entities entities_created_by_company_member_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.entities
+    ADD CONSTRAINT entities_created_by_company_member_fkey FOREIGN KEY (company_id, created_by_user_id) REFERENCES public.company_memberships(company_id, user_id) ON DELETE SET NULL (created_by_user_id);
 
 
 --

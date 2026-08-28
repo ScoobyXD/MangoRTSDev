@@ -895,20 +895,35 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
         requestJSON={async <T,>(path: string, init): Promise<T> => {
           previewRequests.push({ path, signal: init?.signal });
           if (previewShouldFail) throw new Error("This Entity is unavailable.");
+          if (path.includes("/users")) {
+            return { users: [
+              { company_id: "company-1", user_id: "user-creator", display_name: "Ada Creator", email: "ada@example.test" },
+              { company_id: "company-1", user_id: "user-owner", display_name: "Grace Owner", email: "grace@example.test" },
+            ] } as T;
+          }
           return {
             entity: {
               company_id: "company-1",
               entity_id: "entity exact/id",
               entity_type_id: "type-1",
-              entity_type_name: "Delivery",
+              entity_type_name: "Action Item",
               entity_folder_id: null,
               name: "Current Thailand delivery",
               position: 1000,
               revision: 1,
+              created_by_user_id: "user-creator",
               created_timestamp: "2026-08-27T00:00:00Z",
+              body_json: {
+                format: "mango-tiptap-json",
+                schema_version: 1,
+                document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Contact logistics today." }] }] },
+                annotations: [],
+              },
               entity_fields: [
-                { company_id: "company-1", entity_field_id: "field-2", entity_id: "entity exact/id", name: "Status", field_type: "text", value: "Arriving", position: 2000, created_timestamp: "", updated_timestamp: "" },
-                { company_id: "company-1", entity_field_id: "field-1", entity_id: "entity exact/id", name: "Delivered", field_type: "boolean", value: false, position: 1000, created_timestamp: "", updated_timestamp: "" },
+                { company_id: "company-1", entity_field_id: "field-2", entity_id: "entity exact/id", name: "Status", field_type: "choice", config: { options: [{ key: "in_progress", label: "In progress" }] }, value: "in_progress", position: 2000, created_timestamp: "", updated_timestamp: "" },
+                { company_id: "company-1", entity_field_id: "field-1", entity_id: "entity exact/id", name: "Delivered", field_type: "boolean", config: {}, value: false, position: 1000, created_timestamp: "", updated_timestamp: "" },
+                { company_id: "company-1", entity_field_id: "field-3", entity_id: "entity exact/id", name: "Analysis due date", field_type: "date", config: {}, value: "2026-08-31", position: 3000, created_timestamp: "", updated_timestamp: "" },
+                { company_id: "company-1", entity_field_id: "field-4", entity_id: "entity exact/id", name: "Person in charge", field_type: "person", config: {}, value: "user-owner", position: 4000, created_timestamp: "", updated_timestamp: "" },
               ],
             },
           } as T;
@@ -921,16 +936,24 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     await flushAsyncWork();
     const entityPreview = dom.window.document.querySelector<HTMLElement>('[data-mango-entity-reference-preview="true"]');
     assert.ok(entityPreview, "activating an Entity chip opens the shared detail preview");
-    assert.equal(entityPreview.getAttribute("aria-label"), "Entity details: Current Thailand delivery");
-    assert.match(entityPreview.textContent ?? "", /Delivery/);
+    assert.equal(entityPreview.getAttribute("aria-label"), "Action Item details: Current Thailand delivery");
+    assert.match(entityPreview.textContent ?? "", /Action Item/);
+    assert.match(entityPreview.textContent ?? "", /Contact logistics today\./);
+    assert.match(entityPreview.textContent ?? "", /Created byAda Creator/);
+    assert.match(entityPreview.textContent ?? "", /Created date08\/27\/2026/);
     assert.match(entityPreview.textContent ?? "", /DeliveredNo/);
-    assert.match(entityPreview.textContent ?? "", /StatusArriving/);
-    assert.equal(previewRequests.length, 1);
+    assert.match(entityPreview.textContent ?? "", /StatusIn progress/);
+    assert.match(entityPreview.textContent ?? "", /Analysis due date08\/31\/2026/);
+    assert.match(entityPreview.textContent ?? "", /Person in chargeGrace Owner/);
+    assert.doesNotMatch(entityPreview.textContent ?? "", /user-(?:creator|owner)/);
+    assert.equal(previewRequests.length, 2);
     const previewURL = new URL(previewRequests[0].path, "https://mango.test");
     assert.equal(previewURL.pathname, "/v1/entities/entity%20exact%2Fid");
     assert.equal(previewURL.searchParams.get("company_id"), "company-1");
     assert.ok(previewRequests[0].signal, "the exact Entity detail read is cancellable");
-    const closeEntityPreview = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Close Entity details"]');
+    assert.equal(new URL(previewRequests[1].path, "https://mango.test").pathname, "/v1/companies/company-1/users");
+    assert.ok(previewRequests[1].signal, "the company-user display-name read is cancellable");
+    const closeEntityPreview = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Close Action Item details"]');
     assert.ok(closeEntityPreview);
     await act(async () => closeEntityPreview.click());
     assert.equal(dom.window.document.querySelector('[data-mango-entity-reference-preview="true"]'), null);

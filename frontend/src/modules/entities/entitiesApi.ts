@@ -1,14 +1,26 @@
 import { apiFetchJSON } from "../../auth/cognitoAuth.js";
 import type { BoundRequestJSON } from "../api/requestJSON.js";
 
-export const ENTITY_FIELD_TYPES = ["text", "number", "date", "boolean"] as const;
+export const ENTITY_FIELD_TYPES = ["text", "number", "date", "boolean", "choice", "color", "person"] as const;
 
 export type EntityFieldDataType = (typeof ENTITY_FIELD_TYPES)[number];
 export type EntityFieldValue = string | number | boolean | null;
 
+export type EntityFieldTypeConfigOption = {
+  key: string;
+  label: string;
+  color?: string;
+};
+
+export type EntityFieldTypeConfig = {
+  default?: string | null;
+  options?: EntityFieldTypeConfigOption[];
+};
+
 export type EntityType = {
   company_id: string;
   entity_type_id: string;
+  system_key?: string;
   name: string;
   created_timestamp: string;
   updated_timestamp: string;
@@ -30,8 +42,10 @@ export type EntityFieldType = {
   entity_field_type_id: string;
   entity_type_id: string;
   entity_folder_id?: string | null;
+  system_key?: string;
   name: string;
   field_type: EntityFieldDataType;
+  config: EntityFieldTypeConfig;
   position: number;
   created_timestamp: string;
   updated_timestamp: string;
@@ -42,6 +56,7 @@ export type EntitySummary = {
   entity_id: string;
   entity_type_id: string;
   entity_type_name?: string;
+  created_by_user_id?: string | null;
   entity_folder_id?: string | null;
   name: string;
   position: number;
@@ -54,8 +69,11 @@ export type EntityField = {
   company_id: string;
   entity_field_id: string;
   entity_id: string;
+  entity_field_type_id?: string | null;
+  system_key?: string;
   name: string;
   field_type: EntityFieldDataType;
+  config: EntityFieldTypeConfig;
   value: EntityFieldValue;
   position: number;
   created_timestamp: string;
@@ -67,6 +85,8 @@ export type Entity = EntitySummary & {
   body_json?: unknown;
   entity_fields: EntityField[];
 };
+
+export type ActionItemColor = "yellow" | "red";
 
 export type EntitySearchInput = {
   companyID: string;
@@ -103,6 +123,44 @@ export async function getEntityDetail(
     { cache: "no-store", signal: input.signal },
   );
   return response.entity;
+}
+
+export async function createActionItem(
+  requestJSON: BoundRequestJSON,
+  input: {
+    companyID: string;
+    bodyText: string;
+    name?: string;
+    color: ActionItemColor | null;
+    huddleNodeID?: string;
+  },
+): Promise<Entity> {
+  const response = await requestJSON<{ action_item: Entity }>("/v1/action-items", {
+    method: "POST",
+    json: {
+      company_id: input.companyID,
+      body_text: input.bodyText,
+      ...(input.name?.trim() ? { name: input.name.trim() } : {}),
+      color: input.color,
+      ...(input.huddleNodeID?.trim() ? { huddle_node_id: input.huddleNodeID.trim() } : {}),
+    },
+  });
+  return response.action_item;
+}
+
+export async function listHuddleNodeActionItems(
+  requestJSON: BoundRequestJSON,
+  input: { companyID: string; huddleNodeID: string; signal?: AbortSignal },
+): Promise<Entity[]> {
+  const params = new URLSearchParams({
+    company_id: input.companyID,
+    huddle_node_id: input.huddleNodeID,
+  });
+  const response = await requestJSON<{ action_items?: Entity[] }>(`/v1/action-items?${params.toString()}`, {
+    cache: "no-store",
+    signal: input.signal,
+  });
+  return response.action_items ?? [];
 }
 
 export async function listEntityTypes(companyID: string): Promise<EntityType[]> {
@@ -194,9 +252,10 @@ export async function createEntityFieldType(input: {
   entityFolderID?: string | null;
   name: string;
   fieldType: EntityFieldDataType;
+  config?: EntityFieldTypeConfig;
   position?: number;
-}): Promise<EntityFieldType> {
-  const response = await apiFetchJSON<{ entity_field_type: EntityFieldType }>("/v1/entity-field-types", {
+}, requestJSON: BoundRequestJSON = apiFetchJSON): Promise<EntityFieldType> {
+  const response = await requestJSON<{ entity_field_type: EntityFieldType }>("/v1/entity-field-types", {
     method: "POST",
     body: JSON.stringify({
       company_id: input.companyID,
@@ -204,6 +263,7 @@ export async function createEntityFieldType(input: {
       entity_folder_id: input.entityFolderID ?? null,
       name: input.name,
       field_type: input.fieldType,
+      config: input.config,
       position: input.position,
     }),
   });
@@ -216,15 +276,17 @@ export async function updateEntityFieldType(input: {
   entityFolderID?: string | null;
   name?: string;
   fieldType?: EntityFieldDataType;
+  config?: EntityFieldTypeConfig;
   position?: number;
-}): Promise<EntityFieldType> {
-  const response = await apiFetchJSON<{ entity_field_type: EntityFieldType }>(`/v1/entity-field-types/${encodeURIComponent(input.entityFieldTypeID)}`, {
+}, requestJSON: BoundRequestJSON = apiFetchJSON): Promise<EntityFieldType> {
+  const response = await requestJSON<{ entity_field_type: EntityFieldType }>(`/v1/entity-field-types/${encodeURIComponent(input.entityFieldTypeID)}`, {
     method: "PUT",
     body: JSON.stringify({
       company_id: input.companyID,
       entity_folder_id: input.entityFolderID,
       name: input.name,
       field_type: input.fieldType,
+      config: input.config,
       position: input.position,
     }),
   });

@@ -13,10 +13,20 @@ import (
 )
 
 func TestEntityHandlersCRUDAndExplicitRootMoves(t *testing.T) {
-	const companyID = "11111111-1111-1111-1111-111111111111"
 	repo := store.NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("entities-test-user", "entities@example.com", "Entities Test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	company, err := repo.CreateCompany("Entities Test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	companyID := company.CompanyID
+	if _, err := repo.AddCompanyMembership("entities-test-user", companyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
 	handler := NewServer(repo).Routes()
-	user := domain.User{UserID: "entities-test-user", Email: "entities@example.com", DisplayName: "Entities Test"}
 
 	typeResponse := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPost, "/v1/entity-types", map[string]any{
 		"company_id": companyID,
@@ -29,6 +39,20 @@ func TestEntityHandlersCRUDAndExplicitRootMoves(t *testing.T) {
 		EntityType domain.EntityType `json:"entity_type"`
 	}
 	decodeEntitiesHTTPResponse(t, typeResponse, &createdType)
+	for _, invalidKey := range []string{"Open", "open state", "open-state"} {
+		invalidOptionResponse := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPost, "/v1/entity-field-types", map[string]any{
+			"company_id":     companyID,
+			"entity_type_id": createdType.EntityType.EntityTypeID,
+			"name":           "Invalid option",
+			"field_type":     "choice",
+			"config": map[string]any{
+				"options": []map[string]string{{"key": invalidKey, "label": "Open"}},
+			},
+		})
+		if invalidOptionResponse.Code != http.StatusBadRequest {
+			t.Fatalf("invalid option key %q status=%d body=%s, want 400", invalidKey, invalidOptionResponse.Code, invalidOptionResponse.Body.String())
+		}
+	}
 
 	folderResponse := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPost, "/v1/entity-folders", map[string]any{
 		"company_id":              companyID,
@@ -78,7 +102,7 @@ func TestEntityHandlersCRUDAndExplicitRootMoves(t *testing.T) {
 		Entity domain.Entity `json:"entity"`
 	}
 	decodeEntitiesHTTPResponse(t, entityResponse, &createdEntity)
-	if createdEntity.Entity.Position != 9 || len(createdEntity.Entity.EntityFields) != 1 || createdEntity.Entity.EntityFields[0].Name != "Status" {
+	if createdEntity.Entity.Position != 9 || createdEntity.Entity.CreatedByUserID != user.UserID || len(createdEntity.Entity.EntityFields) != 1 || createdEntity.Entity.EntityFields[0].Name != "Status" {
 		t.Fatalf("created entity=%+v", createdEntity.Entity)
 	}
 	blankEntityMove := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPut, "/v1/entities/"+createdEntity.Entity.EntityID, map[string]any{

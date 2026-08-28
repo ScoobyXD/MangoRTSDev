@@ -293,6 +293,11 @@ func (r *MemoryRepo) DeleteHuddleLogicGate(companyID, id, userID string) error {
 			delete(r.huddleLogicGateRelationships, relationshipKey)
 		}
 	}
+	for relationshipKey, relationship := range r.actionItemHuddleRelationships {
+		if relationship.CompanyID == companyID && relationship.HuddleLogicGateID == id {
+			delete(r.actionItemHuddleRelationships, relationshipKey)
+		}
+	}
 	for ik, p := range r.huddleExplorerItems {
 		if p.CompanyID == companyID && p.ResourceType == EntityTypeHuddleLogicGate && p.ResourceID == id {
 			delete(r.huddleExplorerItems, ik)

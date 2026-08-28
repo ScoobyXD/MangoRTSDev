@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"maps"
 	"miraeopus/backend/internal/domain"
 	"slices"
 	"strings"
@@ -163,6 +164,8 @@ func (r *MemoryRepo) CreateCompany(name string) (domain.Company, error) {
 	defer r.mu.Unlock()
 
 	snapshot := r.snapshotProcessMapMutationLocked()
+	entityTypesSnapshot := maps.Clone(r.entityTypes)
+	entityFieldTypesSnapshot := maps.Clone(r.entityFieldTypes)
 	now := time.Now().UTC()
 	company := domain.Company{
 		CompanyID:        newUUIDv7String(),
@@ -175,6 +178,14 @@ func (r *MemoryRepo) CreateCompany(name string) (domain.Company, error) {
 	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(company.CompanyID)
 	if err := r.syncMemoryDefaultFolderProcessMapPlacementsLocked(company.CompanyID, defaultFolders); err != nil {
 		r.restoreProcessMapMutationLocked(snapshot)
+		r.entityTypes = entityTypesSnapshot
+		r.entityFieldTypes = entityFieldTypesSnapshot
+		return domain.Company{}, err
+	}
+	if err := r.ensureActionItemDefaultsLocked(company.CompanyID); err != nil {
+		r.restoreProcessMapMutationLocked(snapshot)
+		r.entityTypes = entityTypesSnapshot
+		r.entityFieldTypes = entityFieldTypesSnapshot
 		return domain.Company{}, err
 	}
 	return company, nil
@@ -222,6 +233,8 @@ func (r *MemoryRepo) EnsureCompany(companyID, name string) domain.Company {
 	defer r.mu.Unlock()
 
 	snapshot := r.snapshotProcessMapMutationLocked()
+	entityTypesSnapshot := maps.Clone(r.entityTypes)
+	entityFieldTypesSnapshot := maps.Clone(r.entityFieldTypes)
 	now := time.Now().UTC()
 	company, ok := r.companies[companyID]
 	if !ok {
@@ -243,7 +256,17 @@ func (r *MemoryRepo) EnsureCompany(companyID, name string) domain.Company {
 		// deterministic bootstrap/test setup. Return an unmistakable empty value
 		// after restoring every mutation if existing malformed map state blocks it.
 		r.restoreProcessMapMutationLocked(snapshot)
+		r.entityTypes = entityTypesSnapshot
+		r.entityFieldTypes = entityFieldTypesSnapshot
 		return domain.Company{}
+	}
+	if cleanUUIDText(companyID) == companyID {
+		if err := r.ensureActionItemDefaultsLocked(companyID); err != nil {
+			r.restoreProcessMapMutationLocked(snapshot)
+			r.entityTypes = entityTypesSnapshot
+			r.entityFieldTypes = entityFieldTypesSnapshot
+			return domain.Company{}
+		}
 	}
 	return company
 }
@@ -597,6 +620,8 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	membershipsSnapshot := cloneMemoryMap(r.memberships)
 	userGroupMembersSnapshot := cloneMemoryMap(r.userGroupMembers)
 	entityPermissionsSnapshot := cloneMemoryMap(r.entityPermissions)
+	entitiesSnapshot := cloneMemoryMap(r.entities)
+	entityFieldsSnapshot := cloneMemoryMap(r.entityFields)
 	nodesSnapshot := cloneMemoryMap(r.nodes)
 	nodeLogicGateAssignmentsSnapshot := cloneMemoryMap(r.nodeLogicGateAssignments)
 	logicGateRACISnapshot := cloneMemorySliceMap(r.logicGateRACI)
@@ -619,6 +644,8 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		r.memberships = membershipsSnapshot
 		r.userGroupMembers = userGroupMembersSnapshot
 		r.entityPermissions = entityPermissionsSnapshot
+		r.entities = entitiesSnapshot
+		r.entityFields = entityFieldsSnapshot
 		r.nodes = nodesSnapshot
 		r.nodeLogicGateAssignments = nodeLogicGateAssignmentsSnapshot
 		r.logicGateRACI = logicGateRACISnapshot
@@ -650,6 +677,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	}
 
 	r.clearLogicGateAssignmentMemberReferencesLocked(companyID, userID)
+	r.clearEntityMemberReferencesLocked(companyID, userID)
 	delete(r.memberships, membershipKey(companyID, userID))
 	for folderKey, folder := range r.raciTabFolders {
 		if folder.CompanyID == companyID && folder.UserID == userID {
@@ -741,6 +769,7 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	r.clearLogicGateAssignmentMemberReferencesLocked("", userID)
 	for membershipKeyValue, membership := range r.memberships {
 		if membership.UserID == userID {
+			r.clearEntityMemberReferencesLocked(membership.CompanyID, userID)
 			delete(r.memberships, membershipKeyValue)
 		}
 	}

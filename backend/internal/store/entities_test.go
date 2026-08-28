@@ -17,6 +17,28 @@ const (
 	entitiesTestTypeID    = "22222222-2222-2222-2222-222222222222"
 )
 
+func TestMemoryEntitiesRejectInvalidOptionKeys(t *testing.T) {
+	repo := NewMemoryRepo()
+	entityType, err := repo.CreateEntityType(EntityTypeInput{CompanyID: entitiesTestCompanyID, EntityTypeID: entitiesTestTypeID, Name: "Delivery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"Open", "open state", "open-state", "_open", strings.Repeat("a", EntityNameMaxLength+1)} {
+		config, err := json.Marshal(map[string]any{
+			"options": []map[string]string{{"key": key, "label": "Open"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.CreateEntityFieldType(EntityFieldTypeInput{
+			CompanyID: entityType.CompanyID, EntityTypeID: entityType.EntityTypeID,
+			Name: "Invalid option", FieldType: EntityFieldTypeChoice, Config: config, ConfigSet: true,
+		}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("option key %q error = %v, want ErrInvalid", key, err)
+		}
+	}
+}
+
 func TestMemoryEntitiesResolveAndSnapshotInheritedFieldTypes(t *testing.T) {
 	repo := NewMemoryRepo()
 	if _, err := repo.CreateEntityType(EntityTypeInput{CompanyID: entitiesTestCompanyID, EntityTypeID: entitiesTestTypeID, Name: "Delivery"}); err != nil {
@@ -112,8 +134,10 @@ func TestMemoryEntitiesFieldValuesUniquenessCyclesAndDeleteRules(t *testing.T) {
 	if _, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: entitiesTestCompanyID, EntityID: entity.EntityID, EntityFieldID: field.EntityFieldID, FieldType: EntityFieldTypeDate, FieldTypeSet: true}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: entitiesTestCompanyID, EntityID: entity.EntityID, EntityFieldID: field.EntityFieldID, Value: json.RawMessage(`"2026-02-30"`), ValueSet: true}); !errors.Is(err, ErrInvalid) {
-		t.Fatalf("invalid date error = %v, want ErrInvalid", err)
+	for _, invalidDate := range []json.RawMessage{json.RawMessage(`"2026-02-30"`), json.RawMessage(`"08/28/2026"`), json.RawMessage(`"0000-01-01"`)} {
+		if _, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: entitiesTestCompanyID, EntityID: entity.EntityID, EntityFieldID: field.EntityFieldID, Value: invalidDate, ValueSet: true}); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("invalid date %s error = %v, want ErrInvalid", invalidDate, err)
+		}
 	}
 	if err := repo.DeleteEntityFolder(entitiesTestCompanyID, parent.EntityFolderID); !errors.Is(err, ErrConflict) {
 		t.Fatalf("delete parent error = %v, want ErrConflict", err)
@@ -271,7 +295,7 @@ func TestEntitiesSchemaReplacesLegacyEntityFields(t *testing.T) {
 	}
 }
 
-func TestPostgresEntitiesUseSetBasedFolderAncestryAndFieldSnapshot(t *testing.T) {
+func TestPostgresEntitiesUseSetBasedFolderAncestryAndLiveTemplateLinks(t *testing.T) {
 	raw, err := os.ReadFile("postgres_entities.go")
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +305,8 @@ func TestPostgresEntitiesUseSetBasedFolderAncestryAndFieldSnapshot(t *testing.T)
 		"with recursive ancestry as",
 		"parent.entity_folder_id=any(ancestry.path)",
 		"entity_folder_id::text=any($3::text[])",
-		"from unnest($3::text[], $4::text[], $5::text[]) with ordinality",
+		"entity_field_type_id",
+		"coalesce(field_type.config_jsonb, '{}'::jsonb)",
 	} {
 		if !strings.Contains(source, fragment) {
 			t.Fatalf("PostgreSQL Entities store missing set-based contract %q", fragment)

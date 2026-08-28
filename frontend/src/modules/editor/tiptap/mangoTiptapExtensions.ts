@@ -1189,6 +1189,14 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
             parseHTML: (element) => element.getAttribute("data-mango-email-shared-inbox-id"),
             renderHTML: () => ({}),
           },
+          actionItemColor: {
+            default: null,
+            parseHTML: (element) => {
+              const value = element.getAttribute("data-mango-action-item-color");
+              return value === "yellow" || value === "red" ? value : null;
+            },
+            renderHTML: () => ({}),
+          },
         };
       },
       parseHTML() {
@@ -1198,6 +1206,10 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
         const type = String(node.attrs.entityType || "node");
         const entityType = type === "logic_gate" || type === "project" || type === "entity" || type === "email_message" ? type : "node";
         const label = String(node.attrs.label || "Entity");
+        const actionItemColor = entityType === "entity" && (node.attrs.actionItemColor === "yellow" || node.attrs.actionItemColor === "red")
+          ? node.attrs.actionItemColor as "yellow" | "red"
+          : null;
+        const actionItemSeverity = actionItemColor === "yellow" ? "Yellow" : actionItemColor === "red" ? "Red" : "";
         const ownerDocument = globalThis.document;
         const icon = ownerDocument
           ? createEditorEntityIconElement(ownerDocument, entityType)
@@ -1207,6 +1219,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           "data-mango-entity-type": entityType,
           "data-mango-entity-id": node.attrs.entityId,
           "data-mango-entity-label": label,
+          "data-mango-action-item-color": actionItemColor || undefined,
           ...(entityType === "email_message" ? {
             "data-mango-email-message-id": node.attrs.emailMessageId || undefined,
             "data-mango-email-thread-id": node.attrs.emailThreadId || undefined,
@@ -1215,9 +1228,14 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           } : {}),
           role: "link",
           tabindex: "0",
-          "aria-label": `Open ${editorEntityTypeLabel(entityType)} ${label}`,
-          class: `mango-editor-entity-link mango-editor-entity-link--${entityType}`,
-        }), icon, ["span", { class: "mango-editor-entity-label" }, label]];
+          "aria-label": actionItemColor
+            ? `Open ${actionItemSeverity} Action Item ${label}`
+            : `Open ${editorEntityTypeLabel(entityType)} ${label}`,
+          title: actionItemColor ? `${actionItemSeverity} Action Item: ${label}` : undefined,
+          class: `mango-editor-entity-link mango-editor-entity-link--${entityType}${actionItemColor ? ` mango-editor-action-item mango-editor-action-item--${actionItemColor}` : ""}`,
+        }), icon, ["span", { class: "mango-editor-entity-label" }, label], ...(actionItemColor
+          ? [["span", { class: "mango-editor-action-item-severity", "aria-hidden": "true" }, actionItemSeverity]]
+          : [])];
       },
     }),
     options.attachmentImageExtension ?? MangoAttachmentImage,

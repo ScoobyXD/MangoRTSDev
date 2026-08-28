@@ -21,6 +21,7 @@ test("Huddle column dividers resize only their neighboring columns and preserve 
 test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, RACI controls, icon actions, and raised sidebar rows", () => {
   const page = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleLogicGatePage.tsx"), "utf8");
   const surface = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleResourceSurface.tsx"), "utf8");
+  const actionItems = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleActionItemsPanel.tsx"), "utf8");
   const cards = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleLogicGateCards.tsx"), "utf8");
   const kpis = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/LogicGateKPISection.tsx"), "utf8");
   const kpiIcon = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/KPIIcon.tsx"), "utf8");
@@ -39,6 +40,11 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.match(surface, /lockMode/);
   assert.match(surface, /linkTargetTypes=\{\["logic_gate"\]\}/);
   assert.match(surface, /data-huddle-node-snapshot="true"/);
+  assert.match(surface, /<HuddleActionItemsPanel/);
+  assert.match(actionItems, /data-huddle-action-items="live"/);
+  assert.match(actionItems, /<UniversalGroupingControls/);
+  assert.match(actionItems, /huddleNodeID/);
+  assert.match(actionItems, /openEditorEntityLink\(\{/);
   assert.match(cards, /data-huddle-logic-gate-card/);
   assert.match(cards, /data-huddle-kpi-card/);
   assert.match(cards, /onClick=\{\(\) => onOpenLogicGate\(item\)\}/);

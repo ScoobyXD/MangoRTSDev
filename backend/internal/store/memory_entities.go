@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -61,6 +62,9 @@ func (r *MemoryRepo) UpdateEntityType(input EntityTypeInput) (domain.EntityType,
 	if !exists {
 		return domain.EntityType{}, ErrNotFound
 	}
+	if item.SystemKey == ActionItemEntityTypeSystemKey {
+		return domain.EntityType{}, ErrConflict
+	}
 	for _, candidate := range r.entityTypes {
 		if candidate.CompanyID == normalized.CompanyID && candidate.EntityTypeID != normalized.EntityTypeID && strings.EqualFold(strings.TrimSpace(candidate.Name), normalized.Name) {
 			return domain.EntityType{}, ErrAlreadyExists
@@ -82,6 +86,9 @@ func (r *MemoryRepo) DeleteEntityType(companyID, entityTypeID string) error {
 	itemKey := key(companyID, entityTypeID)
 	if _, exists := r.entityTypes[itemKey]; !exists {
 		return ErrNotFound
+	}
+	if r.entityTypes[itemKey].SystemKey == ActionItemEntityTypeSystemKey {
+		return ErrConflict
 	}
 	for _, entity := range r.entities {
 		if entity.CompanyID == companyID && entity.EntityTypeID == entityTypeID {
@@ -251,6 +258,9 @@ func (r *MemoryRepo) CreateEntityFieldType(input EntityFieldTypeInput) (domain.E
 	if err := r.validateEntityFieldTypeFolderLocked(normalized.CompanyID, normalized.EntityTypeID, normalized.EntityFolderID); err != nil {
 		return domain.EntityFieldType{}, err
 	}
+	if normalized.EntityTypeID == ActionItemEntityTypeID && isReservedActionItemFieldName(normalized.Name) {
+		return domain.EntityFieldType{}, ErrConflict
+	}
 	if r.entityFieldTypeNameExistsLocked(normalized.CompanyID, normalized.EntityTypeID, normalized.EntityFolderID, normalized.Name, "") {
 		return domain.EntityFieldType{}, ErrAlreadyExists
 	}
@@ -258,7 +268,7 @@ func (r *MemoryRepo) CreateEntityFieldType(input EntityFieldTypeInput) (domain.E
 		normalized.Position = r.nextEntityFieldTypePositionLocked(normalized.CompanyID, normalized.EntityTypeID, normalized.EntityFolderID)
 	}
 	now := time.Now().UTC()
-	item := domain.EntityFieldType{CompanyID: normalized.CompanyID, EntityFieldTypeID: normalized.EntityFieldTypeID, EntityTypeID: normalized.EntityTypeID, EntityFolderID: cloneStringPointer(normalized.EntityFolderID), Name: normalized.Name, FieldType: normalized.FieldType, Position: normalized.Position, CreatedTimestamp: now, UpdatedTimestamp: now}
+	item := domain.EntityFieldType{CompanyID: normalized.CompanyID, EntityFieldTypeID: normalized.EntityFieldTypeID, EntityTypeID: normalized.EntityTypeID, EntityFolderID: cloneStringPointer(normalized.EntityFolderID), Name: normalized.Name, FieldType: normalized.FieldType, Config: append([]byte(nil), normalized.Config...), Position: normalized.Position, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.entityFieldTypes[key(item.CompanyID, item.EntityFieldTypeID)] = item
 	return cloneEntityFieldType(item), nil
 }
@@ -275,6 +285,10 @@ func (r *MemoryRepo) UpdateEntityFieldType(input EntityFieldTypeInput) (domain.E
 	if !exists {
 		return domain.EntityFieldType{}, ErrNotFound
 	}
+	isRequiredActionItemFieldType := item.EntityTypeID == ActionItemEntityTypeID && isRequiredActionItemFieldSystemKey(item.SystemKey)
+	if isRequiredActionItemFieldType && (normalized.NameSet || normalized.FieldTypeSet || normalized.EntityFolderSet) {
+		return domain.EntityFieldType{}, ErrConflict
+	}
 	nextFolder := item.EntityFolderID
 	if normalized.EntityFolderSet {
 		if err := r.validateEntityFieldTypeFolderLocked(item.CompanyID, item.EntityTypeID, normalized.EntityFolderID); err != nil {
@@ -286,19 +300,65 @@ func (r *MemoryRepo) UpdateEntityFieldType(input EntityFieldTypeInput) (domain.E
 	if normalized.NameSet {
 		nextName = normalized.Name
 	}
+	if item.EntityTypeID == ActionItemEntityTypeID && !isRequiredActionItemFieldSystemKey(item.SystemKey) && isReservedActionItemFieldName(nextName) {
+		return domain.EntityFieldType{}, ErrConflict
+	}
 	if r.entityFieldTypeNameExistsLocked(item.CompanyID, item.EntityTypeID, nextFolder, nextName, item.EntityFieldTypeID) {
 		return domain.EntityFieldType{}, ErrAlreadyExists
 	}
+	nextFieldType := item.FieldType
+	if normalized.FieldTypeSet {
+		nextFieldType = normalized.FieldType
+	}
+	fieldTypeChanged := nextFieldType != item.FieldType
+	nextConfig := item.Config
+	if normalized.ConfigSet {
+		nextConfig = normalized.Config
+	}
+	canonicalConfig, err := normalizeEntityFieldTypeConfig(nextFieldType, nextConfig)
+	if err != nil {
+		return domain.EntityFieldType{}, err
+	}
+	if isRequiredActionItemFieldType {
+		if err := validateRequiredActionItemFieldConfig(item.SystemKey, nextFieldType, canonicalConfig); err != nil {
+			return domain.EntityFieldType{}, err
+		}
+	}
 	item.EntityFolderID = cloneStringPointer(nextFolder)
 	item.Name = nextName
-	if normalized.FieldTypeSet {
-		item.FieldType = normalized.FieldType
-	}
+	item.FieldType = nextFieldType
+	item.Config = canonicalConfig
 	if normalized.PositionSet {
 		item.Position = normalized.Position
 	}
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.entityFieldTypes[itemKey] = item
+	defaultValue, err := entityFieldTypeDefaultValue(item.FieldType, item.Config)
+	if err != nil {
+		return domain.EntityFieldType{}, err
+	}
+	for fieldKey, field := range r.entityFields {
+		if field.CompanyID != item.CompanyID || optionalEntityIDValue(field.EntityFieldTypeID) != item.EntityFieldTypeID {
+			continue
+		}
+		if fieldTypeChanged {
+			field.EntityFieldTypeID = nil
+			field.SystemKey = ""
+			field.Config = json.RawMessage(`{}`)
+			field.UpdatedTimestamp = item.UpdatedTimestamp
+			r.entityFields[fieldKey] = field
+			continue
+		}
+		if field.Value == nil || (field.FieldType != EntityFieldTypeChoice && field.FieldType != EntityFieldTypeColor) {
+			continue
+		}
+		if _, err := normalizeEntityFieldValueForConfig(field.FieldType, field.Value, item.Config); err == nil {
+			continue
+		}
+		field.Value = append([]byte(nil), defaultValue...)
+		field.UpdatedTimestamp = item.UpdatedTimestamp
+		r.entityFields[fieldKey] = field
+	}
 	return cloneEntityFieldType(item), nil
 }
 
@@ -310,8 +370,20 @@ func (r *MemoryRepo) DeleteEntityFieldType(companyID, entityFieldTypeID string) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	itemKey := key(companyID, entityFieldTypeID)
-	if _, exists := r.entityFieldTypes[itemKey]; !exists {
+	item, exists := r.entityFieldTypes[itemKey]
+	if !exists {
 		return ErrNotFound
+	}
+	if item.EntityTypeID == ActionItemEntityTypeID && isRequiredActionItemFieldSystemKey(item.SystemKey) {
+		return ErrConflict
+	}
+	for fieldKey, field := range r.entityFields {
+		if field.CompanyID == companyID && optionalEntityIDValue(field.EntityFieldTypeID) == entityFieldTypeID {
+			field.EntityFieldTypeID = nil
+			field.SystemKey = ""
+			field.Config = json.RawMessage(`{}`)
+			r.entityFields[fieldKey] = field
+		}
 	}
 	delete(r.entityFieldTypes, itemKey)
 	return nil
@@ -343,7 +415,7 @@ func (r *MemoryRepo) ListEntities(ctx context.Context, query EntityListQuery) ([
 		if !exists {
 			continue
 		}
-		items = append(items, domain.EntitySummary{CompanyID: item.CompanyID, EntityID: item.EntityID, EntityTypeID: item.EntityTypeID, EntityTypeName: typeItem.Name, EntityFolderID: cloneStringPointer(item.EntityFolderID), Name: item.Name, Position: item.Position, Revision: item.Revision, CreatedTimestamp: item.CreatedTimestamp, UpdatedTimestamp: item.UpdatedTimestamp})
+		items = append(items, domain.EntitySummary{CompanyID: item.CompanyID, EntityID: item.EntityID, EntityTypeID: item.EntityTypeID, EntityTypeName: typeItem.Name, EntityFolderID: cloneStringPointer(item.EntityFolderID), Name: item.Name, Position: item.Position, Revision: item.Revision, CreatedByUserID: item.CreatedByUserID, CreatedTimestamp: item.CreatedTimestamp, UpdatedTimestamp: item.UpdatedTimestamp})
 	}
 	sortEntitySummaries(items)
 	if normalized.AllForType {
@@ -376,6 +448,11 @@ func (r *MemoryRepo) CreateEntity(input EntityInput) (domain.Entity, error) {
 	if _, exists := r.entities[key(normalized.CompanyID, normalized.EntityID)]; exists {
 		return domain.Entity{}, ErrAlreadyExists
 	}
+	if normalized.CreatedByUserID != "" {
+		if _, exists := r.memberships[membershipKey(normalized.CompanyID, normalized.CreatedByUserID)]; !exists {
+			return domain.Entity{}, ErrPrincipalNotInCompany
+		}
+	}
 	if err := r.validateEntityFolderForTypeLocked(normalized.CompanyID, normalized.EntityTypeID, normalized.EntityFolderID); err != nil {
 		return domain.Entity{}, err
 	}
@@ -387,10 +464,16 @@ func (r *MemoryRepo) CreateEntity(input EntityInput) (domain.Entity, error) {
 		return domain.Entity{}, err
 	}
 	now := time.Now().UTC()
-	item := domain.Entity{CompanyID: normalized.CompanyID, EntityID: normalized.EntityID, EntityTypeID: normalized.EntityTypeID, EntityTypeName: typeItem.Name, EntityFolderID: cloneStringPointer(normalized.EntityFolderID), Name: normalized.Name, Position: normalized.Position, BodyJSON: append([]byte(nil), normalized.BodyJSON...), Revision: 0, CreatedTimestamp: now, UpdatedTimestamp: now}
+	item := domain.Entity{CompanyID: normalized.CompanyID, EntityID: normalized.EntityID, EntityTypeID: normalized.EntityTypeID, EntityTypeName: typeItem.Name, EntityFolderID: cloneStringPointer(normalized.EntityFolderID), Name: normalized.Name, Position: normalized.Position, BodyJSON: append([]byte(nil), normalized.BodyJSON...), Revision: 0, CreatedByUserID: normalized.CreatedByUserID, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.entities[key(item.CompanyID, item.EntityID)] = item
 	for position, fieldType := range resolvedFieldTypes {
-		field := domain.EntityField{CompanyID: item.CompanyID, EntityFieldID: newUUIDv7String(), EntityID: item.EntityID, Name: fieldType.Name, FieldType: fieldType.FieldType, Position: position, CreatedTimestamp: now, UpdatedTimestamp: now}
+		value, err := entityFieldTypeDefaultValue(fieldType.FieldType, fieldType.Config)
+		if err != nil {
+			delete(r.entities, key(item.CompanyID, item.EntityID))
+			return domain.Entity{}, err
+		}
+		fieldTypeID := fieldType.EntityFieldTypeID
+		field := domain.EntityField{CompanyID: item.CompanyID, EntityFieldID: newUUIDv7String(), EntityID: item.EntityID, EntityFieldTypeID: &fieldTypeID, SystemKey: fieldType.SystemKey, Name: fieldType.Name, FieldType: fieldType.FieldType, Config: append([]byte(nil), fieldType.Config...), Value: append([]byte(nil), value...), Position: position, CreatedTimestamp: now, UpdatedTimestamp: now}
 		r.entityFields[key(field.CompanyID, field.EntityFieldID)] = field
 	}
 	return r.entityDetailLocked(item), nil
@@ -454,12 +537,21 @@ func (r *MemoryRepo) DeleteEntity(companyID, entityID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	itemKey := key(companyID, entityID)
-	if _, exists := r.entities[itemKey]; !exists {
+	item, exists := r.entities[itemKey]
+	if !exists {
 		return ErrNotFound
+	}
+	if item.EntityTypeID == ActionItemEntityTypeID {
+		return ErrConflict
 	}
 	for fieldKey, field := range r.entityFields {
 		if field.CompanyID == companyID && field.EntityID == entityID {
 			delete(r.entityFields, fieldKey)
+		}
+	}
+	for relationshipKey, relationship := range r.actionItemHuddleRelationships {
+		if relationship.CompanyID == companyID && relationship.EntityID == entityID {
+			delete(r.actionItemHuddleRelationships, relationshipKey)
 		}
 	}
 	delete(r.entities, itemKey)
@@ -489,7 +581,14 @@ func (r *MemoryRepo) CreateEntityField(input EntityFieldInput) (domain.EntityFie
 		normalized.Position = r.nextEntityFieldPositionLocked(normalized.CompanyID, normalized.EntityID)
 	}
 	now := time.Now().UTC()
-	item := domain.EntityField{CompanyID: normalized.CompanyID, EntityFieldID: normalized.EntityFieldID, EntityID: normalized.EntityID, Name: normalized.Name, FieldType: normalized.FieldType, Value: append([]byte(nil), normalized.Value...), Position: normalized.Position, CreatedTimestamp: now, UpdatedTimestamp: now}
+	value, err := normalizeEntityFieldValueForConfig(normalized.FieldType, normalized.Value, json.RawMessage(`{}`))
+	if err != nil {
+		return domain.EntityField{}, err
+	}
+	if normalized.FieldType == EntityFieldTypePerson && value != nil && !r.entityPersonValueExistsLocked(normalized.CompanyID, value) {
+		return domain.EntityField{}, ErrNotFound
+	}
+	item := domain.EntityField{CompanyID: normalized.CompanyID, EntityFieldID: normalized.EntityFieldID, EntityID: normalized.EntityID, Name: normalized.Name, FieldType: normalized.FieldType, Config: json.RawMessage(`{}`), Value: append([]byte(nil), value...), Position: normalized.Position, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.entityFields[key(item.CompanyID, item.EntityFieldID)] = item
 	return cloneEntityField(item), nil
 }
@@ -509,6 +608,9 @@ func (r *MemoryRepo) UpdateEntityField(input EntityFieldInput) (domain.EntityFie
 	if !exists || item.EntityID != normalized.EntityID {
 		return domain.EntityField{}, ErrNotFound
 	}
+	if isRequiredActionItemFieldTypeID(optionalEntityIDValue(item.EntityFieldTypeID)) && (normalized.NameSet || normalized.FieldTypeSet) {
+		return domain.EntityField{}, ErrConflict
+	}
 	if normalized.NameSet {
 		if r.entityFieldNameExistsLocked(normalized.CompanyID, normalized.EntityID, normalized.Name, normalized.EntityFieldID) {
 			return domain.EntityField{}, ErrAlreadyExists
@@ -516,12 +618,24 @@ func (r *MemoryRepo) UpdateEntityField(input EntityFieldInput) (domain.EntityFie
 		item.Name = normalized.Name
 	}
 	if normalized.FieldTypeSet && normalized.FieldType != item.FieldType {
+		item.EntityFieldTypeID = nil
+		item.SystemKey = ""
+		item.Config = json.RawMessage(`{}`)
 		item.FieldType = normalized.FieldType
 		item.Value = nil
 	} else if normalized.ValueSet {
-		value, err := normalizeEntityFieldValue(item.FieldType, normalized.Value)
+		config := item.Config
+		if item.EntityFieldTypeID != nil {
+			if fieldType, exists := r.entityFieldTypes[key(item.CompanyID, *item.EntityFieldTypeID)]; exists {
+				config = fieldType.Config
+			}
+		}
+		value, err := normalizeEntityFieldValueForConfig(item.FieldType, normalized.Value, config)
 		if err != nil {
 			return domain.EntityField{}, err
+		}
+		if item.FieldType == EntityFieldTypePerson && value != nil && !r.entityPersonValueExistsLocked(item.CompanyID, value) {
+			return domain.EntityField{}, ErrNotFound
 		}
 		item.Value = value
 	}
@@ -544,6 +658,9 @@ func (r *MemoryRepo) DeleteEntityField(companyID, entityID, entityFieldID string
 	item, exists := r.entityFields[itemKey]
 	if !exists || item.EntityID != entityID {
 		return ErrNotFound
+	}
+	if isRequiredActionItemFieldTypeID(optionalEntityIDValue(item.EntityFieldTypeID)) {
+		return ErrConflict
 	}
 	delete(r.entityFields, itemKey)
 	return nil
@@ -641,11 +758,54 @@ func (r *MemoryRepo) entityDetailLocked(item domain.Entity) domain.Entity {
 	item.EntityFields = []domain.EntityField{}
 	for _, field := range r.entityFields {
 		if field.CompanyID == item.CompanyID && field.EntityID == item.EntityID {
+			if field.EntityFieldTypeID != nil {
+				if fieldType, exists := r.entityFieldTypes[key(field.CompanyID, *field.EntityFieldTypeID)]; exists {
+					field.SystemKey = fieldType.SystemKey
+					field.Config = append([]byte(nil), fieldType.Config...)
+				} else {
+					field.EntityFieldTypeID = nil
+					field.SystemKey = ""
+					field.Config = json.RawMessage(`{}`)
+				}
+			} else if len(field.Config) == 0 {
+				field.Config = json.RawMessage(`{}`)
+			}
 			item.EntityFields = append(item.EntityFields, cloneEntityField(field))
 		}
 	}
 	sortEntityFields(item.EntityFields)
 	return cloneEntity(item)
+}
+
+func (r *MemoryRepo) entityPersonValueExistsLocked(companyID string, raw json.RawMessage) bool {
+	var userID string
+	if err := json.Unmarshal(raw, &userID); err != nil {
+		return false
+	}
+	_, exists := r.memberships[membershipKey(companyID, userID)]
+	return exists
+}
+
+func (r *MemoryRepo) clearEntityMemberReferencesLocked(companyID, userID string) {
+	now := time.Now().UTC()
+	for fieldKey, field := range r.entityFields {
+		if field.CompanyID != companyID || field.FieldType != EntityFieldTypePerson || field.Value == nil {
+			continue
+		}
+		var assignedUserID string
+		if json.Unmarshal(field.Value, &assignedUserID) != nil || cleanUUIDText(assignedUserID) != userID {
+			continue
+		}
+		field.Value = nil
+		field.UpdatedTimestamp = now
+		r.entityFields[fieldKey] = field
+	}
+	for entityKey, entity := range r.entities {
+		if entity.CompanyID == companyID && entity.CreatedByUserID == userID {
+			entity.CreatedByUserID = ""
+			r.entities[entityKey] = entity
+		}
+	}
 }
 
 func (r *MemoryRepo) nextEntityFolderPositionLocked(companyID, entityTypeID string, parentID *string) int {

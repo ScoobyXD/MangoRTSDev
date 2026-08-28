@@ -13,11 +13,13 @@ import {
 import { sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { calculateEditorSelectionActionPosition } from "../../../../frontend/src/modules/editor/editorSelectionActions.js";
 import {
+  createActionItemEntityFromSelection,
   createEditorEntityLinkElement,
   createNodeEntityFromSelection,
   editorEntityRoute,
   EVENT_EDITOR_EMAIL_REFERENCE_OPEN,
   EVENT_EDITOR_ENTITY_REFERENCE_OPEN,
+  normalizeEditorSelectionActionItemName,
   normalizeEditorSelectionNodeTitle,
   openEditorEntityLink,
   readActiveEntityLinkDraft,
@@ -242,6 +244,59 @@ test("selection Node creation normalizes the exact title and returns a durable e
     label: "Create this Node",
     updatedTimestamp: "2026-07-21T12:00:00Z",
   });
+});
+
+test("the shared Tiptap selection toolbar exposes one keyboard-operable yellow/red Action Item split control", () => {
+  const source = readFileSync("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx", "utf8");
+  const css = readFileSync("frontend/src/index.css", "utf8");
+  assert.match(source, /role="group"[\s\S]*aria-label="Create an Action Item from highlighted text"/);
+  assert.match(source, /\(\["yellow", "red"\] as const\)\.map/);
+  assert.match(source, /aria-label=\{`Create \$\{color\} Action Item from highlighted text\.`\}/);
+  assert.match(source, /createActionItemEntityFromSelection\(\{ companyID, requestJSON \}, action\.quote, color\)/);
+  assert.match(css, /\.mango-editor-action-item--yellow[\s\S]*animation: mango-editor-action-item-pulse 2s/);
+  assert.match(css, /\.mango-editor-action-item--red[\s\S]*animation: mango-editor-action-item-pulse 1s/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.mango-editor-action-item--yellow,[\s\S]*animation: none/);
+});
+
+test("selection Action Item creation sends the exact body, normalized name, and chosen color", async () => {
+  let submittedJSON: unknown;
+  const entity = await createActionItemEntityFromSelection({
+    companyID: "company-1",
+    requestJSON: async <T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      assert.equal(path, "/v1/action-items");
+      assert.equal(init?.method, "POST");
+      submittedJSON = init?.json;
+      return {
+        action_item: {
+          company_id: "company-1",
+          entity_id: "action-item-1",
+          entity_type_id: "action-item-type",
+          entity_type_name: "Action Item",
+          entity_folder_id: null,
+          name: "Escalate delayed shipment",
+          position: 1000,
+          revision: 1,
+          created_timestamp: "2026-08-28T12:00:00Z",
+          updated_timestamp: "2026-08-28T12:00:01Z",
+          entity_fields: [],
+        },
+      } as T;
+    },
+  }, "  Escalate\n delayed   shipment  ", "yellow");
+
+  assert.deepEqual(submittedJSON, {
+    company_id: "company-1",
+    body_text: "  Escalate\n delayed   shipment  ",
+    name: "Escalate delayed shipment",
+    color: "yellow",
+  });
+  assert.deepEqual(entity, {
+    entityType: "entity",
+    entityID: "action-item-1",
+    label: "Escalate delayed shipment",
+    updatedTimestamp: "2026-08-28T12:00:01Z",
+  });
+  assert.equal(normalizeEditorSelectionActionItemName(`  ${"x".repeat(240)}  `), "x".repeat(200));
 });
 
 test("legacy entity chips preserve identity, type styling, and routes", () => {
@@ -494,6 +549,29 @@ test("durable Tiptap entity nodes keep their identity through history and Backsp
     assert.match(editor.getHTML(), /data-mango-entity-type="entity"/);
     assert.match(editor.getHTML(), /data-mango-entity-id="entity-1"/);
     assert.match(editor.getHTML(), /M5.1 5.35h5.8M5.1 8h5.8M5.1 10.65h3.65/);
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{
+      type: "mangoEntityLink",
+      attrs: { entityType: "entity", entityId: "action-item-1", label: "Escalate delayed shipment", actionItemColor: "yellow" },
+    }] }] });
+    const actionItemHTML = editor.getHTML();
+    assert.match(actionItemHTML, /data-mango-action-item-color="yellow"/);
+    assert.match(actionItemHTML, /mango-editor-action-item--yellow/);
+    assert.match(actionItemHTML, /aria-label="Open Yellow Action Item Escalate delayed shipment"/);
+    assert.match(actionItemHTML, />Yellow<\/span>/);
+    editor.commands.setContent(actionItemHTML);
+    const actionItemNode = editor.getJSON().content?.[0]?.content?.[0] as { attrs?: Record<string, unknown> } | undefined;
+    assert.equal(actionItemNode?.attrs?.actionItemColor, "yellow", "HTML clipboard hydration preserves Action Item presentation");
+    let actionItemEnd = -1;
+    editor.state.doc.descendants((node, position) => {
+      if (node.type.name !== "mangoEntityLink") return true;
+      actionItemEnd = position + node.nodeSize;
+      return false;
+    });
+    editor.commands.setTextSelection(actionItemEnd);
+    editor.view.dom.dispatchEvent(new domGlobals.KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
+    assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink") ?? false, false);
+    assert.match(editor.state.doc.textContent, /Escalate delayed shipment/);
 
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{
       type: "mangoEntityLink",

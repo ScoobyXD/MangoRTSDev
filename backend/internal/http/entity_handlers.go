@@ -216,6 +216,7 @@ func (s *Server) handleEntityFieldTypes(w http.ResponseWriter, r *http.Request) 
 			EntityFolderID    json.RawMessage `json:"entity_folder_id"`
 			Name              string          `json:"name"`
 			FieldType         string          `json:"field_type"`
+			Config            json.RawMessage `json:"config"`
 			Position          *int            `json:"position"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -231,6 +232,9 @@ func (s *Server) handleEntityFieldTypes(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		input := store.EntityFieldTypeInput{CompanyID: request.CompanyID, EntityFieldTypeID: request.EntityFieldTypeID, EntityTypeID: request.EntityTypeID, EntityFolderID: folderID, Name: request.Name, FieldType: request.FieldType}
+		if len(request.Config) > 0 {
+			input.Config, input.ConfigSet = request.Config, true
+		}
 		if request.Position != nil {
 			input.Position, input.PositionSet = *request.Position, true
 		}
@@ -258,6 +262,7 @@ func (s *Server) handleEntityFieldTypeByID(w http.ResponseWriter, r *http.Reques
 			EntityFolderID json.RawMessage `json:"entity_folder_id"`
 			Name           *string         `json:"name"`
 			FieldType      *string         `json:"field_type"`
+			Config         json.RawMessage `json:"config"`
 			Position       *int            `json:"position"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -278,6 +283,9 @@ func (s *Server) handleEntityFieldTypeByID(w http.ResponseWriter, r *http.Reques
 		}
 		if request.FieldType != nil {
 			input.FieldType, input.FieldTypeSet = *request.FieldType, true
+		}
+		if len(request.Config) > 0 {
+			input.Config, input.ConfigSet = request.Config, true
 		}
 		if request.Position != nil {
 			input.Position, input.PositionSet = *request.Position, true
@@ -356,7 +364,8 @@ func (s *Server) handleEntities(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid_json")
 			return
 		}
-		if _, ok := s.requireAccountCompanyAccess(w, r, request.CompanyID); !ok {
+		actor, ok := s.requireAccountCompanyAccess(w, r, request.CompanyID)
+		if !ok {
 			return
 		}
 		folderID, _, err := decodeNullableEntityID(request.EntityFolderID)
@@ -364,7 +373,7 @@ func (s *Server) handleEntities(w http.ResponseWriter, r *http.Request) {
 			writeEntityError(w, store.ErrInvalid, "invalid_entity_request")
 			return
 		}
-		input := store.EntityInput{CompanyID: request.CompanyID, EntityID: request.EntityID, EntityTypeID: request.EntityTypeID, EntityFolderID: folderID, Name: request.Name}
+		input := store.EntityInput{CompanyID: request.CompanyID, EntityID: request.EntityID, EntityTypeID: request.EntityTypeID, EntityFolderID: folderID, Name: request.Name, CreatedByUserID: actor.User.UserID}
 		if request.Position != nil {
 			input.Position, input.PositionSet = *request.Position, true
 		}

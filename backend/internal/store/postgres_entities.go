@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -16,7 +17,7 @@ type postgresEntityQueryer interface {
 
 func scanEntityType(row interface{ Scan(...any) error }) (domain.EntityType, error) {
 	var item domain.EntityType
-	err := row.Scan(&item.CompanyID, &item.EntityTypeID, &item.Name, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	err := row.Scan(&item.CompanyID, &item.EntityTypeID, &item.SystemKey, &item.Name, &item.CreatedTimestamp, &item.UpdatedTimestamp)
 	return item, err
 }
 
@@ -28,14 +29,17 @@ func scanEntityFolder(row interface{ Scan(...any) error }) (domain.EntityFolder,
 
 func scanEntityFieldType(row interface{ Scan(...any) error }) (domain.EntityFieldType, error) {
 	var item domain.EntityFieldType
-	err := row.Scan(&item.CompanyID, &item.EntityFieldTypeID, &item.EntityTypeID, &item.EntityFolderID, &item.Name, &item.FieldType, &item.Position, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	var config []byte
+	err := row.Scan(&item.CompanyID, &item.EntityFieldTypeID, &item.EntityTypeID, &item.EntityFolderID, &item.SystemKey, &item.Name, &item.FieldType, &config, &item.Position, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	item.Config = append(item.Config, config...)
 	return item, err
 }
 
 func scanEntityField(row interface{ Scan(...any) error }) (domain.EntityField, error) {
 	var item domain.EntityField
-	var value []byte
-	err := row.Scan(&item.CompanyID, &item.EntityFieldID, &item.EntityID, &item.Name, &item.FieldType, &value, &item.Position, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	var config, value []byte
+	err := row.Scan(&item.CompanyID, &item.EntityFieldID, &item.EntityID, &item.EntityFieldTypeID, &item.SystemKey, &item.Name, &item.FieldType, &config, &value, &item.Position, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	item.Config = append(item.Config, config...)
 	item.Value = append(item.Value, value...)
 	return item, err
 }
@@ -43,14 +47,14 @@ func scanEntityField(row interface{ Scan(...any) error }) (domain.EntityField, e
 func scanEntity(row interface{ Scan(...any) error }) (domain.Entity, error) {
 	var item domain.Entity
 	var body []byte
-	err := row.Scan(&item.CompanyID, &item.EntityID, &item.EntityTypeID, &item.EntityTypeName, &item.EntityFolderID, &item.Name, &item.Position, &body, &item.Revision, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	err := row.Scan(&item.CompanyID, &item.EntityID, &item.EntityTypeID, &item.EntityTypeName, &item.EntityFolderID, &item.Name, &item.Position, &body, &item.Revision, &item.CreatedByUserID, &item.CreatedTimestamp, &item.UpdatedTimestamp)
 	item.BodyJSON = append(item.BodyJSON, body...)
 	return item, err
 }
 
 func scanEntitySummary(row interface{ Scan(...any) error }) (domain.EntitySummary, error) {
 	var item domain.EntitySummary
-	err := row.Scan(&item.CompanyID, &item.EntityID, &item.EntityTypeID, &item.EntityTypeName, &item.EntityFolderID, &item.Name, &item.Position, &item.Revision, &item.CreatedTimestamp, &item.UpdatedTimestamp)
+	err := row.Scan(&item.CompanyID, &item.EntityID, &item.EntityTypeID, &item.EntityTypeName, &item.EntityFolderID, &item.Name, &item.Position, &item.Revision, &item.CreatedByUserID, &item.CreatedTimestamp, &item.UpdatedTimestamp)
 	return item, err
 }
 
@@ -60,7 +64,7 @@ func (r *PostgresRepo) ListEntityTypes(companyID string) ([]domain.EntityType, e
 		return nil, ErrInvalid
 	}
 	rows, err := r.db.QueryContext(context.Background(), `
-select company_id::text, entity_type_id::text, name, created_timestamp, updated_timestamp
+select company_id::text, entity_type_id::text, coalesce(system_key, ''), name, created_timestamp, updated_timestamp
 from entity_types
 where company_id=$1::uuid
 order by lower(name), entity_type_id`, companyID)
@@ -91,7 +95,7 @@ func (r *PostgresRepo) CreateEntityType(input EntityTypeInput) (domain.EntityTyp
 insert into entity_types (company_id, entity_type_id, name)
 values ($1::uuid, $2::uuid, $3::text)
 on conflict do nothing
-returning company_id::text, entity_type_id::text, name, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityTypeID, normalized.Name))
+returning company_id::text, entity_type_id::text, coalesce(system_key, ''), name, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityTypeID, normalized.Name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.EntityType{}, ErrAlreadyExists
 	}
@@ -110,7 +114,7 @@ func (r *PostgresRepo) UpdateEntityType(input EntityTypeInput) (domain.EntityTyp
 update entity_types
 set name=$3::text, updated_timestamp=now()
 where company_id=$1::uuid and entity_type_id=$2::uuid
-returning company_id::text, entity_type_id::text, name, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityTypeID, normalized.Name))
+returning company_id::text, entity_type_id::text, coalesce(system_key, ''), name, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityTypeID, normalized.Name))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.EntityType{}, ErrNotFound
 	}
@@ -370,7 +374,8 @@ func (r *PostgresRepo) ListEntityFieldTypes(companyID, entityTypeID string) ([]d
 		return nil, ErrNotFound
 	}
 	rows, err := r.db.QueryContext(context.Background(), `
-select company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text, name, field_type, position, created_timestamp, updated_timestamp
+select company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text,
+       coalesce(system_key, ''), name, field_type, config_jsonb, position, created_timestamp, updated_timestamp
 from entity_field_types
 where company_id=$1::uuid and entity_type_id=$2::uuid
 order by entity_folder_id nulls first, position, lower(name), entity_field_type_id`, companyID, entityTypeID)
@@ -398,15 +403,16 @@ func (r *PostgresRepo) CreateEntityFieldType(input EntityFieldTypeInput) (domain
 		normalized.EntityFieldTypeID = newUUIDv7String()
 	}
 	item, err := scanEntityFieldType(r.db.QueryRowContext(context.Background(), `
-insert into entity_field_types (company_id, entity_field_type_id, entity_type_id, entity_folder_id, name, field_type, position)
-select $1::uuid, $2::uuid, $3::uuid, nullif($4::text, '')::uuid, $5::text, $6::text,
+insert into entity_field_types (company_id, entity_field_type_id, entity_type_id, entity_folder_id, name, field_type, config_jsonb, position)
+select $1::uuid, $2::uuid, $3::uuid, nullif($4::text, '')::uuid, $5::text, $6::text, $9::jsonb,
        case when $8::boolean then $7::integer else coalesce((
          select max(position)+1 from entity_field_types
          where company_id=$1::uuid and entity_type_id=$3::uuid
            and entity_folder_id is not distinct from nullif($4::text, '')::uuid
        ), 0) end
 where exists(select 1 from entity_types where company_id=$1::uuid and entity_type_id=$3::uuid)
-returning company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text, name, field_type, position, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityFieldTypeID, normalized.EntityTypeID, optionalEntityIDValue(normalized.EntityFolderID), normalized.Name, normalized.FieldType, normalized.Position, normalized.PositionSet))
+returning company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text,
+          coalesce(system_key, ''), name, field_type, config_jsonb, position, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityFieldTypeID, normalized.EntityTypeID, optionalEntityIDValue(normalized.EntityFolderID), normalized.Name, normalized.FieldType, normalized.Position, normalized.PositionSet, normalized.Config))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.EntityFieldType{}, ErrNotFound
 	}
@@ -428,7 +434,8 @@ func (r *PostgresRepo) UpdateEntityFieldType(input EntityFieldTypeInput) (domain
 	}
 	defer tx.Rollback()
 	current, err := scanEntityFieldType(tx.QueryRowContext(ctx, `
-select company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text, name, field_type, position, created_timestamp, updated_timestamp
+select company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text,
+       coalesce(system_key, ''), name, field_type, config_jsonb, position, created_timestamp, updated_timestamp
 from entity_field_types where company_id=$1::uuid and entity_field_type_id=$2::uuid for update`, normalized.CompanyID, normalized.EntityFieldTypeID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.EntityFieldType{}, ErrNotFound
@@ -441,16 +448,54 @@ from entity_field_types where company_id=$1::uuid and entity_field_type_id=$2::u
 			return domain.EntityFieldType{}, err
 		}
 	}
+	nextFieldType := current.FieldType
+	if normalized.FieldTypeSet {
+		nextFieldType = normalized.FieldType
+	}
+	nextConfig := current.Config
+	if normalized.ConfigSet {
+		nextConfig = normalized.Config
+	}
+	nextConfig, err = normalizeEntityFieldTypeConfig(nextFieldType, nextConfig)
+	if err != nil {
+		return domain.EntityFieldType{}, err
+	}
+	if current.EntityTypeID == ActionItemEntityTypeID && isRequiredActionItemFieldSystemKey(current.SystemKey) {
+		if err := validateRequiredActionItemFieldConfig(current.SystemKey, nextFieldType, nextConfig); err != nil {
+			return domain.EntityFieldType{}, err
+		}
+	}
 	item, err := scanEntityFieldType(tx.QueryRowContext(ctx, `
 update entity_field_types
 set entity_folder_id=case when $3::boolean then nullif($4::text, '')::uuid else entity_folder_id end,
     name=case when $5::boolean then $6::text else name end,
-    field_type=case when $7::boolean then $8::text else field_type end,
+    field_type=$7::text,
+    config_jsonb=$8::jsonb,
     position=case when $9::boolean then $10::integer else position end,
     updated_timestamp=now()
 where company_id=$1::uuid and entity_field_type_id=$2::uuid
-returning company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text, name, field_type, position, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityFieldTypeID, normalized.EntityFolderSet, optionalEntityIDValue(normalized.EntityFolderID), normalized.NameSet, normalized.Name, normalized.FieldTypeSet, normalized.FieldType, normalized.PositionSet, normalized.Position))
+returning company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text,
+          coalesce(system_key, ''), name, field_type, config_jsonb, position, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityFieldTypeID, normalized.EntityFolderSet, optionalEntityIDValue(normalized.EntityFolderID), normalized.NameSet, normalized.Name, nextFieldType, nextConfig, normalized.PositionSet, normalized.Position))
 	if err != nil {
+		return domain.EntityFieldType{}, mapEntitiesPostgresError(err)
+	}
+	defaultValue, err := entityFieldTypeDefaultValue(item.FieldType, item.Config)
+	if err != nil {
+		return domain.EntityFieldType{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `
+update entity_fields field
+set value_jsonb=$4::jsonb,
+    updated_timestamp=now()
+where field.company_id=$1::uuid
+  and field.entity_field_type_id=$2::uuid
+  and field.field_type in ('choice', 'color')
+  and field.value_jsonb is not null
+  and not exists (
+    select 1
+    from jsonb_array_elements(coalesce($3::jsonb->'options', '[]'::jsonb)) option
+    where field.value_jsonb=to_jsonb(option->>'key')
+  )`, item.CompanyID, item.EntityFieldTypeID, item.Config, defaultValue); err != nil {
 		return domain.EntityFieldType{}, mapEntitiesPostgresError(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -489,7 +534,8 @@ func (r *PostgresRepo) ListEntities(ctx context.Context, query EntityListQuery) 
 	folderFilter := normalized.EntityFolderID != nil
 	rows, err := r.db.QueryContext(ctx, `
 select entity.company_id::text, entity.entity_id::text, entity.entity_type_id::text, entity_type.name,
-       entity.entity_folder_id::text, entity.name, entity.position, entity.revision, entity.created_timestamp, entity.updated_timestamp
+       entity.entity_folder_id::text, entity.name, entity.position, entity.revision,
+       coalesce(entity.created_by_user_id::text, ''), entity.created_timestamp, entity.updated_timestamp
 from entities entity
 join entity_types entity_type on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
 where entity.company_id=$1::uuid
@@ -537,15 +583,16 @@ func (r *PostgresRepo) CreateEntity(input EntityInput) (domain.Entity, error) {
 		return domain.Entity{}, err
 	}
 	item, err := scanEntity(tx.QueryRowContext(ctx, `
-insert into entities (company_id, entity_id, entity_type_id, entity_folder_id, name, position, body_json, revision)
+insert into entities (company_id, entity_id, entity_type_id, entity_folder_id, name, position, body_json, revision, created_by_user_id)
 values ($1::uuid, $2::uuid, $3::uuid, nullif($4::text, '')::uuid, $5::text,
         case when $8::boolean then $7::integer else coalesce((
           select max(position)+1 from entities
           where company_id=$1::uuid and entity_type_id=$3::uuid
             and entity_folder_id is not distinct from nullif($4::text, '')::uuid
         ), 0) end,
-        $6::jsonb, 0)
-returning company_id::text, entity_id::text, entity_type_id::text, $9::text, entity_folder_id::text, name, position, body_json, revision, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityID, normalized.EntityTypeID, optionalEntityIDValue(normalized.EntityFolderID), normalized.Name, normalized.BodyJSON, normalized.Position, normalized.PositionSet, typeName))
+        $6::jsonb, 0, nullif($9::text, '')::uuid)
+returning company_id::text, entity_id::text, entity_type_id::text, $10::text, entity_folder_id::text, name, position, body_json, revision,
+          coalesce(created_by_user_id::text, ''), created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityID, normalized.EntityTypeID, optionalEntityIDValue(normalized.EntityFolderID), normalized.Name, normalized.BodyJSON, normalized.Position, normalized.PositionSet, normalized.CreatedByUserID, typeName))
 	if err != nil {
 		return domain.Entity{}, mapEntitiesPostgresError(err)
 	}
@@ -553,21 +600,35 @@ returning company_id::text, entity_id::text, entity_type_id::text, $9::text, ent
 	if err != nil {
 		return domain.Entity{}, err
 	}
-	if len(resolved) > 0 {
-		fieldIDs := make([]string, len(resolved))
-		fieldNames := make([]string, len(resolved))
-		fieldTypes := make([]string, len(resolved))
-		for index, fieldType := range resolved {
-			fieldIDs[index] = newUUIDv7String()
-			fieldNames[index] = fieldType.Name
-			fieldTypes[index] = fieldType.FieldType
+	fieldIDs := make([]string, len(resolved))
+	fieldTypeIDs := make([]string, len(resolved))
+	for position, fieldType := range resolved {
+		if _, err := entityFieldTypeDefaultValue(fieldType.FieldType, fieldType.Config); err != nil {
+			return domain.Entity{}, err
 		}
-		if _, err := tx.ExecContext(ctx, `
-insert into entity_fields (company_id, entity_field_id, entity_id, name, field_type, value_jsonb, position)
-select $1::uuid, input.entity_field_id::uuid, $2::uuid, input.name, input.field_type, null, (input.position-1)::integer
-from unnest($3::text[], $4::text[], $5::text[]) with ordinality as input(entity_field_id, name, field_type, position)`, item.CompanyID, item.EntityID, fieldIDs, fieldNames, fieldTypes); err != nil {
-			return domain.Entity{}, mapEntitiesPostgresError(err)
-		}
+		fieldIDs[position] = newUUIDv7String()
+		fieldTypeIDs[position] = fieldType.EntityFieldTypeID
+	}
+	result, err := tx.ExecContext(ctx, `
+insert into entity_fields (company_id, entity_field_id, entity_id, entity_field_type_id, name, field_type, value_jsonb, position)
+select $1::uuid, input.entity_field_id::uuid, $2::uuid, template.entity_field_type_id,
+       template.name, template.field_type,
+       case when template.field_type in ('choice','color')
+            then nullif(template.config_jsonb->'default', 'null'::jsonb)
+            else null
+       end,
+       (input.ordinality-1)::integer
+from unnest($3::text[], $4::text[])
+     with ordinality as input(entity_field_id, entity_field_type_id, ordinality)
+join entity_field_types template
+  on template.company_id=$1::uuid and template.entity_field_type_id=input.entity_field_type_id::uuid`, item.CompanyID, item.EntityID, fieldIDs, fieldTypeIDs)
+	if err != nil {
+		return domain.Entity{}, mapEntitiesPostgresError(err)
+	}
+	if count, err := result.RowsAffected(); err != nil {
+		return domain.Entity{}, err
+	} else if count != int64(len(resolved)) {
+		return domain.Entity{}, ErrConflict
 	}
 	item, err = getPostgresEntity(ctx, tx, item.CompanyID, item.EntityID)
 	if err != nil {
@@ -600,7 +661,7 @@ func resolvePostgresEntityFieldTypes(ctx context.Context, queryer postgresEntity
 	}
 	rows, err := queryer.QueryContext(ctx, `
 select company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text,
-       name, field_type, position, created_timestamp, updated_timestamp,
+       coalesce(system_key, ''), name, field_type, config_jsonb, position, created_timestamp, updated_timestamp,
        case when entity_folder_id is null then 0 else array_position($3::text[], entity_folder_id::text) end as layer
 from entity_field_types
 where company_id=$1::uuid and entity_type_id=$2::uuid
@@ -614,9 +675,11 @@ order by layer, position, lower(name), entity_field_type_id`, companyID, entityT
 	for rows.Next() {
 		var item domain.EntityFieldType
 		var layer int
-		if err := rows.Scan(&item.CompanyID, &item.EntityFieldTypeID, &item.EntityTypeID, &item.EntityFolderID, &item.Name, &item.FieldType, &item.Position, &item.CreatedTimestamp, &item.UpdatedTimestamp, &layer); err != nil {
+		var config []byte
+		if err := rows.Scan(&item.CompanyID, &item.EntityFieldTypeID, &item.EntityTypeID, &item.EntityFolderID, &item.SystemKey, &item.Name, &item.FieldType, &config, &item.Position, &item.CreatedTimestamp, &item.UpdatedTimestamp, &layer); err != nil {
 			return nil, err
 		}
+		item.Config = append(item.Config, config...)
 		if layer < 0 || layer >= len(layers) {
 			return nil, ErrConflict
 		}
@@ -639,7 +702,8 @@ func (r *PostgresRepo) GetEntity(companyID, entityID string) (domain.Entity, err
 func getPostgresEntity(ctx context.Context, queryer postgresEntityQueryer, companyID, entityID string) (domain.Entity, error) {
 	item, err := scanEntity(queryer.QueryRowContext(ctx, `
 select entity.company_id::text, entity.entity_id::text, entity.entity_type_id::text, entity_type.name,
-       entity.entity_folder_id::text, entity.name, entity.position, entity.body_json, entity.revision, entity.created_timestamp, entity.updated_timestamp
+       entity.entity_folder_id::text, entity.name, entity.position, entity.body_json, entity.revision,
+       coalesce(entity.created_by_user_id::text, ''), entity.created_timestamp, entity.updated_timestamp
 from entities entity
 join entity_types entity_type on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
 where entity.company_id=$1::uuid and entity.entity_id=$2::uuid`, companyID, entityID))
@@ -650,10 +714,14 @@ where entity.company_id=$1::uuid and entity.entity_id=$2::uuid`, companyID, enti
 		return domain.Entity{}, err
 	}
 	rows, err := queryer.QueryContext(ctx, `
-select company_id::text, entity_field_id::text, entity_id::text, name, field_type, value_jsonb, position, created_timestamp, updated_timestamp
-from entity_fields
-where company_id=$1::uuid and entity_id=$2::uuid
-order by position, lower(name), entity_field_id`, companyID, entityID)
+select field.company_id::text, field.entity_field_id::text, field.entity_id::text, field.entity_field_type_id::text,
+       coalesce(field_type.system_key, ''), field.name, field.field_type, coalesce(field_type.config_jsonb, '{}'::jsonb),
+       field.value_jsonb, field.position, field.created_timestamp, field.updated_timestamp
+from entity_fields field
+left join entity_field_types field_type
+  on field_type.company_id=field.company_id and field_type.entity_field_type_id=field.entity_field_type_id
+where field.company_id=$1::uuid and field.entity_id=$2::uuid
+order by field.position, lower(field.name), field.entity_field_id`, companyID, entityID)
 	if err != nil {
 		return domain.Entity{}, err
 	}
@@ -724,18 +792,31 @@ func (r *PostgresRepo) DeleteEntity(companyID, entityID string) error {
 	if companyID == "" || entityID == "" {
 		return ErrInvalid
 	}
-	result, err := r.db.ExecContext(context.Background(), `delete from entities where company_id=$1::uuid and entity_id=$2::uuid`, companyID, entityID)
-	if err != nil {
-		return mapEntitiesPostgresError(err)
-	}
-	count, err := result.RowsAffected()
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	if count == 0 {
+	defer tx.Rollback()
+	var entityTypeID string
+	err = tx.QueryRowContext(ctx, `
+select entity_type_id::text
+from entities
+where company_id=$1::uuid and entity_id=$2::uuid
+for update`, companyID, entityID).Scan(&entityTypeID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
-	return nil
+	if err != nil {
+		return err
+	}
+	if entityTypeID == ActionItemEntityTypeID {
+		return ErrConflict
+	}
+	if _, err := tx.ExecContext(ctx, `delete from entities where company_id=$1::uuid and entity_id=$2::uuid`, companyID, entityID); err != nil {
+		return mapEntitiesPostgresError(err)
+	}
+	return tx.Commit()
 }
 
 func (r *PostgresRepo) CreateEntityField(input EntityFieldInput) (domain.EntityField, error) {
@@ -746,17 +827,40 @@ func (r *PostgresRepo) CreateEntityField(input EntityFieldInput) (domain.EntityF
 	if normalized.EntityFieldID == "" {
 		normalized.EntityFieldID = newUUIDv7String()
 	}
-	item, err := scanEntityField(r.db.QueryRowContext(context.Background(), `
-insert into entity_fields (company_id, entity_field_id, entity_id, name, field_type, value_jsonb, position)
-select $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::jsonb,
+	normalized.Value, err = normalizeEntityFieldValueForConfig(normalized.FieldType, normalized.Value, []byte(`{}`))
+	if err != nil {
+		return domain.EntityField{}, err
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.EntityField{}, err
+	}
+	defer tx.Rollback()
+	if normalized.FieldType == EntityFieldTypePerson && normalized.Value != nil {
+		if err := validatePostgresEntityPersonValue(ctx, tx, normalized.CompanyID, normalized.Value); err != nil {
+			return domain.EntityField{}, err
+		}
+	}
+	item, err := scanEntityField(tx.QueryRowContext(ctx, `
+with inserted as (
+  insert into entity_fields (company_id, entity_field_id, entity_id, name, field_type, value_jsonb, position)
+  select $1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, $6::jsonb,
        case when $8::boolean then $7::integer else coalesce((select max(position)+1 from entity_fields where company_id=$1::uuid and entity_id=$3::uuid), 0) end
-where exists(select 1 from entities where company_id=$1::uuid and entity_id=$3::uuid)
-returning company_id::text, entity_field_id::text, entity_id::text, name, field_type, value_jsonb, position, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityFieldID, normalized.EntityID, normalized.Name, normalized.FieldType, normalized.Value, normalized.Position, normalized.PositionSet))
+  where exists(select 1 from entities where company_id=$1::uuid and entity_id=$3::uuid)
+  returning *
+)
+select company_id::text, entity_field_id::text, entity_id::text, entity_field_type_id::text, ''::text,
+       name, field_type, '{}'::jsonb, value_jsonb, position, created_timestamp, updated_timestamp
+from inserted`, normalized.CompanyID, normalized.EntityFieldID, normalized.EntityID, normalized.Name, normalized.FieldType, normalized.Value, normalized.Position, normalized.PositionSet))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.EntityField{}, ErrNotFound
 	}
 	if err != nil {
 		return domain.EntityField{}, mapEntitiesPostgresError(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.EntityField{}, err
 	}
 	return item, nil
 }
@@ -773,13 +877,22 @@ func (r *PostgresRepo) UpdateEntityField(input EntityFieldInput) (domain.EntityF
 	}
 	defer tx.Rollback()
 	current, err := scanEntityField(tx.QueryRowContext(ctx, `
-select company_id::text, entity_field_id::text, entity_id::text, name, field_type, value_jsonb, position, created_timestamp, updated_timestamp
-from entity_fields where company_id=$1::uuid and entity_id=$2::uuid and entity_field_id=$3::uuid for update`, normalized.CompanyID, normalized.EntityID, normalized.EntityFieldID))
+select field.company_id::text, field.entity_field_id::text, field.entity_id::text, field.entity_field_type_id::text,
+       coalesce(field_type.system_key, ''), field.name, field.field_type, coalesce(field_type.config_jsonb, '{}'::jsonb),
+       field.value_jsonb, field.position, field.created_timestamp, field.updated_timestamp
+from entity_fields field
+left join entity_field_types field_type
+  on field_type.company_id=field.company_id and field_type.entity_field_type_id=field.entity_field_type_id
+where field.company_id=$1::uuid and field.entity_id=$2::uuid and field.entity_field_id=$3::uuid
+for update of field`, normalized.CompanyID, normalized.EntityID, normalized.EntityFieldID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.EntityField{}, ErrNotFound
 	}
 	if err != nil {
 		return domain.EntityField{}, err
+	}
+	if isRequiredActionItemFieldTypeID(optionalEntityIDValue(current.EntityFieldTypeID)) && (normalized.NameSet || normalized.FieldTypeSet) {
+		return domain.EntityField{}, ErrConflict
 	}
 	fieldType := current.FieldType
 	value := current.Value
@@ -787,20 +900,33 @@ from entity_fields where company_id=$1::uuid and entity_id=$2::uuid and entity_f
 		fieldType = normalized.FieldType
 		value = nil
 	} else if normalized.ValueSet {
-		value, err = normalizeEntityFieldValue(fieldType, normalized.Value)
+		value, err = normalizeEntityFieldValueForConfig(fieldType, normalized.Value, current.Config)
 		if err != nil {
 			return domain.EntityField{}, err
 		}
 	}
+	if fieldType == EntityFieldTypePerson && value != nil {
+		if err := validatePostgresEntityPersonValue(ctx, tx, normalized.CompanyID, value); err != nil {
+			return domain.EntityField{}, err
+		}
+	}
 	item, err := scanEntityField(tx.QueryRowContext(ctx, `
-update entity_fields
-set name=case when $4::boolean then $5::text else name end,
-    field_type=$6::text,
-    value_jsonb=$7::jsonb,
-    position=case when $8::boolean then $9::integer else position end,
-    updated_timestamp=now()
-where company_id=$1::uuid and entity_id=$2::uuid and entity_field_id=$3::uuid
-returning company_id::text, entity_field_id::text, entity_id::text, name, field_type, value_jsonb, position, created_timestamp, updated_timestamp`, normalized.CompanyID, normalized.EntityID, normalized.EntityFieldID, normalized.NameSet, normalized.Name, fieldType, value, normalized.PositionSet, normalized.Position))
+with updated as (
+  update entity_fields
+  set name=case when $4::boolean then $5::text else name end,
+      field_type=$6::text,
+      value_jsonb=$7::jsonb,
+      position=case when $8::boolean then $9::integer else position end,
+      updated_timestamp=now()
+  where company_id=$1::uuid and entity_id=$2::uuid and entity_field_id=$3::uuid
+  returning *
+)
+select field.company_id::text, field.entity_field_id::text, field.entity_id::text, field.entity_field_type_id::text,
+       coalesce(field_type.system_key, ''), field.name, field.field_type, coalesce(field_type.config_jsonb, '{}'::jsonb),
+       field.value_jsonb, field.position, field.created_timestamp, field.updated_timestamp
+from updated field
+left join entity_field_types field_type
+  on field_type.company_id=field.company_id and field_type.entity_field_type_id=field.entity_field_type_id`, normalized.CompanyID, normalized.EntityID, normalized.EntityFieldID, normalized.NameSet, normalized.Name, fieldType, value, normalized.PositionSet, normalized.Position))
 	if err != nil {
 		return domain.EntityField{}, mapEntitiesPostgresError(err)
 	}
@@ -815,7 +941,28 @@ func (r *PostgresRepo) DeleteEntityField(companyID, entityID, entityFieldID stri
 	if companyID == "" || entityID == "" || entityFieldID == "" {
 		return ErrInvalid
 	}
-	result, err := r.db.ExecContext(context.Background(), `delete from entity_fields where company_id=$1::uuid and entity_id=$2::uuid and entity_field_id=$3::uuid`, companyID, entityID, entityFieldID)
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var entityFieldTypeID string
+	err = tx.QueryRowContext(ctx, `
+select coalesce(field.entity_field_type_id::text, '')
+from entity_fields field
+where field.company_id=$1::uuid and field.entity_id=$2::uuid and field.entity_field_id=$3::uuid
+for update of field`, companyID, entityID, entityFieldID).Scan(&entityFieldTypeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if isRequiredActionItemFieldTypeID(entityFieldTypeID) {
+		return ErrConflict
+	}
+	result, err := tx.ExecContext(ctx, `delete from entity_fields where company_id=$1::uuid and entity_id=$2::uuid and entity_field_id=$3::uuid`, companyID, entityID, entityFieldID)
 	if err != nil {
 		return mapEntitiesPostgresError(err)
 	}
@@ -826,12 +973,44 @@ func (r *PostgresRepo) DeleteEntityField(companyID, entityID, entityFieldID stri
 	if count == 0 {
 		return ErrNotFound
 	}
+	return tx.Commit()
+}
+
+func validatePostgresEntityPersonValue(ctx context.Context, queryer postgresEntityQueryer, companyID string, raw []byte) error {
+	var userID string
+	if err := json.Unmarshal(raw, &userID); err != nil {
+		return ErrInvalid
+	}
+	var exists bool
+	if err := queryer.QueryRowContext(ctx, `
+select exists(
+  select 1 from company_memberships
+  where company_id=$1::uuid and user_id=$2::uuid
+)`, companyID, userID).Scan(&exists); err != nil {
+		return err
+	}
+	if !exists {
+		return ErrNotFound
+	}
 	return nil
 }
 
 func mapEntitiesPostgresError(err error) error {
 	message := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(message, "action_item_entity_type_immutable"),
+		strings.Contains(message, "action_item_entity_type_required"),
+		strings.Contains(message, "action_item_field_type_immutable"),
+		strings.Contains(message, "action_item_field_type_required"),
+		strings.Contains(message, "action_item_field_type_name_reserved"),
+		strings.Contains(message, "action_item_entity_field_immutable"),
+		strings.Contains(message, "action_item_entity_field_required"):
+		return ErrConflict
+	case strings.Contains(message, "action_item_field_type_config_invalid"),
+		strings.Contains(message, "action_item_field_type_invalid"),
+		strings.Contains(message, "action_item_entity_field_invalid"),
+		strings.Contains(message, "entity_field_date_invalid"):
+		return ErrInvalid
 	case strings.Contains(message, "duplicate key"), strings.Contains(message, "unique constraint"):
 		return ErrAlreadyExists
 	case strings.Contains(message, "check constraint"), strings.Contains(message, "invalid input syntax"):

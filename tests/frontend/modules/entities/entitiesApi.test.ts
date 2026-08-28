@@ -2,10 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { BoundRequestJSON } from "../../../../frontend/src/modules/api/requestJSON.js";
 import {
+  createEntityFieldType,
   getEntityDetail,
   listAllEntitiesForType,
   listEntities,
+  listHuddleNodeActionItems,
   searchEntities,
+  updateEntityFieldType,
   type Entity,
   type EntitySummary,
 } from "../../../../frontend/src/modules/entities/entitiesApi.js";
@@ -55,6 +58,7 @@ test("getEntityDetail reads one exact company-scoped entity and its fields", asy
       entity_id: "entity-7",
       name: "Due date",
       field_type: "date",
+      config: {},
       value: "2026-09-01",
       position: 0,
       created_timestamp: "2026-08-27T00:00:00Z",
@@ -109,4 +113,70 @@ test("listEntities can request only entities at the type root", async () => {
   const params = new URL(requestedPath, "http://mangorts.test").searchParams;
   assert.equal(params.has("entity_folder_id"), true);
   assert.equal(params.get("entity_folder_id"), "");
+});
+
+test("listHuddleNodeActionItems reads the exact company and Huddle Node scope", async () => {
+  let requestedPath = "";
+  let requestedSignal: AbortSignal | null | undefined;
+  const signal = new AbortController().signal;
+  const requestJSON: BoundRequestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    requestedPath = path;
+    requestedSignal = init?.signal;
+    return { action_items: [{ ...entitySummary("action-item-1"), entity_type_name: "Action Item", entity_fields: [] }] } as T;
+  };
+
+  const loaded = await listHuddleNodeActionItems(requestJSON, {
+    companyID: "company-1",
+    huddleNodeID: "huddle-node-1",
+    signal,
+  });
+
+  assert.equal(requestedPath, "/v1/action-items?company_id=company-1&huddle_node_id=huddle-node-1");
+  assert.equal(requestedSignal, signal);
+  assert.equal(loaded[0]?.entity_id, "action-item-1");
+});
+
+test("field-type create and update serialize choice/color config without changing its option keys", async () => {
+  const calls: Array<{ path: string; init?: RequestInit }> = [];
+  const requestJSON: BoundRequestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    calls.push({ path, init });
+    return { entity_field_type: {} } as T;
+  };
+  const config = {
+    default: null,
+    options: [
+      { key: "yellow", label: "Yellow", color: "#facc15" },
+      { key: "red", label: "Red", color: "#ef4444" },
+    ],
+  };
+
+  await createEntityFieldType({
+    companyID: "company-1",
+    entityTypeID: "action-item-type",
+    name: "Color",
+    fieldType: "color",
+    config,
+  }, requestJSON);
+  await updateEntityFieldType({
+    companyID: "company-1",
+    entityFieldTypeID: "color-field-type",
+    config,
+  }, requestJSON);
+
+  assert.equal(calls[0]?.path, "/v1/entity-field-types");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
+    company_id: "company-1",
+    entity_type_id: "action-item-type",
+    entity_folder_id: null,
+    name: "Color",
+    field_type: "color",
+    config,
+  });
+  assert.equal(calls[1]?.path, "/v1/entity-field-types/color-field-type");
+  assert.equal(calls[1]?.init?.method, "PUT");
+  assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), {
+    company_id: "company-1",
+    config,
+  });
 });
