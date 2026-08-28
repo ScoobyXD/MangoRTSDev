@@ -37,7 +37,7 @@ const item = {
   ],
 } as Entity;
 
-test("Huddle Action Items default to personal person/date/due-date grouping", () => {
+test("Huddle Action Items default to personal person then created-date grouping", () => {
   assert.deepEqual(normalizeActionItemGroupings(undefined), DEFAULT_ACTION_ITEM_GROUPINGS);
   assert.deepEqual(normalizeActionItemGroupings([
     { field: "color", direction: "desc" },

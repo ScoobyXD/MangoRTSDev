@@ -146,7 +146,7 @@ func NormalizeEditorDocumentRef(ref EditorDocumentRef) (EditorDocumentRef, error
 		return EditorDocumentRef{}, ErrInvalid
 	}
 	switch ref.ResourceType {
-	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject:
+	case EntityTypeNode, EntityTypeLogicGate, EntityTypeProject, EntityTypeHuddleNode:
 	default:
 		return EditorDocumentRef{}, ErrInvalid
 	}

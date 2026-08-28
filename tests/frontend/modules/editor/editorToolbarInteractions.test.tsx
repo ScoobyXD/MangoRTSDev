@@ -4,6 +4,7 @@ import React, { act } from "react";
 import { Simulate } from "react-dom/test-utils";
 import { JSDOM } from "jsdom";
 import { EDITOR_NATIVE_INPUT_IDLE_BATCH_MS } from "../../../../frontend/src/modules/editor/editorInputBatch.js";
+import type { Entity, EntityFieldValue } from "../../../../frontend/src/modules/entities/entitiesApi.js";
 
 type Restore = () => void;
 
@@ -33,6 +34,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     "Node", "NodeFilter", "Element", "HTMLElement", "HTMLDivElement", "HTMLSpanElement",
     "HTMLImageElement", "HTMLTemplateElement", "HTMLLIElement", "HTMLUListElement", "HTMLOListElement",
     "HTMLAnchorElement", "HTMLBRElement", "HTMLButtonElement", "HTMLInputElement",
+    "HTMLFormElement", "HTMLSelectElement", "HTMLOptionElement", "FormData",
     "HTMLTableElement", "HTMLTableRowElement", "HTMLTableCellElement", "DocumentFragment",
     "DOMParser", "DOMException", "Event", "EventTarget", "InputEvent", "MouseEvent",
     "KeyboardEvent", "FocusEvent", "MutationObserver", "Range", "CustomEvent",
@@ -98,7 +100,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { UnifiedRichEditorSurface }, { EditorTabBar }, { AppModalPortal }, { UniversalEntityPicker, universalPickerAllowedTypes, universalPickerShortcutCategory }, { EntityReferencePreviewHost }, { openEditorEntityLink }] = await Promise.all([
+    const [{ createRoot }, { UnifiedRichEditorSurface }, { EditorTabBar }, { AppModalPortal }, { UniversalEntityPicker, universalPickerAllowedTypes, universalPickerShortcutCategory }, { EntityReferencePreviewHost }, { createEditorEntityLinkElement, openEditorEntityLink }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"),
       import("../../../../frontend/src/modules/editor/EditorTabBar.tsx"),
@@ -887,49 +889,84 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     await act(async () => processRow.dispatchEvent(new dom.window.Event("dragend", { bubbles: true })));
     assert.equal(dragDismissLayer?.style.pointerEvents, "auto", "normal outside-click dismissal resumes when dragging ends");
 
-    const previewRequests: Array<{ path: string; signal?: AbortSignal | null }> = [];
+    const previewRequests: Array<{ path: string; init?: RequestInit }> = [];
     let previewShouldFail = false;
+    let previewEntity: Entity = {
+      company_id: "company-1",
+      entity_id: "entity exact/id",
+      entity_type_id: "type-1",
+      entity_type_name: "Action Item",
+      entity_folder_id: null,
+      name: "Current Thailand delivery",
+      position: 1000,
+      revision: 1,
+      created_by_user_id: "user-creator",
+      created_timestamp: "2026-08-27T00:00:00Z",
+      updated_timestamp: "2026-08-27T00:00:00Z",
+      body_json: {
+        format: "mango-tiptap-json",
+        schema_version: 1,
+        document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Contact logistics today." }] }] },
+        annotations: [],
+      },
+      entity_fields: [
+        { company_id: "company-1", entity_field_id: "field-1", entity_id: "entity exact/id", name: "Delivered", field_type: "boolean", config: {}, value: false, position: 1000, created_timestamp: "", updated_timestamp: "" },
+        { company_id: "company-1", entity_field_id: "field-2", entity_id: "entity exact/id", system_key: "status", name: "Status", field_type: "choice", config: { options: [{ key: "pending", label: "Pending" }, { key: "in_progress", label: "In progress" }, { key: "done", label: "Done" }] }, value: "in_progress", position: 2000, created_timestamp: "", updated_timestamp: "" },
+        { company_id: "company-1", entity_field_id: "field-3", entity_id: "entity exact/id", system_key: "analysis_due_date", name: "Analysis due date", field_type: "date", config: {}, value: "2026-08-31", position: 3000, created_timestamp: "", updated_timestamp: "" },
+        { company_id: "company-1", entity_field_id: "field-4", entity_id: "entity exact/id", system_key: "person_in_charge", name: "Person in charge", field_type: "person", config: {}, value: "user-owner", position: 4000, created_timestamp: "", updated_timestamp: "" },
+        { company_id: "company-1", entity_field_id: "field-5", entity_id: "entity exact/id", system_key: "action_item_completed_by", name: "Action item completed by", field_type: "date", config: {}, value: null, position: 5000, created_timestamp: "", updated_timestamp: "" },
+        { company_id: "company-1", entity_field_id: "field-6", entity_id: "entity exact/id", system_key: "color", name: "Color", field_type: "color", config: { options: [{ key: "yellow", label: "Yellow", color: "#facc15" }, { key: "red", label: "Red", color: "#ef4444" }] }, value: "yellow", position: 6000, created_timestamp: "", updated_timestamp: "" },
+        { company_id: "company-1", entity_field_id: "field-7", entity_id: "entity exact/id", name: "Escalation note", field_type: "text", config: {}, value: "Call the carrier", position: 7000, created_timestamp: "", updated_timestamp: "" },
+      ],
+    };
     await act(async () => root.render(
       <EntityReferencePreviewHost
         companyID="company-1"
         requestJSON={async <T,>(path: string, init): Promise<T> => {
-          previewRequests.push({ path, signal: init?.signal });
+          previewRequests.push({ path, init });
           if (previewShouldFail) throw new Error("This Entity is unavailable.");
+          if (init?.method === "PUT") {
+            const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
+            if (path.includes("/fields/")) {
+              const fieldID = decodeURIComponent(path.slice(path.lastIndexOf("/") + 1));
+              const currentField = previewEntity.entity_fields.find((field) => field.entity_field_id === fieldID);
+              assert.ok(currentField, `field ${fieldID} exists`);
+              const savedField = {
+                ...currentField,
+                value: body.value as EntityFieldValue,
+                updated_timestamp: "2026-08-28T00:00:00Z",
+              };
+              previewEntity = {
+                ...previewEntity,
+                entity_fields: previewEntity.entity_fields.map((field) => field.entity_field_id === fieldID ? savedField : field),
+              };
+              return { entity_field: savedField } as T;
+            }
+            previewEntity = {
+              ...previewEntity,
+              name: typeof body.name === "string" ? body.name : previewEntity.name,
+              body_json: body.body_json ?? previewEntity.body_json,
+              revision: previewEntity.revision + 1,
+              updated_timestamp: "2026-08-28T00:00:00Z",
+            };
+            return { entity: previewEntity } as T;
+          }
           if (path.includes("/users")) {
             return { users: [
               { company_id: "company-1", user_id: "user-creator", display_name: "Ada Creator", email: "ada@example.test" },
               { company_id: "company-1", user_id: "user-owner", display_name: "Grace Owner", email: "grace@example.test" },
             ] } as T;
           }
-          return {
-            entity: {
-              company_id: "company-1",
-              entity_id: "entity exact/id",
-              entity_type_id: "type-1",
-              entity_type_name: "Action Item",
-              entity_folder_id: null,
-              name: "Current Thailand delivery",
-              position: 1000,
-              revision: 1,
-              created_by_user_id: "user-creator",
-              created_timestamp: "2026-08-27T00:00:00Z",
-              body_json: {
-                format: "mango-tiptap-json",
-                schema_version: 1,
-                document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Contact logistics today." }] }] },
-                annotations: [],
-              },
-              entity_fields: [
-                { company_id: "company-1", entity_field_id: "field-2", entity_id: "entity exact/id", name: "Status", field_type: "choice", config: { options: [{ key: "in_progress", label: "In progress" }] }, value: "in_progress", position: 2000, created_timestamp: "", updated_timestamp: "" },
-                { company_id: "company-1", entity_field_id: "field-1", entity_id: "entity exact/id", name: "Delivered", field_type: "boolean", config: {}, value: false, position: 1000, created_timestamp: "", updated_timestamp: "" },
-                { company_id: "company-1", entity_field_id: "field-3", entity_id: "entity exact/id", name: "Analysis due date", field_type: "date", config: {}, value: "2026-08-31", position: 3000, created_timestamp: "", updated_timestamp: "" },
-                { company_id: "company-1", entity_field_id: "field-4", entity_id: "entity exact/id", name: "Person in charge", field_type: "person", config: {}, value: "user-owner", position: 4000, created_timestamp: "", updated_timestamp: "" },
-              ],
-            },
-          } as T;
+          return { entity: previewEntity } as T;
         }}
       />,
     ));
+    const renderedEntityChip = createEditorEntityLinkElement(dom.window.document, {
+      entityType: "entity",
+      entityID: "entity exact/id",
+      label: "Saved delivery label",
+    });
+    dom.window.document.body.append(renderedEntityChip);
     await act(async () => {
       openEditorEntityLink({ entityType: "entity", entityID: "entity exact/id", label: "Saved delivery label" });
     });
@@ -941,18 +978,86 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.match(entityPreview.textContent ?? "", /Contact logistics today\./);
     assert.match(entityPreview.textContent ?? "", /Created byAda Creator/);
     assert.match(entityPreview.textContent ?? "", /Created date08\/27\/2026/);
-    assert.match(entityPreview.textContent ?? "", /DeliveredNo/);
-    assert.match(entityPreview.textContent ?? "", /StatusIn progress/);
-    assert.match(entityPreview.textContent ?? "", /Analysis due date08\/31\/2026/);
-    assert.match(entityPreview.textContent ?? "", /Person in chargeGrace Owner/);
     assert.doesNotMatch(entityPreview.textContent ?? "", /user-(?:creator|owner)/);
+    const entityNameInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Entity name"]');
+    const detailsEditor = entityPreview.querySelector<HTMLElement>('[data-mango-entity-details-rich-editor="true"]');
+    const statusInput = entityPreview.querySelector<HTMLSelectElement>('select[aria-label="Value for Status"]');
+    const deliveredInput = entityPreview.querySelector<HTMLSelectElement>('select[aria-label="Value for Delivered"]');
+    const analysisDateInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Value for Analysis due date"]');
+    const personInput = entityPreview.querySelector<HTMLSelectElement>('select[aria-label="Value for Person in charge"]');
+    const completionDateInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Value for Action item completed by"]');
+    const colorInput = entityPreview.querySelector<HTMLSelectElement>('select[aria-label="Value for Color"]');
+    const customTextInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Value for Escalation note"]');
+    assert.equal(entityNameInput?.value, "Current Thailand delivery");
+    assert.match(detailsEditor?.textContent ?? "", /Contact logistics today\./);
+    assert.ok(detailsEditor?.querySelector('button[aria-label="Bold"]'), "details use a rich-text editor rather than a plain textarea");
+    assert.equal(deliveredInput?.value, "false");
+    assert.equal(statusInput?.value, "in_progress");
+    assert.equal(statusInput?.selectedOptions[0]?.textContent, "In progress");
+    assert.equal(analysisDateInput?.value, "08/31/2026");
+    assert.equal(personInput?.value, "user-owner");
+    assert.equal(personInput?.selectedOptions[0]?.textContent, "Grace Owner");
+    assert.equal(completionDateInput?.value, "");
+    assert.equal(colorInput?.value, "yellow");
+    assert.equal(customTextInput?.value, "Call the carrier");
+    assert.equal(entityPreview.querySelector('[aria-label="Value for Created by"]'), null, "creator is read-only");
+    assert.equal(entityPreview.querySelector('[aria-label="Value for Created date"]'), null, "created date is read-only");
+    assert.equal(renderedEntityChip.dataset.mangoEntityLabel, "Current Thailand delivery");
+    assert.equal(renderedEntityChip.dataset.mangoActionItemColor, "yellow");
+    assert.equal(renderedEntityChip.getAttribute("aria-label"), "Open Yellow Action Item Current Thailand delivery");
     assert.equal(previewRequests.length, 2);
     const previewURL = new URL(previewRequests[0].path, "https://mango.test");
     assert.equal(previewURL.pathname, "/v1/entities/entity%20exact%2Fid");
     assert.equal(previewURL.searchParams.get("company_id"), "company-1");
-    assert.ok(previewRequests[0].signal, "the exact Entity detail read is cancellable");
+    assert.ok(previewRequests[0].init?.signal, "the exact Entity detail read is cancellable");
     assert.equal(new URL(previewRequests[1].path, "https://mango.test").pathname, "/v1/companies/company-1/users");
-    assert.ok(previewRequests[1].signal, "the company-user display-name read is cancellable");
+    assert.ok(previewRequests[1].init?.signal, "the company-user display-name read is cancellable");
+
+    assert.ok(entityNameInput);
+    entityNameInput.value = "Updated Thailand delivery";
+    await act(async () => Simulate.change(entityNameInput));
+    const saveEntityButton = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Save Entity name and details"]');
+    assert.ok(saveEntityButton);
+    await act(async () => saveEntityButton.click());
+    await flushAsyncWork();
+    const entityWrite = previewRequests.find((request) => request.init?.method === "PUT" && !request.path.includes("/fields/"));
+    assert.ok(entityWrite);
+    assert.equal(entityWrite.path, "/v1/entities/entity%20exact%2Fid");
+    const entityWriteBody = JSON.parse(String(entityWrite.init?.body)) as Record<string, unknown>;
+    assert.equal(entityWriteBody.company_id, "company-1");
+    assert.equal(entityWriteBody.name, "Updated Thailand delivery");
+    assert.equal(entityWriteBody.base_revision, 1);
+    assert.equal((entityWriteBody.body_json as { format?: string }).format, "mango-tiptap-json");
+    assert.deepEqual((entityWriteBody.body_json as { annotations?: unknown[] }).annotations, []);
+    assert.equal(renderedEntityChip.dataset.mangoEntityLabel, "Updated Thailand delivery");
+
+    assert.ok(colorInput);
+    colorInput.value = "red";
+    await act(async () => Simulate.change(colorInput));
+    const saveColorButton = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Save Color"]');
+    assert.ok(saveColorButton);
+    await act(async () => saveColorButton.click());
+    await flushAsyncWork();
+    const colorWrite = previewRequests.find((request) => request.path.endsWith("/fields/field-6") && request.init?.method === "PUT");
+    assert.ok(colorWrite);
+    assert.deepEqual(JSON.parse(String(colorWrite.init?.body)), {
+      company_id: "company-1",
+      value: "red",
+    });
+    assert.equal(renderedEntityChip.dataset.mangoActionItemColor, "red");
+    assert.equal(renderedEntityChip.getAttribute("aria-label"), "Open Red Action Item Updated Thailand delivery");
+
+    assert.ok(customTextInput);
+    customTextInput.value = "Escalate to the carrier manager";
+    await act(async () => Simulate.change(customTextInput));
+    const saveCustomFieldButton = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Save Escalation note"]');
+    assert.ok(saveCustomFieldButton);
+    await act(async () => saveCustomFieldButton.click());
+    await flushAsyncWork();
+    const customWrite = previewRequests.find((request) => request.path.endsWith("/fields/field-7") && request.init?.method === "PUT");
+    assert.ok(customWrite);
+    assert.equal((JSON.parse(String(customWrite.init?.body)) as Record<string, unknown>).value, "Escalate to the carrier manager");
+
     const closeEntityPreview = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Close Action Item details"]');
     assert.ok(closeEntityPreview);
     await act(async () => closeEntityPreview.click());

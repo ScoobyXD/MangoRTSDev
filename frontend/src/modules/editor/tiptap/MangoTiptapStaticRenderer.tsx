@@ -143,6 +143,7 @@ function renderNode(
       const actionItemColor = entityType === "entity" && (attrs.actionItemColor === "yellow" || attrs.actionItemColor === "red")
         ? attrs.actionItemColor
         : null;
+      const isActionItem = entityType === "entity" && attrs.actionItem === true;
       const actionItemSeverity = actionItemColor === "yellow" ? "Yellow" : actionItemColor === "red" ? "Red" : "";
       const emailEntity = entityType === "email_message" ? {
         emailMessageID: String(attrs.emailMessageId || "") || undefined,
@@ -159,13 +160,14 @@ function renderNode(
           data-mango-entity-type={entityType}
           data-mango-entity-id={entityID}
           data-mango-entity-label={label}
+          data-mango-action-item={isActionItem ? "true" : undefined}
           data-mango-action-item-color={actionItemColor || undefined}
           data-mango-email-message-id={entityType === "email_message" ? emailEntity.emailMessageID : undefined}
           data-mango-email-thread-id={entityType === "email_message" ? emailEntity.emailThreadID : undefined}
           data-mango-email-account-email={entityType === "email_message" ? emailEntity.emailAccountEmail : undefined}
           data-mango-email-shared-inbox-id={entityType === "email_message" ? emailEntity.emailSharedInboxID : undefined}
-          aria-label={actionItemColor ? `Open ${actionItemSeverity} Action Item ${label}` : `Open ${editorEntityTypeLabel(entityType)} ${label}`}
-          title={actionItemColor ? `${actionItemSeverity} Action Item: ${label}` : undefined}
+          aria-label={actionItemColor ? `Open ${actionItemSeverity} Action Item ${label}` : `Open ${isActionItem ? "Action Item" : editorEntityTypeLabel(entityType)} ${label}`}
+          title={actionItemColor ? `${actionItemSeverity} Action Item: ${label}` : isActionItem ? `Action Item: ${label}` : undefined}
           role={needsExplicitKeyboardActivation ? "link" : undefined}
           tabIndex={needsExplicitKeyboardActivation ? 0 : undefined}
           href={entityType === "email_message" || entityType === "entity" ? undefined : editorEntityRoute({ entityType, entityID })}

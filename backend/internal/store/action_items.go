@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"encoding/json"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -40,21 +41,15 @@ type ActionItemInput struct {
 	Name            string
 	BodyText        string
 	Color           *string
-	HuddleNodeID    string
 	CreatedByUserID string
 }
 
 func normalizeActionItemInput(input ActionItemInput) (ActionItemInput, error) {
 	input.CompanyID = cleanUUIDText(input.CompanyID)
 	input.CreatedByUserID = cleanUUIDText(input.CreatedByUserID)
-	rawHuddleNodeID := strings.TrimSpace(input.HuddleNodeID)
-	input.HuddleNodeID = rawHuddleNodeID
-	if rawHuddleNodeID != "" {
-		input.HuddleNodeID = cleanUUIDText(rawHuddleNodeID)
-	}
 	input.BodyText = strings.TrimSpace(input.BodyText)
 	input.Name = strings.TrimSpace(input.Name)
-	if input.CompanyID == "" || input.CreatedByUserID == "" || input.BodyText == "" || (rawHuddleNodeID != "" && input.HuddleNodeID == "") || len(input.Name) > EntityNameMaxLength {
+	if input.CompanyID == "" || input.CreatedByUserID == "" || input.BodyText == "" || len(input.Name) > EntityNameMaxLength {
 		return ActionItemInput{}, ErrInvalid
 	}
 	if input.Name == "" {
@@ -179,6 +174,45 @@ func actionItemInitialFieldValue(systemKey string, color *string) json.RawMessag
 	return nil
 }
 
-func actionItemHuddleRelationshipKey(companyID, entityID string) string {
-	return companyID + "|" + entityID
+func entityRelationshipKey(companyID, entityID, resourceType, resourceID string) string {
+	return companyID + "|" + entityID + "|" + resourceType + "|" + resourceID
+}
+
+func entityReferenceIDsFromEditorDocuments(documents []json.RawMessage) []string {
+	ids := map[string]struct{}{}
+	var visit func(any)
+	visit = func(value any) {
+		switch current := value.(type) {
+		case []any:
+			for _, child := range current {
+				visit(child)
+			}
+		case map[string]any:
+			if current["type"] == "mangoEntityLink" {
+				attrs, _ := current["attrs"].(map[string]any)
+				entityType, _ := attrs["entityType"].(string)
+				entityID, _ := attrs["entityId"].(string)
+				if entityType == "entity" {
+					if cleanID := cleanUUIDText(entityID); cleanID != "" {
+						ids[cleanID] = struct{}{}
+					}
+				}
+			}
+			for _, child := range current {
+				visit(child)
+			}
+		}
+	}
+	for _, document := range documents {
+		var value any
+		if json.Unmarshal(document, &value) == nil {
+			visit(value)
+		}
+	}
+	result := make([]string, 0, len(ids))
+	for entityID := range ids {
+		result = append(result, entityID)
+	}
+	sort.Strings(result)
+	return result
 }

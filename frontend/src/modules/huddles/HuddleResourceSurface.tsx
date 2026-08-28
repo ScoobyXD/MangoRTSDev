@@ -29,6 +29,7 @@ import {
 import { HuddleResourceIcon } from "./HuddleResourceIcon";
 import { HuddleActionItemsPanel } from "./HuddleActionItemsPanel";
 import { HuddleLogicGateCards, type HuddleLogicGateCardItem, type HuddleLogicGateKPIItem } from "./HuddleLogicGateCards";
+import { HuddleNodeWorkspace } from "./HuddleNodeWorkspace";
 import { KPIEditorPopup, type KPIEditorItem } from "./LogicGateKPISection";
 import { DEFAULT_HUDDLE_COLUMN_LAYOUT, resizeHuddleColumns, type HuddleColumnLayout } from "./huddleColumnLayout";
 
@@ -86,8 +87,10 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const [permissions, setPermissions] = useState(false);
   const [columnLayout, setColumnLayout] = useState<HuddleColumnLayout>(DEFAULT_HUDDLE_COLUMN_LAYOUT);
   const [nodeLeftFraction, setNodeLeftFraction] = useState(0.62);
+  const [actionItemsRefreshToken, setActionItemsRefreshToken] = useState(0);
   const [error, setError] = useState("");
   const isGate = resource.resourceType === "huddle_logic_gate";
+  const refreshActionItems = useCallback(() => setActionItemsRefreshToken((current) => current + 1), []);
 
   const load = useCallback(async () => {
     setError("");
@@ -341,7 +344,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
           <BareMangoEditorToolbar
             controls={editorControls}
             activeTab={activeTab}
-            visibleTabIDs={isGate ? ["editor", "permissions", "format", "outline-styles"] : ["permissions"]}
+            visibleTabIDs={["editor", "permissions", "format", "outline-styles"]}
             onSelectTab={selectToolbarTab}
             reserveHeaderOffset={false}
           />
@@ -413,17 +416,30 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
             />
           </div>
         ) : (
-          <section aria-label={`${name} Process snapshot`} data-huddle-node-snapshot="true" style={relationshipColumnStyle}>
-            <div style={relationshipColumnHeaderStyle}><strong>Process snapshot</strong></div>
-            <HuddleLogicGateCards
-              items={logicGateCards}
-              emptyLabel="No Processes were linked when this Huddle Node was created."
-              onOpenLogicGate={openLogicGate}
-              onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
+          <div style={nodeWorkspaceColumnStyle}>
+            <HuddleNodeWorkspace
+              apiBase={apiBase}
+              companyID={companyID}
+              huddleNodeID={resource.resourceID}
+              currentUserID={currentUserID}
+              companyUsers={companyUsers}
+              requestJSON={requestJSON}
+              controls={editorControls}
+              onError={setError}
+              onActionItemsChanged={refreshActionItems}
             />
-          </section>
+            <section aria-label={`${name} Process snapshot`} data-huddle-node-snapshot="true" style={relationshipColumnStyle}>
+              <div style={relationshipColumnHeaderStyle}><strong>Process snapshot</strong></div>
+              <HuddleLogicGateCards
+                items={logicGateCards}
+                emptyLabel="No Processes were linked when this Huddle Node was created."
+                onOpenLogicGate={openLogicGate}
+                onOpenKPI={(item, kpi) => void openKPIEditor(item, kpi)}
+              />
+            </section>
+          </div>
         )}
-        <div role="separator" aria-label={isGate ? "Resize Huddle editor and Process columns" : "Resize Huddle Node snapshot and Action Item columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
+        <div role="separator" aria-label={isGate ? "Resize Huddle editor and Process columns" : "Resize Huddle Node workspace and Action Item columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
         {isGate ? (
           <section aria-label="Huddle Processes" style={relationshipColumnStyle}>
             <div style={relationshipColumnHeaderStyle}>
@@ -445,6 +461,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
             huddleNodeID={resource.resourceID}
             companyUsers={companyUsers}
             requestJSON={requestJSON}
+            refreshToken={actionItemsRefreshToken}
           />
         )}
         {isGate && (
@@ -588,6 +605,7 @@ const errorStyle: React.CSSProperties = { margin: "0 12px 5px", padding: "6px 9p
 const errorPlaceholderStyle: React.CSSProperties = { height: 0, minHeight: 0, overflow: "hidden" };
 const bodyStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gap: 0, padding: "4px 10px 10px", overflowX: "auto", overflowY: "hidden" };
 const editorColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, overflow: "hidden", border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: "rgba(255,255,255,.72)", boxShadow: EDITOR_NEU_SHADOW };
+const nodeWorkspaceColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "minmax(360px, 1fr) minmax(150px, .38fr)", gap: 8, overflow: "hidden" };
 const relationshipColumnStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px minmax(0,1fr)", overflow: "hidden", padding: 9, border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };
 const relationshipColumnHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0 3px 6px", color: "#243047", fontSize: 14 };
 const columnResizeHandleStyle: React.CSSProperties = { minWidth: 8, height: "100%", display: "grid", placeItems: "center", cursor: "col-resize", touchAction: "none" };

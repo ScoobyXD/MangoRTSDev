@@ -557,6 +557,7 @@ test("Action Item presentation is optional but remains durable when present", ()
               entityType: "entity",
               entityId: "action-item-1",
               label: "Escalate delayed shipment",
+              actionItem: true,
               actionItemColor: "red",
             },
           }, {
@@ -572,7 +573,9 @@ test("Action Item presentation is optional but remains durable when present", ()
     };
     const compact = compactMangoTiptapDocument(expanded, editor.schema);
     const [actionItem, ordinaryEntity] = compact.document.content?.[0]?.content ?? [];
+    assert.equal(actionItem?.attrs?.actionItem, true);
     assert.equal(actionItem?.attrs?.actionItemColor, "red");
+    assert.equal(Object.prototype.hasOwnProperty.call(ordinaryEntity?.attrs ?? {}, "actionItem"), false);
     assert.equal(Object.prototype.hasOwnProperty.call(ordinaryEntity?.attrs ?? {}, "actionItemColor"), false);
     assert.deepEqual(editor.schema.nodeFromJSON(compact.document).toJSON(), expanded.document);
   } finally {

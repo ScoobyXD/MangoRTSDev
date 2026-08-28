@@ -140,6 +140,27 @@ for update`, input.Document.CompanyID, input.Document.ResourceID, input.Document
 			returning metadata_revision,updated_timestamp`,
 			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID,
 			input.Title).Scan(&revision, &now)
+	case EntityTypeHuddleNode:
+		textboxRef := EditorJSONDocumentRef{
+			CompanyID: input.Document.CompanyID, ResourceType: input.Document.ResourceType,
+			ResourceID: input.Document.ResourceID, DocumentID: input.Document.DocumentID,
+		}
+		storage, ok := postgresEditorTextboxStorageFor(textboxRef)
+		if !ok {
+			return EditorJSONMetadataCommit{}, ErrInvalid
+		}
+		if err = insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, textboxRef); err != nil {
+			return EditorJSONMetadataCommit{}, err
+		}
+		err = tx.QueryRowContext(ctx, `
+			update huddle_node_textboxes
+			set title=$4,revision=revision+1,
+			    updated_timestamp=greatest(clock_timestamp(),created_timestamp)
+			where company_id=$1::uuid and huddle_node_id=$2::uuid and textbox_id=$3::uuid
+			  and deleted_timestamp is null
+			returning revision,updated_timestamp`,
+			input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID,
+			input.Title).Scan(&revision, &now)
 	default:
 		return EditorJSONMetadataCommit{}, ErrInvalid
 	}
@@ -163,6 +184,8 @@ func postgresEditorResourceExistsTx(ctx context.Context, tx *sql.Tx, ref EditorD
 		table, idColumn = "projects", "project_id"
 	case EntityTypeHuddleLogicGate:
 		table, idColumn = "huddle_logic_gates", "huddle_logic_gate_id"
+	case EntityTypeHuddleNode:
+		table, idColumn = "huddle_nodes", "huddle_node_id"
 	case EntityTypeKPI:
 		table, idColumn = "kpis", "kpi_id"
 	default:
@@ -179,7 +202,7 @@ func deletePostgresEditorProjectionTx(ctx context.Context, tx *sql.Tx, ref Edito
 	case EntityTypeNode:
 		// Node textboxes have no separate metadata row.
 		err = nil
-	case EntityTypeLogicGate:
+	case EntityTypeLogicGate, EntityTypeHuddleNode:
 		// Logic Gate textbox metadata is retired with the final textbox row.
 		err = nil
 	case EntityTypeProject:

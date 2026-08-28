@@ -549,9 +549,9 @@ func (r *MemoryRepo) DeleteEntity(companyID, entityID string) error {
 			delete(r.entityFields, fieldKey)
 		}
 	}
-	for relationshipKey, relationship := range r.actionItemHuddleRelationships {
+	for relationshipKey, relationship := range r.entityRelationships {
 		if relationship.CompanyID == companyID && relationship.EntityID == entityID {
-			delete(r.actionItemHuddleRelationships, relationshipKey)
+			delete(r.entityRelationships, relationshipKey)
 		}
 	}
 	delete(r.entities, itemKey)

@@ -19,6 +19,7 @@ import {
   editorEntityRoute,
   EVENT_EDITOR_EMAIL_REFERENCE_OPEN,
   EVENT_EDITOR_ENTITY_REFERENCE_OPEN,
+  EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION,
   normalizeEditorSelectionActionItemName,
   normalizeEditorSelectionNodeTitle,
   openEditorEntityLink,
@@ -28,7 +29,9 @@ import {
   replaceEditorEntityLinkWithLabel,
   returnToEditorEntitySourceNode,
   searchEditorEntityLinks,
+  updateRenderedEditorEntityReference,
   type EditorEntityLink,
+  type EditorEntityReferencePresentation,
 } from "../../../../frontend/src/modules/editor/editorEntityLinks.js";
 
 test("highlighted-text actions keep the square-plus button immediately right of the chat button", () => {
@@ -170,7 +173,7 @@ test("entity search joins bounded Entity results after Nodes, Processes, and Pro
       if (path.startsWith("/v1/entities?")) {
         return {
           entities: [
-            { entity_id: "entity-1", name: "Thailand delivery", updated_timestamp: "2026-08-27T12:00:00Z" },
+            { entity_id: "entity-1", entity_type_name: "Action Item", name: "Thailand delivery", updated_timestamp: "2026-08-27T12:00:00Z" },
             { entity_id: "entity-2", name: "Afternoon delivery", updated_timestamp: "2026-08-27T13:00:00Z" },
             { entity_id: "", name: "Ignored" },
           ],
@@ -190,7 +193,7 @@ test("entity search joins bounded Entity results after Nodes, Processes, and Pro
     { entityType: "node", entityID: "node-1", label: "Receiving", updatedTimestamp: undefined },
     { entityType: "logic_gate", entityID: "gate-1", label: "Delivery process", updatedTimestamp: undefined },
     { entityType: "project", entityID: "project-1", label: "Costco order", updatedTimestamp: undefined },
-    { entityType: "entity", entityID: "entity-1", label: "Thailand delivery", updatedTimestamp: "2026-08-27T12:00:00Z" },
+    { entityType: "entity", entityID: "entity-1", label: "Thailand delivery", updatedTimestamp: "2026-08-27T12:00:00Z", isActionItem: true },
   ]);
   assert.equal(requested.length, 2);
   assert.equal(requested.every((request) => request.signal === controller.signal), true);
@@ -295,6 +298,7 @@ test("selection Action Item creation sends the exact body, normalized name, and 
     entityID: "action-item-1",
     label: "Escalate delayed shipment",
     updatedTimestamp: "2026-08-28T12:00:01Z",
+    isActionItem: true,
   });
   assert.equal(normalizeEditorSelectionActionItemName(`  ${"x".repeat(240)}  `), "x".repeat(200));
 });
@@ -319,6 +323,50 @@ test("legacy entity chips preserve identity, type styling, and routes", () => {
     });
     assert.equal(editorEntityRoute({ entityType: "logic_gate", entityID: "gate one" }), "/logic-gates/gate%20one");
   } finally {
+    if (previousHTMLElement === undefined) delete (globalThis as Record<string, unknown>).HTMLElement;
+    else Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: previousHTMLElement });
+    dom.window.close();
+  }
+});
+
+test("an authoritative Entity read refreshes rendered Action Item labels and severity without replacing chip identity", () => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const domGlobals = dom.window as unknown as typeof globalThis;
+  const previousWindow = globalThis.window;
+  const previousHTMLElement = globalThis.HTMLElement;
+  Object.defineProperty(globalThis, "window", { configurable: true, value: dom.window });
+  Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: domGlobals.HTMLElement });
+  try {
+    const chip = createEditorEntityLinkElement(dom.window.document, {
+      entityType: "entity",
+      entityID: "action-item-1",
+      label: "Saved label",
+    });
+    dom.window.document.body.append(chip);
+    let presentation: EditorEntityReferencePresentation | null = null;
+    dom.window.addEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, (event) => {
+      presentation = (event as CustomEvent<EditorEntityReferencePresentation>).detail;
+    });
+
+    updateRenderedEditorEntityReference({ entityID: "action-item-1", label: "Current label", isActionItem: true, actionItemColor: "red" });
+    assert.equal(chip.dataset.mangoEntityId, "action-item-1");
+    assert.equal(chip.dataset.mangoEntityLabel, "Current label");
+    assert.equal(chip.dataset.mangoActionItem, "true");
+    assert.equal(chip.dataset.mangoActionItemColor, "red");
+    assert.equal(chip.querySelector(".mango-editor-entity-label")?.textContent, "Current label");
+    assert.equal(chip.querySelector(".mango-editor-action-item-severity")?.textContent, "Red");
+    assert.equal(chip.getAttribute("aria-label"), "Open Red Action Item Current label");
+    assert.deepEqual(presentation, { entityID: "action-item-1", label: "Current label", isActionItem: true, actionItemColor: "red" });
+
+    updateRenderedEditorEntityReference({ entityID: "action-item-1", label: "Resolved label", isActionItem: true, actionItemColor: null });
+    assert.equal(chip.dataset.mangoEntityLabel, "Resolved label");
+    assert.equal(chip.dataset.mangoActionItem, "true");
+    assert.equal(chip.hasAttribute("data-mango-action-item-color"), false);
+    assert.equal(chip.querySelector(".mango-editor-action-item-severity"), null);
+    assert.equal(chip.classList.contains("mango-editor-action-item--red"), false);
+  } finally {
+    if (previousWindow === undefined) delete (globalThis as Record<string, unknown>).window;
+    else Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow });
     if (previousHTMLElement === undefined) delete (globalThis as Record<string, unknown>).HTMLElement;
     else Object.defineProperty(globalThis, "HTMLElement", { configurable: true, value: previousHTMLElement });
     dom.window.close();
@@ -552,15 +600,17 @@ test("durable Tiptap entity nodes keep their identity through history and Backsp
 
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{
       type: "mangoEntityLink",
-      attrs: { entityType: "entity", entityId: "action-item-1", label: "Escalate delayed shipment", actionItemColor: "yellow" },
+      attrs: { entityType: "entity", entityId: "action-item-1", label: "Escalate delayed shipment", actionItem: true, actionItemColor: "yellow" },
     }] }] });
     const actionItemHTML = editor.getHTML();
+    assert.match(actionItemHTML, /data-mango-action-item="true"/);
     assert.match(actionItemHTML, /data-mango-action-item-color="yellow"/);
     assert.match(actionItemHTML, /mango-editor-action-item--yellow/);
     assert.match(actionItemHTML, /aria-label="Open Yellow Action Item Escalate delayed shipment"/);
     assert.match(actionItemHTML, />Yellow<\/span>/);
     editor.commands.setContent(actionItemHTML);
     const actionItemNode = editor.getJSON().content?.[0]?.content?.[0] as { attrs?: Record<string, unknown> } | undefined;
+    assert.equal(actionItemNode?.attrs?.actionItem, true, "HTML clipboard hydration preserves Action Item identity");
     assert.equal(actionItemNode?.attrs?.actionItemColor, "yellow", "HTML clipboard hydration preserves Action Item presentation");
     let actionItemEnd = -1;
     editor.state.doc.descendants((node, position) => {

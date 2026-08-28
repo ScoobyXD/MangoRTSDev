@@ -1,7 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CompanyUser } from "../communications/communicationsApi.js";
-import { createActionItem, listHuddleNodeActionItems, type Entity } from "../entities/entitiesApi.js";
-import { openEditorEntityLink } from "../editor/editorEntityLinks.js";
+import { listHuddleNodeActionItems, type Entity } from "../entities/entitiesApi.js";
+import {
+  EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION,
+  openEditorEntityLink,
+  type EditorEntityReferencePresentation,
+} from "../editor/editorEntityLinks.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import { buildUniversalNestedGroups, type UniversalNestedGroup } from "../grouping/universalGrouping.js";
 import {
@@ -29,33 +33,55 @@ export function HuddleActionItemsPanel({
   huddleNodeID,
   companyUsers,
   requestJSON,
+  refreshToken,
 }: {
   companyID: string;
   currentUserID: string;
   huddleNodeID: string;
   companyUsers: CompanyUser[];
   requestJSON: RequestJSON;
+  refreshToken: number;
 }) {
   const [items, setItems] = useState<Entity[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [draft, setDraft] = useState("");
-  const [creating, setCreating] = useState(false);
   const [groupings, setGroupings] = useState<ActionItemGrouping[]>(() => readGroupings(companyID, currentUserID));
+  const itemsRef = useRef<Entity[]>([]);
+  const loadRequestIDRef = useRef(0);
 
-  const load = async () => {
+  const load = useCallback(async () => {
+    const requestID = loadRequestIDRef.current + 1;
+    loadRequestIDRef.current = requestID;
     setLoading(true);
     setError("");
     try {
-      setItems(await listHuddleNodeActionItems(requestJSON, { companyID, huddleNodeID }));
+      const nextItems = await listHuddleNodeActionItems(requestJSON, { companyID, huddleNodeID });
+      if (loadRequestIDRef.current !== requestID) return;
+      itemsRef.current = nextItems;
+      setItems(nextItems);
     } catch (cause) {
+      if (loadRequestIDRef.current !== requestID) return;
       setError(cause instanceof Error ? cause.message : "Could not load Action Items");
     } finally {
-      setLoading(false);
+      if (loadRequestIDRef.current === requestID) setLoading(false);
     }
-  };
+  }, [companyID, huddleNodeID, requestJSON]);
 
-  useEffect(() => { void load(); }, [companyID, huddleNodeID, requestJSON]);
+  useEffect(() => {
+    void load();
+    return () => { loadRequestIDRef.current += 1; };
+  }, [load, refreshToken]);
+
+  useEffect(() => {
+    const refreshEditedActionItem = (event: Event) => {
+      const presentation = (event as CustomEvent<EditorEntityReferencePresentation>).detail;
+      if (!presentation?.isActionItem) return;
+      if (!itemsRef.current.some((item) => item.entity_id === presentation.entityID)) return;
+      void load();
+    };
+    window.addEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, refreshEditedActionItem);
+    return () => window.removeEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, refreshEditedActionItem);
+  }, [load]);
 
   useEffect(() => {
     setGroupings(readGroupings(companyID, currentUserID));
@@ -74,27 +100,6 @@ export function HuddleActionItemsPanel({
     getValues: (item, field) => actionItemGroupingValues(item, field, companyUsers),
     sortRows: sortActionItems,
   }), [companyUsers, groupings, huddleNodeID, items]);
-
-  const create = async (color: "yellow" | "red") => {
-    const text = draft.trim();
-    if (!text || creating) return;
-    setCreating(true);
-    setError("");
-    try {
-      await createActionItem(requestJSON, {
-        companyID,
-        huddleNodeID,
-        bodyText: text,
-        color,
-      });
-      setDraft("");
-      await load();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create Action Item");
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const openItem = (item: Entity) => openEditorEntityLink({
     entityType: "entity",
@@ -155,22 +160,6 @@ export function HuddleActionItemsPanel({
         </div>
       </header>
 
-      <div style={creatorStyle}>
-        <label htmlFor={`huddle-action-item-${huddleNodeID}`} style={creatorLabelStyle}>New Action Item</label>
-        <textarea
-          id={`huddle-action-item-${huddleNodeID}`}
-          value={draft}
-          disabled={creating}
-          placeholder="Call Costco about mangoes"
-          onChange={(event) => setDraft(event.target.value)}
-          style={creatorInputStyle}
-        />
-        <div style={colorActionsStyle}>
-          <button type="button" disabled={creating || !draft.trim()} onClick={() => void create("yellow")} style={createColorButtonStyle("yellow", creating || !draft.trim())}>Yellow</button>
-          <button type="button" disabled={creating || !draft.trim()} onClick={() => void create("red")} style={createColorButtonStyle("red", creating || !draft.trim())}>Red</button>
-        </div>
-      </div>
-
       {error && <div role="alert" style={errorStyle}>{error}</div>}
       <div style={listStyle}>
         {loading && <div style={emptyStyle}>Loading Action Items</div>}
@@ -205,15 +194,10 @@ function collectRows(group: UniversalNestedGroup<Entity, ActionItemGroupingField
   return [...byID.values()];
 }
 
-const panelStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px auto auto minmax(0,1fr)", overflow: "hidden", padding: 9, border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: "rgba(248,250,252,.88)", boxShadow: "4px 4px 12px rgba(148,163,184,.18), -4px -4px 12px rgba(255,255,255,.82)" };
+const panelStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px auto minmax(0,1fr)", overflow: "hidden", padding: 9, border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: "rgba(248,250,252,.88)", boxShadow: "4px 4px 12px rgba(148,163,184,.18), -4px -4px 12px rgba(255,255,255,.82)" };
 const headerStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0 3px 6px", color: "#243047", fontSize: 14 };
 const headerActionsStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5 };
 const refreshButtonStyle: React.CSSProperties = { width: 28, height: 28, border: "1px solid rgba(100,116,139,.25)", borderRadius: 7, background: "#fff", color: "#334155", cursor: "pointer", fontSize: 17 };
-const creatorStyle: React.CSSProperties = { display: "grid", gap: 6, marginBottom: 8, padding: 8, border: "1px solid rgba(148,163,184,.2)", borderRadius: 9, background: "rgba(255,255,255,.72)" };
-const creatorLabelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 800, color: "#475569" };
-const creatorInputStyle: React.CSSProperties = { minHeight: 52, resize: "vertical", border: "1px solid rgba(100,116,139,.28)", borderRadius: 7, padding: "7px 8px", background: "#fff", color: "#111827", font: "inherit", fontSize: 12 };
-const colorActionsStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 };
-const createColorButtonStyle = (color: "yellow" | "red", disabled: boolean): React.CSSProperties => ({ border: `1px solid ${color === "yellow" ? "#eab308" : "#ef4444"}`, borderRadius: 7, padding: "6px 8px", background: color === "yellow" ? "#fef08a" : "#fecaca", color: color === "yellow" ? "#713f12" : "#7f1d1d", font: "inherit", fontSize: 11, fontWeight: 800, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? .48 : 1 });
 const errorStyle: React.CSSProperties = { marginBottom: 6, padding: "6px 8px", borderRadius: 7, background: "#fee2e2", color: "#b91c1c", fontSize: 11, fontWeight: 700 };
 const listStyle: React.CSSProperties = { minHeight: 0, overflowY: "auto", display: "grid", alignContent: "start", gap: 7, padding: "2px" };
 const emptyStyle: React.CSSProperties = { padding: "12px 8px", color: "#64748b", fontSize: 12, fontWeight: 650 };

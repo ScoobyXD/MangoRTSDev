@@ -248,6 +248,40 @@ $$;
 
 
 --
+-- Name: mangorts_enforce_huddle_node_editor_text_limit(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_enforce_huddle_node_editor_text_limit() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+declare
+  total_bytes bigint;
+begin
+  perform pg_advisory_xact_lock(hashtextextended(
+    'editor-owner-text:' || new.company_id::text || ':huddle_node:' || new.huddle_node_id::text, 0
+  ));
+  select coalesce(sum(octet_length(textbox.body_json::text)),0)
+    into total_bytes
+    from huddle_node_textboxes textbox
+   where textbox.company_id=new.company_id
+     and textbox.huddle_node_id=new.huddle_node_id
+     and textbox.deleted_timestamp is null
+     and textbox.textbox_id<>new.textbox_id;
+  if new.deleted_timestamp is null then
+    total_bytes := total_bytes + octet_length(new.body_json::text);
+  end if;
+  if total_bytes > 1073741824 then
+    raise exception 'editor_owner_text_limit_exceeded'
+      using errcode='P0001',
+            detail='The one-GiB limit counts current editor text documents only; attachment object bytes are excluded.';
+  end if;
+  return new;
+end;
+$$;
+
+
+--
 -- Name: mangorts_enforce_logic_gate_editor_text_limit(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -2282,6 +2316,7 @@ $$;
 
 CREATE FUNCTION public.mangorts_validate_attachment_relationship_owner() RETURNS trigger
     LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
     AS $$
 begin
   if new.deleted_timestamp is not null then
@@ -2316,11 +2351,26 @@ begin
                      and project_id=case when pg_input_is_valid(new.resource_id,'uuid') then new.resource_id::uuid end) then
       raise exception 'attachment Project owner does not exist' using errcode='23503';
     end if;
+  elsif new.resource_type='huddle_node' then
+    if not pg_input_is_valid(new.resource_id,'uuid')
+       or not exists(select 1 from huddle_nodes where company_id=new.company_id
+                     and huddle_node_id=case when pg_input_is_valid(new.resource_id,'uuid') then new.resource_id::uuid end) then
+      raise exception 'attachment Huddle Node owner does not exist' using errcode='23503';
+    end if;
   elsif new.resource_type='node_chat_message' then
     if not pg_input_is_valid(new.resource_id,'uuid')
        or not exists(select 1 from node_textbox_chats where company_id=new.company_id
                      and chat_id=case when pg_input_is_valid(new.resource_id,'uuid') then new.resource_id::uuid end and deleted_timestamp is null) then
       raise exception 'attachment Node chat owner does not exist' using errcode='23503';
+    end if;
+  elsif new.resource_type='logic_gate_chat_message' then
+    if not pg_input_is_valid(new.resource_id,'uuid')
+       or not exists(select 1 from logic_gate_projection_table
+                     where company_id=new.company_id
+                       and information_id=case when pg_input_is_valid(new.resource_id,'uuid') then new.resource_id::uuid end
+                       and type='Text block chat'::information_type
+                       and is_deleted=false) then
+      raise exception 'attachment Logic Gate chat owner does not exist' using errcode='23503';
     end if;
   elsif new.resource_type='project_chat_message' then
     if not pg_input_is_valid(new.resource_id,'uuid')
@@ -3455,32 +3505,19 @@ $$;
 
 
 --
--- Name: mangorts_validate_action_item_huddle_relationship(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: mangorts_validate_entity_relationship(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.mangorts_validate_action_item_huddle_relationship() RETURNS trigger
+CREATE FUNCTION public.mangorts_validate_entity_relationship() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public', 'pg_temp'
     AS $$
 begin
-  if tg_op='UPDATE' and (
-    new.company_id is distinct from old.company_id
+  if new.company_id is distinct from old.company_id
     or new.entity_id is distinct from old.entity_id
-    or new.huddle_logic_gate_id is distinct from old.huddle_logic_gate_id
-  ) then
-    raise exception 'action_item_huddle_relationship_endpoints_immutable' using errcode='23514';
-  end if;
-  if not exists (
-    select 1
-    from entities entity
-    join entity_types entity_type
-      on entity_type.company_id=entity.company_id
-     and entity_type.entity_type_id=entity.entity_type_id
-    where entity.company_id=new.company_id
-      and entity.entity_id=new.entity_id
-      and entity_type.system_key='action_item'
-  ) then
-    raise exception 'action_item_huddle_relationship_requires_action_item' using errcode='23514';
+    or new.resource_type is distinct from old.resource_type
+    or new.resource_id is distinct from old.resource_id then
+    raise exception 'entity_relationship_endpoints_immutable' using errcode='23514';
   end if;
   return new;
 end;
@@ -3566,7 +3603,7 @@ CREATE TABLE public.attachment_relationships (
     deleted_timestamp timestamp with time zone,
     CONSTRAINT attachment_relationships_kind_chk CHECK ((relationship_kind = ANY (ARRAY['inline_image'::text, 'file_attachment'::text, 'chat_attachment'::text, 'email_attachment'::text, 'email_inline_attachment'::text, 'migrated_inline_image'::text]))),
     CONSTRAINT attachment_relationships_resource_id_chk CHECK ((btrim(resource_id) <> ''::text)),
-    CONSTRAINT attachment_relationships_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'node_chat_message'::text, 'logic_gate_chat_message'::text, 'project_chat_message'::text, 'email_message'::text, 'email_draft'::text, 'email_signature'::text, 'shared_inbox'::text, 'company_explorer_folder'::text, 'shared_inbox_folder'::text])))
+    CONSTRAINT attachment_relationships_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'huddle_node'::text, 'node_chat_message'::text, 'logic_gate_chat_message'::text, 'project_chat_message'::text, 'email_message'::text, 'email_draft'::text, 'email_signature'::text, 'shared_inbox'::text, 'company_explorer_folder'::text, 'shared_inbox_folder'::text])))
 );
 
 
@@ -3622,7 +3659,7 @@ CREATE TABLE public.attachment_upload_jobs (
     CONSTRAINT attachment_upload_jobs_relationship_chk CHECK ((relationship_kind = ANY (ARRAY['inline_image'::text, 'file_attachment'::text, 'chat_attachment'::text, 'email_attachment'::text, 'email_inline_attachment'::text, 'migrated_inline_image'::text]))),
     CONSTRAINT attachment_upload_jobs_resource_nonblank_chk CHECK (((btrim(resource_type) <> ''::text) AND (btrim(resource_id) <> ''::text))),
     CONSTRAINT attachment_upload_jobs_resource_revision_chk CHECK (((resource_expected_revision >= 0) AND (resource_revision >= 0))),
-    CONSTRAINT attachment_upload_jobs_resource_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'node_chat_message'::text, 'logic_gate_chat_message'::text, 'project_chat_message'::text, 'email_message'::text, 'email_draft'::text, 'email_signature'::text, 'attached_email'::text, 'shared_inbox'::text, 'company_explorer_folder'::text, 'shared_inbox_folder'::text]))),
+    CONSTRAINT attachment_upload_jobs_resource_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'huddle_node'::text, 'node_chat_message'::text, 'logic_gate_chat_message'::text, 'project_chat_message'::text, 'email_message'::text, 'email_draft'::text, 'email_signature'::text, 'attached_email'::text, 'shared_inbox'::text, 'company_explorer_folder'::text, 'shared_inbox_folder'::text]))),
     CONSTRAINT attachment_upload_jobs_sha256_chk CHECK ((sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT attachment_upload_jobs_sha256_method_chk CHECK ((sha256_verification_method = ANY (ARRAY['s3_full'::text, 'server_stream'::text, 'client_reported'::text]))),
     CONSTRAINT attachment_upload_jobs_size_chk CHECK ((size_bytes >= 0)),
@@ -4291,6 +4328,60 @@ CREATE TABLE public.huddle_node_logic_gate_relationships (
     huddle_node_id uuid NOT NULL,
     logic_gate_id uuid NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: huddle_node_textbox_chats; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.huddle_node_textbox_chats (
+    company_id uuid NOT NULL,
+    chat_id uuid NOT NULL,
+    huddle_node_id uuid NOT NULL,
+    textbox_id uuid NOT NULL,
+    parent_chat_id uuid,
+    selection_quote text DEFAULT ''::text NOT NULL,
+    selection_start integer,
+    selection_end integer,
+    author_user_id uuid,
+    author_display_name text DEFAULT ''::text NOT NULL,
+    message text DEFAULT ''::text NOT NULL,
+    edited_timestamp timestamp with time zone,
+    entity_links jsonb DEFAULT '[]'::jsonb NOT NULL,
+    mentioned_user_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    mentioned_group_ids uuid[] DEFAULT '{}'::uuid[] NOT NULL,
+    revision bigint DEFAULT 1 NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    deleted_timestamp timestamp with time zone,
+    CONSTRAINT huddle_node_textbox_chats_entity_links_chk CHECK ((jsonb_typeof(entity_links) = 'array'::text)),
+    CONSTRAINT huddle_node_textbox_chats_message_chk CHECK ((btrim(message) <> ''::text)),
+    CONSTRAINT huddle_node_textbox_chats_offsets_chk CHECK ((((selection_start IS NULL) AND (selection_end IS NULL)) OR ((selection_start >= 0) AND (selection_end >= selection_start)))),
+    CONSTRAINT huddle_node_textbox_chats_revision_chk CHECK ((revision > 0)),
+    CONSTRAINT huddle_node_textbox_chats_timestamps_chk CHECK (((updated_timestamp >= created_timestamp) AND ((edited_timestamp IS NULL) OR (edited_timestamp >= created_timestamp)) AND ((deleted_timestamp IS NULL) OR (deleted_timestamp >= created_timestamp))))
+);
+
+
+--
+-- Name: huddle_node_textboxes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.huddle_node_textboxes (
+    company_id uuid NOT NULL,
+    huddle_node_id uuid NOT NULL,
+    textbox_id uuid NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    deleted_timestamp timestamp with time zone,
+    display_order bigint DEFAULT 0 NOT NULL,
+    body_json jsonb NOT NULL,
+    revision bigint DEFAULT 0 NOT NULL,
+    title text DEFAULT ''::text NOT NULL,
+    CONSTRAINT huddle_node_textboxes_body_json_chk CHECK ((((body_json ->> 'format'::text) = 'mango-tiptap-json'::text) AND ((body_json ->> 'schema_version'::text) = '1'::text) AND (((body_json -> 'document'::text) ->> 'type'::text) = 'doc'::text) AND (jsonb_typeof((body_json -> 'annotations'::text)) = 'array'::text))),
+    CONSTRAINT huddle_node_textboxes_revision_chk CHECK ((revision >= 0)),
+    CONSTRAINT huddle_node_textboxes_timestamps_chk CHECK (((updated_timestamp >= created_timestamp) AND ((deleted_timestamp IS NULL) OR (deleted_timestamp >= created_timestamp)))),
+    CONSTRAINT huddle_node_textboxes_title_chk CHECK ((length(title) <= 500))
 );
 
 
@@ -5134,14 +5225,16 @@ CREATE TABLE public.raci_tabs_items (
 
 
 --
--- Name: action_item_huddle_relationships; Type: TABLE; Schema: public; Owner: -
+-- Name: entity_relationships; Type: TABLE; Schema: public; Owner: -
 --
 
-CREATE TABLE public.action_item_huddle_relationships (
+CREATE TABLE public.entity_relationships (
     company_id uuid NOT NULL,
     entity_id uuid NOT NULL,
-    huddle_logic_gate_id uuid NOT NULL,
-    created_timestamp timestamp with time zone DEFAULT now() NOT NULL
+    resource_type text NOT NULL,
+    resource_id uuid NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT entity_relationships_resource_type_chk CHECK ((resource_type = 'huddle_node'::text))
 );
 
 
@@ -5945,6 +6038,22 @@ ALTER TABLE ONLY public.huddle_node_logic_gate_relationships
 
 
 --
+-- Name: huddle_node_textbox_chats huddle_node_textbox_chats_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.huddle_node_textbox_chats
+    ADD CONSTRAINT huddle_node_textbox_chats_pkey PRIMARY KEY (company_id, chat_id);
+
+
+--
+-- Name: huddle_node_textboxes huddle_node_textboxes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.huddle_node_textboxes
+    ADD CONSTRAINT huddle_node_textboxes_pkey PRIMARY KEY (company_id, huddle_node_id, textbox_id);
+
+
+--
 -- Name: huddle_nodes huddle_nodes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6337,11 +6446,11 @@ ALTER TABLE ONLY public.raci_tabs_items
 
 
 --
--- Name: action_item_huddle_relationships action_item_huddle_relationships_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: entity_relationships entity_relationships_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.action_item_huddle_relationships
-    ADD CONSTRAINT action_item_huddle_relationships_pkey PRIMARY KEY (company_id, entity_id);
+ALTER TABLE ONLY public.entity_relationships
+    ADD CONSTRAINT entity_relationships_pkey PRIMARY KEY (company_id, entity_id, resource_type, resource_id);
 
 
 --
@@ -6900,6 +7009,27 @@ CREATE INDEX idx_huddle_node_logic_gate_relationships_logic_gate ON public.huddl
 
 
 --
+-- Name: huddle_node_textbox_chats_live_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX huddle_node_textbox_chats_live_idx ON public.huddle_node_textbox_chats USING btree (company_id, huddle_node_id, textbox_id, created_timestamp, chat_id) WHERE (deleted_timestamp IS NULL);
+
+
+--
+-- Name: huddle_node_textbox_chats_parent_identity_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX huddle_node_textbox_chats_parent_identity_idx ON public.huddle_node_textbox_chats USING btree (company_id, huddle_node_id, textbox_id, chat_id);
+
+
+--
+-- Name: huddle_node_textboxes_live_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX huddle_node_textboxes_live_order_idx ON public.huddle_node_textboxes USING btree (company_id, huddle_node_id, display_order, textbox_id) WHERE (deleted_timestamp IS NULL);
+
+
+--
 -- Name: idx_huddle_nodes_owner; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7369,10 +7499,10 @@ CREATE INDEX idx_raci_tabs_items_owner_role_folder_position ON public.raci_tabs_
 
 
 --
--- Name: idx_action_item_huddle_relationships_huddle; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_entity_relationships_resource; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_action_item_huddle_relationships_huddle ON public.action_item_huddle_relationships USING btree (company_id, huddle_logic_gate_id, entity_id);
+CREATE INDEX idx_entity_relationships_resource ON public.entity_relationships USING btree (company_id, resource_id, resource_type, entity_id);
 
 
 --
@@ -7653,6 +7783,13 @@ CREATE TRIGGER trg_cleanup_process_map_folder_delete BEFORE DELETE ON public.com
 --
 
 CREATE TRIGGER trg_cleanup_process_map_logic_gate_delete BEFORE DELETE ON public.logic_gates FOR EACH ROW EXECUTE FUNCTION public.trg_cleanup_process_map_source_delete();
+
+
+--
+-- Name: huddle_node_textboxes trg_huddle_node_editor_text_limit; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_huddle_node_editor_text_limit BEFORE INSERT OR UPDATE OF company_id, huddle_node_id, textbox_id, body_json, deleted_timestamp ON public.huddle_node_textboxes FOR EACH ROW EXECUTE FUNCTION public.mangorts_enforce_huddle_node_editor_text_limit();
 
 
 --
@@ -8279,10 +8416,10 @@ CREATE TRIGGER trg_unlink_entity_fields_after_template_retype AFTER UPDATE OF fi
 
 
 --
--- Name: action_item_huddle_relationships trg_validate_action_item_huddle_relationship; Type: TRIGGER; Schema: public; Owner: -
+-- Name: entity_relationships trg_validate_entity_relationship; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_validate_action_item_huddle_relationship BEFORE INSERT OR UPDATE ON public.action_item_huddle_relationships FOR EACH ROW EXECUTE FUNCTION public.mangorts_validate_action_item_huddle_relationship();
+CREATE TRIGGER trg_validate_entity_relationship BEFORE UPDATE ON public.entity_relationships FOR EACH ROW EXECUTE FUNCTION public.mangorts_validate_entity_relationship();
 
 
 --
@@ -8755,6 +8892,38 @@ ALTER TABLE ONLY public.huddle_node_logic_gate_relationships
 
 ALTER TABLE ONLY public.huddle_node_logic_gate_relationships
     ADD CONSTRAINT huddle_node_logic_gate_relationsh_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
+
+
+--
+-- Name: huddle_node_textbox_chats huddle_node_textbox_chats_author_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.huddle_node_textbox_chats
+    ADD CONSTRAINT huddle_node_textbox_chats_author_fkey FOREIGN KEY (author_user_id) REFERENCES public.users(user_id) ON DELETE SET NULL;
+
+
+--
+-- Name: huddle_node_textbox_chats huddle_node_textbox_chats_parent_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.huddle_node_textbox_chats
+    ADD CONSTRAINT huddle_node_textbox_chats_parent_fkey FOREIGN KEY (company_id, huddle_node_id, textbox_id, parent_chat_id) REFERENCES public.huddle_node_textbox_chats(company_id, huddle_node_id, textbox_id, chat_id) ON DELETE CASCADE;
+
+
+--
+-- Name: huddle_node_textbox_chats huddle_node_textbox_chats_textbox_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.huddle_node_textbox_chats
+    ADD CONSTRAINT huddle_node_textbox_chats_textbox_fkey FOREIGN KEY (company_id, huddle_node_id, textbox_id) REFERENCES public.huddle_node_textboxes(company_id, huddle_node_id, textbox_id) ON DELETE CASCADE;
+
+
+--
+-- Name: huddle_node_textboxes huddle_node_textboxes_owner_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.huddle_node_textboxes
+    ADD CONSTRAINT huddle_node_textboxes_owner_fkey FOREIGN KEY (company_id, huddle_node_id) REFERENCES public.huddle_nodes(company_id, huddle_node_id) ON DELETE CASCADE;
 
 
 --
@@ -9342,19 +9511,19 @@ ALTER TABLE ONLY public.raci_tabs_items
 
 
 --
--- Name: action_item_huddle_relationships action_item_huddle_relationships_entity_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: entity_relationships entity_relationships_entity_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.action_item_huddle_relationships
-    ADD CONSTRAINT action_item_huddle_relationships_entity_fkey FOREIGN KEY (company_id, entity_id) REFERENCES public.entities(company_id, entity_id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.entity_relationships
+    ADD CONSTRAINT entity_relationships_entity_fkey FOREIGN KEY (company_id, entity_id) REFERENCES public.entities(company_id, entity_id) ON DELETE CASCADE;
 
 
 --
--- Name: action_item_huddle_relationships action_item_huddle_relationships_huddle_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: entity_relationships entity_relationships_huddle_node_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
-ALTER TABLE ONLY public.action_item_huddle_relationships
-    ADD CONSTRAINT action_item_huddle_relationships_huddle_fkey FOREIGN KEY (company_id, huddle_logic_gate_id) REFERENCES public.huddle_logic_gates(company_id, huddle_logic_gate_id) ON DELETE CASCADE;
+ALTER TABLE ONLY public.entity_relationships
+    ADD CONSTRAINT entity_relationships_huddle_node_fkey FOREIGN KEY (company_id, resource_id) REFERENCES public.huddle_nodes(company_id, huddle_node_id) ON DELETE CASCADE;
 
 
 --

@@ -81,7 +81,7 @@ func NormalizeEditorJSONDocumentRef(ref EditorJSONDocumentRef) (EditorJSONDocume
 		return EditorJSONDocumentRef{}, ErrInvalid
 	}
 	switch ref.ResourceType {
-	case EntityTypeNode, EntityTypeProject, EntityTypeLogicGate, EntityTypeHuddleLogicGate, EntityTypeKPI:
+	case EntityTypeNode, EntityTypeProject, EntityTypeLogicGate, EntityTypeHuddleLogicGate, EntityTypeHuddleNode, EntityTypeKPI:
 	default:
 		return EditorJSONDocumentRef{}, ErrInvalid
 	}

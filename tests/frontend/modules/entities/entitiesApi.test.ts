@@ -8,6 +8,8 @@ import {
   listEntities,
   listHuddleNodeActionItems,
   searchEntities,
+  updateEntity,
+  updateEntityField,
   updateEntityFieldType,
   type Entity,
   type EntitySummary,
@@ -178,5 +180,72 @@ test("field-type create and update serialize choice/color config without changin
   assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), {
     company_id: "company-1",
     config,
+  });
+});
+
+test("inline Entity editing uses the injected request boundary for revisioned body and assigned-field writes", async () => {
+  const calls: Array<{ path: string; init?: RequestInit }> = [];
+  const entity: Entity = {
+    ...entitySummary("action-item-1"),
+    entity_type_name: "Action Item",
+    body_json: {
+      format: "mango-tiptap-json",
+      schema_version: 1,
+      document: { type: "doc", content: [{ type: "paragraph" }] },
+      annotations: [],
+    },
+    entity_fields: [],
+  };
+  const field = {
+    company_id: "company-1",
+    entity_field_id: "color-field",
+    entity_id: "action-item-1",
+    system_key: "color",
+    name: "Color",
+    field_type: "color" as const,
+    config: { options: [{ key: "yellow", label: "Yellow" }, { key: "red", label: "Red" }] },
+    value: "red",
+    position: 0,
+    created_timestamp: "2026-08-27T00:00:00Z",
+    updated_timestamp: "2026-08-28T00:00:00Z",
+  };
+  const requestJSON: BoundRequestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
+    calls.push({ path, init });
+    return (path.includes("/fields/") ? { entity_field: field } : { entity }) as T;
+  };
+
+  const bodyJSON = {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "Escalate today" }] }] },
+    annotations: [],
+  };
+  await updateEntity({
+    companyID: "company-1",
+    entityID: "action-item/1",
+    name: "Escalate delivery",
+    bodyJSON,
+    baseRevision: 7,
+  }, requestJSON);
+  await updateEntityField({
+    companyID: "company-1",
+    entityID: "action-item/1",
+    entityFieldID: "color/field",
+    value: "red",
+  }, requestJSON);
+
+  assert.equal(calls[0]?.path, "/v1/entities/action-item%2F1");
+  assert.equal(calls[0]?.init?.method, "PUT");
+  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
+    company_id: "company-1",
+    name: "Escalate delivery",
+    body_json: bodyJSON,
+    base_revision: 7,
+  });
+  assert.equal(calls[1]?.path, "/v1/entities/action-item%2F1/fields/color%2Ffield");
+  assert.equal(calls[1]?.init?.method, "PUT");
+  assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), {
+    company_id: "company-1",
+    value: "red",
   });
 });

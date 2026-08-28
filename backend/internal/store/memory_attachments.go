@@ -443,6 +443,32 @@ func (r *MemoryRepo) convergeCommunicationsEmailThreadAttachmentLinksLocked(comp
 	return true
 }
 
+func (r *MemoryRepo) retireMemoryAttachmentOwnerLocked(companyID, resourceType, resourceID string, now time.Time) {
+	retiredAttachmentIDs := map[string]bool{}
+	for relationshipID, link := range r.resourceAttachments {
+		if link.CompanyID == companyID && link.ResourceType == resourceType && link.ResourceID == resourceID && link.DeletedTimestamp == nil {
+			link.DeletedTimestamp = &now
+			r.resourceAttachments[relationshipID] = link
+			retiredAttachmentIDs[link.AttachmentID] = true
+		}
+	}
+	for attachmentID := range retiredAttachmentIDs {
+		stillOwned := false
+		for _, link := range r.resourceAttachments {
+			if link.CompanyID == companyID && link.AttachmentID == attachmentID && link.DeletedTimestamp == nil {
+				stillOwned = true
+				break
+			}
+		}
+		if !stillOwned {
+			storedKey := attachmentKey(companyID, attachmentID)
+			attachment := r.attachments[storedKey]
+			attachment.DeletedTimestamp = &now
+			r.attachments[storedKey] = attachment
+		}
+	}
+}
+
 func (r *MemoryRepo) SoftDeleteResourceAttachment(input ResourceAttachmentDeleteInput) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

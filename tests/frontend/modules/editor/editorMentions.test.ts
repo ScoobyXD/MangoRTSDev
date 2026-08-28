@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   buildMentionOptions,
   mentionUserProfileColor,
+  mentionedUserIDsFromChatDraft,
   readActiveMentionDraft,
   splitTextByMentions,
   type MentionableCompanyUser,
@@ -124,4 +125,18 @@ test("mention text splitting highlights urgent !name tokens", () => {
     { text: " and ", mention: false, userID: "" },
     { text: "@lee", mention: true, userID: "user-lee" },
   ]);
+});
+
+test("chat mention IDs reuse the visible mention parser and deduplicate repeated people", () => {
+  assert.deepEqual(
+    mentionedUserIDsFromChatDraft("Ask @Jane Doe, then !Lee Quinn and @Jane Doe again", users),
+    ["user-jane", "user-lee"],
+  );
+});
+
+test("chat mention IDs ignore an ambiguous displayed name", () => {
+  assert.deepEqual(mentionedUserIDsFromChatDraft("Ask @Jane Doe", [
+    users[0]!,
+    { user_id: "user-other-jane", display_name: "Jane Doe", email: "other-jane@example.com" },
+  ]), []);
 });

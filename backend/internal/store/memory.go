@@ -20,6 +20,8 @@ type MemoryRepo struct {
 	qdRatings                        map[string]domain.QDRating
 	huddleLogicGates                 map[string]domain.HuddleLogicGate
 	huddleNodes                      map[string]domain.HuddleNode
+	huddleNodeTextboxes              map[string]map[string]HuddleNodeTextbox
+	huddleNodeTextboxChats           map[string]map[string]HuddleNodeTextboxChat
 	kpis                             map[string]domain.KPI
 	huddleExplorerFolders            map[string]domain.HuddleExplorerFolder
 	huddleExplorerItems              map[string]domain.HuddleExplorerItem
@@ -46,7 +48,7 @@ type MemoryRepo struct {
 	entityFieldTypes                 map[string]domain.EntityFieldType
 	entities                         map[string]domain.Entity
 	entityFields                     map[string]domain.EntityField
-	actionItemHuddleRelationships    map[string]domain.ActionItemHuddleRelationship
+	entityRelationships              map[string]domain.EntityRelationship
 	projectInfo                      map[string][]domain.ProjectInformation
 	projectText                      map[string]map[string]domain.ProjectProjection
 	projectRelationships             map[string]domain.ProjectRelationship
@@ -139,6 +141,8 @@ func NewMemoryRepo() *MemoryRepo {
 		qdRatings:                        map[string]domain.QDRating{},
 		huddleLogicGates:                 map[string]domain.HuddleLogicGate{},
 		huddleNodes:                      map[string]domain.HuddleNode{},
+		huddleNodeTextboxes:              map[string]map[string]HuddleNodeTextbox{},
+		huddleNodeTextboxChats:           map[string]map[string]HuddleNodeTextboxChat{},
 		kpis:                             map[string]domain.KPI{},
 		huddleExplorerFolders:            map[string]domain.HuddleExplorerFolder{},
 		huddleExplorerItems:              map[string]domain.HuddleExplorerItem{},
@@ -163,7 +167,7 @@ func NewMemoryRepo() *MemoryRepo {
 		entityFieldTypes:                 map[string]domain.EntityFieldType{},
 		entities:                         map[string]domain.Entity{},
 		entityFields:                     map[string]domain.EntityField{},
-		actionItemHuddleRelationships:    map[string]domain.ActionItemHuddleRelationship{},
+		entityRelationships:              map[string]domain.EntityRelationship{},
 		projectInfo:                      map[string][]domain.ProjectInformation{},
 		projectText:                      map[string]map[string]domain.ProjectProjection{},
 		projectRelationships:             map[string]domain.ProjectRelationship{},

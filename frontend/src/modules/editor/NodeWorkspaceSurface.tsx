@@ -135,7 +135,7 @@ import {
   createOrdinaryNodeTextBlockContent,
   defaultOpenTextBlockChatIDs,
 } from "./nodeTextBlockCreation";
-import { mentionUserDisplayName, splitTextByMentions, type MentionableCompanyUser } from "./editorMentions";
+import { mentionedUserIDsFromChatDraft } from "./editorMentions";
 
 const TEXT_TIMELINE_COLUMN_WIDTH_PX = 34;
 const TEXT_TIMELINE_COMPACT_COLUMN_WIDTH_PX = 34;
@@ -157,19 +157,6 @@ const TEXT_SIDE_PANE_WIDTH_STORAGE_KEY_PREFIX = "node-editor-side-pane-width-v2"
 const TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIX = "node-editor-pane-layout-v4";
 const LEGACY_TEXT_PANE_LAYOUT_STORAGE_KEY_PREFIXES = ["node-editor-pane-layout-v3", "node-editor-pane-layout-v2"] as const;
 const EMAIL_SELECTION_NODE_TITLE_MAX_LENGTH = 80;
-
-function mentionedUserIDsFromChatDraft(draft: string, users: MentionableCompanyUser[]): string[] {
-  const aliasCounts = new Map<string, number>();
-  for (const user of users) {
-    const alias = mentionUserDisplayName(user).trim().toLowerCase();
-    if (alias) aliasCounts.set(alias, (aliasCounts.get(alias) ?? 0) + 1);
-  }
-  const unambiguousUsers = users.filter((user) => aliasCounts.get(mentionUserDisplayName(user).trim().toLowerCase()) === 1);
-  return Array.from(new Set(splitTextByMentions(draft, unambiguousUsers)
-    .filter((segment) => segment.mention)
-    .map((segment) => segment.user?.user_id.trim() ?? "")
-    .filter(Boolean)));
-}
 
 function buildEmailSelectionNodeTitle(quote: string, fallback: string): string {
   const compactQuote = quote.replace(/\s+/g, " ").trim();

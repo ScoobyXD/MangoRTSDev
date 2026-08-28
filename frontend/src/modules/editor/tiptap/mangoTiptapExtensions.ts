@@ -1197,6 +1197,11 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
             },
             renderHTML: () => ({}),
           },
+          actionItem: {
+            default: false,
+            parseHTML: (element) => element.getAttribute("data-mango-action-item") === "true",
+            renderHTML: () => ({}),
+          },
         };
       },
       parseHTML() {
@@ -1220,6 +1225,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           "data-mango-entity-id": node.attrs.entityId,
           "data-mango-entity-label": label,
           "data-mango-action-item-color": actionItemColor || undefined,
+          "data-mango-action-item": entityType === "entity" && node.attrs.actionItem === true ? "true" : undefined,
           ...(entityType === "email_message" ? {
             "data-mango-email-message-id": node.attrs.emailMessageId || undefined,
             "data-mango-email-thread-id": node.attrs.emailThreadId || undefined,
@@ -1230,8 +1236,10 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
           tabindex: "0",
           "aria-label": actionItemColor
             ? `Open ${actionItemSeverity} Action Item ${label}`
-            : `Open ${editorEntityTypeLabel(entityType)} ${label}`,
-          title: actionItemColor ? `${actionItemSeverity} Action Item: ${label}` : undefined,
+            : `Open ${entityType === "entity" && node.attrs.actionItem === true ? "Action Item" : editorEntityTypeLabel(entityType)} ${label}`,
+          title: actionItemColor
+            ? `${actionItemSeverity} Action Item: ${label}`
+            : entityType === "entity" && node.attrs.actionItem === true ? `Action Item: ${label}` : undefined,
           class: `mango-editor-entity-link mango-editor-entity-link--${entityType}${actionItemColor ? ` mango-editor-action-item mango-editor-action-item--${actionItemColor}` : ""}`,
         }), icon, ["span", { class: "mango-editor-entity-label" }, label], ...(actionItemColor
           ? [["span", { class: "mango-editor-action-item-severity", "aria-hidden": "true" }, actionItemSeverity]]

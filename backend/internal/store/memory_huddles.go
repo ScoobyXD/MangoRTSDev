@@ -293,11 +293,6 @@ func (r *MemoryRepo) DeleteHuddleLogicGate(companyID, id, userID string) error {
 			delete(r.huddleLogicGateRelationships, relationshipKey)
 		}
 	}
-	for relationshipKey, relationship := range r.actionItemHuddleRelationships {
-		if relationship.CompanyID == companyID && relationship.HuddleLogicGateID == id {
-			delete(r.actionItemHuddleRelationships, relationshipKey)
-		}
-	}
 	for ik, p := range r.huddleExplorerItems {
 		if p.CompanyID == companyID && p.ResourceType == EntityTypeHuddleLogicGate && p.ResourceID == id {
 			delete(r.huddleExplorerItems, ik)
@@ -400,9 +395,23 @@ func (r *MemoryRepo) DeleteHuddleNode(companyID, id, userID string) error {
 	if !ok {
 		return ErrNotFound
 	}
-	r.addSimpleHuddleRecycleLocked(companyID, userID, "huddle_node", id, item.Name)
+	before := r.snapshotRecycleStateLocked()
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeHuddleNode, id)
+	r.retireMemoryAttachmentOwnerLocked(companyID, EntityTypeHuddleNode, id, time.Now().UTC())
 	delete(r.huddleNodes, k)
+	delete(r.huddleNodeTextboxes, k)
+	delete(r.huddleNodeTextboxChats, k)
+	editorDocumentPrefix := companyID + ":" + EntityTypeHuddleNode + ":" + id + ":"
+	for documentKey := range r.editorJSONDocuments {
+		if strings.HasPrefix(documentKey, editorDocumentPrefix) {
+			delete(r.editorJSONDocuments, documentKey)
+		}
+	}
+	for documentKey := range r.editorJSONOperations {
+		if strings.HasPrefix(documentKey, editorDocumentPrefix) {
+			delete(r.editorJSONOperations, documentKey)
+		}
+	}
 	for relationshipKey, relationship := range r.huddleNodeLogicGateRelationships {
 		if relationship.CompanyID == companyID && relationship.HuddleNodeID == id {
 			delete(r.huddleNodeLogicGateRelationships, relationshipKey)
@@ -412,6 +421,21 @@ func (r *MemoryRepo) DeleteHuddleNode(companyID, id, userID string) error {
 		if relationship.CompanyID == companyID && relationship.HuddleNodeID == id {
 			delete(r.huddleNodeKPIRelationships, relationshipKey)
 		}
+	}
+	for relationshipKey, relationship := range r.entityRelationships {
+		if relationship.CompanyID == companyID && relationship.ResourceType == EntityTypeHuddleNode && relationship.ResourceID == id {
+			delete(r.entityRelationships, relationshipKey)
+		}
+	}
+	now := time.Now().UTC()
+	recycleID := newUUIDv7String()
+	delta := memoryRecycleSnapshotDelta(before, r.snapshotRecycleStateLocked())
+	r.recycleBin[key(companyID, recycleID)] = memoryRecycleBinItem{
+		Item: domain.RecycleBinItem{
+			CompanyID: companyID, RecycleBinItemID: recycleID, ObjectKind: "huddle_node",
+			ObjectID: id, ObjectLabel: item.Name, DeletedByUserID: userID, DeletedTimestamp: now,
+		},
+		Delta: delta, UseDelta: true,
 	}
 	return nil
 }

@@ -228,3 +228,18 @@ export function splitTextByMentions(value: string, users: MentionableCompanyUser
   if (plainStart < value.length) segments.push({ text: value.slice(plainStart), mention: false });
   return segments;
 }
+
+export function mentionedUserIDsFromChatDraft(draft: string, users: MentionableCompanyUser[]): string[] {
+  const aliasCounts = new Map<string, number>();
+  for (const user of users) {
+    const alias = mentionUserDisplayName(user).trim().toLowerCase();
+    if (alias) aliasCounts.set(alias, (aliasCounts.get(alias) ?? 0) + 1);
+  }
+  const unambiguousUsers = users.filter((user) => (
+    aliasCounts.get(mentionUserDisplayName(user).trim().toLowerCase()) === 1
+  ));
+  return Array.from(new Set(splitTextByMentions(draft, unambiguousUsers)
+    .filter((segment) => segment.mention)
+    .map((segment) => segment.user?.user_id.trim() ?? "")
+    .filter(Boolean)));
+}

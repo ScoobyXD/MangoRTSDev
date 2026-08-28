@@ -185,6 +185,27 @@ test("parses editor snapshots, tombstones, and application heartbeats", () => {
   const heartbeat = parseRealtimeMessage(JSON.stringify({ type: "heartbeat.confirmed", nonce: "nonce-1" }));
   assert.equal(heartbeat.type, "heartbeat.confirmed");
 });
+
+test("parses canonical editor events for Huddle and KPI documents", () => {
+  for (const resourceType of ["huddle_node", "huddle_logic_gate", "kpi"] as const) {
+    const message = parseRealtimeMessage(JSON.stringify({
+      type: "editor.snapshot.required",
+      company_id: "company-1",
+      scope: `editor-json:${resourceType}:resource-1:document-1`,
+      event_id: `event-${resourceType}`,
+      resource_type: resourceType,
+      resource_id: "resource-1",
+      document_id: "document-1",
+      resource_revision: 4,
+      operation_id: `operation-${resourceType}`,
+      client_id: "remote-client",
+    }));
+    assert.equal(message.type, "editor.snapshot.required");
+    assert.equal(message.resource_type, resourceType);
+    assert.equal(isSupportedRealtimeScope(`editor-json:${resourceType}:resource-1:document-1`), true);
+  }
+});
+
 test("rejects deleted broad protocol messages", () => {
   for (const type of ["projection.delta", "workspace.event", "communications.event", "snapshot.refetch", "permission.revoked", "editor.delta.committed"]) {
     assert.throws(() => parseRealtimeMessage(JSON.stringify({ type, company_id: "company-1", scope: "board:A" })), /unknown_realtime_message_type/);

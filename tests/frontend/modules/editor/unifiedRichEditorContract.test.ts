@@ -239,9 +239,11 @@ test("shared editor surfaces retain semantic identity, placeholders, and urgent 
   assert.match(editorDocumentSurface, /data-placeholder=\{placeholder\}/);
   assert.match(indexCSS, /\[data-mango-editor-empty="true"\]\[data-placeholder\]::before/);
   assert.match(nodeWorkspaceParts, /dataAttributes=\{\{/);
+  assert.match(nodeWorkspaceParts, /"data-node-text-block-id": props\.surfaceKind === "project" \|\| props\.surfaceKind === "huddle_node" \? undefined : props\.blockID/);
   assert.match(nodeWorkspaceParts, /"data-project-text-block-id": props\.surfaceKind === "project" \? props\.blockID : undefined/);
   assert.match(editorDocumentSurface, /\{\.\.\.dataAttributes\}/);
-  assert.match(nodeWorkspaceParts, /"Project" : "Node"\} text box/);
+  assert.match(nodeWorkspaceParts, /"Project" : props\.surfaceKind === "huddle_node" \? "Huddle Node" : "Node"\} text box/);
+  assert.match(nodeWorkspaceParts, /"data-huddle-node-textbox-id": props\.surfaceKind === "huddle_node" \? props\.blockID : undefined/);
   assert.match(projectSummary, /surfaceKind="project"/);
   assert.match(projectSummary, /const \[activeRichTextBlockID, setActiveRichTextBlockID\] = useState\(""\)/);
   assert.match(projectSummary, /formattingDisabled=\{!activeRichTextBlockID \|\| !blocks\.some\(\(block\) => block\.id === activeRichTextBlockID\)\}/);

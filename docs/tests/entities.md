@@ -40,15 +40,15 @@ E18 - Deleting an ordinary Entity Field hard-deletes only that field. Deleting a
 
 E19 - An Entity Folder may be deleted only when it has no child folders and no Entities; deleting it also deletes its own ordinary Entity Field Types. An ordinary Entity Type may be deleted only when it has no Entities; deleting it also deletes its folders and Entity Field Types.
 
-E20 - Deleting an ordinary Entity hard-deletes its Entity Fields and Action Item Huddle relationship. An Action Item cannot be hard-deleted while its archive behavior is deferred; a delete attempt changes nothing. Existing inline references retain their saved label but resolve to an unavailable Entity and never silently target another Entity.
+E20 - Deleting an ordinary Entity hard-deletes its Entity Fields and exact `entity_relationships` rows. An Action Item cannot be hard-deleted while its archive behavior is deferred; a delete attempt changes nothing. Existing inline references retain their saved label but resolve to an unavailable Entity and never silently target another Entity.
 
 E21 - Entities are company-wide and have no per-Entity permission, GVIC, placement, assignment, or policy rows. A signed-in company member may list, read, create, edit, move, and delete that company's ordinary Entities data but never another company's data.
 
-E22 - Every supported non-email Mango editor may insert an Entity through Universal Picker `#` reference mode. Email compose, reply, and signature editors never retain Entity reference chips: pasted, dropped, or preloaded Entity chips become their saved label as plain text before any local or remote save, including close and navigation autosave, while other supported resource references remain unchanged. An Entity is never a legal `##` link target and selecting one never mutates a relationship table.
+E22 - Every supported non-email Mango editor may insert an Entity through Universal Picker `#` reference mode. Email compose, reply, and signature editors never retain inline Entity references: pasted, dropped, or preloaded Entity references become their saved label as plain text before any local or remote save, including close and navigation autosave, while other supported resource references remain unchanged. An Entity is never a legal `##` link target. Saving an Action Item reference in a Huddle Node derives that exact Node's `entity_relationships` in the same transaction; other editor contexts create no Entity relationship.
 
 E23 - The Universal Picker category order is Nodes, Processes, Projects, Entities, Emails. Entity search is company-scoped, bounded, cancellable, and returns only real Entities, never Entity Types or folders.
 
-E24 - An inline Entity reference stores the fixed resource type `entity`, exact canonical Entity ID, and saved display label. Pointer, Enter, or Space activation reads that exact current Entity and opens its details; deleting the chip changes only editor content.
+E24 - An inline Entity reference stores the fixed resource type `entity`, exact canonical Entity ID, and saved display label. Pointer, Enter, or Space activation reads that exact current Entity and opens its editable details. Deleting the reference changes editor content; in a Huddle Node, removing its final reference also removes only that Node's exact Entity relationship.
 
 E25 - Every company has exactly one required Entity Type named `Action Item` with system key `action_item`. Its identity, system key, and label are immutable, and it cannot be deleted independently of its company.
 
@@ -61,3 +61,13 @@ E28 - The mandated Status configuration always contains exactly the keys `in_pro
 E29 - Action Item creation records the authenticated same-company actor in `created_by_user_id`; deleting that actor's company membership sets this audit pointer to null without changing the Action Item's name, Details, or created timestamp, while the independent exact-person cleanup in E14 still applies.
 
 E30 - The retired Entity Fields label library, assignments, `/fields` page, Project field column/filter/grouping behavior, APIs, implementation, and old schema objects do not coexist with the current Entities system and have no compatibility path.
+
+E31 - The inline Entity details dialog edits the Entity name, rich Details body, and every assigned editable field through the existing Entity APIs. Created by and Created Date are read-only audit values.
+
+E32 - Highlighting nonblank text in a supported editor exposes one split yellow/red Action Item action. Choosing a side creates one real Action Item Entity with that color and replaces the selection with one inline Entity reference to its exact ID.
+
+E33 - Inline Action Item creation seeds Details from the selected text, defaults Status to In progress, records the authenticated creator, and leaves the remaining required fields editable in the details dialog.
+
+E34 - Yellow inline Action Item references pulse once every two seconds and red references once every second. A reduced-motion preference disables the pulse without changing color, identity, editing, or relationship behavior.
+
+E35 - A Huddle Node editor save atomically stores one `entity_relationships` row per distinct referenced Action Item Entity across all of that Node's live text boxes. Several references share that row, removing one reference keeps a sibling reference's row, and removing the final saved reference removes only the row and never deletes the Entity.

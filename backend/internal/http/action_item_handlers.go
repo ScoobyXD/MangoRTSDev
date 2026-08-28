@@ -17,11 +17,10 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		var request struct {
-			CompanyID    string  `json:"company_id"`
-			BodyText     string  `json:"body_text"`
-			Name         string  `json:"name"`
-			Color        *string `json:"color"`
-			HuddleNodeID string  `json:"huddle_node_id"`
+			CompanyID string  `json:"company_id"`
+			BodyText  string  `json:"body_text"`
+			Name      string  `json:"name"`
+			Color     *string `json:"color"`
 		}
 		decoder := json.NewDecoder(r.Body)
 		decoder.DisallowUnknownFields()
@@ -33,12 +32,9 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		if strings.TrimSpace(request.HuddleNodeID) != "" && !s.requireEntityEdit(w, r, request.CompanyID, store.EntityTypeHuddleNode, request.HuddleNodeID, "huddle_node_not_found") {
-			return
-		}
 		item, err := s.repo.CreateActionItem(store.ActionItemInput{
 			CompanyID: request.CompanyID, Name: request.Name, BodyText: request.BodyText,
-			Color: request.Color, HuddleNodeID: request.HuddleNodeID, CreatedByUserID: actor.User.UserID,
+			Color: request.Color, CreatedByUserID: actor.User.UserID,
 		})
 		if errors.Is(err, store.ErrPrincipalNotInCompany) {
 			writeError(w, http.StatusForbidden, "company_access_denied")
@@ -55,7 +51,7 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		huddleNodeID := strings.TrimSpace(r.URL.Query().Get("huddle_node_id"))
-		if !s.requireEntityView(w, r, companyID, store.EntityTypeHuddleNode, huddleNodeID, "huddle_node_not_found") {
+		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleNode, huddleNodeID, "huddle_node_not_found") {
 			return
 		}
 		items, err := s.repo.ListHuddleNodeActionItems(companyID, huddleNodeID)

@@ -13,6 +13,23 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
+type huddleNodeCardsAccessRepo struct {
+	store.Repository
+	huddleNodeID    string
+	logicGateChecks int
+}
+
+func (r *huddleNodeCardsAccessRepo) UserHasEffectiveAccess(_, _, resourceType, resourceID, _ string) (bool, error) {
+	if resourceType == store.EntityTypeHuddleNode && resourceID == r.huddleNodeID {
+		return true, nil
+	}
+	if resourceType == store.EntityTypeLogicGate {
+		r.logicGateChecks++
+		return false, nil
+	}
+	return false, nil
+}
+
 func TestHuddleLogicGateRelationshipRoutesCreateAndReadTypedCards(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	handler := NewServer(repo).Routes()
@@ -73,6 +90,52 @@ func TestHuddleLogicGateRelationshipRoutesCreateAndReadTypedCards(t *testing.T) 
 	handler.ServeHTTP(rec, userPinRequestWithActor(req, admin, companyID, domain.RoleCompanyAdmin))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("idempotent reverse PUT relationship status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHuddleNodeCardsUseExactHuddleNodeEditAccessWithoutProcessFiltering(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	companyID := "79797979-7979-4797-8797-797979797979"
+	member := mustCreateUserPinUser(t, repo, "huddle-node-cards-member", companyID, "huddle-node-cards@example.com", domain.RoleCompanyUser)
+	huddleID := createHuddleLogicGateForHTTPTest(t, repo, companyID)
+	logicGate, err := repo.CreateLogicGate(companyID, "Operations")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateKPI(store.HuddleCreateInput{CompanyID: companyID, OwnerID: logicGate.LogicGateID, Name: "On-time delivery"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateHuddleLogicGateRelationship(store.HuddleLogicGateRelationshipInput{
+		CompanyID: companyID, HuddleLogicGateID: huddleID, LogicGateID: logicGate.LogicGateID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateHuddleNode(store.HuddleCreateInput{
+		CompanyID: companyID, OwnerID: huddleID, Name: "Wednesday", ActorID: member.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	accessRepo := &huddleNodeCardsAccessRepo{Repository: repo, huddleNodeID: node.HuddleNodeID}
+	handler := NewServer(accessRepo).Routes()
+	request := httptest.NewRequest(http.MethodGet, "/v1/huddle-nodes/"+node.HuddleNodeID+"/logic-gates?company_id="+companyID, nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, userPinRequestWithActor(request, member, companyID, domain.RoleCompanyUser))
+	if response.Code != http.StatusOK {
+		t.Fatalf("Huddle Node cards status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		LogicGates []domain.HuddleLogicGateCard `json:"logic_gates"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.LogicGates) != 1 || payload.LogicGates[0].LogicGateID != logicGate.LogicGateID || len(payload.LogicGates[0].KPIs) != 1 {
+		t.Fatalf("Huddle Node cards=%+v", payload.LogicGates)
+	}
+	if accessRepo.logicGateChecks != 0 {
+		t.Fatalf("Huddle Node cards performed %d separate Process permission checks", accessRepo.logicGateChecks)
 	}
 }
 

@@ -38,6 +38,8 @@ func writeHuddleError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "resource_not_found")
 	case errors.Is(err, store.ErrConflict):
 		writeError(w, http.StatusConflict, "resource_has_children")
+	case errors.Is(err, store.ErrVersionConflict):
+		writeError(w, http.StatusConflict, "version_conflict")
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_request")
 	default:
@@ -265,8 +267,11 @@ func (s *Server) handleHuddleNodeByID(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if s.handleHuddleNodeWorkspaceSubresource(w, r, id, parts) {
+		return
+	}
 	if len(parts) == 2 && parts[1] == "logic-gates" && r.Method == http.MethodGet {
-		if !s.requireEntityView(w, r, companyID, store.EntityTypeHuddleNode, id, "huddle_node_not_found") {
+		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleNode, id, "huddle_node_not_found") {
 			return
 		}
 		items, err := s.repo.ListHuddleNodeLogicGateCards(companyID, id)
@@ -274,19 +279,7 @@ func (s *Server) handleHuddleNodeByID(w http.ResponseWriter, r *http.Request) {
 			writeHuddleError(w, err)
 			return
 		}
-		actor, _ := authenticatedActor(r)
-		visible := items[:0]
-		for _, item := range items {
-			allowed, accessErr := s.actorCanViewHuddleResource(actor, companyID, store.EntityTypeLogicGate, item.LogicGateID)
-			if accessErr != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_check_entity_permission")
-				return
-			}
-			if allowed {
-				visible = append(visible, item)
-			}
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"logic_gates": visible})
+		writeJSON(w, http.StatusOK, map[string]any{"logic_gates": items})
 		return
 	}
 	if len(parts) != 1 {
@@ -320,7 +313,7 @@ func (s *Server) handleHuddleNodeByID(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
-		if !s.requireEntityView(w, r, companyID, store.EntityTypeHuddleNode, id, "huddle_node_not_found") {
+		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleNode, id, "huddle_node_not_found") {
 			return
 		}
 		item, err := s.repo.GetHuddleNode(companyID, id)
