@@ -406,10 +406,11 @@ Assert-NativeSuccess "restore into exact QA raw database"
 ```
 
 Run the read-only preflight and one-transaction sanitizer first. Then apply the
-existing reviewed Action Item migration only to this exact isolated raw QA
-database. Dev has no Entity or Action Item rows, so this creates only the current
-required Entity Type and five field templates for each copied company; it does
-not recreate historical Action Items. Finally run the read-only verifier:
+existing reviewed Action Item and Entity relationship migrations in filename
+order only to this exact isolated raw QA database. Dev has no Entity or Action
+Item rows, so this creates only the current required Entity Type and five field
+templates for each copied company; it does not recreate historical Action
+Items. Finally run the read-only verifier:
 
 ```powershell
 foreach ($sqlFile in @(
@@ -423,10 +424,15 @@ foreach ($sqlFile in @(
 }
 
 Assert-QaWritersStopped
-& $psql --host $qaHost --port $qaPort --username $qaUser `
-  --dbname $rawDatabase --no-password --no-psqlrc `
-  --set ON_ERROR_STOP=on --file .\backend\db\migrations\20260828_action_items.sql
-Assert-NativeSuccess "upgrade only the exact QA raw Entity schema and seed current defaults"
+foreach ($migrationFile in @(
+  ".\backend\db\migrations\20260828_action_items.sql",
+  ".\backend\db\migrations\20260828_entity_relationships.sql"
+)) {
+  & $psql --host $qaHost --port $qaPort --username $qaUser `
+    --dbname $rawDatabase --no-password --no-psqlrc `
+    --set ON_ERROR_STOP=on --file $migrationFile
+  Assert-NativeSuccess "apply $migrationFile to the exact QA raw database"
+}
 
 & $psql --host $qaHost --port $qaPort --username $qaUser `
   --dbname $rawDatabase --no-password --no-psqlrc `

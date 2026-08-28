@@ -372,13 +372,22 @@ func TestEntitySchemaReadinessUsesExactUnorderedColumnSets(t *testing.T) {
 	}
 }
 
-func TestActionItemSchemaReadinessRequiresHuddleRelationshipTable(t *testing.T) {
+func TestActionItemSchemaReadinessRequiresEntityRelationshipAndHuddleWorkspaceTables(t *testing.T) {
+	required := map[string]bool{
+		"entity_relationships":      false,
+		"huddle_node_textboxes":     false,
+		"huddle_node_textbox_chats": false,
+	}
 	for _, table := range requiredApplicationTables {
-		if table == "action_item_huddle_relationships" {
-			return
+		if _, ok := required[table]; ok {
+			required[table] = true
 		}
 	}
-	t.Fatal("application schema readiness does not require action_item_huddle_relationships")
+	for table, found := range required {
+		if !found {
+			t.Fatalf("application schema readiness does not require %s", table)
+		}
+	}
 }
 
 func TestEditorJSONAcceptsEntityEntityLink(t *testing.T) {

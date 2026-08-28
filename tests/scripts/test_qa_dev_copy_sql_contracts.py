@@ -71,10 +71,18 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("raw qa source is not the audited empty base entity schema", self.preflight)
         self.assertIn("select * from expected except select * from actual", self.preflight)
         self.assertIn("select * from actual except select * from expected", self.preflight)
-        self.assertIn("to_regclass('public.action_item_huddle_relationships') is not null", self.preflight)
+        for retired_or_not_yet_applied_table in (
+            "action_item_huddle_relationships",
+            "entity_relationships",
+        ):
+            self.assertIn(
+                f"to_regclass('public.{retired_or_not_yet_applied_table}') is not null",
+                self.preflight,
+            )
         self.assertIn("select count(*) from public.entities", self.preflight)
         self.assertIn("'20260827_entities.sql'", self.preflight)
         self.assertIn("'20260828_action_items.sql'", self.preflight)
+        self.assertIn("'20260828_entity_relationships.sql'", self.preflight)
         self.assertNotIn(
             "to_regclass('public.action_item_huddle_relationships') is null",
             self.sanitizer,
@@ -83,10 +91,12 @@ class QADevCopySQLContracts(unittest.TestCase):
     def test_runbook_bridges_raw_entity_schema_before_verification_and_export(self) -> None:
         sanitizer = self.runbook.index("qa_dev_copy_sanitize.sql")
         action_items = self.runbook.index("20260828_action_items.sql")
+        entity_relationships = self.runbook.index("20260828_entity_relationships.sql")
         verifier = self.runbook.index("qa_dev_copy_verify.sql", sanitizer)
         export = self.runbook.index("--data-only", verifier)
         self.assertLess(sanitizer, action_items)
-        self.assertLess(action_items, verifier)
+        self.assertLess(action_items, entity_relationships)
+        self.assertLess(entity_relationships, verifier)
         self.assertLess(verifier, export)
         self.assertIn("-auditpurpose canonicalbaseline", self.runbook)
         self.assertIn("canonical_schema_inventory_sha256=", self.runbook)
@@ -280,9 +290,9 @@ class QADevCopySQLContracts(unittest.TestCase):
             "field.field_type = 'person'",
             "from public.company_memberships membership",
             "entity person field has no exact same-company membership",
-            "from public.action_item_huddle_relationships relationship",
-            "entity_type.system_key is distinct from 'action_item'",
-            "action item huddle relationship points to a non-action-item entity",
+            "from public.entity_relationships relationship",
+            "left join public.huddle_nodes huddle_node",
+            "entity relationship has a missing entity or unsupported or missing exact resource",
             "a company is missing its exact required action item entity type",
             "a company is missing an exact required action item field template",
             "an action item entity is missing a required linked field",
@@ -409,7 +419,7 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             """
             drop trigger if exists trg_clear_entity_person_fields_for_membership
               on public.company_memberships;
-            drop table public.action_item_huddle_relationships;
+            drop table public.entity_relationships;
             drop table public.entity_fields,public.entities,public.entity_field_types,
               public.entity_folders,public.entity_types cascade;
             create table public.entity_field_assignments(placeholder integer);
@@ -443,12 +453,29 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
                 encoding="utf-8"
             )
         )
+        self.run_sql(
+            (
+                ROOT
+                / "backend"
+                / "db"
+                / "migrations"
+                / "20260828_entity_relationships.sql"
+            ).read_text(encoding="utf-8")
+        )
         self.run_sql(self.verifier_sql())
 
         result = self.run_sql(
             f"""
             select
-              to_regclass('public.action_item_huddle_relationships') is not null,
+              to_regclass('public.entity_relationships') is not null,
+              to_regclass('public.action_item_huddle_relationships') is null,
+              (select count(*) from information_schema.columns
+               where table_schema='public' and table_name='entity_relationships'),
+              not exists(
+                select 1 from information_schema.columns
+                where table_schema='public' and table_name='entity_relationships'
+                  and column_name='entity_type_id'
+              ),
               (select count(*) from public.entity_types
                where company_id='{bridge_company}' and system_key='action_item'),
               (select count(*) from public.entity_field_types
@@ -458,7 +485,9 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
               (select count(*) from public.schema_migrations);
             """
         )
-        self.assertEqual(result.split("|"), ["t", "1", "5", "0", "0"])
+        self.assertEqual(
+            result.split("|"), ["t", "t", "5", "t", "1", "5", "0", "0"]
+        )
 
     def test_non_owning_boundary_and_typed_entity_link_collisions(self) -> None:
         company_a = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -492,6 +521,9 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
         huddle_root = "85000000-0000-4000-8000-000000000001"
         excluded_huddle = "86000000-0000-4000-8000-000000000001"
         surviving_huddle = "86000000-0000-4000-8000-000000000002"
+        excluded_huddle_node = "86000000-0000-4000-8000-000000000011"
+        surviving_huddle_node = "86000000-0000-4000-8000-000000000012"
+        missing_huddle_node = "86000000-0000-4000-8000-000000000099"
         huddle_item = "87000000-0000-4000-8000-000000000001"
 
         self.run_sql(
@@ -583,15 +615,24 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             insert into public.huddle_logic_gates(company_id,huddle_logic_gate_id,header)
             values ('{company_a}','{excluded_huddle}','Excluded Fixture Huddle');
 
+            insert into public.huddle_nodes(
+              company_id,huddle_node_id,huddle_logic_gate_id,name
+            ) values (
+              '{company_a}','{excluded_huddle_node}','{excluded_huddle}',
+              'Excluded Fixture Huddle Node'
+            );
+
             insert into public.huddle_explorer_items(
               company_id,huddle_explorer_item_id,resource_huddle_resource_id,huddle_type,parent_folder_id
             ) values (
               '{company_a}','{huddle_item}','{excluded_huddle}','huddle_logic_gate','{huddle_root}'
             );
 
-            insert into public.action_item_huddle_relationships(
-              company_id,entity_id,huddle_logic_gate_id
-            ) values ('{company_a}','{action_entity}','{excluded_huddle}');
+            insert into public.entity_relationships(
+              company_id,entity_id,resource_type,resource_id
+            ) values (
+              '{company_a}','{action_entity}','huddle_node','{excluded_huddle_node}'
+            );
 
             insert into public.company_explorer_folders(company_id,folder_id,parent_folder_id,name)
             select '{company_a}'::uuid, gen_random_uuid(), null, root_name
@@ -773,7 +814,7 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
                  from public.entity_fields where company_id='{company_a}' and entity_field_id='{invalid_person_field}'),
               (select count(*) from public.huddle_logic_gates
                  where company_id='{company_a}' and huddle_logic_gate_id='{excluded_huddle}'),
-              (select count(*) from public.action_item_huddle_relationships
+              (select count(*) from public.entity_relationships
                  where company_id='{company_a}' and entity_id='{action_entity}'),
               (select count(*) from public.entities
                  where company_id='{company_a}' and entity_id='{action_entity}');
@@ -937,19 +978,43 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             f"""
             insert into public.huddle_logic_gates(company_id,huddle_logic_gate_id,header)
             values ('{company_a}','{surviving_huddle}','Surviving Fixture Huddle');
+
+            insert into public.huddle_nodes(
+              company_id,huddle_node_id,huddle_logic_gate_id,name
+            ) values (
+              '{company_a}','{surviving_huddle_node}','{surviving_huddle}',
+              'Surviving Fixture Huddle Node'
+            );
+
+            insert into public.entity_relationships(
+              company_id,entity_id,resource_type,resource_id
+            ) values (
+              '{company_a}','{allowed_entity}','huddle_node','{surviving_huddle_node}'
+            );
+            """
+        )
+        self.run_sql(verifier)
+        self.run_sql(
+            f"""
             set session_replication_role = replica;
-            insert into public.action_item_huddle_relationships(
-              company_id,entity_id,huddle_logic_gate_id
-            ) values ('{company_a}','{allowed_entity}','{surviving_huddle}');
+            insert into public.entity_relationships(
+              company_id,entity_id,resource_type,resource_id
+            ) values (
+              '{company_a}','{action_entity}','huddle_node','{missing_huddle_node}'
+            );
             set session_replication_role = origin;
             """
         )
-        action_edge_error = self.run_sql_failure(verifier)
-        self.assertIn("non-action-item entity", action_edge_error)
+        entity_edge_error = self.run_sql_failure(verifier)
+        self.assertIn("entity_relationships_huddle_node_fkey", entity_edge_error)
+        self.assertIn("orphaned child data", entity_edge_error)
         self.run_sql(
             f"""
-            delete from public.action_item_huddle_relationships
-            where company_id='{company_a}' and entity_id='{allowed_entity}';
+            delete from public.entity_relationships
+            where company_id='{company_a}'
+              and resource_id in ('{surviving_huddle_node}','{missing_huddle_node}');
+            delete from public.huddle_nodes
+            where company_id='{company_a}' and huddle_node_id='{surviving_huddle_node}';
             delete from public.huddle_logic_gates
             where company_id='{company_a}' and huddle_logic_gate_id='{surviving_huddle}';
             """

@@ -45,8 +45,9 @@ begin
   end if;
 
   -- The one-time source bridge is deliberately narrow. Dev currently has the
-  -- exact base Entity schema and no Entity data; the reviewed 20260828 migration
-  -- is applied only to this isolated raw QA database after sanitization.
+  -- exact base Entity schema and no Entity data; the reviewed current Action
+  -- Item and Entity relationship migrations are applied only to this isolated
+  -- raw QA database after sanitization.
   with expected(table_name,column_name) as (
     values
       ('entity_types','company_id'),('entity_types','entity_type_id'),
@@ -84,6 +85,7 @@ begin
 
   if entity_schema_mismatch_count <> 0
      or to_regclass('public.action_item_huddle_relationships') is not null
+     or to_regclass('public.entity_relationships') is not null
      or to_regclass('public.entity_field_assignments') is not null then
     raise exception 'STOP: raw QA source is not the audited empty base Entity schema';
   end if;
@@ -98,7 +100,11 @@ begin
 
   if exists (
     select 1 from public.schema_migrations
-    where version in ('20260827_entities.sql','20260828_action_items.sql')
+    where version in (
+      '20260827_entities.sql',
+      '20260828_action_items.sql',
+      '20260828_entity_relationships.sql'
+    )
   ) then
     raise exception 'STOP: Dev Entity migration ledger changed after the approved read-only audit';
   end if;

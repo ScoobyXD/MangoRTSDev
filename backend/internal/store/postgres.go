@@ -31,7 +31,7 @@ var requiredApplicationTables = []string{
 	"project_textboxes", "project_textbox_chats", "logic_gate_textboxes", "logic_gate_textboxes_history",
 	"scorecards",
 	"entity_types", "entity_folders", "entity_field_types", "entities", "entity_fields",
-	"action_item_huddle_relationships",
+	"entity_relationships", "huddle_node_textboxes", "huddle_node_textbox_chats",
 }
 
 func NewPostgresRepo(db *sql.DB) *PostgresRepo {

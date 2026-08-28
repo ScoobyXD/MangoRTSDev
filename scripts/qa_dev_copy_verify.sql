@@ -47,7 +47,8 @@ begin
      or to_regclass('public.entity_field_types') is null
      or to_regclass('public.entities') is null
      or to_regclass('public.entity_fields') is null
-     or to_regclass('public.action_item_huddle_relationships') is null
+     or to_regclass('public.entity_relationships') is null
+     or to_regclass('public.action_item_huddle_relationships') is not null
      or to_regclass('public.schema_migrations') is null then
     raise exception 'STOP: required canonical Mango tables are missing';
   end if;
@@ -75,12 +76,18 @@ begin
       ('entity_fields','entity_id'),('entity_fields','entity_field_type_id'),
       ('entity_fields','name'),('entity_fields','field_type'),
       ('entity_fields','value_jsonb'),('entity_fields','position'),
-      ('entity_fields','created_timestamp'),('entity_fields','updated_timestamp')
+      ('entity_fields','created_timestamp'),('entity_fields','updated_timestamp'),
+      ('entity_relationships','company_id'),('entity_relationships','entity_id'),
+      ('entity_relationships','resource_type'),('entity_relationships','resource_id'),
+      ('entity_relationships','created_timestamp')
   ), actual(table_name,column_name) as (
     select table_name::text,column_name::text
     from information_schema.columns
     where table_schema='public'
-      and table_name in ('entity_types','entity_folders','entity_field_types','entities','entity_fields')
+      and table_name in (
+        'entity_types','entity_folders','entity_field_types','entities','entity_fields',
+        'entity_relationships'
+      )
   ), mismatches as (
     (select * from expected except select * from actual)
     union all
@@ -453,16 +460,19 @@ begin
 
   if exists (
     select 1
-    from public.action_item_huddle_relationships relationship
-    join public.entities entity
+    from public.entity_relationships relationship
+    left join public.entities entity
       on entity.company_id = relationship.company_id
      and entity.entity_id = relationship.entity_id
-    join public.entity_types entity_type
-      on entity_type.company_id = entity.company_id
-     and entity_type.entity_type_id = entity.entity_type_id
-    where entity_type.system_key is distinct from 'action_item'
+    left join public.huddle_nodes huddle_node
+      on relationship.resource_type = 'huddle_node'
+     and huddle_node.company_id = relationship.company_id
+     and huddle_node.huddle_node_id = relationship.resource_id
+    where entity.entity_id is null
+       or relationship.resource_type is distinct from 'huddle_node'
+       or huddle_node.huddle_node_id is null
   ) then
-    raise exception 'STOP: an Action Item Huddle relationship points to a non-Action-Item Entity';
+    raise exception 'STOP: an Entity relationship has a missing Entity or unsupported or missing exact resource';
   end if;
 
   if exists (
