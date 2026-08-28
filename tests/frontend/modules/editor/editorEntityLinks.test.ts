@@ -15,6 +15,7 @@ import {
   createNodeEntityFromSelection,
   editorEntityRoute,
   EVENT_EDITOR_EMAIL_REFERENCE_OPEN,
+  EVENT_EDITOR_ENTITY_REFERENCE_OPEN,
   normalizeEditorSelectionNodeTitle,
   openEditorEntityLink,
   readActiveEntityLinkDraft,
@@ -99,7 +100,7 @@ test("# entity drafts respect text boundaries and allow a searchable phrase", ()
   assert.equal(readActiveEntityLinkDraft("#road,", 6), null);
 });
 
-test("entity search groups Nodes, Projects, and Logic Gates in product order and forwards cancellation", async () => {
+test("entity search groups Nodes, Processes, and Projects in product order and forwards cancellation", async () => {
   let requestedPath = "";
   let requestedSignal: AbortSignal | null | undefined;
   const controller = new AbortController();
@@ -118,16 +119,16 @@ test("entity search groups Nodes, Projects, and Logic Gates in product order and
         ],
       } as T;
     },
-  }, "road", 20, ["node", "project", "logic_gate"], controller.signal);
+  }, "road", 20, ["node", "logic_gate", "project"], controller.signal);
 
   const url = new URL(requestedPath, "https://mango.test");
   assert.equal(url.pathname, "/v1/company-explorer/search");
   assert.equal(url.searchParams.get("company_id"), "company-1");
   assert.equal(url.searchParams.get("q"), "road");
-  assert.equal(url.searchParams.get("resource_types"), "node,project,logic_gate");
+  assert.equal(url.searchParams.get("resource_types"), "node,logic_gate,project");
   assert.equal(url.searchParams.get("ranking"), "editor_entities");
   assert.equal(requestedSignal, controller.signal);
-  assert.deepEqual(results.map((entity) => entity.entityType), ["node", "project", "logic_gate"]);
+  assert.deepEqual(results.map((entity) => entity.entityType), ["node", "logic_gate", "project"]);
 });
 
 test("entity search requests and returns only the selected picker category", async () => {
@@ -153,6 +154,62 @@ test("entity search requests and returns only the selected picker category", asy
     label: "Launch",
     updatedTimestamp: undefined,
   }]);
+});
+
+test("entity search joins bounded Entity results after Nodes, Processes, and Projects", async () => {
+  const requested: Array<{ path: string; signal?: AbortSignal | null }> = [];
+  const controller = new AbortController();
+  const results = await searchEditorEntityLinks({
+    companyID: "company-1",
+    requestJSON: async <T>(path: string, init?: RequestInit): Promise<T> => {
+      requested.push({ path, signal: init?.signal });
+      if (path.startsWith("/v1/entities?")) {
+        return {
+          entities: [
+            { entity_id: "entity-1", name: "Thailand delivery", updated_timestamp: "2026-08-27T12:00:00Z" },
+            { entity_id: "entity-2", name: "Afternoon delivery", updated_timestamp: "2026-08-27T13:00:00Z" },
+            { entity_id: "", name: "Ignored" },
+          ],
+        } as T;
+      }
+      return {
+        results: [
+          { resource_type: "project", resource_id: "project-1", display_name: "Costco order" },
+          { resource_type: "node", resource_id: "node-1", display_name: "Receiving" },
+          { resource_type: "logic_gate", resource_id: "gate-1", display_name: "Delivery process" },
+        ],
+      } as T;
+    },
+  }, "delivery", 4, ["node", "logic_gate", "project", "entity"], controller.signal);
+
+  assert.deepEqual(results, [
+    { entityType: "node", entityID: "node-1", label: "Receiving", updatedTimestamp: undefined },
+    { entityType: "logic_gate", entityID: "gate-1", label: "Delivery process", updatedTimestamp: undefined },
+    { entityType: "project", entityID: "project-1", label: "Costco order", updatedTimestamp: undefined },
+    { entityType: "entity", entityID: "entity-1", label: "Thailand delivery", updatedTimestamp: "2026-08-27T12:00:00Z" },
+  ]);
+  assert.equal(requested.length, 2);
+  assert.equal(requested.every((request) => request.signal === controller.signal), true);
+  const entityURL = new URL(requested.find((request) => request.path.startsWith("/v1/entities?"))?.path ?? "", "https://mango.test");
+  assert.equal(entityURL.searchParams.get("company_id"), "company-1");
+  assert.equal(entityURL.searchParams.get("q"), "delivery");
+  assert.equal(entityURL.searchParams.get("limit"), "4");
+  assert.equal(results.length, 4, "the merged workspace and Entity result set honors the requested total limit");
+});
+
+test("Entity-only blank search lists the bounded company Entities without querying Company Explorer", async () => {
+  const requestedPaths: string[] = [];
+  const results = await searchEditorEntityLinks({
+    companyID: "company-1",
+    requestJSON: async <T>(path: string): Promise<T> => {
+      requestedPaths.push(path);
+      return { entities: [{ entity_id: "entity-1", name: "First Entity" }] } as T;
+    },
+  }, "", 50, ["entity"]);
+
+  assert.equal(requestedPaths.length, 1);
+  assert.equal(new URL(requestedPaths[0], "https://mango.test").pathname, "/v1/entities");
+  assert.deepEqual(results, [{ entityType: "entity", entityID: "entity-1", label: "First Entity", updatedTimestamp: undefined }]);
 });
 
 test("selection Node creation normalizes the exact title and returns a durable entity", async () => {
@@ -211,13 +268,14 @@ test("legacy entity chips preserve identity, type styling, and routes", () => {
   }
 });
 
-test("entity chips render the canonical Node, Logic Gate, Project, and Email icons", () => {
+test("entity chips render the canonical Node, Logic Gate, Project, Entity, and Email icons", () => {
   const dom = new JSDOM("<!doctype html>");
   try {
     const icons = [
       ["node", "M3.7 1.7h5.45l3.15 3.15v9.45H3.7z"],
       ["logic_gate", "M4.35 3.55h3.35c2.45 0 4.45 1.95 4.45 4.45s-2 4.45-4.45 4.45H4.35z"],
       ["project", "M2.3 3.1h11.4v9.8H2.3z"],
+      ["entity", "M5.1 5.35h5.8M5.1 8h5.8M5.1 10.65h3.65"],
       ["email_message", "M2.1 3.65h11.8v8.7H2.1z"],
     ] as const;
     for (const [entityType, expectedPath] of icons) {
@@ -246,9 +304,13 @@ test("entity clicks navigate inside the app and Node-to-Node links retain a safe
   let popStateCount = 0;
   let historyBackCount = 0;
   let openedEmail: EditorEntityLink | undefined;
+  let openedEntity: EditorEntityLink | undefined;
   dom.window.addEventListener("popstate", () => { popStateCount += 1; });
   dom.window.addEventListener(EVENT_EDITOR_EMAIL_REFERENCE_OPEN, (event) => {
     openedEmail = (event as CustomEvent<EditorEntityLink>).detail;
+  });
+  dom.window.addEventListener(EVENT_EDITOR_ENTITY_REFERENCE_OPEN, (event) => {
+    openedEntity = (event as CustomEvent<EditorEntityLink>).detail;
   });
   Object.defineProperty(dom.window.history, "back", { configurable: true, value: () => { historyBackCount += 1; } });
   try {
@@ -283,6 +345,14 @@ test("entity clicks navigate inside the app and Node-to-Node links retain a safe
       emailThreadID: "22222222-2222-4222-8222-222222222222",
       emailAccountEmail: "owner@example.com",
     });
+
+    openEditorEntityLink({ entityType: "entity", entityID: "entity-1", label: "Thailand delivery" });
+    assert.equal(dom.window.location.pathname, "/projects/project-1", "an Entity reference opens through the detail-preview event without inventing an app route");
+    assert.deepEqual(openedEntity, { entityType: "entity", entityID: "entity-1", label: "Thailand delivery" });
+    assert.throws(
+      () => editorEntityRoute({ entityType: "entity", entityID: "entity-1" }),
+      /detail preview/,
+    );
   } finally {
     if (previousWindow === undefined) delete (globalThis as Record<string, unknown>).window;
     else Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow });
@@ -387,6 +457,18 @@ test("durable Tiptap entity nodes keep their identity through history and Backsp
     assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink") ?? false, false);
     assert.equal(editor.commands.redo(), true);
     assert.equal(editor.getJSON().content?.[0]?.content?.some((node) => node.type === "mangoEntityLink"), true);
+
+    editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{
+      type: "mangoEntityLink",
+      attrs: { entityType: "entity", entityId: "entity-1", label: "Saved delivery label" },
+    }] }] });
+    const entityNode = editor.getJSON().content?.[0]?.content?.[0] as { attrs?: Record<string, unknown> } | undefined;
+    assert.equal(entityNode?.attrs?.entityType, "entity");
+    assert.equal(entityNode?.attrs?.entityId, "entity-1");
+    assert.equal(entityNode?.attrs?.label, "Saved delivery label");
+    assert.match(editor.getHTML(), /data-mango-entity-type="entity"/);
+    assert.match(editor.getHTML(), /data-mango-entity-id="entity-1"/);
+    assert.match(editor.getHTML(), /M5.1 5.35h5.8M5.1 8h5.8M5.1 10.65h3.65/);
 
     editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: [{
       type: "mangoEntityLink",

@@ -1196,7 +1196,7 @@ export function createMangoTiptapExtensions(options: MangoTiptapExtensionOptions
       },
       renderHTML({ node, HTMLAttributes }) {
         const type = String(node.attrs.entityType || "node");
-        const entityType = type === "logic_gate" || type === "project" || type === "email_message" ? type : "node";
+        const entityType = type === "logic_gate" || type === "project" || type === "entity" || type === "email_message" ? type : "node";
         const label = String(node.attrs.label || "Entity");
         const ownerDocument = globalThis.document;
         const icon = ownerDocument

@@ -77,21 +77,6 @@ export function createTeamsFrames(): FrameDataModel[] {
   ];
 }
 
-export function createFieldsFrames(): FrameDataModel[] {
-  return [
-    {
-      id: createFrameId(),
-      kind: "fields",
-      x: 1,
-      y: 1,
-      w: 42,
-      h: 30,
-      title: "Fields",
-      ...WHITE_FRAME,
-    },
-  ];
-}
-
 export function createHomeViewFrames(): FrameDataModel[] {
   const homeID = createFrameId();
 

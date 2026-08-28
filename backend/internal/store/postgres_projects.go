@@ -38,10 +38,6 @@ type postgresProjectAssignmentQueryer interface {
 }
 
 func attachProjectAssignmentReadModel(ctx context.Context, queryer postgresProjectAssignmentQueryer, project domain.Project) (domain.Project, error) {
-	fields, err := listEntityFieldsForResource(ctx, queryer, project.CompanyID, EntityTypeProject, project.ProjectID)
-	if err != nil {
-		return domain.Project{}, err
-	}
 	accounts, err := listProjectAccountAssignments(ctx, queryer, project.CompanyID, project.ProjectID)
 	if err != nil {
 		return domain.Project{}, err
@@ -50,7 +46,6 @@ func attachProjectAssignmentReadModel(ctx context.Context, queryer postgresProje
 	if err != nil {
 		return domain.Project{}, err
 	}
-	project.Fields = fields
 	project.Accounts = accounts
 	project.Teams = teams
 	return project, nil

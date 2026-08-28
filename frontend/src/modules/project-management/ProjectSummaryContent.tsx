@@ -131,7 +131,6 @@ import {
   type EditorHistoryResourceRef,
 } from "../editor/editorExitHistory.js";
 import { flushMangoTiptapDocument, flushMangoTiptapResource } from "../editor/tiptap/mangoTiptapFlushRegistry.js";
-import { setEntityFieldAssignments, type EntityField } from "../fields/entityFieldsApi.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import {
   filterMangoResourceAttachments,
@@ -202,8 +201,6 @@ function projectChatMentionedUserIDs(draft: string, users: MentionableCompanyUse
 
 type ProjectSummaryContentProps = {
   projectID: string;
-  entityFields: EntityField[];
-  showFieldMetadata?: boolean;
   focusInformationID?: string;
   focusMentionUserID?: string;
   focusRequestID?: number;
@@ -413,8 +410,6 @@ const PROJECT_HEALTH_OPTIONS: ProjectHealth[] = ["On Track", "AT RISK", "Off Tra
 
 export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
   projectID,
-  entityFields,
-  showFieldMetadata = false,
   focusInformationID,
   focusMentionUserID,
   focusRequestID,
@@ -2339,38 +2334,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
     }
   }, [accounts, companyID, groups, onProjectUpdated, project, projectID]);
 
-  const saveProjectFields = useCallback(async (nextFieldIDs: string[]) => {
-    if (!project || projectMetadataSaving) return;
-    const fieldIDs = uniqueStringIDs(nextFieldIDs);
-    const previous = project;
-    const optimistic: ProjectRecord = {
-      ...project,
-      fields: fieldIDs.map((fieldID) => (
-        entityFields.find((field) => field.field_id === fieldID)
-        ?? project.fields?.find((field) => field.field_id === fieldID)
-      )).filter((field): field is EntityField => Boolean(field)),
-    };
-    setProjectMetadataSaving(true);
-    setProject(optimistic);
-    setError("");
-    try {
-      const savedFields = await setEntityFieldAssignments({
-        companyID,
-        resourceType: "project",
-        resourceID: projectID,
-        fieldIDs,
-      });
-      const saved = { ...optimistic, fields: savedFields };
-      setProject(saved);
-      onProjectUpdated?.(saved);
-    } catch (metadataError) {
-      setProject(previous);
-      setError(metadataError instanceof Error ? metadataError.message : "Failed to update project fields");
-    } finally {
-      setProjectMetadataSaving(false);
-    }
-  }, [companyID, entityFields, onProjectUpdated, project, projectID, projectMetadataSaving]);
-
   const selectRelationshipNode = useCallback((relationshipID: string, event: React.MouseEvent<HTMLElement>) => {
     const next = buildProjectRelationshipNodeSelectionUpdate({
       orderedIDs: visibleRelationshipNodeIDs,
@@ -3168,20 +3131,6 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
           </div>
         </div>
         <div className="mango-project-summary-meta" style={summaryMetaPillsStyle}>
-          {showFieldMetadata ? (
-            <div style={summaryMetaFieldStyle}>
-              <span style={summaryMetaFieldLabelStyle}>Fields</span>
-              <ProjectFieldControl
-                ariaLabel="Project fields"
-                values={project?.fields?.map((field) => field.field_id) ?? []}
-                choices={entityFields.map((field) => ({ id: field.field_id, label: field.name || field.field_id }))}
-                multiple
-                placeholder="Not set"
-                disabled={projectMetadataSaving || !project}
-                onChange={(fieldIDs) => void saveProjectFields(fieldIDs)}
-              />
-            </div>
-          ) : null}
           <div style={summaryMetaFieldStyle}>
             <span style={summaryMetaFieldLabelStyle}>Status</span>
             <ProjectFieldControl

@@ -78,7 +78,6 @@ logic, up from 17.7% in the previous snapshot.
 | `backend/internal/attachments` | 1 | 459 | 0.2% |
 | `frontend/src/pages/logic-gate-arena` | 3 | 445 | 0.2% |
 | `backend/cmd/miraeopus-api` | 1 | 365 | 0.1% |
-| `frontend/src/modules/fields` | 2 | 337 | 0.1% |
 | `frontend/src/modules/api` | 2 | 330 | 0.1% |
 | `backend/cmd/mango-attachment-previews` | 1 | 303 | 0.1% |
 | `frontend/src/modules/workspace` | 2 | 217 | 0.1% |
@@ -99,7 +98,6 @@ logic, up from 17.7% in the previous snapshot.
 | `frontend/src/modules/entityLabels.ts` | 1 | 23 | 0.0% |
 | `frontend/src/pages/teams` | 1 | 19 | 0.0% |
 | `frontend/src/pages/account-manager` | 1 | 15 | 0.0% |
-| `frontend/src/pages/fields` | 1 | 4 | 0.0% |
 
 ## Files Over 1,500 Logic Lines
 

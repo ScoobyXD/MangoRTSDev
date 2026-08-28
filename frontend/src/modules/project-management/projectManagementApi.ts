@@ -1,7 +1,6 @@
 import { editorChatEntityLinkPayloads, type EditorChatEntityLink } from "../editor/chatEntityLinks.js";
 import { apiFetchJSON, getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import type { Account } from "../accounts/accountsApi.js";
-import type { EntityField } from "../fields/entityFieldsApi.js";
 import { emitExplorerContextUpdated } from "../dashboardEvents.js";
 
 export type ProjectManagementEntityType = "node" | "logic_gate";
@@ -51,7 +50,6 @@ export type ProjectRecord = {
   default_access?: string;
   accounts?: Account[];
   teams?: ProjectTeam[];
-  fields?: EntityField[];
   effective_access_level?: string;
   created_timestamp: string;
   updated_timestamp: string;

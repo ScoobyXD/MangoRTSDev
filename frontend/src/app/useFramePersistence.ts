@@ -1,6 +1,6 @@
 import type { FrameDataModel } from "../types.js";
 import { FRAME_REGISTRY_KEY } from "../modules/linkingGraph.js";
-import { createAccountManagerFrames, createFieldsFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews.js";
+import { createAccountManagerFrames, createHomeViewFrames, createLogicGateArenaFrames, createProjectManagementFrames, createTeamsFrames } from "./DefaultViews.js";
 import {
   FRAME_LINKS_KEY,
   sanitizeFrameLinks,
@@ -27,7 +27,6 @@ const SUPPORTED_PERSISTED_FRAME_KINDS = new Set<string>([
   "kanban",
   "account-manager",
   "project-management",
-  "fields",
   "teams",
 ]);
 
@@ -136,7 +135,7 @@ function sanitizeFrames(value: unknown): FrameDataModel[] {
 
 function sanitizePage(value: unknown): ViewTab["page"] {
   if (value === "communications") return "home";
-  return value === "logic-gate-arena" || value === "project-management" || value === "process-map" || value === "account-manager" || value === "teams" || value === "fields" || value === "home" ? value : undefined;
+  return value === "logic-gate-arena" || value === "project-management" || value === "process-map" || value === "entities" || value === "account-manager" || value === "teams" || value === "home" ? value : undefined;
 }
 
 function createUniqueFrameID(usedFrameIDs: Set<string>): string {
@@ -171,8 +170,8 @@ function isTeamsTab(tab: ViewTab): boolean {
   return tab.page === "teams" || /^teams$/i.test(tab.name.trim());
 }
 
-function isFieldsTab(tab: ViewTab): boolean {
-  return tab.page === "fields" || /^fields$/i.test(tab.name.trim());
+function isEntitiesTab(tab: ViewTab): boolean {
+  return tab.page === "entities" || /^entities$/i.test(tab.name.trim());
 }
 
 function normalizePrimaryTab(tab: ViewTab): ViewTab {
@@ -180,9 +179,9 @@ function normalizePrimaryTab(tab: ViewTab): ViewTab {
   if (isLogicGateArenaTab(tab)) return { ...tab, name: "Process Arena", page: "logic-gate-arena" };
   if (isProjectManagementTab(tab)) return { ...tab, name: "Projects", page: "project-management" };
   if (isProcessMapTab(tab)) return { ...tab, name: "Process Map", page: "process-map", frames: [] };
+  if (isEntitiesTab(tab)) return { ...tab, name: "Entities", page: "entities", frames: [] };
   if (isAccountManagerTab(tab)) return { ...tab, name: "Accounts", page: "account-manager" };
   if (isTeamsTab(tab)) return { ...tab, name: "Teams", page: "teams" };
-  if (isFieldsTab(tab)) return { ...tab, name: "Fields", page: "fields" };
   return tab;
 }
 
@@ -192,9 +191,9 @@ function createPrimaryTabs(): ViewTab[] {
     { id: "view-logic-gate-arena", name: "Process Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() },
     { id: "view-project-management", name: "Projects", page: "project-management", frames: createProjectManagementFrames() },
     { id: "view-process-map", name: "Process Map", page: "process-map", frames: [] },
+    { id: "view-entities", name: "Entities", page: "entities", frames: [] },
     { id: "view-account-manager", name: "Accounts", page: "account-manager", frames: createAccountManagerFrames() },
     { id: "view-teams", name: "Teams", page: "teams", frames: createTeamsFrames() },
-    { id: "view-fields", name: "Fields", page: "fields", frames: createFieldsFrames() },
   ];
 }
 
@@ -206,14 +205,14 @@ function ensurePrimaryHeaderTabs(tabs: ViewTab[]): ViewTab[] {
   if (!next.some(isLogicGateArenaTab)) next.push(defaults[1]);
   if (!next.some(isProjectManagementTab)) next.push(defaults[2]);
   if (!next.some(isProcessMapTab)) next.push(defaults[3]);
-  if (!next.some(isAccountManagerTab)) next.push(defaults[4]);
-  if (!next.some(isTeamsTab)) next.push(defaults[5]);
-  if (!next.some(isFieldsTab)) next.push(defaults[6]);
+  if (!next.some(isEntitiesTab)) next.push(defaults[4]);
+  if (!next.some(isAccountManagerTab)) next.push(defaults[5]);
+  if (!next.some(isTeamsTab)) next.push(defaults[6]);
 
   return next
     .map((tab, index) => ({ tab, index }))
     .sort((a, b) => {
-      const rank = (tab: ViewTab) => isCommunicationsTab(tab) ? 0 : isLogicGateArenaTab(tab) ? 1 : isProjectManagementTab(tab) ? 2 : isProcessMapTab(tab) ? 3 : isAccountManagerTab(tab) ? 4 : isTeamsTab(tab) ? 5 : isFieldsTab(tab) ? 6 : 7;
+      const rank = (tab: ViewTab) => isCommunicationsTab(tab) ? 0 : isLogicGateArenaTab(tab) ? 1 : isProjectManagementTab(tab) ? 2 : isProcessMapTab(tab) ? 3 : isEntitiesTab(tab) ? 4 : isAccountManagerTab(tab) ? 5 : isTeamsTab(tab) ? 6 : 7;
       const rankDelta = rank(a.tab) - rank(b.tab);
       return rankDelta || a.index - b.index;
     })

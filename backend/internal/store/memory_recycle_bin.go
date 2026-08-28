@@ -50,7 +50,6 @@ type memoryRecycleBinSnapshot struct {
 	projects                         map[string]domain.Project
 	projectAccountAssignments        map[string]bool
 	projectTeamAssignments           map[string]bool
-	entityFieldAssignments           map[string]bool
 	projectInfo                      map[string][]domain.ProjectInformation
 	projectText                      map[string]map[string]domain.ProjectProjection
 	projectRelationships             map[string]domain.ProjectRelationship
@@ -415,7 +414,6 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		projects:                         cloneMap(r.projects),
 		projectAccountAssignments:        cloneMap(r.projectAccountAssignments),
 		projectTeamAssignments:           cloneMap(r.projectTeamAssignments),
-		entityFieldAssignments:           cloneMap(r.entityFieldAssignments),
 		projectInfo:                      cloneSliceMap(r.projectInfo),
 		projectText:                      cloneNestedMap(r.projectText),
 		projectRelationships:             cloneMap(r.projectRelationships),
@@ -482,7 +480,6 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.projects = cloneMap(snapshot.projects)
 	r.projectAccountAssignments = cloneMap(snapshot.projectAccountAssignments)
 	r.projectTeamAssignments = cloneMap(snapshot.projectTeamAssignments)
-	r.entityFieldAssignments = cloneMap(snapshot.entityFieldAssignments)
 	r.projectInfo = cloneSliceMap(snapshot.projectInfo)
 	r.projectText = cloneNestedMap(snapshot.projectText)
 	r.projectRelationships = cloneMap(snapshot.projectRelationships)
@@ -541,7 +538,6 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		projects:                         recycleMapDelta(before.projects, after.projects),
 		projectAccountAssignments:        recycleMapDelta(before.projectAccountAssignments, after.projectAccountAssignments),
 		projectTeamAssignments:           recycleMapDelta(before.projectTeamAssignments, after.projectTeamAssignments),
-		entityFieldAssignments:           recycleMapDelta(before.entityFieldAssignments, after.entityFieldAssignments),
 		projectInfo:                      recycleMapDelta(before.projectInfo, after.projectInfo),
 		projectText:                      recycleMapDelta(before.projectText, after.projectText),
 		projectRelationships:             recycleMapDelta(before.projectRelationships, after.projectRelationships),
@@ -604,7 +600,6 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.projects, delta.projects)
 	mergeRecycleMap(destination.projectAccountAssignments, delta.projectAccountAssignments)
 	mergeRecycleMap(destination.projectTeamAssignments, delta.projectTeamAssignments)
-	mergeRecycleMap(destination.entityFieldAssignments, delta.entityFieldAssignments)
 	mergeRecycleMap(destination.projectInfo, delta.projectInfo)
 	mergeRecycleMap(destination.projectText, delta.projectText)
 	mergeRecycleMap(destination.projectRelationships, delta.projectRelationships)

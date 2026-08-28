@@ -65,6 +65,7 @@ function structuredDocument(): MangoTiptapDocument {
       { type: "paragraph", attrs: { blockId: "paragraph-1", indentLevel: 0 }, content: [
         { type: "text", text: "Alpha" },
         { type: "mangoEntityLink", attrs: { entityType: "project", entityId: "project-1", label: "Project One" } },
+        { type: "mangoEntityLink", attrs: { entityType: "entity", entityId: "entity-1", label: "Saved delivery label" } },
         { type: "mangoEntityLink", attrs: {
           entityType: "email_message",
           entityId: REFERENCED_EMAIL_MESSAGE_ID,
@@ -195,6 +196,12 @@ test("static JSON renderer paints true ProseMirror ranges across blocks, lists, 
   assert.match(html, /href="\/projects\/project-1"/);
   assert.match(html, /mango-editor-entity-icon/);
   assert.match(html, /M2.3 3.1h11.4v9.8H2.3z/);
+  assert.match(html, /data-mango-entity-type="entity"/);
+  assert.match(html, /data-mango-entity-id="entity-1"/);
+  assert.match(html, /Saved delivery label/);
+  assert.match(html, /data-mango-entity-id="entity-1"[^>]*role="link"[^>]*tabindex="0"/);
+  assert.match(html, /M5.1 5.35h5.8M5.1 8h5.8M5.1 10.65h3.65/);
+  assert.doesNotMatch(html, /data-mango-entity-id="entity-1"[^>]*href=/, "an Entity chip opens its exact detail preview instead of inventing an app route");
 
   const compactDefaultsHTML = renderToStaticMarkup(
     <MangoTiptapStaticRenderer

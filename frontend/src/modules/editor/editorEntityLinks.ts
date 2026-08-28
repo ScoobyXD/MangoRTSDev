@@ -1,10 +1,14 @@
 import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute, parseDeepLinkRoute } from "../../app/deepLinkRoutes.js";
 import { createExplorerEntityIconElement } from "../../icons/index.js";
+import type { BoundRequestJSON } from "../api/requestJSON.js";
 import type { EmailMessage } from "../communications/communicationsApi.js";
+import { searchEntities } from "../entities/entitiesApi.js";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle } from "../nodes/selectionNodeCreation.js";
+import { createEntityIconElement } from "./EntityIcon.js";
 
 export type EditorWorkspaceEntityType = "node" | "logic_gate" | "project";
-export type EditorEntityType = EditorWorkspaceEntityType | "email_message";
+export type EditorSearchableEntityType = EditorWorkspaceEntityType | "entity";
+export type EditorEntityType = EditorSearchableEntityType | "email_message";
 
 export type EditorEntityLink = {
   entityType: EditorEntityType;
@@ -18,12 +22,13 @@ export type EditorEntityLink = {
   emailMessage?: EmailMessage;
 };
 
-export type EditorEntityLinkRequest = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
+export type EditorEntityLinkRequest = BoundRequestJSON;
 
 export type EditorEntityLinkContext = {
   companyID: string;
   requestJSON: EditorEntityLinkRequest;
   onOpen?: (entity: EditorEntityLink) => void;
+  includeEntityReferences?: boolean;
 };
 
 export type ActiveEntityLinkDraft = {
@@ -48,9 +53,10 @@ export const EDITOR_ENTITY_ID_ATTRIBUTE = "data-mango-entity-id";
 export const EDITOR_ENTITY_LABEL_ATTRIBUTE = "data-mango-entity-label";
 export const EDITOR_ENTITY_NAVIGATION_STATE_KEY = "mangoInlineEditorEntityNavigation";
 export const EVENT_EDITOR_EMAIL_REFERENCE_OPEN = "mangorts:editor-email-reference-open";
+export const EVENT_EDITOR_ENTITY_REFERENCE_OPEN = "mangorts:editor-entity-reference-open";
 
 const ENTITY_DRAFT_BOUNDARY_PATTERN = /[A-Za-z0-9_#.-]/;
-const ENTITY_TYPES = new Set<EditorEntityType>(["node", "logic_gate", "project", "email_message"]);
+const ENTITY_TYPES = new Set<EditorEntityType>(["node", "logic_gate", "project", "entity", "email_message"]);
 const WORKSPACE_ENTITY_TYPES = new Set<EditorWorkspaceEntityType>(["node", "logic_gate", "project"]);
 
 export function isEditorEntityType(value: unknown): value is EditorEntityType {
@@ -60,11 +66,13 @@ export function isEditorEntityType(value: unknown): value is EditorEntityType {
 export function editorEntityTypeLabel(type: EditorEntityType): string {
   if (type === "email_message") return "Email";
   if (type === "logic_gate") return "Process";
-  return type === "project" ? "Project" : "Node";
+  if (type === "project") return "Project";
+  return type === "entity" ? "Entity" : "Node";
 }
 
 export function editorEntityRoute(entity: Pick<EditorEntityLink, "entityType" | "entityID">): string {
   if (entity.entityType === "email_message") throw new Error("Email references open through their exact mailbox scope, not an app route.");
+  if (entity.entityType === "entity") throw new Error("Entity references open in their detail preview, not an app route.");
   if (entity.entityType === "logic_gate") return buildLogicGateRoute(entity.entityID);
   if (entity.entityType === "project") return buildProjectRoute(entity.entityID);
   return buildNodeRoute(entity.entityID);
@@ -100,6 +108,10 @@ export function openEditorEntityLink(entity: EditorEntityLink, context?: Pick<Ed
   if (typeof window === "undefined") return;
   if (entity.entityType === "email_message") {
     window.dispatchEvent(new window.CustomEvent<EditorEntityLink>(EVENT_EDITOR_EMAIL_REFERENCE_OPEN, { detail: entity }));
+    return;
+  }
+  if (entity.entityType === "entity") {
+    window.dispatchEvent(new window.CustomEvent<EditorEntityLink>(EVENT_EDITOR_ENTITY_REFERENCE_OPEN, { detail: entity }));
     return;
   }
   const targetPath = editorEntityRoute(entity);
@@ -141,22 +153,36 @@ export async function searchEditorEntityLinks(
   context: Pick<EditorEntityLinkContext, "companyID" | "requestJSON">,
   query: string,
   limit = 20,
-  entityTypes: readonly EditorWorkspaceEntityType[] = ["node", "project", "logic_gate"],
+  entityTypes: readonly EditorSearchableEntityType[] = ["node", "logic_gate", "project"],
   signal?: AbortSignal,
 ): Promise<EditorEntityLink[]> {
   const requestedTypes = entityTypes.filter((type, index) => entityTypes.indexOf(type) === index);
   const requestedTypeSet = new Set(requestedTypes);
   if (requestedTypes.length === 0) return [];
+  const boundedLimit = Math.max(1, Math.min(50, Math.round(limit)));
+  const workspaceTypes = requestedTypes.filter((type): type is EditorWorkspaceEntityType => WORKSPACE_ENTITY_TYPES.has(type as EditorWorkspaceEntityType));
   const params = new URLSearchParams({
     company_id: context.companyID.trim(),
     q: query.trim(),
-    limit: String(Math.max(1, Math.min(50, Math.round(limit)))),
-    resource_types: requestedTypes.join(","),
+    limit: String(boundedLimit),
+    resource_types: workspaceTypes.join(","),
     ranking: "editor_entities",
   });
-  const response = await context.requestJSON<CompanyExplorerEntitySearchResponse>(`/v1/company-explorer/search?${params.toString()}`, { signal });
+  const [response, entities] = await Promise.all([
+    workspaceTypes.length > 0
+      ? context.requestJSON<CompanyExplorerEntitySearchResponse>(`/v1/company-explorer/search?${params.toString()}`, { signal })
+      : Promise.resolve({ results: [] } satisfies CompanyExplorerEntitySearchResponse),
+    requestedTypeSet.has("entity")
+      ? searchEntities(context.requestJSON, {
+          companyID: context.companyID,
+          query: query.trim() || undefined,
+          limit: boundedLimit,
+          signal,
+        })
+      : Promise.resolve([]),
+  ]);
   const seen = new Set<string>();
-  const results = (response.results ?? []).flatMap((result, responseIndex) => {
+  const workspaceResults = (response.results ?? []).flatMap((result, responseIndex) => {
     const entityType = result.resource_type;
     const entityID = result.resource_id?.trim() ?? "";
     const label = result.display_name?.trim() ?? "";
@@ -166,13 +192,18 @@ export async function searchEditorEntityLinks(
     seen.add(key);
     return [{ entityType, entityID, label, updatedTimestamp: result.updated_timestamp, responseIndex }];
   });
-  const typeOrder: Record<EditorWorkspaceEntityType, number> = {
-    node: 0,
-    project: 1,
-    logic_gate: 2,
-  };
-  return results
-    .sort((left, right) => typeOrder[left.entityType as EditorWorkspaceEntityType] - typeOrder[right.entityType as EditorWorkspaceEntityType] || left.responseIndex - right.responseIndex)
+  const entityResults = entities.flatMap((entity, responseIndex) => {
+    const entityID = entity.entity_id.trim();
+    const label = entity.name.trim();
+    const key = `entity:${entityID}`;
+    if (!entityID || !label || seen.has(key)) return [];
+    seen.add(key);
+    return [{ entityType: "entity" as const, entityID, label, updatedTimestamp: entity.updated_timestamp, responseIndex }];
+  });
+  const typeOrder = new Map(requestedTypes.map((type, index) => [type, index]));
+  return [...workspaceResults, ...entityResults]
+    .sort((left, right) => (typeOrder.get(left.entityType as EditorSearchableEntityType) ?? requestedTypes.length) - (typeOrder.get(right.entityType as EditorSearchableEntityType) ?? requestedTypes.length) || left.responseIndex - right.responseIndex)
+    .slice(0, boundedLimit)
     .map(({ entityType, entityID, label, updatedTimestamp }) => ({ entityType, entityID, label, updatedTimestamp }));
 }
 
@@ -202,10 +233,17 @@ export function applyEditorEntityLinkStyle(element: HTMLElement, entityType?: Ed
   element.setAttribute("tabindex", "0");
   element.classList.add("mango-editor-entity-link");
   if (entityType) element.classList.add(`mango-editor-entity-link--${entityType}`);
+  if (entityType === "entity") {
+    element.style.setProperty("--mango-entity-chip-border", "rgba(13,148,136,0.42)");
+    element.style.setProperty("--mango-entity-chip-background", "linear-gradient(135deg, rgba(255,255,255,0.98), rgba(204,251,241,0.9), rgba(219,234,254,0.82))");
+    element.style.setProperty("--mango-entity-chip-shadow", "rgba(15,118,110,0.16)");
+  }
 }
 
 export function createEditorEntityIconElement(ownerDocument: Document, entityType: EditorEntityType): SVGSVGElement {
-  const icon = createExplorerEntityIconElement(ownerDocument, entityType);
+  const icon = entityType === "entity"
+    ? createEntityIconElement(ownerDocument)
+    : createExplorerEntityIconElement(ownerDocument, entityType);
   icon.classList.add("mango-editor-entity-icon", `mango-editor-entity-icon--${entityType}`);
   return icon;
 }
@@ -246,6 +284,19 @@ export function readEditorEntityLinkElement(element: Element | null): EditorEnti
       emailSharedInboxID: element.dataset.mangoEmailSharedInboxId?.trim() || undefined,
     } : {}),
   };
+}
+
+export function replaceEditorEntityReferencesWithLabels(root: ParentNode): boolean {
+  const entityReferences = root.querySelectorAll<HTMLElement>(
+    `[${EDITOR_ENTITY_LINK_ATTRIBUTE}="true"][${EDITOR_ENTITY_TYPE_ATTRIBUTE}="entity"]`,
+  );
+  let changed = false;
+  for (const element of entityReferences) {
+    const label = element.getAttribute(EDITOR_ENTITY_LABEL_ATTRIBUTE)?.trim() || element.textContent?.trim() || "Entity";
+    element.replaceWith(element.ownerDocument.createTextNode(label));
+    changed = true;
+  }
+  return changed;
 }
 
 function editorEntityLinkImmediatelyBeforeCaret(root: HTMLElement): HTMLElement | null {

@@ -2,9 +2,7 @@ import type { UniversalGroupingSetting } from "../grouping/universalGrouping.js"
 import type { ProjectRecord } from "./projectManagementApi.js";
 
 export type ProjectListBuiltInGroupingField = "account" | "team" | "status" | "health" | "created_month" | "updated_month";
-export const PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER = "__field_column__" as const;
-export const PROJECT_LIST_FIELD_GROUPING = "field" as const;
-export type ProjectListGroupingField = ProjectListBuiltInGroupingField | typeof PROJECT_LIST_FIELD_GROUPING | `field:${string}`;
+export type ProjectListGroupingField = ProjectListBuiltInGroupingField;
 
 export const PROJECT_LIST_FILTER_UNASSIGNED = "__unassigned" as const;
 
@@ -14,44 +12,29 @@ export type ProjectListFilters = {
   teamIDs: string[];
   statuses: string[];
   healthValues: string[];
-  fieldIDs: string[];
   createdFrom: string;
   createdTo: string;
   updatedFrom: string;
   updatedTo: string;
 };
 
-export const PROJECT_LIST_GROUPING_FIELDS: ReadonlyArray<{ value: ProjectListBuiltInGroupingField | typeof PROJECT_LIST_FIELD_GROUPING; label: string }> = [
+export const PROJECT_LIST_GROUPING_FIELDS: ReadonlyArray<{ value: ProjectListBuiltInGroupingField; label: string }> = [
   { value: "account", label: "Account" },
   { value: "team", label: "Team" },
   { value: "status", label: "Status" },
   { value: "health", label: "Health" },
   { value: "created_month", label: "Date created" },
   { value: "updated_month", label: "Date updated" },
-  { value: PROJECT_LIST_FIELD_GROUPING, label: "Group by Fields" },
 ];
 
 export function projectListGroupingFields(): Array<{ value: ProjectListGroupingField; label: string }> {
   return [...PROJECT_LIST_GROUPING_FIELDS];
 }
 
-export function entityFieldGroupingValue(fieldID: string): `field:${string}` {
-  return `field:${fieldID}`;
-}
-
-export function entityFieldIDFromGrouping(field: ProjectListGroupingField): string {
-  return field.startsWith("field:") ? field.slice("field:".length).trim() : "";
-}
-
 export function activeProjectListGroupings(
   groupings: ReadonlyArray<UniversalGroupingSetting<ProjectListGroupingField>>,
 ): Array<UniversalGroupingSetting<ProjectListGroupingField>> {
   return normalizeProjectListGroupings(groupings);
-}
-
-export function normalizeProjectListFieldColumns(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length === 0) return [];
-  return value.some((item) => String(item ?? "").trim()) ? [PROJECT_LIST_FIELD_COLUMN_PLACEHOLDER] : [];
 }
 
 export function normalizeProjectListGroupings(value: unknown): Array<UniversalGroupingSetting<ProjectListGroupingField>> {
@@ -61,8 +44,7 @@ export function normalizeProjectListGroupings(value: unknown): Array<UniversalGr
   const result: Array<UniversalGroupingSetting<ProjectListGroupingField>> = [];
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
-    const storedField = String((item as { field?: unknown }).field ?? "") as ProjectListGroupingField;
-    const field = entityFieldIDFromGrouping(storedField) ? PROJECT_LIST_FIELD_GROUPING : storedField;
+    const field = String((item as { field?: unknown }).field ?? "") as ProjectListGroupingField;
     if (!allowed.has(field) || seen.has(field)) continue;
     seen.add(field);
     result.push({ field, direction: (item as { direction?: unknown }).direction === "desc" ? "desc" : "asc" });
@@ -77,7 +59,6 @@ export function createEmptyProjectListFilters(): ProjectListFilters {
     teamIDs: [],
     statuses: [],
     healthValues: [],
-    fieldIDs: [],
     createdFrom: "",
     createdTo: "",
     updatedFrom: "",
@@ -95,8 +76,7 @@ export function hasActiveProjectListFilters(filters: ProjectListFilters): boolea
     || filters.accountIDs.some((value) => value.trim())
     || filters.teamIDs.some((value) => value.trim())
     || filters.statuses.some((value) => value.trim())
-    || filters.healthValues.some((value) => value.trim())
-    || filters.fieldIDs.some((value) => value.trim()),
+    || filters.healthValues.some((value) => value.trim()),
   );
 }
 
@@ -110,7 +90,6 @@ export function projectMatchesProjectListFilters(project: ProjectRecord, filters
   if (nameQuery && !project.name.toLocaleLowerCase().includes(nameQuery)) return false;
   if (!matchesAssignmentFilter(project.accounts?.map((account) => account.account_id) ?? [], filters.accountIDs)) return false;
   if (!matchesAssignmentFilter(project.teams?.map((team) => team.group_id) ?? [], filters.teamIDs)) return false;
-  if (!matchesAssignmentFilter(project.fields?.map((field) => field.field_id) ?? [], filters.fieldIDs)) return false;
   if (!matchesSingleValueFilter(project.status.trim() || "Active", filters.statuses)) return false;
   if (!matchesSingleValueFilter(project.health?.trim() || "On Track", filters.healthValues)) return false;
   if (!matchesDateRange(project.created_timestamp, filters.createdFrom, filters.createdTo)) return false;

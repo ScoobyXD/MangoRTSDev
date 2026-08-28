@@ -32,10 +32,10 @@ test("planLikelyDashboardPreload falls back to Home without a tab", () => {
   });
 });
 
-test("planLikelyDashboardPreload isolates the Fields entity surface", () => {
-  assert.deepEqual(planLikelyDashboardPreload({ page: "fields", frames: [{ kind: "editor" }, { kind: "fields" }] }), {
-    moduleKinds: ["fields"],
-    routeSurfaces: ["fields"],
+test("planLikelyDashboardPreload loads Entities as a route surface without dashboard modules", () => {
+  assert.deepEqual(planLikelyDashboardPreload({ page: "entities", frames: [{ kind: "editor" }] }), {
+    moduleKinds: [],
+    routeSurfaces: ["entities"],
   });
 });
 

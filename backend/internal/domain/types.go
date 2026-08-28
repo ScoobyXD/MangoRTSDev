@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 )
@@ -92,16 +93,73 @@ type Account struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
-// EntityField is a company-scoped label that can be attached to Projects,
-// Nodes, and Logic Gates. AssignmentCount is populated by list reads so the
-// management surface can explain whether a field is in use before deletion.
-type EntityField struct {
+type EntityType struct {
 	CompanyID        string    `json:"company_id"`
-	FieldID          string    `json:"field_id"`
+	EntityTypeID     string    `json:"entity_type_id"`
 	Name             string    `json:"name"`
-	Color            string    `json:"color"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type EntityFolder struct {
+	CompanyID            string    `json:"company_id"`
+	EntityFolderID       string    `json:"entity_folder_id"`
+	EntityTypeID         string    `json:"entity_type_id"`
+	ParentEntityFolderID *string   `json:"parent_entity_folder_id,omitempty"`
+	Name                 string    `json:"name"`
+	Position             int       `json:"position"`
+	CreatedTimestamp     time.Time `json:"created_timestamp"`
+	UpdatedTimestamp     time.Time `json:"updated_timestamp"`
+}
+
+type EntityFieldType struct {
+	CompanyID         string    `json:"company_id"`
+	EntityFieldTypeID string    `json:"entity_field_type_id"`
+	EntityTypeID      string    `json:"entity_type_id"`
+	EntityFolderID    *string   `json:"entity_folder_id,omitempty"`
+	Name              string    `json:"name"`
+	FieldType         string    `json:"field_type"`
+	Position          int       `json:"position"`
+	CreatedTimestamp  time.Time `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time `json:"updated_timestamp"`
+}
+
+type EntityField struct {
+	CompanyID        string          `json:"company_id"`
+	EntityFieldID    string          `json:"entity_field_id"`
+	EntityID         string          `json:"entity_id"`
+	Name             string          `json:"name"`
+	FieldType        string          `json:"field_type"`
+	Value            json.RawMessage `json:"value"`
+	Position         int             `json:"position"`
+	CreatedTimestamp time.Time       `json:"created_timestamp"`
+	UpdatedTimestamp time.Time       `json:"updated_timestamp"`
+}
+
+type Entity struct {
+	CompanyID        string          `json:"company_id"`
+	EntityID         string          `json:"entity_id"`
+	EntityTypeID     string          `json:"entity_type_id"`
+	EntityTypeName   string          `json:"entity_type_name"`
+	EntityFolderID   *string         `json:"entity_folder_id,omitempty"`
+	Name             string          `json:"name"`
+	Position         int             `json:"position"`
+	BodyJSON         json.RawMessage `json:"body_json"`
+	Revision         int64           `json:"revision"`
+	EntityFields     []EntityField   `json:"entity_fields"`
+	CreatedTimestamp time.Time       `json:"created_timestamp"`
+	UpdatedTimestamp time.Time       `json:"updated_timestamp"`
+}
+
+type EntitySummary struct {
+	CompanyID        string    `json:"company_id"`
+	EntityID         string    `json:"entity_id"`
+	EntityTypeID     string    `json:"entity_type_id"`
+	EntityTypeName   string    `json:"entity_type_name"`
+	EntityFolderID   *string   `json:"entity_folder_id,omitempty"`
+	Name             string    `json:"name"`
 	Position         int       `json:"position"`
-	AssignmentCount  int       `json:"assignment_count,omitempty"`
+	Revision         int64     `json:"revision"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
@@ -1106,7 +1164,6 @@ type Project struct {
 	DefaultAccess    string             `json:"default_access"`
 	Accounts         []Account          `json:"accounts,omitempty"`
 	Teams            []CompanyUserGroup `json:"teams,omitempty"`
-	Fields           []EntityField      `json:"fields,omitempty"`
 	EffectiveAccess  string             `json:"effective_access_level,omitempty"`
 	CreatedTimestamp time.Time          `json:"created_timestamp"`
 	UpdatedTimestamp time.Time          `json:"updated_timestamp"`

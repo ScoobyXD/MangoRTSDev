@@ -9,6 +9,19 @@ type PostgresRepo struct {
 	db *sql.DB
 }
 
+type exactTableColumnContract struct {
+	table   string
+	columns []string
+}
+
+var exactEntityTableColumnContracts = []exactTableColumnContract{
+	{table: "entity_types", columns: []string{"company_id", "entity_type_id", "name", "created_timestamp", "updated_timestamp"}},
+	{table: "entity_folders", columns: []string{"company_id", "entity_folder_id", "entity_type_id", "parent_entity_folder_id", "name", "position", "created_timestamp", "updated_timestamp"}},
+	{table: "entity_field_types", columns: []string{"company_id", "entity_field_type_id", "entity_type_id", "entity_folder_id", "name", "field_type", "position", "created_timestamp", "updated_timestamp"}},
+	{table: "entities", columns: []string{"company_id", "entity_id", "entity_type_id", "entity_folder_id", "name", "position", "body_json", "revision", "created_timestamp", "updated_timestamp"}},
+	{table: "entity_fields", columns: []string{"company_id", "entity_field_id", "entity_id", "name", "field_type", "value_jsonb", "position", "created_timestamp", "updated_timestamp"}},
+}
+
 func NewPostgresRepo(db *sql.DB) *PostgresRepo {
 	return &PostgresRepo{db: db}
 }
@@ -27,6 +40,7 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		"node_textboxes", "node_textbox_chats", "node_textboxes_history",
 		"project_textboxes", "project_textbox_chats", "logic_gate_textboxes", "logic_gate_textboxes_history",
 		"scorecards",
+		"entity_types", "entity_folders", "entity_field_types", "entities", "entity_fields",
 	}
 	for _, table := range requiredTables {
 		var exists bool
@@ -87,6 +101,9 @@ select exists (
 			return fmt.Errorf("application schema is not ready: missing column %s.%s", required[0], required[1])
 		}
 	}
+	if err := r.checkExactEntityTableColumns(); err != nil {
+		return err
+	}
 	var obsoleteConnectionStorage bool
 	if err := r.db.QueryRow(`
 select to_regclass('public.user_email_connections') is not null
@@ -98,5 +115,63 @@ select to_regclass('public.user_email_connections') is not null
 	if obsoleteConnectionStorage {
 		return fmt.Errorf("application schema is not ready: obsolete email connection or ingestion job table remains")
 	}
+	var obsoleteEntityFieldAssignmentStorage bool
+	if err := r.db.QueryRow(`
+select to_regclass('public.entity_field_assignments') is not null
+`).Scan(&obsoleteEntityFieldAssignmentStorage); err != nil {
+		return err
+	}
+	if obsoleteEntityFieldAssignmentStorage {
+		return fmt.Errorf("application schema is not ready: obsolete entity field assignment table remains")
+	}
 	return nil
+}
+
+func (r *PostgresRepo) checkExactEntityTableColumns() error {
+	for _, contract := range exactEntityTableColumnContracts {
+		rows, err := r.db.Query(`
+select column_name
+from information_schema.columns
+where table_schema='public' and table_name=$1`, contract.table)
+		if err != nil {
+			return err
+		}
+		actual := make([]string, 0, len(contract.columns))
+		for rows.Next() {
+			var column string
+			if err := rows.Scan(&column); err != nil {
+				rows.Close()
+				return err
+			}
+			actual = append(actual, column)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if !matchesExactUnorderedColumns(actual, contract.columns) {
+			return fmt.Errorf("application schema is not ready: exact unordered column set drifted for %s", contract.table)
+		}
+	}
+	return nil
+}
+
+func matchesExactUnorderedColumns(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	remaining := make(map[string]bool, len(expected))
+	for _, column := range expected {
+		remaining[column] = true
+	}
+	for _, column := range actual {
+		if !remaining[column] {
+			return false
+		}
+		delete(remaining, column)
+	}
+	return len(remaining) == 0
 }

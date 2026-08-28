@@ -4,6 +4,7 @@ import { needsMangoTiptapLegacyDateHeadingBreak, type MangoTiptapDocument } from
 import { isDormantMangoTiptapAnnotation, type MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
 import { ExplorerEntityIcon } from "../../../icons/index.js";
 import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
+import { EntityIcon } from "../EntityIcon.js";
 import "./mangoTiptap.css";
 import { mangoTiptapImagePlacementDOMAttributes } from "./mangoTiptapImagePlacement.js";
 
@@ -146,6 +147,7 @@ function renderNode(
         emailAccountEmail: String(attrs.emailAccountEmail || "").trim().toLowerCase() || undefined,
         emailSharedInboxID: String(attrs.emailSharedInboxId || "").trim() || undefined,
       } : {};
+      const needsExplicitKeyboardActivation = entityType === "email_message" || entityType === "entity";
       return (
         <a
           key={key}
@@ -159,14 +161,24 @@ function renderNode(
           data-mango-email-account-email={entityType === "email_message" ? emailEntity.emailAccountEmail : undefined}
           data-mango-email-shared-inbox-id={entityType === "email_message" ? emailEntity.emailSharedInboxID : undefined}
           aria-label={`Open ${editorEntityTypeLabel(entityType)} ${label}`}
-          href={entityType === "email_message" ? undefined : editorEntityRoute({ entityType, entityID })}
+          role={needsExplicitKeyboardActivation ? "link" : undefined}
+          tabIndex={needsExplicitKeyboardActivation ? 0 : undefined}
+          href={entityType === "email_message" || entityType === "entity" ? undefined : editorEntityRoute({ entityType, entityID })}
           onClick={(event) => {
             if (event.button !== 0 || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
             event.preventDefault();
             openEditorEntityLink({ entityType, entityID, label, ...emailEntity });
           }}
+          onKeyDown={(event) => {
+            if (!needsExplicitKeyboardActivation || (event.key !== "Enter" && event.key !== " ")) return;
+            event.preventDefault();
+            event.stopPropagation();
+            openEditorEntityLink({ entityType, entityID, label, ...emailEntity });
+          }}
         >
-          <ExplorerEntityIcon kind={entityType} className="mango-editor-entity-icon" />
+          {entityType === "entity"
+            ? <EntityIcon className="mango-editor-entity-icon" />
+            : <ExplorerEntityIcon kind={entityType} className="mango-editor-entity-icon" />}
           <span className="mango-editor-entity-label">{label}</span>
         </a>
       );

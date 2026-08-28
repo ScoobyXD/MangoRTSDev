@@ -19,7 +19,8 @@ import {
   splitEditorChatTextByEntityLinks,
   type EditorChatEntityLink,
 } from "./chatEntityLinks.js";
-import { editorEntityTypeLabel, openEditorEntityLink, readActiveEntityLinkDraft, searchEditorEntityLinks, type ActiveEntityLinkDraft, type EditorEntityLink, type EditorEntityLinkRequest } from "./editorEntityLinks.js";
+import { editorEntityTypeLabel, openEditorEntityLink, readActiveEntityLinkDraft, searchEditorEntityLinks, type ActiveEntityLinkDraft, type EditorEntityLink, type EditorEntityLinkRequest, type EditorSearchableEntityType } from "./editorEntityLinks.js";
+import { EntityIcon } from "./EntityIcon.js";
 import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
 import type { EditorSaveState } from "./EditorSaveStatusIcon.js";
 import type { EditorScrollMemory } from "./editorScroll";
@@ -43,6 +44,8 @@ import {
   loadedEmailSignatureForScope,
   type ScopedEmailSignatureState,
 } from "./emailSignatureBody.js";
+
+const CHAT_EDITOR_ENTITY_TYPES: readonly EditorSearchableEntityType[] = ["node", "logic_gate", "project", "entity"];
 import { applyEmailBodyHighlights, type EmailBodyHighlightRange } from "./emailBodyHighlights.js";
 import { splitChatTextLinks } from "./nodeChatLinks";
 import {
@@ -966,23 +969,32 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       return undefined;
     }
     let current = true;
+    const controller = new AbortController();
     setEntitySearchPending(true);
     setEntitySearchError("");
     const timer = window.setTimeout(() => {
-      void searchEditorEntityLinks({ companyID, requestJSON: entityRequestJSON }, activeEntityDraft.query).then((options) => {
+      void searchEditorEntityLinks(
+        { companyID, requestJSON: entityRequestJSON },
+        activeEntityDraft.query,
+        20,
+        CHAT_EDITOR_ENTITY_TYPES,
+        controller.signal,
+      ).then((options) => {
         if (!current) return;
         setEntityOptions(options);
         setEntitySearchPending(false);
       }).catch((cause) => {
         if (!current) return;
+        if (cause instanceof Error && cause.name === "AbortError") return;
         setEntityOptions([]);
         setEntitySearchPending(false);
-        setEntitySearchError(cause instanceof Error ? cause.message : "Unable to search workspace entities");
+        setEntitySearchError(cause instanceof Error ? cause.message : "Unable to search resources");
       });
     }, 120);
     return () => {
       current = false;
       window.clearTimeout(timer);
+      controller.abort();
     };
   }, [activeEntityDraft?.query, activeEntityDraft?.start, companyID, editable, entityRequestJSON]);
 
@@ -1526,7 +1538,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             {entityMenuOpen && activeEntityDraft && (
               <div
                 role="listbox"
-                aria-label="Link a Node, Process, or Project"
+                aria-label="Reference a Node, Process, Project, or Entity"
                 data-mango-chat-entity-menu="true"
                 style={{
                   position: "absolute",
@@ -1545,7 +1557,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                   padding: 6,
                 }}
               >
-                {entitySearchPending && <div role="status" style={{ padding: "8px 10px", color: "rgba(71,85,105,.84)", fontSize: 11, fontWeight: 750 }}>Searching workspace…</div>}
+                {entitySearchPending && <div role="status" style={{ padding: "8px 10px", color: "rgba(71,85,105,.84)", fontSize: 11, fontWeight: 750 }}>Searching resources…</div>}
                 {!entitySearchPending && entitySearchError && <div role="alert" style={{ padding: "8px 10px", color: "#b91c1c", fontSize: 11, fontWeight: 750 }}>{entitySearchError}</div>}
                 {!entitySearchPending && !entitySearchError && entityOptions.map((entity, index) => {
                   const selected = index === activeEntityIndex;
@@ -1578,7 +1590,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(14,165,233,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined,
                       }}
                     >
-                      <ExplorerEntityIcon kind={entity.entityType} />
+                      {entity.entityType === "entity" ? <EntityIcon /> : <ExplorerEntityIcon kind={entity.entityType} />}
                       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800 }}>{entity.label}</span>
                       <span style={{ color: "rgba(100,116,139,.88)", fontSize: 9.5, fontWeight: 800 }}>{editorEntityTypeLabel(entity.entityType)}</span>
                     </button>
@@ -1980,7 +1992,7 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
           onDoubleClick={(event) => event.stopPropagation()}
           style={{ display: "inline-flex", alignItems: "center", gap: 3, margin: "0 1px", padding: "0 4px", border: "1px solid rgba(14,165,233,.32)", borderRadius: 6, background: "rgba(224,242,254,.82)", color: "#075985", cursor: "pointer", font: "inherit", fontWeight: 800, lineHeight: 1.35, verticalAlign: "baseline" }}
         >
-          <ExplorerEntityIcon kind={segment.entity.entityType} />
+          {segment.entity.entityType === "entity" ? <EntityIcon /> : <ExplorerEntityIcon kind={segment.entity.entityType} />}
           <span>{segment.text}</span>
         </button>
       ) : (

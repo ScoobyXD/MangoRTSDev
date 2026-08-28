@@ -35,7 +35,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     "HTMLAnchorElement", "HTMLBRElement", "HTMLButtonElement", "HTMLInputElement",
     "HTMLTableElement", "HTMLTableRowElement", "HTMLTableCellElement", "DocumentFragment",
     "DOMParser", "DOMException", "Event", "EventTarget", "InputEvent", "MouseEvent",
-    "KeyboardEvent", "FocusEvent", "MutationObserver", "Range",
+    "KeyboardEvent", "FocusEvent", "MutationObserver", "Range", "CustomEvent",
   ] as const;
   for (const name of browserGlobals) {
     const value = name === "window" || name === "self"
@@ -98,16 +98,19 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { UnifiedRichEditorSurface }, { EditorTabBar }, { AppModalPortal }, { UniversalEntityPicker }] = await Promise.all([
+    const [{ createRoot }, { UnifiedRichEditorSurface }, { EditorTabBar }, { AppModalPortal }, { UniversalEntityPicker, universalPickerAllowedTypes, universalPickerShortcutCategory }, { EntityReferencePreviewHost }, { openEditorEntityLink }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"),
       import("../../../../frontend/src/modules/editor/EditorTabBar.tsx"),
       import("../../../../frontend/src/app/AppModalPortal.tsx"),
       import("../../../../frontend/src/modules/editor/UniversalEntityPicker.tsx"),
+      import("../../../../frontend/src/modules/editor/EntityReferencePreviewHost.tsx"),
+      import("../../../../frontend/src/modules/editor/editorEntityLinks.ts"),
     ]);
     const controllerRef = { current: null as any };
     const savedDocuments: string[] = [];
     const highlightApplications: Array<`#${string}` | null> = [];
+    const mailEditorEntitySearchPaths: string[] = [];
     let setToolbarHighlightContext: React.Dispatch<React.SetStateAction<`#${string}` | null>> = () => undefined;
     const noop = () => undefined;
     const ToolbarHarness = () => {
@@ -161,6 +164,13 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
         indentGuideColor="#94a3b8"
         scrollbarTrack="#e2e8f0"
         mentionUsers={[{ user_id: "ada", display_name: "Ada Lovelace", email: "ada@example.test" }]}
+        entityLinkContext={{
+          companyID: "company-1",
+          requestJSON: async <T,>(path: string): Promise<T> => {
+            mailEditorEntitySearchPaths.push(path);
+            return { results: [] } as T;
+          },
+        }}
         formattingControllerRef={controllerRef}
         onChange={(documentValue) => savedDocuments.push(documentValue)}
         onFlush={noop}
@@ -285,6 +295,16 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     const mentionEntity = editorRoot.querySelector<HTMLElement>('[data-mango-mention-user-id="ada"]');
     assert.ok(mentionEntity, "Tab accepts the recommended user as an atomic mention entity");
     assert.equal(mentionEntity.textContent, "@Ada Lovelace");
+
+    editorRoot.textContent = "#delivery";
+    await act(async () => editorRoot.focus());
+    await setTextSelection("#delivery", "#delivery".length);
+    await flushAsyncWork();
+    assert.equal(mailEditorEntitySearchPaths.length, 1);
+    const mailEditorSearchURL = new URL(mailEditorEntitySearchPaths[0], "https://mango.test");
+    assert.equal(mailEditorSearchURL.pathname, "/v1/company-explorer/search");
+    assert.equal(mailEditorSearchURL.searchParams.get("resource_types"), "node,logic_gate,project", "mail compose keeps Entities out of its legacy # picker");
+    assert.equal(mailEditorEntitySearchPaths.some((path) => path.startsWith("/v1/entities?")), false);
 
     editorRoot.textContent = "selected";
     await act(async () => editorRoot.focus());
@@ -681,12 +701,22 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.ok(dashCell.contains(dom.window.document.getSelection()?.anchorNode ?? null));
 
     let pickerCancelCount = 0;
+    assert.deepEqual(
+      universalPickerAllowedTypes("link", ["entity", "project"], "all"),
+      ["project"],
+      "Entity is never a legal ## link target even if a caller supplies it",
+    );
+    assert.equal(universalPickerShortcutCategory("r"), null, "Entities intentionally has no single-letter shortcut");
 
     await act(async () => root.render(
       <AppModalPortal ownerDocument={dom.window.document}>
         <UniversalEntityPicker
           companyID="company-1"
-          requestJSON={async <T,>(): Promise<T> => ({ user_pin_folders: [], user_pins: [] }) as T}
+          requestJSON={async <T,>(path: string): Promise<T> => (
+            path.startsWith("/v1/entities?")
+              ? { entities: [{ entity_id: "entity-1", name: "Thailand delivery", entity_type_id: "type-1", position: 1000, revision: 1, company_id: "company-1", created_timestamp: "2026-08-27T00:00:00Z" }] }
+              : { user_pin_folders: [], user_pins: [] }
+          ) as T}
           sourceType="node"
           linkTargetTypes={["logic_gate", "project", "email_message"]}
           initialMode="link"
@@ -704,7 +734,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.ok(activeModalLayer);
     assert.ok(modalPickerInput);
     assert.equal(modalPicker.dataset.mangoUniversalPickerMode, "link");
-    assert.equal(modalPicker.style.width, "460px", "the normal universal picker stays compact while keeping all four categories on one row");
+    assert.equal(modalPicker.style.width, "460px", "the normal universal picker stays compact while keeping all five categories on one row");
     const pickerCategories = modalPicker.querySelector<HTMLElement>('[data-mango-universal-picker-categories="true"]');
     assert.ok(pickerCategories);
     assert.equal(pickerCategories.style.display, "grid");
@@ -713,7 +743,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(pickerCategories.style.overflowX, "", "category tabs do not use a horizontal scrollbar");
     assert.deepEqual(
       [...pickerCategories.querySelectorAll<HTMLButtonElement>("button")].map((button) => button.textContent?.trim()),
-      ["Nodes", "Projects", "Processes", "Emails"],
+      ["Nodes", "Processes", "Projects", "Entities", "Emails"],
       "category tabs show only their icon and name",
     );
     assert.equal(pickerCategories.querySelector("kbd"), null, "category tabs do not show shortcut instructions");
@@ -730,6 +760,15 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     modalPickerInput = modalPicker.querySelector<HTMLInputElement>('input[aria-label="Search resources to reference"]');
     assert.ok(modalPickerInput);
     assert.equal(modalPicker.dataset.mangoUniversalPickerMode, "reference", "Backspace on an empty ## picker returns to # reference mode");
+
+    const entityCategory = [...pickerCategories.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Entities");
+    assert.equal(entityCategory?.disabled, false, "Entities is available in # reference mode");
+    await act(async () => entityCategory?.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+    const entityRow = [...modalPicker.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((button) => button.textContent?.includes("Thailand delivery"));
+    assert.equal(entityCategory?.getAttribute("aria-pressed"), "true");
+    assert.ok(entityRow, "the blank Entities category lists a bounded company Entity result");
+    assert.equal(entityRow.querySelector("svg")?.getAttribute("viewBox"), "0 0 16 16");
 
     await act(async () => {
       modalPickerInput?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "#", bubbles: true, cancelable: true }));
@@ -810,8 +849,9 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
       [...dragCategories.querySelectorAll<HTMLButtonElement>("button")].map((button) => ({ label: button.textContent?.trim(), disabled: button.disabled })),
       [
         { label: "Nodes", disabled: true },
-        { label: "Projects", disabled: true },
         { label: "Processes", disabled: false },
+        { label: "Projects", disabled: true },
+        { label: "Entities", disabled: true },
         { label: "Emails", disabled: true },
       ],
       "only Processes are enabled in the locked Process Map picker",
@@ -846,6 +886,169 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.ok(dom.window.document.querySelector('[data-mango-universal-picker="true"]'), "keyboard use does not close a drag-only picker");
     await act(async () => processRow.dispatchEvent(new dom.window.Event("dragend", { bubbles: true })));
     assert.equal(dragDismissLayer?.style.pointerEvents, "auto", "normal outside-click dismissal resumes when dragging ends");
+
+    const previewRequests: Array<{ path: string; signal?: AbortSignal | null }> = [];
+    let previewShouldFail = false;
+    await act(async () => root.render(
+      <EntityReferencePreviewHost
+        companyID="company-1"
+        requestJSON={async <T,>(path: string, init): Promise<T> => {
+          previewRequests.push({ path, signal: init?.signal });
+          if (previewShouldFail) throw new Error("This Entity is unavailable.");
+          return {
+            entity: {
+              company_id: "company-1",
+              entity_id: "entity exact/id",
+              entity_type_id: "type-1",
+              entity_type_name: "Delivery",
+              entity_folder_id: null,
+              name: "Current Thailand delivery",
+              position: 1000,
+              revision: 1,
+              created_timestamp: "2026-08-27T00:00:00Z",
+              entity_fields: [
+                { company_id: "company-1", entity_field_id: "field-2", entity_id: "entity exact/id", name: "Status", field_type: "text", value: "Arriving", position: 2000, created_timestamp: "", updated_timestamp: "" },
+                { company_id: "company-1", entity_field_id: "field-1", entity_id: "entity exact/id", name: "Delivered", field_type: "boolean", value: false, position: 1000, created_timestamp: "", updated_timestamp: "" },
+              ],
+            },
+          } as T;
+        }}
+      />,
+    ));
+    await act(async () => {
+      openEditorEntityLink({ entityType: "entity", entityID: "entity exact/id", label: "Saved delivery label" });
+    });
+    await flushAsyncWork();
+    const entityPreview = dom.window.document.querySelector<HTMLElement>('[data-mango-entity-reference-preview="true"]');
+    assert.ok(entityPreview, "activating an Entity chip opens the shared detail preview");
+    assert.equal(entityPreview.getAttribute("aria-label"), "Entity details: Current Thailand delivery");
+    assert.match(entityPreview.textContent ?? "", /Delivery/);
+    assert.match(entityPreview.textContent ?? "", /DeliveredNo/);
+    assert.match(entityPreview.textContent ?? "", /StatusArriving/);
+    assert.equal(previewRequests.length, 1);
+    const previewURL = new URL(previewRequests[0].path, "https://mango.test");
+    assert.equal(previewURL.pathname, "/v1/entities/entity%20exact%2Fid");
+    assert.equal(previewURL.searchParams.get("company_id"), "company-1");
+    assert.ok(previewRequests[0].signal, "the exact Entity detail read is cancellable");
+    const closeEntityPreview = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Close Entity details"]');
+    assert.ok(closeEntityPreview);
+    await act(async () => closeEntityPreview.click());
+    assert.equal(dom.window.document.querySelector('[data-mango-entity-reference-preview="true"]'), null);
+    previewShouldFail = true;
+    await act(async () => {
+      openEditorEntityLink({ entityType: "entity", entityID: "deleted-entity", label: "Saved deleted label" });
+    });
+    await flushAsyncWork();
+    const deletedEntityPreview = dom.window.document.querySelector<HTMLElement>('[data-mango-entity-reference-preview="true"]');
+    assert.equal(deletedEntityPreview?.getAttribute("aria-label"), "Entity details: Saved deleted label", "an unavailable Entity keeps the durable chip label");
+    assert.match(deletedEntityPreview?.querySelector('[role="alert"]')?.textContent ?? "", /This Entity is unavailable/);
+
+    const legacyEntitySearchPaths: string[] = [];
+    await act(async () => root.render(
+      <UnifiedRichEditorSurface
+        value="<!-- mango-editor-html-v1 -->"
+        editable
+        outlineStyle="automatic-outline-numbering"
+        surfaceID="node-text-block"
+        ariaLabel="Node body"
+        surfaceText="#111827"
+        accent="#0d9488"
+        indentGuideColor="#94a3b8"
+        entityLinkContext={{
+          companyID: "company-1",
+          requestJSON: async <T,>(path: string): Promise<T> => {
+            legacyEntitySearchPaths.push(path);
+            return (path.startsWith("/v1/entities?")
+              ? { entities: [{ entity_id: "entity-legacy", name: "Thailand delivery" }] }
+              : { results: [] }) as T;
+          },
+        }}
+        onChange={noop}
+      />,
+    ));
+    await flushAsyncWork();
+    const legacyEntityEditor = dom.window.document.querySelector<HTMLElement>('[data-mango-unified-rich-editor="node-text-block"]');
+    assert.ok(legacyEntityEditor);
+    legacyEntityEditor.textContent = "#thai";
+    const legacyEntityText = legacyEntityEditor.firstChild;
+    assert.ok(legacyEntityText);
+    const legacyEntityRange = dom.window.document.createRange();
+    legacyEntityRange.setStart(legacyEntityText, "#thai".length);
+    legacyEntityRange.collapse(true);
+    legacyEntityEditor.focus();
+    dom.window.document.getSelection()?.removeAllRanges();
+    dom.window.document.getSelection()?.addRange(legacyEntityRange);
+    await act(async () => legacyEntityEditor.dispatchEvent(new dom.window.KeyboardEvent("keyup", { key: "i", bubbles: true })));
+    await flushAsyncWork();
+    const legacyEntityOption = [...dom.window.document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Reference a resource"] [role="option"]')]
+      .find((option) => option.textContent?.includes("Thailand delivery"));
+    assert.ok(legacyEntityOption, "the legacy HTML editor searches Entities alongside its existing resource types");
+    assert.equal(legacyEntitySearchPaths.some((path) => path.startsWith("/v1/entities?")), true);
+    await act(async () => legacyEntityOption.click());
+    const legacyEntityChip = legacyEntityEditor.querySelector<HTMLElement>('[data-mango-entity-type="entity"]');
+    assert.ok(legacyEntityChip);
+    assert.equal(legacyEntityChip.dataset.mangoEntityId, "entity-legacy");
+    assert.equal(legacyEntityChip.dataset.mangoEntityLabel, "Thailand delivery");
+    assert.equal(legacyEntityChip.textContent, "Thailand delivery");
+
+    const emailSavedDocuments: string[] = [];
+    const entityReferenceHTML = '<span data-mango-entity-link="true" data-mango-entity-type="entity" data-mango-entity-id="entity exact/id" data-mango-entity-label="Saved Entity label">Untrusted Entity text</span>';
+    const projectReferenceHTML = '<span data-mango-entity-link="true" data-mango-entity-type="project" data-mango-entity-id="project-1" data-mango-entity-label="Saved Project label">Untrusted Project text</span>';
+    await act(async () => root.render(
+      <UnifiedRichEditorSurface
+        value={`<!-- mango-editor-html-v1 -->Before ${entityReferenceHTML} ${projectReferenceHTML}`}
+        editable
+        outlineStyle="automatic-outline-numbering"
+        surfaceID="shared-triage-compose"
+        ariaLabel="Email body"
+        surfaceText="#111827"
+        accent="#0d9488"
+        indentGuideColor="#94a3b8"
+        onChange={(documentValue) => emailSavedDocuments.push(documentValue)}
+      />,
+    ));
+    await flushAsyncWork();
+    const emailEditor = dom.window.document.querySelector<HTMLElement>('[data-mango-unified-rich-editor="shared-triage-compose"]');
+    assert.ok(emailEditor);
+    assert.equal(emailEditor.querySelector('[data-mango-entity-type="entity"]'), null, "preloaded Entity references are plain saved-label text in email editors");
+    assert.match(emailEditor.textContent ?? "", /Saved Entity label/);
+    assert.equal(emailEditor.querySelector('[data-mango-entity-type="project"]')?.getAttribute("data-mango-entity-id"), "project-1", "email cleanup preserves existing non-Entity resource references");
+
+    const moveEmailCaretToEnd = () => {
+      const range = dom.window.document.createRange();
+      range.selectNodeContents(emailEditor);
+      range.collapse(false);
+      dom.window.document.getSelection()?.removeAllRanges();
+      dom.window.document.getSelection()?.addRange(range);
+    };
+    moveEmailCaretToEnd();
+    await act(async () => {
+      Simulate.paste(emailEditor, {
+        clipboardData: {
+          items: [],
+          files: [],
+          getData: (type: string) => type === "text/html" ? entityReferenceHTML + projectReferenceHTML : "Saved Entity label Saved Project label",
+        },
+      } as never);
+    });
+    assert.equal(emailEditor.querySelector('[data-mango-entity-type="entity"]'), null, "pasted Entity references are immediately downgraded");
+    assert.equal(emailEditor.querySelectorAll('[data-mango-entity-type="project"]').length, 2);
+    assert.doesNotMatch(emailSavedDocuments.at(-1) ?? "", /data-mango-entity-type="entity"/);
+    assert.match(emailSavedDocuments.at(-1) ?? "", /data-mango-entity-type="project"/);
+
+    moveEmailCaretToEnd();
+    await act(async () => {
+      Simulate.drop(emailEditor, {
+        dataTransfer: {
+          items: [],
+          files: [],
+          getData: (type: string) => type === "text/html" ? entityReferenceHTML + projectReferenceHTML : "Saved Entity label Saved Project label",
+        },
+      } as never);
+    });
+    assert.equal(emailEditor.querySelector('[data-mango-entity-type="entity"]'), null, "dropped Entity references are immediately downgraded");
+    assert.equal(emailEditor.querySelectorAll('[data-mango-entity-type="project"]').length, 3);
+    assert.doesNotMatch(emailSavedDocuments.at(-1) ?? "", /data-mango-entity-type="entity"/);
 
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
