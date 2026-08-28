@@ -3,6 +3,7 @@ import {
   linkifyEditorPlainTextToHTML,
   sanitizeEditorDocumentHTML,
 } from "./richTextEditing.js";
+import { replaceEditorEntityReferencesWithLabels } from "./editorEntityLinks.js";
 
 export type ScopedEmailSignatureState = Readonly<{
   scopeKey: string;
@@ -38,6 +39,15 @@ export function applyEmailSignatureOnceForSession(
     body: applyEmailSignature(body, signature),
     session: { scopeKey, applied: true },
   };
+}
+
+export function emailBodyWithoutEntityReferences(body: string): string {
+  if (!body.startsWith(EDITOR_RICH_TEXT_PREFIX) || typeof document === "undefined") return body;
+  const root = document.createElement("div");
+  root.innerHTML = body.slice(EDITOR_RICH_TEXT_PREFIX.length);
+  return replaceEditorEntityReferencesWithLabels(root)
+    ? `${EDITOR_RICH_TEXT_PREFIX}${root.innerHTML}`
+    : body;
 }
 
 function plainTextToEditorHTML(value: string): string {

@@ -4,7 +4,6 @@ import type { BoundRequestJSON } from "../api/requestJSON.js";
 import type { EmailMessage } from "../communications/communicationsApi.js";
 import { searchEntities } from "../entities/entitiesApi.js";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle } from "../nodes/selectionNodeCreation.js";
-import { createEntityIconElement } from "./EntityIcon.js";
 
 export type EditorWorkspaceEntityType = "node" | "logic_gate" | "project";
 export type EditorSearchableEntityType = EditorWorkspaceEntityType | "entity";
@@ -241,9 +240,7 @@ export function applyEditorEntityLinkStyle(element: HTMLElement, entityType?: Ed
 }
 
 export function createEditorEntityIconElement(ownerDocument: Document, entityType: EditorEntityType): SVGSVGElement {
-  const icon = entityType === "entity"
-    ? createEntityIconElement(ownerDocument)
-    : createExplorerEntityIconElement(ownerDocument, entityType);
+  const icon = createExplorerEntityIconElement(ownerDocument, entityType);
   icon.classList.add("mango-editor-entity-icon", `mango-editor-entity-icon--${entityType}`);
   return icon;
 }

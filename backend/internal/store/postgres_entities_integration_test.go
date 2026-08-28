@@ -69,3 +69,61 @@ func TestPostgresEntitiesConcurrentFolderMovesKeepTreeAcyclic(t *testing.T) {
 		t.Fatalf("create Entity after concurrent folder moves: %v", err)
 	}
 }
+
+func TestPostgresEntitiesResolveDeepTemplatesIntoOneFieldSnapshot(t *testing.T) {
+	db, repo := openRealtimePostgresIntegration(t)
+	company, err := repo.CreateCompany("Entity template snapshot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	entityType, err := repo.CreateEntityType(EntityTypeInput{CompanyID: company.CompanyID, Name: "Delivery"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := repo.CreateEntityFolder(EntityFolderInput{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, Name: "Imports"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := repo.CreateEntityFolder(EntityFolderInput{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, ParentEntityFolderID: &parent.EntityFolderID, Name: "Thailand"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grandchild, err := repo.CreateEntityFolder(EntityFolderInput{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, ParentEntityFolderID: &child.EntityFolderID, Name: "Morning"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fieldTypes := []EntityFieldTypeInput{
+		{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, Name: "Status", FieldType: EntityFieldTypeText, Position: 0, PositionSet: true},
+		{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, EntityFolderID: &parent.EntityFolderID, Name: "status", FieldType: EntityFieldTypeNumber, Position: 0, PositionSet: true},
+		{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, EntityFolderID: &child.EntityFolderID, Name: "Due date", FieldType: EntityFieldTypeDate, Position: 0, PositionSet: true},
+		{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, EntityFolderID: &grandchild.EntityFolderID, Name: "Confirmed", FieldType: EntityFieldTypeBoolean, Position: 0, PositionSet: true},
+	}
+	for _, input := range fieldTypes {
+		if _, err := repo.CreateEntityFieldType(input); err != nil {
+			t.Fatalf("CreateEntityFieldType(%q): %v", input.Name, err)
+		}
+	}
+
+	entity, err := repo.CreateEntity(EntityInput{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, EntityFolderID: &grandchild.EntityFolderID, Name: "Morning shipment"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		name      string
+		fieldType string
+	}{
+		{name: "status", fieldType: EntityFieldTypeNumber},
+		{name: "Due date", fieldType: EntityFieldTypeDate},
+		{name: "Confirmed", fieldType: EntityFieldTypeBoolean},
+	}
+	if len(entity.EntityFields) != len(want) {
+		t.Fatalf("Entity field snapshot = %+v, want %d fields", entity.EntityFields, len(want))
+	}
+	for index, expected := range want {
+		field := entity.EntityFields[index]
+		if field.Name != expected.name || field.FieldType != expected.fieldType || field.Position != index {
+			t.Fatalf("Entity field %d = %+v, want name=%q type=%q position=%d", index, field, expected.name, expected.fieldType, index)
+		}
+	}
+}

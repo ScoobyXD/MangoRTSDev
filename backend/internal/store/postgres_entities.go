@@ -258,24 +258,66 @@ returning company_id::text, entity_folder_id::text, entity_type_id::text, parent
 }
 
 func validatePostgresEntityFolderParent(ctx context.Context, tx *sql.Tx, item domain.EntityFolder, parentID *string) error {
-	seen := map[string]bool{}
-	for parentID != nil {
-		if *parentID == item.EntityFolderID || seen[*parentID] {
+	ancestors, err := postgresEntityFolderAncestry(ctx, tx, item.CompanyID, item.EntityTypeID, parentID)
+	if err != nil {
+		return err
+	}
+	for _, ancestorID := range ancestors {
+		if ancestorID == item.EntityFolderID {
 			return ErrConflict
 		}
-		seen[*parentID] = true
-		var parentTypeID string
-		var next *string
-		err := tx.QueryRowContext(ctx, `select entity_type_id::text, parent_entity_folder_id::text from entity_folders where company_id=$1::uuid and entity_folder_id=$2::uuid`, item.CompanyID, *parentID).Scan(&parentTypeID, &next)
-		if errors.Is(err, sql.ErrNoRows) || (err == nil && parentTypeID != item.EntityTypeID) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		parentID = next
 	}
 	return nil
+}
+
+func postgresEntityFolderAncestry(ctx context.Context, queryer postgresEntityQueryer, companyID, entityTypeID string, folderID *string) ([]string, error) {
+	if folderID == nil {
+		return []string{}, nil
+	}
+	rows, err := queryer.QueryContext(ctx, `
+with recursive ancestry as (
+  select entity_folder_id, parent_entity_folder_id, array[entity_folder_id] as path, false as cycle, 0 as depth
+  from entity_folders
+  where company_id=$1::uuid and entity_type_id=$2::uuid and entity_folder_id=$3::uuid
+  union all
+  select parent.entity_folder_id, parent.parent_entity_folder_id,
+         ancestry.path || parent.entity_folder_id,
+         parent.entity_folder_id=any(ancestry.path), ancestry.depth+1
+  from ancestry
+  join entity_folders parent
+    on parent.company_id=$1::uuid
+   and parent.entity_type_id=$2::uuid
+   and parent.entity_folder_id=ancestry.parent_entity_folder_id
+  where not ancestry.cycle
+)
+select entity_folder_id::text, cycle
+from ancestry
+order by depth desc`, companyID, entityTypeID, *folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ancestors := []string{}
+	cycle := false
+	for rows.Next() {
+		var entityFolderID string
+		var rowCycle bool
+		if err := rows.Scan(&entityFolderID, &rowCycle); err != nil {
+			return nil, err
+		}
+		ancestors = append(ancestors, entityFolderID)
+		cycle = cycle || rowCycle
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ancestors) == 0 {
+		return nil, ErrNotFound
+	}
+	if cycle {
+		return nil, ErrConflict
+	}
+	return ancestors, nil
 }
 
 func (r *PostgresRepo) DeleteEntityFolder(companyID, entityFolderID string) error {
@@ -452,10 +494,10 @@ from entities entity
 join entity_types entity_type on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
 where entity.company_id=$1::uuid
   and ($2::text='' or entity.entity_type_id=nullif($2::text, '')::uuid)
-  and ($3::text='' or entity.name ilike '%' || $3::text || '%')
+  and ($3::text='' or lower(entity.name) like '%' || lower($3::text) || '%')
   and (not $4::boolean or entity.entity_folder_id is not distinct from nullif($5::text, '')::uuid)
 order by entity.position, lower(entity.name), entity.entity_id
-limit $6::integer offset $7::integer`, normalized.CompanyID, normalized.EntityTypeID, normalized.Query, folderFilter, optionalEntityIDValue(normalized.EntityFolderID), normalized.Limit, normalized.Offset)
+limit case when $8::boolean then null else $6::integer end offset $7::integer`, normalized.CompanyID, normalized.EntityTypeID, normalized.Query, folderFilter, optionalEntityIDValue(normalized.EntityFolderID), normalized.Limit, normalized.Offset, normalized.AllForType)
 	if err != nil {
 		return nil, err
 	}
@@ -511,11 +553,19 @@ returning company_id::text, entity_id::text, entity_type_id::text, $9::text, ent
 	if err != nil {
 		return domain.Entity{}, err
 	}
-	for position, fieldType := range resolved {
-		fieldID := newUUIDv7String()
+	if len(resolved) > 0 {
+		fieldIDs := make([]string, len(resolved))
+		fieldNames := make([]string, len(resolved))
+		fieldTypes := make([]string, len(resolved))
+		for index, fieldType := range resolved {
+			fieldIDs[index] = newUUIDv7String()
+			fieldNames[index] = fieldType.Name
+			fieldTypes[index] = fieldType.FieldType
+		}
 		if _, err := tx.ExecContext(ctx, `
 insert into entity_fields (company_id, entity_field_id, entity_id, name, field_type, value_jsonb, position)
-values ($1::uuid, $2::uuid, $3::uuid, $4::text, $5::text, null, $6::integer)`, item.CompanyID, fieldID, item.EntityID, fieldType.Name, fieldType.FieldType, position); err != nil {
+select $1::uuid, input.entity_field_id::uuid, $2::uuid, input.name, input.field_type, null, (input.position-1)::integer
+from unnest($3::text[], $4::text[], $5::text[]) with ordinality as input(entity_field_id, name, field_type, position)`, item.CompanyID, item.EntityID, fieldIDs, fieldNames, fieldTypes); err != nil {
 			return domain.Entity{}, mapEntitiesPostgresError(err)
 		}
 	}
@@ -543,60 +593,37 @@ func validatePostgresEntityFolderForType(ctx context.Context, queryer postgresEn
 	return nil
 }
 
-func listPostgresEntityFieldTypesForFolder(ctx context.Context, queryer postgresEntityQueryer, companyID, entityTypeID string, folderID *string) ([]domain.EntityFieldType, error) {
+func resolvePostgresEntityFieldTypes(ctx context.Context, queryer postgresEntityQueryer, companyID, entityTypeID string, folderID *string) ([]domain.EntityFieldType, error) {
+	ancestors, err := postgresEntityFolderAncestry(ctx, queryer, companyID, entityTypeID, folderID)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := queryer.QueryContext(ctx, `
-select company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text, name, field_type, position, created_timestamp, updated_timestamp
+select company_id::text, entity_field_type_id::text, entity_type_id::text, entity_folder_id::text,
+       name, field_type, position, created_timestamp, updated_timestamp,
+       case when entity_folder_id is null then 0 else array_position($3::text[], entity_folder_id::text) end as layer
 from entity_field_types
 where company_id=$1::uuid and entity_type_id=$2::uuid
-  and entity_folder_id is not distinct from nullif($3::text, '')::uuid
-order by position, lower(name), entity_field_type_id`, companyID, entityTypeID, optionalEntityIDValue(folderID))
+  and (entity_folder_id is null or entity_folder_id::text=any($3::text[]))
+order by layer, position, lower(name), entity_field_type_id`, companyID, entityTypeID, ancestors)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []domain.EntityFieldType{}
+	layers := make([][]domain.EntityFieldType, len(ancestors)+1)
 	for rows.Next() {
-		item, err := scanEntityFieldType(rows)
-		if err != nil {
+		var item domain.EntityFieldType
+		var layer int
+		if err := rows.Scan(&item.CompanyID, &item.EntityFieldTypeID, &item.EntityTypeID, &item.EntityFolderID, &item.Name, &item.FieldType, &item.Position, &item.CreatedTimestamp, &item.UpdatedTimestamp, &layer); err != nil {
 			return nil, err
 		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func resolvePostgresEntityFieldTypes(ctx context.Context, queryer postgresEntityQueryer, companyID, entityTypeID string, folderID *string) ([]domain.EntityFieldType, error) {
-	root, err := listPostgresEntityFieldTypesForFolder(ctx, queryer, companyID, entityTypeID, nil)
-	if err != nil {
-		return nil, err
-	}
-	layers := [][]domain.EntityFieldType{root}
-	ancestors := []string{}
-	seen := map[string]bool{}
-	current := cloneStringPointer(folderID)
-	for current != nil {
-		if seen[*current] {
+		if layer < 0 || layer >= len(layers) {
 			return nil, ErrConflict
 		}
-		seen[*current] = true
-		ancestors = append(ancestors, *current)
-		var parent *string
-		err := queryer.QueryRowContext(ctx, `select parent_entity_folder_id::text from entity_folders where company_id=$1::uuid and entity_type_id=$2::uuid and entity_folder_id=$3::uuid`, companyID, entityTypeID, *current).Scan(&parent)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, ErrNotFound
-		}
-		if err != nil {
-			return nil, err
-		}
-		current = parent
+		layers[layer] = append(layers[layer], item)
 	}
-	for index := len(ancestors) - 1; index >= 0; index-- {
-		id := ancestors[index]
-		layer, err := listPostgresEntityFieldTypesForFolder(ctx, queryer, companyID, entityTypeID, &id)
-		if err != nil {
-			return nil, err
-		}
-		layers = append(layers, layer)
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return resolveEntityFieldTypeLayers(layers), nil
 }

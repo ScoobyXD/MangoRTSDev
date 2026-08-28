@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { JSDOM } from "jsdom";
 import type { CompanyUser, CommunicationsArchiveJob, CommunicationsSharedInbox, CommunicationsSharedInboxRACIAssignment, CommunicationsSharedInboxRACIRole, EmailMessage, SendEmailInput, UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 import type { LogicGateAssignmentCommandResult, RACIMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
@@ -225,6 +226,35 @@ test("a stale signature GET cannot overwrite a completed same-body save", async 
 
   assert.equal(await loadPromise, body);
   assert.equal(readHomeMailSignature(companyID, userID, "", accountEmail), body);
+});
+
+test("signature persistence downgrades Entity chips and preserves other references", async (t: { after: (callback: () => void) => void }) => {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>");
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  Object.defineProperty(globalThis, "document", { configurable: true, value: dom.window.document });
+  t.after(() => {
+    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+    dom.window.close();
+  });
+  installMemoryStorage(t);
+  const companyID = "company-signature-entity-reference";
+  const userID = "user-signature-entity-reference";
+  const accountEmail = "entity-reference@example.test";
+  const signature = "<!-- mango-editor-html-v1 --><div><span data-mango-entity-link=\"true\" data-mango-entity-type=\"entity\" data-mango-entity-id=\"entity-1\" data-mango-entity-label=\"Thailand delivery\">Thailand delivery</span> <span data-mango-entity-link=\"true\" data-mango-entity-type=\"project\" data-mango-entity-id=\"project-1\" data-mango-entity-label=\"Costco order\">Costco order</span></div>";
+  let outboundBody = "";
+  installSignatureFetch(t, async (init) => {
+    outboundBody = signatureBodyFromRequest(init);
+    return signatureResponse(outboundBody);
+  });
+
+  await saveHomeMailSignatureRemote(companyID, userID, signature, "", accountEmail);
+
+  assert.match(outboundBody, /Thailand delivery/);
+  assert.doesNotMatch(outboundBody, /data-mango-entity-type="entity"|data-mango-entity-id="entity-1"/);
+  assert.match(outboundBody, /data-mango-entity-type="project"/);
+  assert.match(outboundBody, /data-mango-entity-id="project-1"/);
+  assert.equal(readHomeMailSignature(companyID, userID, "", accountEmail), outboundBody);
 });
 
 test("legacy signature backfill stays ordered ahead of a newer save", async (t: { after: (callback: () => void) => void }) => {

@@ -69,11 +69,11 @@ PM58 - A successful inline Project rename updates the parent Project Management 
 PM59 - Expanding a node in Project Logic Gates / Nodes renders the inline node editor at the full relationship-panel width. Group and row depth still indent the collapsed row labels, but must not add a left offset or reduce the width of the expanded editor.
 PM60 - Project Logic Gates / Nodes exposes an Add control that opens an elevated Company Explorer search surface restricted to Nodes and Logic Gates. Choosing a result creates or reuses its project relationship; a selected Logic Gate follows the existing Logic Gate-add contract and includes its known child nodes. Existing relationships are visibly marked and cannot be added again.
 
-PM61 - Project Field, Status, Health, Account, and Team dropdowns are one-click commit controls. Selecting an option immediately persists that selected or toggled value and closes the menu, with no staged Apply or Cancel footer. Multi-value controls preserve every other selected ID, while Not set clears the complete assignment.
-PM62 - Project Summary conditionally mirrors the company-local generic Field column as a **Fields** metadata control immediately left of Status. It shows and edits the same project field assignments through the canonical entity-field assignment endpoint.
+PM61 - Project Status, Health, Account, and Team dropdowns are one-click commit controls. Selecting an option immediately persists that selected or toggled value and closes the menu, with no staged Apply or Cancel footer. Multi-value controls preserve every other selected ID, while Not set clears the complete assignment.
+PM62 - Project metadata has no generic Field column, **Fields** control, field assignment, or entity-field assignment endpoint. Entities remain independent resources and may appear in Project editor content only as `#` references.
 PM63 - Project Summary chat gives every current user's sent comment an author-only Edit action. A successful edit PATCHes the stable Project chat projection, preserves reply/source/attachment/creation metadata and ordering, updates the displayed text and mention IDs, and marks the comment Edited. Project Edit permission alone never permits editing or deleting another author's comment, and the generic Project information POST cannot overwrite an existing chat projection.
-PM64 - The Projects view menu exposes Project name, Account, Team, Status, Health, Field, Date created, and Date updated filters beneath the existing grouping controls.
-PM65 - Project list filters use OR between selected values in one category and AND between categories. Date range endpoints are inclusive, and Account, Team, and Field each offer an Unassigned value.
+PM64 - The Projects view menu exposes Project name, Account, Team, Status, Health, Date created, and Date updated filters beneath the existing grouping controls.
+PM65 - Project list filters use OR between selected values in one category and AND between categories. Date range endpoints are inclusive, and Account and Team each offer an Unassigned value.
 PM66 - Project list filtering runs before grouping, group counts use only matching Projects, and the header reports the matching count when any filter is active.
 PM67 - Project list filters change presentation only, remain session state, and never mutate Project data or issue a filtered Project API request.
 
@@ -108,8 +108,8 @@ Expected:
 - Updating metadata requires edit access.
 - Deleting a project requires edit access and removes it through the Company Explorer target deletion path.
 - Deleting the project removes its project-owned associations/data but leaves related nodes, Logic Gates, node-to-gate assignments, and Kanban boards active.
-- The Projects view menu filters the loaded list by Project name, Account, Team, Status, Health, Field, and inclusive created or updated date ranges before grouping it.
-- Choices within one filter category are alternatives, different filter categories must all match, and Account, Team, and Field can match Unassigned Projects.
+- The Projects view menu filters the loaded list by Project name, Account, Team, Status, Health, and inclusive created or updated date ranges before grouping it.
+- Choices within one filter category are alternatives, different filter categories must all match, and Account and Team can match Unassigned Projects.
 - Clearing or reloading the session removes the presentation-only filters without changing any Project.
 
 ### Scenario PM-S2: Project Information, Relationships, And Critical Path
@@ -306,23 +306,22 @@ Expected:
 - A shared message never silently falls back to a personal grant.
 - Reply files and inline images remain linked to the project and originating project information ID, while the stored personal/shared mailbox scope continues to authorize provider reads, drafts, replies, and sends.
 
-### Scenario PM-S9: Immediate Project Metadata Selection And Detail Parity
+### Scenario PM-S9: Immediate Project Metadata Selection
 
 Business logic covered:
 - PM61
 - PM62
 
 Given:
-- The generic Field column is enabled for the active company.
-- A project has editable Field, Status, Health, Account, and Team metadata.
+- A project has editable Status, Health, Account, and Team metadata.
 
 Expected:
 - Selecting any option immediately saves that option and closes its dropdown.
-- Field, Account, and Team clicks toggle only the clicked assignment while preserving the other selected assignments.
+- Account and Team clicks toggle only the clicked assignment while preserving the other selected assignments.
 - Choosing Not set clears the complete value for that multi-value control.
 - No Project metadata dropdown displays Apply or Cancel buttons.
-- Opening the project shows **Fields** immediately left of Status in Project Summary.
-- The summary value matches the list-row assignment, and changing it updates the same canonical project field assignments.
+- Project Summary exposes no generic Field column, **Fields** control, field assignment, or entity-field assignment endpoint.
+- An Entity may appear in Project editor content only as a `#` reference and never becomes Project metadata.
 
 ### Scenario PM-S10: Edit A Project Comment
 

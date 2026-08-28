@@ -20,7 +20,6 @@ import {
   type EditorChatEntityLink,
 } from "./chatEntityLinks.js";
 import { editorEntityTypeLabel, openEditorEntityLink, readActiveEntityLinkDraft, searchEditorEntityLinks, type ActiveEntityLinkDraft, type EditorEntityLink, type EditorEntityLinkRequest, type EditorSearchableEntityType } from "./editorEntityLinks.js";
-import { EntityIcon } from "./EntityIcon.js";
 import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
 import type { EditorSaveState } from "./EditorSaveStatusIcon.js";
 import type { EditorScrollMemory } from "./editorScroll";
@@ -1590,7 +1589,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         boxShadow: selected ? "0 8px 20px rgba(15,23,42,0.10), 0 0 12px rgba(14,165,233,0.16), inset 1px 1px 0 rgba(255,255,255,0.86)" : undefined,
                       }}
                     >
-                      {entity.entityType === "entity" ? <EntityIcon /> : <ExplorerEntityIcon kind={entity.entityType} />}
+                      <ExplorerEntityIcon kind={entity.entityType} />
                       <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800 }}>{entity.label}</span>
                       <span style={{ color: "rgba(100,116,139,.88)", fontSize: 9.5, fontWeight: 800 }}>{editorEntityTypeLabel(entity.entityType)}</span>
                     </button>
@@ -1992,7 +1991,7 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
           onDoubleClick={(event) => event.stopPropagation()}
           style={{ display: "inline-flex", alignItems: "center", gap: 3, margin: "0 1px", padding: "0 4px", border: "1px solid rgba(14,165,233,.32)", borderRadius: 6, background: "rgba(224,242,254,.82)", color: "#075985", cursor: "pointer", font: "inherit", fontWeight: 800, lineHeight: 1.35, verticalAlign: "baseline" }}
         >
-          {segment.entity.entityType === "entity" ? <EntityIcon /> : <ExplorerEntityIcon kind={segment.entity.entityType} />}
+          <ExplorerEntityIcon kind={segment.entity.entityType} />
           <span>{segment.text}</span>
         </button>
       ) : (

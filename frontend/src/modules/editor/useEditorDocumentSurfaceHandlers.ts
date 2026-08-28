@@ -96,7 +96,6 @@ import {
   type MentionableCompanyUser,
 } from "./editorMentions";
 import { ExplorerEntityIcon } from "../../icons/index.js";
-import { EntityIcon } from "./EntityIcon.js";
 import {
   createEditorEntityLinkElement,
   createNodeEntityFromSelection,
@@ -4899,9 +4898,7 @@ export function useEditorDocumentSurfaceHandlers({
                   background: index === activeEntityIndex ? "#e0f2fe" : "transparent", color: mentionSurfaceText, cursor: "pointer",
                 } satisfies React.CSSProperties,
               },
-              entity.entityType === "entity"
-                ? React.createElement(EntityIcon, { className: "mango-editor-entity-icon" })
-                : React.createElement(ExplorerEntityIcon, { kind: entity.entityType, className: "mango-editor-entity-icon" }),
+              React.createElement(ExplorerEntityIcon, { kind: entity.entityType, className: "mango-editor-entity-icon" }),
               React.createElement("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11.5, fontWeight: 800 } }, entity.label),
               React.createElement("span", { style: { color: "#64748b", fontSize: 9.5, fontWeight: 800 } }, editorEntityTypeLabel(entity.entityType)),
             )),

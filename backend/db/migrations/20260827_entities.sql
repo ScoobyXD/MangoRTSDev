@@ -98,8 +98,8 @@ create table entities (
 create index idx_entities_type_folder_position
   on entities(company_id, entity_type_id, entity_folder_id, position, lower(name), entity_id);
 
-create index idx_entities_company_name_search
-  on entities(company_id, lower(name), entity_id);
+create index idx_entities_name_trgm
+  on entities using gin (lower(name) gin_trgm_ops);
 
 create table entity_fields (
   company_id uuid not null,

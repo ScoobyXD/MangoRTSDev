@@ -4,7 +4,6 @@ import { needsMangoTiptapLegacyDateHeadingBreak, type MangoTiptapDocument } from
 import { isDormantMangoTiptapAnnotation, type MangoTiptapAnnotation } from "./mangoTiptapAnnotations.js";
 import { ExplorerEntityIcon } from "../../../icons/index.js";
 import { editorEntityRoute, editorEntityTypeLabel, isEditorEntityType, openEditorEntityLink } from "../editorEntityLinks.js";
-import { EntityIcon } from "../EntityIcon.js";
 import "./mangoTiptap.css";
 import { mangoTiptapImagePlacementDOMAttributes } from "./mangoTiptapImagePlacement.js";
 
@@ -176,9 +175,7 @@ function renderNode(
             openEditorEntityLink({ entityType, entityID, label, ...emailEntity });
           }}
         >
-          {entityType === "entity"
-            ? <EntityIcon className="mango-editor-entity-icon" />
-            : <ExplorerEntityIcon kind={entityType} className="mango-editor-entity-icon" />}
+          <ExplorerEntityIcon kind={entityType} className="mango-editor-entity-icon" />
           <span className="mango-editor-entity-label">{label}</span>
         </a>
       );

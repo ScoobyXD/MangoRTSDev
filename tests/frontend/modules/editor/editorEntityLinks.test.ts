@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 
+import { createExplorerEntityIconElement } from "../../../../frontend/src/icons/EntityIcons.js";
+
 import {
   createMangoTiptapExtensions,
   MangoTiptapEditorEngine,
@@ -292,6 +294,29 @@ test("entity chips render the canonical Node, Logic Gate, Project, Entity, and E
       );
       assert.equal(element.querySelector(".mango-editor-entity-label")?.textContent, `${entityType} name`);
     }
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("the shared React and DOM Entity icon uses the same default, inverse, and orange tone specs", () => {
+  const dom = new JSDOM("<!doctype html>");
+  try {
+    const tones = [
+      ["default", "#0d9488", "rgba(13,148,136,0.10)"],
+      ["inverse", "#ffffff", "rgba(255,255,255,0.10)"],
+      ["orange", "#ff9708", "rgba(255,151,8,0.10)"],
+    ] as const;
+
+    for (const [tone, expectedStroke, expectedFill] of tones) {
+      const icon = createExplorerEntityIconElement(dom.window.document, "entity", tone);
+      assert.equal(icon.querySelector("rect")?.getAttribute("stroke"), expectedStroke);
+      assert.equal(icon.querySelector("rect")?.getAttribute("fill"), expectedFill);
+      assert.equal(icon.querySelector("path")?.getAttribute("stroke"), expectedStroke);
+    }
+    const source = readFileSync("frontend/src/icons/EntityIcons.tsx", "utf8");
+    assert.match(source, /ExplorerEntityIcon[\s\S]*iconSpecs\(kind, tone, id\)/);
+    assert.match(source, /createExplorerEntityIconElement[\s\S]*iconSpecs\(kind, tone, id\)/);
   } finally {
     dom.window.close();
   }

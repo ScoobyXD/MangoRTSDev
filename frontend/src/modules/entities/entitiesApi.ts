@@ -243,6 +243,7 @@ type EntityListInput = {
   query?: string;
   limit?: number;
   offset?: number;
+  allForType?: boolean;
 };
 
 async function requestEntityList(requestJSON: BoundRequestJSON, input: EntityListInput): Promise<EntitySummary[]> {
@@ -254,6 +255,10 @@ async function requestEntityList(requestJSON: BoundRequestJSON, input: EntityLis
   if (input.entityTypeID) params.set("entity_type_id", input.entityTypeID);
   if (input.entityFolderID !== undefined) params.set("entity_folder_id", input.entityFolderID?.trim() ?? "");
   if (input.offset && input.offset > 0) params.set("offset", String(Math.floor(input.offset)));
+  if (input.allForType) {
+    params.delete("limit");
+    params.set("all_for_type", "true");
+  }
   const response = await requestJSON<{ entities?: EntitySummary[] }>(`/v1/entities?${params.toString()}`, { cache: "no-store" });
   return response.entities ?? [];
 }
@@ -270,22 +275,7 @@ export async function listAllEntitiesForType(
   entityTypeID: string,
   requestJSON: BoundRequestJSON = apiFetchJSON,
 ): Promise<EntitySummary[]> {
-  const pageSize = 50;
-  const entities: EntitySummary[] = [];
-  const seenEntityIDs = new Set<string>();
-  let offset = 0;
-  for (;;) {
-    const page = await requestEntityList(requestJSON, { companyID, entityTypeID, limit: pageSize, offset });
-    let added = 0;
-    for (const entity of page) {
-      if (seenEntityIDs.has(entity.entity_id)) continue;
-      seenEntityIDs.add(entity.entity_id);
-      entities.push(entity);
-      added += 1;
-    }
-    if (page.length < pageSize || added === 0) return entities;
-    offset += page.length;
-  }
+  return requestEntityList(requestJSON, { companyID, entityTypeID, allForType: true });
 }
 
 export async function getEntity(companyID: string, entityID: string, signal?: AbortSignal): Promise<Entity> {

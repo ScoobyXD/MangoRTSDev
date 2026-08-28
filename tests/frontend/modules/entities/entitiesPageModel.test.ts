@@ -8,6 +8,15 @@ import {
 } from "../../../../frontend/src/modules/entities/entitiesPageModel.js";
 import type { EntityFolder, EntitySummary } from "../../../../frontend/src/modules/entities/entitiesApi.js";
 
+function buttonTagContaining(source: string, marker: string): string {
+  const markerIndex = source.indexOf(marker);
+  assert.notEqual(markerIndex, -1, `Missing button marker: ${marker}`);
+  const tagStart = source.lastIndexOf("<button", markerIndex);
+  const tagEnd = source.indexOf(">", markerIndex);
+  assert.ok(tagStart >= 0 && tagEnd > markerIndex, `Could not read button for: ${marker}`);
+  return source.slice(tagStart, tagEnd + 1);
+}
+
 function folder(entityFolderID: string, parentEntityFolderID: string | null, position: number): EntityFolder {
   return {
     company_id: "company-1",
@@ -81,4 +90,21 @@ test("Entities is directly below Process Map and the retired Fields surface is g
   assert.match(entitiesSource, /parentPath \? `\$\{parentPath\} \/ \$\{row\.folder\.name\}`/);
   assert.equal(existsSync(resolve(process.cwd(), "frontend/src/modules/fields/entityFieldsApi.ts")), false);
   assert.equal(existsSync(resolve(process.cwd(), "frontend/src/pages/fields/index.tsx")), false);
+});
+
+test("Entities manager blocks every type, folder, and entity selection while a mutation is busy", () => {
+  const source = readFileSync(resolve(process.cwd(), "frontend/src/modules/entities/EntitiesContent.tsx"), "utf8");
+  const selectionButtons = [
+    "onClick={() => selectType(entityType.entity_type_id)}",
+    "onClick={() => selectFolder(null)}",
+    "onClick={() => selectFolder(row.id)}",
+    "onClick={() => selectEntity(row.entity)}",
+  ];
+
+  for (const marker of selectionButtons) {
+    assert.match(buttonTagContaining(source, marker), /disabled=\{busy\}/);
+  }
+  assert.match(source, /const selectType = \(entityTypeID: string\) => \{\s+if \(busy\) return;/);
+  assert.match(source, /const selectFolder = \(entityFolderID: string \| null\) => \{\s+if \(busy\) return;/);
+  assert.match(source, /const selectEntity = \(entity: EntitySummary\) => \{\s+if \(busy\) return;/);
 });

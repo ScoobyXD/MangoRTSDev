@@ -189,17 +189,20 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
   };
 
   const selectType = (entityTypeID: string) => {
+    if (busy) return;
     setSelectedTypeID(entityTypeID);
     setSelectedFolderID(null);
     setSelectedEntityID("");
   };
 
   const selectFolder = (entityFolderID: string | null) => {
+    if (busy) return;
     setSelectedFolderID(entityFolderID);
     setSelectedEntityID("");
   };
 
   const selectEntity = (entity: EntitySummary) => {
+    if (busy) return;
     setSelectedFolderID(entity.entity_folder_id?.trim() || null);
     setSelectedEntityID(entity.entity_id);
   };
@@ -243,6 +246,7 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
               <button
                 key={entityType.entity_type_id}
                 type="button"
+                disabled={busy}
                 style={listButtonStyle(entityType.entity_type_id === selectedTypeID, accent)}
                 onClick={() => selectType(entityType.entity_type_id)}
               >
@@ -329,12 +333,13 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                   <AddButton disabled={busy} label="Add entity" />
                 </form>
               </div>
-              <button type="button" style={rootButtonStyle(selectedFolderID === null && !selectedEntityID, accent)} onClick={() => selectFolder(null)}>⌂ Type root</button>
+              <button type="button" disabled={busy} style={rootButtonStyle(selectedFolderID === null && !selectedEntityID, accent)} onClick={() => selectFolder(null)}>⌂ Type root</button>
               <div style={treeStyle}>
                 {loadingCatalog ? <EmptyState>Loading entities…</EmptyState> : treeRows.length === 0 ? <EmptyState>No folders or entities yet.</EmptyState> : treeRows.map((row) => row.kind === "folder" ? (
                   <button
                     key={`folder:${row.id}`}
                     type="button"
+                    disabled={busy}
                     style={treeButtonStyle(row.depth, row.id === selectedFolderID && !selectedEntityID, accent)}
                     onClick={() => selectFolder(row.id)}
                   >
@@ -344,6 +349,7 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                   <button
                     key={`entity:${row.id}`}
                     type="button"
+                    disabled={busy}
                     style={treeButtonStyle(row.depth, row.id === selectedEntityID, accent)}
                     onClick={() => selectEntity(row.entity)}
                   >

@@ -62,6 +62,7 @@ type EntityListQuery struct {
 	EntityFolderID *string
 	Limit          int
 	Offset         int
+	AllForType     bool
 }
 
 type EntityInput struct {
@@ -175,6 +176,12 @@ func normalizeEntityListQuery(query EntityListQuery) (EntityListQuery, error) {
 			}
 		}
 		query.EntityFolderID = &clean
+	}
+	if query.AllForType {
+		if query.EntityTypeID == "" || query.Query != "" || query.EntityFolderID != nil || query.Limit != 0 || query.Offset != 0 {
+			return EntityListQuery{}, ErrInvalid
+		}
+		return query, nil
 	}
 	if query.Limit <= 0 {
 		query.Limit = EntitySearchMaxLimit

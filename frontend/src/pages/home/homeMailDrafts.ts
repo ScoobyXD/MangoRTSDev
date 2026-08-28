@@ -1,6 +1,6 @@
 import type { CommunicationsEmailDraft, EmailMessage } from "../../modules/communications/communicationsApi.js";
 import { deleteEmailDraft, getEmailDraft, getEmailSignature, listEmailDrafts, parseEmailAddressList, saveEmailDraft, saveEmailSignature } from "../../modules/communications/communicationsApi.js";
-import { applyEmailSignature, emailBodyHasSignature, emailBodyWithoutSignature } from "../../modules/editor/emailSignatureBody.js";
+import { applyEmailSignature, emailBodyHasSignature, emailBodyWithoutEntityReferences, emailBodyWithoutSignature } from "../../modules/editor/emailSignatureBody.js";
 import { EDITOR_RICH_TEXT_PREFIX, editorBodyHasEmailContent, linkifyEditorPlainTextToHTML, sanitizeEditorDocumentHTML } from "../../modules/editor/richTextEditing.js";
 import { emptyCompose, type ComposeAttachment, type ComposeKind, type ComposeState } from "./homeTypes.js";
 
@@ -184,7 +184,18 @@ function readPendingHomeMailSignatureSync(
   accountEmail = "",
 ): string | null {
   if (!storageAvailable()) return null;
-  return localStorage.getItem(homeMailSignaturePendingSyncKey(companyID, userID, sharedInboxID, accountEmail));
+  const key = homeMailSignaturePendingSyncKey(companyID, userID, sharedInboxID, accountEmail);
+  const signature = localStorage.getItem(key);
+  if (signature === null) return null;
+  const cleanSignature = emailBodyWithoutEntityReferences(signature);
+  if (cleanSignature !== signature) {
+    try {
+      localStorage.setItem(key, cleanSignature);
+    } catch {
+      // The sanitized value still remains authoritative for this retry.
+    }
+  }
+  return cleanSignature;
 }
 
 function markPendingHomeMailSignatureSync(
@@ -792,7 +803,9 @@ export function saveHomeMailDraftFromCompose(
   options: { preserveEmpty?: boolean } = {},
 ): HomeMailDraft[] {
   if (!compose.open) return readHomeMailDrafts(companyID, userID);
-  if (!options.preserveEmpty && !composeHasDraftContent(compose, signature)) {
+  const body = emailBodyWithoutEntityReferences(compose.body);
+  const cleanSignature = emailBodyWithoutEntityReferences(signature);
+  if (!options.preserveEmpty && !composeHasDraftContent({ ...compose, body }, cleanSignature)) {
     return compose.draftID ? deleteHomeMailDraft(companyID, userID, compose.draftID) : readHomeMailDrafts(companyID, userID);
   }
   const now = new Date().toISOString();
@@ -812,7 +825,7 @@ export function saveHomeMailDraftFromCompose(
     cc: compose.cc,
     bcc: compose.bcc,
     subject: compose.subject,
-    body: compose.body,
+    body,
     attachments: cloneAttachments(compose.attachments),
     scheduledAt: compose.scheduledAt.trim(),
     createdAt: existing?.createdAt ?? now,
@@ -895,10 +908,10 @@ export function readHomeMailSignature(
 ): string {
   if (!storageAvailable()) return "";
   const scopedSignature = localStorage.getItem(homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail));
-  if (scopedSignature !== null) return scopedSignature;
+  if (scopedSignature !== null) return emailBodyWithoutEntityReferences(scopedSignature);
   if (sharedInboxID.trim()) return "";
   const legacyKey = legacySignatureStorageKey(companyID, userID);
-  const legacySignature = localStorage.getItem(legacyKey) ?? "";
+  const legacySignature = emailBodyWithoutEntityReferences(localStorage.getItem(legacyKey) ?? "");
   if (!legacySignature) return "";
   if (!accountEmail.trim()) return legacySignature;
   try {
@@ -918,10 +931,11 @@ export function saveHomeMailSignature(
   accountEmail = "",
 ): void {
   const scopeKey = homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail);
+  const cleanSignature = emailBodyWithoutEntityReferences(signature);
   advanceHomeMailSignatureLocalRevision(scopeKey);
   if (!storageAvailable()) return;
   try {
-    localStorage.setItem(scopeKey, signature);
+    localStorage.setItem(scopeKey, cleanSignature);
   } catch {
     // Ignore storage failures; the compose state still keeps the signature text for this session.
   }
@@ -962,7 +976,7 @@ export async function loadHomeMailSignature(
       return pendingAfterLoad ?? localAfterLoad;
     }
     if (remoteSignature) {
-      const body = remoteSignature.body_editor_html ?? "";
+      const body = emailBodyWithoutEntityReferences(remoteSignature.body_editor_html ?? "");
       saveHomeMailSignature(companyID, userID, body, sharedInboxID, accountEmail);
       return body;
     }
@@ -986,11 +1000,12 @@ export async function saveHomeMailSignatureRemote(
   sharedInboxID = "",
   accountEmail = "",
 ): Promise<void> {
-  saveHomeMailSignature(companyID, userID, signature, sharedInboxID, accountEmail);
-  markPendingHomeMailSignatureSync(companyID, userID, signature, sharedInboxID, accountEmail);
+  const cleanSignature = emailBodyWithoutEntityReferences(signature);
+  saveHomeMailSignature(companyID, userID, cleanSignature, sharedInboxID, accountEmail);
+  markPendingHomeMailSignatureSync(companyID, userID, cleanSignature, sharedInboxID, accountEmail);
   const scopeKey = homeMailSignatureScopeKey(companyID, userID, sharedInboxID, accountEmail);
   await queueHomeMailSignatureRemoteSave(scopeKey, () => (
-    saveEmailSignature({ companyID, sharedInboxID, accountEmail, bodyEditorHTML: signature })
+    saveEmailSignature({ companyID, sharedInboxID, accountEmail, bodyEditorHTML: cleanSignature })
   ));
-  clearPendingHomeMailSignatureSync(companyID, userID, signature, sharedInboxID, accountEmail);
+  clearPendingHomeMailSignatureSync(companyID, userID, cleanSignature, sharedInboxID, accountEmail);
 }

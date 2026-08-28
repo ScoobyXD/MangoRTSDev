@@ -310,6 +310,14 @@ func (s *Server) handleEntities(w http.ResponseWriter, r *http.Request) {
 		if _, ok := s.requireAccountCompanyAccess(w, r, companyID); !ok {
 			return
 		}
+		allForType := false
+		if values, present := r.URL.Query()["all_for_type"]; present {
+			if len(values) != 1 || values[0] != "true" {
+				writeEntityError(w, store.ErrInvalid, "invalid_entity_request")
+				return
+			}
+			allForType = true
+		}
 		limit, err := optionalNonnegativeQueryInt(r, "limit")
 		if err != nil {
 			writeEntityError(w, store.ErrInvalid, "invalid_entity_request")
@@ -328,7 +336,7 @@ func (s *Server) handleEntities(w http.ResponseWriter, r *http.Request) {
 			}
 			folderID = &value
 		}
-		items, err := s.repo.ListEntities(r.Context(), store.EntityListQuery{CompanyID: companyID, Query: r.URL.Query().Get("q"), EntityTypeID: r.URL.Query().Get("entity_type_id"), EntityFolderID: folderID, Limit: limit, Offset: offset})
+		items, err := s.repo.ListEntities(r.Context(), store.EntityListQuery{CompanyID: companyID, Query: r.URL.Query().Get("q"), EntityTypeID: r.URL.Query().Get("entity_type_id"), EntityFolderID: folderID, Limit: limit, Offset: offset, AllForType: allForType})
 		if err != nil {
 			writeEntityError(w, err, "failed_to_list_entities")
 			return

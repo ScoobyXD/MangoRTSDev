@@ -148,6 +148,31 @@ func TestEntityHandlersCRUDAndExplicitRootMoves(t *testing.T) {
 		t.Fatalf("listed entities=%+v", listed.Entities)
 	}
 
+	managerListRequest := httptest.NewRequest(http.MethodGet, "/v1/entities?company_id="+companyID+"&entity_type_id="+createdType.EntityType.EntityTypeID+"&all_for_type=true", nil)
+	managerListResponse := httptest.NewRecorder()
+	handler.ServeHTTP(managerListResponse, requestWithActorForTest(managerListRequest, user, companyID))
+	if managerListResponse.Code != http.StatusOK {
+		t.Fatalf("exact Entity Type manager list status=%d body=%s", managerListResponse.Code, managerListResponse.Body.String())
+	}
+	var managerListed struct {
+		Entities []domain.EntitySummary `json:"entities"`
+	}
+	decodeEntitiesHTTPResponse(t, managerListResponse, &managerListed)
+	if len(managerListed.Entities) != 1 || managerListed.Entities[0].EntityID != createdEntity.Entity.EntityID {
+		t.Fatalf("exact Entity Type manager list=%+v", managerListed.Entities)
+	}
+	for _, path := range []string{
+		"/v1/entities?company_id=" + companyID + "&entity_type_id=" + createdType.EntityType.EntityTypeID + "&all_for_type=false",
+		"/v1/entities?company_id=" + companyID + "&all_for_type=true",
+	} {
+		invalidManagerRequest := httptest.NewRequest(http.MethodGet, path, nil)
+		invalidManagerResponse := httptest.NewRecorder()
+		handler.ServeHTTP(invalidManagerResponse, requestWithActorForTest(invalidManagerRequest, user, companyID))
+		if invalidManagerResponse.Code != http.StatusBadRequest {
+			t.Fatalf("invalid Entity manager list %q status=%d body=%s, want 400", path, invalidManagerResponse.Code, invalidManagerResponse.Body.String())
+		}
+	}
+
 	invalidFilterRequest := httptest.NewRequest(http.MethodGet, "/v1/entities?company_id="+companyID+"&entity_type_id=not-a-uuid", nil)
 	invalidFilterResponse := httptest.NewRecorder()
 	handler.ServeHTTP(invalidFilterResponse, requestWithActorForTest(invalidFilterRequest, user, companyID))

@@ -346,6 +346,9 @@ func (r *MemoryRepo) ListEntities(ctx context.Context, query EntityListQuery) ([
 		items = append(items, domain.EntitySummary{CompanyID: item.CompanyID, EntityID: item.EntityID, EntityTypeID: item.EntityTypeID, EntityTypeName: typeItem.Name, EntityFolderID: cloneStringPointer(item.EntityFolderID), Name: item.Name, Position: item.Position, Revision: item.Revision, CreatedTimestamp: item.CreatedTimestamp, UpdatedTimestamp: item.UpdatedTimestamp})
 	}
 	sortEntitySummaries(items)
+	if normalized.AllForType {
+		return items, nil
+	}
 	if normalized.Offset >= len(items) {
 		return []domain.EntitySummary{}, nil
 	}

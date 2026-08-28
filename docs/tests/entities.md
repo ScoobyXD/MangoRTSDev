@@ -34,7 +34,7 @@ E15 - Deleting an Entity hard-deletes its Entity Fields. Existing inline referen
 
 E16 - Entities are company-wide and have no per-Entity permission, GVIC, placement, assignment, or policy rows. A signed-in company member may list, read, create, edit, move, and delete that company's Entities data but never another company's data.
 
-E17 - Every supported non-email Mango editor may insert an Entity through Universal Picker `#` reference mode. Email compose, reply, and signature editors never retain Entity reference chips: pasted, dropped, or preloaded Entity chips become their saved label as plain text while other supported resource references remain unchanged. An Entity is never a legal `##` link target and selecting one never mutates a relationship table.
+E17 - Every supported non-email Mango editor may insert an Entity through Universal Picker `#` reference mode. Email compose, reply, and signature editors never retain Entity reference chips: pasted, dropped, or preloaded Entity chips become their saved label as plain text before any local or remote save, including close and navigation autosave, while other supported resource references remain unchanged. An Entity is never a legal `##` link target and selecting one never mutates a relationship table.
 
 E18 - The Universal Picker category order is Nodes, Processes, Projects, Entities, Emails. Entity search is company-scoped, bounded, cancellable, and returns only real Entities, never Entity Types or folders.
 

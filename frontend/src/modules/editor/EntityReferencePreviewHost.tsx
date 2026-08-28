@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppModalPortal } from "../../app/AppModalPortal.js";
+import { ExplorerEntityIcon } from "../../icons/index.js";
 import { getEntityDetail, type Entity, type EntityField } from "../entities/entitiesApi.js";
 import {
   EVENT_EDITOR_ENTITY_REFERENCE_OPEN,
   type EditorEntityLink,
   type EditorEntityLinkRequest,
 } from "./editorEntityLinks.js";
-import { EntityIcon } from "./EntityIcon.js";
 
 export type EntityReferencePreviewHostProps = {
   companyID: string;
@@ -104,7 +104,7 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
       >
         <section style={{ width: "min(560px, calc(100vw - 32px))", maxHeight: "min(720px, calc(100vh - 32px))", display: "grid", gridTemplateRows: "auto minmax(0,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 18, background: "#fff", boxShadow: "0 28px 80px rgba(15,23,42,.30)" }}>
           <header style={{ display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center", gap: 10, padding: "16px 18px", borderBottom: "1px solid rgba(148,163,184,.22)", background: "linear-gradient(135deg,rgba(240,253,250,.96),rgba(239,246,255,.96))" }}>
-            <EntityIcon />
+            <ExplorerEntityIcon kind="entity" />
             <div style={{ minWidth: 0 }}>
               <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#0f172a", fontSize: 17, fontWeight: 850 }}>{title}</div>
               <div style={{ marginTop: 2, color: "#64748b", fontSize: 11, fontWeight: 700 }}>{preview.detail?.entity_type_name || "Entity"}</div>

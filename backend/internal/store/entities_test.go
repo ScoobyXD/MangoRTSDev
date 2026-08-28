@@ -159,6 +159,10 @@ func TestMemoryEntitiesStableBoundedPaging(t *testing.T) {
 	if first[49].Position != 49 || second[0].Position != 50 {
 		t.Fatalf("paging boundary = %d/%d, want 49/50", first[49].Position, second[0].Position)
 	}
+	allForType, err := repo.ListEntities(context.Background(), EntityListQuery{CompanyID: entitiesTestCompanyID, EntityTypeID: entitiesTestTypeID, AllForType: true})
+	if err != nil || len(allForType) != 55 {
+		t.Fatalf("exact Entity Type manager list len=%d err=%v, want 55 in one request", len(allForType), err)
+	}
 }
 
 func TestEntitiesRejectMalformedOptionalAndFilterIDs(t *testing.T) {
@@ -172,6 +176,19 @@ func TestEntitiesRejectMalformedOptionalAndFilterIDs(t *testing.T) {
 		EntityTypeID: "not-a-uuid",
 	}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid Entity Type filter error = %v, want ErrInvalid", err)
+	}
+	root := ""
+	invalidManagerQueries := []EntityListQuery{
+		{CompanyID: entitiesTestCompanyID, AllForType: true},
+		{CompanyID: entitiesTestCompanyID, EntityTypeID: entitiesTestTypeID, Query: "delivery", AllForType: true},
+		{CompanyID: entitiesTestCompanyID, EntityTypeID: entitiesTestTypeID, EntityFolderID: &root, AllForType: true},
+		{CompanyID: entitiesTestCompanyID, EntityTypeID: entitiesTestTypeID, Limit: 1, AllForType: true},
+		{CompanyID: entitiesTestCompanyID, EntityTypeID: entitiesTestTypeID, Offset: 1, AllForType: true},
+	}
+	for index, query := range invalidManagerQueries {
+		if _, err := repo.ListEntities(context.Background(), query); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("invalid exact Entity Type manager query %d error = %v, want ErrInvalid", index, err)
+		}
 	}
 }
 
@@ -242,6 +259,33 @@ func TestEntitiesSchemaReplacesLegacyEntityFields(t *testing.T) {
 	}
 	if strings.Contains(normalizedMigration, "drop table if exists entity_field") {
 		t.Fatal("Entities cutover must fail when the required legacy tables are missing")
+	}
+	if !strings.Contains(normalizedMigration, "on entities using gin (lower(name) gin_trgm_ops)") {
+		t.Fatal("Entities migration missing the pg_trgm index used by substring name search")
+	}
+	if !strings.Contains(normalizedSchema, "create index idx_entities_name_trgm on public.entities using gin (lower((name)::text) public.gin_trgm_ops)") {
+		t.Fatal("canonical schema missing the pg_trgm index used by substring Entity name search")
+	}
+	if strings.Contains(normalizedMigration, "idx_entities_company_name_search") || strings.Contains(normalizedSchema, "idx_entities_company_name_search") {
+		t.Fatal("Entities schema still contains the obsolete B-tree substring search index")
+	}
+}
+
+func TestPostgresEntitiesUseSetBasedFolderAncestryAndFieldSnapshot(t *testing.T) {
+	raw, err := os.ReadFile("postgres_entities.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := strings.ToLower(string(raw))
+	for _, fragment := range []string{
+		"with recursive ancestry as",
+		"parent.entity_folder_id=any(ancestry.path)",
+		"entity_folder_id::text=any($3::text[])",
+		"from unnest($3::text[], $4::text[], $5::text[]) with ordinality",
+	} {
+		if !strings.Contains(source, fragment) {
+			t.Fatalf("PostgreSQL Entities store missing set-based contract %q", fragment)
+		}
 	}
 }
 

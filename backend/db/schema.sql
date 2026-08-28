@@ -6958,10 +6958,10 @@ CREATE UNIQUE INDEX idx_entity_types_company_name_unique ON public.entity_types 
 
 
 --
--- Name: idx_entities_company_name_search; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_entities_name_trgm; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_entities_company_name_search ON public.entities USING btree (company_id, lower((name)::text), entity_id);
+CREATE INDEX idx_entities_name_trgm ON public.entities USING gin (lower((name)::text) public.gin_trgm_ops);
 
 
 --

@@ -73,26 +73,24 @@ test("getEntityDetail reads one exact company-scoped entity and its fields", asy
   assert.equal(loaded.entity_fields[0]?.name, "Due date");
 });
 
-test("listAllEntitiesForType pages the manager list without per-folder requests", async () => {
+test("listAllEntitiesForType loads the exact type manager list in one request", async () => {
   const requestedPaths: string[] = [];
   const allEntities = Array.from({ length: 101 }, (_, index) => entitySummary(`entity-${index + 1}`));
   const requestJSON: BoundRequestJSON = async <T,>(path: string): Promise<T> => {
     requestedPaths.push(path);
-    const params = new URL(path, "http://mangorts.test").searchParams;
-    const offset = Number(params.get("offset") ?? "0");
-    return { entities: allEntities.slice(offset, offset + 50) } as T;
+    return { entities: allEntities } as T;
   };
 
   const loaded = await listAllEntitiesForType("company-1", "type-1", requestJSON);
 
   assert.equal(loaded.length, 101);
-  assert.deepEqual(requestedPaths.map((path) => new URL(path, "http://mangorts.test").searchParams.get("offset")), [null, "50", "100"]);
-  for (const path of requestedPaths) {
-    const params = new URL(path, "http://mangorts.test").searchParams;
-    assert.equal(params.get("entity_type_id"), "type-1");
-    assert.equal(params.get("entity_folder_id"), null);
-    assert.equal(params.get("limit"), "50");
-  }
+  assert.equal(requestedPaths.length, 1);
+  const params = new URL(requestedPaths[0]!, "http://mangorts.test").searchParams;
+  assert.equal(params.get("entity_type_id"), "type-1");
+  assert.equal(params.get("all_for_type"), "true");
+  assert.equal(params.get("entity_folder_id"), null);
+  assert.equal(params.get("limit"), null);
+  assert.equal(params.get("offset"), null);
 });
 
 test("listEntities can request only entities at the type root", async () => {
