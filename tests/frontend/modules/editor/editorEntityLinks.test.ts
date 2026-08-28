@@ -262,6 +262,8 @@ test("the shared Tiptap selection toolbar exposes one keyboard-operable yellow/r
   assert.match(source, /createActionItemEntityFromSelection\(\{ companyID, requestJSON \}, action\.quote, color\)/);
   assert.match(css, /\.mango-editor-action-item--yellow[\s\S]*animation: mango-editor-action-item-pulse 2s/);
   assert.match(css, /\.mango-editor-action-item--red[\s\S]*animation: mango-editor-action-item-pulse 1s/);
+  assert.match(css, /\.mango-editor-action-item--yellow,\s*\.mango-editor-entity-link\.mango-editor-action-item--yellow/, "the fully filled yellow chip wins over the generic Entity variables");
+  assert.match(css, /\.mango-editor-action-item--red,\s*\.mango-editor-entity-link\.mango-editor-action-item--red/, "the fully filled red chip wins over the generic Entity variables");
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.mango-editor-action-item--yellow,[\s\S]*animation: none/);
 });
 

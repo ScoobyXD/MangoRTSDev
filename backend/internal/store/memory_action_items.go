@@ -123,10 +123,13 @@ func (r *MemoryRepo) CreateActionItem(input ActionItemInput) (domain.Entity, err
 	return r.entityDetailLocked(entity), nil
 }
 
-func (r *MemoryRepo) syncHuddleNodeActionItemRelationshipsLocked(companyID, huddleNodeID string) {
+func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resourceType, resourceID string) {
+	if resourceType != EntityTypeHuddleNode && resourceType != EntityTypeHuddleLogicGate {
+		return
+	}
 	documents := make([]json.RawMessage, 0)
 	for _, document := range r.editorJSONDocuments {
-		if document.Deleted || document.Ref.CompanyID != companyID || document.Ref.ResourceType != EntityTypeHuddleNode || document.Ref.ResourceID != huddleNodeID {
+		if document.Deleted || document.Ref.CompanyID != companyID || document.Ref.ResourceType != resourceType || document.Ref.ResourceID != resourceID {
 			continue
 		}
 		documents = append(documents, document.JSONDocument)
@@ -140,7 +143,7 @@ func (r *MemoryRepo) syncHuddleNodeActionItemRelationshipsLocked(companyID, hudd
 		}
 	}
 	for relationshipKey, relationship := range r.entityRelationships {
-		if relationship.CompanyID != companyID || relationship.ResourceType != EntityTypeHuddleNode || relationship.ResourceID != huddleNodeID || desired[relationship.EntityID] {
+		if relationship.CompanyID != companyID || relationship.ResourceType != resourceType || relationship.ResourceID != resourceID || desired[relationship.EntityID] {
 			continue
 		}
 		entity, exists := r.entities[key(companyID, relationship.EntityID)]
@@ -150,13 +153,13 @@ func (r *MemoryRepo) syncHuddleNodeActionItemRelationshipsLocked(companyID, hudd
 	}
 	now := time.Now().UTC()
 	for entityID := range desired {
-		relationshipKey := entityRelationshipKey(companyID, entityID, EntityTypeHuddleNode, huddleNodeID)
+		relationshipKey := entityRelationshipKey(companyID, entityID, resourceType, resourceID)
 		if _, exists := r.entityRelationships[relationshipKey]; exists {
 			continue
 		}
 		r.entityRelationships[relationshipKey] = domain.EntityRelationship{
 			CompanyID: companyID, EntityID: entityID,
-			ResourceType: EntityTypeHuddleNode, ResourceID: huddleNodeID, CreatedTimestamp: now,
+			ResourceType: resourceType, ResourceID: resourceID, CreatedTimestamp: now,
 		}
 	}
 }
@@ -192,11 +195,15 @@ func (r *MemoryRepo) listHuddleLogicGateActionItemsLocked(companyID, huddleLogic
 	seen := map[string]bool{}
 	items := []domain.Entity{}
 	for _, relationship := range r.entityRelationships {
-		if relationship.CompanyID != companyID || relationship.ResourceType != EntityTypeHuddleNode || seen[relationship.EntityID] {
+		if relationship.CompanyID != companyID || seen[relationship.EntityID] {
 			continue
 		}
-		linkedNode, exists := r.huddleNodes[key(companyID, relationship.ResourceID)]
-		if !exists || linkedNode.HuddleLogicGateID != huddleLogicGateID {
+		belongsToProcess := relationship.ResourceType == EntityTypeHuddleLogicGate && relationship.ResourceID == huddleLogicGateID
+		if relationship.ResourceType == EntityTypeHuddleNode {
+			linkedNode, exists := r.huddleNodes[key(companyID, relationship.ResourceID)]
+			belongsToProcess = exists && linkedNode.HuddleLogicGateID == huddleLogicGateID
+		}
+		if !belongsToProcess {
 			continue
 		}
 		entity, exists := r.entities[key(companyID, relationship.EntityID)]

@@ -97,7 +97,7 @@ test("Huddle Action Items request the exact node or Process scope", async () => 
 });
 
 test("Action Item reference signatures include only exact Action Item entities", () => {
-  assert.deepEqual(actionItemReferenceIDs({
+  const document = {
     type: "doc",
     content: [
       { type: "mangoEntityLink", attrs: { entityType: "entity", entityId: "item-2", actionItem: true } },
@@ -108,6 +108,12 @@ test("Action Item reference signatures include only exact Action Item entities",
         { type: "mangoEntityLink", attrs: { entityType: "entity", entityId: "item-2", actionItem: true } },
       ] },
     ],
+  };
+  assert.deepEqual(actionItemReferenceIDs(document), ["item-1", "item-2"]);
+  assert.deepEqual(actionItemReferenceIDs({
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    document,
   }), ["item-1", "item-2"]);
 });
 

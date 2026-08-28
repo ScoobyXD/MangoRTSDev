@@ -103,7 +103,8 @@ begin
     where version in (
       '20260827_entities.sql',
       '20260828_action_items.sql',
-      '20260828_entity_relationships.sql'
+      '20260828_entity_relationships.sql',
+      '20260828_zz_huddle_logic_gate_action_item_relationships.sql'
     )
   ) then
     raise exception 'STOP: Dev Entity migration ledger changed after the approved read-only audit';

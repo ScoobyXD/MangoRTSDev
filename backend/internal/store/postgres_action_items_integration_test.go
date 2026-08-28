@@ -25,6 +25,9 @@ func TestPostgresEntityRelationshipHuddleLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if workspace, workspaceErr := repo.GetHuddleNodeWorkspace(company.CompanyID, firstNode.HuddleNodeID); workspaceErr != nil || len(workspace.Textboxes) != 1 || workspace.Textboxes[0].Title != "New text box" || workspace.Textboxes[0].DisplayOrder != 0 {
+		t.Fatalf("new Postgres Huddle Node workspace=%+v err=%v", workspace, workspaceErr)
+	}
 	secondNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: firstProcess.HuddleLogicGateID, Name: "Tuesday", ActorID: actor.UserID})
 	if err != nil {
 		t.Fatal(err)
@@ -193,6 +196,74 @@ func TestPostgresEntityRelationshipHuddleLifecycle(t *testing.T) {
 	restoredItems, err := repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(restoredItems) != 1 || restoredItems[0].EntityID != created.EntityID {
 		t.Fatalf("restored Huddle Process and Node action items = %+v, err = %v", restoredItems, err)
+	}
+}
+
+func TestPostgresHuddleLogicGateActionItemRelationshipLifecycle(t *testing.T) {
+	db, repo := openPostgresProcessMapIntegration(t)
+	actor, err := repo.UpsertAuthUser("postgres-direct-huddle-action-item", "postgres-direct-huddle-action-item@example.test", "Direct Huddle Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	company, err := repo.CreateCompany("Postgres Direct Huddle Action Item")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	process := createPostgresActionItemHuddleProcess(t, repo, company.CompanyID, actor.UserID, "Direct Process")
+	actionItem, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Direct gate action", CreatedByUserID: actor.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeHuddleLogicGate, ResourceID: process.HuddleLogicGateID, DocumentID: process.HuddleLogicGateID}
+	commitActionItemEditorTestDocument(t, repo, ref, actor.UserID, 0, "postgres-direct-gate-reference", actionItemEditorReference{EntityID: actionItem.EntityID})
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and entity_id=$2::uuid and resource_type='huddle_logic_gate' and resource_id=$3::uuid`, company.CompanyID, actionItem.EntityID, process.HuddleLogicGateID); got != 1 {
+		t.Fatalf("direct Huddle Logic Gate relationship count=%d, want 1", got)
+	}
+	items, err := repo.ListHuddleLogicGateActionItems(company.CompanyID, process.HuddleLogicGateID)
+	if err != nil || len(items) != 1 || items[0].EntityID != actionItem.EntityID {
+		t.Fatalf("direct Huddle Logic Gate items=%+v err=%v", items, err)
+	}
+
+	otherCompany, err := repo.CreateCompany("Other Direct Huddle Company")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, otherCompany.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	otherProcess := createPostgresActionItemHuddleProcess(t, repo, otherCompany.CompanyID, actor.UserID, "Other Direct Process")
+	if _, err := db.Exec(`insert into entity_relationships(company_id,entity_id,resource_type,resource_id) values($1::uuid,$2::uuid,'huddle_logic_gate',$3::uuid)`, company.CompanyID, actionItem.EntityID, otherProcess.HuddleLogicGateID); err == nil {
+		t.Fatal("cross-company Huddle Logic Gate relationship insert succeeded")
+	}
+
+	if err := repo.DeleteHuddleLogicGate(company.CompanyID, process.HuddleLogicGateID, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from entity_relationships where company_id=$1::uuid and resource_type='huddle_logic_gate' and resource_id=$2::uuid`, company.CompanyID, process.HuddleLogicGateID); got != 0 {
+		t.Fatalf("direct Huddle Logic Gate relationships after recycle=%d, want 0", got)
+	}
+	recycleItems, err := repo.ListRecycleBinItems(company.CompanyID, actor.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processRecycleID := ""
+	for _, item := range recycleItems {
+		if item.ObjectKind == EntityTypeHuddleLogicGate && item.ObjectID == process.HuddleLogicGateID {
+			processRecycleID = item.RecycleBinItemID
+		}
+	}
+	if processRecycleID == "" {
+		t.Fatalf("direct Huddle Logic Gate recycle item missing from %+v", recycleItems)
+	}
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{processRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	items, err = repo.ListHuddleLogicGateActionItems(company.CompanyID, process.HuddleLogicGateID)
+	if err != nil || len(items) != 1 || items[0].EntityID != actionItem.EntityID {
+		t.Fatalf("restored direct Huddle Logic Gate items=%+v err=%v", items, err)
 	}
 }
 

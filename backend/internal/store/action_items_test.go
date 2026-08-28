@@ -66,6 +66,54 @@ func TestEntityRelationshipMigrationUsesExactHuddleNodesWithoutCompatibilityBack
 	}
 }
 
+func TestEntityRelationshipForwardMigrationAddsExactHuddleLogicGateEndpoints(t *testing.T) {
+	migration, err := os.ReadFile("../../db/migrations/20260828_zz_huddle_logic_gate_action_item_relationships.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizedMigration := strings.ToLower(strings.Join(strings.Fields(string(migration)), " "))
+	for _, required := range []string{
+		"drop constraint entity_relationships_huddle_node_fkey",
+		"check (resource_type in ('huddle_node','huddle_logic_gate'))",
+		"before insert or update on entity_relationships",
+		"from huddle_nodes",
+		"from huddle_logic_gates",
+		"trg_delete_huddle_node_entity_relationships",
+		"trg_delete_huddle_logic_gate_entity_relationships",
+		"insert into entity_relationships",
+		"entity_type.system_key='action_item'",
+	} {
+		if !strings.Contains(normalizedMigration, required) {
+			t.Fatalf("forward migration missing %q", required)
+		}
+	}
+	for _, forbidden := range []string{"resource registry", "surrogate", "compatibility"} {
+		if strings.Contains(normalizedMigration, forbidden) {
+			t.Fatalf("forward migration contains forbidden generic or compatibility path %q", forbidden)
+		}
+	}
+
+	canonical, err := os.ReadFile("../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizedCanonical := strings.ToLower(strings.Join(strings.Fields(string(canonical)), " "))
+	for _, required := range []string{
+		"resource_type = any (array['huddle_node'::text, 'huddle_logic_gate'::text])",
+		"before insert or update on public.entity_relationships",
+		"new.resource_type='huddle_logic_gate'",
+		"trg_delete_huddle_node_entity_relationships after delete on public.huddle_nodes",
+		"trg_delete_huddle_logic_gate_entity_relationships after delete on public.huddle_logic_gates",
+	} {
+		if !strings.Contains(normalizedCanonical, required) {
+			t.Fatalf("canonical schema missing %q", required)
+		}
+	}
+	if strings.Contains(normalizedCanonical, "add constraint entity_relationships_huddle_node_fkey") {
+		t.Fatal("canonical schema retains the Huddle-Node-only resource foreign key")
+	}
+}
+
 type actionItemEditorReference struct {
 	EntityID   string
 	ActionItem bool
@@ -319,6 +367,96 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 	restoredItems, err = repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(restoredItems) != 1 || restoredItems[0].EntityID != created.EntityID {
 		t.Fatalf("restored Huddle Process and Node action items=%+v err=%v", restoredItems, err)
+	}
+}
+
+func TestMemoryHuddleLogicGateSavedActionItemReferencesRollUpAndRestore(t *testing.T) {
+	repo := NewMemoryRepo()
+	user, company := createActionItemTestCompany(t, repo, "huddle-logic-gate-action-item-owner")
+	gate, err := repo.CreateLogicGate(company.CompanyID, "Direct Huddle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := repo.ConvertLogicGateToHuddle(company.CompanyID, gate.LogicGateID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actionItem, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Direct process action", CreatedByUserID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processRef := EditorJSONDocumentRef{
+		CompanyID: company.CompanyID, ResourceType: EntityTypeHuddleLogicGate,
+		ResourceID: process.HuddleLogicGateID, DocumentID: process.HuddleLogicGateID,
+	}
+	processCommit := commitActionItemEditorTestDocument(t, repo, processRef, user.UserID, 0, "direct-process-reference", actionItemEditorReference{EntityID: actionItem.EntityID})
+	processRelationshipKey := entityRelationshipKey(company.CompanyID, actionItem.EntityID, EntityTypeHuddleLogicGate, process.HuddleLogicGateID)
+	if _, exists := repo.entityRelationships[processRelationshipKey]; !exists {
+		t.Fatalf("direct Huddle Logic Gate relationship missing from %+v", repo.entityRelationships)
+	}
+	items, err := repo.ListHuddleLogicGateActionItems(company.CompanyID, process.HuddleLogicGateID)
+	if err != nil || len(items) != 1 || items[0].EntityID != actionItem.EntityID {
+		t.Fatalf("direct Huddle Logic Gate rollup=%+v err=%v", items, err)
+	}
+
+	node, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: process.HuddleLogicGateID, Name: "Monday", ActorID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := repo.GetHuddleNodeWorkspace(company.CompanyID, node.HuddleNodeID)
+	if err != nil || len(workspace.Textboxes) != 1 {
+		t.Fatalf("default Huddle Node workspace=%+v err=%v", workspace, err)
+	}
+	nodeRef := EditorJSONDocumentRef{CompanyID: company.CompanyID, ResourceType: EntityTypeHuddleNode, ResourceID: node.HuddleNodeID, DocumentID: workspace.Textboxes[0].TextboxID}
+	nodeCommit := commitActionItemEditorTestDocument(t, repo, nodeRef, user.UserID, 0, "child-node-reference", actionItemEditorReference{EntityID: actionItem.EntityID})
+	items, err = repo.ListHuddleLogicGateActionItems(company.CompanyID, process.HuddleLogicGateID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("deduped direct and child rollup=%+v err=%v", items, err)
+	}
+
+	processClear := commitActionItemEditorTestDocument(t, repo, processRef, user.UserID, processCommit.Revision, "clear-direct-process-reference")
+	if _, exists := repo.entityRelationships[processRelationshipKey]; exists {
+		t.Fatal("clearing the direct Huddle Logic Gate reference retained its exact relationship")
+	}
+	items, err = repo.ListHuddleLogicGateActionItems(company.CompanyID, process.HuddleLogicGateID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("child reference did not survive direct reference removal: items=%+v err=%v", items, err)
+	}
+	commitActionItemEditorTestDocument(t, repo, nodeRef, user.UserID, nodeCommit.Revision, "clear-child-node-reference")
+	items, err = repo.ListHuddleLogicGateActionItems(company.CompanyID, process.HuddleLogicGateID)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("clearing both reference sources retained rollup items=%+v err=%v", items, err)
+	}
+	commitActionItemEditorTestDocument(t, repo, processRef, user.UserID, processClear.Revision, "restore-direct-process-reference", actionItemEditorReference{EntityID: actionItem.EntityID})
+
+	if err := repo.DeleteHuddleNode(company.CompanyID, node.HuddleNodeID, user.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteHuddleLogicGate(company.CompanyID, process.HuddleLogicGateID, user.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := repo.entityRelationships[processRelationshipKey]; exists {
+		t.Fatal("direct Huddle Logic Gate relationship survived recycle")
+	}
+	recycleItems, err := repo.ListRecycleBinItems(company.CompanyID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processRecycleID := ""
+	for _, item := range recycleItems {
+		if item.ObjectKind == EntityTypeHuddleLogicGate && item.ObjectID == process.HuddleLogicGateID {
+			processRecycleID = item.RecycleBinItemID
+		}
+	}
+	if processRecycleID == "" {
+		t.Fatalf("Huddle Logic Gate recycle item missing from %+v", recycleItems)
+	}
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, user.UserID, []string{processRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	items, err = repo.ListHuddleLogicGateActionItems(company.CompanyID, process.HuddleLogicGateID)
+	if err != nil || len(items) != 1 || items[0].EntityID != actionItem.EntityID {
+		t.Fatalf("restored direct Huddle Logic Gate action items=%+v err=%v", items, err)
 	}
 }
 

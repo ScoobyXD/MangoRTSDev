@@ -440,7 +440,7 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if err := lockPostgresHuddleNodeActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
+	if err := lockPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, input.Document); err != nil {
@@ -492,8 +492,8 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err := updatePostgresEditorTextboxTx(ctx, tx, storage, input.Document, nextBody, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if input.Document.ResourceType == EntityTypeHuddleNode {
-		if err := syncPostgresHuddleNodeActionItemRelationshipsTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceID); err != nil {
+	if input.Document.ResourceType == EntityTypeHuddleNode || input.Document.ResourceType == EntityTypeHuddleLogicGate {
+		if err := syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
 			return EditorJSONCommit{}, err
 		}
 	}
@@ -541,7 +541,7 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if err := lockPostgresHuddleNodeActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
+	if err := lockPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
 		return EditorJSONCommit{}, err
 	}
 	query := fmt.Sprintf(`select revision,body_json,deleted_timestamp is not null,
@@ -582,8 +582,8 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		input.Document.DocumentID, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if input.Document.ResourceType == EntityTypeHuddleNode {
-		if err := syncPostgresHuddleNodeActionItemRelationshipsTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceID); err != nil {
+	if input.Document.ResourceType == EntityTypeHuddleNode || input.Document.ResourceType == EntityTypeHuddleLogicGate {
+		if err := syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
 			return EditorJSONCommit{}, err
 		}
 	}

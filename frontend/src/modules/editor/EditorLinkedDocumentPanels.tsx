@@ -2,7 +2,12 @@ import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } f
 import { createPortal } from "react-dom";
 import { useAppFloatingMenuDismissal, useAppOverlayPortalTarget } from "../../app/AppModalPortal";
 import type { EditorTabID } from "./editorTabs";
-import { normalizeNodeDueDateDraft } from "./editorDates";
+import {
+  CompanyUserSearchPicker,
+  EditorCalendarDateInput,
+  editorCompanyUserLabel,
+  editorCompanyUserMatches,
+} from "./EditorFieldControls";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
 import { createOneShotBlurSuppression } from "../realtime/committedEntityTitleUpdates";
@@ -175,10 +180,7 @@ type LogicGateRACIPrincipalPickerOption = {
 };
 
 function companyUserOptionLabel(user: { user_id: string; email?: string; display_name?: string }): string {
-  const name = (user.display_name ?? "").trim();
-  const email = (user.email ?? "").trim();
-  if (name && email) return `${name} <${email}>`;
-  return name || email || user.user_id;
+  return editorCompanyUserLabel(user);
 }
 
 function companyGroupLabel(group: { group_id: string; name?: string } | undefined, fallbackID: string): string {
@@ -294,25 +296,9 @@ function selectEditableTitleContents(element: HTMLElement | null) {
   selection.addRange(range);
 }
 
-function dateInputValueFromDraft(draft: string): string {
-  return normalizeNodeDueDateDraft(draft) ?? "";
-}
-
-function editorDateFromDateInput(value: string): string {
-  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) return value;
-  return `${Number(match[2])}/${Number(match[3])}/${match[1]}`;
-}
-
 const PriorityCheckIcon: React.FC<{ color: string }> = ({ color }) => (
   <svg aria-hidden="true" width="13" height="13" viewBox="0 0 13 13" style={{ display: "block" }}>
     <path d="m3.1 6.55 2.05 2.05 4.75-4.75" fill="none" stroke={color} strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const CalendarIcon: React.FC<{ color: string }> = ({ color }) => (
-  <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" style={{ display: "block" }}>
-    <path d="M3 2.75h10v10.5H3zM3 5.5h10M5.25 1.5v2.4M10.75 1.5v2.4" fill="none" stroke={color} strokeWidth="1.25" strokeLinecap="round" />
   </svg>
 );
 
@@ -357,7 +343,6 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
   const [hoveredPriorityValue, setHoveredPriorityValue] = useState("");
   const statusMenuRef = useRef<HTMLSpanElement | null>(null);
   const priorityMenuRef = useRef<HTMLSpanElement | null>(null);
-  const dueDatePickerRef = useRef<HTMLInputElement | null>(null);
   const selectedPriority = NODE_PRIORITY_OPTIONS.find((option) => option.value === (nodePresetFields?.priorityDraft || "0")) ?? NODE_PRIORITY_OPTIONS[0];
   const selectedStatus = NODE_STATUS_OPTIONS.find((option) => option.value === normalizeNodeStatusValue(nodePresetFields?.status ?? ""));
   const displayStatusColor = selectedStatus?.color ?? "#64748b";
@@ -682,56 +667,17 @@ export const EditorLinkedDocumentPanels: React.FC<EditorLinkedDocumentPanelsProp
               </div>
               <label style={{ ...(compactHeader ? { order: 4 } : { gridColumn: 4, gridRow: 1 }), minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Due Date:</strong>
-                <span style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: compactHeader ? "min(148px, 100%)" : 138 }}>
-                  <input
-                    value={nodePresetFields.dueDateDraft}
-                    disabled={!canEdit}
-                    readOnly={!canEdit}
-                    onChange={(event) => { if (canEdit) onSetNodeDueDateDraft(event.target.value); }}
-                    onBlur={(event) => { if (canEdit) onCommitNodeDueDateDraft(event.currentTarget.value); }}
-                    onKeyDown={(event) => {
-                      if (!canEdit) {
-                        event.preventDefault();
-                        return;
-                      }
-                      if (event.key === "Enter") event.currentTarget.blur();
-                    }}
-                    placeholder="mm/dd/yyyy"
-                    aria-label="Due date"
-                    style={{ width: "100%", minWidth: 0, border: "1px solid transparent", borderRight: "none", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none", caretColor: canEdit ? "auto" : "transparent", cursor: canEdit ? "text" : "default" }}
-                  />
-                  <button
-                    type="button"
-                    title="Choose due date"
-                    disabled={!canEdit}
-                    onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => {
-                      if (!canEdit) return;
-                      const picker = dueDatePickerRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
-                      if (!picker) return;
-                      if (picker.showPicker) picker.showPicker();
-                      else picker.click();
-                    }}
-                    style={{ width: 24, height: 24, border: `1px solid ${ruleColor}`, borderRadius: 5, background: panelBackground, color: accent, display: "grid", placeItems: "center", cursor: canEdit ? "pointer" : "default", opacity: canEdit ? 1 : 0.46, padding: 0 }}
-                  >
-                    <CalendarIcon color={accent} />
-                  </button>
-                  <input
-                    ref={dueDatePickerRef}
-                    type="date"
-                    tabIndex={-1}
-                    disabled={!canEdit}
-                    value={dateInputValueFromDraft(nodePresetFields.dueDateDraft)}
-                    onChange={(event) => {
-                      if (!canEdit) return;
-                      const next = editorDateFromDateInput(event.currentTarget.value);
-                      onSetNodeDueDateDraft(next);
-                      onCommitNodeDueDateDraft(next);
-                    }}
-                    aria-hidden="true"
-                    style={{ position: "absolute", right: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: "none" }}
-                  />
-                </span>
+                <EditorCalendarDateInput
+                  value={nodePresetFields.dueDateDraft}
+                  ariaLabel="Due date"
+                  disabled={!canEdit}
+                  accent={accent}
+                  ruleColor={ruleColor}
+                  panelBackground={panelBackground}
+                  onChange={onSetNodeDueDateDraft}
+                  onCommit={onCommitNodeDueDateDraft}
+                  containerStyle={{ width: compactHeader ? "min(148px, 100%)" : 138 }}
+                />
               </label>
               <label style={{ ...(compactHeader ? { order: 2 } : { gridColumn: 2, gridRow: 1 }), minWidth: 0, display: "grid", gridTemplateColumns: "max-content minmax(0, 1fr)", gap: 6, alignItems: "center" }}>
                 <strong>Priority:</strong>
@@ -1056,12 +1002,7 @@ function RACIRoleEditor({
     }
 
     const userMatches = (user: { user_id: string; email?: string; display_name?: string }) => {
-      if (!query) return true;
-      const userLabel = companyUserOptionLabel(user);
-      const name = (user.display_name ?? "").trim();
-      const email = (user.email ?? "").trim();
-      const fields = [userLabel, name, email, user.user_id].map((field) => field.trim().toLowerCase());
-      return fields.some((field) => field.includes(query));
+      return editorCompanyUserMatches(user, query);
     };
     const groupMatches = (group: { group_id: string; name: string }) => {
       if (!query) return true;
@@ -1376,7 +1317,7 @@ function RACIRoleEditor({
           aria-label={`Add ${label} user or team`}
           aria-haspopup="listbox"
           aria-expanded={canEdit && open}
-          aria-controls={`${inputID}-options`}
+          aria-controls={`${inputID}-search-options`}
           onClick={() => {
             if (!canEdit) return;
             setAssignedOpen(false);
@@ -1414,36 +1355,28 @@ function RACIRoleEditor({
           </div>
         )}
         {canEdit && open && pickerListPosition && floatingPortalTarget && createPortal(
-          <div
+          <CompanyUserSearchPicker
             ref={pickerListRef}
-            id={`${inputID}-options`}
-            role="dialog"
-            aria-label={pickerAriaLabel}
+            id={`${inputID}-search`}
+            inputAriaLabel={pickerAriaLabel}
+            resultsAriaLabel={pickerAriaLabel}
+            query={draft}
+            placeholder={inputPlaceholder}
+            accent={hexWithAlpha(roleAccent, "45")}
+            autoFocus
+            showResults
+            hasResults={pickerRows.length > 0}
+            emptyMessage={draft.trim() ? "No matches" : "No users or teams available"}
+            onQueryChange={setDraft}
+            onInputKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                commitDraft();
+              }
+            }}
             style={{ position: "fixed", zIndex: RACI_FLOATING_LAYER_Z_INDEX + 2, top: pickerListPosition.top, left: pickerListPosition.left, width: pickerListPosition.width, maxHeight: pickerListPosition.maxHeight, overflow: "hidden", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", padding: 6, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 10, background: panelBackground || EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_PANEL_SHADOW, color: "#111827" }}
           >
-            <input
-              value={draft}
-              autoFocus
-              autoComplete="new-password"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              placeholder={inputPlaceholder}
-              onChange={(event) => setDraft(event.currentTarget.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  commitDraft();
-                }
-              }}
-              style={{ minWidth: 0, minHeight: 30, boxSizing: "border-box", border: `1px solid ${hexWithAlpha(roleAccent, "45")}`, borderRadius: 8, background: "#ffffff", color: "#111827", font: "inherit", fontSize: 11.5, fontWeight: 750, padding: "5px 8px", outline: "none", boxShadow: "inset 1px 1px 0 rgba(255,255,255,0.86)" }}
-            />
-            <div role="listbox" aria-label={pickerAriaLabel} style={{ minHeight: 0, overflowY: "auto", display: "grid", alignContent: "start", gap: 3, paddingTop: 6 }}>
-              {pickerRows.length === 0 ? (
-                <div style={{ padding: "8px 10px", color: "#64748b", fontSize: 11, fontWeight: 500 }}>
-                  {draft.trim() ? "No matches" : "No users or teams available"}
-                </div>
-              ) : pickerRows.map((option) => {
+            {pickerRows.map((option) => {
               const optionAccent = option.principalType === "group" ? roleAccent : userAccentForName(option.label || option.principalID);
               const canAct = option.selectable || (option.rowType === "group" && option.expandable);
               const rowIndent = 6 + option.depth * 18;
@@ -1489,8 +1422,7 @@ function RACIRoleEditor({
                 </div>
               );
               })}
-            </div>
-          </div>,
+          </CompanyUserSearchPicker>,
           floatingPortalTarget,
         )}
         </div>

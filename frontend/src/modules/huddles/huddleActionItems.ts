@@ -62,7 +62,8 @@ export function actionItemReferenceIDs(document: unknown): string[] {
     }
     if (Array.isArray(node.content)) node.content.forEach(visit);
   };
-  visit(document);
+  const envelope = document && typeof document === "object" ? document as { document?: unknown } : undefined;
+  visit(envelope?.document ?? document);
   return [...ids].sort();
 }
 
