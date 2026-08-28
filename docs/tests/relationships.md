@@ -22,8 +22,9 @@
 20. A Huddle Process Action Item rollup joins `entity_relationships.resource_id` to its Huddle Nodes, filters Entities whose Entity Type system key is `action_item`, and deduplicates each Entity once per Huddle Logic Gate.
 21. A surviving reference in a sibling Huddle Node keeps the Action Item in that Process rollup. The same Action Item may have edges in several Huddle Nodes and several Huddle Processes.
 22. Every Huddle Node reads its owning Huddle Logic Gate's current live Action Item rollup. Action Item edges are never copied into the immutable Huddle Node Logic Gate or KPI snapshots.
-23. An Entity relationship grants no permission, RACI role, policy parentage, Entity access, or Huddle access. Reading or changing a Huddle Node's Action Item relationships requires Edit access to that Huddle Node.
+23. An Entity relationship grants no permission, RACI role, policy parentage, Entity access, or Huddle access. Reading or changing a Huddle Node's Action Item relationships requires Edit access to that Huddle Node, and reading a Huddle Process rollup directly requires Edit access to that exact Huddle Logic Gate.
 24. Permanent endpoint deletion leaves no stale edge, and recycle/restore preserves every promised exact edge. The table uses no relationship ID, resource registry, copied label, copied body, translated identity, or compatibility identity.
+25. Direct Huddle Logic Gate creation atomically stores the exact resource, its same-ID root Huddle Explorer placement, and its direct policies; typed Huddle Logic Gate attachment relationships use that same exact resource ID and follow its recycle, restore, and permanent-delete lifecycle.
 
 Last updated: 2026-08-28
 
@@ -508,7 +509,7 @@ Removing one textbox-specific email relationship deletes only that exact edge an
 
 `huddle_nodes.huddle_logic_gate_id` MUST equal the exact owning `huddle_logic_gates.huddle_logic_gate_id`. `huddle_explorer_items.resource_huddle_resource_id` MUST equal the exact source `huddle_logic_gates.huddle_logic_gate_id`, and the retained `huddle_type` column MUST equal `huddle_logic_gate`. Huddle Nodes MUST NOT receive Huddle Explorer items.
 
-Converting a normal Logic Gate and creating its required Huddle Logic Gate Explorer item MUST be atomic. Creating, updating, deleting, or restoring a Huddle Node MUST NOT create or restore an Explorer item. Deleting only an Explorer item removes only that Huddle Logic Gate placement. Recycling a Huddle Logic Gate MUST preserve its exact typed placement for restore. These relationships MUST NOT create a central registry, translated ID, untyped edge, access grant, or policy-parent link.
+Directly creating a Huddle Logic Gate MUST atomically create its same-ID root Huddle Explorer item and direct policies. Converting a normal Logic Gate and creating its required Huddle Logic Gate Explorer item MUST also be atomic. Creating, updating, deleting, or restoring a Huddle Node MUST NOT create or restore an Explorer item. Deleting only an Explorer item removes only that Huddle Logic Gate placement. Recycling a Huddle Logic Gate MUST preserve its exact typed placement for restore. These relationships MUST NOT create a central registry, translated ID, untyped edge, access grant, or policy-parent link.
 
 ### Law 33 — Huddle membership and Huddle Node snapshots use fixed typed edges
 

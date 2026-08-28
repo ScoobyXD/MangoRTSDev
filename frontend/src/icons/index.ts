@@ -1,3 +1,4 @@
+export * from "./ActionItemIcon.js";
 export * from "./EditorSelectionNodeIcon.js";
 export * from "./EntityIcons.js";
 export * from "./ExplorerIcons.js";

@@ -13,6 +13,45 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
+func TestCreateHuddleLogicGateCreatesRootExplorerPlacement(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	user, err := repo.UpsertAuthUser("huddle-create-owner", "huddle-create@example.com", "Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	company, err := repo.CreateCompany("Huddle creation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership("huddle-create-owner", company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]string{"company_id": company.CompanyID, "header": "Weekly operations"})
+	request := httptest.NewRequest(http.MethodPost, "/v1/huddle-logic-gates", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	NewServer(repo).Routes().ServeHTTP(response, requestWithActorForTest(request, user, company.CompanyID))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		HuddleLogicGate domain.HuddleLogicGate `json:"huddle_logic_gate"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.HuddleLogicGate.HuddleLogicGateID == "" || payload.HuddleLogicGate.Header != "Weekly operations" {
+		t.Fatalf("created Huddle Logic Gate=%+v", payload.HuddleLogicGate)
+	}
+	explorer, err := repo.ListHuddleExplorer(company.CompanyID)
+	if err != nil || len(explorer.Items) != 1 {
+		t.Fatalf("Huddle Explorer=%+v err=%v", explorer, err)
+	}
+	placement := explorer.Items[0]
+	if placement.ParentFolderID != nil || placement.ResourceType != store.EntityTypeHuddleLogicGate || placement.ResourceID != payload.HuddleLogicGate.HuddleLogicGateID {
+		t.Fatalf("root Huddle placement=%+v", placement)
+	}
+}
+
 type huddleNodeCardsAccessRepo struct {
 	store.Repository
 	huddleNodeID    string

@@ -701,8 +701,7 @@ on conflict do nothing`, string(rows)); err != nil {
 	if tableName == "attachments" {
 		if _, err := tx.ExecContext(ctx, `
 update attachments existing
-set deleted_timestamp=restored.deleted_timestamp,
-    updated_timestamp=greatest(existing.updated_timestamp,clock_timestamp())
+set deleted_timestamp=restored.deleted_timestamp
 from jsonb_populate_recordset(null::attachments,coalesce($1::jsonb,'[]'::jsonb)) restored
 where existing.company_id=restored.company_id
   and existing.attachment_id=restored.attachment_id`, string(rows)); err != nil {

@@ -34,6 +34,59 @@ func TestMemoryLogicGateConversionReturnsEveryBlocker(t *testing.T) {
 	}
 }
 
+func TestMemoryDirectHuddleLogicGateCreationAndAttachmentRecycle(t *testing.T) {
+	repo := NewMemoryRepo()
+	company, err := repo.CreateCompany("Direct Huddle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const userID = "55555555-5555-4555-8555-555555555555"
+	huddle, err := repo.CreateHuddleLogicGate(HuddleCreateInput{
+		CompanyID: company.CompanyID, Name: "Weekly operations", ActorID: userID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	permissionPolicy, err := repo.GetResourcePermissionPolicy(company.CompanyID, EntityTypeHuddleLogicGate, huddle.HuddleLogicGateID)
+	if err != nil || permissionPolicy.PermissionMode != PolicyModeCustomized || permissionPolicy.DefaultAccess == nil || *permissionPolicy.DefaultAccess != EntityPermissionEdit {
+		t.Fatalf("direct Huddle permission policy=%+v err=%v", permissionPolicy, err)
+	}
+	explorer, err := repo.ListHuddleExplorer(company.CompanyID)
+	if err != nil || len(explorer.Items) != 1 || explorer.Items[0].ParentFolderID != nil || explorer.Items[0].ResourceID != huddle.HuddleLogicGateID {
+		t.Fatalf("direct Huddle root placement=%+v err=%v", explorer, err)
+	}
+	attachmentID := NewUUIDv7String()
+	if _, _, err := repo.CreateAttachmentWithResourceLink(AttachmentCreateInput{
+		CompanyID: company.CompanyID, AttachmentID: attachmentID, OriginalFilename: "agenda.png", MimeType: "image/png",
+		ByteSize: 1, SHA256: strings.Repeat("a", 64), StorageBucket: "huddle-attachment-bucket",
+		StorageKey: "companies/" + company.CompanyID + "/attachments/" + attachmentID + "/original",
+		SourceKind: AttachmentSourceUserUpload,
+		ResourceLink: ResourceAttachmentInput{
+			CompanyID: company.CompanyID, ResourceType: EntityTypeHuddleLogicGate, ResourceID: huddle.HuddleLogicGateID,
+			RelationshipKind: AttachmentRelationshipInlineImage,
+		},
+	}); err != nil {
+		t.Fatalf("create Huddle attachment: %v", err)
+	}
+	if err := repo.DeleteHuddleLogicGate(company.CompanyID, huddle.HuddleLogicGateID, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetAttachment(company.CompanyID, attachmentID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("recycled Huddle attachment error=%v, want ErrNotFound", err)
+	}
+	recycleItems, err := repo.ListRecycleBinItems(company.CompanyID, userID)
+	if err != nil || len(recycleItems) != 1 {
+		t.Fatalf("Huddle recycle items=%+v err=%v", recycleItems, err)
+	}
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, userID, []string{recycleItems[0].RecycleBinItemID}); err != nil {
+		t.Fatal(err)
+	}
+	links, err := repo.ListResourceAttachments(company.CompanyID, EntityTypeHuddleLogicGate, huddle.HuddleLogicGateID)
+	if err != nil || len(links) != 1 || links[0].AttachmentID != attachmentID {
+		t.Fatalf("restored Huddle attachments=%+v err=%v", links, err)
+	}
+}
+
 func TestMemoryHuddleLifecycleKeepsTypedIdentityAndRecycleRestore(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-1111-1111-111111111111"

@@ -1,21 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppModalPortal } from "../../app/AppModalPortal.js";
-import { ExplorerEntityIcon } from "../../icons/index.js";
+import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
+import { ActionItemIcon, ExplorerEntityIcon } from "../../icons/index.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
 import {
   getEntityDetail,
   updateEntity,
   updateEntityField,
-  type ActionItemColor,
   type Entity,
   type EntityField,
   type EntityFieldValue,
 } from "../entities/entitiesApi.js";
 import {
   EVENT_EDITOR_ENTITY_REFERENCE_OPEN,
+  editorEntityActionItemColor,
   updateRenderedEditorEntityReference,
+  type EditorEntityLinkAnchorBounds,
   type EditorEntityLink,
   type EditorEntityLinkRequest,
+  type EditorEntityReferenceOpenDetail,
 } from "./editorEntityLinks.js";
 import { EntityDetailsRichEditor } from "./EntityDetailsRichEditor.js";
 import {
@@ -32,6 +34,7 @@ export type EntityReferencePreviewHostProps = {
 type EntityReferencePreview = {
   requestID: number;
   entity: EditorEntityLink;
+  anchor?: EditorEntityLinkAnchorBounds;
   detail: Entity | null;
   companyUsers: CompanyUser[];
   loading: boolean;
@@ -61,15 +64,6 @@ function formatCalendarDate(value: string): string {
   }).format(date);
 }
 
-function entityActionItemColor(entity: Entity): ActionItemColor | null {
-  if (!isActionItemEntity(entity)) return null;
-  const field = entity.entity_fields.find((candidate) => (
-    candidate.system_key?.trim().toLowerCase() === "color"
-    || candidate.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") === "color"
-  ));
-  return field?.value === "yellow" || field?.value === "red" ? field.value : null;
-}
-
 function isActionItemEntity(entity: Entity): boolean {
   return entity.entity_type_name.trim().toLowerCase() === "action item";
 }
@@ -79,7 +73,7 @@ function syncEntityReferencePresentation(entity: Entity): void {
     entityID: entity.entity_id,
     label: entity.name,
     isActionItem: isActionItemEntity(entity),
-    actionItemColor: entityActionItemColor(entity),
+    actionItemColor: editorEntityActionItemColor(entity),
   });
 }
 
@@ -148,19 +142,19 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
     setPreview(null);
   }, []);
 
-  const open = useCallback((entity: EditorEntityLink) => {
+  const open = useCallback((entity: EditorEntityLink, anchor?: EditorEntityLinkAnchorBounds) => {
     if (entity.entityType !== "entity") return;
     const requestID = requestIDRef.current + 1;
     requestIDRef.current = requestID;
     setSavingTarget("");
     setSaveError("");
-    setPreview({ requestID, entity, detail: null, companyUsers: [], loading: true, error: "" });
+    setPreview({ requestID, entity, ...(anchor ? { anchor } : {}), detail: null, companyUsers: [], loading: true, error: "" });
   }, []);
 
   useEffect(() => {
     const onOpenEntityReference = (event: Event) => {
-      const entity = (event as CustomEvent<EditorEntityLink>).detail;
-      if (entity?.entityType === "entity") open(entity);
+      const detail = (event as CustomEvent<EditorEntityReferenceOpenDetail>).detail;
+      if (detail?.entity?.entityType === "entity") open(detail.entity, detail.anchor);
     };
     window.addEventListener(EVENT_EDITOR_ENTITY_REFERENCE_OPEN, onOpenEntityReference);
     return () => window.removeEventListener(EVENT_EDITOR_ENTITY_REFERENCE_OPEN, onOpenEntityReference);
@@ -271,6 +265,13 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
     }
   }, [companyID, preview, requestJSON, savingTarget]);
 
+  const acceptSavedActionItem = useCallback((requestID: number, saved: Entity) => {
+    syncEntityReferencePresentation(saved);
+    setPreview((current) => current?.requestID === requestID
+      ? { ...current, entity: { ...current.entity, label: saved.name, isActionItem: true }, detail: saved }
+      : current);
+  }, []);
+
   if (!preview) return null;
   const title = preview.detail?.name.trim() || preview.entity.label.trim() || "Entity";
   const fields = [...(preview.detail?.entity_fields ?? [])].sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
@@ -280,6 +281,20 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
     ? companyUserLabel(preview.companyUsers, preview.detail.created_by_user_id)
     : "Not set";
   const createdDate = preview.detail?.created_timestamp ? formatCalendarDate(preview.detail.created_timestamp) : "Not set";
+  const actionItem = preview.entity.isActionItem === true || Boolean(preview.detail && isActionItemEntity(preview.detail));
+
+  if (actionItem) {
+    return (
+      <ActionItemReferencePopover
+        preview={preview}
+        companyID={companyID}
+        requestJSON={requestJSON}
+        onRetry={retry}
+        onSaved={(saved) => acceptSavedActionItem(preview.requestID, saved)}
+        onClose={close}
+      />
+    );
+  }
 
   return (
     <AppModalPortal onRequestClose={close}>
@@ -346,6 +361,495 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
   );
 }
 
+type ActionItemDraft = {
+  name: string;
+  details: string;
+  fieldValues: Record<string, string>;
+};
+
+function actionItemFieldKey(field: EntityField): string {
+  return field.system_key?.trim().toLowerCase()
+    || field.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+function actionItemFieldDraftValue(field: EntityField): string {
+  if (field.value === null) return "";
+  const value = String(field.value);
+  return field.field_type === "date" ? formatCalendarDate(value) : value;
+}
+
+function plainEntityBodyText(value: unknown): string {
+  if (!isRecord(value)) return "";
+  const document = isRecord(value.document) ? value.document : value;
+  const read = (node: unknown): string => {
+    if (!isRecord(node)) return "";
+    if (node.type === "text" && typeof node.text === "string") return node.text;
+    if (node.type === "hardBreak") return "\n";
+    if (!Array.isArray(node.content)) return "";
+    const values = node.content.map(read);
+    return node.type === "doc" ? values.join("\n") : values.join("");
+  };
+  return read(document).trim();
+}
+
+function plainEntityBodyJSON(value: string, currentBody: unknown): Record<string, unknown> {
+  const annotations = isRecord(currentBody) && Array.isArray(currentBody.annotations)
+    ? currentBody.annotations
+    : [];
+  const lines = value.replace(/\r\n?/g, "\n").split("\n");
+  return {
+    format: "mango-tiptap-json",
+    schema_version: 1,
+    annotations,
+    document: {
+      type: "doc",
+      content: lines.map((line) => ({
+        type: "paragraph",
+        ...(line ? { content: [{ type: "text", text: line }] } : {}),
+      })),
+    },
+  };
+}
+
+function actionItemDraft(entity: Entity): ActionItemDraft {
+  return {
+    name: entity.name,
+    details: plainEntityBodyText(entity.body_json),
+    fieldValues: Object.fromEntries(entity.entity_fields.map((field) => [
+      field.entity_field_id,
+      actionItemFieldDraftValue(field),
+    ])),
+  };
+}
+
+function actionItemDraftsEqual(left: ActionItemDraft, right: ActionItemDraft): boolean {
+  if (left.name !== right.name || left.details !== right.details) return false;
+  const fieldIDs = new Set([...Object.keys(left.fieldValues), ...Object.keys(right.fieldValues)]);
+  return [...fieldIDs].every((fieldID) => left.fieldValues[fieldID] === right.fieldValues[fieldID]);
+}
+
+export function actionItemReferencePopoverPosition(
+  anchor: EditorEntityLinkAnchorBounds | undefined,
+  viewportWidth = typeof window === "undefined" ? 1200 : window.innerWidth,
+  viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight,
+): React.CSSProperties {
+  const width = Math.max(0, Math.min(500, viewportWidth - 24));
+  const maxHeight = Math.max(0, Math.min(640, viewportHeight - 24));
+  const desiredLeft = anchor
+    ? anchor.right + 8 + width <= viewportWidth - 12
+      ? anchor.right + 8
+      : anchor.left - width - 8
+    : (viewportWidth - width) / 2;
+  const left = Math.max(12, Math.min(desiredLeft, viewportWidth - width - 12));
+  const desiredTop = anchor ? anchor.top : (viewportHeight - maxHeight) / 2;
+  const top = Math.max(12, Math.min(desiredTop, viewportHeight - maxHeight - 12));
+  return { position: "fixed", left, top, width, maxHeight };
+}
+
+function ActionItemReferencePopover({
+  preview,
+  companyID,
+  requestJSON,
+  onRetry,
+  onSaved,
+  onClose,
+}: {
+  preview: EntityReferencePreview;
+  companyID: string;
+  requestJSON: EditorEntityLinkRequest;
+  onRetry: () => void;
+  onSaved: (entity: Entity) => void;
+  onClose: () => void;
+}) {
+  if (preview.detail) {
+    return (
+      <EditableActionItemPopover
+        key={preview.detail.entity_id}
+        entity={preview.detail}
+        companyUsers={preview.companyUsers}
+        anchor={preview.anchor}
+        companyID={companyID}
+        requestJSON={requestJSON}
+        onSaved={onSaved}
+        onClose={onClose}
+      />
+    );
+  }
+  const title = preview.entity.label.trim() || "Action Item";
+  return (
+    <PendingActionItemReferencePopover
+      preview={preview}
+      title={title}
+      onRetry={onRetry}
+      onClose={onClose}
+    />
+  );
+}
+
+function PendingActionItemReferencePopover({
+  preview,
+  title,
+  onRetry,
+  onClose,
+}: {
+  preview: EntityReferencePreview;
+  title: string;
+  onRetry: () => void;
+  onClose: () => void;
+}) {
+  const popoverRef = useRef<HTMLElement | null>(null);
+  useAppFloatingMenuDismissal(true, popoverRef, onClose);
+  return (
+    <AppModalPortal trapFocus={false}>
+      <section
+        ref={popoverRef}
+        role="dialog"
+        aria-modal="false"
+        aria-label={"Action Item details: " + title}
+        data-mango-entity-reference-preview="true"
+        data-mango-action-item-popover="true"
+        style={{ ...actionItemReferencePopoverPosition(preview.anchor), zIndex: 1, display: "grid", gridTemplateRows: "auto minmax(120px,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 14, background: "#fff", boxShadow: "0 18px 50px rgba(15,23,42,.24)" }}
+      >
+        <header style={actionItemHeaderStyle}>
+          <span style={actionItemIconBadgeStyle(null)}><ActionItemIcon size={17} /></span>
+          <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#0f172a", fontSize: 14 }}>{title}</strong>
+          <button type="button" aria-label="Close Action Item details" onClick={onClose} style={actionItemCloseButtonStyle}>×</button>
+        </header>
+        {preview.loading ? (
+          <div role="status" style={{ padding: "34px 18px", color: "#64748b", textAlign: "center", fontSize: 12 }}>Loading Action Item…</div>
+        ) : (
+          <div role="alert" style={{ display: "grid", justifyItems: "center", gap: 12, padding: "28px 18px", color: "#991b1b", textAlign: "center", fontSize: 12 }}>
+            <span>{preview.error}</span>
+            <button type="button" onClick={onRetry} style={{ padding: "7px 13px", border: "1px solid rgba(153,27,27,.3)", borderRadius: 9, background: "#fff", color: "#991b1b", cursor: "pointer", fontWeight: 800 }}>Retry</button>
+          </div>
+        )}
+      </section>
+    </AppModalPortal>
+  );
+}
+
+function EditableActionItemPopover({
+  entity,
+  companyUsers,
+  anchor,
+  companyID,
+  requestJSON,
+  onSaved,
+  onClose,
+}: {
+  entity: Entity;
+  companyUsers: readonly CompanyUser[];
+  anchor?: EditorEntityLinkAnchorBounds;
+  companyID: string;
+  requestJSON: EditorEntityLinkRequest;
+  onSaved: (entity: Entity) => void;
+  onClose: () => void;
+}) {
+  const initialDraft = actionItemDraft(entity);
+  const [draft, setDraft] = useState(initialDraft);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const entityRef = useRef(entity);
+  const draftRef = useRef(initialDraft);
+  const savedDraftRef = useRef(initialDraft);
+  const changeVersionRef = useRef(0);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savePromiseRef = useRef<Promise<boolean> | null>(null);
+  const popoverRef = useRef<HTMLElement | null>(null);
+
+  const saveCurrentDraft = useCallback(async (): Promise<boolean> => {
+    const target: ActionItemDraft = {
+      name: draftRef.current.name,
+      details: draftRef.current.details,
+      fieldValues: { ...draftRef.current.fieldValues },
+    };
+    const previouslySaved = savedDraftRef.current;
+    let latestEntity = entityRef.current;
+    const cleanName = target.name.trim();
+    setSaving(true);
+    setSaveError("");
+    try {
+      if (!cleanName) throw new Error("Action Item title is required.");
+      const nextSaved: ActionItemDraft = {
+        name: previouslySaved.name,
+        details: previouslySaved.details,
+        fieldValues: { ...previouslySaved.fieldValues },
+      };
+      const nameChanged = target.name !== previouslySaved.name;
+      const detailsChanged = target.details !== previouslySaved.details;
+
+      if (nameChanged || detailsChanged) {
+        const saved = await updateEntity({
+          companyID,
+          entityID: latestEntity.entity_id,
+          name: cleanName,
+          ...(detailsChanged ? { bodyJSON: plainEntityBodyJSON(target.details, latestEntity.body_json) } : {}),
+          baseRevision: latestEntity.revision,
+        }, requestJSON);
+        latestEntity = saved;
+        nextSaved.name = target.name;
+        nextSaved.details = target.details;
+        entityRef.current = latestEntity;
+        savedDraftRef.current = {
+          ...nextSaved,
+          fieldValues: { ...nextSaved.fieldValues },
+        };
+        onSaved(latestEntity);
+      }
+
+      for (const field of latestEntity.entity_fields) {
+        const rawValue = target.fieldValues[field.entity_field_id] ?? "";
+        if (rawValue === previouslySaved.fieldValues[field.entity_field_id]) continue;
+        const savedField = await updateEntityField({
+          companyID,
+          entityID: latestEntity.entity_id,
+          entityFieldID: field.entity_field_id,
+          value: parseEntityFieldInput(field, rawValue),
+        }, requestJSON);
+        latestEntity = {
+          ...latestEntity,
+          entity_fields: latestEntity.entity_fields.map((candidate) => (
+            candidate.entity_field_id === savedField.entity_field_id ? savedField : candidate
+          )),
+        };
+        nextSaved.fieldValues[field.entity_field_id] = rawValue;
+        entityRef.current = latestEntity;
+        savedDraftRef.current = {
+          ...nextSaved,
+          fieldValues: { ...nextSaved.fieldValues },
+        };
+        onSaved(latestEntity);
+      }
+
+      savedDraftRef.current = nextSaved;
+      entityRef.current = latestEntity;
+      return true;
+    } catch (cause) {
+      setSaveError(previewError(cause));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }, [companyID, onSaved, requestJSON]);
+
+  const flushLatest = useCallback(async (): Promise<boolean> => {
+    while (true) {
+      if (saveTimerRef.current !== null) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      const activeSave = savePromiseRef.current;
+      if (activeSave) {
+        if (!(await activeSave)) return false;
+        continue;
+      }
+      if (actionItemDraftsEqual(draftRef.current, savedDraftRef.current)) return true;
+      const save = saveCurrentDraft();
+      savePromiseRef.current = save;
+      void save.finally(() => {
+        if (savePromiseRef.current === save) savePromiseRef.current = null;
+      });
+      if (!(await save)) return false;
+      if (savePromiseRef.current === save) savePromiseRef.current = null;
+    }
+  }, [saveCurrentDraft]);
+
+  const scheduleSave = useCallback((next: ActionItemDraft) => {
+    draftRef.current = next;
+    setDraft(next);
+    changeVersionRef.current += 1;
+    setSaveError("");
+    if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      void flushLatest();
+    }, 500);
+  }, [flushLatest]);
+
+  useEffect(() => () => {
+    if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
+  }, []);
+
+  const updateName = (name: string) => scheduleSave({ ...draftRef.current, name });
+  const updateDetails = (details: string) => scheduleSave({ ...draftRef.current, details });
+  const updateField = (fieldID: string, value: string) => scheduleSave({
+    ...draftRef.current,
+    fieldValues: { ...draftRef.current.fieldValues, [fieldID]: value },
+  });
+  const closeAfterFlush = async () => {
+    while (true) {
+      const versionBeforeFlush = changeVersionRef.current;
+      if (!(await flushLatest())) return;
+      if (
+        versionBeforeFlush === changeVersionRef.current
+        && actionItemDraftsEqual(draftRef.current, savedDraftRef.current)
+      ) {
+        onClose();
+        return;
+      }
+    }
+  };
+
+  useAppFloatingMenuDismissal(true, popoverRef, () => { void closeAfterFlush(); });
+
+  const orderedFields = [...entity.entity_fields].sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
+  const fieldByKey = new Map(orderedFields.map((field) => [actionItemFieldKey(field), field]));
+  const personField = fieldByKey.get("person_in_charge");
+  const colorField = fieldByKey.get("color");
+  const analysisDateField = fieldByKey.get("analysis_due_date");
+  const completionDateField = fieldByKey.get("completion_due_date");
+  const statusField = fieldByKey.get("status");
+  const primaryFields = [personField, colorField, analysisDateField, completionDateField, statusField]
+    .filter((field): field is EntityField => Boolean(field));
+  const primaryFieldIDs = new Set(primaryFields.map((field) => field.entity_field_id));
+  const additionalFields = orderedFields.filter((field) => !primaryFieldIDs.has(field.entity_field_id));
+  const color = colorField ? draft.fieldValues[colorField.entity_field_id] : "";
+  const saved = !saving && !saveError && actionItemDraftsEqual(draft, savedDraftRef.current);
+  const createdBy = entity.created_by_user_id ? companyUserLabel(companyUsers, entity.created_by_user_id) : "Not set";
+  const createdDate = entity.created_timestamp ? formatCalendarDate(entity.created_timestamp) : "Not set";
+
+  return (
+    <AppModalPortal trapFocus={false}>
+      <section
+        ref={popoverRef}
+        role="dialog"
+        aria-modal="false"
+        aria-label={"Action Item details: " + (draft.name.trim() || entity.name)}
+        data-mango-entity-reference-preview="true"
+        data-mango-action-item-popover="true"
+        style={{ ...actionItemReferencePopoverPosition(anchor), zIndex: 1, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 14, background: "#fff", boxShadow: "0 18px 50px rgba(15,23,42,.24)" }}
+      >
+        <header style={actionItemHeaderStyle}>
+            <span className={color === "yellow" || color === "red" ? "mango-editor-action-item--" + color : undefined} style={actionItemIconBadgeStyle(color)}>
+              <ActionItemIcon size={17} />
+            </span>
+            <input
+              value={draft.name}
+              maxLength={200}
+              aria-label="Action Item title"
+              onChange={(event) => updateName(event.currentTarget.value)}
+              style={{ ...editorInputStyle, minHeight: 36, fontSize: 14, fontWeight: 850 }}
+            />
+            <span role="status" style={{ color: saveError ? "#b91c1c" : saving ? "#64748b" : saved ? "#15803d" : "#92400e", fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>
+              {saveError ? "Not saved" : saving ? "Saving…" : saved ? "Saved" : "Pending"}
+            </span>
+            <button type="button" aria-label="Close Action Item details" onClick={() => void closeAfterFlush()} style={actionItemCloseButtonStyle}>×</button>
+        </header>
+        <div style={{ minHeight: 0, overflowY: "auto", padding: 14 }}>
+            <div style={{ display: "grid", gap: 12 }}>
+              {saveError && <div role="alert" data-mango-entity-save-error="true" style={saveErrorStyle}>{saveError}</div>}
+              <label style={editorLabelStyle}>
+                Details
+                <textarea
+                  value={draft.details}
+                  rows={5}
+                  aria-label="Action Item details"
+                  onChange={(event) => updateDetails(event.currentTarget.value)}
+                  style={{ ...editorInputStyle, minHeight: 104, resize: "vertical", padding: "9px 10px", lineHeight: 1.45 }}
+                />
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,.82fr) minmax(0,1.18fr)", gap: 10, alignItems: "start" }}>
+                <section aria-label="Action Item creation details" style={actionItemMetadataCardStyle}>
+                  <ReadOnlyEntityValue label="Created by" value={createdBy} compact />
+                  <ReadOnlyEntityValue label="Created date" value={createdDate} compact />
+                </section>
+                <section aria-label="Action Item responsibility and dates" style={actionItemMetadataCardStyle}>
+                  {[personField, colorField, analysisDateField, completionDateField].map((field) => field ? (
+                    <ActionItemFieldControl
+                      key={field.entity_field_id}
+                      field={field}
+                      value={draft.fieldValues[field.entity_field_id] ?? ""}
+                      companyUsers={companyUsers}
+                      onChange={(value) => updateField(field.entity_field_id, value)}
+                    />
+                  ) : null)}
+                </section>
+              </div>
+              {additionalFields.length > 0 && (
+                <section aria-label="Additional Action Item fields" style={{ ...actionItemMetadataCardStyle, gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
+                  {additionalFields.map((field) => (
+                    <ActionItemFieldControl
+                      key={field.entity_field_id}
+                      field={field}
+                      value={draft.fieldValues[field.entity_field_id] ?? ""}
+                      companyUsers={companyUsers}
+                      onChange={(value) => updateField(field.entity_field_id, value)}
+                    />
+                  ))}
+                </section>
+              )}
+              {statusField && (
+                <section aria-label="Action Item status" style={actionItemMetadataCardStyle}>
+                  <ActionItemFieldControl
+                    field={statusField}
+                    value={draft.fieldValues[statusField.entity_field_id] ?? ""}
+                    companyUsers={companyUsers}
+                    onChange={(value) => updateField(statusField.entity_field_id, value)}
+                  />
+                </section>
+              )}
+            </div>
+        </div>
+      </section>
+    </AppModalPortal>
+  );
+}
+
+function ActionItemFieldControl({
+  field,
+  value,
+  companyUsers,
+  onChange,
+}: {
+  field: EntityField;
+  value: string;
+  companyUsers: readonly CompanyUser[];
+  onChange: (value: string) => void;
+}) {
+  const id = "action-item-field-" + field.entity_field_id;
+  const select = (children: React.ReactNode) => (
+    <select id={id} value={value} aria-label={"Value for " + field.name} onChange={(event) => onChange(event.currentTarget.value)} style={editorInputStyle}>
+      {children}
+    </select>
+  );
+  let control: React.ReactNode;
+  if (field.field_type === "boolean") {
+    control = select(<><option value="">Not set</option><option value="true">Yes</option><option value="false">No</option></>);
+  } else if (field.field_type === "choice" || field.field_type === "color") {
+    const options = field.config?.options ?? [];
+    const currentConfigured = !value || options.some((option) => option.key === value);
+    const picker = select(<>
+      <option value="">{field.field_type === "color" ? "No color" : "Not set"}</option>
+      {!currentConfigured && <option value={value}>{readableOptionKey(value)}</option>}
+      {options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
+    </>);
+    if (field.field_type === "color") {
+      const configuredColor = options.find((option) => option.key === value)?.color;
+      const fill = configuredColor || (value === "yellow" ? "#facc15" : value === "red" ? "#ef4444" : "transparent");
+      control = (
+        <div style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr)", alignItems: "center", gap: 7 }}>
+          <span aria-label="Selected Action Item color" style={{ width: 18, height: 18, border: "1px solid rgba(15,23,42,.28)", borderRadius: 5, background: fill, boxShadow: "inset 0 1px 0 rgba(255,255,255,.55)" }} />
+          {picker}
+        </div>
+      );
+    } else {
+      control = picker;
+    }
+  } else if (field.field_type === "person") {
+    const currentKnown = !value || companyUsers.some((user) => user.user_id === value);
+    control = select(<>
+      <option value="">Unassigned</option>
+      {!currentKnown && <option value={value}>Company user unavailable</option>}
+      {companyUsers.map((user) => <option key={user.user_id} value={user.user_id}>{user.display_name?.trim() || user.email?.trim() || "Company user unavailable"}</option>)}
+    </>);
+  } else if (field.field_type === "date") {
+    control = <input id={id} value={value} type="text" inputMode="numeric" pattern="(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12][0-9]|3[01])/\d{4}" placeholder="MM/DD/YYYY" aria-label={"Value for " + field.name} onChange={(event) => onChange(event.currentTarget.value)} style={editorInputStyle} />;
+  } else {
+    control = <input id={id} value={value} type={field.field_type === "number" ? "number" : "text"} step={field.field_type === "number" ? "any" : undefined} aria-label={"Value for " + field.name} onChange={(event) => onChange(event.currentTarget.value)} style={editorInputStyle} />;
+  }
+  return <label htmlFor={id} style={editorLabelStyle}>{field.name}{control}</label>;
+}
+
 function EntityNameAndDetailsEditor({ entity, body, saving, disabled, onSave }: {
   entity: Entity;
   body: MangoTiptapDocument;
@@ -390,9 +894,9 @@ function EntityNameAndDetailsEditor({ entity, body, saving, disabled, onSave }: 
   );
 }
 
-function ReadOnlyEntityValue({ label, value }: { label: string; value: string }) {
+function ReadOnlyEntityValue({ label, value, compact = false }: { label: string; value: string; compact?: boolean }) {
   return (
-    <div style={readOnlyFieldStyle}>
+    <div style={compact ? compactReadOnlyFieldStyle : readOnlyFieldStyle}>
       <span style={fieldNameStyle}>{label}</span>
       <span style={{ ...readOnlyTextStyle, color: value === "Not set" ? "#94a3b8" : "#0f172a" }}>{value}</span>
     </div>
@@ -484,11 +988,16 @@ function EntityFieldInput({ field, companyUsers, disabled }: {
 }
 
 const sectionHeadingStyle: React.CSSProperties = { margin: "0 0 8px", color: "#334155", fontSize: 11, fontWeight: 900, letterSpacing: ".06em", textTransform: "uppercase" };
+const actionItemHeaderStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto auto", alignItems: "center", gap: 9, padding: "11px 12px", borderBottom: "1px solid rgba(148,163,184,.22)", background: "linear-gradient(135deg,rgba(254,252,232,.98),rgba(255,255,255,.98))" };
+const actionItemIconBadgeStyle = (color: string | null): React.CSSProperties => ({ width: 30, height: 30, display: "inline-grid", placeItems: "center", border: "1px solid rgba(15,23,42,.24)", borderRadius: 8, background: color === "yellow" ? "#facc15" : color === "red" ? "#ef4444" : "#f8fafc", color: "#111827" });
+const actionItemCloseButtonStyle: React.CSSProperties = { width: 30, height: 30, border: "1px solid rgba(185,28,28,.36)", borderRadius: 8, background: "#fee2e2", color: "#b91c1c", cursor: "pointer", fontSize: 18, fontWeight: 900, lineHeight: 1 };
+const actionItemMetadataCardStyle: React.CSSProperties = { display: "grid", gap: 8, padding: 10, border: "1px solid rgba(148,163,184,.22)", borderRadius: 10, background: "#f8fafc" };
 const editorLabelStyle: React.CSSProperties = { display: "grid", gap: 5, color: "#475569", fontSize: 11, fontWeight: 850 };
 const editorInputStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 34, boxSizing: "border-box", border: "1px solid rgba(148,163,184,.32)", borderRadius: 8, background: "#fff", color: "#0f172a", padding: "0 9px", font: "inherit", fontSize: 12 };
 const saveButtonStyle = (disabled: boolean): React.CSSProperties => ({ minHeight: 32, border: 0, borderRadius: 8, background: disabled ? "#cbd5e1" : "#0f766e", color: "#fff", padding: "0 12px", font: "inherit", fontSize: 11, fontWeight: 850, cursor: disabled ? "default" : "pointer" });
 const fieldListStyle: React.CSSProperties = { display: "grid", gap: 9 };
 const readOnlyFieldStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(120px,.8fr) minmax(0,1.2fr) 58px", alignItems: "center", gap: 10, padding: "9px 11px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc" };
+const compactReadOnlyFieldStyle: React.CSSProperties = { display: "grid", gap: 4, padding: "8px 9px", border: "1px solid rgba(148,163,184,.18)", borderRadius: 8, background: "#fff" };
 const editableFieldStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "minmax(120px,.8fr) minmax(0,1.2fr) 58px", alignItems: "center", gap: 10, padding: "9px 11px", border: "1px solid rgba(148,163,184,.2)", borderRadius: 10, background: "#f8fafc" };
 const fieldNameStyle: React.CSSProperties = { color: "#475569", fontSize: 11, fontWeight: 800 };
 const readOnlyTextStyle: React.CSSProperties = { minWidth: 0, overflowWrap: "anywhere", fontSize: 12 };

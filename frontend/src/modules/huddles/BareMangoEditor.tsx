@@ -3,8 +3,10 @@ import { EditorTabBar } from "../editor/EditorTabBar";
 import type { EditorTabID } from "../editor/editorTabs";
 import { MangoTiptapEditor, type MangoTiptapFormattingController } from "../editor/tiptap/MangoTiptapEditor";
 import type { MangoTiptapResourceType } from "../editor/tiptap/mangoTiptapSync";
+import type { MentionableCompanyUser } from "../editor/editorMentions";
+import type { EditorImageAttachmentContext } from "../editor/useEditorDocumentSurfaceHandlers";
 import type { EditorHighlightColor, EditorTextAlignment } from "../editor/richTextEditing";
-import type { EditorOutlineStyleID } from "../editor/plainTextEditing";
+import { DEFAULT_EDITOR_OUTLINE_STYLE, type EditorOutlineStyleID } from "../editor/plainTextEditing";
 
 type Props = {
   companyID: string;
@@ -14,6 +16,8 @@ type Props = {
   requestJSON: <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
   ariaLabel: string;
   editable?: boolean;
+  attachmentContext?: EditorImageAttachmentContext;
+  mentionUsers?: MentionableCompanyUser[];
 };
 
 export type BareMangoEditorControls = {
@@ -32,7 +36,7 @@ export type BareMangoEditorControls = {
 
 export function useBareMangoEditorControls(): BareMangoEditorControls {
   const controllerRef = useRef<MangoTiptapFormattingController | null>(null);
-  const [outlineStyle, setOutlineStyle] = useState<EditorOutlineStyleID>("bullet-list");
+  const [outlineStyle, setOutlineStyle] = useState<EditorOutlineStyleID>(DEFAULT_EDITOR_OUTLINE_STYLE);
   const [fontSize, setFontSize] = useState(15);
   const [inline, setInline] = useState({ bold: false, underline: false, italic: false, strikethrough: false });
   const [highlight, setHighlight] = useState<EditorHighlightColor | null>(null);
@@ -89,8 +93,11 @@ export const BareMangoEditorToolbar: React.FC<{
         controls.controllerRef.current?.applyTextAlignment(value);
         controls.setAlignment(value);
       }}
-      onOutlineStyleFocus={() => undefined}
-      onOutlineStyleChange={controls.setOutlineStyle}
+      onOutlineStyleFocus={() => onSelectTab("outline-styles")}
+      onOutlineStyleChange={(value) => {
+        onSelectTab("outline-styles");
+        controls.setOutlineStyle(value);
+      }}
       onInsertTable={() => controls.controllerRef.current?.insertTable()}
       formattingDisabled={formattingDisabled}
       reserveHeaderOffset={reserveHeaderOffset}
@@ -100,7 +107,7 @@ export const BareMangoEditorToolbar: React.FC<{
   );
 };
 
-export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEditorControls; style?: React.CSSProperties }> = ({ companyID, resourceType, resourceID, currentUserID, requestJSON, ariaLabel, editable = true, controls, style }) => (
+export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEditorControls; style?: React.CSSProperties }> = ({ companyID, resourceType, resourceID, currentUserID, requestJSON, ariaLabel, editable = true, attachmentContext, mentionUsers, controls, style }) => (
   <MangoTiptapEditor
     companyID={companyID}
     resourceType={resourceType}
@@ -108,6 +115,8 @@ export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEdit
     documentID={resourceID}
     currentUserID={currentUserID}
     requestJSON={requestJSON}
+    attachmentContext={attachmentContext}
+    mentionUsers={mentionUsers}
     editable={editable}
     ariaLabel={ariaLabel}
     placeholder="Start writing…"

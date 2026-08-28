@@ -405,14 +405,14 @@ func (r *MemoryRepo) ListEntities(ctx context.Context, query EntityListQuery) ([
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if item.CompanyID != normalized.CompanyID || (normalized.EntityTypeID != "" && item.EntityTypeID != normalized.EntityTypeID) || (needle != "" && !strings.Contains(strings.ToLower(item.Name), needle)) {
-			continue
-		}
-		if normalized.EntityFolderID != nil && optionalEntityIDValue(item.EntityFolderID) != *normalized.EntityFolderID {
+		if item.CompanyID != normalized.CompanyID || (normalized.EntityTypeID != "" && item.EntityTypeID != normalized.EntityTypeID) {
 			continue
 		}
 		typeItem, exists := r.entityTypes[key(item.CompanyID, item.EntityTypeID)]
-		if !exists {
+		if !exists || (needle != "" && !strings.Contains(strings.ToLower(item.Name), needle) && !strings.Contains(strings.ToLower(typeItem.Name), needle)) {
+			continue
+		}
+		if normalized.EntityFolderID != nil && optionalEntityIDValue(item.EntityFolderID) != *normalized.EntityFolderID {
 			continue
 		}
 		items = append(items, domain.EntitySummary{CompanyID: item.CompanyID, EntityID: item.EntityID, EntityTypeID: item.EntityTypeID, EntityTypeName: typeItem.Name, EntityFolderID: cloneStringPointer(item.EntityFolderID), Name: item.Name, Position: item.Position, Revision: item.Revision, CreatedByUserID: item.CreatedByUserID, CreatedTimestamp: item.CreatedTimestamp, UpdatedTimestamp: item.UpdatedTimestamp})

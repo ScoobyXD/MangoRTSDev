@@ -3,7 +3,7 @@
 1. A Huddle Logic Gate is stored in `huddle_logic_gates` with `company_id`, `huddle_logic_gate_id`, `header`, `body_json`, `created_timestamp`, and `updated_timestamp`.
 2. `body_json` stores one document through the existing Mango TipTap JSON editor contract.
 3. A Huddle Logic Gate uses the exact resource type `huddle_logic_gate` and the exact `huddle_logic_gates.huddle_logic_gate_id` everywhere it is referenced.
-4. A Huddle Logic Gate cannot be created directly; it is created only by converting an existing normal Logic Gate.
+4. A Huddle Logic Gate may be created directly from the Huddles sidebar or by converting an eligible normal Logic Gate.
 5. The normal Logic Gate **More editor actions** menu contains **Turn into Huddle Logic Gate** for an actor allowed to edit that Logic Gate.
 6. Conversion is allowed only when the current Logic Gate editor document is empty, the Kanban board has no Node cards or assignments, and the Logic Gate owns zero KPIs.
 7. Default empty Kanban columns do not block conversion; only actual Node work on the board blocks conversion.
@@ -17,10 +17,10 @@
 15. Conversion is irreversible; the product provides no command to turn a Huddle Logic Gate back into a normal Logic Gate.
 16. A Huddle Logic Gate opens on its own `/huddle-logic-gates/{huddle_logic_gate_id}` page while the application left sidebar remains visible.
 17. The page header shows the existing Huddle Logic Gate icon and a separate live-derived clickable Huddle hierarchy breadcrumb instead of a fixed **Huddle Logic Gate:** label. The current editable `huddle_logic_gates.header` stays separate from the breadcrumb and keeps its existing save behavior.
-18. The page reuses the normal Node and Logic Gate RACI role cards, people-and-group picker, Editor tab, Permissions tab, and shared Mango editor toolbar in its top header area.
-19. The shared editor toolbar includes the existing font size, bold, underline, italic, strikethrough, highlight, alignment, alphabetical list, numerical list, dense bullet list, checklist, and table controls.
+18. The page reuses the normal Node and Logic Gate RACI role cards, people-and-group picker, Editor tab, Permissions tab, shared Mango editor toolbar, and canonical Saved, Pending, and Failed state in its top header area.
+19. The shared editor toolbar includes the existing font size, bold, underline, italic, strikethrough, highlight, alignment, alphabetical list, numerical list, dense bullet list, checklist, and table controls, and the title surface is no wider than the shared RACI row.
 20. Pin, fullscreen, delete, and close are compact icon actions in the top-right header instead of text buttons.
-21. The page has three horizontally resizable columns: the TipTap editor on the left, related normal Logic Gates in the middle, and Huddle Nodes on the right.
+21. The page has three horizontally resizable columns: the TipTap editor on the left, a middle view toggle that defaults to Action Items and may show related Processes, and Huddle Nodes on the right.
 22. `huddle_logic_gate_relationships` is the only live authority that links a Huddle Logic Gate to a normal Logic Gate, and each row stores the literal `company_id`, `huddle_logic_gate_id`, and `logic_gate_id`.
 23. A Huddle Logic Gate may link to many normal Logic Gates, and the same normal Logic Gate may link to many Huddle Logic Gates.
 24. One exact Huddle Logic Gate and normal Logic Gate pair has at most one row, and repeating the link command is idempotent.
@@ -41,15 +41,21 @@
 39. The normal Logic Gate's Huddle plus button opens the shared Universal Picker in locked `##` mode with only Huddle Logic Gates enabled, and choosing one creates the same exact idempotent relationship edge.
 40. Every Huddle Logic Gate card on a normal Logic Gate shows the shared Huddle Logic Gate icon and current header, and opening or removing that card never copies or deletes either endpoint.
 41. KPI cards shown inside Huddle Logic Gate and Huddle Node cards use the shared orange, red, and yellow KPI chart icon.
+42. Direct creation atomically inserts one Huddle Logic Gate with the standard empty TipTap document, its direct policy settings, and one root Huddle Explorer item using the same exact UUID.
+43. The Huddle Logic Gate editor uses the canonical 500 ms autosave, Universal Picker references, selection Action Item control, and typed S3 inline-image attachment path used by normal supported Mango editors.
+44. A Huddle Logic Gate attachment uses `resource_type='huddle_logic_gate'` and the exact Huddle Logic Gate ID; no normal Logic Gate, Huddle Node, or generic compatibility owner is substituted.
+45. The Action Items view reads the current deduplicated rollup directly by exact Huddle Logic Gate ID and remains valid when the Process owns no Huddle Nodes.
+46. Action Items default to grouping by Person in charge and then Completion Due Date, with the existing universal grouping controls available for composition and sort direction.
+47. Refreshing the Action Items view keeps the current rows visible and does not reload or remount the Huddle editor.
 
-Last updated: 2026-08-25
+Last updated: 2026-08-28
 
-# Process Story: Link current Logic Gates and capture a Huddle Node
+# Process Story: Create a Huddle Process and manage its live work
 
-An editor uses the middle-column plus button and chooses one normal Logic Gate through the locked `##` Universal Picker
+An editor creates a Huddle Process from the sidebar or converts an eligible Process
 ↓
-Mango creates one typed `huddle_logic_gate_relationships` row and shows the shared Logic Gate card with its current KPI cards
+Mango atomically stores the exact Huddle Process, direct policy, and Huddle Explorer placement
 ↓
-Creating a Huddle Node atomically records the current Logic Gate and KPI identities for that new Huddle Node
+The shared editor autosaves text, references, and typed S3 images while the middle view opens on current Action Items
 ↓
-The Huddle Logic Gate stays live, while the Huddle Node keeps that creation-time relationship set and reads current displayed Logic Gate and KPI fields when opened
+The Process view may still link normal Processes, and every Huddle Node keeps its fixed creation-time Process and KPI snapshot

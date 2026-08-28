@@ -7,10 +7,15 @@ import {
   actionItemColor,
   actionItemColorHex,
   actionItemFieldOptionLabel,
+  actionItemGroupingStorageKey,
   actionItemGroupingValues,
   actionItemPersonLabel,
+  actionItemReferenceIDs,
   formatActionItemDate,
+  listHuddleActionItems,
   normalizeActionItemGroupings,
+  transitionActionItemReferenceRefresh,
+  type ActionItemReferenceRefreshState,
 } from "../../../../frontend/src/modules/huddles/huddleActionItems.js";
 
 const users: CompanyUser[] = [{
@@ -37,8 +42,13 @@ const item = {
   ],
 } as Entity;
 
-test("Huddle Action Items default to personal person then created-date grouping", () => {
+test("Huddle Action Items default to person then completion due date with the v2 personal storage key", () => {
   assert.deepEqual(normalizeActionItemGroupings(undefined), DEFAULT_ACTION_ITEM_GROUPINGS);
+  assert.deepEqual(DEFAULT_ACTION_ITEM_GROUPINGS, [
+    { field: "person", direction: "asc" },
+    { field: "completion_due_date", direction: "asc" },
+  ]);
+  assert.equal(actionItemGroupingStorageKey(" company-1 ", " user-1 "), "mangorts-huddle-action-item-groupings-v2:company-1:user-1");
   assert.deepEqual(normalizeActionItemGroupings([
     { field: "color", direction: "desc" },
     { field: "color", direction: "asc" },
@@ -62,4 +72,65 @@ test("missing owner and due date group last", () => {
   const unassigned = { ...item, entity_fields: [] } as Entity;
   assert.equal(actionItemGroupingValues(unassigned, "person", users)[0]?.sortLast, true);
   assert.equal(actionItemGroupingValues(unassigned, "completion_due_date", users)[0]?.sortLast, true);
+});
+
+test("Huddle Action Items request the exact node or Process scope", async () => {
+  const paths: string[] = [];
+  const requestJSON = async <T>(path: string): Promise<T> => {
+    paths.push(path);
+    return { action_items: [item] } as T;
+  };
+
+  assert.deepEqual(await listHuddleActionItems(requestJSON, {
+    companyID: "company-1",
+    scope: { resourceType: "huddle_node", resourceID: "node-1" },
+  }), [item]);
+  await listHuddleActionItems(requestJSON, {
+    companyID: "company-1",
+    scope: { resourceType: "huddle_logic_gate", resourceID: "huddle-1" },
+  });
+
+  assert.deepEqual(paths, [
+    "/v1/action-items?company_id=company-1&huddle_node_id=node-1",
+    "/v1/action-items?company_id=company-1&huddle_logic_gate_id=huddle-1",
+  ]);
+});
+
+test("Action Item reference signatures include only exact Action Item entities", () => {
+  assert.deepEqual(actionItemReferenceIDs({
+    type: "doc",
+    content: [
+      { type: "mangoEntityLink", attrs: { entityType: "entity", entityId: "item-2", actionItem: true } },
+      { type: "paragraph", content: [
+        { type: "mangoEntityLink", attrs: { entityType: "entity", entityId: "item-1", actionItemColor: "yellow" } },
+        { type: "mangoEntityLink", attrs: { entityType: "entity", entityId: "entity-plain", actionItem: false } },
+        { type: "mangoEntityLink", attrs: { entityType: "node", entityId: "node-1", actionItem: true } },
+        { type: "mangoEntityLink", attrs: { entityType: "entity", entityId: "item-2", actionItem: true } },
+      ] },
+    ],
+  }), ["item-1", "item-2"]);
+});
+
+test("Huddle Action Item rollups refresh only after a saved reference-set change", () => {
+  let state: ActionItemReferenceRefreshState | undefined;
+  const apply = (event: Parameters<typeof transitionActionItemReferenceRefresh>[1]) => {
+    const result = transitionActionItemReferenceRefresh(state, event);
+    state = result.state;
+    return result.refresh;
+  };
+
+  assert.equal(apply({ type: "snapshot", signature: "" }), false, "initial document establishes the baseline");
+  assert.equal(apply({ type: "snapshot", signature: "" }), false, "plain typing does not dirty the Action Item set");
+  assert.equal(apply({ type: "saved" }), false, "saving plain text does not refresh the rollup");
+
+  assert.equal(apply({ type: "snapshot", signature: "item-1" }), false, "a local reference waits for its durable save");
+  assert.equal(apply({ type: "saved" }), true, "the saved added reference refreshes exactly once");
+  assert.equal(apply({ type: "saved" }), false, "a repeated saved signal does not refresh again");
+  assert.equal(apply({ type: "canonical", signature: "item-1" }), false, "an unchanged canonical echo does not refresh");
+
+  assert.equal(apply({ type: "snapshot", signature: "" }), false, "a local removal also waits for save");
+  assert.equal(apply({ type: "saved" }), true, "the saved removal refreshes exactly once");
+  assert.equal(apply({ type: "canonical", signature: "item-2" }), true, "a genuinely changed remote canonical set refreshes once");
+  assert.equal(apply({ type: "canonical", signature: "item-2" }), false, "a repeated canonical set is ignored");
+  assert.equal(apply({ type: "removed" }), true, "a successful textbox deletion refreshes even before editor hydration");
 });

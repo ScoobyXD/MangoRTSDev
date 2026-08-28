@@ -136,6 +136,10 @@ const componentTests = [
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/huddles/logicGateKPISection.test.js"),
   },
   {
+    source: resolve(repoRoot, "tests/frontend/modules/huddles/huddleActionItemsPanel.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/huddles/huddleActionItemsPanel.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/logic-gates/logicGateQDTracker.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/logic-gates/logicGateQDTracker.test.js"),
   },

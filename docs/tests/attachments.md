@@ -1,8 +1,8 @@
 # Process Story
 
-A Mango user uploads one file and Mango stores the completed original in private S3 with one `attachments` row. Each Node, Huddle Node, Project, Logic Gate, chat, email message, email draft, or signature that uses the file gets an `attachment_relationships` row. A Project or Huddle Node textbox file remains an owner relationship with the textbox ID as origin metadata, while a sent Project chat owns its final link through `project_chat_message` and the exact `project_textbox_chats.chat_id`. Removing one relationship keeps the file when another valid relationship survives. Removing the final relationship makes the file garbage: Mango makes it unavailable, deletes its original and generated previews from S3, and then removes its database rows. Sending an email creates the exact `email_message` relationship before its draft is removed, so the Sent viewer can still open the file.
+A Mango user uploads one file and Mango stores the completed original in private S3 with one `attachments` row. Each Node, Huddle Node, Project, Logic Gate, Huddle Logic Gate, chat, email message, email draft, or signature that uses the file gets an `attachment_relationships` row. A Project or Huddle Node textbox file remains an owner relationship with the textbox ID as origin metadata, while a sent Project chat owns its final link through `project_chat_message` and the exact `project_textbox_chats.chat_id`. Removing one relationship keeps the file when another valid relationship survives. Removing the final relationship makes the file garbage: Mango makes it unavailable, deletes its original and generated previews from S3, and then removes its database rows. Sending an email creates the exact `email_message` relationship before its draft is removed, so the Sent viewer can still open the file.
 
-Last updated: 2026-08-17
+Last updated: 2026-08-28
 
 Development Attachment Step 2 completed on 2026-08-04. The final sync reported `READY_FOR_ATTACHMENT_STEP2_DATABASE_BOUNDARY` with 491 upload jobs, 842 previews, and 1,080 relationships; all 253 pending zero-owner cleanups were finalized. The five retired attachment source tables (`attachment_migration_items`, `attachment_migration_runs`, `attachment_variants`, `resource_attachments`, and `attachment_upload_intents`) are absent from the canonical schema. The obsolete attachment migration command is removed; current operations use only final tables and the shared retry-safe cleanup service.
 
@@ -123,6 +123,7 @@ ATT71 - The development attachment cutover has no known unfinished uploads to pr
 ATT72 - Attachment rollout completed all three gates: copy/reconcile, the writer-paused Step 2 boundary plus final backend deploy, then tests/snapshot and strict retirement of `resource_attachments`, `attachment_upload_intents`, `attachment_variants`, `attachment_migration_runs`, and `attachment_migration_items`. Fresh databases contain only the five final attachment tables.
 ATT73 - A complete bucket-wide S3 audit is not required for the first consolidation. Every object actively deleted by the migration or product cleanup must still be matched to its database key, and normal product deletion must start through Mango rather than by directly removing an S3 object.
 ATT74 - A Huddle Node file uses `resource_type='huddle_node'`, the exact `huddle_nodes.huddle_node_id` as `resource_id`, and its exact textbox ID only as optional `information_id` origin metadata. Edit access to that Huddle Node authorizes the same upload, list, content, and delete flow used by other editor owners; no email relationship or second attachment table is created.
+ATT75 - A Huddle Logic Gate inline image uses `resource_type='huddle_logic_gate'` and the exact `huddle_logic_gates.huddle_logic_gate_id` as both owner and editor-document origin. Edit access to that exact Huddle Logic Gate authorizes upload, link, list, content, and delete. Recycle captures and retires those exact links, restore revives them, permanent deletion leaves no stale link, and no normal Logic Gate, Huddle Node, or generic compatibility owner is substituted.
 
 ### Attachment Step 1 operator sequence
 
@@ -582,6 +583,8 @@ Business logic covered:
 - ATT71
 - ATT72
 - ATT73
+- ATT74
+- ATT75
 
 Given:
 - One attachment has two valid relationships, and another has only one valid relationship.

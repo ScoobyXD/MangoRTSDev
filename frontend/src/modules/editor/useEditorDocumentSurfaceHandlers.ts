@@ -99,6 +99,7 @@ import { ExplorerEntityIcon } from "../../icons/index.js";
 import {
   createEditorEntityLinkElement,
   createNodeEntityFromSelection,
+  editorEntityLinkAnchorBounds,
   editorEntityTypeLabel,
   openEditorEntityLink,
   readActiveEntityLinkDraft,
@@ -5505,7 +5506,11 @@ export function useEditorDocumentSurfaceHandlers({
       if (entity) {
         event.preventDefault();
         event.stopPropagation();
-        openEditorEntityLink(entity, entityLinkContext?.onOpen ? { onOpen: entityLinkContext.onOpen } : undefined);
+        openEditorEntityLink(
+          entity,
+          entityLinkContext?.onOpen ? { onOpen: entityLinkContext.onOpen } : undefined,
+          editorEntityLinkAnchorBounds(entityElement),
+        );
         return;
       }
       const checklistItem = getChecklistItemForPointer(root, event);
@@ -5662,7 +5667,11 @@ export function useEditorDocumentSurfaceHandlers({
         event.preventDefault();
         event.stopPropagation();
         editorInputBatcher.flush(root);
-        openEditorEntityLink(keyboardEntity, entityLinkContext?.onOpen ? { onOpen: entityLinkContext.onOpen } : undefined);
+        openEditorEntityLink(
+          keyboardEntity,
+          entityLinkContext?.onOpen ? { onOpen: entityLinkContext.onOpen } : undefined,
+          editorEntityLinkAnchorBounds(keyboardEntityElement),
+        );
         return;
       }
       if (!event.nativeEvent.isComposing && event.key === "Backspace") {

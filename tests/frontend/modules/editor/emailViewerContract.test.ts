@@ -163,7 +163,7 @@ test("the shared inline email reference host opens the exact stored thread on ev
   assert.match(appLayout, /\{!homePageOwnsEmailReferencePreview && \(\s*<EmailReferencePreviewHost/);
   assert.match(homePage, /if \(entity\.entityType === "email_message"\) \{\s*openEditorEntityLink\(entity\)/);
   assert.match(tiptapEditor, /target\?\.closest\('\[data-mango-entity-link="true"\]'\)\) return/);
-  assert.match(activeClick, /openEntityLink\(\{ entityType, entityID, label, \.\.\.\(entityType === "email_message" \? emailEntityMetadataFromRecord\(node\.attrs\) : \{\}\) \}\)/);
+  assert.match(activeClick, /openEntityLink\(\{[\s\S]{0,800}\.\.\.\(entityType === "email_message" \? emailEntityMetadataFromRecord\(node\.attrs\) : \{\}\),[\s\S]{0,100}\}, editorEntityLinkAnchorBounds\(entityElement\)\)/);
   assert.match(staticRenderer, /onClick=\{\(event\) =>[\s\S]{0,300}openEditorEntityLink/);
   assert.match(homeParts, /data-email-reference-preview="true"/);
   assert.match(homeParts, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);

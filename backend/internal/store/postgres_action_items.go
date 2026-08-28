@@ -327,6 +327,49 @@ where company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, huddleNodeID)
 	if err != nil {
 		return nil, err
 	}
+	items, err := listHuddleLogicGateActionItemsTx(ctx, tx, companyID, ownerID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *PostgresRepo) ListHuddleLogicGateActionItems(companyID, huddleLogicGateID string) ([]domain.Entity, error) {
+	companyID, huddleLogicGateID = cleanUUIDText(companyID), cleanUUIDText(huddleLogicGateID)
+	if companyID == "" || huddleLogicGateID == "" {
+		return nil, ErrInvalid
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var exists bool
+	if err = tx.QueryRowContext(ctx, `
+select exists(
+  select 1 from huddle_logic_gates
+  where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid
+)`, companyID, huddleLogicGateID).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	items, err := listHuddleLogicGateActionItemsTx(ctx, tx, companyID, huddleLogicGateID)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func listHuddleLogicGateActionItemsTx(ctx context.Context, tx *sql.Tx, companyID, huddleLogicGateID string) ([]domain.Entity, error) {
 	rows, err := tx.QueryContext(ctx, `
 select entity.company_id::text, entity.entity_id::text, entity.entity_type_id::text, entity_type.name,
        entity.entity_folder_id::text, entity.name, entity.position, entity.body_json, entity.revision,
@@ -346,7 +389,7 @@ join entities entity
 join entity_types entity_type
   on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
 where entity_type.system_key=$4::text
-order by entity.created_timestamp, entity.entity_id`, companyID, ownerID, EntityTypeHuddleNode, ActionItemEntityTypeSystemKey)
+order by entity.created_timestamp, entity.entity_id`, companyID, huddleLogicGateID, EntityTypeHuddleNode, ActionItemEntityTypeSystemKey)
 	if err != nil {
 		return nil, err
 	}
@@ -403,9 +446,6 @@ order by field.entity_id, field.position, lower(field.name), field.entity_field_
 		if err := fieldRows.Close(); err != nil {
 			return nil, err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
 	}
 	return items, nil
 }

@@ -23,6 +23,16 @@ type fakeAttachmentObjectStorage struct {
 	getKeys []string
 }
 
+func TestHuddleLogicGateAttachmentPermissionUsesExactTypedOwner(t *testing.T) {
+	entityType, ok := attachmentPermissionEntityType(store.EntityTypeHuddleLogicGate)
+	if !ok || entityType != store.EntityTypeHuddleLogicGate {
+		t.Fatalf("Huddle Logic Gate attachment permission type=%q ok=%v", entityType, ok)
+	}
+	if entityType, ok := attachmentPermissionEntityType("huddle-logic-gate"); ok || entityType != "" {
+		t.Fatalf("noncanonical Huddle Logic Gate attachment permission type=%q ok=%v", entityType, ok)
+	}
+}
+
 type attachmentMetadataCountingRepo struct {
 	store.Repository
 	listAttachmentResourceLinksCalls int

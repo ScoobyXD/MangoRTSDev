@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -51,12 +52,26 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		huddleNodeID := strings.TrimSpace(r.URL.Query().Get("huddle_node_id"))
-		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleNode, huddleNodeID, "huddle_node_not_found") {
+		huddleLogicGateID := strings.TrimSpace(r.URL.Query().Get("huddle_logic_gate_id"))
+		if (huddleNodeID == "") == (huddleLogicGateID == "") {
+			writeError(w, http.StatusBadRequest, "exactly_one_huddle_scope_required")
 			return
 		}
-		items, err := s.repo.ListHuddleNodeActionItems(companyID, huddleNodeID)
-		if err != nil {
-			writeEntityError(w, err, "failed_to_list_action_items")
+		var itemsErr error
+		var items []domain.Entity
+		if huddleNodeID != "" {
+			if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleNode, huddleNodeID, "huddle_node_not_found") {
+				return
+			}
+			items, itemsErr = s.repo.ListHuddleNodeActionItems(companyID, huddleNodeID)
+		} else {
+			if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleLogicGate, huddleLogicGateID, "huddle_logic_gate_not_found") {
+				return
+			}
+			items, itemsErr = s.repo.ListHuddleLogicGateActionItems(companyID, huddleLogicGateID)
+		}
+		if itemsErr != nil {
+			writeEntityError(w, itemsErr, "failed_to_list_action_items")
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"action_items": items})

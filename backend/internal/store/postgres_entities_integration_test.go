@@ -1,10 +1,35 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"testing"
 )
+
+func TestPostgresEntitySearchMatchesEntityTypeName(t *testing.T) {
+	db, repo := openRealtimePostgresIntegration(t)
+	company, err := repo.CreateCompany("Entity Type search")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.Exec("delete from companies where company_id=$1::uuid", company.CompanyID) })
+	entityType, err := repo.CreateEntityType(EntityTypeInput{CompanyID: company.CompanyID, Name: "Action Item Search"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entity, err := repo.CreateEntity(EntityInput{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, Name: "Call supplier"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := repo.ListEntities(context.Background(), EntityListQuery{CompanyID: company.CompanyID, Query: "action item search", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].EntityID != entity.EntityID {
+		t.Fatalf("Entity Type-name search results=%+v", items)
+	}
+}
 
 func TestPostgresEntitiesConcurrentFolderMovesKeepTreeAcyclic(t *testing.T) {
 	db, repo := openRealtimePostgresIntegration(t)

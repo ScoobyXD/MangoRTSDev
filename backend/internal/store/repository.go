@@ -114,6 +114,7 @@ type EntitiesRepository interface {
 	DeleteEntityField(companyID, entityID, entityFieldID string) error
 	CreateActionItem(input ActionItemInput) (domain.Entity, error)
 	ListHuddleNodeActionItems(companyID, huddleNodeID string) ([]domain.Entity, error)
+	ListHuddleLogicGateActionItems(companyID, huddleLogicGateID string) ([]domain.Entity, error)
 }
 
 type AccountRepository interface {
@@ -518,6 +519,8 @@ func NormalizeAttachmentResourceType(resourceType string) string {
 		return "logic_gate"
 	case "project":
 		return "project"
+	case "huddle_logic_gate":
+		return EntityTypeHuddleLogicGate
 	case "huddle_node", "huddle-node":
 		return EntityTypeHuddleNode
 	case "node_chat_message", "node-chat-message":
@@ -1640,6 +1643,7 @@ type HuddleLogicGateRelationshipInput struct {
 
 type HuddleRepository interface {
 	ConvertLogicGateToHuddle(companyID, logicGateID, actorID string) (domain.HuddleLogicGate, error)
+	CreateHuddleLogicGate(input HuddleCreateInput) (domain.HuddleLogicGate, error)
 	ListHuddleLogicGates(companyID string) ([]domain.HuddleLogicGate, error)
 	GetHuddleLogicGate(companyID, huddleLogicGateID string) (domain.HuddleLogicGate, error)
 	UpdateHuddleLogicGate(input HuddleUpdateInput) (domain.HuddleLogicGate, error)

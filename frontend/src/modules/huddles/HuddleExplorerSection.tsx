@@ -8,6 +8,7 @@ import { HuddlePeopleIcon, HuddleResourceIcon } from "./HuddleResourceIcon";
 type Folder = { company_id: string; folder_id: string; parent_folder_id?: string | null; name: string };
 type Item = { company_id: string; item_id: string; parent_folder_id?: string | null; resource_type: "huddle_logic_gate"; resource_id: string; name: string };
 type Tree = { folders?: Folder[]; items?: Item[] };
+type HuddleLogicGate = { company_id: string; huddle_logic_gate_id: string; header: string };
 
 export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: string; currentUserID: string }> = ({ apiBase, companyID, currentUserID }) => {
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
@@ -86,6 +87,20 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
     if (!name) return;
     await requestJSON("/v1/huddle-explorer/folders", { method: "POST", json: { company_id: companyID, parent_folder_id: parentFolderID, name } });
     await load();
+  };
+  const createHuddle = async () => {
+    const header = window.prompt("Huddle Process name", "New Huddle Process")?.trim();
+    if (!header) return;
+    const payload = await requestJSON<{ huddle_logic_gate: HuddleLogicGate }>("/v1/huddle-logic-gates", {
+      method: "POST",
+      json: { company_id: companyID, header },
+    });
+    const created = payload.huddle_logic_gate;
+    emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
+    await load();
+    window.dispatchEvent(new CustomEvent<HuddleOpenResource>("mangorts:huddle-open", {
+      detail: { resourceType: "huddle_logic_gate", resourceID: created.huddle_logic_gate_id, name: created.header },
+    }));
   };
   const renameFolder = async (folder: Folder) => {
     const name = window.prompt("Folder name", folder.name)?.trim();
@@ -180,7 +195,10 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
       <div style={headerStyle}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><HuddlePeopleIcon color="#334155" size={15} /><span>Huddles</span></span>
         <span style={headerLineStyle} />
-        <button type="button" aria-label="Create Huddle folder" title="Create folder" onClick={() => void createFolder()} style={addFolderButtonStyle}>+ Folder</button>
+        <span style={headerActionsStyle}>
+          <button type="button" aria-label="Create Huddle Process" title="Create Huddle Process" onClick={() => void createHuddle()} style={addButtonStyle}>+ Huddle</button>
+          <button type="button" aria-label="Create Huddle folder" title="Create folder" onClick={() => void createFolder()} style={addButtonStyle}>+ Folder</button>
+        </span>
       </div>
       <div style={{ minWidth: 0, display: "grid", alignContent: "start", gap: 3 }}>
         {renderLevel("", 0)}
@@ -194,7 +212,8 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
 const sectionStyle: React.CSSProperties = { flex: "0 0 auto", minWidth: 0, display: "grid", gap: 6, margin: "0 1px 8px", padding: "8px 7px 9px", border: "1px solid rgba(148,163,184,.24)", borderRadius: 11, background: "linear-gradient(145deg,rgba(255,255,255,.92),rgba(248,250,252,.78))", boxShadow: "4px 5px 14px rgba(148,163,184,.2), -3px -3px 10px rgba(255,255,255,.82), inset 1px 1px 0 rgba(255,255,255,.76)" };
 const headerStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center", gap: 8, padding: "0 1px 0 2px", color: "#111827", fontSize: 12, fontWeight: 650 };
 const headerLineStyle: React.CSSProperties = { minWidth: 0, height: 1, background: "rgba(15,23,42,.12)" };
-const addFolderButtonStyle: React.CSSProperties = { minWidth: 58, height: 22, border: "1px solid rgba(100,116,139,.25)", borderRadius: 5, background: "rgba(255,255,255,.74)", color: "#334155", cursor: "pointer", padding: "0 6px", font: "inherit", fontSize: 10.5, fontWeight: 700 };
+const headerActionsStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 4 };
+const addButtonStyle: React.CSSProperties = { minWidth: 58, height: 22, border: "1px solid rgba(100,116,139,.25)", borderRadius: 5, background: "rgba(255,255,255,.74)", color: "#334155", cursor: "pointer", padding: "0 6px", font: "inherit", fontSize: 10.5, fontWeight: 700 };
 function rowStyle(raised: boolean): React.CSSProperties { return { minWidth: 0, minHeight: 31, display: "grid", gridTemplateColumns: "14px minmax(0,1fr) 58px 22px 22px 22px", alignItems: "center", gap: 2, borderRadius: 8, background: raised ? "rgba(255,255,255,.78)" : "transparent", boxShadow: raised ? "0 5px 12px rgba(100,116,139,.18), 0 1px 3px rgba(15,23,42,.08)" : "none", transform: raised ? "translateY(-2px)" : "translateY(0)", transition: "background 120ms ease,box-shadow 140ms ease,transform 120ms ease" }; }
 function itemRowStyle(raised: boolean): React.CSSProperties { return { ...rowStyle(raised), gridTemplateColumns: "minmax(0,1fr) 58px 22px" }; }
 const disclosureButtonStyle: React.CSSProperties = { width: 14, height: 22, display: "grid", placeItems: "center", border: 0, background: "transparent", cursor: "pointer", padding: 0 };

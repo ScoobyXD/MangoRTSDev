@@ -172,6 +172,23 @@ func (r *MemoryRepo) ListHuddleNodeActionItems(companyID, huddleNodeID string) (
 	if !exists {
 		return nil, ErrNotFound
 	}
+	return r.listHuddleLogicGateActionItemsLocked(companyID, node.HuddleLogicGateID), nil
+}
+
+func (r *MemoryRepo) ListHuddleLogicGateActionItems(companyID, huddleLogicGateID string) ([]domain.Entity, error) {
+	companyID, huddleLogicGateID = cleanUUIDText(companyID), cleanUUIDText(huddleLogicGateID)
+	if companyID == "" || huddleLogicGateID == "" {
+		return nil, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, exists := r.huddleLogicGates[key(companyID, huddleLogicGateID)]; !exists {
+		return nil, ErrNotFound
+	}
+	return r.listHuddleLogicGateActionItemsLocked(companyID, huddleLogicGateID), nil
+}
+
+func (r *MemoryRepo) listHuddleLogicGateActionItemsLocked(companyID, huddleLogicGateID string) []domain.Entity {
 	seen := map[string]bool{}
 	items := []domain.Entity{}
 	for _, relationship := range r.entityRelationships {
@@ -179,7 +196,7 @@ func (r *MemoryRepo) ListHuddleNodeActionItems(companyID, huddleNodeID string) (
 			continue
 		}
 		linkedNode, exists := r.huddleNodes[key(companyID, relationship.ResourceID)]
-		if !exists || linkedNode.HuddleLogicGateID != node.HuddleLogicGateID {
+		if !exists || linkedNode.HuddleLogicGateID != huddleLogicGateID {
 			continue
 		}
 		entity, exists := r.entities[key(companyID, relationship.EntityID)]
@@ -190,7 +207,7 @@ func (r *MemoryRepo) ListHuddleNodeActionItems(companyID, huddleNodeID string) (
 		items = append(items, r.entityDetailLocked(entity))
 	}
 	sortActionItems(items)
-	return items, nil
+	return items
 }
 
 func sortActionItems(items []domain.Entity) {
