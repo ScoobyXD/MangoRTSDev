@@ -3519,13 +3519,60 @@ CREATE FUNCTION public.mangorts_validate_entity_relationship() RETURNS trigger
     SET search_path TO 'public', 'pg_temp'
     AS $$
 begin
-  if new.company_id is distinct from old.company_id
-    or new.entity_id is distinct from old.entity_id
-    or new.resource_type is distinct from old.resource_type
-    or new.resource_id is distinct from old.resource_id then
+  if tg_op='UPDATE' and (
+       new.company_id is distinct from old.company_id
+       or new.entity_id is distinct from old.entity_id
+       or new.resource_type is distinct from old.resource_type
+       or new.resource_id is distinct from old.resource_id
+     ) then
     raise exception 'entity_relationship_endpoints_immutable' using errcode='23514';
   end if;
+
+  if new.resource_type='huddle_node' then
+    perform 1
+    from huddle_nodes
+    where company_id=new.company_id and huddle_node_id=new.resource_id
+    for key share;
+  elsif new.resource_type='huddle_logic_gate' then
+    perform 1
+    from huddle_logic_gates
+    where company_id=new.company_id and huddle_logic_gate_id=new.resource_id
+    for key share;
+  else
+    raise exception 'entity_relationship_resource_type_invalid:%',new.resource_type using errcode='23514';
+  end if;
+
+  if not found then
+    raise exception 'entity_relationship_resource_not_found:%:%',new.resource_type,new.resource_id using errcode='23503';
+  end if;
   return new;
+end;
+$$;
+
+
+--
+-- Name: mangorts_delete_entity_relationships_for_huddle_resource(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_delete_entity_relationships_for_huddle_resource() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+begin
+  if tg_table_name='huddle_nodes' then
+    delete from entity_relationships
+    where company_id=old.company_id
+      and resource_type='huddle_node'
+      and resource_id=old.huddle_node_id;
+  elsif tg_table_name='huddle_logic_gates' then
+    delete from entity_relationships
+    where company_id=old.company_id
+      and resource_type='huddle_logic_gate'
+      and resource_id=old.huddle_logic_gate_id;
+  else
+    raise exception 'entity_relationship_delete_source_invalid:%',tg_table_name using errcode='23514';
+  end if;
+  return old;
 end;
 $$;
 
@@ -5240,7 +5287,7 @@ CREATE TABLE public.entity_relationships (
     resource_type text NOT NULL,
     resource_id uuid NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT entity_relationships_resource_type_chk CHECK ((resource_type = 'huddle_node'::text))
+    CONSTRAINT entity_relationships_resource_type_chk CHECK ((resource_type = ANY (ARRAY['huddle_node'::text, 'huddle_logic_gate'::text])))
 );
 
 
@@ -8425,7 +8472,21 @@ CREATE TRIGGER trg_unlink_entity_fields_after_template_retype AFTER UPDATE OF fi
 -- Name: entity_relationships trg_validate_entity_relationship; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_validate_entity_relationship BEFORE UPDATE ON public.entity_relationships FOR EACH ROW EXECUTE FUNCTION public.mangorts_validate_entity_relationship();
+CREATE TRIGGER trg_validate_entity_relationship BEFORE INSERT OR UPDATE ON public.entity_relationships FOR EACH ROW EXECUTE FUNCTION public.mangorts_validate_entity_relationship();
+
+
+--
+-- Name: huddle_nodes trg_delete_huddle_node_entity_relationships; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_delete_huddle_node_entity_relationships AFTER DELETE ON public.huddle_nodes FOR EACH ROW EXECUTE FUNCTION public.mangorts_delete_entity_relationships_for_huddle_resource();
+
+
+--
+-- Name: huddle_logic_gates trg_delete_huddle_logic_gate_entity_relationships; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_delete_huddle_logic_gate_entity_relationships AFTER DELETE ON public.huddle_logic_gates FOR EACH ROW EXECUTE FUNCTION public.mangorts_delete_entity_relationships_for_huddle_resource();
 
 
 --
@@ -9522,14 +9583,6 @@ ALTER TABLE ONLY public.raci_tabs_items
 
 ALTER TABLE ONLY public.entity_relationships
     ADD CONSTRAINT entity_relationships_entity_fkey FOREIGN KEY (company_id, entity_id) REFERENCES public.entities(company_id, entity_id) ON DELETE CASCADE;
-
-
---
--- Name: entity_relationships entity_relationships_huddle_node_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.entity_relationships
-    ADD CONSTRAINT entity_relationships_huddle_node_fkey FOREIGN KEY (company_id, resource_id) REFERENCES public.huddle_nodes(company_id, huddle_node_id) ON DELETE CASCADE;
 
 
 --

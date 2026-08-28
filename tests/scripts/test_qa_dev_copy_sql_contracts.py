@@ -83,6 +83,10 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("'20260827_entities.sql'", self.preflight)
         self.assertIn("'20260828_action_items.sql'", self.preflight)
         self.assertIn("'20260828_entity_relationships.sql'", self.preflight)
+        self.assertIn(
+            "'20260828_zz_huddle_logic_gate_action_item_relationships.sql'",
+            self.preflight,
+        )
         self.assertNotIn(
             "to_regclass('public.action_item_huddle_relationships') is null",
             self.sanitizer,
@@ -92,11 +96,15 @@ class QADevCopySQLContracts(unittest.TestCase):
         sanitizer = self.runbook.index("qa_dev_copy_sanitize.sql")
         action_items = self.runbook.index("20260828_action_items.sql")
         entity_relationships = self.runbook.index("20260828_entity_relationships.sql")
+        huddle_logic_gate_relationships = self.runbook.index(
+            "20260828_zz_huddle_logic_gate_action_item_relationships.sql"
+        )
         verifier = self.runbook.index("qa_dev_copy_verify.sql", sanitizer)
         export = self.runbook.index("--data-only", verifier)
         self.assertLess(sanitizer, action_items)
         self.assertLess(action_items, entity_relationships)
-        self.assertLess(entity_relationships, verifier)
+        self.assertLess(entity_relationships, huddle_logic_gate_relationships)
+        self.assertLess(huddle_logic_gate_relationships, verifier)
         self.assertLess(verifier, export)
         self.assertIn("-auditpurpose canonicalbaseline", self.runbook)
         self.assertIn("canonical_schema_inventory_sha256=", self.runbook)
@@ -460,6 +468,15 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
                 / "db"
                 / "migrations"
                 / "20260828_entity_relationships.sql"
+            ).read_text(encoding="utf-8")
+        )
+        self.run_sql(
+            (
+                ROOT
+                / "backend"
+                / "db"
+                / "migrations"
+                / "20260828_zz_huddle_logic_gate_action_item_relationships.sql"
             ).read_text(encoding="utf-8")
         )
         self.run_sql(self.verifier_sql())

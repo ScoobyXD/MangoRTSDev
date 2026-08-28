@@ -426,7 +426,8 @@ foreach ($sqlFile in @(
 Assert-QaWritersStopped
 foreach ($migrationFile in @(
   ".\backend\db\migrations\20260828_action_items.sql",
-  ".\backend\db\migrations\20260828_entity_relationships.sql"
+  ".\backend\db\migrations\20260828_entity_relationships.sql",
+  ".\backend\db\migrations\20260828_zz_huddle_logic_gate_action_item_relationships.sql"
 )) {
   & $psql --host $qaHost --port $qaPort --username $qaUser `
     --dbname $rawDatabase --no-password --no-psqlrc `

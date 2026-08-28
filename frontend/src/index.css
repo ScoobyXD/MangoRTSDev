@@ -1167,7 +1167,8 @@ button, input, textarea, select {
   }
 }
 
-.mango-editor-action-item--yellow {
+.mango-editor-action-item--yellow,
+.mango-editor-entity-link.mango-editor-action-item--yellow {
   --mango-entity-chip-border: rgba(161, 98, 7, 0.82);
   --mango-entity-chip-background: linear-gradient(135deg, #fde047, #facc15);
   --mango-entity-chip-shadow: rgba(161, 98, 7, 0.34);
@@ -1176,7 +1177,8 @@ button, input, textarea, select {
   animation: mango-editor-action-item-pulse 2s ease-in-out infinite;
 }
 
-.mango-editor-action-item--red {
+.mango-editor-action-item--red,
+.mango-editor-entity-link.mango-editor-action-item--red {
   --mango-entity-chip-border: rgba(153, 27, 27, 0.84);
   --mango-entity-chip-background: linear-gradient(135deg, #f87171, #ef4444);
   --mango-entity-chip-shadow: rgba(153, 27, 27, 0.34);

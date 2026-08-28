@@ -30,6 +30,7 @@ export type EditorEntityLinkAnchorBounds = {
   top: number;
   right: number;
   bottom: number;
+  portalTarget?: HTMLElement;
 };
 
 export type EditorEntityReferenceOpenDetail = {
@@ -136,7 +137,8 @@ export function editorEntityLinkAnchorBounds(element: Element | null): EditorEnt
   if (!element) return undefined;
   const rect = element.getBoundingClientRect();
   if (![rect.left, rect.top, rect.right, rect.bottom].every(Number.isFinite)) return undefined;
-  return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom };
+  const portalTarget = element.closest<HTMLElement>('[data-mango-modal-layer="true"]') ?? undefined;
+  return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, ...(portalTarget ? { portalTarget } : {}) };
 }
 
 export function openEditorEntityLink(

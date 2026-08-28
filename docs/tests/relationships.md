@@ -15,12 +15,12 @@
 13. The Huddle Logic Gate surface and the normal Logic Gate surface create, read, and remove the same `huddle_logic_gate_relationships` rows; neither surface owns a second relationship list.
 14. The normal Logic Gate relationship tray may change an edge only when the actor can edit that normal Logic Gate and view the selected Huddle Logic Gate.
 15. Reading relationships from a normal Logic Gate returns only related Huddle Logic Gates that the actor may currently view.
-16. `entity_relationships` is the only live authority that connects an Entity to a supported exact resource; the first supported resource type is `huddle_node`.
+16. `entity_relationships` is the only live authority that connects an Entity to a supported exact resource; its supported resource types are exactly `huddle_node` and `huddle_logic_gate`.
 17. Each row stores the exact same-company `entities.entity_id`, canonical `resource_type`, and exact source `resource_id`; `entity_id` already determines the Entity Type, so no `entity_type_id` is stored.
-18. One exact Entity and Huddle Node pair has one semantic edge. Repeating the relationship or placing the same Entity reference several times in one Huddle Node creates no duplicate row.
-19. Saving a Huddle Node editor document atomically derives that Node's Action Item edges from all of its live inline references in the same database transaction. Removing one of several saved references keeps the edge, while removing the final saved reference removes only that edge and preserves the Entity.
-20. A Huddle Process Action Item rollup joins `entity_relationships.resource_id` to its Huddle Nodes, filters Entities whose Entity Type system key is `action_item`, and deduplicates each Entity once per Huddle Logic Gate.
-21. A surviving reference in a sibling Huddle Node keeps the Action Item in that Process rollup. The same Action Item may have edges in several Huddle Nodes and several Huddle Processes.
+18. One exact Entity and typed Huddle resource pair has one semantic edge. Repeating the relationship or placing the same Entity reference several times in one Huddle resource creates no duplicate row.
+19. Saving a Huddle Node or Huddle Logic Gate editor document atomically derives that exact resource's Action Item edges from all of its live inline references in the same database transaction. Removing one of several saved references keeps the edge, while removing the final saved reference removes only that edge and preserves the Entity.
+20. A Huddle Process Action Item rollup unions the exact Huddle Logic Gate's direct edges with every edge from its owned Huddle Nodes, filters Entities whose Entity Type system key is `action_item`, and deduplicates each Entity once.
+21. A surviving direct Huddle Logic Gate reference or sibling Huddle Node reference keeps the Action Item in that Process rollup. The same Action Item may have edges in several Huddle resources and several Huddle Processes.
 22. Every Huddle Node reads its owning Huddle Logic Gate's current live Action Item rollup. Action Item edges are never copied into the immutable Huddle Node Logic Gate or KPI snapshots.
 23. An Entity relationship grants no permission, RACI role, policy parentage, Entity access, or Huddle access. Reading or changing a Huddle Node's Action Item relationships requires Edit access to that Huddle Node, and reading a Huddle Process rollup directly requires Edit access to that exact Huddle Logic Gate.
 24. Permanent endpoint deletion leaves no stale edge, and recycle/restore preserves every promised exact edge. The table uses no relationship ID, resource registry, copied label, copied body, translated identity, or compatibility identity.
@@ -38,9 +38,9 @@ Creating a Huddle Node atomically copies only those current Logic Gate and KPI i
 ↓
 Later membership changes do not rewrite that Huddle Node, while current source data is joined on each read and no generic edge or copied display payload is created
 ↓
-Saving an inline Action Item reference in a Huddle Node stores one exact `entity_relationships` edge to that Huddle Node in the same transaction as the editor document; repeated inline references in that Node share the same edge
+Saving an inline Action Item reference in a Huddle Node or its Huddle Logic Gate stores one exact typed `entity_relationships` edge in the same transaction as that editor document; repeated inline references in one resource share the same edge
 ↓
-Removing the final reference removes that Node edge, and each Huddle Node reads the parent's current deduplicated Action Item rollup by joining those live Node edges while its Logic Gate and KPI relationship sets remain immutable creation-time snapshots
+Removing the final reference removes only that resource edge, and each Huddle Node reads the parent's current deduplicated Action Item rollup by uniting direct Gate edges with live child-Node edges while its Logic Gate and KPI relationship sets remain immutable creation-time snapshots
 
 # Current Email Relationship Business Logic Laws
 
@@ -289,7 +289,7 @@ Examples include:
 - `attachment_relationships` for stored files owned or used by supported Mango resources.
 - `huddle_logic_gate_relationships` for live Huddle Logic Gate-to-normal-Logic-Gate membership.
 - `huddle_node_logic_gate_relationships` and `huddle_node_kpi_relationships` for one Huddle Node's creation-time relationship set.
-- `entity_relationships` for one exact Entity linked to a supported exact resource such as a Huddle Node.
+- `entity_relationships` for one exact Entity linked to one exact Huddle Node or Huddle Logic Gate.
 - `huddle_nodes.huddle_logic_gate_id` for one Huddle Node's fixed owning Huddle Logic Gate.
 - `kpis.logic_gate_id` for one KPI's fixed owning normal Logic Gate.
 - `entities.entity_type_id` and optional `entities.entity_folder_id` for one Entity's fixed type and current organizational folder.
@@ -541,11 +541,11 @@ One operational relationship has at most one company-map trace, and a relationsh
 
 ### Law 37 — Entity relationships use exact Entity-to-resource edges
 
-`entity_relationships` MUST store the exact same-company `entities.entity_id`, canonical `resource_type`, and exact source `resource_id`. The Entity's own row determines its Entity Type, so the relationship MUST NOT store `entity_type_id`. The first supported resource type is `huddle_node`, whose `resource_id` MUST equal the exact `huddle_nodes.huddle_node_id`. One exact typed endpoint pair is one semantic edge, and repeating it MUST converge on that row.
+`entity_relationships` MUST store the exact same-company `entities.entity_id`, canonical `resource_type`, and exact source `resource_id`. The Entity's own row determines its Entity Type, so the relationship MUST NOT store `entity_type_id`. The supported resource types are exactly `huddle_node`, whose ID MUST equal `huddle_nodes.huddle_node_id`, and `huddle_logic_gate`, whose ID MUST equal `huddle_logic_gates.huddle_logic_gate_id`. One exact typed endpoint pair is one semantic edge, and repeating it MUST converge on that row.
 
-Creating or referencing an Action Item in a Huddle Node MUST create that Node edge. Several inline references to the same Entity in the same Node MUST share it; removing one reference MUST retain it while another survives, and removing the final reference MUST remove only that Node edge. An Action Item MAY have edges in sibling Huddle Nodes or Huddle Nodes owned by different Huddle Logic Gates.
+Saving an Action Item reference in a Huddle Node or Huddle Logic Gate MUST derive that exact resource edge in the same transaction as the editor document. Several inline references to the same Entity in one resource MUST share it; removing one reference MUST retain it while another survives, and removing the final reference MUST remove only that resource edge. An Action Item MAY have edges in sibling Huddle Nodes, directly in Huddle Logic Gates, or in resources owned by different Huddle Processes.
 
-The Huddle Process rollup MUST join those exact Huddle Node edges through `huddle_nodes.huddle_logic_gate_id`, include only Entities whose Entity Type system key is `action_item`, and deduplicate each Entity once per Huddle Logic Gate. Every Huddle Node under that owner reads that current rollup live; no rollup edge is copied into Huddle Node snapshot tables, editor JSON, or another projection.
+The Huddle Process rollup MUST union its exact direct Huddle Logic Gate edges with Huddle Node edges joined through `huddle_nodes.huddle_logic_gate_id`, include only Entities whose Entity Type system key is `action_item`, and deduplicate each Entity once. Every Huddle Node under that owner reads that current rollup live; no rollup edge is copied into Huddle Node snapshot tables, editor JSON, or another projection.
 
 Removing an edge MUST preserve both endpoints. Permanent deletion MUST leave no stale edge, while recycling and restoring an endpoint MUST preserve and recreate every promised exact edge. The relationship grants no Entity, Huddle, permission, RACI, or policy-parent access, and its storage MUST NOT add a relationship ID, resource registry, copied display data, translated identity, fallback, or second live authority.
 

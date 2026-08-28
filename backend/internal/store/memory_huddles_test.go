@@ -161,7 +161,7 @@ func TestMemoryHuddleLifecycleKeepsTypedIdentityAndRecycleRestore(t *testing.T) 
 		t.Fatalf("restored node = %+v, err=%v", restored, err)
 	}
 	workspace, err := repo.GetHuddleNodeWorkspace(companyID, node.HuddleNodeID)
-	if err != nil || len(workspace.Textboxes) != 1 || workspace.Textboxes[0].TextboxID != textbox.TextboxID || len(workspace.Chats) != 1 || workspace.Chats[0].Message != "Follow up" {
+	if err != nil || len(workspace.Textboxes) != 2 || workspace.Textboxes[1].TextboxID != textbox.TextboxID || len(workspace.Chats) != 1 || workspace.Chats[0].Message != "Follow up" {
 		t.Fatalf("restored Huddle Node workspace = %+v, err=%v", workspace, err)
 	}
 	tree, err = repo.ListHuddleExplorer(companyID)

@@ -2,7 +2,9 @@ import React, { useRef, useState } from "react";
 import { EditorTabBar } from "../editor/EditorTabBar";
 import type { EditorTabID } from "../editor/editorTabs";
 import { MangoTiptapEditor, type MangoTiptapFormattingController } from "../editor/tiptap/MangoTiptapEditor";
+import type { MangoTiptapDocument } from "../editor/tiptap/mangoTiptapDocument";
 import type { MangoTiptapResourceType } from "../editor/tiptap/mangoTiptapSync";
+import type { EditorSaveState } from "../editor/EditorSaveStatusIcon";
 import type { MentionableCompanyUser } from "../editor/editorMentions";
 import type { EditorImageAttachmentContext } from "../editor/useEditorDocumentSurfaceHandlers";
 import type { EditorHighlightColor, EditorTextAlignment } from "../editor/richTextEditing";
@@ -18,6 +20,9 @@ type Props = {
   editable?: boolean;
   attachmentContext?: EditorImageAttachmentContext;
   mentionUsers?: MentionableCompanyUser[];
+  onSaveStateChange?: (state: EditorSaveState) => void;
+  onDocumentSnapshotChange?: (document: MangoTiptapDocument) => void;
+  onCanonicalDocumentChange?: (document: MangoTiptapDocument) => void;
 };
 
 export type BareMangoEditorControls = {
@@ -107,7 +112,7 @@ export const BareMangoEditorToolbar: React.FC<{
   );
 };
 
-export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEditorControls; style?: React.CSSProperties }> = ({ companyID, resourceType, resourceID, currentUserID, requestJSON, ariaLabel, editable = true, attachmentContext, mentionUsers, controls, style }) => (
+export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEditorControls; style?: React.CSSProperties }> = ({ companyID, resourceType, resourceID, currentUserID, requestJSON, ariaLabel, editable = true, attachmentContext, mentionUsers, onSaveStateChange, onDocumentSnapshotChange, onCanonicalDocumentChange, controls, style }) => (
   <MangoTiptapEditor
     companyID={companyID}
     resourceType={resourceType}
@@ -117,6 +122,9 @@ export const BareMangoEditorDocument: React.FC<Props & { controls: BareMangoEdit
     requestJSON={requestJSON}
     attachmentContext={attachmentContext}
     mentionUsers={mentionUsers}
+    onSaveStateChange={onSaveStateChange}
+    onDocumentSnapshotChange={onDocumentSnapshotChange}
+    onCanonicalDocumentChange={onCanonicalDocumentChange}
     editable={editable}
     ariaLabel={ariaLabel}
     placeholder="Start writing…"

@@ -234,27 +234,44 @@ join entity_field_types template
 	return item, nil
 }
 
-func lockPostgresHuddleNodeActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {
-	if ref.ResourceType != EntityTypeHuddleNode {
+func lockPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {
+	var query string
+	switch ref.ResourceType {
+	case EntityTypeHuddleNode:
+		query = `select huddle_node_id::text from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid for update`
+	case EntityTypeHuddleLogicGate:
+		query = `select huddle_logic_gate_id::text from huddle_logic_gates where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid for update`
+	default:
 		return nil
 	}
-	var huddleNodeID string
-	err := tx.QueryRowContext(ctx, `
-select huddle_node_id::text
-from huddle_nodes
-where company_id=$1::uuid and huddle_node_id=$2::uuid
-for update`, ref.CompanyID, ref.ResourceID).Scan(&huddleNodeID)
+	var resourceID string
+	err := tx.QueryRowContext(ctx, query, ref.CompanyID, ref.ResourceID).Scan(&resourceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	return err
 }
 
-func syncPostgresHuddleNodeActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, companyID, huddleNodeID string) error {
-	rows, err := tx.QueryContext(ctx, `
+func syncPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {
+	var rows *sql.Rows
+	var err error
+	switch ref.ResourceType {
+	case EntityTypeHuddleNode:
+		rows, err = tx.QueryContext(ctx, `
 select body_json
 from huddle_node_textboxes
-where company_id=$1::uuid and huddle_node_id=$2::uuid and deleted_timestamp is null`, companyID, huddleNodeID)
+where company_id=$1::uuid and huddle_node_id=$2::uuid and deleted_timestamp is null`, ref.CompanyID, ref.ResourceID)
+	case EntityTypeHuddleLogicGate:
+		if ref.DocumentID != ref.ResourceID {
+			return ErrInvalid
+		}
+		rows, err = tx.QueryContext(ctx, `
+select body_json
+from huddle_logic_gates
+where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid and deleted_timestamp is null`, ref.CompanyID, ref.ResourceID)
+	default:
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -285,7 +302,7 @@ where relationship.company_id=$1::uuid
   and entity_type.company_id=entity.company_id
   and entity_type.entity_type_id=entity.entity_type_id
   and entity_type.system_key=$4::text
-  and not (relationship.entity_id::text=any($5::text[]))`, companyID, EntityTypeHuddleNode, huddleNodeID, ActionItemEntityTypeSystemKey, actionItemIDs); err != nil {
+  and not (relationship.entity_id::text=any($5::text[]))`, ref.CompanyID, ref.ResourceType, ref.ResourceID, ActionItemEntityTypeSystemKey, actionItemIDs); err != nil {
 		return mapEntitiesPostgresError(err)
 	}
 	if len(actionItemIDs) > 0 {
@@ -298,7 +315,7 @@ join entities entity
 join entity_types entity_type
   on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
 where entity_type.system_key=$5::text
-on conflict (company_id, entity_id, resource_type, resource_id) do nothing`, companyID, EntityTypeHuddleNode, huddleNodeID, actionItemIDs, ActionItemEntityTypeSystemKey); err != nil {
+on conflict (company_id, entity_id, resource_type, resource_id) do nothing`, ref.CompanyID, ref.ResourceType, ref.ResourceID, actionItemIDs, ActionItemEntityTypeSystemKey); err != nil {
 			return mapEntitiesPostgresError(err)
 		}
 	}
@@ -375,21 +392,27 @@ select entity.company_id::text, entity.entity_id::text, entity.entity_type_id::t
        entity.entity_folder_id::text, entity.name, entity.position, entity.body_json, entity.revision,
        coalesce(entity.created_by_user_id::text, ''), entity.created_timestamp, entity.updated_timestamp
 from (
-  select distinct relationship.entity_id
+  select relationship.entity_id
+  from entity_relationships relationship
+  where relationship.company_id=$1::uuid
+    and relationship.resource_type=$3::text
+    and relationship.resource_id=$2::uuid
+  union
+  select relationship.entity_id
   from entity_relationships relationship
   join huddle_nodes linked_node
     on linked_node.company_id=relationship.company_id
    and linked_node.huddle_node_id=relationship.resource_id
   where relationship.company_id=$1::uuid
-    and relationship.resource_type=$3::text
+    and relationship.resource_type=$4::text
     and linked_node.huddle_logic_gate_id=$2::uuid
 ) relationship
 join entities entity
   on entity.company_id=$1::uuid and entity.entity_id=relationship.entity_id
 join entity_types entity_type
   on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
-where entity_type.system_key=$4::text
-order by entity.created_timestamp, entity.entity_id`, companyID, huddleLogicGateID, EntityTypeHuddleNode, ActionItemEntityTypeSystemKey)
+where entity_type.system_key=$5::text
+order by entity.created_timestamp, entity.entity_id`, companyID, huddleLogicGateID, EntityTypeHuddleLogicGate, EntityTypeHuddleNode, ActionItemEntityTypeSystemKey)
 	if err != nil {
 		return nil, err
 	}

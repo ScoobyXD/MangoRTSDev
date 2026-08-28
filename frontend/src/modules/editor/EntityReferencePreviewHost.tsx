@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
 import { ActionItemIcon, ExplorerEntityIcon } from "../../icons/index.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
@@ -20,6 +21,12 @@ import {
   type EditorEntityReferenceOpenDetail,
 } from "./editorEntityLinks.js";
 import { EntityDetailsRichEditor } from "./EntityDetailsRichEditor.js";
+import {
+  CompanyUserSearchPicker,
+  EditorCalendarDateInput,
+  editorCompanyUserLabel,
+  editorCompanyUserMatches,
+} from "./EditorFieldControls.js";
 import {
   createEmptyMangoTiptapDocument,
   validateMangoTiptapDocument,
@@ -169,7 +176,7 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
     void getEntityDetail(requestJSON, { companyID, entityID, signal: controller.signal })
       .then(async (detail) => {
         const needsCompanyUsers = Boolean(detail.created_by_user_id)
-          || detail.entity_fields.some((field) => field.field_type === "person" && typeof field.value === "string" && field.value.trim());
+          || detail.entity_fields.some((field) => field.field_type === "person");
         let companyUsers: CompanyUser[] = [];
         if (needsCompanyUsers) {
           try {
@@ -446,6 +453,20 @@ export function actionItemReferencePopoverPosition(
   return { position: "fixed", left, top, width, maxHeight };
 }
 
+const ACTION_ITEM_POPOVER_Z_INDEX = 12020;
+
+function ActionItemFloatingPortal({
+  anchor,
+  children,
+}: {
+  anchor?: EditorEntityLinkAnchorBounds;
+  children: React.ReactNode;
+}) {
+  const owningModalLayer = anchor?.portalTarget;
+  if (owningModalLayer?.isConnected) return createPortal(children, owningModalLayer);
+  return <AppModalPortal trapFocus={false}>{children}</AppModalPortal>;
+}
+
 function ActionItemReferencePopover({
   preview,
   companyID,
@@ -500,7 +521,7 @@ function PendingActionItemReferencePopover({
   const popoverRef = useRef<HTMLElement | null>(null);
   useAppFloatingMenuDismissal(true, popoverRef, onClose);
   return (
-    <AppModalPortal trapFocus={false}>
+    <ActionItemFloatingPortal anchor={preview.anchor}>
       <section
         ref={popoverRef}
         role="dialog"
@@ -508,7 +529,7 @@ function PendingActionItemReferencePopover({
         aria-label={"Action Item details: " + title}
         data-mango-entity-reference-preview="true"
         data-mango-action-item-popover="true"
-        style={{ ...actionItemReferencePopoverPosition(preview.anchor), zIndex: 1, display: "grid", gridTemplateRows: "auto minmax(120px,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 14, background: "#fff", boxShadow: "0 18px 50px rgba(15,23,42,.24)" }}
+        style={{ ...actionItemReferencePopoverPosition(preview.anchor), zIndex: ACTION_ITEM_POPOVER_Z_INDEX, display: "grid", gridTemplateRows: "auto minmax(120px,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 14, background: "#fff", boxShadow: "0 18px 50px rgba(15,23,42,.24)" }}
       >
         <header style={actionItemHeaderStyle}>
           <span style={actionItemIconBadgeStyle(null)}><ActionItemIcon size={17} /></span>
@@ -524,7 +545,7 @@ function PendingActionItemReferencePopover({
           </div>
         )}
       </section>
-    </AppModalPortal>
+    </ActionItemFloatingPortal>
   );
 }
 
@@ -709,7 +730,7 @@ function EditableActionItemPopover({
   const createdDate = entity.created_timestamp ? formatCalendarDate(entity.created_timestamp) : "Not set";
 
   return (
-    <AppModalPortal trapFocus={false}>
+    <ActionItemFloatingPortal anchor={anchor}>
       <section
         ref={popoverRef}
         role="dialog"
@@ -717,7 +738,7 @@ function EditableActionItemPopover({
         aria-label={"Action Item details: " + (draft.name.trim() || entity.name)}
         data-mango-entity-reference-preview="true"
         data-mango-action-item-popover="true"
-        style={{ ...actionItemReferencePopoverPosition(anchor), zIndex: 1, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 14, background: "#fff", boxShadow: "0 18px 50px rgba(15,23,42,.24)" }}
+        style={{ ...actionItemReferencePopoverPosition(anchor), zIndex: ACTION_ITEM_POPOVER_Z_INDEX, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 14, background: "#fff", boxShadow: "0 18px 50px rgba(15,23,42,.24)" }}
       >
         <header style={actionItemHeaderStyle}>
             <span className={color === "yellow" || color === "red" ? "mango-editor-action-item--" + color : undefined} style={actionItemIconBadgeStyle(color)}>
@@ -752,9 +773,17 @@ function EditableActionItemPopover({
                 <section aria-label="Action Item creation details" style={actionItemMetadataCardStyle}>
                   <ReadOnlyEntityValue label="Created by" value={createdBy} compact />
                   <ReadOnlyEntityValue label="Created date" value={createdDate} compact />
+                  {personField && (
+                    <ActionItemFieldControl
+                      field={personField}
+                      value={draft.fieldValues[personField.entity_field_id] ?? ""}
+                      companyUsers={companyUsers}
+                      onChange={(value) => updateField(personField.entity_field_id, value)}
+                    />
+                  )}
                 </section>
                 <section aria-label="Action Item responsibility and dates" style={actionItemMetadataCardStyle}>
-                  {[personField, colorField, analysisDateField, completionDateField].map((field) => field ? (
+                  {[colorField, analysisDateField, completionDateField].map((field) => field ? (
                     <ActionItemFieldControl
                       key={field.entity_field_id}
                       field={field}
@@ -791,7 +820,7 @@ function EditableActionItemPopover({
             </div>
         </div>
       </section>
-    </AppModalPortal>
+    </ActionItemFloatingPortal>
   );
 }
 
@@ -815,39 +844,198 @@ function ActionItemFieldControl({
   let control: React.ReactNode;
   if (field.field_type === "boolean") {
     control = select(<><option value="">Not set</option><option value="true">Yes</option><option value="false">No</option></>);
-  } else if (field.field_type === "choice" || field.field_type === "color") {
+  } else if (field.field_type === "choice") {
     const options = field.config?.options ?? [];
     const currentConfigured = !value || options.some((option) => option.key === value);
-    const picker = select(<>
-      <option value="">{field.field_type === "color" ? "No color" : "Not set"}</option>
+    control = select(<>
+      <option value="">Not set</option>
       {!currentConfigured && <option value={value}>{readableOptionKey(value)}</option>}
       {options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
     </>);
-    if (field.field_type === "color") {
-      const configuredColor = options.find((option) => option.key === value)?.color;
-      const fill = configuredColor || (value === "yellow" ? "#facc15" : value === "red" ? "#ef4444" : "transparent");
-      control = (
-        <div style={{ display: "grid", gridTemplateColumns: "22px minmax(0,1fr)", alignItems: "center", gap: 7 }}>
-          <span aria-label="Selected Action Item color" style={{ width: 18, height: 18, border: "1px solid rgba(15,23,42,.28)", borderRadius: 5, background: fill, boxShadow: "inset 0 1px 0 rgba(255,255,255,.55)" }} />
-          {picker}
-        </div>
-      );
-    } else {
-      control = picker;
-    }
+  } else if (field.field_type === "color") {
+    return (
+      <div style={editorLabelStyle}>
+        <span>{field.name}</span>
+        <ActionItemColorPicker id={id} field={field} value={value} onChange={onChange} />
+      </div>
+    );
   } else if (field.field_type === "person") {
-    const currentKnown = !value || companyUsers.some((user) => user.user_id === value);
-    control = select(<>
-      <option value="">Unassigned</option>
-      {!currentKnown && <option value={value}>Company user unavailable</option>}
-      {companyUsers.map((user) => <option key={user.user_id} value={user.user_id}>{user.display_name?.trim() || user.email?.trim() || "Company user unavailable"}</option>)}
-    </>);
+    return (
+      <div style={editorLabelStyle}>
+        <label htmlFor={id}>{field.name}</label>
+        <ActionItemPersonPicker id={id} value={value} companyUsers={companyUsers} onChange={onChange} />
+      </div>
+    );
   } else if (field.field_type === "date") {
-    control = <input id={id} value={value} type="text" inputMode="numeric" pattern="(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12][0-9]|3[01])/\d{4}" placeholder="MM/DD/YYYY" aria-label={"Value for " + field.name} onChange={(event) => onChange(event.currentTarget.value)} style={editorInputStyle} />;
+    return (
+      <div style={editorLabelStyle}>
+        <label htmlFor={id}>{field.name}</label>
+        <EditorCalendarDateInput
+          id={id}
+          value={value}
+          ariaLabel={"Value for " + field.name}
+          accent="#0f766e"
+          onChange={onChange}
+          containerStyle={{ gridTemplateColumns: "minmax(0, 1fr) 34px" }}
+          inputStyle={{ ...editorInputStyle, borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+          buttonStyle={{ width: 34, height: 34, borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+        />
+      </div>
+    );
   } else {
     control = <input id={id} value={value} type={field.field_type === "number" ? "number" : "text"} step={field.field_type === "number" ? "any" : undefined} aria-label={"Value for " + field.name} onChange={(event) => onChange(event.currentTarget.value)} style={editorInputStyle} />;
   }
   return <label htmlFor={id} style={editorLabelStyle}>{field.name}{control}</label>;
+}
+
+function actionItemPersonLabel(user: CompanyUser | undefined): string {
+  return user?.display_name?.trim() || user?.email?.trim() || "Company user unavailable";
+}
+
+function ActionItemPersonPicker({
+  id,
+  value,
+  companyUsers,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  companyUsers: readonly CompanyUser[];
+  onChange: (value: string) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selectedUser = companyUsers.find((user) => user.user_id === value);
+  const selectedLabel = value ? actionItemPersonLabel(selectedUser) : "";
+  const [query, setQuery] = useState(selectedLabel);
+  const [open, setOpen] = useState(false);
+  const matchingUsers = useMemo(() => [...companyUsers]
+    .filter((user) => editorCompanyUserMatches(user, query))
+    .sort((left, right) => editorCompanyUserLabel(left).localeCompare(editorCompanyUserLabel(right), undefined, { numeric: true, sensitivity: "base" })), [companyUsers, query]);
+  const showUnassigned = !query.trim() || "unassigned".includes(query.trim().toLocaleLowerCase());
+
+  useEffect(() => {
+    if (!open) setQuery(selectedLabel);
+  }, [open, selectedLabel]);
+  useAppFloatingMenuDismissal(open, rootRef, () => setOpen(false));
+
+  const choose = (userID: string, label: string) => {
+    setQuery(label);
+    setOpen(false);
+    onChange(userID);
+  };
+  return (
+    <CompanyUserSearchPicker
+      ref={rootRef}
+      id={id}
+      inputAriaLabel="Value for Person in charge"
+      resultsAriaLabel="Person in charge results"
+      query={query}
+      placeholder="Search company users"
+      accent="rgba(148,163,184,.32)"
+      showResults={open}
+      hasResults={showUnassigned || matchingUsers.length > 0}
+      emptyMessage="No matching company users"
+      onQueryChange={(nextQuery) => {
+        setQuery(nextQuery);
+        setOpen(true);
+      }}
+      onInputFocus={(event) => {
+        setOpen(true);
+        event.currentTarget.select();
+      }}
+      onInputKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          setQuery(selectedLabel);
+          setOpen(false);
+        } else if (event.key === "Enter" && matchingUsers[0]) {
+          event.preventDefault();
+          choose(matchingUsers[0].user_id, actionItemPersonLabel(matchingUsers[0]));
+        }
+      }}
+      style={{ position: "relative", minWidth: 0 }}
+      inputStyle={{ width: "100%", minHeight: 34, padding: "0 9px", fontSize: 12, fontWeight: 600 }}
+      listStyle={actionItemPickerMenuStyle}
+      onBlur={(event) => {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        setOpen(false);
+      }}
+    >
+      {showUnassigned && (
+        <button type="button" role="option" aria-selected={!value} onMouseDown={(event) => event.preventDefault()} onClick={() => choose("", "")} style={actionItemPickerOptionStyle}>
+          <span aria-hidden="true" style={actionItemPersonAvatarStyle}>—</span>
+          <span>Unassigned</span>
+        </button>
+      )}
+      {matchingUsers.map((user) => {
+        const label = actionItemPersonLabel(user);
+        return (
+          <button key={user.user_id} type="button" role="option" aria-selected={user.user_id === value} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(user.user_id, label)} style={actionItemPickerOptionStyle}>
+            <span aria-hidden="true" style={actionItemPersonAvatarStyle}>{label.slice(0, 1).toLocaleUpperCase()}</span>
+            <span style={{ minWidth: 0, display: "grid", textAlign: "left" }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+              {user.email?.trim() && user.display_name?.trim() && <span style={{ color: "#64748b", fontSize: 10, fontWeight: 600 }}>{user.email.trim()}</span>}
+            </span>
+          </button>
+        );
+      })}
+    </CompanyUserSearchPicker>
+  );
+}
+
+function actionItemColorFill(key: string, configuredColor?: string): string {
+  return configuredColor || (key === "yellow" ? "#facc15" : key === "red" ? "#ef4444" : "#ffffff");
+}
+
+function ActionItemColorPicker({ id, field, value, onChange }: { id: string; field: EntityField; value: string; onChange: (value: string) => void }) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const configuredOptions = field.config?.options ?? [];
+  const currentOption = configuredOptions.find((option) => option.key === value);
+  const selectedLabel = value ? currentOption?.label || readableOptionKey(value) : "No color";
+  useAppFloatingMenuDismissal(open, rootRef, () => setOpen(false));
+  const options = [
+    { key: "", label: "No color", color: undefined },
+    ...(!value || currentOption ? [] : [{ key: value, label: readableOptionKey(value), color: undefined }]),
+    ...configuredOptions,
+  ];
+  return (
+    <div ref={rootRef} style={{ position: "relative", minWidth: 0 }}>
+      <button
+        id={id}
+        type="button"
+        aria-label={"Value for " + field.name}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={`${id}-options`}
+        data-action-item-color-value={value}
+        onClick={() => setOpen((current) => !current)}
+        style={{ ...editorInputStyle, display: "grid", gridTemplateColumns: "18px minmax(0,1fr) auto", alignItems: "center", gap: 8, textAlign: "left", cursor: "pointer" }}
+      >
+        <span data-action-item-color-swatch="true" aria-hidden="true" style={actionItemColorSwatchStyle(actionItemColorFill(value, currentOption?.color))} />
+        <span>{selectedLabel}</span>
+        <span aria-hidden="true" style={{ color: "#64748b", fontSize: 10 }}>⌄</span>
+      </button>
+      {open && (
+        <div id={`${id}-options`} role="listbox" aria-label="Action Item color options" style={actionItemPickerMenuStyle}>
+          {options.map((option) => (
+            <button
+              key={option.key || "no-color"}
+              type="button"
+              role="option"
+              aria-selected={option.key === value}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => { onChange(option.key); setOpen(false); }}
+              style={actionItemPickerOptionStyle}
+            >
+              <span data-action-item-color-option-swatch={option.key || "none"} aria-hidden="true" style={actionItemColorSwatchStyle(actionItemColorFill(option.key, option.color))} />
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function EntityNameAndDetailsEditor({ entity, body, saving, disabled, onSave }: {
@@ -992,6 +1180,10 @@ const actionItemHeaderStyle: React.CSSProperties = { display: "grid", gridTempla
 const actionItemIconBadgeStyle = (color: string | null): React.CSSProperties => ({ width: 30, height: 30, display: "inline-grid", placeItems: "center", border: "1px solid rgba(15,23,42,.24)", borderRadius: 8, background: color === "yellow" ? "#facc15" : color === "red" ? "#ef4444" : "#f8fafc", color: "#111827" });
 const actionItemCloseButtonStyle: React.CSSProperties = { width: 30, height: 30, border: "1px solid rgba(185,28,28,.36)", borderRadius: 8, background: "#fee2e2", color: "#b91c1c", cursor: "pointer", fontSize: 18, fontWeight: 900, lineHeight: 1 };
 const actionItemMetadataCardStyle: React.CSSProperties = { display: "grid", gap: 8, padding: 10, border: "1px solid rgba(148,163,184,.22)", borderRadius: 10, background: "#f8fafc" };
+const actionItemPickerMenuStyle: React.CSSProperties = { position: "absolute", zIndex: 4, left: 0, right: 0, top: "calc(100% + 4px)", maxHeight: 190, overflowY: "auto", display: "grid", gap: 3, padding: 5, border: "1px solid rgba(148,163,184,.34)", borderRadius: 9, background: "#ffffff", boxShadow: "0 12px 28px rgba(15,23,42,.18)" };
+const actionItemPickerOptionStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 32, display: "grid", gridTemplateColumns: "24px minmax(0,1fr)", alignItems: "center", gap: 8, border: 0, borderRadius: 7, background: "transparent", color: "#0f172a", padding: "4px 7px", font: "inherit", fontSize: 11, fontWeight: 750, cursor: "pointer", textAlign: "left" };
+const actionItemPersonAvatarStyle: React.CSSProperties = { width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 999, background: "#ccfbf1", color: "#115e59", fontSize: 10, fontWeight: 900 };
+const actionItemColorSwatchStyle = (fill: string): React.CSSProperties => ({ width: 18, height: 18, display: "block", border: "1px solid rgba(15,23,42,.3)", borderRadius: 4, background: fill, boxShadow: "inset 0 1px 0 rgba(255,255,255,.55)" });
 const editorLabelStyle: React.CSSProperties = { display: "grid", gap: 5, color: "#475569", fontSize: 11, fontWeight: 850 };
 const editorInputStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 34, boxSizing: "border-box", border: "1px solid rgba(148,163,184,.32)", borderRadius: 8, background: "#fff", color: "#0f172a", padding: "0 9px", font: "inherit", fontSize: 12 };
 const saveButtonStyle = (disabled: boolean): React.CSSProperties => ({ minHeight: 32, border: 0, borderRadius: 8, background: disabled ? "#cbd5e1" : "#0f766e", color: "#fff", padding: "0 12px", font: "inherit", fontSize: 11, fontWeight: 850, cursor: disabled ? "default" : "pointer" });

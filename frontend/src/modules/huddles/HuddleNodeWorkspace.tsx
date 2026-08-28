@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import {
   deleteMangoAttachmentPermanently,
   groupMangoResourceAttachmentsByInformationID,
@@ -12,14 +13,21 @@ import { mentionedUserIDsFromChatDraft } from "../editor/editorMentions.js";
 import {
   AttachmentCountDropdown,
   ChatPane,
+  DeleteTextBlockConfirmationModal,
   NodeTextBlockEditor,
+  TextBlockActionsMenu,
+  TimelineCell,
 } from "../editor/NodeWorkspaceSurfaceParts.js";
 import {
+  ChatIcon,
   EDITOR_NEU_ACTIVE_SURFACE,
+  EDITOR_NEU_EDGE_FRAME,
   EDITOR_NEU_PANEL_BACKGROUND,
   EDITOR_NEU_SHADOW,
   EDITOR_NEU_SOFT_BORDER,
   EDITOR_NEU_SURFACE,
+  PlusIcon,
+  TextEditorIcon,
 } from "../editor/NodeWorkspaceSurfaceShared.js";
 import type { TextBlockSelectionAnchor, TextBlockSelectionDraft } from "../editor/NodeWorkspaceSurfaceShared.js";
 import type { EditorSaveState } from "../editor/EditorSaveStatusIcon.js";
@@ -38,7 +46,6 @@ import {
   deleteHuddleNodeTextBox,
   getHuddleNodeWorkspace,
   updateHuddleNodeChat,
-  updateHuddleNodeTextBoxTitle,
   type HuddleNodeChat,
   type HuddleNodeTextBox,
   type HuddleNodeWorkspaceRequest,
@@ -85,7 +92,12 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
   const [resourceAttachments, setResourceAttachments] = useState<MangoResourceAttachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(false);
   const [attachmentsError, setAttachmentsError] = useState("");
-  const savedTitlesRef = useRef(new Map<string, string>());
+  const [deleteTextBoxConfirmation, setDeleteTextBoxConfirmation] = useState<{
+    textBoxID: string;
+    title: string;
+    chatCount: number;
+    position: ConfirmActionMenuPosition;
+  } | null>(null);
   const actionItemReferenceRefreshByTextBoxRef = useRef(new Map<string, ActionItemReferenceRefreshState>());
   const navigationRequestIDRef = useRef(0);
   const chatSubmissionsInProgressRef = useRef(new Set<string>());
@@ -99,7 +111,6 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
         ? current
         : workspace.textboxes[0]?.textbox_id ?? "");
       setChats(workspace.chats);
-      savedTitlesRef.current = new Map(workspace.textboxes.map((item) => [item.textbox_id, item.title]));
       actionItemReferenceRefreshByTextBoxRef.current.clear();
     } catch (cause) {
       onError(errorMessage(cause, "Could not load the Huddle Node workspace"));
@@ -175,7 +186,6 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
     setCreating(true);
     try {
       const created = await createHuddleNodeTextBox(requestJSON, { companyID, huddleNodeID, title: "New text box" });
-      savedTitlesRef.current.set(created.textbox_id, created.title);
       setTextBoxes((current) => [created, ...current]);
       setActiveTextBoxID(created.textbox_id);
     } catch (cause) {
@@ -185,32 +195,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
     }
   };
 
-  const changeTextBoxTitle = (textBoxID: string, title: string) => {
-    setTextBoxes((current) => current.map((item) => item.textbox_id === textBoxID ? { ...item, title } : item));
-  };
-
-  const saveTextBoxTitle = async (textBoxID: string) => {
-    const textBox = textBoxes.find((item) => item.textbox_id === textBoxID);
-    if (!textBox) return;
-    const savedTitle = savedTitlesRef.current.get(textBoxID) ?? "Text box";
-    const title = textBox.title.trim();
-    if (!title) {
-      changeTextBoxTitle(textBoxID, savedTitle);
-      return;
-    }
-    if (title === savedTitle) return;
-    try {
-      const revision = await updateHuddleNodeTextBoxTitle(requestJSON, { companyID, huddleNodeID, textBoxID, title });
-      savedTitlesRef.current.set(textBoxID, title);
-      setTextBoxes((current) => current.map((item) => item.textbox_id === textBoxID ? { ...item, title, revision } : item));
-    } catch (cause) {
-      changeTextBoxTitle(textBoxID, savedTitle);
-      onError(errorMessage(cause, "Could not rename the text box"));
-    }
-  };
-
   const removeTextBox = async (textBox: HuddleNodeTextBox) => {
-    if (!window.confirm(`Delete “${textBox.title}” and its chat?`)) return;
     try {
       await deleteHuddleNodeTextBox(requestJSON, {
         companyID,
@@ -219,7 +204,6 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
         revision: textBox.revision,
       });
       const next = textBoxes.filter((item) => item.textbox_id !== textBox.textbox_id);
-      savedTitlesRef.current.delete(textBox.textbox_id);
       recordActionItemReferenceEvent(textBox.textbox_id, { type: "removed" });
       setTextBoxes(next);
       setChats((current) => current.filter((item) => item.textbox_id !== textBox.textbox_id));
@@ -228,6 +212,13 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
     } catch (cause) {
       onError(errorMessage(cause, "Could not delete the text box"));
     }
+  };
+
+  const confirmTextBoxDeletion = () => {
+    if (!deleteTextBoxConfirmation) return;
+    const textBox = textBoxes.find((item) => item.textbox_id === deleteTextBoxConfirmation.textBoxID);
+    setDeleteTextBoxConfirmation(null);
+    if (textBox) void removeTextBox(textBox);
   };
 
   const uploadTextBoxFiles = async (textBoxID: string, files: File[]) => {
@@ -344,32 +335,40 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
 
   return (
     <section aria-label="Huddle Node editor" data-huddle-node-workspace="node-tools-without-email" style={workspaceStyle}>
-      <header style={workspaceHeaderStyle}>
-        <strong>Text boxes</strong>
-        <button type="button" disabled={creating} onClick={() => void createTextBox()} style={addTextBoxButtonStyle}>
-          {creating ? "Adding…" : "+ Add text box"}
-        </button>
-      </header>
-      <div style={textBoxListStyle}>
+      <div style={timelineGridStyle}>
+        <div data-huddle-node-header-timeline-control="true" style={timelineHeaderControlStyle}>
+          <button
+            type="button"
+            disabled={creating}
+            title={creating ? "Adding text box" : "Add text box"}
+            aria-label={creating ? "Adding text box" : "Add text box"}
+            onClick={() => void createTextBox()}
+            style={{ ...timelineAddButtonStyle, cursor: creating ? "wait" : "pointer", opacity: creating ? 0.6 : 1 }}
+          >
+            <PlusIcon color="#0f766e" />
+          </button>
+        </div>
+        <div aria-hidden="true" style={timelineHeaderSpacerStyle} />
         {textBoxes.length === 0 && <div style={emptyStyle}>No text boxes yet.</div>}
-        {textBoxes.map((textBox) => {
+        {textBoxes.map((textBox, index) => {
           const textBoxID = textBox.textbox_id;
           const textBoxChats = chats.filter((item) => item.textbox_id === textBoxID).map(toEditorChatMessage);
           const chatOpen = openChatTextBoxIDs.has(textBoxID);
           const selectionAnchor = chatSelectionAnchors[textBoxID];
           const textBoxAttachments = attachmentsByTextBox.get(textBoxID) ?? [];
           return (
-            <article key={textBoxID} data-huddle-node-textbox={textBoxID} style={textBoxCardStyle}>
+            <React.Fragment key={textBoxID}>
+              <div style={timelineCellFrameStyle}>
+                <TimelineCell accent="#0f766e" muted={false} isLast={index === textBoxes.length - 1} minHeight={HUDDLE_TEXT_BOX_ROW_HEIGHT} />
+              </div>
+              <article data-huddle-node-textbox={textBoxID} style={textBoxCardStyle}>
               <div style={textBoxHeaderStyle}>
-                <input
-                  aria-label="Text box title"
-                  value={textBox.title}
-                  onChange={(event) => changeTextBoxTitle(textBoxID, event.currentTarget.value)}
-                  onBlur={() => void saveTextBoxTitle(textBoxID)}
-                  onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
-                  style={textBoxTitleStyle}
-                />
-                <div style={textBoxActionsStyle}>
+                <div aria-hidden="true" />
+                <div data-node-pane-header="editor" style={editorHeaderControlsStyle}>
+                  <span style={activeTextBoxID === textBoxID ? activeEditorBadgeStyle : editorBadgeStyle}>
+                    <TextEditorIcon color="#0f766e" />
+                    <span>Editor</span>
+                  </span>
                   <AttachmentCountDropdown
                     items={textBoxAttachments.map((resourceAttachment) => ({ resourceAttachment }))}
                     apiBase={apiBase}
@@ -384,16 +383,31 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
                     onRemove={({ resourceAttachment }) => void removeTextBoxAttachment(resourceAttachment)}
                     onError={onError}
                   />
+                  <TextBlockActionsMenu
+                    accent="#0f766e"
+                    surfaceText="#0f172a"
+                    panelBackground={EDITOR_NEU_PANEL_BACKGROUND}
+                    strokeColor="rgba(15,23,42,.18)"
+                    onDelete={(position) => setDeleteTextBoxConfirmation({
+                      textBoxID,
+                      title: textBox.title,
+                      chatCount: textBoxChats.length,
+                      position,
+                    })}
+                  />
+                </div>
+                <div data-node-pane-header="chat" style={chatHeaderControlsStyle}>
                   <button
                     type="button"
+                    title={chatOpen ? "Hide chat" : "Open chat"}
                     aria-label="Toggle chat column"
                     aria-pressed={chatOpen}
                     onClick={() => setOpenChatTextBoxIDs((current) => toggleSetValue(current, textBoxID))}
-                    style={{ ...textBoxActionButtonStyle, color: chatOpen ? "#0369a1" : "#334155" }}
+                    style={{ ...chatToggleButtonStyle, border: chatOpen ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: chatOpen ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE }}
                   >
-                    Chat{textBoxChats.length > 0 ? ` ${textBoxChats.length}` : ""}
+                    <ChatIcon color="#0f766e" />
+                    <span>Chat{textBoxChats.length > 0 ? ` ${textBoxChats.length}` : ""}</span>
                   </button>
-                  <button type="button" aria-label={`Delete ${textBox.title}`} onClick={() => void removeTextBox(textBox)} style={{ ...textBoxActionButtonStyle, color: "#be123c" }}>Delete</button>
                 </div>
               </div>
               <div data-huddle-node-textbox-columns={chatOpen ? "editor-chat" : "editor"} style={{ ...textBoxBodyStyle, gridTemplateColumns: chatOpen ? "minmax(300px,1fr) minmax(280px,.72fr)" : "minmax(0,1fr)" }}>
@@ -493,10 +507,24 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
                   </div>
                 )}
               </div>
-            </article>
+              </article>
+            </React.Fragment>
           );
         })}
       </div>
+      {deleteTextBoxConfirmation && (
+        <DeleteTextBlockConfirmationModal
+          title={deleteTextBoxConfirmation.title}
+          chatCount={deleteTextBoxConfirmation.chatCount}
+          accent="#0f766e"
+          surfaceText="#0f172a"
+          panelBackground={EDITOR_NEU_PANEL_BACKGROUND}
+          ruleColor="rgba(15,118,110,.22)"
+          position={deleteTextBoxConfirmation.position}
+          onConfirm={confirmTextBoxDeletion}
+          onCancel={() => setDeleteTextBoxConfirmation(null)}
+        />
+      )}
     </section>
   );
 };
@@ -548,16 +576,22 @@ function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 }
 
-const workspaceStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "42px minmax(0,1fr)", overflow: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_SURFACE, boxShadow: EDITOR_NEU_SHADOW };
-const workspaceHeaderStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, borderBottom: "1px solid rgba(148,163,184,.18)", padding: "6px 9px 6px 12px", fontSize: 13 };
-const addTextBoxButtonStyle: React.CSSProperties = { minHeight: 28, border: "1px solid rgba(15,118,110,.24)", borderRadius: 8, background: EDITOR_NEU_ACTIVE_SURFACE, color: "#0f766e", cursor: "pointer", padding: "4px 9px", font: "inherit", fontSize: 11, fontWeight: 850 };
-const textBoxListStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", alignContent: "start", gap: 10, overflowY: "auto", padding: 9 };
-const textBoxCardStyle: React.CSSProperties = { minWidth: 0, minHeight: 320, display: "grid", gridTemplateRows: "38px minmax(280px,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.22)", borderRadius: 11, background: "rgba(255,255,255,.76)", boxShadow: "3px 4px 10px rgba(148,163,184,.15), -3px -3px 9px rgba(255,255,255,.84)" };
-const textBoxHeaderStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateColumns: "minmax(120px,1fr) auto", alignItems: "center", gap: 8, padding: "5px 7px 5px 10px", borderBottom: "1px solid rgba(148,163,184,.16)" };
-const textBoxTitleStyle: React.CSSProperties = { minWidth: 0, border: 0, outline: 0, background: "transparent", color: "#0f172a", font: "inherit", fontSize: 12, fontWeight: 850, padding: 0 };
-const textBoxActionsStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5 };
-const textBoxActionButtonStyle: React.CSSProperties = { minHeight: 26, border: "1px solid rgba(148,163,184,.2)", borderRadius: 7, background: EDITOR_NEU_SURFACE, cursor: "pointer", padding: "3px 7px", font: "inherit", fontSize: 10, fontWeight: 850 };
+const HUDDLE_TEXT_BOX_BODY_HEIGHT = 320;
+const HUDDLE_TEXT_BOX_ROW_HEIGHT = 358;
+const workspaceStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_SHADOW, scrollbarGutter: "stable" };
+const timelineGridStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateColumns: "34px minmax(0,1fr)", columnGap: 4, rowGap: 12, alignItems: "start", alignContent: "start", padding: "0 14px 38px" };
+const timelineHeaderControlStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 44, minHeight: 38, padding: "0 0 7px", background: EDITOR_NEU_PANEL_BACKGROUND, display: "flex", alignItems: "flex-start", justifyContent: "flex-start" };
+const timelineHeaderSpacerStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 43, minHeight: 38, background: EDITOR_NEU_PANEL_BACKGROUND };
+const timelineAddButtonStyle: React.CSSProperties = { width: 30, height: 30, borderRadius: 9, border: "1px solid transparent", background: EDITOR_NEU_SURFACE, color: "#0f766e", display: "grid", placeItems: "center", padding: 0, boxShadow: EDITOR_NEU_SHADOW };
+const timelineCellFrameStyle: React.CSSProperties = { minHeight: HUDDLE_TEXT_BOX_ROW_HEIGHT, height: HUDDLE_TEXT_BOX_ROW_HEIGHT };
+const textBoxCardStyle: React.CSSProperties = { minWidth: 0, minHeight: HUDDLE_TEXT_BOX_ROW_HEIGHT, height: HUDDLE_TEXT_BOX_ROW_HEIGHT, display: "grid", gridTemplateRows: `38px ${HUDDLE_TEXT_BOX_BODY_HEIGHT}px`, overflow: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, rgba(255,255,255,.76), rgba(255,255,255,.76)) border-box`, boxShadow: EDITOR_NEU_SHADOW };
+const textBoxHeaderStyle: React.CSSProperties = { minWidth: 0, height: 38, display: "grid", gridTemplateColumns: "44px minmax(200px,1fr) 96px", alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box", borderBottom: "1px solid rgba(15,118,110,.22)", background: "linear-gradient(90deg, rgba(255,241,242,.62), rgba(236,253,245,.42) 52%, rgba(239,246,255,.66))" };
+const editorHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
+const chatHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5 };
+const editorBadgeStyle: React.CSSProperties = { minHeight: 26, flex: "0 0 auto", borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: "#0f766e", display: "inline-flex", alignItems: "center", gap: 5, padding: "0 7px", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW };
+const activeEditorBadgeStyle: React.CSSProperties = { ...editorBadgeStyle, border: "1px solid transparent", background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` };
+const chatToggleButtonStyle: React.CSSProperties = { minHeight: 26, borderRadius: 8, color: "#0f766e", display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", padding: "0 7px", font: "inherit", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW };
 const textBoxBodyStyle: React.CSSProperties = { minWidth: 0, minHeight: 280, display: "grid", overflowX: "auto", overflowY: "hidden" };
-const editorFrameStyle: React.CSSProperties = { minWidth: 300, minHeight: 280, height: 320, overflow: "hidden", background: "rgba(255,255,255,.72)" };
-const chatFrameStyle: React.CSSProperties = { minWidth: 280, minHeight: 280, height: 320, overflow: "hidden", borderLeft: "1px solid rgba(148,163,184,.18)" };
-const emptyStyle: React.CSSProperties = { minHeight: 80, display: "grid", placeItems: "center", color: "#64748b", fontSize: 12, fontWeight: 700, padding: 16 };
+const editorFrameStyle: React.CSSProperties = { minWidth: 300, minHeight: HUDDLE_TEXT_BOX_BODY_HEIGHT, height: HUDDLE_TEXT_BOX_BODY_HEIGHT, overflow: "hidden", background: "rgba(255,255,255,.72)" };
+const chatFrameStyle: React.CSSProperties = { minWidth: 280, minHeight: HUDDLE_TEXT_BOX_BODY_HEIGHT, height: HUDDLE_TEXT_BOX_BODY_HEIGHT, overflow: "hidden", borderLeft: "1px solid rgba(148,163,184,.18)" };
+const emptyStyle: React.CSSProperties = { gridColumn: "2", minHeight: 80, display: "grid", placeItems: "center", color: "#64748b", fontSize: 12, fontWeight: 700, padding: 16 };

@@ -228,8 +228,8 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 	document.Annotations = append([]EditorJSONAnnotation(nil), input.Annotations...)
 	document.UpdatedTimestamp = now
 	r.editorJSONDocuments[key] = document
-	if input.Document.ResourceType == EntityTypeHuddleNode {
-		r.syncHuddleNodeActionItemRelationshipsLocked(input.Document.CompanyID, input.Document.ResourceID)
+	if input.Document.ResourceType == EntityTypeHuddleNode || input.Document.ResourceType == EntityTypeHuddleLogicGate {
+		r.syncHuddleActionItemRelationshipsLocked(input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID)
 	}
 	r.editorJSONOperations[key] = append(r.editorJSONOperations[key], memoryEditorJSONOperation{
 		OperationID: input.OperationID, ClientID: input.ClientID, BaseRevision: input.BaseRevision,
@@ -325,8 +325,8 @@ func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Edit
 	document.Revision, document.Deleted, document.UpdatedTimestamp = revision, true, now
 	document.CollaborationEpoch = newUUIDv7String()
 	r.editorJSONDocuments[key] = document
-	if ref.ResourceType == EntityTypeHuddleNode {
-		r.syncHuddleNodeActionItemRelationshipsLocked(ref.CompanyID, ref.ResourceID)
+	if ref.ResourceType == EntityTypeHuddleNode || ref.ResourceType == EntityTypeHuddleLogicGate {
+		r.syncHuddleActionItemRelationshipsLocked(ref.CompanyID, ref.ResourceType, ref.ResourceID)
 	}
 	r.editorJSONOperations[key] = append(r.editorJSONOperations[key], memoryEditorJSONOperation{
 		OperationID: input.OperationID, ClientID: input.ClientID, BaseRevision: input.BaseRevision,

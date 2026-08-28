@@ -77,8 +77,11 @@ func TestHuddleNodeWorkspaceHTTPRoutes(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&workspace); err != nil {
 		t.Fatal(err)
 	}
-	if workspace.Textboxes == nil || workspace.Chats == nil || len(workspace.Textboxes) != 0 || len(workspace.Chats) != 0 {
-		t.Fatalf("empty workspace=%+v", workspace)
+	if workspace.Textboxes == nil || workspace.Chats == nil || len(workspace.Textboxes) != 1 || len(workspace.Chats) != 0 {
+		t.Fatalf("initial workspace=%+v", workspace)
+	}
+	if workspace.Textboxes[0].TextboxID == "" || workspace.Textboxes[0].Title != "New text box" || workspace.Textboxes[0].DisplayOrder != 0 || workspace.Textboxes[0].Revision != 0 {
+		t.Fatalf("default textbox=%+v", workspace.Textboxes[0])
 	}
 
 	const textboxID = "30000000-0000-4000-8000-000000000001"
@@ -94,7 +97,7 @@ func TestHuddleNodeWorkspaceHTTPRoutes(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&createdTextbox); err != nil {
 		t.Fatal(err)
 	}
-	if createdTextbox.Textbox.TextboxID != textboxID || createdTextbox.Textbox.Title != "Risks" {
+	if createdTextbox.Textbox.TextboxID != textboxID || createdTextbox.Textbox.Title != "Risks" || createdTextbox.Textbox.DisplayOrder != 1 {
 		t.Fatalf("created textbox=%+v", createdTextbox.Textbox)
 	}
 
@@ -194,7 +197,7 @@ func TestHuddleNodeWorkspaceHTTPRoutes(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&workspace); err != nil {
 		t.Fatal(err)
 	}
-	if len(workspace.Textboxes) != 1 || len(workspace.Chats) != 0 {
+	if len(workspace.Textboxes) != 2 || len(workspace.Chats) != 0 {
 		t.Fatalf("final workspace=%+v", workspace)
 	}
 
@@ -373,7 +376,7 @@ func TestHuddleNodeWorkspaceHTTPRequiresExactNodeEditAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workspace.Textboxes) != 1 || len(workspace.Chats) != 1 || workspace.Chats[0].ChatID != chatID || workspace.Chats[0].Revision != chat.Revision || workspace.Chats[0].Message != chat.Message {
+	if len(workspace.Textboxes) != 2 || len(workspace.Chats) != 1 || workspace.Chats[0].ChatID != chatID || workspace.Chats[0].Revision != chat.Revision || workspace.Chats[0].Message != chat.Message {
 		t.Fatalf("denied requests changed workspace=%+v", workspace)
 	}
 }

@@ -349,6 +349,12 @@ func (r *PostgresRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleN
 	if err != nil {
 		return domain.HuddleNode{}, err
 	}
+	if _, err = tx.ExecContext(ctx, `
+insert into huddle_node_textboxes(company_id,huddle_node_id,textbox_id,title,display_order,body_json)
+values($1::uuid,$2::uuid,$3::uuid,'New text box',0,$4::jsonb)`,
+		input.CompanyID, id, newUUIDv7String(), emptyEditorTextboxBody()); err != nil {
+		return domain.HuddleNode{}, mapEditorOwnerTextLimitError(err)
+	}
 	if err = postgresCreateDirectPolicyTx(ctx, tx, input.CompanyID, EntityTypeHuddleNode, id); err != nil {
 		return domain.HuddleNode{}, err
 	}
@@ -629,14 +635,16 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 			return err
 		}
 	}
+	if kind == "huddle_logic_gate" || kind == "huddle_node" {
+		if err = add("entity_relationships", `company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, kind, id); err != nil {
+			return err
+		}
+	}
 	if kind == "huddle_node" {
 		if err = add("huddle_node_textboxes", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
 			return err
 		}
 		if err = add("huddle_node_textbox_chats", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
-			return err
-		}
-		if err = add("entity_relationships", `company_id=$1::uuid and resource_type='huddle_node' and resource_id=$2::uuid`, companyID, id); err != nil {
 			return err
 		}
 		if err = add("huddle_node_logic_gate_relationships", `company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id); err != nil {
@@ -681,6 +689,9 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 			if _, err = tx.ExecContext(ctx, `delete from `+policyTable+` where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, kind, id); err != nil {
 				return err
 			}
+		}
+		if _, err = tx.ExecContext(ctx, `delete from entity_relationships where company_id=$1::uuid and resource_type=$2 and resource_id=$3::uuid`, companyID, kind, id); err != nil {
+			return err
 		}
 	}
 	if kind == "huddle_logic_gate" {

@@ -468,9 +468,14 @@ begin
       on relationship.resource_type = 'huddle_node'
      and huddle_node.company_id = relationship.company_id
      and huddle_node.huddle_node_id = relationship.resource_id
+    left join public.huddle_logic_gates huddle_logic_gate
+      on relationship.resource_type = 'huddle_logic_gate'
+     and huddle_logic_gate.company_id = relationship.company_id
+     and huddle_logic_gate.huddle_logic_gate_id = relationship.resource_id
     where entity.entity_id is null
-       or relationship.resource_type is distinct from 'huddle_node'
-       or huddle_node.huddle_node_id is null
+       or relationship.resource_type not in ('huddle_node','huddle_logic_gate')
+       or (relationship.resource_type = 'huddle_node' and huddle_node.huddle_node_id is null)
+       or (relationship.resource_type = 'huddle_logic_gate' and huddle_logic_gate.huddle_logic_gate_id is null)
   ) then
     raise exception 'STOP: an Entity relationship has a missing Entity or unsupported or missing exact resource';
   end if;

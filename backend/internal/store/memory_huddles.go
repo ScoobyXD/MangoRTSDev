@@ -314,6 +314,11 @@ func (r *MemoryRepo) DeleteHuddleLogicGate(companyID, id, userID string) error {
 	r.addSimpleHuddleRecycleLocked(companyID, userID, "huddle_logic_gate", id, item.Header)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeHuddleLogicGate, id)
 	r.retireMemoryAttachmentOwnerLocked(companyID, EntityTypeHuddleLogicGate, id, time.Now().UTC())
+	for relationshipKey, relationship := range r.entityRelationships {
+		if relationship.CompanyID == companyID && relationship.ResourceType == EntityTypeHuddleLogicGate && relationship.ResourceID == id {
+			delete(r.entityRelationships, relationshipKey)
+		}
+	}
 	delete(r.huddleLogicGates, k)
 	for relationshipKey, relationship := range r.huddleLogicGateRelationships {
 		if relationship.CompanyID == companyID && relationship.HuddleLogicGateID == id {
@@ -354,6 +359,11 @@ func (r *MemoryRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleNod
 	now := time.Now().UTC()
 	item := domain.HuddleNode{CompanyID: input.CompanyID, HuddleNodeID: newUUIDv7String(), HuddleLogicGateID: input.OwnerID, Name: input.Name, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.huddleNodes[key(input.CompanyID, item.HuddleNodeID)] = item
+	textbox := HuddleNodeTextbox{
+		CompanyID: input.CompanyID, HuddleNodeID: item.HuddleNodeID, TextboxID: newUUIDv7String(),
+		Title: "New text box", DisplayOrder: 0, Revision: 0, CreatedTimestamp: now, UpdatedTimestamp: now,
+	}
+	r.huddleNodeTextboxes[key(input.CompanyID, item.HuddleNodeID)] = map[string]HuddleNodeTextbox{textbox.TextboxID: textbox}
 	r.ensureV2PolicySettingsLocked(input.CompanyID, EntityTypeHuddleNode, item.HuddleNodeID)
 	for _, relationship := range r.huddleLogicGateRelationships {
 		if relationship.CompanyID != input.CompanyID || relationship.HuddleLogicGateID != input.OwnerID {

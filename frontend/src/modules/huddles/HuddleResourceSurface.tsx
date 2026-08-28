@@ -6,6 +6,7 @@ import { HeaderRecycleBinIcon } from "../../icons/index.js";
 import type { CompanyUser, CompanyUserGroup, CompanyUserGroupMember } from "../communications/communicationsApi";
 import { RACIAssignmentBoard } from "../editor/EditorLinkedDocumentPanels";
 import { openEditorEntityLink } from "../editor/editorEntityLinks";
+import type { EditorSaveState } from "../editor/EditorSaveStatusIcon";
 import {
   EDITOR_NEU_PANEL_BACKGROUND,
   EDITOR_NEU_PANEL_SHADOW,
@@ -29,6 +30,12 @@ import {
 } from "./BareMangoEditor";
 import { HuddleResourceIcon } from "./HuddleResourceIcon";
 import { HuddleActionItemsPanel } from "./HuddleActionItemsPanel";
+import {
+  actionItemReferenceIDs,
+  transitionActionItemReferenceRefresh,
+  type ActionItemReferenceRefreshEvent,
+  type ActionItemReferenceRefreshState,
+} from "./huddleActionItems";
 import { HuddleLogicGateCards, type HuddleLogicGateCardItem, type HuddleLogicGateKPIItem } from "./HuddleLogicGateCards";
 import { HuddleNodeWorkspace } from "./HuddleNodeWorkspace";
 import { KPIEditorPopup, type KPIEditorItem } from "./LogicGateKPISection";
@@ -73,6 +80,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
 }) => {
   const editorControls = useBareMangoEditorControls();
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const gateActionItemReferenceRefreshRef = useRef<ActionItemReferenceRefreshState | undefined>(undefined);
   const [name, setName] = useState(resource.name);
   const [savedName, setSavedName] = useState(resource.name);
   const [nodes, setNodes] = useState<HuddleNode[]>([]);
@@ -95,6 +103,23 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const [error, setError] = useState("");
   const isGate = resource.resourceType === "huddle_logic_gate";
   const refreshActionItems = useCallback(() => setActionItemsRefreshToken((current) => current + 1), []);
+  const recordGateActionItemReferenceEvent = useCallback((event: ActionItemReferenceRefreshEvent) => {
+    const result = transitionActionItemReferenceRefresh(gateActionItemReferenceRefreshRef.current, event);
+    gateActionItemReferenceRefreshRef.current = result.state;
+    if (result.refresh) refreshActionItems();
+  }, [refreshActionItems]);
+  const recordGateEditorSaveState = useCallback((state: EditorSaveState) => {
+    if (state.status === "saved") recordGateActionItemReferenceEvent({ type: "saved" });
+  }, [recordGateActionItemReferenceEvent]);
+  const recordGateActionItemReferenceSnapshot = useCallback((document: unknown) => {
+    recordGateActionItemReferenceEvent({ type: "snapshot", signature: actionItemReferenceIDs(document).join("\n") });
+  }, [recordGateActionItemReferenceEvent]);
+  const recordCanonicalGateActionItemReferences = useCallback((document: unknown) => {
+    recordGateActionItemReferenceEvent({ type: "canonical", signature: actionItemReferenceIDs(document).join("\n") });
+  }, [recordGateActionItemReferenceEvent]);
+  useEffect(() => {
+    gateActionItemReferenceRefreshRef.current = undefined;
+  }, [resource.resourceID, resource.resourceType]);
   const saveStateStorageKey = isGate || activeHuddleNodeTextBoxID ? mangoTiptapPendingStorageKey({
     companyID,
     resourceType: isGate ? "huddle_logic_gate" : "huddle_node",
@@ -433,6 +458,9 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
                 editorSurface: "huddle_logic_gate",
               }}
               mentionUsers={companyUsers}
+              onSaveStateChange={recordGateEditorSaveState}
+              onDocumentSnapshotChange={recordGateActionItemReferenceSnapshot}
+              onCanonicalDocumentChange={recordCanonicalGateActionItemReferences}
               controls={editorControls}
               style={{ padding: "22px 26px", background: "rgba(255,255,255,.72)" }}
             />
