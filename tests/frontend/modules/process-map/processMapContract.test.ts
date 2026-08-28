@@ -79,11 +79,12 @@ test("retired map and full-company relationship graph files remain absent", () =
   assert.doesNotMatch(activeSources, /logicGateRelationshipGraph|\/v1\/logic-gate-relationships/);
 });
 
-test("V3 Surface retains containment, owned traces, rollback, and permission-state disposal", () => {
+test("V3 Surface retains placement containment, Folder resize safety, owned traces, rollback, and permission-state disposal", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
 
   assert.match(surface, /processMapDeepestContainingFolder\(processMapPlacementBounds\(placement\)/);
-  assert.match(surface, /folderContainsItsChildren\(saved, current\.containedPlacements\)/);
+  assert.match(surface, /pending\.values\(\)\]\.some\(\(item\) => item\.grid_width < 1 \|\| item\.grid_height < 1\)/);
+  assert.match(surface, /Folder resize was restored because its contents cannot be shrunk any further/);
   assert.match(surface, /const routePoints = defaultProcessMapRoutePoints\([\s\S]{0,220}postProcessMapRelationship\(apiBase, companyID, current\.source, target, routePoints\)/);
   assert.match(surface, /shouldApplyProcessMapMutationAck/);
   assert.match(surface, /Placement was restored because it could not be saved/);
@@ -119,14 +120,15 @@ test("V3 Surface retains containment, owned traces, rollback, and permission-sta
   }
 });
 
-test("Folder drag frames update only a delta over one stable subtree plan", () => {
+test("Folder move and resize frames update only a delta over one stable subtree plan", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const startGesture = surface.slice(
     surface.indexOf("const startPlacementGesture"),
     surface.indexOf("const handleDragStart"),
   );
   assert.match(startGesture, /const subtree = processMapPlacementSubtree/);
-  assert.match(startGesture, /processMapInternalTracesForMove/);
+  assert.match(startGesture, /const basePlacements = subtree/);
+  assert.match(startGesture, /processMapInternalTracesForTransform/);
   assert.match(startGesture, /basePlacementKeys/);
   assert.match(startGesture, /baseTraceIDs/);
 
@@ -137,14 +139,14 @@ test("Folder drag frames update only a delta over one stable subtree plan", () =
   const placementDragFrame = dragFrame.slice(dragFrame.indexOf("const dx = snapProcessMapGridCoordinate"));
   assert.match(placementDragFrame, /deltaX: dx/);
   assert.match(placementDragFrame, /deltaY: dy/);
-  assert.doesNotMatch(placementDragFrame, /setPreviewPlacements|setPreviewTraces|translatedTraces|materializeProcessMapPlacementTransform/);
+  assert.doesNotMatch(placementDragFrame, /setPreviewPlacements|setPreviewTraces|transformedTraces|materializeProcessMapPlacementTransform/);
 
   const dragEnd = surface.slice(
     surface.indexOf("const handleDragEnd"),
     surface.indexOf("const fitFolder"),
   );
   assert.match(dragEnd, /materializeProcessMapPlacementTransform\(current\.basePlacements, transform\)/);
-  assert.match(dragEnd, /translatedTraces\(current\.baseTraces, current\.deltaX, current\.deltaY\)/);
+  assert.match(dragEnd, /transformedTraces\(current\.baseTraces, transform\)/);
 });
 
 test("company or auth scope changes synchronously suppress protected geometry before replacement reads", () => {
@@ -210,7 +212,7 @@ test("name-visible hover reveals anchors and resize grips while connection drag 
   assert.match(surface, /!options\.editOverlay\.connectionSourceKey/);
   assert.match(surface, /processMapResizeCursor\(gesture\.horizontal!, gesture\.vertical!\)/);
   assert.match(surface, /"nwse-resize" \| "nesw-resize"/);
-  assert.match(surface, /getCursor=\{\(\{ isDragging, isHovering \}\) => resizeCursor \?\?/);
+  assert.match(surface, /getCursor=\{\(\{ isDragging, isHovering \}\) => dragSelectionActive \? "crosshair" : resizeCursor \?\?/);
   assert.match(drag, /pick\.kind === "anchor" && pick\.anchor === "output"/);
   assert.ok(drag.indexOf("gestureRef.current = next") < drag.indexOf("setGesture(next)"));
 });
@@ -306,7 +308,24 @@ test("V3 Surface keeps valid tile data through camera settlement and accepts dec
 
 test("static XY traces remain below placements with no moving marker path", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
-  assert.match(surface, /return \[spatial\.background, editTraces\.path, \.\.\.\(spatial\.tile \? \[spatial\.tile\] : \[\]\), editTraces\.waypoints, \.\.\.editPlacementLayers\(options\)\]/);
+  const compose = surface.slice(
+    surface.indexOf("function composeProcessMapLayers"),
+    surface.indexOf("export function buildProcessMapLayers"),
+  );
+  const orderedLayers = [
+    "spatial.background",
+    "...editPlacements.backdrops",
+    "editTraces.path",
+    "...(spatial.tile ? [spatial.tile] : [])",
+    "editTraces.waypoints",
+    "...editPlacements.foreground",
+  ];
+  let previous = -1;
+  for (const layer of orderedLayers) {
+    const index = compose.indexOf(layer);
+    assert.ok(index > previous, `${layer} must retain its intended visual stacking order`);
+    previous = index;
+  }
   assert.equal((surface.match(/positionFormat:\s*"XY"/g) ?? []).length, 6, "all six Process Map PathLayers must opt into flat XY coordinates");
   for (const removed of [
     /buildProcessMapFlowLayer/,
@@ -405,7 +424,7 @@ test("QDC visibility starts with the server-capped name-visible presentation", (
   assert.match(surface, /const qdVisible = qdPlacement && qdGeometry && processMapPlacementDisplayLOD\(\{[\s\S]*?presentation: qdPlacement\.presentation,[\s\S]*?\}, 2 \*\* settledViewState\.zoom\) !== "whole"/);
 });
 
-test("dark mode is scoped to the Process Map canvas and map content", () => {
+test("light mode is scoped to the Process Map canvas and map content", () => {
   const css = source("frontend/src/modules/process-map/processMap.css");
   const page = source("frontend/src/pages/process-map/ProcessMapPage.tsx");
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
@@ -415,18 +434,18 @@ test("dark mode is scoped to the Process Map canvas and map content", () => {
   const surfaceRule = css.match(/\.process-map-surface\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
 
   assert.match(pageRule, /grid-template-rows:\s*minmax\(0, 1fr\)/);
-  assert.match(pageRule, /background:\s*#020617/);
-  assert.match(canvasRule, /background:\s*#020617/);
-  assert.match(surfaceRule, /background:\s*#020617/);
+  assert.match(pageRule, /background:\s*#fff/);
+  assert.match(canvasRule, /background:\s*#fff/);
+  assert.match(surfaceRule, /background:\s*#fff/);
   assert.match(hoverModeRule, /position:\s*absolute/);
   assert.match(hoverModeRule, /top:\s*20px/);
   assert.match(hoverModeRule, /right:\s*22px/);
-  assert.match(hoverModeRule, /color:\s*#f8fafc/);
-  assert.match(hoverModeRule, /background:\s*rgba\(15, 23, 42, 0\.88\)/);
+  assert.match(hoverModeRule, /color:\s*#475569/);
+  assert.match(hoverModeRule, /background:\s*rgba\(255, 255, 255, 0\.94\)/);
   assert.doesNotMatch(page, /<header|<h1>/);
   assert.match(page, /<div className="process-map-page__canvas">[\s\S]*<ProcessMapSurface[\s\S]*<label className="process-map-page__hover-mode">/);
   assert.doesNotMatch(css, /\.process-map-page__header|\.process-map-toolbar/);
-  assert.match(surface, /const COLOR_MAP_BACKGROUND:[^=]*= \[2, 6, 23, 255\]/);
-  assert.match(surface, /const COLOR_TEXT:[^=]*= \[248, 250, 252, 255\]/);
+  assert.match(surface, /const COLOR_MAP_BACKGROUND:[^=]*= \[255, 255, 255, 255\]/);
+  assert.match(surface, /const COLOR_TEXT:[^=]*= \[30, 41, 59, 245\]/);
   assert.match(surface, /fill: COLOR_MAP_BACKGROUND, line: COLOR_MAP_BACKGROUND/);
 });

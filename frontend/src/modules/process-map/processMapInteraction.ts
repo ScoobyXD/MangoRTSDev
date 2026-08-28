@@ -1,4 +1,11 @@
 import type { ProcessMapResourceRef } from "./processMapApi.js";
+import {
+  processMapBoundsContain,
+  processMapPlacementBounds,
+  type ProcessMapBounds,
+  type ProcessMapGridPoint,
+  type ProcessMapPlacementGeometry,
+} from "./processMapGeometry.js";
 
 export type ProcessMapInteractionState = {
   isDragging?: boolean;
@@ -17,6 +24,28 @@ export type ProcessMapRefinementTile = {
 
 export function processMapResourceNodeID(resource: ProcessMapResourceRef): string {
   return `${resource.resource_type}:${resource.resource_id}`;
+}
+
+export function processMapDragSelectionBounds(start: ProcessMapGridPoint, end: ProcessMapGridPoint): ProcessMapBounds {
+  return {
+    min_x: Math.min(start.x, end.x),
+    min_y: Math.min(start.y, end.y),
+    max_x: Math.max(start.x, end.x),
+    max_y: Math.max(start.y, end.y),
+  };
+}
+
+export function processMapPlacementsInsideBounds<T extends ProcessMapPlacementGeometry & ProcessMapResourceRef>(
+  placements: Iterable<T>,
+  bounds: ProcessMapBounds,
+): Set<string> {
+  const selected = new Set<string>();
+  for (const placement of placements) {
+    if (processMapBoundsContain(bounds, processMapPlacementBounds(placement))) {
+      selected.add(processMapResourceNodeID(placement));
+    }
+  }
+  return selected;
 }
 
 export function isValidProcessMapConnection(connection: {

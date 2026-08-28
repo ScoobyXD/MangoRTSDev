@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   createProcessMapSettlementGate,
   isValidProcessMapConnection,
+  processMapDragSelectionBounds,
+  processMapPlacementsInsideBounds,
   shouldApplyProcessMapCommit,
   shouldApplyProcessMapMutationAck,
   transparentVectorRefinementStrategy,
@@ -18,6 +20,30 @@ test("connections keep exact directed endpoint identities", () => {
   assert.equal(isValidProcessMapConnection({ source: "folder-1", target: "folder-1", sourceHandle: "output", targetHandle: "input" }), false);
   assert.equal(isValidProcessMapConnection({ source: "folder-1", target: "gate-1", sourceHandle: "input", targetHandle: "output" }), false);
   assert.equal(isValidProcessMapConnection({ source: null, target: "gate-1", sourceHandle: "output", targetHandle: "input" }), false);
+});
+
+test("reverse drag normalizes one company-world selection rectangle", () => {
+  assert.deepEqual(
+    processMapDragSelectionBounds({ x: 20, y: 15 }, { x: -5, y: -10 }),
+    { min_x: -5, min_y: -10, max_x: 20, max_y: 15 },
+  );
+});
+
+test("drag selection includes complete edge-aligned placements and excludes partial overlaps", () => {
+  const bounds = processMapDragSelectionBounds({ x: 20, y: 15 }, { x: -5, y: -10 });
+  const selected = processMapPlacementsInsideBounds([
+    { resource_type: "company_explorer_folder", resource_id: "edge-aligned", grid_x: -5, grid_y: -10, grid_width: 25, grid_height: 25 },
+    { resource_type: "logic_gate", resource_id: "inside", grid_x: 0, grid_y: 0, grid_width: 10, grid_height: 5 },
+    { resource_type: "logic_gate", resource_id: "left-overlap", grid_x: -6, grid_y: 0, grid_width: 2, grid_height: 2 },
+    { resource_type: "logic_gate", resource_id: "right-overlap", grid_x: 19, grid_y: 0, grid_width: 2, grid_height: 2 },
+    { resource_type: "logic_gate", resource_id: "outside", grid_x: 30, grid_y: 30, grid_width: 2, grid_height: 2 },
+  ], bounds);
+
+  assert.deepEqual(
+    [...selected].sort(),
+    ["company_explorer_folder:edge-aligned", "logic_gate:inside"],
+    "selection is inclusive at every boundary but requires the complete placement rectangle",
+  );
 });
 
 test("mutation acknowledgements cannot replace a newer canonical generation", () => {

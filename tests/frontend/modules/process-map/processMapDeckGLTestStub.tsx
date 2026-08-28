@@ -5,7 +5,11 @@ export type ProcessMapDeckGLTestProps = {
   viewState: Record<string, unknown>;
   onClick: (info: { object?: unknown; coordinate?: number[] }, event: { type: string }) => void;
   onHover: (info: { object?: unknown; coordinate?: number[] }) => void;
-  onDragStart: (info: { object?: unknown; coordinate?: number[] }, event: { stopPropagation: () => void }) => void;
+  onDragStart: (info: { object?: unknown; coordinate?: number[] }, event: {
+    stopPropagation: () => void;
+    shiftKey?: boolean;
+    srcEvent?: { shiftKey?: boolean };
+  }) => void;
   onDrag: (info: { object?: unknown; coordinate?: number[] }) => void;
   onDragEnd: (info: { object?: unknown; coordinate?: number[] }) => void;
   onResize: (size: { width: number; height: number }) => void;

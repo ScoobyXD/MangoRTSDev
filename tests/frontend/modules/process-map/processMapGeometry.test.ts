@@ -15,6 +15,8 @@ import {
   processMapPlacementDisplayLOD,
   processMapPlacementLOD,
   resizeProcessMapPlacement,
+  scaleProcessMapGridPoint,
+  scaleProcessMapPlacement,
 } from "../../../../frontend/src/modules/process-map/processMapGeometry.js";
 
 type ContainmentFolder = Parameters<typeof processMapDeepestContainingFolder>[1][number];
@@ -52,6 +54,51 @@ test("saved global dimensions define placement bounds and physical side anchors"
   });
   assert.deepEqual(processMapInputAnchor(placement), { x: -4, y: 11.5 });
   assert.deepEqual(processMapOutputAnchor(placement), { x: 7, y: 11.5 });
+});
+
+test("grid points scale exactly through growth, shrink, reverse-edge movement, ties, and negative coordinates", () => {
+  const compact = { min_x: 0, min_y: 0, max_x: 10, max_y: 10 };
+  const grown = { min_x: 0, min_y: 0, max_x: 20, max_y: 30 };
+  assert.deepEqual(scaleProcessMapGridPoint({ x: 2, y: 8 }, compact, grown), { x: 4, y: 24 }, "growth scales each axis from the source origin");
+  assert.deepEqual(scaleProcessMapGridPoint({ x: 16, y: 6 }, { min_x: 0, min_y: 0, max_x: 20, max_y: 10 }, { min_x: 5, min_y: -5, max_x: 15, max_y: 0 }), { x: 13, y: -2 }, "shrink retains the target translation");
+  assert.deepEqual(scaleProcessMapGridPoint({ x: 14, y: 24 }, { min_x: 10, min_y: 20, max_x: 30, max_y: 40 }, { min_x: 0, min_y: 5, max_x: 30, max_y: 40 }), { x: 6, y: 12 }, "west and north growth keeps the opposite edges fixed");
+  assert.deepEqual(scaleProcessMapGridPoint({ x: 1, y: 1 }, { min_x: 0, min_y: 0, max_x: 2, max_y: 2 }, { min_x: 0, min_y: 0, max_x: 1, max_y: 1 }), { x: 1, y: 1 }, "positive half-grid ties use the shared grid snap rule");
+  assert.deepEqual(scaleProcessMapGridPoint({ x: -15, y: -5 }, { min_x: -20, min_y: -10, max_x: 0, max_y: 10 }, { min_x: -40, min_y: -30, max_x: 0, max_y: 10 }), { x: -30, y: -20 }, "negative company-world coordinates scale without an unsigned origin");
+});
+
+test("placement rectangles scale both corners through growth, shrink, reverse-edge movement, ties, and negative coordinates", () => {
+  const compact = { min_x: 0, min_y: 0, max_x: 20, max_y: 10 };
+  const grown = { min_x: 0, min_y: 0, max_x: 40, max_y: 30 };
+  const grownPlacement = scaleProcessMapPlacement({ grid_x: 5, grid_y: 2, grid_width: 5, grid_height: 4 }, compact, grown);
+  assert.deepEqual(grownPlacement, { grid_x: 10, grid_y: 6, grid_width: 10, grid_height: 12 });
+  assert.deepEqual(scaleProcessMapPlacement(grownPlacement, grown, compact), { grid_x: 5, grid_y: 2, grid_width: 5, grid_height: 4 }, "shrinking reverses an exact growth");
+  assert.deepEqual(
+    scaleProcessMapPlacement(
+      { grid_x: 14, grid_y: 24, grid_width: 8, grid_height: 8 },
+      { min_x: 10, min_y: 20, max_x: 30, max_y: 40 },
+      { min_x: 0, min_y: 5, max_x: 30, max_y: 40 },
+    ),
+    { grid_x: 6, grid_y: 12, grid_width: 12, grid_height: 14 },
+    "west and north growth scales both placement corners while east and south remain fixed",
+  );
+  assert.deepEqual(
+    scaleProcessMapPlacement(
+      { grid_x: 1, grid_y: 1, grid_width: 2, grid_height: 2 },
+      { min_x: 0, min_y: 0, max_x: 4, max_y: 4 },
+      { min_x: 0, min_y: 0, max_x: 2, max_y: 2 },
+    ),
+    { grid_x: 1, grid_y: 1, grid_width: 1, grid_height: 1 },
+    "each half-grid corner snaps before the scaled dimensions are derived",
+  );
+  assert.deepEqual(
+    scaleProcessMapPlacement(
+      { grid_x: -15, grid_y: -5, grid_width: 10, grid_height: 10 },
+      { min_x: -20, min_y: -10, max_x: 0, max_y: 10 },
+      { min_x: -40, min_y: -30, max_x: 0, max_y: 10 },
+    ),
+    { grid_x: -30, grid_y: -20, grid_width: 20, grid_height: 20 },
+    "negative placement bounds retain positive scaled dimensions",
+  );
 });
 
 test("the deepest eligible saved map Folder contains the final placement independently from Explorer", () => {

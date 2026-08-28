@@ -1200,14 +1200,7 @@ for update of trace`, companyID, string(movedJSON))
 	return items, rows.Err()
 }
 
-func postgresSaveTranslatedProcessMapTraceTx(ctx context.Context, tx *sql.Tx, item domain.ProcessMapTrace, deltaX, deltaY int) (domain.ProcessMapTrace, error) {
-	for index := range item.RoutePoints {
-		if !validProcessMapCoordinate(item.RoutePoints[index].X+deltaX) || !validProcessMapCoordinate(item.RoutePoints[index].Y+deltaY) {
-			return domain.ProcessMapTrace{}, ErrInvalid
-		}
-		item.RoutePoints[index].X += deltaX
-		item.RoutePoints[index].Y += deltaY
-	}
+func postgresSaveProcessMapTraceRouteTx(ctx context.Context, tx *sql.Tx, item domain.ProcessMapTrace) (domain.ProcessMapTrace, error) {
 	routeJSON, err := json.Marshal(item.RoutePoints)
 	if err != nil {
 		return domain.ProcessMapTrace{}, err
@@ -1218,6 +1211,17 @@ set route_points=$3::jsonb,revision=revision+1,updated_timestamp=statement_times
 where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid
 returning company_id::text,resource_operational_relationship_id::text,route_points,revision,created_timestamp,updated_timestamp`,
 		item.CompanyID, item.ResourceOperationalRelationshipID, string(routeJSON)))
+}
+
+func postgresSaveTranslatedProcessMapTraceTx(ctx context.Context, tx *sql.Tx, item domain.ProcessMapTrace, deltaX, deltaY int) (domain.ProcessMapTrace, error) {
+	for index := range item.RoutePoints {
+		if !validProcessMapCoordinate(item.RoutePoints[index].X+deltaX) || !validProcessMapCoordinate(item.RoutePoints[index].Y+deltaY) {
+			return domain.ProcessMapTrace{}, ErrInvalid
+		}
+		item.RoutePoints[index].X += deltaX
+		item.RoutePoints[index].Y += deltaY
+	}
+	return postgresSaveProcessMapTraceRouteTx(ctx, tx, item)
 }
 
 func processMapEnvelopeVersionTx(ctx context.Context, tx *sql.Tx, companyID string, result *ProcessMapMutationEnvelope) error {
@@ -1270,11 +1274,14 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 	movesFolderGroup := resourceType == domain.ProcessMapResourceTypeFolder && exists &&
 		(input.GridX != current.GridX || input.GridY != current.GridY) &&
 		input.GridWidth == current.GridWidth && input.GridHeight == current.GridHeight
+	resizesFolderGroup := resourceType == domain.ProcessMapResourceTypeFolder && exists &&
+		(input.GridWidth != current.GridWidth || input.GridHeight != current.GridHeight)
+	transformsFolderGroup := movesFolderGroup || resizesFolderGroup
 	resources := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
 	if parentID != "" {
 		resources = append(resources, domain.ProcessMapResourceRef{ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: parentID})
 	}
-	if movesFolderGroup {
+	if transformsFolderGroup {
 		for _, item := range descendants {
 			resources = append(resources, domain.ProcessMapResourceRef{ResourceType: item.ResourceType, ResourceID: item.ResourceID})
 		}
@@ -1353,42 +1360,57 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 	}
 
 	changedPlacements := []domain.ProcessMapPlacement{}
-	movedRefs := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
+	transformedRefs := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
 	if resourceType == domain.ProcessMapResourceTypeFolder {
 		folderBounds := processMapPlacementBounds(target)
-		for _, descendant := range descendants {
-			shifted := descendant
+		for index, descendant := range descendants {
+			transformed := descendant
 			if movesFolderGroup {
-				shifted.GridX += deltaX
-				shifted.GridY += deltaY
+				transformed.GridX += deltaX
+				transformed.GridY += deltaY
+			} else if resizesFolderGroup {
+				transformed = processMapScalePlacementWithinFolder(transformed, current, target)
 			}
-			if !validProcessMapGeometry(shifted.GridX, shifted.GridY, shifted.GridWidth, shifted.GridHeight) {
+			if !validProcessMapGeometry(transformed.GridX, transformed.GridY, transformed.GridWidth, transformed.GridHeight) {
 				return ProcessMapMutationEnvelope{}, ErrInvalid
 			}
-			if !processMapBoundsContain(folderBounds, processMapPlacementBounds(shifted)) {
+			if !processMapBoundsContain(folderBounds, processMapPlacementBounds(transformed)) {
 				return ProcessMapMutationEnvelope{}, ErrProcessMapContainment
 			}
-			if movesFolderGroup {
-				movedRefs = append(movedRefs, domain.ProcessMapResourceRef{ResourceType: descendant.ResourceType, ResourceID: descendant.ResourceID})
+			if transformsFolderGroup {
+				transformedRefs = append(transformedRefs, domain.ProcessMapResourceRef{ResourceType: descendant.ResourceType, ResourceID: descendant.ResourceID})
 			}
+			descendants[index] = transformed
 		}
 	}
 	internalTraces := []domain.ProcessMapTrace{}
-	if movesFolderGroup {
-		internalTraces, err = postgresInternalProcessMapTracesTx(ctx, tx, companyID, movedRefs)
+	if transformsFolderGroup {
+		internalTraces, err = postgresInternalProcessMapTracesTx(ctx, tx, companyID, transformedRefs)
 		if err != nil {
 			return ProcessMapMutationEnvelope{}, err
 		}
+		transformedTraces := make([]domain.ProcessMapTrace, 0, len(internalTraces))
 		for _, trace := range internalTraces {
-			for _, point := range trace.RoutePoints {
-				if !validProcessMapCoordinate(point.X+deltaX) || !validProcessMapCoordinate(point.Y+deltaY) {
+			if movesFolderGroup {
+				for _, point := range trace.RoutePoints {
+					if !validProcessMapCoordinate(point.X+deltaX) || !validProcessMapCoordinate(point.Y+deltaY) {
+						return ProcessMapMutationEnvelope{}, ErrInvalid
+					}
+				}
+			} else {
+				scaled := processMapScaleRoutePointsWithinFolder(trace.RoutePoints, current, target)
+				if !validProcessMapRoutePoints(scaled) {
 					return ProcessMapMutationEnvelope{}, ErrInvalid
 				}
+				if processMapRoutePointsEqual(trace.RoutePoints, scaled) {
+					continue
+				}
+				trace.RoutePoints = scaled
 			}
+			transformedTraces = append(transformedTraces, trace)
 		}
+		internalTraces = transformedTraces
 		for _, descendant := range descendants {
-			descendant.GridX += deltaX
-			descendant.GridY += deltaY
 			updated, err := postgresUpdateProcessMapPlacementTx(ctx, tx, descendant)
 			if err != nil {
 				return ProcessMapMutationEnvelope{}, err
@@ -1408,7 +1430,12 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 	changedPlacements = append(changedPlacements, saved)
 	changedTraces := []domain.ProcessMapTrace{}
 	for _, trace := range internalTraces {
-		updated, err := postgresSaveTranslatedProcessMapTraceTx(ctx, tx, trace, deltaX, deltaY)
+		var updated domain.ProcessMapTrace
+		if movesFolderGroup {
+			updated, err = postgresSaveTranslatedProcessMapTraceTx(ctx, tx, trace, deltaX, deltaY)
+		} else {
+			updated, err = postgresSaveProcessMapTraceRouteTx(ctx, tx, trace)
+		}
 		if err != nil {
 			return ProcessMapMutationEnvelope{}, err
 		}

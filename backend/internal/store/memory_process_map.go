@@ -743,6 +743,11 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 
 	placementKey := processMapPlacementMemoryKey(input.CompanyID, resourceType, input.ResourceID)
 	current, exists := r.processMapPlacements[placementKey]
+	sourceFolder := cloneProcessMapPlacement(current)
+	descendants := []domain.ProcessMapPlacement{}
+	if resourceType == domain.ProcessMapResourceTypeFolder && exists {
+		descendants = r.processMapDescendantsLocked(input.CompanyID, input.ResourceID)
+	}
 	desiredParent := processMapParentPointer(parentID)
 	parentChanged := !exists || !sameProcessMapParent(current.MapParentFolderID, desiredParent)
 	audienceResources := []domain.ProcessMapResourceRef(nil)
@@ -758,27 +763,16 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 	}
 	movesFolderGroup := resourceType == domain.ProcessMapResourceTypeFolder && exists &&
 		(deltaX != 0 || deltaY != 0) && input.GridWidth == current.GridWidth && input.GridHeight == current.GridHeight
+	resizesFolderGroup := resourceType == domain.ProcessMapResourceTypeFolder && exists &&
+		(input.GridWidth != current.GridWidth || input.GridHeight != current.GridHeight)
+	transformsFolderGroup := movesFolderGroup || resizesFolderGroup
 	changedPlacements := []domain.ProcessMapPlacement{}
-	movedKeys := map[string]bool{}
-	if movesFolderGroup {
-		moved := append([]domain.ProcessMapPlacement{cloneProcessMapPlacement(current)}, r.processMapDescendantsLocked(input.CompanyID, input.ResourceID)...)
-		for _, item := range moved {
+	transformedKeys := map[string]bool{}
+	if transformsFolderGroup {
+		for _, item := range append([]domain.ProcessMapPlacement{sourceFolder}, descendants...) {
 			if !r.processMapResourceAllowedLocked(input.CompanyID, input.PermissionUserID, item.ResourceType, item.ResourceID) {
 				return restore(ErrNotFound)
 			}
-			if !validProcessMapGeometry(item.GridX+deltaX, item.GridY+deltaY, item.GridWidth, item.GridHeight) {
-				return restore(ErrInvalid)
-			}
-		}
-		for _, item := range moved[1:] {
-			item.GridX += deltaX
-			item.GridY += deltaY
-			item.Revision++
-			item.UpdatedTimestamp = now
-			itemKey := processMapPlacementMemoryKey(item.CompanyID, item.ResourceType, item.ResourceID)
-			r.processMapPlacements[itemKey] = item
-			movedKeys[itemKey] = true
-			changedPlacements = append(changedPlacements, cloneProcessMapPlacement(item))
 		}
 	}
 
@@ -804,10 +798,31 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 	}
 	if resourceType == domain.ProcessMapResourceTypeFolder {
 		folderBounds := processMapPlacementBounds(current)
-		for _, descendant := range r.processMapDescendantsLocked(input.CompanyID, input.ResourceID) {
-			if !processMapBoundsContain(folderBounds, processMapPlacementBounds(descendant)) {
+		for index, descendant := range descendants {
+			transformed := descendant
+			if movesFolderGroup {
+				transformed.GridX += deltaX
+				transformed.GridY += deltaY
+			} else if resizesFolderGroup {
+				transformed = processMapScalePlacementWithinFolder(transformed, sourceFolder, current)
+			}
+			if !validProcessMapGeometry(transformed.GridX, transformed.GridY, transformed.GridWidth, transformed.GridHeight) {
+				return restore(ErrInvalid)
+			}
+			if !processMapBoundsContain(folderBounds, processMapPlacementBounds(transformed)) {
 				return restore(ErrProcessMapContainment)
 			}
+			descendants[index] = transformed
+		}
+	}
+	if transformsFolderGroup {
+		for _, item := range descendants {
+			item.Revision++
+			item.UpdatedTimestamp = now
+			itemKey := processMapPlacementMemoryKey(item.CompanyID, item.ResourceType, item.ResourceID)
+			r.processMapPlacements[itemKey] = item
+			transformedKeys[itemKey] = true
+			changedPlacements = append(changedPlacements, cloneProcessMapPlacement(item))
 		}
 	}
 	r.processMapPlacements[placementKey] = current
@@ -816,11 +831,11 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 		r.syncMemoryProcessMapParentToExplorerLocked(input.CompanyID, resourceType, input.ResourceID, desiredParent, now)
 		protectedGeometryChanged = processMapAccessAudienceChanged(beforeAudience, r.processMapAccessAudienceLocked(input.CompanyID, audienceResources))
 	}
-	movedKeys[placementKey] = true
+	transformedKeys[placementKey] = true
 	changedPlacements = append(changedPlacements, cloneProcessMapPlacement(current))
 
 	changedTraces := []domain.ProcessMapTrace{}
-	if movesFolderGroup {
+	if transformsFolderGroup {
 		for traceKey, trace := range r.processMapTraces {
 			relationship, ok := r.resourceOperationalRelationships[traceKey]
 			if !ok {
@@ -829,19 +844,30 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 			if !ok || relationship.CompanyID != input.CompanyID {
 				continue
 			}
-			sourceMoved := movedKeys[processMapPlacementMemoryKey(input.CompanyID, relationship.Source.ResourceType, relationship.Source.ResourceID)]
-			targetMoved := movedKeys[processMapPlacementMemoryKey(input.CompanyID, relationship.Target.ResourceType, relationship.Target.ResourceID)]
-			if !sourceMoved || !targetMoved {
+			sourceTransformed := transformedKeys[processMapPlacementMemoryKey(input.CompanyID, relationship.Source.ResourceType, relationship.Source.ResourceID)]
+			targetTransformed := transformedKeys[processMapPlacementMemoryKey(input.CompanyID, relationship.Target.ResourceType, relationship.Target.ResourceID)]
+			if !sourceTransformed || !targetTransformed {
 				continue
 			}
-			for _, point := range trace.RoutePoints {
-				if !validProcessMapCoordinate(point.X+deltaX) || !validProcessMapCoordinate(point.Y+deltaY) {
+			if movesFolderGroup {
+				for _, point := range trace.RoutePoints {
+					if !validProcessMapCoordinate(point.X+deltaX) || !validProcessMapCoordinate(point.Y+deltaY) {
+						return restore(ErrInvalid)
+					}
+				}
+				for index := range trace.RoutePoints {
+					trace.RoutePoints[index].X += deltaX
+					trace.RoutePoints[index].Y += deltaY
+				}
+			} else {
+				scaled := processMapScaleRoutePointsWithinFolder(trace.RoutePoints, sourceFolder, current)
+				if !validProcessMapRoutePoints(scaled) {
 					return restore(ErrInvalid)
 				}
-			}
-			for index := range trace.RoutePoints {
-				trace.RoutePoints[index].X += deltaX
-				trace.RoutePoints[index].Y += deltaY
+				if processMapRoutePointsEqual(trace.RoutePoints, scaled) {
+					continue
+				}
+				trace.RoutePoints = scaled
 			}
 			trace.Revision++
 			trace.UpdatedTimestamp = now

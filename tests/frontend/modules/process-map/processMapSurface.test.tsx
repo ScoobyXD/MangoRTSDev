@@ -13,13 +13,14 @@ import {
   ProcessMapProtectedTileLayer,
   ProcessMapSurface,
   processMapCurrentOperationKeys,
-  processMapInternalTracesForMove,
+  processMapInternalTracesForTransform,
   processMapPerimeterSegments,
   processMapPlacementSubtree,
   processMapViewportHasCompleteCoverage,
   replaceProcessMapPreviewEntries,
   retireProcessMapMutationMasks,
   type ProcessMapLayerBuildOptions,
+  type ProcessMapPlacementTransform,
   type ProcessMapPresentationState,
 } from "../../../../frontend/src/modules/process-map/ProcessMapSurface.js";
 import type {
@@ -455,6 +456,57 @@ test("name-visible normal LOD keeps Process scorecards, controls, and drag movem
     assert.equal(propagationStopped, true);
     assert.deepEqual(movedBody.polygon, [[3, 2], [17, 2], [17, 10], [3, 10]], "dragging moves the selected Process through the existing snapped transform");
     assert.ok(mounted.container.querySelector(".process-map-qd-card"), "dragging keeps the pinned scorecard attached");
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("Shift-drag on empty Folder surface selects only placements fully inside the dragged bounds", async () => {
+  const folder = placement("selection-folder", 0, 0, 40, 30, "company_explorer_folder");
+  const first = { ...placement("selection-first", 4, 4, 6, 4), map_parent_folder_id: folder.resource_id };
+  const second = { ...placement("selection-second", 16, 4, 6, 4), map_parent_folder_id: folder.resource_id };
+  const outside = { ...placement("selection-outside", 22, 9, 8, 6), map_parent_folder_id: folder.resource_id };
+  const mounted = await mountProcessMapForBehavior(() => undefined, {
+    process: first,
+    initialPlacements: [folder, first, second, outside],
+    sceneBounds: { min_x: 0, min_y: 0, max_x: 40, max_y: 30 },
+  });
+  try {
+    type ShiftDragStart = (
+      info: { object?: unknown; coordinate?: number[] },
+      event: { stopPropagation: () => void; shiftKey?: boolean; srcEvent?: { shiftKey?: boolean } },
+    ) => void;
+    let propagationStopped = false;
+    await act(async () => {
+      (readProcessMapDeckGLTestProps().onDragStart as unknown as ShiftDragStart)(
+        { coordinate: [2, 2] },
+        { shiftKey: true, stopPropagation: () => { propagationStopped = true; } },
+      );
+    });
+    await act(async () => {
+      readProcessMapDeckGLTestProps().onDrag({ coordinate: [24, 10] });
+    });
+    const selectionLayer = currentDeckLayer("process-map-edit-drag-selection");
+    assert.equal(selectionLayer.props.pickable, false);
+    assert.deepEqual(
+      selectionLayer.props.data,
+      [{ polygon: [[2, 2], [24, 2], [24, 10], [2, 10]], fill: [14, 165, 233, 28], line: [14, 165, 233, 255], lineWidth: 2 }],
+      "drag feedback shows the exact company-world bounds without becoming another pick target",
+    );
+    assert.equal(propagationStopped, true, "Shift-drag owns the gesture instead of panning the camera");
+
+    await act(async () => {
+      readProcessMapDeckGLTestProps().onDragEnd({ coordinate: [24, 10] });
+      await Promise.resolve();
+    });
+    const surface = mounted.container.querySelector<HTMLDivElement>(".process-map-surface");
+    assert.equal(surface?.getAttribute("aria-label"), "Process Map. 2 placements selected.");
+    const selectedBodies = mountedPlacementDatums("process-map-edit-placement-bodies").map((item) => item.pick?.key);
+    assert.deepEqual(selectedBodies, [
+      `logic_gate:${first.resource_id}`,
+      `logic_gate:${second.resource_id}`,
+    ], "partially intersected and enclosing placements are not selected");
+    assert.deepEqual(currentDeckLayer("process-map-edit-drag-selection").props.data, [], "the transient selection rectangle clears when the gesture ends");
   } finally {
     await mounted.cleanup();
   }
@@ -920,21 +972,27 @@ test("whole-company tile rendering keeps every placement perceptible without lea
   const tileLayer = layerByID(layers, "process-map-spatial-tiles");
   const render = tileLayer.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
   const sublayers = render({ id: "tile", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
+  const folderShadows = layerByID(sublayers, "tile-folder-shadows");
+  const folderSurfaces = layerByID(sublayers, "tile-folder-surfaces");
   const bodies = layerByID(sublayers, "tile-placements");
   const fences = layerByID(sublayers, "tile-folder-fences");
   const restricted = layerByID(sublayers, "tile-restricted");
   const labels = layerByID(sublayers, "tile-labels");
-  assert.deepEqual((background.props.data as Array<{ fill: number[] }>)[0].fill, [2, 6, 23, 255], "the Deck canvas matches the dark navy map surface");
-  assert.equal((bodies.props.data as unknown[]).length, 1, "only the Process needs a filled body at whole-company LOD");
-  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [15, 23, 42, 252]);
-  assert.ok((fences.props.data as unknown[]).length > 0, "transparent Folder perimeter remains visible");
+  assert.deepEqual((background.props.data as Array<{ fill: number[] }>)[0].fill, [255, 255, 255, 255], "the Deck canvas uses the light map surface");
+  assert.equal((folderShadows.props.data as unknown[]).length, 1, "the Folder remains elevated at whole-company LOD");
+  assert.equal(folderShadows.props.pickable, false);
+  assert.deepEqual((folderSurfaces.props.data as Array<{ fill: number[] }>)[0].fill, [255, 247, 237, 190]);
+  assert.equal(folderSurfaces.props.pickable, false, "the Folder surface must not hide restricted or accessible picks inside it");
+  assert.equal((bodies.props.data as unknown[]).length, 1, "only the Process needs a pickable filled body at whole-company LOD");
+  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [248, 250, 252, 252]);
+  assert.ok((fences.props.data as unknown[]).length > 0, "the elevated Folder retains its orange selection perimeter");
   assert.equal((restricted.props.data as unknown[]).length, 1);
-  assert.deepEqual((restricted.props.data as Array<{ fill: number[] }>)[0].fill, [30, 41, 59, 245]);
+  assert.deepEqual((restricted.props.data as Array<{ fill: number[] }>)[0].fill, [226, 232, 240, 245]);
   assert.equal(restricted.props.pickable, false);
   const texts = (labels.props.data as Array<{ text: string }>).map((item) => item.text);
   assert.deepEqual(texts, ["?"], "whole LOD suppresses names but retains a permission-safe placeholder");
   const getLabelColor = labels.props.getColor as (item: { color?: number[] }) => number[];
-  assert.deepEqual(getLabelColor((labels.props.data as Array<{ color?: number[] }>)[0]), [248, 250, 252, 255]);
+  assert.deepEqual(getLabelColor((labels.props.data as Array<{ color?: number[] }>)[0]), [30, 41, 59, 245]);
 });
 
 test("large Folder labels stay in their six-unit title band while Process labels remain centered", () => {
@@ -959,17 +1017,25 @@ test("large Folder labels stay in their six-unit title band while Process labels
   assert.equal(labelsLayer.props.pickable, true, "a Folder name is a direct selection and move target");
   assert.equal(folderLabel.pick.key, `company_explorer_folder:${folder.resource_id}`);
   const getLabelColor = labelsLayer.props.getColor as (item: { color?: number[] }) => number[];
-  assert.ok(labels.every((item) => getLabelColor(item).join(",") === "248,250,252,255"), "entity names stay white on the dark map");
+  assert.ok(labels.every((item) => getLabelColor(item).join(",") === "30,41,59,245"), "entity names stay dark and readable on the light surfaces");
 
+  const folderShadows = layerByID(sublayers, "normal-labels-folder-shadows");
+  const folderSurfaces = layerByID(sublayers, "normal-labels-folder-surfaces");
   const shadows = layerByID(sublayers, "normal-labels-process-shadows");
   const bodies = layerByID(sublayers, "normal-labels-placements");
   const fences = layerByID(sublayers, "normal-labels-folder-fences");
   const processPerimeters = layerByID(sublayers, "normal-labels-process-perimeters");
-  assert.equal((shadows.props.data as unknown[]).length, 1, "only the Process receives an elevation shadow");
+  assert.equal((folderShadows.props.data as unknown[]).length, 1, "the Folder receives an elevation shadow");
+  assert.equal((folderSurfaces.props.data as unknown[]).length, 1, "the Folder receives one encompassing surface");
+  assert.equal(folderShadows.props.pickable, false);
+  assert.equal(folderSurfaces.props.pickable, false);
+  assert.equal((shadows.props.data as unknown[]).length, 1, "the Process retains its own elevation shadow");
   assert.equal(shadows.props.pickable, false, "the shadow never becomes another interaction target");
-  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [15, 23, 42, 252]);
+  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [248, 250, 252, 252]);
   assert.ok((fences.props.data as Array<{ color: number[] }>).every((item) => item.color.join(",") === "249,115,22,230"));
   assert.ok((processPerimeters.props.data as Array<{ color: number[] }>).every((item) => item.color.join(",") === "25,240,122,235"));
+  assert.ok(sublayers.indexOf(folderShadows) < sublayers.indexOf(folderSurfaces));
+  assert.ok(sublayers.indexOf(folderSurfaces) < sublayers.indexOf(fences), "the noninteractive Folder surface stays behind its interactive perimeter");
   assert.ok(sublayers.indexOf(shadows) < sublayers.indexOf(bodies), "the Process surface stays above its shadow");
 
   const presentation: ProcessMapPresentationState = {
@@ -1316,7 +1382,7 @@ test("Folder move and delete acknowledgements clear only previews from their own
   );
 });
 
-test("selected name-visible Folder stays transparent and exposes saved-geometry resize and connection handles", () => {
+test("selected name-visible Folder keeps a non-pickable elevated surface behind its contents and controls", () => {
   const folder = placement("Folder", 10, 20, 12, 8, "company_explorer_folder");
   const child = { ...placement("Child", 12, 22, 4, 2), map_parent_folder_id: folder.resource_id };
   const key = "company_explorer_folder:Folder";
@@ -1328,13 +1394,16 @@ test("selected name-visible Folder stays transparent and exposes saved-geometry 
     presentation,
     editedPlacementKeys: new Set([key]),
     editOverlay: {
-      placements: [folder], traces: [], selectedPlacementKey: key, selectedTraceID: null,
+      placements: [folder], traces: [], selectedPlacementKey: key, selectedPlacementKeys: new Set([key]), selectedTraceID: null,
       connectionPreview: null, highlightedFolderKey: key, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
-  const fences = layerByID(layers, "process-map-edit-folder-fences").props.data as unknown[];
-  const shadows = layerByID(layers, "process-map-edit-placement-shadows").props.data as unknown[];
-  const bodies = layerByID(layers, "process-map-edit-placement-bodies").props.data as Array<{ fill: number[] }>;
+  const folderShadowLayer = layerByID(layers, "process-map-edit-folder-shadows");
+  const folderSurfaceLayer = layerByID(layers, "process-map-edit-folder-surfaces");
+  const fenceLayer = layerByID(layers, "process-map-edit-folder-fences");
+  const fences = fenceLayer.props.data as Array<{ color: number[] }>;
+  const processShadows = layerByID(layers, "process-map-edit-placement-shadows").props.data as unknown[];
+  const processBodies = layerByID(layers, "process-map-edit-placement-bodies").props.data as Array<{ fill: number[] }>;
   const handles = layerByID(layers, "process-map-edit-resize-handles").props.data as unknown[];
   const anchors = layerByID(layers, "process-map-edit-anchors").props.data as unknown[];
   const labels = layerByID(layers, "process-map-edit-labels").props.data as Array<{ position: [number, number] }>;
@@ -1346,10 +1415,18 @@ test("selected name-visible Folder stays transparent and exposes saved-geometry 
     tile: { boundingBox: [[0, 0], [256, 256]] },
   });
   const containedBodies = layerByID(tileLayers, "selected-folder-placements").props.data as Array<{ pick: { key: string } }>;
-  assert.equal(fences.length, 4, "a Folder is a perimeter fence, not an opaque card");
-  assert.equal(shadows.length, 0, "a Folder does not receive a card shadow");
-  assert.equal(bodies.length, 0, "the selected Folder has no invisible interior pick surface over its contents");
+  assert.equal((folderShadowLayer.props.data as unknown[]).length, 1);
+  assert.equal((folderSurfaceLayer.props.data as unknown[]).length, 1);
+  assert.equal(folderShadowLayer.props.pickable, false);
+  assert.equal(folderSurfaceLayer.props.pickable, false, "the selected Folder surface does not become an interior hit target");
+  assert.equal(fences.length, 4, "the selected Folder retains one interactive perimeter");
+  assert.ok(fences.every((item) => item.color.join(",") === "14,165,233,255"), "selection remains visible without changing the surface's hit behavior");
+  assert.equal(processShadows.length, 0, "Folder elevation remains separate from Process-card elevation");
+  assert.equal(processBodies.length, 0, "the selected Folder is absent from the pickable Process-body layer");
   assert.deepEqual(containedBodies.map((item) => item.pick.key), ["logic_gate:Child"], "the contained Process body stays directly pickable");
+  assert.ok(layers.indexOf(folderShadowLayer) < layers.indexOf(folderSurfaceLayer));
+  assert.ok(layers.indexOf(folderSurfaceLayer) < layers.indexOf(tileLayer), "the selected Folder backdrop stays below its tiled contents");
+  assert.ok(layers.indexOf(tileLayer) < layers.indexOf(fenceLayer), "the selected perimeter and controls stay above the tiled contents");
   assert.ok(labels[0].position[1] > folder.grid_y && labels[0].position[1] < folder.grid_y + folder.grid_height / 2, "the selected Folder label stays along the inside top edge");
   assert.equal(handles.length, 4, "all four corners resize the saved global bounds");
   assert.equal(anchors.length, 2, "physical input and output sides remain connectable when the Folder name is visible");
@@ -1366,7 +1443,7 @@ test("selected name-visible Process retains the elevated surface and exposes fou
     presentation,
     editedPlacementKeys: new Set([key]),
     editOverlay: {
-      placements: [process], traces: [], selectedPlacementKey: key, selectedTraceID: null,
+      placements: [process], traces: [], selectedPlacementKey: key, selectedPlacementKeys: new Set([key]), selectedTraceID: null,
       connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
@@ -1377,7 +1454,7 @@ test("selected name-visible Process retains the elevated surface and exposes fou
   const anchors = layerByID(layers, "process-map-edit-anchors").props.data as unknown[];
   assert.equal((shadows.props.data as unknown[]).length, 1);
   assert.equal(shadows.props.pickable, false);
-  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [15, 23, 42, 252]);
+  assert.deepEqual((bodies.props.data as Array<{ fill: number[] }>)[0].fill, [248, 250, 252, 252]);
   assert.deepEqual(labels.map((item) => [item.text, item.pick.key]), [[process.name, key]]);
   assert.equal(handles.length, 4, "all four corners resize the Process bounds");
   assert.equal(anchors.length, 2, "selected Process input and output anchors remain distinct from resize corners");
@@ -1429,7 +1506,7 @@ test("editing Process cards show bounded QCD and RACI summaries in tiled and sel
     [242, 193, 79, 255],
     [223, 83, 83, 255],
   ]);
-  assert.deepEqual([tiledText[4].color, tiledText[6].color], [[248, 250, 252, 255], [248, 250, 252, 255]], "assignment names stay white on the dark Process surface");
+  assert.deepEqual([tiledText[4].color, tiledText[6].color], [[30, 41, 59, 245], [30, 41, 59, 245]], "assignment names stay dark and readable on the light Process surface");
   assert.deepEqual(tiledText.slice(0, 3).map((datum) => datum.size), [14, 14, 14]);
   assert.deepEqual([tiledText[3].size, tiledText[5].size], [13, 13]);
   assert.deepEqual([tiledText[4].size, tiledText[6].size], [11, 11]);
@@ -1450,7 +1527,7 @@ test("editing Process cards show bounded QCD and RACI summaries in tiled and sel
     presentation,
     editedPlacementKeys: new Set([key]),
     editOverlay: {
-      placements: [process], traces: [], selectedPlacementKey: key, selectedTraceID: null,
+      placements: [process], traces: [], selectedPlacementKey: key, selectedPlacementKeys: new Set([key]), selectedTraceID: null,
       connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
     },
   }));
@@ -1753,6 +1830,102 @@ test("one group-move envelope reconciles every moved placement and translated in
   assert.equal(next.traces.get("relationship-1")?.revision, 5);
 });
 
+test("Folder resize scales its complete subtree and internal trace preview together", () => {
+  const root = placement("resize-root", 0, 0, 100, 80, "company_explorer_folder");
+  const nested = { ...placement("resize-nested", 20, 16, 40, 32, "company_explorer_folder"), map_parent_folder_id: root.resource_id };
+  const source = { ...placement("resize-source", 28, 24, 16, 8), map_parent_folder_id: nested.resource_id };
+  const target = { ...placement("resize-target", 68, 48, 16, 8), map_parent_folder_id: root.resource_id };
+  const outside = placement("resize-outside", 120, 20, 16, 8);
+  const rootKey = `company_explorer_folder:${root.resource_id}`;
+  const basePlacements = new Map<string, ProcessMapVisiblePlacement>([
+    [rootKey, root],
+    [`company_explorer_folder:${nested.resource_id}`, nested],
+    [`logic_gate:${source.resource_id}`, source],
+    [`logic_gate:${target.resource_id}`, target],
+  ]);
+  const internalTrace: ProcessMapTrace = {
+    ...trace(source, target),
+    resource_operational_relationship_id: "resize-internal",
+    route_points: [{ x: 80, y: 8 }],
+    path_fragments: [[{ x: 44, y: 28 }, { x: 80, y: 8 }, { x: 68, y: 52 }]],
+  };
+  const externalTrace: ProcessMapTrace = {
+    ...trace(source, outside),
+    resource_operational_relationship_id: "resize-external",
+    target: { resource_type: outside.resource_type, resource_id: outside.resource_id },
+  };
+  const placementKeys = new Set(basePlacements.keys());
+  const internalTraces = processMapInternalTracesForTransform(new Map([
+    [internalTrace.resource_operational_relationship_id, internalTrace],
+    [externalTrace.resource_operational_relationship_id, externalTrace],
+  ]), placementKeys);
+  assert.deepEqual([...internalTraces.keys()], [internalTrace.resource_operational_relationship_id], "only a trace whose two endpoints resize with the Folder is transformed");
+
+  const transform: ProcessMapPlacementTransform = {
+    kind: "resize",
+    key: rootKey,
+    placementKeys,
+    traceIDs: new Set(internalTraces.keys()),
+    basePlacements,
+    deltaX: -50,
+    deltaY: -40,
+    horizontal: "east",
+    vertical: "south",
+  };
+  const transformed = materializeProcessMapPlacementTransform(basePlacements, transform);
+  assert.deepEqual(
+    [...transformed.values()].map((item) => [item.resource_id, item.grid_x, item.grid_y, item.grid_width, item.grid_height]),
+    [
+      [root.resource_id, 0, 0, 50, 40],
+      [nested.resource_id, 10, 8, 20, 16],
+      [source.resource_id, 14, 12, 8, 4],
+      [target.resource_id, 34, 24, 8, 4],
+    ],
+  );
+  assert.deepEqual([root.grid_x, root.grid_y, root.grid_width, root.grid_height], [0, 0, 100, 80], "preview materialization never mutates stable placement geometry");
+
+  const presentation: ProcessMapPresentationState = {
+    placements: basePlacements,
+    traces: internalTraces,
+    removedPlacementKeys: new Set(),
+  };
+  const layers = buildProcessMapLayers(buildOptions({
+    settledPixelsPerGridUnit: 24,
+    presentation,
+    editedPlacementKeys: placementKeys,
+    editedTraceIDs: new Set(internalTraces.keys()),
+    editOverlay: {
+      placements: [...basePlacements.values()],
+      traces: [...internalTraces.values()],
+      selectedPlacementKey: rootKey,
+      selectedPlacementKeys: new Set([rootKey]),
+      selectedTraceID: null,
+      connectionPreview: null,
+      highlightedFolderKey: null,
+      connectionSourceKey: null,
+      hoveredPlacementKey: null,
+      placementTransform: transform,
+    },
+  }));
+  const folderSurfaces = layerByID(layers, "process-map-edit-folder-surfaces").props.data as Array<{ polygon: number[][] }>;
+  assert.deepEqual(folderSurfaces.map((item) => item.polygon), [
+    [[0, 0], [50, 0], [50, 40], [0, 40]],
+    [[10, 8], [30, 8], [30, 24], [10, 24]],
+  ], "root and nested Folder surfaces preview the same scale transform");
+  const processBodies = layerByID(layers, "process-map-edit-placement-bodies").props.data as Array<{ polygon: number[][]; pick: { key: string } }>;
+  assert.deepEqual(processBodies.map((item) => [item.pick.key, item.polygon]), [
+    [`logic_gate:${source.resource_id}`, [[14, 12], [22, 12], [22, 16], [14, 16]]],
+    [`logic_gate:${target.resource_id}`, [[34, 24], [42, 24], [42, 28], [34, 28]]],
+  ]);
+  const previewPaths = layerByID(layers, "process-map-edit-traces").props.data as Array<{ path: number[][] }>;
+  assert.equal(previewPaths.length, 1);
+  const previewPath = previewPaths[0].path;
+  assert.deepEqual(previewPath[0], [22, 14], "the preview leaves the scaled source output");
+  assert.deepEqual(previewPath.at(-1), [34, 26], "the preview enters the scaled target input");
+  assert.ok(previewPath.some((point) => point[0] === 40 && point[1] === 4), "the saved internal route point scales with the Folder");
+  assert.ok(previewPath.slice(1).every((point, index) => point[0] === previewPath[index][0] || point[1] === previewPath[index][1]), "the scaled preview remains orthogonal");
+});
+
 test("large deep Folder move planning indexes and traverses each stable member once", () => {
   class SingleValuesPassMap<K, V> extends Map<K, V> {
     valuesCalls = 0;
@@ -1811,7 +1984,7 @@ test("large deep Folder move planning indexes and traverses each stable member o
   });
   const countedTraces = new SingleValuesPassMap(sourceTraces.map((item) => [item.resource_operational_relationship_id, item]));
   const movedKeys = new Set(subtree.keys());
-  const internalTraces = processMapInternalTracesForMove(countedTraces, movedKeys);
+  const internalTraces = processMapInternalTracesForTransform(countedTraces, movedKeys);
   assert.equal(countedTraces.valuesCalls, 1);
   assert.equal(countedTraces.valueVisits, sourceTraces.length);
   assert.equal(internalTraces.size, sourceTraces.length - 1);
@@ -1824,6 +1997,7 @@ test("large deep Folder move planning indexes and traverses each stable member o
     key: `company_explorer_folder:${root.resource_id}`,
     placementKeys: movedKeys,
     traceIDs: new Set(internalTraces.keys()),
+    basePlacements: subtree,
     deltaX: 17,
     deltaY: -9,
   });
@@ -2064,7 +2238,7 @@ test("representative large-company transport and presentation stay byte-, reques
     assert.equal(
       pickableDatumCount,
       visiblePlacementCount * 5 - visibleFolderCount + representative.placements.length + representative.traces.length,
-      "Folder interiors add no pick datum while name or permission-safe placeholder labels, fences, Process bodies, and continuous static trace paths remain bounded",
+      "visual Folder surfaces add no pick datum while names, permission-safe placeholders, fences, Process bodies, and continuous static trace paths remain bounded",
     );
     const labelBytes = labelData.reduce((total, datum) => total + encodedBytes(datum.text), 0);
     assert.ok(labelBytes < 64 * 1024, "representative label text stays bounded before the shared font atlas");

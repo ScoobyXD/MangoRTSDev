@@ -258,6 +258,34 @@ func processMapBoundsContain(outer, inner domain.ProcessMapBounds) bool {
 	return inner.MinX >= outer.MinX && inner.MinY >= outer.MinY && inner.MaxX <= outer.MaxX && inner.MaxY <= outer.MaxY
 }
 
+func processMapScaleCoordinate(value, sourceOrigin, sourceSize, targetOrigin, targetSize int) int {
+	// Math.floor(value + 0.5) matches JavaScript Math.round, including negative
+	// half values, so the server commits the exact geometry shown by the client.
+	scaled := float64(targetOrigin) + float64(value-sourceOrigin)*float64(targetSize)/float64(sourceSize)
+	return int(math.Floor(scaled + 0.5))
+}
+
+func processMapScalePlacementWithinFolder(item, sourceFolder, targetFolder domain.ProcessMapPlacement) domain.ProcessMapPlacement {
+	minX := processMapScaleCoordinate(item.GridX, sourceFolder.GridX, sourceFolder.GridWidth, targetFolder.GridX, targetFolder.GridWidth)
+	minY := processMapScaleCoordinate(item.GridY, sourceFolder.GridY, sourceFolder.GridHeight, targetFolder.GridY, targetFolder.GridHeight)
+	maxX := processMapScaleCoordinate(item.GridX+item.GridWidth, sourceFolder.GridX, sourceFolder.GridWidth, targetFolder.GridX, targetFolder.GridWidth)
+	maxY := processMapScaleCoordinate(item.GridY+item.GridHeight, sourceFolder.GridY, sourceFolder.GridHeight, targetFolder.GridY, targetFolder.GridHeight)
+	item.GridX, item.GridY = minX, minY
+	item.GridWidth, item.GridHeight = maxX-minX, maxY-minY
+	return item
+}
+
+func processMapScaleRoutePointsWithinFolder(points []domain.ProcessMapRoutePoint, sourceFolder, targetFolder domain.ProcessMapPlacement) []domain.ProcessMapRoutePoint {
+	result := make([]domain.ProcessMapRoutePoint, len(points))
+	for index, point := range points {
+		result[index] = domain.ProcessMapRoutePoint{
+			X: processMapScaleCoordinate(point.X, sourceFolder.GridX, sourceFolder.GridWidth, targetFolder.GridX, targetFolder.GridWidth),
+			Y: processMapScaleCoordinate(point.Y, sourceFolder.GridY, sourceFolder.GridHeight, targetFolder.GridY, targetFolder.GridHeight),
+		}
+	}
+	return result
+}
+
 func processMapPlacementsConflictWithGap(left, right domain.ProcessMapPlacement, gap int) bool {
 	return int64(left.GridX) < int64(right.GridX)+int64(right.GridWidth)+int64(gap) &&
 		int64(left.GridX)+int64(left.GridWidth)+int64(gap) > int64(right.GridX) &&

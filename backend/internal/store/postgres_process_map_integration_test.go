@@ -1557,7 +1557,7 @@ func TestPostgresProcessMapScoreCardRenameMigrationIsRestartSafe(t *testing.T) {
 	}
 }
 
-func TestPostgresProcessMapFolderResizeDoesNotRequireUnmovedDescendantAccess(t *testing.T) {
+func TestPostgresProcessMapFolderResizeRequiresDescendantAccessAndScalesAtomically(t *testing.T) {
 	ctx := context.Background()
 	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Process Map Folder resize permission test")
@@ -1620,14 +1620,13 @@ func TestPostgresProcessMapFolderResizeDoesNotRequireUnmovedDescendantAccess(t *
 		t.Fatal(err)
 	}
 
-	resized, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
-		company.CompanyID, viewer.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, -5, -7, 55, 47,
-	))
-	if err != nil || len(resized.Placements) != 1 || len(resized.Traces) != 0 || resized.Placements[0].GridX != -5 || resized.Placements[0].GridY != -7 {
-		t.Fatalf("Folder resize with restricted unmoved child = %+v, err=%v", resized, err)
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, viewer.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, -50, -40, 100, 80,
+	)); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Folder resize with restricted changed child error = %v, want %v", err, ErrNotFound)
 	}
-	var childX, childY int
-	if err := db.QueryRow(`select grid_x,grid_y from process_map_placements where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, child.LogicGateID).Scan(&childX, &childY); err != nil {
+	var rootX, rootY, rootWidth, rootHeight int
+	if err := db.QueryRow(`select grid_x,grid_y,grid_width,grid_height from process_map_placements where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`, company.CompanyID, folder.FolderID).Scan(&rootX, &rootY, &rootWidth, &rootHeight); err != nil {
 		t.Fatal(err)
 	}
 	var routeJSON []byte
@@ -1638,13 +1637,35 @@ func TestPostgresProcessMapFolderResizeDoesNotRequireUnmovedDescendantAccess(t *
 	if err := json.Unmarshal(routeJSON, &routeAfterResize); err != nil {
 		t.Fatal(err)
 	}
-	if childX != 10 || childY != 10 || !slices.Equal(routeAfterResize, route) {
-		t.Fatalf("Folder resize moved contents: child=(%d,%d) route=%+v", childX, childY, routeAfterResize)
+	var deniedChildX, deniedChildY, deniedChildWidth, deniedChildHeight int
+	if err := db.QueryRow(`select grid_x,grid_y,grid_width,grid_height from process_map_placements where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, child.LogicGateID).Scan(&deniedChildX, &deniedChildY, &deniedChildWidth, &deniedChildHeight); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
-		company.CompanyID, viewer.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, -4, -7, 55, 47,
-	)); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("Folder group move with restricted child error = %v, want %v", err, ErrNotFound)
+	if rootX != 0 || rootY != 0 || rootWidth != 50 || rootHeight != 40 ||
+		deniedChildX != 10 || deniedChildY != 10 || deniedChildWidth != 10 || deniedChildHeight != 6 ||
+		!slices.Equal(routeAfterResize, route) {
+		t.Fatalf("denied Folder resize changed state: root=(%d,%d %dx%d) child=(%d,%d %dx%d) route=%+v", rootX, rootY, rootWidth, rootHeight, deniedChildX, deniedChildY, deniedChildWidth, deniedChildHeight, routeAfterResize)
+	}
+
+	resized, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, -50, -40, 100, 80,
+	))
+	if err != nil || len(resized.Placements) != 3 || len(resized.Traces) != 1 {
+		t.Fatalf("authorized Folder resize = %+v, err=%v", resized, err)
+	}
+	var childX, childY, childWidth, childHeight int
+	if err := db.QueryRow(`select grid_x,grid_y,grid_width,grid_height from process_map_placements where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, company.CompanyID, child.LogicGateID).Scan(&childX, &childY, &childWidth, &childHeight); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`select route_points from process_map_traces where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`, company.CompanyID, created.Relationship.ResourceOperationalRelationshipID).Scan(&routeJSON); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(routeJSON, &routeAfterResize); err != nil {
+		t.Fatal(err)
+	}
+	wantRoute := []domain.ProcessMapRoutePoint{{X: -2, Y: -14}, {X: 6, Y: -14}}
+	if childX != -30 || childY != -20 || childWidth != 20 || childHeight != 12 || !slices.Equal(routeAfterResize, wantRoute) {
+		t.Fatalf("authorized Folder resize did not scale child and route: child=(%d,%d %dx%d) route=%+v", childX, childY, childWidth, childHeight, routeAfterResize)
 	}
 }
 
