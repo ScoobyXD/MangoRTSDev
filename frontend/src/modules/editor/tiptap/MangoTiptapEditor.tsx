@@ -110,12 +110,12 @@ import { MangoTiptapStaticRenderer, type MangoStaticAttachmentImageProps } from 
 import { markEditorHistoryChanged } from "../editorExitHistory.js";
 import { registerMangoTiptapFlusher } from "./mangoTiptapFlushRegistry.js";
 import {
-  calculateMangoTiptapTableGrowth,
-  growMangoTiptapTable,
+  calculateMangoTiptapTableResize,
   handleMangoTiptapTableClipboardPaste,
   readActiveMangoTiptapTableFrame,
+  resizeMangoTiptapTable,
   type MangoTiptapTableFrame,
-  type MangoTiptapTableGrowth,
+  type MangoTiptapTableResize,
 } from "./mangoTiptapTable.js";
 import { MangoTiptapSync, type MangoTiptapConflict, type MangoTiptapResourceType, type MangoTiptapSaveState } from "./mangoTiptapSync.js";
 
@@ -149,12 +149,12 @@ export type MangoTiptapImageAction = {
   y: number;
 };
 
-type MangoTiptapTableGrowthDrag = {
+type MangoTiptapTableResizeDrag = {
   pointerID: number;
   startX: number;
   startY: number;
   frame: MangoTiptapTableFrame;
-  growth: MangoTiptapTableGrowth;
+  resize: MangoTiptapTableResize;
 };
 
 export type MangoTiptapEditorProps = {
@@ -879,8 +879,8 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [renderedAnnotations, setRenderedAnnotations] = useState<readonly MangoTiptapAnnotation[]>(annotations);
   const [tableActive, setTableActive] = useState(false);
   const [activeTableFrame, setActiveTableFrame] = useState<MangoTiptapTableFrame | null>(null);
-  const [tableGrowthDrag, setTableGrowthDrag] = useState<MangoTiptapTableGrowthDrag | null>(null);
-  const tableGrowthDragRef = useRef<MangoTiptapTableGrowthDrag | null>(null);
+  const [tableResizeDrag, setTableResizeDrag] = useState<MangoTiptapTableResizeDrag | null>(null);
+  const tableResizeDragRef = useRef<MangoTiptapTableResizeDrag | null>(null);
   const [universalPickerDraft, setUniversalPickerDraft] = useState<UniversalPickerDraft | null>(null);
   const [tableContextMenu, setTableContextMenu] = useState<{ x: number; y: number } | null>(null);
   const latestTargetRequestRef = useRef(0);
@@ -1727,10 +1727,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       if (formattingControllerInstanceRef.current === controller) formattingControllerInstanceRef.current = null;
       editorRef.current = null;
       pointerActivationPendingRef.current = false;
-      tableGrowthDragRef.current = null;
+      tableResizeDragRef.current = null;
       setLiveSurfaceReady(false);
       setActiveTableFrame(null);
-      setTableGrowthDrag(null);
+      setTableResizeDrag(null);
       setActiveEditor((current) => current === editor ? null : current);
       editor.destroy();
       releaseActive();
@@ -1889,56 +1889,60 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     };
   }, [activeEditor, tableActive]);
 
-  const beginTableGrowth = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+  const beginTableResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0 || !activeTableFrame) return;
     event.preventDefault();
     event.stopPropagation();
     setTableContextMenu(null);
     const pointerID = Number.isFinite(event.pointerId) ? event.pointerId : 1;
-    const drag: MangoTiptapTableGrowthDrag = {
+    const drag: MangoTiptapTableResizeDrag = {
       pointerID,
       startX: event.clientX,
       startY: event.clientY,
       frame: activeTableFrame,
-      growth: { rows: 0, columns: 0 },
+      resize: { rows: 0, columns: 0 },
     };
-    tableGrowthDragRef.current = drag;
-    setTableGrowthDrag(drag);
+    tableResizeDragRef.current = drag;
+    setTableResizeDrag(drag);
     try { event.currentTarget.setPointerCapture?.(pointerID); } catch { /* Pointer capture is optional. */ }
   }, [activeTableFrame]);
 
-  const updateTableGrowth = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const drag = tableGrowthDragRef.current;
+  const updateTableResize = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = tableResizeDragRef.current;
     if (!drag || (Number.isFinite(event.pointerId) && event.pointerId !== drag.pointerID)) return;
     event.preventDefault();
-    const growth = calculateMangoTiptapTableGrowth({
+    const resize = calculateMangoTiptapTableResize({
       startX: drag.startX,
       startY: drag.startY,
       currentX: event.clientX,
       currentY: event.clientY,
+      rows: drag.frame.rows,
+      columns: drag.frame.columns,
+      minimumRows: drag.frame.minimumRows,
+      minimumColumns: drag.frame.minimumColumns,
       rowHeight: drag.frame.rowHeight,
       columnWidth: drag.frame.columnWidth,
     });
-    if (growth.rows === drag.growth.rows && growth.columns === drag.growth.columns) return;
-    const next = { ...drag, growth };
-    tableGrowthDragRef.current = next;
-    setTableGrowthDrag(next);
+    if (resize.rows === drag.resize.rows && resize.columns === drag.resize.columns) return;
+    const next = { ...drag, resize };
+    tableResizeDragRef.current = next;
+    setTableResizeDrag(next);
   }, []);
 
-  const finishTableGrowth = useCallback((event: React.PointerEvent<HTMLButtonElement>, cancelled = false) => {
-    const drag = tableGrowthDragRef.current;
+  const finishTableResize = useCallback((event: React.PointerEvent<HTMLButtonElement>, cancelled = false) => {
+    const drag = tableResizeDragRef.current;
     if (!drag || (Number.isFinite(event.pointerId) && event.pointerId !== drag.pointerID)) return;
     event.preventDefault();
     event.stopPropagation();
-    tableGrowthDragRef.current = null;
-    setTableGrowthDrag(null);
+    tableResizeDragRef.current = null;
+    setTableResizeDrag(null);
     try { event.currentTarget.releasePointerCapture?.(drag.pointerID); } catch { /* Pointer capture is optional. */ }
     const editor = editorRef.current;
     const root = rootRef.current;
-    if (cancelled || !editor || (drag.growth.rows === 0 && drag.growth.columns === 0)) return;
+    if (cancelled || !editor || (drag.resize.rows === 0 && drag.resize.columns === 0)) return;
     const preservedScrollTop = root?.scrollTop ?? 0;
     const preservedScrollLeft = root?.scrollLeft ?? 0;
-    if (!growMangoTiptapTable(editor, drag.growth)) return;
+    if (!resizeMangoTiptapTable(editor, drag.resize, drag.frame.columnWidth)) return;
     (editor.view.dom as HTMLElement).focus({ preventScroll: true });
     if (root) {
       root.scrollTop = preservedScrollTop;
@@ -1956,12 +1960,15 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       onPointerEnter={editable ? activate : undefined}
     />
   ), [activate, attachmentContext, editable]);
-  const tableHandleFrame = tableGrowthDrag?.frame ?? activeTableFrame;
+  const tableHandleFrame = tableResizeDrag?.frame ?? activeTableFrame;
+  const tableResizeChanged = Boolean(tableResizeDrag && (tableResizeDrag.resize.rows !== 0 || tableResizeDrag.resize.columns !== 0));
   const tablePreviewWidth = tableHandleFrame
-    ? tableHandleFrame.width + (tableGrowthDrag?.growth.columns ?? 0) * tableHandleFrame.columnWidth
+    ? tableResizeChanged
+      ? (tableHandleFrame.columns + (tableResizeDrag?.resize.columns ?? 0)) * tableHandleFrame.columnWidth
+      : tableHandleFrame.width
     : 0;
   const tablePreviewHeight = tableHandleFrame
-    ? tableHandleFrame.height + (tableGrowthDrag?.growth.rows ?? 0) * tableHandleFrame.rowHeight
+    ? tableHandleFrame.height + (tableResizeDrag?.resize.rows ?? 0) * tableHandleFrame.rowHeight
     : 0;
 
   return (
@@ -2051,12 +2058,12 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
       )}
       {isActive && editable && tableHandleFrame && (
         <>
-          {tableGrowthDrag && (tableGrowthDrag.growth.rows > 0 || tableGrowthDrag.growth.columns > 0) && (
+          {tableResizeDrag && (tableResizeDrag.resize.rows !== 0 || tableResizeDrag.resize.columns !== 0) && (
             <div
               aria-hidden="true"
-              data-mango-tiptap-table-growth-preview="true"
-              data-preview-rows={tableHandleFrame.rows + tableGrowthDrag.growth.rows}
-              data-preview-columns={tableHandleFrame.columns + tableGrowthDrag.growth.columns}
+              data-mango-tiptap-table-resize-preview="true"
+              data-preview-rows={tableHandleFrame.rows + tableResizeDrag.resize.rows}
+              data-preview-columns={tableHandleFrame.columns + tableResizeDrag.resize.columns}
               style={{
                 position: "absolute",
                 left: tableHandleFrame.left,
@@ -2075,13 +2082,13 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
           )}
           <button
             type="button"
-            aria-label="Drag to add table rows and columns"
-            title="Drag to add table rows and columns"
-            data-mango-tiptap-table-growth-handle="true"
-            onPointerDown={beginTableGrowth}
-            onPointerMove={updateTableGrowth}
-            onPointerUp={(event) => finishTableGrowth(event)}
-            onPointerCancel={(event) => finishTableGrowth(event, true)}
+            aria-label="Drag to resize table rows and columns"
+            title="Drag to resize table rows and columns"
+            data-mango-tiptap-table-resize-handle="true"
+            onPointerDown={beginTableResize}
+            onPointerMove={updateTableResize}
+            onPointerUp={(event) => finishTableResize(event)}
+            onPointerCancel={(event) => finishTableResize(event, true)}
             style={{
               position: "absolute",
               left: tableHandleFrame.left + tablePreviewWidth - 10,
