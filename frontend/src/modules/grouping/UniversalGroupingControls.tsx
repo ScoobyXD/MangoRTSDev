@@ -1,4 +1,10 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  useAppOverlayPortalTarget,
+  useAppViewportAnchorRect,
+  type AppViewportAnchorRect,
+} from "../../app/AppModalPortal.js";
 import type { UniversalGroupingSetting } from "./universalGrouping.js";
 
 export type UniversalGroupingFieldOption<Field extends string> = Readonly<{
@@ -62,6 +68,8 @@ export function UniversalGroupingControls<Field extends string>({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const popoverID = useId();
+  const triggerAnchor = useAppViewportAnchorRect(triggerRef, open && externalPopoverPosition === null);
+  const overlayTarget = useAppOverlayPortalTarget(triggerRef.current?.ownerDocument);
   const uniqueFieldOptions = useMemo(() => dedupeFieldOptions(fieldOptions), [fieldOptions]);
   const uniqueVariantOptions = fieldVariant ? dedupeFieldOptions(fieldVariant.options) : [];
   const usedFields = new Set(groupings.map((grouping) => grouping.field));
@@ -108,7 +116,7 @@ export function UniversalGroupingControls<Field extends string>({
     if (!open) return undefined;
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
-      if (target && !rootRef.current?.contains(target)) setOpen(false);
+      if (target && !rootRef.current?.contains(target) && !popoverRef.current?.contains(target)) setOpen(false);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -159,6 +167,8 @@ export function UniversalGroupingControls<Field extends string>({
     if (!next || groupingStacksEqual(groupings, next)) return;
     onChange(next);
   };
+  const popoverPosition = externalPopoverPosition
+    ?? (triggerAnchor ? groupingPopoverViewportPosition(triggerAnchor, popoverAlign, popoverWidth) : null);
 
   return (
     <div ref={rootRef} style={controlsRootStyle(triggerHidden)}>
@@ -190,13 +200,13 @@ export function UniversalGroupingControls<Field extends string>({
         </button>
       )}
 
-      {open && (
+      {open && popoverPosition && overlayTarget && createPortal((
         <div
           ref={popoverRef}
           id={popoverID}
           role="dialog"
           aria-label={popoverLabel}
-          style={groupPopoverStyle(popoverAlign, externalPopoverPosition, popoverWidth)}
+          style={groupPopoverStyle(popoverPosition, popoverWidth)}
         >
           <div style={popoverHeaderStyle}>
             <span style={popoverTitleStyle}>{popoverLabel}</span>
@@ -372,7 +382,7 @@ export function UniversalGroupingControls<Field extends string>({
           </div>
           {additionalContent}
         </div>
-      )}
+      ), overlayTarget)}
     </div>
   );
 }
@@ -467,16 +477,31 @@ function groupCountStyle(open: boolean, accent: string): React.CSSProperties {
   };
 }
 
-function groupPopoverStyle(align: "start" | "end", externalPosition: { left: number; top: number } | null, width: number): React.CSSProperties {
+export function groupingPopoverViewportPosition(
+  anchor: AppViewportAnchorRect,
+  align: "start" | "end",
+  width: number,
+  viewportWidth = typeof window === "undefined" ? 1200 : window.innerWidth,
+  viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight,
+): { left: number; top: number } {
+  const gutter = 8;
+  const estimatedHeight = 330;
+  const desiredLeft = align === "start" ? anchor.left : anchor.left + anchor.width - width;
   return {
-    position: externalPosition ? "fixed" : "absolute",
-    ...(externalPosition
-      ? { left: externalPosition.left, top: externalPosition.top }
-      : { top: "calc(100% + 6px)", ...(align === "start" ? { left: 0 } : { right: 0 }) }),
-    zIndex: externalPosition ? 10020 : 60,
+    left: Math.max(gutter, Math.min(desiredLeft, viewportWidth - width - gutter)),
+    top: Math.max(gutter, Math.min(anchor.top + anchor.height + 6, viewportHeight - estimatedHeight - gutter)),
+  };
+}
+
+function groupPopoverStyle(position: { left: number; top: number }, width: number): React.CSSProperties {
+  return {
+    position: "fixed",
+    left: position.left,
+    top: position.top,
+    zIndex: 10020,
     width,
     maxWidth: "min(" + width + "px, calc(100vw - 24px))",
-    maxHeight: externalPosition ? `calc(100vh - ${Math.round(externalPosition.top) + 8}px)` : "calc(100vh - 24px)",
+    maxHeight: `calc(100vh - ${Math.round(position.top) + 8}px)`,
     overflowY: "auto",
     overscrollBehavior: "contain",
     display: "grid",

@@ -529,7 +529,7 @@ function PendingActionItemReferencePopover({
         aria-label={"Action Item details: " + title}
         data-mango-entity-reference-preview="true"
         data-mango-action-item-popover="true"
-        style={{ ...actionItemReferencePopoverPosition(preview.anchor), zIndex: ACTION_ITEM_POPOVER_Z_INDEX, display: "grid", gridTemplateRows: "auto minmax(120px,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 14, background: "#fff", boxShadow: "0 18px 50px rgba(15,23,42,.24)" }}
+        style={actionItemPopoverSurfaceStyle(preview.anchor)}
       >
         <header style={actionItemHeaderStyle}>
           <span style={actionItemIconBadgeStyle(null)}><ActionItemIcon size={17} /></span>
@@ -738,7 +738,7 @@ function EditableActionItemPopover({
         aria-label={"Action Item details: " + (draft.name.trim() || entity.name)}
         data-mango-entity-reference-preview="true"
         data-mango-action-item-popover="true"
-        style={{ ...actionItemReferencePopoverPosition(anchor), zIndex: ACTION_ITEM_POPOVER_Z_INDEX, display: "grid", gridTemplateRows: "auto minmax(0,1fr)", overflow: "hidden", border: "1px solid rgba(148,163,184,.34)", borderRadius: 14, background: "#fff", boxShadow: "0 18px 50px rgba(15,23,42,.24)" }}
+        style={actionItemPopoverSurfaceStyle(anchor)}
       >
         <header style={actionItemHeaderStyle}>
             <span className={color === "yellow" || color === "red" ? "mango-editor-action-item--" + color : undefined} style={actionItemIconBadgeStyle(color)}>
@@ -756,7 +756,7 @@ function EditableActionItemPopover({
             </span>
             <button type="button" aria-label="Close Action Item details" onClick={() => void closeAfterFlush()} style={actionItemCloseButtonStyle}>×</button>
         </header>
-        <div style={{ minHeight: 0, overflowY: "auto", padding: 14 }}>
+        <div style={actionItemPopoverBodyStyle}>
             <div style={{ display: "grid", gap: 12 }}>
               {saveError && <div role="alert" data-mango-entity-save-error="true" style={saveErrorStyle}>{saveError}</div>}
               <label style={editorLabelStyle}>
@@ -1176,10 +1176,31 @@ function EntityFieldInput({ field, companyUsers, disabled }: {
 }
 
 const sectionHeadingStyle: React.CSSProperties = { margin: "0 0 8px", color: "#334155", fontSize: 11, fontWeight: 900, letterSpacing: ".06em", textTransform: "uppercase" };
-const actionItemHeaderStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto auto", alignItems: "center", gap: 9, padding: "11px 12px", borderBottom: "1px solid rgba(148,163,184,.22)", background: "linear-gradient(135deg,rgba(254,252,232,.98),rgba(255,255,255,.98))" };
-const actionItemIconBadgeStyle = (color: string | null): React.CSSProperties => ({ width: 30, height: 30, display: "inline-grid", placeItems: "center", border: "1px solid rgba(15,23,42,.24)", borderRadius: 8, background: color === "yellow" ? "#facc15" : color === "red" ? "#ef4444" : "#f8fafc", color: "#111827" });
-const actionItemCloseButtonStyle: React.CSSProperties = { width: 30, height: 30, border: "1px solid rgba(185,28,28,.36)", borderRadius: 8, background: "#fee2e2", color: "#b91c1c", cursor: "pointer", fontSize: 18, fontWeight: 900, lineHeight: 1 };
-const actionItemMetadataCardStyle: React.CSSProperties = { display: "grid", gap: 8, padding: 10, border: "1px solid rgba(148,163,184,.22)", borderRadius: 10, background: "#f8fafc" };
+function actionItemPopoverSurfaceStyle(anchor: EditorEntityLinkAnchorBounds | undefined): React.CSSProperties {
+  return {
+    ...actionItemReferencePopoverPosition(anchor),
+    zIndex: ACTION_ITEM_POPOVER_Z_INDEX,
+    display: "grid",
+    gridTemplateRows: "auto minmax(120px,1fr)",
+    overflow: "hidden",
+    boxSizing: "border-box",
+    border: "1px solid transparent",
+    borderRadius: 18,
+    background: "linear-gradient(145deg, rgba(255,255,255,.99), rgba(241,245,249,.97)) padding-box, linear-gradient(145deg, rgba(255,255,255,.98), rgba(148,163,184,.38)) border-box",
+    boxShadow: "18px 22px 54px rgba(71,85,105,.26), -10px -10px 30px rgba(255,255,255,.96), inset 1px 1px 0 rgba(255,255,255,.98), inset -1px -1px 0 rgba(148,163,184,.10)",
+  };
+}
+
+const actionItemPopoverBodyStyle: React.CSSProperties = {
+  minHeight: 0,
+  overflowY: "auto",
+  padding: 14,
+  background: "linear-gradient(145deg, rgba(248,250,252,.88), rgba(238,242,247,.72))",
+};
+const actionItemHeaderStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto auto", alignItems: "center", gap: 9, padding: "12px 13px", borderBottom: "1px solid rgba(148,163,184,.16)", background: "linear-gradient(145deg,rgba(255,255,255,.99),rgba(254,249,195,.42),rgba(241,245,249,.92))", boxShadow: "0 7px 16px rgba(100,116,139,.10), inset 0 1px 0 rgba(255,255,255,.98)" };
+const actionItemIconBadgeStyle = (color: string | null): React.CSSProperties => ({ width: 32, height: 32, display: "inline-grid", placeItems: "center", border: "1px solid rgba(15,23,42,.24)", borderRadius: 9, background: color === "yellow" ? "linear-gradient(145deg,#fde047,#facc15)" : color === "red" ? "linear-gradient(145deg,#f87171,#ef4444)" : "linear-gradient(145deg,#ffffff,#e2e8f0)", color: "#111827", boxShadow: "4px 4px 9px rgba(100,116,139,.18), -3px -3px 8px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.72)" });
+const actionItemCloseButtonStyle: React.CSSProperties = { width: 30, height: 30, border: "1px solid rgba(185,28,28,.30)", borderRadius: 9, background: "linear-gradient(145deg,#fff5f5,#fecaca)", color: "#b91c1c", boxShadow: "3px 3px 8px rgba(185,28,28,.13), -2px -2px 7px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.84)", cursor: "pointer", fontSize: 18, fontWeight: 900, lineHeight: 1 };
+const actionItemMetadataCardStyle: React.CSSProperties = { display: "grid", gap: 9, padding: 12, border: "1px solid transparent", borderRadius: 14, background: "linear-gradient(145deg,rgba(255,255,255,.98),rgba(241,245,249,.90)) padding-box, linear-gradient(145deg,rgba(255,255,255,.98),rgba(148,163,184,.24)) border-box", boxShadow: "7px 7px 16px rgba(100,116,139,.15), -5px -5px 14px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.96)" };
 const actionItemPickerMenuStyle: React.CSSProperties = { position: "absolute", zIndex: 4, left: 0, right: 0, top: "calc(100% + 4px)", maxHeight: 190, overflowY: "auto", display: "grid", gap: 3, padding: 5, border: "1px solid rgba(148,163,184,.34)", borderRadius: 9, background: "#ffffff", boxShadow: "0 12px 28px rgba(15,23,42,.18)" };
 const actionItemPickerOptionStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 32, display: "grid", gridTemplateColumns: "24px minmax(0,1fr)", alignItems: "center", gap: 8, border: 0, borderRadius: 7, background: "transparent", color: "#0f172a", padding: "4px 7px", font: "inherit", fontSize: 11, fontWeight: 750, cursor: "pointer", textAlign: "left" };
 const actionItemPersonAvatarStyle: React.CSSProperties = { width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 999, background: "#ccfbf1", color: "#115e59", fontSize: 10, fontWeight: 900 };

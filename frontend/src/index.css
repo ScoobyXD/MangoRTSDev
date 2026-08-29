@@ -1237,6 +1237,25 @@ button, input, textarea, select {
   filter: drop-shadow(0 5px 7px rgba(100, 116, 139, 0.16));
 }
 
+@keyframes my-work-action-item-title-pulse {
+  0%, 100% {
+    text-shadow: 0 0 0 transparent;
+  }
+  50% {
+    text-shadow: 0 0 8px var(--my-work-action-title-glow);
+  }
+}
+
+.my-work-action-item-title--yellow {
+  --my-work-action-title-glow: rgba(202, 138, 4, 0.56);
+  animation: my-work-action-item-title-pulse 2s ease-in-out infinite;
+}
+
+.my-work-action-item-title--red {
+  --my-work-action-title-glow: rgba(220, 38, 38, 0.54);
+  animation: my-work-action-item-title-pulse 1s ease-in-out infinite;
+}
+
 .my-work-inline-context {
   transform: translateY(0);
   transition: transform 150ms ease, filter 150ms ease;
@@ -1263,9 +1282,12 @@ button, input, textarea, select {
 
 @media (prefers-reduced-motion: reduce) {
   .my-work-resource-row,
+  .my-work-action-item-title--yellow,
+  .my-work-action-item-title--red,
   .my-work-inline-context,
   .my-work-resizer__grip {
     transition: none;
+    animation: none;
   }
 
   .my-work-resource-row:hover,
