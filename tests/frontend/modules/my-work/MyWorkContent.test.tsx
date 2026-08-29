@@ -189,8 +189,14 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
 
     const redActionRow = container.querySelector<HTMLElement>('[data-my-work-target="action-item"][data-my-work-action-item-color="red"]');
     const yellowActionRow = container.querySelector<HTMLElement>('[data-my-work-target="action-item"][data-my-work-action-item-color="yellow"]');
-    assert.equal(redActionRow?.querySelectorAll(".mango-editor-action-item--red").length, 2, "the red icon and title both use the one-second Huddle pulse");
-    assert.equal(yellowActionRow?.querySelectorAll(".mango-editor-action-item--yellow").length, 2, "the yellow icon and title both use the two-second Huddle pulse");
+    assert.equal(redActionRow?.querySelectorAll(".mango-editor-action-item--red").length, 1, "the red icon keeps the one-second raised Huddle pulse");
+    assert.equal(yellowActionRow?.querySelectorAll(".mango-editor-action-item--yellow").length, 1, "the yellow icon keeps the two-second raised Huddle pulse");
+    const redActionTitle = redActionRow?.querySelector<HTMLElement>('[data-my-work-action-item-title="true"]');
+    const yellowActionTitle = yellowActionRow?.querySelector<HTMLElement>('[data-my-work-action-item-title="true"]');
+    assert.equal(redActionTitle?.classList.contains("my-work-action-item-title--red"), true);
+    assert.equal(yellowActionTitle?.classList.contains("my-work-action-item-title--yellow"), true);
+    assert.equal(redActionTitle?.style.background, "", "Action Item titles stay plain text instead of raised chips");
+    assert.equal(redActionTitle?.style.fontSize, "13px", "resource row text uses the larger My Work type scale");
     assert.equal(container.querySelectorAll(".my-work-resource-row").length, 6, "every resource row uses the shared lift interaction");
 
     const radios = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="radio"]'));
@@ -269,13 +275,21 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     );
 
     let actionItemOpened = "";
+    let actionItemAnchor: { left?: number; top?: number; right?: number; bottom?: number } | undefined;
     dom.window.addEventListener("mangorts:editor-entity-reference-open", ((event: CustomEvent) => {
       actionItemOpened = event.detail?.entity?.entityID ?? "";
+      actionItemAnchor = event.detail?.anchor;
     }) as EventListener, { once: true });
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('[data-my-work-target="action-item"]')?.click();
+      container.querySelector<HTMLButtonElement>('[data-my-work-target="action-item"]')?.dispatchEvent(new dom.window.MouseEvent("click", {
+        bubbles: true,
+        clientX: 314,
+        clientY: 286,
+        detail: 1,
+      }));
     });
     assert.equal(actionItemOpened, "action-red");
+    assert.deepEqual(actionItemAnchor, { left: 314, top: 286, right: 314, bottom: 286 }, "pointer opens the Action Item overlay at the click point");
 
     await act(async () => nodeRows[0]?.querySelector<HTMLButtonElement>('[data-my-work-target="node"]')?.click());
     assert.equal(dom.window.location.pathname, "/nodes/node-context");
@@ -415,7 +429,10 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
 
     const beforeGroupingCalls = calls.length;
     await act(async () => groupButtons[0]?.click());
-    const directionButton = container.querySelector<HTMLButtonElement>('button[aria-label="Sort descending for grouping level 1"]');
+    const actionGroupingDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Action Item grouping"]');
+    assert.equal(actionGroupingDialog?.parentElement, dom.window.document.body, "the grouping dialog is portaled above the clipped section");
+    assert.equal(actionGroupingDialog?.style.position, "fixed");
+    const directionButton = actionGroupingDialog?.querySelector<HTMLButtonElement>('button[aria-label="Sort descending for grouping level 1"]');
     assert.ok(directionButton);
     await act(async () => {
       directionButton.click();
@@ -441,7 +458,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
 
     const beforeNodeGroupingCalls = calls.length;
     await act(async () => groupButtons[1]?.click());
-    const nodeGroupingDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Node grouping"]');
+    const nodeGroupingDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Node grouping"]');
     const removeNodeDueDate = nodeGroupingDialog?.querySelector<HTMLButtonElement>('button[aria-label="Remove grouping level 2"]');
     assert.ok(removeNodeDueDate);
     await act(async () => {

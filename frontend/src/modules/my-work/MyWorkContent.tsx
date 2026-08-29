@@ -9,6 +9,7 @@ import type { BoundRequestJSON } from "../api/requestJSON.js";
 import {
   editorEntityLinkAnchorBounds,
   openEditorEntityLink,
+  type EditorEntityLinkAnchorBounds,
 } from "../editor/editorEntityLinks.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import {
@@ -201,7 +202,7 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
                 onChange={changeActionItemGroupings}
                 buttonLabel="Group Action Items"
                 popoverLabel="Action Item grouping"
-                popoverAlign="start"
+                popoverAlign="end"
                 triggerIcon={<StaggeredGroupingIcon />}
                 iconOnly
                 disabled={state.action_items.loading}
@@ -245,7 +246,7 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
                 onChange={changeNodeGroupings}
                 buttonLabel="Group Nodes"
                 popoverLabel="Node grouping"
-                popoverAlign="start"
+                popoverAlign="end"
                 triggerIcon={<StaggeredGroupingIcon />}
                 iconOnly
                 disabled={state.nodes.loading}
@@ -693,13 +694,43 @@ function ActionItemRow({ item }: { item: MyWorkActionItem }) {
         entityID: item.entity_id,
         label: item.name,
         isActionItem: true,
-      }, undefined, editorEntityLinkAnchorBounds(event.currentTarget))}
+      }, undefined, myWorkActionItemAnchor(event.currentTarget, event))}
     >
       <span aria-hidden="true" style={actionItemColorBarStyle(color)} />
       <span className={pulseClassName} style={actionItemIconStyle(color)}><ActionItemIcon className="mango-editor-action-item-icon" size={16} /></span>
-      <span className={pulseClassName} style={actionItemNameStyle(color)}>{item.name}</span>
+      <span
+        className={color === "red" || color === "yellow" ? `my-work-action-item-title--${color}` : undefined}
+        data-my-work-action-item-title="true"
+        style={actionItemNameStyle(color)}
+      >
+        {item.name}
+      </span>
     </button>
   );
+}
+
+export function myWorkActionItemAnchor(
+  row: Element,
+  activation: Pick<React.MouseEvent<HTMLElement>, "clientX" | "clientY" | "detail">,
+): EditorEntityLinkAnchorBounds | undefined {
+  const rowBounds = editorEntityLinkAnchorBounds(row);
+  if (!rowBounds) return undefined;
+  const pointerActivation = activation.detail > 0
+    && Number.isFinite(activation.clientX)
+    && Number.isFinite(activation.clientY);
+  const left = pointerActivation
+    ? activation.clientX
+    : Math.min(rowBounds.right, rowBounds.left + 42);
+  const top = pointerActivation
+    ? activation.clientY
+    : rowBounds.top + (rowBounds.bottom - rowBounds.top) / 2;
+  return {
+    left,
+    top,
+    right: left,
+    bottom: top,
+    ...(rowBounds.portalTarget ? { portalTarget: rowBounds.portalTarget } : {}),
+  };
 }
 
 function NodeRow({ item }: { item: MyWorkNode }) {
@@ -1001,7 +1032,6 @@ const nestedRowListStyle: React.CSSProperties = {
   gap: 7,
   marginLeft: 16,
   paddingLeft: 10,
-  borderLeft: "2px solid rgba(148,163,184,0.20)",
 };
 const groupListStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 9 };
 
@@ -1012,7 +1042,6 @@ function groupStyle(depth: number): React.CSSProperties {
     gap: 7,
     marginLeft: depth === 0 ? 0 : 15,
     paddingLeft: depth === 0 ? 0 : 10,
-    borderLeft: depth === 0 ? "none" : "2px solid rgba(148,163,184,0.20)",
   };
 }
 
@@ -1030,7 +1059,7 @@ function groupHeaderStyle(section: "action_items" | "nodes", field: string, key:
       ? "linear-gradient(145deg, rgba(255,255,255,0.94), rgba(226,232,240,0.72))"
       : "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(241,245,249,0.78))",
     color: "#475569",
-    fontSize: 10.5,
+    fontSize: 11.5,
     fontWeight: 850,
     padding: "0 9px",
     boxShadow: "3px 3px 8px rgba(100,116,139,0.09), -2px -2px 6px rgba(255,255,255,0.88), inset 1px 1px 0 rgba(255,255,255,0.90)",
@@ -1063,7 +1092,7 @@ const groupCountStyle: React.CSSProperties = {
   borderRadius: 999,
   background: "rgba(255,255,255,0.58)",
   color: "inherit",
-  fontSize: 9.5,
+  fontSize: 10.5,
   fontWeight: 900,
   textAlign: "center",
   padding: "1px 5px",
@@ -1093,7 +1122,7 @@ const resourceNameStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  fontSize: 11.5,
+  fontSize: 13,
   fontWeight: 800,
 };
 
@@ -1151,19 +1180,12 @@ function actionItemIconStyle(color: string | undefined): React.CSSProperties {
 }
 
 function actionItemNameStyle(color: string | undefined): React.CSSProperties {
-  const colored = color === "red" || color === "yellow";
   return {
     ...resourceNameStyle,
     width: "fit-content",
     maxWidth: "100%",
-    border: colored ? "1px solid var(--mango-entity-chip-border)" : "1px solid transparent",
-    borderRadius: 8,
-    background: colored ? "var(--mango-entity-chip-background)" : "transparent",
-    color: colored ? "#111827" : resourceNameStyle.color,
-    boxShadow: colored
-      ? "inset 1px 1px 0 rgba(255,255,255,0.84), 0 2px 7px var(--mango-entity-chip-shadow)"
-      : "none",
-    padding: colored ? "4px 8px" : "4px 0",
+    color: color === "red" ? "#991b1b" : color === "yellow" ? "#713f12" : "#1e293b",
+    padding: "4px 0",
   };
 }
 
@@ -1255,7 +1277,7 @@ const inlineContextLabelStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  fontSize: 9.5,
+  fontSize: 10.75,
   fontWeight: 800,
 };
 

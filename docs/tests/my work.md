@@ -88,6 +88,14 @@ MW42 - The Process role selector uses the established RACI colors: Responsible i
 
 MW43 - Each major My Work section is an elevated surface. Every resource row lifts on hover or keyboard focus, and inline Node Process and Project references are independent elevated click targets.
 
+MW44 - Action Item, Node, Process, and Project row names use the readable My Work row type scale. Nested group levels and their rows remain indented without continuous vertical guide lines.
+
+MW45 - A colored Action Item keeps its established raised pulsing icon, while its title is plain highlighted text with the same red one-second or yellow two-second pulse and no separate raised chip surface.
+
+MW46 - Every universal grouping dialog opens as a fixed elevated overlay anchored to its grouping button. It never becomes a clipped section descendant, changes a section's scroll position, or moves the underlying My Work layout.
+
+MW47 - Opening an Action Item from My Work anchors the existing exact Action Item editor to the activation point above the current page. The editor and its field cards use the elevated My Work surface treatment and never become a right-side layout column.
+
 ## Process Story: One person sees assigned work and current company context
 
 A company member opens My Work beneath My Tower
