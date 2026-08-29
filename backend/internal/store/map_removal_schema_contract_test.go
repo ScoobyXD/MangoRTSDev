@@ -400,18 +400,26 @@ func TestMapRemovalForwardMigrationIsNonDestructive(t *testing.T) {
 func TestMapPositionOperatorSQLIsDefaultDenyAndExact(t *testing.T) {
 	preflight := readMapRemovalContractFile(t, "..", "..", "..", "scripts", "map_position_storage_retirement_preflight.sql")
 	operator := readMapRemovalContractFile(t, "..", "..", "..", "scripts", "retire_map_position_storage.sql")
-	for _, required := range []string{"begin transaction isolation level repeatable read read only", "server_version_num", "170000", "180000", "workspace_derived_domain_event_projection_checkpoints", "node_map_position_upsert", "logic_gate_map_position_upsert", "exact unordered column set drifted", "ready_for_separately_approved_map_position_retirement", "process_map_placements", "resource_operational_relationships", "process_map_traces", "retired logic_gate_relationships authority is still present", "rollback;"} {
+	for _, required := range []string{"begin transaction isolation level repeatable read read only", "server_version_num", "170000", "180000", "exact unordered column set drifted", "ready_for_separately_approved_map_position_retirement", "process_map_placements", "resource_operational_relationships", "process_map_traces", "retired logic_gate_relationships authority is still present", "rollback;"} {
 		if !strings.Contains(preflight, required) {
 			t.Errorf("preflight missing %q", required)
 		}
 	}
-	for _, required := range []string{"values (false,false,false,false,false,false)", "map_free_application_deployed", "old_writers_stopped", "operator_approved", "drop table public.node_map_positions;", "drop table public.logic_gate_map_positions;", "workspace_derived_domain_event_projection_checkpoints", "exact unordered column set drifted", "process_map_placements", "resource_operational_relationships", "process_map_traces", "logic_gate_relationships_retired", "commit;"} {
+	for _, required := range []string{"values (false,false,false,false,false)", "map_free_application_deployed", "old_writers_stopped", "operator_approved", "drop table public.node_map_positions;", "drop table public.logic_gate_map_positions;", "exact unordered column set drifted", "process_map_placements", "resource_operational_relationships", "process_map_traces", "logic_gate_relationships_retired", "commit;"} {
 		if !strings.Contains(operator, required) {
 			t.Errorf("operator SQL missing %q", required)
 		}
 	}
 	if strings.Contains(operator, "logic_gate_relationships_preserved") {
 		t.Error("operator SQL still treats retired logic_gate_relationships as protected")
+	}
+	for _, retired := range []string{"workspace_derived_domain_event_projection_checkpoints", "workspace_derived_projection_requested", "node_map_position_upsert", "logic_gate_map_position_upsert", "projection_checkpoint_drained"} {
+		if strings.Contains(preflight, retired) {
+			t.Errorf("preflight still depends on retired projection contract %q", retired)
+		}
+		if strings.Contains(operator, retired) {
+			t.Errorf("operator SQL still depends on retired projection contract %q", retired)
+		}
 	}
 	if strings.Contains(operator, "drop table public.node_map_positions cascade") || strings.Contains(operator, "drop table public.logic_gate_map_positions cascade") {
 		t.Error("operator SQL must never use CASCADE")

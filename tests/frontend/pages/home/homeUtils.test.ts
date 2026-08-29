@@ -778,31 +778,17 @@ test("home explorer rows expose selected nodes as Logic Gate Arena drag items", 
   ]);
 });
 
-test("my logic gate groups merge shortcuts with RACI-assigned gates without Explorer folders", () => {
-  const shortcut = {
-    user_id: "user-1",
-    company_id: "company-1",
-    logic_gate_id: "gate-shortcut",
-    position: 1000,
-    created_timestamp: "2026-01-01T00:00:00Z",
-    updated_timestamp: "2026-01-01T00:00:00Z",
-  };
-  const shortcutGate = logicGate("gate-shortcut", []);
-  const assignedGate = logicGate("gate-assigned", [{ company_id: "company-1", logic_gate_id: "gate-assigned", role: "consulted", user_id: "user-1", created_timestamp: "2026-01-01T00:00:00Z" }]);
-  const duplicateAssignedGate = logicGate("gate-shortcut", [{ company_id: "company-1", logic_gate_id: "gate-shortcut", role: "responsible", user_id: "user-1", created_timestamp: "2026-01-01T00:00:00Z" }]);
-  const logicGateByID = new Map([
-    [shortcutGate.logic_gate_id, shortcutGate],
-    [assignedGate.logic_gate_id, assignedGate],
-  ]);
-
+test("my logic gate groups contain only RACI-assigned Processes in title order", () => {
+  const zuluGate = logicGate("gate-zulu", [{ company_id: "company-1", logic_gate_id: "gate-zulu", role: "consulted", user_id: "user-1", created_timestamp: "2026-01-01T00:00:00Z" }]);
+  zuluGate.header = "Zulu";
+  const alphaGate = logicGate("gate-alpha", [{ company_id: "company-1", logic_gate_id: "gate-alpha", role: "responsible", user_id: "user-1", created_timestamp: "2026-01-01T00:00:00Z" }]);
+  alphaGate.header = "Alpha";
   const groups = buildMyLogicGateGroups({
-    shortcuts: [shortcut],
-    assignedLogicGates: [assignedGate, duplicateAssignedGate],
-    logicGateByID,
+    assignedLogicGates: [zuluGate, alphaGate],
   });
 
   assert.deepEqual(groups.map((group) => [group.label, group.logicGates.map((item) => item.logic_gate_id)]), [
-    ["My Processes", ["gate-shortcut", "gate-assigned"]],
+    ["My Processes", ["gate-alpha", "gate-zulu"]],
   ]);
 });
 

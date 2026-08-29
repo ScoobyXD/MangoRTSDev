@@ -4871,60 +4871,6 @@ CREATE TABLE public.pins (
 
 
 --
--- Name: process_map_actual_size_layout_recovery_placements; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.process_map_actual_size_layout_recovery_placements (
-    company_id uuid NOT NULL,
-    resource_type text NOT NULL,
-    resource_id uuid NOT NULL,
-    placement_incarnation_token uuid NOT NULL,
-    map_parent_folder_id uuid,
-    before_grid_x integer NOT NULL,
-    before_grid_y integer NOT NULL,
-    before_grid_width integer NOT NULL,
-    before_grid_height integer NOT NULL,
-    before_revision bigint NOT NULL,
-    before_created_timestamp timestamp with time zone NOT NULL,
-    before_updated_timestamp timestamp with time zone NOT NULL,
-    expected_grid_x integer NOT NULL,
-    expected_grid_y integer NOT NULL,
-    expected_grid_width integer NOT NULL,
-    expected_grid_height integer NOT NULL,
-    expected_revision bigint NOT NULL,
-    expected_created_timestamp timestamp with time zone NOT NULL,
-    expected_updated_timestamp timestamp with time zone NOT NULL,
-    changed_by_migration boolean NOT NULL
-);
-
-
---
--- Name: process_map_actual_size_layout_recovery_runs; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.process_map_actual_size_layout_recovery_runs (
-    company_id uuid NOT NULL,
-    recovery_key text NOT NULL,
-    format_version integer NOT NULL,
-    status text NOT NULL,
-    marker_event_id uuid NOT NULL,
-    marker_sequence bigint NOT NULL,
-    marker_created_timestamp timestamp with time zone NOT NULL,
-    placement_count bigint NOT NULL,
-    changed_placement_count bigint NOT NULL,
-    placement_checksum text NOT NULL,
-    created_timestamp timestamp with time zone NOT NULL,
-    rollback_event_id uuid,
-    rollback_sequence bigint,
-    rolled_back_timestamp timestamp with time zone,
-    CONSTRAINT pm_actual_size_recovery_runs_counts_chk CHECK (((placement_count >= 0) AND (changed_placement_count >= 0) AND (changed_placement_count <= placement_count))),
-    CONSTRAINT pm_actual_size_recovery_runs_format_chk CHECK ((format_version = 1)),
-    CONSTRAINT pm_actual_size_recovery_runs_rollback_state_chk CHECK ((((status = 'applied'::text) AND (rollback_event_id IS NULL) AND (rollback_sequence IS NULL) AND (rolled_back_timestamp IS NULL)) OR ((status = 'rolled_back'::text) AND (rollback_event_id IS NOT NULL) AND (rollback_sequence IS NOT NULL) AND (rolled_back_timestamp IS NOT NULL)))),
-    CONSTRAINT pm_actual_size_recovery_runs_status_chk CHECK ((status = ANY (ARRAY['applied'::text, 'rolled_back'::text])))
-);
-
-
---
 -- Name: process_map_placements; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5611,20 +5557,6 @@ CREATE TABLE public.shared_inboxes (
 
 
 --
--- Name: user_logic_gate_shortcuts; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.user_logic_gate_shortcuts (
-    user_id uuid NOT NULL,
-    company_id uuid NOT NULL,
-    logic_gate_id uuid NOT NULL,
-    "position" integer NOT NULL,
-    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
 -- Name: users; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5638,18 +5570,6 @@ CREATE TABLE public.users (
     CONSTRAINT users_cognito_subject_nonblank_chk CHECK ((btrim(cognito_subject) <> ''::text)),
     CONSTRAINT users_display_name_nonblank_chk CHECK ((btrim(display_name) <> ''::text)),
     CONSTRAINT users_email_lowercase_chk CHECK ((email = lower(btrim(email))))
-);
-
-
---
--- Name: workspace_derived_domain_event_projection_checkpoints; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.workspace_derived_domain_event_projection_checkpoints (
-    company_id uuid NOT NULL,
-    checkpoint_timestamp timestamp with time zone NOT NULL,
-    checkpoint_event_id uuid NOT NULL,
-    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL
 );
 
 
@@ -6292,22 +6212,6 @@ ALTER TABLE ONLY public.pins
 
 
 --
--- Name: process_map_actual_size_layout_recovery_placements process_map_actual_size_layout_recovery_placements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.process_map_actual_size_layout_recovery_placements
-    ADD CONSTRAINT process_map_actual_size_layout_recovery_placements_pkey PRIMARY KEY (company_id, resource_type, resource_id);
-
-
---
--- Name: process_map_actual_size_layout_recovery_runs process_map_actual_size_layout_recovery_runs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.process_map_actual_size_layout_recovery_runs
-    ADD CONSTRAINT process_map_actual_size_layout_recovery_runs_pkey PRIMARY KEY (company_id);
-
-
---
 -- Name: process_map_placements process_map_placements_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6604,14 +6508,6 @@ ALTER TABLE ONLY public.shared_inboxes
 
 
 --
--- Name: user_logic_gate_shortcuts user_logic_gate_shortcuts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.user_logic_gate_shortcuts
-    ADD CONSTRAINT user_logic_gate_shortcuts_pkey PRIMARY KEY (user_id, company_id, logic_gate_id);
-
-
---
 -- Name: users users_cognito_subject_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6625,14 +6521,6 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (user_id);
-
-
---
--- Name: workspace_derived_domain_event_projection_checkpoints workspace_derived_domain_event_projection_checkpoints_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.workspace_derived_domain_event_projection_checkpoints
-    ADD CONSTRAINT workspace_derived_domain_event_projection_checkpoints_pkey PRIMARY KEY (company_id);
 
 
 --
@@ -7740,13 +7628,6 @@ CREATE INDEX idx_shared_inboxes_company_email_connection ON public.shared_inboxe
 --
 
 CREATE INDEX idx_shared_inboxes_parent ON public.shared_inboxes USING btree (company_id, parent_folder_id, "position", created_timestamp);
-
-
---
--- Name: idx_user_logic_gate_shortcuts_user_company_position; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_user_logic_gate_shortcuts_user_company_position ON public.user_logic_gate_shortcuts USING btree (user_id, company_id, "position", logic_gate_id);
 
 
 --
@@ -9722,22 +9603,6 @@ ALTER TABLE ONLY public.shared_inboxes
 
 ALTER TABLE ONLY public.shared_inboxes
     ADD CONSTRAINT shared_inboxes_company_id_parent_folder_id_fkey FOREIGN KEY (company_id, parent_folder_id) REFERENCES public.shared_inbox_folders(company_id, folder_id);
-
-
---
--- Name: user_logic_gate_shortcuts user_logic_gate_shortcuts_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.user_logic_gate_shortcuts
-    ADD CONSTRAINT user_logic_gate_shortcuts_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
-
-
---
--- Name: user_logic_gate_shortcuts user_logic_gate_shortcuts_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.user_logic_gate_shortcuts
-    ADD CONSTRAINT user_logic_gate_shortcuts_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(user_id) ON DELETE CASCADE;
 
 
 --

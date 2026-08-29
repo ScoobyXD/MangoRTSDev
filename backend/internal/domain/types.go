@@ -809,15 +809,6 @@ type CommunicationsEmailCollaborationParticipant struct {
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 }
 
-type UserLogicGateShortcut struct {
-	UserID           string    `json:"user_id"`
-	CompanyID        string    `json:"company_id"`
-	LogicGateID      string    `json:"logic_gate_id"`
-	Position         int       `json:"position"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
-}
-
 type Node struct {
 	CompanyID        string    `json:"company_id"`
 	NodeID           string    `json:"node_id"`

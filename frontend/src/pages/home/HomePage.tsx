@@ -61,7 +61,6 @@ import {
   type MessagePage,
   type CommunicationsStatus,
   type EmailProvider,
-  type UserLogicGateShortcut,
 } from "../../modules/communications/communicationsApi";
 import { mangoEmailDraftResourceID, uploadMangoAttachment } from "../../modules/attachments/attachmentApi";
 import { isOutboundEmailUndoneError } from "../../modules/communications/outboundEmailUndo";
@@ -104,8 +103,8 @@ import { applyHomeMailboxCountDelta, cancelHomeMailboxListRequestTimers, consume
 import { ARCHIVE_QUEUE_MAX_EMAILS, HOME_COLUMN_RESIZER_WIDTH, MESSAGE_BATCH_SIZE, MESSAGE_EVENT_REFRESH_DELAY_MS } from "./homeConstants";
 import { TRIAGE_MESSAGE_DRAG_MIME } from "../../modules/triage/triageDragDrop";
 import { EVENT_TRIAGE_CONVERSION_APPLIED, type TriageConversionAppliedDetail } from "../../modules/triage/triageEvents";
-import { addMyLogicGateShortcutsCommand, addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRACIMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, removeMyLogicGateShortcutCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
-import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailMessagesForOrderedPage, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, inboxCountPresentation, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRACIRole, logicGateHasRACIRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeEmailMessageIntoScopedMessageList, mergeLogicGateShortcuts, messageListFilterKey, nextEmailMessageAfterRemoval, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortLogicGateShortcuts, sortSharedInboxes, shouldAutoMarkEmailSelectionRead, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
+import { addNodesToLogicGateCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeNodeCommand, createHomeRACIMatrixNodeCommand, deleteHomeEntitiesCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, updateSharedInboxAccountEmailCommand } from "./homeCommands";
+import { buildMyLogicGateGroups, buildMyNodeGroups, canDragTriageMessageFromMailbox, cleanIDList, condenseEmailThreadMessages, emailMailboxMessageKey, emailMailboxScopeKey, emailMessagesForOrderedPage, emailThreadKey, filterExplorerRowsForSearch, fitHomeColumnWidthsToAvailableWidth, formatAddressList, formatError, formatErrorCode, getHomeColumnMinimumTrackWidth, getHomeGridTemplateColumns, getHomeGridTemplateColumnsWithoutSidebar, getHomeWorkspaceTrackWidth, getHomeViewLabel, getInboxMatrixGridTemplateColumns, getInboxMatrixGridTemplateColumnsWithoutSidebar, inboxCountPresentation, isArchivableHomeViewID, isEditableKeyboardTarget, isEmailAccessExpiredError, isInboxMatrixViewID, isWorkspacePanelHomeViewID, logicGateHasAnyRACIRole, logicGateHasRACIRole, logicGateIDFromTreeID, logicGateTitle, logicGateTreeID, mailboxCountsFromFolders, missingLogicGateRecordIDs, mailboxForHomeView, mailboxLabel, mergeEmailMessageIntoScopedMessageList, messageListFilterKey, nextEmailMessageAfterRemoval, nodeIDFromTreeID, nodeTitle, nodeTreeID, gvicInboxSectionForView, orderEmailConversationMessages, readHomeColumnWidths, resizeHomeColumns, resizeHomeColumnsWithoutSidebar, resizeHomeInboxMatrixColumnsWithoutSidebar, saveHomeColumnWidths, sharedInboxCanLoadMail, sharedInboxTreeUserCanManageMail, sortEmailConversationMessagesNewestFirst, sortSharedInboxes, shouldAutoMarkEmailSelectionRead, unreadEmailThreadMessagesForSelection, userCanManageSharedInboxStructure, userHasFullSharedInboxAccess, type EmailConversationOrder } from "./homeUtils";
 import { brandStyle, centerStyle, connectPanelStyle, errorStyle, headerButtonStyle, headerDividerStyle, headerStyle, mutedTextStyle, noticeStyle, pageStyle, panelTitleStyle, primaryButtonStyle, titleStyle, userPillStyle, workspaceStyle } from "./homeStyles";
 import { emptyCompose, type ComposeAttachment, type ComposeState, type HomeColumnResizeDrag, type HomeColumnWidths, type HomeEntityDeleteKind, type HomeEntityDeleteTarget, type HomePageProps, type HomeViewID, type InboxPriority, type LoadMessagesOptions, type MessageSelectionModifiers, type NodeEditorOverlayState, type RACIInboxStatus } from "./homeTypes";
 import { emailCollaborationListMessage, emailMessageMatchesCollaboration, emailMessageMatchesNodeAttachment, emailMessageUsesActiveProviderScope, mergeEmailCollaborationsForView, mergeEmailMessageWithCollaboration, mergeEmailMessageWithNodeAttachment, sharedInboxIDForHomeView, type EmailNodeAttachmentChange } from "./emailCollaborationRows";
@@ -512,7 +511,6 @@ export function HomePage({
   const [RACIMatrixTargetUserID, setRACIMatrixTargetUserID] = useState("");
   const [matrixAccountFilterIDs, setMatrixAccountFilterIDs] = useState<string[]>([]);
   const [logicGates, setLogicGates] = useState<LogicGateRecord[]>([]);
-  const [myLogicGateShortcuts, setMyLogicGateShortcuts] = useState<UserLogicGateShortcut[]>([]);
   const [nodeSearch, setNodeSearch] = useState("");
   const [nodeExpandedIDs, setNodeExpandedIDs] = useState<Set<string>>(new Set());
   const [selectedNodeRowIDs, setSelectedNodeRowIDs] = useState<Set<string>>(new Set());
@@ -1489,7 +1487,6 @@ export function HomePage({
         panel.logicGates, companyID, titleVersionAtStart,
         reconcileCommittedLogicGateRecordTitles,
       ));
-      setMyLogicGateShortcuts(sortLogicGateShortcuts(panel.myLogicGateShortcuts));
       setNodes(foldCommittedEntityTitlesSince(
         panel.nodes, companyID, titleVersionAtStart,
         reconcileCommittedNodeTitleInSnapshot,
@@ -4009,12 +4006,9 @@ export function HomePage({
     rootRowOrder: {},
   }).filter((row) => row.kind === "logic_gate"), [logicGateCanvasRecords, logicGateExpandedIDs]);
   const visibleLogicGateRows = useMemo(() => filterExplorerRowsForSearch(allLogicGateRows, logicGateSearch), [allLogicGateRows, logicGateSearch]);
-  const shortcutLogicGateIDs = useMemo(() => new Set(myLogicGateShortcuts.map((shortcut) => shortcut.logic_gate_id)), [myLogicGateShortcuts]);
   const myLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
-    shortcuts: myLogicGateShortcuts,
     assignedLogicGates: assignedMyLogicGates,
-    logicGateByID,
-  }), [assignedMyLogicGates, logicGateByID, myLogicGateShortcuts]);
+  }), [assignedMyLogicGates]);
   const myLogicGateOrderedRowIDs = useMemo(() => myLogicGateGroups
     .flatMap((group) => group.logicGates.map((logicGate) => logicGateTreeID(logicGate.logic_gate_id))), [myLogicGateGroups]);
   const activeRACIRoleLogicGates = useMemo(() => {
@@ -4023,10 +4017,8 @@ export function HomePage({
     return logicGates.filter((logicGate) => logicGateHasRACIRole(logicGate, role, workspacePanelUserID));
   }, [activeRACIInboxSection?.role, logicGates, workspacePanelUserID]);
   const activeRACIRoleLogicGateGroups = useMemo(() => buildMyLogicGateGroups({
-    shortcuts: [],
     assignedLogicGates: activeRACIRoleLogicGates,
-    logicGateByID,
-  }), [activeRACIRoleLogicGates, logicGateByID]);
+  }), [activeRACIRoleLogicGates]);
   const RACIMatrixDirectoryUsers = useMemo(() => {
     const users = [...companyUsers];
     if (currentUserID && !users.some((user) => user.user_id.trim() === currentUserID)) {
@@ -4443,37 +4435,6 @@ export function HomePage({
       if (mailboxRequestOwnerIsCurrent(owner)) setBusy("");
     }
   }, [adjustPrimaryMailboxCount, canMutateCurrentMailView, companyID, currentMailboxRequestOwner, forgetLocalMailboxMutationEchoes, mailboxRequestOwnerIsCurrent, providerMutationAvailableForMessageIDs, rememberLocalMailboxMutationEchoes, removeMessagesFromVisibleMailList, selectedMessageID]);
-  const addShortcutsFromExplorer = useCallback(async (logicGateIDs: string[]) => {
-    setBusy("my-logic-gates");
-    setError("");
-    try {
-      const result = await addMyLogicGateShortcutsCommand({
-        companyID,
-        logicGateIDs,
-      });
-      if (!result) return;
-      setMyLogicGateShortcuts((previous) => mergeLogicGateShortcuts(previous, result.shortcuts));
-      setNotice(result.logicGateIDs.length === 1 ? "Added to My Processes." : `${result.logicGateIDs.length} Processes added.`);
-    } catch (shortcutError) {
-      setError(formatError(shortcutError, "Failed to add My Processes"));
-    } finally {
-      setBusy("");
-    }
-  }, [companyID]);
-  const removeShortcut = useCallback(async (logicGateID: string) => {
-    if (!logicGateID.trim()) return;
-    setBusy("my-logic-gates");
-    setError("");
-    try {
-      const removedLogicGateID = await removeMyLogicGateShortcutCommand({ companyID, logicGateID });
-      if (!removedLogicGateID) return;
-      setMyLogicGateShortcuts((previous) => previous.filter((shortcut) => shortcut.logic_gate_id !== removedLogicGateID));
-    } catch (shortcutError) {
-      setError(formatError(shortcutError, "Failed to remove My Process"));
-    } finally {
-      setBusy("");
-    }
-  }, [companyID]);
   const convertMessagesToLogicGate = useCallback(async (logicGateID: string, messageIDs: string[], priority: number) => {
     const ids = cleanIDList(messageIDs);
     if (!logicGateID || ids.length === 0) return;
@@ -4529,7 +4490,7 @@ export function HomePage({
   const selectLogicGateRow = useCallback((row: ExplorerTreeNode, event: React.MouseEvent) => {
     selectLogicGateTreeID(row.id, visibleLogicGateRows.map((item) => item.id), event);
   }, [selectLogicGateTreeID, visibleLogicGateRows]);
-  const selectLogicGateShortcut = useCallback((logicGateID: string, event: React.MouseEvent) => {
+  const selectMyLogicGate = useCallback((logicGateID: string, event: React.MouseEvent) => {
     selectLogicGateTreeID(logicGateTreeID(logicGateID), myLogicGateOrderedRowIDs, event);
   }, [myLogicGateOrderedRowIDs, selectLogicGateTreeID]);
   const selectNodeTreeID = useCallback((treeID: string, orderedIDs: string[], event: React.MouseEvent) => {
@@ -5192,7 +5153,6 @@ export function HomePage({
         }));
       setNodeRelationships((previous) => previous.filter((relationship) => !nodeIDSet.has(relationship.node_id_a) && !nodeIDSet.has(relationship.node_id_b)));
       setLogicGates((previous) => previous.filter((logicGate) => !logicGateIDSet.has(logicGate.logic_gate_id)));
-      setMyLogicGateShortcuts((previous) => previous.filter((shortcut) => !logicGateIDSet.has(shortcut.logic_gate_id)));
       setSelectedNodeRowIDs((previous) => new Set(Array.from(previous).filter((treeID) => !nodeIDSet.has(nodeIDFromTreeID(treeID)))));
       setSelectedLogicGateRowIDs((previous) => new Set(Array.from(previous).filter((treeID) => !logicGateIDSet.has(logicGateIDFromTreeID(treeID)))));
       if (nodeSelectionAnchorID && nodeIDSet.has(nodeIDFromTreeID(nodeSelectionAnchorID))) setNodeSelectionAnchorID("");
@@ -5695,7 +5655,6 @@ export function HomePage({
                   selectedLogicGateRowIDs={selectedLogicGateRowIDs}
                   expandedRowIDs={nodeExpandedIDs}
                   search={nodeSearch}
-                  busy={!!busy}
                   getNodeDragIDs={getNodeDragIDs}
                   getLogicGateDragIDs={getLogicGateDragIDs}
                   onSearchChange={setNodeSearch}
@@ -5713,7 +5672,6 @@ export function HomePage({
                   onOpenNode={openNodeEditorOverlay}
                   onOpenLogicGate={openLogicGateArena}
                   onOpenNodeBulkMenu={openNodeBulkEditMenu}
-                  onRemoveLogicGateShortcut={removeShortcut}
                   onConvertMessages={convertMessagesToLogicGate}
                   onRequestDeleteLogicGate={requestDeleteLogicGateContext}
                   onCreateNode={() => { void createHomeNode(); }}
@@ -5852,16 +5810,12 @@ export function HomePage({
             <LogicGateRail
               loading={loadingLogicGates}
               logicGateByID={logicGateByID}
-              apiBase={apiBase}
-              companyID={companyID}
               allRows={visibleLogicGateRows}
               selectedRowIDs={selectedLogicGateRowIDs}
               expandedRowIDs={logicGateExpandedIDs}
               search={logicGateSearch}
               myGroups={myLogicGateGroups}
-              busy={!!busy}
               getLogicGateDragIDs={getLogicGateDragIDs}
-              shortcutLogicGateIDs={shortcutLogicGateIDs}
               onSearchChange={setLogicGateSearch}
               onToggleFolder={(rowID) => {
                 setLogicGateExpandedIDs((previous) => {
@@ -5872,10 +5826,8 @@ export function HomePage({
                 });
               }}
               onSelectRow={selectLogicGateRow}
-              onSelectShortcut={selectLogicGateShortcut}
+              onSelectLogicGate={selectMyLogicGate}
               onOpenLogicGate={openLogicGateArena}
-              onAddShortcuts={addShortcutsFromExplorer}
-              onRemoveShortcut={removeShortcut}
               onConvertMessages={convertMessagesToLogicGate}
               onCreateLogicGate={(options) => { void createHomeLogicGate({ ...options, openArena: false }); }}
               onRequestDeleteLogicGate={requestDeleteLogicGateContext}

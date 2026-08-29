@@ -662,7 +662,7 @@ test("workspace resource scoped stale refetches only matching resource caches", 
     calls.push(path);
     if (path.startsWith("/v1/logic-gates?")) return jsonResponse({ logic_gates: [{ company_id: "company-1", logic_gate_id: "gate-1", header: "Gate 1", created_timestamp: "2026-01-01T00:00:00Z" }] });
     if (path.startsWith("/v1/nodes?")) return jsonResponse({ nodes: [{ company_id: "company-1", node_id: `node-${calls.filter((call) => call.startsWith("/v1/nodes?")).length}`, name: "Node", created_timestamp: "2026-01-01T00:00:00Z" }] });
-    return jsonResponse({ folders: [], shortcuts: [], users: [] });
+    return jsonResponse({ folders: [], users: [] });
   };
   try {
     await listLogicGates("company-1");

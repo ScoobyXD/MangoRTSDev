@@ -87,7 +87,6 @@ type memoryRecycleBinSnapshot struct {
 	emailDrafts                      map[string]domain.CommunicationsEmailDraft
 	attachments                      map[string]domain.Attachment
 	resourceAttachments              map[string]domain.ResourceAttachment
-	logicGateShortcuts               map[string]domain.UserLogicGateShortcut
 	companyExplorerV2Entities        map[string]memoryCompanyExplorerV2Entity
 	companyExplorerV2Edges           map[string]memoryCompanyExplorerV2Edge
 	companyExplorerV2Subscriptions   map[string]memoryCompanyExplorerV2Subscription
@@ -456,7 +455,6 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		emailDrafts:                      cloneMap(r.emailDrafts),
 		attachments:                      cloneMap(r.attachments),
 		resourceAttachments:              cloneMap(r.resourceAttachments),
-		logicGateShortcuts:               cloneMap(r.logicGateShortcuts),
 		companyExplorerV2Entities:        cloneMap(r.companyExplorerV2Entities),
 		companyExplorerV2Edges:           cloneMap(r.companyExplorerV2Edges),
 		companyExplorerV2Subscriptions:   cloneMap(r.companyExplorerV2Subscriptions),
@@ -527,7 +525,6 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.emailDrafts = cloneMap(snapshot.emailDrafts)
 	r.attachments = cloneMap(snapshot.attachments)
 	r.resourceAttachments = cloneMap(snapshot.resourceAttachments)
-	r.logicGateShortcuts = cloneMap(snapshot.logicGateShortcuts)
 	r.companyExplorerV2Entities = cloneMap(snapshot.companyExplorerV2Entities)
 	r.companyExplorerV2Edges = cloneMap(snapshot.companyExplorerV2Edges)
 	r.companyExplorerV2Subscriptions = cloneMap(snapshot.companyExplorerV2Subscriptions)
@@ -590,7 +587,6 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		emailDrafts:                      recycleMapDelta(before.emailDrafts, after.emailDrafts),
 		attachments:                      recycleMapDelta(before.attachments, after.attachments),
 		resourceAttachments:              recycleMapDelta(before.resourceAttachments, after.resourceAttachments),
-		logicGateShortcuts:               recycleMapDelta(before.logicGateShortcuts, after.logicGateShortcuts),
 		companyExplorerV2Entities:        recycleMapDelta(before.companyExplorerV2Entities, after.companyExplorerV2Entities),
 		companyExplorerV2Edges:           recycleMapDelta(before.companyExplorerV2Edges, after.companyExplorerV2Edges),
 		companyExplorerV2Subscriptions:   recycleMapDelta(before.companyExplorerV2Subscriptions, after.companyExplorerV2Subscriptions),
@@ -727,7 +723,6 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.emailDrafts, delta.emailDrafts)
 	mergeRecycleMap(destination.attachments, delta.attachments)
 	mergeRecycleMap(destination.resourceAttachments, delta.resourceAttachments)
-	mergeRecycleMap(destination.logicGateShortcuts, delta.logicGateShortcuts)
 	mergeRecycleMap(destination.companyExplorerV2Entities, delta.companyExplorerV2Entities)
 	mergeRecycleMap(destination.companyExplorerV2Edges, delta.companyExplorerV2Edges)
 	mergeRecycleMap(destination.companyExplorerV2Subscriptions, delta.companyExplorerV2Subscriptions)

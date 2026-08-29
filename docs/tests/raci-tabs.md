@@ -8,7 +8,7 @@ RT3 - A collapsed tab that has not yet been opened sends no RACI Tabs item, fold
 RT4 - Every collapsed-to-expanded role-tab transition performs one fresh bounded GET for only that role's root page. It does not load another role or any unopened folder, and a truncated page returns a continuation cursor instead of silently dropping rows.
 RT5 - Every collapsed-to-expanded folder transition performs one fresh bounded GET for only that folder's direct-child page. Folder rows include `has_children` and recursive status totals without returning unopened descendant rows.
 RT6 - Collapsing a role tab or folder discards that branch's loaded rows. A closed or never-opened branch stays unloaded and sends no branch GET until its next expansion.
-RT7 - The canonical RACI Tabs tables are `raci_tabs_items` and `raci_tabs_folders`; Company Explorer, Pins, retired My Work storage, and browser storage are not RACI Tabs storage.
+RT7 - The canonical RACI Tabs tables are `raci_tabs_items` and `raci_tabs_folders`; Company Explorer, Pins, retired My Work storage, retired `user_logic_gate_shortcuts`, and browser storage are not RACI Tabs storage.
 RT8 - `raci_tabs_items` has exactly `company_id`, `user_id`, `role`, `logic_gate_id`, nullable `folder_id`, `name`, `position`, `created_timestamp`, and `updated_timestamp`. It has no item ID, generic resource type, translated resource ID, permission field, or RACI policy field.
 RT9 - The `raci_tabs_items` primary key is `(company_id, user_id, logic_gate_id)`. Its stored role is that user's one winning effective role under Responsible, Accountable, Consulted, then Informed priority.
 RT10 - `raci_tabs_folders` has exactly `company_id`, `folder_id`, `user_id`, `role`, nullable `parent_folder_id`, `name`, `position`, `created_timestamp`, and `updated_timestamp`; `folder_id` is its primary key.
@@ -44,6 +44,7 @@ RT39 - A committed direct-user, group, group-membership, group-parent, group-del
 RT40 - Loading Mango performs zero RACI Tabs recalculations. Startup may read prepared rows only after the user opens a role.
 RT41 - Opening a role or folder performs only its bounded read of prepared `raci_tabs_items` and `raci_tabs_folders` rows. No RACI Tabs GET creates defaults, repairs projection rows, starts a transaction, or recalculates RACI.
 RT42 - Every ordinary RACI input mutation identifies the exact Logic Gate, Explorer folder subtree, or group-assigned resources whose effective RACI could change. The canonical schema has no ordinary company-wide RACI Tabs synchronization function or trigger.
+RT43 - Home's My Processes list is derived only from the user's current effective Logic Gate RACI. Users cannot add manual shortcuts, and no shortcut API or shortcut table participates.
 
 ## Process Story: Effective Logic Gate RACI appears in a lazy personal tree
 
@@ -57,7 +58,7 @@ Opening that role freshly loads only its root page, and opening a folder freshly
 ↓
 The user selects and drags Logic Gate items through nested personal folders without changing the Logic Gate, its RACI, its permission, Company Explorer, or Pins
 
-Last updated: 2026-08-11
+Last updated: 2026-08-28
 
 ## Scenarios
 

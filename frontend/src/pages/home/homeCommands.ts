@@ -1,10 +1,8 @@
 import {
 	archiveEmailMessagesBatch as defaultArchiveEmailMessagesBatch,
-  addMyLogicGateShortcuts as defaultAddMyLogicGateShortcuts,
   convertTriageMessagesToExplorerTarget as defaultConvertTriageMessagesToExplorerTarget,
   convertTriageMessagesToLogicGate as defaultConvertTriageMessagesToLogicGate,
   deleteEmailMessage as defaultDeleteEmailMessage,
-  removeMyLogicGateShortcut as defaultRemoveMyLogicGateShortcut,
   parseEmailAddressList,
   sendEmail as defaultSendEmail,
   unarchiveEmailMessage as defaultUnarchiveEmailMessage,
@@ -26,7 +24,6 @@ import type {
   EmailMessage,
   CommunicationsTriageConversionTarget,
   SendEmailInput,
-  UserLogicGateShortcut,
 } from "../../modules/communications/communicationsApi.js";
 import {
   assignNodeToLogicGateStatus as defaultAssignNodeToLogicGateStatus,
@@ -72,8 +69,6 @@ export type HomeDeleteEmailMessage = typeof defaultDeleteEmailMessage;
 export type HomeUpdateEmailMessage = typeof defaultUpdateEmailMessage;
 export type HomeSendEmail = typeof defaultSendEmail;
 export type HomeBulkUpdateNode = typeof defaultUpdateNode;
-export type HomeAddMyLogicGateShortcuts = typeof defaultAddMyLogicGateShortcuts;
-export type HomeRemoveMyLogicGateShortcut = typeof defaultRemoveMyLogicGateShortcut;
 export type HomeConvertTriageMessagesToExplorerTarget = typeof defaultConvertTriageMessagesToExplorerTarget;
 export type HomeConvertTriageMessagesToLogicGate = typeof defaultConvertTriageMessagesToLogicGate;
 export type HomeUpdateSharedInbox = typeof defaultUpdateCommunicationsSharedInbox;
@@ -85,11 +80,6 @@ export type HomeMailMessageUpdate = { unread?: boolean; starred?: boolean; folde
 export type HomeKanbanBoardContentsInvalidator = (apiBase: string, companyID: string, boardID: string) => void;
 export type HomeNodeRecordInvalidator = (apiBase: string, companyID: string, nodeID: string) => void;
 export type HomeNodeGraphNodeUpsert = (apiBase: string, companyID: string, node: NodeRecord) => void;
-
-export type HomeLogicGateShortcutCommandResult = {
-  logicGateIDs: string[];
-  shortcuts: UserLogicGateShortcut[];
-};
 
 export type HomeTriageConversionCommandResult = {
   result: Awaited<ReturnType<HomeConvertTriageMessagesToLogicGate>>;
@@ -689,30 +679,6 @@ export async function removeSharedInboxRACIPrincipalCommand(args: {
     updateSharedInboxRACIAssignments: args.updateSharedInboxRACIAssignments,
   });
 }
-export async function addMyLogicGateShortcutsCommand(args: {
-  companyID: string;
-  logicGateIDs: string[];
-  addMyLogicGateShortcuts?: HomeAddMyLogicGateShortcuts;
-}): Promise<HomeLogicGateShortcutCommandResult | null> {
-  const logicGateIDs = cleanIDList(args.logicGateIDs);
-  if (logicGateIDs.length === 0) return null;
-  const addMyLogicGateShortcuts = args.addMyLogicGateShortcuts ?? defaultAddMyLogicGateShortcuts;
-  const shortcuts = await addMyLogicGateShortcuts(args.companyID, logicGateIDs);
-  return { logicGateIDs, shortcuts };
-}
-
-export async function removeMyLogicGateShortcutCommand(args: {
-  companyID: string;
-  logicGateID: string;
-  removeMyLogicGateShortcut?: HomeRemoveMyLogicGateShortcut;
-}): Promise<string> {
-  const logicGateID = args.logicGateID.trim();
-  if (!logicGateID) return "";
-  const removeMyLogicGateShortcut = args.removeMyLogicGateShortcut ?? defaultRemoveMyLogicGateShortcut;
-  await removeMyLogicGateShortcut(args.companyID, logicGateID);
-  return logicGateID;
-}
-
 function explorerTargetLogicGateID(target: CommunicationsTriageConversionTarget): string {
   switch (target.mode) {
     case "existing_logic_gate":

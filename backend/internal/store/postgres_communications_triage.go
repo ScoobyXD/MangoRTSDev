@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"miraeopus/backend/internal/domain"
-	"sort"
 	"strings"
 	"time"
 )
@@ -32,21 +31,6 @@ func scanCommunicationsTriageItem(row interface {
 	}
 	item.Message = normalizeEmailMessageSnapshot(item.Message)
 	return item, nil
-}
-
-func scanUserLogicGateShortcut(row interface {
-	Scan(dest ...any) error
-}) (domain.UserLogicGateShortcut, error) {
-	var item domain.UserLogicGateShortcut
-	err := row.Scan(
-		&item.UserID,
-		&item.CompanyID,
-		&item.LogicGateID,
-		&item.Position,
-		&item.CreatedTimestamp,
-		&item.UpdatedTimestamp,
-	)
-	return item, err
 }
 
 func scanCommunicationsEmailPlacement(row interface {
@@ -1095,119 +1079,4 @@ returning user_id::text,message_id,message,created_timestamp,updated_timestamp`,
 	}
 	return CommunicationsTriageRevertResult{TriageItem: triageItem, DeletedNodeID: link.NodeID,
 		DeletedCardID: input.CardID, BoardID: input.BoardID, Events: events}, nil
-}
-
-func (r *PostgresRepo) ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error) {
-	userID = strings.TrimSpace(userID)
-	companyID = strings.TrimSpace(companyID)
-	if userID == "" || companyID == "" {
-		return nil, ErrInvalid
-	}
-	rows, err := r.db.Query(`
-select user_id::text, company_id::text, logic_gate_id::text, position, created_timestamp, updated_timestamp
-from user_logic_gate_shortcuts
-where user_id=$1 and company_id=$2
-order by position asc, created_timestamp asc, logic_gate_id asc`, userID, companyID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	items := make([]domain.UserLogicGateShortcut, 0)
-	for rows.Next() {
-		item, err := scanUserLogicGateShortcut(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
-}
-
-func (r *PostgresRepo) UpsertUserLogicGateShortcuts(userID, companyID string, logicGateIDs []string) ([]domain.UserLogicGateShortcut, error) {
-	userID = strings.TrimSpace(userID)
-	companyID = strings.TrimSpace(companyID)
-	ids := normalizeUniqueStrings(logicGateIDs, UserLogicGateShortcutBatchMaxItems)
-	if userID == "" || companyID == "" || len(ids) == 0 {
-		return nil, ErrInvalid
-	}
-
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	var nextPosition int
-	if err := tx.QueryRowContext(ctx, `
-select coalesce(max(position), 0) + 1000
-from user_logic_gate_shortcuts
-where user_id=$1 and company_id=$2`, userID, companyID).Scan(&nextPosition); err != nil {
-		return nil, err
-	}
-
-	items := make([]domain.UserLogicGateShortcut, 0, len(ids))
-	for _, logicGateID := range ids {
-		var exists bool
-		if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from logic_gates where company_id=$1 and logic_gate_id=$2)`, companyID, logicGateID).Scan(&exists); err != nil {
-			return nil, err
-		}
-		if !exists {
-			return nil, ErrNotFound
-		}
-
-		var position int
-		err := tx.QueryRowContext(ctx, `
-select position
-from user_logic_gate_shortcuts
-where user_id=$1 and company_id=$2 and logic_gate_id=$3`, userID, companyID, logicGateID).Scan(&position)
-		if errors.Is(err, sql.ErrNoRows) {
-			position = nextPosition
-			nextPosition += 1000
-		} else if err != nil {
-			return nil, err
-		}
-
-		item, err := scanUserLogicGateShortcut(tx.QueryRowContext(ctx, `
-insert into user_logic_gate_shortcuts (user_id, company_id, logic_gate_id, position, created_timestamp, updated_timestamp)
-values ($1, $2, $3, $4, now(), now())
-on conflict (user_id, company_id, logic_gate_id)
-do update set updated_timestamp=now()
-returning user_id::text, company_id::text, logic_gate_id::text, position, created_timestamp, updated_timestamp`,
-			userID, companyID, logicGateID, position))
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	sort.Slice(items, func(i, j int) bool { return items[i].Position < items[j].Position })
-	return items, nil
-}
-
-func (r *PostgresRepo) DeleteUserLogicGateShortcut(userID, companyID, logicGateID string) error {
-	userID = strings.TrimSpace(userID)
-	companyID = strings.TrimSpace(companyID)
-	logicGateID = strings.TrimSpace(logicGateID)
-	if userID == "" || companyID == "" || logicGateID == "" {
-		return ErrInvalid
-	}
-	result, err := r.db.Exec(`
-delete from user_logic_gate_shortcuts
-where user_id=$1 and company_id=$2 and logic_gate_id=$3`, userID, companyID, logicGateID)
-	if err != nil {
-		return err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if affected == 0 {
-		return ErrNotFound
-	}
-	return nil
 }

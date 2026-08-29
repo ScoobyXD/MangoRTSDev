@@ -10,7 +10,7 @@ const backendDir = join(repoRoot, "backend");
 const database = "mangorts_process_map_test_gate";
 const adminHost = "127.0.0.1";
 const user = "postgres";
-const testPattern = "^TestPostgres(ProcessMap|CompanyMembershipProcessMap|PendingInvitationDowngradeInvalidatesGlobalDevAdmin)";
+const testPattern = "^TestPostgres(ProcessMap|ObsoleteOperationalTables|CompanyMembershipProcessMap|PendingInvitationDowngradeInvalidatesGlobalDevAdmin)";
 
 function postgresBinary(name) {
   const suffix = process.platform === "win32" ? ".exe" : "";

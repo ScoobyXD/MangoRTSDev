@@ -308,8 +308,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/communications/email-nodes/transfer", s.handleCommunicationsEmailNodeTransfer)
 	mux.HandleFunc("/v1/communications/triage/convert", s.handleCommunicationsTriageConvert)
 	mux.HandleFunc("/v1/communications/triage/revert-card", s.handleCommunicationsTriageRevert)
-	mux.HandleFunc("/v1/communications/my-logic-gates", s.handleCommunicationsMyLogicGates)
-	mux.HandleFunc("/v1/communications/my-logic-gates/", s.handleCommunicationsMyLogicGateByID)
 	mux.HandleFunc("/v1/notifications", s.handleNotifications)
 	mux.HandleFunc("/v1/notifications/summary", s.handleNotificationSummary)
 	mux.HandleFunc("/v1/notifications/unread-count", s.handleNotificationUnreadCount)

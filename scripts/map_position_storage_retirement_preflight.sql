@@ -15,58 +15,6 @@ select current_setting('server_version') as server_version,
          else 'STOP_UNSUPPORTED_POSTGRESQL_VERSION'
        end as version_status;
 
--- Report historical map work relative to the durable derived-projection checkpoint.
-with map_projection_events as (
-  select event.company_id, event.event_id, event.event_type, event.created_timestamp
-  from domain_events event
-  where event.stream_type = 'workspace'
-    and event.stream_id = event.company_id::text
-    and (
-      event.event_type in (
-        'node_map_position_upsert_requested',
-        'logic_gate_map_position_upsert_requested'
-      )
-      or (
-        event.event_type = 'workspace_derived_projection_requested'
-        and exists (
-          select 1
-          from jsonb_array_elements(
-            case
-              when jsonb_typeof(event.payload->'tasks') = 'array' then event.payload->'tasks'
-              else '[]'::jsonb
-            end
-          ) task
-          where task->>'kind' in (
-            'node_map_position_upsert',
-            'logic_gate_map_position_upsert'
-          )
-        )
-      )
-    )
-), classified as (
-  select event.*,
-         checkpoint.checkpoint_timestamp,
-         checkpoint.checkpoint_event_id,
-         case
-           when checkpoint.company_id is null then true
-           when event.created_timestamp > checkpoint.checkpoint_timestamp then true
-           when event.created_timestamp = checkpoint.checkpoint_timestamp
-             and event.event_id::text > checkpoint.checkpoint_event_id::text then true
-           else false
-         end as is_pending
-  from map_projection_events event
-  left join workspace_derived_domain_event_projection_checkpoints checkpoint
-    on checkpoint.company_id = event.company_id
-)
-select company_id,
-       count(*) as historical_map_projection_event_count,
-       count(*) filter (where is_pending) as pending_map_projection_event_count,
-       max(created_timestamp) as newest_map_projection_event_timestamp,
-       max(checkpoint_timestamp) as projection_checkpoint_timestamp
-from classified
-group by company_id
-order by company_id;
-
 -- Report the exact target, retired, and protected-table presence before the blocking checks.
 select name,
        to_regclass('public.' || name) is not null as present
@@ -96,11 +44,6 @@ begin
 
   if not current_setting('transaction_read_only')::boolean then
     raise exception 'STOP: run this preflight with a database-enforced read-only credential';
-  end if;
-
-  if to_regclass('public.domain_events') is null
-     or to_regclass('public.workspace_derived_domain_event_projection_checkpoints') is null then
-    raise exception 'STOP: required derived-projection evidence tables are missing';
   end if;
 
   if to_regclass('public.node_map_positions') is null
@@ -152,48 +95,6 @@ begin
          and confrelid = 'public.logic_gates'::regclass and confdeltype = 'c'
      ) then
     raise exception 'STOP: map position foreign-key contract drifted';
-  end if;
-
-  if exists (
-    select 1
-    from domain_events event
-    left join workspace_derived_domain_event_projection_checkpoints checkpoint
-      on checkpoint.company_id = event.company_id
-    where event.stream_type = 'workspace'
-      and event.stream_id = event.company_id::text
-      and (
-        event.event_type in (
-          'node_map_position_upsert_requested',
-          'logic_gate_map_position_upsert_requested'
-        )
-        or (
-          event.event_type = 'workspace_derived_projection_requested'
-          and exists (
-            select 1
-            from jsonb_array_elements(
-              case
-                when jsonb_typeof(event.payload->'tasks') = 'array'
-                  then event.payload->'tasks'
-                else '[]'::jsonb
-              end
-            ) task
-            where task->>'kind' in (
-              'node_map_position_upsert',
-              'logic_gate_map_position_upsert'
-            )
-          )
-        )
-      )
-      and (
-        checkpoint.company_id is null
-        or event.created_timestamp > checkpoint.checkpoint_timestamp
-        or (
-          event.created_timestamp = checkpoint.checkpoint_timestamp
-          and event.event_id::text > checkpoint.checkpoint_event_id::text
-        )
-      )
-  ) then
-    raise exception 'STOP: a historical map projection task is still beyond its company checkpoint';
   end if;
 
   if exists (

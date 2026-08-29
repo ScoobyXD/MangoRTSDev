@@ -202,15 +202,6 @@ export type CommunicationsTriageItem = {
   updated_timestamp: string;
 };
 
-export type UserLogicGateShortcut = {
-  user_id: string;
-  company_id: string;
-  logic_gate_id: string;
-  position: number;
-  created_timestamp: string;
-  updated_timestamp: string;
-};
-
 export type CompanyUser = {
   company_id: string;
   user_id: string;
@@ -244,7 +235,6 @@ export type CompanyUserGroupsResponse = {
 
 export type CommunicationsWorkspaceResources = {
   logicGates: LogicGateRecord[];
-  myLogicGateShortcuts: UserLogicGateShortcut[];
   nodes: NodeRecord[];
 };
 
@@ -1755,40 +1745,14 @@ export async function updateNode(companyID: string, nodeID: string, update: Part
   return { ...node };
 }
 
-export async function listMyLogicGateShortcuts(companyID: string): Promise<UserLogicGateShortcut[]> {
-  const cleanCompanyID = companyID.trim();
-  return cachedRead(`my-logic-gates:${cleanCompanyID}`, WORKSPACE_RESOURCE_CACHE_TTL_MS, async () => {
-    const params = new URLSearchParams({ company_id: cleanCompanyID });
-    const payload = await apiFetchJSON<{ shortcuts?: UserLogicGateShortcut[] }>(`/v1/communications/my-logic-gates?${params.toString()}`);
-    return cloneLogicGateShortcuts(payload.shortcuts ?? []);
-  }, cloneLogicGateShortcuts);
-}
-
-export async function addMyLogicGateShortcuts(companyID: string, logicGateIDs: string[]): Promise<UserLogicGateShortcut[]> {
-  const payload = await apiFetchJSON<{ shortcuts?: UserLogicGateShortcut[] }>("/v1/communications/my-logic-gates", {
-    method: "POST",
-    body: JSON.stringify({ company_id: companyID, logic_gate_ids: cleanIDs(logicGateIDs) }),
-  });
-  invalidateCacheKey(`my-logic-gates:${companyID.trim()}`);
-  return cloneLogicGateShortcuts(payload.shortcuts ?? []);
-}
-
-export async function removeMyLogicGateShortcut(companyID: string, logicGateID: string): Promise<void> {
-  const params = new URLSearchParams({ company_id: companyID });
-  await apiFetchJSON<{ status?: string }>(`/v1/communications/my-logic-gates/${encodeURIComponent(logicGateID)}?${params.toString()}`, { method: "DELETE" });
-  invalidateCacheKey(`my-logic-gates:${companyID.trim()}`);
-}
-
 export async function fetchCommunicationsWorkspaceResources(companyID: string): Promise<CommunicationsWorkspaceResources> {
   const cleanCompanyID = companyID.trim();
-  const [logicGates, shortcuts, nodes] = await Promise.all([
+  const [logicGates, nodes] = await Promise.all([
     listLogicGates(cleanCompanyID),
-    listMyLogicGateShortcuts(cleanCompanyID),
     listNodes(cleanCompanyID),
   ]);
   return {
     logicGates,
-    myLogicGateShortcuts: cloneLogicGateShortcuts(shortcuts),
     nodes,
   };
 }
@@ -3050,10 +3014,6 @@ function cloneCompanyUserGroupsResponse(response: CompanyUserGroupsResponse): Co
     groups: response.groups.map((group) => ({ ...group })),
     members: response.members.map((member) => ({ ...member })),
   };
-}
-
-function cloneLogicGateShortcuts(shortcuts: UserLogicGateShortcut[]): UserLogicGateShortcut[] {
-  return shortcuts.map((shortcut) => ({ ...shortcut }));
 }
 
 function cloneNodes(nodes: NodeRecord[]): NodeRecord[] {

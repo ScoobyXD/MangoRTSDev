@@ -1,14 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
-import type { CompanyUser, CommunicationsArchiveJob, CommunicationsSharedInbox, CommunicationsSharedInboxRACIAssignment, CommunicationsSharedInboxRACIRole, EmailMessage, SendEmailInput, UserLogicGateShortcut } from "../../../../frontend/src/modules/communications/communicationsApi.js";
+import type { CompanyUser, CommunicationsArchiveJob, CommunicationsSharedInbox, CommunicationsSharedInboxRACIAssignment, CommunicationsSharedInboxRACIRole, EmailMessage, SendEmailInput } from "../../../../frontend/src/modules/communications/communicationsApi.js";
 import type { CompanyExplorerFolderItem } from "../../../../frontend/src/modules/folders/companyExplorerFolders.js";
 import type { LogicGateAssignmentCommandResult, RACIMatrixProjectionRow } from "../../../../frontend/src/modules/kanban/kanbanApi.js";
 import type { KanbanBoard, KanbanCard } from "../../../../frontend/src/modules/kanban/shared.js";
 import type { NodeRecord } from "../../../../frontend/src/modules/nodes/types.js";
 import { EDITOR_RICH_TEXT_PREFIX } from "../../../../frontend/src/modules/editor/richTextEditing.js";
 import { INBOX_NO_LOGIC_GATE_ID } from "../../../../frontend/src/pages/home/homeConstants.js";
-import { addMyLogicGateShortcutsCommand, addSharedInboxRACIPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeRACIMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, removeMyLogicGateShortcutCommand, removeSharedInboxRACIPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeAddMyLogicGateShortcuts, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateRACIMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeRemoveMyLogicGateShortcut, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxRACIAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
+import { addSharedInboxRACIPrincipalCommand, applyBulkNodePatchCommand, archiveHomeMailMessagesCommand, convertMessagesToLogicGateCommand, createHomeLogicGateCommand, createHomeRACIMatrixNodeCommand, deleteHomeMailMessagesCommand, dropNodesIntoInboxLogicGateCommand, removeSharedInboxRACIPrincipalCommand, sendHomeMailComposeCommand, unarchiveHomeMailMessagesCommand, updateHomeMailMessageCommand, type HomeArchiveEmailMessagesBatch, type HomeBulkMoveLogicGateAssignment, type HomeBulkNodePatch, type HomeBulkUpdateNode, type HomeConvertTriageMessagesToLogicGate, type HomeCreateRACIMatrixNode, type HomeDeleteEmailMessage, type HomeDropAssignNodeToLogicGateStatus, type HomeSendEmail, type HomeUnarchiveEmailMessage, type HomeUpdateEmailMessage, type HomeUpdateSharedInboxRACIAssignments } from "../../../../frontend/src/pages/home/homeCommands.js";
 import { appendHomeMailPlainText, applyHomeMailSignature, composeHasDraftContent, homeMailBodyHasSignature, homeMailDraftToMessage, homeMailSignatureScopeKey, loadHomeMailSignature, readHomeMailSignature, saveHomeMailSignatureRemote } from "../../../../frontend/src/pages/home/homeMailDrafts.js";
 import { emptyCompose } from "../../../../frontend/src/pages/home/homeTypes.js";
 
@@ -345,17 +345,6 @@ function board(id = "logic-gate:gate-1", logicGateID = "gate-1"): KanbanBoard {
     logic_gate_id: logicGateID,
     title: "Gate 1",
     position: 1000,
-    created_timestamp: timestamp,
-    updated_timestamp: timestamp,
-  };
-}
-
-function shortcut(logicGateID: string, position = 1000): UserLogicGateShortcut {
-  return {
-    user_id: "user-1",
-    company_id: "company-1",
-    logic_gate_id: logicGateID,
-    position,
     created_timestamp: timestamp,
     updated_timestamp: timestamp,
   };
@@ -783,35 +772,6 @@ test("Home bulk node patch keeps non-placement fields on the node update endpoin
   assert.equal(moveCalls[0]?.priority, null);
   assert.deepEqual(updateCalls, [{ companyID: "company-1", nodeID: "node-1", patch: { due_date: "2026-05-20" } }]);
 });
-test("Home My Logic Gate shortcut add saves the resolved Logic Gate IDs", async () => {
-  const calls: Array<{ companyID: string; logicGateIDs: string[] }> = [];
-  const addMyLogicGateShortcuts: HomeAddMyLogicGateShortcuts = async (companyID, logicGateIDs) => {
-    calls.push({ companyID, logicGateIDs });
-    return logicGateIDs.map((logicGateID, index) => shortcut(logicGateID, (index + 1) * 1000));
-  };
-
-  const result = await addMyLogicGateShortcutsCommand({
-    companyID: "company-1",
-    logicGateIDs: ["gate-a", "gate-b", "gate-a"],
-    addMyLogicGateShortcuts,
-  });
-
-  assert.deepEqual(calls, [{ companyID: "company-1", logicGateIDs: ["gate-a", "gate-b"] }]);
-  assert.deepEqual(result?.logicGateIDs, ["gate-a", "gate-b"]);
-  assert.deepEqual(result?.shortcuts.map((item) => [item.logic_gate_id, item.position]), [["gate-a", 1000], ["gate-b", 2000]]);
-});
-
-test("Home My Logic Gate shortcut remove trims ids and skips empty input", async () => {
-  const calls: Array<{ companyID: string; logicGateID: string }> = [];
-  const removeMyLogicGateShortcut: HomeRemoveMyLogicGateShortcut = async (companyID, logicGateID) => {
-    calls.push({ companyID, logicGateID });
-  };
-
-  assert.equal(await removeMyLogicGateShortcutCommand({ companyID: "company-1", logicGateID: "   ", removeMyLogicGateShortcut }), "");
-  assert.equal(await removeMyLogicGateShortcutCommand({ companyID: "company-1", logicGateID: " gate-a ", removeMyLogicGateShortcut }), "gate-a");
-  assert.deepEqual(calls, [{ companyID: "company-1", logicGateID: "gate-a" }]);
-});
-
 test("Home triage conversion command owns cache, event, and graph side effects", async () => {
   const convertCalls: Array<Parameters<HomeConvertTriageMessagesToLogicGate>[0]> = [];
   const folderItem = explorerFolderItem("folder-nodes", "node-1", "node");
