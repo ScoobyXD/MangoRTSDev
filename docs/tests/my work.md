@@ -4,7 +4,7 @@ Last updated: 2026-08-29
 
 MW1 - The page is named My Work and is the first built-in item beneath My Tower, immediately above Projects.
 
-MW2 - The first version always uses the authenticated company member as its subject. Me, Team, Company, another-person, and Assigned by me perspectives are later capabilities and do not appear in the first version.
+MW2 - My Work always uses the authenticated company member as its subject. Team, Company, and another-person subjects do not appear; Action Items instead expose the exact Mine and Delegated perspectives defined below.
 
 MW3 - The My Work header shows the page title and has no grouping button.
 
@@ -14,15 +14,15 @@ MW5 - The left column has no shared Work title or other unified section name. It
 
 MW6 - Action Items and Nodes are permanent separate top-level sections. Grouping never mixes an Action Item with a Node or moves Nodes above Action Items.
 
-MW7 - The left column shows only work assigned to the current subject. Work assigned by the subject is outside the first version.
+MW7 - The Action Items section has one Mine or Delegated perspective. Mine is active by default, and the two perspectives never share or duplicate a self-assigned item.
 
-MW8 - A Node is assigned to the subject only when that user has the current effective Responsible role, whether the role comes directly, through a group, or through RACI inheritance.
+MW8 - The Nodes section has its own R, A, C, I selector and defaults to Responsible. A Node qualifies only when the subject has the selected current effective winning role, whether it comes directly, through a group or nested group, or through RACI inheritance.
 
-MW9 - Accountable, Consulted, or Informed status alone does not place a Node in the left-column Nodes section.
+MW9 - Selecting a different Node role replaces only the Node rows. It preserves the Node grouping stack, clears stale rows and cursor state, and requests that exact role from the server.
 
-MW10 - An Action Item is assigned to the subject solely when its exact canonical `person_in_charge` field stores that user's current company-member ID. Creator metadata and relationships are not assignment sources.
+MW10 - Mine requires exact canonical `person_in_charge` equal to the subject. Delegated requires exact canonical `assigned_by` equal to the subject and a nonnull `person_in_charge` for a different member; creator metadata, Source, and relationships are not assignment sources.
 
-MW11 - The Action Items section and Nodes section each own an independent grouping stack and an independent grouping button. Both buttons use the approved staggered three-line grouping icon.
+MW11 - The Action Items header places its compact Mine/Delegated control immediately left of its grouping button. It uses the established elevated segmented-control presentation and keyboard/accessibility behavior and remains usable as the header resizes. The Nodes header places the unchanged established RACI selector immediately left of its grouping button. Each section owns an independent grouping stack, and both grouping buttons use the approved staggered three-line icon.
 
 MW12 - No grouping control outside those two section headers changes either section's grouping stack.
 
@@ -44,11 +44,11 @@ MW20 - Every Process and Project row is clickable and opens that exact Process o
 
 MW21 - An inline Process or Project reference inside another row is independently clickable and opens that exact resource without also opening the surrounding row.
 
-MW22 - The middle column has one R, A, C, I role selector. Exactly one role is active, Responsible is active by default, and the column lists the Processes for which the subject has that current effective RACI role.
+MW22 - The middle column has its own R, A, C, I selector. It is independent from the Nodes selector, defaults to Responsible, and lists only Processes for which the subject has that current effective winning RACI role.
 
 MW23 - The right column lists a Project when the subject is a direct member of any currently assigned same-company Team group or a member of any current descendant group beneath that Team. Membership only in an ancestor or unrelated group does not qualify.
 
-MW24 - My Work reads canonical Nodes, Action Items, RACI, Process relationships, Project relationships, Project Team assignments, and company membership when a view is requested. There is no My Work projection table and no My Work relationship authority.
+MW24 - My Work reads canonical Nodes, Action Item person fields, RACI, Process relationships, Project relationships, Project Team assignments, and company membership when requested. There is no My Work projection table and no My Work relationship authority.
 
 MW25 - My Work is a read surface. Opening, grouping, or viewing My Work never rewrites a Node, Action Item, RACI assignment, Process relationship, Project relationship, Project Team assignment, permission, or source record.
 
@@ -60,19 +60,19 @@ MW28 - Effective RACI and Project Team membership never grant resource access. T
 
 MW29 - Access to a Node does not grant access to its associated Process or Project. An inaccessible inline Process or Project is omitted completely, including its ID, name, hidden count, placeholder, and relationship details, while the accessible Node remains visible.
 
-MW30 - Permission filtering occurs before grouping, sorting, limits, pagination cursors, has-more decisions, or counts. The backend applies each section's active grouping stack before its limit and binds that stack to its cursor; the frontend never receives hidden resources for local filtering or regroups a limited page into a different global order.
+MW30 - The backend applies the selected Node role or Action Item perspective before permission filtering, sorting, grouping, limits, pagination cursors, has-more decisions, or counts. It binds the role or perspective and grouping stack to that section's cursor; the frontend never filters a limited page locally or receives hidden resources.
 
 MW31 - Opening any My Work resource performs that destination's normal current permission check. A prior My Work response is never proof of continued access.
 
 MW32 - A permission-resolution failure fails the My Work read closed. My Work never returns an unfiltered partial result after an authorization error.
 
-MW33 - The normal Action Items list excludes an Action Item whose current canonical Status is Done, Complete, or Completed; that item appears only in the Action Items History view while it remains assigned and permitted.
+MW33 - Mine and Delegated both exclude an Action Item whose current canonical Status is Done, Complete, or Completed; that item appears only in Action Items History while it still qualifies for the selected perspective and viewer.
 
-MW34 - The normal Nodes list excludes a Node whose current status is Done, Complete, or Completed; that Node appears only in the Nodes History view while it remains effectively Responsible and permitted.
+MW34 - The normal Nodes list excludes a Node whose current status is Done, Complete, or Completed; that Node appears only in Nodes History while it still has the selected effective RACI role and remains permitted.
 
 MW35 - A first-version Action Item row exposes only the Action Item summary needed to display and open that exact Entity. It derives and exposes no Process, Project, or other resource context.
 
-MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that section nears its scroll boundary. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section.
+MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page near that section's scroll boundary. Switching Mine/Delegated, Node role, or Process role clears only that section's stale rows and cursor and reloads only that section; no selector changes its grouping stack or another section.
 
 MW37 - A section never requests the same next cursor concurrently, ignores canceled or stale responses, rejects a non-advancing cursor, and never appends the same resource twice.
 
@@ -84,7 +84,7 @@ MW40 - Red Action Item icons and names use the established Huddle red treatment 
 
 MW41 - Completion due date and Due date remain available as ordering levels but render no date-group header. Other selected grouping levels and their rows remain visibly nested, and color or priority groups use the established Action Item or Node priority color.
 
-MW42 - The Process role selector uses the established RACI colors: Responsible is orange, Accountable is green, Consulted is blue, and Informed is purple.
+MW42 - The Node and Process role selectors reuse the same established accessible selector and colors: Responsible is orange, Accountable is green, Consulted is blue, and Informed is purple.
 
 MW43 - Each major My Work section is an elevated surface. Every resource row lifts on hover or keyboard focus, and inline Node Process and Project references are independent elevated click targets.
 
@@ -122,7 +122,7 @@ A company member logs in without an explicit return destination or opens My Work
 
 ↓
 
-Mango reads that member's current effectively Responsible Nodes and exact Person-in-charge Action Items from their canonical sources, applies the authenticated viewer's current permissions, and selects either active work or completed History before any result is grouped or cursor-bounded
+Mango reads that member's Action Items for the selected Mine or Delegated perspective and Nodes for the independently selected effective RACI role, applies current permissions, and selects either active work or completed History before any result is grouped or cursor-bounded
 
 ↓
 
@@ -130,7 +130,7 @@ The unnamed left column keeps Action Items above Nodes, shows editable inline du
 
 ↓
 
-The middle column defaults to the member's Responsible Processes and can switch among R, A, C, and I, while the right column lists Projects whose assigned Team includes that member directly or through a current descendant group
+The Nodes and Processes selectors both default to Responsible but change independently, while the right column lists Projects whose assigned Team includes that member directly or through a current descendant group
 
 ↓
 

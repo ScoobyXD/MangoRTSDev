@@ -20,6 +20,7 @@ var exactEntityTableColumnContracts = []exactTableColumnContract{
 	{table: "entity_field_types", columns: []string{"company_id", "entity_field_type_id", "entity_type_id", "entity_folder_id", "name", "field_type", "system_key", "config_jsonb", "position", "created_timestamp", "updated_timestamp"}},
 	{table: "entities", columns: []string{"company_id", "entity_id", "entity_type_id", "entity_folder_id", "name", "position", "body_json", "revision", "created_by_user_id", "created_timestamp", "updated_timestamp"}},
 	{table: "entity_fields", columns: []string{"company_id", "entity_field_id", "entity_id", "entity_field_type_id", "name", "field_type", "value_jsonb", "position", "created_timestamp", "updated_timestamp"}},
+	{table: "action_item_sources", columns: []string{"company_id", "entity_id", "resource_type", "resource_id", "created_timestamp"}},
 }
 
 var requiredApplicationTables = []string{
@@ -31,7 +32,7 @@ var requiredApplicationTables = []string{
 	"project_textboxes", "project_textbox_chats", "logic_gate_textboxes", "logic_gate_textboxes_history",
 	"scorecards",
 	"entity_types", "entity_folders", "entity_field_types", "entities", "entity_fields",
-	"entity_relationships", "huddle_node_textboxes", "huddle_node_textbox_chats",
+	"entity_relationships", "action_item_sources", "huddle_node_textboxes", "huddle_node_textbox_chats",
 }
 
 func NewPostgresRepo(db *sql.DB) *PostgresRepo {

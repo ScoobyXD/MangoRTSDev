@@ -65,6 +65,7 @@ func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID st
 	item := domain.HuddleExplorerItem{CompanyID: companyID, ItemID: newUUIDv7String(), ResourceType: EntityTypeHuddleLogicGate, ResourceID: logicGateID, Name: gate.Header, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.huddleExplorerItems[key(companyID, item.ItemID)] = item
 	r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeProcess, logicGateID)
+	r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeLogicGate, logicGateID)
 	delete(r.logicGates, key(companyID, logicGateID))
 	delete(r.logicGateInfo, key(companyID, logicGateID))
 	delete(r.logicGateText, key(companyID, logicGateID))
@@ -188,6 +189,7 @@ func (r *MemoryRepo) deleteMemoryHuddleRelationshipsForLogicGateLocked(companyID
 	}
 	for kpiKey, kpi := range r.kpis {
 		if kpi.CompanyID == companyID && kpi.LogicGateID == logicGateID {
+			r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeKPI, kpi.KPIID)
 			delete(r.kpis, kpiKey)
 		}
 	}
@@ -312,6 +314,7 @@ func (r *MemoryRepo) DeleteHuddleLogicGate(companyID, id, userID string) error {
 		}
 	}
 	r.addSimpleHuddleRecycleLocked(companyID, userID, "huddle_logic_gate", id, item.Header)
+	r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeHuddleLogicGate, id)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeHuddleLogicGate, id)
 	r.retireMemoryAttachmentOwnerLocked(companyID, EntityTypeHuddleLogicGate, id, time.Now().UTC())
 	for relationshipKey, relationship := range r.entityRelationships {
@@ -433,6 +436,7 @@ func (r *MemoryRepo) DeleteHuddleNode(companyID, id, userID string) error {
 		return ErrNotFound
 	}
 	before := r.snapshotRecycleStateLocked()
+	r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeHuddleNode, id)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeHuddleNode, id)
 	r.retireMemoryAttachmentOwnerLocked(companyID, EntityTypeHuddleNode, id, time.Now().UTC())
 	delete(r.huddleNodes, k)
@@ -539,6 +543,7 @@ func (r *MemoryRepo) DeleteKPI(companyID, id, userID string) error {
 		return ErrNotFound
 	}
 	r.addSimpleHuddleRecycleLocked(companyID, userID, "kpi", id, item.Name)
+	r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeKPI, id)
 	delete(r.kpis, k)
 	for relationshipKey, relationship := range r.huddleNodeKPIRelationships {
 		if relationship.CompanyID == companyID && relationship.KPIID == id {

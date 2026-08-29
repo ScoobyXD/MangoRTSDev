@@ -25,7 +25,7 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 	}
 	for key := range queryValues {
 		switch key {
-		case "company_id", "section", "role", "grouping", "limit", "cursor", "history":
+		case "company_id", "section", "role", "perspective", "grouping", "limit", "cursor", "history":
 		default:
 			writeError(w, http.StatusBadRequest, "unsupported_my_work_query_param")
 			return
@@ -64,8 +64,17 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raciRole := strings.ToLower(strings.TrimSpace(queryValues.Get("role")))
-	if raciRole != "" && section != "" && section != store.MyWorkSectionProcesses {
-		writeError(w, http.StatusBadRequest, "my_work_role_only_valid_for_processes")
+	if raciRole != "" && section != store.MyWorkSectionNodes && section != store.MyWorkSectionProcesses {
+		writeError(w, http.StatusBadRequest, "my_work_role_only_valid_for_nodes_or_processes")
+		return
+	}
+	perspective := strings.ToLower(strings.TrimSpace(queryValues.Get("perspective")))
+	if perspective != "" && section != store.MyWorkSectionActionItems {
+		writeError(w, http.StatusBadRequest, "my_work_perspective_only_valid_for_action_items")
+		return
+	}
+	if perspective != "" && perspective != store.MyWorkActionItemPerspectiveMine && perspective != store.MyWorkActionItemPerspectiveDelegated {
+		writeError(w, http.StatusBadRequest, "invalid_my_work_perspective")
 		return
 	}
 	if raciRole != "" {
@@ -122,7 +131,7 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(actor.User.UserID)
 	response, err := s.repo.GetMyWork(r.Context(), store.MyWorkQuery{
 		CompanyID: companyID, UserID: userID, ViewerUserID: userID,
-		Section: section, Role: raciRole, Grouping: grouping, Limit: limit, Cursor: cursor, History: history,
+		Section: section, Role: raciRole, Perspective: perspective, Grouping: grouping, Limit: limit, Cursor: cursor, History: history,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_my_work_query")

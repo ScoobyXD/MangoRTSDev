@@ -37,6 +37,7 @@ function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
     company_id: "company-1",
     user_id: "viewer-1",
     action_items: {
+      perspective: "mine",
       items: [
         { entity_id: "action-red", name: "Red Action", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red" },
         { entity_id: "action-yellow", name: "Yellow Action", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow" },
@@ -45,6 +46,7 @@ function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
       has_more: true,
     },
     nodes: {
+      role: "responsible",
       items: [
         {
           node_id: "node-context",
@@ -126,6 +128,18 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
           },
         }) as T);
       }
+      if (section === "action_items" && url.searchParams.get("perspective") === "delegated") {
+        return Promise.resolve(response({
+          nodes: undefined,
+          processes: undefined,
+          projects: undefined,
+          action_items: {
+            perspective: "delegated",
+            items: [{ entity_id: "action-delegated", name: "Delegated Action", color: "red", completion_due_date_field_id: "field-delegated" }],
+            has_more: false,
+          },
+        }) as T);
+      }
       if (section === "action_items" && url.searchParams.has("grouping")) {
         return new Promise<T>((resolve) => {
           resolveActionGrouping = (value) => resolve(value as T);
@@ -135,6 +149,14 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
         return new Promise<T>((resolve) => {
           resolveNodeLoadMore = (value) => resolve(value as T);
         });
+      }
+      if (section === "nodes" && url.searchParams.get("role") === "accountable") {
+        return Promise.resolve(response({
+          action_items: undefined,
+          processes: undefined,
+          projects: undefined,
+          nodes: { role: "accountable", items: [{ node_id: "node-accountable", name: "Accountable Node" }], has_more: false },
+        }) as T);
       }
       if (section === "processes" && url.searchParams.get("cursor")) {
         return Promise.resolve(response({
@@ -197,8 +219,10 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.deepEqual(groupButtons.map((button) => button.getAttribute("aria-label")), ["Group Action Items", "Group Nodes"]);
     assert.deepEqual(groupButtons.map((button) => button.textContent), ["", ""], "both section groupers are icon-only");
     const historyButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-pressed][data-my-work-history-selected]'));
-    assert.deepEqual(historyButtons.map((button) => button.textContent), ["History", "History"]);
+    assert.deepEqual(historyButtons.map((button) => button.getAttribute("aria-label")), ["Open History", "Open History"]);
+    assert.deepEqual(historyButtons.map((button) => button.textContent?.trim()), ["History", "History"], "the existing visible History labels remain beside their icons");
     assert.deepEqual(historyButtons.map((button) => button.getAttribute("aria-pressed")), ["false", "false"]);
+    assert.match(container.querySelector<HTMLElement>('[data-my-work-columns="true"]')?.style.gridTemplateColumns ?? "", /minmax\(360px,/, "the left column has enough capacity for the established controls and new selectors");
     assert.equal(container.querySelectorAll("[data-my-work-section-icon]").length, 4, "every major section has its exact resource icon");
     assert.equal(container.querySelectorAll('[data-my-work-group-field="completion_due_date"], [data-my-work-group-field="due_date"]').length, 0, "date ordering never renders a date group header");
     assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Red Action"]')?.value, "9/1/2026");
@@ -217,10 +241,21 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.equal(redActionTitle?.style.fontSize, "13px", "resource row text uses the larger My Work type scale");
     assert.equal(container.querySelectorAll(".my-work-resource-row").length, 6, "every resource row uses the shared lift interaction");
 
-    const radios = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="radio"]'));
+    const perspectiveGroup = container.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Action Item perspective"]');
+    const perspectiveRadios = Array.from(perspectiveGroup?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
+    assert.deepEqual(perspectiveRadios.map((button) => button.textContent), ["Mine", "Delegated"]);
+    assert.deepEqual(perspectiveRadios.map((button) => button.getAttribute("aria-checked")), ["true", "false"]);
+    const nodeRoleGroup = container.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Node RACI role"]');
+    const nodeRadios = Array.from(nodeRoleGroup?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
+    assert.deepEqual(nodeRadios.map((button) => button.getAttribute("aria-label")), ["Responsible", "Accountable", "Consulted", "Informed"]);
+    assert.deepEqual(nodeRadios.map((button) => button.getAttribute("aria-checked")), ["true", "false", "false", "false"]);
+    const processRoleGroup = container.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Process RACI role"]');
+    const radios = Array.from(processRoleGroup?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
     assert.deepEqual(radios.map((button) => button.getAttribute("aria-label")), ["Responsible", "Accountable", "Consulted", "Informed"]);
     assert.deepEqual(radios.map((button) => button.getAttribute("aria-checked")), ["true", "false", "false", "false"]);
     assert.deepEqual(radios.map((button) => button.tabIndex), [0, -1, -1, -1]);
+    assert.deepEqual(radios.map((button) => [button.style.width, button.style.height]), Array.from({ length: 4 }, () => ["27px", "26px"]), "the shared selector preserves the established Process dimensions");
+    assert.deepEqual(nodeRadios.map((button) => [button.style.width, button.style.height]), Array.from({ length: 4 }, () => ["27px", "26px"]), "Nodes reuse that exact established selector");
     assert.match(radios[0]?.getAttribute("style") ?? "", /240, 138, 36/, "Responsible uses the canonical orange RACI color");
     assert.match(radios[1]?.getAttribute("style") ?? "", /25, 200, 121/, "Accountable uses the canonical green RACI color");
     assert.match(radios[2]?.getAttribute("style") ?? "", /25, 168, 255/, "Consulted uses the canonical blue RACI color");
@@ -429,10 +464,10 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
       radios[0]?.focus();
       radios[0]?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
     });
-    assert.equal(container.querySelector<HTMLButtonElement>('[aria-label="Accountable"]')?.getAttribute("aria-checked"), "true");
+    assert.equal(processRoleGroup?.querySelector<HTMLButtonElement>('[aria-label="Accountable"]')?.getAttribute("aria-checked"), "true");
     assert.equal(dom.window.document.activeElement?.getAttribute("aria-label"), "Accountable");
     assert.deepEqual(
-      Array.from(container.querySelectorAll<HTMLButtonElement>('[role="radio"]')).map((button) => button.tabIndex),
+      Array.from(processRoleGroup?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []).map((button) => button.tabIndex),
       [-1, 0, -1, -1],
       "the radio group keeps exactly one keyboard tab stop",
     );
@@ -441,7 +476,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.equal(new URL(accountableCall?.path ?? "", "http://api.test").searchParams.get("section"), "processes");
     assert.equal(new URL(accountableCall?.path ?? "", "http://api.test").searchParams.get("role"), "accountable");
 
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Consulted"]')?.click());
+    await act(async () => processRoleGroup?.querySelector<HTMLButtonElement>('[aria-label="Consulted"]')?.click());
     assert.equal(accountableCall?.init?.signal?.aborted, true, "a later role request cancels the stale role request");
     await act(async () => {
       pendingRoles.get("accountable")?.(response({
@@ -515,6 +550,32 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.match(nodeSection?.textContent ?? "", /Context Node/, "regrouping replaces the section with its first cursor page");
     assert.doesNotMatch(nodeSection?.textContent ?? "", /Second Page Node/, "regrouping does not reuse the prior cursor");
     assert.doesNotMatch(nodeSection?.textContent ?? "", /\bPrevious\b|\bNext\b|Page \d/, "Nodes use continuous scrolling instead of paging controls");
+
+    await act(async () => {
+      perspectiveRadios[0]?.focus();
+      perspectiveRadios[0]?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await Promise.resolve();
+    });
+    const delegatedURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
+    assert.equal(delegatedURL.searchParams.get("section"), "action_items");
+    assert.equal(delegatedURL.searchParams.get("perspective"), "delegated");
+    assert.equal(delegatedURL.searchParams.get("grouping"), "color:desc,completion_due_date:asc", "perspective preserves the grouping stack");
+    assert.match(actionSection?.textContent ?? "", /Delegated Action/);
+    assert.equal(perspectiveRadios[1]?.getAttribute("aria-checked"), "true");
+    assert.equal(dom.window.document.activeElement, perspectiveRadios[1]);
+
+    await act(async () => {
+      nodeRadios[0]?.focus();
+      nodeRadios[0]?.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      await Promise.resolve();
+    });
+    const accountableNodeURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
+    assert.equal(accountableNodeURL.searchParams.get("section"), "nodes");
+    assert.equal(accountableNodeURL.searchParams.get("role"), "accountable");
+    assert.equal(accountableNodeURL.searchParams.get("grouping"), "priority:asc", "Node role preserves the grouping stack");
+    assert.match(nodeSection?.textContent ?? "", /Accountable Node/);
+    assert.equal(nodeRadios[1]?.getAttribute("aria-checked"), "true");
+    assert.match(container.textContent ?? "", /Consulted Process/, "Node role changes reload only Nodes");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

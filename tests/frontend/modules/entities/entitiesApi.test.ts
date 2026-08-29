@@ -2,8 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { BoundRequestJSON } from "../../../../frontend/src/modules/api/requestJSON.js";
 import {
+  createActionItem,
   createEntityFieldType,
   getEntityDetail,
+  getActionItemSource,
   listAllEntitiesForType,
   listEntities,
   listHuddleNodeActionItems,
@@ -77,6 +79,43 @@ test("getEntityDetail reads one exact company-scoped entity and its fields", asy
 
   assert.equal(requestedPath, "/v1/entities/entity-7?company_id=company-1");
   assert.equal(loaded.entity_fields[0]?.name, "Due date");
+});
+
+test("Action Item creation writes one exact typed source and source reads stay permission-safe", async () => {
+  const calls: Array<{ path: string; init?: RequestInit & { json?: unknown } }> = [];
+  const signal = new AbortController().signal;
+  const actionItem = { ...entitySummary("action-item-1"), entity_type_name: "Action Item", entity_fields: [] };
+  const requestJSON: BoundRequestJSON = async <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+    calls.push({ path, init });
+    if (init?.method === "POST") return { action_item: actionItem } as T;
+    return { source: { resource_type: "kpi", resource_id: "kpi-1", name: "Current KPI name", parent_resource_id: "process-1" } } as T;
+  };
+
+  await createActionItem(requestJSON, {
+    companyID: "company-1",
+    bodyText: "Fix the shipment",
+    name: "Fix the shipment",
+    color: "red",
+    source: { resourceType: "huddle_logic_gate", resourceID: "huddle-process-1" },
+  });
+  const source = await getActionItemSource(requestJSON, {
+    companyID: " company-1 ",
+    entityID: "action/item-1",
+    signal,
+  });
+
+  assert.deepEqual(calls[0]?.init?.json, {
+    company_id: "company-1",
+    body_text: "Fix the shipment",
+    name: "Fix the shipment",
+    color: "red",
+    source: { resource_type: "huddle_logic_gate", resource_id: "huddle-process-1" },
+  });
+  assert.equal(calls[1]?.path, "/v1/action-items/action%2Fitem-1/source?company_id=company-1");
+  assert.equal(calls[1]?.init?.signal, signal);
+  assert.equal(calls[1]?.init?.cache, "no-store");
+  assert.equal(source?.name, "Current KPI name");
+  assert.equal(source?.parent_resource_id, "process-1");
 });
 
 test("listAllEntitiesForType loads the exact type manager list in one request", async () => {

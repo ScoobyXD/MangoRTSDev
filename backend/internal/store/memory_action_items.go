@@ -84,6 +84,23 @@ func (r *MemoryRepo) CreateActionItem(input ActionItemInput) (domain.Entity, err
 	if err := r.verifyActionItemDefaultsLocked(normalized.CompanyID); err != nil {
 		return domain.Entity{}, err
 	}
+	if normalized.SourceResourceType != "" && !r.actionItemSourceResourceExistsLocked(
+		normalized.CompanyID,
+		normalized.SourceResourceType,
+		normalized.SourceResourceID,
+	) {
+		return domain.Entity{}, ErrNotFound
+	}
+	if normalized.SourceResourceType != "" {
+		accessType, accessID := normalized.SourceResourceType, normalized.SourceResourceID
+		if normalized.SourceResourceType == EntityTypeKPI {
+			accessType = EntityTypeLogicGate
+			accessID = r.kpis[key(normalized.CompanyID, normalized.SourceResourceID)].LogicGateID
+		}
+		if !r.userHasEffectiveAccessLocked(normalized.CompanyID, normalized.CreatedByUserID, accessType, accessID, EntityPermissionEdit) {
+			return domain.Entity{}, ErrNotFound
+		}
+	}
 	now := time.Now().UTC()
 	entity := domain.Entity{
 		CompanyID: normalized.CompanyID, EntityID: newUUIDv7String(), EntityTypeID: ActionItemEntityTypeID,
@@ -120,7 +137,62 @@ func (r *MemoryRepo) CreateActionItem(input ActionItemInput) (domain.Entity, err
 	for _, field := range entity.EntityFields {
 		r.entityFields[key(field.CompanyID, field.EntityFieldID)] = field
 	}
+	if normalized.SourceResourceType != "" {
+		r.actionItemSources[actionItemSourceKey(entity.CompanyID, entity.EntityID)] = domain.ActionItemSource{
+			CompanyID: entity.CompanyID, EntityID: entity.EntityID,
+			ResourceType: normalized.SourceResourceType, ResourceID: normalized.SourceResourceID,
+			CreatedTimestamp: now,
+		}
+	}
 	return r.entityDetailLocked(entity), nil
+}
+
+func (r *MemoryRepo) GetActionItemSource(companyID, entityID string) (domain.ActionItemSource, error) {
+	companyID, entityID = cleanUUIDText(companyID), cleanUUIDText(entityID)
+	if companyID == "" || entityID == "" {
+		return domain.ActionItemSource{}, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	source, exists := r.actionItemSources[actionItemSourceKey(companyID, entityID)]
+	if !exists {
+		return domain.ActionItemSource{}, ErrNotFound
+	}
+	return source, nil
+}
+
+func (r *MemoryRepo) actionItemSourceResourceExistsLocked(companyID, resourceType, resourceID string) bool {
+	resourceKey := key(companyID, resourceID)
+	switch resourceType {
+	case EntityTypeNode:
+		_, exists := r.nodes[resourceKey]
+		return exists
+	case EntityTypeLogicGate:
+		_, exists := r.logicGates[resourceKey]
+		return exists
+	case EntityTypeProject:
+		_, exists := r.projects[resourceKey]
+		return exists
+	case EntityTypeHuddleNode:
+		_, exists := r.huddleNodes[resourceKey]
+		return exists
+	case EntityTypeHuddleLogicGate:
+		_, exists := r.huddleLogicGates[resourceKey]
+		return exists
+	case EntityTypeKPI:
+		_, exists := r.kpis[resourceKey]
+		return exists
+	default:
+		return false
+	}
+}
+
+func (r *MemoryRepo) deleteActionItemSourcesForResourceLocked(companyID, resourceType, resourceID string) {
+	for sourceKey, source := range r.actionItemSources {
+		if source.CompanyID == companyID && source.ResourceType == resourceType && source.ResourceID == resourceID {
+			delete(r.actionItemSources, sourceKey)
+		}
+	}
 }
 
 func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resourceType, resourceID string) {

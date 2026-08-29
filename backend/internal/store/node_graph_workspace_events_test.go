@@ -121,7 +121,7 @@ func TestMemoryNodeGraphWorkspaceEventAppendFailureRollsBackState(t *testing.T) 
 			t.Fatalf("CreateNode setup: %v", err)
 		}
 		now := time.Now().UTC()
-		draftID, attachmentID, relationshipID := "shared-draft", newUUIDv7String(), newUUIDv7String()
+		draftID, attachmentID, relationshipID, actionItemID := "shared-draft", newUUIDv7String(), newUUIDv7String(), newUUIDv7String()
 		repo.mu.Lock()
 		repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)] = domain.CommunicationsEmailDraft{
 			CompanyID: companyID, DraftID: draftID, SharedResourceType: EntityTypeNode, SharedResourceID: node.NodeID, Revision: 1, Kind: "reply",
@@ -132,6 +132,10 @@ func TestMemoryNodeGraphWorkspaceEventAppendFailureRollsBackState(t *testing.T) 
 		repo.resourceAttachments[relationshipID] = domain.ResourceAttachment{
 			CompanyID: companyID, ResourceAttachmentID: relationshipID, ResourceType: "email_draft",
 			ResourceID: draftID, AttachmentID: attachmentID, CreatedTimestamp: now,
+		}
+		repo.actionItemSources[actionItemSourceKey(companyID, actionItemID)] = domain.ActionItemSource{
+			CompanyID: companyID, EntityID: actionItemID, ResourceType: EntityTypeNode,
+			ResourceID: node.NodeID, CreatedTimestamp: now,
 		}
 		repo.mu.Unlock()
 		repo.domainEventAppendErr = errAppend
@@ -146,9 +150,13 @@ func TestMemoryNodeGraphWorkspaceEventAppendFailureRollsBackState(t *testing.T) 
 		_, draftExists := repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)]
 		attachment := repo.attachments[attachmentKey(companyID, attachmentID)]
 		link := repo.resourceAttachments[relationshipID]
+		source, sourceExists := repo.actionItemSources[actionItemSourceKey(companyID, actionItemID)]
 		repo.mu.RUnlock()
 		if !draftExists || attachment.DeletedTimestamp != nil || link.DeletedTimestamp != nil {
 			t.Fatalf("shared draft graph was not rolled back: draft=%v attachment=%+v link=%+v", draftExists, attachment, link)
+		}
+		if !sourceExists || source.ResourceID != node.NodeID {
+			t.Fatalf("Action Item Source was not rolled back: exists=%v source=%+v", sourceExists, source)
 		}
 		assertNoWorkspaceEvents(t, repo, companyID)
 	})

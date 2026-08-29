@@ -171,6 +171,9 @@ with candidates as (
   left join entity_fields status
     on status.company_id=entity.company_id and status.entity_id=entity.entity_id
    and status.entity_field_type_id=$4::uuid
+  left join entity_fields assigned_by
+    on assigned_by.company_id=entity.company_id and assigned_by.entity_id=entity.entity_id
+   and assigned_by.entity_field_type_id='a17e0000-0000-4000-8000-000000000106'::uuid
   left join entity_fields color
     on color.company_id=entity.company_id and color.entity_id=entity.entity_id
    and color.entity_field_type_id=$5::uuid
@@ -179,7 +182,13 @@ with candidates as (
    and completion_due.entity_field_type_id=$6::uuid
   where person.company_id=$1::uuid
     and person.entity_field_type_id='a17e0000-0000-4000-8000-000000000101'::uuid
-    and mangorts_try_uuid(person.value_jsonb #>> '{}')=$2::uuid
+    and (
+      ($17::text='mine' and mangorts_try_uuid(person.value_jsonb #>> '{}')=$2::uuid)
+      or ($17::text='delegated'
+          and mangorts_try_uuid(assigned_by.value_jsonb #>> '{}')=$2::uuid
+          and mangorts_try_uuid(person.value_jsonb #>> '{}') is not null
+          and mangorts_try_uuid(person.value_jsonb #>> '{}')<>$2::uuid)
+    )
     and ($15::boolean = (lower(btrim(coalesce(status.value_jsonb #>> '{}',''))) in ('done','complete','completed')))
 )
 select entity_id::text,name,nullif(color_key,''),completion_due_date,entity_field_id::text,completed_timestamp
@@ -193,7 +202,7 @@ limit $14`, keyset, orderBy)
 	rows, err := r.db.QueryContext(ctx, querySQL, query.CompanyID, query.UserID, ActionItemEntityTypeID, ActionItemStatusFieldTypeID,
 		ActionItemColorFieldTypeID, ActionItemCompletionDueDateFieldTypeID,
 		query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.GroupText, cursor.DateNull, cursor.Date, myWorkCursorUUID(cursor.ResourceID), query.Limit+1,
-		query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp))
+		query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp), query.Perspective)
 	if err != nil {
 		return domain.MyWorkActionItemPage{}, err
 	}
@@ -219,15 +228,15 @@ limit $14`, keyset, orderBy)
 	if err := rows.Err(); err != nil {
 		return domain.MyWorkActionItemPage{}, err
 	}
-	page := domain.MyWorkActionItemPage{Items: items, HasMore: len(items) > query.Limit}
+	page := domain.MyWorkActionItemPage{Perspective: query.Perspective, Items: items, HasMore: len(items) > query.Limit}
 	if page.HasMore {
 		page.Items = items[:query.Limit]
 		last := page.Items[len(page.Items)-1]
 		if query.History {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.EntityID})
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.EntityID})
 		} else {
 			color := strings.ToLower(myWorkOptionalString(last.Color))
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Grouping: grouping, GroupNull: color == "", GroupInt: myWorkColorRank(color), GroupText: color, DateNull: last.CompletionDueDate == nil, Date: myWorkOptionalString(last.CompletionDueDate), ResourceID: last.EntityID})
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, GroupNull: color == "", GroupInt: myWorkColorRank(color), GroupText: color, DateNull: last.CompletionDueDate == nil, Date: myWorkOptionalString(last.CompletionDueDate), ResourceID: last.EntityID})
 		}
 	}
 	return page, nil
@@ -361,7 +370,7 @@ left join lateral (
 ) project on true
 order by %s
 `, orderBy)
-	rows, err := r.db.QueryContext(ctx, querySQL, query.CompanyID, query.UserID, domain.RACIRoleResponsible, query.ViewerUserID, query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.DateNull, cursor.Date, myWorkCursorUUID(cursor.ResourceID), query.Limit+1, query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp))
+	rows, err := r.db.QueryContext(ctx, querySQL, query.CompanyID, query.UserID, query.Role, query.ViewerUserID, query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.DateNull, cursor.Date, myWorkCursorUUID(cursor.ResourceID), query.Limit+1, query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp))
 	if err != nil {
 		return domain.MyWorkNodePage{}, err
 	}
@@ -394,14 +403,14 @@ order by %s
 	if err := rows.Err(); err != nil {
 		return domain.MyWorkNodePage{}, err
 	}
-	page := domain.MyWorkNodePage{Items: items, HasMore: len(items) > query.Limit}
+	page := domain.MyWorkNodePage{Role: query.Role, Items: items, HasMore: len(items) > query.Limit}
 	if page.HasMore {
 		page.Items = items[:query.Limit]
 		last := page.Items[len(page.Items)-1]
 		if query.History {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
 		} else {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
 		}
 	}
 	return page, nil

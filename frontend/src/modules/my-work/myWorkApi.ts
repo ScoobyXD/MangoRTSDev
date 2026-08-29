@@ -6,6 +6,9 @@ export type MyWorkSection = (typeof MY_WORK_SECTIONS)[number];
 export const MY_WORK_PROCESS_ROLES = ["responsible", "accountable", "consulted", "informed"] as const;
 export type MyWorkProcessRole = (typeof MY_WORK_PROCESS_ROLES)[number];
 
+export const MY_WORK_ACTION_ITEM_PERSPECTIVES = ["mine", "delegated"] as const;
+export type MyWorkActionItemPerspective = (typeof MY_WORK_ACTION_ITEM_PERSPECTIVES)[number];
+
 export type MyWorkGroupingField = "color" | "completion_due_date" | "priority" | "due_date";
 export type MyWorkGroupingSetting = {
   field: MyWorkGroupingField;
@@ -61,11 +64,19 @@ export type MyWorkProcessesPage = MyWorkPage<MyWorkProcess> & {
   role: MyWorkProcessRole;
 };
 
+export type MyWorkNodesPage = MyWorkPage<MyWorkNode> & {
+  role: MyWorkProcessRole;
+};
+
+export type MyWorkActionItemsPage = MyWorkPage<MyWorkActionItem> & {
+  perspective: MyWorkActionItemPerspective;
+};
+
 export type MyWorkResponse = {
   company_id: string;
   user_id: string;
-  action_items?: MyWorkPage<MyWorkActionItem>;
-  nodes?: MyWorkPage<MyWorkNode>;
+  action_items?: MyWorkActionItemsPage;
+  nodes?: MyWorkNodesPage;
   processes?: MyWorkProcessesPage;
   projects?: MyWorkPage<MyWorkProject>;
 };
@@ -74,6 +85,7 @@ export type FetchMyWorkInput = {
   companyID: string;
   section?: MyWorkSection;
   role?: MyWorkProcessRole;
+  perspective?: MyWorkActionItemPerspective;
   grouping?: ReadonlyArray<MyWorkGroupingSetting>;
   limit?: number;
   cursor?: string;
@@ -95,7 +107,8 @@ export async function fetchMyWork(
   }
   const params = new URLSearchParams({ company_id: input.companyID.trim() });
   if (input.section) params.set("section", input.section);
-  if ((!input.section || input.section === "processes") && input.role) params.set("role", input.role);
+  if ((input.section === "nodes" || input.section === "processes") && input.role) params.set("role", input.role);
+  if (input.section === "action_items" && input.perspective) params.set("perspective", input.perspective);
   if (input.grouping !== undefined) params.set("grouping", serializeMyWorkGrouping(input.section, input.grouping));
   if (input.history) params.set("history", "true");
   params.set("limit", String(boundedMyWorkLimit(input.limit)));

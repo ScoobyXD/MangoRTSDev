@@ -253,6 +253,7 @@ class QADevCopySQLContracts(unittest.TestCase):
             )
         for required_table in (
             "entity_relationships",
+            "action_item_sources",
             "huddle_node_textboxes",
             "huddle_node_textbox_chats",
         ):
@@ -267,6 +268,7 @@ class QADevCopySQLContracts(unittest.TestCase):
             "'20260828_zz_huddle_logic_gate_action_item_relationships.sql'",
             self.preflight,
         )
+        self.assertIn("'20260829_action_item_delegation_source.sql'", self.preflight)
         self.assertNotIn(
             "to_regclass('public.action_item_huddle_relationships') is null",
             self.sanitizer,
@@ -521,10 +523,13 @@ class QADevCopySQLContracts(unittest.TestCase):
             "from public.entity_relationships relationship",
             "left join public.huddle_nodes huddle_node",
             "entity relationship has a missing entity or unsupported or missing exact resource",
+            "from public.action_item_sources source",
+            "action item source has a missing action item or unsupported or missing exact same-company endpoint",
             "a company is missing its exact required action item entity type",
             "a company is missing an exact required action item field template",
             "an action item entity is missing a required linked field",
             "person_in_charge",
+            "assigned_by",
             "analysis_due_date",
             "completion_due_date",
             "in_progress",
@@ -534,6 +539,9 @@ class QADevCopySQLContracts(unittest.TestCase):
             "red",
         ):
             self.assertIn(fragment, self.verify)
+        for sql in (self.preflight, self.verify):
+            self.assertIn("huddle_logic_gate.deleted_timestamp is null", sql)
+            self.assertIn("kpi.deleted_timestamp is null", sql)
         self.assertIn("select company_id, 'editor', body_json from public.entities", self.verify)
         self.assertIn("select company_id, 'entity', entity_id, 'editor', body_json", self.sanitizer)
         self.assertIn("select * from expected except select * from actual", self.verify)
@@ -687,10 +695,11 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
               name,field_type,system_key,config_jsonb,position
             ) values
               ('{bridge_company}','a17e0000-0000-4000-8000-000000000101','a17e0000-0000-4000-8000-000000000001',null,'Person in charge','person','person_in_charge','{{}}',0),
-              ('{bridge_company}','a17e0000-0000-4000-8000-000000000102','a17e0000-0000-4000-8000-000000000001',null,'Analysis due date','date','analysis_due_date','{{}}',1),
-              ('{bridge_company}','a17e0000-0000-4000-8000-000000000103','a17e0000-0000-4000-8000-000000000001',null,'Completion due date','date','completion_due_date','{{}}',2),
-              ('{bridge_company}','a17e0000-0000-4000-8000-000000000104','a17e0000-0000-4000-8000-000000000001',null,'Status','choice','status','{{"default":"in_progress","options":[{{"key":"in_progress","label":"In progress"}},{{"key":"pending","label":"Pending"}},{{"key":"done","label":"Done"}}]}}',3),
-              ('{bridge_company}','a17e0000-0000-4000-8000-000000000105','a17e0000-0000-4000-8000-000000000001',null,'Color','color','color','{{"default":null,"options":[{{"key":"yellow","label":"Yellow","color":"#facc15"}},{{"key":"red","label":"Red","color":"#ef4444"}}]}}',4);
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000106','a17e0000-0000-4000-8000-000000000001',null,'Assigned by','person','assigned_by','{{}}',1),
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000102','a17e0000-0000-4000-8000-000000000001',null,'Analysis due date','date','analysis_due_date','{{}}',2),
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000103','a17e0000-0000-4000-8000-000000000001',null,'Completion due date','date','completion_due_date','{{}}',3),
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000104','a17e0000-0000-4000-8000-000000000001',null,'Status','choice','status','{{"default":"in_progress","options":[{{"key":"in_progress","label":"In progress"}},{{"key":"pending","label":"Pending"}},{{"key":"done","label":"Done"}}]}}',4),
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000105','a17e0000-0000-4000-8000-000000000001',null,'Color','color','color','{{"default":null,"options":[{{"key":"yellow","label":"Yellow","color":"#facc15"}},{{"key":"red","label":"Red","color":"#ef4444"}}]}}',5);
             insert into public.entities(company_id,entity_id,entity_type_id,name)
             values ('{bridge_company}','{ordinary_entity}','{ordinary_type}','Preserved Ordinary Entity');
             insert into public.company_explorer_folders(
@@ -758,7 +767,7 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
         )
         self.assertEqual(
             result.split("|"),
-            ["t", "t", "5", "t", "1", "5", "1", "0", "0", "1", "0"],
+            ["t", "t", "5", "t", "1", "6", "1", "0", "0", "1", "0"],
         )
 
     def test_non_owning_boundary_and_typed_entity_link_collisions(self) -> None:
@@ -852,12 +861,13 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             from public.companies company
             cross join (values
               ('a17e0000-0000-4000-8000-000000000101'::uuid,'Person in charge','person','person_in_charge','{{}}'::jsonb,0),
-              ('a17e0000-0000-4000-8000-000000000102'::uuid,'Analysis due date','date','analysis_due_date','{{}}'::jsonb,1),
-              ('a17e0000-0000-4000-8000-000000000103'::uuid,'Completion due date','date','completion_due_date','{{}}'::jsonb,2),
+              ('a17e0000-0000-4000-8000-000000000106'::uuid,'Assigned by','person','assigned_by','{{}}'::jsonb,1),
+              ('a17e0000-0000-4000-8000-000000000102'::uuid,'Analysis due date','date','analysis_due_date','{{}}'::jsonb,2),
+              ('a17e0000-0000-4000-8000-000000000103'::uuid,'Completion due date','date','completion_due_date','{{}}'::jsonb,3),
               ('a17e0000-0000-4000-8000-000000000104'::uuid,'Status','choice','status',
-               '{{"default":"in_progress","options":[{{"key":"in_progress","label":"In progress"}},{{"key":"pending","label":"Pending"}},{{"key":"done","label":"Done"}}]}}'::jsonb,3),
+               '{{"default":"in_progress","options":[{{"key":"in_progress","label":"In progress"}},{{"key":"pending","label":"Pending"}},{{"key":"done","label":"Done"}}]}}'::jsonb,4),
               ('a17e0000-0000-4000-8000-000000000105'::uuid,'Color','color','color',
-               '{{"default":null,"options":[{{"key":"yellow","label":"Yellow","color":"#facc15"}},{{"key":"red","label":"Red","color":"#ef4444"}}]}}'::jsonb,4)
+               '{{"default":null,"options":[{{"key":"yellow","label":"Yellow","color":"#facc15"}},{{"key":"red","label":"Red","color":"#ef4444"}}]}}'::jsonb,5)
             ) definition(entity_field_type_id,name,field_type,system_key,config_jsonb,position)
             where company.company_id in ('{company_a}','{company_b}');
 
@@ -972,6 +982,12 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
               company_id,entity_id,resource_type,resource_id
             ) values (
               '{company_a}','{action_entity}','huddle_node','{excluded_huddle_node}'
+            );
+
+            insert into public.action_item_sources(
+              company_id,entity_id,resource_type,resource_id
+            ) values (
+              '{company_a}','{action_entity}','huddle_node','{surviving_huddle_node}'
             );
 
             insert into public.company_explorer_folders(company_id,folder_id,parent_folder_id,name)
@@ -1209,6 +1225,9 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
                  where company_id='{company_a}' and huddle_logic_gate_id='{excluded_huddle}'),
               (select count(*) from public.entity_relationships
                  where company_id='{company_a}' and entity_id='{action_entity}'),
+              (select count(*) from public.action_item_sources
+                 where company_id='{company_a}' and entity_id='{action_entity}'
+                   and resource_type='huddle_node' and resource_id='{surviving_huddle_node}'),
               (select count(*) from public.entities
                  where company_id='{company_a}' and entity_id='{action_entity}');
             """
@@ -1220,7 +1239,7 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
                 "1", "0", "0", "1", "1", "0", "0",
                 "t", "f", "f", "f", "0", "1", "0", "t",
                 "t", "f", "f", "f", "t", "t",
-                "t", "f", "f", "f", "0", "1", "0", "0", "1",
+                "t", "f", "f", "f", "0", "1", "0", "0", "1", "1",
             ],
         )
 

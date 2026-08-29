@@ -2,7 +2,13 @@ import { buildLogicGateRoute, buildNodeRoute, buildProjectRoute, parseDeepLinkRo
 import { createActionItemIconElement, createExplorerEntityIconElement } from "../../icons/index.js";
 import type { BoundRequestJSON } from "../api/requestJSON.js";
 import type { EmailMessage } from "../communications/communicationsApi.js";
-import { createActionItem, searchEntities, type ActionItemColor, type Entity } from "../entities/entitiesApi.js";
+import {
+  createActionItem,
+  searchEntities,
+  type ActionItemColor,
+  type ActionItemSourceResourceType,
+  type Entity,
+} from "../entities/entitiesApi.js";
 import { createNodeFromSelectionTitle, normalizeSelectedTextForNodeTitle } from "../nodes/selectionNodeCreation.js";
 
 export type EditorWorkspaceEntityType = "node" | "logic_gate" | "project";
@@ -331,7 +337,9 @@ export async function createNodeEntityFromSelection(
 }
 
 export async function createActionItemEntityFromSelection(
-  context: Pick<EditorEntityLinkContext, "companyID" | "requestJSON">,
+  context: Pick<EditorEntityLinkContext, "companyID" | "requestJSON"> & {
+    source: { resourceType: ActionItemSourceResourceType; resourceID: string };
+  },
   selectedText: string,
   color: ActionItemColor,
 ): Promise<EditorEntityLink> {
@@ -342,6 +350,7 @@ export async function createActionItemEntityFromSelection(
     bodyText: selectedText,
     name,
     color,
+    source: context.source,
   });
   return {
     entityType: "entity",

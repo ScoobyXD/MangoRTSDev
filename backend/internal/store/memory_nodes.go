@@ -308,6 +308,7 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
 	}
+	r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeNode, nodeID)
 	r.deleteMemoryResourceSharedEmailDraftsLocked(companyID, EntityTypeNode, nodeID)
 	r.deleteRACIMatrixProjectionForNodeLocked(companyID, nodeID)
 	for itemKey, item := range r.projectTimelineItems {

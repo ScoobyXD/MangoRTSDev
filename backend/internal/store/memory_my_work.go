@@ -66,7 +66,9 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 			continue
 		}
 		fields := r.memoryActionItemFieldsLocked(entity.CompanyID, entity.EntityID)
-		if fields.personInCharge != query.UserID || myWorkStatusDone(fields.status) != query.History {
+		matchesPerspective := (query.Perspective == MyWorkActionItemPerspectiveMine && fields.personInCharge == query.UserID) ||
+			(query.Perspective == MyWorkActionItemPerspectiveDelegated && fields.assignedBy == query.UserID && fields.personInCharge != "" && fields.personInCharge != query.UserID)
+		if !matchesPerspective || myWorkStatusDone(fields.status) != query.History {
 			continue
 		}
 		item := domain.MyWorkActionItem{
@@ -115,7 +117,7 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 		}
 		rows = filtered
 	}
-	page := domain.MyWorkActionItemPage{Items: []domain.MyWorkActionItem{}}
+	page := domain.MyWorkActionItemPage{Perspective: query.Perspective, Items: []domain.MyWorkActionItem{}}
 	page.HasMore = len(rows) > query.Limit
 	if page.HasMore {
 		rows = rows[:query.Limit]
@@ -126,9 +128,9 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 	if page.HasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
 		if query.History {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, History: true, CompletedTimestamp: last.item.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.item.EntityID})
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, History: true, CompletedTimestamp: last.item.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.item.EntityID})
 		} else {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Grouping: grouping, GroupNull: last.colorKey == "", GroupInt: last.colorRank, GroupText: last.colorKey, DateNull: last.dateNull, Date: last.date, ResourceID: last.item.EntityID})
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, GroupNull: last.colorKey == "", GroupInt: last.colorRank, GroupText: last.colorKey, DateNull: last.dateNull, Date: last.date, ResourceID: last.item.EntityID})
 		}
 	}
 	return page
@@ -136,6 +138,7 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 
 type memoryActionItemFields struct {
 	personInCharge           string
+	assignedBy               string
 	completionDueDate        string
 	status                   string
 	color                    string
@@ -153,6 +156,8 @@ func (r *MemoryRepo) memoryActionItemFieldsLocked(companyID, entityID string) me
 		switch *field.EntityFieldTypeID {
 		case ActionItemPersonInChargeFieldTypeID:
 			result.personInCharge = cleanUUIDText(value)
+		case ActionItemAssignedByFieldTypeID:
+			result.assignedBy = cleanUUIDText(value)
 		case ActionItemCompletionDueDateFieldTypeID:
 			result.completionDueDate = strings.TrimSpace(value)
 			result.completionDueDateFieldID = field.EntityFieldID
@@ -181,7 +186,7 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 		if myWorkStatusDone(myWorkOptionalString(node.Status)) != query.History {
 			continue
 		}
-		if !r.gvicEffectiveUserHasRoleLocked(query.CompanyID, EntityTypeNode, node.NodeID, query.UserID, domain.RACIRoleResponsible) {
+		if !r.gvicEffectiveUserHasRoleLocked(query.CompanyID, EntityTypeNode, node.NodeID, query.UserID, query.Role) {
 			continue
 		}
 		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeNode, node.NodeID, EntityPermissionEdit) {
@@ -247,7 +252,7 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 	} else {
 		sort.Slice(rows, func(i, j int) bool { return compareMyWorkNodes(rows[i], rows[j], groupingTerms) < 0 })
 	}
-	page := domain.MyWorkNodePage{Items: []domain.MyWorkNode{}}
+	page := domain.MyWorkNodePage{Role: query.Role, Items: []domain.MyWorkNode{}}
 	page.HasMore = len(rows) > query.Limit
 	if page.HasMore {
 		rows = rows[:query.Limit]
@@ -256,9 +261,9 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 	if page.HasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
 		if query.History {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
 		} else {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
 		}
 	}
 	return page

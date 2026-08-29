@@ -11,8 +11,8 @@ test("My Work initial read derives its subject from auth and requests all typed 
     return {
       company_id: "company-1",
       user_id: "viewer-1",
-      action_items: { items: [], has_more: false },
-      nodes: { items: [], has_more: false },
+      action_items: { perspective: "mine", items: [], has_more: false },
+      nodes: { role: "responsible", items: [], has_more: false },
       processes: { role: "responsible", items: [], has_more: false },
       projects: { items: [], has_more: false },
     } as T;
@@ -20,7 +20,6 @@ test("My Work initial read derives its subject from auth and requests all typed 
 
   await fetchMyWork(requestJSON, {
     companyID: " company-1 ",
-    role: "responsible",
     limit: 500,
     signal,
   });
@@ -28,7 +27,8 @@ test("My Work initial read derives its subject from auth and requests all typed 
   const url = new URL(calls[0]?.path ?? "", "https://mango.test");
   assert.equal(url.pathname, "/v1/my-work");
   assert.equal(url.searchParams.get("company_id"), "company-1");
-  assert.equal(url.searchParams.get("role"), "responsible");
+  assert.equal(url.searchParams.has("role"), false, "the all-section read uses the canonical server defaults");
+  assert.equal(url.searchParams.has("perspective"), false);
   assert.equal(url.searchParams.get("limit"), "100");
   assert.equal(url.searchParams.has("section"), false);
   assert.equal(url.searchParams.has("user_id"), false);
@@ -61,7 +61,7 @@ test("My Work follow-ups request only the affected section and its opaque cursor
   assert.equal(url.searchParams.get("cursor"), "node/cursor + 2");
   assert.equal(url.searchParams.get("grouping"), "due_date:desc,priority:asc");
   assert.equal(url.searchParams.get("limit"), "40");
-  assert.equal(url.searchParams.has("role"), false, "non-Process requests never carry a RACI role");
+  assert.equal(url.searchParams.get("role"), "accountable", "Node reads carry their independent RACI role");
 });
 
 test("My Work sends the sole explicit empty grouping form without inventing a default", async () => {
@@ -126,4 +126,27 @@ test("Process follow-ups carry exactly the selected RACI role", async () => {
   const url = new URL(requestedPath, "https://mango.test");
   assert.equal(url.searchParams.get("section"), "processes");
   assert.equal(url.searchParams.get("role"), "consulted");
+});
+
+test("Action Item follow-ups carry exactly the selected Mine or Delegated perspective", async () => {
+  let requestedPath = "";
+  const requestJSON: BoundRequestJSON = async <T>(path: string): Promise<T> => {
+    requestedPath = path;
+    return {
+      company_id: "company-1",
+      user_id: "viewer-1",
+      action_items: { perspective: "delegated", items: [], has_more: false },
+    } as T;
+  };
+
+  await fetchMyWork(requestJSON, {
+    companyID: "company-1",
+    section: "action_items",
+    perspective: "delegated",
+    grouping: [{ field: "color", direction: "desc" }],
+  });
+  const url = new URL(requestedPath, "https://mango.test");
+  assert.equal(url.searchParams.get("section"), "action_items");
+  assert.equal(url.searchParams.get("perspective"), "delegated");
+  assert.equal(url.searchParams.get("grouping"), "color:desc");
 });

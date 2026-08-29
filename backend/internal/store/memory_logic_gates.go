@@ -577,6 +577,7 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	if _, ok := r.logicGates[k]; !ok {
 		return ErrNotFound
 	}
+	r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeLogicGate, logicGateID)
 	affectedNodeIDs := []string{}
 	for _, assignment := range r.nodeLogicGateAssignments {
 		if assignment.CompanyID == companyID && assignment.LogicGateID == logicGateID {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
@@ -236,6 +237,171 @@ func TestActionItemHandlersRequireExactHuddleNodeAccess(t *testing.T) {
 	items, err := repo.ListHuddleNodeActionItems(company.CompanyID, node.HuddleNodeID)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("restricted request created Action Items=%+v err=%v", items, err)
+	}
+}
+
+func TestActionItemSourceHTTPResolvesCurrentNameAndHidesUnavailableIdentity(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	owner, err := repo.UpsertAuthUser("action-item-source-http-owner", "source-owner@example.com", "Source Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := repo.UpsertAuthUser("action-item-source-http-member", "source-member@example.com", "Source Member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	company, err := repo.CreateCompany("Action Item Source HTTP")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(owner.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(member.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	sourceNode, err := repo.CreateNode(company.CompanyID, "Current source name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServer(repo).Routes()
+	memberActor := ActorContext{
+		User:        member,
+		Memberships: []domain.CompanyMembership{{CompanyID: company.CompanyID, UserID: member.UserID, Role: domain.RoleCompanyUser}},
+		CompanyID:   company.CompanyID, CompanyRole: domain.RoleCompanyUser,
+	}
+	withMember := func(request *http.Request) *http.Request {
+		return request.WithContext(context.WithValue(request.Context(), actorContextKey{}, memberActor))
+	}
+	post := func(body map[string]any) *httptest.ResponseRecorder {
+		t.Helper()
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, withMember(httptest.NewRequest(http.MethodPost, "/v1/action-items", bytes.NewReader(raw))))
+		return response
+	}
+	getSource := func(entityID string) (*domain.ActionItemSourceView, string) {
+		t.Helper()
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/v1/action-items/"+entityID+"/source?company_id="+company.CompanyID, nil)
+		handler.ServeHTTP(response, withMember(request))
+		if response.Code != http.StatusOK {
+			t.Fatalf("source GET status=%d body=%s", response.Code, response.Body.String())
+		}
+		var payload struct {
+			Source *domain.ActionItemSourceView `json:"source"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.Source, response.Body.String()
+	}
+	listActionItems := func() []domain.EntitySummary {
+		t.Helper()
+		items, err := repo.ListEntities(context.Background(), store.EntityListQuery{
+			CompanyID: company.CompanyID, EntityTypeID: store.ActionItemEntityTypeID, AllForType: true,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return items
+	}
+
+	createdResponse := post(map[string]any{
+		"company_id": company.CompanyID,
+		"body_text":  "Created from highlighted source",
+		"color":      "yellow",
+		"source": map[string]any{
+			"resource_type": store.EntityTypeNode,
+			"resource_id":   sourceNode.NodeID,
+		},
+	})
+	if createdResponse.Code != http.StatusCreated {
+		t.Fatalf("source create status=%d body=%s", createdResponse.Code, createdResponse.Body.String())
+	}
+	var created struct {
+		ActionItem domain.Entity `json:"action_item"`
+	}
+	if err := json.NewDecoder(createdResponse.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	view, _ := getSource(created.ActionItem.EntityID)
+	if view == nil || view.ResourceType != store.EntityTypeNode || view.ResourceID != sourceNode.NodeID || view.Name != "Current source name" {
+		t.Fatalf("source view = %+v", view)
+	}
+	if _, err := repo.UpdateNode(store.UpdateNodeInput{CompanyID: company.CompanyID, NodeID: sourceNode.NodeID, Title: "Renamed source", TitleSet: true}); err != nil {
+		t.Fatal(err)
+	}
+	view, _ = getSource(created.ActionItem.EntityID)
+	if view == nil || view.Name != "Renamed source" {
+		t.Fatalf("renamed source view = %+v", view)
+	}
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: company.CompanyID, EntityType: store.EntityTypeNode, EntityID: sourceNode.NodeID,
+		DefaultAccess: store.EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hidden, hiddenBody := getSource(created.ActionItem.EntityID)
+	if hidden != nil || strings.Contains(hiddenBody, sourceNode.NodeID) || strings.Contains(hiddenBody, "Renamed source") {
+		t.Fatalf("inaccessible source leaked identity: source=%+v body=%s", hidden, hiddenBody)
+	}
+	beforeRejected := len(listActionItems())
+	rejected := post(map[string]any{
+		"company_id": company.CompanyID, "body_text": "Unauthorized source", "color": "red",
+		"source": map[string]any{"resource_type": store.EntityTypeNode, "resource_id": sourceNode.NodeID},
+	})
+	if rejected.Code != http.StatusNotFound {
+		t.Fatalf("unauthorized source create status=%d body=%s, want 404", rejected.Code, rejected.Body.String())
+	}
+	if afterRejected := len(listActionItems()); afterRejected != beforeRejected {
+		t.Fatalf("unauthorized source create partially wrote Action Item: %d -> %d", beforeRejected, afterRejected)
+	}
+
+	otherCompany := repo.EnsureCompany("93939393-9393-4393-8393-939393939393", "Other HTTP source company")
+	otherNode, err := repo.CreateNode(otherCompany.CompanyID, "Hidden other-company source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	crossCompany := post(map[string]any{
+		"company_id": company.CompanyID, "body_text": "Cross-company source", "color": "red",
+		"source": map[string]any{"resource_type": store.EntityTypeNode, "resource_id": otherNode.NodeID},
+	})
+	if crossCompany.Code != http.StatusNotFound || strings.Contains(crossCompany.Body.String(), otherNode.NodeID) {
+		t.Fatalf("cross-company source response status=%d body=%s", crossCompany.Code, crossCompany.Body.String())
+	}
+
+	if err := repo.DeleteNode(company.CompanyID, sourceNode.NodeID); err != nil {
+		t.Fatal(err)
+	}
+	unavailable, unavailableBody := getSource(created.ActionItem.EntityID)
+	if unavailable != nil || strings.Contains(unavailableBody, sourceNode.NodeID) || strings.Contains(unavailableBody, "Renamed source") {
+		t.Fatalf("removed source leaked identity: source=%+v body=%s", unavailable, unavailableBody)
+	}
+
+	directResponse := post(map[string]any{"company_id": company.CompanyID, "body_text": "Direct source unset", "color": nil})
+	if directResponse.Code != http.StatusCreated {
+		t.Fatalf("direct create status=%d body=%s", directResponse.Code, directResponse.Body.String())
+	}
+	created = struct {
+		ActionItem domain.Entity `json:"action_item"`
+	}{}
+	if err := json.NewDecoder(directResponse.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	directSource, _ := getSource(created.ActionItem.EntityID)
+	if directSource != nil {
+		t.Fatalf("direct Action Item source = %+v, want unset", directSource)
+	}
+	methodResponse := httptest.NewRecorder()
+	methodRequest := httptest.NewRequest(http.MethodPut, "/v1/action-items/"+created.ActionItem.EntityID+"/source?company_id="+company.CompanyID, bytes.NewReader([]byte(`{}`)))
+	handler.ServeHTTP(methodResponse, withMember(methodRequest))
+	if methodResponse.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("source mutation status=%d body=%s, want 405", methodResponse.Code, methodResponse.Body.String())
 	}
 }
 

@@ -117,6 +117,9 @@ select exists(select 1 from companies where company_id=$1::uuid),
 	if !creatorIsMember {
 		return domain.Entity{}, ErrPrincipalNotInCompany
 	}
+	if err := validatePostgresActionItemSourceTx(ctx, tx, normalized); err != nil {
+		return domain.Entity{}, err
+	}
 	requiredByID := map[string]domain.EntityFieldType{}
 	requiredIDs := make([]string, 0, len(actionItemFieldTypes(normalized.CompanyID)))
 	for _, required := range actionItemFieldTypes(normalized.CompanyID) {
@@ -224,6 +227,13 @@ join entity_field_types template
 	} else if count != int64(len(currentTemplates)) {
 		return domain.Entity{}, ErrConflict
 	}
+	if normalized.SourceResourceType != "" {
+		if _, err := tx.ExecContext(ctx, `
+insert into action_item_sources (company_id,entity_id,resource_type,resource_id)
+values ($1::uuid,$2::uuid,$3::text,$4::uuid)`, normalized.CompanyID, entityID, normalized.SourceResourceType, normalized.SourceResourceID); err != nil {
+			return domain.Entity{}, mapEntitiesPostgresError(err)
+		}
+	}
 	item, err := getPostgresEntity(ctx, tx, normalized.CompanyID, entityID)
 	if err != nil {
 		return domain.Entity{}, err
@@ -232,6 +242,77 @@ join entity_field_types template
 		return domain.Entity{}, err
 	}
 	return item, nil
+}
+
+func validatePostgresActionItemSourceTx(ctx context.Context, tx *sql.Tx, input ActionItemInput) error {
+	if input.SourceResourceType == "" {
+		return nil
+	}
+	var query string
+	accessType, accessID := input.SourceResourceType, input.SourceResourceID
+	switch input.SourceResourceType {
+	case EntityTypeNode:
+		query = `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`
+	case EntityTypeLogicGate:
+		query = `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`
+	case EntityTypeProject:
+		query = `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`
+	case EntityTypeHuddleNode:
+		query = `select exists(select 1 from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid)`
+	case EntityTypeHuddleLogicGate:
+		query = `select exists(select 1 from huddle_logic_gates where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid and deleted_timestamp is null)`
+	case EntityTypeKPI:
+		var logicGateID string
+		err := tx.QueryRowContext(ctx, `select logic_gate_id::text from kpis where company_id=$1::uuid and kpi_id=$2::uuid and deleted_timestamp is null`, input.CompanyID, input.SourceResourceID).Scan(&logicGateID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		accessType, accessID = EntityTypeLogicGate, logicGateID
+	default:
+		return ErrInvalid
+	}
+	if query != "" {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, query, input.CompanyID, input.SourceResourceID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+	}
+	var allowed bool
+	if err := tx.QueryRowContext(ctx, `select mangorts_user_can_access_resource($1::uuid,$2::text,$3::uuid,$4::uuid,'edit')`, input.CompanyID, accessType, accessID, input.CreatedByUserID).Scan(&allowed); err != nil {
+		return err
+	}
+	if !allowed {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepo) GetActionItemSource(companyID, entityID string) (domain.ActionItemSource, error) {
+	companyID, entityID = cleanUUIDText(companyID), cleanUUIDText(entityID)
+	if companyID == "" || entityID == "" {
+		return domain.ActionItemSource{}, ErrInvalid
+	}
+	var source domain.ActionItemSource
+	err := r.db.QueryRowContext(context.Background(), `
+select company_id::text,entity_id::text,resource_type,resource_id::text,created_timestamp
+from action_item_sources
+where company_id=$1::uuid and entity_id=$2::uuid`, companyID, entityID).Scan(
+		&source.CompanyID,
+		&source.EntityID,
+		&source.ResourceType,
+		&source.ResourceID,
+		&source.CreatedTimestamp,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ActionItemSource{}, ErrNotFound
+	}
+	return source, err
 }
 
 func lockPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {

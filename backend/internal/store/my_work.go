@@ -15,6 +15,9 @@ const (
 
 	MyWorkGroupingNone = "none"
 
+	MyWorkActionItemPerspectiveMine      = "mine"
+	MyWorkActionItemPerspectiveDelegated = "delegated"
+
 	MyWorkActionItemGroupingColor             = "color"
 	MyWorkActionItemGroupingCompletionDueDate = "completion_due_date"
 	MyWorkNodeGroupingPriority                = "priority"
@@ -33,6 +36,7 @@ type MyWorkQuery struct {
 	ViewerUserID string
 	Section      string
 	Role         string
+	Perspective  string
 	Grouping     string
 	Limit        int
 	Cursor       string
@@ -49,6 +53,7 @@ type myWorkCursor struct {
 	Version            int    `json:"v"`
 	Section            string `json:"section"`
 	Role               string `json:"role,omitempty"`
+	Perspective        string `json:"perspective,omitempty"`
 	Grouping           string `json:"grouping,omitempty"`
 	GroupNull          bool   `json:"group_null,omitempty"`
 	GroupInt           int    `json:"group_int,omitempty"`
@@ -68,6 +73,8 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	query.Section = strings.ToLower(strings.TrimSpace(query.Section))
 	rawRole := strings.TrimSpace(query.Role)
 	query.Role = strings.ToLower(rawRole)
+	rawPerspective := strings.TrimSpace(query.Perspective)
+	query.Perspective = strings.ToLower(rawPerspective)
 	query.Grouping = strings.ToLower(strings.TrimSpace(query.Grouping))
 	query.Cursor = strings.TrimSpace(query.Cursor)
 	if query.CompanyID == "" || query.UserID == "" || query.ViewerUserID == "" {
@@ -89,7 +96,16 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	} else {
 		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 	}
-	if rawRole != "" && query.Section != "" && query.Section != MyWorkSectionProcesses {
+	if rawRole != "" && query.Section != MyWorkSectionNodes && query.Section != MyWorkSectionProcesses {
+		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+	}
+	if query.Perspective == "" {
+		query.Perspective = MyWorkActionItemPerspectiveMine
+	}
+	if query.Perspective != MyWorkActionItemPerspectiveMine && query.Perspective != MyWorkActionItemPerspectiveDelegated {
+		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+	}
+	if rawPerspective != "" && query.Section != MyWorkSectionActionItems {
 		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 	}
 	switch query.Section {
@@ -128,11 +144,18 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	if err != nil || json.Unmarshal(payload, &cursor) != nil || cursor.Version != 1 || cursor.Section != query.Section || cleanUUIDText(cursor.ResourceID) == "" {
 		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 	}
-	if query.Section == MyWorkSectionProcesses {
+	if query.Section == MyWorkSectionProcesses || query.Section == MyWorkSectionNodes {
 		if cursor.Role != query.Role {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 	} else if cursor.Role != "" {
+		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+	}
+	if query.Section == MyWorkSectionActionItems {
+		if cursor.Perspective != query.Perspective {
+			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+		}
+	} else if cursor.Perspective != "" {
 		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 	}
 	if cursor.History != query.History {

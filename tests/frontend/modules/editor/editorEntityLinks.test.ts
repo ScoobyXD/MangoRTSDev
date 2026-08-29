@@ -253,13 +253,16 @@ test("selection Node creation normalizes the exact title and returns a durable e
 
 test("the shared Tiptap selection toolbar exposes one keyboard-operable yellow/red Action Item split control", () => {
   const source = readFileSync("frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx", "utf8");
+  const previewHost = readFileSync("frontend/src/modules/editor/EntityReferencePreviewHost.tsx", "utf8");
   const css = readFileSync("frontend/src/index.css", "utf8");
   assert.match(source, /role="group"[\s\S]*aria-label="Create an Action Item from highlighted text"/);
   assert.match(source, /\(\["yellow", "red"\] as const\)\.map/);
   assert.match(source, /aria-label=\{`Create \$\{color\} Action Item from highlighted text\.`\}/);
   assert.match(source, /<ActionItemIcon size=\{16\} \/>/);
   assert.doesNotMatch(source, /label\.slice\(0, 1\)/);
-  assert.match(source, /createActionItemEntityFromSelection\(\{ companyID, requestJSON \}, action\.quote, color\)/);
+  assert.match(source, /createActionItemEntityFromSelection\(\{[\s\S]*source: \{ resourceType, resourceID \}[\s\S]*\}, action\.quote, color\)/);
+  assert.match(previewHost, /<KPIEditorPopup[\s\S]*item=\{kpiSource\}[\s\S]*canEdit/);
+  assert.match(previewHost, /kpi_id: source\.resource_id,[\s\S]*logic_gate_id: source\.parent_resource_id/);
   assert.match(css, /\.mango-editor-action-item--yellow[\s\S]*animation: mango-editor-action-item-pulse 2s/);
   assert.match(css, /\.mango-editor-action-item--red[\s\S]*animation: mango-editor-action-item-pulse 1s/);
   assert.match(css, /\.mango-editor-action-item--yellow,\s*\.mango-editor-entity-link\.mango-editor-action-item--yellow/, "the fully filled yellow chip wins over the generic Entity variables");
@@ -277,10 +280,11 @@ test("the shared Tiptap selection toolbar stays hidden during primary-pointer se
   assert.match(source, /selectionPointerDownRef\.current = false;[\s\S]*requestAnimationFrame\(\(\) => \{[\s\S]*updateSelectionState\(editor\)/);
 });
 
-test("selection Action Item creation sends the exact body, normalized name, and chosen color", async () => {
+test("selection Action Item creation sends the exact body, normalized name, chosen color, and typed source", async () => {
   let submittedJSON: unknown;
   const entity = await createActionItemEntityFromSelection({
     companyID: "company-1",
+    source: { resourceType: "huddle_node", resourceID: "huddle-node-1" },
     requestJSON: async <T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
       assert.equal(path, "/v1/action-items");
       assert.equal(init?.method, "POST");
@@ -308,6 +312,7 @@ test("selection Action Item creation sends the exact body, normalized name, and 
     body_text: "  Escalate\n delayed   shipment  ",
     name: "Escalate delayed shipment",
     color: "yellow",
+    source: { resource_type: "huddle_node", resource_id: "huddle-node-1" },
   });
   assert.deepEqual(entity, {
     entityType: "entity",

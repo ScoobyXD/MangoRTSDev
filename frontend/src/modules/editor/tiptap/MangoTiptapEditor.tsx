@@ -1957,7 +1957,11 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     setCreatingSelectionActionItem(color);
     setError("");
     try {
-      const entity = await createActionItemEntityFromSelection({ companyID, requestJSON }, action.quote, color);
+      const entity = await createActionItemEntityFromSelection({
+        companyID,
+        requestJSON,
+        source: { resourceType, resourceID },
+      }, action.quote, color);
       const currentSelection = editor.state.selection;
       const currentText = editor.state.doc.textBetween(action.from, action.to, "\n", "\n");
       if (currentSelection.from !== action.from || currentSelection.to !== action.to || currentText !== action.quote) {
@@ -1976,7 +1980,7 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
     } finally {
       setCreatingSelectionActionItem(null);
     }
-  }, [companyID, creatingSelectionActionItem, creatingSelectionNode, requestJSON, selectionAction]);
+  }, [companyID, creatingSelectionActionItem, creatingSelectionNode, requestJSON, resourceID, resourceType, selectionAction]);
 
   const runTableContextCommand = useCallback((command: "add-row-before" | "add-row-after" | "add-column-before" | "add-column-after" | "delete-row" | "delete-column" | "delete-table") => {
     const editor = editorRef.current;

@@ -1,6 +1,14 @@
 # Backend Workspace Read and Cache Notes
 
-Last updated: 2026-08-05
+Last updated: 2026-08-29
+
+## Action Item and My Work contracts
+
+`POST /v1/action-items` accepts an optional `source` object with exact `resource_type` and `resource_id`. Source is allowed only for Node, Process, Project, Huddle Node, Huddle Process, and KPI editor owners. The backend validates the same-company endpoint and current actor access and creates the Action Item and Source atomically. Omitting `source` keeps direct Entities-page creation valid and leaves Source unset.
+
+`GET /v1/action-items/{entity_id}/source?company_id={company_id}` returns the current permission-safe Source projection or `null`. It resolves the current resource name and never returns a hidden, missing, recycled, permanently deleted, or unset identity.
+
+`GET /v1/my-work` accepts `role` only with the `nodes` or `processes` section and accepts `perspective=mine|delegated` only with the `action_items` section. Node and Process roles default independently to Responsible, Action Items default to Mine, and each selector value is bound to its section cursor.
 
 ## Current workspace snapshot contract
 

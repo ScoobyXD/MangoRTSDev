@@ -4,6 +4,7 @@ import {
   fetchMyWork,
   MY_WORK_PAGE_LIMIT,
   type MyWorkActionItem,
+  type MyWorkActionItemPerspective,
   type MyWorkNode,
   type MyWorkPage,
   type MyWorkProcess,
@@ -35,6 +36,7 @@ type AnySectionState = MyWorkSectionState<MyWorkItem>;
 type SectionRequest = {
   cursor?: string;
   role?: MyWorkProcessRole;
+  perspective?: MyWorkActionItemPerspective;
   grouping?: ReadonlyArray<MyWorkGroupingSetting>;
   clearItems?: boolean;
   append?: boolean;
@@ -63,9 +65,13 @@ function errorMessage(cause: unknown): string {
 
 export function useMyWorkData(companyID: string, subjectID: string, requestJSON: BoundRequestJSON) {
   const [state, setState] = useState<MyWorkDataState>(createInitialState);
+  const [actionItemPerspective, setActionItemPerspective] = useState<MyWorkActionItemPerspective>("mine");
+  const [nodeRole, setNodeRole] = useState<MyWorkProcessRole>("responsible");
   const [processRole, setProcessRole] = useState<MyWorkProcessRole>("responsible");
   const stateRef = useRef(state);
-  const roleRef = useRef(processRole);
+  const actionItemPerspectiveRef = useRef(actionItemPerspective);
+  const nodeRoleRef = useRef(nodeRole);
+  const processRoleRef = useRef(processRole);
   const initialControllerRef = useRef<AbortController | null>(null);
   const sectionControllersRef = useRef<Partial<Record<MyWorkSection, AbortController>>>({});
   const requestVersionsRef = useRef<Record<MyWorkSection, number>>({
@@ -82,7 +88,15 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
   }, [state]);
 
   useEffect(() => {
-    roleRef.current = processRole;
+    actionItemPerspectiveRef.current = actionItemPerspective;
+  }, [actionItemPerspective]);
+
+  useEffect(() => {
+    nodeRoleRef.current = nodeRole;
+  }, [nodeRole]);
+
+  useEffect(() => {
+    processRoleRef.current = processRole;
   }, [processRole]);
 
   const requestSection = useCallback(async (
@@ -104,7 +118,14 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
       const response = await fetchMyWork(requestJSON, {
         companyID,
         section,
-        role: section === "processes" ? request.role ?? roleRef.current : undefined,
+        role: section === "nodes"
+          ? request.role ?? nodeRoleRef.current
+          : section === "processes"
+            ? request.role ?? processRoleRef.current
+            : undefined,
+        perspective: section === "action_items"
+          ? request.perspective ?? actionItemPerspectiveRef.current
+          : undefined,
         grouping: request.grouping,
         history: request.history,
         limit: MY_WORK_PAGE_LIMIT,
@@ -156,7 +177,11 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
       processes: ++requestVersionsRef.current.processes,
       projects: ++requestVersionsRef.current.projects,
     };
-    roleRef.current = "responsible";
+    actionItemPerspectiveRef.current = "mine";
+    nodeRoleRef.current = "responsible";
+    processRoleRef.current = "responsible";
+    setActionItemPerspective("mine");
+    setNodeRole("responsible");
     setProcessRole("responsible");
     setState({
       action_items: { ...createInitialState().action_items, loading: true },
@@ -167,7 +192,6 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
 
     void fetchMyWork(requestJSON, {
       companyID,
-      role: "responsible",
       limit: MY_WORK_PAGE_LIMIT,
       signal: controller.signal,
     }).then((response) => {
@@ -221,18 +245,44 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     });
   }, [requestSection]);
 
+  const selectActionItemPerspective = useCallback((
+    perspective: MyWorkActionItemPerspective,
+    grouping?: ReadonlyArray<MyWorkGroupingSetting>,
+    history = false,
+  ): Promise<void> => {
+    if (actionItemPerspectiveRef.current === perspective) return Promise.resolve();
+    actionItemPerspectiveRef.current = perspective;
+    setActionItemPerspective(perspective);
+    return requestSection("action_items", { perspective, grouping, history, clearItems: true });
+  }, [requestSection]);
+
+  const selectNodeRole = useCallback((
+    role: MyWorkProcessRole,
+    grouping?: ReadonlyArray<MyWorkGroupingSetting>,
+    history = false,
+  ): Promise<void> => {
+    if (nodeRoleRef.current === role) return Promise.resolve();
+    nodeRoleRef.current = role;
+    setNodeRole(role);
+    return requestSection("nodes", { role, grouping, history, clearItems: true });
+  }, [requestSection]);
+
   const selectProcessRole = useCallback((role: MyWorkProcessRole): Promise<void> => {
-    if (roleRef.current === role) return Promise.resolve();
-    roleRef.current = role;
+    if (processRoleRef.current === role) return Promise.resolve();
+    processRoleRef.current = role;
     setProcessRole(role);
     return requestSection("processes", { role, clearItems: true });
   }, [requestSection]);
 
   return {
     state,
+    actionItemPerspective,
+    nodeRole,
     processRole,
     reloadSection,
     loadMore,
+    selectActionItemPerspective,
+    selectNodeRole,
     selectProcessRole,
   };
 }

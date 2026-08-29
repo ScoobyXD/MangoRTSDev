@@ -81,6 +81,28 @@ func TestMyWorkEndpointDerivesSubjectAndReturnsRequestedTypedSections(t *testing
 		t.Fatalf("grouped repository query = %+v", repo.query)
 	}
 
+	nodeRole := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/v1/my-work?company_id="+companyID+"&section=nodes&role=informed", nil)
+	request = workItemInboxReadRequestWithActor(request, user.UserID, companyID, domain.RoleCompanyUser, false)
+	handler.ServeHTTP(nodeRole, request)
+	if nodeRole.Code != http.StatusOK {
+		t.Fatalf("Node role status = %d body=%s", nodeRole.Code, nodeRole.Body.String())
+	}
+	if repo.query.Section != store.MyWorkSectionNodes || repo.query.Role != domain.RACIRoleInformed {
+		t.Fatalf("Node role repository query = %+v", repo.query)
+	}
+
+	delegated := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/v1/my-work?company_id="+companyID+"&section=action_items&perspective=delegated", nil)
+	request = workItemInboxReadRequestWithActor(request, user.UserID, companyID, domain.RoleCompanyUser, false)
+	handler.ServeHTTP(delegated, request)
+	if delegated.Code != http.StatusOK {
+		t.Fatalf("Delegated status = %d body=%s", delegated.Code, delegated.Body.String())
+	}
+	if repo.query.Section != store.MyWorkSectionActionItems || repo.query.Perspective != store.MyWorkActionItemPerspectiveDelegated {
+		t.Fatalf("Delegated repository query = %+v", repo.query)
+	}
+
 	history := httptest.NewRecorder()
 	request = httptest.NewRequest(http.MethodGet, "/v1/my-work?company_id="+companyID+"&section=action_items&history=true", nil)
 	request = workItemInboxReadRequestWithActor(request, user.UserID, companyID, domain.RoleCompanyUser, false)
@@ -106,7 +128,7 @@ func TestMyWorkEndpointRejectsSubjectSpoofingAndInvalidSectionInputs(t *testing.
 	}
 	handler := NewServer(base).Routes()
 	malformedDateCursorPayload, _ := json.Marshal(map[string]any{
-		"v": 1, "section": store.MyWorkSectionNodes, "grouping": store.MyWorkDefaultNodeGrouping, "group_int": 1, "date": "not-a-date",
+		"v": 1, "section": store.MyWorkSectionNodes, "role": domain.RACIRoleResponsible, "grouping": store.MyWorkDefaultNodeGrouping, "group_int": 1, "date": "not-a-date",
 		"resource_id": "30000000-0000-4000-8000-000000000001",
 	})
 	malformedDateCursor := base64.RawURLEncoding.EncodeToString(malformedDateCursorPayload)
@@ -114,7 +136,11 @@ func TestMyWorkEndpointRejectsSubjectSpoofingAndInvalidSectionInputs(t *testing.
 		"/v1/my-work?company_id=" + companyID + "&user_id=" + user.UserID,
 		"/v1/my-work?company_id=" + companyID + "&target_user_id=",
 		"/v1/my-work?company_id=" + companyID + "&section=unknown",
-		"/v1/my-work?company_id=" + companyID + "&section=nodes&role=responsible",
+		"/v1/my-work?company_id=" + companyID + "&section=action_items&role=responsible",
+		"/v1/my-work?company_id=" + companyID + "&section=nodes&role=unknown",
+		"/v1/my-work?company_id=" + companyID + "&perspective=mine",
+		"/v1/my-work?company_id=" + companyID + "&section=nodes&perspective=mine",
+		"/v1/my-work?company_id=" + companyID + "&section=action_items&perspective=unknown",
 		"/v1/my-work?company_id=" + companyID + "&cursor=abc",
 		"/v1/my-work?company_id=" + companyID + "&section=nodes&cursor=" + malformedDateCursor,
 		"/v1/my-work?company_id=" + companyID + "&grouping=none",
@@ -195,10 +221,18 @@ func (r *recordingMyWorkRepo) GetMyWork(ctx context.Context, query store.MyWorkQ
 	}
 	response := domain.MyWorkResponse{CompanyID: query.CompanyID, UserID: query.UserID}
 	if query.Section == "" || query.Section == store.MyWorkSectionActionItems {
-		response.ActionItems = &domain.MyWorkActionItemPage{Items: []domain.MyWorkActionItem{}}
+		perspective := query.Perspective
+		if perspective == "" {
+			perspective = store.MyWorkActionItemPerspectiveMine
+		}
+		response.ActionItems = &domain.MyWorkActionItemPage{Perspective: perspective, Items: []domain.MyWorkActionItem{}}
 	}
 	if query.Section == "" || query.Section == store.MyWorkSectionNodes {
-		response.Nodes = &domain.MyWorkNodePage{Items: []domain.MyWorkNode{}}
+		role := query.Role
+		if role == "" {
+			role = domain.RACIRoleResponsible
+		}
+		response.Nodes = &domain.MyWorkNodePage{Role: role, Items: []domain.MyWorkNode{}}
 	}
 	if query.Section == "" || query.Section == store.MyWorkSectionProcesses {
 		role := query.Role
