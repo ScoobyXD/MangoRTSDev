@@ -108,7 +108,7 @@ Last updated: 2026-08-08
 30. A Node or Logic Gate header shows its live-derived clickable hierarchy breadcrumb inside the same rounded title container, directly above the existing resource icon and independently editable title, instead of adding a separate breadcrumb surface or a fixed **Node:** or **Process:** label. The current item name remains the independently editable `nodes.name` or `logic_gates.header` value and is never copied into or saved through the breadcrumb.
 31. A Node or Project timeline textbox must size from its own visible timeline container, keep the shared safety minimum, leave the shared next-row circle, header, and editor preview visible whenever space permits, and keep its editor, linked email, chat, timeline, virtual spacing, and logical scroll position aligned after every container resize.
 32. Dragging an editor table's bottom-right resize handle must add or remove whole trailing rows and columns, never reduce the table below one row or column, stop each axis before deleting a cell with content, and commit the allowed resize in one document transaction only when the pointer is released.
-33. A Huddle Node text box uses the same left timeline circle and line, left plus control, row spacing, canonical `mango-tiptap-json` document, revision, conflict, recovery, formatting toolbar, Universal Linker, inline Entity, image, attachment, and selection-comment behavior as a normal Node text box.
+33. A Huddle Node text box uses the normal Node's visible-container row-height rule, safety minimum, next-row preview, left timeline circle and line, left plus control, row spacing, canonical `mango-tiptap-json` document, revision, conflict, recovery, formatting toolbar, Universal Linker, inline Entity, image, attachment, and selection-comment behavior.
 34. Huddle Node editor documents use resource type `huddle_node`, the exact Huddle Node ID, and an exact Huddle Node textbox ID; they never borrow or manufacture a normal Node ID.
 35. A Huddle Node editor has no attached-email column and never creates an email relationship, email draft, or pass-to-Logic-Gate command.
 36. Highlighting nonblank text in a supported non-email editor exposes one yellow/red Action Item control, and choosing a color creates one real Action Item Entity before replacing the selection with its exact inline Entity reference.
@@ -116,7 +116,7 @@ Last updated: 2026-08-08
 38. Yellow and red Action Item references use their saved Action Item color for the complete live and static chip, keep black text and icon, and pulse at two-second and one-second intervals respectively; reduced-motion preference disables only the pulse.
 39. After a Huddle Node or Huddle Logic Gate editor save, its distinct Action Item references replace that exact resource's `entity_relationships` set. A non-final duplicate removal changes no edge, and removing the final saved reference removes only that resource edge.
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 # Process Story: Editor policy status follows the draft automatically
 

@@ -31,6 +31,11 @@ import {
 } from "../editor/NodeWorkspaceSurfaceShared.js";
 import type { TextBlockSelectionAnchor, TextBlockSelectionDraft } from "../editor/NodeWorkspaceSurfaceShared.js";
 import { EditorSavedTimestamp, EditorSaveStatusIcon, type EditorSaveState } from "../editor/EditorSaveStatusIcon.js";
+import {
+  resolveTextBlockViewportGeometry,
+  TEXT_BLOCK_HEADER_CHROME_HEIGHT,
+  TEXT_BLOCK_ROW_GAP,
+} from "../editor/editorRowVirtualization.js";
 import { mangoTiptapPendingStorageKey } from "../editor/tiptap/mangoTiptapSync.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
 import type { BareMangoEditorControls } from "./BareMangoEditor.js";
@@ -77,9 +82,11 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
   onActionItemsChanged,
   onActiveTextBoxIDChange,
 }) => {
+  const workspaceRef = useRef<HTMLElement | null>(null);
   const [textBoxes, setTextBoxes] = useState<HuddleNodeTextBox[]>([]);
   const [chats, setChats] = useState<HuddleNodeChat[]>([]);
   const [loading, setLoading] = useState(true);
+  const [workspaceHeight, setWorkspaceHeight] = useState(0);
   const [creating, setCreating] = useState(false);
   const [activeTextBoxID, setActiveTextBoxID] = useState("");
   const [openChatTextBoxIDs, setOpenChatTextBoxIDs] = useState<Set<string>>(new Set());
@@ -102,6 +109,9 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
   const actionItemReferenceRefreshByTextBoxRef = useRef(new Map<string, ActionItemReferenceRefreshState>());
   const navigationRequestIDRef = useRef(0);
   const chatSubmissionsInProgressRef = useRef(new Set<string>());
+  const textBoxViewport = resolveTextBlockViewportGeometry(
+    Math.max(0, Math.floor(workspaceHeight - TEXT_BLOCK_HEADER_CHROME_HEIGHT - TEXT_BLOCK_ROW_GAP)),
+  );
 
   const loadWorkspace = useCallback(async () => {
     setLoading(true);
@@ -142,6 +152,19 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
   useEffect(() => { void loadWorkspace(); }, [loadWorkspace]);
   useEffect(() => { void loadAttachments(); }, [loadAttachments]);
   useEffect(() => { onActiveTextBoxIDChange?.(activeTextBoxID); }, [activeTextBoxID, onActiveTextBoxIDChange]);
+  useEffect(() => {
+    const workspace = workspaceRef.current;
+    if (!workspace) return;
+    const updateHeight = () => setWorkspaceHeight(workspace.getBoundingClientRect().height);
+    updateHeight();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateHeight);
+      return () => window.removeEventListener("resize", updateHeight);
+    }
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, [loading]);
 
   const attachmentsByTextBox = useMemo(
     () => groupMangoResourceAttachmentsByInformationID(resourceAttachments),
@@ -335,7 +358,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
   if (loading) return <div role="status" style={emptyStyle}>Loading Huddle Node workspace…</div>;
 
   return (
-    <section aria-label="Huddle Node editor" data-huddle-node-workspace="node-tools-without-email" style={workspaceStyle}>
+    <section ref={workspaceRef} aria-label="Huddle Node editor" data-huddle-node-workspace="node-tools-without-email" style={workspaceStyle}>
       <div style={timelineGridStyle}>
         <div data-huddle-node-header-timeline-control="true" style={timelineHeaderControlStyle}>
           <button
@@ -361,10 +384,10 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
           const textBoxSaveFallback = { status: "saved" as const, updatedTimestamp: textBox.updated_timestamp };
           return (
             <React.Fragment key={textBoxID}>
-              <div style={timelineCellFrameStyle}>
-                <TimelineCell accent="#0f766e" muted={false} isLast={index === textBoxes.length - 1} minHeight={HUDDLE_TEXT_BOX_ROW_HEIGHT} />
+              <div style={{ minHeight: textBoxViewport.rowHeight, height: textBoxViewport.rowHeight }}>
+                <TimelineCell accent="#0f766e" muted={false} isLast={index === textBoxes.length - 1} minHeight={textBoxViewport.rowHeight} />
               </div>
-              <article data-huddle-node-textbox={textBoxID} style={textBoxCardStyle}>
+              <article data-huddle-node-textbox={textBoxID} style={{ ...textBoxCardStyle, minHeight: textBoxViewport.rowHeight, height: textBoxViewport.rowHeight }}>
               <div style={textBoxHeaderStyle}>
                 <div data-node-header-save-metadata="true" style={saveMetadataStyle}>
                   <EditorSaveStatusIcon state={textBoxSaveFallback} storageKey={textBoxSaveStorageKey} compact />
@@ -417,7 +440,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
                 </div>
               </div>
               <div data-huddle-node-textbox-columns={chatOpen ? "editor-chat" : "editor"} style={{ ...textBoxBodyStyle, gridTemplateColumns: chatOpen ? "minmax(300px,1fr) minmax(280px,.72fr)" : "minmax(0,1fr)" }}>
-                <div style={editorFrameStyle}>
+                <div style={{ ...editorFrameStyle, minHeight: textBoxViewport.bodyHeight, height: textBoxViewport.bodyHeight }}>
                   <NodeTextBlockEditor
                     fillHeight
                     blockID={textBoxID}
@@ -465,7 +488,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
                   />
                 </div>
                 {chatOpen && (
-                  <div style={chatFrameStyle}>
+                  <div style={{ ...chatFrameStyle, minHeight: textBoxViewport.bodyHeight, height: textBoxViewport.bodyHeight }}>
                     <ChatPane
                       blockID={textBoxID}
                       editable
@@ -591,15 +614,12 @@ function formatTextBlockMetadataTimestamp(value: string | number | undefined): s
   return `${time} ${day}`;
 }
 
-const HUDDLE_TEXT_BOX_BODY_HEIGHT = 320;
-const HUDDLE_TEXT_BOX_ROW_HEIGHT = 358;
 const workspaceStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_SHADOW, scrollbarGutter: "stable" };
 const timelineGridStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateColumns: "34px minmax(0,1fr)", columnGap: 4, rowGap: 12, alignItems: "start", alignContent: "start", padding: "0 14px 38px" };
 const timelineHeaderControlStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 44, minHeight: 38, padding: "0 0 7px", background: EDITOR_NEU_PANEL_BACKGROUND, display: "flex", alignItems: "flex-start", justifyContent: "flex-start" };
 const timelineHeaderSpacerStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 43, minHeight: 38, background: EDITOR_NEU_PANEL_BACKGROUND };
 const timelineAddButtonStyle: React.CSSProperties = { width: 30, height: 30, borderRadius: 9, border: "1px solid transparent", background: EDITOR_NEU_SURFACE, color: "#0f766e", display: "grid", placeItems: "center", padding: 0, boxShadow: EDITOR_NEU_SHADOW };
-const timelineCellFrameStyle: React.CSSProperties = { minHeight: HUDDLE_TEXT_BOX_ROW_HEIGHT, height: HUDDLE_TEXT_BOX_ROW_HEIGHT };
-const textBoxCardStyle: React.CSSProperties = { minWidth: 0, minHeight: HUDDLE_TEXT_BOX_ROW_HEIGHT, height: HUDDLE_TEXT_BOX_ROW_HEIGHT, display: "grid", gridTemplateRows: `38px ${HUDDLE_TEXT_BOX_BODY_HEIGHT}px`, overflow: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, rgba(255,255,255,.76), rgba(255,255,255,.76)) border-box`, boxShadow: EDITOR_NEU_SHADOW };
+const textBoxCardStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateRows: "38px minmax(0,1fr)", overflow: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, rgba(255,255,255,.76), rgba(255,255,255,.76)) border-box`, boxShadow: EDITOR_NEU_SHADOW };
 const textBoxHeaderStyle: React.CSSProperties = { minWidth: 0, height: 38, display: "grid", gridTemplateColumns: "minmax(220px,1fr) auto auto", alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box", borderBottom: "1px solid rgba(15,118,110,.22)", background: "linear-gradient(90deg, rgba(255,241,242,.62), rgba(236,253,245,.42) 52%, rgba(239,246,255,.66))" };
 const saveMetadataStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 6, overflow: "hidden" };
 const editorHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 };
@@ -608,6 +628,6 @@ const editorBadgeStyle: React.CSSProperties = { minHeight: 26, flex: "0 0 auto",
 const activeEditorBadgeStyle: React.CSSProperties = { ...editorBadgeStyle, border: "1px solid transparent", background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` };
 const chatToggleButtonStyle: React.CSSProperties = { minHeight: 26, borderRadius: 8, color: "#0f766e", display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", padding: "0 7px", font: "inherit", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW };
 const textBoxBodyStyle: React.CSSProperties = { minWidth: 0, minHeight: 280, display: "grid", overflowX: "auto", overflowY: "hidden" };
-const editorFrameStyle: React.CSSProperties = { minWidth: 300, minHeight: HUDDLE_TEXT_BOX_BODY_HEIGHT, height: HUDDLE_TEXT_BOX_BODY_HEIGHT, overflow: "hidden", background: "rgba(255,255,255,.72)" };
-const chatFrameStyle: React.CSSProperties = { minWidth: 280, minHeight: HUDDLE_TEXT_BOX_BODY_HEIGHT, height: HUDDLE_TEXT_BOX_BODY_HEIGHT, overflow: "hidden", borderLeft: "1px solid rgba(148,163,184,.18)" };
+const editorFrameStyle: React.CSSProperties = { minWidth: 300, overflow: "hidden", background: "rgba(255,255,255,.72)" };
+const chatFrameStyle: React.CSSProperties = { minWidth: 280, overflow: "hidden", borderLeft: "1px solid rgba(148,163,184,.18)" };
 const emptyStyle: React.CSSProperties = { gridColumn: "2", minHeight: 80, display: "grid", placeItems: "center", color: "#64748b", fontSize: 12, fontWeight: 700, padding: 16 };

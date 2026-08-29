@@ -251,7 +251,8 @@ func (r *PostgresRepo) postgresMyWorkNodes(ctx context.Context, query MyWorkQuer
 )
 ` + myWorkSubjectRACIWinnerCTEs("node_raci_targets", "node_raci") + myWorkViewerPermissionCTE + `
 , node_candidates as (
-  select node.company_id,node.node_id,node.name,node.priority,node.due_date,node.created_timestamp
+  select node.company_id,node.node_id,node.name,node.priority,node.due_date,
+         coalesce(node.completion_transition_timestamp,node.created_timestamp) as completed_timestamp
   from node_raci_winners winner
   join nodes node on node.company_id=$1::uuid and node.node_id=winner.resource_id
   left join lateral (
@@ -281,38 +282,9 @@ func (r *PostgresRepo) postgresMyWorkNodes(ctx context.Context, query MyWorkQuer
   from node_candidates candidate
   join node_access access
     on access.resource_type='node' and access.resource_id=candidate.node_id and access.allowed
-), visible_node_snapshots as (
-  select event.payload #>> '{node,node_id}' as node_id,
-         event.sequence,
-         event.created_timestamp,
-         lower(btrim(coalesce(event.payload #>> '{node,status}',''))) as status
-  from visible_nodes visible
-  join domain_events event
-    on event.company_id=visible.company_id
-   and event.stream_type='workspace'
-   and event.stream_id=visible.company_id::text
-   and event.event_type in ('node_created','node_updated')
-   and event.payload #>> '{node,node_id}'=visible.node_id::text
-  where $12::boolean and jsonb_typeof(event.payload -> 'node')='object'
-), sequenced_node_snapshots as (
-  select snapshot.*,
-         lag(snapshot.status) over (partition by snapshot.node_id order by snapshot.sequence) as previous_status
-  from visible_node_snapshots snapshot
-), latest_node_completions as (
-  select distinct on (snapshot.node_id) snapshot.node_id,snapshot.created_timestamp
-  from sequenced_node_snapshots snapshot
-  where snapshot.status in ('done','complete','completed')
-    and snapshot.previous_status is not null
-    and snapshot.previous_status not in ('done','complete','completed')
-  order by snapshot.node_id,snapshot.sequence desc
-), history_nodes as (
-  select visible.*,
-         coalesce(completion.created_timestamp,visible.created_timestamp) as completed_timestamp
-  from visible_nodes visible
-  left join latest_node_completions completion on completion.node_id=visible.node_id::text
 ), paged_nodes as (
   select *
-  from history_nodes node
+  from visible_nodes node
   where $6::boolean is not null and $7::integer is not null and $8::boolean is not null
     and $9::text is not null and $10::uuid is not null
     and %s
@@ -430,12 +402,30 @@ func (r *PostgresRepo) postgresMyWorkProcesses(ctx context.Context, query MyWork
   from process_candidates candidate
   join process_access access
     on access.resource_type='logic_gate' and access.resource_id=candidate.logic_gate_id and access.allowed
+), visible_process_page as (
+  select logic_gate_id,header
+  from visible_processes
+  where not $5::boolean or (lower(header) collate "C",logic_gate_id)>($6::text collate "C",$7::uuid)
+  order by lower(header) collate "C",logic_gate_id
+  limit $8
+), process_counts as (
+  select
+    page.logic_gate_id,
+    count(*) filter (where projection.status_rank=0)::integer as request_count,
+    count(*) filter (where projection.status_rank=2)::integer as pending_count,
+    count(*) filter (where projection.status_rank=3)::integer as in_progress_count,
+    count(*) filter (where projection.status_rank=4)::integer as review_count
+  from visible_process_page page
+  left join kanban_board_projection projection
+    on projection.company_id=$1::uuid and projection.logic_gate_id=page.logic_gate_id
+  group by page.logic_gate_id
 )
-select logic_gate_id::text,header,lower(header)
-from visible_processes
-where not $5::boolean or (lower(header) collate "C",logic_gate_id)>($6::text collate "C",$7::uuid)
-order by lower(header) collate "C",logic_gate_id
-limit $8`
+select page.logic_gate_id::text,page.header,lower(page.header),
+       coalesce(counts.request_count,0),coalesce(counts.pending_count,0),
+       coalesce(counts.in_progress_count,0),coalesce(counts.review_count,0)
+from visible_process_page page
+left join process_counts counts on counts.logic_gate_id=page.logic_gate_id
+order by lower(page.header) collate "C",page.logic_gate_id`
 	rows, err := r.db.QueryContext(ctx, querySQL, query.CompanyID, query.UserID, query.Role, query.ViewerUserID, query.Cursor != "", cursor.Name, myWorkCursorUUID(cursor.ResourceID), query.Limit+1)
 	if err != nil {
 		return domain.MyWorkProcessPage{}, err
@@ -448,7 +438,15 @@ limit $8`
 	resultRows := make([]processRow, 0, query.Limit+1)
 	for rows.Next() {
 		var row processRow
-		if err := rows.Scan(&row.item.LogicGateID, &row.item.Name, &row.sortKey); err != nil {
+		if err := rows.Scan(
+			&row.item.LogicGateID,
+			&row.item.Name,
+			&row.sortKey,
+			&row.item.StatusCounts.Request,
+			&row.item.StatusCounts.Pending,
+			&row.item.StatusCounts.InProgress,
+			&row.item.StatusCounts.Review,
+		); err != nil {
 			return domain.MyWorkProcessPage{}, err
 		}
 		resultRows = append(resultRows, row)

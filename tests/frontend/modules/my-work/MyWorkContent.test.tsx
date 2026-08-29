@@ -3,8 +3,19 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import type { MyWorkResponse } from "../../../../frontend/src/modules/my-work/myWorkApi.js";
+import { getQDBusinessDate } from "../../../../frontend/src/modules/logic-gates/qdRatingsApi.js";
 
 type Restore = () => void;
+
+const businessDateKey = getQDBusinessDate().dateKey;
+
+function dateKeyAfter(days: number): string {
+  const [year, month, day] = businessDateKey.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return date.toISOString().slice(0, 10);
+}
+
+const emptyProcessStatusCounts = { request: 0, pending: 0, in_progress: 0, review: 0 };
 
 function installGlobal(name: string, value: unknown, restores: Restore[]) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -38,8 +49,8 @@ function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
     user_id: "viewer-1",
     action_items: {
       items: [
-        { entity_id: "action-red", name: "Red Action", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red" },
-        { entity_id: "action-yellow", name: "Yellow Action", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow" },
+        { entity_id: "action-red", name: "Red Action", color: "red", completion_due_date: dateKeyAfter(0), completion_due_date_field_id: "field-red" },
+        { entity_id: "action-yellow", name: "Yellow Action", color: "yellow", completion_due_date: dateKeyAfter(1), completion_due_date_field_id: "field-yellow" },
       ],
       next_cursor: "actions-old-cursor",
       has_more: true,
@@ -50,7 +61,7 @@ function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
           node_id: "node-context",
           name: "Context Node",
           priority: 1,
-          due_date: "2026-09-03",
+          due_date: dateKeyAfter(3),
           process: { logic_gate_id: "process-inline", name: "Visible Process" },
           project: { project_id: "project-inline", name: "Visible Project" },
         },
@@ -61,7 +72,11 @@ function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
     },
     processes: {
       role: "responsible",
-      items: [{ logic_gate_id: "process-responsible", name: "Responsible Process" }],
+      items: [{
+        logic_gate_id: "process-responsible",
+        name: "Responsible Process",
+        status_counts: { request: 12, pending: 3, in_progress: 7, review: 2 },
+      }],
       next_cursor: "processes-page-2",
       has_more: true,
     },
@@ -87,6 +102,16 @@ function setElementSize(element: HTMLElement, { clientWidth, scrollWidth, client
   if (scrollWidth !== undefined) Object.defineProperty(element, "scrollWidth", { configurable: true, value: scrollWidth });
   if (clientHeight !== undefined) Object.defineProperty(element, "clientHeight", { configurable: true, value: clientHeight });
 }
+
+test("My Work due-date labels cover the first four Los Angeles date offsets only", async () => {
+  const { myWorkRelativeDueDateLabel } = await import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx");
+  assert.equal(myWorkRelativeDueDateLabel(dateKeyAfter(0), businessDateKey), "Due Today");
+  assert.equal(myWorkRelativeDueDateLabel(dateKeyAfter(1), businessDateKey), "Due Tomorrow");
+  assert.equal(myWorkRelativeDueDateLabel(dateKeyAfter(2), businessDateKey), "Due in two days");
+  assert.equal(myWorkRelativeDueDateLabel(dateKeyAfter(3), businessDateKey), "Due in three days");
+  assert.equal(myWorkRelativeDueDateLabel(dateKeyAfter(4), businessDateKey), "");
+  assert.equal(myWorkRelativeDueDateLabel(dateKeyAfter(-1), businessDateKey), "");
+});
 
 test("My Work keeps sections isolated, removes stale role rows, and opens exact independent targets", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
@@ -141,7 +166,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
           action_items: undefined,
           nodes: undefined,
           projects: undefined,
-          processes: { role: "responsible", items: [{ logic_gate_id: "process-page-2", name: "Second Process" }], has_more: false },
+          processes: { role: "responsible", items: [{ logic_gate_id: "process-page-2", name: "Second Process", status_counts: emptyProcessStatusCounts }], has_more: false },
         }) as T);
       }
       if (section === "projects" && url.searchParams.get("cursor")) {
@@ -201,8 +226,33 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.deepEqual(historyButtons.map((button) => button.getAttribute("aria-pressed")), ["false", "false"]);
     assert.equal(container.querySelectorAll("[data-my-work-section-icon]").length, 4, "every major section has its exact resource icon");
     assert.equal(container.querySelectorAll('[data-my-work-group-field="completion_due_date"], [data-my-work-group-field="due_date"]').length, 0, "date ordering never renders a date group header");
-    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Red Action"]')?.value, "9/1/2026");
-    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Context Node"]')?.value, "9/3/2026");
+    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Red Action"]')?.value, "Due Today");
+    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Yellow Action"]')?.value, "Due Tomorrow");
+    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Context Node"]')?.value, "Due in three days");
+    assert.equal(container.querySelectorAll('[data-my-work-due-date="true"] button[aria-haspopup="dialog"]').length, 4, "every relative or regular due-date form keeps its calendar control");
+    const relativeCalendarButton = container.querySelector<HTMLButtonElement>('[data-my-work-row="action-item"][data-my-work-action-item-color="red"] [data-my-work-due-date="true"] button[aria-haspopup="dialog"]');
+    assert.ok(relativeCalendarButton);
+    await act(async () => {
+      relativeCalendarButton.click();
+      await Promise.resolve();
+    });
+    assert.ok(dom.window.document.querySelector('[data-editor-calendar-popover="Due Date for Red Action"]'), "a relative label keeps its calendar clickable");
+    await act(async () => {
+      relativeCalendarButton.click();
+      await Promise.resolve();
+    });
+    const myWorkPage = container.querySelector<HTMLElement>('[data-my-work-page="true"]');
+    assert.equal(myWorkPage?.style.zoom, "0.9", "one page-level scale matches the 90% reference");
+    assert.equal(myWorkPage?.style.width, `${100 / 0.9}%`, "the scaled page still fills the complete workspace width");
+
+    const processCounts = container.querySelector<HTMLElement>('[data-my-work-target="process"] [data-my-work-process-status-counts="true"]');
+    assert.ok(processCounts);
+    assert.equal(processCounts.style.gridTemplateColumns, "repeat(4, 22px)", "every Process row reserves the same four aligned columns");
+    assert.equal(processCounts.querySelectorAll("[data-my-work-process-status-slot]").length, 4);
+    assert.deepEqual(
+      Array.from(processCounts.querySelectorAll<HTMLElement>("[data-my-work-process-status-count]")).map((count) => [count.dataset.myWorkProcessStatus, count.dataset.myWorkProcessStatusCount]),
+      [["request", "12"], ["pending", "3"], ["inProgress", "7"], ["review", "2"]],
+    );
     assert.doesNotMatch(container.textContent ?? "", /\bPrevious\b|\bNext\b|Page \d/, "cursor pages are never exposed as page controls");
 
     const redActionRow = container.querySelector<HTMLElement>('[data-my-work-target="action-item"][data-my-work-action-item-color="red"]');
@@ -448,7 +498,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
         action_items: undefined,
         nodes: undefined,
         projects: undefined,
-        processes: { role: "accountable", items: [{ logic_gate_id: "process-responsible", name: "Stale Accountable" }], has_more: false },
+        processes: { role: "accountable", items: [{ logic_gate_id: "process-responsible", name: "Stale Accountable", status_counts: emptyProcessStatusCounts }], has_more: false },
       }));
       await Promise.resolve();
     });
@@ -458,7 +508,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
         action_items: undefined,
         nodes: undefined,
         projects: undefined,
-        processes: { role: "consulted", items: [{ logic_gate_id: "process-responsible", name: "Consulted Process" }], has_more: false },
+        processes: { role: "consulted", items: [{ logic_gate_id: "process-responsible", name: "Consulted Process", status_counts: emptyProcessStatusCounts }], has_more: false },
       }));
       await Promise.resolve();
     });
@@ -639,6 +689,7 @@ test("My Work toggles completed History in place, refreshes Action Item edits, a
     );
     const actionHistoryURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
     assert.equal(actionHistoryURL.searchParams.get("history"), "true");
+    assert.equal(actionHistoryURL.searchParams.get("limit"), "12");
     assert.equal(actionHistoryURL.searchParams.has("grouping"), false);
     await act(async () => {
       actionHistory.click();
@@ -651,6 +702,9 @@ test("My Work toggles completed History in place, refreshes Action Item edits, a
       nodeHistoryButton.click();
       await Promise.resolve();
     });
+    const nodeHistoryURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
+    assert.equal(nodeHistoryURL.searchParams.get("history"), "true");
+    assert.equal(nodeHistoryURL.searchParams.get("limit"), "12");
     assert.deepEqual(
       Array.from(nodeSection.querySelectorAll<HTMLElement>('[data-my-work-target="node"]')).map((row) => row.textContent?.trim()),
       ["Newest completed Node", "Older completed Node"],
@@ -791,6 +845,7 @@ test("My Work windows a thousand rows while keeping focused and late exact resou
     const processes = Array.from({ length: 1_000 }, (_, index) => ({
       logic_gate_id: `process-${index}`,
       name: `Process ${index}`,
+      status_counts: emptyProcessStatusCounts,
     }));
     const requestJSON = <T,>(_path: string, _init?: RequestInit): Promise<T> => Promise.resolve(response({
       action_items: { items: [], has_more: false },
@@ -875,7 +930,7 @@ test("My Work reloads the same resource ID when the subject changes", async () =
         nodes: { items: [], has_more: false },
         processes: {
           role: "responsible",
-          items: [{ logic_gate_id: "shared-process", name: subjectLabel }],
+          items: [{ logic_gate_id: "shared-process", name: subjectLabel, status_counts: emptyProcessStatusCounts }],
           has_more: false,
         },
         projects: { items: [], has_more: false },

@@ -4841,6 +4841,7 @@ CREATE TABLE public.nodes (
     due_date date,
     priority smallint,
     status text,
+    completion_transition_timestamp timestamp with time zone,
     default_access text DEFAULT 'edit'::text NOT NULL,
     CONSTRAINT nodes_default_access_chk CHECK ((default_access = ANY (ARRAY['edit'::text, 'no_access'::text]))),
     CONSTRAINT nodes_priority_chk CHECK (((priority IS NULL) OR ((priority >= 1) AND (priority <= 5))))
@@ -7150,6 +7151,13 @@ CREATE INDEX idx_node_timeline_verification_recipient_user ON public.node_timeli
 --
 
 CREATE INDEX idx_nodes_name_trgm ON public.nodes USING gin (lower(name) public.gin_trgm_ops);
+
+
+--
+-- Name: idx_nodes_completion_transition; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_nodes_completion_transition ON public.nodes USING btree (company_id, completion_transition_timestamp DESC, node_id) WHERE (completion_transition_timestamp IS NOT NULL);
 
 
 --

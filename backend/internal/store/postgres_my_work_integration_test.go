@@ -2,7 +2,10 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -47,47 +50,87 @@ func TestPostgresMyWorkNodeHistoryUsesLatestDoneTransitionNotLaterDoneUpdate(t *
 			t.Fatal(err)
 		}
 	}
-	setEventTime := func(result LogicGateNodeAssignmentResult, timestamp time.Time) {
+	nodeEventTime := func(result LogicGateNodeAssignmentResult) time.Time {
 		t.Helper()
 		for _, event := range result.Events {
-			if event.Type != "node_updated" {
-				continue
+			if event.Type == "node_updated" {
+				return event.CreatedTimestamp
 			}
-			if _, err := db.Exec(`update domain_events set created_timestamp=$3 where company_id=$1::uuid and event_id=$2::uuid`, company.CompanyID, event.EventID, timestamp); err != nil {
-				t.Fatal(err)
+		}
+		t.Fatal("assignment result did not include a Node snapshot event")
+		return time.Time{}
+	}
+	assertTransition := func(nodeID string, want *time.Time) {
+		t.Helper()
+		var got sql.NullTime
+		if err := db.QueryRow(`select completion_transition_timestamp from nodes where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, nodeID).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if want == nil {
+			if got.Valid {
+				t.Fatalf("Node %s completion transition = %s, want null", nodeID, got.Time)
 			}
 			return
 		}
-		t.Fatal("assignment result did not include a Node snapshot event")
+		if !got.Valid || !got.Time.Equal(*want) {
+			t.Fatalf("Node %s completion transition = %v, want %s", nodeID, got, *want)
+		}
 	}
 
 	older, err := repo.CreateNode(company.CompanyID, "Older completion")
 	if err != nil {
 		t.Fatal(err)
 	}
+	makeResponsible(older.NodeID)
 	assign(older.NodeID, "in progress", 1)
 	firstOlderDone := assign(older.NodeID, "done", 1)
+	firstOlderDoneAt := nodeEventTime(firstOlderDone)
+	assertTransition(older.NodeID, &firstOlderDoneAt)
+	staleCompletionInput := nodeUpdatedWorkspaceEventInput(firstOlderDone.Node)
+	staleCompletionInput.IdempotencyKey = "postgres-my-work-stale-completion"
+	if _, err := repo.AppendDomainEvent(staleCompletionInput); err != nil {
+		t.Fatal(err)
+	}
+	laterFirstDoneUpdate := assign(older.NodeID, "done", 99)
+	nodeEventTime(laterFirstDoneUpdate)
+	assertTransition(older.NodeID, &firstOlderDoneAt)
 	assign(older.NodeID, "in progress", 1)
+	assertTransition(older.NodeID, nil)
+	if _, err := repo.AppendDomainEvent(staleCompletionInput); err != nil {
+		t.Fatal(err)
+	}
+	assertTransition(older.NodeID, nil)
+	reopenedHistory, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, History: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reopenedHistory.Nodes == nil || len(reopenedHistory.Nodes.Items) != 0 {
+		t.Fatalf("reopened Node remained in History: %+v", reopenedHistory.Nodes)
+	}
 	latestOlderDone := assign(older.NodeID, "done", 1)
-	makeResponsible(older.NodeID)
+	olderDoneAt := nodeEventTime(latestOlderDone)
+	assertTransition(older.NodeID, &olderDoneAt)
 
 	newer, err := repo.CreateNode(company.CompanyID, "Newer completion")
 	if err != nil {
 		t.Fatal(err)
 	}
+	makeResponsible(newer.NodeID)
 	assign(newer.NodeID, "in progress", 1)
 	newerDone := assign(newer.NodeID, "done", 1)
-	makeResponsible(newer.NodeID)
+	newerDoneAt := nodeEventTime(newerDone)
+	assertTransition(newer.NodeID, &newerDoneAt)
 
-	laterOlderUpdate := assign(older.NodeID, "done", 99)
-	firstOlderDoneAt := time.Date(2026, time.August, 26, 9, 0, 0, 0, time.UTC)
-	olderDoneAt := time.Date(2026, time.August, 27, 10, 0, 0, 0, time.UTC)
-	newerDoneAt := time.Date(2026, time.August, 28, 11, 0, 0, 0, time.UTC)
-	laterOlderUpdateAt := time.Date(2026, time.August, 29, 12, 0, 0, 0, time.UTC)
-	setEventTime(firstOlderDone, firstOlderDoneAt)
-	setEventTime(latestOlderDone, olderDoneAt)
-	setEventTime(newerDone, newerDoneAt)
-	setEventTime(laterOlderUpdate, laterOlderUpdateAt)
+	fixedOlderDoneAt := newerDoneAt.Add(-time.Hour)
+	if _, err := db.Exec(`update nodes set completion_transition_timestamp=$3 where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, older.NodeID, fixedOlderDoneAt); err != nil {
+		t.Fatal(err)
+	}
+	assertTransition(older.NodeID, &fixedOlderDoneAt)
+	laterOlderUpdate := assign(older.NodeID, "done", 100)
+	nodeEventTime(laterOlderUpdate)
+	assertTransition(older.NodeID, &fixedOlderDoneAt)
 
 	history, err := repo.GetMyWork(context.Background(), MyWorkQuery{
 		CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, History: true,
@@ -98,9 +141,98 @@ func TestPostgresMyWorkNodeHistoryUsesLatestDoneTransitionNotLaterDoneUpdate(t *
 	if history.Nodes == nil || len(history.Nodes.Items) != 2 || history.Nodes.Items[0].NodeID != newer.NodeID || history.Nodes.Items[1].NodeID != older.NodeID {
 		t.Fatalf("Node History order = %+v, want newer true completion before later-updated older completion", history.Nodes)
 	}
-	if history.Nodes.Items[0].CompletedTimestamp == nil || !history.Nodes.Items[0].CompletedTimestamp.Equal(newerDoneAt) || history.Nodes.Items[1].CompletedTimestamp == nil || !history.Nodes.Items[1].CompletedTimestamp.Equal(olderDoneAt) {
-		t.Fatalf("Node History completion timestamps = %+v, want %s then %s", history.Nodes.Items, newerDoneAt, olderDoneAt)
+	if history.Nodes.Items[0].CompletedTimestamp == nil || !history.Nodes.Items[0].CompletedTimestamp.Equal(newerDoneAt) || history.Nodes.Items[1].CompletedTimestamp == nil || !history.Nodes.Items[1].CompletedTimestamp.Equal(fixedOlderDoneAt) {
+		t.Fatalf("Node History completion timestamps = %+v, want %s then %s", history.Nodes.Items, newerDoneAt, fixedOlderDoneAt)
 	}
+}
+
+func TestPostgresMyWorkNodeCompletionTransitionMigrationBackfillsProjection(t *testing.T) {
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Postgres My Work completion migration")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate, err := repo.CreateLogicGate(company.CompanyID, "Completion migration process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(company.CompanyID, "Completion migration Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assign := func(status string) LogicGateNodeAssignmentResult {
+		t.Helper()
+		result, assignErr := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+			CompanyID: company.CompanyID, LogicGateID: gate.LogicGateID, NodeID: node.NodeID, Status: status,
+		})
+		if assignErr != nil {
+			t.Fatal(assignErr)
+		}
+		return result
+	}
+	nodeEventTime := func(result LogicGateNodeAssignmentResult) time.Time {
+		t.Helper()
+		for _, event := range result.Events {
+			if event.Type == "node_updated" {
+				return event.CreatedTimestamp
+			}
+		}
+		t.Fatal("assignment result did not include a Node snapshot event")
+		return time.Time{}
+	}
+	assertTransition := func(want *time.Time) {
+		t.Helper()
+		var got sql.NullTime
+		if scanErr := db.QueryRow(`select completion_transition_timestamp from nodes where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, node.NodeID).Scan(&got); scanErr != nil {
+			t.Fatal(scanErr)
+		}
+		if want == nil {
+			if got.Valid {
+				t.Fatalf("completion transition = %s, want null", got.Time)
+			}
+			return
+		}
+		if !got.Valid || !got.Time.Equal(*want) {
+			t.Fatalf("completion transition = %v, want %s", got, *want)
+		}
+	}
+
+	assign("in progress")
+	doneAt := nodeEventTime(assign("done"))
+	if _, err := db.Exec(`update nodes set completion_transition_timestamp=null where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, node.NodeID); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260829_my_work_node_completion_transition.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	assertTransition(&doneAt)
+
+	var beforeReplayXID, afterReplayXID string
+	if err := db.QueryRow(`select xmin::text from nodes where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, node.NodeID).Scan(&beforeReplayXID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`select xmin::text from nodes where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, node.NodeID).Scan(&afterReplayXID); err != nil {
+		t.Fatal(err)
+	}
+	if afterReplayXID != beforeReplayXID {
+		t.Fatalf("idempotent backfill rewrote the Node row: xmin %s -> %s", beforeReplayXID, afterReplayXID)
+	}
+
+	assign("in progress")
+	if _, err := db.Exec(`update nodes set completion_transition_timestamp=$3 where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, node.NodeID, doneAt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatal(err)
+	}
+	assertTransition(nil)
 }
 
 func TestPostgresMyWorkAndStaleRACIQueriesExecuteAgainstCanonicalSchema(t *testing.T) {
@@ -197,6 +329,9 @@ where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$4::uu
 	}
 	if response.Processes == nil || len(response.Processes.Items) != 1 || response.Processes.Items[0].LogicGateID != gate.LogicGateID {
 		t.Fatalf("Postgres processes = %+v", response.Processes)
+	}
+	if counts := response.Processes.Items[0].StatusCounts; counts != (domain.RACITabStatusCounts{InProgress: 1}) {
+		t.Fatalf("Postgres process counts = %+v, want only the active In Progress Node", counts)
 	}
 	if response.Projects == nil || len(response.Projects.Items) != 1 || response.Projects.Items[0].ProjectID != projectResult.Project.ProjectID {
 		t.Fatalf("Postgres projects = %+v", response.Projects)

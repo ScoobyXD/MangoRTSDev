@@ -128,13 +128,13 @@ func (r *PostgresRepo) AppendDomainEvents(inputs []DomainEventInput) ([]domain.D
 	return events, nil
 }
 
-func (r *PostgresRepo) appendDomainEventRecordTx(ctx context.Context, tx *sql.Tx, input DomainEventInput) (domain.DomainEvent, error) {
+func (r *PostgresRepo) appendDomainEventRecordTx(ctx context.Context, tx *sql.Tx, input DomainEventInput) (domain.DomainEvent, bool, error) {
 	defer observeTiming(ctx, "repo.appendDomainEventTx.total")()
 	stop := observeTiming(ctx, "repo.appendDomainEventTx.normalize_payload")
 	input, payloadBytes, err := normalizePostgresDomainEventInput(input)
 	stop()
 	if err != nil {
-		return domain.DomainEvent{}, err
+		return domain.DomainEvent{}, false, err
 	}
 
 	stop = observeTiming(ctx, "repo.appendDomainEventTx.advisory_lock")
@@ -143,12 +143,13 @@ func (r *PostgresRepo) appendDomainEventRecordTx(ctx context.Context, tx *sql.Tx
 		input.CompanyID, input.StreamType, input.StreamID,
 	); err != nil {
 		stop()
-		return domain.DomainEvent{}, err
+		return domain.DomainEvent{}, false, err
 	}
 	stop()
 
 	stop = observeTiming(ctx, "repo.appendDomainEventTx.insert")
 	defer stop()
+	eventID := newUUIDv7String()
 	item, err := scanDomainEvent(tx.QueryRowContext(ctx, `
 with next_sequence as (
   select coalesce(max(sequence), 0) + 1 as sequence
@@ -166,18 +167,23 @@ from next_sequence
 on conflict (company_id, idempotency_key) where btrim(idempotency_key) <> ''
 do update set idempotency_key=domain_events.idempotency_key
 returning `+domainEventSelectColumns,
-		newUUIDv7String(), input.CompanyID, input.ActorUserID, input.StreamType, input.StreamID, input.Type, input.IdempotencyKey, string(payloadBytes),
+		eventID, input.CompanyID, input.ActorUserID, input.StreamType, input.StreamID, input.Type, input.IdempotencyKey, string(payloadBytes),
 	))
 	if err != nil {
-		return domain.DomainEvent{}, err
+		return domain.DomainEvent{}, false, err
 	}
-	return item, nil
+	return item, item.EventID == eventID, nil
 }
 
 func (r *PostgresRepo) appendDomainEventTx(ctx context.Context, tx *sql.Tx, input DomainEventInput) (domain.DomainEvent, error) {
-	item, err := r.appendDomainEventRecordTx(ctx, tx, input)
+	item, inserted, err := r.appendDomainEventRecordTx(ctx, tx, input)
 	if err != nil {
 		return domain.DomainEvent{}, err
+	}
+	if inserted {
+		if err := syncPostgresNodeCompletionTransitionsTx(ctx, tx, []domain.DomainEvent{item}); err != nil {
+			return domain.DomainEvent{}, err
+		}
 	}
 	if err := r.enqueueKanbanRealtimeForDomainEventTx(ctx, tx, item); err != nil {
 		return domain.DomainEvent{}, err
@@ -204,12 +210,19 @@ func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inp
 	}
 	if len(inputs) == 1 || domainEventInputsRequireSequentialAppend(inputs) {
 		events := make([]domain.DomainEvent, 0, len(inputs))
+		insertedEvents := make([]domain.DomainEvent, 0, len(inputs))
 		for _, input := range inputs {
-			event, err := r.appendDomainEventRecordTx(ctx, tx, input)
+			event, inserted, err := r.appendDomainEventRecordTx(ctx, tx, input)
 			if err != nil {
 				return nil, err
 			}
 			events = append(events, event)
+			if inserted {
+				insertedEvents = append(insertedEvents, event)
+			}
+		}
+		if err := syncPostgresNodeCompletionTransitionsTx(ctx, tx, insertedEvents); err != nil {
+			return nil, err
 		}
 		if err := r.enqueueKanbanRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
 			return nil, err
@@ -366,6 +379,9 @@ order by sequence asc, event_id asc`, args...)
 	}
 	if len(events) != len(items) {
 		return nil, fmt.Errorf("append domain events batch inserted %d events, want %d", len(events), len(items))
+	}
+	if err := syncPostgresNodeCompletionTransitionsTx(ctx, tx, events); err != nil {
+		return nil, err
 	}
 	return events, nil
 }

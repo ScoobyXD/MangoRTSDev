@@ -50,6 +50,12 @@ export type MyWorkNode = {
 export type MyWorkProcess = {
   logic_gate_id: string;
   name: string;
+  status_counts: {
+    request: number;
+    pending: number;
+    in_progress: number;
+    review: number;
+  };
 };
 
 export type MyWorkProject = {
@@ -82,6 +88,7 @@ export type FetchMyWorkInput = {
 };
 
 export const MY_WORK_PAGE_LIMIT = 40;
+export const MY_WORK_HISTORY_PAGE_LIMIT = 12;
 
 export async function fetchMyWork(
   requestJSON: BoundRequestJSON,

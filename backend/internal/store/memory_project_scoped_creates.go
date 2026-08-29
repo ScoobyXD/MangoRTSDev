@@ -26,6 +26,7 @@ type memoryProjectScopedCreateSnapshot struct {
 	RACIMatrixProjectionRows      map[string]memoryRACIMatrixProjectionRow
 	effectiveAccess               map[string]domain.EffectiveResourceAccess
 	domainEvents                  map[string]domain.DomainEvent
+	nodeCompletionTransitions     map[string]time.Time
 	workspaceReadVersions         map[string]int64
 }
 
@@ -49,6 +50,7 @@ func (r *MemoryRepo) snapshotProjectScopedCreateLocked() memoryProjectScopedCrea
 		RACIMatrixProjectionRows:      cloneMemoryMap(r.RACIMatrixProjectionRows),
 		effectiveAccess:               cloneMemoryMap(r.effectiveAccess),
 		domainEvents:                  cloneMemoryMap(r.domainEvents),
+		nodeCompletionTransitions:     cloneMemoryMap(r.nodeCompletionTransitions),
 		workspaceReadVersions:         cloneMemoryMap(r.workspaceReadVersions),
 	}
 }
@@ -72,6 +74,7 @@ func (r *MemoryRepo) restoreProjectScopedCreateLocked(snapshot memoryProjectScop
 	r.RACIMatrixProjectionRows = snapshot.RACIMatrixProjectionRows
 	r.effectiveAccess = snapshot.effectiveAccess
 	r.domainEvents = snapshot.domainEvents
+	r.nodeCompletionTransitions = snapshot.nodeCompletionTransitions
 	r.workspaceReadVersions = snapshot.workspaceReadVersions
 }
 

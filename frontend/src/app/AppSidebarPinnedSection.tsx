@@ -695,7 +695,7 @@ function folderLegendStyle(hasCounts: boolean): React.CSSProperties {
     marginLeft: 6,
     padding: "0 2px",
     display: "inline-grid",
-    gridTemplateColumns: hasCounts ? "14px minmax(0, 1fr) 94px" : "14px minmax(0, 1fr)",
+    gridTemplateColumns: hasCounts ? "14px minmax(0, 1fr) 74px" : "14px minmax(0, 1fr)",
     alignItems: "center",
     gap: 2,
     color: "#111827",
@@ -716,14 +716,14 @@ const pinRowStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: 
 const rowIconStyle: React.CSSProperties = { width: 28, height: 20, display: "grid", placeItems: "center", color: "#111" };
 const pinButtonStyle: React.CSSProperties = { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "28px minmax(0,1fr)", alignItems: "center", gap: 4, border: 0, borderRadius: 7, background: "transparent", color: "#111", cursor: "pointer", font: "inherit", fontSize: 11.5, fontWeight: 600, padding: "0 5px", textAlign: "left" };
 const rowTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-const statusCountsStyle: React.CSSProperties = { width: 94, display: "grid", gridTemplateColumns: "repeat(4, 22px)", alignItems: "center", justifyContent: "end", gap: 2, minWidth: 94, whiteSpace: "nowrap" };
-const statusCountSlotStyle: React.CSSProperties = { width: 22, height: 22, display: "grid", placeItems: "center" };
-const folderStatusColumnStyle: React.CSSProperties = { width: 94, height: 22, display: "block" };
+const statusCountsStyle: React.CSSProperties = { width: 74, display: "grid", gridTemplateColumns: "repeat(4, 17px)", alignItems: "center", justifyContent: "end", gap: 2, minWidth: 74, whiteSpace: "nowrap" };
+const statusCountSlotStyle: React.CSSProperties = { width: 17, height: 17, display: "grid", placeItems: "center" };
+const folderStatusColumnStyle: React.CSSProperties = { width: 74, height: 17, display: "block" };
 function statusCountStyle(definition: SidebarLogicGateStatusCountDefinition): React.CSSProperties {
   return {
-    width: 22,
-    minWidth: 22,
-    height: 22,
+    width: 17,
+    minWidth: 17,
+    height: 17,
     boxSizing: "border-box",
     display: "inline-grid",
     placeItems: "center",
@@ -734,7 +734,7 @@ function statusCountStyle(definition: SidebarLogicGateStatusCountDefinition): Re
     backgroundImage: definition.gradient,
     color: definition.textColor,
     boxShadow: `0 3px 8px ${definition.glowColor}, inset 0 1px 0 rgba(255,255,255,.68)`,
-    fontSize: 11.5,
+    fontSize: 9.5,
     fontWeight: 850,
     lineHeight: 1,
   };

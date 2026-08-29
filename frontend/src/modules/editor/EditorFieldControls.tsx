@@ -238,6 +238,7 @@ const CalendarIcon: React.FC<{ color: string }> = ({ color }) => (
 type EditorCalendarDateInputProps = {
   id?: string;
   value: string;
+  displayValue?: string;
   ariaLabel: string;
   disabled?: boolean;
   accent?: string;
@@ -257,6 +258,7 @@ type EditorCalendarDateInputProps = {
 export function EditorCalendarDateInput({
   id,
   value,
+  displayValue,
   ariaLabel,
   disabled = false,
   accent = "#0f766e",
@@ -274,6 +276,7 @@ export function EditorCalendarDateInput({
   const containerRef = useRef<HTMLSpanElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = React.useState(false);
+  const [editing, setEditing] = React.useState(false);
   const [visibleMonth, setVisibleMonth] = React.useState(() => calendarMonthForValue(value));
   const popoverID = React.useId();
   const defaultPortalTarget = useAppOverlayPortalTarget(containerRef.current?.ownerDocument);
@@ -299,18 +302,25 @@ export function EditorCalendarDateInput({
     <span ref={containerRef} style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: "100%", ...containerStyle }}>
       <input
         id={id}
-        value={value}
+        value={displayValue && !editing ? displayValue : value}
         disabled={disabled}
         readOnly={disabled}
         inputMode="numeric"
         pattern="(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12][0-9]|3[01])/\d{4}"
         onChange={(event) => { if (!disabled) onChange(event.currentTarget.value); }}
+        onFocus={() => {
+          if (!disabled && displayValue) setEditing(true);
+        }}
         onClick={() => {
           if (disabled || !openOnInputClick) return;
+          if (displayValue) setEditing(true);
           setVisibleMonth(calendarMonthForValue(value));
           setOpen(true);
         }}
-        onBlur={(event) => { if (!disabled) commit(event.currentTarget.value); }}
+        onBlur={(event) => {
+          if (!disabled) commit(event.currentTarget.value);
+          setEditing(false);
+        }}
         onKeyDown={(event) => {
           if (disabled) {
             event.preventDefault();
