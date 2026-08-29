@@ -306,20 +306,28 @@ jobs:
           push_if_missing() {
             local dockerfile="$1"
             local tag="$2"
+            local context="${3:-backend}"
+            local source_revision="${4:-}"
             local image_uri="${ECR_REPOSITORY_URL}:${tag}"
             if aws ecr describe-images --repository-name "$REPOSITORY_NAME" --image-ids "imageTag=${tag}" >/dev/null 2>&1; then
               echo "Image already exists: ${image_uri}"
             else
-              docker build -t "$image_uri" -f "$dockerfile" backend
+              local -a build_args=()
+              if [[ -n "$source_revision" ]]; then
+                build_args+=(--build-arg "MANGORTS_GIT_COMMIT=${source_revision}")
+              fi
+              docker build "${build_args[@]}" -t "$image_uri" -f "$dockerfile" "$context"
               docker push "$image_uri"
             fi
           }
 
           push_if_missing backend/Dockerfile "$GITHUB_SHA"
           push_if_missing backend/Dockerfile.migrations "${GITHUB_SHA}-migrations"
+          push_if_missing backend/Dockerfile.qa-copy "${GITHUB_SHA}-qa-copy" . "$GITHUB_SHA"
           {
             echo "IMAGE_URI=${ECR_REPOSITORY_URL}:${GITHUB_SHA}"
             echo "MIGRATION_IMAGE_URI=${ECR_REPOSITORY_URL}:${GITHUB_SHA}-migrations"
+            echo "QA_COPY_IMAGE_URI=${ECR_REPOSITORY_URL}:${GITHUB_SHA}-qa-copy"
           } >> "$GITHUB_ENV"
 
       - name: Terraform plan
@@ -437,6 +445,7 @@ jobs:
             echo "- Revision: ${GITHUB_SHA}"
             echo "- API image: ${IMAGE_URI}"
             echo "- Migration image: ${MIGRATION_IMAGE_URI}"
+            echo "- Human-triggered one-time copy image: ${QA_COPY_IMAGE_URI}"
             echo "- App: ${APP_URL}"
             echo "- API: ${API_URL}"
             echo "- Nylas callback: ${NYLAS_CALLBACK_URL}"
@@ -453,6 +462,7 @@ jobs:
             echo "- Revision: ${GITHUB_SHA}"
             echo "- API image: ${IMAGE_URI}"
             echo "- Migration image: ${MIGRATION_IMAGE_URI}"
+            echo "- Human-triggered one-time copy image: ${QA_COPY_IMAGE_URI}"
             echo "- API desired count: 0"
             echo "- Email worker: disabled"
             echo "- Database schema confirmation: false"

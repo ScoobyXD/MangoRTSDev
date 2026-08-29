@@ -16,10 +16,22 @@ set local statement_timeout = '30min';
 
 do $guard$
 declare
-  entity_schema_mismatch_count integer;
+  canonical_schema_mismatch_count integer;
 begin
   if not exists (select 1 from public.companies) then
     raise exception 'STOP: QA copy contains no surviving company; do not invent TF_QA_COMPANY_ID';
+  end if;
+
+  if exists (
+    select 1
+    from pg_catalog.pg_trigger trigger_row
+    join pg_catalog.pg_class relation on relation.oid = trigger_row.tgrelid
+    join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace
+    where namespace.nspname = 'public'
+      and not trigger_row.tgisinternal
+      and trigger_row.tgenabled = 'D'
+  ) then
+    raise exception 'STOP: a public user trigger remains disabled after the data restore';
   end if;
 
   if current_setting('server_version_num')::integer < 170000
@@ -48,6 +60,8 @@ begin
      or to_regclass('public.entities') is null
      or to_regclass('public.entity_fields') is null
      or to_regclass('public.entity_relationships') is null
+     or to_regclass('public.huddle_node_textboxes') is null
+     or to_regclass('public.huddle_node_textbox_chats') is null
      or to_regclass('public.action_item_huddle_relationships') is not null
      or to_regclass('public.schema_migrations') is null then
     raise exception 'STOP: required canonical Mango tables are missing';
@@ -79,24 +93,39 @@ begin
       ('entity_fields','created_timestamp'),('entity_fields','updated_timestamp'),
       ('entity_relationships','company_id'),('entity_relationships','entity_id'),
       ('entity_relationships','resource_type'),('entity_relationships','resource_id'),
-      ('entity_relationships','created_timestamp')
+      ('entity_relationships','created_timestamp'),
+      ('huddle_node_textboxes','company_id'),('huddle_node_textboxes','huddle_node_id'),
+      ('huddle_node_textboxes','textbox_id'),('huddle_node_textboxes','created_timestamp'),
+      ('huddle_node_textboxes','updated_timestamp'),('huddle_node_textboxes','deleted_timestamp'),
+      ('huddle_node_textboxes','display_order'),('huddle_node_textboxes','body_json'),
+      ('huddle_node_textboxes','revision'),('huddle_node_textboxes','title'),
+      ('huddle_node_textbox_chats','company_id'),('huddle_node_textbox_chats','chat_id'),
+      ('huddle_node_textbox_chats','huddle_node_id'),('huddle_node_textbox_chats','textbox_id'),
+      ('huddle_node_textbox_chats','parent_chat_id'),('huddle_node_textbox_chats','selection_quote'),
+      ('huddle_node_textbox_chats','selection_start'),('huddle_node_textbox_chats','selection_end'),
+      ('huddle_node_textbox_chats','author_user_id'),('huddle_node_textbox_chats','author_display_name'),
+      ('huddle_node_textbox_chats','message'),('huddle_node_textbox_chats','edited_timestamp'),
+      ('huddle_node_textbox_chats','entity_links'),('huddle_node_textbox_chats','mentioned_user_ids'),
+      ('huddle_node_textbox_chats','mentioned_group_ids'),('huddle_node_textbox_chats','revision'),
+      ('huddle_node_textbox_chats','created_timestamp'),('huddle_node_textbox_chats','updated_timestamp'),
+      ('huddle_node_textbox_chats','deleted_timestamp')
   ), actual(table_name,column_name) as (
     select table_name::text,column_name::text
     from information_schema.columns
     where table_schema='public'
       and table_name in (
         'entity_types','entity_folders','entity_field_types','entities','entity_fields',
-        'entity_relationships'
+        'entity_relationships','huddle_node_textboxes','huddle_node_textbox_chats'
       )
   ), mismatches as (
     (select * from expected except select * from actual)
     union all
     (select * from actual except select * from expected)
   )
-  select count(*) into entity_schema_mismatch_count from mismatches;
+  select count(*) into canonical_schema_mismatch_count from mismatches;
 
-  if entity_schema_mismatch_count <> 0 then
-    raise exception 'STOP: current Entity schema columns do not match the exact unordered canonical sets';
+  if canonical_schema_mismatch_count <> 0 then
+    raise exception 'STOP: current Entity or Huddle workspace schema columns do not match the exact unordered canonical sets';
   end if;
 end
 $guard$;
@@ -149,6 +178,8 @@ begin
     select 1 from public.project_textboxes_history where body_json::text ~ 'mangoAttachmentImage|attachmentId|attachment_id'
     union all
     select 1 from public.huddle_logic_gates where body_json::text ~ 'mangoAttachmentImage|attachmentId|attachment_id'
+    union all
+    select 1 from public.huddle_node_textboxes where body_json::text ~ 'mangoAttachmentImage|attachmentId|attachment_id'
     union all
     select 1 from public.entities where body_json::text ~ 'mangoAttachmentImage|attachmentId|attachment_id'
   ) then
@@ -610,11 +641,15 @@ begin
       union all
       select company_id, 'editor', body_json from public.huddle_logic_gates
       union all
+      select company_id, 'editor', body_json from public.huddle_node_textboxes
+      union all
       select company_id, 'editor', body_json from public.entities
       union all
       select company_id, 'chat', entity_links from public.node_textbox_chats
       union all
       select company_id, 'chat', entity_links from public.project_textbox_chats
+      union all
+      select company_id, 'chat', entity_links from public.huddle_node_textbox_chats
     ), imported_json_walk(company_id, source_kind, object_value) as (
       select company_id, source_kind, payload
       from imported_json_sources

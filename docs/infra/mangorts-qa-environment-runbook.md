@@ -334,9 +334,13 @@ if ($inventoryCommit -cne $releaseCommit) { throw "Dev inventory commit mismatch
 Stop if the export is older than 24 hours, is not PostgreSQL 17.x, or its
 repository fingerprint/commit differs from the release. The Dev catalog hash is
 evidence about the read-only source; it is not the expected QA target hash.
-`qa_dev_copy_preflight.sql` permits only the audited base Entity tables, zero
-Entity rows, no Action Item table, and no 20260827/20260828 ledger rows. If that
-state changes, stop and reassess. Do not run
+`qa_dev_copy_preflight.sql` permits only the audited exact current Entity and
+Huddle Node workspace column sets, rejects obsolete Entity tables, validates
+every current Entity relationship endpoint, and requires the corresponding
+20260827/20260828 Dev ledger rows to remain absent. Current allowed Entity,
+Action Item, relationship, document, and chat rows are source business data;
+their aggregate counts are reported without printing their contents. If the
+schema or relationship shape changes, stop and reassess. Do not run
 `20260825_canonical_schema_reconciliation.sql` on Dev or use it to force a hash;
 the fresh next database is built from the release's canonical migrations.
 
@@ -367,7 +371,51 @@ if ([double]$freeStorageText -lt $requiredFreeBytes) {
 }
 ```
 
-## Phase 3: Create, Sanitize, And Remove The Raw Scratch Database
+## Phase 3: Run The Guarded AWS Copy
+
+The preferred one-time path is the temporary Fargate task built as
+`<release-commit>-qa-copy` by the QA `bootstrap-images` workflow. It has no task
+role or public IP, receives the QA managed password and temporary Dev read-only
+login only through ECS secret injection, keeps both compressed dumps on task
+ephemeral storage, and removes the raw scratch database on exit. It builds and
+verifies the fresh same-commit target before retaining the old QA database under
+a timestamped rollback name and cutting over the stable `mangorts_qa` name.
+The launcher refuses a source above 4 GiB, requires at least 12 GiB of recent QA
+RDS free storage, and repeats the storage and stopped-writer checks immediately
+before launch. During the fresh data restore, only public user triggers are
+temporarily disabled; constraint triggers stay active, and the verifier requires
+every public user trigger to be enabled again before cutover.
+
+The temporary Dev secret must be less than 24 hours old, contain only JSON keys
+`username` and `password`, use the exact prefix
+`mangorts/qa-copy/dev-readonly-temp-`, and have tags `Environment=qa`,
+`Purpose=dev-readonly-source`, and `Temporary=true`. Never put the QA database
+password in that secret; QA continues to use the RDS-managed secret.
+
+An agent may run the launcher's plan-only guard, but QDC2 permits only Jonat to
+pass its execution switches and typed confirmation:
+
+```powershell
+.\scripts\qa_run_data_copy_task.ps1 `
+  -ExpectedGitCommit $releaseCommit `
+  -DevReadOnlySecretArn $devReadOnlySecretArn
+
+# Human operator only:
+.\scripts\qa_run_data_copy_task.ps1 `
+  -ExpectedGitCommit $releaseCommit `
+  -DevReadOnlySecretArn $devReadOnlySecretArn `
+  -Execute -HumanOperatorApproval
+```
+
+The execution path verifies stopped writers and empty QA queues, creates and
+waits for a manual QA snapshot, gets or creates only Jonat's approved QA Cognito
+user, launches exactly one task, monitors its exact logs and exit code, removes
+the temporary IAM permission/task definition, and schedules the temporary Dev
+secret for deletion. It does not create Andy or Rohan because their emails are
+not approved yet. Keep the API stopped until the final task attestation and the
+post-copy checks in Phase 7 pass.
+
+### Manual fallback: create, sanitize, and remove the raw scratch database
 
 Bind every QA client directly to the reviewed Terraform host, port, and user.
 Do not use a service-name alias for writes.
@@ -405,40 +453,24 @@ Assert-QaWritersStopped
 Assert-NativeSuccess "restore into exact QA raw database"
 ```
 
-Run the read-only preflight and one-transaction sanitizer first. Then apply the
-existing reviewed Action Item and Entity relationship migrations in filename
-order only to this exact isolated raw QA database. Dev has no Entity or Action
-Item rows, so this creates only the current required Entity Type and five field
-templates for each copied company; it does not recreate historical Action
-Items. Finally run the read-only verifier:
+Run the read-only preflight, one-transaction sanitizer, and read-only verifier
+against this exact isolated raw database. Do not rerun the Entity, Action Item,
+Entity relationship, Huddle workspace, or canonical reconciliation migrations
+in the raw database: the audited source already has that current DDL, and its
+ledger is deliberately excluded. The fresh next database owns the complete
+repository migration set.
 
 ```powershell
 foreach ($sqlFile in @(
   ".\scripts\qa_dev_copy_preflight.sql",
-  ".\scripts\qa_dev_copy_sanitize.sql"
+  ".\scripts\qa_dev_copy_sanitize.sql",
+  ".\scripts\qa_dev_copy_verify.sql"
 )) {
   & $psql --host $qaHost --port $qaPort --username $qaUser `
     --dbname $rawDatabase --no-password --no-psqlrc `
     --set ON_ERROR_STOP=on --file $sqlFile
   Assert-NativeSuccess "run $sqlFile against exact QA raw database"
 }
-
-Assert-QaWritersStopped
-foreach ($migrationFile in @(
-  ".\backend\db\migrations\20260828_action_items.sql",
-  ".\backend\db\migrations\20260828_entity_relationships.sql",
-  ".\backend\db\migrations\20260828_zz_huddle_logic_gate_action_item_relationships.sql"
-)) {
-  & $psql --host $qaHost --port $qaPort --username $qaUser `
-    --dbname $rawDatabase --no-password --no-psqlrc `
-    --set ON_ERROR_STOP=on --file $migrationFile
-  Assert-NativeSuccess "apply $migrationFile to the exact QA raw database"
-}
-
-& $psql --host $qaHost --port $qaPort --username $qaUser `
-  --dbname $rawDatabase --no-password --no-psqlrc `
-  --set ON_ERROR_STOP=on --file .\scripts\qa_dev_copy_verify.sql
-Assert-NativeSuccess "verify upgraded exact QA raw database"
 ```
 
 Stop on any error or unexpected count. Export data only, excluding the Dev

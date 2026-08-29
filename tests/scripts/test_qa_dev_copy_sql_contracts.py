@@ -12,6 +12,9 @@ PREFLIGHT = ROOT / "scripts" / "qa_dev_copy_preflight.sql"
 SANITIZER = ROOT / "scripts" / "qa_dev_copy_sanitize.sql"
 VERIFY = ROOT / "scripts" / "qa_dev_copy_verify.sql"
 RUNBOOK = ROOT / "docs" / "infra" / "mangorts-qa-environment-runbook.md"
+COPY_DOCKERFILE = ROOT / "backend" / "Dockerfile.qa-copy"
+COPY_ENTRYPOINT = ROOT / "scripts" / "qa_fargate_copy_entrypoint.sh"
+COPY_LAUNCHER = ROOT / "scripts" / "qa_run_data_copy_task.ps1"
 
 ROOT_NAMES = (
     "sidebar huddles private",
@@ -38,6 +41,9 @@ class QADevCopySQLContracts(unittest.TestCase):
         cls.sanitizer = read(SANITIZER)
         cls.verify = read(VERIFY)
         cls.runbook = read(RUNBOOK)
+        cls.copy_dockerfile = read(COPY_DOCKERFILE)
+        cls.copy_entrypoint = read(COPY_ENTRYPOINT)
+        cls.copy_launcher = read(COPY_LAUNCHER)
 
     def test_scripts_are_plain_postgresql_not_psql_templates(self) -> None:
         for path, sql in (
@@ -60,6 +66,64 @@ class QADevCopySQLContracts(unittest.TestCase):
                 self.assertIn("170000", sql)
                 self.assertIn("180000", sql)
 
+    def test_hosted_copy_image_is_exact_revision_postgresql_17_and_non_root(self) -> None:
+        self.assertIn("from postgres:17.11-bookworm", self.copy_dockerfile)
+        self.assertIn("arg mangorts_git_commit", self.copy_dockerfile)
+        self.assertIn("env mangorts_qa_copy_image_commit=$mangorts_git_commit", self.copy_dockerfile)
+        self.assertIn("user postgres", self.copy_dockerfile)
+        self.assertIn("qa_dev_copy_preflight.sql", self.copy_dockerfile)
+        self.assertIn("qa_dev_copy_sanitize.sql", self.copy_dockerfile)
+        self.assertIn("qa_dev_copy_verify.sql", self.copy_dockerfile)
+
+    def test_hosted_copy_keeps_dev_read_only_and_qa_secret_out_of_the_task_role(self) -> None:
+        self.assertIn("export pgsslmode=require", self.copy_entrypoint)
+        self.assertIn("default_transaction_read_only=on", self.copy_entrypoint)
+        self.assertIn("dev login failed the database-enforced read-only capability check", self.copy_entrypoint)
+        self.assertIn("pg_dump", self.copy_entrypoint)
+        self.assertIn("qa_dev_copy_preflight.sql", self.copy_entrypoint)
+        self.assertIn("qa_dev_copy_sanitize.sql", self.copy_entrypoint)
+        self.assertIn("qa_dev_copy_verify.sql", self.copy_entrypoint)
+        self.assertNotRegex(self.copy_launcher, r"(?m)^\s*taskrolearn\s*=")
+        self.assertIn("registered.taskdefinition.taskrolearn", self.copy_launcher)
+        self.assertIn('assignpublicip = "disabled"', self.copy_launcher)
+        self.assertIn("${devreadonlysecretarn}:password::", self.copy_launcher)
+        self.assertIn("${qasecretarn}:password::", self.copy_launcher)
+        self.assertNotIn("get-secret-value", self.copy_launcher)
+
+    def test_hosted_restore_temporarily_suppresses_only_user_triggers(self) -> None:
+        disable = self.copy_entrypoint.index('set_user_triggers "$qa_next_database" disable')
+        restore = self.copy_entrypoint.index('pg_restore \\\n', disable)
+        enable = self.copy_entrypoint.index('set_user_triggers "$qa_next_database" enable', restore)
+        verify = self.copy_entrypoint.index('qa_psql "$qa_next_database" --file', enable)
+        self.assertLess(disable, restore)
+        self.assertLess(restore, enable)
+        self.assertLess(enable, verify)
+        self.assertIn("$action trigger user", self.copy_entrypoint)
+        self.assertNotIn("disable trigger all", self.copy_entrypoint)
+        self.assertIn("a public user trigger remains disabled", self.verify)
+
+    def test_hosted_copy_execution_is_an_explicit_human_only_gate(self) -> None:
+        self.assertIn("[switch]$humanoperatorapproval", self.copy_launcher)
+        self.assertIn("if (-not $humanoperatorapproval)", self.copy_launcher)
+        self.assertIn("[environment]::userinteractive", self.copy_launcher)
+        self.assertIn("agents must not use this switch", self.copy_launcher)
+        self.assertIn("read-host", self.copy_launcher)
+        self.assertIn("create-db-snapshot", self.copy_launcher)
+        self.assertIn("db-snapshot-completed", self.copy_launcher)
+        self.assertIn('"freestoragespace"', self.copy_launcher)
+        self.assertIn("$minimumqafreestoragebytes", self.copy_launcher)
+        self.assertIn("[int64]12884901888", self.copy_launcher)
+        self.assertIn('name = "max_dev_database_bytes"', self.copy_launcher)
+        self.assertIn("pg_database_size(current_database())", self.copy_entrypoint)
+        self.assertIn("dev database exceeds the reviewed 4-gib copy ceiling", self.copy_entrypoint)
+        self.assertIn("deregister-task-definition", self.copy_launcher)
+        self.assertIn("recovery-window-in-days", self.copy_launcher)
+        self.assertIn("$psnativecommanduseerroractionpreference = $false", self.copy_launcher)
+        self.assertIn("-allowedtaskarn $taskarn", self.copy_launcher)
+        self.assertGreaterEqual(self.copy_launcher.count("assert-qastorageheadroom"), 4)
+        self.assertIn('"filter-log-events"', self.copy_launcher)
+        self.assertIn("addminutes(5)", self.copy_launcher)
+
     def test_preflight_and_sanitizer_are_raw_database_only(self) -> None:
         raw_guard = "^mangorts_qa_raw_[0-9]{8}(_[a-z0-9]+)*$"
         self.assertIn(raw_guard, self.preflight)
@@ -67,22 +131,30 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("lower(current_database()) ~ '(dev|prod)'", self.preflight)
         self.assertIn("lower(current_database()) ~ '(dev|prod)'", self.sanitizer)
 
-    def test_preflight_pins_the_audited_empty_base_entity_source(self) -> None:
-        self.assertIn("raw qa source is not the audited empty base entity schema", self.preflight)
+    def test_preflight_pins_the_audited_current_entity_and_huddle_source(self) -> None:
+        self.assertIn(
+            "raw qa source is not the audited current entity and huddle workspace schema",
+            self.preflight,
+        )
         self.assertIn("select * from expected except select * from actual", self.preflight)
         self.assertIn("select * from actual except select * from expected", self.preflight)
-        for retired_or_not_yet_applied_table in (
-            "action_item_huddle_relationships",
-            "entity_relationships",
-        ):
+        for retired_table in ("action_item_huddle_relationships", "entity_field_assignments"):
             self.assertIn(
-                f"to_regclass('public.{retired_or_not_yet_applied_table}') is not null",
+                f"to_regclass('public.{retired_table}') is not null",
                 self.preflight,
             )
-        self.assertIn("select count(*) from public.entities", self.preflight)
+        for required_table in (
+            "entity_relationships",
+            "huddle_node_textboxes",
+            "huddle_node_textbox_chats",
+        ):
+            self.assertIn(f"to_regclass('public.{required_table}') is null", self.preflight)
+        self.assertIn("action_item_entities", self.preflight)
         self.assertIn("'20260827_entities.sql'", self.preflight)
         self.assertIn("'20260828_action_items.sql'", self.preflight)
         self.assertIn("'20260828_entity_relationships.sql'", self.preflight)
+        self.assertIn("'20260828_huddle_node_workspace.sql'", self.preflight)
+        self.assertIn("'20260828_z_huddle_logic_gate_attachments.sql'", self.preflight)
         self.assertIn(
             "'20260828_zz_huddle_logic_gate_action_item_relationships.sql'",
             self.preflight,
@@ -92,20 +164,13 @@ class QADevCopySQLContracts(unittest.TestCase):
             self.sanitizer,
         )
 
-    def test_runbook_bridges_raw_entity_schema_before_verification_and_export(self) -> None:
+    def test_runbook_sanitizes_current_source_before_verification_and_export(self) -> None:
         sanitizer = self.runbook.index("qa_dev_copy_sanitize.sql")
-        action_items = self.runbook.index("20260828_action_items.sql")
-        entity_relationships = self.runbook.index("20260828_entity_relationships.sql")
-        huddle_logic_gate_relationships = self.runbook.index(
-            "20260828_zz_huddle_logic_gate_action_item_relationships.sql"
-        )
         verifier = self.runbook.index("qa_dev_copy_verify.sql", sanitizer)
         export = self.runbook.index("--data-only", verifier)
-        self.assertLess(sanitizer, action_items)
-        self.assertLess(action_items, entity_relationships)
-        self.assertLess(entity_relationships, huddle_logic_gate_relationships)
-        self.assertLess(huddle_logic_gate_relationships, verifier)
+        self.assertLess(sanitizer, verifier)
         self.assertLess(verifier, export)
+        self.assertIn("do not rerun the entity, action item", self.runbook)
         self.assertIn("-auditpurpose canonicalbaseline", self.runbook)
         self.assertIn("canonical_schema_inventory_sha256=", self.runbook)
 
@@ -198,11 +263,37 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("join qa_excluded_resources excluded", self.sanitizer)
         self.assertIn("not exists (\n    select 1 from qa_excluded_email_threads", self.sanitizer)
 
+    def test_huddle_node_workspace_uses_the_same_json_safety_gate(self) -> None:
+        for sql in (self.preflight, self.sanitizer, self.verify):
+            self.assertIn("public.huddle_node_textboxes", sql)
+            self.assertIn("public.huddle_node_textbox_chats", sql)
+        self.assertIn("select company_id, 'huddle_node', huddle_node_id, 'editor', body_json", self.sanitizer)
+        self.assertIn("select company_id, 'huddle_node', huddle_node_id, 'chat', entity_links", self.sanitizer)
+        self.assertIn("update public.huddle_node_textboxes", self.sanitizer)
+        self.assertIn("delete from public.huddle_node_textbox_chats chat", self.sanitizer)
+        self.assertIn("update public.huddle_node_textbox_chats", self.sanitizer)
+        self.assertIn("select company_id, 'editor', body_json from public.huddle_node_textboxes", self.verify)
+        self.assertIn("select company_id, 'chat', entity_links from public.huddle_node_textbox_chats", self.verify)
+
     def test_ownership_edges_detach_before_excluded_policy_rows_are_removed(self) -> None:
         policy_delete = self.sanitizer.index("delete from public.resource_gvic_settings")
         self.assertLess(self.sanitizer.index("delete from public.company_explorer_items"), policy_delete)
         self.assertLess(self.sanitizer.index("delete from public.huddle_explorer_items"), policy_delete)
         self.assertLess(self.sanitizer.index("delete from public.node_logic_gate_assignments"), policy_delete)
+
+    def test_omitted_email_dependencies_are_removed_before_the_thread(self) -> None:
+        selection_chat = self.sanitizer.index("delete from public.node_textbox_chats chat")
+        textbox_relationship = self.sanitizer.index(
+            "delete from public.email_relationships relationship\nusing qa_omit_email_threads omitted"
+        )
+        wide_relationship = self.sanitizer.index(
+            "delete from public.email_relationships relationship\nusing qa_omit_email_threads omitted",
+            textbox_relationship + 1,
+        )
+        thread = self.sanitizer.index("delete from public.email_threads thread")
+        self.assertLess(selection_chat, textbox_relationship)
+        self.assertLess(textbox_relationship, wide_relationship)
+        self.assertLess(wide_relationship, thread)
 
     def test_sanitizer_omits_all_attachment_database_state(self) -> None:
         for table in (
@@ -421,28 +512,29 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
     def verifier_sql(cls) -> str:
         return cls.script_sql(VERIFY)
 
-    def test_audited_base_entity_schema_bridge_to_current_schema(self) -> None:
+    def test_audited_current_entity_schema_preserves_allowed_data(self) -> None:
         bridge_company = "90000000-0000-4000-8000-000000000001"
-        self.run_sql(
-            """
-            drop trigger if exists trg_clear_entity_person_fields_for_membership
-              on public.company_memberships;
-            drop table public.entity_relationships;
-            drop table public.entity_fields,public.entities,public.entity_field_types,
-              public.entity_folders,public.entity_types cascade;
-            create table public.entity_field_assignments(placeholder integer);
-            create table public.entity_fields(placeholder integer);
-            """
-        )
-        self.run_sql(
-            (ROOT / "backend" / "db" / "migrations" / "20260827_entities.sql").read_text(
-                encoding="utf-8"
-            )
-        )
+        ordinary_type = "90000000-0000-4000-8000-000000000002"
+        ordinary_entity = "90000000-0000-4000-8000-000000000003"
         self.run_sql(
             f"""
             insert into public.companies(company_id,name)
-            values ('{bridge_company}','Base Entity Bridge Fixture');
+            values ('{bridge_company}','Current Entity Source Fixture');
+            insert into public.entity_types(company_id,entity_type_id,name) values
+              ('{bridge_company}','{ordinary_type}','Ordinary Fixture Type');
+            insert into public.entity_types(company_id,entity_type_id,name,system_key) values
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000001','Action Item','action_item');
+            insert into public.entity_field_types(
+              company_id,entity_field_type_id,entity_type_id,entity_folder_id,
+              name,field_type,system_key,config_jsonb,position
+            ) values
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000101','a17e0000-0000-4000-8000-000000000001',null,'Person in charge','person','person_in_charge','{{}}',0),
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000102','a17e0000-0000-4000-8000-000000000001',null,'Analysis due date','date','analysis_due_date','{{}}',1),
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000103','a17e0000-0000-4000-8000-000000000001',null,'Completion due date','date','completion_due_date','{{}}',2),
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000104','a17e0000-0000-4000-8000-000000000001',null,'Status','choice','status','{{"default":"in_progress","options":[{{"key":"in_progress","label":"In progress"}},{{"key":"pending","label":"Pending"}},{{"key":"done","label":"Done"}}]}}',3),
+              ('{bridge_company}','a17e0000-0000-4000-8000-000000000105','a17e0000-0000-4000-8000-000000000001',null,'Color','color','color','{{"default":null,"options":[{{"key":"yellow","label":"Yellow","color":"#facc15"}},{{"key":"red","label":"Red","color":"#ef4444"}}]}}',4);
+            insert into public.entities(company_id,entity_id,entity_type_id,name)
+            values ('{bridge_company}','{ordinary_entity}','{ordinary_type}','Preserved Ordinary Entity');
             insert into public.company_explorer_folders(
               company_id,folder_id,parent_folder_id,name
             )
@@ -456,29 +548,6 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
 
         self.run_sql(self.script_sql(PREFLIGHT))
         self.run_sql(self.script_sql(SANITIZER))
-        self.run_sql(
-            (ROOT / "backend" / "db" / "migrations" / "20260828_action_items.sql").read_text(
-                encoding="utf-8"
-            )
-        )
-        self.run_sql(
-            (
-                ROOT
-                / "backend"
-                / "db"
-                / "migrations"
-                / "20260828_entity_relationships.sql"
-            ).read_text(encoding="utf-8")
-        )
-        self.run_sql(
-            (
-                ROOT
-                / "backend"
-                / "db"
-                / "migrations"
-                / "20260828_zz_huddle_logic_gate_action_item_relationships.sql"
-            ).read_text(encoding="utf-8")
-        )
         self.run_sql(self.verifier_sql())
 
         result = self.run_sql(
@@ -496,14 +565,15 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
               (select count(*) from public.entity_types
                where company_id='{bridge_company}' and system_key='action_item'),
               (select count(*) from public.entity_field_types
-               where company_id='{bridge_company}'
-                 and entity_type_id='a17e0000-0000-4000-8000-000000000001'),
-              (select count(*) from public.entities where company_id='{bridge_company}'),
+                where company_id='{bridge_company}'
+                  and entity_type_id='a17e0000-0000-4000-8000-000000000001'),
+              (select count(*) from public.entities
+               where company_id='{bridge_company}' and entity_id='{ordinary_entity}'),
               (select count(*) from public.schema_migrations);
             """
         )
         self.assertEqual(
-            result.split("|"), ["t", "t", "5", "t", "1", "5", "0", "0"]
+            result.split("|"), ["t", "t", "5", "t", "1", "5", "1", "0"]
         )
 
     def test_non_owning_boundary_and_typed_entity_link_collisions(self) -> None:
@@ -542,6 +612,10 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
         surviving_huddle_node = "86000000-0000-4000-8000-000000000012"
         missing_huddle_node = "86000000-0000-4000-8000-000000000099"
         huddle_item = "87000000-0000-4000-8000-000000000001"
+        huddle_textbox = "89000000-0000-4000-8000-000000000001"
+        huddle_bad_chat = "89100000-0000-4000-8000-000000000001"
+        huddle_bad_reply = "89100000-0000-4000-8000-000000000002"
+        huddle_good_chat = "89100000-0000-4000-8000-000000000003"
 
         self.run_sql(
             f"""
@@ -637,6 +711,52 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             ) values (
               '{company_a}','{excluded_huddle_node}','{excluded_huddle}',
               'Excluded Fixture Huddle Node'
+            );
+
+            insert into public.huddle_logic_gates(company_id,huddle_logic_gate_id,header)
+            values ('{company_a}','{surviving_huddle}','Surviving Fixture Huddle');
+
+            insert into public.huddle_nodes(
+              company_id,huddle_node_id,huddle_logic_gate_id,name
+            ) values (
+              '{company_a}','{surviving_huddle_node}','{surviving_huddle}',
+              'Surviving Fixture Huddle Node'
+            );
+
+            insert into public.huddle_node_textboxes(
+              company_id,huddle_node_id,textbox_id,body_json
+            ) values (
+              '{company_a}','{surviving_huddle_node}','{huddle_textbox}',
+              '{{
+                "format":"mango-tiptap-json","schema_version":1,"annotations":[],
+                "document":{{"type":"doc","content":[{{"type":"paragraph","content":[
+                  {{"type":"mangoEntityLink","attrs":{{"entityType":"entity","entityId":"{allowed_entity}","label":"Allowed Huddle entity"}}}},
+                  {{"type":"mangoEntityLink","attrs":{{"entityType":"entity","entityId":"{other_company_entity}","label":"Wrong company Huddle entity"}}}},
+                  {{"type":"mangoEntityLink","attrs":{{"entityType":"entity","entityId":"{dangling_entity}","label":"Dangling Huddle entity"}}}},
+                  {{"type":"mangoAttachmentImage","attrs":{{"attachmentId":"88000000-0000-4000-8000-000000000002"}}}}
+                ]}}]}}
+              }}'::jsonb
+            );
+
+            insert into public.huddle_node_textbox_chats(
+              company_id,chat_id,huddle_node_id,textbox_id,message,entity_links
+            ) values (
+              '{company_a}','{huddle_bad_chat}','{surviving_huddle_node}','{huddle_textbox}',
+              '#Allowed Huddle entity #Dangling Huddle entity',
+              '[{{"start":0,"end":22,"entity_type":"entity","entity_id":"{allowed_entity}","label":"Allowed Huddle entity"}},{{"start":23,"end":46,"entity_type":"entity","entity_id":"{dangling_entity}","label":"Dangling Huddle entity"}}]'::jsonb
+            );
+            insert into public.huddle_node_textbox_chats(
+              company_id,chat_id,huddle_node_id,textbox_id,parent_chat_id,message,entity_links
+            ) values (
+              '{company_a}','{huddle_bad_reply}','{surviving_huddle_node}','{huddle_textbox}','{huddle_bad_chat}',
+              'Reply that must cascade', '[]'::jsonb
+            );
+            insert into public.huddle_node_textbox_chats(
+              company_id,chat_id,huddle_node_id,textbox_id,message,entity_links
+            ) values (
+              '{company_a}','{huddle_good_chat}','{surviving_huddle_node}','{huddle_textbox}',
+              '#Allowed Huddle entity',
+              '[{{"start":0,"end":22,"entity_type":"entity","entity_id":"{allowed_entity}","label":"Allowed Huddle entity"}}]'::jsonb
             );
 
             insert into public.huddle_explorer_items(
@@ -772,6 +892,21 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
               '#Excluded chat wins',
               '[{{"start":0,"end":19,"entity_type":"email_message","entity_id":"{excluded_wins_message}","label":"Excluded chat wins"}}]'::jsonb
             );
+
+            insert into public.email_relationships(
+              company_id,email_relationship_id,email_thread_id,email_message_id,
+              resource_type,resource_id,resource_textbox_id
+            ) values
+              ('{company_a}','61000000-0000-4000-8000-000000000001','{excluded_wins_thread}','{excluded_wins_message}','node','{shared_id}',null),
+              ('{company_a}','61000000-0000-4000-8000-000000000002','{excluded_wins_thread}','{excluded_wins_message}','node','{shared_id}','{textbox_id}');
+
+            insert into public.node_textbox_chats(
+              company_id,chat_id,node_id,textbox_id,selection_source,
+              selection_email_message_id,message,entity_links
+            ) values (
+              '{company_a}','60000000-0000-4000-8000-000000000004','{shared_id}','{textbox_id}',
+              'email','{excluded_wins_message}','Active selection email dependency','[]'::jsonb
+            );
             """
         )
 
@@ -795,6 +930,10 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
               (select count(*) from public.email_threads where company_id='{company_a}' and email_thread_id='{excluded_only_thread}'),
               (select count(*) from public.email_threads where company_id='{company_a}' and email_thread_id='{allowed_chat_thread}'),
               (select count(*) from public.email_threads where company_id='{company_b}' and email_thread_id='{other_company_thread}'),
+              (select count(*) from public.email_relationships
+                 where company_id='{company_a}' and email_thread_id='{excluded_wins_thread}'),
+              (select count(*) from public.node_textbox_chats
+                 where company_id='{company_a}' and chat_id='60000000-0000-4000-8000-000000000004'),
               (select position('Allowed editor email' in body_json::text) > 0
                  from public.node_textboxes where company_id='{company_a}' and node_id='{shared_id}'),
               (select position('Excluded wins email' in body_json::text) > 0
@@ -829,6 +968,23 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
                  from public.entity_fields where company_id='{company_a}' and entity_field_id='{valid_person_field}'),
               (select value_jsonb is null
                  from public.entity_fields where company_id='{company_a}' and entity_field_id='{invalid_person_field}'),
+              (select position('Allowed Huddle entity' in body_json::text) > 0
+                 from public.huddle_node_textboxes
+                where company_id='{company_a}' and textbox_id='{huddle_textbox}'),
+              (select position('Wrong company Huddle entity' in body_json::text) > 0
+                 from public.huddle_node_textboxes
+                where company_id='{company_a}' and textbox_id='{huddle_textbox}'),
+              (select position('Dangling Huddle entity' in body_json::text) > 0
+                 from public.huddle_node_textboxes
+                where company_id='{company_a}' and textbox_id='{huddle_textbox}'),
+              (select body_json::text ~ 'mangoAttachmentImage|attachmentId|attachment_id'
+                 from public.huddle_node_textboxes
+                where company_id='{company_a}' and textbox_id='{huddle_textbox}'),
+              (select count(*) from public.huddle_node_textbox_chats
+                where company_id='{company_a}' and chat_id in ('{huddle_bad_chat}','{huddle_bad_reply}')),
+              (select count(*) from public.huddle_node_textbox_chats
+                where company_id='{company_a}' and chat_id='{huddle_good_chat}'
+                  and position('Allowed Huddle entity' in entity_links::text) > 0),
               (select count(*) from public.huddle_logic_gates
                  where company_id='{company_a}' and huddle_logic_gate_id='{excluded_huddle}'),
               (select count(*) from public.entity_relationships
@@ -841,9 +997,10 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             result.split("|"),
             [
                 "0", "1", "0", "1", "t", "f", "t",
-                "1", "0", "0", "1", "1",
+                "1", "0", "0", "1", "1", "0", "0",
                 "t", "f", "f", "f", "0", "1", "0", "t",
-                "t", "f", "f", "f", "t", "t", "0", "0", "1",
+                "t", "f", "f", "f", "t", "t",
+                "t", "f", "f", "f", "0", "1", "0", "0", "1",
             ],
         )
 
@@ -974,6 +1131,60 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
 
         self.run_sql(
             f"""
+            update public.huddle_node_textboxes
+            set body_json = jsonb_insert(
+              body_json,
+              '{{document,content,0,content,-1}}',
+              '{{"type":"mangoEntityLink","attrs":{{"entityType":"entity","entityId":"{dangling_entity}","label":"Verifier dangling Huddle Entity"}}}}'::jsonb,
+              true
+            )
+            where company_id='{company_a}' and textbox_id='{huddle_textbox}';
+            """
+        )
+        huddle_link_error = self.run_sql_failure(verifier)
+        self.assertIn("retained tiptap/chat entity link", huddle_link_error)
+        self.run_sql(
+            f"""
+            update public.huddle_node_textboxes
+            set body_json = jsonb_set(
+              body_json,
+              '{{document,content,0,content}}',
+              (body_json #> '{{document,content,0,content}}')
+                - (jsonb_array_length(body_json #> '{{document,content,0,content}}') - 1)
+            )
+            where company_id='{company_a}' and textbox_id='{huddle_textbox}';
+            """
+        )
+
+        self.run_sql(
+            f"""
+            update public.huddle_node_textboxes
+            set body_json = jsonb_insert(
+              body_json,
+              '{{document,content,0,content,-1}}',
+              '{{"type":"mangoAttachmentImage","attrs":{{"attachmentId":"88000000-0000-4000-8000-000000000099"}}}}'::jsonb,
+              true
+            )
+            where company_id='{company_a}' and textbox_id='{huddle_textbox}';
+            """
+        )
+        huddle_attachment_error = self.run_sql_failure(verifier)
+        self.assertIn("durable editor document still references an omitted attachment", huddle_attachment_error)
+        self.run_sql(
+            f"""
+            update public.huddle_node_textboxes
+            set body_json = jsonb_set(
+              body_json,
+              '{{document,content,0,content}}',
+              (body_json #> '{{document,content,0,content}}')
+                - (jsonb_array_length(body_json #> '{{document,content,0,content}}') - 1)
+            )
+            where company_id='{company_a}' and textbox_id='{huddle_textbox}';
+            """
+        )
+
+        self.run_sql(
+            f"""
             set session_replication_role = replica;
             update public.entity_fields
             set value_jsonb=to_jsonb('{user_b}'::text)
@@ -993,16 +1204,6 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
 
         self.run_sql(
             f"""
-            insert into public.huddle_logic_gates(company_id,huddle_logic_gate_id,header)
-            values ('{company_a}','{surviving_huddle}','Surviving Fixture Huddle');
-
-            insert into public.huddle_nodes(
-              company_id,huddle_node_id,huddle_logic_gate_id,name
-            ) values (
-              '{company_a}','{surviving_huddle_node}','{surviving_huddle}',
-              'Surviving Fixture Huddle Node'
-            );
-
             insert into public.entity_relationships(
               company_id,entity_id,resource_type,resource_id
             ) values (
@@ -1064,6 +1265,37 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             """
         )
 
+        self.run_sql(verifier)
+
+    def test_z_user_trigger_restore_guard(self) -> None:
+        company_id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        node_id = "99900000-0000-4000-8000-000000000001"
+        verifier = self.verifier_sql()
+
+        self.run_sql("alter table public.nodes disable trigger user;")
+        disabled_error = self.run_sql_failure(verifier)
+        self.assertIn("a public user trigger remains disabled", disabled_error)
+        self.run_sql("alter table public.nodes enable trigger user;")
+
+        result = self.run_sql(
+            f"""
+            delete from public.workspace_read_versions;
+            alter table public.nodes disable trigger user;
+            insert into public.nodes(company_id,node_id,name,created_timestamp)
+            values ('{company_id}','{node_id}','Trigger-free restore fixture',now());
+            alter table public.nodes enable trigger user;
+            select count(*) from public.workspace_read_versions;
+            """
+        )
+        self.assertEqual(result.splitlines()[-1], "0")
+
+        self.run_sql(
+            f"""
+            delete from public.nodes
+            where company_id='{company_id}' and node_id='{node_id}';
+            delete from public.workspace_read_versions;
+            """
+        )
         self.run_sql(verifier)
 
 
