@@ -58,6 +58,22 @@ function Invoke-AwsNoOutput {
   }
 }
 
+function Get-AwsResponseList {
+  param(
+    [Parameter(Mandatory = $true)][AllowNull()][object]$Response,
+    [Parameter(Mandatory = $true)][string]$PropertyName
+  )
+
+  if ($null -eq $Response) {
+    return
+  }
+  $property = $Response.PSObject.Properties[$PropertyName]
+  if ($null -eq $property) {
+    return
+  }
+  return @($property.Value)
+}
+
 function Get-EnvironmentValue {
   param([Parameter(Mandatory = $true)][object]$Container, [Parameter(Mandatory = $true)][string]$Name)
 
@@ -143,13 +159,25 @@ function Assert-QaStorageHeadroom {
 function Get-OrCreateJonatQaCognitoSubject {
   param([Parameter(Mandatory = $true)][string]$UserPoolID)
 
-  $listed = Invoke-AwsJson -Arguments @(
-    "cognito-idp", "list-users", "--user-pool-id", $UserPoolID,
-    "--filter", "email = `"$jonatQaEmail`"", "--limit", "2"
-  )
-  $listedUsers = @(if ($listed.PSObject.Properties.Name -contains "Users") { $listed.Users })
+  $listUsersInputPath = [IO.Path]::GetTempFileName()
+  try {
+    $listUsersInput = @{
+      UserPoolId = $UserPoolID
+      Filter     = "email = `"$jonatQaEmail`""
+      Limit      = 2
+    } | ConvertTo-Json -Compress
+    [IO.File]::WriteAllText($listUsersInputPath, $listUsersInput, [Text.UTF8Encoding]::new($false))
+    $listed = Invoke-AwsJson -Arguments @(
+      "cognito-idp", "list-users", "--cli-input-json", "file://$listUsersInputPath"
+    )
+  }
+  finally {
+    Remove-Item -LiteralPath $listUsersInputPath -Force -ErrorAction SilentlyContinue
+  }
+
+  $listedUsers = @(Get-AwsResponseList -Response $listed -PropertyName "Users")
   $exactUsers = @($listedUsers | Where-Object {
-    $attributes = @(if ($_.PSObject.Properties.Name -contains "Attributes") { $_.Attributes })
+    $attributes = @(Get-AwsResponseList -Response $_ -PropertyName "Attributes")
     $emails = @($attributes | Where-Object { [string]$_.Name -ceq "email" } | ForEach-Object { [string]$_.Value })
     $emails.Count -eq 1 -and [string]::Equals($emails[0], $jonatQaEmail, [StringComparison]::OrdinalIgnoreCase)
   })
@@ -162,21 +190,98 @@ function Get-OrCreateJonatQaCognitoSubject {
       "--username", $jonatQaEmail,
       "--user-attributes", "Name=email,Value=$jonatQaEmail", "Name=email_verified,Value=true"
     )
-    if ($null -eq $created -or $created.PSObject.Properties.Name -notcontains "User") {
+    $createdUsers = @(Get-AwsResponseList -Response $created -PropertyName "User")
+    if ($createdUsers.Count -ne 1) {
       throw "Cognito did not return Jonat's created QA user."
     }
-    $user = $created.User
+    $user = $createdUsers[0]
   }
   else {
     $user = $exactUsers[0]
   }
 
-  $userAttributes = @(if ($user.PSObject.Properties.Name -contains "Attributes") { $user.Attributes })
+  $userAttributes = @(Get-AwsResponseList -Response $user -PropertyName "Attributes")
   $subjects = @($userAttributes | Where-Object { [string]$_.Name -ceq "sub" } | ForEach-Object { [string]$_.Value })
   if ($subjects.Count -ne 1 -or $subjects[0] -notmatch '^[0-9a-fA-F-]{36}$') {
     throw "Jonat's exact QA Cognito user did not contain one UUID subject."
   }
   return $subjects[0]
+}
+
+function Get-RegisteredQaCopyTaskDefinitionArn {
+  param([Parameter(Mandatory = $true)][AllowNull()][object]$Registered)
+
+  if ($null -eq $Registered) {
+    throw "ECS did not return the registered QA copy task definition."
+  }
+  $taskDefinitionProperty = $Registered.PSObject.Properties["taskDefinition"]
+  if ($null -eq $taskDefinitionProperty -or $null -eq $taskDefinitionProperty.Value) {
+    throw "ECS did not return the registered QA copy task definition."
+  }
+
+  $registeredTask = $taskDefinitionProperty.Value
+  $taskDefinitionArnProperty = $registeredTask.PSObject.Properties["taskDefinitionArn"]
+  $registeredTaskDefinitionArn = if ($null -ne $taskDefinitionArnProperty) { [string]$taskDefinitionArnProperty.Value } else { "" }
+  $taskRoleArnProperty = $registeredTask.PSObject.Properties["taskRoleArn"]
+  $registeredTaskRoleArn = if ($null -ne $taskRoleArnProperty) { [string]$taskRoleArnProperty.Value } else { "" }
+  if ($registeredTaskDefinitionArn -notmatch '^arn:aws:ecs:us-west-1:686458136219:task-definition/mangorts-qa-database-copy-temp:[0-9]+$' -or
+      -not [string]::IsNullOrWhiteSpace($registeredTaskRoleArn)) {
+    throw "Registered QA copy task identity or no-task-role guard failed."
+  }
+  return $registeredTaskDefinitionArn
+}
+
+function Get-QaCopyContainerExitCode {
+  param([Parameter(Mandatory = $true)][AllowNull()][object]$TaskRecord)
+
+  $taskContainers = @(Get-AwsResponseList -Response $TaskRecord -PropertyName "containers")
+  $containers = @($taskContainers | Where-Object {
+    $null -ne $_.PSObject.Properties["name"] -and [string]$_.name -ceq $qaCopyContainerName
+  })
+  if ($containers.Count -ne 1) {
+    throw "QA copy task stopped without exactly one reviewed container."
+  }
+
+  $container = $containers[0]
+  $exitCodeProperty = $container.PSObject.Properties["exitCode"]
+  if ($null -eq $exitCodeProperty -or $null -eq $exitCodeProperty.Value) {
+    $taskStopReasonProperty = $TaskRecord.PSObject.Properties["stoppedReason"]
+    $containerReasonProperty = $container.PSObject.Properties["reason"]
+    $taskStopReason = if ($null -ne $taskStopReasonProperty -and -not [string]::IsNullOrWhiteSpace([string]$taskStopReasonProperty.Value)) { [string]$taskStopReasonProperty.Value } else { "not reported" }
+    $containerReason = if ($null -ne $containerReasonProperty -and -not [string]::IsNullOrWhiteSpace([string]$containerReasonProperty.Value)) { [string]$containerReasonProperty.Value } else { "not reported" }
+    throw "QA copy task stopped before reporting an exit code. Task reason: $taskStopReason Container reason: $containerReason"
+  }
+  return [int]$exitCodeProperty.Value
+}
+
+function Get-SoleEcsTask {
+  param(
+    [Parameter(Mandatory = $true)][AllowNull()][object]$Response,
+    [Parameter(Mandatory = $true)][string]$FailureMessage
+  )
+
+  $failures = @(Get-AwsResponseList -Response $Response -PropertyName "failures")
+  $tasks = @(Get-AwsResponseList -Response $Response -PropertyName "tasks")
+  if ($failures.Count -ne 0 -or $tasks.Count -ne 1) {
+    throw $FailureMessage
+  }
+  return $tasks[0]
+}
+
+function Assert-QaCopyTaskSucceeded {
+  param(
+    [Parameter(Mandatory = $true)][int]$ExitCode,
+    [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$Messages,
+    [Parameter(Mandatory = $true)][string]$SnapshotID
+  )
+
+  if ($ExitCode -ne 0) {
+    throw "QA copy task failed with exit code $ExitCode. The API remains stopped; snapshot $SnapshotID is retained."
+  }
+  $successAttestations = @($Messages | Where-Object { $_ -ceq "QA_COPY_STATUS=success" })
+  if ($successAttestations.Count -ne 1) {
+    throw "QA copy task exited zero without one exact success attestation."
+  }
 }
 
 if (-not (Get-Command "aws" -ErrorAction SilentlyContinue)) {
@@ -264,7 +369,7 @@ if ([string]$devSecret.ARN -cne $DevReadOnlySecretArn -or [string]$devSecret.Nam
   throw "Temporary Dev read-only secret metadata failed its exact guard."
 }
 $secretTags = @{}
-$devSecretTags = @(if ($devSecret.PSObject.Properties.Name -contains "Tags") { $devSecret.Tags })
+$devSecretTags = @(Get-AwsResponseList -Response $devSecret -PropertyName "Tags")
 foreach ($tag in $devSecretTags) { $secretTags[[string]$tag.Key] = [string]$tag.Value }
 if ($secretTags["Environment"] -cne "qa" -or $secretTags["Purpose"] -cne "dev-readonly-source" -or
     $secretTags["Temporary"] -cne "true") {
@@ -334,10 +439,10 @@ if ($resolvedDevDatabaseGroups.Count -ne $devDatabaseSecurityGroupIDs.Count) {
 }
 $devIngressMatches = @(
   foreach ($databaseGroup in $resolvedDevDatabaseGroups) {
-    $permissions = @(if ($databaseGroup.PSObject.Properties.Name -contains "IpPermissions") { $databaseGroup.IpPermissions })
+    $permissions = @(Get-AwsResponseList -Response $databaseGroup -PropertyName "IpPermissions")
     foreach ($permission in $permissions) {
       if ([string]$permission.IpProtocol -ceq "tcp" -and [int]$permission.FromPort -eq 5432 -and [int]$permission.ToPort -eq 5432) {
-        $sourceGroups = @(if ($permission.PSObject.Properties.Name -contains "UserIdGroupPairs") { $permission.UserIdGroupPairs })
+        $sourceGroups = @(Get-AwsResponseList -Response $permission -PropertyName "UserIdGroupPairs")
         $sourceGroups | Where-Object { [string]$_.GroupId -ceq $devEcsSecurityGroup }
       }
     }
@@ -376,7 +481,8 @@ $copyImage = "$([string]$repositories[0].repositoryUri)@$([string]$copyImages[0]
 $existingInlinePolicies = Invoke-AwsJson -Arguments @(
   "iam", "list-role-policies", "--role-name", $executionRoleName
 )
-if (@($existingInlinePolicies.PolicyNames | Where-Object { [string]$_ -ceq $temporaryExecutionPolicyName }).Count -ne 0) {
+$existingInlinePolicyNames = @(Get-AwsResponseList -Response $existingInlinePolicies -PropertyName "PolicyNames")
+if (@($existingInlinePolicyNames | Where-Object { [string]$_ -ceq $temporaryExecutionPolicyName }).Count -ne 0) {
   throw "Temporary QA copy execution policy already exists; inspect and remove stale state before continuing."
 }
 
@@ -471,7 +577,7 @@ try {
     $visiblePolicies = Invoke-AwsJson -Arguments @(
       "iam", "list-role-policies", "--role-name", $executionRoleName
     )
-    $visiblePolicyNames = @(if ($visiblePolicies.PSObject.Properties.Name -contains "PolicyNames") { $visiblePolicies.PolicyNames })
+    $visiblePolicyNames = @(Get-AwsResponseList -Response $visiblePolicies -PropertyName "PolicyNames")
     if (@($visiblePolicyNames | Where-Object { [string]$_ -ceq $temporaryExecutionPolicyName }).Count -eq 1) {
       $policyVisible = $true
       break
@@ -548,16 +654,7 @@ try {
   $registered = Invoke-AwsJson -Arguments @(
     "ecs", "register-task-definition", "--cli-input-json", "file://$taskDefinitionPath"
   )
-  if ($null -eq $registered -or $registered.PSObject.Properties.Name -notcontains "taskDefinition") {
-    throw "ECS did not return the registered QA copy task definition."
-  }
-  $registeredTask = $registered.taskDefinition
-  $registeredTaskDefinitionArn = [string]$registeredTask.taskDefinitionArn
-  $registeredTaskRoleArn = if ($registeredTask.PSObject.Properties.Name -contains "taskRoleArn") { [string]$registeredTask.taskRoleArn } else { "" }
-  if ($registeredTaskDefinitionArn -notmatch '^arn:aws:ecs:us-west-1:686458136219:task-definition/mangorts-qa-database-copy-temp:[0-9]+$' -or
-      -not [string]::IsNullOrWhiteSpace($registeredTaskRoleArn)) {
-    throw "Registered QA copy task identity or no-task-role guard failed."
-  }
+  $registeredTaskDefinitionArn = Get-RegisteredQaCopyTaskDefinitionArn -Registered $registered
 
   $networkConfiguration = @{
     awsvpcConfiguration = @{
@@ -580,13 +677,9 @@ try {
     "--enable-ecs-managed-tags",
     "--tags", "key=project,value=mangorts", "key=environment,value=qa", "key=purpose,value=one-time-dev-copy"
   )
-  $runFailures = @(if ($run.PSObject.Properties.Name -contains "failures") { $run.failures })
-  $runTasks = @(if ($run.PSObject.Properties.Name -contains "tasks") { $run.tasks })
-  if ($runFailures.Count -ne 0 -or $runTasks.Count -ne 1) {
-    throw "ECS did not start exactly one QA copy task."
-  }
-  $runTask = $runTasks[0]
-  $taskArn = if ($runTask.PSObject.Properties.Name -contains "taskArn") { [string]$runTask.taskArn } else { "" }
+  $runTask = Get-SoleEcsTask -Response $run -FailureMessage "ECS did not start exactly one QA copy task."
+  $taskArnProperty = $runTask.PSObject.Properties["taskArn"]
+  $taskArn = if ($null -ne $taskArnProperty) { [string]$taskArnProperty.Value } else { "" }
   if ($taskArn -notmatch '^arn:aws:ecs:us-west-1:686458136219:task/mangorts-qa-cluster/[0-9a-f]+$') {
     throw "ECS returned an unexpected QA copy task identity."
   }
@@ -600,13 +693,9 @@ try {
     $description = Invoke-AwsJson -Arguments @(
       "ecs", "describe-tasks", "--cluster", $qaClusterName, "--tasks", $taskArn
     )
-    $descriptionFailures = @(if ($description.PSObject.Properties.Name -contains "failures") { $description.failures })
-    $descriptionTasks = @(if ($description.PSObject.Properties.Name -contains "tasks") { $description.tasks })
-    if ($descriptionFailures.Count -ne 0 -or $descriptionTasks.Count -ne 1) {
-      throw "Could not read the exact QA copy task."
-    }
-    $taskRecord = $descriptionTasks[0]
-    $lastStatus = if ($taskRecord.PSObject.Properties.Name -contains "lastStatus") { [string]$taskRecord.lastStatus } else { "" }
+    $taskRecord = Get-SoleEcsTask -Response $description -FailureMessage "Could not read the exact QA copy task."
+    $lastStatusProperty = $taskRecord.PSObject.Properties["lastStatus"]
+    $lastStatus = if ($null -ne $lastStatusProperty) { [string]$lastStatusProperty.Value } else { "" }
     if ([string]::IsNullOrWhiteSpace($lastStatus)) { throw "Exact QA copy task did not report a status." }
     if ($lastStatus -ceq "RUNNING" -and $policyAttached) {
       Invoke-AwsNoOutput -Arguments @(
@@ -624,23 +713,7 @@ try {
   }
   Assert-QaWritersStopped
 
-  $taskContainers = @(if ($taskRecord.PSObject.Properties.Name -contains "containers") { $taskRecord.containers })
-  $containers = @($taskContainers | Where-Object { $_.PSObject.Properties.Name -contains "name" -and [string]$_.name -ceq $qaCopyContainerName })
-  if ($containers.Count -ne 1) {
-    throw "QA copy task stopped without exactly one reviewed container."
-  }
-  $container = $containers[0]
-  $containerExitCode = if ($container.PSObject.Properties.Name -contains "exitCode" -and $null -ne $container.exitCode) {
-    [int]$container.exitCode
-  }
-  else {
-    $null
-  }
-  if ($null -eq $containerExitCode) {
-    $taskStopReason = if ($taskRecord.PSObject.Properties.Name -contains "stoppedReason") { [string]$taskRecord.stoppedReason } else { "not reported" }
-    $containerReason = if ($container.PSObject.Properties.Name -contains "reason") { [string]$container.reason } else { "not reported" }
-    throw "QA copy task stopped before reporting an exit code. Task reason: $taskStopReason Container reason: $containerReason"
-  }
+  $containerExitCode = Get-QaCopyContainerExitCode -TaskRecord $taskRecord
 
   $taskID = ($taskArn -split '/')[-1]
   $logStream = "ecs/$qaCopyContainerName/$taskID"
@@ -666,12 +739,7 @@ try {
 
   foreach ($message in $messages) { Write-Host $message }
 
-  if ([int]$containerExitCode -ne 0) {
-    throw "QA copy task failed with exit code $containerExitCode. The API remains stopped; snapshot $snapshotID is retained."
-  }
-  if ($successAttestations.Count -ne 1) {
-    throw "QA copy task exited zero without one exact success attestation."
-  }
+  Assert-QaCopyTaskSucceeded -ExitCode $containerExitCode -Messages $messages -SnapshotID $snapshotID
   Assert-QaWritersStopped
   $taskSucceeded = $true
 }
