@@ -423,9 +423,9 @@ Do not use a service-name alias for writes.
 ```powershell
 $qaIdentity = (& $psql --host $qaHost --port $qaPort --username $qaUser `
   --dbname postgres --no-password --no-psqlrc --tuples-only --no-align `
-  --command "select current_database() || '|' || current_user || '|' || current_setting('server_version_num') || '|' || pg_is_in_recovery();").Trim()
+  --command "select concat_ws('|', current_database(), current_user, current_setting('server_version_num'), case when pg_is_in_recovery() then 'recovery' else 'primary' end);").Trim()
 Assert-NativeSuccess "verify exact QA writer target"
-if ($qaIdentity -notmatch "^postgres\|$([regex]::Escape($qaUser))\|17\d{4}\|f$") {
+if ($qaIdentity -notmatch "^postgres\|$([regex]::Escape($qaUser))\|17\d{4}\|primary$") {
   throw "QA writer identity/version mismatch: $qaIdentity"
 }
 

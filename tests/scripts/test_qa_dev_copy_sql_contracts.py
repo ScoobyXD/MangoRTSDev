@@ -95,6 +95,16 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("${qasecretarn}:password::", self.copy_launcher)
         self.assertNotIn("get-secret-value", self.copy_launcher)
 
+    def test_hosted_copy_uses_an_explicit_qa_primary_identity_token(self) -> None:
+        primary_token_sql = "case when pg_is_in_recovery() then 'recovery' else 'primary' end"
+        self.assertIn(primary_token_sql, self.copy_entrypoint)
+        self.assertIn(primary_token_sql, self.runbook)
+        self.assertIn('qa_recovery_state <<< "$qa_identity"', self.copy_entrypoint)
+        self.assertIn('"$qa_recovery_state" == "primary"', self.copy_entrypoint)
+        self.assertIn(r"\|primary$", self.runbook)
+        self.assertNotIn("|| pg_is_in_recovery()", self.copy_entrypoint)
+        self.assertNotIn("|| pg_is_in_recovery()", self.runbook)
+
     def test_hosted_restore_temporarily_suppresses_only_user_triggers(self) -> None:
         disable = self.copy_entrypoint.index('set_user_triggers "$qa_next_database" disable')
         restore = self.copy_entrypoint.index('pg_restore \\\n', disable)
@@ -595,6 +605,23 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
     @classmethod
     def verifier_sql(cls) -> str:
         return cls.script_sql(VERIFY)
+
+    def test_hosted_qa_identity_query_emits_primary_token(self) -> None:
+        entrypoint = COPY_ENTRYPOINT.read_text(encoding="utf-8")
+        match = re.search(
+            r'qa_identity="\$\(qa_psql postgres --tuples-only --no-align --command "\s*(select .*?;)"\)"',
+            entrypoint,
+            re.DOTALL | re.IGNORECASE,
+        )
+        self.assertIsNotNone(match, "Could not extract the production QA identity SQL.")
+        identity = self.run_sql(match.group(1))
+        fields = identity.split("|")
+        expected_fields = self.run_sql(
+            "select current_database(), current_user, current_setting('server_version_num');"
+        ).split("|")
+        self.assertEqual(len(fields), 4, identity)
+        self.assertEqual(fields[:3], expected_fields, identity)
+        self.assertEqual(fields[3], "primary", identity)
 
     def test_audited_current_entity_schema_preserves_allowed_data(self) -> None:
         bridge_company = "90000000-0000-4000-8000-000000000001"

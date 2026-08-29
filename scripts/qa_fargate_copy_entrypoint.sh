@@ -228,9 +228,19 @@ dev_database_bytes="$(dev_psql --tuples-only --no-align --command "select pg_dat
 (( dev_database_bytes <= MAX_DEV_DATABASE_BYTES )) || fail "Dev database exceeds the reviewed 4-GiB copy ceiling"
 printf 'Dev source size guard passed: %s bytes (maximum %s).\n' "$dev_database_bytes" "$MAX_DEV_DATABASE_BYTES"
 
-qa_identity="$(qa_psql postgres --tuples-only --no-align --command "select current_database() || '|' || current_user || '|' || current_setting('server_version_num') || '|' || pg_is_in_recovery();")"
-IFS='|' read -r qa_database qa_user qa_version qa_recovery <<< "$qa_identity"
-[[ "$qa_database" == "postgres" && "$qa_user" == "$QA_DB_USER" && "$qa_version" =~ ^17[0-9]{4}$ && "$qa_recovery" == "f" ]] || fail "QA writer identity is not the exact PostgreSQL 17 primary"
+qa_identity="$(qa_psql postgres --tuples-only --no-align --command "
+select concat_ws(
+  '|',
+  current_database(),
+  current_user,
+  current_setting('server_version_num'),
+  case when pg_is_in_recovery() then 'recovery' else 'primary' end
+);")"
+IFS='|' read -r qa_database qa_user qa_version qa_recovery_state <<< "$qa_identity"
+[[ "$qa_database" == "postgres" ]] || fail "QA writer did not connect to the postgres maintenance database"
+[[ "$qa_user" == "$QA_DB_USER" ]] || fail "QA writer login differs from the reviewed RDS master username"
+[[ "$qa_version" =~ ^17[0-9]{4}$ ]] || fail "QA writer target is not PostgreSQL 17.x"
+[[ "$qa_recovery_state" == "primary" ]] || fail "QA writer endpoint is not the primary"
 
 database_exists "$QA_STABLE_DATABASE" || fail "stable QA database does not exist"
 for database in "$QA_RAW_DATABASE" "$QA_NEXT_DATABASE" "$QA_ROLLBACK_DATABASE" "$QA_FAILED_DATABASE"; do
