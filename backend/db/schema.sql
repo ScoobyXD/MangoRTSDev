@@ -7615,6 +7615,13 @@ CREATE INDEX idx_entity_fields_field_type_link ON public.entity_fields USING btr
 
 
 --
+-- Name: idx_entity_fields_action_item_person_in_charge; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_entity_fields_action_item_person_in_charge ON public.entity_fields USING btree (company_id, public.mangorts_try_uuid((value_jsonb #>> '{}'::text[])), entity_id) WHERE (entity_field_type_id = 'a17e0000-0000-4000-8000-000000000101'::uuid);
+
+
+--
 -- Name: idx_entity_folders_type_parent_position; Type: INDEX; Schema: public; Owner: -
 --
 

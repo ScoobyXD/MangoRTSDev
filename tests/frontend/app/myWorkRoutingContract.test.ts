@@ -1,0 +1,36 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+test("My Work is the first Tower row and Projects is immediately second", () => {
+  const source = readFileSync("frontend/src/app/AppSidebarChrome.tsx", "utf8");
+  const towerStart = source.indexOf('aria-label="Tower"');
+  const towerEnd = source.indexOf("</section>", towerStart);
+  assert.ok(towerStart >= 0 && towerEnd > towerStart);
+  const tower = source.slice(towerStart, towerEnd);
+  const myWork = tower.indexOf('label="My Work"');
+  const projects = tower.indexOf('label="Projects"');
+  const raciTabs = tower.indexOf("<AppSidebarRACITabsSection");
+  const processMap = tower.indexOf('label="Process Map"');
+  const builtInRows = Array.from(tower.matchAll(/<HomeBuiltInViewSidebarRow\s+label="([^"]+)"/g))
+    .map((match) => match[1]);
+  assert.ok(myWork >= 0);
+  assert.ok(projects > myWork);
+  assert.ok(raciTabs > projects);
+  assert.ok(processMap > raciTabs);
+  assert.deepEqual(builtInRows.slice(0, 2), ["My Work", "Projects"]);
+});
+
+test("My Work is a lazy authenticated static page with persisted page identity", () => {
+  const auth = readFileSync("frontend/src/auth/AuthGate.tsx", "utf8");
+  const app = readFileSync("frontend/src/app/applayout.tsx", "utf8");
+  const lazyPages = readFileSync("frontend/src/pages/lazyPages.ts", "utf8");
+  const persistence = readFileSync("frontend/src/app/useFramePersistence.ts", "utf8");
+  assert.match(auth, /path === "\/my-work"[\s\S]*preloadMyWorkSurface/);
+  assert.match(auth, /normalizedPath === "\/my-work"[\s\S]*initialPage="my-work"/);
+  assert.match(lazyPages, /import\("\.\/my-work"\)/);
+  assert.match(lazyPages, /LazyMyWorkPage/);
+  assert.match(app, /if \(page === "my-work"\) return "\/my-work"/);
+  assert.match(app, /<LazyMyWorkPage companyID=\{activeCompanyID\} requestJSON=\{appRequestJSON\} \/>/);
+  assert.match(persistence, /id: "view-my-work", name: "My Work", page: "my-work", frames: \[\]/);
+});

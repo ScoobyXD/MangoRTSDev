@@ -2,6 +2,7 @@ import React from "react";
 
 let logicGateArenaPagePromise: Promise<typeof import("./logic-gate-arena")> | null = null;
 let homePagePromise: Promise<typeof import("./home/HomePage")> | null = null;
+let myWorkPagePromise: Promise<typeof import("./my-work")> | null = null;
 let projectManagementPagePromise: Promise<typeof import("./project-management")> | null = null;
 let accountManagerPagePromise: Promise<typeof import("./account-manager")> | null = null;
 let teamsPagePromise: Promise<typeof import("./teams")> | null = null;
@@ -16,6 +17,11 @@ function loadLogicGateArenaPage() {
 function loadHomePage() {
   homePagePromise ??= import("./home/HomePage");
   return homePagePromise;
+}
+
+function loadMyWorkPage() {
+  myWorkPagePromise ??= import("./my-work");
+  return myWorkPagePromise;
 }
 
 function loadProjectManagementPage() {
@@ -51,6 +57,10 @@ export function preloadHomePage(): void {
   void loadHomePage();
 }
 
+export function preloadMyWorkPage(): void {
+  void loadMyWorkPage();
+}
+
 export function preloadProjectManagementPage(): void {
   void loadProjectManagementPage();
 }
@@ -65,6 +75,7 @@ export function preloadTeamsPage(): void {
 
 export const LazyLogicGateArenaPage = React.lazy(() => loadLogicGateArenaPage().then((module) => ({ default: module.LogicGateArenaPage })));
 export const LazyHomePage = React.lazy(() => loadHomePage().then((module) => ({ default: module.HomePage })));
+export const LazyMyWorkPage = React.lazy(() => loadMyWorkPage().then((module) => ({ default: module.MyWorkPage })));
 
 export function preloadEntitiesPage(): void {
   void loadEntitiesPage();

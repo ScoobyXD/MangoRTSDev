@@ -37,10 +37,10 @@ func queryPostgresRACIMatrixRows(ctx context.Context, queryer postgresPolicyRows
 	}
 	rows, err := queryer.QueryContext(ctx, `
 with candidates as (
-  select node.company_id,node.node_id as resource_id,'node'::text as resource_type,node.title as display_title,
+  select node.company_id,node.node_id as resource_id,'node'::text as resource_type,node.name as display_title,
          assignment.role,assignment.user_id,assignment.source_resource_type,assignment.source_resource_id,
          assignment.source_principal_type,assignment.source_principal_id,assignment.inheritance_type,
-         node.status,node.due_date,node.priority,node.created_timestamp,node.updated_timestamp
+         node.status,node.due_date,node.priority,node.created_timestamp,greatest(node.created_timestamp,assignment.updated_timestamp) as updated_timestamp
   from nodes node
   join lateral mangorts_v2_effective_gvic_assignments(node.company_id,'node',node.node_id) assignment on true
   where node.company_id=$1::uuid
@@ -50,7 +50,7 @@ with candidates as (
   select gate.company_id,gate.logic_gate_id,'logic_gate',gate.header,
          assignment.role,assignment.user_id,assignment.source_resource_type,assignment.source_resource_id,
          assignment.source_principal_type,assignment.source_principal_id,assignment.inheritance_type,
-         null::text,null::date,null::integer,gate.created_timestamp,gate.updated_timestamp
+         null::text,null::date,null::integer,gate.created_timestamp,greatest(gate.created_timestamp,assignment.updated_timestamp) as updated_timestamp
   from logic_gates gate
   join lateral mangorts_v2_effective_gvic_assignments(gate.company_id,'logic_gate',gate.logic_gate_id) assignment on true
   where gate.company_id=$1::uuid

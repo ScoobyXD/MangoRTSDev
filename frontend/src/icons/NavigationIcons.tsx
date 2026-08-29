@@ -1,5 +1,18 @@
 import type React from "react";
 
+export const StaggeredGroupingIcon: React.FC<{ color?: string; size?: number }> = ({ color = "currentColor", size = 16 }) => (
+  <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <path d="M2.5 4h11M4.5 8h9M6.5 12h7" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+  </svg>
+);
+
+export const HeaderMyWorkIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
+  <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
+    <path d="M2.2 3.1h11.6v9.8H2.2Z" fill="none" stroke={color} strokeWidth="1.25" strokeLinejoin="round" />
+    <path d="m4.1 6.1.9.9 1.55-1.75M4.1 10l.9.9 1.55-1.75M8.1 6.2h3.6M8.1 10.1h3.6" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 export const HeaderRecycleBinIcon: React.FC<{ color?: string }> = ({ color = "currentColor" }) => (
   <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
     <path d="M5.7 2.1h4.6l.45 1.35h2.05" fill="none" stroke={color} strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />

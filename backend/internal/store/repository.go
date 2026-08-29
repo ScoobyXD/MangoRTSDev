@@ -78,6 +78,7 @@ type Repository interface {
 	RACITabsRepository
 	LogicGateWorkRepository
 	WorkItemReadRepository
+	MyWorkRepository
 	CompanyExplorerRepository
 	HuddleRepository
 	RecycleBinRepository
@@ -867,6 +868,10 @@ type WorkItemReadRepository interface {
 	ListKanbanBoardProjectionRows(companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]KanbanBoardProjectionRow, error)
 	ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error)
+}
+
+type MyWorkRepository interface {
+	GetMyWork(ctx context.Context, query MyWorkQuery) (domain.MyWorkResponse, error)
 }
 
 type ProjectManagementRepository interface {

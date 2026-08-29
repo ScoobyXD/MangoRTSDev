@@ -28,6 +28,8 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/emailCollaborationContracts.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/notifications/notificationsApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/grouping/universalStatusGrouping.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/my-work/myWorkApi.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/my-work/myWorkGrouping.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectRelationshipGrouping.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectManagementApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectListView.test.js"),
@@ -61,6 +63,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarLogicGateStatusCounts.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/sidebarPinPopup.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/preloadDashboardPlan.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/app/myWorkRoutingContract.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/timelineState.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/app/committedTitleCacheReconciliation.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/linkingGraph.test.js"),
@@ -138,6 +141,10 @@ const componentTests = [
   {
     source: resolve(repoRoot, "tests/frontend/modules/huddles/huddleActionItemsPanel.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/huddles/huddleActionItemsPanel.test.js"),
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/my-work/MyWorkContent.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/my-work/MyWorkContent.test.js"),
   },
   {
     source: resolve(repoRoot, "tests/frontend/modules/logic-gates/logicGateQDTracker.test.tsx"),

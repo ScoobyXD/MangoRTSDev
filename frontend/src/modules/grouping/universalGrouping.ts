@@ -23,6 +23,7 @@ export type UniversalGroupingAdapter<Item, Field extends string> = {
   rowKey: (item: Item) => string;
   getValues: (item: Item, field: Field) => UniversalGroupValue[];
   sortRows: (items: Item[]) => Item[];
+  preserveGroupOrder?: boolean;
 };
 
 export function buildUniversalNestedGroups<Item, Field extends string>(
@@ -70,7 +71,11 @@ function buildUniversalNestedGroupLevel<Item, Field extends string>(
       byKey.set(value.key, existing);
     }
   }
-  return sortUniversalGroups(Array.from(byKey.values()), grouping.direction).map((group) => {
+  const groupedValues = Array.from(byKey.values());
+  const orderedGroups = adapter.preserveGroupOrder
+    ? groupedValues
+    : sortUniversalGroups(groupedValues, grouping.direction);
+  return orderedGroups.map((group) => {
     const id = `${parentID}/${grouping.field}:${group.key}`;
     return {
       key: group.key,

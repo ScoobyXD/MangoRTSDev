@@ -172,6 +172,76 @@ type EntitySummary struct {
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
 }
 
+type MyWorkActionItem struct {
+	EntityID          string  `json:"entity_id"`
+	Name              string  `json:"name"`
+	Color             *string `json:"color,omitempty"`
+	CompletionDueDate *string `json:"completion_due_date,omitempty"`
+}
+
+type MyWorkProcessReference struct {
+	LogicGateID string `json:"logic_gate_id"`
+	Name        string `json:"name"`
+}
+
+type MyWorkProjectReference struct {
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+}
+
+type MyWorkNode struct {
+	NodeID   string                  `json:"node_id"`
+	Name     string                  `json:"name"`
+	Priority *int                    `json:"priority,omitempty"`
+	DueDate  *string                 `json:"due_date,omitempty"`
+	Process  *MyWorkProcessReference `json:"process,omitempty"`
+	Project  *MyWorkProjectReference `json:"project,omitempty"`
+}
+
+type MyWorkProcess struct {
+	LogicGateID string `json:"logic_gate_id"`
+	Name        string `json:"name"`
+}
+
+type MyWorkProject struct {
+	ProjectID string `json:"project_id"`
+	Name      string `json:"name"`
+}
+
+type MyWorkActionItemPage struct {
+	Items      []MyWorkActionItem `json:"items"`
+	NextCursor string             `json:"next_cursor,omitempty"`
+	HasMore    bool               `json:"has_more"`
+}
+
+type MyWorkNodePage struct {
+	Items      []MyWorkNode `json:"items"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+	HasMore    bool         `json:"has_more"`
+}
+
+type MyWorkProcessPage struct {
+	Role       string          `json:"role"`
+	Items      []MyWorkProcess `json:"items"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+	HasMore    bool            `json:"has_more"`
+}
+
+type MyWorkProjectPage struct {
+	Items      []MyWorkProject `json:"items"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+	HasMore    bool            `json:"has_more"`
+}
+
+type MyWorkResponse struct {
+	CompanyID   string                `json:"company_id"`
+	UserID      string                `json:"user_id"`
+	ActionItems *MyWorkActionItemPage `json:"action_items,omitempty"`
+	Nodes       *MyWorkNodePage       `json:"nodes,omitempty"`
+	Processes   *MyWorkProcessPage    `json:"processes,omitempty"`
+	Projects    *MyWorkProjectPage    `json:"projects,omitempty"`
+}
+
 type CompanyMembership struct {
 	CompanyID        string    `json:"company_id"`
 	CompanyName      string    `json:"company_name,omitempty"`

@@ -10,7 +10,7 @@ import { AppSidebarRACITabsSection } from "./AppSidebarRACITabsSection";
 import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMapIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
-import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadMyWorkSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
 import { requestProjectViewSettings } from "../modules/project-management/projectViewEvents";
 import { ExplorerDisclosureIcon, ExplorerRowIcon } from "../icons/index.js";
 import { CompanyExplorerSearchBox } from "../modules/company-explorer/CompanyExplorerSearchBox";
@@ -150,7 +150,7 @@ type SidebarSectionID = "shared-triage";
 export type HomeKeyViewID = "my-triage" | "shared-root" | "r-inbox" | "a-inbox" | "c-inbox" | "i-inbox" | "o-inbox" | "updates" | `shared:${string}`;
 export type { SidebarPin, SidebarPinKind } from "./sidebarPins";
 
-type AppSidebarPrimaryPage = "home" | "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams";
+type AppSidebarPrimaryPage = "home" | "my-work" | "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams";
 
 type AppSidebarProps = {
   accountChrome?: React.ReactNode;
@@ -1373,6 +1373,22 @@ export function AppSidebar({
 
       <section style={appSidebarNavSectionStyle} aria-label="Tower">
         <AppSidebarSectionHeader label="Tower" />
+        <HomeBuiltInViewSidebarRow
+          label="My Work"
+          active={activePage === "my-work"}
+          onSelect={() => onPageSelect("my-work")}
+          onPreload={preloadMyWorkSurface}
+        />
+        <HomeBuiltInViewSidebarRow
+          label="Projects"
+          active={activePage === "project-management"}
+          onSelect={() => onPageSelect("project-management")}
+          onPreload={preloadProjectManagementSurface}
+          settings={{
+            ariaLabel: "Edit Projects view",
+            onOpen: requestProjectViewSettings,
+          }}
+        />
         <AppSidebarRACITabsSection
           apiBase={apiBase}
           companyID={companyID}
@@ -1385,16 +1401,6 @@ export function AppSidebar({
             position: 0,
             createdTimestamp: "",
           })}
-        />
-        <HomeBuiltInViewSidebarRow
-          label="Projects"
-          active={activePage === "project-management"}
-          onSelect={() => onPageSelect("project-management")}
-          onPreload={preloadProjectManagementSurface}
-          settings={{
-            ariaLabel: "Edit Projects view",
-            onOpen: requestProjectViewSettings,
-          }}
         />
         <AppSidebarButton
           label="Process Map"

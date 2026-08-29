@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "../icons/index.js";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderHomeIcon, HeaderLogicGateArenaIcon, HeaderMapIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderTeamsIcon } from "../icons/index.js";
 import type { CurrentUserResponse } from "../auth/cognitoAuth";
 import { getActiveCompanyID } from "../auth/currentCompany";
 import FrameCanvas from "./framecanvas";
@@ -34,8 +34,8 @@ import {
   type ViewTab,
 } from "./frameLayoutTypes";
 import { loadFrameLinks, loadSettings, loadViews, persistFrameLinks, persistFrameRegistry, saveSettings, saveViews } from "./useFramePersistence";
-import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadHomeSurface, preloadLogicGateArenaSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
-import { LazyAccountManagerPage, LazyEntitiesPage, LazyHomePage, LazyLogicGateArenaPage, LazyProcessMapPage, LazyProjectManagementPage, LazyTeamsPage } from "../pages/lazyPages";
+import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadHomeSurface, preloadLogicGateArenaSurface, preloadMyWorkSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface, preloadVisibleFrameModules } from "./preloadDashboardModules";
+import { LazyAccountManagerPage, LazyEntitiesPage, LazyHomePage, LazyLogicGateArenaPage, LazyMyWorkPage, LazyProcessMapPage, LazyProjectManagementPage, LazyTeamsPage } from "../pages/lazyPages";
 import type { HomeViewID } from "../pages/home/homeTypes";
 import { writePendingLogicGateArenaSelection } from "../pages/logic-gate-arena/logicGateArenaLaunch";
 import { NotificationRealtimeBridge } from "./NotificationRealtimeBridge";
@@ -117,7 +117,7 @@ const SIDEBAR_WIDTH_KEY = "mangorts.app-sidebar-width.v1";
 const HOME_VIEW_STORAGE_PREFIX = "mangorts.app.home-view.v1";
 const SHOW_LEGACY_HEADER = false;
 
-type PrimaryPage = "home" | "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams";
+type PrimaryPage = "home" | "my-work" | "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams";
 type NavigateOptions = { replace?: boolean };
 type ExplorerEntityActivatedDetail = {
   companyID?: string;
@@ -184,6 +184,7 @@ function projectTargetFromRoute(route: DeepLinkRoute | null | undefined): Projec
 function createPrimaryPageTab(page: PrimaryPage, id = createTabId()): ViewTab {
   if (page === "home") return { id, name: "Home", page: "home", frames: createHomeViewFrames() };
   if (page === "logic-gate-arena") return { id, name: "Process Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() };
+  if (page === "my-work") return { id, name: "My Work", page: "my-work", frames: [] };
   if (page === "project-management") return { id, name: "Projects", page: "project-management", frames: createProjectManagementFrames() };
   if (page === "process-map") return { id, name: "Process Map", page: "process-map", frames: [] };
   if (page === "entities") return { id, name: "Entities", page: "entities", frames: [] };
@@ -246,12 +247,14 @@ function sidebarPinIdentity(pin: Pick<SidebarPin, "pinID" | "kind" | "id">): str
 function pageForTab(tab: ViewTab): PrimaryPage | null {
   if (tab.page === "home" || tab.page === "communications") return "home";
   if (tab.page === "logic-gate-arena") return "logic-gate-arena";
+  if (tab.page === "my-work") return "my-work";
   if (tab.page === "project-management") return "project-management";
   if (tab.page === "process-map") return "process-map";
   if (tab.page === "entities") return "entities";
   if (tab.page === "account-manager") return "account-manager";
   if (tab.page === "teams") return "teams";
   if (/^(project management|projects)$/i.test(tab.name.trim())) return "project-management";
+  if (/^my work$/i.test(tab.name.trim())) return "my-work";
   if (/^process map$/i.test(tab.name.trim())) return "process-map";
   if (/^entities$/i.test(tab.name.trim())) return "entities";
   if (/^(account manager|accounts)$/i.test(tab.name.trim())) return "account-manager";
@@ -263,6 +266,7 @@ function labelForTab(tab: ViewTab): string {
   const page = pageForTab(tab);
   if (page === "home") return "Home";
   if (page === "logic-gate-arena") return "Process Arena";
+  if (page === "my-work") return "My Work";
   if (page === "project-management") return "Projects";
   if (page === "process-map") return "Process Map";
   if (page === "entities") return "Entities";
@@ -275,6 +279,7 @@ function iconForTab(tab: ViewTab): React.ReactNode {
   const page = pageForTab(tab);
   if (page === "home") return <HeaderHomeIcon />;
   if (page === "logic-gate-arena") return <HeaderLogicGateArenaIcon />;
+  if (page === "my-work") return <HeaderMyWorkIcon />;
   if (page === "project-management") return <HeaderProjectManagementIcon />;
   if (page === "process-map") return <HeaderMapIcon />;
   if (page === "entities") return <HeaderExplorerIcon />;
@@ -286,6 +291,7 @@ function iconForTab(tab: ViewTab): React.ReactNode {
 function routeForPage(page: PrimaryPage): string {
   if (page === "home") return "/home";
   if (page === "logic-gate-arena") return "/logic-gate-arena";
+  if (page === "my-work") return "/my-work";
   if (page === "project-management") return "/project-management";
   if (page === "process-map") return "/process-map";
   if (page === "entities") return "/entities";
@@ -515,6 +521,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   ), [frames]);
   const isLogicGateArenaView = activeTab?.page === "logic-gate-arena";
   const isHomeView = activePrimaryPage === "home";
+  const isMyWorkView = activePrimaryPage === "my-work";
   const isProjectManagementView = activePrimaryPage === "project-management";
   const isProcessMapView = activePrimaryPage === "process-map";
   const isEntitiesView = activePrimaryPage === "entities";
@@ -522,7 +529,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const isTeamsView = activePrimaryPage === "teams";
   const huddleLogicGateID = deepLink?.kind === "huddle_logic_gate" ? deepLink.huddleLogicGateID : "";
   const isHuddleLogicGateView = Boolean(huddleLogicGateID);
-  const isFullPageView = isHuddleLogicGateView || isLogicGateArenaView || isHomeView || isProjectManagementView || isProcessMapView || isEntitiesView || isAccountManagerView || isTeamsView;
+  const isFullPageView = isHuddleLogicGateView || isLogicGateArenaView || isHomeView || isMyWorkView || isProjectManagementView || isProcessMapView || isEntitiesView || isAccountManagerView || isTeamsView;
   const homePageOwnsEmailReferencePreview = !overrideContent && !isHuddleLogicGateView && !isLogicGateArenaView && isHomeView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
 
@@ -554,6 +561,10 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       preloadHomeSurface();
       return;
     }
+    if (isMyWorkView) {
+      preloadMyWorkSurface();
+      return;
+    }
     if (isProjectManagementView) {
       preloadProjectManagementSurface();
       return;
@@ -575,7 +586,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       return;
     }
     preloadVisibleFrameModules(frames);
-  }, [frames, isAccountManagerView, isEntitiesView, isHomeView, isLogicGateArenaView, isProcessMapView, isProjectManagementView, isTeamsView]);
+  }, [frames, isAccountManagerView, isEntitiesView, isHomeView, isLogicGateArenaView, isMyWorkView, isProcessMapView, isProjectManagementView, isTeamsView]);
   useEffect(() => {
     if (!isProcessMapView) setProcessMapLogicGateOverlay(null);
   }, [isProcessMapView]);
@@ -1100,6 +1111,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
   const activatePrimaryPage = useCallback((page: PrimaryPage) => {
     if (page === "home") preloadHomeSurface();
+    if (page === "my-work") preloadMyWorkSurface();
     if (page === "logic-gate-arena") preloadLogicGateArenaSurface();
     if (page === "project-management") preloadProjectManagementSurface();
     if (page === "process-map") preloadProcessMapSurface();
@@ -2100,6 +2112,10 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               onNodeOverlayOpen={openHomeNodeRoute}
               onNodeOverlayClose={closeHomeNodeRoute}
             />
+          </React.Suspense>
+        ) : isMyWorkView ? (
+          <React.Suspense fallback={fullPageFallback}>
+            <LazyMyWorkPage companyID={activeCompanyID} requestJSON={appRequestJSON} />
           </React.Suspense>
         ) : isProjectManagementView ? (
           <React.Suspense fallback={fullPageFallback}>

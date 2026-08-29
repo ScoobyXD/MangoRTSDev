@@ -20,6 +20,8 @@ export type UniversalGroupingControlsProps<Field extends string> = {
   fieldVariant?: UniversalGroupingFieldVariant<Field>;
   onChange: (nextStack: Array<UniversalGroupingSetting<Field>>) => void;
   buttonLabel?: string;
+  triggerIcon?: React.ReactNode;
+  iconOnly?: boolean;
   popoverLabel?: string;
   emptyLabel?: string;
   accent?: string;
@@ -41,6 +43,8 @@ export function UniversalGroupingControls<Field extends string>({
   fieldVariant,
   onChange,
   buttonLabel = "Group",
+  triggerIcon,
+  iconOnly = false,
   popoverLabel = "Grouping settings",
   emptyLabel = "No grouping levels",
   accent = "#2563eb",
@@ -163,19 +167,26 @@ export function UniversalGroupingControls<Field extends string>({
           ref={triggerRef}
           type="button"
           aria-haspopup="dialog"
+          aria-label={iconOnly ? buttonLabel : undefined}
           aria-expanded={open}
           aria-controls={open ? popoverID : undefined}
+          title={iconOnly ? buttonLabel : undefined}
           disabled={disabled}
-          style={groupButtonStyle(open, disabled, accent)}
+          style={groupButtonStyle(open, disabled, accent, iconOnly)}
           onClick={() => {
             setExternalPopoverPosition(null);
             setOpen((value) => !value);
           }}
         >
-          <span>{buttonLabel}</span>
-          <span aria-label={`${groupings.length} grouping levels`} style={groupCountStyle(open, accent)}>
-            {groupings.length}
-          </span>
+          {iconOnly ? triggerIcon : (
+            <>
+              {triggerIcon}
+              <span>{buttonLabel}</span>
+              <span aria-label={`${groupings.length} grouping levels`} style={groupCountStyle(open, accent)}>
+                {groupings.length}
+              </span>
+            </>
+          )}
         </button>
       )}
 
@@ -417,7 +428,7 @@ function controlsRootStyle(triggerHidden: boolean): React.CSSProperties {
   };
 }
 
-function groupButtonStyle(open: boolean, disabled: boolean, accent: string): React.CSSProperties {
+function groupButtonStyle(open: boolean, disabled: boolean, accent: string, iconOnly: boolean): React.CSSProperties {
   return {
     minHeight: 30,
     display: "inline-flex",
@@ -432,7 +443,8 @@ function groupButtonStyle(open: boolean, disabled: boolean, accent: string): Rea
     fontSize: 12,
     fontWeight: 850,
     cursor: disabled ? "default" : "pointer",
-    padding: "0 9px",
+    width: iconOnly ? 30 : undefined,
+    padding: iconOnly ? 0 : "0 9px",
     opacity: disabled ? 0.72 : 1,
     boxShadow: open ? `0 0 0 2px ${accent}22` : "0 4px 10px rgba(15, 23, 42, 0.06)",
   };

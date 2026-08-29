@@ -1,0 +1,122 @@
+import type { BoundRequestJSON } from "../api/requestJSON.js";
+
+export const MY_WORK_SECTIONS = ["action_items", "nodes", "processes", "projects"] as const;
+export type MyWorkSection = (typeof MY_WORK_SECTIONS)[number];
+
+export const MY_WORK_PROCESS_ROLES = ["responsible", "accountable", "consulted", "informed"] as const;
+export type MyWorkProcessRole = (typeof MY_WORK_PROCESS_ROLES)[number];
+
+export type MyWorkGroupingField = "color" | "completion_due_date" | "priority" | "due_date";
+export type MyWorkGroupingSetting = {
+  field: MyWorkGroupingField;
+  direction: "asc" | "desc";
+};
+
+export type MyWorkPage<Item> = {
+  items: Item[];
+  next_cursor?: string;
+  has_more: boolean;
+};
+
+export type MyWorkActionItem = {
+  entity_id: string;
+  name: string;
+  color?: string | null;
+  completion_due_date?: string | null;
+};
+
+export type MyWorkInlineProcess = {
+  logic_gate_id: string;
+  name: string;
+};
+
+export type MyWorkInlineProject = {
+  project_id: string;
+  name: string;
+};
+
+export type MyWorkNode = {
+  node_id: string;
+  name: string;
+  priority?: number | null;
+  due_date?: string | null;
+  process?: MyWorkInlineProcess;
+  project?: MyWorkInlineProject;
+};
+
+export type MyWorkProcess = {
+  logic_gate_id: string;
+  name: string;
+};
+
+export type MyWorkProject = {
+  project_id: string;
+  name: string;
+};
+
+export type MyWorkProcessesPage = MyWorkPage<MyWorkProcess> & {
+  role: MyWorkProcessRole;
+};
+
+export type MyWorkResponse = {
+  company_id: string;
+  user_id: string;
+  action_items?: MyWorkPage<MyWorkActionItem>;
+  nodes?: MyWorkPage<MyWorkNode>;
+  processes?: MyWorkProcessesPage;
+  projects?: MyWorkPage<MyWorkProject>;
+};
+
+export type FetchMyWorkInput = {
+  companyID: string;
+  section?: MyWorkSection;
+  role?: MyWorkProcessRole;
+  grouping?: ReadonlyArray<MyWorkGroupingSetting>;
+  limit?: number;
+  cursor?: string;
+  signal?: AbortSignal;
+};
+
+export const MY_WORK_PAGE_LIMIT = 40;
+
+export async function fetchMyWork(
+  requestJSON: BoundRequestJSON,
+  input: FetchMyWorkInput,
+): Promise<MyWorkResponse> {
+  const params = new URLSearchParams({ company_id: input.companyID.trim() });
+  if (input.section) params.set("section", input.section);
+  if ((!input.section || input.section === "processes") && input.role) params.set("role", input.role);
+  if (input.grouping !== undefined) params.set("grouping", serializeMyWorkGrouping(input.section, input.grouping));
+  params.set("limit", String(boundedMyWorkLimit(input.limit)));
+  if (input.cursor?.trim()) params.set("cursor", input.cursor.trim());
+  return requestJSON<MyWorkResponse>(`/v1/my-work?${params.toString()}`, {
+    cache: "no-store",
+    signal: input.signal,
+  });
+}
+
+export function serializeMyWorkGrouping(
+  section: MyWorkSection | undefined,
+  groupings: ReadonlyArray<MyWorkGroupingSetting>,
+): string {
+  const supportedFields = section === "action_items"
+    ? new Set<MyWorkGroupingField>(["color", "completion_due_date"])
+    : section === "nodes"
+      ? new Set<MyWorkGroupingField>(["priority", "due_date"])
+      : null;
+  if (!supportedFields) throw new Error("My Work grouping is valid only for Action Items or Nodes section reads.");
+  if (groupings.length === 0) return "none";
+  const seen = new Set<MyWorkGroupingField>();
+  return groupings.map((grouping) => {
+    if (!supportedFields.has(grouping.field) || seen.has(grouping.field) || (grouping.direction !== "asc" && grouping.direction !== "desc")) {
+      throw new Error(`Invalid ${section} grouping field: ${grouping.field}.`);
+    }
+    seen.add(grouping.field);
+    return `${grouping.field}:${grouping.direction}`;
+  }).join(",");
+}
+
+function boundedMyWorkLimit(value: number | undefined): number {
+  if (!Number.isFinite(value)) return MY_WORK_PAGE_LIMIT;
+  return Math.min(100, Math.max(1, Math.floor(value ?? MY_WORK_PAGE_LIMIT)));
+}

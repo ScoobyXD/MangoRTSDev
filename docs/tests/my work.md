@@ -20,7 +20,7 @@ MW8 - A Node is assigned to the subject only when that user has the current effe
 
 MW9 - Accountable, Consulted, or Informed status alone does not place a Node in the left-column Nodes section.
 
-MW10 - An Action Item is assigned to the subject only when its exact Person in charge field stores that user's current company-member ID. Creator metadata is not an assignment.
+MW10 - An Action Item is assigned to the subject solely when its exact canonical `person_in_charge` field stores that user's current company-member ID. Creator metadata and relationships are not assignment sources.
 
 MW11 - The Action Items section and Nodes section each own an independent grouping stack and an independent grouping button. Both buttons use the approved staggered three-line grouping icon.
 
@@ -46,7 +46,7 @@ MW21 - An inline Process or Project reference inside another row is independentl
 
 MW22 - The middle column has one R, A, C, I role selector. Exactly one role is active, Responsible is active by default, and the column lists the Processes for which the subject has that current effective RACI role.
 
-MW23 - The right column lists the Projects whose current Team assignment includes the subject through current company-team membership.
+MW23 - The right column lists a Project when the subject is a direct member of any currently assigned same-company Team group or a member of any current descendant group beneath that Team. Membership only in an ancestor or unrelated group does not qualify.
 
 MW24 - My Work reads canonical Nodes, Action Items, RACI, Process relationships, Project relationships, Project Team assignments, and company membership when a view is requested. There is no My Work projection table and no My Work relationship authority.
 
@@ -60,11 +60,17 @@ MW28 - Effective RACI and Project Team membership never grant resource access. T
 
 MW29 - Access to a Node does not grant access to its associated Process or Project. An inaccessible inline Process or Project is omitted completely, including its ID, name, hidden count, placeholder, and relationship details, while the accessible Node remains visible.
 
-MW30 - Permission filtering occurs before grouping, sorting, limits, pagination cursors, has-more decisions, or counts. The frontend never receives hidden resources for local filtering.
+MW30 - Permission filtering occurs before grouping, sorting, limits, pagination cursors, has-more decisions, or counts. The backend applies each section's active grouping stack before its limit and binds that stack to its cursor; the frontend never receives hidden resources for local filtering or regroups a limited page into a different global order.
 
 MW31 - Opening any My Work resource performs that destination's normal current permission check. A prior My Work response is never proof of continued access.
 
 MW32 - A permission-resolution failure fails the My Work read closed. My Work never returns an unfiltered partial result after an authorization error.
+
+MW33 - An Action Item whose current canonical Status is Done or Completed is never displayed in My Work.
+
+MW34 - A Node whose current status is Done or Completed is never displayed in My Work.
+
+MW35 - A first-version Action Item row exposes only the Action Item summary needed to display and open that exact Entity. It derives and exposes no Process, Project, or other resource context.
 
 ## Process Story: One person sees assigned work and current company context
 
@@ -72,7 +78,7 @@ A company member opens My Work beneath My Tower
 
 ↓
 
-Mango reads that member's current effectively Responsible Nodes and exact Person-in-charge Action Items from their canonical sources, then applies the authenticated viewer's current permissions before any result is grouped or paged
+Mango reads that member's current effectively Responsible Nodes and exact Person-in-charge Action Items from their canonical sources, excludes completed work, then applies the authenticated viewer's current permissions before any result is grouped or paged
 
 ↓
 
@@ -80,8 +86,8 @@ The unnamed left column keeps Action Items above Nodes and applies each section'
 
 ↓
 
-The middle column defaults to the member's Responsible Processes and can switch among R, A, C, and I, while the right column lists Projects whose Team includes that member
+The middle column defaults to the member's Responsible Processes and can switch among R, A, C, and I, while the right column lists Projects whose assigned Team includes that member directly or through a current descendant group
 
 ↓
 
-Every displayed Node, Action Item, Process, Project, and inline resource reference opens its exact canonical resource without changing source data
+Every displayed Node, Process, Project, and permitted inline reference opens its exact canonical resource, while each Action Item opens only its exact Entity without derived resource context or source-data changes

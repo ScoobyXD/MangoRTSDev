@@ -4,13 +4,14 @@ import type { ViewTab } from "./frameLayoutTypes.js";
 export const DEFAULT_DASHBOARD_MODULE_KINDS = ["home"];
 export const LOGIC_GATE_ARENA_MODULE_KINDS = ["editor", "kanban"];
 export const HOME_MODULE_KINDS = ["home"];
+export const MY_WORK_MODULE_KINDS: string[] = [];
 export const PROJECT_MANAGEMENT_MODULE_KINDS = ["project-management"];
 export const ACCOUNT_MANAGER_MODULE_KINDS = ["account-manager"];
 export const TEAMS_MODULE_KINDS = ["teams"];
 export const ENTITIES_MODULE_KINDS: string[] = [];
 export const PROCESS_MAP_MODULE_KINDS: string[] = [];
 
-export type DashboardRouteSurface = "home" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "entities" | "process-map";
+export type DashboardRouteSurface = "home" | "my-work" | "logic-gate-arena" | "project-management" | "account-manager" | "teams" | "entities" | "process-map";
 
 export type DashboardPreloadPlan = {
   moduleKinds: string[];
@@ -36,6 +37,9 @@ export function planLikelyDashboardPreload(activeTab: ({ page?: ViewTab["page"];
   }
   if (activeTab.page === "home" || activeTab.page === "communications") {
     return { moduleKinds: HOME_MODULE_KINDS, routeSurfaces: ["home"] };
+  }
+  if (activeTab.page === "my-work") {
+    return { moduleKinds: MY_WORK_MODULE_KINDS, routeSurfaces: ["my-work"] };
   }
   if (activeTab.page === "project-management") {
     return { moduleKinds: PROJECT_MANAGEMENT_MODULE_KINDS, routeSurfaces: ["project-management"] };

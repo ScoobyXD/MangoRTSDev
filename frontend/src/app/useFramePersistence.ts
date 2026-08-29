@@ -135,7 +135,7 @@ function sanitizeFrames(value: unknown): FrameDataModel[] {
 
 function sanitizePage(value: unknown): ViewTab["page"] {
   if (value === "communications") return "home";
-  return value === "logic-gate-arena" || value === "project-management" || value === "process-map" || value === "entities" || value === "account-manager" || value === "teams" || value === "home" ? value : undefined;
+  return value === "logic-gate-arena" || value === "my-work" || value === "project-management" || value === "process-map" || value === "entities" || value === "account-manager" || value === "teams" || value === "home" ? value : undefined;
 }
 
 function createUniqueFrameID(usedFrameIDs: Set<string>): string {
@@ -158,6 +158,10 @@ function isProjectManagementTab(tab: ViewTab): boolean {
   return tab.page === "project-management" || /^(project management|projects)$/i.test(tab.name.trim());
 }
 
+function isMyWorkTab(tab: ViewTab): boolean {
+  return tab.page === "my-work" || /^my work$/i.test(tab.name.trim());
+}
+
 function isProcessMapTab(tab: ViewTab): boolean {
   return tab.page === "process-map" || /^process map$/i.test(tab.name.trim());
 }
@@ -177,6 +181,7 @@ function isEntitiesTab(tab: ViewTab): boolean {
 function normalizePrimaryTab(tab: ViewTab): ViewTab {
   if (isCommunicationsTab(tab)) return { ...tab, name: "Home", page: "home" };
   if (isLogicGateArenaTab(tab)) return { ...tab, name: "Process Arena", page: "logic-gate-arena" };
+  if (isMyWorkTab(tab)) return { ...tab, name: "My Work", page: "my-work", frames: [] };
   if (isProjectManagementTab(tab)) return { ...tab, name: "Projects", page: "project-management" };
   if (isProcessMapTab(tab)) return { ...tab, name: "Process Map", page: "process-map", frames: [] };
   if (isEntitiesTab(tab)) return { ...tab, name: "Entities", page: "entities", frames: [] };
@@ -189,6 +194,7 @@ function createPrimaryTabs(): ViewTab[] {
   return [
     { id: "view-home", name: "Home", page: "home", frames: createHomeViewFrames() },
     { id: "view-logic-gate-arena", name: "Process Arena", page: "logic-gate-arena", frames: createLogicGateArenaFrames() },
+    { id: "view-my-work", name: "My Work", page: "my-work", frames: [] },
     { id: "view-project-management", name: "Projects", page: "project-management", frames: createProjectManagementFrames() },
     { id: "view-process-map", name: "Process Map", page: "process-map", frames: [] },
     { id: "view-entities", name: "Entities", page: "entities", frames: [] },
@@ -203,16 +209,17 @@ function ensurePrimaryHeaderTabs(tabs: ViewTab[]): ViewTab[] {
   const defaults = createPrimaryTabs();
   if (!next.some(isCommunicationsTab)) next.push(defaults[0]);
   if (!next.some(isLogicGateArenaTab)) next.push(defaults[1]);
-  if (!next.some(isProjectManagementTab)) next.push(defaults[2]);
-  if (!next.some(isProcessMapTab)) next.push(defaults[3]);
-  if (!next.some(isEntitiesTab)) next.push(defaults[4]);
-  if (!next.some(isAccountManagerTab)) next.push(defaults[5]);
-  if (!next.some(isTeamsTab)) next.push(defaults[6]);
+  if (!next.some(isMyWorkTab)) next.push(defaults[2]);
+  if (!next.some(isProjectManagementTab)) next.push(defaults[3]);
+  if (!next.some(isProcessMapTab)) next.push(defaults[4]);
+  if (!next.some(isEntitiesTab)) next.push(defaults[5]);
+  if (!next.some(isAccountManagerTab)) next.push(defaults[6]);
+  if (!next.some(isTeamsTab)) next.push(defaults[7]);
 
   return next
     .map((tab, index) => ({ tab, index }))
     .sort((a, b) => {
-      const rank = (tab: ViewTab) => isCommunicationsTab(tab) ? 0 : isLogicGateArenaTab(tab) ? 1 : isProjectManagementTab(tab) ? 2 : isProcessMapTab(tab) ? 3 : isEntitiesTab(tab) ? 4 : isAccountManagerTab(tab) ? 5 : isTeamsTab(tab) ? 6 : 7;
+      const rank = (tab: ViewTab) => isCommunicationsTab(tab) ? 0 : isLogicGateArenaTab(tab) ? 1 : isMyWorkTab(tab) ? 2 : isProjectManagementTab(tab) ? 3 : isProcessMapTab(tab) ? 4 : isEntitiesTab(tab) ? 5 : isAccountManagerTab(tab) ? 6 : isTeamsTab(tab) ? 7 : 8;
       const rankDelta = rank(a.tab) - rank(b.tab);
       return rankDelta || a.index - b.index;
     })
