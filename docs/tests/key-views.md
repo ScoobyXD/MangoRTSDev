@@ -1,6 +1,6 @@
 # Key Views
 
-Last updated: 2026-08-10
+Last updated: 2026-08-28
 
 Business Logic Covered By Automated Tests: Updates saved grouping views are covered by frontend grouping tests and backend saved-view tests. This file records the sidebar placement and ownership contract.
 
@@ -26,7 +26,7 @@ KV10 - Status uses the canonical order In Progress, Review, Pending, Requested, 
 
 KV11 - Key Views and its floating editor remain app/sidebar chrome beneath the shared body-level blocking modal layer. Closing an overlay leaves the saved-view selection and grouping draft unchanged.
 
-KV12 - The Tower sidebar section remains visible and contains Projects as its built-in view. It contains no personal-work tab, page, saved-view controls, or hidden route.
+KV12 - The Tower sidebar section remains visible and shows My Work as its first built-in view immediately above Projects. My Work owns no saved-view controls in its first version.
 
 KV13 - The browser document links the orange Mango favicon on every app route and never falls back to the browser's generic globe.
 
