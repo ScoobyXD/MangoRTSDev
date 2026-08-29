@@ -57,6 +57,36 @@ test("Logic Gate Arena creates editor and Kanban root modules", () => {
   assert.equal(computeLinkPlan(frames)?.edges.length, 1);
 });
 
+test("fresh and invalid tab persistence default to My Work", () => {
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    },
+  });
+  try {
+    assert.equal(loadViews().activeId, "view-my-work");
+
+    values.set("grid-dashboard-views-v1", JSON.stringify({
+      tabs: [{ id: "saved-home", name: "Home", page: "home", frames: [] }],
+      activeId: "missing-tab",
+    }));
+    assert.equal(loadViews().activeId, "view-my-work");
+
+    values.set("grid-dashboard-views-v1", JSON.stringify({
+      tabs: [{ id: "saved-home", name: "Home", page: "home", frames: [] }],
+      activeId: "saved-home",
+    }));
+    assert.equal(loadViews().activeId, "saved-home", "a valid saved active tab remains authoritative");
+  } finally {
+    if (originalStorage) Object.defineProperty(globalThis, "localStorage", originalStorage);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  }
+});
+
 test("persisted Logic Gate Arena tabs are renamed to Process Arena", () => {
   const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
   const legacyFrames = createLogicGateArenaFrames().map((frame) => ({

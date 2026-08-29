@@ -270,7 +270,7 @@ export function persistFrameLinks(next: FrameLinkEdge[]) {
 // Load saved dashboard views/tabs with legacy widget compatibility fallback.
 export function loadViews(): { tabs: ViewTab[]; activeId: string } {
   const fallbackTabs = createPrimaryTabs();
-  const fallback = { tabs: fallbackTabs, activeId: "view-home" };
+  const fallback = { tabs: fallbackTabs, activeId: "view-my-work" };
   try {
     const raw = localStorage.getItem(VIEWS_KEY);
     if (!raw) return fallback;
@@ -289,7 +289,7 @@ export function loadViews(): { tabs: ViewTab[]; activeId: string } {
 
     if (tabs.length === 0) return fallback;
     const normalizedTabs = ensurePrimaryHeaderTabs(ensureGloballyUniqueFrameIDs(tabs));
-    const activeId = normalizedTabs.some((tab) => tab.id === parsed.activeId) ? parsed.activeId : (normalizedTabs.find(isCommunicationsTab)?.id ?? normalizedTabs[0].id);
+    const activeId = normalizedTabs.some((tab) => tab.id === parsed.activeId) ? parsed.activeId : (normalizedTabs.find(isMyWorkTab)?.id ?? normalizedTabs[0].id);
     return { tabs: normalizedTabs, activeId };
   } catch {
     return fallback;

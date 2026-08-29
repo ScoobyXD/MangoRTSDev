@@ -102,9 +102,11 @@ MW49 - Action Item date fields use the shared elevated calendar with a light-blu
 
 MW50 - Every universal grouping dialog uses raised grouping rows, raised level tags and buttons, and recessed field selectors within its elevated overlay.
 
+MW51 - A successful login with no explicit supported return destination opens My Work as the active page. A fresh authenticated load with no valid saved active tab also selects My Work, while explicit supported return destinations and valid saved tabs on ordinary authenticated reloads remain authoritative.
+
 ## Process Story: One person sees assigned work and current company context
 
-A company member opens My Work beneath My Tower
+A company member logs in without an explicit return destination or opens My Work beneath My Tower
 
 ↓
 

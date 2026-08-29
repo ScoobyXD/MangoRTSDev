@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import {
   ActionItemIcon,
   ExplorerEntityIcon,
@@ -14,7 +15,6 @@ import {
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import {
   buildUniversalNestedGroups,
-  type UniversalNestedGroup,
 } from "../grouping/universalGrouping.js";
 import { logicGateRACIRolePresentation } from "../logic-gates/raciPresentation.js";
 import { homeRACIRoleAccent } from "../../pages/home/homeStyles.js";
@@ -35,17 +35,21 @@ import {
   myWorkNodeGroupingAdapter,
   normalizeMyWorkActionItemGroupings,
   normalizeMyWorkNodeGroupings,
-  sortActionItems,
-  sortNodes,
-  sortProcesses,
-  sortProjects,
   type MyWorkActionItemGrouping,
   type MyWorkNodeGrouping,
 } from "./myWorkGrouping.js";
+import {
+  findAdjacentMyWorkRowEntryIndex,
+  findMyWorkDisplayEntryIndex,
+  flattenMyWorkGroupedDisplayEntries,
+  flattenMyWorkUngroupedDisplayEntries,
+  type MyWorkDisplayEntry,
+} from "./myWorkWindowing.js";
 import { useMyWorkData, type MyWorkSectionState } from "./useMyWorkData.js";
 
 export type MyWorkContentProps = {
   companyID: string;
+  subjectID: string;
   requestJSON: BoundRequestJSON;
 };
 
@@ -71,24 +75,30 @@ const MY_WORK_RESIZER_SIZE = 10;
 const MY_WORK_LOAD_MORE_THRESHOLD = 160;
 const MY_WORK_COLUMN_MIN_WIDTHS: MyWorkColumnWeights = [300, 240, 240];
 const MY_WORK_SECTION_MIN_HEIGHT = 140;
+const MY_WORK_WINDOW_THRESHOLD = 120;
+const MY_WORK_WINDOW_OVERSCAN = 8;
 const DEFAULT_MY_WORK_LAYOUT: MyWorkLayout = {
   columnWeights: normalizedColumnWeights([1.25, 0.9, 0.9]),
   actionItemsRatio: 0.5,
 };
 
-export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
+export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkContentProps) {
   const {
     state,
     processRole,
     reloadSection,
     loadMore,
     selectProcessRole,
-  } = useMyWorkData(companyID, requestJSON);
+  } = useMyWorkData(companyID, subjectID, requestJSON);
   const [layout, setLayout] = useState<MyWorkLayout>(() => readMyWorkLayout(companyID));
   const [paneMeasurements, setPaneMeasurements] = useState({ columnAvailableWidth: 0, leftAvailableHeight: 0 });
   const layoutRef = useRef(layout);
   const columnsRef = useRef<HTMLDivElement>(null);
   const leftColumnRef = useRef<HTMLDivElement>(null);
+  const actionItemsScrollRef = useRef<HTMLDivElement>(null);
+  const nodesScrollRef = useRef<HTMLDivElement>(null);
+  const processesScrollRef = useRef<HTMLDivElement>(null);
+  const projectsScrollRef = useRef<HTMLDivElement>(null);
   const [actionItemGroupings, setActionItemGroupings] = useState<MyWorkActionItemGrouping[]>(() => (
     DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping }))
   ));
@@ -99,8 +109,17 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
   useEffect(() => {
     setActionItemGroupings(DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })));
     setNodeGroupings(DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping })));
-    setLayout(readMyWorkLayout(companyID));
+  }, [companyID, subjectID]);
+
+  useEffect(() => {
+    const nextLayout = readMyWorkLayout(companyID);
+    layoutRef.current = nextLayout;
+    setLayout(nextLayout);
   }, [companyID]);
+
+  useEffect(() => {
+    layoutRef.current = layout;
+  }, [layout]);
 
   useEffect(() => {
     const measure = () => {
@@ -129,8 +148,6 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
     };
   }, []);
 
-  layoutRef.current = layout;
-
   const actionItemGroups = useMemo(() => buildUniversalNestedGroups(
     state.action_items.items,
     actionItemGroupings,
@@ -141,6 +158,32 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
     nodeGroupings,
     myWorkNodeGroupingAdapter,
   ), [nodeGroupings, state.nodes.items]);
+  const actionItemEntries = useMemo(() => actionItemGroupings.length > 0
+    ? flattenMyWorkGroupedDisplayEntries(actionItemGroups, (item) => item.entity_id)
+    : flattenMyWorkUngroupedDisplayEntries(state.action_items.items, (item) => item.entity_id), [
+    actionItemGroups,
+    actionItemGroupings.length,
+    state.action_items.items,
+  ]);
+  const nodeEntries = useMemo(() => nodeGroupings.length > 0
+    ? flattenMyWorkGroupedDisplayEntries(nodeGroups, (item) => item.node_id)
+    : flattenMyWorkUngroupedDisplayEntries(state.nodes.items, (item) => item.node_id), [
+    nodeGroups,
+    nodeGroupings.length,
+    state.nodes.items,
+  ]);
+  const processEntries = useMemo(() => flattenMyWorkUngroupedDisplayEntries(
+    state.processes.items,
+    (process) => process.logic_gate_id,
+  ), [state.processes.items]);
+  const projectEntries = useMemo(() => flattenMyWorkUngroupedDisplayEntries(
+    state.projects.items,
+    (project) => project.project_id,
+  ), [state.projects.items]);
+  const renderActionItemRow = useCallback((item: MyWorkActionItem) => <ActionItemRow item={item} />, []);
+  const renderNodeRow = useCallback((item: MyWorkNode) => <NodeRow item={item} />, []);
+  const renderProcessRow = useCallback((process: MyWorkProcess) => <ProcessRow process={process} />, []);
+  const renderProjectRow = useCallback((project: MyWorkProject) => <ProjectRow project={project} />, []);
 
   const changeActionItemGroupings = (next: MyWorkActionItemGrouping[]) => {
     const normalized = normalizeMyWorkActionItemGroupings(next);
@@ -153,30 +196,35 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
     void reloadSection("nodes", normalized, true);
   };
 
-  const resizeColumnPair = (dividerIndex: 0 | 1, delta: number) => {
+  const resizeColumnPair = (dividerIndex: 0 | 1, delta: number): number | undefined => {
     const containerWidth = Math.max(columnsRef.current?.clientWidth ?? 0, columnsRef.current?.scrollWidth ?? 0);
     const availableWidth = Math.max(0, containerWidth - (MY_WORK_RESIZER_SIZE * 2));
-    if (availableWidth <= 0) return;
+    if (availableWidth <= 0) return undefined;
     const current = layoutRef.current;
     const next = {
       ...current,
       columnWeights: resizedColumnWeights(current.columnWeights, dividerIndex, delta, availableWidth),
     };
     layoutRef.current = next;
-    setLayout(next);
+    if (columnsRef.current) columnsRef.current.style.gridTemplateColumns = columnGridTemplate(next.columnWeights);
+    return columnResizeA11y(next.columnWeights, dividerIndex, availableWidth).current;
   };
-  const resizeLeftSections = (delta: number) => {
+  const resizeLeftSections = (delta: number): number | undefined => {
     const availableHeight = Math.max(0, (leftColumnRef.current?.clientHeight ?? 0) - MY_WORK_RESIZER_SIZE);
-    if (availableHeight <= 0) return;
+    if (availableHeight <= 0) return undefined;
     const current = layoutRef.current;
     const next = {
       ...current,
       actionItemsRatio: resizedSplitRatio(current.actionItemsRatio, delta, availableHeight),
     };
     layoutRef.current = next;
-    setLayout(next);
+    if (leftColumnRef.current) leftColumnRef.current.style.gridTemplateRows = leftColumnGridTemplate(next.actionItemsRatio);
+    return splitResizeA11y(next.actionItemsRatio, availableHeight).current;
   };
-  const saveLayout = () => writeMyWorkLayout(companyID, layoutRef.current);
+  const saveLayout = () => {
+    setLayout(layoutRef.current);
+    writeMyWorkLayout(companyID, layoutRef.current);
+  };
   const actionItemsResizeA11y = splitResizeA11y(layout.actionItemsRatio, paneMeasurements.leftAvailableHeight);
   const firstColumnResizeA11y = columnResizeA11y(layout.columnWeights, 0, paneMeasurements.columnAvailableWidth);
   const secondColumnResizeA11y = columnResizeA11y(layout.columnWeights, 1, paneMeasurements.columnAvailableWidth);
@@ -212,14 +260,15 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
               ? loadMore("action_items", actionItemGroupings)
               : reloadSection("action_items", actionItemGroupings))}
             onLoadMore={() => void loadMore("action_items", actionItemGroupings)}
+            scrollBodyRef={actionItemsScrollRef}
           >
-            <GroupedRows
+            <MyWorkWindowedRows
               section="action_items"
-              groups={actionItemGroups}
-              ungroupedRows={sortActionItems(state.action_items.items)}
-              groupings={actionItemGroupings}
+              entries={actionItemEntries}
+              scrollBodyRef={actionItemsScrollRef}
+              rowEstimate={52}
               emptyLabel="No Action Items assigned to you."
-              renderRow={(item) => <ActionItemRow key={item.entity_id} item={item} />}
+              renderRow={renderActionItemRow}
             />
           </SectionFrame>
 
@@ -256,14 +305,15 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
               ? loadMore("nodes", nodeGroupings)
               : reloadSection("nodes", nodeGroupings))}
             onLoadMore={() => void loadMore("nodes", nodeGroupings)}
+            scrollBodyRef={nodesScrollRef}
           >
-            <GroupedRows
+            <MyWorkWindowedRows
               section="nodes"
-              groups={nodeGroups}
-              ungroupedRows={sortNodes(state.nodes.items)}
-              groupings={nodeGroupings}
+              entries={nodeEntries}
+              scrollBodyRef={nodesScrollRef}
+              rowEstimate={50}
               emptyLabel="No responsible Nodes."
-              renderRow={(item) => <NodeRow key={item.node_id} item={item} />}
+              renderRow={renderNodeRow}
             />
           </SectionFrame>
         </div>
@@ -315,11 +365,15 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
           )}
           onRetry={() => void (state.processes.items.length > 0 ? loadMore("processes") : reloadSection("processes"))}
           onLoadMore={() => void loadMore("processes")}
+          scrollBodyRef={processesScrollRef}
         >
-          <SimpleRows
-            rows={sortProcesses(state.processes.items)}
+          <MyWorkWindowedRows
+            section="processes"
+            entries={processEntries}
+            scrollBodyRef={processesScrollRef}
+            rowEstimate={47}
             emptyLabel={`No ${PROCESS_ROLE_OPTIONS.find((option) => option.role === processRole)?.label ?? "matching"} Processes.`}
-            renderRow={(process) => <ProcessRow key={process.logic_gate_id} process={process} />}
+            renderRow={renderProcessRow}
           />
         </SectionFrame>
 
@@ -341,11 +395,15 @@ export function MyWorkContent({ companyID, requestJSON }: MyWorkContentProps) {
           state={state.projects}
           onRetry={() => void (state.projects.items.length > 0 ? loadMore("projects") : reloadSection("projects"))}
           onLoadMore={() => void loadMore("projects")}
+          scrollBodyRef={projectsScrollRef}
         >
-          <SimpleRows
-            rows={sortProjects(state.projects.items)}
+          <MyWorkWindowedRows
+            section="projects"
+            entries={projectEntries}
+            scrollBodyRef={projectsScrollRef}
+            rowEstimate={47}
             emptyLabel="No visible Projects assigned to your Project Teams."
-            renderRow={(project) => <ProjectRow key={project.project_id} project={project} />}
+            renderRow={renderProjectRow}
           />
         </SectionFrame>
       </div>
@@ -479,7 +537,7 @@ function MyWorkResizeHandle({
   valueMin: number;
   valueMax: number;
   valueNow: number;
-  onDelta: (delta: number) => void;
+  onDelta: (delta: number) => number | undefined;
   onCommit: () => void;
 }) {
   const positionRef = useRef<number | null>(null);
@@ -515,7 +573,11 @@ function MyWorkResizeHandle({
         if (previous === null) return;
         event.preventDefault();
         const next = coordinate(event);
-        onDelta(next - previous);
+        const nextValue = onDelta(next - previous);
+        if (nextValue !== undefined) {
+          event.currentTarget.setAttribute("aria-valuenow", String(nextValue));
+          event.currentTarget.setAttribute("aria-valuetext", `${nextValue}%`);
+        }
         positionRef.current = next;
       }}
       onPointerUp={finish}
@@ -532,7 +594,11 @@ function MyWorkResizeHandle({
           : event.key === "ArrowUp" ? -24 : event.key === "ArrowDown" ? 24 : 0;
         if (delta === 0) return;
         event.preventDefault();
-        onDelta(delta);
+        const nextValue = onDelta(delta);
+        if (nextValue !== undefined) {
+          event.currentTarget.setAttribute("aria-valuenow", String(nextValue));
+          event.currentTarget.setAttribute("aria-valuetext", `${nextValue}%`);
+        }
         onCommit();
       }}
     >
@@ -549,6 +615,7 @@ type SectionFrameProps<Item> = {
   actions?: React.ReactNode;
   onRetry: () => void;
   onLoadMore: () => void;
+  scrollBodyRef: React.RefObject<HTMLDivElement>;
   children: React.ReactNode;
 };
 
@@ -560,11 +627,11 @@ function SectionFrame<Item>({
   actions,
   onRetry,
   onLoadMore,
+  scrollBodyRef,
   children,
 }: SectionFrameProps<Item>) {
   const titleID = `my-work-${section}-title`;
   const sectionID = `my-work-${section.replace("_", "-")}-section`;
-  const scrollBodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const body = scrollBodyRef.current;
@@ -624,59 +691,167 @@ function SectionFrame<Item>({
   );
 }
 
-type GroupedRowsProps<Item, Field extends string> = {
-  section: "action_items" | "nodes";
-  groups: Array<UniversalNestedGroup<Item, Field>>;
-  ungroupedRows: Item[];
-  groupings: ReadonlyArray<{ field: Field; direction: "asc" | "desc" }>;
+type MyWorkWindowedRowsProps<Item, Field extends string> = {
+  section: MyWorkSection;
+  entries: Array<MyWorkDisplayEntry<Item, Field>>;
+  scrollBodyRef: React.RefObject<HTMLDivElement>;
+  rowEstimate: number;
   emptyLabel: string;
   renderRow: (item: Item) => React.ReactNode;
 };
 
-function GroupedRows<Item, Field extends string>({
+function MyWorkWindowedRowsImpl<Item, Field extends string>({
   section,
-  groups,
-  ungroupedRows,
-  groupings,
+  entries,
+  scrollBodyRef,
+  rowEstimate,
   emptyLabel,
   renderRow,
-}: GroupedRowsProps<Item, Field>) {
-  if (ungroupedRows.length === 0) return <EmptyState label={emptyLabel} />;
-  if (groupings.length === 0) return <div style={rowListStyle}>{ungroupedRows.map(renderRow)}</div>;
-  return <div style={groupListStyle}>{groups.map((group) => renderGroup(section, group, renderRow))}</div>;
-}
+}: MyWorkWindowedRowsProps<Item, Field>) {
+  const [focusedEntryID, setFocusedEntryID] = useState("");
+  const focusedIndex = useMemo(
+    () => focusedEntryID ? findMyWorkDisplayEntryIndex(entries, focusedEntryID) : -1,
+    [entries, focusedEntryID],
+  );
+  const rangeExtractor = useCallback((range: Range) => {
+    const indexes = new Set(defaultRangeExtractor(range));
+    if (focusedIndex >= 0) {
+      indexes.add(focusedIndex);
+      const previous = findAdjacentMyWorkRowEntryIndex(entries, focusedIndex, "previous");
+      const next = findAdjacentMyWorkRowEntryIndex(entries, focusedIndex, "next");
+      if (previous !== null) indexes.add(previous);
+      if (next !== null) indexes.add(next);
+    }
+    return [...indexes].sort((left, right) => left - right);
+  }, [entries, focusedIndex]);
+  const estimateSize = useCallback((index: number) => estimatedMyWorkEntrySize(entries[index], rowEstimate, index), [entries, rowEstimate]);
+  const getItemKey = useCallback((index: number) => entries[index]?.entryID ?? index, [entries]);
+  const virtualizer = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: entries.length,
+    enabled: entries.length > MY_WORK_WINDOW_THRESHOLD,
+    estimateSize,
+    getItemKey,
+    getScrollElement: () => scrollBodyRef.current,
+    initialRect: { width: 400, height: 600 },
+    measureElement: measureMyWorkDisplayEntry,
+    overscan: MY_WORK_WINDOW_OVERSCAN,
+    rangeExtractor,
+  });
+  const onFocusCapture = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    const entryElement = (event.target as Element).closest<HTMLElement>("[data-my-work-entry-id]");
+    if (entryElement?.dataset.myWorkEntryId) setFocusedEntryID(entryElement.dataset.myWorkEntryId);
+  }, []);
+  const onBlurCapture = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+    setFocusedEntryID("");
+  }, []);
 
-function renderGroup<Item, Field extends string>(
-  section: "action_items" | "nodes",
-  group: UniversalNestedGroup<Item, Field>,
-  renderRow: (item: Item) => React.ReactNode,
-): React.ReactNode {
-  return (
-    <div key={group.id} data-my-work-group={group.id} data-my-work-group-field={group.field} data-my-work-group-key={group.key} style={groupStyle(group.depth)}>
-      <div style={groupHeaderStyle(section, group.field, group.key, group.depth)}>
-        <span>{group.label}</span>
-        <span aria-label={`${group.rows.length || nestedGroupRowCount(group)} items`} style={groupCountStyle}>
-          {group.rows.length || nestedGroupRowCount(group)}
-        </span>
+  if (entries.length === 0) return <EmptyState label={emptyLabel} />;
+  if (entries.length <= MY_WORK_WINDOW_THRESHOLD) {
+    return (
+      <div data-my-work-windowed-list="false" onFocusCapture={onFocusCapture} onBlurCapture={onBlurCapture}>
+        {entries.map((entry, index) => (
+          <div
+            key={entry.entryID}
+            data-my-work-entry-id={entry.entryID}
+            data-my-work-entry-kind={entry.kind}
+            style={myWorkDisplayEntryStyle(entry, index)}
+          >
+            {renderMyWorkDisplayEntry(section, entry, renderRow)}
+          </div>
+        ))}
       </div>
-      {group.groups.length > 0
-        ? group.groups.map((nested) => renderGroup(section, nested, renderRow))
-        : <div style={nestedRowListStyle}>{group.rows.map(renderRow)}</div>}
+    );
+  }
+
+  return (
+    <div
+      data-my-work-windowed-list="true"
+      data-my-work-total-entries={entries.length}
+      data-my-work-mounted-entries={virtualizer.getVirtualItems().length}
+      onFocusCapture={onFocusCapture}
+      onBlurCapture={onBlurCapture}
+      style={{ height: virtualizer.getTotalSize(), minWidth: 0, position: "relative" }}
+    >
+      {virtualizer.getVirtualItems().map((virtualEntry) => {
+        const entry = entries[virtualEntry.index];
+        if (!entry) return null;
+        const estimatedSize = estimatedMyWorkEntrySize(entry, rowEstimate, virtualEntry.index);
+        return (
+          <div
+            key={virtualEntry.key}
+            ref={virtualizer.measureElement}
+            data-index={virtualEntry.index}
+            data-my-work-entry-id={entry.entryID}
+            data-my-work-entry-kind={entry.kind}
+            data-my-work-estimated-size={estimatedSize}
+            style={myWorkDisplayEntryStyle(entry, virtualEntry.index, virtualEntry.start)}
+          >
+            {renderMyWorkDisplayEntry(section, entry, renderRow)}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function nestedGroupRowCount<Item, Field extends string>(group: UniversalNestedGroup<Item, Field>): number {
-  if (group.rows.length > 0) return group.rows.length;
-  return group.groups.reduce((count, nested) => count + nestedGroupRowCount(nested), 0);
+const MyWorkWindowedRows = React.memo(MyWorkWindowedRowsImpl) as typeof MyWorkWindowedRowsImpl;
+
+function renderMyWorkDisplayEntry<Item, Field extends string>(
+  section: MyWorkSection,
+  entry: MyWorkDisplayEntry<Item, Field>,
+  renderRow: (item: Item) => React.ReactNode,
+): React.ReactNode {
+  if (entry.kind === "row") return renderRow(entry.row);
+  if (section !== "action_items" && section !== "nodes") return null;
+  return (
+    <div
+      data-my-work-group={entry.groupID}
+      data-my-work-group-field={entry.field}
+      data-my-work-group-key={entry.groupKey}
+      style={groupHeaderStyle(section, entry.field, entry.groupKey, entry.depth)}
+    >
+      <span>{entry.label}</span>
+      <span aria-label={`${entry.rowCount} items`} style={groupCountStyle}>{entry.rowCount}</span>
+    </div>
+  );
 }
 
-function SimpleRows<Item>({
-  rows,
-  emptyLabel,
-  renderRow,
-}: { rows: Item[]; emptyLabel: string; renderRow: (item: Item) => React.ReactNode }) {
-  return rows.length > 0 ? <div style={rowListStyle}>{rows.map(renderRow)}</div> : <EmptyState label={emptyLabel} />;
+function estimatedMyWorkEntrySize<Item, Field extends string>(
+  entry: MyWorkDisplayEntry<Item, Field> | undefined,
+  rowEstimate: number,
+  index: number,
+): number {
+  if (entry?.kind !== "group-header") return rowEstimate;
+  return 36 + (entry.depth === 0 && index > 0 ? 2 : 0);
+}
+
+function measureMyWorkDisplayEntry(element: HTMLDivElement): number {
+  const measured = element.getBoundingClientRect().height;
+  if (measured > 0) return measured;
+  return Number(element.dataset.myWorkEstimatedSize) || 48;
+}
+
+function myWorkDisplayEntryStyle<Item, Field extends string>(
+  entry: MyWorkDisplayEntry<Item, Field>,
+  index: number,
+  start?: number,
+): React.CSSProperties {
+  const indentation = entry.depth > 0 ? entry.depth * 25 + (entry.kind === "row" ? 1 : 0) : 0;
+  return {
+    minWidth: 0,
+    width: "100%",
+    boxSizing: "border-box",
+    paddingTop: entry.kind === "group-header" && entry.depth === 0 && index > 0 ? 2 : 0,
+    paddingBottom: 7,
+    paddingLeft: indentation,
+    ...(start === undefined ? {} : {
+      position: "absolute",
+      top: 0,
+      left: 0,
+      transform: `translateY(${start}px)`,
+    }),
+  };
 }
 
 function ActionItemRow({ item }: { item: MyWorkActionItem }) {
@@ -869,7 +1044,7 @@ function columnsStyle(weights: MyWorkColumnWeights): React.CSSProperties {
     minWidth: 0,
     minHeight: 0,
     display: "grid",
-    gridTemplateColumns: `minmax(${MY_WORK_COLUMN_MIN_WIDTHS[0]}px, ${weights[0]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[1]}px, ${weights[1]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[2]}px, ${weights[2]}fr)`,
+    gridTemplateColumns: columnGridTemplate(weights),
     gap: 0,
     overflowX: "auto",
     overflowY: "hidden",
@@ -877,14 +1052,22 @@ function columnsStyle(weights: MyWorkColumnWeights): React.CSSProperties {
   };
 }
 
+function columnGridTemplate(weights: MyWorkColumnWeights): string {
+  return `minmax(${MY_WORK_COLUMN_MIN_WIDTHS[0]}px, ${weights[0]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[1]}px, ${weights[1]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[2]}px, ${weights[2]}fr)`;
+}
+
 function leftColumnStyle(actionItemsRatio: number): React.CSSProperties {
   return {
     minWidth: 0,
     minHeight: 0,
     display: "grid",
-    gridTemplateRows: `minmax(${MY_WORK_SECTION_MIN_HEIGHT}px, ${actionItemsRatio}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_SECTION_MIN_HEIGHT}px, ${1 - actionItemsRatio}fr)`,
+    gridTemplateRows: leftColumnGridTemplate(actionItemsRatio),
     gap: 0,
   };
+}
+
+function leftColumnGridTemplate(actionItemsRatio: number): string {
+  return `minmax(${MY_WORK_SECTION_MIN_HEIGHT}px, ${actionItemsRatio}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_SECTION_MIN_HEIGHT}px, ${1 - actionItemsRatio}fr)`;
 }
 
 function sectionStyle(hasError: boolean): React.CSSProperties {
@@ -939,6 +1122,7 @@ const sectionBodyStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
   overflow: "auto",
+  overflowAnchor: "none",
   padding: 10,
   scrollbarGutter: "stable",
 };
@@ -1021,27 +1205,6 @@ function roleButtonStyle(active: boolean, accent: string): React.CSSProperties {
     cursor: "pointer",
     padding: 0,
     transition: "transform 140ms ease, box-shadow 140ms ease, background 140ms ease",
-  };
-}
-
-const rowListStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 7 };
-const nestedRowListStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  alignContent: "start",
-  gap: 7,
-  marginLeft: 16,
-  paddingLeft: 10,
-};
-const groupListStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 9 };
-
-function groupStyle(depth: number): React.CSSProperties {
-  return {
-    minWidth: 0,
-    display: "grid",
-    gap: 7,
-    marginLeft: depth === 0 ? 0 : 15,
-    paddingLeft: depth === 0 ? 0 : 10,
   };
 }
 
