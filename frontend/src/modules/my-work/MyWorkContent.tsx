@@ -6,6 +6,12 @@ import {
   HeaderMyWorkIcon,
   StaggeredGroupingIcon,
 } from "../../icons/index.js";
+import {
+  SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS,
+  visibleSidebarLogicGateStatusCounts,
+  type SidebarLogicGateStatusCountDefinition,
+  type SidebarLogicGateStatusCounts,
+} from "../../app/sidebarLogicGateStatusCounts.js";
 import type { BoundRequestJSON } from "../api/requestJSON.js";
 import {
   editorEntityLinkAnchorBounds,
@@ -22,6 +28,7 @@ import {
   buildUniversalNestedGroups,
 } from "../grouping/universalGrouping.js";
 import { logicGateRACIRolePresentation } from "../logic-gates/raciPresentation.js";
+import { getQDBusinessDate, millisecondsUntilNextQDBusinessDay } from "../logic-gates/qdRatingsApi.js";
 import { homeRACIRoleAccent } from "../../pages/home/homeStyles.js";
 import type {
   MyWorkActionItem,
@@ -83,6 +90,7 @@ const MY_WORK_COLUMN_MIN_WIDTHS: MyWorkColumnWeights = [360, 240, 240];
 const MY_WORK_SECTION_MIN_HEIGHT = 140;
 const MY_WORK_WINDOW_THRESHOLD = 120;
 const MY_WORK_WINDOW_OVERSCAN = 8;
+const MY_WORK_PAGE_SCALE = 0.9;
 const DEFAULT_MY_WORK_LAYOUT: MyWorkLayout = {
   columnWeights: normalizedColumnWeights([1.25, 0.9, 0.9]),
   actionItemsRatio: 0.5,
@@ -117,6 +125,7 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   ));
   const [actionItemHistory, setActionItemHistory] = useState(false);
   const [nodeHistory, setNodeHistory] = useState(false);
+  const businessDateKey = useMyWorkBusinessDateKey();
 
   useEffect(() => {
     setActionItemGroupings(DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })));
@@ -214,11 +223,11 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     await reloadSection("nodes", nodeHistory ? undefined : nodeGroupings, false, nodeHistory);
   }, [companyID, nodeGroupings, nodeHistory, reloadSection, requestJSON]);
   const renderActionItemRow = useCallback((item: MyWorkActionItem) => (
-    <ActionItemRow item={item} onSaveDueDate={(dueDate) => saveActionItemDueDate(item, dueDate)} />
-  ), [saveActionItemDueDate]);
+    <ActionItemRow item={item} businessDateKey={businessDateKey} onSaveDueDate={(dueDate) => saveActionItemDueDate(item, dueDate)} />
+  ), [businessDateKey, saveActionItemDueDate]);
   const renderNodeRow = useCallback((item: MyWorkNode) => (
-    <NodeRow item={item} onSaveDueDate={(dueDate) => saveNodeDueDate(item, dueDate)} />
-  ), [saveNodeDueDate]);
+    <NodeRow item={item} businessDateKey={businessDateKey} onSaveDueDate={(dueDate) => saveNodeDueDate(item, dueDate)} />
+  ), [businessDateKey, saveNodeDueDate]);
   const renderProcessRow = useCallback((process: MyWorkProcess) => <ProcessRow process={process} />, []);
   const renderProjectRow = useCallback((project: MyWorkProject) => <ProjectRow project={project} />, []);
 
@@ -729,7 +738,7 @@ function MyWorkResizeHandle({
         if (previous === null) return;
         event.preventDefault();
         const next = coordinate(event);
-        const nextValue = onDelta(next - previous);
+        const nextValue = onDelta(myWorkUnscaledPointerDelta(next - previous));
         if (nextValue !== undefined) {
           event.currentTarget.setAttribute("aria-valuenow", String(nextValue));
           event.currentTarget.setAttribute("aria-valuetext", `${nextValue}%`);
@@ -982,8 +991,12 @@ function estimatedMyWorkEntrySize<Item, Field extends string>(
   return 36 + (entry.depth === 0 && index > 0 ? 2 : 0);
 }
 
-function measureMyWorkDisplayEntry(element: HTMLDivElement): number {
-  const measured = element.getBoundingClientRect().height;
+export function myWorkUnscaledPointerDelta(delta: number): number {
+  return delta / MY_WORK_PAGE_SCALE;
+}
+
+export function measureMyWorkDisplayEntry(element: HTMLDivElement): number {
+  const measured = element.offsetHeight;
   if (measured > 0) return measured;
   return Number(element.dataset.myWorkEstimatedSize) || 48;
 }
@@ -1037,7 +1050,11 @@ function HistoryClockIcon() {
   );
 }
 
-function ActionItemRow({ item, onSaveDueDate }: { item: MyWorkActionItem; onSaveDueDate: (dueDate: string | null) => Promise<void> }) {
+function ActionItemRow({ item, businessDateKey, onSaveDueDate }: {
+  item: MyWorkActionItem;
+  businessDateKey: string;
+  onSaveDueDate: (dueDate: string | null) => Promise<void>;
+}) {
   const color = item.color?.trim().toLowerCase();
   const pulseClassName = color === "red" || color === "yellow" ? `mango-editor-action-item--${color}` : undefined;
   return (
@@ -1069,7 +1086,7 @@ function ActionItemRow({ item, onSaveDueDate }: { item: MyWorkActionItem; onSave
           {item.name}
         </span>
       </button>
-      <InlineDueDateEditor value={item.completion_due_date} resourceLabel={item.name} onSave={onSaveDueDate} />
+      <InlineDueDateEditor value={item.completion_due_date} resourceLabel={item.name} businessDateKey={businessDateKey} onSave={onSaveDueDate} />
     </div>
   );
 }
@@ -1098,7 +1115,11 @@ export function myWorkActionItemAnchor(
   };
 }
 
-function NodeRow({ item, onSaveDueDate }: { item: MyWorkNode; onSaveDueDate: (dueDate: string | null) => Promise<void> }) {
+function NodeRow({ item, businessDateKey, onSaveDueDate }: {
+  item: MyWorkNode;
+  businessDateKey: string;
+  onSaveDueDate: (dueDate: string | null) => Promise<void>;
+}) {
   return (
     <div className="my-work-resource-row" data-my-work-row="node" style={nodeRowStyle}>
       <button
@@ -1111,7 +1132,7 @@ function NodeRow({ item, onSaveDueDate }: { item: MyWorkNode; onSaveDueDate: (du
         <span style={resourceNameStyle}>{item.name}</span>
       </button>
       <div style={inlineContextStyle}>
-        <InlineDueDateEditor value={item.due_date} resourceLabel={item.name} onSave={onSaveDueDate} />
+        <InlineDueDateEditor value={item.due_date} resourceLabel={item.name} businessDateKey={businessDateKey} onSave={onSaveDueDate} />
         {item.process && (
           <button
             type="button"
@@ -1149,9 +1170,10 @@ function NodeRow({ item, onSaveDueDate }: { item: MyWorkNode; onSaveDueDate: (du
   );
 }
 
-function InlineDueDateEditor({ value, resourceLabel, onSave }: {
+function InlineDueDateEditor({ value, resourceLabel, businessDateKey, onSave }: {
   value: string | null | undefined;
   resourceLabel: string;
+  businessDateKey: string;
   onSave: (dueDate: string | null) => Promise<void>;
 }) {
   const formatted = formatNodeDueDateForEditor(value);
@@ -1160,6 +1182,7 @@ function InlineDueDateEditor({ value, resourceLabel, onSave }: {
   const [error, setError] = useState("");
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveVersionRef = useRef(0);
+  const relativeLabel = myWorkRelativeDueDateLabel(draft, businessDateKey);
   useEffect(() => setDraft(formatted), [formatted]);
   const commit = async (raw: string) => {
     const normalized = normalizeNodeDueDateDraft(raw);
@@ -1194,9 +1217,10 @@ function InlineDueDateEditor({ value, resourceLabel, onSave }: {
   };
   return (
     <span data-my-work-due-date="true" style={inlineDueDateStyle(Boolean(error))} title={error || undefined}>
-      <span style={inlineDueDateLabelStyle}>Due Date:</span>
+      {!relativeLabel && <span style={inlineDueDateLabelStyle}>Due Date:</span>}
       <EditorCalendarDateInput
         value={draft}
+        displayValue={relativeLabel || undefined}
         ariaLabel={`Due Date for ${resourceLabel}`}
         disabled={saving}
         accent="#0284c7"
@@ -1204,7 +1228,7 @@ function InlineDueDateEditor({ value, resourceLabel, onSave }: {
         onChange={(next) => { setDraft(next); setError(""); }}
         onCommit={(next) => void commit(next)}
         openOnInputClick
-        containerStyle={{ width: 112, gridTemplateColumns: "minmax(0,1fr) 24px" }}
+        containerStyle={{ width: relativeLabel ? 126 : 112, gridTemplateColumns: "minmax(0,1fr) 24px" }}
         inputStyle={{ color: error ? "#b91c1c" : "#075985", fontSize: 10.5, fontWeight: 850, cursor: saving ? "default" : "pointer" }}
         buttonStyle={{ width: 24, height: 24 }}
       />
@@ -1213,18 +1237,94 @@ function InlineDueDateEditor({ value, resourceLabel, onSave }: {
 }
 
 function ProcessRow({ process }: { process: MyWorkProcess }) {
+  const counts: SidebarLogicGateStatusCounts = {
+    request: process.status_counts.request,
+    pending: process.status_counts.pending,
+    inProgress: process.status_counts.in_progress,
+    review: process.status_counts.review,
+  };
   return (
     <button
       type="button"
       className="my-work-resource-row"
       data-my-work-target="process"
-      style={resourceButtonStyle}
+      style={processResourceButtonStyle}
       onClick={() => openEditorEntityLink({ entityType: "logic_gate", entityID: process.logic_gate_id, label: process.name })}
     >
       <span style={resourceIconSurfaceStyle("#19c879")}><ExplorerEntityIcon kind="logic_gate" /></span>
       <span style={resourceNameStyle}>{process.name}</span>
+      <ProcessStatusCounts counts={counts} />
     </button>
   );
+}
+
+function ProcessStatusCounts({ counts }: { counts: SidebarLogicGateStatusCounts }) {
+  const visibleByKey = new Map(visibleSidebarLogicGateStatusCounts(counts).map((item) => [item.key, item]));
+  return (
+    <span data-my-work-process-status-counts="true" style={processStatusCountsStyle}>
+      {SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS.map((definition) => {
+        const item = visibleByKey.get(definition.key);
+        return (
+          <span key={definition.key} data-my-work-process-status-slot={definition.key} style={processStatusCountSlotStyle}>
+            {item && (
+              <span
+                data-my-work-process-status={item.key}
+                data-my-work-process-status-count={item.count}
+                aria-label={`${item.label}: ${item.count}`}
+                title={`${item.label}: ${item.count}`}
+                style={processStatusCountStyle(item)}
+              >
+                {item.count}
+              </span>
+            )}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+export function myWorkRelativeDueDateLabel(value: string | null | undefined, businessDateKey = getQDBusinessDate().dateKey): string {
+  const dueDateKey = normalizeNodeDueDateDraft(value ?? "");
+  const dueDay = myWorkDateKeyDay(dueDateKey ?? "");
+  const businessDay = myWorkDateKeyDay(businessDateKey);
+  if (dueDay === null || businessDay === null) return "";
+  switch (dueDay - businessDay) {
+  case 0:
+    return "Due Today";
+  case 1:
+    return "Due Tomorrow";
+  case 2:
+    return "Due in two days";
+  case 3:
+    return "Due in three days";
+  default:
+    return "";
+  }
+}
+
+function myWorkDateKeyDay(value: string): number | null {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return Math.floor(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])) / 86_400_000);
+}
+
+function useMyWorkBusinessDateKey(): string {
+  const [dateKey, setDateKey] = useState(() => getQDBusinessDate().dateKey);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = () => {
+      timer = setTimeout(() => {
+        setDateKey(getQDBusinessDate().dateKey);
+        schedule();
+      }, millisecondsUntilNextQDBusinessDay());
+    };
+    schedule();
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+  return dateKey;
 }
 
 function ProjectRow({ project }: { project: MyWorkProject }) {
@@ -1257,8 +1357,9 @@ function LoadingRows() {
 }
 
 const pageStyle: React.CSSProperties = {
-  width: "100%",
-  height: "100%",
+  width: `${100 / MY_WORK_PAGE_SCALE}%`,
+  height: `${100 / MY_WORK_PAGE_SCALE}%`,
+  zoom: MY_WORK_PAGE_SCALE,
   minWidth: 0,
   minHeight: 0,
   display: "grid",
@@ -1596,6 +1697,50 @@ const resourceButtonStyle: React.CSSProperties = {
   textAlign: "left",
   padding: "6px 9px",
 };
+
+const processResourceButtonStyle: React.CSSProperties = {
+  ...resourceButtonStyle,
+  display: "grid",
+  gridTemplateColumns: "27px minmax(0,1fr) 94px",
+};
+
+const processStatusCountsStyle: React.CSSProperties = {
+  width: 94,
+  minWidth: 94,
+  display: "grid",
+  gridTemplateColumns: "repeat(4, 22px)",
+  alignItems: "center",
+  justifyContent: "end",
+  gap: 2,
+};
+
+const processStatusCountSlotStyle: React.CSSProperties = {
+  width: 22,
+  height: 22,
+  display: "grid",
+  placeItems: "center",
+};
+
+function processStatusCountStyle(definition: SidebarLogicGateStatusCountDefinition): React.CSSProperties {
+  return {
+    width: 22,
+    minWidth: 22,
+    height: 22,
+    boxSizing: "border-box",
+    display: "inline-grid",
+    placeItems: "center",
+    padding: 0,
+    border: `1px solid ${definition.borderColor}`,
+    borderRadius: 4,
+    backgroundColor: definition.color,
+    backgroundImage: definition.gradient,
+    color: definition.textColor,
+    boxShadow: `0 3px 8px ${definition.glowColor}, inset 0 1px 0 rgba(255,255,255,.68)`,
+    fontSize: 11.5,
+    fontWeight: 850,
+    lineHeight: 1,
+  };
+}
 
 const resourceNameStyle: React.CSSProperties = {
   minWidth: 0,

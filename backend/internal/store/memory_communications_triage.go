@@ -39,6 +39,7 @@ type memoryCommunicationsTriageConversionSnapshot struct {
 	nodeLogicGateAssignments       map[string]domain.NodeLogicGateAssignment
 	emailNodeLinks                 map[string]communicationsEmailNodeLink
 	domainEvents                   map[string]domain.DomainEvent
+	nodeCompletionTransitions      map[string]time.Time
 	projectRelationships           map[string]domain.ProjectRelationship
 	projectRelationshipProjection  map[string]domain.ProjectRelationshipProjection
 	companyExplorerV2Entities      map[string]memoryCompanyExplorerV2Entity
@@ -76,6 +77,7 @@ func (r *MemoryRepo) snapshotCommunicationsTriageConversionStateLocked() memoryC
 		nodeLogicGateAssignments:       cloneMemoryMap(r.nodeLogicGateAssignments),
 		emailNodeLinks:                 cloneMemoryMap(r.emailNodeLinks),
 		domainEvents:                   cloneMemoryMap(r.domainEvents),
+		nodeCompletionTransitions:      cloneMemoryMap(r.nodeCompletionTransitions),
 		projectRelationships:           cloneMemoryMap(r.projectRelationships),
 		projectRelationshipProjection:  cloneMemoryMap(r.projectRelationshipProjection),
 		companyExplorerV2Entities:      cloneMemoryMap(r.companyExplorerV2Entities),
@@ -113,6 +115,7 @@ func (r *MemoryRepo) restoreCommunicationsTriageConversionStateLocked(snapshot m
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
 	r.emailNodeLinks = snapshot.emailNodeLinks
 	r.domainEvents = snapshot.domainEvents
+	r.nodeCompletionTransitions = snapshot.nodeCompletionTransitions
 	r.projectRelationships = snapshot.projectRelationships
 	r.projectRelationshipProjection = snapshot.projectRelationshipProjection
 	r.companyExplorerV2Entities = snapshot.companyExplorerV2Entities

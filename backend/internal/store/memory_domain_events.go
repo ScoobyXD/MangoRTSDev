@@ -47,11 +47,13 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 	}
 
 	beforeDomainEvents := maps.Clone(r.domainEvents)
+	beforeNodeCompletionTransitions := maps.Clone(r.nodeCompletionTransitions)
 	beforeWorkspaceReadVersions := maps.Clone(r.workspaceReadVersions)
 	beforeOutbox := maps.Clone(r.realtimeOutbox)
 	beforeOutboxSequence := r.realtimeOutboxSequence
 	restore := func() {
 		r.domainEvents = beforeDomainEvents
+		r.nodeCompletionTransitions = beforeNodeCompletionTransitions
 		r.workspaceReadVersions = beforeWorkspaceReadVersions
 		r.realtimeOutbox = beforeOutbox
 		r.realtimeOutboxSequence = beforeOutboxSequence
@@ -98,6 +100,7 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 		CreatedTimestamp: now,
 	}
 	r.domainEvents[domainEventMemoryKey(item.CompanyID, item.EventID)] = item
+	r.applyNodeCompletionTransitionUpdatesLocked([]domain.DomainEvent{item})
 	r.updateWorkspaceReadVersionsLocked(item)
 	r.updateLogicGateWorkReadVersionsLocked(item)
 	if err := r.enqueueKanbanRealtimeForDomainEventLocked(item); err != nil {
@@ -117,11 +120,13 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 
 func (r *MemoryRepo) appendDomainEventsLocked(inputs []DomainEventInput) ([]domain.DomainEvent, error) {
 	beforeDomainEvents := maps.Clone(r.domainEvents)
+	beforeNodeCompletionTransitions := maps.Clone(r.nodeCompletionTransitions)
 	beforeWorkspaceReadVersions := maps.Clone(r.workspaceReadVersions)
 	beforeOutbox := maps.Clone(r.realtimeOutbox)
 	beforeOutboxSequence := r.realtimeOutboxSequence
 	restore := func() {
 		r.domainEvents = beforeDomainEvents
+		r.nodeCompletionTransitions = beforeNodeCompletionTransitions
 		r.workspaceReadVersions = beforeWorkspaceReadVersions
 		r.realtimeOutbox = beforeOutbox
 		r.realtimeOutboxSequence = beforeOutboxSequence

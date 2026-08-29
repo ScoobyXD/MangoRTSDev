@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { isAbortError, type BoundRequestJSON } from "../api/requestJSON.js";
 import {
   fetchMyWork,
+  MY_WORK_HISTORY_PAGE_LIMIT,
   MY_WORK_PAGE_LIMIT,
   type MyWorkActionItem,
   type MyWorkActionItemPerspective,
@@ -128,7 +129,7 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
           : undefined,
         grouping: request.grouping,
         history: request.history,
-        limit: MY_WORK_PAGE_LIMIT,
+        limit: request.history ? MY_WORK_HISTORY_PAGE_LIMIT : MY_WORK_PAGE_LIMIT,
         cursor: request.cursor,
         signal: controller.signal,
       });

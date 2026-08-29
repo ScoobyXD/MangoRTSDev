@@ -49,6 +49,10 @@ The later human-run conversion/cutover is separate: drain editor writes or enter
 
 `backend/db/migrations/20260829_action_item_delegation_source.sql` adds the required nullable `assigned_by` person template and field rows, creates the dedicated immutable `action_item_sources` table, and installs exact endpoint validation and cleanup triggers. Existing Action Items receive null Assigned by values and no Source; the migration never infers either from creator audit or inline relationships. Apply it through the normal reviewed migration workflow before deploying the new My Work perspectives or editor Source projection. No agent task applies it to a live database.
 
+### 20260829 My Work Node completion transition
+
+`backend/db/migrations/20260829_my_work_node_completion_transition.sql` adds the persisted nullable `nodes.completion_transition_timestamp`, backfills it once from immutable Node snapshots with the Node creation timestamp as the completed-row fallback, and creates its partial History index. Apply it through the normal reviewed migration workflow before deploying My Work Node History reads. The backfill and nonconcurrent index creation may hold transactional locks, and no agent task applies it to a live database.
+
 MangoRTS uses both migration history and a current schema snapshot:
 
 - `backend/db/migrations/` is the append-only change history. Every durable schema repair belongs here, even if the same SQL also exists in a DBeaver/runbook file.

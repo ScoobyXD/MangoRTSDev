@@ -72,7 +72,7 @@ MW34 - The normal Nodes list excludes a Node whose current status is Done, Compl
 
 MW35 - A first-version Action Item row exposes only the Action Item summary needed to display and open that exact Entity. It derives and exposes no Process, Project, or other resource context.
 
-MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page near that section's scroll boundary. Switching Mine/Delegated, Node role, or Process role clears only that section's stale rows and cursor and reloads only that section; no selector changes its grouping stack or another section.
+MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that section nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated, Node role, or Process role clears only that section's stale rows and cursor, reloads only that section, and preserves its grouping stack.
 
 MW37 - A section never requests the same next cursor concurrently, ignores canceled or stale responses, rejects a non-advancing cursor, and never appends the same resource twice.
 
@@ -108,13 +108,17 @@ MW52 - Action Items and Nodes each have an independent History toggle in their s
 
 MW53 - Each History list contains only completed work that still qualifies for that subject and viewer. It is ordered by completion status-change time from newest to oldest, uses exact resource ID as the stable tie-breaker, and keeps cursor pagination bound to History mode.
 
-MW54 - An Action Item History timestamp is its canonical Status field update timestamp. A Node History timestamp is the latest immutable full Node snapshot that changed its status from non-complete to Done, Complete, or Completed; later updates while it stays complete never change that timestamp, and a completed Node with no recorded transition falls back to its immutable Node creation timestamp.
+MW54 - An Action Item History timestamp is its canonical Status field update timestamp. A Node's canonical `completion_transition_timestamp` is updated atomically from each newly inserted immutable full Node snapshot: entering Done, Complete, or Completed sets that snapshot's timestamp, remaining complete preserves it, and reopening clears it so a later re-completion records the newer transition. Existing rows are backfilled once from immutable snapshots, a completed Node with no recorded transition falls back to its immutable Node creation timestamp, and History reads this persisted value without scanning snapshot history.
 
-MW55 - Every Action Item and Node row shows `Due Date:` plus its current date or empty state as the leftmost inline context label. Process and Project chips follow it. Activating the date field opens the shared elevated calendar and saves the selected date directly.
+MW55 - Every Action Item and Node row shows its current due date or empty state as the leftmost inline context label. A date on the current `America/Los_Angeles` business day reads `Due Today`; the next three dates read `Due Tomorrow`, `Due in two days`, and `Due in three days`; every later or earlier date keeps `Due Date:` plus its normal date. Every form keeps the shared clickable calendar control, and Process and Project chips follow it.
 
 MW56 - The Action Item row's official due date is always its canonical Completion due date field. Inline Action Item due-date edits update that exact existing Entity field, while inline Node due-date edits update the exact Node. Rapid date commits are serialized per row so the user's latest calendar or typed choice is always the final saved value.
 
 MW57 - After a same-page Action Item editor successfully renames an item or changes one of its fields, My Work immediately reloads that Action Item section. A renamed row shows its current name, and an item newly marked complete leaves the normal list without a page reload.
+
+MW58 - Only the My Work page content uses the uniform 90-percent visual density shown by browser zoom at 90 percent. Its compensated page bounds still fill the available workspace, while the shared left sidebar keeps its normal size and interaction behavior.
+
+MW59 - Every Process row reserves the same four right-aligned Request, Pending, In Progress, and Review columns. Counts use the canonical Logic Gate work-status source and the established Pinned colors and order; Backlog and Done are excluded, and a zero keeps its fixed column empty instead of shifting another status.
 
 ## Process Story: One person sees assigned work and current company context
 
@@ -130,7 +134,7 @@ The unnamed left column keeps Action Items above Nodes, shows editable inline du
 
 ↓
 
-The Nodes and Processes selectors both default to Responsible but change independently, while the right column lists Projects whose assigned Team includes that member directly or through a current descendant group
+The Nodes and Processes selectors both default to Responsible and change independently; each Process row shows four aligned canonical active-work counts, while the right column lists Projects whose assigned Team includes that member directly or through a current descendant group
 
 ↓
 

@@ -36,6 +36,16 @@ test("Node and Huddle Node text box headers keep save metadata left of Editor an
   }
 });
 
+test("Huddle Node text boxes reuse the normal Node viewport-height rule", () => {
+  const huddleNodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleNodeWorkspace.tsx"), "utf8");
+
+  assert.match(huddleNodeWorkspace, /resolveTextBlockViewportGeometry\(/);
+  assert.match(huddleNodeWorkspace, /workspaceHeight - TEXT_BLOCK_HEADER_CHROME_HEIGHT - TEXT_BLOCK_ROW_GAP/);
+  assert.match(huddleNodeWorkspace, /minHeight: textBoxViewport\.bodyHeight, height: textBoxViewport\.bodyHeight/);
+  assert.match(huddleNodeWorkspace, /minHeight=\{textBoxViewport\.rowHeight\}/);
+  assert.doesNotMatch(huddleNodeWorkspace, /HUDDLE_TEXT_BOX_(?:BODY|ROW)_HEIGHT/);
+});
+
 test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, RACI controls, icon actions, and raised sidebar rows", () => {
   const page = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleLogicGatePage.tsx"), "utf8");
   const surface = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleResourceSurface.tsx"), "utf8");

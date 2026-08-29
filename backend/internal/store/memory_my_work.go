@@ -173,10 +173,6 @@ func (r *MemoryRepo) memoryActionItemFieldsLocked(companyID, entityID string) me
 
 func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCursor) domain.MyWorkNodePage {
 	grouping, groupingTerms := myWorkEffectiveGrouping(query, MyWorkSectionNodes)
-	completedTimestamps := map[string]time.Time{}
-	if query.History {
-		completedTimestamps = r.memoryMyWorkNodeCompletedTimestampsLocked(query.CompanyID)
-	}
 	rows := make([]domain.MyWorkNode, 0)
 	for _, node := range r.nodes {
 		if node.CompanyID != query.CompanyID {
@@ -195,7 +191,7 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 		item := domain.MyWorkNode{NodeID: node.NodeID, Name: node.Title, Priority: cloneIntPointer(node.Priority), DueDate: cloneStringPointer(node.DueDate)}
 		if query.History {
 			completed := node.CreatedTimestamp
-			if transitionTimestamp, ok := completedTimestamps[node.NodeID]; ok {
+			if transitionTimestamp, ok := r.nodeCompletionTransitions[key(query.CompanyID, node.NodeID)]; ok {
 				completed = transitionTimestamp
 			}
 			item.CompletedTimestamp = &completed
@@ -269,40 +265,9 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 	return page
 }
 
-func (r *MemoryRepo) memoryMyWorkNodeCompletedTimestampsLocked(companyID string) map[string]time.Time {
-	events := make([]domain.DomainEvent, 0)
-	for _, event := range r.domainEvents {
-		if event.CompanyID != companyID || event.StreamType != workspaceDomainStreamType || event.StreamID != companyID || (event.Type != "node_created" && event.Type != "node_updated") {
-			continue
-		}
-		if _, ok := event.Payload["node"].(domain.Node); ok {
-			events = append(events, event)
-		}
-	}
-	sort.Slice(events, func(i, j int) bool {
-		if events[i].Sequence != events[j].Sequence {
-			return events[i].Sequence < events[j].Sequence
-		}
-		return events[i].EventID < events[j].EventID
-	})
-
-	previousStatuses := make(map[string]string)
-	seen := make(map[string]bool)
-	completedTimestamps := make(map[string]time.Time)
-	for _, event := range events {
-		node := event.Payload["node"].(domain.Node)
-		status := myWorkOptionalString(node.Status)
-		if seen[node.NodeID] && !myWorkStatusDone(previousStatuses[node.NodeID]) && myWorkStatusDone(status) {
-			completedTimestamps[node.NodeID] = event.CreatedTimestamp
-		}
-		previousStatuses[node.NodeID] = status
-		seen[node.NodeID] = true
-	}
-	return completedTimestamps
-}
-
 func (r *MemoryRepo) memoryMyWorkProcessesLocked(query MyWorkQuery, cursor myWorkCursor) domain.MyWorkProcessPage {
 	items := make([]domain.MyWorkProcess, 0)
+	countsByLogicGateID := r.memoryRACITabLogicGateCountsLocked(query.CompanyID)
 	for _, gate := range r.logicGates {
 		if gate.CompanyID != query.CompanyID || !r.gvicEffectiveUserHasRoleLocked(query.CompanyID, EntityTypeLogicGate, gate.LogicGateID, query.UserID, query.Role) {
 			continue
@@ -310,7 +275,11 @@ func (r *MemoryRepo) memoryMyWorkProcessesLocked(query MyWorkQuery, cursor myWor
 		if !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeLogicGate, gate.LogicGateID, EntityPermissionEdit) {
 			continue
 		}
-		item := domain.MyWorkProcess{LogicGateID: gate.LogicGateID, Name: gate.Header}
+		item := domain.MyWorkProcess{
+			LogicGateID:  gate.LogicGateID,
+			Name:         gate.Header,
+			StatusCounts: countsByLogicGateID[gate.LogicGateID],
+		}
 		if query.Cursor == "" || compareMyWorkNamedCursor(strings.ToLower(item.Name), item.LogicGateID, cursor) > 0 {
 			items = append(items, item)
 		}

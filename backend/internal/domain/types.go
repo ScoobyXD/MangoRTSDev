@@ -217,8 +217,9 @@ type MyWorkNode struct {
 }
 
 type MyWorkProcess struct {
-	LogicGateID string `json:"logic_gate_id"`
-	Name        string `json:"name"`
+	LogicGateID  string              `json:"logic_gate_id"`
+	Name         string              `json:"name"`
+	StatusCounts RACITabStatusCounts `json:"status_counts"`
 }
 
 type MyWorkProject struct {

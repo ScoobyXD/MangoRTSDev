@@ -3,6 +3,7 @@ package store
 import (
 	"miraeopus/backend/internal/domain"
 	"sync"
+	"time"
 )
 
 type MemoryRepo struct {
@@ -109,6 +110,7 @@ type MemoryRepo struct {
 	emailCollaborations              map[string]domain.CommunicationsEmailCollaboration
 	emailCollaborationParticipants   map[string]domain.CommunicationsEmailCollaborationParticipant
 	domainEvents                     map[string]domain.DomainEvent
+	nodeCompletionTransitions        map[string]time.Time
 	realtimeOutbox                   map[string]RealtimeOutboxEvent
 	realtimeOutboxSequence           int64
 	realtimeOutboxErr                error
@@ -227,6 +229,7 @@ func NewMemoryRepo() *MemoryRepo {
 		emailCollaborations:              map[string]domain.CommunicationsEmailCollaboration{},
 		emailCollaborationParticipants:   map[string]domain.CommunicationsEmailCollaborationParticipant{},
 		domainEvents:                     map[string]domain.DomainEvent{},
+		nodeCompletionTransitions:        map[string]time.Time{},
 		realtimeOutbox:                   map[string]RealtimeOutboxEvent{},
 		editorJSONDocuments:              map[string]memoryEditorJSONDocument{},
 		editorJSONOperations:             map[string][]memoryEditorJSONOperation{},

@@ -357,6 +357,17 @@ func TestMemoryMyWorkProcessesRoleAndNestedProjectTeamRemainPermissionFiltered(t
 	}
 	responsibleGate := mustCreateMyWorkGateWithRole(t, repo, companyID, user.UserID, "Responsible", domain.RACIRoleResponsible)
 	accountableGate := mustCreateMyWorkGateWithRole(t, repo, companyID, user.UserID, "Accountable", domain.RACIRoleAccountable)
+	for index, status := range []string{"requested", "pending", "in_progress", "review", "done"} {
+		node, createErr := repo.CreateNode(companyID, "Counted process node "+status)
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		if _, assignErr := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+			CompanyID: companyID, LogicGateID: responsibleGate.LogicGateID, NodeID: node.NodeID, Status: status, Position: index,
+		}); assignErr != nil {
+			t.Fatal(assignErr)
+		}
+	}
 	visibleProject, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: "Visible nested team", Status: "active", Health: "on_track", TeamIDs: []string{parent.GroupID}, TeamIDsSet: true})
 	if err != nil || visibleProject.Project == nil {
 		t.Fatal(err)
@@ -380,12 +391,18 @@ func TestMemoryMyWorkProcessesRoleAndNestedProjectTeamRemainPermissionFiltered(t
 	if responsible.Processes == nil || responsible.Processes.Role != domain.RACIRoleResponsible || len(responsible.Processes.Items) != 1 || responsible.Processes.Items[0].LogicGateID != responsibleGate.LogicGateID {
 		t.Fatalf("responsible processes = %+v", responsible.Processes)
 	}
+	if counts := responsible.Processes.Items[0].StatusCounts; counts != (domain.RACITabStatusCounts{Request: 1, Pending: 1, InProgress: 1, Review: 1}) {
+		t.Fatalf("responsible process counts = %+v", counts)
+	}
 	accountable, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionProcesses, Role: domain.RACIRoleAccountable})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if accountable.Processes == nil || len(accountable.Processes.Items) != 1 || accountable.Processes.Items[0].LogicGateID != accountableGate.LogicGateID {
 		t.Fatalf("accountable processes = %+v", accountable.Processes)
+	}
+	if accountable.Processes.Items[0].StatusCounts != (domain.RACITabStatusCounts{}) {
+		t.Fatalf("empty accountable process counts = %+v", accountable.Processes.Items[0].StatusCounts)
 	}
 	projects, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionProjects})
 	if err != nil {
@@ -626,6 +643,50 @@ func TestPostgresMyWorkQueriesKeepSubjectAndViewerResolutionSetBased(t *testing.
 			t.Fatalf("My Work PostgreSQL query missing set-based contract %q", required)
 		}
 	}
+	nodeQueryStart := strings.Index(source, "func (r *PostgresRepo) postgresMyWorkNodes")
+	nodeQueryEnd := strings.Index(source, "func (r *PostgresRepo) postgresMyWorkProcesses")
+	if nodeQueryStart < 0 || nodeQueryEnd <= nodeQueryStart {
+		t.Fatal("could not isolate the PostgreSQL My Work Nodes query")
+	}
+	nodeQuery := source[nodeQueryStart:nodeQueryEnd]
+	if strings.Contains(nodeQuery, "domain_events") {
+		t.Fatal("My Work Node History must use the persisted completion transition instead of scanning domain_events")
+	}
+	permissionIndex := strings.Index(nodeQuery, ", visible_nodes as (")
+	pageIndex := strings.Index(nodeQuery, "), paged_nodes as (")
+	if permissionIndex < 0 || pageIndex < 0 || permissionIndex >= pageIndex {
+		t.Fatal("My Work Node permission filtering must remain before paged_nodes")
+	}
+}
+
+func TestMyWorkNodeCompletionTransitionSchemaContract(t *testing.T) {
+	canonical, err := os.ReadFile("../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile("../../db/migrations/20260829_my_work_node_completion_transition.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, source := range map[string]string{"canonical schema": string(canonical), "migration": string(migration)} {
+		for _, required := range []string{"completion_transition_timestamp", "idx_nodes_completion_transition"} {
+			if !strings.Contains(source, required) {
+				t.Fatalf("%s missing %q", name, required)
+			}
+		}
+	}
+	for _, required := range []string{
+		"lag(snapshot.status)",
+		"snapshot.previous_status not in ('done', 'complete', 'completed')",
+		"event.stream_id = event.company_id::text",
+		"(event.payload -> 'node') ? 'status'",
+		"left join latest_node_completions completion",
+		"is distinct from projected.transition_timestamp",
+	} {
+		if !strings.Contains(string(migration), required) {
+			t.Fatalf("completion-transition backfill missing %q", required)
+		}
+	}
 }
 
 func TestMemoryMyWorkPermissionResolutionFailureReturnsNoPartialResponse(t *testing.T) {
@@ -762,6 +823,16 @@ func setMemoryMyWorkNodeDoneSnapshotTimes(t *testing.T, repo *MemoryRepo, nodeID
 		snapshot.event.CreatedTimestamp = timestamps[index]
 		repo.domainEvents[snapshot.key] = snapshot.event
 	}
+	allSnapshots := make([]domain.DomainEvent, 0)
+	for _, event := range repo.domainEvents {
+		node, ok := event.Payload["node"].(domain.Node)
+		if ok && node.NodeID == nodeID {
+			allSnapshots = append(allSnapshots, event)
+		}
+	}
+	sort.Slice(allSnapshots, func(i, j int) bool { return allSnapshots[i].Sequence < allSnapshots[j].Sequence })
+	delete(repo.nodeCompletionTransitions, key(allSnapshots[0].CompanyID, nodeID))
+	repo.applyNodeCompletionTransitionUpdatesLocked(allSnapshots)
 }
 
 func mustCreateMyWorkGateWithRole(t *testing.T, repo *MemoryRepo, companyID, userID, name, role string) domain.LogicGate {

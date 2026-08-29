@@ -1,6 +1,10 @@
 package store
 
-import "miraeopus/backend/internal/domain"
+import (
+	"time"
+
+	"miraeopus/backend/internal/domain"
+)
 
 type memoryNodeGraphEventSnapshot struct {
 	nodes                          map[string]domain.Node
@@ -20,6 +24,7 @@ type memoryNodeGraphEventSnapshot struct {
 	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
 	actionItemSources              map[string]domain.ActionItemSource
 	domainEvents                   map[string]domain.DomainEvent
+	nodeCompletionTransitions      map[string]time.Time
 	effectiveAccess                map[string]domain.EffectiveResourceAccess
 }
 
@@ -66,6 +71,7 @@ func (r *MemoryRepo) snapshotNodeGraphEventStateLocked() memoryNodeGraphEventSna
 		emailCollaborationParticipants: cloneMemoryMap(r.emailCollaborationParticipants),
 		actionItemSources:              cloneMemoryMap(r.actionItemSources),
 		domainEvents:                   cloneMemoryMap(r.domainEvents),
+		nodeCompletionTransitions:      cloneMemoryMap(r.nodeCompletionTransitions),
 		effectiveAccess:                cloneMemoryMap(r.effectiveAccess),
 	}
 }
@@ -88,5 +94,6 @@ func (r *MemoryRepo) restoreNodeGraphEventStateLocked(snapshot memoryNodeGraphEv
 	r.emailCollaborationParticipants = snapshot.emailCollaborationParticipants
 	r.actionItemSources = snapshot.actionItemSources
 	r.domainEvents = snapshot.domainEvents
+	r.nodeCompletionTransitions = snapshot.nodeCompletionTransitions
 	r.effectiveAccess = snapshot.effectiveAccess
 }

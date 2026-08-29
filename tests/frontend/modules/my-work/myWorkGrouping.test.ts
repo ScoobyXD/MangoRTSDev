@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildUniversalNestedGroups } from "../../../../frontend/src/modules/grouping/universalGrouping.js";
 import {
@@ -14,12 +15,27 @@ import {
 } from "../../../../frontend/src/modules/my-work/useMyWorkData.js";
 import {
   columnResizeA11y,
+  measureMyWorkDisplayEntry,
+  myWorkUnscaledPointerDelta,
   resizedColumnWeights,
   resizedSplitRatio,
   scrollRemaining,
   splitResizeA11y,
 } from "../../../../frontend/src/modules/my-work/MyWorkContent.js";
 import type { MyWorkActionItem } from "../../../../frontend/src/modules/my-work/myWorkApi.js";
+
+test("My Work density keeps virtual rows and resizer movement in unscaled layout coordinates", () => {
+  const measuredRow = {
+    offsetHeight: 52,
+    dataset: { myWorkEstimatedSize: "48" },
+  } as unknown as HTMLDivElement;
+  assert.equal(measureMyWorkDisplayEntry(measuredRow), 52, "virtual rows use the unscaled layout height");
+  assert.equal(myWorkUnscaledPointerDelta(18), 20, "90-percent viewport movement converts back to layout pixels");
+
+  const source = readFileSync(new URL("../../../../../src/modules/my-work/MyWorkContent.tsx", import.meta.url), "utf8");
+  assert.match(source, /onDelta\(myWorkUnscaledPointerDelta\(next - previous\)\)/, "pointer movement is unscaled at its viewport boundary");
+  assert.match(source, /const nextValue = onDelta\(delta\);/, "keyboard steps remain in layout pixels");
+});
 
 test("Action Items default to Color then exact Completion due date in Red, Yellow, No color order", () => {
   const groups = buildUniversalNestedGroups([
@@ -113,7 +129,11 @@ test("universal My Work grouping allows an empty stack without restoring a hidde
 
 test("a Process role change clears the old role rows while its replacement is loading", () => {
   const next = beginMyWorkSectionRequest({
-    items: [{ logic_gate_id: "old", name: "Old Responsible Process" }],
+    items: [{
+      logic_gate_id: "old",
+      name: "Old Responsible Process",
+      status_counts: { request: 0, pending: 0, in_progress: 0, review: 0 },
+    }],
     nextCursor: "old-next",
     hasMore: true,
     loading: false,
