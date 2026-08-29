@@ -505,24 +505,25 @@ function groupPopoverStyle(position: { left: number; top: number }, width: numbe
     overflowY: "auto",
     overscrollBehavior: "contain",
     display: "grid",
-    gap: 9,
-    border: "1px solid rgba(100, 116, 139, 0.28)",
-    borderRadius: 10,
-    background: "linear-gradient(145deg, rgba(255,255,255,0.99), rgba(248,250,252,0.98))",
+    gap: 10,
+    border: "1px solid rgba(255, 255, 255, 0.88)",
+    borderRadius: 14,
+    background: "linear-gradient(145deg, rgba(255,255,255,0.99), rgba(241,245,249,0.96))",
     color: "#0f172a",
-    padding: 9,
+    padding: 11,
     boxSizing: "border-box",
-    boxShadow: "0 18px 42px rgba(15, 23, 42, 0.18), inset 0 1px 0 rgba(255,255,255,0.92)",
+    boxShadow: "14px 16px 38px rgba(71,85,105,0.20), -8px -8px 24px rgba(255,255,255,0.88), inset 1px 1px 0 rgba(255,255,255,0.96)",
   };
 }
 
 const popoverHeaderStyle: React.CSSProperties = {
   minWidth: 0,
-  minHeight: 24,
+  minHeight: 30,
   display: "flex",
   alignItems: "center",
   justifyContent: "space-between",
   gap: 8,
+  paddingBottom: 2,
 };
 
 const popoverTitleStyle: React.CSSProperties = {
@@ -531,22 +532,23 @@ const popoverTitleStyle: React.CSSProperties = {
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
   color: "#334155",
-  fontSize: 12,
+  fontSize: 13,
   fontWeight: 900,
 };
 
 const closeButtonStyle: React.CSSProperties = {
-  width: 24,
-  height: 24,
-  border: "none",
-  borderRadius: 5,
-  background: "transparent",
+  width: 28,
+  height: 28,
+  border: "1px solid rgba(148,163,184,0.24)",
+  borderRadius: 8,
+  background: "linear-gradient(145deg,#ffffff,#f1f5f9)",
   color: "#64748b",
   font: "inherit",
   fontSize: 12,
   fontWeight: 900,
   cursor: "pointer",
   padding: 0,
+  boxShadow: "2px 2px 6px rgba(148,163,184,0.14), -2px -2px 6px rgba(255,255,255,0.86), inset 1px 1px 0 rgba(255,255,255,0.94)",
 };
 
 const groupingStackStyle: React.CSSProperties = {
@@ -557,12 +559,12 @@ const groupingStackStyle: React.CSSProperties = {
 };
 
 const emptyStackStyle: React.CSSProperties = {
-  minHeight: 38,
+  minHeight: 42,
   display: "grid",
   placeItems: "center",
   border: "1px dashed rgba(148, 163, 184, 0.42)",
-  borderRadius: 7,
-  background: "rgba(248, 250, 252, 0.72)",
+  borderRadius: 10,
+  background: "linear-gradient(145deg,rgba(255,255,255,.90),rgba(241,245,249,.82))",
   color: "#64748b",
   fontSize: 11,
   fontWeight: 750,
@@ -583,20 +585,20 @@ function groupingRowStyle(
   return {
     width: `calc(100% - ${indent}px)`,
     minWidth: 0,
-    minHeight: 32,
+    minHeight: 38,
     display: "grid",
-    gridTemplateColumns: "20px 18px minmax(92px, 1fr) 46px 22px",
+    gridTemplateColumns: "20px 22px minmax(92px, 1fr) 48px 26px",
     alignItems: "center",
     gap: 4,
     marginLeft: indent,
-    border: "1px solid rgba(148, 163, 184, 0.28)",
+    border: `1px solid ${accent}2e`,
     borderLeft: `3px solid ${accent}`,
-    borderRadius: 7,
-    background: dragging ? "rgba(219, 234, 254, 0.72)" : "rgba(255, 255, 255, 0.96)",
-    padding: "2px 4px",
+    borderRadius: 10,
+    background: dragging ? `linear-gradient(145deg,rgba(255,255,255,.90),${accent}24)` : `linear-gradient(145deg,rgba(255,255,255,.97),${accent}14)`,
+    padding: "4px 5px",
     boxSizing: "border-box",
     opacity: dragging ? 0.66 : 1,
-    boxShadow: dropIndicator || "0 3px 8px rgba(15, 23, 42, 0.035)",
+    boxShadow: dropIndicator || "4px 4px 12px rgba(148,163,184,0.13), -3px -3px 10px rgba(255,255,255,0.72), inset 1px 1px 0 rgba(255,255,255,0.82)",
   };
 }
 
@@ -621,15 +623,17 @@ function dragHandleStyle(enabled: boolean): React.CSSProperties {
 
 function levelNumberStyle(accent: string): React.CSSProperties {
   return {
-    width: 18,
-    height: 18,
+    width: 22,
+    height: 22,
     display: "grid",
     placeItems: "center",
-    borderRadius: 5,
-    background: `${accent}14`,
+    border: `1px solid ${accent}2e`,
+    borderRadius: 7,
+    background: `linear-gradient(145deg,#ffffff,${accent}14)`,
     color: accent,
     fontSize: 10,
     fontWeight: 900,
+    boxShadow: "2px 2px 5px rgba(148,163,184,0.13), -2px -2px 5px rgba(255,255,255,0.80), inset 1px 1px 0 rgba(255,255,255,0.90)",
   };
 }
 
@@ -645,42 +649,45 @@ function fieldSelectionStyle(compound: boolean): React.CSSProperties {
 const fieldSelectStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
-  height: 25,
+  height: 29,
   border: "1px solid rgba(148, 163, 184, 0.30)",
-  borderRadius: 5,
-  background: "#ffffff",
+  borderRadius: 7,
+  background: "rgba(255,255,255,.90)",
   color: "#1e293b",
   font: "inherit",
-  fontSize: 11,
+  fontSize: 11.5,
   fontWeight: 800,
-  padding: "0 4px",
+  padding: "0 7px",
+  boxShadow: "inset 2px 2px 6px rgba(148,163,184,0.13), inset -2px -2px 6px rgba(255,255,255,0.86)",
 };
 
 const directionButtonStyle: React.CSSProperties = {
-  height: 24,
-  border: "1px solid rgba(148, 163, 184, 0.32)",
-  borderRadius: 5,
-  background: "#f8fafc",
+  height: 28,
+  border: "1px solid rgba(148,163,184,0.24)",
+  borderRadius: 7,
+  background: "linear-gradient(145deg,#ffffff,#f1f5f9)",
   color: "#475569",
   font: "inherit",
   fontSize: 10,
   fontWeight: 850,
   cursor: "pointer",
   padding: 0,
+  boxShadow: "2px 2px 5px rgba(148,163,184,0.14), -2px -2px 5px rgba(255,255,255,0.86), inset 1px 1px 0 rgba(255,255,255,0.94)",
 };
 
 const removeButtonStyle: React.CSSProperties = {
-  width: 22,
-  height: 24,
-  border: "none",
-  borderRadius: 5,
-  background: "transparent",
+  width: 26,
+  height: 28,
+  border: "1px solid rgba(148,163,184,0.20)",
+  borderRadius: 7,
+  background: "linear-gradient(145deg,#ffffff,#f1f5f9)",
   color: "#94a3b8",
   font: "inherit",
   fontSize: 11,
   fontWeight: 900,
   cursor: "pointer",
   padding: 0,
+  boxShadow: "2px 2px 5px rgba(148,163,184,0.12), -2px -2px 5px rgba(255,255,255,0.84), inset 1px 1px 0 rgba(255,255,255,0.94)",
 };
 
 const popoverFooterStyle: React.CSSProperties = {
@@ -694,10 +701,10 @@ const popoverFooterStyle: React.CSSProperties = {
 function addGroupingSelectStyle(disabled: boolean): React.CSSProperties {
   return {
     minWidth: 0,
-    height: 29,
+    height: 32,
     border: "1px dashed rgba(37, 99, 235, 0.40)",
-    borderRadius: 6,
-    background: "rgba(239, 246, 255, 0.76)",
+    borderRadius: 8,
+    background: disabled ? "rgba(241,245,249,.72)" : "linear-gradient(145deg,#ffffff,#eff6ff)",
     color: disabled ? "#94a3b8" : "#1d4ed8",
     font: "inherit",
     fontSize: 11,
@@ -705,20 +712,22 @@ function addGroupingSelectStyle(disabled: boolean): React.CSSProperties {
     cursor: disabled ? "default" : "pointer",
     padding: "0 6px",
     opacity: disabled ? 0.72 : 1,
+    boxShadow: disabled ? "inset 2px 2px 5px rgba(148,163,184,.10)" : "3px 3px 8px rgba(148,163,184,.14), -3px -3px 8px rgba(255,255,255,.88), inset 1px 1px 0 rgba(255,255,255,.95)",
   };
 }
 
 function clearButtonStyle(disabled: boolean): React.CSSProperties {
   return {
-    height: 29,
-    border: "1px solid rgba(148, 163, 184, 0.30)",
-    borderRadius: 6,
-    background: "#ffffff",
+    height: 32,
+    border: "1px solid rgba(148,163,184,0.24)",
+    borderRadius: 8,
+    background: "linear-gradient(145deg,#ffffff,#f1f5f9)",
     color: disabled ? "#cbd5e1" : "#64748b",
     font: "inherit",
     fontSize: 10.5,
     fontWeight: 800,
     cursor: disabled ? "default" : "pointer",
     padding: "0 8px",
+    boxShadow: disabled ? "inset 2px 2px 5px rgba(148,163,184,.08)" : "2px 2px 6px rgba(148,163,184,.14), -2px -2px 6px rgba(255,255,255,.86), inset 1px 1px 0 rgba(255,255,255,.94)",
   };
 }

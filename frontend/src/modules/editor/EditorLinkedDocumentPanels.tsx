@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAppFloatingMenuDismissal, useAppOverlayPortalTarget } from "../../app/AppModalPortal";
 import type { EditorTabID } from "./editorTabs";
@@ -7,6 +7,7 @@ import {
   EditorCalendarDateInput,
   editorCompanyUserLabel,
   editorCompanyUserMatches,
+  useFloatingLayerPosition,
 } from "./EditorFieldControls";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
 import type { Account } from "../accounts/accountsApi";
@@ -106,66 +107,6 @@ function RACIRoleDisplayLabel(role: LogicGateRACIRole): string {
 }
 
 const RACI_FLOATING_LAYER_Z_INDEX = 10060;
-
-type FloatingLayerPosition = {
-  left: number;
-  top: number;
-  width: number;
-  maxHeight: number;
-};
-
-function useFloatingLayerPosition(
-  anchorRef: React.RefObject<HTMLElement | null>,
-  open: boolean,
-  options: { width: number; maxHeight: number; gutter?: number },
-): FloatingLayerPosition | null {
-  const [position, setPosition] = useState<FloatingLayerPosition | null>(null);
-  const gutter = options.gutter ?? 8;
-
-  useLayoutEffect(() => {
-    if (!open || typeof window === "undefined") {
-      setPosition(null);
-      return undefined;
-    }
-
-    const update = () => {
-      const anchor = anchorRef.current;
-      if (!anchor) return;
-      const rect = anchor.getBoundingClientRect();
-      const viewportWidth = window.innerWidth || 1;
-      const viewportHeight = window.innerHeight || 1;
-      const width = Math.max(180, Math.min(options.width, viewportWidth - gutter * 2));
-      const maxHeight = Math.max(120, Math.min(options.maxHeight, viewportHeight - gutter * 2));
-      const belowSpace = viewportHeight - rect.bottom - gutter;
-      const aboveSpace = rect.top - gutter;
-      const openAbove = belowSpace < Math.min(170, maxHeight) && aboveSpace > belowSpace;
-      const belowMaxHeight = Math.min(maxHeight, Math.max(120, belowSpace));
-      const aboveMaxHeight = Math.min(maxHeight, Math.max(120, aboveSpace));
-      const top = openAbove
-        ? Math.max(gutter, rect.top - aboveMaxHeight - 6)
-        : Math.max(gutter, Math.min(rect.bottom + 6, viewportHeight - gutter - belowMaxHeight));
-      const availableHeight = openAbove ? Math.max(120, rect.top - top - 6) : Math.max(120, viewportHeight - top - gutter);
-      const left = Math.max(gutter, Math.min(rect.left, viewportWidth - width - gutter));
-
-      setPosition({
-        left,
-        top,
-        width,
-        maxHeight: Math.min(maxHeight, availableHeight),
-      });
-    };
-
-    update();
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
-    return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
-    };
-  }, [anchorRef, gutter, open, options.maxHeight, options.width]);
-
-  return position;
-}
 
 type LogicGateRACIPrincipalPickerOption = {
   principalType: LogicGateRACIPrincipalType;

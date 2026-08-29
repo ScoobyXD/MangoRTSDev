@@ -1122,20 +1122,47 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.ok(previewRequests[1].init?.signal, "the company-user display-name read is cancellable");
 
     assert.ok(personInput);
-    const analysisDatePicker = entityPreview.querySelector<HTMLInputElement>('input[type="date"][data-editor-calendar-picker="Value for Analysis due date"]');
-    assert.ok(analysisDatePicker);
+    const analysisCalendarButton = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Choose analysis due date"]');
+    assert.ok(analysisCalendarButton);
+    assert.equal(analysisCalendarButton.querySelector("path")?.getAttribute("stroke"), "#38bdf8", "Action Item calendars use the light-blue icon");
     personInput.value = "Ada";
     await act(async () => Simulate.change(personInput));
-    const adaOption = [...entityPreview.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Person in charge results"] [role="option"]')]
+    const personResults = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Person in charge results"]');
+    assert.ok(personResults, "Person in charge results escape the clipped Action Item card");
+    const floatingFieldRoot = dom.window.document.querySelector<HTMLElement>('[data-mango-action-item-floating-fields="true"]');
+    assert.ok(floatingFieldRoot);
+    assert.equal(personResults.parentElement, floatingFieldRoot, "all Action Item field overlays share one owned layer");
+    assert.equal(floatingFieldRoot.parentElement, entityPreview.parentElement, "field overlays stay inside the Action Item's current modal layer");
+    assert.equal(personResults.style.position, "fixed");
+    assert.equal(personResults.style.width, "360px");
+    assert.equal(personResults.style.maxHeight, "196px", "the picker shows four identity rows before scrolling");
+    assert.equal(entityPreview.contains(personResults), false);
+    const adaOption = [...personResults.querySelectorAll<HTMLButtonElement>('[role="option"]')]
       .find((option) => option.textContent?.includes("Ada Creator"));
     assert.ok(adaOption, "typing in Person in charge searches the current company directory");
     await act(async () => {
+      adaOption.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
       adaOption.click();
-      analysisDatePicker.value = "2026-09-02";
-      Simulate.change(analysisDatePicker);
+      analysisCalendarButton.click();
+    });
+    const analysisCalendar = dom.window.document.querySelector<HTMLElement>('[data-editor-calendar-popover="Value for Analysis due date"]');
+    assert.ok(analysisCalendar, "Action Item dates use the elevated app calendar");
+    assert.equal(analysisCalendar.parentElement, floatingFieldRoot);
+    assert.equal(analysisCalendar.style.position, "fixed");
+    assert.match(analysisCalendar.style.boxShadow, /14px 16px 38px/, "the calendar is an elevated neomorphic surface");
+    assert.equal(entityPreview.contains(analysisCalendar), false);
+    const nextMonthButton = analysisCalendar.querySelector<HTMLButtonElement>('button[aria-label="Next month"]');
+    assert.ok(nextMonthButton);
+    await act(async () => nextMonthButton.click());
+    const septemberSecond = analysisCalendar.querySelector<HTMLButtonElement>('button[aria-label="September 2, 2026"]');
+    assert.ok(septemberSecond);
+    await act(async () => {
+      septemberSecond.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+      septemberSecond.click();
       await new Promise((resolve) => setTimeout(resolve, 550));
     });
     await flushAsyncWork();
+    assert.equal(entityPreview.isConnected, true, "using the portaled calendar keeps the Action Item editor open");
     const personWrite = previewRequests.find((request) => request.path.endsWith("/fields/field-4") && request.init?.method === "PUT");
     const analysisDateWrite = previewRequests.find((request) => request.path.endsWith("/fields/field-3") && request.init?.method === "PUT");
     assert.equal((JSON.parse(String(personWrite?.init?.body)) as Record<string, unknown>).value, "user-creator", "person search stores the exact user ID");

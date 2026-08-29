@@ -432,6 +432,10 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     const actionGroupingDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Action Item grouping"]');
     assert.equal(actionGroupingDialog?.parentElement, dom.window.document.body, "the grouping dialog is portaled above the clipped section");
     assert.equal(actionGroupingDialog?.style.position, "fixed");
+    assert.equal(actionGroupingDialog?.style.borderRadius, "14px", "the grouping dialog uses the raised surface treatment");
+    assert.match(actionGroupingDialog?.style.boxShadow ?? "", /14px 16px 38px/);
+    const firstGroupingRow = actionGroupingDialog?.querySelector<HTMLSelectElement>('select[aria-label="Grouping level 1 field"]')?.parentElement?.parentElement;
+    assert.equal(firstGroupingRow?.style.borderRadius, "10px", "grouping rows and their level tags are raised surfaces");
     const directionButton = actionGroupingDialog?.querySelector<HTMLButtonElement>('button[aria-label="Sort descending for grouping level 1"]');
     assert.ok(directionButton);
     await act(async () => {
