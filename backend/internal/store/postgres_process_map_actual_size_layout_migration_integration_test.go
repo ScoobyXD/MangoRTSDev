@@ -382,13 +382,16 @@ where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uui
 func assertProcessMapActualSizeMigrationRefusal(t *testing.T, repo *PostgresRepo, companyID, wantedError string) {
 	t.Helper()
 	before := readProcessMapSquareMigrationSnapshot(t, repo, companyID)
-	var eventsBefore, recoveryRowsBefore int
+	var eventsBefore int
 	if err := repo.db.QueryRow(`select count(*) from domain_events where company_id=$1::uuid`, companyID).Scan(&eventsBefore); err != nil {
 		t.Fatal(err)
 	}
+	var recoveryPlacementsTableBefore, recoveryRunsTableBefore bool
 	if err := repo.db.QueryRow(`
-select (select count(*) from process_map_actual_size_layout_recovery_placements)
-     + (select count(*) from process_map_actual_size_layout_recovery_runs)`).Scan(&recoveryRowsBefore); err != nil {
+select to_regclass('public.process_map_actual_size_layout_recovery_placements') is not null,
+       to_regclass('public.process_map_actual_size_layout_recovery_runs') is not null`).Scan(
+		&recoveryPlacementsTableBefore, &recoveryRunsTableBefore,
+	); err != nil {
 		t.Fatal(err)
 	}
 	migration := readProcessMapSquareMigrationFile(t, "20260826_zzzy_process_map_actual_size_square_layout.sql")
@@ -408,24 +411,34 @@ select (select count(*) from process_map_actual_size_layout_recovery_placements)
 	if after := readProcessMapSquareMigrationSnapshot(t, repo, companyID); after != before {
 		t.Fatalf("actual-size missing-placement refusal changed data:\nbefore=%+v\nafter=%+v", before, after)
 	}
-	var ledgerRows, eventsAfter, recoveryRowsAfter int
+	var ledgerRows, eventsAfter int
 	if err := repo.db.QueryRow(`select count(*) from schema_migrations`).Scan(&ledgerRows); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.db.QueryRow(`select count(*) from domain_events where company_id=$1::uuid`, companyID).Scan(&eventsAfter); err != nil {
 		t.Fatal(err)
 	}
+	var recoveryPlacementsTableAfter, recoveryRunsTableAfter bool
 	if err := repo.db.QueryRow(`
-select (select count(*) from process_map_actual_size_layout_recovery_placements)
-     + (select count(*) from process_map_actual_size_layout_recovery_runs)`).Scan(&recoveryRowsAfter); err != nil {
+select to_regclass('public.process_map_actual_size_layout_recovery_placements') is not null,
+       to_regclass('public.process_map_actual_size_layout_recovery_runs') is not null`).Scan(
+		&recoveryPlacementsTableAfter, &recoveryRunsTableAfter,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if ledgerRows != 0 || eventsAfter != eventsBefore || recoveryRowsAfter != recoveryRowsBefore {
-		t.Fatalf("actual-size refusal recorded %d migration rows, changed domain events %d->%d, recovery rows %d->%d", ledgerRows, eventsBefore, eventsAfter, recoveryRowsBefore, recoveryRowsAfter)
+	if ledgerRows != 0 || eventsAfter != eventsBefore ||
+		recoveryPlacementsTableAfter != recoveryPlacementsTableBefore ||
+		recoveryRunsTableAfter != recoveryRunsTableBefore {
+		t.Fatalf(
+			"actual-size refusal recorded %d migration rows, changed domain events %d->%d, recovery table existence %t/%t->%t/%t",
+			ledgerRows, eventsBefore, eventsAfter,
+			recoveryPlacementsTableBefore, recoveryRunsTableBefore,
+			recoveryPlacementsTableAfter, recoveryRunsTableAfter,
+		)
 	}
 }
 
-func TestPostgresProcessMapActualSizeLayoutMigrationRejectsUnsafeRecoveryAndReadVersionStructure(t *testing.T) {
+func TestPostgresProcessMapActualSizeLayoutMigrationRejectsUnsafeReadVersionStructure(t *testing.T) {
 	for _, testCase := range []struct {
 		name   string
 		wanted string
@@ -440,20 +453,6 @@ func TestPostgresProcessMapActualSizeLayoutMigrationRejectsUnsafeRecoveryAndRead
 			if _, err := repo.db.Exec(`
 update workspace_read_versions set version=9223372036854775807
 where company_id=$1::uuid and scope='process-map' and resource_key=''`, companyID); err != nil {
-				t.Fatal(err)
-			}
-		}},
-		{name: "recovery column drift", wanted: "recovery table structure is unsafe", mutate: func(t *testing.T, repo *PostgresRepo, _ string) {
-			if _, err := repo.db.Exec(`
-alter table process_map_actual_size_layout_recovery_placements
-alter column changed_by_migration drop not null`); err != nil {
-				t.Fatal(err)
-			}
-		}},
-		{name: "recovery constraint drift", wanted: "recovery table structure is unsafe", mutate: func(t *testing.T, repo *PostgresRepo, _ string) {
-			if _, err := repo.db.Exec(`
-alter table process_map_actual_size_layout_recovery_runs
-drop constraint pm_actual_size_recovery_runs_counts_chk`); err != nil {
 				t.Fatal(err)
 			}
 		}},

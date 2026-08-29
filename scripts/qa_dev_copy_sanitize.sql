@@ -665,16 +665,13 @@ set grant_id = 'qa-disabled:' || email_connection_id::text,
     last_successful_scan_at = transaction_timestamp(),
     updated_timestamp = greatest(updated_timestamp, transaction_timestamp());
 
--- Clear payload-bearing, delivery, retry, projection, checkpoint, and recovery
--- state. The application rebuilds current projections from surviving sources.
+-- Clear payload-bearing, delivery, retry, and projection state. The application
+-- rebuilds current projections from surviving sources.
 delete from public.notifications;
 delete from public.realtime_outbox;
 delete from public.domain_events;
 delete from public.recycle_bin_items;
-delete from public.workspace_derived_domain_event_projection_checkpoints;
 delete from public.workspace_read_versions;
-delete from public.process_map_actual_size_layout_recovery_placements;
-delete from public.process_map_actual_size_layout_recovery_runs;
 delete from public.saved_views;
 select setval('public.realtime_outbox_outbox_sequence_seq', 1, false);
 
@@ -690,12 +687,6 @@ using qa_excluded_resources excluded
 where excluded.company_id = item.company_id
   and excluded.resource_type = 'logic_gate'
   and excluded.resource_id = item.logic_gate_id;
-
-delete from public.user_logic_gate_shortcuts shortcut
-using qa_excluded_resources excluded
-where excluded.company_id = shortcut.company_id
-  and excluded.resource_type = 'logic_gate'
-  and excluded.resource_id = shortcut.logic_gate_id;
 
 delete from public.process_map_placements placement
 where exists (

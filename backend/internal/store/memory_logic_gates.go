@@ -625,11 +625,6 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error 
 	delete(r.kanbanColumns, boardKey(companyID, defaultBoardID))
 	delete(r.kanbanBoards, boardKey(companyID, defaultBoardID))
 	delete(r.folderItems, folderItemKey(companyID, "kanban", defaultBoardID))
-	for shortcutKey, shortcut := range r.logicGateShortcuts {
-		if shortcut.CompanyID == companyID && shortcut.LogicGateID == logicGateID {
-			delete(r.logicGateShortcuts, shortcutKey)
-		}
-	}
 	for linkKey, link := range r.emailNodeLinks {
 		if link.CompanyID == companyID && link.LogicGateID == logicGateID {
 			delete(r.emailNodeLinks, linkKey)

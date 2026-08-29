@@ -430,7 +430,6 @@ var recycleSnapshotTables = map[string]bool{
 	"process_map_placements":             true,
 	"resource_operational_relationships": true,
 	"process_map_traces":                 true,
-	"user_logic_gate_shortcuts":          true,
 
 	"project_relationships":                  true,
 	"project_relationship_projection":        true,
@@ -484,7 +483,6 @@ var recycleRestoreTableOrder = []string{
 	"resource_permission_settings",
 	"resource_gvic_assignments",
 	"resource_permissions",
-	"user_logic_gate_shortcuts",
 	"email_drafts",
 	"attachments",
 	"attachment_relationships",
@@ -989,9 +987,6 @@ func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *s
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 				return nil, err
 			}
-		}
-		if err := addTable("user_logic_gate_shortcuts", `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
-			return nil, err
 		}
 		for _, tableName := range []string{"kpis", "huddle_logic_gate_relationships", "huddle_node_logic_gate_relationships", "huddle_node_kpi_relationships"} {
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {

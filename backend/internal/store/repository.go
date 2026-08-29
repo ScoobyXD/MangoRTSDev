@@ -232,9 +232,6 @@ type CommunicationsRepository interface {
 	SoftDeleteCommunicationsEmailDraft(input CommunicationsEmailDraftDeleteInput) error
 	GetCommunicationsEmailSignature(input CommunicationsEmailSignatureScopeInput) (domain.CommunicationsEmailSignature, error)
 	UpsertCommunicationsEmailSignature(input CommunicationsEmailSignatureInput) (domain.CommunicationsEmailSignature, error)
-	ListUserLogicGateShortcuts(userID, companyID string) ([]domain.UserLogicGateShortcut, error)
-	UpsertUserLogicGateShortcuts(userID, companyID string, logicGateIDs []string) ([]domain.UserLogicGateShortcut, error)
-	DeleteUserLogicGateShortcut(userID, companyID, logicGateID string) error
 }
 
 const (
@@ -1577,7 +1574,6 @@ type NodeAccountAssignmentUpdateResult struct {
 }
 
 const CommunicationsTriageBatchMaxItems = 50
-const UserLogicGateShortcutBatchMaxItems = 200
 
 const (
 	EntityTypeNode                  = "node"

@@ -218,11 +218,8 @@ begin
      or exists (select 1 from public.realtime_outbox)
      or exists (select 1 from public.domain_events)
      or exists (select 1 from public.recycle_bin_items)
-     or exists (select 1 from public.workspace_derived_domain_event_projection_checkpoints)
-     or exists (select 1 from public.workspace_read_versions)
-     or exists (select 1 from public.process_map_actual_size_layout_recovery_placements)
-     or exists (select 1 from public.process_map_actual_size_layout_recovery_runs) then
-    raise exception 'STOP: imported job/event/delivery/recycle/checkpoint state remains';
+     or exists (select 1 from public.workspace_read_versions) then
+    raise exception 'STOP: imported job/event/delivery/recycle state remains';
   end if;
 
   if exists (

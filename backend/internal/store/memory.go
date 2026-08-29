@@ -107,7 +107,6 @@ type MemoryRepo struct {
 	nodeEmailThreads                 map[string]domain.CommunicationsNodeEmailThread
 	emailCollaborations              map[string]domain.CommunicationsEmailCollaboration
 	emailCollaborationParticipants   map[string]domain.CommunicationsEmailCollaborationParticipant
-	logicGateShortcuts               map[string]domain.UserLogicGateShortcut
 	domainEvents                     map[string]domain.DomainEvent
 	realtimeOutbox                   map[string]RealtimeOutboxEvent
 	realtimeOutboxSequence           int64
@@ -225,7 +224,6 @@ func NewMemoryRepo() *MemoryRepo {
 		nodeEmailThreads:                 map[string]domain.CommunicationsNodeEmailThread{},
 		emailCollaborations:              map[string]domain.CommunicationsEmailCollaboration{},
 		emailCollaborationParticipants:   map[string]domain.CommunicationsEmailCollaborationParticipant{},
-		logicGateShortcuts:               map[string]domain.UserLogicGateShortcut{},
 		domainEvents:                     map[string]domain.DomainEvent{},
 		realtimeOutbox:                   map[string]RealtimeOutboxEvent{},
 		editorJSONDocuments:              map[string]memoryEditorJSONDocument{},
@@ -295,10 +293,6 @@ func emailNodeAttachmentLinkKey(companyID, userID, messageID, nodeID string) str
 
 func emailCollaborationParticipantKey(companyID, collaborationID, userID string) string {
 	return companyID + ":" + collaborationID + ":" + userID
-}
-
-func logicGateShortcutKey(userID, companyID, logicGateID string) string {
-	return userID + ":" + companyID + ":" + logicGateID
 }
 
 func sharedInboxRACIKey(companyID, folderID string) string {

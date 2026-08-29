@@ -1,4 +1,4 @@
-import { mergeEmailMessageIntoMessageList, sortEmailMessagesByDateDescending, type CommunicationsSharedInbox, type EmailAddress, type EmailFolder, type EmailMailbox, type EmailMessage, type EmailReadStatus, type UserLogicGateShortcut } from "../../modules/communications/communicationsApi.js";
+import { mergeEmailMessageIntoMessageList, sortEmailMessagesByDateDescending, type CommunicationsSharedInbox, type EmailAddress, type EmailFolder, type EmailMailbox, type EmailMessage, type EmailReadStatus } from "../../modules/communications/communicationsApi.js";
 import { normalizeEmailContentID } from "../../modules/communications/emailAttachments.js";
 import {
   emailThreadKey,
@@ -674,36 +674,13 @@ export function nodeIDsFromExplorerPayload(payload: ExplorerDragPayload | null):
   return [];
 }
 
-export function sortLogicGateShortcuts(shortcuts: UserLogicGateShortcut[]): UserLogicGateShortcut[] {
-  return [...shortcuts].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.logic_gate_id.localeCompare(b.logic_gate_id));
-}
-
-export function mergeLogicGateShortcuts(current: UserLogicGateShortcut[], incoming: UserLogicGateShortcut[]): UserLogicGateShortcut[] {
-  const byID = new Map(current.map((shortcut) => [shortcut.logic_gate_id, shortcut]));
-  for (const shortcut of incoming) byID.set(shortcut.logic_gate_id, shortcut);
-  return sortLogicGateShortcuts(Array.from(byID.values()));
-}
-
 export function buildMyLogicGateGroups(input: {
-  shortcuts: UserLogicGateShortcut[];
-  assignedLogicGates?: LogicGateRecord[];
-  logicGateByID: Map<string, LogicGateRecord>;
+  assignedLogicGates: LogicGateRecord[];
 }): MyLogicGateGroup[] {
-  const seen = new Set<string>();
-  const orderedLogicGates = [
-    ...sortLogicGateShortcuts(input.shortcuts)
-      .map((shortcut) => input.logicGateByID.get(shortcut.logic_gate_id))
-      .filter((logicGate): logicGate is LogicGateRecord => Boolean(logicGate)),
-    ...[...(input.assignedLogicGates ?? [])].sort((a, b) => (
-      logicGateTitle(a).localeCompare(logicGateTitle(b), undefined, { numeric: true, sensitivity: "base" })
-      || a.logic_gate_id.localeCompare(b.logic_gate_id)
-    )),
-  ];
-  const logicGates = orderedLogicGates.filter((logicGate) => {
-    if (seen.has(logicGate.logic_gate_id)) return false;
-    seen.add(logicGate.logic_gate_id);
-    return true;
-  });
+  const logicGates = [...input.assignedLogicGates].sort((a, b) => (
+    logicGateTitle(a).localeCompare(logicGateTitle(b), undefined, { numeric: true, sensitivity: "base" })
+    || a.logic_gate_id.localeCompare(b.logic_gate_id)
+  ));
   return logicGates.length > 0 ? [{ key: "unfiled", label: "My Processes", logicGates }] : [];
 }
 

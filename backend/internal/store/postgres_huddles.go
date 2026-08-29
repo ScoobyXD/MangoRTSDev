@@ -99,7 +99,6 @@ func (r *PostgresRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID 
 		`delete from project_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from email_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from attachment_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2`,
-		`delete from user_logic_gate_shortcuts where company_id=$1::uuid and logic_gate_id=$2::uuid`,
 		`delete from pins where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid`,
 	} {

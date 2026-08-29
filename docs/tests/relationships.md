@@ -555,6 +555,10 @@ A nonnull `person` Entity Field value MUST equal one exact current `company_memb
 
 Removing one company membership MUST clear only `person` values containing that exact company and user identity. `entities.created_by_user_id` is nullable audit metadata tied to the same exact company membership and becomes null when that membership is deleted; neither cleanup may target another company's assignment or change any other Entity content.
 
+### Law 39 — Personal Logic Gate lists have no manual shortcut relationship
+
+Home's My Processes list MUST derive only from the acting user's current effective Logic Gate RACI. A manual user-to-Logic-Gate shortcut edge, shortcut API, compatibility identity, or `user_logic_gate_shortcuts` table MUST NOT exist.
+
 ## Required design examples
 
 These examples show the required identity pattern; they do not replace each subsystem's detailed schema.

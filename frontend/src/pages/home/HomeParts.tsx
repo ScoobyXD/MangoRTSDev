@@ -1513,8 +1513,6 @@ export function RailRowResizeHandle({ onPointerDown }: { onPointerDown: (event: 
 }
 
 export function LogicGateRail({
-  apiBase,
-  companyID,
   loading,
   logicGateByID,
   allRows,
@@ -1522,22 +1520,16 @@ export function LogicGateRail({
   expandedRowIDs,
   search,
   myGroups,
-  busy,
   getLogicGateDragIDs,
-  shortcutLogicGateIDs,
   onSearchChange,
   onToggleFolder,
   onSelectRow,
-  onSelectShortcut,
+  onSelectLogicGate,
   onOpenLogicGate,
-  onAddShortcuts,
-  onRemoveShortcut,
   onConvertMessages,
   onCreateLogicGate,
   onRequestDeleteLogicGate,
 }: {
-  apiBase: string;
-  companyID: string;
   loading: boolean;
   logicGateByID: Map<string, LogicGateRecord>;
   allRows: ExplorerTreeNode[];
@@ -1545,16 +1537,12 @@ export function LogicGateRail({
   expandedRowIDs: Set<string>;
   search: string;
   myGroups: MyLogicGateGroup[];
-  busy: boolean;
   getLogicGateDragIDs: (logicGateID: string) => string[];
-  shortcutLogicGateIDs: Set<string>;
   onSearchChange: (value: string) => void;
   onToggleFolder: (rowID: string) => void;
   onSelectRow: (row: ExplorerTreeNode, event: React.MouseEvent) => void;
-  onSelectShortcut: (logicGateID: string, event: React.MouseEvent) => void;
+  onSelectLogicGate: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
-  onAddShortcuts: (logicGateIDs: string[]) => void;
-  onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[], priority: number) => void;
   onCreateLogicGate: (options?: { creatorRACIRole?: LogicGateRACIRole }) => void;
   onRequestDeleteLogicGate: (logicGateID: string, position?: ConfirmActionMenuPosition) => void;
@@ -1587,23 +1575,7 @@ export function LogicGateRail({
   return (
     <>
     <aside ref={railSplit.railRef} style={logicGateRailStyle(railSplit.topHeight)}>
-      <section
-        style={logicGateRailSectionStyle}
-        onContextMenu={(event) => openCreateLogicGateMenu(event, "responsible")}
-        onDragOver={(event) => {
-          if (!hasExplorerDrag(event.dataTransfer)) return;
-          event.preventDefault();
-          event.dataTransfer.dropEffect = "copy";
-        }}
-        onDrop={(event) => {
-          const payload = readExplorerDragPayload(event.dataTransfer);
-          if (!explorerPayloadMayContainLogicGates(payload)) return;
-          event.preventDefault();
-          void resolveHomeExplorerLogicGateIDs(apiBase, companyID, payload).then((logicGateIDs) => {
-            if (logicGateIDs.length > 0) onAddShortcuts(logicGateIDs);
-          }, (cause) => console.error("Failed to load Company Explorer folder", cause));
-        }}
-      >
+      <section style={logicGateRailSectionStyle} onContextMenu={(event) => openCreateLogicGateMenu(event, "responsible")}>
         <div style={logicGateRailHeaderStyle}>
           <h2 style={panelTitleStyle}>My Processes</h2>
           {loading && <span style={mutedSmallStyle}>Loading</span>}
@@ -1623,14 +1595,11 @@ export function LogicGateRail({
                     key={logicGate.logic_gate_id}
                     logicGate={logicGate}
                     selected={selectedRowIDs.has(logicGateTreeID(logicGate.logic_gate_id))}
-                    busy={busy}
                     getLogicGateDragIDs={getLogicGateDragIDs}
                     logicGateByID={logicGateByID}
-                    shortcut={shortcutLogicGateIDs.has(logicGate.logic_gate_id)}
-                    onSelectShortcut={onSelectShortcut}
+                    onSelectLogicGate={onSelectLogicGate}
                     onOpenLogicGate={onOpenLogicGate}
                     onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
-                    onRemoveShortcut={onRemoveShortcut}
                     onConvertMessages={requestTriageConversionPriority}
                   />
                 ))}
@@ -1777,26 +1746,20 @@ export function LogicGateRail({
 export function MyLogicGateTile({
   logicGate,
   selected,
-  busy,
   logicGateByID,
   getLogicGateDragIDs,
-  shortcut,
-  onSelectShortcut,
+  onSelectLogicGate,
   onOpenLogicGate,
   onOpenPinContextMenu,
-  onRemoveShortcut,
   onConvertMessages,
 }: {
   logicGate: LogicGateRecord;
   selected: boolean;
-  busy: boolean;
   logicGateByID: Map<string, LogicGateRecord>;
   getLogicGateDragIDs: (logicGateID: string) => string[];
-  shortcut: boolean;
-  onSelectShortcut: (logicGateID: string, event: React.MouseEvent) => void;
+  onSelectLogicGate: (logicGateID: string, event: React.MouseEvent) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenPinContextMenu: (event: React.MouseEvent, target: Omit<HomePinContextMenuState, "x" | "y">) => void;
-  onRemoveShortcut: (logicGateID: string) => void;
   onConvertMessages: (event: React.DragEvent<HTMLElement>, logicGateID: string, messageIDs: string[]) => void;
 }) {
   const logicGateID = logicGate.logic_gate_id;
@@ -1805,7 +1768,7 @@ export function MyLogicGateTile({
       type="button"
       draggable
       style={myLogicGateTileStyle(selected)}
-      onClick={(event) => onSelectShortcut(logicGateID, event)}
+      onClick={(event) => onSelectLogicGate(logicGateID, event)}
       onDoubleClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -1833,29 +1796,6 @@ export function MyLogicGateTile({
     >
       <span style={myLogicGateTileIconStyle}><ExplorerRowIcon kind="logic_gate" /></span>
       <span style={myLogicGateTileTextStyle}>{logicGateTitle(logicGate)}</span>
-      {shortcut && <span
-        role="button"
-        tabIndex={0}
-        aria-label="Remove shortcut"
-        style={shortcutRemoveStyle}
-        onClick={(event) => {
-          event.stopPropagation();
-          if (!busy) onRemoveShortcut(logicGateID);
-        }}
-        onDoubleClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-        onKeyDown={(event) => {
-          if ((event.key === "Enter" || event.key === " ") && !busy) {
-            event.preventDefault();
-            event.stopPropagation();
-            onRemoveShortcut(logicGateID);
-          }
-        }}
-      >
-        x
-      </span>}
     </button>
   );
 }
@@ -1870,7 +1810,6 @@ export function NodeInboxRail({
   inboxRole,
   selectedRowIDs,
   selectedLogicGateRowIDs,
-  busy,
   getNodeDragIDs,
   getLogicGateDragIDs,
   onSelectNode,
@@ -1878,7 +1817,6 @@ export function NodeInboxRail({
   onOpenNode,
   onOpenLogicGate,
   onOpenNodeBulkMenu,
-  onRemoveLogicGateShortcut,
   onConvertMessages,
   onRequestDeleteLogicGate,
   onCreateNode,
@@ -1895,7 +1833,6 @@ export function NodeInboxRail({
   selectedLogicGateRowIDs: Set<string>;
   expandedRowIDs: Set<string>;
   search: string;
-  busy: boolean;
   getNodeDragIDs: (nodeID: string) => string[];
   getLogicGateDragIDs: (logicGateID: string) => string[];
   onSearchChange: (value: string) => void;
@@ -1906,7 +1843,6 @@ export function NodeInboxRail({
   onOpenNode: (node: NodeRecord, informationID?: string) => void;
   onOpenLogicGate: (logicGateID: string, label: string, nodeID?: string) => void;
   onOpenNodeBulkMenu: (nodeID: string, event: React.MouseEvent) => void;
-  onRemoveLogicGateShortcut: (logicGateID: string) => void;
   onConvertMessages: (logicGateID: string, messageIDs: string[], priority: number) => void;
   onRequestDeleteLogicGate: (logicGateID: string, position?: ConfirmActionMenuPosition) => void;
   onCreateNode: () => void;
@@ -2011,14 +1947,11 @@ export function NodeInboxRail({
                   key={logicGate.logic_gate_id}
                   logicGate={logicGate}
                   selected={selectedLogicGateRowIDs.has(logicGateTreeID(logicGate.logic_gate_id))}
-                  busy={busy}
                   getLogicGateDragIDs={getLogicGateDragIDs}
                   logicGateByID={logicGateByID}
-                  shortcut={false}
-                  onSelectShortcut={selectInboxLogicGate}
+                  onSelectLogicGate={selectInboxLogicGate}
                   onOpenLogicGate={onOpenLogicGate}
                   onOpenPinContextMenu={(event, target) => openHomePinContextMenu(event, target, setPinContextMenu)}
-                  onRemoveShortcut={onRemoveLogicGateShortcut}
                   onConvertMessages={requestTriageConversionPriority}
                 />
               ))}

@@ -19,7 +19,6 @@ set local statement_timeout = '5min';
 
 create temporary table mangorts_map_position_retirement_approval (
   read_only_preflight_ready boolean not null,
-  projection_checkpoint_drained boolean not null,
   map_free_application_deployed boolean not null,
   old_writers_stopped boolean not null,
   smoke_and_snapshot_confirmed boolean not null,
@@ -28,7 +27,7 @@ create temporary table mangorts_map_position_retirement_approval (
 
 -- OPERATOR: change every false to true only after the named evidence exists.
 insert into mangorts_map_position_retirement_approval
-values (false,false,false,false,false,false);
+values (false,false,false,false,false);
 
 do $$
 begin
@@ -43,18 +42,15 @@ begin
   if not exists (
     select 1 from mangorts_map_position_retirement_approval
     where read_only_preflight_ready
-      and projection_checkpoint_drained
       and map_free_application_deployed
       and old_writers_stopped
       and smoke_and_snapshot_confirmed
       and operator_approved
   ) then
-    raise exception 'STOP: all six map position retirement approvals must be explicitly true';
+    raise exception 'STOP: all five map position retirement approvals must be explicitly true';
   end if;
-  if to_regclass('public.domain_events') is null
-     or to_regclass('public.workspace_derived_domain_event_projection_checkpoints') is null
-     or to_regclass('public.schema_migrations') is null then
-    raise exception 'STOP: required projection or migration evidence tables are missing';
+  if to_regclass('public.schema_migrations') is null then
+    raise exception 'STOP: required migration evidence table is missing';
   end if;
   if to_regclass('public.node_map_positions') is null
      or to_regclass('public.logic_gate_map_positions') is null then
@@ -72,7 +68,6 @@ end
 $$;
 
 lock table public.node_map_positions, public.logic_gate_map_positions in access exclusive mode;
-lock table public.domain_events, public.workspace_derived_domain_event_projection_checkpoints in share mode;
 
 do $$
 declare
@@ -122,37 +117,6 @@ begin
          and confrelid = 'public.logic_gates'::regclass and confdeltype = 'c'
      ) then
     raise exception 'STOP: map position foreign-key contract drifted';
-  end if;
-
-  if exists (
-    select 1
-    from domain_events event
-    left join workspace_derived_domain_event_projection_checkpoints checkpoint
-      on checkpoint.company_id = event.company_id
-    where event.stream_type = 'workspace'
-      and event.stream_id = event.company_id::text
-      and (
-        event.event_type in ('node_map_position_upsert_requested','logic_gate_map_position_upsert_requested')
-        or (
-          event.event_type = 'workspace_derived_projection_requested'
-          and exists (
-            select 1
-            from jsonb_array_elements(
-              case when jsonb_typeof(event.payload->'tasks') = 'array'
-                then event.payload->'tasks' else '[]'::jsonb end
-            ) task
-            where task->>'kind' in ('node_map_position_upsert','logic_gate_map_position_upsert')
-          )
-        )
-      )
-      and (
-        checkpoint.company_id is null
-        or event.created_timestamp > checkpoint.checkpoint_timestamp
-        or (event.created_timestamp = checkpoint.checkpoint_timestamp
-          and event.event_id::text > checkpoint.checkpoint_event_id::text)
-      )
-  ) then
-    raise exception 'STOP: a historical map projection task is still beyond its company checkpoint';
   end if;
 
   if exists (
