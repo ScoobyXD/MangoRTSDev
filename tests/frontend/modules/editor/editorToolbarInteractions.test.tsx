@@ -1008,6 +1008,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
         { company_id: "company-1", entity_field_id: "field-6", entity_id: "entity exact/id", system_key: "color", name: "Color", field_type: "color", config: { options: [{ key: "yellow", label: "Yellow", color: "#facc15" }, { key: "red", label: "Red", color: "#ef4444" }] }, value: "yellow", position: 6000, created_timestamp: "", updated_timestamp: "" },
         { company_id: "company-1", entity_field_id: "field-7", entity_id: "entity exact/id", name: "Escalation note", field_type: "text", config: {}, value: "Call the carrier", position: 7000, created_timestamp: "", updated_timestamp: "" },
         { company_id: "company-1", entity_field_id: "field-8", entity_id: "entity exact/id", system_key: "assigned_by", name: "Assigned by", field_type: "person", config: {}, value: null, position: 8000, created_timestamp: "", updated_timestamp: "" },
+        { company_id: "company-1", entity_field_id: "field-9", entity_id: "entity exact/id", system_key: "source", name: "Source", field_type: "resource", config: {}, value: { resource_type: "logic_gate", resource_id: "process-source" }, position: 9000, created_timestamp: "", updated_timestamp: "" },
       ],
     };
     await act(async () => root.render(
@@ -1419,6 +1420,23 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(unavailableSource?.querySelector("button"), null, "an unavailable Source is not clickable");
     assert.doesNotMatch(unavailableSource?.textContent ?? "", /process-source/, "the neutral Source state leaks no hidden identity");
     await act(async () => unavailableSourcePopover?.querySelector<HTMLButtonElement>('button[aria-label="Close Action Item details"]')?.click());
+    await flushAsyncWork();
+
+    previewEntity = {
+      ...previewEntity,
+      entity_type_name: "Delivery",
+      entity_fields: previewEntity.entity_fields.filter((field) => field.entity_field_id === "field-9"),
+    };
+    await act(async () => {
+      openEditorEntityLink({ entityType: "entity", entityID: "entity exact/id", label: "Delivery" });
+    });
+    await flushAsyncWork();
+    const genericResourcePreview = dom.window.document.querySelector<HTMLElement>('[data-mango-entity-reference-preview="true"]');
+    assert.match(genericResourcePreview?.textContent ?? "", /SourceLinked resource/, "generic Entity previews render resource values read-only");
+    assert.doesNotMatch(genericResourcePreview?.textContent ?? "", /\[object Object\]|process-source/, "generic resource fields expose neither object coercion nor raw identity");
+    assert.equal(genericResourcePreview?.querySelector('[data-mango-entity-field-editor="field-9"]'), null, "generic resource fields have no editable form");
+    assert.equal(genericResourcePreview?.querySelector('button[aria-label="Save Source"]'), null);
+    await act(async () => genericResourcePreview?.querySelector<HTMLButtonElement>('button[aria-label="Close Entity details"]')?.click());
     await flushAsyncWork();
 
     previewShouldFail = true;

@@ -17,6 +17,89 @@ const (
 	entitiesTestTypeID    = "22222222-2222-2222-2222-222222222222"
 )
 
+func TestEntityResourceFieldValueCanonicalizesExactTypedIdentity(t *testing.T) {
+	got, err := normalizeEntityFieldValue(EntityFieldTypeResource, json.RawMessage(
+		`{"resource_type":" NODE ","resource_id":" AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA "}`,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"resource_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","resource_type":"node"}`
+	if string(got) != want {
+		t.Fatalf("canonical resource value=%s, want %s", got, want)
+	}
+	if _, err := normalizeEntityFieldValue(EntityFieldTypeResource, json.RawMessage(
+		`{"resource_type":"node","resource_id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","label":"copied"}`,
+	)); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("resource value with copied label error=%v, want ErrInvalid", err)
+	}
+}
+
+func TestMapEntitiesPostgresResourceErrors(t *testing.T) {
+	if got := mapEntitiesPostgresError(errors.New("entity_field_resource_not_found")); !errors.Is(got, ErrNotFound) {
+		t.Fatalf("resource endpoint error=%v, want ErrNotFound", got)
+	}
+	for _, message := range []string{"entity_resource_field_type_reserved", "entity_resource_field_reserved"} {
+		if got := mapEntitiesPostgresError(errors.New(message)); !errors.Is(got, ErrInvalid) {
+			t.Fatalf("reserved resource error %q=%v, want ErrInvalid", message, got)
+		}
+	}
+}
+
+func TestMemoryGenericEntityCommandsRejectReservedResourceKind(t *testing.T) {
+	repo := NewMemoryRepo()
+	company, err := repo.CreateCompany("Resource field company")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entityType, err := repo.CreateEntityType(EntityTypeInput{CompanyID: company.CompanyID, Name: "Work record"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entity, err := repo.CreateEntity(EntityInput{CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID, Name: "Work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateEntityFieldType(EntityFieldTypeInput{
+		CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID,
+		Name: "Related work", FieldType: EntityFieldTypeResource,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generic resource template create error=%v, want ErrInvalid", err)
+	}
+	template, err := repo.CreateEntityFieldType(EntityFieldTypeInput{
+		CompanyID: company.CompanyID, EntityTypeID: entityType.EntityTypeID,
+		Name: "Description", FieldType: EntityFieldTypeText,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateEntityFieldType(EntityFieldTypeInput{
+		CompanyID: company.CompanyID, EntityFieldTypeID: template.EntityFieldTypeID,
+		FieldType: EntityFieldTypeResource, FieldTypeSet: true,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generic resource template retype error=%v, want ErrInvalid", err)
+	}
+	field, err := repo.CreateEntityField(EntityFieldInput{
+		CompanyID: company.CompanyID, EntityID: entity.EntityID,
+		Name: "Note", FieldType: EntityFieldTypeText,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateEntityField(EntityFieldInput{
+		CompanyID: company.CompanyID, EntityID: entity.EntityID,
+		Name: "Related work", FieldType: EntityFieldTypeResource,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generic resource field create error=%v, want ErrInvalid", err)
+	}
+	if _, err := repo.UpdateEntityField(EntityFieldInput{
+		CompanyID: company.CompanyID, EntityID: entity.EntityID, EntityFieldID: field.EntityFieldID,
+		FieldType: EntityFieldTypeResource, FieldTypeSet: true,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generic resource field retype error=%v, want ErrInvalid", err)
+	}
+}
+
 func TestMemoryEntitiesRejectInvalidOptionKeys(t *testing.T) {
 	repo := NewMemoryRepo()
 	entityType, err := repo.CreateEntityType(EntityTypeInput{CompanyID: entitiesTestCompanyID, EntityTypeID: entitiesTestTypeID, Name: "Delivery"})
@@ -360,12 +443,11 @@ func TestCanonicalSchemaKeepsPostgresRecordLoopVariables(t *testing.T) {
 
 func TestEntitySchemaReadinessUsesExactUnorderedColumnSets(t *testing.T) {
 	expected := map[string][]string{
-		"entity_types":        {"company_id", "entity_type_id", "name", "system_key", "created_timestamp", "updated_timestamp"},
-		"entity_folders":      {"company_id", "entity_folder_id", "entity_type_id", "parent_entity_folder_id", "name", "position", "created_timestamp", "updated_timestamp"},
-		"entity_field_types":  {"company_id", "entity_field_type_id", "entity_type_id", "entity_folder_id", "name", "field_type", "system_key", "config_jsonb", "position", "created_timestamp", "updated_timestamp"},
-		"entities":            {"company_id", "entity_id", "entity_type_id", "entity_folder_id", "name", "position", "body_json", "revision", "created_by_user_id", "created_timestamp", "updated_timestamp"},
-		"entity_fields":       {"company_id", "entity_field_id", "entity_id", "entity_field_type_id", "name", "field_type", "value_jsonb", "position", "created_timestamp", "updated_timestamp"},
-		"action_item_sources": {"company_id", "entity_id", "resource_type", "resource_id", "created_timestamp"},
+		"entity_types":       {"company_id", "entity_type_id", "name", "system_key", "created_timestamp", "updated_timestamp"},
+		"entity_folders":     {"company_id", "entity_folder_id", "entity_type_id", "parent_entity_folder_id", "name", "position", "created_timestamp", "updated_timestamp"},
+		"entity_field_types": {"company_id", "entity_field_type_id", "entity_type_id", "entity_folder_id", "name", "field_type", "system_key", "config_jsonb", "position", "created_timestamp", "updated_timestamp"},
+		"entities":           {"company_id", "entity_id", "entity_type_id", "entity_folder_id", "name", "position", "body_json", "revision", "created_by_user_id", "created_timestamp", "updated_timestamp"},
+		"entity_fields":      {"company_id", "entity_field_id", "entity_id", "entity_field_type_id", "name", "field_type", "value_jsonb", "position", "created_timestamp", "updated_timestamp"},
 	}
 	if len(exactEntityTableColumnContracts) != len(expected) {
 		t.Fatalf("Entity exact column contract count = %d, want %d", len(exactEntityTableColumnContracts), len(expected))

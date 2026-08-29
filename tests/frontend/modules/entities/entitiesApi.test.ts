@@ -14,6 +14,7 @@ import {
   updateEntityField,
   updateEntityFieldType,
   type Entity,
+  type EntityResourceFieldValue,
   type EntitySummary,
 } from "../../../../frontend/src/modules/entities/entitiesApi.js";
 
@@ -67,6 +68,18 @@ test("getEntityDetail reads one exact company-scoped entity and its fields", asy
       position: 0,
       created_timestamp: "2026-08-27T00:00:00Z",
       updated_timestamp: "2026-08-27T00:00:00Z",
+    }, {
+      company_id: "company-1",
+      entity_field_id: "field-source",
+      entity_id: "entity-7",
+      system_key: "source",
+      name: "Source",
+      field_type: "resource",
+      config: {},
+      value: { resource_type: "node", resource_id: "11111111-1111-4111-8111-111111111111" } satisfies EntityResourceFieldValue,
+      position: 1,
+      created_timestamp: "2026-08-27T00:00:00Z",
+      updated_timestamp: "2026-08-27T00:00:00Z",
     }],
   };
   let requestedPath = "";
@@ -79,6 +92,10 @@ test("getEntityDetail reads one exact company-scoped entity and its fields", asy
 
   assert.equal(requestedPath, "/v1/entities/entity-7?company_id=company-1");
   assert.equal(loaded.entity_fields[0]?.name, "Due date");
+  assert.deepEqual(loaded.entity_fields[1]?.value, {
+    resource_type: "node",
+    resource_id: "11111111-1111-4111-8111-111111111111",
+  });
 });
 
 test("Action Item creation writes one exact typed source and source reads stay permission-safe", async () => {

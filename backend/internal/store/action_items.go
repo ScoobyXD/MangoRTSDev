@@ -20,6 +20,7 @@ const (
 	ActionItemCompletionDueDateSystemKey = "completion_due_date"
 	ActionItemStatusSystemKey            = "status"
 	ActionItemColorSystemKey             = "color"
+	ActionItemSourceSystemKey            = "source"
 
 	ActionItemPersonInChargeFieldTypeID    = "a17e0000-0000-4000-8000-000000000101"
 	ActionItemAssignedByFieldTypeID        = "a17e0000-0000-4000-8000-000000000106"
@@ -27,6 +28,7 @@ const (
 	ActionItemCompletionDueDateFieldTypeID = "a17e0000-0000-4000-8000-000000000103"
 	ActionItemStatusFieldTypeID            = "a17e0000-0000-4000-8000-000000000104"
 	ActionItemColorFieldTypeID             = "a17e0000-0000-4000-8000-000000000105"
+	ActionItemSourceFieldTypeID            = "a17e0000-0000-4000-8000-000000000107"
 
 	ActionItemStatusInProgress = "in_progress"
 	ActionItemColorYellow      = "yellow"
@@ -117,12 +119,13 @@ func actionItemFieldTypes(companyID string) []domain.EntityFieldType {
 		{CompanyID: companyID, EntityFieldTypeID: ActionItemCompletionDueDateFieldTypeID, EntityTypeID: ActionItemEntityTypeID, SystemKey: ActionItemCompletionDueDateSystemKey, Name: "Completion due date", FieldType: EntityFieldTypeDate, Config: json.RawMessage(`{}`), Position: 3},
 		{CompanyID: companyID, EntityFieldTypeID: ActionItemStatusFieldTypeID, EntityTypeID: ActionItemEntityTypeID, SystemKey: ActionItemStatusSystemKey, Name: "Status", FieldType: EntityFieldTypeChoice, Config: append(json.RawMessage(nil), actionItemStatusConfig...), Position: 4},
 		{CompanyID: companyID, EntityFieldTypeID: ActionItemColorFieldTypeID, EntityTypeID: ActionItemEntityTypeID, SystemKey: ActionItemColorSystemKey, Name: "Color", FieldType: EntityFieldTypeColor, Config: append(json.RawMessage(nil), actionItemColorConfig...), Position: 5},
+		{CompanyID: companyID, EntityFieldTypeID: ActionItemSourceFieldTypeID, EntityTypeID: ActionItemEntityTypeID, SystemKey: ActionItemSourceSystemKey, Name: "Source", FieldType: EntityFieldTypeResource, Config: json.RawMessage(`{}`), Position: 6},
 	}
 }
 
 func isRequiredActionItemFieldSystemKey(systemKey string) bool {
 	switch strings.TrimSpace(systemKey) {
-	case ActionItemPersonInChargeSystemKey, ActionItemAssignedBySystemKey, ActionItemAnalysisDueDateSystemKey, ActionItemCompletionDueDateSystemKey, ActionItemStatusSystemKey, ActionItemColorSystemKey:
+	case ActionItemPersonInChargeSystemKey, ActionItemAssignedBySystemKey, ActionItemAnalysisDueDateSystemKey, ActionItemCompletionDueDateSystemKey, ActionItemStatusSystemKey, ActionItemColorSystemKey, ActionItemSourceSystemKey:
 		return true
 	default:
 		return false
@@ -131,7 +134,7 @@ func isRequiredActionItemFieldSystemKey(systemKey string) bool {
 
 func isRequiredActionItemFieldTypeID(entityFieldTypeID string) bool {
 	switch strings.TrimSpace(entityFieldTypeID) {
-	case ActionItemPersonInChargeFieldTypeID, ActionItemAssignedByFieldTypeID, ActionItemAnalysisDueDateFieldTypeID, ActionItemCompletionDueDateFieldTypeID, ActionItemStatusFieldTypeID, ActionItemColorFieldTypeID:
+	case ActionItemPersonInChargeFieldTypeID, ActionItemAssignedByFieldTypeID, ActionItemAnalysisDueDateFieldTypeID, ActionItemCompletionDueDateFieldTypeID, ActionItemStatusFieldTypeID, ActionItemColorFieldTypeID, ActionItemSourceFieldTypeID:
 		return true
 	default:
 		return false
@@ -146,10 +149,6 @@ func NormalizeActionItemSourceResourceType(resourceType string) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-func actionItemSourceKey(companyID, entityID string) string {
-	return companyID + "|" + entityID
 }
 
 func isReservedActionItemFieldName(name string) bool {
@@ -203,6 +202,31 @@ func actionItemInitialFieldValue(systemKey string, color *string) json.RawMessag
 		}
 	}
 	return nil
+}
+
+func actionItemSourceValue(resourceType, resourceID string) json.RawMessage {
+	if resourceType == "" || resourceID == "" {
+		return nil
+	}
+	encoded, _ := json.Marshal(map[string]string{"resource_type": resourceType, "resource_id": resourceID})
+	return encoded
+}
+
+func decodeActionItemSourceValue(value json.RawMessage) (resourceType, resourceID string, ok bool) {
+	canonical, err := normalizeEntityFieldValue(EntityFieldTypeResource, value)
+	if err != nil || canonical == nil {
+		return "", "", false
+	}
+	var resource struct {
+		ResourceType string `json:"resource_type"`
+		ResourceID   string `json:"resource_id"`
+	}
+	if json.Unmarshal(canonical, &resource) != nil {
+		return "", "", false
+	}
+	resource.ResourceType, ok = NormalizeActionItemSourceResourceType(resource.ResourceType)
+	resource.ResourceID = cleanUUIDText(resource.ResourceID)
+	return resource.ResourceType, resource.ResourceID, ok && resource.ResourceID != ""
 }
 
 func entityRelationshipKey(companyID, entityID, resourceType, resourceID string) string {

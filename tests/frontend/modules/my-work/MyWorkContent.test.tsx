@@ -77,7 +77,7 @@ function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
       items: [{
         logic_gate_id: "process-responsible",
         name: "Responsible Process",
-        status_counts: { request: 12, pending: 3, in_progress: 7, review: 2 },
+        status_counts: { request: 12, pending: 0, in_progress: 7, review: 2 },
       }],
       next_cursor: "processes-page-2",
       has_more: true,
@@ -249,11 +249,32 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.deepEqual(historyButtons.map((button) => button.getAttribute("aria-pressed")), ["false", "false"]);
     assert.match(container.querySelector<HTMLElement>('[data-my-work-columns="true"]')?.style.gridTemplateColumns ?? "", /minmax\(360px,/, "the left column has enough capacity for the established controls and new selectors");
     assert.equal(container.querySelectorAll("[data-my-work-section-icon]").length, 4, "every major section has its exact resource icon");
+    const actionItemsSection = container.querySelector<HTMLElement>('[data-my-work-section="action_items"]');
+    const actionHeaderIconPaths = actionItemsSection?.querySelectorAll<SVGPathElement>('[data-my-work-section-icon="action_items"] svg path');
+    assert.equal(actionHeaderIconPaths?.[0]?.getAttribute("stroke"), "#facc15", "only the Action Items header target uses the established yellow outer ring");
+    assert.equal(actionHeaderIconPaths?.[1]?.getAttribute("stroke"), "#ef4444", "the Action Items header target uses the established red inner ring");
     assert.equal(container.querySelectorAll('[data-my-work-group-field="completion_due_date"], [data-my-work-group-field="due_date"]').length, 0, "date ordering never renders a date group header");
     assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Red Action"]')?.value, "Due Today");
     assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Yellow Action"]')?.value, "Due Tomorrow");
     assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Context Node"]')?.value, "Due in three days");
     assert.equal(container.querySelectorAll('[data-my-work-due-date="true"] button[aria-haspopup="dialog"]').length, 4, "every relative or regular due-date form keeps its calendar control");
+    const todayInput = container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Red Action"]');
+    const tomorrowInput = container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Yellow Action"]');
+    const soonInput = container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Context Node"]');
+    const standardInput = container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Context Hidden Node"]');
+    assert.equal(todayInput?.closest<HTMLElement>('[data-my-work-due-date]')?.dataset.myWorkDueDateTone, "urgent");
+    assert.equal(tomorrowInput?.closest<HTMLElement>('[data-my-work-due-date]')?.dataset.myWorkDueDateTone, "urgent");
+    assert.equal(soonInput?.closest<HTMLElement>('[data-my-work-due-date]')?.dataset.myWorkDueDateTone, "soon");
+    assert.equal(standardInput?.closest<HTMLElement>('[data-my-work-due-date]')?.dataset.myWorkDueDateTone, "standard");
+    assert.equal(todayInput?.style.color, "rgb(185, 28, 28)", "Due Today text is red");
+    assert.equal(tomorrowInput?.parentElement?.querySelector("svg path")?.getAttribute("stroke"), "#ef4444", "Due Tomorrow calendar is red");
+    assert.equal(soonInput?.parentElement?.querySelector("svg path")?.getAttribute("stroke"), "#eab308", "two- and three-day calendars are yellow");
+    assert.equal(standardInput?.parentElement?.querySelector("svg path")?.getAttribute("stroke"), "#8b5cf6", "ordinary and empty dates keep the purple calendar");
+    assert.equal(todayInput?.style.gridColumn, "2", "due-date text follows the calendar control");
+    assert.equal(todayInput?.parentElement?.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')?.style.gridColumn, "1", "the calendar button is the left column");
+    assert.match(standardInput?.value ?? "", /^Due Date: /, "ordinary dates keep the label after the left-side calendar");
+    assert.equal(todayInput?.parentElement?.style.width, "116px", "relative labels use the compact width");
+    assert.equal(standardInput?.parentElement?.style.width, "126px", "ordinary dates fit their complete icon-first label without extra outer spacing");
     const relativeCalendarButton = container.querySelector<HTMLButtonElement>('[data-my-work-row="action-item"][data-my-work-action-item-color="red"] [data-my-work-due-date="true"] button[aria-haspopup="dialog"]');
     assert.ok(relativeCalendarButton);
     await act(async () => {
@@ -275,7 +296,8 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.equal(processCounts.querySelectorAll("[data-my-work-process-status-slot]").length, 4);
     assert.deepEqual(
       Array.from(processCounts.querySelectorAll<HTMLElement>("[data-my-work-process-status-count]")).map((count) => [count.dataset.myWorkProcessStatus, count.dataset.myWorkProcessStatusCount]),
-      [["request", "12"], ["pending", "3"], ["inProgress", "7"], ["review", "2"]],
+      [["request", "12"], ["pending", "0"], ["inProgress", "7"], ["review", "2"]],
+      "all four Process status squares render even when a count is zero",
     );
     assert.doesNotMatch(container.textContent ?? "", /\bPrevious\b|\bNext\b|Page \d/, "cursor pages are never exposed as page controls");
 
@@ -295,10 +317,15 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     const perspectiveRadios = Array.from(perspectiveGroup?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
     assert.deepEqual(perspectiveRadios.map((button) => button.textContent), ["Mine", "Delegated"]);
     assert.deepEqual(perspectiveRadios.map((button) => button.getAttribute("aria-checked")), ["true", "false"]);
+    assert.equal(perspectiveGroup?.previousElementSibling?.tagName, "H2", "Mine / Delegated sits immediately to the right of the Action Items title");
+    assert.deepEqual(perspectiveRadios.map((button) => button.style.height), ["27px", "27px"], "the perspective segments use the larger target");
+    assert.match(perspectiveRadios[0]?.style.background ?? "", /239, 246, 255/, "the selected perspective uses the light-blue gradient");
+    assert.equal(perspectiveRadios[0]?.style.color, "rgb(29, 78, 216)", "the selected perspective avoids the former dark fill");
     const nodeRoleGroup = container.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Node RACI role"]');
     const nodeRadios = Array.from(nodeRoleGroup?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
     assert.deepEqual(nodeRadios.map((button) => button.getAttribute("aria-label")), ["Responsible", "Accountable", "Consulted", "Informed"]);
     assert.deepEqual(nodeRadios.map((button) => button.getAttribute("aria-checked")), ["true", "false", "false", "false"]);
+    assert.equal(nodeRoleGroup?.nextElementSibling?.getAttribute("data-my-work-history-selected"), "false", "Node RACI is immediately left of History");
     const processRoleGroup = container.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Process RACI role"]');
     const radios = Array.from(processRoleGroup?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
     assert.deepEqual(radios.map((button) => button.getAttribute("aria-label")), ["Responsible", "Accountable", "Consulted", "Informed"]);
@@ -834,7 +861,7 @@ test("My Work toggles completed History in place, refreshes Action Item edits, a
     }
     assert.deepEqual(actionDueWrites, ["2026-09-10", null], "the later calendar choice is always the final serialized write");
     assert.equal(activeActionDue, "", "clearing the Action Item date writes null to its exact Completion due date field");
-    assert.equal(actionSection.querySelector<HTMLInputElement>('input[aria-label="Due Date for Renamed Action"]')?.value, "");
+    assert.equal(actionSection.querySelector<HTMLInputElement>('input[aria-label="Due Date for Renamed Action"]')?.value, "Due Date: No date");
 
     const nodeDateInput = nodeSection.querySelector<HTMLInputElement>('input[aria-label="Due Date for Active Node"]');
     assert.ok(nodeDateInput);
@@ -849,7 +876,7 @@ test("My Work toggles completed History in place, refreshes Action Item edits, a
       await Promise.resolve();
     });
     assert.equal(nodeDue, "", "clearing the Node date writes null to the exact Node");
-    assert.equal(nodeSection.querySelector<HTMLInputElement>('input[aria-label="Due Date for Active Node"]')?.value, "");
+    assert.equal(nodeSection.querySelector<HTMLInputElement>('input[aria-label="Due Date for Active Node"]')?.value, "Due Date: No date");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

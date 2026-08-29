@@ -4,14 +4,13 @@ import {
   SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS,
   aggregateSidebarPinFolderStatusCounts,
   countSidebarLogicGateStatuses,
-  visibleSidebarLogicGateStatusCounts,
 } from "../../../frontend/src/app/sidebarLogicGateStatusCounts.js";
 import type { SidebarPinTree } from "../../../frontend/src/app/sidebarPins.js";
 
 const timestamp = "2026-08-06T00:00:00Z";
 
 describe("pinned Logic Gate status counts", () => {
-  it("counts the four requested statuses with the aligned Pinned palette and suppresses zeroes", () => {
+  it("counts the four requested statuses with the aligned Pinned palette", () => {
     const counts = countSidebarLogicGateStatuses({
       columns: [
         { column_id: "requested", title: "Requested" },
@@ -52,12 +51,6 @@ describe("pinned Logic Gate status counts", () => {
         ["review", "linear-gradient(180deg, #33ddd5 0%, #19a8ff 100%)"],
       ],
     );
-    assert.deepEqual(visibleSidebarLogicGateStatusCounts(counts).map(({ key, count }) => [key, count]), [
-      ["request", 2],
-      ["inProgress", 1],
-      ["review", 3],
-    ]);
-    assert.deepEqual(visibleSidebarLogicGateStatusCounts({ request: 0, pending: 0, inProgress: 0, review: 0 }), []);
   });
 
   it("adds direct and nested Logic Gate counts into every ancestor folder only once", () => {
@@ -82,8 +75,7 @@ describe("pinned Logic Gate status counts", () => {
 
     assert.deepEqual(result.inner, { request: 1, pending: 2, inProgress: 0, review: 4 });
     assert.deepEqual(result.outer, { request: 4, pending: 2, inProgress: 5, review: 4 });
-    assert.deepEqual(result.empty, { request: 0, pending: 0, inProgress: 0, review: 0 });
-    assert.deepEqual(visibleSidebarLogicGateStatusCounts(result.empty), []);
+    assert.equal(result.empty, undefined, "folders without Process descendants reserve no status column");
   });
 
 });

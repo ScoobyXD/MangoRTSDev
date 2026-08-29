@@ -92,6 +92,9 @@ test("Entities is directly below Process Map and the retired Fields surface is g
   assert.match(entitiesSource, /config_color_hex:/);
   assert.match(entitiesSource, /config_color_label:/);
   assert.match(entitiesSource, /DIRECT_ENTITY_FIELD_TYPES/);
+  assert.match(entitiesSource, /USER_EDITABLE_ENTITY_FIELD_TYPES = ENTITY_FIELD_TYPES\.filter\(\(fieldType\) => fieldType !== "resource"\)/, "resource stays out of ordinary create and retype selectors");
+  assert.match(entitiesSource, /field\.field_type === "resource"[\s\S]*data-entity-resource-field-value="true"[\s\S]*"Linked resource"/, "generic resource fields render as neutral read-only values");
+  assert.match(entitiesSource, /nextType !== "resource"/, "generic saves never serialize a resource object through the text parser");
   assert.match(entitiesSource, /Person in charge|field\.field_type === "person"/);
   assert.match(entitiesSource, /placeholder="MM\/DD\/YYYY"/);
   assert.match(entitiesSource, /Required company Entity Type/);

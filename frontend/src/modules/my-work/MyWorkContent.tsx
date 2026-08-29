@@ -8,7 +8,6 @@ import {
 } from "../../icons/index.js";
 import {
   SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS,
-  visibleSidebarLogicGateStatusCounts,
   type SidebarLogicGateStatusCountDefinition,
   type SidebarLogicGateStatusCounts,
 } from "../../app/sidebarLogicGateStatusCounts.js";
@@ -321,15 +320,17 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
           <SectionFrame
             section="action_items"
             title="Action Items"
-            icon={<ActionItemIcon size={16} />}
+            icon={<ActionItemIcon size={16} outerRingColor="#facc15" innerRingColor="#ef4444" />}
             state={state.action_items}
+            titleAccessory={(
+              <ActionItemPerspectiveSelector
+                perspective={actionItemPerspective}
+                onChange={changeActionItemPerspective}
+              />
+            )}
             actions={(
               <div style={sectionActionsStyle}>
                 <HistoryButton selected={actionItemHistory} disabled={state.action_items.loading} onClick={toggleActionItemHistory} />
-                <ActionItemPerspectiveSelector
-                  perspective={actionItemPerspective}
-                  onChange={changeActionItemPerspective}
-                />
                 <UniversalGroupingControls
                   groupings={actionItemGroupings}
                   fieldOptions={MY_WORK_ACTION_ITEM_GROUPING_FIELDS}
@@ -381,12 +382,12 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
             state={state.nodes}
             actions={(
               <div style={sectionActionsStyle}>
-                <HistoryButton selected={nodeHistory} disabled={state.nodes.loading} onClick={toggleNodeHistory} />
                 <MyWorkRACISelector
                   label="Node RACI role"
                   role={nodeRole}
                   onChange={changeNodeRole}
                 />
+                <HistoryButton selected={nodeHistory} disabled={state.nodes.loading} onClick={toggleNodeHistory} />
                 <UniversalGroupingControls
                   groupings={nodeGroupings}
                   fieldOptions={MY_WORK_NODE_GROUPING_FIELDS}
@@ -777,6 +778,7 @@ type SectionFrameProps<Item> = {
   title: string;
   icon: React.ReactNode;
   state: MyWorkSectionState<Item>;
+  titleAccessory?: React.ReactNode;
   actions?: React.ReactNode;
   onRetry: () => void;
   onLoadMore: () => void;
@@ -789,6 +791,7 @@ function SectionFrame<Item>({
   title,
   icon,
   state,
+  titleAccessory,
   actions,
   onRetry,
   onLoadMore,
@@ -817,10 +820,13 @@ function SectionFrame<Item>({
   return (
     <section id={sectionID} aria-labelledby={titleID} aria-busy={state.loading} data-my-work-section={section} style={sectionStyle(Boolean(state.error))}>
       <header style={sectionHeaderStyle}>
-        <h2 id={titleID} style={sectionTitleStyle}>
-          <span data-my-work-section-icon={section} style={sectionTitleIconStyle}>{icon}</span>
-          <span>{title}</span>
-        </h2>
+        <div style={sectionTitleRegionStyle}>
+          <h2 id={titleID} style={sectionTitleStyle}>
+            <span data-my-work-section-icon={section} style={sectionTitleIconStyle}>{icon}</span>
+            <span>{title}</span>
+          </h2>
+          {titleAccessory}
+        </div>
         {actions}
       </header>
       {state.error && (
@@ -1183,6 +1189,12 @@ function InlineDueDateEditor({ value, resourceLabel, businessDateKey, onSave }: 
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const saveVersionRef = useRef(0);
   const relativeLabel = myWorkRelativeDueDateLabel(draft, businessDateKey);
+  const tone = relativeLabel === "Due Today" || relativeLabel === "Due Tomorrow"
+    ? "urgent"
+    : relativeLabel === "Due in two days" || relativeLabel === "Due in three days"
+      ? "soon"
+      : "standard";
+  const presentation = inlineDueDatePresentation(tone, Boolean(error));
   useEffect(() => setDraft(formatted), [formatted]);
   const commit = async (raw: string) => {
     const normalized = normalizeNodeDueDateDraft(raw);
@@ -1216,21 +1228,22 @@ function InlineDueDateEditor({ value, resourceLabel, businessDateKey, onSave }: 
     }
   };
   return (
-    <span data-my-work-due-date="true" style={inlineDueDateStyle(Boolean(error))} title={error || undefined}>
-      {!relativeLabel && <span style={inlineDueDateLabelStyle}>Due Date:</span>}
+    <span data-my-work-due-date="true" data-my-work-due-date-tone={tone} style={inlineDueDateStyle(presentation)} title={error || undefined}>
       <EditorCalendarDateInput
         value={draft}
-        displayValue={relativeLabel || undefined}
+        displayValue={relativeLabel || `Due Date: ${draft || "No date"}`}
         ariaLabel={`Due Date for ${resourceLabel}`}
         disabled={saving}
-        accent="#0284c7"
+        accent={presentation.accent}
+        ruleColor={presentation.borderColor}
+        panelBackground={presentation.buttonBackground}
         placeholder="No date"
         onChange={(next) => { setDraft(next); setError(""); }}
         onCommit={(next) => void commit(next)}
         openOnInputClick
-        containerStyle={{ width: relativeLabel ? 126 : 112, gridTemplateColumns: "minmax(0,1fr) 24px" }}
-        inputStyle={{ color: error ? "#b91c1c" : "#075985", fontSize: 10.5, fontWeight: 850, cursor: saving ? "default" : "pointer" }}
-        buttonStyle={{ width: 24, height: 24 }}
+        containerStyle={{ width: relativeLabel ? 116 : 126, gridTemplateColumns: "24px minmax(0,1fr)", columnGap: 2 }}
+        inputStyle={{ gridColumn: "2", gridRow: "1", color: presentation.textColor, fontSize: 10.5, fontWeight: 850, cursor: saving ? "default" : "pointer" }}
+        buttonStyle={{ gridColumn: "1", gridRow: "1", width: 24, height: 24 }}
       />
     </span>
   );
@@ -1259,24 +1272,22 @@ function ProcessRow({ process }: { process: MyWorkProcess }) {
 }
 
 function ProcessStatusCounts({ counts }: { counts: SidebarLogicGateStatusCounts }) {
-  const visibleByKey = new Map(visibleSidebarLogicGateStatusCounts(counts).map((item) => [item.key, item]));
   return (
     <span data-my-work-process-status-counts="true" style={processStatusCountsStyle}>
       {SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS.map((definition) => {
-        const item = visibleByKey.get(definition.key);
+        const value = counts[definition.key];
+        const count = Number.isSafeInteger(value) && value > 0 ? value : 0;
         return (
           <span key={definition.key} data-my-work-process-status-slot={definition.key} style={processStatusCountSlotStyle}>
-            {item && (
-              <span
-                data-my-work-process-status={item.key}
-                data-my-work-process-status-count={item.count}
-                aria-label={`${item.label}: ${item.count}`}
-                title={`${item.label}: ${item.count}`}
-                style={processStatusCountStyle(item)}
-              >
-                {item.count}
-              </span>
-            )}
+            <span
+              data-my-work-process-status={definition.key}
+              data-my-work-process-status-count={count}
+              aria-label={`${definition.label}: ${count}`}
+              title={`${definition.label}: ${count}`}
+              style={processStatusCountStyle(definition)}
+            >
+              {count}
+            </span>
           </span>
         );
       })}
@@ -1451,6 +1462,13 @@ const sectionHeaderStyle: React.CSSProperties = {
   padding: "0 11px 0 12px",
 };
 
+const sectionTitleRegionStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: 9,
+};
+
 const sectionTitleStyle: React.CSSProperties = {
   minWidth: 0,
   display: "flex",
@@ -1577,30 +1595,31 @@ const roleSelectorStyle: React.CSSProperties = {
 const perspectiveSelectorStyle: React.CSSProperties = {
   display: "inline-flex",
   minWidth: 0,
-  border: "1px solid rgba(148, 163, 184, 0.20)",
-  borderRadius: 9,
+  flex: "0 0 auto",
+  border: "1px solid rgba(147,197,253,.52)",
+  borderRadius: 10,
   background: "linear-gradient(145deg, rgba(255,255,255,0.94), rgba(241,245,249,0.82))",
   boxShadow: "inset 2px 2px 5px rgba(148,163,184,0.12), inset -2px -2px 5px rgba(255,255,255,0.92)",
-  padding: 2,
+  padding: 3,
 };
 
 function perspectiveButtonStyle(active: boolean): React.CSSProperties {
   return {
-    height: 24,
-    border: active ? "1px solid rgba(37,99,235,.76)" : "1px solid transparent",
+    height: 27,
+    border: active ? "1px solid rgba(96,165,250,.72)" : "1px solid transparent",
     borderRadius: 7,
     background: active
-      ? "linear-gradient(145deg,#3b82f6,#2563eb)"
+      ? "linear-gradient(145deg,#eff6ff,#bfdbfe)"
       : "transparent",
-    color: active ? "#ffffff" : "#475569",
+    color: active ? "#1d4ed8" : "#475569",
     boxShadow: active
-      ? "2px 2px 6px rgba(37,99,235,.24), -1px -1px 4px rgba(255,255,255,.9), inset 1px 1px 0 rgba(255,255,255,.35)"
+      ? "2px 2px 6px rgba(59,130,246,.16), -1px -1px 4px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.76)"
       : "none",
     font: "inherit",
-    fontSize: 9.5,
-    fontWeight: 850,
+    fontSize: 10.5,
+    fontWeight: 900,
     cursor: "pointer",
-    padding: "0 4px",
+    padding: "0 7px",
   };
 }
 
@@ -1870,30 +1889,57 @@ const inlineContextStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-function inlineDueDateStyle(error: boolean): React.CSSProperties {
+type InlineDueDatePresentation = {
+  accent: string;
+  borderColor: string;
+  buttonBackground: string;
+  background: string;
+  textColor: string;
+  shadowColor: string;
+};
+
+function inlineDueDatePresentation(tone: "urgent" | "soon" | "standard", error: boolean): InlineDueDatePresentation {
+  if (error || tone === "urgent") return {
+    accent: "#ef4444",
+    borderColor: "rgba(239,68,68,.46)",
+    buttonBackground: "#fff1f2",
+    background: "linear-gradient(145deg,#ffffff,#fee2e2)",
+    textColor: "#b91c1c",
+    shadowColor: "rgba(239,68,68,.12)",
+  };
+  if (tone === "soon") return {
+    accent: "#eab308",
+    borderColor: "rgba(234,179,8,.48)",
+    buttonBackground: "#fefce8",
+    background: "linear-gradient(145deg,#ffffff,#fef9c3)",
+    textColor: "#854d0e",
+    shadowColor: "rgba(234,179,8,.12)",
+  };
+  return {
+    accent: "#8b5cf6",
+    borderColor: "rgba(139,92,246,.40)",
+    buttonBackground: "#f5f3ff",
+    background: "linear-gradient(145deg,#ffffff,#ede9fe)",
+    textColor: "#6d28d9",
+    shadowColor: "rgba(139,92,246,.12)",
+  };
+}
+
+function inlineDueDateStyle(presentation: InlineDueDatePresentation): React.CSSProperties {
   return {
     minWidth: 0,
     flex: "0 0 auto",
     minHeight: 31,
     display: "inline-flex",
     alignItems: "center",
-    gap: 4,
-    border: `1px solid ${error ? "rgba(239,68,68,.42)" : "rgba(2,132,199,.26)"}`,
+    gap: 3,
+    border: `1px solid ${presentation.borderColor}`,
     borderRadius: 9,
-    background: error
-      ? "linear-gradient(145deg,#ffffff,#fef2f2)"
-      : "linear-gradient(145deg,#ffffff,rgba(224,242,254,.72))",
-    boxShadow: "3px 3px 8px rgba(2,132,199,.10), -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.94)",
-    padding: "2px 3px 2px 7px",
+    background: presentation.background,
+    boxShadow: `3px 3px 8px ${presentation.shadowColor}, -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.94)`,
+    padding: "2px 4px",
   };
 }
-
-const inlineDueDateLabelStyle: React.CSSProperties = {
-  color: "#475569",
-  fontSize: 10,
-  fontWeight: 900,
-  whiteSpace: "nowrap",
-};
 
 function inlineContextButtonStyle(color: string): React.CSSProperties {
   return {

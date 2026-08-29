@@ -39,6 +39,15 @@ func TestEntityHandlersCRUDAndExplicitRootMoves(t *testing.T) {
 		EntityType domain.EntityType `json:"entity_type"`
 	}
 	decodeEntitiesHTTPResponse(t, typeResponse, &createdType)
+	resourceFieldTypeResponse := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPost, "/v1/entity-field-types", map[string]any{
+		"company_id":     companyID,
+		"entity_type_id": createdType.EntityType.EntityTypeID,
+		"name":           "Related resource",
+		"field_type":     store.EntityFieldTypeResource,
+	})
+	if resourceFieldTypeResponse.Code != http.StatusBadRequest {
+		t.Fatalf("generic resource field type status=%d body=%s, want 400", resourceFieldTypeResponse.Code, resourceFieldTypeResponse.Body.String())
+	}
 	for _, invalidKey := range []string{"Open", "open state", "open-state"} {
 		invalidOptionResponse := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPost, "/v1/entity-field-types", map[string]any{
 			"company_id":     companyID,
@@ -87,6 +96,13 @@ func TestEntityHandlersCRUDAndExplicitRootMoves(t *testing.T) {
 		EntityFieldType domain.EntityFieldType `json:"entity_field_type"`
 	}
 	decodeEntitiesHTTPResponse(t, fieldTypeResponse, &createdFieldType)
+	resourceFieldTypeUpdate := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPut, "/v1/entity-field-types/"+createdFieldType.EntityFieldType.EntityFieldTypeID, map[string]any{
+		"company_id": companyID,
+		"field_type": store.EntityFieldTypeResource,
+	})
+	if resourceFieldTypeUpdate.Code != http.StatusBadRequest {
+		t.Fatalf("generic resource field type update status=%d body=%s, want 400", resourceFieldTypeUpdate.Code, resourceFieldTypeUpdate.Body.String())
+	}
 
 	entityResponse := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPost, "/v1/entities", map[string]any{
 		"company_id":       companyID,
@@ -104,6 +120,25 @@ func TestEntityHandlersCRUDAndExplicitRootMoves(t *testing.T) {
 	decodeEntitiesHTTPResponse(t, entityResponse, &createdEntity)
 	if createdEntity.Entity.Position != 9 || createdEntity.Entity.CreatedByUserID != user.UserID || len(createdEntity.Entity.EntityFields) != 1 || createdEntity.Entity.EntityFields[0].Name != "Status" {
 		t.Fatalf("created entity=%+v", createdEntity.Entity)
+	}
+	resourceFieldResponse := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPost, "/v1/entities/"+createdEntity.Entity.EntityID+"/fields", map[string]any{
+		"company_id": companyID,
+		"name":       "Related resource",
+		"field_type": store.EntityFieldTypeResource,
+		"value": map[string]string{
+			"resource_type": store.EntityTypeNode,
+			"resource_id":   "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		},
+	})
+	if resourceFieldResponse.Code != http.StatusBadRequest {
+		t.Fatalf("generic resource field status=%d body=%s, want 400", resourceFieldResponse.Code, resourceFieldResponse.Body.String())
+	}
+	resourceFieldUpdate := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPut, "/v1/entities/"+createdEntity.Entity.EntityID+"/fields/"+createdEntity.Entity.EntityFields[0].EntityFieldID, map[string]any{
+		"company_id": companyID,
+		"field_type": store.EntityFieldTypeResource,
+	})
+	if resourceFieldUpdate.Code != http.StatusBadRequest {
+		t.Fatalf("generic resource field update status=%d body=%s, want 400", resourceFieldUpdate.Code, resourceFieldUpdate.Body.String())
 	}
 	blankEntityMove := entitiesHTTPJSON(t, handler, user, companyID, http.MethodPut, "/v1/entities/"+createdEntity.Entity.EntityID, map[string]any{
 		"company_id":       companyID,
@@ -219,6 +254,24 @@ func TestEntityHandlersCRUDAndExplicitRootMoves(t *testing.T) {
 	handler.ServeHTTP(deniedResponse, requestWithActorForTest(deniedRequest, user, companyID))
 	if deniedResponse.Code != http.StatusForbidden {
 		t.Fatalf("cross-company Entity list status=%d body=%s, want 403", deniedResponse.Code, deniedResponse.Body.String())
+	}
+}
+
+func TestEntityResponsesRedactEveryResourceFieldValue(t *testing.T) {
+	fieldTypeID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	raw := json.RawMessage(`{"resource_type":"node","resource_id":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"}`)
+	entity := domain.Entity{EntityFields: []domain.EntityField{{
+		EntityFieldTypeID: &fieldTypeID,
+		FieldType:         store.EntityFieldTypeResource,
+		Value:             raw,
+	}}}
+
+	redacted := redactActionItemSourceEntity(entity)
+	if redacted.EntityFields[0].Value != nil {
+		t.Fatalf("resource value=%s, want redacted", redacted.EntityFields[0].Value)
+	}
+	if string(entity.EntityFields[0].Value) != string(raw) {
+		t.Fatal("redaction mutated the repository value")
 	}
 }
 

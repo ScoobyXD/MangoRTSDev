@@ -13,16 +13,17 @@ import (
 )
 
 const (
-	EntityFieldTypeText    = "text"
-	EntityFieldTypeNumber  = "number"
-	EntityFieldTypeDate    = "date"
-	EntityFieldTypeBoolean = "boolean"
-	EntityFieldTypeChoice  = "choice"
-	EntityFieldTypeColor   = "color"
-	EntityFieldTypePerson  = "person"
-	EntityNameMaxLength    = 200
-	EntitySearchMaxLength  = 200
-	EntitySearchMaxLimit   = 50
+	EntityFieldTypeText     = "text"
+	EntityFieldTypeNumber   = "number"
+	EntityFieldTypeDate     = "date"
+	EntityFieldTypeBoolean  = "boolean"
+	EntityFieldTypeChoice   = "choice"
+	EntityFieldTypeColor    = "color"
+	EntityFieldTypePerson   = "person"
+	EntityFieldTypeResource = "resource"
+	EntityNameMaxLength     = 200
+	EntitySearchMaxLength   = 200
+	EntitySearchMaxLimit    = 50
 )
 
 type EntityTypeInput struct {
@@ -147,7 +148,7 @@ func normalizeEntityFieldTypeInput(input EntityFieldTypeInput, update bool) (Ent
 		return EntityFieldTypeInput{}, err
 	}
 	input.EntityFolderID = folder
-	if input.CompanyID == "" || (update && input.EntityFieldTypeID == "") || (!update && (input.EntityTypeID == "" || input.Name == "" || !validEntityFieldType(input.FieldType))) || len(input.Name) > EntityNameMaxLength || (input.PositionSet && input.Position < 0) {
+	if input.CompanyID == "" || (update && input.EntityFieldTypeID == "") || (!update && (input.EntityTypeID == "" || input.Name == "" || !validEditableEntityFieldType(input.FieldType))) || len(input.Name) > EntityNameMaxLength || (input.PositionSet && input.Position < 0) {
 		return EntityFieldTypeInput{}, ErrInvalid
 	}
 	if update && !input.NameSet && !input.EntityFolderSet && !input.FieldTypeSet && !input.ConfigSet && !input.PositionSet {
@@ -156,7 +157,7 @@ func normalizeEntityFieldTypeInput(input EntityFieldTypeInput, update bool) (Ent
 	if input.NameSet && input.Name == "" {
 		return EntityFieldTypeInput{}, ErrInvalid
 	}
-	if input.FieldTypeSet && !validEntityFieldType(input.FieldType) {
+	if input.FieldTypeSet && !validEditableEntityFieldType(input.FieldType) {
 		return EntityFieldTypeInput{}, ErrInvalid
 	}
 	if !update || (input.ConfigSet && input.FieldTypeSet) {
@@ -251,7 +252,7 @@ func normalizeEntityFieldInput(input EntityFieldInput, update bool) (EntityField
 	input.EntityFieldID = cleanUUIDText(input.EntityFieldID)
 	input.Name = strings.TrimSpace(input.Name)
 	input.FieldType = strings.ToLower(strings.TrimSpace(input.FieldType))
-	if input.CompanyID == "" || input.EntityID == "" || (update && input.EntityFieldID == "") || (!update && (input.Name == "" || !validEntityFieldType(input.FieldType))) || len(input.Name) > EntityNameMaxLength || (input.PositionSet && input.Position < 0) {
+	if input.CompanyID == "" || input.EntityID == "" || (update && input.EntityFieldID == "") || (!update && (input.Name == "" || !validEditableEntityFieldType(input.FieldType))) || len(input.Name) > EntityNameMaxLength || (input.PositionSet && input.Position < 0) {
 		return EntityFieldInput{}, ErrInvalid
 	}
 	if update && !input.NameSet && !input.FieldTypeSet && !input.ValueSet && !input.PositionSet {
@@ -260,7 +261,7 @@ func normalizeEntityFieldInput(input EntityFieldInput, update bool) (EntityField
 	if input.NameSet && input.Name == "" {
 		return EntityFieldInput{}, ErrInvalid
 	}
-	if input.FieldTypeSet && !validEntityFieldType(input.FieldType) {
+	if input.FieldTypeSet && !validEditableEntityFieldType(input.FieldType) {
 		return EntityFieldInput{}, ErrInvalid
 	}
 	if !update && input.ValueSet {
@@ -289,11 +290,15 @@ func normalizeOptionalEntityID(value *string) (*string, error) {
 
 func validEntityFieldType(value string) bool {
 	switch value {
-	case EntityFieldTypeText, EntityFieldTypeNumber, EntityFieldTypeDate, EntityFieldTypeBoolean, EntityFieldTypeChoice, EntityFieldTypeColor, EntityFieldTypePerson:
+	case EntityFieldTypeText, EntityFieldTypeNumber, EntityFieldTypeDate, EntityFieldTypeBoolean, EntityFieldTypeChoice, EntityFieldTypeColor, EntityFieldTypePerson, EntityFieldTypeResource:
 		return true
 	default:
 		return false
 	}
+}
+
+func validEditableEntityFieldType(value string) bool {
+	return value != EntityFieldTypeResource && validEntityFieldType(value)
 }
 
 func normalizeEntityFieldValue(fieldType string, raw json.RawMessage) (json.RawMessage, error) {
@@ -331,6 +336,19 @@ func normalizeEntityFieldValue(fieldType string, raw json.RawMessage) (json.RawM
 	case EntityFieldTypePerson:
 		text, ok := value.(string)
 		valid = ok && cleanUUIDText(text) != ""
+	case EntityFieldTypeResource:
+		resource, ok := value.(map[string]any)
+		if ok && len(resource) == 2 {
+			resourceType, typeOK := resource["resource_type"].(string)
+			resourceID, idOK := resource["resource_id"].(string)
+			resourceType, typeOK = NormalizeActionItemSourceResourceType(resourceType)
+			resourceID = cleanUUIDText(resourceID)
+			valid = typeOK && idOK && resourceID != ""
+			if valid {
+				resource["resource_type"] = resourceType
+				resource["resource_id"] = resourceID
+			}
+		}
 	}
 	if !valid {
 		return nil, ErrInvalid

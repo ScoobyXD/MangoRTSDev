@@ -322,11 +322,40 @@ func TestActionItemSourceHTTPResolvesCurrentNameAndHidesUnavailableIdentity(t *t
 	if createdResponse.Code != http.StatusCreated {
 		t.Fatalf("source create status=%d body=%s", createdResponse.Code, createdResponse.Body.String())
 	}
+	createdBody := createdResponse.Body.String()
+	if strings.Contains(createdBody, sourceNode.NodeID) {
+		t.Fatalf("Action Item creation response leaked raw Source identity: %s", createdBody)
+	}
 	var created struct {
 		ActionItem domain.Entity `json:"action_item"`
 	}
-	if err := json.NewDecoder(createdResponse.Body).Decode(&created); err != nil {
+	if err := json.Unmarshal([]byte(createdBody), &created); err != nil {
 		t.Fatal(err)
+	}
+	sourceFieldFound := false
+	for _, field := range created.ActionItem.EntityFields {
+		if field.SystemKey == store.ActionItemSourceSystemKey {
+			sourceFieldFound = true
+			if string(field.Value) != "null" {
+				t.Fatalf("creation response Source value=%s, want redacted null", field.Value)
+			}
+		}
+	}
+	if !sourceFieldFound {
+		t.Fatal("creation response omitted the declared Source field")
+	}
+	getEntityBody := func() string {
+		t.Helper()
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/v1/entities/"+created.ActionItem.EntityID+"?company_id="+company.CompanyID, nil)
+		handler.ServeHTTP(response, withMember(request))
+		if response.Code != http.StatusOK {
+			t.Fatalf("Entity GET status=%d body=%s", response.Code, response.Body.String())
+		}
+		return response.Body.String()
+	}
+	if body := getEntityBody(); strings.Contains(body, sourceNode.NodeID) {
+		t.Fatalf("ordinary authorized Entity GET leaked raw Source identity: %s", body)
 	}
 	view, _ := getSource(created.ActionItem.EntityID)
 	if view == nil || view.ResourceType != store.EntityTypeNode || view.ResourceID != sourceNode.NodeID || view.Name != "Current source name" {
@@ -349,6 +378,9 @@ func TestActionItemSourceHTTPResolvesCurrentNameAndHidesUnavailableIdentity(t *t
 	hidden, hiddenBody := getSource(created.ActionItem.EntityID)
 	if hidden != nil || strings.Contains(hiddenBody, sourceNode.NodeID) || strings.Contains(hiddenBody, "Renamed source") {
 		t.Fatalf("inaccessible source leaked identity: source=%+v body=%s", hidden, hiddenBody)
+	}
+	if body := getEntityBody(); strings.Contains(body, sourceNode.NodeID) {
+		t.Fatalf("ordinary inaccessible Entity GET leaked raw Source identity: %s", body)
 	}
 	beforeRejected := len(listActionItems())
 	rejected := post(map[string]any{
@@ -375,12 +407,18 @@ func TestActionItemSourceHTTPResolvesCurrentNameAndHidesUnavailableIdentity(t *t
 		t.Fatalf("cross-company source response status=%d body=%s", crossCompany.Code, crossCompany.Body.String())
 	}
 
-	if err := repo.DeleteNode(company.CompanyID, sourceNode.NodeID); err != nil {
+	if _, err := repo.DeleteCompanyExplorerTargets(company.CompanyID, []store.CompanyExplorerDeleteTargetInput{{Kind: store.EntityTypeNode, ID: sourceNode.NodeID}}, owner.UserID); err != nil {
 		t.Fatal(err)
+	}
+	if persisted, err := repo.GetActionItemSource(company.CompanyID, created.ActionItem.EntityID); err != nil || persisted.ResourceID != sourceNode.NodeID {
+		t.Fatalf("recycled Source storage=%+v err=%v, want preserved exact identity", persisted, err)
 	}
 	unavailable, unavailableBody := getSource(created.ActionItem.EntityID)
 	if unavailable != nil || strings.Contains(unavailableBody, sourceNode.NodeID) || strings.Contains(unavailableBody, "Renamed source") {
 		t.Fatalf("removed source leaked identity: source=%+v body=%s", unavailable, unavailableBody)
+	}
+	if body := getEntityBody(); strings.Contains(body, sourceNode.NodeID) {
+		t.Fatalf("ordinary recycled Entity GET leaked raw Source identity: %s", body)
 	}
 
 	directResponse := post(map[string]any{"company_id": company.CompanyID, "body_text": "Direct source unset", "color": nil})

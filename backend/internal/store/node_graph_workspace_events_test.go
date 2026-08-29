@@ -133,9 +133,10 @@ func TestMemoryNodeGraphWorkspaceEventAppendFailureRollsBackState(t *testing.T) 
 			CompanyID: companyID, ResourceAttachmentID: relationshipID, ResourceType: "email_draft",
 			ResourceID: draftID, AttachmentID: attachmentID, CreatedTimestamp: now,
 		}
-		repo.actionItemSources[actionItemSourceKey(companyID, actionItemID)] = domain.ActionItemSource{
-			CompanyID: companyID, EntityID: actionItemID, ResourceType: EntityTypeNode,
-			ResourceID: node.NodeID, CreatedTimestamp: now,
+		sourceFieldID := newUUIDv7String()
+		repo.entityFields[key(companyID, sourceFieldID)] = domain.EntityField{
+			CompanyID: companyID, EntityFieldID: sourceFieldID, EntityID: actionItemID,
+			FieldType: EntityFieldTypeResource, Value: actionItemSourceValue(EntityTypeNode, node.NodeID), CreatedTimestamp: now,
 		}
 		repo.mu.Unlock()
 		repo.domainEventAppendErr = errAppend
@@ -150,12 +151,13 @@ func TestMemoryNodeGraphWorkspaceEventAppendFailureRollsBackState(t *testing.T) 
 		_, draftExists := repo.emailDrafts[communicationsEmailDraftKey(companyID, draftID)]
 		attachment := repo.attachments[attachmentKey(companyID, attachmentID)]
 		link := repo.resourceAttachments[relationshipID]
-		source, sourceExists := repo.actionItemSources[actionItemSourceKey(companyID, actionItemID)]
+		source, sourceExists := repo.entityFields[key(companyID, sourceFieldID)]
 		repo.mu.RUnlock()
 		if !draftExists || attachment.DeletedTimestamp != nil || link.DeletedTimestamp != nil {
 			t.Fatalf("shared draft graph was not rolled back: draft=%v attachment=%+v link=%+v", draftExists, attachment, link)
 		}
-		if !sourceExists || source.ResourceID != node.NodeID {
+		_, sourceID, sourceValid := decodeActionItemSourceValue(source.Value)
+		if !sourceExists || !sourceValid || sourceID != node.NodeID {
 			t.Fatalf("Action Item Source was not rolled back: exists=%v source=%+v", sourceExists, source)
 		}
 		assertNoWorkspaceEvents(t, repo, companyID)

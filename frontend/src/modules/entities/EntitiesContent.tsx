@@ -530,7 +530,7 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                             entityFieldID: field.entity_field_id,
                             ...(systemField ? {} : { name: formText(form, "name"), fieldType: nextType }),
                             position: formPosition(form, "position", field.position),
-                            ...(nextType === field.field_type ? { value: parseFieldValue(nextType, formText(form, "value")) } : {}),
+                            ...(nextType === field.field_type && nextType !== "resource" ? { value: parseFieldValue(nextType, formText(form, "value")) } : {}),
                           });
                           await loadDetail(entityDetail.entity_id);
                         }, "Failed to update entity field")}
@@ -605,7 +605,7 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                     }}
                   >
                     <input name="name" defaultValue={field.name} maxLength={100} aria-label={`Default field name ${field.name}`} style={inputStyle} disabled={Boolean(field.system_key?.trim())} />
-                    <select name="field_type" defaultValue={field.field_type} aria-label={`Default field type ${field.name}`} style={inputStyle} disabled={Boolean(field.system_key?.trim())}>{fieldTypeOptions()}</select>
+                    <select name="field_type" defaultValue={field.field_type} aria-label={`Default field type ${field.name}`} style={inputStyle} disabled={Boolean(field.system_key?.trim())}>{fieldTypeOptions(field.system_key?.trim() ? [field.field_type] : USER_EDITABLE_ENTITY_FIELD_TYPES)}</select>
                     <select name="entity_folder_id" defaultValue={field.entity_folder_id ?? ""} aria-label={`Default field location ${field.name}`} style={inputStyle} disabled={Boolean(field.system_key?.trim())}>
                       <option value="">Type root</option>
                       {folderOptions.map(({ folder, label }) => <option key={folder.entity_folder_id} value={folder.entity_folder_id}>{label}</option>)}
@@ -646,7 +646,7 @@ function EmptyState({ children }: { children: React.ReactNode }) {
   return <div style={emptyStyle}>{children}</div>;
 }
 
-function FieldTypeSelect({ value, onChange, fieldTypes = ENTITY_FIELD_TYPES }: { value: EntityFieldDataType; onChange: (value: EntityFieldDataType) => void; fieldTypes?: readonly EntityFieldDataType[] }) {
+function FieldTypeSelect({ value, onChange, fieldTypes = USER_EDITABLE_ENTITY_FIELD_TYPES }: { value: EntityFieldDataType; onChange: (value: EntityFieldDataType) => void; fieldTypes?: readonly EntityFieldDataType[] }) {
   return <select value={value} aria-label="Field type" style={inputStyle} onChange={(event) => onChange(fieldDataType(event.currentTarget.value))}>{fieldTypeOptions(fieldTypes)}</select>;
 }
 
@@ -659,10 +659,11 @@ function EntityFieldEditor({ field, busy, accent, companyUsers, onSave, onDelete
   onDelete: () => void;
 }) {
   const systemField = Boolean(field.system_key?.trim());
+  const resourceField = field.field_type === "resource";
   return (
     <form key={`${field.entity_field_id}:${field.updated_timestamp}`} style={entityFieldEditorStyle} onSubmit={(event) => { event.preventDefault(); onSave(event.currentTarget); }}>
-      <input name="name" defaultValue={field.name} maxLength={100} aria-label={`Entity field name ${field.name}`} style={inputStyle} disabled={systemField} />
-      <select name="field_type" defaultValue={field.field_type} aria-label={`Entity field type ${field.name}`} style={inputStyle} disabled={systemField}>{fieldTypeOptions(directEntityFieldTypes(field.field_type))}</select>
+      <input name="name" defaultValue={field.name} maxLength={100} aria-label={`Entity field name ${field.name}`} style={inputStyle} disabled={systemField || resourceField} />
+      <select name="field_type" defaultValue={field.field_type} aria-label={`Entity field type ${field.name}`} style={inputStyle} disabled={systemField || resourceField}>{fieldTypeOptions(systemField || resourceField ? [field.field_type] : DIRECT_ENTITY_FIELD_TYPES)}</select>
       <FieldValueInput field={field} companyUsers={companyUsers} />
       <input name="position" type="number" min={0} step={1} required defaultValue={field.position} aria-label={`Entity field position ${field.name}`} style={inputStyle} />
       <div style={actionsStyle}>
@@ -675,6 +676,9 @@ function EntityFieldEditor({ field, busy, accent, companyUsers, onSave, onDelete
 }
 
 function FieldValueInput({ field, companyUsers }: { field: EntityField; companyUsers: CompanyUser[] }) {
+  if (field.field_type === "resource") {
+    return <span data-entity-resource-field-value="true" aria-label={`Value for ${field.name}`} style={readOnlyValueStyle}>{field.value === null ? "Not set" : "Linked resource"}</span>;
+  }
   if (field.field_type === "boolean") {
     return <select name="value" defaultValue={field.value === true ? "true" : field.value === false ? "false" : ""} aria-label={`Value for ${field.name}`} style={inputStyle}>
       <option value="">Not set</option><option value="true">True</option><option value="false">False</option>
@@ -724,7 +728,8 @@ const COLOR_FIELD_PRESETS: ReadonlyArray<FieldConfigOption> = [
   { key: "purple", label: "Purple", color: "#a855f7" },
 ];
 
-const DIRECT_ENTITY_FIELD_TYPES = ENTITY_FIELD_TYPES.filter((fieldType) => fieldType !== "choice" && fieldType !== "color");
+const USER_EDITABLE_ENTITY_FIELD_TYPES = ENTITY_FIELD_TYPES.filter((fieldType) => fieldType !== "resource");
+const DIRECT_ENTITY_FIELD_TYPES = USER_EDITABLE_ENTITY_FIELD_TYPES.filter((fieldType) => fieldType !== "choice" && fieldType !== "color");
 
 function FieldConfigEditor({ fieldType, config, systemKey = "" }: { fieldType: EntityFieldDataType; config: FieldConfig; systemKey?: string }) {
   if (fieldType === "choice") {
@@ -910,10 +915,6 @@ function entityBodyText(value: unknown): string {
     return item.content.map(read).join(separator);
   };
   return read(document).trim();
-}
-
-function directEntityFieldTypes(current: EntityFieldDataType): readonly EntityFieldDataType[] {
-  return ENTITY_FIELD_TYPES.filter((fieldType) => (fieldType !== "choice" && fieldType !== "color") || fieldType === current);
 }
 
 function fieldTypeOptions(fieldTypes: readonly EntityFieldDataType[] = ENTITY_FIELD_TYPES) {

@@ -25,12 +25,12 @@
 23. An Entity relationship grants no permission, RACI role, policy parentage, Entity access, or Huddle access. Reading or changing a Huddle Node's Action Item relationships requires Edit access to that Huddle Node, and reading a Huddle Process rollup directly requires Edit access to that exact Huddle Logic Gate.
 24. Permanent endpoint deletion leaves no stale edge, and recycle/restore preserves every promised exact edge. The table uses no relationship ID, resource registry, copied label, copied body, translated identity, or compatibility identity.
 25. Direct Huddle Logic Gate creation atomically stores the exact resource, its same-ID root Huddle Explorer placement, and its direct policies; typed Huddle Logic Gate attachment relationships use that same exact resource ID and follow its recycle, restore, and permanent-delete lifecycle.
-26. `action_item_sources` is the only authority for one Action Item's optional creation provenance and is separate from live inline-reference `entity_relationships`.
-27. One Source row stores the exact same-company Action Item Entity ID plus one canonical `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, or `kpi` resource type and exact ID, with no copied label, text anchor, registry, translated identity, or fallback.
-28. Creating an editor Action Item validates the exact live endpoint and the actor's current Edit access, then commits the Entity, required fields, and Source atomically. Direct Entities-page creation leaves Source unset.
-29. Source is immutable and grants no access. Reads resolve the current endpoint name and disclose its typed identity only to a currently authorized viewer; every unavailable case returns a neutral state without hidden identity.
-30. Inline chip insertion or removal changes only editor content and any derived live Huddle Entity edge. It never creates, rewrites, or deletes Action Item Source.
-31. Recycling a source endpoint captures its Source rows before removing them live, restore recreates the exact rows after the endpoint, and permanent deletion leaves no stale Source row.
+26. The required Action Item `source` / `Source` / `resource` system Entity Field is the only authority for one Action Item's optional creation provenance and is separate from live inline-reference `entity_relationships`.
+27. One nonnull Source field value contains exactly a canonical `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, or `kpi` `resource_type` and the exact same-company `resource_id`, with no copied label, text anchor, registry, translated identity, or fallback.
+28. Creating an editor Action Item validates the exact live endpoint and the actor's current Edit access, then commits the Entity and all seven required fields, including Source, atomically. Direct Entities-page creation leaves the required Source field value null.
+29. Source is immutable after creation and grants no access. Reads resolve the current endpoint name and disclose its typed identity only to a currently authorized viewer; every unavailable case returns a neutral state without hidden identity.
+30. Inline chip insertion or removal changes only editor content and any derived live Huddle Entity edge. It never creates, rewrites, or clears the Action Item Source field.
+31. Recycling a source endpoint preserves its exact Source field value while reads project it as unavailable, and restoring that exact endpoint makes it resolvable again. Permanent endpoint deletion atomically clears matching Source field values so no stale typed reference remains; this lifecycle cleanup is the only allowed post-creation Source mutation.
 
 Last updated: 2026-08-29
 
@@ -50,7 +50,7 @@ Removing the final reference removes only that resource edge, and each Huddle No
 
 ↓
 
-When that Action Item was created from highlighted text, its separate immutable `action_item_sources` row keeps the exact creation resource through chip removal, resolves only current permitted data, and follows that endpoint through recycle, restore, or permanent deletion
+When that Action Item was created from highlighted text, its immutable typed Source Entity Field keeps the exact creation resource through chip removal, resolves only current permitted data, stays unavailable while the endpoint is recycled, resolves again after restore, and clears on permanent deletion
 
 # Current Email Relationship Business Logic Laws
 
@@ -561,13 +561,13 @@ Removing an edge MUST preserve both endpoints. Permanent deletion MUST leave no 
 
 ### Law 38 — Action Item Source is one exact immutable creation endpoint
 
-`action_item_sources` MUST store one optional row per Action Item with the exact same-company `entities.entity_id`, canonical `resource_type`, and exact `resource_id`. Supported types are exactly `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, and `kpi`. The table MUST NOT store a copied name, text selection, textbox ID, document ID, timeline identity, relationship ID, central registry identity, translated identity, or fallback.
+The required protected Action Item Entity Field Type and linked Entity Field with system key `source`, label `Source`, and kind `resource` MUST be the only Source authority. Its nullable `value_jsonb` MUST be either null or an object containing only canonical `resource_type` and exact UUID `resource_id`. Supported types are exactly `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, and `kpi`. Source MUST NOT store a copied name, text selection, textbox ID, document ID, timeline identity, relationship ID, central registry identity, translated identity, or fallback.
 
-Creating an Action Item from highlighted editor text MUST validate the exact live endpoint and the actor's current Edit access and insert Source in the same transaction as the Action Item and its required fields. Direct Entities-page creation and existing Action Items have no Source. Source MUST reject every update and MUST remain unchanged when an inline chip or derived `entity_relationships` edge is added or removed.
+Creating an Action Item from highlighted editor text MUST validate the exact live same-company endpoint and the actor's current Edit access and write Source in the same transaction as the Action Item and its other required fields. Direct Entities-page creation and existing Action Items MUST have the required linked Source field with a null value. User and ordinary Entity Field APIs MUST reject every post-creation Source update, and Source MUST remain unchanged when an inline chip or derived `entity_relationships` edge is added or removed.
 
-Source MUST grant no access. A read MAY disclose the current endpoint type, ID, name, and canonical icon only after the viewer's current access is rechecked. An unset, missing, inaccessible, recycled, or permanently deleted source MUST return one neutral unavailable state without disclosing hidden identity.
+Source MUST grant no access. A read MAY disclose the current endpoint type, ID, name, and canonical icon only after the viewer's current access is rechecked. An unset, missing, inaccessible, recycled, or permanently deleted source MUST return one neutral unavailable state without disclosing hidden identity. A live source rename MUST appear through current endpoint resolution and MUST NOT rewrite Source.
 
-Recycling a source endpoint MUST capture every affected Source row before live endpoint cleanup removes it. Restore MUST recreate the exact row after the endpoint exists; permanent deletion MUST leave no live row. A source rename MUST appear through a current endpoint join and MUST NOT rewrite Source.
+Recycling a source endpoint MUST preserve the exact Source value while making its projection unavailable. Restoring that exact endpoint MUST make the preserved value resolvable again. Permanent endpoint deletion MUST atomically clear every matching Source field value so no stale typed reference remains; that system lifecycle cleanup is the only permitted post-creation mutation.
 
 ### Law 39 — Entity person fields store exact company principals
 
@@ -623,6 +623,11 @@ Action Item collected by a Huddle Process:
 Action Item person in charge:
   company_id    = C
   value_jsonb   = exact current company_memberships.user_id as a JSON string
+
+Action Item Source:
+  company_id    = C
+  system_key    = source
+  value_jsonb   = {"resource_type":"node","resource_id": exact nodes.node_id}
 ```
 
 No example introduces a translated resource identity. The fixed endpoint and the typed literal endpoint are sufficient.

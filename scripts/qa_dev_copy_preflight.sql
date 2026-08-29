@@ -41,7 +41,6 @@ begin
      or to_regclass('public.entities') is null
      or to_regclass('public.entity_fields') is null
      or to_regclass('public.entity_relationships') is null
-     or to_regclass('public.action_item_sources') is null
      or to_regclass('public.huddle_node_textboxes') is null
      or to_regclass('public.huddle_node_textbox_chats') is null
      or to_regclass('public.schema_migrations') is null then
@@ -78,9 +77,6 @@ begin
       ('entity_relationships','company_id'),('entity_relationships','entity_id'),
       ('entity_relationships','resource_type'),('entity_relationships','resource_id'),
       ('entity_relationships','created_timestamp'),
-      ('action_item_sources','company_id'),('action_item_sources','entity_id'),
-      ('action_item_sources','resource_type'),('action_item_sources','resource_id'),
-      ('action_item_sources','created_timestamp'),
       ('huddle_node_textboxes','company_id'),('huddle_node_textboxes','huddle_node_id'),
       ('huddle_node_textboxes','textbox_id'),('huddle_node_textboxes','created_timestamp'),
       ('huddle_node_textboxes','updated_timestamp'),('huddle_node_textboxes','deleted_timestamp'),
@@ -102,7 +98,7 @@ begin
     where table_schema='public'
       and table_name in (
         'entity_types','entity_folders','entity_field_types','entities','entity_fields',
-        'entity_relationships','action_item_sources','huddle_node_textboxes','huddle_node_textbox_chats'
+        'entity_relationships','huddle_node_textboxes','huddle_node_textbox_chats'
       )
   ), mismatches as (
     (select * from expected except select * from actual)
@@ -156,51 +152,66 @@ begin
   end if;
 
   if exists (
+    with live_or_recycled_resources(company_id,resource_type,resource_id) as (
+      select company_id,'node'::text,node_id::text from public.nodes
+      union all
+      select company_id,'logic_gate',logic_gate_id::text from public.logic_gates
+      union all
+      select company_id,'project',project_id::text from public.projects
+      union all
+      select company_id,'huddle_node',huddle_node_id::text from public.huddle_nodes
+      union all
+      select huddle_logic_gate.company_id,'huddle_logic_gate',huddle_logic_gate.huddle_logic_gate_id::text
+      from public.huddle_logic_gates huddle_logic_gate
+      where huddle_logic_gate.deleted_timestamp is null
+      union all
+      select kpi.company_id,'kpi',kpi.kpi_id::text
+      from public.kpis kpi where kpi.deleted_timestamp is null
+      union all
+      select recycle.company_id,definition.resource_type,
+             restored.row_json->>definition.id_column
+      from public.recycle_bin_items recycle
+      cross join (values
+        ('nodes','node_id','node'),
+        ('logic_gates','logic_gate_id','logic_gate'),
+        ('projects','project_id','project'),
+        ('huddle_nodes','huddle_node_id','huddle_node'),
+        ('huddle_logic_gates','huddle_logic_gate_id','huddle_logic_gate'),
+        ('kpis','kpi_id','kpi')
+      ) definition(table_name,id_column,resource_type)
+      cross join lateral jsonb_array_elements(
+        case
+          when jsonb_typeof(recycle.restore_payload->definition.table_name)='array'
+          then recycle.restore_payload->definition.table_name
+          else '[]'::jsonb
+        end
+      ) restored(row_json)
+    )
     select 1
-    from public.action_item_sources source
-    left join public.entities entity
-      on entity.company_id = source.company_id
-     and entity.entity_id = source.entity_id
-    left join public.entity_types entity_type
-      on entity_type.company_id = entity.company_id
-     and entity_type.entity_type_id = entity.entity_type_id
-    left join public.nodes node
-      on source.resource_type = 'node'
-     and node.company_id = source.company_id
-     and node.node_id = source.resource_id
-    left join public.logic_gates logic_gate
-      on source.resource_type = 'logic_gate'
-     and logic_gate.company_id = source.company_id
-     and logic_gate.logic_gate_id = source.resource_id
-    left join public.projects project
-      on source.resource_type = 'project'
-     and project.company_id = source.company_id
-     and project.project_id = source.resource_id
-    left join public.huddle_nodes huddle_node
-      on source.resource_type = 'huddle_node'
-     and huddle_node.company_id = source.company_id
-     and huddle_node.huddle_node_id = source.resource_id
-    left join public.huddle_logic_gates huddle_logic_gate
-      on source.resource_type = 'huddle_logic_gate'
-     and huddle_logic_gate.company_id = source.company_id
-     and huddle_logic_gate.huddle_logic_gate_id = source.resource_id
-     and huddle_logic_gate.deleted_timestamp is null
-    left join public.kpis kpi
-      on source.resource_type = 'kpi'
-     and kpi.company_id = source.company_id
-     and kpi.kpi_id = source.resource_id
-     and kpi.deleted_timestamp is null
-    where entity.entity_id is null
-       or entity_type.system_key is distinct from 'action_item'
-       or source.resource_type not in ('node','logic_gate','project','huddle_node','huddle_logic_gate','kpi')
-       or (source.resource_type = 'node' and node.node_id is null)
-       or (source.resource_type = 'logic_gate' and logic_gate.logic_gate_id is null)
-       or (source.resource_type = 'project' and project.project_id is null)
-       or (source.resource_type = 'huddle_node' and huddle_node.huddle_node_id is null)
-       or (source.resource_type = 'huddle_logic_gate' and huddle_logic_gate.huddle_logic_gate_id is null)
-       or (source.resource_type = 'kpi' and kpi.kpi_id is null)
+    from public.entity_fields field
+    where field.field_type='resource'
+      and field.value_jsonb is not null
+      and (
+        jsonb_typeof(field.value_jsonb) is distinct from 'object'
+        or jsonb_typeof(field.value_jsonb->'resource_type') is distinct from 'string'
+        or jsonb_typeof(field.value_jsonb->'resource_id') is distinct from 'string'
+        or field.value_jsonb is distinct from jsonb_build_object(
+          'resource_type',field.value_jsonb->>'resource_type',
+          'resource_id',field.value_jsonb->>'resource_id'
+        )
+        or field.value_jsonb->>'resource_type' not in ('node','logic_gate','project','huddle_node','huddle_logic_gate','kpi')
+        or public.mangorts_try_uuid(field.value_jsonb->>'resource_id')::text
+             is distinct from field.value_jsonb->>'resource_id'
+        or not exists (
+          select 1
+          from live_or_recycled_resources endpoint
+          where endpoint.company_id=field.company_id
+            and endpoint.resource_type=field.value_jsonb->>'resource_type'
+            and endpoint.resource_id=field.value_jsonb->>'resource_id'
+        )
+      )
   ) then
-    raise exception 'STOP: Dev Action Item Source has a missing Action Item or unsupported or missing exact same-company endpoint';
+    raise exception 'STOP: Dev Entity resource field has an unsupported or missing exact same-company endpoint (live or recycled)';
   end if;
 
   with audited_excluded_folders(company_id, resource_type, resource_id, audit_label) as (

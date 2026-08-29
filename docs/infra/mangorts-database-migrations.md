@@ -47,7 +47,7 @@ The later human-run conversion/cutover is separate: drain editor writes or enter
 
 ### 20260829 Action Item delegation and Source
 
-`backend/db/migrations/20260829_action_item_delegation_source.sql` adds the required nullable `assigned_by` person template and field rows, creates the dedicated immutable `action_item_sources` table, and installs exact endpoint validation and cleanup triggers. Existing Action Items receive null Assigned by values and no Source; the migration never infers either from creator audit or inline relationships. Apply it through the normal reviewed migration workflow before deploying the new My Work perspectives or editor Source projection. No agent task applies it to a live database.
+`backend/db/migrations/20260829_action_item_delegation_source.sql` reuses `entity_field_types` and `entity_fields`: it adds the required nullable `assigned_by` person and `source` resource templates and linked field rows, protects their system contracts, validates each nonnull Source value as an exact supported same-company `{resource_type, resource_id}` pair, preserves Source through endpoint recycle/restore, and clears matching values on permanent endpoint deletion. It creates no Source-specific table. Existing Action Items receive null Assigned by and Source values; the migration never infers either from creator audit or inline relationships. Apply it through the normal reviewed migration workflow before deploying the new My Work perspectives or editor Source projection. No agent task applies it to a live database.
 
 ### 20260829 My Work Node completion transition
 

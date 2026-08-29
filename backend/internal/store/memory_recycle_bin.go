@@ -95,7 +95,6 @@ type memoryRecycleBinSnapshot struct {
 	huddleNodeLogicGateRelationships map[string]domain.HuddleNodeLogicGateRelationship
 	huddleNodeKPIRelationships       map[string]domain.HuddleNodeKPIRelationship
 	entityRelationships              map[string]domain.EntityRelationship
-	actionItemSources                map[string]domain.ActionItemSource
 }
 
 func (r *MemoryRepo) ListRecycleBinItems(companyID, deletedByUserID string) ([]domain.RecycleBinItem, error) {
@@ -135,6 +134,28 @@ func (r *MemoryRepo) PermanentlyDeleteRecycleBinItems(companyID, deletedByUserID
 		record, ok := r.recycleBin[key(companyID, itemID)]
 		if !ok || record.Item.CompanyID != companyID || (deletedByUserID != "" && record.Item.DeletedByUserID != deletedByUserID) {
 			continue
+		}
+		if record.UseDelta {
+			for _, item := range record.Delta.nodes {
+				r.clearEntityResourceFieldsForMissingResourceLocked(companyID, EntityTypeNode, item.NodeID)
+			}
+			for _, item := range record.Delta.logicGates {
+				r.clearEntityResourceFieldsForMissingResourceLocked(companyID, EntityTypeLogicGate, item.LogicGateID)
+			}
+			for _, item := range record.Delta.projects {
+				r.clearEntityResourceFieldsForMissingResourceLocked(companyID, EntityTypeProject, item.ProjectID)
+			}
+			for _, item := range record.Delta.huddleLogicGates {
+				r.clearEntityResourceFieldsForMissingResourceLocked(companyID, EntityTypeHuddleLogicGate, item.HuddleLogicGateID)
+			}
+			for _, item := range record.Delta.huddleNodes {
+				r.clearEntityResourceFieldsForMissingResourceLocked(companyID, EntityTypeHuddleNode, item.HuddleNodeID)
+			}
+			for _, item := range record.Delta.kpis {
+				r.clearEntityResourceFieldsForMissingResourceLocked(companyID, EntityTypeKPI, item.KPIID)
+			}
+		} else {
+			r.clearEntityResourceFieldsForMissingResourceLocked(companyID, record.Item.ObjectKind, record.Item.ObjectID)
 		}
 		delete(r.recycleBin, key(companyID, itemID))
 		deleted++
@@ -325,7 +346,7 @@ func memoryRecycleSnapshotWithProcessMapTraceContext(before, after, deleted memo
 
 func (r *MemoryRepo) deleteCompanyExplorerRecycleScopeLocked(companyID string, scope companyExplorerRecycleScope) error {
 	for logicGateID := range scope.LogicGateIDs {
-		if err := r.deleteLogicGateLocked(companyID, logicGateID); err != nil {
+		if err := r.deleteLogicGateLocked(companyID, logicGateID, true); err != nil {
 			return err
 		}
 	}
@@ -338,12 +359,12 @@ func (r *MemoryRepo) deleteCompanyExplorerRecycleScopeLocked(companyID string, s
 		}
 	}
 	for projectID := range scope.ProjectIDs {
-		if err := r.deleteProjectLocked(companyID, projectID); err != nil {
+		if err := r.deleteProjectLocked(companyID, projectID, true); err != nil {
 			return err
 		}
 	}
 	for nodeID := range scope.NodeIDs {
-		if err := r.deleteNodeLocked(companyID, nodeID); err != nil {
+		if err := r.deleteNodeLocked(companyID, nodeID, true); err != nil {
 			return err
 		}
 	}
@@ -464,7 +485,6 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		huddleNodeLogicGateRelationships: cloneMap(r.huddleNodeLogicGateRelationships),
 		huddleNodeKPIRelationships:       cloneMap(r.huddleNodeKPIRelationships),
 		entityRelationships:              cloneMap(r.entityRelationships),
-		actionItemSources:                cloneMap(r.actionItemSources),
 	}
 }
 
@@ -485,7 +505,6 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.huddleNodeLogicGateRelationships = cloneMap(snapshot.huddleNodeLogicGateRelationships)
 	r.huddleNodeKPIRelationships = cloneMap(snapshot.huddleNodeKPIRelationships)
 	r.entityRelationships = cloneMap(snapshot.entityRelationships)
-	r.actionItemSources = cloneMap(snapshot.actionItemSources)
 	r.huddleExplorerFolders = cloneMap(snapshot.huddleExplorerFolders)
 	r.huddleExplorerItems = cloneMap(snapshot.huddleExplorerItems)
 	r.logicGateInfo = cloneSliceMap(snapshot.logicGateInfo)
@@ -597,7 +616,6 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		huddleNodeLogicGateRelationships: recycleMapDelta(before.huddleNodeLogicGateRelationships, after.huddleNodeLogicGateRelationships),
 		huddleNodeKPIRelationships:       recycleMapDelta(before.huddleNodeKPIRelationships, after.huddleNodeKPIRelationships),
 		entityRelationships:              recycleMapDelta(before.entityRelationships, after.entityRelationships),
-		actionItemSources:                recycleMapDelta(before.actionItemSources, after.actionItemSources),
 	}
 }
 
@@ -734,7 +752,6 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.huddleNodeLogicGateRelationships, delta.huddleNodeLogicGateRelationships)
 	mergeRecycleMap(destination.huddleNodeKPIRelationships, delta.huddleNodeKPIRelationships)
 	mergeRecycleMap(destination.entityRelationships, delta.entityRelationships)
-	mergeRecycleMap(destination.actionItemSources, delta.actionItemSources)
 }
 
 func processMapParentIDsEqual(left, right *string) bool {

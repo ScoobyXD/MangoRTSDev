@@ -1,10 +1,24 @@
 import { apiFetchJSON } from "../../auth/cognitoAuth.js";
 import type { BoundRequestJSON } from "../api/requestJSON.js";
 
-export const ENTITY_FIELD_TYPES = ["text", "number", "date", "boolean", "choice", "color", "person"] as const;
+export const ENTITY_FIELD_TYPES = ["text", "number", "date", "boolean", "choice", "color", "person", "resource"] as const;
+
+export const ACTION_ITEM_SOURCE_RESOURCE_TYPES = [
+  "node",
+  "logic_gate",
+  "project",
+  "huddle_node",
+  "huddle_logic_gate",
+  "kpi",
+] as const;
+export type ActionItemSourceResourceType = (typeof ACTION_ITEM_SOURCE_RESOURCE_TYPES)[number];
+export type EntityResourceFieldValue = {
+  resource_type: ActionItemSourceResourceType;
+  resource_id: string;
+};
 
 export type EntityFieldDataType = (typeof ENTITY_FIELD_TYPES)[number];
-export type EntityFieldValue = string | number | boolean | null;
+export type EntityFieldValue = string | number | boolean | EntityResourceFieldValue | null;
 
 export type EntityFieldTypeConfigOption = {
   key: string;
@@ -87,15 +101,6 @@ export type Entity = EntitySummary & {
 };
 
 export type ActionItemColor = "yellow" | "red";
-export const ACTION_ITEM_SOURCE_RESOURCE_TYPES = [
-  "node",
-  "logic_gate",
-  "project",
-  "huddle_node",
-  "huddle_logic_gate",
-  "kpi",
-] as const;
-export type ActionItemSourceResourceType = (typeof ACTION_ITEM_SOURCE_RESOURCE_TYPES)[number];
 export type ActionItemSource = {
   resource_type: ActionItemSourceResourceType;
   resource_id: string;
