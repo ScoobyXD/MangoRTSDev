@@ -9,6 +9,13 @@ import {
   normalizeMyWorkActionItemGroupings,
 } from "../../../../frontend/src/modules/my-work/myWorkGrouping.js";
 import { beginMyWorkSectionRequest } from "../../../../frontend/src/modules/my-work/useMyWorkData.js";
+import {
+  columnResizeA11y,
+  resizedColumnWeights,
+  resizedSplitRatio,
+  scrollRemaining,
+  splitResizeA11y,
+} from "../../../../frontend/src/modules/my-work/MyWorkContent.js";
 import type { MyWorkActionItem } from "../../../../frontend/src/modules/my-work/myWorkApi.js";
 
 test("Action Items default to Color then exact Completion due date in Red, Yellow, No color order", () => {
@@ -19,8 +26,8 @@ test("Action Items default to Color then exact Completion due date in Red, Yello
   ], DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter);
 
   assert.deepEqual(groups.map((group) => group.label), ["Red", "Yellow", "No color"]);
-  assert.deepEqual(groups[0]?.groups.map((group) => group.label), ["09/01/2026"]);
-  assert.deepEqual(groups[1]?.groups.map((group) => group.label), ["09/02/2026"]);
+  assert.deepEqual(groups[0]?.groups.map((group) => group.label), ["Completion due date: 09/01/2026"]);
+  assert.deepEqual(groups[1]?.groups.map((group) => group.label), ["Completion due date: 09/02/2026"]);
   assert.deepEqual(groups[2]?.groups.map((group) => group.label), ["No completion due date"]);
   assert.deepEqual(DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => grouping.field), ["color", "completion_due_date"]);
 });
@@ -47,7 +54,7 @@ test("Nodes default to Priority then exact Due date and keep missing values visi
   ], DEFAULT_MY_WORK_NODE_GROUPINGS, myWorkNodeGroupingAdapter);
 
   assert.deepEqual(groups.map((group) => group.label), ["1  URGENT(<1hr)", "5  Later (low priority)", "No priority"]);
-  assert.deepEqual(groups[0]?.groups.map((group) => group.label), ["08/29/2026"]);
+  assert.deepEqual(groups[0]?.groups.map((group) => group.label), ["Due date: 08/29/2026"]);
   assert.deepEqual(groups[2]?.groups.map((group) => group.label), ["No due date"]);
   assert.equal(groups.flatMap((group) => group.groups).some((group) => /today|tomorrow|overdue/i.test(group.label)), false);
   assert.deepEqual(DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => grouping.field), ["priority", "due_date"]);
@@ -57,22 +64,37 @@ test("universal My Work grouping allows an empty stack without restoring a hidde
   assert.deepEqual(normalizeMyWorkActionItemGroupings([]), []);
 });
 
-test("a Process role change clears the old role page while its replacement is loading", () => {
+test("a Process role change clears the old role rows while its replacement is loading", () => {
   const next = beginMyWorkSectionRequest({
     items: [{ logic_gate_id: "old", name: "Old Responsible Process" }],
     nextCursor: "old-next",
     hasMore: true,
     loading: false,
     error: "old error",
-    currentCursor: "old-page",
-    previousCursors: ["", "older"],
   }, true);
 
   assert.deepEqual(next.items, []);
   assert.equal(next.nextCursor, undefined);
   assert.equal(next.hasMore, false);
-  assert.equal(next.currentCursor, undefined);
-  assert.deepEqual(next.previousCursors, []);
   assert.equal(next.loading, true);
   assert.equal(next.error, "");
+});
+
+test("My Work splitters resize only adjacent panes and keep every pane reachable", () => {
+  const start: [number, number, number] = [0.4, 0.3, 0.3];
+  const first = resizedColumnWeights(start, 0, 80, 1000);
+  assert.ok(first[0] > start[0]);
+  assert.ok(first[1] < start[1]);
+  assert.equal(Math.round(first[2] * 1000), Math.round(start[2] * 1000));
+
+  const second = resizedColumnWeights(start, 1, -80, 1000);
+  assert.equal(Math.round(second[0] * 1000), Math.round(start[0] * 1000));
+  assert.ok(second[1] < start[1]);
+  assert.ok(second[2] > start[2]);
+
+  assert.equal(resizedSplitRatio(0.5, -10000, 800), 0.175);
+  assert.equal(resizedSplitRatio(0.5, 10000, 800), 0.825);
+  assert.deepEqual(splitResizeA11y(0.5, 790), { minimum: 18, maximum: 82, current: 50 });
+  assert.deepEqual(columnResizeA11y(start, 1, 1000), { minimum: 40, maximum: 60, current: 50 });
+  assert.equal(scrollRemaining({ scrollHeight: 900, scrollTop: 600, clientHeight: 250 }), 50);
 });

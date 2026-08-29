@@ -20,8 +20,6 @@ export type MyWorkSectionState<Item> = {
   hasMore: boolean;
   loading: boolean;
   error: string;
-  currentCursor?: string;
-  previousCursors: string[];
 };
 
 export type MyWorkDataState = {
@@ -36,10 +34,10 @@ type AnySectionState = MyWorkSectionState<MyWorkItem>;
 
 type SectionRequest = {
   cursor?: string;
-  previousCursors?: string[];
   role?: MyWorkProcessRole;
   grouping?: ReadonlyArray<MyWorkGroupingSetting>;
-  clearPage?: boolean;
+  clearItems?: boolean;
+  append?: boolean;
 };
 
 const EMPTY_SECTION_STATE = {
@@ -47,7 +45,6 @@ const EMPTY_SECTION_STATE = {
   hasMore: false,
   loading: false,
   error: "",
-  previousCursors: [],
 };
 
 function createInitialState(): MyWorkDataState {
@@ -76,6 +73,7 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
     processes: 0,
     projects: 0,
   });
+  const consumedCursorsRef = useRef<Record<MyWorkSection, Set<string>>>(createCursorSets());
 
   useEffect(() => {
     stateRef.current = state;
@@ -89,6 +87,7 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
     section: MyWorkSection,
     request: SectionRequest = {},
   ): Promise<void> => {
+    if (!request.append) consumedCursorsRef.current[section] = new Set<string>();
     sectionControllersRef.current[section]?.abort();
     const controller = new AbortController();
     sectionControllersRef.current[section] = controller;
@@ -96,7 +95,7 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
     setState((current) => replaceSection(
       current,
       section,
-      beginMyWorkSectionRequest(current[section] as AnySectionState, request.clearPage),
+      beginMyWorkSectionRequest(current[section] as AnySectionState, request.clearItems),
     ));
     try {
       const response = await fetchMyWork(requestJSON, {
@@ -111,10 +110,18 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
       if (controller.signal.aborted || requestVersionsRef.current[section] !== version) return;
       const page = response[section] as MyWorkPage<MyWorkItem> | undefined;
       if (!page) throw new Error(`My Work response omitted ${section}.`);
+      const nextCursor = page.next_cursor?.trim() ?? "";
+      const consumedCursors = consumedCursorsRef.current[section];
+      if (page.has_more && (!nextCursor || (request.append && (
+        nextCursor === request.cursor?.trim() || consumedCursors.has(nextCursor)
+      )))) {
+        throw new Error(`My Work ${section.replace("_", " ")} pagination did not advance.`);
+      }
+      if (request.append && request.cursor?.trim()) consumedCursors.add(request.cursor.trim());
       setState((current) => replaceSection(current, section, stateFromPage(
+        section,
         page,
-        request.cursor,
-        request.previousCursors ?? [],
+        request.append ? (current[section] as AnySectionState).items : [],
       )));
     } catch (cause) {
       if (controller.signal.aborted || isAbortError(cause) || requestVersionsRef.current[section] !== version) return;
@@ -123,6 +130,8 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
         loading: false,
         error: errorMessage(cause),
       }));
+    } finally {
+      if (sectionControllersRef.current[section] === controller) delete sectionControllersRef.current[section];
     }
   }, [companyID, requestJSON]);
 
@@ -130,6 +139,7 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
     initialControllerRef.current?.abort();
     Object.values(sectionControllersRef.current).forEach((controller) => controller?.abort());
     sectionControllersRef.current = {};
+    consumedCursorsRef.current = createCursorSets();
     const controller = new AbortController();
     initialControllerRef.current = controller;
     const versions = {
@@ -170,78 +180,98 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
   const reloadSection = useCallback((
     section: MyWorkSection,
     grouping?: ReadonlyArray<MyWorkGroupingSetting>,
-    clearPage = false,
-  ): Promise<void> => requestSection(section, { grouping, clearPage }), [requestSection]);
+    clearItems = false,
+  ): Promise<void> => requestSection(section, { grouping, clearItems }), [requestSection]);
 
-  const nextPage = useCallback((
+  const loadMore = useCallback((
     section: MyWorkSection,
     grouping?: ReadonlyArray<MyWorkGroupingSetting>,
   ): Promise<void> => {
     const current = stateRef.current[section];
-    if (current.loading || !current.hasMore || !current.nextCursor) return Promise.resolve();
+    const activeController = sectionControllersRef.current[section];
+    if (
+      current.loading
+      || (activeController && !activeController.signal.aborted)
+      || !current.hasMore
+      || !current.nextCursor
+      || consumedCursorsRef.current[section].has(current.nextCursor)
+    ) return Promise.resolve();
     return requestSection(section, {
       cursor: current.nextCursor,
-      previousCursors: [...current.previousCursors, current.currentCursor ?? ""],
       grouping,
+      append: true,
     });
-  }, [requestSection]);
-
-  const previousPage = useCallback((
-    section: MyWorkSection,
-    grouping?: ReadonlyArray<MyWorkGroupingSetting>,
-  ): Promise<void> => {
-    const current = stateRef.current[section];
-    if (current.loading || current.previousCursors.length === 0) return Promise.resolve();
-    const previousCursors = current.previousCursors.slice(0, -1);
-    const cursor = current.previousCursors[current.previousCursors.length - 1] || undefined;
-    return requestSection(section, { cursor, previousCursors, grouping });
   }, [requestSection]);
 
   const selectProcessRole = useCallback((role: MyWorkProcessRole): Promise<void> => {
     if (roleRef.current === role) return Promise.resolve();
     roleRef.current = role;
     setProcessRole(role);
-    return requestSection("processes", { role, clearPage: true });
+    return requestSection("processes", { role, clearItems: true });
   }, [requestSection]);
 
   return {
     state,
     processRole,
     reloadSection,
-    nextPage,
-    previousPage,
+    loadMore,
     selectProcessRole,
   };
 }
 
+function createCursorSets(): Record<MyWorkSection, Set<string>> {
+  return {
+    action_items: new Set<string>(),
+    nodes: new Set<string>(),
+    processes: new Set<string>(),
+    projects: new Set<string>(),
+  };
+}
+
 function stateFromPage<Item>(
+  section: MyWorkSection,
   page: MyWorkPage<Item>,
-  currentCursor: string | undefined,
-  previousCursors: string[],
+  previousItems: Item[],
 ): MyWorkSectionState<Item> {
   return {
-    items: page.items,
+    items: appendUniqueMyWorkItems(section, previousItems, page.items),
     nextCursor: page.next_cursor?.trim() || undefined,
     hasMore: page.has_more,
     loading: false,
     error: "",
-    currentCursor,
-    previousCursors,
   };
+}
+
+function appendUniqueMyWorkItems<Item>(section: MyWorkSection, previousItems: Item[], pageItems: Item[]): Item[] {
+  if (previousItems.length === 0) return [...pageItems];
+  const seen = new Set(previousItems.map((item) => myWorkItemKey(section, item)));
+  return [...previousItems, ...pageItems.filter((item) => {
+    const key = myWorkItemKey(section, item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  })];
+}
+
+function myWorkItemKey(section: MyWorkSection, item: unknown): string {
+  if (!item || typeof item !== "object") return "";
+  const row = item as Record<string, unknown>;
+  if (section === "action_items") return String(row.entity_id ?? "");
+  if (section === "nodes") return String(row.node_id ?? "");
+  if (section === "processes") return String(row.logic_gate_id ?? "");
+  return String(row.project_id ?? "");
 }
 
 export function beginMyWorkSectionRequest<Item>(
   current: MyWorkSectionState<Item>,
-  clearPage = false,
+  clearItems = false,
 ): MyWorkSectionState<Item> {
   return {
     ...current,
-    ...(clearPage ? {
+    ...(clearItems ? {
       items: [],
       nextCursor: undefined,
       hasMore: false,
-      currentCursor: undefined,
-      previousCursors: [],
     } : {}),
     loading: true,
     error: "",
@@ -268,22 +298,22 @@ function applyInitialResponse(
   let next = state;
   if (currentVersions.action_items === versions.action_items) {
     next = replaceSection(next, "action_items", response.action_items
-      ? stateFromPage(response.action_items, undefined, [])
+      ? stateFromPage("action_items", response.action_items, [])
       : { ...next.action_items, loading: false, error: "My Work response omitted action_items." });
   }
   if (currentVersions.nodes === versions.nodes) {
     next = replaceSection(next, "nodes", response.nodes
-      ? stateFromPage(response.nodes, undefined, [])
+      ? stateFromPage("nodes", response.nodes, [])
       : { ...next.nodes, loading: false, error: "My Work response omitted nodes." });
   }
   if (currentVersions.processes === versions.processes) {
     next = replaceSection(next, "processes", response.processes
-      ? stateFromPage(response.processes, undefined, [])
+      ? stateFromPage("processes", response.processes, [])
       : { ...next.processes, loading: false, error: "My Work response omitted processes." });
   }
   if (currentVersions.projects === versions.projects) {
     next = replaceSection(next, "projects", response.projects
-      ? stateFromPage(response.projects, undefined, [])
+      ? stateFromPage("projects", response.projects, [])
       : { ...next.projects, loading: false, error: "My Work response omitted projects." });
   }
   return next;

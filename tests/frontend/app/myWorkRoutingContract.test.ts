@@ -12,13 +12,15 @@ test("My Work is the first Tower row and Projects is immediately second", () => 
   const projects = tower.indexOf('label="Projects"');
   const raciTabs = tower.indexOf("<AppSidebarRACITabsSection");
   const processMap = tower.indexOf('label="Process Map"');
-  const builtInRows = Array.from(tower.matchAll(/<HomeBuiltInViewSidebarRow\s+label="([^"]+)"/g))
-    .map((match) => match[1]);
   assert.ok(myWork >= 0);
   assert.ok(projects > myWork);
   assert.ok(raciTabs > projects);
   assert.ok(processMap > raciTabs);
-  assert.deepEqual(builtInRows.slice(0, 2), ["My Work", "Projects"]);
+  assert.match(tower, /<AppSidebarButton\s+label="My Work"[\s\S]*?icon=\{<HeaderMyWorkIcon color="#2563eb" \/>\}[\s\S]*?elevated[\s\S]*?onClick=\{\(\) => onPageSelect\("my-work"\)\}/);
+  assert.match(tower, /<AppSidebarElevatedActionButton\s+label="Projects"[\s\S]*?icon=\{<HeaderProjectManagementIcon color="#3b82f6" \/>\}[\s\S]*?actionLabel="Edit Projects view"[\s\S]*?onAction=\{requestProjectViewSettings\}/);
+  assert.doesNotMatch(tower, /HomeBuiltInViewSidebarRow/);
+  assert.match(source, /function AppSidebarButton[\s\S]*?aria-current=\{active \? "page" : undefined\}/);
+  assert.match(source, /function AppSidebarElevatedActionButton[\s\S]*?<button[\s\S]*?onClick=\{onSelect\}[\s\S]*?<\/button>[\s\S]*?<button[\s\S]*?aria-label=\{actionLabel\}/);
 });
 
 test("My Work is a lazy authenticated static page with persisted page identity", () => {

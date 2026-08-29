@@ -1220,6 +1220,63 @@ button, input, textarea, select {
     animation: none;
   }
 }
+
+.my-work-resource-row {
+  position: relative;
+  transform: translateY(0);
+  transition: transform 160ms ease, filter 160ms ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 42px;
+}
+
+.my-work-resource-row:hover,
+.my-work-resource-row:focus-visible,
+.my-work-resource-row:focus-within {
+  z-index: 2;
+  transform: translateY(-2px);
+  filter: drop-shadow(0 5px 7px rgba(100, 116, 139, 0.16));
+}
+
+.my-work-inline-context {
+  transform: translateY(0);
+  transition: transform 150ms ease, filter 150ms ease;
+}
+
+.my-work-inline-context:hover,
+.my-work-inline-context:focus-visible {
+  transform: translateY(-2px) scale(1.01);
+  filter: drop-shadow(0 4px 5px rgba(100, 116, 139, 0.14));
+}
+
+.my-work-resizer:hover .my-work-resizer__grip,
+.my-work-resizer:focus-visible .my-work-resizer__grip {
+  background: linear-gradient(145deg, rgba(56, 189, 248, 0.70), rgba(99, 102, 241, 0.76));
+  box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.12), 1px 1px 4px rgba(79, 70, 229, 0.24), -1px -1px 3px rgba(255,255,255,0.94);
+  transform: scale(1.08);
+}
+
+.my-work-resizer:focus-visible {
+  border-radius: 6px;
+  outline: 2px solid rgba(37, 99, 235, 0.72);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .my-work-resource-row,
+  .my-work-inline-context,
+  .my-work-resizer__grip {
+    transition: none;
+  }
+
+  .my-work-resource-row:hover,
+  .my-work-resource-row:focus-visible,
+  .my-work-resource-row:focus-within,
+  .my-work-inline-context:hover,
+  .my-work-inline-context:focus-visible {
+    transform: none;
+  }
+}
+
 @media (max-width: 1100px) {
   .mango-project-management-header {
     grid-template-columns: minmax(0, 1fr) auto !important;

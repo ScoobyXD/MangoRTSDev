@@ -68,7 +68,7 @@ export function actionItemGroupingValues(
   field: MyWorkActionItemGroupingField,
 ): UniversalGroupValue[] {
   if (field === "completion_due_date") {
-    return exactDateGroupingValue(item.completion_due_date, "No completion due date");
+    return exactDateGroupingValue(item.completion_due_date, "Completion due date", "No completion due date");
   }
   const color = item.color?.trim().toLowerCase() ?? "";
   if (!color) return [{ key: "none", label: "No color", sortValue: 99, sortLast: true }];
@@ -78,7 +78,7 @@ export function actionItemGroupingValues(
 }
 
 export function nodeGroupingValues(item: MyWorkNode, field: MyWorkNodeGroupingField): UniversalGroupValue[] {
-  if (field === "due_date") return exactDateGroupingValue(item.due_date, "No due date");
+  if (field === "due_date") return exactDateGroupingValue(item.due_date, "Due date", "No due date");
   const priority = item.priority;
   if (!Number.isInteger(priority) || priority === undefined || priority === null || priority <= 0) {
     return [{ key: "none", label: "No priority", sortValue: 99, sortLast: true }];
@@ -104,11 +104,11 @@ export function sortProjects<T extends { name: string; project_id: string }>(ite
   return [...items];
 }
 
-function exactDateGroupingValue(value: string | null | undefined, emptyLabel: string): UniversalGroupValue[] {
+function exactDateGroupingValue(value: string | null | undefined, fieldLabel: string, emptyLabel: string): UniversalGroupValue[] {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value?.trim() ?? "");
   if (!match) return [{ key: "none", label: emptyLabel, sortValue: "", sortLast: true }];
   const exactDate = `${match[1]}-${match[2]}-${match[3]}`;
-  return [{ key: exactDate, label: `${match[2]}/${match[3]}/${match[1]}`, sortValue: exactDate }];
+  return [{ key: exactDate, label: `${fieldLabel}: ${match[2]}/${match[3]}/${match[1]}`, sortValue: exactDate }];
 }
 
 function normalizeGroupingStack<Field extends string>(
