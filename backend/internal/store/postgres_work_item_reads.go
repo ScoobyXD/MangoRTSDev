@@ -37,7 +37,7 @@ func (r *PostgresRepo) listRACIMatrixProjectedNodes(ctx context.Context, query W
 select
   node.company_id::text,
   node.node_id::text,
-  node.title,
+  node.name,
   node.status,
   node.due_date::text,
   node.priority,

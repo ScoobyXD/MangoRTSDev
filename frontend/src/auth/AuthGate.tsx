@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../app/ConfirmActionMenu";
-import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
+import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadHomeSurface, preloadLikelyDashboardModules, preloadLogicGateArenaSurface, preloadMyWorkSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "../app/preloadDashboardModules";
 import { HeaderRecycleBinIcon, HeaderSettingsIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { getActiveCompanyID, getStoredActiveCompanyID, setActiveCompanyID } from "./currentCompany";
@@ -62,6 +62,10 @@ function preloadRouteSurface(path: string): void {
     preloadHomeSurface();
     return;
   }
+  if (path === "/my-work") {
+    preloadMyWorkSurface();
+    return;
+  }
   if (path === "/project-management") {
     preloadProjectManagementSurface();
     return;
@@ -105,6 +109,7 @@ const AUTH_RETURN_STATIC_PATHS = new Set([
   "/communication",
   "/communications",
   "/logic-gate-arena",
+  "/my-work",
   "/project-management",
   "/account-manager",
   "/teams",
@@ -432,7 +437,9 @@ export default function AuthGate() {
       ? "logic-gate-arena"
       : deepLinkRoute?.kind === "gvic"
         ? "home"
-        : deepLinkRoute?.kind === "project" || normalizedPath === "/project-management"
+        : normalizedPath === "/my-work"
+          ? "my-work"
+          : deepLinkRoute?.kind === "project" || normalizedPath === "/project-management"
           ? "project-management"
           : normalizedPath === "/account-manager"
             ? "account-manager"
@@ -481,6 +488,10 @@ export default function AuthGate() {
 
   if (normalizedPath === "/logic-gate-arena") {
     return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="logic-gate-arena" /></React.Suspense>;
+  }
+
+  if (normalizedPath === "/my-work") {
+    return <React.Suspense fallback={routeFallback}><LazyAppLayout accountChrome={<AccountBar me={me} onNavigate={navigate} />} me={me} onNavigate={navigate} initialPage="my-work" /></React.Suspense>;
   }
 
   if (normalizedPath === "/project-management") {

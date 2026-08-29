@@ -44,7 +44,7 @@ export const UI_THEME = {
 export interface ViewTab {
   id: string;
   name: string;
-  page?: "logic-gate-arena" | "project-management" | "process-map" | "entities" | "account-manager" | "teams" | "home" | "communications";
+  page?: "logic-gate-arena" | "my-work" | "project-management" | "process-map" | "entities" | "account-manager" | "teams" | "home" | "communications";
   frames: FrameDataModel[];
 }
 

@@ -45,3 +45,10 @@ test("planLikelyDashboardPreload loads Process Map as a route surface without da
     routeSurfaces: ["process-map"],
   });
 });
+
+test("planLikelyDashboardPreload loads My Work as its own lazy route surface", () => {
+  assert.deepEqual(planLikelyDashboardPreload({ page: "my-work", frames: [{ kind: "editor" }] }), {
+    moduleKinds: [],
+    routeSurfaces: ["my-work"],
+  });
+});

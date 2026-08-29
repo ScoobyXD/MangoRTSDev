@@ -344,6 +344,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/entities", s.handleEntities)
 	mux.HandleFunc("/v1/entities/", s.handleEntityByID)
 	mux.HandleFunc("/v1/action-items", s.handleActionItems)
+	mux.HandleFunc("/v1/my-work", s.handleMyWork)
 	mux.HandleFunc("/v1/attachments", s.handleAttachments)
 	mux.HandleFunc("/v1/attachments/", s.handleAttachmentByID)
 	mux.HandleFunc("/v1/resources/", s.handleResourceSubresource)
