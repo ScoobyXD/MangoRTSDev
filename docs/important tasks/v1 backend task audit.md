@@ -4,7 +4,7 @@ Date: August 18, 2026
 
 Status: Source-code, history, documentation, and recorded cloud-evidence audit complete. Live DEV and PROD data preflights remain pending. This document records current behavior, risks, and recommended future work. It does not authorize or implement backend, database, infrastructure, development, or production changes.
 
-Implementation update, August 28, 2026: the separately approved implementation removed the obsolete workspace-derived projector from runtime code and removed its checkpoint table from the canonical schema. Physical DEV/PROD retirement remains a human operation: deploy the shortcut-free application, stop older instances, run `scripts/retire_unused_operational_tables_preflight.sql` read-only, confirm a restorable snapshot, then run the guarded `scripts/retire_unused_operational_tables.sql`. The historical audit and future-tense sections below describe the August 18 source state, not current runtime authority.
+Implementation update, August 28, 2026: the separately approved implementation removed the obsolete workspace-derived projector from runtime code and removed its checkpoint table from the canonical schema. `20260828_zz_retire_unused_operational_tables.sql` now retires that checkpoint, manual Logic Gate shortcuts, and the two historical Process Map recovery tables through the normal runner-managed migration transaction. The historical audit and future-tense sections below describe the August 18 source state, not current runtime authority.
 
 ## Contents
 
