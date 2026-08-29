@@ -84,7 +84,8 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("qa_dev_copy_sanitize.sql", self.copy_entrypoint)
         self.assertIn("qa_dev_copy_verify.sql", self.copy_entrypoint)
         self.assertNotRegex(self.copy_launcher, r"(?m)^\s*taskrolearn\s*=")
-        self.assertIn("registered.taskdefinition.taskrolearn", self.copy_launcher)
+        self.assertIn('properties.name -contains "taskrolearn"', self.copy_launcher)
+        self.assertIn("$registeredtaskrolearn", self.copy_launcher)
         self.assertIn('assignpublicip = "disabled"', self.copy_launcher)
         self.assertIn("${devreadonlysecretarn}:password::", self.copy_launcher)
         self.assertIn("${qasecretarn}:password::", self.copy_launcher)
@@ -118,14 +119,40 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("dev database exceeds the reviewed 4-gib copy ceiling", self.copy_entrypoint)
         self.assertIn("deregister-task-definition", self.copy_launcher)
         self.assertIn("recovery-window-in-days", self.copy_launcher)
-        self.assertIn('$previouserroractionpreference = $erroractionpreference', self.copy_launcher)
-        self.assertIn('$erroractionpreference = "continue"', self.copy_launcher)
-        self.assertIn('$erroractionpreference = $previouserroractionpreference', self.copy_launcher)
-        self.assertIn("$psnativecommanduseerroractionpreference = $false", self.copy_launcher)
+        self.assertIn('"cognito-idp", "list-users"', self.copy_launcher)
+        self.assertIn('"--filter", "email = `\"$jonatqaemail`\""', self.copy_launcher)
+        self.assertNotIn('"cognito-idp", "admin-get-user"', self.copy_launcher)
         self.assertIn("-allowedtaskarn $taskarn", self.copy_launcher)
         self.assertGreaterEqual(self.copy_launcher.count("assert-qastorageheadroom"), 4)
         self.assertIn('"filter-log-events"', self.copy_launcher)
         self.assertIn("addminutes(5)", self.copy_launcher)
+
+    def test_launcher_normalizes_optional_aws_fields_under_strict_mode(self) -> None:
+        for guarded_property in (
+            'properties.name -contains "taskrolearn"',
+            'properties.name -contains "failures"',
+            'properties.name -contains "tasks"',
+            'properties.name -contains "containers"',
+            'properties.name -contains "exitcode"',
+            'properties.name -contains "stoppedreason"',
+            'properties.name -contains "reason"',
+        ):
+            self.assertIn(guarded_property, self.copy_launcher)
+        for normalized_array in (
+            "$listedusers = @(if",
+            "$runfailures = @(if",
+            "$runtasks = @(if",
+            "$descriptionfailures = @(if",
+            "$descriptiontasks = @(if",
+            "$taskcontainers = @(if",
+            "$permissions = @(if",
+            "$sourcegroups = @(if",
+        ):
+            self.assertIn(normalized_array, self.copy_launcher)
+        self.assertIn("$containerexitcode", self.copy_launcher)
+        self.assertIn('$null -ne $container.exitcode', self.copy_launcher)
+        self.assertIn("temporary dev-secret permission did not become visible", self.copy_launcher)
+        self.assertIn("ecs did not confirm the exact qa copy task stopped", self.copy_launcher)
 
     def test_preflight_and_sanitizer_are_raw_database_only(self) -> None:
         raw_guard = "^mangorts_qa_raw_[0-9]{8}(_[a-z0-9]+)*$"

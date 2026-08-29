@@ -143,39 +143,36 @@ function Assert-QaStorageHeadroom {
 function Get-OrCreateJonatQaCognitoSubject {
   param([Parameter(Mandatory = $true)][string]$UserPoolID)
 
-  $arguments = @(
-    "cognito-idp", "admin-get-user", "--user-pool-id", $UserPoolID,
-    "--username", $jonatQaEmail
+  $listed = Invoke-AwsJson -Arguments @(
+    "cognito-idp", "list-users", "--user-pool-id", $UserPoolID,
+    "--filter", "email = `"$jonatQaEmail`"", "--limit", "2"
   )
-  $previousErrorActionPreference = $ErrorActionPreference
-  $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  $PSNativeCommandUseErrorActionPreference = $false
-  try {
-    $raw = @(& aws @arguments --profile $AwsProfile --region $AwsRegion --output json 2>&1)
-    $exitCode = $LASTEXITCODE
+  $listedUsers = @(if ($listed.PSObject.Properties.Name -contains "Users") { $listed.Users })
+  $exactUsers = @($listedUsers | Where-Object {
+    $attributes = @(if ($_.PSObject.Properties.Name -contains "Attributes") { $_.Attributes })
+    $emails = @($attributes | Where-Object { [string]$_.Name -ceq "email" } | ForEach-Object { [string]$_.Value })
+    $emails.Count -eq 1 -and [string]::Equals($emails[0], $jonatQaEmail, [StringComparison]::OrdinalIgnoreCase)
+  })
+  if ($exactUsers.Count -gt 1) {
+    throw "More than one QA Cognito user has Jonat's exact email."
   }
-  finally {
-    $ErrorActionPreference = $previousErrorActionPreference
-    $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
-  }
-  if ($exitCode -ne 0) {
-    $message = ($raw -join "`n")
-    if ($message -notmatch "UserNotFoundException") {
-      throw "Failed to inspect Jonat's exact QA Cognito identity."
-    }
-    Invoke-AwsNoOutput -Arguments @(
+  if ($exactUsers.Count -eq 0) {
+    $created = Invoke-AwsJson -Arguments @(
       "cognito-idp", "admin-create-user", "--user-pool-id", $UserPoolID,
       "--username", $jonatQaEmail,
       "--user-attributes", "Name=email,Value=$jonatQaEmail", "Name=email_verified,Value=true"
     )
-    $user = Invoke-AwsJson -Arguments $arguments
+    if ($null -eq $created -or $created.PSObject.Properties.Name -notcontains "User") {
+      throw "Cognito did not return Jonat's created QA user."
+    }
+    $user = $created.User
   }
   else {
-    $user = (($raw -join "`n") | ConvertFrom-Json)
+    $user = $exactUsers[0]
   }
 
-  $subjects = @($user.UserAttributes | Where-Object { [string]$_.Name -ceq "sub" } | ForEach-Object { [string]$_.Value })
+  $userAttributes = @(if ($user.PSObject.Properties.Name -contains "Attributes") { $user.Attributes })
+  $subjects = @($userAttributes | Where-Object { [string]$_.Name -ceq "sub" } | ForEach-Object { [string]$_.Value })
   if ($subjects.Count -ne 1 -or $subjects[0] -notmatch '^[0-9a-fA-F-]{36}$') {
     throw "Jonat's exact QA Cognito user did not contain one UUID subject."
   }
@@ -209,7 +206,11 @@ $originMain = (& git rev-parse origin/main).Trim()
 if ($LASTEXITCODE -ne 0 -or $originMain -cne $ExpectedGitCommit) {
   throw "origin/main does not match the approved exact commit. Fetch and review before continuing."
 }
-if ((& git status --porcelain) -join "`n") {
+$worktreeStatus = @(& git status --porcelain)
+if ($LASTEXITCODE -ne 0) {
+  throw "Could not inspect the main worktree status."
+}
+if ($worktreeStatus -join "`n") {
   throw "The main worktree must be clean before the QA copy."
 }
 
@@ -255,13 +256,16 @@ $devSecret = Invoke-AwsJson -Arguments @(
 )
 $deletedDate = if ($devSecret.PSObject.Properties.Name -contains "DeletedDate") { [string]$devSecret.DeletedDate } else { "" }
 $owningService = if ($devSecret.PSObject.Properties.Name -contains "OwningService") { [string]$devSecret.OwningService } else { "" }
+$devSecretKmsKeyID = if ($devSecret.PSObject.Properties.Name -contains "KmsKeyId") { [string]$devSecret.KmsKeyId } else { "" }
 if ([string]$devSecret.ARN -cne $DevReadOnlySecretArn -or [string]$devSecret.Name -notmatch '^mangorts/qa-copy/dev-readonly-temp-' -or
     -not [string]::IsNullOrWhiteSpace($deletedDate) -or
-    -not [string]::IsNullOrWhiteSpace($owningService)) {
+    -not [string]::IsNullOrWhiteSpace($owningService) -or
+    -not [string]::IsNullOrWhiteSpace($devSecretKmsKeyID)) {
   throw "Temporary Dev read-only secret metadata failed its exact guard."
 }
 $secretTags = @{}
-foreach ($tag in @($devSecret.Tags)) { $secretTags[[string]$tag.Key] = [string]$tag.Value }
+$devSecretTags = @(if ($devSecret.PSObject.Properties.Name -contains "Tags") { $devSecret.Tags })
+foreach ($tag in $devSecretTags) { $secretTags[[string]$tag.Key] = [string]$tag.Value }
 if ($secretTags["Environment"] -cne "qa" -or $secretTags["Purpose"] -cne "dev-readonly-source" -or
     $secretTags["Temporary"] -cne "true") {
   throw "Temporary Dev read-only secret requires Environment=qa, Purpose=dev-readonly-source, Temporary=true tags."
@@ -280,6 +284,9 @@ $migrationResult = Invoke-AwsJson -Arguments @(
   "ecs", "describe-task-definition", "--task-definition", [string]$migrationDefinitionArns[0]
 )
 $migrationTask = $migrationResult.taskDefinition
+if ([string]$migrationTask.family -cne $qaMigrationFamily) {
+  throw "Newest QA migration task definition did not belong to the exact reviewed family."
+}
 $migrationContainers = @($migrationTask.containerDefinitions | Where-Object { [string]$_.name -ceq "database-migration" })
 if ($migrationContainers.Count -ne 1) { throw "QA migration container is missing." }
 $migrationContainer = $migrationContainers[0]
@@ -317,13 +324,24 @@ $devEcsSecurityGroups = @($devEcsGroups.SecurityGroups)
 if ($devEcsSecurityGroups.Count -ne 1) { throw "Exact Dev ECS source security group was not found." }
 $devEcsSecurityGroup = [string]$devEcsSecurityGroups[0].GroupId
 $devDatabaseSecurityGroupIDs = @($devCluster.VpcSecurityGroups | ForEach-Object { [string]$_.VpcSecurityGroupId })
-$devDatabaseGroups = Invoke-AwsJson -Arguments @(
-  "ec2", "describe-security-groups", "--group-ids", $devDatabaseSecurityGroupIDs[0]
-)
+if ($devDatabaseSecurityGroupIDs.Count -lt 1) { throw "Dev RDS did not report an attached security group." }
+$devDatabaseGroups = Invoke-AwsJson -Arguments (@(
+  "ec2", "describe-security-groups", "--group-ids"
+) + $devDatabaseSecurityGroupIDs)
+$resolvedDevDatabaseGroups = @($devDatabaseGroups.SecurityGroups)
+if ($resolvedDevDatabaseGroups.Count -ne $devDatabaseSecurityGroupIDs.Count) {
+  throw "Could not resolve every Dev RDS security group."
+}
 $devIngressMatches = @(
-  $devDatabaseGroups.SecurityGroups[0].IpPermissions | Where-Object {
-    [string]$_.IpProtocol -ceq "tcp" -and [int]$_.FromPort -eq 5432 -and [int]$_.ToPort -eq 5432
-  } | ForEach-Object { @($_.UserIdGroupPairs) } | Where-Object { [string]$_.GroupId -ceq $devEcsSecurityGroup }
+  foreach ($databaseGroup in $resolvedDevDatabaseGroups) {
+    $permissions = @(if ($databaseGroup.PSObject.Properties.Name -contains "IpPermissions") { $databaseGroup.IpPermissions })
+    foreach ($permission in $permissions) {
+      if ([string]$permission.IpProtocol -ceq "tcp" -and [int]$permission.FromPort -eq 5432 -and [int]$permission.ToPort -eq 5432) {
+        $sourceGroups = @(if ($permission.PSObject.Properties.Name -contains "UserIdGroupPairs") { $permission.UserIdGroupPairs })
+        $sourceGroups | Where-Object { [string]$_.GroupId -ceq $devEcsSecurityGroup }
+      }
+    }
+  }
 )
 if ($devIngressMatches.Count -lt 1) {
   throw "Dev RDS does not allow PostgreSQL from the existing Dev ECS security group."
@@ -448,6 +466,21 @@ try {
     "--policy-name", $temporaryExecutionPolicyName, "--policy-document", "file://$policyPath"
   )
   $policyAttached = $true
+  $policyVisible = $false
+  for ($attempt = 0; $attempt -lt 6; $attempt++) {
+    $visiblePolicies = Invoke-AwsJson -Arguments @(
+      "iam", "list-role-policies", "--role-name", $executionRoleName
+    )
+    $visiblePolicyNames = @(if ($visiblePolicies.PSObject.Properties.Name -contains "PolicyNames") { $visiblePolicies.PolicyNames })
+    if (@($visiblePolicyNames | Where-Object { [string]$_ -ceq $temporaryExecutionPolicyName }).Count -eq 1) {
+      $policyVisible = $true
+      break
+    }
+    Start-Sleep -Seconds 5
+  }
+  if (-not $policyVisible) {
+    throw "Temporary Dev-secret permission did not become visible before task registration."
+  }
 
   $environment = @(
     @{ name = "EXPECTED_GIT_COMMIT"; value = $ExpectedGitCommit },
@@ -515,9 +548,14 @@ try {
   $registered = Invoke-AwsJson -Arguments @(
     "ecs", "register-task-definition", "--cli-input-json", "file://$taskDefinitionPath"
   )
-  $registeredTaskDefinitionArn = [string]$registered.taskDefinition.taskDefinitionArn
+  if ($null -eq $registered -or $registered.PSObject.Properties.Name -notcontains "taskDefinition") {
+    throw "ECS did not return the registered QA copy task definition."
+  }
+  $registeredTask = $registered.taskDefinition
+  $registeredTaskDefinitionArn = [string]$registeredTask.taskDefinitionArn
+  $registeredTaskRoleArn = if ($registeredTask.PSObject.Properties.Name -contains "taskRoleArn") { [string]$registeredTask.taskRoleArn } else { "" }
   if ($registeredTaskDefinitionArn -notmatch '^arn:aws:ecs:us-west-1:686458136219:task-definition/mangorts-qa-database-copy-temp:[0-9]+$' -or
-      -not [string]::IsNullOrWhiteSpace([string]$registered.taskDefinition.taskRoleArn)) {
+      -not [string]::IsNullOrWhiteSpace($registeredTaskRoleArn)) {
     throw "Registered QA copy task identity or no-task-role guard failed."
   }
 
@@ -542,24 +580,34 @@ try {
     "--enable-ecs-managed-tags",
     "--tags", "key=project,value=mangorts", "key=environment,value=qa", "key=purpose,value=one-time-dev-copy"
   )
-  if (@($run.failures).Count -ne 0 -or @($run.tasks).Count -ne 1) {
+  $runFailures = @(if ($run.PSObject.Properties.Name -contains "failures") { $run.failures })
+  $runTasks = @(if ($run.PSObject.Properties.Name -contains "tasks") { $run.tasks })
+  if ($runFailures.Count -ne 0 -or $runTasks.Count -ne 1) {
     throw "ECS did not start exactly one QA copy task."
   }
-  $taskArn = [string]@($run.tasks)[0].taskArn
+  $runTask = $runTasks[0]
+  $taskArn = if ($runTask.PSObject.Properties.Name -contains "taskArn") { [string]$runTask.taskArn } else { "" }
+  if ($taskArn -notmatch '^arn:aws:ecs:us-west-1:686458136219:task/mangorts-qa-cluster/[0-9a-f]+$') {
+    throw "ECS returned an unexpected QA copy task identity."
+  }
   Write-Host "Started guarded QA copy task: $taskArn"
 
   $deadline = (Get-Date).AddHours(3)
   $taskRecord = $null
+  $lastStatus = ""
   while ((Get-Date) -lt $deadline) {
     Assert-QaWritersStopped -AllowedTaskArn $taskArn
     $description = Invoke-AwsJson -Arguments @(
       "ecs", "describe-tasks", "--cluster", $qaClusterName, "--tasks", $taskArn
     )
-    if (@($description.failures).Count -ne 0 -or @($description.tasks).Count -ne 1) {
+    $descriptionFailures = @(if ($description.PSObject.Properties.Name -contains "failures") { $description.failures })
+    $descriptionTasks = @(if ($description.PSObject.Properties.Name -contains "tasks") { $description.tasks })
+    if ($descriptionFailures.Count -ne 0 -or $descriptionTasks.Count -ne 1) {
       throw "Could not read the exact QA copy task."
     }
-    $taskRecord = @($description.tasks)[0]
-    $lastStatus = [string]$taskRecord.lastStatus
+    $taskRecord = $descriptionTasks[0]
+    $lastStatus = if ($taskRecord.PSObject.Properties.Name -contains "lastStatus") { [string]$taskRecord.lastStatus } else { "" }
+    if ([string]::IsNullOrWhiteSpace($lastStatus)) { throw "Exact QA copy task did not report a status." }
     if ($lastStatus -ceq "RUNNING" -and $policyAttached) {
       Invoke-AwsNoOutput -Arguments @(
         "iam", "delete-role-policy", "--role-name", $executionRoleName,
@@ -571,14 +619,27 @@ try {
     if ($lastStatus -ceq "STOPPED") { break }
     Start-Sleep -Seconds 10
   }
-  if ($null -eq $taskRecord -or [string]$taskRecord.lastStatus -cne "STOPPED") {
+  if ($null -eq $taskRecord -or $lastStatus -cne "STOPPED") {
     throw "Timed out waiting for the QA copy task to stop."
   }
   Assert-QaWritersStopped
 
-  $containers = @($taskRecord.containers | Where-Object { [string]$_.name -ceq $qaCopyContainerName })
-  if ($containers.Count -ne 1 -or $null -eq $containers[0].exitCode) {
-    throw "QA copy task stopped without an exact container exit code."
+  $taskContainers = @(if ($taskRecord.PSObject.Properties.Name -contains "containers") { $taskRecord.containers })
+  $containers = @($taskContainers | Where-Object { $_.PSObject.Properties.Name -contains "name" -and [string]$_.name -ceq $qaCopyContainerName })
+  if ($containers.Count -ne 1) {
+    throw "QA copy task stopped without exactly one reviewed container."
+  }
+  $container = $containers[0]
+  $containerExitCode = if ($container.PSObject.Properties.Name -contains "exitCode" -and $null -ne $container.exitCode) {
+    [int]$container.exitCode
+  }
+  else {
+    $null
+  }
+  if ($null -eq $containerExitCode) {
+    $taskStopReason = if ($taskRecord.PSObject.Properties.Name -contains "stoppedReason") { [string]$taskRecord.stoppedReason } else { "not reported" }
+    $containerReason = if ($container.PSObject.Properties.Name -contains "reason") { [string]$container.reason } else { "not reported" }
+    throw "QA copy task stopped before reporting an exit code. Task reason: $taskStopReason Container reason: $containerReason"
   }
 
   $taskID = ($taskArn -split '/')[-1]
@@ -599,14 +660,14 @@ try {
     }
     $successAttestations = @($messages | Where-Object { $_ -ceq "QA_COPY_STATUS=success" })
     if ($successAttestations.Count -eq 1) { break }
-    if ([int]$containers[0].exitCode -ne 0 -and (Get-Date) -ge $failureLogDeadline) { break }
+    if ([int]$containerExitCode -ne 0 -and (Get-Date) -ge $failureLogDeadline) { break }
     Start-Sleep -Seconds 5
   } while ((Get-Date) -lt $logDeadline)
 
   foreach ($message in $messages) { Write-Host $message }
 
-  if ([int]$containers[0].exitCode -ne 0) {
-    throw "QA copy task failed with exit code $($containers[0].exitCode). The API remains stopped; snapshot $snapshotID is retained."
+  if ([int]$containerExitCode -ne 0) {
+    throw "QA copy task failed with exit code $containerExitCode. The API remains stopped; snapshot $snapshotID is retained."
   }
   if ($successAttestations.Count -ne 1) {
     throw "QA copy task exited zero without one exact success attestation."
@@ -623,6 +684,7 @@ finally {
       )
       & aws ecs wait tasks-stopped --cluster $qaClusterName --tasks $taskArn `
         --profile $AwsProfile --region $AwsRegion | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "ECS did not confirm the exact QA copy task stopped." }
     }
     catch {
       Write-Warning "Could not confirm the exact QA copy task stopped: $taskArn"
