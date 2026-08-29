@@ -1099,7 +1099,7 @@ function ConnectGooglePage({ onNavigate, onLogout }: { onNavigate: (path: string
       .then((payload) => {
         if (cancelled) return;
         setStatus(payload);
-        if (payload.connected && payload.connection?.provider === "google" && payload.status === "connected") onNavigate("/home");
+        if (payload.connected && payload.connection?.provider === "google" && payload.status === "connected") onNavigate("/my-work");
       })
       .catch((statusError) => {
         if (!cancelled) setError(formatAuthError(statusError, "Could not load Google connection status"));
@@ -1142,7 +1142,7 @@ function ConnectGooglePage({ onNavigate, onLogout }: { onNavigate: (path: string
           </AuthPrimaryButton>
         )}
         <div style={authActionRowStyle}>
-          <AuthSecondaryButton type="button" onClick={() => onNavigate("/home")}>Continue</AuthSecondaryButton>
+          <AuthSecondaryButton type="button" onClick={() => onNavigate("/my-work")}>Continue</AuthSecondaryButton>
           <AuthSecondaryButton type="button" onClick={onLogout}>Logout</AuthSecondaryButton>
         </div>
       </div>

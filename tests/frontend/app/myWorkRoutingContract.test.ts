@@ -30,6 +30,12 @@ test("My Work is a lazy authenticated static page with persisted page identity",
   const persistence = readFileSync("frontend/src/app/useFramePersistence.ts", "utf8");
   assert.match(auth, /path === "\/my-work"[\s\S]*preloadMyWorkSurface/);
   assert.match(auth, /normalizedPath === "\/my-work"[\s\S]*initialPage="my-work"/);
+  const connectGoogleStart = auth.indexOf("function ConnectGooglePage");
+  const settingsStart = auth.indexOf("function SettingsPage", connectGoogleStart);
+  assert.ok(connectGoogleStart >= 0 && settingsStart > connectGoogleStart);
+  const connectGoogle = auth.slice(connectGoogleStart, settingsStart);
+  assert.equal(connectGoogle.match(/onNavigate\("\/my-work"\)/g)?.length, 2, "connected and skipped Google onboarding both continue to My Work");
+  assert.doesNotMatch(connectGoogle, /onNavigate\("\/home"\)/);
   assert.match(lazyPages, /import\("\.\/my-work"\)/);
   assert.match(lazyPages, /LazyMyWorkPage/);
   assert.match(app, /if \(page === "my-work"\) return "\/my-work"/);

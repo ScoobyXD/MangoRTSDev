@@ -11,7 +11,8 @@ test("auth route guard sends unauthenticated app routes to login", () => {
 });
 
 test("auth route guard sends authenticated login routes back to app", () => {
-  assert.equal(nextPathForAuthState("/login", true), "/home");
+  assert.equal(nextPathForAuthState("/login", true), "/my-work");
+  assert.equal(nextPathForAuthState("/complete-account", true), "/my-work");
   assert.equal(nextPathForAuthState("/admin/users", true), "/settings");
   assert.equal(nextPathForAuthState("/settings", true), "/settings");
   assert.equal(nextPathForAuthState("/communications", true), "/home");
@@ -36,9 +37,9 @@ test("auth route guard returns to a requested resource after authentication", ()
 });
 
 test("auth route guard ignores auth pages as return targets", () => {
-  assert.equal(nextPathAfterAuthentication("/login"), "/home");
-  assert.equal(nextPathAfterAuthentication("/login", ""), "/home");
-  assert.equal(nextPathAfterAuthentication("/login", "/login"), "/home");
-  assert.equal(nextPathAfterAuthentication("/complete-account", "/forgot-password"), "/home");
+  assert.equal(nextPathAfterAuthentication("/login"), "/my-work");
+  assert.equal(nextPathAfterAuthentication("/login", ""), "/my-work");
+  assert.equal(nextPathAfterAuthentication("/login", "/login"), "/my-work");
+  assert.equal(nextPathAfterAuthentication("/complete-account", "/forgot-password"), "/my-work");
 });
 
