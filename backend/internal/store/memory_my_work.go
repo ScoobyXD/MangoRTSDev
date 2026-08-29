@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strings"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 )
@@ -65,10 +66,21 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 			continue
 		}
 		fields := r.memoryActionItemFieldsLocked(entity.CompanyID, entity.EntityID)
-		if fields.personInCharge != query.UserID || myWorkStatusDone(fields.status) {
+		if fields.personInCharge != query.UserID || myWorkStatusDone(fields.status) != query.History {
 			continue
 		}
-		item := domain.MyWorkActionItem{EntityID: entity.EntityID, Name: entity.Name}
+		item := domain.MyWorkActionItem{
+			EntityID:                 entity.EntityID,
+			Name:                     entity.Name,
+			CompletionDueDateFieldID: fields.completionDueDateFieldID,
+		}
+		if query.History {
+			completed := fields.statusUpdatedTimestamp
+			if completed.IsZero() {
+				completed = entity.UpdatedTimestamp
+			}
+			item.CompletedTimestamp = &completed
+		}
 		if fields.color != "" {
 			item.Color = stringPointer(fields.color)
 		}
@@ -77,17 +89,27 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 		}
 		rows = append(rows, row{item: item, colorRank: myWorkColorRank(fields.color), colorKey: fields.color, dateNull: fields.completionDueDate == "", date: fields.completionDueDate})
 	}
-	sort.Slice(rows, func(i, j int) bool {
-		return compareMyWorkActionValues(
-			rows[i].colorRank, rows[i].colorKey, rows[i].dateNull, rows[i].date, rows[i].item.EntityID,
-			rows[j].colorRank, rows[j].colorKey, rows[j].dateNull, rows[j].date, rows[j].item.EntityID,
-			groupingTerms,
-		) < 0
-	})
+	if query.History {
+		sort.Slice(rows, func(i, j int) bool {
+			return compareMyWorkHistoryItems(
+				*rows[i].item.CompletedTimestamp, rows[i].item.EntityID,
+				*rows[j].item.CompletedTimestamp, rows[j].item.EntityID,
+			) < 0
+		})
+	} else {
+		sort.Slice(rows, func(i, j int) bool {
+			return compareMyWorkActionValues(
+				rows[i].colorRank, rows[i].colorKey, rows[i].dateNull, rows[i].date, rows[i].item.EntityID,
+				rows[j].colorRank, rows[j].colorKey, rows[j].dateNull, rows[j].date, rows[j].item.EntityID,
+				groupingTerms,
+			) < 0
+		})
+	}
 	if query.Cursor != "" {
 		filtered := rows[:0]
 		for _, item := range rows {
-			if compareMyWorkActionCursor(item.colorRank, item.colorKey, item.dateNull, item.date, item.item.EntityID, cursor, groupingTerms) > 0 {
+			if (query.History && myWorkHistoryItemAfter(*item.item.CompletedTimestamp, item.item.EntityID, cursor)) ||
+				(!query.History && compareMyWorkActionCursor(item.colorRank, item.colorKey, item.dateNull, item.date, item.item.EntityID, cursor, groupingTerms) > 0) {
 				filtered = append(filtered, item)
 			}
 		}
@@ -103,16 +125,22 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 	}
 	if page.HasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
-		page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Grouping: grouping, GroupNull: last.colorKey == "", GroupInt: last.colorRank, GroupText: last.colorKey, DateNull: last.dateNull, Date: last.date, ResourceID: last.item.EntityID})
+		if query.History {
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, History: true, CompletedTimestamp: last.item.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.item.EntityID})
+		} else {
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Grouping: grouping, GroupNull: last.colorKey == "", GroupInt: last.colorRank, GroupText: last.colorKey, DateNull: last.dateNull, Date: last.date, ResourceID: last.item.EntityID})
+		}
 	}
 	return page
 }
 
 type memoryActionItemFields struct {
-	personInCharge    string
-	completionDueDate string
-	status            string
-	color             string
+	personInCharge           string
+	completionDueDate        string
+	status                   string
+	color                    string
+	completionDueDateFieldID string
+	statusUpdatedTimestamp   time.Time
 }
 
 func (r *MemoryRepo) memoryActionItemFieldsLocked(companyID, entityID string) memoryActionItemFields {
@@ -127,8 +155,10 @@ func (r *MemoryRepo) memoryActionItemFieldsLocked(companyID, entityID string) me
 			result.personInCharge = cleanUUIDText(value)
 		case ActionItemCompletionDueDateFieldTypeID:
 			result.completionDueDate = strings.TrimSpace(value)
+			result.completionDueDateFieldID = field.EntityFieldID
 		case ActionItemStatusFieldTypeID:
 			result.status = value
+			result.statusUpdatedTimestamp = field.UpdatedTimestamp
 		case ActionItemColorFieldTypeID:
 			result.color = strings.ToLower(strings.TrimSpace(value))
 		}
@@ -138,13 +168,17 @@ func (r *MemoryRepo) memoryActionItemFieldsLocked(companyID, entityID string) me
 
 func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCursor) domain.MyWorkNodePage {
 	grouping, groupingTerms := myWorkEffectiveGrouping(query, MyWorkSectionNodes)
+	completedTimestamps := map[string]time.Time{}
+	if query.History {
+		completedTimestamps = r.memoryMyWorkNodeCompletedTimestampsLocked(query.CompanyID)
+	}
 	rows := make([]domain.MyWorkNode, 0)
 	for _, node := range r.nodes {
 		if node.CompanyID != query.CompanyID {
 			continue
 		}
 		node = r.withDerivedNodeStatusLocked(node)
-		if myWorkStatusDone(myWorkOptionalString(node.Status)) {
+		if myWorkStatusDone(myWorkOptionalString(node.Status)) != query.History {
 			continue
 		}
 		if !r.gvicEffectiveUserHasRoleLocked(query.CompanyID, EntityTypeNode, node.NodeID, query.UserID, domain.RACIRoleResponsible) {
@@ -154,6 +188,13 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 			continue
 		}
 		item := domain.MyWorkNode{NodeID: node.NodeID, Name: node.Title, Priority: cloneIntPointer(node.Priority), DueDate: cloneStringPointer(node.DueDate)}
+		if query.History {
+			completed := node.CreatedTimestamp
+			if transitionTimestamp, ok := completedTimestamps[node.NodeID]; ok {
+				completed = transitionTimestamp
+			}
+			item.CompletedTimestamp = &completed
+		}
 		assignments := make([]domain.NodeLogicGateAssignment, 0, 1)
 		for _, assignment := range r.nodeLogicGateAssignments {
 			if assignment.CompanyID != query.CompanyID || assignment.NodeID != node.NodeID {
@@ -195,11 +236,17 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 				break
 			}
 		}
-		if query.Cursor == "" || compareMyWorkNodeCursor(item, cursor, groupingTerms) > 0 {
+		if query.Cursor == "" || (query.History && myWorkHistoryItemAfter(*item.CompletedTimestamp, item.NodeID, cursor)) || (!query.History && compareMyWorkNodeCursor(item, cursor, groupingTerms) > 0) {
 			rows = append(rows, item)
 		}
 	}
-	sort.Slice(rows, func(i, j int) bool { return compareMyWorkNodes(rows[i], rows[j], groupingTerms) < 0 })
+	if query.History {
+		sort.Slice(rows, func(i, j int) bool {
+			return compareMyWorkHistoryItems(*rows[i].CompletedTimestamp, rows[i].NodeID, *rows[j].CompletedTimestamp, rows[j].NodeID) < 0
+		})
+	} else {
+		sort.Slice(rows, func(i, j int) bool { return compareMyWorkNodes(rows[i], rows[j], groupingTerms) < 0 })
+	}
 	page := domain.MyWorkNodePage{Items: []domain.MyWorkNode{}}
 	page.HasMore = len(rows) > query.Limit
 	if page.HasMore {
@@ -208,9 +255,45 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 	page.Items = append(page.Items, rows...)
 	if page.HasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
-		page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
+		if query.History {
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
+		} else {
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
+		}
 	}
 	return page
+}
+
+func (r *MemoryRepo) memoryMyWorkNodeCompletedTimestampsLocked(companyID string) map[string]time.Time {
+	events := make([]domain.DomainEvent, 0)
+	for _, event := range r.domainEvents {
+		if event.CompanyID != companyID || event.StreamType != workspaceDomainStreamType || event.StreamID != companyID || (event.Type != "node_created" && event.Type != "node_updated") {
+			continue
+		}
+		if _, ok := event.Payload["node"].(domain.Node); ok {
+			events = append(events, event)
+		}
+	}
+	sort.Slice(events, func(i, j int) bool {
+		if events[i].Sequence != events[j].Sequence {
+			return events[i].Sequence < events[j].Sequence
+		}
+		return events[i].EventID < events[j].EventID
+	})
+
+	previousStatuses := make(map[string]string)
+	seen := make(map[string]bool)
+	completedTimestamps := make(map[string]time.Time)
+	for _, event := range events {
+		node := event.Payload["node"].(domain.Node)
+		status := myWorkOptionalString(node.Status)
+		if seen[node.NodeID] && !myWorkStatusDone(previousStatuses[node.NodeID]) && myWorkStatusDone(status) {
+			completedTimestamps[node.NodeID] = event.CreatedTimestamp
+		}
+		previousStatuses[node.NodeID] = status
+		seen[node.NodeID] = true
+	}
+	return completedTimestamps
 }
 
 func (r *MemoryRepo) memoryMyWorkProcessesLocked(query MyWorkQuery, cursor myWorkCursor) domain.MyWorkProcessPage {

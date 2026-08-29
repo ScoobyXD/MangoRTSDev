@@ -250,6 +250,7 @@ type EditorCalendarDateInputProps = {
   inputStyle?: React.CSSProperties;
   buttonStyle?: React.CSSProperties;
   floatingPortalTarget?: Element | DocumentFragment | null;
+  openOnInputClick?: boolean;
 };
 
 /** Shared editable date text plus the app's elevated calendar picker. */
@@ -268,6 +269,7 @@ export function EditorCalendarDateInput({
   inputStyle,
   buttonStyle,
   floatingPortalTarget,
+  openOnInputClick = false,
 }: EditorCalendarDateInputProps) {
   const containerRef = useRef<HTMLSpanElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -303,6 +305,11 @@ export function EditorCalendarDateInput({
         inputMode="numeric"
         pattern="(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12][0-9]|3[01])/\d{4}"
         onChange={(event) => { if (!disabled) onChange(event.currentTarget.value); }}
+        onClick={() => {
+          if (disabled || !openOnInputClick) return;
+          setVisibleMonth(calendarMonthForValue(value));
+          setOpen(true);
+        }}
         onBlur={(event) => { if (!disabled) commit(event.currentTarget.value); }}
         onKeyDown={(event) => {
           if (disabled) {

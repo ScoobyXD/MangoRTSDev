@@ -372,7 +372,7 @@ test("title headers keep editable titles separate and use existing entity icons"
 
   assert.match(sidebar, /<div hidden=\{explorerSearchActive\}>\s*<HuddleExplorerSection/);
   assert.match(sidebar, /useExplorerSearchQuery\(companyID\)/);
-  assert.match(sidebar, /onBeforeHierarchyNavigate=\{popupSidebarFill \? undefined : \(onHierarchyNavigate \?\? onClose\)\}/);
+  assert.match(sidebar, /onBeforeHierarchyNavigate=\{onHierarchyNavigate \?\? onClose\}/);
   assert.match(homePopups, /onBeforeHierarchyNavigate=\{onClose\}/);
   assert.match(updates, /onBeforeHierarchyNavigate=\{fullscreen \? \(\) => setFullscreen\(false\) : undefined\}/);
   assert.match(kanbanOverlays, /onBeforeHierarchyNavigate=\{fullscreen \? \(onToggleFullscreen \?\? onClose\) : undefined\}/);

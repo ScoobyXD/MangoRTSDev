@@ -18,11 +18,11 @@ function pin(kind: SidebarPin["kind"]): SidebarPin {
 }
 
 describe("sidebarPinNodePopupLaunch", () => {
-  it("opens only pinned Nodes beside the sidebar and gives each open a fresh instance identity", () => {
+  it("opens only pinned Nodes as inset fullscreen popups and gives each open a fresh instance identity", () => {
     assert.deepEqual(sidebarPinNodePopupLaunch(pin("node"), 101), {
       nodeID: "resource-1",
       nodeTitle: "Pinned resource",
-      initialSidebarFill: true,
+      initialFullscreen: true,
       popupInstanceID: 101,
     });
     assert.equal(sidebarPinNodePopupLaunch(pin("logic_gate"), 102), null);
@@ -30,18 +30,17 @@ describe("sidebarPinNodePopupLaunch", () => {
     assert.notEqual(sidebarPinNodePopupLaunch(pin("node"), 101)?.popupInstanceID, sidebarPinNodePopupLaunch(pin("node"), 102)?.popupInstanceID);
   });
 
-  it("fills only the viewport beside the sidebar until the user chooses full screen", () => {
+  it("uses the same inset fullscreen modal layout as a Process Node", () => {
     const source = readFileSync(resolve(process.cwd(), "frontend/src/app/AppSidebarChrome.tsx"), "utf8");
 
-    assert.match(source, /const left = Math\.max\(0, Math\.min\(window\.innerWidth, Math\.ceil\(nodeEditorPopupSidebarBoundary\(\) \?\? 0\)\)\)/);
-    assert.match(source, /width: Math\.max\(0, window\.innerWidth - left\)/);
-    assert.match(source, /height: Math\.max\(0, window\.innerHeight\)/);
-    assert.match(source, /<AppModalPortal trapFocus=\{!popupSidebarFill\} onRequestClose=\{onClose\}>/);
-    assert.match(source, /role=\{popupSidebarFill \? "group" : "dialog"\}/);
-    assert.match(source, /ariaModal=\{!popupSidebarFill\}/);
-    assert.match(source, /left: popupSidebarFill \? popupRect\.left : 0/);
-    assert.doesNotMatch(source, /const nodeEditorPopupBackdropStyle[\s\S]*?\binset:\s*0[\s\S]*?const nodeEditorPopupStyle/);
-    assert.match(source, /left: popupSidebarFill \? 0 : popupRect\.left/);
-    assert.match(source, /restoredViewMode === "sidebar-fill"\s*\? sidebarFillNodeEditorPopupRect\(\)/);
+    assert.match(source, /initialFullscreen \? fullscreenNodeEditorPopupRect\(\) : defaultNodeEditorPopupRect\(\)/);
+    assert.match(source, /initialFullscreen \? "fullscreen" : "windowed"/);
+    assert.match(source, /return fullscreenNodeEditorViewportRect\(\)/);
+    assert.match(source, /<AppModalPortal onRequestClose=\{onClose\}>/);
+    assert.match(source, /role="dialog"/);
+    assert.match(source, /ariaModal/);
+    assert.match(source, /style=\{nodeEditorPopupBackdropStyle\}/);
+    assert.match(source, /left: popupRect\.left, top: popupRect\.top, width: popupRect\.width, height: popupRect\.height/);
+    assert.doesNotMatch(source, /sidebar-fill|sidebarFillNodeEditorPopupRect|initialSidebarFill/);
   });
 });

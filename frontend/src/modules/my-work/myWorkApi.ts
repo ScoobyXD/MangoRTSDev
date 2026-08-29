@@ -23,6 +23,8 @@ export type MyWorkActionItem = {
   name: string;
   color?: string | null;
   completion_due_date?: string | null;
+  completion_due_date_field_id: string;
+  completed_timestamp?: string;
 };
 
 export type MyWorkInlineProcess = {
@@ -40,6 +42,7 @@ export type MyWorkNode = {
   name: string;
   priority?: number | null;
   due_date?: string | null;
+  completed_timestamp?: string;
   process?: MyWorkInlineProcess;
   project?: MyWorkInlineProject;
 };
@@ -74,6 +77,7 @@ export type FetchMyWorkInput = {
   grouping?: ReadonlyArray<MyWorkGroupingSetting>;
   limit?: number;
   cursor?: string;
+  history?: boolean;
   signal?: AbortSignal;
 };
 
@@ -83,10 +87,17 @@ export async function fetchMyWork(
   requestJSON: BoundRequestJSON,
   input: FetchMyWorkInput,
 ): Promise<MyWorkResponse> {
+  if (input.history && input.section !== "action_items" && input.section !== "nodes") {
+    throw new Error("My Work history is valid only for Action Items or Nodes section reads.");
+  }
+  if (input.history && input.grouping !== undefined) {
+    throw new Error("My Work history cannot be grouped.");
+  }
   const params = new URLSearchParams({ company_id: input.companyID.trim() });
   if (input.section) params.set("section", input.section);
   if ((!input.section || input.section === "processes") && input.role) params.set("role", input.role);
   if (input.grouping !== undefined) params.set("grouping", serializeMyWorkGrouping(input.section, input.grouping));
+  if (input.history) params.set("history", "true");
   params.set("limit", String(boundedMyWorkLimit(input.limit)));
   if (input.cursor?.trim()) params.set("cursor", input.cursor.trim());
   return requestJSON<MyWorkResponse>(`/v1/my-work?${params.toString()}`, {

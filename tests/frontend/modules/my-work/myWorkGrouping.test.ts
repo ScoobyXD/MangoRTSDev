@@ -23,9 +23,9 @@ import type { MyWorkActionItem } from "../../../../frontend/src/modules/my-work/
 
 test("Action Items default to Color then exact Completion due date in Red, Yellow, No color order", () => {
   const groups = buildUniversalNestedGroups([
-    { entity_id: "red", name: "Red", color: "red", completion_due_date: "2026-09-01" },
-    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02T18:00:00Z" },
-    { entity_id: "none", name: "No color", completion_due_date: null },
+    { entity_id: "red", name: "Red", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red" },
+    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02T18:00:00Z", completion_due_date_field_id: "field-yellow" },
+    { entity_id: "none", name: "No color", completion_due_date: null, completion_due_date_field_id: "field-none" },
   ], DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter);
 
   assert.deepEqual(groups.map((group) => group.label), ["Red", "Yellow", "No color"]);
@@ -37,9 +37,9 @@ test("Action Items default to Color then exact Completion due date in Red, Yello
 
 test("My Work preserves the backend keyset order instead of applying locale or numeric name sorting", () => {
   const authoritativeRows: MyWorkActionItem[] = [
-    { entity_id: "00000000-0000-4000-8000-000000000001", name: "Item 10", color: "red" },
-    { entity_id: "00000000-0000-4000-8000-000000000002", name: "Älpha", color: "red" },
-    { entity_id: "00000000-0000-4000-8000-000000000003", name: "Item 2", color: "red" },
+    { entity_id: "00000000-0000-4000-8000-000000000001", name: "Item 10", color: "red", completion_due_date_field_id: "field-1" },
+    { entity_id: "00000000-0000-4000-8000-000000000002", name: "Älpha", color: "red", completion_due_date_field_id: "field-2" },
+    { entity_id: "00000000-0000-4000-8000-000000000003", name: "Item 2", color: "red", completion_due_date_field_id: "field-3" },
   ];
   const groups = buildUniversalNestedGroups(
     authoritativeRows,

@@ -9,7 +9,7 @@
 7. Later Huddle membership or KPI ownership changes do not rewrite an existing Huddle Node snapshot, while later edits to already captured source rows appear on the next read.
 8. Recycling or permanently deleting a captured Logic Gate or KPI removes its live typed snapshot edge; restore recreates only an edge captured in the Recycle Bin payload.
 9. A Huddle Node has its own editable rich-text workspace in `huddle_node_textboxes`; the `huddle_nodes` row itself does not duplicate a body document.
-10. The workspace may contain several ordered text boxes, and each text box uses the normal Node's left timeline circle and line, left plus control, row spacing, canonical editor JSON save, revision, conflict, toolbar, and delete behavior.
+10. The workspace may contain several ordered text boxes, and each text box uses the normal Node's left timeline circle and line, left plus control, row spacing, canonical editor JSON save, revision, conflict, toolbar, and delete behavior. Its header shows live Saved state and Last Updated/Created timestamps at the far left, keeps attachment and row actions next, and places Editor immediately left of Chat at the far right.
 11. The Huddle Node left column always shows its editable text boxes, while the right column toggles between Action Items and the captured Process and KPI snapshot and defaults to Action Items.
 12. Huddle Node text boxes support the Universal Linker, formatting toolbar, inline Entity references, attachments, selection comments, ordinary chats, and the existing Permissions tab.
 13. A Huddle Node has no attached-email column, email owner, due date, status, account, pass-to-Logic-Gate control, timeline events, frequency, or period.
@@ -37,7 +37,7 @@
 35. Every Action Item row and inline label uses the shared target-and-arrow icon, black label text, and a fully filled yellow or red surface without a visible color-name suffix.
 36. The Action Item editor is clamped to the visible viewport and opens to the left when the right side lacks room.
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 # Process Story: A Huddle Node edits current meeting work while fixed Process cards and live Action Items remain separate
 

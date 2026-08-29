@@ -76,6 +76,29 @@ test("My Work sends the sole explicit empty grouping form without inventing a de
   assert.equal(url.searchParams.get("grouping"), "none");
 });
 
+test("My Work History is section-scoped and never carries grouping", async () => {
+  let requestedPath = "";
+  const requestJSON: BoundRequestJSON = async <T>(path: string): Promise<T> => {
+    requestedPath = path;
+    return { company_id: "company-1", user_id: "viewer-1", action_items: { items: [], has_more: false } } as T;
+  };
+
+  await fetchMyWork(requestJSON, { companyID: "company-1", section: "action_items", history: true, cursor: "history-cursor" });
+  const url = new URL(requestedPath, "https://mango.test");
+  assert.equal(url.searchParams.get("section"), "action_items");
+  assert.equal(url.searchParams.get("history"), "true");
+  assert.equal(url.searchParams.get("cursor"), "history-cursor");
+  assert.equal(url.searchParams.has("grouping"), false);
+  await assert.rejects(
+    fetchMyWork(requestJSON, { companyID: "company-1", section: "action_items", history: true, grouping: [] }),
+    /cannot be grouped/,
+  );
+  await assert.rejects(
+    fetchMyWork(requestJSON, { companyID: "company-1", section: "projects", history: true }),
+    /valid only for Action Items or Nodes/,
+  );
+});
+
 test("My Work refuses grouping on ungroupable section and all-section reads", async () => {
   const requestJSON: BoundRequestJSON = async <T>(): Promise<T> => ({} as T);
   await assert.rejects(

@@ -162,7 +162,9 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     assert.equal(folderInProgress?.style.backgroundImage, "none");
     assert.equal(folderReview?.style.backgroundImage, "linear-gradient(180deg, rgb(51, 221, 213) 0%, rgb(25, 168, 255) 100%)");
     for (const box of [folderRequest, folderPending, folderInProgress, folderReview]) {
-      assert.equal(box?.style.width, "17px", "every count box has the same fixed width regardless of digit count");
+      assert.equal(box?.style.width, "22px", "every count box has the same large fixed width regardless of digit count");
+      assert.equal(box?.style.height, "22px");
+      assert.equal(box?.style.fontSize, "11.5px", "status totals remain easy to read");
       assert.equal(box?.style.padding, "0px");
     }
     const folderStatusColumn = folderA.querySelector<HTMLElement>("[data-pin-folder-status-column]");
@@ -170,8 +172,8 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     assert.ok(folderStatusColumn && folderStatusGrid);
     assert.equal(folderStatusColumn.parentElement, folderALegend, "folder totals stay on the same row as the folder title");
     assert.equal(folderALegend.style.width, "calc(100% - 24px)", "folder totals reach the same right-side columns as pin totals after shortening the corner");
-    assert.equal(folderALegend.style.gridTemplateColumns, "14px minmax(0, 1fr) 74px");
-    assert.equal(folderStatusGrid.style.gridTemplateColumns, "repeat(4, 17px)");
+    assert.equal(folderALegend.style.gridTemplateColumns, "14px minmax(0, 1fr) 94px");
+    assert.equal(folderStatusGrid.style.gridTemplateColumns, "repeat(4, 22px)");
     assert.equal(folderRequest?.parentElement?.dataset.pinStatusSlot, "request");
     assert.equal(folderReview?.parentElement?.dataset.pinStatusSlot, "review");
 
@@ -221,7 +223,8 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     assert.ok(logicGateEntry, "expanding the nested folder reveals the counted Logic Gate row");
     assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="request"]')?.dataset.pinStatusCount, "12");
     assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status="review"]')?.dataset.pinStatusCount, "5");
-    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status-counts]')?.style.gridTemplateColumns, "repeat(4, 17px)");
+    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status-counts]')?.style.gridTemplateColumns, "repeat(4, 22px)");
+    assert.equal(logicGateEntry.querySelector<HTMLElement>('[data-pin-status-counts]')?.style.width, "94px", "every Process row uses the same four fixed status columns");
 
     const pinEntry = container.querySelector<HTMLElement>('[data-pin-entry-id="pin-root"]');
     const pinButton = pinEntry?.querySelector<HTMLButtonElement>("button");

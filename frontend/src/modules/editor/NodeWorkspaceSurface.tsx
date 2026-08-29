@@ -3411,22 +3411,18 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     }}
                     style={{ minWidth: 0, overflowX: "auto", overflowY: "hidden", borderBottom: `1px solid ${ruleColor}`, background: blockColor ? `linear-gradient(90deg, ${blockColor}30, ${blockColor}0c 54%, rgba(255,255,255,0.88))` : "linear-gradient(90deg, rgba(255,241,242,0.62), rgba(236,253,245,0.42) 52%, rgba(239,246,255,0.66))" }}
                   >
-                    <div style={{ minWidth: Math.max(448, minimumCommunicationWidth), height: 37, display: "grid", gridTemplateColumns: `${hasLinkedEmailMessages ? 128 : 44}px minmax(360px, 1fr) ${chatPaneIsVisible ? chatPaneWidth : 96}px`, alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
-                      <div style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start" }}>
+                    <div style={{ minWidth: Math.max(448, minimumCommunicationWidth), height: 37, display: "grid", gridTemplateColumns: "minmax(220px, 1fr) auto auto", alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box" }}>
+                      <div data-node-header-save-metadata="true" style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 6, overflow: "hidden" }}>
+                        {!block.temporaryEmailChat && <EditorSaveStatusIcon state={blockSaveFallback} storageKey={blockSaveStorageKey} compact />}
+                        {!block.temporaryEmailChat && <EditorSavedTimestamp storageKey={blockSaveStorageKey} fallbackUpdatedTimestamp={block.updatedTimestamp} createdTimestamp={block.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />}
+                      </div>
+                      <div data-node-pane-header="editor" style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
                         {hasLinkedEmailMessages ? (
                           <button type="button" aria-label={linkedEmailExpanded ? "Hide linked email" : "Show linked email"} aria-expanded={linkedEmailExpanded} title={linkedEmailExpanded ? "Hide the linked email" : "Show the linked email"} onClick={toggleLinkedEmail} style={{ minWidth: 0, minHeight: 26, display: "inline-flex", alignItems: "center", gap: 5, border: `1px solid ${blockColor || EDITOR_NEU_SOFT_BORDER}`, borderRadius: 8, background: linkedEmailExpanded ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: blockColor || accent, cursor: "pointer", padding: "2px 7px", fontSize: 10, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
                             <MailIcon color={blockColor || accent} />
                             <span>{linkedEmailExpanded ? "Hide email" : "Show email"}</span>
                           </button>
                         ) : null}
-                      </div>
-                      <div data-node-pane-header="editor" style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-                        <button type="button" title={editorPaneIsVisible ? "Hide text editor" : "Open text editor"} aria-label="Toggle text editor column" aria-pressed={editorPaneIsVisible} onClick={toggleEditor} style={{ minHeight: 26, flex: "0 0 auto", borderRadius: 8, border: editorPaneIsVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: editorPaneIsVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", padding: "0 7px", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
-                          <TextEditorIcon color={accent} />
-                          <span>Editor</span>
-                        </button>
-                        {!block.temporaryEmailChat && <EditorSaveStatusIcon state={blockSaveFallback} storageKey={blockSaveStorageKey} compact />}
-                        {!block.temporaryEmailChat && <EditorSavedTimestamp storageKey={blockSaveStorageKey} fallbackUpdatedTimestamp={block.updatedTimestamp} createdTimestamp={block.createdTimestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />}
                         {!block.temporaryEmailChat && <AttachmentCountDropdown
                           items={blockAttachmentDropdownItems}
                           apiBase={apiBase}
@@ -3442,6 +3438,10 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                           onError={onError}
                         />}
                         {canEdit && !block.temporaryEmailChat && <TextBlockActionsMenu accent={accent} surfaceText={surfaceText} panelBackground={panelBackground} strokeColor={strokeColor} onDelete={(position) => requestDeleteTextBlock(block.id, position)} />}
+                        <button type="button" title={editorPaneIsVisible ? "Hide text editor" : "Open text editor"} aria-label="Toggle text editor column" aria-pressed={editorPaneIsVisible} onClick={toggleEditor} style={{ minHeight: 26, flex: "0 0 auto", borderRadius: 8, border: editorPaneIsVisible ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: editorPaneIsVisible ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", padding: "0 7px", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>
+                          <TextEditorIcon color={accent} />
+                          <span>Editor</span>
+                        </button>
                       </div>
                       <div data-node-pane-header="chat" style={{ minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5 }}>
                         <button type="button" data-email-chat-destination-action={pendingEmailChatSelection ? "true" : undefined} title={pendingEmailChatSelection ? "Use this chat column for highlighted email text" : chatPaneIsVisible ? "Hide chat" : "Open chat"} aria-label={pendingEmailChatSelection ? "Use this chat column for highlighted email text" : "Toggle chat column"} aria-pressed={chatPaneIsVisible} onClick={toggleChat} style={{ minHeight: 26, borderRadius: 8, border: chatPaneIsVisible || pendingEmailChatSelection ? "1px solid transparent" : `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: chatPaneIsVisible || pendingEmailChatSelection ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` : EDITOR_NEU_SURFACE, color: accent, display: "inline-flex", alignItems: "center", gap: 5, cursor: "pointer", padding: "0 7px", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW }}>

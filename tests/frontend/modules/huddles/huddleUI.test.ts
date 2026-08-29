@@ -18,6 +18,24 @@ test("Huddle column dividers resize only their neighboring columns and preserve 
   assert.ok(Math.abs(second.reduce((total, value) => total + value, 0) - 1) < 1e-9);
 });
 
+test("Node and Huddle Node text box headers keep save metadata left of Editor and Chat", () => {
+  const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurface.tsx"), "utf8");
+  const huddleNodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleNodeWorkspace.tsx"), "utf8");
+
+  for (const source of [nodeWorkspace, huddleNodeWorkspace]) {
+    const saveMetadataIndex = source.indexOf('data-node-header-save-metadata="true"');
+    const editorIndex = source.indexOf('data-node-pane-header="editor"', saveMetadataIndex);
+    const chatIndex = source.indexOf('data-node-pane-header="chat"', editorIndex);
+    assert.ok(saveMetadataIndex >= 0);
+    assert.ok(editorIndex > saveMetadataIndex);
+    assert.ok(chatIndex > editorIndex);
+    const header = source.slice(saveMetadataIndex, chatIndex);
+    assert.match(header, /<EditorSaveStatusIcon/);
+    assert.match(header, /<EditorSavedTimestamp/);
+    assert.ok(header.lastIndexOf("TextEditorIcon") > header.lastIndexOf("TextBlockActionsMenu"));
+  }
+});
+
 test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, RACI controls, icon actions, and raised sidebar rows", () => {
   const page = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleLogicGatePage.tsx"), "utf8");
   const surface = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleResourceSurface.tsx"), "utf8");

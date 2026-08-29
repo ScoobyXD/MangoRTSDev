@@ -66,9 +66,9 @@ MW31 - Opening any My Work resource performs that destination's normal current p
 
 MW32 - A permission-resolution failure fails the My Work read closed. My Work never returns an unfiltered partial result after an authorization error.
 
-MW33 - An Action Item whose current canonical Status is Done or Completed is never displayed in My Work.
+MW33 - The normal Action Items list excludes an Action Item whose current canonical Status is Done, Complete, or Completed; that item appears only in the Action Items History view while it remains assigned and permitted.
 
-MW34 - A Node whose current status is Done or Completed is never displayed in My Work.
+MW34 - The normal Nodes list excludes a Node whose current status is Done, Complete, or Completed; that Node appears only in the Nodes History view while it remains effectively Responsible and permitted.
 
 MW35 - A first-version Action Item row exposes only the Action Item summary needed to display and open that exact Entity. It derives and exposes no Process, Project, or other resource context.
 
@@ -82,7 +82,7 @@ MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact
 
 MW40 - Red Action Item icons and names use the established Huddle red treatment and pulse once per second. Yellow Action Item icons and names use the established Huddle yellow treatment and pulse once every two seconds.
 
-MW41 - A displayed Action Item date group is labeled `Completion due date: <date>`, and a displayed Node date group is labeled `Due date: <date>`. Nested group levels and their rows are visibly indented, and color or priority groups use the established Action Item or Node priority color.
+MW41 - Completion due date and Due date remain available as ordering levels but render no date-group header. Other selected grouping levels and their rows remain visibly nested, and color or priority groups use the established Action Item or Node priority color.
 
 MW42 - The Process role selector uses the established RACI colors: Responsible is orange, Accountable is green, Consulted is blue, and Informed is purple.
 
@@ -104,17 +104,29 @@ MW50 - Every universal grouping dialog uses raised grouping rows, raised level t
 
 MW51 - A successful login with no explicit supported return destination opens My Work as the active page. A fresh authenticated load with no valid saved active tab also selects My Work, while explicit supported return destinations and valid saved tabs on ordinary authenticated reloads remain authoritative.
 
+MW52 - Action Items and Nodes each have an independent History toggle in their section header. The button shows the History icon to the left of the word History, exposes its pressed state, and pressing it again returns that section to its normal list in the same space without a popup.
+
+MW53 - Each History list contains only completed work that still qualifies for that subject and viewer. It is ordered by completion status-change time from newest to oldest, uses exact resource ID as the stable tie-breaker, and keeps cursor pagination bound to History mode.
+
+MW54 - An Action Item History timestamp is its canonical Status field update timestamp. A Node History timestamp is the latest immutable full Node snapshot that changed its status from non-complete to Done, Complete, or Completed; later updates while it stays complete never change that timestamp, and a completed Node with no recorded transition falls back to its immutable Node creation timestamp.
+
+MW55 - Every Action Item and Node row shows `Due Date:` plus its current date or empty state as the leftmost inline context label. Process and Project chips follow it. Activating the date field opens the shared elevated calendar and saves the selected date directly.
+
+MW56 - The Action Item row's official due date is always its canonical Completion due date field. Inline Action Item due-date edits update that exact existing Entity field, while inline Node due-date edits update the exact Node. Rapid date commits are serialized per row so the user's latest calendar or typed choice is always the final saved value.
+
+MW57 - After a same-page Action Item editor successfully renames an item or changes one of its fields, My Work immediately reloads that Action Item section. A renamed row shows its current name, and an item newly marked complete leaves the normal list without a page reload.
+
 ## Process Story: One person sees assigned work and current company context
 
 A company member logs in without an explicit return destination or opens My Work beneath My Tower
 
 ↓
 
-Mango reads that member's current effectively Responsible Nodes and exact Person-in-charge Action Items from their canonical sources, excludes completed work, then applies the authenticated viewer's current permissions before any result is grouped or cursor-bounded
+Mango reads that member's current effectively Responsible Nodes and exact Person-in-charge Action Items from their canonical sources, applies the authenticated viewer's current permissions, and selects either active work or completed History before any result is grouped or cursor-bounded
 
 ↓
 
-The unnamed left column keeps Action Items above Nodes and applies each section's independent grouping stack while all four sections append more permitted rows within their own scroll areas
+The unnamed left column keeps Action Items above Nodes, shows editable inline due dates, and applies each normal section's independent ordering/grouping stack while all four sections append more permitted rows within their own scroll areas; either left section may replace its own rows with newest-first History and return in place
 
 ↓
 

@@ -38,6 +38,7 @@ type SectionRequest = {
   grouping?: ReadonlyArray<MyWorkGroupingSetting>;
   clearItems?: boolean;
   append?: boolean;
+  history?: boolean;
 };
 
 const EMPTY_SECTION_STATE = {
@@ -105,6 +106,7 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
         section,
         role: section === "processes" ? request.role ?? roleRef.current : undefined,
         grouping: request.grouping,
+        history: request.history,
         limit: MY_WORK_PAGE_LIMIT,
         cursor: request.cursor,
         signal: controller.signal,
@@ -194,11 +196,13 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     section: MyWorkSection,
     grouping?: ReadonlyArray<MyWorkGroupingSetting>,
     clearItems = false,
-  ): Promise<void> => requestSection(section, { grouping, clearItems }), [requestSection]);
+    history = false,
+  ): Promise<void> => requestSection(section, { grouping, clearItems, history }), [requestSection]);
 
   const loadMore = useCallback((
     section: MyWorkSection,
     grouping?: ReadonlyArray<MyWorkGroupingSetting>,
+    history = false,
   ): Promise<void> => {
     const current = stateRef.current[section];
     const activeController = sectionControllersRef.current[section];
@@ -212,6 +216,7 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     return requestSection(section, {
       cursor: current.nextCursor,
       grouping,
+      history,
       append: true,
     });
   }, [requestSection]);

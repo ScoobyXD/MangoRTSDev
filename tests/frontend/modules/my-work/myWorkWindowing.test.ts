@@ -17,10 +17,10 @@ import {
 
 test("My Work display entries preserve canonical group and backend row order", () => {
   const rows: MyWorkActionItem[] = [
-    { entity_id: "red-first", name: "Red first", color: "red", completion_due_date: "2026-09-01" },
-    { entity_id: "red-second", name: "Red second", color: "red", completion_due_date: "2026-09-01" },
-    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02" },
-    { entity_id: "none", name: "No color", completion_due_date: null },
+    { entity_id: "red-first", name: "Red first", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-first" },
+    { entity_id: "red-second", name: "Red second", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-second" },
+    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow" },
+    { entity_id: "none", name: "No color", completion_due_date: null, completion_due_date_field_id: "field-none" },
   ];
   const groups = buildUniversalNestedGroups(
     rows,
@@ -53,11 +53,45 @@ test("My Work display entries preserve canonical group and backend row order", (
   );
 });
 
+test("hidden date headers keep due-date-first batches and nested color boundaries", () => {
+  const rows: MyWorkActionItem[] = [
+    { entity_id: "early-red", name: "Early red", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-early-red" },
+    { entity_id: "early-yellow", name: "Early yellow", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-early-yellow" },
+    { entity_id: "late-red", name: "Late red", color: "red", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-late-red" },
+  ];
+  const groups = buildUniversalNestedGroups(rows, [
+    { field: "completion_due_date", direction: "asc" },
+    { field: "color", direction: "asc" },
+  ], myWorkActionItemGroupingAdapter);
+
+  const entries = flattenMyWorkGroupedDisplayEntries(
+    groups,
+    (row) => row.entity_id,
+    new Set(["completion_due_date"]),
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.kind === "group-header"
+    ? `header:${entry.depth}:${entry.label}`
+    : `row:${entry.depth}:${entry.rowID}`), [
+    "header:0:Red",
+    "row:1:early-red",
+    "header:0:Yellow",
+    "row:1:early-yellow",
+    "header:0:Red",
+    "row:1:late-red",
+  ]);
+  assert.deepEqual(entries.filter((entry) => entry.kind === "row").map((entry) => entry.rowID), [
+    "early-red",
+    "early-yellow",
+    "late-red",
+  ], "removing date headers never regroups rows across date batches");
+});
+
 test("My Work row navigation skips group headers in both directions", () => {
   const rows: MyWorkActionItem[] = [
-    { entity_id: "red-first", name: "Red first", color: "red", completion_due_date: "2026-09-01" },
-    { entity_id: "red-second", name: "Red second", color: "red", completion_due_date: "2026-09-01" },
-    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02" },
+    { entity_id: "red-first", name: "Red first", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-first" },
+    { entity_id: "red-second", name: "Red second", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-second" },
+    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow" },
   ];
   const entries = flattenMyWorkGroupedDisplayEntries(
     buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter),
