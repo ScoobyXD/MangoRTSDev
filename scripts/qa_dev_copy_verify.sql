@@ -139,21 +139,35 @@ declare
   foreign_key_count integer := 0;
 begin
   if exists (
-    select 1 from public.company_explorer_folders
-    where parent_folder_id is null
-      and lower(btrim(name)) in (
+    select 1
+    from public.company_explorer_folders folder
+    where (
+      folder.company_id = '11111111-1111-1111-1111-111111111111'::uuid
+      and folder.folder_id in (
+        '019fcceb-fc3f-7000-afe8-753caec7192d'::uuid,
+        '019e6a1f-03c3-7000-b82f-700c63804e55'::uuid,
+        '019e481c-8883-709c-ab8a-732ab4cc905d'::uuid,
+        '019e8fb8-0487-7000-9ea2-5e49697c9e50'::uuid,
+        '019e8fb0-a1c7-7000-991a-828bde4514ee'::uuid,
+        '019e6ff3-e03e-7000-80c7-bd9aaaa266ed'::uuid,
+        '019e8fbb-4e49-7000-b59e-03bc60c93772'::uuid,
+        '019e8fbb-2ae3-7000-ad45-92438718f024'::uuid,
+        '019e8fbe-f567-7000-b483-e855cc8f46a6'::uuid,
+        '019e481f-3f20-767e-8c2a-5b37fca774ad'::uuid
+      )
+    ) or lower(btrim(folder.name)) in (
         'sidebar huddles private','tk','finance 1','finance 1.5','finance 2',
         'hr 1','hr 1.5','hr 2','legal','fo'
       )
   ) or exists (
-    select 1 from public.huddle_explorer_folders
-    where parent_folder_id is null
-      and lower(btrim(name)) in (
-        'sidebar huddles private','tk','finance 1','finance 1.5','finance 2',
-        'hr 1','hr 1.5','hr 2','legal','fo'
-      )
+    select 1
+    from public.huddle_explorer_folders folder
+    where lower(btrim(folder.name)) in (
+      'sidebar huddles private','tk','finance 1','finance 1.5','finance 2',
+      'hr 1','hr 1.5','hr 2','legal','fo'
+    )
   ) then
-    raise exception 'STOP: an excluded explorer root remains';
+    raise exception 'STOP: an audited excluded Explorer folder identity or denied folder name remains';
   end if;
 
   if exists (select 1 from public.attachments)

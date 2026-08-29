@@ -33,6 +33,20 @@ ROOT_NAMES = (
     "fo",
 )
 
+AUDITED_EXCLUDED_COMPANY_ID = "11111111-1111-1111-1111-111111111111"
+AUDITED_EXCLUDED_FOLDERS = (
+    ("sidebar huddles private", "019fcceb-fc3f-7000-afe8-753caec7192d"),
+    ("tk", "019e6a1f-03c3-7000-b82f-700c63804e55"),
+    ("finance 1", "019e481c-8883-709c-ab8a-732ab4cc905d"),
+    ("finance 1.5", "019e8fb8-0487-7000-9ea2-5e49697c9e50"),
+    ("finance 2", "019e8fb0-a1c7-7000-991a-828bde4514ee"),
+    ("hr 1", "019e6ff3-e03e-7000-80c7-bd9aaaa266ed"),
+    ("hr 1.5", "019e8fbb-4e49-7000-b59e-03bc60c93772"),
+    ("hr 2", "019e8fbb-2ae3-7000-ad45-92438718f024"),
+    ("legal", "019e8fbe-f567-7000-b483-e855cc8f46a6"),
+    ("fo", "019e481f-3f20-767e-8c2a-5b37fca774ad"),
+)
+
 
 def read(path: Path) -> str:
     return path.read_text(encoding="utf-8").lower()
@@ -289,7 +303,28 @@ class QADevCopySQLContracts(unittest.TestCase):
                 ):
                     self.assertNotIn(mutation, sql)
 
-    def test_all_excluded_root_names_are_built_into_each_script(self) -> None:
+    def test_audited_exclusion_manifest_is_built_into_each_script(self) -> None:
+        for path, sql in (
+            (PREFLIGHT, self.preflight),
+            (SANITIZER, self.sanitizer),
+            (VERIFY, self.verify),
+        ):
+            with self.subTest(path=path.name, value=AUDITED_EXCLUDED_COMPANY_ID):
+                self.assertIn(AUDITED_EXCLUDED_COMPANY_ID, sql)
+            for audit_label, folder_id in AUDITED_EXCLUDED_FOLDERS:
+                with self.subTest(path=path.name, folder_id=folder_id):
+                    self.assertIn(folder_id, sql)
+                if path != VERIFY:
+                    with self.subTest(path=path.name, audit_label=audit_label):
+                        self.assertIn(f"'{audit_label}'", sql)
+
+        for sql in (self.preflight, self.sanitizer):
+            seeds = sql.split("), seeds(", 1)[1].split("), edges(", 1)[0]
+            self.assertIn("from audited_excluded_folders", seeds)
+            self.assertIn("join excluded_folder_names", seeds)
+            self.assertNotIn("parent_folder_id", seeds)
+            self.assertNotIn("missing_root_count", sql)
+
         for root_name in ROOT_NAMES:
             for path, sql in (
                 (PREFLIGHT, self.preflight),
@@ -624,9 +659,21 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
         self.assertEqual(fields[3], "primary", identity)
 
     def test_audited_current_entity_schema_preserves_allowed_data(self) -> None:
-        bridge_company = "90000000-0000-4000-8000-000000000001"
+        bridge_company = AUDITED_EXCLUDED_COMPANY_ID
         ordinary_type = "90000000-0000-4000-8000-000000000002"
         ordinary_entity = "90000000-0000-4000-8000-000000000003"
+        allowed_parent = "90000000-0000-4000-8000-000000000004"
+        excluded_child = "90000000-0000-4000-8000-000000000005"
+        missing_manifest_error = self.run_sql_failure(self.script_sql(PREFLIGHT))
+        self.assertIn(
+            "audited excluded explorer folder identities are missing",
+            missing_manifest_error,
+        )
+        missing_sanitizer_error = self.run_sql_failure(self.script_sql(SANITIZER))
+        self.assertIn(
+            "audited excluded explorer folder identities are missing",
+            missing_sanitizer_error,
+        )
         self.run_sql(
             f"""
             insert into public.companies(company_id,name)
@@ -648,18 +695,38 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             values ('{bridge_company}','{ordinary_entity}','{ordinary_type}','Preserved Ordinary Entity');
             insert into public.company_explorer_folders(
               company_id,folder_id,parent_folder_id,name
-            )
-            select '{bridge_company}',gen_random_uuid(),null,root_name
-            from (values
-              ('Sidebar Huddles Private'),('TK'),('Finance 1'),('Finance 1.5'),
-              ('Finance 2'),('HR 1'),('HR 1.5'),('HR 2'),('Legal'),('FO')
-            ) roots(root_name);
+            ) values
+              ('{bridge_company}','{allowed_parent}',null,'Allowed parent'),
+              ('{bridge_company}','019fcceb-fc3f-7000-afe8-753caec7192d',null,'Sidebar Huddles Private'),
+              ('{bridge_company}','019e6a1f-03c3-7000-b82f-700c63804e55',null,'TK'),
+              ('{bridge_company}','019e481c-8883-709c-ab8a-732ab4cc905d','{allowed_parent}','8. Finance1 (All Teams)'),
+              ('{bridge_company}','019e8fb8-0487-7000-9ea2-5e49697c9e50',null,'8. Finance1.5 (Fin Only)'),
+              ('{bridge_company}','019e8fb0-a1c7-7000-991a-828bde4514ee',null,'8. Finance2 (Fin Executive)'),
+              ('{bridge_company}','019e6ff3-e03e-7000-80c7-bd9aaaa266ed',null,'9. HR1'),
+              ('{bridge_company}','019e8fbb-4e49-7000-b59e-03bc60c93772',null,'9. HR1.5'),
+              ('{bridge_company}','019e8fbb-2ae3-7000-ad45-92438718f024',null,'9. HR2'),
+              ('{bridge_company}','019e8fbe-f567-7000-b483-e855cc8f46a6',null,'9. Legal'),
+              ('{bridge_company}','019e481f-3f20-767e-8c2a-5b37fca774ad',null,'FO'),
+              ('{bridge_company}','{excluded_child}','019e481c-8883-709c-ab8a-732ab4cc905d','Renamed private child');
             """
         )
 
-        self.run_sql(self.script_sql(PREFLIGHT))
+        preflight_output = self.run_sql(self.script_sql(PREFLIGHT))
+        self.assertIn(
+            "Finance 1|company_explorer_folder|nested",
+            preflight_output,
+        )
+        surviving_manifest_error = self.run_sql_failure(self.verifier_sql())
+        self.assertIn(
+            "audited excluded explorer folder identity or denied folder name remains",
+            surviving_manifest_error,
+        )
         self.run_sql(self.script_sql(SANITIZER))
         self.run_sql(self.verifier_sql())
+
+        manifest_ids_sql = ",".join(
+            f"'{folder_id}'" for _, folder_id in AUDITED_EXCLUDED_FOLDERS
+        )
 
         result = self.run_sql(
             f"""
@@ -680,11 +747,18 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
                   and entity_type_id='a17e0000-0000-4000-8000-000000000001'),
               (select count(*) from public.entities
                where company_id='{bridge_company}' and entity_id='{ordinary_entity}'),
-              (select count(*) from public.schema_migrations);
+              (select count(*) from public.schema_migrations),
+              (select count(*) from public.company_explorer_folders
+               where company_id='{bridge_company}' and folder_id in ({manifest_ids_sql})),
+              (select count(*) from public.company_explorer_folders
+               where company_id='{bridge_company}' and folder_id='{allowed_parent}'),
+              (select count(*) from public.company_explorer_folders
+               where company_id='{bridge_company}' and folder_id='{excluded_child}');
             """
         )
         self.assertEqual(
-            result.split("|"), ["t", "t", "5", "t", "1", "5", "1", "0"]
+            result.split("|"),
+            ["t", "t", "5", "t", "1", "5", "1", "0", "0", "1", "0"],
         )
 
     def test_non_owning_boundary_and_typed_entity_link_collisions(self) -> None:
@@ -717,6 +791,7 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
         valid_person_field = "84000000-0000-4000-8000-000000000001"
         invalid_person_field = "84000000-0000-4000-8000-000000000002"
         huddle_root = "85000000-0000-4000-8000-000000000001"
+        huddle_allowed_parent = "85000000-0000-4000-8000-000000000002"
         excluded_huddle = "86000000-0000-4000-8000-000000000001"
         surviving_huddle = "86000000-0000-4000-8000-000000000002"
         excluded_huddle_node = "86000000-0000-4000-8000-000000000011"
@@ -733,6 +808,21 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             insert into public.companies(company_id,name) values
               ('{company_a}','Fixture A'),
               ('{company_b}','Fixture B');
+
+            insert into public.company_explorer_folders(
+              company_id,folder_id,parent_folder_id,name
+            ) values
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019fcceb-fc3f-7000-afe8-753caec7192d',null,'Sidebar Huddles Private'),
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019e6a1f-03c3-7000-b82f-700c63804e55',null,'TK'),
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019e481c-8883-709c-ab8a-732ab4cc905d','90000000-0000-4000-8000-000000000004','8. Finance1 (All Teams)'),
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019e8fb8-0487-7000-9ea2-5e49697c9e50',null,'8. Finance1.5 (Fin Only)'),
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019e8fb0-a1c7-7000-991a-828bde4514ee',null,'8. Finance2 (Fin Executive)'),
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019e6ff3-e03e-7000-80c7-bd9aaaa266ed',null,'9. HR1'),
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019e8fbb-4e49-7000-b59e-03bc60c93772',null,'9. HR1.5'),
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019e8fbb-2ae3-7000-ad45-92438718f024',null,'9. HR2'),
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019e8fbe-f567-7000-b483-e855cc8f46a6',null,'9. Legal'),
+              ('{AUDITED_EXCLUDED_COMPANY_ID}','019e481f-3f20-767e-8c2a-5b37fca774ad',null,'FO'),
+              ('{company_b}','019fcceb-fc3f-7000-afe8-753caec7192d',null,'Allowed same-ID Company folder');
 
             insert into public.users(user_id,cognito_subject,email,display_name) values
               ('{user_a}','dev-fixture-user-a','fixture-user-a@example.test','Fixture User A'),
@@ -811,8 +901,10 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             );
             set session_replication_role = origin;
 
-            insert into public.huddle_explorer_folders(company_id,folder_id,parent_folder_id,name)
-            values ('{company_a}','{huddle_root}',null,'TK');
+            insert into public.huddle_explorer_folders(company_id,folder_id,parent_folder_id,name) values
+              ('{company_a}','{huddle_allowed_parent}',null,'Allowed Huddle parent'),
+              ('{company_a}','{huddle_root}','{huddle_allowed_parent}','TK'),
+              ('{company_b}','019fcceb-fc3f-7000-afe8-753caec7192d',null,'Allowed same-ID Huddle folder');
 
             insert into public.huddle_logic_gates(company_id,huddle_logic_gate_id,header)
             values ('{company_a}','{excluded_huddle}','Excluded Fixture Huddle');
@@ -1022,6 +1114,23 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
         )
 
         self.run_sql(self.script_sql(SANITIZER))
+
+        identity_boundary = self.run_sql(
+            f"""
+            select
+              (select count(*) from public.company_explorer_folders
+               where company_id='{company_b}'
+                 and folder_id='019fcceb-fc3f-7000-afe8-753caec7192d'),
+              (select count(*) from public.huddle_explorer_folders
+               where company_id='{company_b}'
+                 and folder_id='019fcceb-fc3f-7000-afe8-753caec7192d'),
+              (select count(*) from public.huddle_explorer_folders
+               where company_id='{company_a}' and folder_id='{huddle_allowed_parent}'),
+              (select count(*) from public.huddle_explorer_folders
+               where company_id='{company_a}' and folder_id='{huddle_root}');
+            """
+        )
+        self.assertEqual(identity_boundary.split("|"), ["1", "1", "1", "0"])
 
         result = self.run_sql(
             f"""
