@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AppModalPortal, useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
+import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget } from "../../app/AppModalPortal.js";
 import { ActionItemIcon, ExplorerEntityIcon } from "../../icons/index.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
 import {
@@ -26,6 +26,7 @@ import {
   EditorCalendarDateInput,
   editorCompanyUserLabel,
   editorCompanyUserMatches,
+  useFloatingLayerPosition,
 } from "./EditorFieldControls.js";
 import {
   createEmptyMangoTiptapDocument,
@@ -577,6 +578,12 @@ function EditableActionItemPopover({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savePromiseRef = useRef<Promise<boolean> | null>(null);
   const popoverRef = useRef<HTMLElement | null>(null);
+  const floatingOverlayRootRef = useRef<HTMLDivElement | null>(null);
+  const [floatingPortalTarget, setFloatingPortalTarget] = useState<HTMLDivElement | null>(null);
+  const setFloatingOverlayRoot = useCallback((element: HTMLDivElement | null) => {
+    floatingOverlayRootRef.current = element;
+    if (element) setFloatingPortalTarget(element);
+  }, []);
 
   const saveCurrentDraft = useCallback(async (): Promise<boolean> => {
     const target: ActionItemDraft = {
@@ -711,7 +718,7 @@ function EditableActionItemPopover({
     }
   };
 
-  useAppFloatingMenuDismissal(true, popoverRef, () => { void closeAfterFlush(); });
+  useAppFloatingMenuDismissal(true, popoverRef, () => { void closeAfterFlush(); }, floatingOverlayRootRef);
 
   const orderedFields = [...entity.entity_fields].sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
   const fieldByKey = new Map(orderedFields.map((field) => [actionItemFieldKey(field), field]));
@@ -731,15 +738,16 @@ function EditableActionItemPopover({
 
   return (
     <ActionItemFloatingPortal anchor={anchor}>
-      <section
-        ref={popoverRef}
-        role="dialog"
-        aria-modal="false"
-        aria-label={"Action Item details: " + (draft.name.trim() || entity.name)}
-        data-mango-entity-reference-preview="true"
-        data-mango-action-item-popover="true"
-        style={actionItemPopoverSurfaceStyle(anchor)}
-      >
+      <>
+        <section
+          ref={popoverRef}
+          role="dialog"
+          aria-modal="false"
+          aria-label={"Action Item details: " + (draft.name.trim() || entity.name)}
+          data-mango-entity-reference-preview="true"
+          data-mango-action-item-popover="true"
+          style={actionItemPopoverSurfaceStyle(anchor)}
+        >
         <header style={actionItemHeaderStyle}>
             <span className={color === "yellow" || color === "red" ? "mango-editor-action-item--" + color : undefined} style={actionItemIconBadgeStyle(color)}>
               <ActionItemIcon size={17} />
@@ -779,6 +787,7 @@ function EditableActionItemPopover({
                       value={draft.fieldValues[personField.entity_field_id] ?? ""}
                       companyUsers={companyUsers}
                       onChange={(value) => updateField(personField.entity_field_id, value)}
+                      floatingPortalTarget={floatingPortalTarget}
                     />
                   )}
                 </section>
@@ -790,6 +799,7 @@ function EditableActionItemPopover({
                       value={draft.fieldValues[field.entity_field_id] ?? ""}
                       companyUsers={companyUsers}
                       onChange={(value) => updateField(field.entity_field_id, value)}
+                      floatingPortalTarget={floatingPortalTarget}
                     />
                   ) : null)}
                 </section>
@@ -803,6 +813,7 @@ function EditableActionItemPopover({
                       value={draft.fieldValues[field.entity_field_id] ?? ""}
                       companyUsers={companyUsers}
                       onChange={(value) => updateField(field.entity_field_id, value)}
+                      floatingPortalTarget={floatingPortalTarget}
                     />
                   ))}
                 </section>
@@ -814,12 +825,19 @@ function EditableActionItemPopover({
                     value={draft.fieldValues[statusField.entity_field_id] ?? ""}
                     companyUsers={companyUsers}
                     onChange={(value) => updateField(statusField.entity_field_id, value)}
+                    floatingPortalTarget={floatingPortalTarget}
                   />
                 </section>
               )}
             </div>
         </div>
-      </section>
+        </section>
+        <div
+          ref={setFloatingOverlayRoot}
+          data-mango-action-item-floating-fields="true"
+          style={{ position: "fixed", left: 0, top: 0, width: 0, height: 0, zIndex: 12050, pointerEvents: "none" }}
+        />
+      </>
     </ActionItemFloatingPortal>
   );
 }
@@ -829,11 +847,13 @@ function ActionItemFieldControl({
   value,
   companyUsers,
   onChange,
+  floatingPortalTarget,
 }: {
   field: EntityField;
   value: string;
   companyUsers: readonly CompanyUser[];
   onChange: (value: string) => void;
+  floatingPortalTarget: HTMLDivElement | null;
 }) {
   const id = "action-item-field-" + field.entity_field_id;
   const select = (children: React.ReactNode) => (
@@ -863,7 +883,7 @@ function ActionItemFieldControl({
     return (
       <div style={editorLabelStyle}>
         <label htmlFor={id}>{field.name}</label>
-        <ActionItemPersonPicker id={id} value={value} companyUsers={companyUsers} onChange={onChange} />
+        <ActionItemPersonPicker id={id} value={value} companyUsers={companyUsers} onChange={onChange} floatingPortalTarget={floatingPortalTarget} />
       </div>
     );
   } else if (field.field_type === "date") {
@@ -874,11 +894,12 @@ function ActionItemFieldControl({
           id={id}
           value={value}
           ariaLabel={"Value for " + field.name}
-          accent="#0f766e"
+          accent="#38bdf8"
           onChange={onChange}
           containerStyle={{ gridTemplateColumns: "minmax(0, 1fr) 34px" }}
           inputStyle={{ ...editorInputStyle, borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
           buttonStyle={{ width: 34, height: 34, borderTopLeftRadius: 0, borderBottomLeftRadius: 0 }}
+          floatingPortalTarget={floatingPortalTarget}
         />
       </div>
     );
@@ -897,17 +918,23 @@ function ActionItemPersonPicker({
   value,
   companyUsers,
   onChange,
+  floatingPortalTarget,
 }: {
   id: string;
   value: string;
   companyUsers: readonly CompanyUser[];
   onChange: (value: string) => void;
+  floatingPortalTarget: HTMLDivElement | null;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
   const selectedUser = companyUsers.find((user) => user.user_id === value);
   const selectedLabel = value ? actionItemPersonLabel(selectedUser) : "";
   const [query, setQuery] = useState(selectedLabel);
   const [open, setOpen] = useState(false);
+  const defaultResultsPortalTarget = useAppOverlayPortalTarget(rootRef.current?.ownerDocument);
+  const resultsPortalTarget = floatingPortalTarget ?? defaultResultsPortalTarget;
+  const resultsPosition = useFloatingLayerPosition(rootRef, open, { width: 360, maxHeight: 196 });
   const matchingUsers = useMemo(() => [...companyUsers]
     .filter((user) => editorCompanyUserMatches(user, query))
     .sort((left, right) => editorCompanyUserLabel(left).localeCompare(editorCompanyUserLabel(right), undefined, { numeric: true, sensitivity: "base" })), [companyUsers, query]);
@@ -916,7 +943,7 @@ function ActionItemPersonPicker({
   useEffect(() => {
     if (!open) setQuery(selectedLabel);
   }, [open, selectedLabel]);
-  useAppFloatingMenuDismissal(open, rootRef, () => setOpen(false));
+  useAppFloatingMenuDismissal(open, rootRef, () => setOpen(false), resultsRef);
 
   const choose = (userID: string, label: string) => {
     setQuery(label);
@@ -932,7 +959,7 @@ function ActionItemPersonPicker({
       query={query}
       placeholder="Search company users"
       accent="rgba(148,163,184,.32)"
-      showResults={open}
+      showResults={open && Boolean(resultsPosition)}
       hasResults={showUnassigned || matchingUsers.length > 0}
       emptyMessage="No matching company users"
       onQueryChange={(nextQuery) => {
@@ -955,14 +982,16 @@ function ActionItemPersonPicker({
       }}
       style={{ position: "relative", minWidth: 0 }}
       inputStyle={{ width: "100%", minHeight: 34, padding: "0 9px", fontSize: 12, fontWeight: 600 }}
-      listStyle={actionItemPickerMenuStyle}
+      resultsPortalTarget={resultsPortalTarget}
+      resultsContainerRef={resultsRef}
+      listStyle={resultsPosition ? actionItemPersonPickerMenuStyle(resultsPosition) : undefined}
       onBlur={(event) => {
-        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        if (event.relatedTarget instanceof Node && (event.currentTarget.contains(event.relatedTarget) || resultsRef.current?.contains(event.relatedTarget))) return;
         setOpen(false);
       }}
     >
       {showUnassigned && (
-        <button type="button" role="option" aria-selected={!value} onMouseDown={(event) => event.preventDefault()} onClick={() => choose("", "")} style={actionItemPickerOptionStyle}>
+        <button type="button" role="option" aria-selected={!value} onMouseDown={(event) => event.preventDefault()} onClick={() => choose("", "")} style={actionItemPersonPickerOptionStyle}>
           <span aria-hidden="true" style={actionItemPersonAvatarStyle}>—</span>
           <span>Unassigned</span>
         </button>
@@ -970,11 +999,11 @@ function ActionItemPersonPicker({
       {matchingUsers.map((user) => {
         const label = actionItemPersonLabel(user);
         return (
-          <button key={user.user_id} type="button" role="option" aria-selected={user.user_id === value} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(user.user_id, label)} style={actionItemPickerOptionStyle}>
+          <button key={user.user_id} type="button" role="option" aria-selected={user.user_id === value} onMouseDown={(event) => event.preventDefault()} onClick={() => choose(user.user_id, label)} style={actionItemPersonPickerOptionStyle}>
             <span aria-hidden="true" style={actionItemPersonAvatarStyle}>{label.slice(0, 1).toLocaleUpperCase()}</span>
             <span style={{ minWidth: 0, display: "grid", textAlign: "left" }}>
               <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-              {user.email?.trim() && user.display_name?.trim() && <span style={{ color: "#64748b", fontSize: 10, fontWeight: 600 }}>{user.email.trim()}</span>}
+              {user.email?.trim() && user.display_name?.trim() && <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#64748b", fontSize: 10, fontWeight: 600 }}>{user.email.trim()}</span>}
             </span>
           </button>
         );
@@ -1202,7 +1231,9 @@ const actionItemIconBadgeStyle = (color: string | null): React.CSSProperties => 
 const actionItemCloseButtonStyle: React.CSSProperties = { width: 30, height: 30, border: "1px solid rgba(185,28,28,.30)", borderRadius: 9, background: "linear-gradient(145deg,#fff5f5,#fecaca)", color: "#b91c1c", boxShadow: "3px 3px 8px rgba(185,28,28,.13), -2px -2px 7px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.84)", cursor: "pointer", fontSize: 18, fontWeight: 900, lineHeight: 1 };
 const actionItemMetadataCardStyle: React.CSSProperties = { display: "grid", gap: 9, padding: 12, border: "1px solid transparent", borderRadius: 14, background: "linear-gradient(145deg,rgba(255,255,255,.98),rgba(241,245,249,.90)) padding-box, linear-gradient(145deg,rgba(255,255,255,.98),rgba(148,163,184,.24)) border-box", boxShadow: "7px 7px 16px rgba(100,116,139,.15), -5px -5px 14px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.96)" };
 const actionItemPickerMenuStyle: React.CSSProperties = { position: "absolute", zIndex: 4, left: 0, right: 0, top: "calc(100% + 4px)", maxHeight: 190, overflowY: "auto", display: "grid", gap: 3, padding: 5, border: "1px solid rgba(148,163,184,.34)", borderRadius: 9, background: "#ffffff", boxShadow: "0 12px 28px rgba(15,23,42,.18)" };
+const actionItemPersonPickerMenuStyle = (position: { left: number; top: number; width: number; maxHeight: number }): React.CSSProperties => ({ position: "fixed", zIndex: 12060, left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight, overflowY: "auto", pointerEvents: "auto", boxSizing: "border-box", display: "grid", alignContent: "start", gap: 4, padding: 7, border: "1px solid rgba(255,255,255,.92)", borderRadius: 13, background: "linear-gradient(145deg,rgba(255,255,255,.99),rgba(240,249,255,.97))", boxShadow: "12px 14px 32px rgba(71,85,105,.22), -7px -7px 20px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.98)" });
 const actionItemPickerOptionStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 32, display: "grid", gridTemplateColumns: "24px minmax(0,1fr)", alignItems: "center", gap: 8, border: 0, borderRadius: 7, background: "transparent", color: "#0f172a", padding: "4px 7px", font: "inherit", fontSize: 11, fontWeight: 750, cursor: "pointer", textAlign: "left" };
+const actionItemPersonPickerOptionStyle: React.CSSProperties = { ...actionItemPickerOptionStyle, minHeight: 42, border: "1px solid rgba(148,163,184,.16)", borderRadius: 9, background: "linear-gradient(145deg,rgba(255,255,255,.98),rgba(241,245,249,.82))", boxShadow: "2px 2px 7px rgba(148,163,184,.12), -2px -2px 6px rgba(255,255,255,.82), inset 1px 1px 0 rgba(255,255,255,.94)" };
 const actionItemPersonAvatarStyle: React.CSSProperties = { width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 999, background: "#ccfbf1", color: "#115e59", fontSize: 10, fontWeight: 900 };
 const actionItemColorSwatchStyle = (fill: string): React.CSSProperties => ({ width: 18, height: 18, display: "block", border: "1px solid rgba(15,23,42,.3)", borderRadius: 4, background: fill, boxShadow: "inset 0 1px 0 rgba(255,255,255,.55)" });
 const editorLabelStyle: React.CSSProperties = { display: "grid", gap: 5, color: "#475569", fontSize: 11, fontWeight: 850 };

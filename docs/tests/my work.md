@@ -1,6 +1,6 @@
 # My Work Business Logic Laws
 
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 MW1 - The page is named My Work and is the first built-in item beneath My Tower, immediately above Projects.
 
@@ -95,6 +95,12 @@ MW45 - A colored Action Item keeps its established raised pulsing icon, while it
 MW46 - Every universal grouping dialog opens as a fixed elevated overlay anchored to its grouping button. It never becomes a clipped section descendant, changes a section's scroll position, or moves the underlying My Work layout.
 
 MW47 - Opening an Action Item from My Work anchors the existing exact Action Item editor to the activation point above the current page. The editor and its field cards use the elevated My Work surface treatment and never become a right-side layout column.
+
+MW48 - The Action Item Person in charge search opens a viewport-clamped elevated result overlay wide enough for full identity context, shows four result rows before scrolling, and is never clipped by the Action Item card.
+
+MW49 - Action Item date fields use the shared elevated calendar with a light-blue trigger. The calendar opens above the current layout, supports direct date selection, and does not close the Action Item editor when used.
+
+MW50 - Every universal grouping dialog uses raised grouping rows, raised level tags and buttons, and recessed field selectors within its elevated overlay.
 
 ## Process Story: One person sees assigned work and current company context
 
