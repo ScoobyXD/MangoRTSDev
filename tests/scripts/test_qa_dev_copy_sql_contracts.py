@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -15,6 +17,8 @@ RUNBOOK = ROOT / "docs" / "infra" / "mangorts-qa-environment-runbook.md"
 COPY_DOCKERFILE = ROOT / "backend" / "Dockerfile.qa-copy"
 COPY_ENTRYPOINT = ROOT / "scripts" / "qa_fargate_copy_entrypoint.sh"
 COPY_LAUNCHER = ROOT / "scripts" / "qa_run_data_copy_task.ps1"
+COPY_LAUNCHER_CONTRACT = ROOT / "tests" / "scripts" / "qa_run_data_copy_task_contract.ps1"
+COPY_AWS_ARGV_PROBE = ROOT / "tests" / "scripts" / "qa_copy_aws_argv_probe.py"
 
 ROOT_NAMES = (
     "sidebar huddles private",
@@ -84,7 +88,7 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("qa_dev_copy_sanitize.sql", self.copy_entrypoint)
         self.assertIn("qa_dev_copy_verify.sql", self.copy_entrypoint)
         self.assertNotRegex(self.copy_launcher, r"(?m)^\s*taskrolearn\s*=")
-        self.assertIn('properties.name -contains "taskrolearn"', self.copy_launcher)
+        self.assertIn('properties["taskrolearn"]', self.copy_launcher)
         self.assertIn("$registeredtaskrolearn", self.copy_launcher)
         self.assertIn('assignpublicip = "disabled"', self.copy_launcher)
         self.assertIn("${devreadonlysecretarn}:password::", self.copy_launcher)
@@ -120,7 +124,8 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("deregister-task-definition", self.copy_launcher)
         self.assertIn("recovery-window-in-days", self.copy_launcher)
         self.assertIn('"cognito-idp", "list-users"', self.copy_launcher)
-        self.assertIn('"--filter", "email = `\"$jonatqaemail`\""', self.copy_launcher)
+        self.assertIn('"--cli-input-json", "file://$listusersinputpath"', self.copy_launcher)
+        self.assertNotIn('"--filter", "email = `\"$jonatqaemail`\""', self.copy_launcher)
         self.assertNotIn('"cognito-idp", "admin-get-user"', self.copy_launcher)
         self.assertIn("-allowedtaskarn $taskarn", self.copy_launcher)
         self.assertGreaterEqual(self.copy_launcher.count("assert-qastorageheadroom"), 4)
@@ -129,30 +134,79 @@ class QADevCopySQLContracts(unittest.TestCase):
 
     def test_launcher_normalizes_optional_aws_fields_under_strict_mode(self) -> None:
         for guarded_property in (
-            'properties.name -contains "taskrolearn"',
-            'properties.name -contains "failures"',
-            'properties.name -contains "tasks"',
-            'properties.name -contains "containers"',
-            'properties.name -contains "exitcode"',
-            'properties.name -contains "stoppedreason"',
-            'properties.name -contains "reason"',
+            'properties["taskrolearn"]',
+            'properties["taskdefinition"]',
+            'properties["exitcode"]',
+            'properties["stoppedreason"]',
+            'properties["reason"]',
         ):
             self.assertIn(guarded_property, self.copy_launcher)
         for normalized_array in (
-            "$listedusers = @(if",
-            "$runfailures = @(if",
-            "$runtasks = @(if",
-            "$descriptionfailures = @(if",
-            "$descriptiontasks = @(if",
-            "$taskcontainers = @(if",
-            "$permissions = @(if",
-            "$sourcegroups = @(if",
+            '$listedusers = @(get-awsresponselist -response $listed -propertyname "users")',
+            '$failures = @(get-awsresponselist -response $response -propertyname "failures")',
+            '$tasks = @(get-awsresponselist -response $response -propertyname "tasks")',
+            '$taskcontainers = @(get-awsresponselist -response $taskrecord -propertyname "containers")',
+            '$permissions = @(get-awsresponselist -response $databasegroup -propertyname "ippermissions")',
+            '$sourcegroups = @(get-awsresponselist -response $permission -propertyname "useridgrouppairs")',
         ):
             self.assertIn(normalized_array, self.copy_launcher)
         self.assertIn("$containerexitcode", self.copy_launcher)
-        self.assertIn('$null -ne $container.exitcode', self.copy_launcher)
+        self.assertIn("get-qacopycontainerexitcode", self.copy_launcher)
+        self.assertIn("get-registeredqacopytaskdefinitionarn", self.copy_launcher)
+        self.assertIn("get-soleecstask", self.copy_launcher)
+        self.assertIn("assert-qacopytasksucceeded", self.copy_launcher)
         self.assertIn("temporary dev-secret permission did not become visible", self.copy_launcher)
         self.assertIn("ecs did not confirm the exact qa copy task stopped", self.copy_launcher)
+
+    def test_launcher_behavior_in_each_available_powershell_engine(self) -> None:
+        candidates = (
+            ("Windows PowerShell 5.1", "powershell.exe"),
+            ("PowerShell 7", "pwsh.exe" if os.name == "nt" else "pwsh"),
+        )
+        engines: list[tuple[str, str]] = []
+        seen_paths: set[str] = set()
+        for label, command in candidates:
+            executable = shutil.which(command)
+            if executable is None:
+                continue
+            key = str(Path(executable).resolve()).casefold()
+            if key not in seen_paths:
+                engines.append((label, executable))
+                seen_paths.add(key)
+        if not engines:
+            self.skipTest("No PowerShell engine is available for the launcher behavior contract.")
+
+        for label, executable in engines:
+            with self.subTest(engine=label):
+                command = [executable, "-NoLogo", "-NoProfile", "-NonInteractive"]
+                if os.name == "nt":
+                    command.extend(["-ExecutionPolicy", "Bypass"])
+                command.extend(
+                    [
+                        "-File",
+                        str(COPY_LAUNCHER_CONTRACT),
+                        "-LauncherPath",
+                        str(COPY_LAUNCHER),
+                        "-PythonExecutable",
+                        sys.executable,
+                        "-AwsProbePath",
+                        str(COPY_AWS_ARGV_PROBE),
+                    ]
+                )
+                completed = subprocess.run(
+                    command,
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    timeout=60,
+                    check=False,
+                )
+                self.assertEqual(
+                    completed.returncode,
+                    0,
+                    msg=f"{label} launcher contract failed.\nstdout:\n{completed.stdout}\nstderr:\n{completed.stderr}",
+                )
+                self.assertIn("QA copy launcher behavioral contract passed", completed.stdout)
 
     def test_preflight_and_sanitizer_are_raw_database_only(self) -> None:
         raw_guard = "^mangorts_qa_raw_[0-9]{8}(_[a-z0-9]+)*$"
