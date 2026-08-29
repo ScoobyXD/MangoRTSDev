@@ -22,7 +22,7 @@ MW9 - Selecting a different Node role replaces only the Node rows. It preserves 
 
 MW10 - Mine requires exact canonical `person_in_charge` equal to the subject. Delegated requires exact canonical `assigned_by` equal to the subject and a nonnull `person_in_charge` for a different member; creator metadata, Source, and relationships are not assignment sources.
 
-MW11 - The Action Items header places its compact Mine/Delegated control immediately left of its grouping button. It uses the established elevated segmented-control presentation and keyboard/accessibility behavior and remains usable as the header resizes. The Nodes header places the unchanged established RACI selector immediately left of its grouping button. Each section owns an independent grouping stack, and both grouping buttons use the approved staggered three-line icon.
+MW11 - The Action Items header places its Mine/Delegated control immediately to the right of the Action Items title. The control is larger than the former compact version, keeps the established elevated segmented-control keyboard/accessibility behavior, and gives the selected segment a light-blue gradient instead of a dark fill. The Nodes header orders its right-side controls as RACI, History, then grouping, so the unchanged established RACI selector sits immediately left of History. Each section owns an independent grouping stack, and both grouping buttons use the approved staggered three-line icon.
 
 MW12 - No grouping control outside those two section headers changes either section's grouping stack.
 
@@ -78,7 +78,7 @@ MW37 - A section never requests the same next cursor concurrently, ignores cance
 
 MW38 - My Work has independently adjustable widths between its three columns and an independently adjustable height between Action Items and Nodes. Every divider supports pointer and keyboard adjustment, remains within usable bounds, and saves the company-specific layout locally.
 
-MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact icons. Action Items, Nodes, Processes, and Projects each show their exact icon beside the section title.
+MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact icons. Action Items, Nodes, Processes, and Projects each show their exact icon beside the section title. Only the Action Items section-header icon combines the established Action Item colors: its outer ring is Yellow and its inner ring is Red; Action Item row and editor-chip icons still use each item's saved color.
 
 MW40 - Red Action Item icons and names use the established Huddle red treatment and pulse once per second. Yellow Action Item icons and names use the established Huddle yellow treatment and pulse once every two seconds.
 
@@ -110,7 +110,7 @@ MW53 - Each History list contains only completed work that still qualifies for t
 
 MW54 - An Action Item History timestamp is its canonical Status field update timestamp. A Node's canonical `completion_transition_timestamp` is updated atomically from each newly inserted immutable full Node snapshot: entering Done, Complete, or Completed sets that snapshot's timestamp, remaining complete preserves it, and reopening clears it so a later re-completion records the newer transition. Existing rows are backfilled once from immutable snapshots, a completed Node with no recorded transition falls back to its immutable Node creation timestamp, and History reads this persisted value without scanning snapshot history.
 
-MW55 - Every Action Item and Node row shows its current due date or empty state as the leftmost inline context label. A date on the current `America/Los_Angeles` business day reads `Due Today`; the next three dates read `Due Tomorrow`, `Due in two days`, and `Due in three days`; every later or earlier date keeps `Due Date:` plus its normal date. Every form keeps the shared clickable calendar control, and Process and Project chips follow it.
+MW55 - Every Action Item and Node row shows its current due date or empty state as its inline clickable calendar label. The calendar icon is immediately left of the date text with one compact gap and no empty spacer. A date on the current `America/Los_Angeles` business day reads `Due Today`, and the next three dates read `Due Tomorrow`, `Due in two days`, and `Due in three days`; every later or earlier date keeps `Due Date:` plus its normal date. The complete label treatment, including text and calendar icon, is Red for Due Today and Due Tomorrow, Yellow for Due in two or three days, and the established Purple for every ordinary date or empty-date form. Process and Project chips follow the date label.
 
 MW56 - The Action Item row's official due date is always its canonical Completion due date field. Inline Action Item due-date edits update that exact existing Entity field, while inline Node due-date edits update the exact Node. Rapid date commits are serialized per row so the user's latest calendar or typed choice is always the final saved value.
 
@@ -118,7 +118,7 @@ MW57 - After a same-page Action Item editor successfully renames an item or chan
 
 MW58 - Only the My Work page content uses the uniform 90-percent visual density shown by browser zoom at 90 percent. Its compensated page bounds still fill the available workspace, while the shared left sidebar keeps its normal size and interaction behavior.
 
-MW59 - Every Process row reserves the same four right-aligned Request, Pending, In Progress, and Review columns. Counts use the canonical Logic Gate work-status source and the established Pinned colors and order; Backlog and Done are excluded, and a zero keeps its fixed column empty instead of shifting another status.
+MW59 - Every Process row always shows the same four right-aligned Request, Pending, In Progress, and Review squares. Counts use the canonical Logic Gate work-status source and the established Pinned colors and order; Backlog and Done are excluded, and an empty status shows `0` in its fixed square instead of disappearing or shifting another status.
 
 ## Process Story: One person sees assigned work and current company context
 
@@ -134,7 +134,7 @@ The unnamed left column keeps Action Items above Nodes, shows editable inline du
 
 ↓
 
-The Nodes and Processes selectors both default to Responsible and change independently; each Process row shows four aligned canonical active-work counts, while the right column lists Projects whose assigned Team includes that member directly or through a current descendant group
+The Nodes and Processes selectors both default to Responsible and change independently; each Process row shows four aligned always-visible canonical active-work counts including zeros, while the right column lists Projects whose assigned Team includes that member directly or through a current descendant group
 
 ↓
 

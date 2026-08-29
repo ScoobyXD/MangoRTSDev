@@ -203,6 +203,7 @@ values (
 		fieldTypeIDs[index] = current.EntityFieldTypeID
 	}
 	colorValue := actionItemInitialFieldValue(ActionItemColorSystemKey, normalized.Color)
+	sourceValue := actionItemSourceValue(normalized.SourceResourceType, normalized.SourceResourceID)
 	result, err := tx.ExecContext(ctx, `
 insert into entity_fields (
   company_id, entity_field_id, entity_id, entity_field_type_id,
@@ -210,15 +211,16 @@ insert into entity_fields (
 )
 select $1::uuid, input.entity_field_id::uuid, $2::uuid, template.entity_field_type_id,
        template.name, template.field_type,
-       case template.system_key
-         when 'status' then template.config_jsonb->'default'
-         when 'color' then $5::jsonb
-         else null
+	       case template.system_key
+	         when 'status' then template.config_jsonb->'default'
+	         when 'color' then $5::jsonb
+	         when 'source' then $6::jsonb
+	         else null
        end,
        template.position
 from unnest($3::text[], $4::text[]) as input(entity_field_id, entity_field_type_id)
 join entity_field_types template
-  on template.company_id=$1::uuid and template.entity_field_type_id=input.entity_field_type_id::uuid`, normalized.CompanyID, entityID, fieldIDs, fieldTypeIDs, colorValue)
+  on template.company_id=$1::uuid and template.entity_field_type_id=input.entity_field_type_id::uuid`, normalized.CompanyID, entityID, fieldIDs, fieldTypeIDs, colorValue, sourceValue)
 	if err != nil {
 		return domain.Entity{}, mapEntitiesPostgresError(err)
 	}
@@ -226,13 +228,6 @@ join entity_field_types template
 		return domain.Entity{}, err
 	} else if count != int64(len(currentTemplates)) {
 		return domain.Entity{}, ErrConflict
-	}
-	if normalized.SourceResourceType != "" {
-		if _, err := tx.ExecContext(ctx, `
-insert into action_item_sources (company_id,entity_id,resource_type,resource_id)
-values ($1::uuid,$2::uuid,$3::text,$4::uuid)`, normalized.CompanyID, entityID, normalized.SourceResourceType, normalized.SourceResourceID); err != nil {
-			return domain.Entity{}, mapEntitiesPostgresError(err)
-		}
 	}
 	item, err := getPostgresEntity(ctx, tx, normalized.CompanyID, entityID)
 	if err != nil {
@@ -248,40 +243,30 @@ func validatePostgresActionItemSourceTx(ctx context.Context, tx *sql.Tx, input A
 	if input.SourceResourceType == "" {
 		return nil
 	}
-	var query string
+	var lockQuery string
 	accessType, accessID := input.SourceResourceType, input.SourceResourceID
 	switch input.SourceResourceType {
 	case EntityTypeNode:
-		query = `select exists(select 1 from nodes where company_id=$1::uuid and node_id=$2::uuid)`
+		lockQuery = `select node_id::text,node_id::text from nodes where company_id=$1::uuid and node_id=$2::uuid for key share`
 	case EntityTypeLogicGate:
-		query = `select exists(select 1 from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid)`
+		lockQuery = `select logic_gate_id::text,logic_gate_id::text from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid for key share`
 	case EntityTypeProject:
-		query = `select exists(select 1 from projects where company_id=$1::uuid and project_id=$2::uuid)`
+		lockQuery = `select project_id::text,project_id::text from projects where company_id=$1::uuid and project_id=$2::uuid for key share`
 	case EntityTypeHuddleNode:
-		query = `select exists(select 1 from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid)`
+		lockQuery = `select huddle_node_id::text,huddle_node_id::text from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid for key share`
 	case EntityTypeHuddleLogicGate:
-		query = `select exists(select 1 from huddle_logic_gates where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid and deleted_timestamp is null)`
+		lockQuery = `select huddle_logic_gate_id::text,huddle_logic_gate_id::text from huddle_logic_gates where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid and deleted_timestamp is null for key share`
 	case EntityTypeKPI:
-		var logicGateID string
-		err := tx.QueryRowContext(ctx, `select logic_gate_id::text from kpis where company_id=$1::uuid and kpi_id=$2::uuid and deleted_timestamp is null`, input.CompanyID, input.SourceResourceID).Scan(&logicGateID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		accessType, accessID = EntityTypeLogicGate, logicGateID
+		lockQuery = `select kpi_id::text,logic_gate_id::text from kpis where company_id=$1::uuid and kpi_id=$2::uuid and deleted_timestamp is null for key share`
+		accessType = EntityTypeLogicGate
 	default:
 		return ErrInvalid
 	}
-	if query != "" {
-		var exists bool
-		if err := tx.QueryRowContext(ctx, query, input.CompanyID, input.SourceResourceID).Scan(&exists); err != nil {
-			return err
-		}
-		if !exists {
-			return ErrNotFound
-		}
+	var lockedResourceID string
+	if err := tx.QueryRowContext(ctx, lockQuery, input.CompanyID, input.SourceResourceID).Scan(&lockedResourceID, &accessID); errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
 	}
 	var allowed bool
 	if err := tx.QueryRowContext(ctx, `select mangorts_user_can_access_resource($1::uuid,$2::text,$3::uuid,$4::uuid,'edit')`, input.CompanyID, accessType, accessID, input.CreatedByUserID).Scan(&allowed); err != nil {
@@ -299,20 +284,35 @@ func (r *PostgresRepo) GetActionItemSource(companyID, entityID string) (domain.A
 		return domain.ActionItemSource{}, ErrInvalid
 	}
 	var source domain.ActionItemSource
+	var value json.RawMessage
 	err := r.db.QueryRowContext(context.Background(), `
-select company_id::text,entity_id::text,resource_type,resource_id::text,created_timestamp
-from action_item_sources
-where company_id=$1::uuid and entity_id=$2::uuid`, companyID, entityID).Scan(
+select field.company_id::text,field.entity_id::text,field.value_jsonb,field.created_timestamp
+from entity_fields field
+join entities entity
+  on entity.company_id=field.company_id and entity.entity_id=field.entity_id
+join entity_types entity_type
+  on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
+where field.company_id=$1::uuid and field.entity_id=$2::uuid
+  and field.entity_field_type_id=$3::uuid
+  and entity_type.system_key=$4::text
+  and field.value_jsonb is not null`, companyID, entityID, ActionItemSourceFieldTypeID, ActionItemEntityTypeSystemKey).Scan(
 		&source.CompanyID,
 		&source.EntityID,
-		&source.ResourceType,
-		&source.ResourceID,
+		&value,
 		&source.CreatedTimestamp,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.ActionItemSource{}, ErrNotFound
 	}
-	return source, err
+	if err != nil {
+		return domain.ActionItemSource{}, err
+	}
+	var ok bool
+	source.ResourceType, source.ResourceID, ok = decodeActionItemSourceValue(value)
+	if !ok {
+		return domain.ActionItemSource{}, ErrNotFound
+	}
+	return source, nil
 }
 
 func lockPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {

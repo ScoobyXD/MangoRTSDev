@@ -22,7 +22,7 @@ type memoryNodeGraphEventSnapshot struct {
 	nodeEmailThreads               map[string]domain.CommunicationsNodeEmailThread
 	emailCollaborations            map[string]domain.CommunicationsEmailCollaboration
 	emailCollaborationParticipants map[string]domain.CommunicationsEmailCollaborationParticipant
-	actionItemSources              map[string]domain.ActionItemSource
+	entityFields                   map[string]domain.EntityField
 	domainEvents                   map[string]domain.DomainEvent
 	nodeCompletionTransitions      map[string]time.Time
 	effectiveAccess                map[string]domain.EffectiveResourceAccess
@@ -69,7 +69,7 @@ func (r *MemoryRepo) snapshotNodeGraphEventStateLocked() memoryNodeGraphEventSna
 		nodeEmailThreads:               cloneMemoryMap(r.nodeEmailThreads),
 		emailCollaborations:            cloneMemoryMap(r.emailCollaborations),
 		emailCollaborationParticipants: cloneMemoryMap(r.emailCollaborationParticipants),
-		actionItemSources:              cloneMemoryMap(r.actionItemSources),
+		entityFields:                   cloneMemoryMap(r.entityFields),
 		domainEvents:                   cloneMemoryMap(r.domainEvents),
 		nodeCompletionTransitions:      cloneMemoryMap(r.nodeCompletionTransitions),
 		effectiveAccess:                cloneMemoryMap(r.effectiveAccess),
@@ -92,7 +92,7 @@ func (r *MemoryRepo) restoreNodeGraphEventStateLocked(snapshot memoryNodeGraphEv
 	r.nodeEmailThreads = snapshot.nodeEmailThreads
 	r.emailCollaborations = snapshot.emailCollaborations
 	r.emailCollaborationParticipants = snapshot.emailCollaborationParticipants
-	r.actionItemSources = snapshot.actionItemSources
+	r.entityFields = snapshot.entityFields
 	r.domainEvents = snapshot.domainEvents
 	r.nodeCompletionTransitions = snapshot.nodeCompletionTransitions
 	r.effectiveAccess = snapshot.effectiveAccess

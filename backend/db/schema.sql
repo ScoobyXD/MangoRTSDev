@@ -3228,6 +3228,17 @@ declare
   expected_name text;
   expected_field_type text;
 begin
+  if tg_op <> 'DELETE'
+     and new.field_type='resource'
+     and (
+       new.entity_field_type_id <> 'a17e0000-0000-4000-8000-000000000107'::uuid
+       or new.entity_type_id <> 'a17e0000-0000-4000-8000-000000000001'::uuid
+       or new.entity_folder_id is not null
+       or new.system_key is distinct from 'source'
+       or new.name <> 'Source'
+     ) then
+    raise exception 'entity_resource_field_type_reserved' using errcode='23514';
+  end if;
   if tg_op <> 'INSERT' then
     select coalesce(entity_type.system_key='action_item',false)
     into old_is_action_item
@@ -3235,7 +3246,7 @@ begin
     where entity_type.company_id=old.company_id
       and entity_type.entity_type_id=old.entity_type_id;
     old_is_required := coalesce(old_is_action_item,false)
-      and old.system_key in ('person_in_charge','assigned_by','analysis_due_date','completion_due_date','status','color');
+      and old.system_key in ('person_in_charge','assigned_by','analysis_due_date','completion_due_date','status','color','source');
     if tg_op = 'DELETE' then
       if old_is_required and exists (select 1 from companies where company_id=old.company_id) then
         raise exception 'action_item_field_type_required:%',old.system_key using errcode='23514';
@@ -3263,8 +3274,8 @@ begin
     return new;
   end if;
   if new.system_key is null
-     or new.system_key not in ('person_in_charge','assigned_by','analysis_due_date','completion_due_date','status','color') then
-    if lower(btrim(new.name)) in ('person in charge','assigned by','analysis due date','completion due date','status','color') then
+     or new.system_key not in ('person_in_charge','assigned_by','analysis_due_date','completion_due_date','status','color','source') then
+    if lower(btrim(new.name)) in ('person in charge','assigned by','analysis due date','completion due date','status','color','source') then
       raise exception 'action_item_field_type_name_reserved:%',new.name using errcode='23514';
     end if;
     return new;
@@ -3277,7 +3288,8 @@ begin
     ('analysis_due_date','a17e0000-0000-4000-8000-000000000102'::uuid,'Analysis due date','date'),
     ('completion_due_date','a17e0000-0000-4000-8000-000000000103'::uuid,'Completion due date','date'),
     ('status','a17e0000-0000-4000-8000-000000000104'::uuid,'Status','choice'),
-    ('color','a17e0000-0000-4000-8000-000000000105'::uuid,'Color','color')
+    ('color','a17e0000-0000-4000-8000-000000000105'::uuid,'Color','color'),
+    ('source','a17e0000-0000-4000-8000-000000000107'::uuid,'Source','resource')
   ) as definition(system_key,expected_id,expected_name,expected_field_type)
   where definition.system_key=new.system_key;
   if new.entity_field_type_id <> expected_id
@@ -3323,7 +3335,12 @@ CREATE FUNCTION public.mangorts_maintain_entity_field_template_link() RETURNS tr
 declare
   template_field_type text;
   template_config jsonb;
+  template_system_key text;
+  template_entity_type_id uuid;
   person_id text;
+  resource_type text;
+  resource_id_text text;
+  resource_id uuid;
   date_text text;
   parsed_date date;
 begin
@@ -3333,8 +3350,8 @@ begin
     new.entity_field_type_id := null;
   end if;
   if new.entity_field_type_id is not null then
-    select template.field_type,template.config_jsonb
-    into template_field_type,template_config
+    select template.field_type,template.config_jsonb,template.system_key,template.entity_type_id
+    into template_field_type,template_config,template_system_key,template_entity_type_id
     from entity_field_types template
     join entities entity
       on entity.company_id=new.company_id
@@ -3355,6 +3372,15 @@ begin
        ) then
       raise exception 'entity_field_option_invalid' using errcode='23514';
     end if;
+  end if;
+  if new.field_type='resource' and (
+    new.entity_field_type_id is null
+    or new.entity_field_type_id <> 'a17e0000-0000-4000-8000-000000000107'::uuid
+    or template_entity_type_id is distinct from 'a17e0000-0000-4000-8000-000000000001'::uuid
+    or template_system_key is distinct from 'source'
+    or new.name <> 'Source'
+  ) then
+    raise exception 'entity_resource_field_reserved' using errcode='23514';
   end if;
   if new.value_jsonb is not null and new.field_type='date' then
     date_text := new.value_jsonb #>> '{}';
@@ -3380,6 +3406,17 @@ begin
            and membership.user_id=person_id::uuid
        ) then
       raise exception 'entity_field_person_not_company_member' using errcode='23503';
+    end if;
+  end if;
+  if new.value_jsonb is not null and new.field_type='resource' then
+    resource_type := new.value_jsonb->>'resource_type';
+    resource_id_text := new.value_jsonb->>'resource_id';
+    resource_id := mangorts_try_uuid(resource_id_text);
+    if resource_type not in ('node','logic_gate','project','huddle_node','huddle_logic_gate','kpi')
+       or resource_id is null
+       or resource_id::text<>resource_id_text
+       or not mangorts_entity_resource_exists(new.company_id,resource_type,resource_id) then
+      raise exception 'entity_field_resource_not_found' using errcode='23503';
     end if;
   end if;
   return new;
@@ -3453,7 +3490,7 @@ begin
      and entity_type.system_key='action_item'
     where template.company_id=old.company_id
       and template.entity_field_type_id=old.entity_field_type_id;
-    old_is_required := old_system_key in ('person_in_charge','assigned_by','analysis_due_date','completion_due_date','status','color');
+    old_is_required := old_system_key in ('person_in_charge','assigned_by','analysis_due_date','completion_due_date','status','color','source');
     if tg_op = 'DELETE' then
       if old_is_required and exists (
         select 1 from entities entity
@@ -3473,6 +3510,14 @@ begin
     ) then
       raise exception 'action_item_entity_field_immutable:%',old_system_key using errcode='23514';
     end if;
+    if old_system_key='source'
+       and new.value_jsonb is distinct from old.value_jsonb
+       and not (
+         pg_trigger_depth()>1 and new.value_jsonb is null and old.value_jsonb is not null
+         and not mangorts_entity_resource_exists(old.company_id,old.value_jsonb->>'resource_type',mangorts_try_uuid(old.value_jsonb->>'resource_id'))
+       ) then
+      raise exception 'action_item_source_immutable' using errcode='23514';
+    end if;
   elsif tg_op = 'DELETE' then
     return old;
   end if;
@@ -3487,6 +3532,7 @@ begin
            when 'completion_due_date' then 'Completion due date'
            when 'status' then 'Status'
            when 'color' then 'Color'
+           when 'source' then 'Source'
          end,
          case template.system_key
            when 'person_in_charge' then 'person'
@@ -3495,6 +3541,7 @@ begin
            when 'completion_due_date' then 'date'
            when 'status' then 'choice'
            when 'color' then 'color'
+           when 'source' then 'resource'
          end
   into new_system_key,new_expected_name,new_expected_field_type
   from entity_field_types template
@@ -3504,7 +3551,7 @@ begin
    and entity_type.system_key='action_item'
   where template.company_id=new.company_id
     and template.entity_field_type_id=new.entity_field_type_id
-    and template.system_key in ('person_in_charge','assigned_by','analysis_due_date','completion_due_date','status','color');
+    and template.system_key in ('person_in_charge','assigned_by','analysis_due_date','completion_due_date','status','color','source');
   if found and (new.name <> new_expected_name or new.field_type <> new_expected_field_type) then
     raise exception 'action_item_entity_field_invalid:%',new_system_key using errcode='23514';
   end if;
@@ -3514,122 +3561,103 @@ $$;
 
 
 --
--- Name: mangorts_validate_action_item_source(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: mangorts_entity_resource_exists(uuid, text, uuid); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.mangorts_validate_action_item_source() RETURNS trigger
+CREATE FUNCTION public.mangorts_entity_resource_exists(p_company_id uuid, p_resource_type text, p_resource_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  select case p_resource_type
+    when 'node' then exists(select 1 from nodes where company_id=p_company_id and node_id=p_resource_id)
+    when 'logic_gate' then exists(select 1 from logic_gates where company_id=p_company_id and logic_gate_id=p_resource_id)
+    when 'project' then exists(select 1 from projects where company_id=p_company_id and project_id=p_resource_id)
+    when 'huddle_node' then exists(select 1 from huddle_nodes where company_id=p_company_id and huddle_node_id=p_resource_id)
+    when 'huddle_logic_gate' then exists(select 1 from huddle_logic_gates where company_id=p_company_id and huddle_logic_gate_id=p_resource_id and deleted_timestamp is null)
+    when 'kpi' then exists(select 1 from kpis where company_id=p_company_id and kpi_id=p_resource_id and deleted_timestamp is null)
+    else false
+  end
+$$;
+
+
+--
+-- Name: mangorts_resource_is_in_recycle_payload(uuid, text, text, uuid); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_resource_is_in_recycle_payload(p_company_id uuid, p_table_name text, p_id_column text, p_resource_id uuid) RETURNS boolean
+    LANGUAGE sql STABLE
+    SET search_path TO 'public', 'pg_temp'
+    AS $$
+  select exists(
+    select 1 from recycle_bin_items recycle
+    cross join lateral jsonb_array_elements(coalesce(recycle.restore_payload->p_table_name,'[]'::jsonb)) restored(row_json)
+    where recycle.company_id=p_company_id and restored.row_json->>p_id_column=p_resource_id::text
+  )
+$$;
+
+
+--
+-- Name: mangorts_clear_entity_resource_fields_for_deleted_resource(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.mangorts_clear_entity_resource_fields_for_deleted_resource() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public', 'pg_temp'
     AS $$
+declare
+  resource_type text;
+  resource_id uuid;
+  id_column text;
 begin
-  if tg_op='UPDATE' then
-    raise exception 'action_item_source_immutable' using errcode='23514';
-  end if;
-
-  if tg_op='DELETE' then
-    if pg_trigger_depth()>1 then
-      return old;
-    end if;
-    raise exception 'action_item_source_immutable' using errcode='23514';
-  end if;
-
-  perform 1
-  from entities entity
-  join entity_types entity_type
-    on entity_type.company_id=entity.company_id
-   and entity_type.entity_type_id=entity.entity_type_id
-   and entity_type.system_key='action_item'
-  where entity.company_id=new.company_id
-    and entity.entity_id=new.entity_id
-  for key share of entity;
-
-  if not found then
-    raise exception 'action_item_source_requires_action_item' using errcode='23514';
-  end if;
-
-  if new.resource_type='node' then
-    perform 1 from nodes
-    where company_id=new.company_id and node_id=new.resource_id
-    for key share;
-  elsif new.resource_type='logic_gate' then
-    perform 1 from logic_gates
-    where company_id=new.company_id and logic_gate_id=new.resource_id
-    for key share;
-  elsif new.resource_type='project' then
-    perform 1 from projects
-    where company_id=new.company_id and project_id=new.resource_id
-    for key share;
-  elsif new.resource_type='huddle_node' then
-    perform 1 from huddle_nodes
-    where company_id=new.company_id and huddle_node_id=new.resource_id
-    for key share;
-  elsif new.resource_type='huddle_logic_gate' then
-    perform 1 from huddle_logic_gates
-    where company_id=new.company_id
-      and huddle_logic_gate_id=new.resource_id
-      and deleted_timestamp is null
-    for key share;
-  elsif new.resource_type='kpi' then
-    perform 1 from kpis
-    where company_id=new.company_id
-      and kpi_id=new.resource_id
-      and deleted_timestamp is null
-    for key share;
+  if tg_table_name='nodes' then
+    resource_type := 'node'; resource_id := old.node_id; id_column := 'node_id';
+  elsif tg_table_name='logic_gates' then
+    resource_type := 'logic_gate'; resource_id := old.logic_gate_id; id_column := 'logic_gate_id';
+  elsif tg_table_name='projects' then
+    resource_type := 'project'; resource_id := old.project_id; id_column := 'project_id';
+  elsif tg_table_name='huddle_nodes' then
+    resource_type := 'huddle_node'; resource_id := old.huddle_node_id; id_column := 'huddle_node_id';
+  elsif tg_table_name='huddle_logic_gates' then
+    resource_type := 'huddle_logic_gate'; resource_id := old.huddle_logic_gate_id; id_column := 'huddle_logic_gate_id';
+  elsif tg_table_name='kpis' then
+    resource_type := 'kpi'; resource_id := old.kpi_id; id_column := 'kpi_id';
   else
-    raise exception 'action_item_source_resource_type_invalid:%',new.resource_type using errcode='23514';
+    raise exception 'entity_resource_cleanup_type_invalid:%',tg_table_name using errcode='23514';
   end if;
-
-  if not found then
-    raise exception 'action_item_source_resource_not_found:%:%',new.resource_type,new.resource_id using errcode='23503';
-  end if;
-
-  return new;
+  if mangorts_resource_is_in_recycle_payload(old.company_id,tg_table_name,id_column,resource_id) then return old; end if;
+  update entity_fields set value_jsonb=null,updated_timestamp=clock_timestamp()
+  where company_id=old.company_id and field_type='resource'
+    and value_jsonb->>'resource_type'=resource_type
+    and mangorts_try_uuid(value_jsonb->>'resource_id')=resource_id;
+  return old;
 end;
 $$;
 
 
 --
--- Name: mangorts_delete_action_item_sources_for_resource(); Type: FUNCTION; Schema: public; Owner: -
+-- Name: mangorts_clear_entity_resource_fields_for_permanent_recycle_delete(); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.mangorts_delete_action_item_sources_for_resource() RETURNS trigger
+CREATE FUNCTION public.mangorts_clear_entity_resource_fields_for_permanent_recycle_delete() RETURNS trigger
     LANGUAGE plpgsql
     SET search_path TO 'public', 'pg_temp'
     AS $$
+declare endpoint record;
 begin
-  if tg_table_name='nodes' then
-    delete from action_item_sources
-    where company_id=old.company_id
-      and resource_type='node'
-      and resource_id=old.node_id;
-  elsif tg_table_name='logic_gates' then
-    delete from action_item_sources
-    where company_id=old.company_id
-      and resource_type='logic_gate'
-      and resource_id=old.logic_gate_id;
-  elsif tg_table_name='projects' then
-    delete from action_item_sources
-    where company_id=old.company_id
-      and resource_type='project'
-      and resource_id=old.project_id;
-  elsif tg_table_name='huddle_nodes' then
-    delete from action_item_sources
-    where company_id=old.company_id
-      and resource_type='huddle_node'
-      and resource_id=old.huddle_node_id;
-  elsif tg_table_name='huddle_logic_gates' then
-    delete from action_item_sources
-    where company_id=old.company_id
-      and resource_type='huddle_logic_gate'
-      and resource_id=old.huddle_logic_gate_id;
-  elsif tg_table_name='kpis' then
-    delete from action_item_sources
-    where company_id=old.company_id
-      and resource_type='kpi'
-      and resource_id=old.kpi_id;
-  else
-    raise exception 'action_item_source_delete_resource_invalid:%',tg_table_name using errcode='23514';
-  end if;
+  for endpoint in
+    select definition.resource_type,restored.row_json->>definition.id_column resource_id
+    from (values
+      ('nodes','node_id','node'),('logic_gates','logic_gate_id','logic_gate'),('projects','project_id','project'),
+      ('huddle_nodes','huddle_node_id','huddle_node'),('huddle_logic_gates','huddle_logic_gate_id','huddle_logic_gate'),('kpis','kpi_id','kpi')
+    ) definition(table_name,id_column,resource_type)
+    cross join lateral jsonb_array_elements(coalesce(old.restore_payload->definition.table_name,'[]'::jsonb)) restored(row_json)
+  loop
+    if not mangorts_entity_resource_exists(old.company_id,endpoint.resource_type,mangorts_try_uuid(endpoint.resource_id)) then
+      update entity_fields set value_jsonb=null,updated_timestamp=clock_timestamp()
+      where company_id=old.company_id and field_type='resource'
+        and value_jsonb->>'resource_type'=endpoint.resource_type and value_jsonb->>'resource_id'=endpoint.resource_id;
+    end if;
+  end loop;
   return old;
 end;
 $$;
@@ -5350,20 +5378,6 @@ CREATE TABLE public.raci_tabs_items (
 
 
 --
--- Name: action_item_sources; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.action_item_sources (
-    company_id uuid NOT NULL,
-    entity_id uuid NOT NULL,
-    resource_type text NOT NULL,
-    resource_id uuid NOT NULL,
-    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT action_item_sources_resource_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'huddle_node'::text, 'huddle_logic_gate'::text, 'kpi'::text])))
-);
-
-
---
 -- Name: entity_relationships; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5394,7 +5408,7 @@ CREATE TABLE public.entity_field_types (
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT entity_field_types_config_jsonb_chk CHECK (public.mangorts_entity_field_type_config_valid(field_type, config_jsonb)),
-    CONSTRAINT entity_field_types_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text, 'choice'::text, 'color'::text, 'person'::text]))),
+    CONSTRAINT entity_field_types_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text, 'choice'::text, 'color'::text, 'person'::text, 'resource'::text]))),
     CONSTRAINT entity_field_types_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text)),
     CONSTRAINT entity_field_types_position_chk CHECK (("position" >= 0)),
     CONSTRAINT entity_field_types_system_key_chk CHECK (((system_key IS NULL) OR (system_key ~ '^[a-z][a-z0-9_]*$'::text)))
@@ -5416,10 +5430,10 @@ CREATE TABLE public.entity_fields (
     "position" integer DEFAULT 0 NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT entity_fields_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text, 'choice'::text, 'color'::text, 'person'::text]))),
+    CONSTRAINT entity_fields_field_type_chk CHECK ((field_type = ANY (ARRAY['text'::text, 'number'::text, 'date'::text, 'boolean'::text, 'choice'::text, 'color'::text, 'person'::text, 'resource'::text]))),
     CONSTRAINT entity_fields_name_nonblank_chk CHECK ((btrim((name)::text) <> ''::text)),
     CONSTRAINT entity_fields_position_chk CHECK (("position" >= 0)),
-    CONSTRAINT entity_fields_value_shape_chk CHECK (((value_jsonb IS NULL) OR ((field_type = ANY (ARRAY['text'::text, 'date'::text, 'choice'::text, 'color'::text])) AND (jsonb_typeof(value_jsonb) = 'string'::text)) OR ((field_type = 'person'::text) AND (jsonb_typeof(value_jsonb) = 'string'::text) AND ((value_jsonb #>> '{}'::text[]) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)) OR ((field_type = 'number'::text) AND (jsonb_typeof(value_jsonb) = 'number'::text)) OR ((field_type = 'boolean'::text) AND (jsonb_typeof(value_jsonb) = 'boolean'::text))))
+    CONSTRAINT entity_fields_value_shape_chk CHECK (((value_jsonb IS NULL) OR ((field_type = ANY (ARRAY['text'::text, 'date'::text, 'choice'::text, 'color'::text])) AND (jsonb_typeof(value_jsonb) = 'string'::text)) OR ((field_type = 'person'::text) AND (jsonb_typeof(value_jsonb) = 'string'::text) AND ((value_jsonb #>> '{}'::text[]) ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text)) OR ((field_type = 'number'::text) AND (jsonb_typeof(value_jsonb) = 'number'::text)) OR ((field_type = 'boolean'::text) AND (jsonb_typeof(value_jsonb) = 'boolean'::text)) OR ((field_type = 'resource'::text) AND (jsonb_typeof(value_jsonb) = 'object'::text) AND (jsonb_typeof((value_jsonb -> 'resource_type'::text)) = 'string'::text) AND (jsonb_typeof((value_jsonb -> 'resource_id'::text)) = 'string'::text) AND (value_jsonb = jsonb_build_object('resource_type', (value_jsonb ->> 'resource_type'::text), 'resource_id', (value_jsonb ->> 'resource_id'::text))) AND ((value_jsonb ->> 'resource_type'::text) = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'huddle_node'::text, 'huddle_logic_gate'::text, 'kpi'::text])) AND ((value_jsonb ->> 'resource_id'::text) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) AND ((value_jsonb ->> 'resource_id'::text) = (((value_jsonb ->> 'resource_id'::text))::uuid)::text))))
 );
 
 
@@ -6543,14 +6557,6 @@ ALTER TABLE ONLY public.raci_tabs_items
 
 
 --
--- Name: action_item_sources action_item_sources_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.action_item_sources
-    ADD CONSTRAINT action_item_sources_pkey PRIMARY KEY (company_id, entity_id);
-
-
---
 -- Name: entity_relationships entity_relationships_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7658,10 +7664,10 @@ CREATE INDEX idx_entity_fields_field_type_link ON public.entity_fields USING btr
 
 
 --
--- Name: idx_action_item_sources_source; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_entity_fields_resource_endpoint; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE INDEX idx_action_item_sources_source ON public.action_item_sources USING btree (company_id, resource_type, resource_id, entity_id);
+CREATE INDEX idx_entity_fields_resource_endpoint ON public.entity_fields USING btree (company_id, ((value_jsonb ->> 'resource_type'::text)), public.mangorts_try_uuid((value_jsonb ->> 'resource_id'::text)), entity_id) WHERE ((field_type = 'resource'::text) AND (value_jsonb IS NOT NULL));
 
 
 --
@@ -8519,13 +8525,6 @@ CREATE TRIGGER trg_protect_action_item_entity_field BEFORE INSERT OR DELETE OR U
 
 
 --
--- Name: action_item_sources trg_validate_action_item_source; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_validate_action_item_source BEFORE INSERT OR DELETE OR UPDATE ON public.action_item_sources FOR EACH ROW EXECUTE FUNCTION public.mangorts_validate_action_item_source();
-
-
---
 -- Name: entity_field_types trg_unlink_entity_fields_after_template_retype; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -8554,45 +8553,52 @@ CREATE TRIGGER trg_delete_huddle_logic_gate_entity_relationships AFTER DELETE ON
 
 
 --
--- Name: nodes trg_delete_node_action_item_sources; Type: TRIGGER; Schema: public; Owner: -
+-- Name: nodes trg_clear_node_entity_resource_fields; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_delete_node_action_item_sources AFTER DELETE ON public.nodes FOR EACH ROW EXECUTE FUNCTION public.mangorts_delete_action_item_sources_for_resource();
-
-
---
--- Name: logic_gates trg_delete_logic_gate_action_item_sources; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_delete_logic_gate_action_item_sources AFTER DELETE ON public.logic_gates FOR EACH ROW EXECUTE FUNCTION public.mangorts_delete_action_item_sources_for_resource();
+CREATE TRIGGER trg_clear_node_entity_resource_fields AFTER DELETE ON public.nodes FOR EACH ROW EXECUTE FUNCTION public.mangorts_clear_entity_resource_fields_for_deleted_resource();
 
 
 --
--- Name: projects trg_delete_project_action_item_sources; Type: TRIGGER; Schema: public; Owner: -
+-- Name: logic_gates trg_clear_logic_gate_entity_resource_fields; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_delete_project_action_item_sources AFTER DELETE ON public.projects FOR EACH ROW EXECUTE FUNCTION public.mangorts_delete_action_item_sources_for_resource();
-
-
---
--- Name: huddle_nodes trg_delete_huddle_node_action_item_sources; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_delete_huddle_node_action_item_sources AFTER DELETE ON public.huddle_nodes FOR EACH ROW EXECUTE FUNCTION public.mangorts_delete_action_item_sources_for_resource();
+CREATE TRIGGER trg_clear_logic_gate_entity_resource_fields AFTER DELETE ON public.logic_gates FOR EACH ROW EXECUTE FUNCTION public.mangorts_clear_entity_resource_fields_for_deleted_resource();
 
 
 --
--- Name: huddle_logic_gates trg_delete_huddle_logic_gate_action_item_sources; Type: TRIGGER; Schema: public; Owner: -
+-- Name: projects trg_clear_project_entity_resource_fields; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_delete_huddle_logic_gate_action_item_sources AFTER DELETE ON public.huddle_logic_gates FOR EACH ROW EXECUTE FUNCTION public.mangorts_delete_action_item_sources_for_resource();
+CREATE TRIGGER trg_clear_project_entity_resource_fields AFTER DELETE ON public.projects FOR EACH ROW EXECUTE FUNCTION public.mangorts_clear_entity_resource_fields_for_deleted_resource();
 
 
 --
--- Name: kpis trg_delete_kpi_action_item_sources; Type: TRIGGER; Schema: public; Owner: -
+-- Name: huddle_nodes trg_clear_huddle_node_entity_resource_fields; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_delete_kpi_action_item_sources AFTER DELETE ON public.kpis FOR EACH ROW EXECUTE FUNCTION public.mangorts_delete_action_item_sources_for_resource();
+CREATE TRIGGER trg_clear_huddle_node_entity_resource_fields AFTER DELETE ON public.huddle_nodes FOR EACH ROW EXECUTE FUNCTION public.mangorts_clear_entity_resource_fields_for_deleted_resource();
+
+
+--
+-- Name: huddle_logic_gates trg_clear_huddle_logic_gate_entity_resource_fields; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_clear_huddle_logic_gate_entity_resource_fields AFTER DELETE ON public.huddle_logic_gates FOR EACH ROW EXECUTE FUNCTION public.mangorts_clear_entity_resource_fields_for_deleted_resource();
+
+
+--
+-- Name: kpis trg_clear_kpi_entity_resource_fields; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_clear_kpi_entity_resource_fields AFTER DELETE ON public.kpis FOR EACH ROW EXECUTE FUNCTION public.mangorts_clear_entity_resource_fields_for_deleted_resource();
+
+
+--
+-- Name: recycle_bin_items trg_clear_entity_resource_fields_on_permanent_recycle_delete; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER trg_clear_entity_resource_fields_on_permanent_recycle_delete BEFORE DELETE ON public.recycle_bin_items FOR EACH ROW EXECUTE FUNCTION public.mangorts_clear_entity_resource_fields_for_permanent_recycle_delete();
 
 
 --
@@ -9681,14 +9687,6 @@ ALTER TABLE ONLY public.raci_tabs_items
 
 ALTER TABLE ONLY public.raci_tabs_items
     ADD CONSTRAINT raci_tabs_items_company_id_user_id_role_folder_id_fkey FOREIGN KEY (company_id, user_id, role, folder_id) REFERENCES public.raci_tabs_folders(company_id, user_id, role, folder_id) ON DELETE CASCADE;
-
-
---
--- Name: action_item_sources action_item_sources_entity_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.action_item_sources
-    ADD CONSTRAINT action_item_sources_entity_fkey FOREIGN KEY (company_id, entity_id) REFERENCES public.entities(company_id, entity_id) ON DELETE CASCADE;
 
 
 --

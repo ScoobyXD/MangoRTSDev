@@ -48,23 +48,12 @@ export function countSidebarLogicGateStatuses(
   return counts;
 }
 
-export function visibleSidebarLogicGateStatusCounts(
-  counts: SidebarLogicGateStatusCounts | undefined,
-): Array<SidebarLogicGateStatusCountDefinition & { count: number }> {
-  if (!counts) return [];
-  return SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS.flatMap((definition) => {
-    const count = normalizeCount(counts[definition.key]);
-    return count > 0 ? [{ ...definition, count }] : [];
-  });
-}
-
 export function aggregateSidebarPinFolderStatusCounts(
   tree: SidebarPinTree,
   countsByLogicGateID: Readonly<Record<string, SidebarLogicGateStatusCounts | undefined>>,
 ): Record<string, SidebarLogicGateStatusCounts> {
   const parentByFolderID = new Map(tree.folders.map((folder) => [folder.folderID, folder.parentFolderID]));
   const countsByFolderID: Record<string, SidebarLogicGateStatusCounts> = {};
-  for (const folder of tree.folders) countsByFolderID[folder.folderID] = emptySidebarLogicGateStatusCounts();
 
   for (const pin of tree.pins) {
     if (pin.kind !== "logic_gate") continue;
@@ -72,9 +61,9 @@ export function aggregateSidebarPinFolderStatusCounts(
     if (!counts) continue;
     const visited = new Set<string>();
     for (let folderID = pin.parentFolderID; folderID && !visited.has(folderID); folderID = parentByFolderID.get(folderID) ?? "") {
+      if (!parentByFolderID.has(folderID)) break;
       visited.add(folderID);
-      const folderCounts = countsByFolderID[folderID];
-      if (!folderCounts) break;
+      const folderCounts = countsByFolderID[folderID] ?? (countsByFolderID[folderID] = emptySidebarLogicGateStatusCounts());
       addCounts(folderCounts, counts);
     }
   }

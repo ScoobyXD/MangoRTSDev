@@ -61,7 +61,7 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 			writeEntityError(w, err, "failed_to_create_action_item")
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]any{"action_item": item})
+		writeJSON(w, http.StatusCreated, map[string]any{"action_item": redactActionItemSourceEntity(item)})
 	case http.MethodGet:
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		if _, ok := s.requireAccountCompanyAccess(w, r, companyID); !ok {
@@ -89,6 +89,9 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 		if itemsErr != nil {
 			writeEntityError(w, itemsErr, "failed_to_list_action_items")
 			return
+		}
+		for index := range items {
+			items[index] = redactActionItemSourceEntity(items[index])
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"action_items": items})
 	default:

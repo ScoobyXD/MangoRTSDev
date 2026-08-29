@@ -9,7 +9,9 @@ export const ACTION_ITEM_TARGET_ARROW_PATH = "M8 8 14.5 1.5M11.5 1.5h3v3";
 export const ActionItemIcon: React.FC<{
   className?: string;
   size?: number;
-}> = ({ className, size = 16 }) => (
+  outerRingColor?: string;
+  innerRingColor?: string;
+}> = ({ className, size = 16, outerRingColor = "currentColor", innerRingColor = "currentColor" }) => (
   <svg
     aria-hidden="true"
     className={className}
@@ -19,10 +21,10 @@ export const ActionItemIcon: React.FC<{
     fill="none"
     style={{ display: "block", flexShrink: 0 }}
   >
-    <path d={ACTION_ITEM_TARGET_RING_PATH} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    <path d={ACTION_ITEM_TARGET_INNER_PATH} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    <circle cx="8" cy="8" r="1" fill="currentColor" />
-    <path d={ACTION_ITEM_TARGET_ARROW_PATH} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <path d={ACTION_ITEM_TARGET_RING_PATH} stroke={outerRingColor} strokeWidth="1.5" strokeLinecap="round" />
+    <path d={ACTION_ITEM_TARGET_INNER_PATH} stroke={innerRingColor} strokeWidth="1.5" strokeLinecap="round" />
+    <circle cx="8" cy="8" r="1" fill={innerRingColor} />
+    <path d={ACTION_ITEM_TARGET_ARROW_PATH} stroke={innerRingColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 

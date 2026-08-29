@@ -89,7 +89,7 @@ func (r *MemoryRepo) DeleteProject(companyID, projectID, actorUserID string) (Pr
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	gvicNodeIDs, gvicLogicGateIDs := r.gvicMatrixProjectAffectedResourceIDsLocked(companyID, projectID)
-	if err := r.deleteProjectLocked(companyID, projectID); err != nil {
+	if err := r.deleteProjectLocked(companyID, projectID, false); err != nil {
 		return ProjectMutationResult{}, err
 	}
 	r.syncRACIMatrixProjectionForProjectResourcesLocked(companyID, gvicNodeIDs, gvicLogicGateIDs)
@@ -901,12 +901,14 @@ func projectCriticalPathStepKey(companyID, projectID, stepID string) string {
 	return strings.TrimSpace(companyID) + ":" + strings.TrimSpace(projectID) + ":" + strings.TrimSpace(stepID)
 }
 
-func (r *MemoryRepo) deleteProjectLocked(companyID, projectID string) error {
+func (r *MemoryRepo) deleteProjectLocked(companyID, projectID string, preserveResourceFields bool) error {
 	k := key(companyID, projectID)
 	if _, ok := r.projects[k]; !ok {
 		return ErrNotFound
 	}
-	r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeProject, projectID)
+	if !preserveResourceFields {
+		r.clearEntityResourceFieldsForResourceLocked(companyID, EntityTypeProject, projectID)
+	}
 	r.deleteMemoryResourceSharedEmailDraftsLocked(companyID, EntityTypeProject, projectID)
 	delete(r.projects, k)
 	for assignmentKey := range r.projectAccountAssignments {

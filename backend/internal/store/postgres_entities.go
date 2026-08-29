@@ -443,6 +443,9 @@ from entity_field_types where company_id=$1::uuid and entity_field_type_id=$2::u
 	if err != nil {
 		return domain.EntityFieldType{}, err
 	}
+	if current.FieldType == EntityFieldTypeResource {
+		return domain.EntityFieldType{}, ErrConflict
+	}
 	if normalized.EntityFolderSet {
 		if err := validatePostgresEntityFolderForType(ctx, tx, current.CompanyID, current.EntityTypeID, normalized.EntityFolderID); err != nil {
 			return domain.EntityFieldType{}, err
@@ -891,6 +894,9 @@ for update of field`, normalized.CompanyID, normalized.EntityID, normalized.Enti
 	if err != nil {
 		return domain.EntityField{}, err
 	}
+	if current.FieldType == EntityFieldTypeResource {
+		return domain.EntityField{}, ErrConflict
+	}
 	if isRequiredActionItemFieldTypeID(optionalEntityIDValue(current.EntityFieldTypeID)) && (normalized.NameSet || normalized.FieldTypeSet) {
 		return domain.EntityField{}, ErrConflict
 	}
@@ -1005,16 +1011,16 @@ func mapEntitiesPostgresError(err error) error {
 		strings.Contains(message, "action_item_field_type_name_reserved"),
 		strings.Contains(message, "action_item_entity_field_immutable"),
 		strings.Contains(message, "action_item_entity_field_required"),
-		strings.Contains(message, "action_item_source_requires_action_item"),
 		strings.Contains(message, "action_item_source_immutable"):
 		return ErrConflict
 	case strings.Contains(message, "action_item_field_type_config_invalid"),
 		strings.Contains(message, "action_item_field_type_invalid"),
 		strings.Contains(message, "action_item_entity_field_invalid"),
-		strings.Contains(message, "action_item_source_resource_type_invalid"),
+		strings.Contains(message, "entity_resource_field_type_reserved"),
+		strings.Contains(message, "entity_resource_field_reserved"),
 		strings.Contains(message, "entity_field_date_invalid"):
 		return ErrInvalid
-	case strings.Contains(message, "action_item_source_resource_not_found"):
+	case strings.Contains(message, "entity_field_resource_not_found"):
 		return ErrNotFound
 	case strings.Contains(message, "duplicate key"), strings.Contains(message, "unique constraint"):
 		return ErrAlreadyExists

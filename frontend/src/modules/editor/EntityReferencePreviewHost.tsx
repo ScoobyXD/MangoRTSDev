@@ -114,6 +114,7 @@ function parseEditableCalendarDate(value: string): string {
 
 function parseEntityFieldInput(field: EntityField, rawValue: string): EntityFieldValue {
   const value = rawValue.trim();
+  if (field.field_type === "resource") throw new Error(`${field.name} is read-only.`);
   if (!value) return null;
   if (field.field_type === "boolean") return value === "true";
   if (field.field_type === "number") {
@@ -433,7 +434,7 @@ function actionItemFieldKey(field: EntityField): string {
 }
 
 function actionItemFieldDraftValue(field: EntityField): string {
-  if (field.value === null) return "";
+  if (field.value === null || field.field_type === "resource") return "";
   const value = String(field.value);
   return field.field_type === "date" ? formatCalendarDate(value) : value;
 }
@@ -686,6 +687,7 @@ function EditableActionItemPopover({
       }
 
       for (const field of latestEntity.entity_fields) {
+        if (field.field_type === "resource") continue;
         const rawValue = target.fieldValues[field.entity_field_id] ?? "";
         if (rawValue === previouslySaved.fieldValues[field.entity_field_id]) continue;
         const savedField = await updateEntityField({
@@ -1380,6 +1382,9 @@ function EntityFieldValueEditor({ field, companyUsers, saving, disabled, onSave 
   disabled: boolean;
   onSave: (field: EntityField, rawValue: string) => Promise<void>;
 }) {
+  if (field.field_type === "resource") {
+    return <ReadOnlyEntityValue label={field.name} value={field.value === null ? "Not set" : "Linked resource"} />;
+  }
   const locked = saving || disabled;
   return (
     <form

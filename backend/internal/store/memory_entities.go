@@ -285,6 +285,9 @@ func (r *MemoryRepo) UpdateEntityFieldType(input EntityFieldTypeInput) (domain.E
 	if !exists {
 		return domain.EntityFieldType{}, ErrNotFound
 	}
+	if item.FieldType == EntityFieldTypeResource {
+		return domain.EntityFieldType{}, ErrConflict
+	}
 	isRequiredActionItemFieldType := item.EntityTypeID == ActionItemEntityTypeID && isRequiredActionItemFieldSystemKey(item.SystemKey)
 	if isRequiredActionItemFieldType && (normalized.NameSet || normalized.FieldTypeSet || normalized.EntityFolderSet) {
 		return domain.EntityFieldType{}, ErrConflict
@@ -554,7 +557,6 @@ func (r *MemoryRepo) DeleteEntity(companyID, entityID string) error {
 			delete(r.entityRelationships, relationshipKey)
 		}
 	}
-	delete(r.actionItemSources, actionItemSourceKey(companyID, entityID))
 	delete(r.entities, itemKey)
 	return nil
 }
@@ -608,6 +610,9 @@ func (r *MemoryRepo) UpdateEntityField(input EntityFieldInput) (domain.EntityFie
 	item, exists := r.entityFields[itemKey]
 	if !exists || item.EntityID != normalized.EntityID {
 		return domain.EntityField{}, ErrNotFound
+	}
+	if item.FieldType == EntityFieldTypeResource {
+		return domain.EntityField{}, ErrConflict
 	}
 	if isRequiredActionItemFieldTypeID(optionalEntityIDValue(item.EntityFieldTypeID)) && (normalized.NameSet || normalized.FieldTypeSet) {
 		return domain.EntityField{}, ErrConflict

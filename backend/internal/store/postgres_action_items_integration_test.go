@@ -1,11 +1,92 @@
 package store
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 )
+
+func TestPostgresActionItemSourceEndpointLockOrdersConcurrentPermanentDelete(t *testing.T) {
+	db, repo := openPostgresProcessMapIntegration(t)
+	actor, err := repo.UpsertAuthUser("postgres-source-lock-owner", "postgres-source-lock-owner@example.test", "Postgres Source Lock Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	company, err := repo.CreateCompany("Postgres Source Lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateNode(company.CompanyID, "Concurrent source endpoint")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	input := ActionItemInput{
+		CompanyID: company.CompanyID, CreatedByUserID: actor.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: node.NodeID,
+	}
+	if err := validatePostgresActionItemSourceTx(ctx, tx, input); err != nil {
+		t.Fatal(err)
+	}
+	entityID := newUUIDv7String()
+	if _, err := tx.ExecContext(ctx, `insert into entities(company_id,entity_id,entity_type_id,name,created_by_user_id) values($1::uuid,$2::uuid,$3::uuid,'Concurrent Source',$4::uuid)`, company.CompanyID, entityID, ActionItemEntityTypeID, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
+	result, err := tx.ExecContext(ctx, `
+insert into entity_fields(company_id,entity_field_id,entity_id,entity_field_type_id,name,field_type,value_jsonb,position)
+select $1::uuid,gen_random_uuid(),$2::uuid,entity_field_type_id,name,field_type,$3::jsonb,position
+from entity_field_types
+where company_id=$1::uuid and entity_field_type_id=$4::uuid`, company.CompanyID, entityID, actionItemSourceValue(EntityTypeNode, node.NodeID), ActionItemSourceFieldTypeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected != 1 {
+		t.Fatalf("Source insert affected=%d err=%v, want 1", affected, err)
+	}
+
+	deleteCtx, cancelDelete := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelDelete()
+	deleteStarted := make(chan struct{})
+	deleteDone := make(chan error, 1)
+	go func() {
+		close(deleteStarted)
+		_, deleteErr := db.ExecContext(deleteCtx, `delete from nodes where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, node.NodeID)
+		deleteDone <- deleteErr
+	}()
+	<-deleteStarted
+	select {
+	case deleteErr := <-deleteDone:
+		t.Fatalf("endpoint delete completed before Source transaction committed: %v", deleteErr)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case deleteErr := <-deleteDone:
+		if deleteErr != nil {
+			t.Fatal(deleteErr)
+		}
+	case <-deleteCtx.Done():
+		t.Fatalf("endpoint delete did not finish after Source commit: %v", deleteCtx.Err())
+	}
+	if got := countPostgresRows(t, db, `select count(*) from entity_fields where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$3::uuid and value_jsonb is null`, company.CompanyID, entityID, ActionItemSourceFieldTypeID); got != 1 {
+		t.Fatalf("Source cleanup after concurrent permanent delete=%d, want 1", got)
+	}
+}
 
 func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
@@ -39,8 +120,8 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateActionItem with source: %v", err)
 	}
-	if len(created.EntityFields) != 6 {
-		t.Fatalf("required Action Item field count=%d, want 6", len(created.EntityFields))
+	if len(created.EntityFields) != 7 {
+		t.Fatalf("required Action Item field count=%d, want 7", len(created.EntityFields))
 	}
 	for _, systemKey := range []string{
 		ActionItemPersonInChargeSystemKey,
@@ -49,6 +130,7 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 		ActionItemCompletionDueDateSystemKey,
 		ActionItemStatusSystemKey,
 		ActionItemColorSystemKey,
+		ActionItemSourceSystemKey,
 	} {
 		found := false
 		for _, field := range created.EntityFields {
@@ -62,12 +144,25 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 		}
 	}
 	assertActionItemFieldValue(t, created, ActionItemAssignedBySystemKey, "null")
+	assertActionItemFieldValue(t, created, ActionItemSourceSystemKey, `{"resource_id":"`+sourceNode.NodeID+`","resource_type":"node"}`)
 	source, err := repo.GetActionItemSource(company.CompanyID, created.EntityID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if source.CompanyID != company.CompanyID || source.EntityID != created.EntityID || source.ResourceType != EntityTypeNode || source.ResourceID != sourceNode.NodeID {
 		t.Fatalf("stored source=%+v, want exact company/entity/type/resource", source)
+	}
+	for _, field := range created.EntityFields {
+		if field.SystemKey != ActionItemSourceSystemKey {
+			continue
+		}
+		if _, err := repo.UpdateEntityField(EntityFieldInput{
+			CompanyID: company.CompanyID, EntityID: created.EntityID, EntityFieldID: field.EntityFieldID,
+			Value: field.Value, ValueSet: true,
+		}); !errors.Is(err, ErrConflict) {
+			t.Fatalf("same-value Source API update error=%v, want ErrConflict", err)
+		}
+		break
 	}
 
 	direct, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Created directly", CreatedByUserID: member.UserID})
@@ -86,6 +181,18 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repo.CreateEntityField(EntityFieldInput{
+		CompanyID: company.CompanyID, EntityID: direct.EntityID, Name: "Related work",
+		FieldType: EntityFieldTypeResource, Value: actionItemSourceValue(EntityTypeNode, otherNode.NodeID), ValueSet: true,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generic resource field error=%v, want ErrInvalid", err)
+	}
+	if _, err := repo.CreateEntityFieldType(EntityFieldTypeInput{
+		CompanyID: company.CompanyID, EntityTypeID: ActionItemEntityTypeID,
+		Name: "Related work", FieldType: EntityFieldTypeResource,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("generic resource template error=%v, want ErrInvalid", err)
+	}
 	restrictedNode, err := repo.CreateNode(company.CompanyID, "Restricted source node")
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +205,7 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 	}
 
 	actionItemCount := countPostgresRows(t, db, `select count(*) from entities where company_id=$1::uuid and entity_type_id=$2::uuid`, company.CompanyID, ActionItemEntityTypeID)
-	sourceCount := countPostgresRows(t, db, `select count(*) from action_item_sources where company_id=$1::uuid`, company.CompanyID)
+	sourceCount := countPostgresRows(t, db, `select count(*) from entity_fields where company_id=$1::uuid and entity_field_type_id=$2::uuid and value_jsonb is not null`, company.CompanyID, ActionItemSourceFieldTypeID)
 	assertRejectedAtomically := func(name string, input ActionItemInput, want error) {
 		t.Helper()
 		if _, err := repo.CreateActionItem(input); !errors.Is(err, want) {
@@ -107,7 +214,7 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 		if got := countPostgresRows(t, db, `select count(*) from entities where company_id=$1::uuid and entity_type_id=$2::uuid`, company.CompanyID, ActionItemEntityTypeID); got != actionItemCount {
 			t.Fatalf("%s partially wrote an Entity: count=%d, want %d", name, got, actionItemCount)
 		}
-		if got := countPostgresRows(t, db, `select count(*) from action_item_sources where company_id=$1::uuid`, company.CompanyID); got != sourceCount {
+		if got := countPostgresRows(t, db, `select count(*) from entity_fields where company_id=$1::uuid and entity_field_type_id=$2::uuid and value_jsonb is not null`, company.CompanyID, ActionItemSourceFieldTypeID); got != sourceCount {
 			t.Fatalf("%s partially wrote a Source: count=%d, want %d", name, got, sourceCount)
 		}
 	}
@@ -128,16 +235,16 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 		SourceResourceType: EntityTypeNode, SourceResourceID: restrictedNode.NodeID,
 	}, ErrNotFound)
 
-	if _, err := db.Exec(`insert into action_item_sources(company_id,entity_id,resource_type,resource_id) values($1::uuid,$2::uuid,'node',$3::uuid)`, company.CompanyID, direct.EntityID, otherNode.NodeID); err == nil {
-		t.Fatal("database accepted a cross-company Source endpoint")
+	if _, err := db.Exec(`insert into entity_field_types(company_id,entity_field_type_id,entity_type_id,name,field_type,config_jsonb,position) values($1::uuid,gen_random_uuid(),$2::uuid,'Custom resource','resource','{}'::jsonb,99)`, company.CompanyID, ActionItemEntityTypeID); err == nil {
+		t.Fatal("database accepted a noncanonical resource template")
 	}
-	if _, err := db.Exec(`insert into action_item_sources(company_id,entity_id,resource_type,resource_id) values($1::uuid,$2::uuid,'project',$3::uuid)`, company.CompanyID, direct.EntityID, sourceNode.NodeID); err == nil {
-		t.Fatal("database accepted a resource ID under the wrong exact Source type")
+	if _, err := db.Exec(`insert into entity_fields(company_id,entity_field_id,entity_id,name,field_type,value_jsonb,position) values($1::uuid,gen_random_uuid(),$2::uuid,'Custom resource','resource',jsonb_build_object('resource_type','node','resource_id',$3::text),99)`, company.CompanyID, direct.EntityID, sourceNode.NodeID); err == nil {
+		t.Fatal("database accepted a noncanonical resource field")
 	}
-	if _, err := db.Exec(`update action_item_sources set resource_id=resource_id where company_id=$1::uuid and entity_id=$2::uuid`, company.CompanyID, created.EntityID); err == nil {
+	if _, err := db.Exec(`update entity_fields set value_jsonb=jsonb_build_object('resource_type','node','resource_id',$3::text) where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$4::uuid`, company.CompanyID, created.EntityID, restrictedNode.NodeID, ActionItemSourceFieldTypeID); err == nil {
 		t.Fatal("database accepted a direct Source update")
 	}
-	if _, err := db.Exec(`delete from action_item_sources where company_id=$1::uuid and entity_id=$2::uuid`, company.CompanyID, created.EntityID); err == nil {
+	if _, err := db.Exec(`delete from entity_fields where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$3::uuid`, company.CompanyID, created.EntityID, ActionItemSourceFieldTypeID); err == nil {
 		t.Fatal("database accepted a direct Source delete")
 	}
 	if persisted, err := repo.GetActionItemSource(company.CompanyID, created.EntityID); err != nil || persisted.ResourceType != EntityTypeNode || persisted.ResourceID != sourceNode.NodeID {
@@ -173,8 +280,11 @@ func TestPostgresActionItemSourceRecycleRestoreAndPermanentDelete(t *testing.T) 
 	if _, err := repo.DeleteCompanyExplorerTargets(company.CompanyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeNode, ID: node.NodeID}}, actor.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.GetActionItemSource(company.CompanyID, nodeActionItem.EntityID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("recycled Node Source error=%v, want ErrNotFound", err)
+	if source, err := repo.GetActionItemSource(company.CompanyID, nodeActionItem.EntityID); err != nil || source.ResourceType != EntityTypeNode || source.ResourceID != node.NodeID {
+		t.Fatalf("preserved recycled Node Source=%+v err=%v", source, err)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from entity_fields where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$3::uuid and value_jsonb is not null`, company.CompanyID, nodeActionItem.EntityID, ActionItemSourceFieldTypeID); got != 1 {
+		t.Fatalf("recycled Source field values=%d, want preserved value", got)
 	}
 	nodeRecycleID := postgresActionItemRecycleID(t, repo, company.CompanyID, actor.UserID, EntityTypeNode, node.NodeID)
 	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{nodeRecycleID}); err != nil {
@@ -202,8 +312,8 @@ func TestPostgresActionItemSourceRecycleRestoreAndPermanentDelete(t *testing.T) 
 	if err := repo.DeleteKPI(company.CompanyID, kpi.KPIID, actor.UserID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.GetActionItemSource(company.CompanyID, kpiActionItem.EntityID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("recycled KPI Source error=%v, want ErrNotFound", err)
+	if source, err := repo.GetActionItemSource(company.CompanyID, kpiActionItem.EntityID); err != nil || source.ResourceType != EntityTypeKPI || source.ResourceID != kpi.KPIID {
+		t.Fatalf("preserved recycled KPI Source=%+v err=%v", source, err)
 	}
 	kpiRecycleID := postgresActionItemRecycleID(t, repo, company.CompanyID, actor.UserID, EntityTypeKPI, kpi.KPIID)
 	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{kpiRecycleID}); err != nil {
@@ -220,8 +330,8 @@ func TestPostgresActionItemSourceRecycleRestoreAndPermanentDelete(t *testing.T) 
 	if err := repo.PermanentlyDeleteRecycleBinItems(company.CompanyID, actor.UserID, []string{permanentNodeRecycleID}); err != nil {
 		t.Fatal(err)
 	}
-	if got := countPostgresRows(t, db, `select count(*) from action_item_sources where company_id=$1::uuid and entity_id=$2::uuid`, company.CompanyID, nodeActionItem.EntityID); got != 0 {
-		t.Fatalf("Source rows after permanent endpoint deletion=%d, want 0", got)
+	if got := countPostgresRows(t, db, `select count(*) from entity_fields where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$3::uuid and value_jsonb is null`, company.CompanyID, nodeActionItem.EntityID, ActionItemSourceFieldTypeID); got != 1 {
+		t.Fatalf("cleared Source fields after permanent endpoint deletion=%d, want 1", got)
 	}
 	if _, err := repo.GetActionItemSource(company.CompanyID, nodeActionItem.EntityID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Source after permanent endpoint deletion error=%v, want ErrNotFound", err)

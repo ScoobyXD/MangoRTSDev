@@ -565,19 +565,21 @@ func (r *MemoryRepo) DeleteLogicGate(companyID, logicGateID string) error {
 		r.restoreProcessMapMutationLocked(beforeEvent)
 		return err
 	}
-	if err := r.deleteLogicGateLocked(companyID, logicGateID); err != nil {
+	if err := r.deleteLogicGateLocked(companyID, logicGateID, false); err != nil {
 		r.restoreProcessMapMutationLocked(beforeEvent)
 		return err
 	}
 	return nil
 }
 
-func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string) error {
+func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string, preserveResourceFields bool) error {
 	k := key(companyID, logicGateID)
 	if _, ok := r.logicGates[k]; !ok {
 		return ErrNotFound
 	}
-	r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeLogicGate, logicGateID)
+	if !preserveResourceFields {
+		r.clearEntityResourceFieldsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID)
+	}
 	affectedNodeIDs := []string{}
 	for _, assignment := range r.nodeLogicGateAssignments {
 		if assignment.CompanyID == companyID && assignment.LogicGateID == logicGateID {

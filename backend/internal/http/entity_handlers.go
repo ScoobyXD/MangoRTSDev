@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
@@ -385,7 +386,7 @@ func (s *Server) handleEntities(w http.ResponseWriter, r *http.Request) {
 			writeEntityError(w, err, "failed_to_create_entity")
 			return
 		}
-		writeJSON(w, http.StatusCreated, map[string]any{"entity": item})
+		writeJSON(w, http.StatusCreated, map[string]any{"entity": redactActionItemSourceEntity(item)})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
@@ -421,7 +422,7 @@ func (s *Server) handleEntityByID(w http.ResponseWriter, r *http.Request) {
 			writeEntityError(w, err, "failed_to_get_entity")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"entity": item})
+		writeJSON(w, http.StatusOK, map[string]any{"entity": redactActionItemSourceEntity(item)})
 	case http.MethodPut:
 		var request struct {
 			CompanyID      string          `json:"company_id"`
@@ -461,7 +462,7 @@ func (s *Server) handleEntityByID(w http.ResponseWriter, r *http.Request) {
 			writeEntityError(w, err, "failed_to_update_entity")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"entity": item})
+		writeJSON(w, http.StatusOK, map[string]any{"entity": redactActionItemSourceEntity(item)})
 	case http.MethodDelete:
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		if _, ok := s.requireAccountCompanyAccess(w, r, companyID); !ok {
@@ -508,7 +509,7 @@ func (s *Server) handleEntityFields(w http.ResponseWriter, r *http.Request, enti
 		writeEntityError(w, err, "failed_to_create_entity_field")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"entity_field": item})
+	writeJSON(w, http.StatusCreated, map[string]any{"entity_field": redactActionItemSourceEntityField(item)})
 }
 
 func (s *Server) handleEntityFieldByID(w http.ResponseWriter, r *http.Request, entityID, fieldID string) {
@@ -546,7 +547,7 @@ func (s *Server) handleEntityFieldByID(w http.ResponseWriter, r *http.Request, e
 			writeEntityError(w, err, "failed_to_update_entity_field")
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"entity_field": item})
+		writeJSON(w, http.StatusOK, map[string]any{"entity_field": redactActionItemSourceEntityField(item)})
 	case http.MethodDelete:
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
 		if _, ok := s.requireAccountCompanyAccess(w, r, companyID); !ok {
@@ -560,6 +561,29 @@ func (s *Server) handleEntityFieldByID(w http.ResponseWriter, r *http.Request, e
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
+}
+
+func redactActionItemSourceEntity(item domain.Entity) domain.Entity {
+	if len(item.EntityFields) == 0 {
+		return item
+	}
+	fields := append([]domain.EntityField(nil), item.EntityFields...)
+	for index := range fields {
+		fields[index] = redactActionItemSourceEntityField(fields[index])
+	}
+	item.EntityFields = fields
+	return item
+}
+
+func redactActionItemSourceEntityField(field domain.EntityField) domain.EntityField {
+	isSource := field.FieldType == store.EntityFieldTypeResource || field.SystemKey == store.ActionItemSourceSystemKey
+	if field.EntityFieldTypeID != nil && *field.EntityFieldTypeID == store.ActionItemSourceFieldTypeID {
+		isSource = true
+	}
+	if isSource {
+		field.Value = nil
+	}
+	return field
 }
 
 func singleEntityPathID(path, prefix string) string {

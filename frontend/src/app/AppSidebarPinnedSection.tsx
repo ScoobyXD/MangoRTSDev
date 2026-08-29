@@ -22,7 +22,6 @@ import {
 import {
   SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS,
   aggregateSidebarPinFolderStatusCounts,
-  visibleSidebarLogicGateStatusCounts,
   type SidebarLogicGateStatusCountDefinition,
   type SidebarLogicGateStatusCounts,
 } from "./sidebarLogicGateStatusCounts.js";
@@ -229,24 +228,23 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
   };
 
   const renderStatusCounts = (counts: SidebarLogicGateStatusCounts | undefined, reserveEmptySlots = false): React.ReactNode => {
-    const visibleCounts = visibleSidebarLogicGateStatusCounts(counts);
-    if (visibleCounts.length === 0 && !reserveEmptySlots) return null;
-    const visibleByKey = new Map(visibleCounts.map((item) => [item.key, item]));
+    if (!counts && !reserveEmptySlots) return null;
     return (
       <span data-pin-status-counts style={statusCountsStyle}>
         {SIDEBAR_LOGIC_GATE_STATUS_COUNT_DEFINITIONS.map((definition) => {
-          const item = visibleByKey.get(definition.key);
+          const value = counts?.[definition.key];
+          const count = typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
           return (
             <span key={definition.key} data-pin-status-slot={definition.key} style={statusCountSlotStyle}>
-              {item && (
+              {counts && (
                 <span
-                  data-pin-status={item.key}
-                  data-pin-status-count={item.count}
-                  aria-label={`${item.label}: ${item.count}`}
-                  title={`${item.label}: ${item.count}`}
-                  style={statusCountStyle(item)}
+                  data-pin-status={definition.key}
+                  data-pin-status-count={count}
+                  aria-label={`${definition.label}: ${count}`}
+                  title={`${definition.label}: ${count}`}
+                  style={statusCountStyle(definition)}
                 >
-                  {item.count}
+                  {count}
                 </span>
               )}
             </span>
@@ -275,7 +273,7 @@ export function AppSidebarPinnedSection(props: AppSidebarPinnedSectionProps): Re
     const folderRaised = row.entryType === "folder" && raisedFolderID === row.folder.folderID;
     const pinRaised = row.entryType === "pin" && (raisedPinID === row.pin.pinID || bumpingPinID === row.pin.pinID);
     const folderCounts = row.entryType === "folder" ? folderStatusCountsByID[row.folder.folderID] : undefined;
-    const folderHasCounts = visibleSidebarLogicGateStatusCounts(folderCounts).length > 0;
+    const folderHasCounts = folderCounts !== undefined;
     const isPinGroupPreviewSource = row.entryType === "pin" && pinGroupPreview?.draggedPinID === row.pin.pinID;
     const isPinGroupPreviewTarget = row.entryType === "pin" && pinGroupPreview?.targetPinID === row.pin.pinID;
     const previewDraggedPin = isPinGroupPreviewTarget

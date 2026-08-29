@@ -80,11 +80,13 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
       folders: [
         { folderID: "folder-a", parentFolderID: "", name: "Folder A", position: 1000, createdTimestamp: "2026-08-06T00:00:00Z", updatedTimestamp: "2026-08-06T00:00:00Z" },
         { folderID: "folder-b", parentFolderID: "folder-a", name: "Folder B", position: 1000, createdTimestamp: "2026-08-06T00:00:01Z", updatedTimestamp: "2026-08-06T00:00:01Z" },
+        { folderID: "folder-zero", parentFolderID: "", name: "Zero Process Folder", position: 3000, createdTimestamp: "2026-08-06T00:00:05Z", updatedTimestamp: "2026-08-06T00:00:05Z" },
       ],
       pins: [
         { pinID: "pin-root", parentFolderID: "", kind: "node", id: "node-root", name: "Root Node", position: 2000, createdTimestamp: "2026-08-06T00:00:02Z" },
         { pinID: "pin-nested", parentFolderID: "folder-b", kind: "logic_gate", id: "gate-1", name: "Nested Gate", position: 1000, createdTimestamp: "2026-08-06T00:00:03Z" },
         { pinID: "pin-notes", parentFolderID: "folder-a", kind: "node", id: "node-notes", name: "Notes Node", position: 2000, createdTimestamp: "2026-08-06T00:00:04Z" },
+        { pinID: "pin-zero-gate", parentFolderID: "folder-zero", kind: "logic_gate", id: "gate-zero", name: "Zero Gate", position: 1000, createdTimestamp: "2026-08-06T00:00:06Z" },
       ],
     };
     let openedPinID = "";
@@ -93,7 +95,10 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     await act(async () => root.render(
       <AppSidebarPinnedSection
         tree={tree}
-        logicGateStatusCountsByID={{ "gate-1": { request: 12, pending: 3, inProgress: 4, review: 5 } }}
+        logicGateStatusCountsByID={{
+          "gate-1": { request: 12, pending: 0, inProgress: 4, review: 5 },
+          "gate-zero": { request: 0, pending: 0, inProgress: 0, review: 0 },
+        }}
         dropActive={false}
         dropSuccess=""
         pinnedResourceDropBusy={false}
@@ -152,7 +157,7 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     const folderInProgress = folderA.querySelector<HTMLElement>('[data-pin-folder-status-column] [data-pin-status="inProgress"]');
     const folderReview = folderA.querySelector<HTMLElement>('[data-pin-folder-status-column] [data-pin-status="review"]');
     assert.equal(folderRequest?.dataset.pinStatusCount, "12", "the collapsed parent shows its nested Logic Gate request total");
-    assert.equal(folderPending?.dataset.pinStatusCount, "3");
+    assert.equal(folderPending?.dataset.pinStatusCount, "0", "Pinned Process status columns remain visible at zero");
     assert.equal(folderInProgress?.dataset.pinStatusCount, "4");
     assert.equal(folderReview?.dataset.pinStatusCount, "5", "the collapsed parent shows its nested Logic Gate review total");
     assert.equal(folderRequest?.style.backgroundColor, "rgb(250, 204, 21)");
@@ -174,6 +179,13 @@ test("Pinned renders Company Explorer-style folders, previews deliberate pin gro
     assert.equal(folderStatusGrid.style.gridTemplateColumns, "repeat(4, 17px)");
     assert.equal(folderRequest?.parentElement?.dataset.pinStatusSlot, "request");
     assert.equal(folderReview?.parentElement?.dataset.pinStatusSlot, "review");
+    const zeroProcessFolder = container.querySelector<HTMLFieldSetElement>('fieldset[data-pin-folder-frame="folder-zero"]');
+    assert.ok(zeroProcessFolder, "a folder with an all-zero Process remains identifiable");
+    assert.deepEqual(
+      Array.from(zeroProcessFolder.querySelectorAll<HTMLElement>('[data-pin-folder-status-column] [data-pin-status-count]')).map((count) => count.dataset.pinStatusCount),
+      ["0", "0", "0", "0"],
+      "Process-containing Pinned folders keep all four colored zero squares",
+    );
 
     const folderATitle = container.querySelector<HTMLButtonElement>('button[data-pin-folder-title="folder-a"]');
     assert.ok(folderATitle);

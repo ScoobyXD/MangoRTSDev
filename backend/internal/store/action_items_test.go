@@ -114,7 +114,7 @@ func TestEntityRelationshipForwardMigrationAddsExactHuddleLogicGateEndpoints(t *
 	}
 }
 
-func TestActionItemSourceSchemaRejectsDirectDeleteAndAllowsLifecycleCleanup(t *testing.T) {
+func TestActionItemSourceSchemaUsesImmutableResourceFieldWithoutDedicatedTable(t *testing.T) {
 	for _, path := range []string{
 		"../../db/migrations/20260829_action_item_delegation_source.sql",
 		"../../db/schema.sql",
@@ -124,29 +124,25 @@ func TestActionItemSourceSchemaRejectsDirectDeleteAndAllowsLifecycleCleanup(t *t
 			t.Fatal(err)
 		}
 		normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
-		if !strings.Contains(normalized, "create table action_item_sources") &&
-			!strings.Contains(normalized, "create table public.action_item_sources") {
-			t.Fatalf("%s is missing the dedicated Action Item Source table", path)
+		if strings.Contains(normalized, "action_item_sources") {
+			t.Fatalf("%s retains the one-off Action Item Source table", path)
 		}
 		for _, required := range []string{
-			"if tg_op='update' then raise exception 'action_item_source_immutable'",
-			"if tg_op='delete' then if pg_trigger_depth()>1 then return old; end if; raise exception 'action_item_source_immutable'",
-			"action_item_sources_entity_fkey",
-			"on delete cascade",
-			"mangorts_delete_action_item_sources_for_resource",
-			"trg_delete_node_action_item_sources after delete on",
-			"trg_delete_logic_gate_action_item_sources after delete on",
-			"trg_delete_project_action_item_sources after delete on",
-			"trg_delete_huddle_node_action_item_sources after delete on",
-			"trg_delete_huddle_logic_gate_action_item_sources after delete on",
-			"trg_delete_kpi_action_item_sources after delete on",
+			"a17e0000-0000-4000-8000-000000000107",
+			"'source','resource'",
+			"raise exception 'action_item_source_immutable'",
+			"idx_entity_fields_resource_endpoint",
+			"mangorts_entity_resource_exists",
+			"raise exception 'entity_resource_field_type_reserved'",
+			"raise exception 'entity_resource_field_reserved'",
+			"mangorts_resource_is_in_recycle_payload",
+			"mangorts_clear_entity_resource_fields_for_deleted_resource",
+			"trg_clear_node_entity_resource_fields after delete on",
+			"trg_clear_entity_resource_fields_on_permanent_recycle_delete",
 		} {
 			if !strings.Contains(normalized, required) {
 				t.Fatalf("%s is missing Action Item Source lifecycle guard %q", path, required)
 			}
-		}
-		if strings.Contains(normalized, "source_exists and exists") {
-			t.Fatalf("%s retains an endpoint-existence DELETE guard that can reject cascades", path)
 		}
 	}
 }
@@ -231,8 +227,9 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 	assertActionItemFieldValue(t, created, ActionItemStatusSystemKey, `"in_progress"`)
 	assertActionItemFieldValue(t, created, ActionItemColorSystemKey, "null")
 	assertActionItemFieldValue(t, created, ActionItemAssignedBySystemKey, "null")
-	if len(created.EntityFields) != 6 {
-		t.Fatalf("field count=%d, want 6", len(created.EntityFields))
+	assertActionItemFieldValue(t, created, ActionItemSourceSystemKey, "null")
+	if len(created.EntityFields) != 7 {
+		t.Fatalf("field count=%d, want 7", len(created.EntityFields))
 	}
 
 	for _, huddleNodeID := range []string{firstNode.HuddleNodeID, secondNode.HuddleNodeID} {
@@ -574,6 +571,35 @@ func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) 
 	if source.CompanyID != company.CompanyID || source.EntityID != created.EntityID || source.ResourceType != EntityTypeNode || source.ResourceID != sourceNode.NodeID {
 		t.Fatalf("stored source = %+v, want exact company/type/ID", source)
 	}
+	for _, field := range created.EntityFields {
+		if field.SystemKey != ActionItemSourceSystemKey {
+			continue
+		}
+		if _, err := repo.UpdateEntityField(EntityFieldInput{
+			CompanyID: company.CompanyID, EntityID: created.EntityID, EntityFieldID: field.EntityFieldID,
+			Value: field.Value, ValueSet: true,
+		}); !errors.Is(err, ErrConflict) {
+			t.Fatalf("same-value Source API update error=%v, want ErrConflict", err)
+		}
+		break
+	}
+	staleRecycleID := newUUIDv7String()
+	repo.mu.Lock()
+	repo.recycleBin[key(company.CompanyID, staleRecycleID)] = memoryRecycleBinItem{
+		Item: domain.RecycleBinItem{
+			CompanyID: company.CompanyID, RecycleBinItemID: staleRecycleID,
+			ObjectKind: EntityTypeNode, ObjectID: sourceNode.NodeID, DeletedByUserID: member.UserID,
+		},
+		Delta:    memoryRecycleBinSnapshot{nodes: map[string]domain.Node{key(company.CompanyID, sourceNode.NodeID): sourceNode}},
+		UseDelta: true,
+	}
+	repo.mu.Unlock()
+	if err := repo.PermanentlyDeleteRecycleBinItems(company.CompanyID, member.UserID, []string{staleRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	if preserved, err := repo.GetActionItemSource(company.CompanyID, created.EntityID); err != nil || preserved.ResourceID != sourceNode.NodeID {
+		t.Fatalf("live Source after stale recycle deletion=%+v err=%v, want preserved", preserved, err)
+	}
 	direct, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Direct", CreatedByUserID: member.UserID})
 	if err != nil {
 		t.Fatal(err)
@@ -585,15 +611,15 @@ func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) 
 	assertRejectedAtomically := func(name string, input ActionItemInput, want error) {
 		t.Helper()
 		repo.mu.RLock()
-		entityCount, sourceCount := len(repo.entities), len(repo.actionItemSources)
+		entityCount, fieldCount := len(repo.entities), len(repo.entityFields)
 		repo.mu.RUnlock()
 		if _, err := repo.CreateActionItem(input); !errors.Is(err, want) {
 			t.Fatalf("%s error = %v, want %v", name, err, want)
 		}
 		repo.mu.RLock()
 		defer repo.mu.RUnlock()
-		if len(repo.entities) != entityCount || len(repo.actionItemSources) != sourceCount {
-			t.Fatalf("%s partially wrote entity/source: entities %d->%d sources %d->%d", name, entityCount, len(repo.entities), sourceCount, len(repo.actionItemSources))
+		if len(repo.entities) != entityCount || len(repo.entityFields) != fieldCount {
+			t.Fatalf("%s partially wrote entity/fields: entities %d->%d fields %d->%d", name, entityCount, len(repo.entities), fieldCount, len(repo.entityFields))
 		}
 	}
 
@@ -627,6 +653,80 @@ func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) 
 		CompanyID: company.CompanyID, BodyText: "Unauthorized", CreatedByUserID: member.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: sourceNode.NodeID,
 	}, ErrNotFound)
+}
+
+func TestMemoryActionItemSourceRecycleRestoreAndPermanentDelete(t *testing.T) {
+	repo := NewMemoryRepo()
+	actor, company := createActionItemTestCompany(t, repo, "action-item-source-lifecycle")
+	node, err := repo.CreateNode(company.CompanyID, "Restorable Source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := repo.CreateActionItem(ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Source lifecycle", CreatedByUserID: actor.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: node.NodeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deleteNode := func() string {
+		t.Helper()
+		if _, err := repo.DeleteCompanyExplorerTargets(company.CompanyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeNode, ID: node.NodeID}}, actor.UserID); err != nil {
+			t.Fatal(err)
+		}
+		items, err := repo.ListRecycleBinItems(company.CompanyID, actor.UserID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, recycled := range items {
+			if recycled.ObjectKind == EntityTypeNode && recycled.ObjectID == node.NodeID {
+				return recycled.RecycleBinItemID
+			}
+		}
+		t.Fatal("recycled Source endpoint is missing")
+		return ""
+	}
+
+	firstRecycleID := deleteNode()
+	if source, err := repo.GetActionItemSource(company.CompanyID, item.EntityID); err != nil || source.ResourceID != node.NodeID {
+		t.Fatalf("preserved recycled Source=%+v err=%v", source, err)
+	}
+	var statusField domain.EntityField
+	for _, field := range item.EntityFields {
+		if field.SystemKey == ActionItemStatusSystemKey {
+			statusField = field
+			break
+		}
+	}
+	if statusField.EntityFieldID == "" {
+		t.Fatal("Action Item status field is missing")
+	}
+	if _, err := repo.UpdateEntityField(EntityFieldInput{
+		CompanyID: company.CompanyID, EntityID: item.EntityID, EntityFieldID: statusField.EntityFieldID,
+		Value: json.RawMessage(`"pending"`), ValueSet: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{firstRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := repo.GetEntity(company.CompanyID, item.EntityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertActionItemFieldValue(t, restored, ActionItemStatusSystemKey, `"pending"`)
+	if source, err := repo.GetActionItemSource(company.CompanyID, item.EntityID); err != nil || source.ResourceID != node.NodeID {
+		t.Fatalf("restored Source=%+v err=%v", source, err)
+	}
+
+	secondRecycleID := deleteNode()
+	if err := repo.PermanentlyDeleteRecycleBinItems(company.CompanyID, actor.UserID, []string{secondRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetActionItemSource(company.CompanyID, item.EntityID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Source after permanent endpoint deletion error=%v, want ErrNotFound", err)
+	}
 }
 
 func TestActionItemDefaultsAndLiveTemplateConfig(t *testing.T) {
@@ -874,6 +974,8 @@ func assertActionItemFieldValue(t *testing.T, entity domain.Entity, systemKey, e
 			if actual == "" {
 				actual = "null"
 			}
+			actual = canonicalJSONForActionItemFieldTest(t, actual)
+			expected = canonicalJSONForActionItemFieldTest(t, expected)
 			if actual != expected {
 				t.Fatalf("field %s value=%s, want %s", systemKey, actual, expected)
 			}
@@ -881,6 +983,19 @@ func assertActionItemFieldValue(t *testing.T, entity domain.Entity, systemKey, e
 		}
 	}
 	t.Fatalf("field %s missing from %+v", systemKey, entity.EntityFields)
+}
+
+func canonicalJSONForActionItemFieldTest(t *testing.T, raw string) string {
+	t.Helper()
+	var value any
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		t.Fatalf("invalid test JSON %q: %v", raw, err)
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(canonical)
 }
 
 func actionItemTemplateBySystemKey(t *testing.T, repo *MemoryRepo, companyID, systemKey string) (domain.EntityFieldType, bool) {

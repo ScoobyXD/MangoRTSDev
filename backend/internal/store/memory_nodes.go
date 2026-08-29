@@ -284,14 +284,14 @@ func (r *MemoryRepo) DeleteNode(companyID, nodeID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	return r.deleteNodeLocked(companyID, nodeID)
+	return r.deleteNodeLocked(companyID, nodeID, false)
 }
 
 func (r *MemoryRepo) DeleteNodeAndWorkspaceEvent(companyID, nodeID string) (domain.DomainEvent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	snapshot := r.snapshotNodeGraphEventStateLocked()
-	if err := r.deleteNodeLocked(companyID, nodeID); err != nil {
+	if err := r.deleteNodeLocked(companyID, nodeID, false); err != nil {
 		r.restoreNodeGraphEventStateLocked(snapshot)
 		return domain.DomainEvent{}, err
 	}
@@ -303,12 +303,14 @@ func (r *MemoryRepo) DeleteNodeAndWorkspaceEvent(companyID, nodeID string) (doma
 	return event, nil
 }
 
-func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string) error {
+func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string, preserveResourceFields bool) error {
 	k := key(companyID, nodeID)
 	if _, ok := r.nodes[k]; !ok {
 		return ErrNotFound
 	}
-	r.deleteActionItemSourcesForResourceLocked(companyID, EntityTypeNode, nodeID)
+	if !preserveResourceFields {
+		r.clearEntityResourceFieldsForResourceLocked(companyID, EntityTypeNode, nodeID)
+	}
 	r.deleteMemoryResourceSharedEmailDraftsLocked(companyID, EntityTypeNode, nodeID)
 	r.deleteRACIMatrixProjectionForNodeLocked(companyID, nodeID)
 	for itemKey, item := range r.projectTimelineItems {
