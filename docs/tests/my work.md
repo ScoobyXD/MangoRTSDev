@@ -72,17 +72,33 @@ MW34 - A Node whose current status is Done or Completed is never displayed in My
 
 MW35 - A first-version Action Item row exposes only the Action Item summary needed to display and open that exact Entity. It derives and exposes no Process, Project, or other resource context.
 
+MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that section nears its scroll boundary. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section.
+
+MW37 - A section never requests the same next cursor concurrently, ignores canceled or stale responses, rejects a non-advancing cursor, and never appends the same resource twice.
+
+MW38 - My Work has independently adjustable widths between its three columns and an independently adjustable height between Action Items and Nodes. Every divider supports pointer and keyboard adjustment, remains within usable bounds, and saves the company-specific layout locally.
+
+MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact icons. Action Items, Nodes, Processes, and Projects each show their exact icon beside the section title.
+
+MW40 - Red Action Item icons and names use the established Huddle red treatment and pulse once per second. Yellow Action Item icons and names use the established Huddle yellow treatment and pulse once every two seconds.
+
+MW41 - A displayed Action Item date group is labeled `Completion due date: <date>`, and a displayed Node date group is labeled `Due date: <date>`. Nested group levels and their rows are visibly indented, and color or priority groups use the established Action Item or Node priority color.
+
+MW42 - The Process role selector uses the established RACI colors: Responsible is orange, Accountable is green, Consulted is blue, and Informed is purple.
+
+MW43 - Each major My Work section is an elevated surface. Every resource row lifts on hover or keyboard focus, and inline Node Process and Project references are independent elevated click targets.
+
 ## Process Story: One person sees assigned work and current company context
 
 A company member opens My Work beneath My Tower
 
 ↓
 
-Mango reads that member's current effectively Responsible Nodes and exact Person-in-charge Action Items from their canonical sources, excludes completed work, then applies the authenticated viewer's current permissions before any result is grouped or paged
+Mango reads that member's current effectively Responsible Nodes and exact Person-in-charge Action Items from their canonical sources, excludes completed work, then applies the authenticated viewer's current permissions before any result is grouped or cursor-bounded
 
 ↓
 
-The unnamed left column keeps Action Items above Nodes and applies each section's independent grouping stack
+The unnamed left column keeps Action Items above Nodes and applies each section's independent grouping stack while all four sections append more permitted rows within their own scroll areas
 
 ↓
 

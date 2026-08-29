@@ -7,7 +7,7 @@ import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { AppSidebarPinnedSection } from "./AppSidebarPinnedSection";
 import { AppSidebarRACITabsSection } from "./AppSidebarRACITabsSection";
-import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMapIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
+import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMapIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
 import { preloadAccountManagerSurface, preloadEntitiesSurface, preloadMyWorkSurface, preloadProcessMapSurface, preloadProjectManagementSurface, preloadTeamsSurface } from "./preloadDashboardModules";
@@ -68,7 +68,7 @@ import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor
 import { INBOX_PRIORITIES } from "../pages/home/homeConstants";
 import { dispatchTriageConversionApplied } from "../modules/triage/triageEvents";
 import { convertMessagesToExplorerTargetCommand } from "../pages/home/homeCommands";
-import { HomeBuiltInViewSidebarRow, HomeSavedViewsSidebarSection, restoreSelectedHomeSavedView } from "../pages/home/HomeSavedViewsSidebar";
+import { HomeSavedViewsSidebarSection, restoreSelectedHomeSavedView } from "../pages/home/HomeSavedViewsSidebar";
 import {
   buildSharedInboxRows,
   cleanIDList,
@@ -1373,21 +1373,24 @@ export function AppSidebar({
 
       <section style={appSidebarNavSectionStyle} aria-label="Tower">
         <AppSidebarSectionHeader label="Tower" />
-        <HomeBuiltInViewSidebarRow
+        <AppSidebarButton
           label="My Work"
           active={activePage === "my-work"}
-          onSelect={() => onPageSelect("my-work")}
-          onPreload={preloadMyWorkSurface}
+          icon={<HeaderMyWorkIcon color="#2563eb" />}
+          elevated
+          onPointerEnter={preloadMyWorkSurface}
+          onFocus={preloadMyWorkSurface}
+          onPointerDown={preloadMyWorkSurface}
+          onClick={() => onPageSelect("my-work")}
         />
-        <HomeBuiltInViewSidebarRow
+        <AppSidebarElevatedActionButton
           label="Projects"
           active={activePage === "project-management"}
+          icon={<HeaderProjectManagementIcon color="#3b82f6" />}
           onSelect={() => onPageSelect("project-management")}
           onPreload={preloadProjectManagementSurface}
-          settings={{
-            ariaLabel: "Edit Projects view",
-            onOpen: requestProjectViewSettings,
-          }}
+          actionLabel="Edit Projects view"
+          onAction={requestProjectViewSettings}
         />
         <AppSidebarRACITabsSection
           apiBase={apiBase}
@@ -1774,6 +1777,7 @@ function AppSidebarButton({
   return (
     <button
       type="button"
+      aria-current={active ? "page" : undefined}
       style={appSidebarButtonStyle(active, !!icon, !!trailing, elevated, raised, splitTrailing)}
       onPointerEnter={() => {
         setRaised(true);
@@ -1801,6 +1805,69 @@ function AppSidebarButton({
       )}
       {trailing && <span style={splitTrailing ? appSidebarSplitTrailingStyle : appSidebarTrailingStyle}>{trailing}</span>}
     </button>
+  );
+}
+
+function AppSidebarElevatedActionButton({
+  label,
+  active,
+  icon,
+  actionLabel,
+  onSelect,
+  onPreload,
+  onAction,
+}: {
+  label: string;
+  active: boolean;
+  icon: React.ReactNode;
+  actionLabel: string;
+  onSelect: () => void;
+  onPreload?: () => void;
+  onAction: (anchor: DOMRect) => void;
+}): React.ReactElement {
+  const [raised, setRaised] = useState(false);
+  return (
+    <div
+      style={appSidebarSharedRootBlockStyle(active, raised)}
+      onPointerEnter={() => {
+        setRaised(true);
+        onPreload?.();
+      }}
+      onPointerLeave={() => setRaised(false)}
+      onFocus={() => {
+        setRaised(true);
+        onPreload?.();
+      }}
+      onBlur={(event) => {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+        setRaised(false);
+      }}
+      onPointerDown={onPreload}
+    >
+      <div style={appSidebarSharedTriageRowStyle(active, false, true)}>
+        <button
+          type="button"
+          aria-current={active ? "page" : undefined}
+          style={appSidebarSharedTriageButtonStyle}
+          onClick={onSelect}
+        >
+          <span style={appSidebarSharedIconStyle}>{icon}</span>
+          <span style={appSidebarTextStyle}>{label}</span>
+        </button>
+        <button
+          type="button"
+          title={actionLabel}
+          aria-label={actionLabel}
+          style={appSidebarSharedDisclosureStyle}
+          onClick={(event) => {
+            event.stopPropagation();
+            onAction(event.currentTarget.getBoundingClientRect());
+          }}
+        >
+          <span aria-hidden="true" style={appSidebarEllipsisStyle}>•••</span>
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2783,6 +2850,14 @@ const appSidebarSharedDisclosureStyle: React.CSSProperties = {
   color: "rgba(15, 23, 42, 0.62)",
   cursor: "pointer",
   padding: 0,
+};
+
+const appSidebarEllipsisStyle: React.CSSProperties = {
+  display: "block",
+  transform: "translateY(-2px)",
+  fontSize: 11,
+  fontWeight: 900,
+  letterSpacing: -1,
 };
 
 const appSidebarSharedMetaStyle: React.CSSProperties = {

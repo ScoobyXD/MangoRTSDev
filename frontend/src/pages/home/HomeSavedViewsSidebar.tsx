@@ -634,58 +634,6 @@ export function HomeSavedViewsSidebarSection({
   );
 }
 
-export function HomeBuiltInViewSidebarRow({
-  label,
-  active,
-  onSelect,
-  onPreload,
-  settings,
-}: {
-  label: string;
-  active: boolean;
-  onSelect: () => void;
-  onPreload?: () => void;
-  settings?: {
-    ariaLabel: string;
-    onOpen: (anchor: DOMRect) => void;
-  };
-}) {
-  return (
-    <div style={savedViewPanelStyle(active)}>
-      <div style={savedViewListStyle}>
-        <div style={builtInSavedViewRowShellStyle(active)}>
-          <button
-            type="button"
-            aria-current={active ? "page" : undefined}
-            style={savedViewRowButtonStyle}
-            onPointerEnter={onPreload}
-            onFocus={onPreload}
-            onPointerDown={onPreload}
-            onClick={onSelect}
-          >
-            <span style={savedViewNameStyle}>{label}</span>
-          </button>
-          {settings ? (
-            <button
-              type="button"
-              title={settings.ariaLabel}
-              aria-label={settings.ariaLabel}
-              style={savedViewSettingsButtonStyle}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                settings.onOpen(event.currentTarget.getBoundingClientRect());
-              }}
-            >
-              ...
-            </button>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function emitHomeSavedViewsChanged(surface: HomeSavedViewsSurface, settingID: string): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(EVENT_HOME_SAVED_VIEWS_CHANGED, {
@@ -838,13 +786,6 @@ function savedViewRowShellStyle(active: boolean, dropPlacement: SavedViewDropPla
     ].filter(Boolean).join(", "),
     cursor: "grab",
     overflow: "hidden",
-  };
-}
-
-function builtInSavedViewRowShellStyle(active: boolean): React.CSSProperties {
-  return {
-    ...savedViewRowShellStyle(active, null),
-    cursor: "pointer",
   };
 }
 
