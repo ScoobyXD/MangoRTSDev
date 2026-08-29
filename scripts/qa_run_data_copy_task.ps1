@@ -147,13 +147,16 @@ function Get-OrCreateJonatQaCognitoSubject {
     "cognito-idp", "admin-get-user", "--user-pool-id", $UserPoolID,
     "--username", $jonatQaEmail
   )
+  $previousErrorActionPreference = $ErrorActionPreference
   $previousNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
+  $ErrorActionPreference = "Continue"
   $PSNativeCommandUseErrorActionPreference = $false
   try {
     $raw = @(& aws @arguments --profile $AwsProfile --region $AwsRegion --output json 2>&1)
     $exitCode = $LASTEXITCODE
   }
   finally {
+    $ErrorActionPreference = $previousErrorActionPreference
     $PSNativeCommandUseErrorActionPreference = $previousNativeErrorPreference
   }
   if ($exitCode -ne 0) {
