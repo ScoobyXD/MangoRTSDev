@@ -423,6 +423,7 @@ const processMapLogicGateOverlayHeaderStyle: React.CSSProperties = {
 const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onNavigate, overrideContent }) => {
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? "http://localhost:8080";
   const activeCompanyID = getActiveCompanyID();
+  const myWorkSubjectID = me?.user.user_id?.trim() || me?.user.email?.trim() || "local";
   const appRequestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const taskbarScope = useMemo(() => (
     appTaskbarStorageScope(me?.user.user_id || me?.user.email || "local", activeCompanyID)
@@ -2115,7 +2116,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           </React.Suspense>
         ) : isMyWorkView ? (
           <React.Suspense fallback={fullPageFallback}>
-            <LazyMyWorkPage companyID={activeCompanyID} requestJSON={appRequestJSON} />
+            <LazyMyWorkPage
+              key={`${activeCompanyID}:${myWorkSubjectID}`}
+              companyID={activeCompanyID}
+              subjectID={myWorkSubjectID}
+              requestJSON={appRequestJSON}
+            />
           </React.Suspense>
         ) : isProjectManagementView ? (
           <React.Suspense fallback={fullPageFallback}>

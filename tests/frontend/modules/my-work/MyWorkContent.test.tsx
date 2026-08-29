@@ -15,6 +15,23 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
   });
 }
 
+function installMyWorkDOMGlobals(dom: JSDOM, restores: Restore[]) {
+  for (const name of [
+    "window", "document", "navigator", "self", "Node", "Element", "HTMLElement", "HTMLButtonElement",
+    "HTMLSelectElement", "SVGElement", "Event", "EventTarget", "MouseEvent", "KeyboardEvent", "FocusEvent", "CustomEvent",
+    "MutationObserver", "PopStateEvent",
+  ] as const) {
+    const value = name === "window" || name === "self"
+      ? dom.window
+      : name === "document"
+        ? dom.window.document
+        : (dom.window as unknown as Record<string, unknown>)[name];
+    installGlobal(name, value, restores);
+  }
+  installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+}
+
 function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
   return {
     company_id: "company-1",
@@ -77,20 +94,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     url: "http://localhost/my-work",
   });
   const restores: Restore[] = [];
-  for (const name of [
-    "window", "document", "navigator", "self", "Node", "Element", "HTMLElement", "HTMLButtonElement",
-    "HTMLSelectElement", "SVGElement", "Event", "EventTarget", "MouseEvent", "KeyboardEvent", "FocusEvent", "CustomEvent",
-    "MutationObserver", "PopStateEvent",
-  ] as const) {
-    const value = name === "window" || name === "self"
-      ? dom.window
-      : name === "document"
-        ? dom.window.document
-        : (dom.window as unknown as Record<string, unknown>)[name];
-    installGlobal(name, value, restores);
-  }
-  installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
-  installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  installMyWorkDOMGlobals(dom, restores);
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
@@ -167,8 +171,18 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.ok(container);
     const root = createRoot(container);
     mountedRoot = root;
+    let myWorkUpdateCommits = 0;
     await act(async () => {
-      root.render(<MyWorkContent companyID="company-1" requestJSON={requestJSON} />);
+      root.render(
+        <React.Profiler
+          id="my-work"
+          onRender={(_id, phase) => {
+            if (phase === "update") myWorkUpdateCommits += 1;
+          }}
+        >
+          <MyWorkContent companyID="company-1" subjectID="viewer-1" requestJSON={requestJSON} />
+        </React.Profiler>,
+      );
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
@@ -249,14 +263,33 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     };
     const columnsAfterKeyboard = columns.style.gridTemplateColumns;
     const storageAfterKeyboard = dom.window.localStorage.getItem("mangorts.my-work.layout.v1:company-1");
+    const commitsBeforePointerDrag = myWorkUpdateCommits;
     await act(async () => {
       projectDivider.dispatchEvent(pointerEvent("pointerdown", 800, 7));
+      projectDivider.dispatchEvent(pointerEvent("pointermove", 780, 7));
+      projectDivider.dispatchEvent(pointerEvent("pointermove", 760, 7));
       projectDivider.dispatchEvent(pointerEvent("pointermove", 740, 7));
+    });
+    const pointerPreviewColumns = columns.style.gridTemplateColumns;
+    const pointerPreviewValue = projectDivider.getAttribute("aria-valuenow");
+    assert.notEqual(pointerPreviewColumns, columnsAfterKeyboard, "pointer dragging updates the visible columns immediately");
+    assert.notEqual(pointerPreviewValue, null, "the pointer preview keeps the separator value current for assistive technology");
+    assert.equal(myWorkUpdateCommits, commitsBeforePointerDrag, "pointer movement previews layout without committing React state");
+    assert.equal(
+      dom.window.localStorage.getItem("mangorts.my-work.layout.v1:company-1"),
+      storageAfterKeyboard,
+      "pointer movement does not persist an unfinished layout",
+    );
+    await act(async () => {
       projectDivider.dispatchEvent(pointerEvent("pointerup", 740, 7));
+    });
+    assert.equal(myWorkUpdateCommits, commitsBeforePointerDrag + 1, "pointer release commits the preview exactly once");
+    assert.equal(columns.style.gridTemplateColumns, pointerPreviewColumns, "the committed layout matches the pointer preview without jumping");
+    assert.equal(projectDivider.getAttribute("aria-valuenow"), pointerPreviewValue);
+    await act(async () => {
       projectDivider.dispatchEvent(pointerEvent("pointerdown", 740, 8));
       projectDivider.dispatchEvent(pointerEvent("pointercancel", 740, 8));
     });
-    assert.notEqual(columns.style.gridTemplateColumns, columnsAfterKeyboard, "pointer dragging resizes the adjacent columns");
     assert.deepEqual(capturedPointers, [7, 8]);
     assert.deepEqual(releasedPointers, [7, 8]);
     assert.notEqual(dom.window.localStorage.getItem("mangorts.my-work.layout.v1:company-1"), storageAfterKeyboard, "pointer release persists the layout");
@@ -411,7 +444,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
         action_items: undefined,
         nodes: undefined,
         projects: undefined,
-        processes: { role: "accountable", items: [{ logic_gate_id: "stale", name: "Stale Accountable" }], has_more: false },
+        processes: { role: "accountable", items: [{ logic_gate_id: "process-responsible", name: "Stale Accountable" }], has_more: false },
       }));
       await Promise.resolve();
     });
@@ -421,11 +454,11 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
         action_items: undefined,
         nodes: undefined,
         projects: undefined,
-        processes: { role: "consulted", items: [{ logic_gate_id: "consulted", name: "Consulted Process" }], has_more: false },
+        processes: { role: "consulted", items: [{ logic_gate_id: "process-responsible", name: "Consulted Process" }], has_more: false },
       }));
       await Promise.resolve();
     });
-    assert.match(container.textContent ?? "", /Consulted Process/);
+    assert.match(container.textContent ?? "", /Consulted Process/, "the new role may return an ID loaded by the prior role");
 
     const beforeGroupingCalls = calls.length;
     await act(async () => groupButtons[0]?.click());
@@ -454,11 +487,11 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
         nodes: undefined,
         processes: undefined,
         projects: undefined,
-        action_items: { items: [{ entity_id: "action-regrouped", name: "Regrouped Action", color: "red" }], has_more: false },
+        action_items: { items: [{ entity_id: "action-red", name: "Regrouped Red Action", color: "red" }], has_more: false },
       }));
       await Promise.resolve();
     });
-    assert.match(actionSection?.textContent ?? "", /Regrouped Action/);
+    assert.match(actionSection?.textContent ?? "", /Regrouped Red Action/, "regrouping may return an ID from the replaced section with fresh presentation data");
 
     const beforeNodeGroupingCalls = calls.length;
     await act(async () => groupButtons[1]?.click());
@@ -478,6 +511,170 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.match(nodeSection?.textContent ?? "", /Context Node/, "regrouping replaces the section with its first cursor page");
     assert.doesNotMatch(nodeSection?.textContent ?? "", /Second Page Node/, "regrouping does not reuse the prior cursor");
     assert.doesNotMatch(nodeSection?.textContent ?? "", /\bPrevious\b|\bNext\b|Page \d/, "Nodes use continuous scrolling instead of paging controls");
+  } finally {
+    if (mountedRoot) await act(async () => mountedRoot?.unmount());
+    for (const restore of restores.reverse()) restore();
+    dom.window.close();
+  }
+});
+
+test("My Work windows a thousand rows while keeping focused and late exact resources reachable", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/my-work",
+  });
+  const restores: Restore[] = [];
+  installMyWorkDOMGlobals(dom, restores);
+
+  const rectDescriptor = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, "getBoundingClientRect");
+  const offsetHeightDescriptor = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, "offsetHeight");
+  const offsetWidthDescriptor = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, "offsetWidth");
+  Object.defineProperty(dom.window.HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value(this: HTMLElement) {
+      const height = this.dataset.myWorkScroll
+        ? 600
+        : Number(this.dataset.myWorkEstimatedSize) || 48;
+      return new dom.window.DOMRect(0, 0, 800, height);
+    },
+  });
+  Object.defineProperties(dom.window.HTMLElement.prototype, {
+    offsetHeight: {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.dataset.myWorkScroll
+          ? 600
+          : Number(this.dataset.myWorkEstimatedSize) || 48;
+      },
+    },
+    offsetWidth: { configurable: true, get: () => 800 },
+  });
+  restores.push(() => {
+    if (rectDescriptor) Object.defineProperty(dom.window.HTMLElement.prototype, "getBoundingClientRect", rectDescriptor);
+    else delete (dom.window.HTMLElement.prototype as unknown as Record<string, unknown>).getBoundingClientRect;
+    if (offsetHeightDescriptor) Object.defineProperty(dom.window.HTMLElement.prototype, "offsetHeight", offsetHeightDescriptor);
+    else delete (dom.window.HTMLElement.prototype as unknown as Record<string, unknown>).offsetHeight;
+    if (offsetWidthDescriptor) Object.defineProperty(dom.window.HTMLElement.prototype, "offsetWidth", offsetWidthDescriptor);
+    else delete (dom.window.HTMLElement.prototype as unknown as Record<string, unknown>).offsetWidth;
+  });
+
+  let mountedRoot: { unmount(): void } | null = null;
+  try {
+    const [{ createRoot }, { MyWorkContent }] = await Promise.all([
+      import("react-dom/client"),
+      import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx"),
+    ]);
+    const processes = Array.from({ length: 1_000 }, (_, index) => ({
+      logic_gate_id: `process-${index}`,
+      name: `Process ${index}`,
+    }));
+    const requestJSON = <T,>(_path: string, _init?: RequestInit): Promise<T> => Promise.resolve(response({
+      action_items: { items: [], has_more: false },
+      nodes: { items: [], has_more: false },
+      processes: { role: "responsible", items: processes, has_more: false },
+      projects: { items: [], has_more: false },
+    }) as T);
+
+    const container = dom.window.document.getElementById("root");
+    assert.ok(container);
+    const root = createRoot(container);
+    mountedRoot = root;
+    await act(async () => {
+      root.render(<MyWorkContent companyID="company-1" subjectID="viewer-1" requestJSON={requestJSON} />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const processSection = container.querySelector<HTMLElement>('[data-my-work-section="processes"]');
+    const processScroll = processSection?.querySelector<HTMLElement>('[data-my-work-scroll="processes"]');
+    const virtualList = processSection?.querySelector<HTMLElement>('[data-my-work-windowed-list="true"]');
+    assert.ok(processScroll && virtualList);
+    assert.equal(virtualList.dataset.myWorkTotalEntries, "1000");
+    const initiallyMounted = virtualList.querySelectorAll('[data-my-work-entry-kind="row"]').length;
+    assert.ok(initiallyMounted > 0 && initiallyMounted < 100, `expected a bounded initial window, mounted ${initiallyMounted}`);
+    assert.equal(virtualList.querySelector('[data-my-work-entry-id="row:process-950"]'), null, "a late row starts outside the mounted window");
+
+    const focusedButton = virtualList.querySelector<HTMLButtonElement>(
+      '[data-my-work-entry-id="row:process-0"] [data-my-work-target="process"]',
+    );
+    assert.ok(focusedButton);
+    await act(async () => {
+      focusedButton.focus();
+      await Promise.resolve();
+    });
+    assert.equal(dom.window.document.activeElement, focusedButton);
+
+    const requestedScrollTop = 950 * 47;
+    await act(async () => {
+      processScroll.scrollTop = requestedScrollTop;
+      processScroll.dispatchEvent(new dom.window.Event("scroll", { bubbles: true }));
+      await Promise.resolve();
+    });
+
+    const lateEntry = virtualList.querySelector<HTMLElement>('[data-my-work-entry-id="row:process-950"]');
+    const lateButton = lateEntry?.querySelector<HTMLButtonElement>('[data-my-work-target="process"]');
+    assert.ok(lateButton, "scrolling mounts a late exact Process target");
+    assert.equal(processScroll.scrollTop, requestedScrollTop, "window measurement does not jump the section scroll position");
+    assert.equal(focusedButton.isConnected, true, "the focused row remains mounted outside the visible window");
+    assert.equal(dom.window.document.activeElement, focusedButton, "window changes preserve keyboard focus");
+    const mountedAfterScroll = virtualList.querySelectorAll('[data-my-work-entry-kind="row"]').length;
+    assert.ok(mountedAfterScroll < 100, `expected scrolling to keep a bounded row window, mounted ${mountedAfterScroll}`);
+
+    await act(async () => lateButton.click());
+    assert.equal(dom.window.location.pathname, "/logic-gates/process-950", "the late virtual row opens its exact resource");
+  } finally {
+    if (mountedRoot) await act(async () => mountedRoot?.unmount());
+    for (const restore of restores.reverse()) restore();
+    dom.window.close();
+  }
+});
+
+test("My Work reloads the same resource ID when the subject changes", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/my-work",
+  });
+  const restores: Restore[] = [];
+  installMyWorkDOMGlobals(dom, restores);
+
+  let mountedRoot: { unmount(): void } | null = null;
+  try {
+    const [{ createRoot }, { MyWorkContent }] = await Promise.all([
+      import("react-dom/client"),
+      import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx"),
+    ]);
+    let initialRequests = 0;
+    const requestJSON = <T,>(_path: string, _init?: RequestInit): Promise<T> => {
+      initialRequests += 1;
+      const subjectLabel = initialRequests === 1 ? "First Subject Process" : "Second Subject Process";
+      return Promise.resolve(response({
+        action_items: { items: [], has_more: false },
+        nodes: { items: [], has_more: false },
+        processes: {
+          role: "responsible",
+          items: [{ logic_gate_id: "shared-process", name: subjectLabel }],
+          has_more: false,
+        },
+        projects: { items: [], has_more: false },
+      }) as T);
+    };
+
+    const container = dom.window.document.getElementById("root");
+    assert.ok(container);
+    const root = createRoot(container);
+    mountedRoot = root;
+    await act(async () => {
+      root.render(<MyWorkContent companyID="company-1" subjectID="viewer-1" requestJSON={requestJSON} />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.match(container.textContent ?? "", /First Subject Process/);
+
+    await act(async () => {
+      root.render(<MyWorkContent companyID="company-1" subjectID="viewer-2" requestJSON={requestJSON} />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(initialRequests, 2);
+    assert.doesNotMatch(container.textContent ?? "", /First Subject Process/);
+    assert.match(container.textContent ?? "", /Second Subject Process/, "a new subject may return the same ID with fresh presentation data");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

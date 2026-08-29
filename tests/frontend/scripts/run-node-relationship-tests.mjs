@@ -30,6 +30,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/grouping/universalStatusGrouping.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/my-work/myWorkApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/my-work/myWorkGrouping.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/my-work/myWorkWindowing.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectRelationshipGrouping.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectManagementApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/project-management/projectListView.test.js"),

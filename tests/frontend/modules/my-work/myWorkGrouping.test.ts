@@ -8,7 +8,10 @@ import {
   myWorkNodeGroupingAdapter,
   normalizeMyWorkActionItemGroupings,
 } from "../../../../frontend/src/modules/my-work/myWorkGrouping.js";
-import { beginMyWorkSectionRequest } from "../../../../frontend/src/modules/my-work/useMyWorkData.js";
+import {
+  beginMyWorkSectionRequest,
+  takeUnseenMyWorkItems,
+} from "../../../../frontend/src/modules/my-work/useMyWorkData.js";
 import {
   columnResizeA11y,
   resizedColumnWeights,
@@ -44,6 +47,50 @@ test("My Work preserves the backend keyset order instead of applying locale or n
     myWorkActionItemGroupingAdapter,
   );
   assert.deepEqual(groups[0]?.rows.map((item) => item.name), ["Item 10", "Älpha", "Item 2"]);
+  assert.equal(myWorkActionItemGroupingAdapter.sortRows(authoritativeRows), authoritativeRows);
+});
+
+test("universal grouping de-duplicates one large group with linear row-key work", () => {
+  const rows = Array.from({ length: 2_000 }, (_, index) => ({ id: `row-${index}` }));
+  let rowKeyReads = 0;
+  const groups = buildUniversalNestedGroups(rows, [{ field: "bucket", direction: "asc" }], {
+    rootID: "linear-grouping-test",
+    rowKey: (row) => {
+      rowKeyReads += 1;
+      return row.id;
+    },
+    getValues: () => [{ key: "shared", label: "Shared", sortValue: 1 }],
+    sortRows: (items) => items,
+  });
+
+  assert.equal(groups[0]?.rows.length, rows.length);
+  assert.equal(rowKeyReads, rows.length);
+});
+
+test("persistent My Work de-duplication reads only the incoming page and resets for replacements", () => {
+  let oldKeyReads = 0;
+  const oldItems = ["old-1", "old-2"].map((id) => Object.defineProperty({}, "entity_id", {
+    configurable: true,
+    enumerable: true,
+    get: () => {
+      oldKeyReads += 1;
+      return id;
+    },
+  }) as MyWorkActionItem);
+  const seen = new Set(oldItems.map((item) => item.entity_id));
+  oldKeyReads = 0;
+  const newItem = { entity_id: "new-1", name: "New" };
+
+  assert.deepEqual(takeUnseenMyWorkItems("action_items", [
+    { entity_id: "old-1", name: "Cursor overlap" },
+    newItem,
+    { entity_id: "new-1", name: "Same-page overlap" },
+  ], seen), [newItem]);
+  assert.equal(oldKeyReads, 0, "appending never re-reads identifiers from accumulated rows");
+  assert.deepEqual([...seen], ["old-1", "old-2", "new-1"]);
+
+  const replacement = { entity_id: "old-1", name: "Legitimate replacement" };
+  assert.deepEqual(takeUnseenMyWorkItems("action_items", [replacement], new Set()), [replacement]);
 });
 
 test("Nodes default to Priority then exact Due date and keep missing values visible", () => {

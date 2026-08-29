@@ -33,6 +33,13 @@ test("My Work is a lazy authenticated static page with persisted page identity",
   assert.match(lazyPages, /import\("\.\/my-work"\)/);
   assert.match(lazyPages, /LazyMyWorkPage/);
   assert.match(app, /if \(page === "my-work"\) return "\/my-work"/);
-  assert.match(app, /<LazyMyWorkPage companyID=\{activeCompanyID\} requestJSON=\{appRequestJSON\} \/>/);
+  const myWorkPageStart = app.indexOf("<LazyMyWorkPage");
+  const myWorkPageEnd = app.indexOf("/>", myWorkPageStart);
+  assert.ok(myWorkPageStart >= 0 && myWorkPageEnd > myWorkPageStart);
+  const myWorkPage = app.slice(myWorkPageStart, myWorkPageEnd);
+  assert.match(myWorkPage, /key=\{`\$\{activeCompanyID\}:\$\{myWorkSubjectID\}`\}/);
+  assert.match(myWorkPage, /companyID=\{activeCompanyID\}/);
+  assert.match(myWorkPage, /subjectID=\{myWorkSubjectID\}/);
+  assert.match(myWorkPage, /requestJSON=\{appRequestJSON\}/);
   assert.match(persistence, /id: "view-my-work", name: "My Work", page: "my-work", frames: \[\]/);
 });

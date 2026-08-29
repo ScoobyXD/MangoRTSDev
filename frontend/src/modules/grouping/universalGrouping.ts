@@ -59,15 +59,20 @@ function buildUniversalNestedGroupLevel<Item, Field extends string>(
 ): Array<UniversalNestedGroup<Item, Field>> {
   const grouping = groupings[depth];
   if (!grouping) return [];
-  const byKey = new Map<string, UniversalGroupValue & { rows: Item[] }>();
+  const byKey = new Map<string, UniversalGroupValue & { rows: Item[]; rowKeys: Set<string> }>();
   for (const row of rows) {
+    const values = adapter.getValues(row, grouping.field);
+    if (values.length === 0) continue;
+    const rowKey = adapter.rowKey(row);
     const seenValues = new Set<string>();
-    for (const value of adapter.getValues(row, grouping.field)) {
+    for (const value of values) {
       if (seenValues.has(value.key)) continue;
       seenValues.add(value.key);
-      const existing = byKey.get(value.key) ?? { ...value, rows: [] };
-      const rowKey = adapter.rowKey(row);
-      if (!existing.rows.some((item) => adapter.rowKey(item) === rowKey)) existing.rows.push(row);
+      const existing = byKey.get(value.key) ?? { ...value, rows: [], rowKeys: new Set<string>() };
+      if (!existing.rowKeys.has(rowKey)) {
+        existing.rowKeys.add(rowKey);
+        existing.rows.push(row);
+      }
       byKey.set(value.key, existing);
     }
   }

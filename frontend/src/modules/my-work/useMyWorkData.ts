@@ -60,7 +60,7 @@ function errorMessage(cause: unknown): string {
   return cause instanceof Error && cause.message.trim() ? cause.message : "My Work could not be loaded.";
 }
 
-export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) {
+export function useMyWorkData(companyID: string, subjectID: string, requestJSON: BoundRequestJSON) {
   const [state, setState] = useState<MyWorkDataState>(createInitialState);
   const [processRole, setProcessRole] = useState<MyWorkProcessRole>("responsible");
   const stateRef = useRef(state);
@@ -74,6 +74,7 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
     projects: 0,
   });
   const consumedCursorsRef = useRef<Record<MyWorkSection, Set<string>>>(createCursorSets());
+  const seenItemKeysRef = useRef<Record<MyWorkSection, Set<string>>>(createSectionSets());
 
   useEffect(() => {
     stateRef.current = state;
@@ -88,6 +89,7 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
     request: SectionRequest = {},
   ): Promise<void> => {
     if (!request.append) consumedCursorsRef.current[section] = new Set<string>();
+    if (!request.append && request.clearItems) seenItemKeysRef.current[section] = new Set<string>();
     sectionControllersRef.current[section]?.abort();
     const controller = new AbortController();
     sectionControllersRef.current[section] = controller;
@@ -118,10 +120,13 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
         throw new Error(`My Work ${section.replace("_", " ")} pagination did not advance.`);
       }
       if (request.append && request.cursor?.trim()) consumedCursors.add(request.cursor.trim());
+      const seenItemKeys = request.append ? seenItemKeysRef.current[section] : new Set<string>();
+      const acceptedPageItems = takeUnseenMyWorkItems(section, page.items, seenItemKeys);
+      if (!request.append) seenItemKeysRef.current[section] = seenItemKeys;
       setState((current) => replaceSection(current, section, stateFromPage(
-        section,
         page,
         request.append ? (current[section] as AnySectionState).items : [],
+        acceptedPageItems,
       )));
     } catch (cause) {
       if (controller.signal.aborted || isAbortError(cause) || requestVersionsRef.current[section] !== version) return;
@@ -140,6 +145,7 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
     Object.values(sectionControllersRef.current).forEach((controller) => controller?.abort());
     sectionControllersRef.current = {};
     consumedCursorsRef.current = createCursorSets();
+    seenItemKeysRef.current = createSectionSets();
     const controller = new AbortController();
     initialControllerRef.current = controller;
     const versions = {
@@ -164,7 +170,13 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
       signal: controller.signal,
     }).then((response) => {
       if (controller.signal.aborted) return;
-      setState((current) => applyInitialResponse(current, response, versions, requestVersionsRef.current));
+      const preparedResponse = prepareInitialResponse(
+        response,
+        versions,
+        requestVersionsRef.current,
+        seenItemKeysRef.current,
+      );
+      setState((current) => applyInitialResponse(current, preparedResponse, versions, requestVersionsRef.current));
     }).catch((cause) => {
       if (controller.signal.aborted || isAbortError(cause)) return;
       const message = errorMessage(cause);
@@ -174,8 +186,9 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
     return () => {
       controller.abort();
       Object.values(sectionControllersRef.current).forEach((sectionController) => sectionController?.abort());
+      seenItemKeysRef.current = createSectionSets();
     };
-  }, [companyID, requestJSON]);
+  }, [companyID, requestJSON, subjectID]);
 
   const reloadSection = useCallback((
     section: MyWorkSection,
@@ -220,6 +233,10 @@ export function useMyWorkData(companyID: string, requestJSON: BoundRequestJSON) 
 }
 
 function createCursorSets(): Record<MyWorkSection, Set<string>> {
+  return createSectionSets();
+}
+
+function createSectionSets(): Record<MyWorkSection, Set<string>> {
   return {
     action_items: new Set<string>(),
     nodes: new Set<string>(),
@@ -229,12 +246,12 @@ function createCursorSets(): Record<MyWorkSection, Set<string>> {
 }
 
 function stateFromPage<Item>(
-  section: MyWorkSection,
   page: MyWorkPage<Item>,
   previousItems: Item[],
+  pageItems: Item[],
 ): MyWorkSectionState<Item> {
   return {
-    items: appendUniqueMyWorkItems(section, previousItems, page.items),
+    items: [...previousItems, ...pageItems],
     nextCursor: page.next_cursor?.trim() || undefined,
     hasMore: page.has_more,
     loading: false,
@@ -242,15 +259,17 @@ function stateFromPage<Item>(
   };
 }
 
-function appendUniqueMyWorkItems<Item>(section: MyWorkSection, previousItems: Item[], pageItems: Item[]): Item[] {
-  if (previousItems.length === 0) return [...pageItems];
-  const seen = new Set(previousItems.map((item) => myWorkItemKey(section, item)));
-  return [...previousItems, ...pageItems.filter((item) => {
+export function takeUnseenMyWorkItems<Item>(
+  section: MyWorkSection,
+  pageItems: Item[],
+  seen: Set<string>,
+): Item[] {
+  return pageItems.filter((item) => {
     const key = myWorkItemKey(section, item);
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
-  })];
+  });
 }
 
 function myWorkItemKey(section: MyWorkSection, item: unknown): string {
@@ -298,23 +317,57 @@ function applyInitialResponse(
   let next = state;
   if (currentVersions.action_items === versions.action_items) {
     next = replaceSection(next, "action_items", response.action_items
-      ? stateFromPage("action_items", response.action_items, [])
+      ? stateFromPage(response.action_items, [], response.action_items.items)
       : { ...next.action_items, loading: false, error: "My Work response omitted action_items." });
   }
   if (currentVersions.nodes === versions.nodes) {
     next = replaceSection(next, "nodes", response.nodes
-      ? stateFromPage("nodes", response.nodes, [])
+      ? stateFromPage(response.nodes, [], response.nodes.items)
       : { ...next.nodes, loading: false, error: "My Work response omitted nodes." });
   }
   if (currentVersions.processes === versions.processes) {
     next = replaceSection(next, "processes", response.processes
-      ? stateFromPage("processes", response.processes, [])
+      ? stateFromPage(response.processes, [], response.processes.items)
       : { ...next.processes, loading: false, error: "My Work response omitted processes." });
   }
   if (currentVersions.projects === versions.projects) {
     next = replaceSection(next, "projects", response.projects
-      ? stateFromPage("projects", response.projects, [])
+      ? stateFromPage(response.projects, [], response.projects.items)
       : { ...next.projects, loading: false, error: "My Work response omitted projects." });
+  }
+  return next;
+}
+
+function prepareInitialResponse(
+  response: MyWorkResponse,
+  versions: Record<MyWorkSection, number>,
+  currentVersions: Record<MyWorkSection, number>,
+  seenItemKeys: Record<MyWorkSection, Set<string>>,
+): MyWorkResponse {
+  let next = response;
+  if (currentVersions.action_items === versions.action_items && response.action_items) {
+    const seen = new Set<string>();
+    const items = takeUnseenMyWorkItems("action_items", response.action_items.items, seen);
+    seenItemKeys.action_items = seen;
+    next = { ...next, action_items: { ...response.action_items, items } };
+  }
+  if (currentVersions.nodes === versions.nodes && response.nodes) {
+    const seen = new Set<string>();
+    const items = takeUnseenMyWorkItems("nodes", response.nodes.items, seen);
+    seenItemKeys.nodes = seen;
+    next = { ...next, nodes: { ...response.nodes, items } };
+  }
+  if (currentVersions.processes === versions.processes && response.processes) {
+    const seen = new Set<string>();
+    const items = takeUnseenMyWorkItems("processes", response.processes.items, seen);
+    seenItemKeys.processes = seen;
+    next = { ...next, processes: { ...response.processes, items } };
+  }
+  if (currentVersions.projects === versions.projects && response.projects) {
+    const seen = new Set<string>();
+    const items = takeUnseenMyWorkItems("projects", response.projects.items, seen);
+    seenItemKeys.projects = seen;
+    next = { ...next, projects: { ...response.projects, items } };
   }
   return next;
 }

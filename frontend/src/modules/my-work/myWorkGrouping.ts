@@ -43,7 +43,7 @@ export const myWorkActionItemGroupingAdapter: UniversalGroupingAdapter<MyWorkAct
   rootID: "my-work/action-items",
   rowKey: (item) => item.entity_id,
   getValues: (item, field) => actionItemGroupingValues(item, field),
-  sortRows: sortActionItems,
+  sortRows: (items) => items,
   preserveGroupOrder: true,
 };
 
@@ -51,7 +51,7 @@ export const myWorkNodeGroupingAdapter: UniversalGroupingAdapter<MyWorkNode, MyW
   rootID: "my-work/nodes",
   rowKey: (item) => item.node_id,
   getValues: (item, field) => nodeGroupingValues(item, field),
-  sortRows: sortNodes,
+  sortRows: (items) => items,
   preserveGroupOrder: true,
 };
 
@@ -86,22 +86,6 @@ export function nodeGroupingValues(item: MyWorkNode, field: MyWorkNodeGroupingFi
   const label = INBOX_PRIORITIES.find((candidate) => candidate.value === priority)?.label.replace(/\u00a0/g, " ")
     ?? `Priority ${priority}`;
   return [{ key: String(priority), label, sortValue: priority }];
-}
-
-export function sortActionItems(items: MyWorkActionItem[]): MyWorkActionItem[] {
-  return [...items];
-}
-
-export function sortNodes(items: MyWorkNode[]): MyWorkNode[] {
-  return [...items];
-}
-
-export function sortProcesses<T extends { name: string; logic_gate_id: string }>(items: T[]): T[] {
-  return [...items];
-}
-
-export function sortProjects<T extends { name: string; project_id: string }>(items: T[]): T[] {
-  return [...items];
 }
 
 function exactDateGroupingValue(value: string | null | undefined, fieldLabel: string, emptyLabel: string): UniversalGroupValue[] {
