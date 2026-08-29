@@ -17,7 +17,7 @@ set local idle_in_transaction_session_timeout = '30min';
 
 do $guard$
 declare
-  missing_root_count integer;
+  missing_excluded_folder_labels text;
 begin
   if current_setting('server_version_num')::integer < 170000
      or current_setting('server_version_num')::integer >= 180000 then
@@ -50,56 +50,42 @@ begin
     raise exception 'STOP: required Mango tables are missing from the raw QA copy';
   end if;
 
-  with excluded_root_names(name) as (
+  with audited_excluded_folders(company_id, resource_type, resource_id, audit_label) as (
     values
-      ('sidebar huddles private'),('tk'),('finance 1'),('finance 1.5'),
-      ('finance 2'),('hr 1'),('hr 1.5'),('hr 2'),('legal'),('fo')
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019fcceb-fc3f-7000-afe8-753caec7192d'::uuid, 'Sidebar Huddles Private'::text),
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e6a1f-03c3-7000-b82f-700c63804e55'::uuid, 'TK'::text),
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e481c-8883-709c-ab8a-732ab4cc905d'::uuid, 'Finance 1'::text),
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fb8-0487-7000-9ea2-5e49697c9e50'::uuid, 'Finance 1.5'::text),
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fb0-a1c7-7000-991a-828bde4514ee'::uuid, 'Finance 2'::text),
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e6ff3-e03e-7000-80c7-bd9aaaa266ed'::uuid, 'HR 1'::text),
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fbb-4e49-7000-b59e-03bc60c93772'::uuid, 'HR 1.5'::text),
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fbb-2ae3-7000-ad45-92438718f024'::uuid, 'HR 2'::text),
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fbe-f567-7000-b483-e855cc8f46a6'::uuid, 'Legal'::text),
+      ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e481f-3f20-767e-8c2a-5b37fca774ad'::uuid, 'FO'::text)
   )
-  select count(*)
-    into missing_root_count
-  from excluded_root_names root_name
-  where not exists (
-    select 1 from public.company_explorer_folders folder
-    where folder.parent_folder_id is null
-      and lower(btrim(folder.name)) = root_name.name
-  )
+  select string_agg(excluded.audit_label, ', ' order by excluded.audit_label)
+    into missing_excluded_folder_labels
+  from audited_excluded_folders excluded
+  where (
+    excluded.resource_type = 'company_explorer_folder'
+    and not exists (
+      select 1
+      from public.company_explorer_folders folder
+      where folder.company_id = excluded.company_id
+        and folder.folder_id = excluded.resource_id
+    )
+  ) or (
+    excluded.resource_type = 'huddle_explorer_folder'
     and not exists (
       select 1 from public.huddle_explorer_folders folder
-      where folder.parent_folder_id is null
-        and lower(btrim(folder.name)) = root_name.name
-    );
+      where folder.company_id = excluded.company_id
+        and folder.folder_id = excluded.resource_id
+    )
+  );
 
-  if missing_root_count <> 0 then
-    raise exception 'STOP: % required excluded root name(s) were not found at the root of either explorer',
-      missing_root_count;
-  end if;
-
-  if exists (
-    select 1
-    from public.company_explorer_folders folder
-    where folder.parent_folder_id is null
-      and lower(btrim(folder.name)) in (
-        'sidebar huddles private','tk','finance 1','finance 1.5','finance 2',
-        'hr 1','hr 1.5','hr 2','legal','fo'
-      )
-    group by folder.company_id, lower(btrim(folder.name))
-    having count(*) <> 1
-  ) then
-    raise exception 'STOP: a company explorer has duplicate excluded root names';
-  end if;
-
-  if exists (
-    select 1
-    from public.huddle_explorer_folders folder
-    where folder.parent_folder_id is null
-      and lower(btrim(folder.name)) in (
-        'sidebar huddles private','tk','finance 1','finance 1.5','finance 2',
-        'hr 1','hr 1.5','hr 2','legal','fo'
-      )
-    group by folder.company_id, lower(btrim(folder.name))
-    having count(*) <> 1
-  ) then
-    raise exception 'STOP: a Huddle explorer has duplicate excluded root names';
+  if missing_excluded_folder_labels is not null then
+    raise exception 'STOP: audited excluded Explorer folder identities are missing: %. Repeat the read-only Dev inventory before copying',
+      missing_excluded_folder_labels;
   end if;
 end
 $guard$;
@@ -112,20 +98,33 @@ create temp table qa_excluded_resources (
 ) on commit drop;
 
 with recursive
-excluded_root_names(name) as (
+audited_excluded_folders(company_id, resource_type, resource_id, audit_label) as (
+  values
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019fcceb-fc3f-7000-afe8-753caec7192d'::uuid, 'Sidebar Huddles Private'::text),
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e6a1f-03c3-7000-b82f-700c63804e55'::uuid, 'TK'::text),
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e481c-8883-709c-ab8a-732ab4cc905d'::uuid, 'Finance 1'::text),
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fb8-0487-7000-9ea2-5e49697c9e50'::uuid, 'Finance 1.5'::text),
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fb0-a1c7-7000-991a-828bde4514ee'::uuid, 'Finance 2'::text),
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e6ff3-e03e-7000-80c7-bd9aaaa266ed'::uuid, 'HR 1'::text),
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fbb-4e49-7000-b59e-03bc60c93772'::uuid, 'HR 1.5'::text),
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fbb-2ae3-7000-ad45-92438718f024'::uuid, 'HR 2'::text),
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e8fbe-f567-7000-b483-e855cc8f46a6'::uuid, 'Legal'::text),
+    ('11111111-1111-1111-1111-111111111111'::uuid, 'company_explorer_folder'::text, '019e481f-3f20-767e-8c2a-5b37fca774ad'::uuid, 'FO'::text)
+), excluded_folder_names(name) as (
   values
     ('sidebar huddles private'),('tk'),('finance 1'),('finance 1.5'),
     ('finance 2'),('hr 1'),('hr 1.5'),('hr 2'),('legal'),('fo')
 ), seeds(company_id, resource_type, resource_id) as (
-  select folder.company_id, 'company_explorer_folder'::text, folder.folder_id
+  select company_id, resource_type, resource_id
+  from audited_excluded_folders
+  union
+  select folder.company_id, 'company_explorer_folder', folder.folder_id
   from public.company_explorer_folders folder
-  join excluded_root_names root_name on root_name.name = lower(btrim(folder.name))
-  where folder.parent_folder_id is null
+  join excluded_folder_names excluded on excluded.name = lower(btrim(folder.name))
   union
   select folder.company_id, 'huddle_explorer_folder', folder.folder_id
   from public.huddle_explorer_folders folder
-  join excluded_root_names root_name on root_name.name = lower(btrim(folder.name))
-  where folder.parent_folder_id is null
+  join excluded_folder_names excluded on excluded.name = lower(btrim(folder.name))
 ), edges(from_company_id, from_type, from_id, to_company_id, to_type, to_id) as (
   select parent.company_id, 'company_explorer_folder', parent.folder_id,
          child.company_id, 'company_explorer_folder', child.folder_id
@@ -1083,21 +1082,35 @@ begin
   end if;
 
   if exists (
-    select 1 from public.company_explorer_folders
-    where parent_folder_id is null
-      and lower(btrim(name)) in (
+    select 1
+    from public.company_explorer_folders folder
+    where (
+      folder.company_id = '11111111-1111-1111-1111-111111111111'::uuid
+      and folder.folder_id in (
+        '019fcceb-fc3f-7000-afe8-753caec7192d'::uuid,
+        '019e6a1f-03c3-7000-b82f-700c63804e55'::uuid,
+        '019e481c-8883-709c-ab8a-732ab4cc905d'::uuid,
+        '019e8fb8-0487-7000-9ea2-5e49697c9e50'::uuid,
+        '019e8fb0-a1c7-7000-991a-828bde4514ee'::uuid,
+        '019e6ff3-e03e-7000-80c7-bd9aaaa266ed'::uuid,
+        '019e8fbb-4e49-7000-b59e-03bc60c93772'::uuid,
+        '019e8fbb-2ae3-7000-ad45-92438718f024'::uuid,
+        '019e8fbe-f567-7000-b483-e855cc8f46a6'::uuid,
+        '019e481f-3f20-767e-8c2a-5b37fca774ad'::uuid
+      )
+    ) or lower(btrim(folder.name)) in (
         'sidebar huddles private','tk','finance 1','finance 1.5','finance 2',
         'hr 1','hr 1.5','hr 2','legal','fo'
       )
   ) or exists (
-    select 1 from public.huddle_explorer_folders
-    where parent_folder_id is null
-      and lower(btrim(name)) in (
-        'sidebar huddles private','tk','finance 1','finance 1.5','finance 2',
-        'hr 1','hr 1.5','hr 2','legal','fo'
-      )
+    select 1
+    from public.huddle_explorer_folders folder
+    where lower(btrim(folder.name)) in (
+      'sidebar huddles private','tk','finance 1','finance 1.5','finance 2',
+      'hr 1','hr 1.5','hr 2','legal','fo'
+    )
   ) then
-    raise exception 'STOP: an excluded explorer root remains after sanitization';
+    raise exception 'STOP: an audited excluded Explorer folder identity or denied folder name remains after sanitization';
   end if;
 
   if exists (select 1 from public.attachments)

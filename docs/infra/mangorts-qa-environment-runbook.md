@@ -344,6 +344,15 @@ schema or relationship shape changes, stop and reassess. Do not run
 `20260825_canonical_schema_reconciliation.sql` on Dev or use it to force a hash;
 the fresh next database is built from the release's canonical migrations.
 
+The 2026-08-29 read-only inventory also pinned the exact Company Explorer
+folder identities for all ten required private trees. Several Finance, HR, and
+Legal labels had changed, so folder names are not deletion authority. The
+preflight stops if any pinned identity is missing, the sanitizer follows those
+identities through renames and moves, and final verification requires every
+pinned identity to be absent. The original ten normalized names remain an
+additional any-depth denylist. Re-audit and update the reviewed manifest rather
+than guessing if a pinned identity changes before the copy runs.
+
 Measure the source through the same read-only tuple and compare it to current QA
 free storage. The raw database is dropped before the next database is built, so
 only one extra full copy exists at a time. Require at least 1.5 times the source
@@ -822,7 +831,8 @@ Stop immediately if:
 - any API, worker, Scheduler, or one-off task is active during copy or cutover;
 - a PostgreSQL client/server is not 17.x;
 - source size lacks the required QA free-storage margin;
-- a required excluded root is absent/duplicated or remains after sanitize;
+- an audited excluded folder identity is missing or any audited identity or
+  denied folder name remains after sanitize;
 - an attachment, provider state, active imported identity, job, orphan, or
   unknown typed reference survives;
 - schema inventory or migration filenames differ from the exact release;
