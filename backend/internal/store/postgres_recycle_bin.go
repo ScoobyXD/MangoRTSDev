@@ -412,6 +412,7 @@ var recycleSnapshotTables = map[string]bool{
 
 	"huddle_logic_gate_relationships":      true,
 	"entity_relationships":                 true,
+	"action_item_sources":                  true,
 	"huddle_node_logic_gate_relationships": true,
 	"huddle_node_kpi_relationships":        true,
 
@@ -464,6 +465,7 @@ var recycleRestoreTableOrder = []string{
 	"huddle_node_textboxes",
 	"huddle_node_textbox_chats",
 	"kpis",
+	"action_item_sources",
 	"huddle_logic_gate_relationships",
 	"entity_relationships",
 	"huddle_node_logic_gate_relationships",
@@ -966,6 +968,18 @@ func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *s
 	projectIDCSV := strings.Join(projectIDs, ",")
 	cleanupFolderIDCSV := strings.Join(sortedMapKeys(cleanupScope.FolderIDs), ",")
 	cleanupLogicGateIDCSV := strings.Join(sortedMapKeys(cleanupScope.LogicGateIDs), ",")
+	if len(nodeIDs) > 0 || len(logicGateIDs) > 0 || len(projectIDs) > 0 {
+		sourceWhere := `company_id=$1::uuid and (` +
+			`(resource_type='node' and resource_id=any(coalesce(string_to_array(nullif($2,''),',')::uuid[],'{}'::uuid[]))) or ` +
+			`(resource_type='logic_gate' and resource_id=any(coalesce(string_to_array(nullif($3,''),',')::uuid[],'{}'::uuid[]))) or ` +
+			`(resource_type='project' and resource_id=any(coalesce(string_to_array(nullif($4,''),',')::uuid[],'{}'::uuid[]))) or ` +
+			`(resource_type='kpi' and resource_id in (` +
+			`select kpi_id from kpis where company_id=$1::uuid and logic_gate_id=any(coalesce(string_to_array(nullif($3,''),',')::uuid[],'{}'::uuid[]))))` +
+			`)`
+		if err := addTable("action_item_sources", sourceWhere, companyID, nodeIDCSV, logicGateIDCSV, projectIDCSV); err != nil {
+			return nil, err
+		}
+	}
 
 	if len(folderIDs) > 0 {
 		if err := addTable("company_explorer_folders", `company_id=$1::uuid and folder_id = any(string_to_array($2, ',')::uuid[])`, companyID, folderIDCSV); err != nil {

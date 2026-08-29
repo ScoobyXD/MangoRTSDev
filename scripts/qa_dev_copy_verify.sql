@@ -60,6 +60,7 @@ begin
      or to_regclass('public.entities') is null
      or to_regclass('public.entity_fields') is null
      or to_regclass('public.entity_relationships') is null
+     or to_regclass('public.action_item_sources') is null
      or to_regclass('public.huddle_node_textboxes') is null
      or to_regclass('public.huddle_node_textbox_chats') is null
      or to_regclass('public.action_item_huddle_relationships') is not null
@@ -94,6 +95,9 @@ begin
       ('entity_relationships','company_id'),('entity_relationships','entity_id'),
       ('entity_relationships','resource_type'),('entity_relationships','resource_id'),
       ('entity_relationships','created_timestamp'),
+      ('action_item_sources','company_id'),('action_item_sources','entity_id'),
+      ('action_item_sources','resource_type'),('action_item_sources','resource_id'),
+      ('action_item_sources','created_timestamp'),
       ('huddle_node_textboxes','company_id'),('huddle_node_textboxes','huddle_node_id'),
       ('huddle_node_textboxes','textbox_id'),('huddle_node_textboxes','created_timestamp'),
       ('huddle_node_textboxes','updated_timestamp'),('huddle_node_textboxes','deleted_timestamp'),
@@ -115,7 +119,7 @@ begin
     where table_schema='public'
       and table_name in (
         'entity_types','entity_folders','entity_field_types','entities','entity_fields',
-        'entity_relationships','huddle_node_textboxes','huddle_node_textbox_chats'
+        'entity_relationships','action_item_sources','huddle_node_textboxes','huddle_node_textbox_chats'
       )
   ), mismatches as (
     (select * from expected except select * from actual)
@@ -388,6 +392,7 @@ begin
     with required(entity_field_type_id,system_key,name,field_type) as (
       values
         ('a17e0000-0000-4000-8000-000000000101'::uuid,'person_in_charge','Person in charge','person'),
+        ('a17e0000-0000-4000-8000-000000000106'::uuid,'assigned_by','Assigned by','person'),
         ('a17e0000-0000-4000-8000-000000000102'::uuid,'analysis_due_date','Analysis due date','date'),
         ('a17e0000-0000-4000-8000-000000000103'::uuid,'completion_due_date','Completion due date','date'),
         ('a17e0000-0000-4000-8000-000000000104'::uuid,'status','Status','choice'),
@@ -461,6 +466,7 @@ begin
     with required(entity_field_type_id,name,field_type) as (
       values
         ('a17e0000-0000-4000-8000-000000000101'::uuid,'Person in charge','person'),
+        ('a17e0000-0000-4000-8000-000000000106'::uuid,'Assigned by','person'),
         ('a17e0000-0000-4000-8000-000000000102'::uuid,'Analysis due date','date'),
         ('a17e0000-0000-4000-8000-000000000103'::uuid,'Completion due date','date'),
         ('a17e0000-0000-4000-8000-000000000104'::uuid,'Status','choice'),
@@ -506,6 +512,54 @@ begin
        or (relationship.resource_type = 'huddle_logic_gate' and huddle_logic_gate.huddle_logic_gate_id is null)
   ) then
     raise exception 'STOP: an Entity relationship has a missing Entity or unsupported or missing exact resource';
+  end if;
+
+  if exists (
+    select 1
+    from public.action_item_sources source
+    left join public.entities entity
+      on entity.company_id = source.company_id
+     and entity.entity_id = source.entity_id
+    left join public.entity_types entity_type
+      on entity_type.company_id = entity.company_id
+     and entity_type.entity_type_id = entity.entity_type_id
+    left join public.nodes node
+      on source.resource_type = 'node'
+     and node.company_id = source.company_id
+     and node.node_id = source.resource_id
+    left join public.logic_gates logic_gate
+      on source.resource_type = 'logic_gate'
+     and logic_gate.company_id = source.company_id
+     and logic_gate.logic_gate_id = source.resource_id
+    left join public.projects project
+      on source.resource_type = 'project'
+     and project.company_id = source.company_id
+     and project.project_id = source.resource_id
+    left join public.huddle_nodes huddle_node
+      on source.resource_type = 'huddle_node'
+     and huddle_node.company_id = source.company_id
+     and huddle_node.huddle_node_id = source.resource_id
+    left join public.huddle_logic_gates huddle_logic_gate
+      on source.resource_type = 'huddle_logic_gate'
+     and huddle_logic_gate.company_id = source.company_id
+     and huddle_logic_gate.huddle_logic_gate_id = source.resource_id
+     and huddle_logic_gate.deleted_timestamp is null
+    left join public.kpis kpi
+      on source.resource_type = 'kpi'
+     and kpi.company_id = source.company_id
+     and kpi.kpi_id = source.resource_id
+     and kpi.deleted_timestamp is null
+    where entity.entity_id is null
+       or entity_type.system_key is distinct from 'action_item'
+       or source.resource_type not in ('node','logic_gate','project','huddle_node','huddle_logic_gate','kpi')
+       or (source.resource_type = 'node' and node.node_id is null)
+       or (source.resource_type = 'logic_gate' and logic_gate.logic_gate_id is null)
+       or (source.resource_type = 'project' and project.project_id is null)
+       or (source.resource_type = 'huddle_node' and huddle_node.huddle_node_id is null)
+       or (source.resource_type = 'huddle_logic_gate' and huddle_logic_gate.huddle_logic_gate_id is null)
+       or (source.resource_type = 'kpi' and kpi.kpi_id is null)
+  ) then
+    raise exception 'STOP: an Action Item Source has a missing Action Item or unsupported or missing exact same-company endpoint';
   end if;
 
   if exists (

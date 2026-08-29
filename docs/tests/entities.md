@@ -1,4 +1,4 @@
-Last updated: 2026-08-28
+Last updated: 2026-08-29
 
 # Entities Business Logic Laws
 
@@ -52,24 +52,34 @@ E24 - An inline Entity reference stores the fixed resource type `entity`, exact 
 
 E25 - Every company has exactly one required Entity Type named `Action Item` with system key `action_item`. Its identity, system key, and label are immutable, and it cannot be deleted independently of its company.
 
-E26 - The Action Item Entity Type always has these required root templates: `person_in_charge` / `Person in charge` / `person`; `analysis_due_date` / `Analysis due date` / `date`; `completion_due_date` / `Completion due date` / `date`; `status` / `Status` / `choice`; and `color` / `Color` / `color`. Their deterministic identities, system keys, labels, kinds, and root placement are immutable, and those labels cannot be shadowed in an Action Item folder.
+E26 - The Action Item Entity Type always has these required root templates: `person_in_charge` / `Person in charge` / `person`; `assigned_by` / `Assigned by` / `person`; `analysis_due_date` / `Analysis due date` / `date`; `completion_due_date` / `Completion due date` / `date`; `status` / `Status` / `choice`; and `color` / `Color` / `color`. Their deterministic identities, system keys, labels, kinds, and root placement are immutable, and those labels cannot be shadowed in an Action Item folder.
 
-E27 - Every new Action Item uses the Entity's built-in name as its name, `body_json` as Details, created timestamp as its created date, and exact nullable `created_by_user_id` as creator audit metadata. Creation copies all five required linked fields atomically, defaults Status to `in_progress`, and defaults Person in charge, both dates, and Color to null.
+E27 - Every new Action Item uses the Entity's built-in name as its name, `body_json` as Details, created timestamp as its created date, and exact nullable `created_by_user_id` as creator audit metadata. Creation copies all six required linked fields atomically, defaults Status to `in_progress`, and defaults Person in charge, Assigned by, both dates, and Color to null.
 
 E28 - The mandated Status configuration always contains exactly the keys `in_progress`, `pending`, and `done` and always defaults to `in_progress`. The mandated Color configuration always defaults to null and retains the keys `yellow` and `red`; it may add other color options or change current labels and hex colors without changing those required identities.
 
-E29 - Action Item creation records the authenticated same-company actor in `created_by_user_id`; deleting that actor's company membership sets this audit pointer to null without changing the Action Item's name, Details, or created timestamp, while the independent exact-person cleanup in E14 still applies.
+E29 - Action Item creation records the authenticated same-company actor in `created_by_user_id`; deleting that actor's company membership sets this audit pointer to null without changing the Action Item's name, Details, created timestamp, or Source. Assigned by is separate editable business attribution, starts null, and is never inferred or backfilled from creator audit.
 
 E30 - The retired Entity Fields label library, assignments, `/fields` page, Project field column/filter/grouping behavior, APIs, implementation, and old schema objects do not coexist with the current Entities system and have no compatibility path.
 
-E31 - An ordinary inline Entity preview keeps the existing rich editor. An Action Item uses one compact editor anchored inside the activation point's owning modal layer, with one title field, one plain Details field, read-only Created by and Created Date values, a lower-left searchable current-company Person in charge picker that stores the exact user ID, shared text-and-calendar controls for both due dates, color options that show a swatch and label, every remaining assigned editable field, 500 ms serialized autosave, close-time flush, and no Save button.
+E31 - An ordinary inline Entity preview keeps the existing rich editor. An Action Item uses one compact editor anchored inside the activation point's owning modal layer. Details spans the top; beneath it the left column is Person in charge, Assigned by, Created date, Source and the right column is Color, Analysis due date, Completion due date, Status. Created date and Source are read-only, Created by remains hidden audit metadata, Status uses the accessible elevated choice listbox, and all edits keep 500 ms serialized autosave, close-time flush, and no Save button.
 
-E32 - After the user releases a primary-pointer text selection, highlighting nonblank text in a supported editor exposes one split yellow/red Action Item action. Choosing a side creates one real Action Item Entity with that color and replaces the selection with one inline Entity reference to its exact ID; keyboard selection remains immediately usable.
+E32 - After the user releases a primary-pointer text selection, highlighting nonblank text in a supported editor exposes one split yellow/red Action Item action. Choosing a side atomically creates one real Action Item Entity with that color and the exact owning editor resource as immutable Source, then replaces the unchanged selection with one inline Entity reference to its exact ID; keyboard selection remains immediately usable.
 
-E33 - Inline Action Item creation seeds Details from the selected text, defaults Status to In progress, records the authenticated creator, and leaves the remaining required fields editable in the details dialog.
+E33 - Inline Action Item creation seeds Details from the selected text, defaults Status to In progress, records the authenticated creator, leaves Person in charge and Assigned by unset, and leaves the remaining editable required fields in the details dialog.
 
 E34 - Yellow inline Action Item references pulse once every two seconds and red references once every second. Each uses the shared target-and-arrow icon, a fully filled color surface, black text, and no visible color-name suffix. A reduced-motion preference disables the pulse without changing color, identity, editing, or relationship behavior.
 
-E35 - A Huddle Node or Huddle Logic Gate editor save atomically stores one exact typed `entity_relationships` row per distinct referenced Action Item Entity across that resource's live document set. Several references share that row, removing one reference keeps a sibling reference's row, and removing the final saved reference removes only the row and never deletes the Entity.
+E35 - A Huddle Node or Huddle Logic Gate editor save atomically stores one exact typed `entity_relationships` row per distinct referenced Action Item Entity across that resource's live document set. Several references share that row, removing one reference keeps a sibling reference's row, and removing the final saved reference removes only that row; it never deletes the Entity or changes immutable Action Item Source.
 
 E36 - A Huddle Process Action Item rollup unions its direct Huddle Logic Gate relationships with every relationship from its owned Huddle Nodes and deduplicates each Action Item once.
+
+E37 - Direct Action Item creation from Entities remains allowed and leaves Source unset. Existing Action Items also keep Source unset; no creator, relationship, or editor history is used to guess or backfill it.
+
+E38 - Action Item Source is not an Entity Field. One optional dedicated row stores the Action Item company and Entity ID plus one exact `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, or `kpi` resource type and ID, with no copied label or fallback identity.
+
+E39 - Source creation validates the same-company endpoint and the actor's current Edit access in the Action Item creation transaction. Source cannot be edited, and deleting an inline Action Item reference never changes it.
+
+E40 - Source grants no access. Its read model resolves the current endpoint name and ID only for a currently authorized viewer; an unset, missing, inaccessible, recycled, or permanently deleted source returns a neutral unavailable state without hidden identity.
+
+E41 - Recycling a source endpoint captures and removes the exact live Source row, restore recreates it after the endpoint, and permanent deletion leaves no live Source row. Renaming a live endpoint changes the displayed Source name without rewriting the stored identity.

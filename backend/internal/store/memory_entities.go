@@ -554,6 +554,7 @@ func (r *MemoryRepo) DeleteEntity(companyID, entityID string) error {
 			delete(r.entityRelationships, relationshipKey)
 		}
 	}
+	delete(r.actionItemSources, actionItemSourceKey(companyID, entityID))
 	delete(r.entities, itemKey)
 	return nil
 }

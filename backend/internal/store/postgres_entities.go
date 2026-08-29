@@ -1004,13 +1004,18 @@ func mapEntitiesPostgresError(err error) error {
 		strings.Contains(message, "action_item_field_type_required"),
 		strings.Contains(message, "action_item_field_type_name_reserved"),
 		strings.Contains(message, "action_item_entity_field_immutable"),
-		strings.Contains(message, "action_item_entity_field_required"):
+		strings.Contains(message, "action_item_entity_field_required"),
+		strings.Contains(message, "action_item_source_requires_action_item"),
+		strings.Contains(message, "action_item_source_immutable"):
 		return ErrConflict
 	case strings.Contains(message, "action_item_field_type_config_invalid"),
 		strings.Contains(message, "action_item_field_type_invalid"),
 		strings.Contains(message, "action_item_entity_field_invalid"),
+		strings.Contains(message, "action_item_source_resource_type_invalid"),
 		strings.Contains(message, "entity_field_date_invalid"):
 		return ErrInvalid
+	case strings.Contains(message, "action_item_source_resource_not_found"):
+		return ErrNotFound
 	case strings.Contains(message, "duplicate key"), strings.Contains(message, "unique constraint"):
 		return ErrAlreadyExists
 	case strings.Contains(message, "check constraint"), strings.Contains(message, "invalid input syntax"):

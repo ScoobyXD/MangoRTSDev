@@ -114,6 +114,7 @@ type EntitiesRepository interface {
 	UpdateEntityField(input EntityFieldInput) (domain.EntityField, error)
 	DeleteEntityField(companyID, entityID, entityFieldID string) error
 	CreateActionItem(input ActionItemInput) (domain.Entity, error)
+	GetActionItemSource(companyID, entityID string) (domain.ActionItemSource, error)
 	ListHuddleNodeActionItems(companyID, huddleNodeID string) ([]domain.Entity, error)
 	ListHuddleLogicGateActionItems(companyID, huddleLogicGateID string) ([]domain.Entity, error)
 }

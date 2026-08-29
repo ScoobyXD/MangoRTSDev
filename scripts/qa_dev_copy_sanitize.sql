@@ -45,6 +45,7 @@ begin
      or to_regclass('public.entities') is null
      or to_regclass('public.entity_fields') is null
      or to_regclass('public.entity_relationships') is null
+     or to_regclass('public.action_item_sources') is null
      or to_regclass('public.huddle_node_textboxes') is null
      or to_regclass('public.huddle_node_textbox_chats') is null then
     raise exception 'STOP: required Mango tables are missing from the raw QA copy';

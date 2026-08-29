@@ -114,6 +114,43 @@ func TestEntityRelationshipForwardMigrationAddsExactHuddleLogicGateEndpoints(t *
 	}
 }
 
+func TestActionItemSourceSchemaRejectsDirectDeleteAndAllowsLifecycleCleanup(t *testing.T) {
+	for _, path := range []string{
+		"../../db/migrations/20260829_action_item_delegation_source.sql",
+		"../../db/schema.sql",
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+		if !strings.Contains(normalized, "create table action_item_sources") &&
+			!strings.Contains(normalized, "create table public.action_item_sources") {
+			t.Fatalf("%s is missing the dedicated Action Item Source table", path)
+		}
+		for _, required := range []string{
+			"if tg_op='update' then raise exception 'action_item_source_immutable'",
+			"if tg_op='delete' then if pg_trigger_depth()>1 then return old; end if; raise exception 'action_item_source_immutable'",
+			"action_item_sources_entity_fkey",
+			"on delete cascade",
+			"mangorts_delete_action_item_sources_for_resource",
+			"trg_delete_node_action_item_sources after delete on",
+			"trg_delete_logic_gate_action_item_sources after delete on",
+			"trg_delete_project_action_item_sources after delete on",
+			"trg_delete_huddle_node_action_item_sources after delete on",
+			"trg_delete_huddle_logic_gate_action_item_sources after delete on",
+			"trg_delete_kpi_action_item_sources after delete on",
+		} {
+			if !strings.Contains(normalized, required) {
+				t.Fatalf("%s is missing Action Item Source lifecycle guard %q", path, required)
+			}
+		}
+		if strings.Contains(normalized, "source_exists and exists") {
+			t.Fatalf("%s retains an endpoint-existence DELETE guard that can reject cascades", path)
+		}
+	}
+}
+
 type actionItemEditorReference struct {
 	EntityID   string
 	ActionItem bool
@@ -193,8 +230,9 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 	}
 	assertActionItemFieldValue(t, created, ActionItemStatusSystemKey, `"in_progress"`)
 	assertActionItemFieldValue(t, created, ActionItemColorSystemKey, "null")
-	if len(created.EntityFields) != 5 {
-		t.Fatalf("field count=%d, want 5", len(created.EntityFields))
+	assertActionItemFieldValue(t, created, ActionItemAssignedBySystemKey, "null")
+	if len(created.EntityFields) != 6 {
+		t.Fatalf("field count=%d, want 6", len(created.EntityFields))
 	}
 
 	for _, huddleNodeID := range []string{firstNode.HuddleNodeID, secondNode.HuddleNodeID} {
@@ -507,6 +545,90 @@ func TestMemorySavedHuddleReferencesUseCanonicalCompanyAndEntityType(t *testing.
 	}
 }
 
+func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) {
+	repo := NewMemoryRepo()
+	owner, company := createActionItemTestCompany(t, repo, "action-item-source-owner")
+	member, err := repo.UpsertAuthUser("action-item-source-member", "source-member@example.com", "Source Member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(member.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	sourceNode, err := repo.CreateNode(company.CompanyID, "Canonical source")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := repo.CreateActionItem(ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Created from source", CreatedByUserID: member.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: sourceNode.NodeID,
+	})
+	if err != nil {
+		t.Fatalf("authorized source creation: %v", err)
+	}
+	source, err := repo.GetActionItemSource(company.CompanyID, created.EntityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.CompanyID != company.CompanyID || source.EntityID != created.EntityID || source.ResourceType != EntityTypeNode || source.ResourceID != sourceNode.NodeID {
+		t.Fatalf("stored source = %+v, want exact company/type/ID", source)
+	}
+	direct, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Direct", CreatedByUserID: member.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetActionItemSource(company.CompanyID, direct.EntityID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("direct Action Item source error = %v, want ErrNotFound", err)
+	}
+
+	assertRejectedAtomically := func(name string, input ActionItemInput, want error) {
+		t.Helper()
+		repo.mu.RLock()
+		entityCount, sourceCount := len(repo.entities), len(repo.actionItemSources)
+		repo.mu.RUnlock()
+		if _, err := repo.CreateActionItem(input); !errors.Is(err, want) {
+			t.Fatalf("%s error = %v, want %v", name, err, want)
+		}
+		repo.mu.RLock()
+		defer repo.mu.RUnlock()
+		if len(repo.entities) != entityCount || len(repo.actionItemSources) != sourceCount {
+			t.Fatalf("%s partially wrote entity/source: entities %d->%d sources %d->%d", name, entityCount, len(repo.entities), sourceCount, len(repo.actionItemSources))
+		}
+	}
+
+	missingID := "91919191-9191-4191-8191-919191919191"
+	assertRejectedAtomically("missing endpoint", ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Missing", CreatedByUserID: member.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: missingID,
+	}, ErrNotFound)
+
+	otherCompany := repo.EnsureCompany("92929292-9292-4292-8292-929292929292", "Other source company")
+	otherNode, err := repo.CreateNode(otherCompany.CompanyID, "Other company source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRejectedAtomically("cross-company endpoint", ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Cross company", CreatedByUserID: member.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: otherNode.NodeID,
+	}, ErrNotFound)
+	assertRejectedAtomically("unsupported type", ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Unsupported", CreatedByUserID: member.UserID,
+		SourceResourceType: "entity", SourceResourceID: sourceNode.NodeID,
+	}, ErrInvalid)
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID: company.CompanyID, EntityType: EntityTypeNode, EntityID: sourceNode.NodeID,
+		DefaultAccess: EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertRejectedAtomically("unauthorized endpoint", ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Unauthorized", CreatedByUserID: member.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: sourceNode.NodeID,
+	}, ErrNotFound)
+}
+
 func TestActionItemDefaultsAndLiveTemplateConfig(t *testing.T) {
 	repo := NewMemoryRepo()
 	user, company := createActionItemTestCompany(t, repo, "action-item-defaults")
@@ -667,21 +789,24 @@ func TestMemoryMembershipDeletionClearsActionItemPersonAndCreatorAtomically(t *t
 		if err != nil {
 			t.Fatal(err)
 		}
+		updated := 0
 		for _, field := range item.EntityFields {
-			if field.SystemKey != ActionItemPersonInChargeSystemKey {
+			if field.SystemKey != ActionItemPersonInChargeSystemKey && field.SystemKey != ActionItemAssignedBySystemKey {
 				continue
 			}
 			if _, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: companyID, EntityID: item.EntityID, EntityFieldID: field.EntityFieldID, Value: personValue, ValueSet: true}); err != nil {
 				t.Fatal(err)
 			}
-			current, err := repo.GetEntity(companyID, item.EntityID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			return current
+			updated++
 		}
-		t.Fatal("Person in charge field missing")
-		return domain.Entity{}
+		if updated != 2 {
+			t.Fatalf("updated person fields=%d, want Person in charge and Assigned by", updated)
+		}
+		current, err := repo.GetEntity(companyID, item.EntityID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return current
 	}
 	itemA := createAssigned(companyA.CompanyID)
 	itemB := createAssigned(companyB.CompanyID)
@@ -700,6 +825,7 @@ func TestMemoryMembershipDeletionClearsActionItemPersonAndCreatorAtomically(t *t
 		t.Fatalf("rolled-back creator=%q, want %q", rolledBack.CreatedByUserID, user.UserID)
 	}
 	assertActionItemFieldValue(t, rolledBack, ActionItemPersonInChargeSystemKey, `"`+user.UserID+`"`)
+	assertActionItemFieldValue(t, rolledBack, ActionItemAssignedBySystemKey, `"`+user.UserID+`"`)
 
 	if _, err := repo.DeleteCompanyUser(companyA.CompanyID, user.UserID, false); err != nil {
 		t.Fatal(err)
@@ -712,6 +838,7 @@ func TestMemoryMembershipDeletionClearsActionItemPersonAndCreatorAtomically(t *t
 		t.Fatalf("deleted-company creator=%q, want empty", cleared.CreatedByUserID)
 	}
 	assertActionItemFieldValue(t, cleared, ActionItemPersonInChargeSystemKey, "null")
+	assertActionItemFieldValue(t, cleared, ActionItemAssignedBySystemKey, "null")
 	untouched, err := repo.GetEntity(companyB.CompanyID, itemB.EntityID)
 	if err != nil {
 		t.Fatal(err)
@@ -720,6 +847,7 @@ func TestMemoryMembershipDeletionClearsActionItemPersonAndCreatorAtomically(t *t
 		t.Fatalf("other-company creator=%q, want %q", untouched.CreatedByUserID, user.UserID)
 	}
 	assertActionItemFieldValue(t, untouched, ActionItemPersonInChargeSystemKey, `"`+user.UserID+`"`)
+	assertActionItemFieldValue(t, untouched, ActionItemAssignedBySystemKey, `"`+user.UserID+`"`)
 }
 
 func createActionItemTestCompany(t *testing.T, repo *MemoryRepo, subject string) (domain.User, domain.Company) {

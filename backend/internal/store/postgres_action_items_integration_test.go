@@ -1,10 +1,250 @@
 package store
 
 import (
+	"errors"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
 )
+
+func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
+	db, repo := openPostgresProcessMapIntegration(t)
+	owner, err := repo.UpsertAuthUser("postgres-action-item-source-owner", "postgres-action-item-source-owner@example.test", "Postgres Source Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	company, err := repo.CreateCompany("Postgres Action Item Source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(owner.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	member, err := repo.UpsertAuthUser("postgres-action-item-source-member", "postgres-action-item-source-member@example.test", "Postgres Source Member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(member.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	sourceNode, err := repo.CreateNode(company.CompanyID, "Canonical source node")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := repo.CreateActionItem(ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Created from the source node", CreatedByUserID: member.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: sourceNode.NodeID,
+	})
+	if err != nil {
+		t.Fatalf("CreateActionItem with source: %v", err)
+	}
+	if len(created.EntityFields) != 6 {
+		t.Fatalf("required Action Item field count=%d, want 6", len(created.EntityFields))
+	}
+	for _, systemKey := range []string{
+		ActionItemPersonInChargeSystemKey,
+		ActionItemAssignedBySystemKey,
+		ActionItemAnalysisDueDateSystemKey,
+		ActionItemCompletionDueDateSystemKey,
+		ActionItemStatusSystemKey,
+		ActionItemColorSystemKey,
+	} {
+		found := false
+		for _, field := range created.EntityFields {
+			if field.SystemKey == systemKey {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("required field %q missing from %+v", systemKey, created.EntityFields)
+		}
+	}
+	assertActionItemFieldValue(t, created, ActionItemAssignedBySystemKey, "null")
+	source, err := repo.GetActionItemSource(company.CompanyID, created.EntityID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source.CompanyID != company.CompanyID || source.EntityID != created.EntityID || source.ResourceType != EntityTypeNode || source.ResourceID != sourceNode.NodeID {
+		t.Fatalf("stored source=%+v, want exact company/entity/type/resource", source)
+	}
+
+	direct, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Created directly", CreatedByUserID: member.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetActionItemSource(company.CompanyID, direct.EntityID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("direct Action Item source error=%v, want ErrNotFound", err)
+	}
+
+	otherCompany, err := repo.CreateCompany("Other Postgres Action Item Source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherNode, err := repo.CreateNode(otherCompany.CompanyID, "Other company node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	restrictedNode, err := repo.CreateNode(company.CompanyID, "Restricted source node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID: company.CompanyID, EntityType: EntityTypeNode, EntityID: restrictedNode.NodeID,
+		DefaultAccess: EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	actionItemCount := countPostgresRows(t, db, `select count(*) from entities where company_id=$1::uuid and entity_type_id=$2::uuid`, company.CompanyID, ActionItemEntityTypeID)
+	sourceCount := countPostgresRows(t, db, `select count(*) from action_item_sources where company_id=$1::uuid`, company.CompanyID)
+	assertRejectedAtomically := func(name string, input ActionItemInput, want error) {
+		t.Helper()
+		if _, err := repo.CreateActionItem(input); !errors.Is(err, want) {
+			t.Fatalf("%s error=%v, want %v", name, err, want)
+		}
+		if got := countPostgresRows(t, db, `select count(*) from entities where company_id=$1::uuid and entity_type_id=$2::uuid`, company.CompanyID, ActionItemEntityTypeID); got != actionItemCount {
+			t.Fatalf("%s partially wrote an Entity: count=%d, want %d", name, got, actionItemCount)
+		}
+		if got := countPostgresRows(t, db, `select count(*) from action_item_sources where company_id=$1::uuid`, company.CompanyID); got != sourceCount {
+			t.Fatalf("%s partially wrote a Source: count=%d, want %d", name, got, sourceCount)
+		}
+	}
+	assertRejectedAtomically("cross-company endpoint", ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Cross-company source", CreatedByUserID: member.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: otherNode.NodeID,
+	}, ErrNotFound)
+	assertRejectedAtomically("wrong exact endpoint type", ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Wrong source type", CreatedByUserID: member.UserID,
+		SourceResourceType: EntityTypeProject, SourceResourceID: sourceNode.NodeID,
+	}, ErrNotFound)
+	assertRejectedAtomically("unsupported endpoint type", ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Unsupported source type", CreatedByUserID: member.UserID,
+		SourceResourceType: "entity", SourceResourceID: sourceNode.NodeID,
+	}, ErrInvalid)
+	assertRejectedAtomically("unauthorized endpoint", ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Unauthorized source", CreatedByUserID: member.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: restrictedNode.NodeID,
+	}, ErrNotFound)
+
+	if _, err := db.Exec(`insert into action_item_sources(company_id,entity_id,resource_type,resource_id) values($1::uuid,$2::uuid,'node',$3::uuid)`, company.CompanyID, direct.EntityID, otherNode.NodeID); err == nil {
+		t.Fatal("database accepted a cross-company Source endpoint")
+	}
+	if _, err := db.Exec(`insert into action_item_sources(company_id,entity_id,resource_type,resource_id) values($1::uuid,$2::uuid,'project',$3::uuid)`, company.CompanyID, direct.EntityID, sourceNode.NodeID); err == nil {
+		t.Fatal("database accepted a resource ID under the wrong exact Source type")
+	}
+	if _, err := db.Exec(`update action_item_sources set resource_id=resource_id where company_id=$1::uuid and entity_id=$2::uuid`, company.CompanyID, created.EntityID); err == nil {
+		t.Fatal("database accepted a direct Source update")
+	}
+	if _, err := db.Exec(`delete from action_item_sources where company_id=$1::uuid and entity_id=$2::uuid`, company.CompanyID, created.EntityID); err == nil {
+		t.Fatal("database accepted a direct Source delete")
+	}
+	if persisted, err := repo.GetActionItemSource(company.CompanyID, created.EntityID); err != nil || persisted.ResourceType != EntityTypeNode || persisted.ResourceID != sourceNode.NodeID {
+		t.Fatalf("immutable Source after rejected writes=%+v err=%v", persisted, err)
+	}
+}
+
+func TestPostgresActionItemSourceRecycleRestoreAndPermanentDelete(t *testing.T) {
+	db, repo := openPostgresProcessMapIntegration(t)
+	actor, err := repo.UpsertAuthUser("postgres-action-item-source-lifecycle", "postgres-action-item-source-lifecycle@example.test", "Postgres Source Lifecycle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	company, err := repo.CreateCompany("Postgres Action Item Source Lifecycle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(actor.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+
+	node, err := repo.CreateNode(company.CompanyID, "Restorable source node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeActionItem, err := repo.CreateActionItem(ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Node source lifecycle", CreatedByUserID: actor.UserID,
+		SourceResourceType: EntityTypeNode, SourceResourceID: node.NodeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DeleteCompanyExplorerTargets(company.CompanyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeNode, ID: node.NodeID}}, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetActionItemSource(company.CompanyID, nodeActionItem.EntityID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("recycled Node Source error=%v, want ErrNotFound", err)
+	}
+	nodeRecycleID := postgresActionItemRecycleID(t, repo, company.CompanyID, actor.UserID, EntityTypeNode, node.NodeID)
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{nodeRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	if source, err := repo.GetActionItemSource(company.CompanyID, nodeActionItem.EntityID); err != nil || source.ResourceType != EntityTypeNode || source.ResourceID != node.NodeID {
+		t.Fatalf("restored Node Source=%+v err=%v", source, err)
+	}
+
+	logicGate, err := repo.CreateLogicGate(company.CompanyID, "KPI source owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kpi, err := repo.CreateKPI(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: logicGate.LogicGateID, Name: "Restorable KPI"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kpiActionItem, err := repo.CreateActionItem(ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "KPI source lifecycle", CreatedByUserID: actor.UserID,
+		SourceResourceType: EntityTypeKPI, SourceResourceID: kpi.KPIID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteKPI(company.CompanyID, kpi.KPIID, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.GetActionItemSource(company.CompanyID, kpiActionItem.EntityID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("recycled KPI Source error=%v, want ErrNotFound", err)
+	}
+	kpiRecycleID := postgresActionItemRecycleID(t, repo, company.CompanyID, actor.UserID, EntityTypeKPI, kpi.KPIID)
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{kpiRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	if source, err := repo.GetActionItemSource(company.CompanyID, kpiActionItem.EntityID); err != nil || source.ResourceType != EntityTypeKPI || source.ResourceID != kpi.KPIID {
+		t.Fatalf("restored KPI Source=%+v err=%v", source, err)
+	}
+
+	if _, err := repo.DeleteCompanyExplorerTargets(company.CompanyID, []CompanyExplorerDeleteTargetInput{{Kind: EntityTypeNode, ID: node.NodeID}}, actor.UserID); err != nil {
+		t.Fatal(err)
+	}
+	permanentNodeRecycleID := postgresActionItemRecycleID(t, repo, company.CompanyID, actor.UserID, EntityTypeNode, node.NodeID)
+	if err := repo.PermanentlyDeleteRecycleBinItems(company.CompanyID, actor.UserID, []string{permanentNodeRecycleID}); err != nil {
+		t.Fatal(err)
+	}
+	if got := countPostgresRows(t, db, `select count(*) from action_item_sources where company_id=$1::uuid and entity_id=$2::uuid`, company.CompanyID, nodeActionItem.EntityID); got != 0 {
+		t.Fatalf("Source rows after permanent endpoint deletion=%d, want 0", got)
+	}
+	if _, err := repo.GetActionItemSource(company.CompanyID, nodeActionItem.EntityID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Source after permanent endpoint deletion error=%v, want ErrNotFound", err)
+	}
+	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{permanentNodeRecycleID}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("restore after permanent deletion error=%v, want ErrNotFound", err)
+	}
+}
+
+func postgresActionItemRecycleID(t *testing.T, repo *PostgresRepo, companyID, actorID, kind, objectID string) string {
+	t.Helper()
+	items, err := repo.ListRecycleBinItems(companyID, actorID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.ObjectKind == kind && item.ObjectID == objectID {
+			return item.RecycleBinItemID
+		}
+	}
+	t.Fatalf("recycle item %s/%s missing from %+v", kind, objectID, items)
+	return ""
+}
 
 func TestPostgresEntityRelationshipHuddleLifecycle(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)

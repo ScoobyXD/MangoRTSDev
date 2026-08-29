@@ -158,6 +158,21 @@ type Entity struct {
 	UpdatedTimestamp time.Time       `json:"updated_timestamp"`
 }
 
+type ActionItemSource struct {
+	CompanyID        string    `json:"company_id"`
+	EntityID         string    `json:"entity_id"`
+	ResourceType     string    `json:"resource_type"`
+	ResourceID       string    `json:"resource_id"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+}
+
+type ActionItemSourceView struct {
+	ResourceType     string `json:"resource_type"`
+	ResourceID       string `json:"resource_id"`
+	Name             string `json:"name"`
+	ParentResourceID string `json:"parent_resource_id,omitempty"`
+}
+
 type EntitySummary struct {
 	CompanyID        string    `json:"company_id"`
 	EntityID         string    `json:"entity_id"`
@@ -212,12 +227,14 @@ type MyWorkProject struct {
 }
 
 type MyWorkActionItemPage struct {
-	Items      []MyWorkActionItem `json:"items"`
-	NextCursor string             `json:"next_cursor,omitempty"`
-	HasMore    bool               `json:"has_more"`
+	Perspective string             `json:"perspective"`
+	Items       []MyWorkActionItem `json:"items"`
+	NextCursor  string             `json:"next_cursor,omitempty"`
+	HasMore     bool               `json:"has_more"`
 }
 
 type MyWorkNodePage struct {
+	Role       string       `json:"role"`
 	Items      []MyWorkNode `json:"items"`
 	NextCursor string       `json:"next_cursor,omitempty"`
 	HasMore    bool         `json:"has_more"`

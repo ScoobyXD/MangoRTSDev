@@ -4,7 +4,7 @@ import React, { act } from "react";
 import { Simulate } from "react-dom/test-utils";
 import { JSDOM } from "jsdom";
 import { EDITOR_NATIVE_INPUT_IDLE_BATCH_MS } from "../../../../frontend/src/modules/editor/editorInputBatch.js";
-import type { Entity, EntityFieldValue } from "../../../../frontend/src/modules/entities/entitiesApi.js";
+import type { ActionItemSource, Entity, EntityFieldValue } from "../../../../frontend/src/modules/entities/entitiesApi.js";
 import type { EditorEntityLink } from "../../../../frontend/src/modules/editor/editorEntityLinks.js";
 
 type Restore = () => void;
@@ -24,7 +24,7 @@ async function flushAsyncWork() {
   });
 }
 
-test("shared toolbar preserves collapsed typing formats, atomic entities, and native list range deletion", { timeout: 8_000 }, async () => {
+test("shared toolbar preserves collapsed typing formats, atomic entities, and native list range deletion", { timeout: 15_000 }, async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -103,7 +103,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
   let modalHarnessRoot: { render(children: React.ReactNode): void; unmount(): void } | null = null;
   let modalHarnessContainer: HTMLDivElement | null = null;
   try {
-    const [{ createRoot }, { UnifiedRichEditorSurface }, { EditorTabBar }, { AppModalPortal }, { UniversalEntityPicker, universalPickerAllowedTypes, universalPickerShortcutCategory }, { EntityReferencePreviewHost, actionItemReferencePopoverPosition }, { createEditorEntityLinkElement, editorEntityLinkAnchorBounds, openEditorEntityLink }] = await Promise.all([
+    const [{ createRoot }, { UnifiedRichEditorSurface }, { EditorTabBar }, { AppModalPortal }, { UniversalEntityPicker, universalPickerAllowedTypes, universalPickerShortcutCategory }, { EntityReferencePreviewHost, actionItemReferencePopoverPosition }, { createEditorEntityLinkElement, editorEntityLinkAnchorBounds, editorEntityRoute, openEditorEntityLink }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/UnifiedRichEditorSurface.tsx"),
       import("../../../../frontend/src/modules/editor/EditorTabBar.tsx"),
@@ -972,9 +972,14 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
 
     const previewRequests: Array<{ path: string; init?: RequestInit }> = [];
     let previewShouldFail = false;
-    let delayNextEscalationWrite = false;
-    let delayedEscalationWriteStarted = false;
-    let releaseDelayedEscalationWrite: (() => void) | undefined;
+    let previewSource: ActionItemSource | null = {
+      resource_type: "logic_gate",
+      resource_id: "process-source",
+      name: "Current Source Process",
+    };
+    let holdSourceNavigationStatusWrite = false;
+    let sourceNavigationStatusWriteStarted = false;
+    let releaseSourceNavigationStatusWrite: (() => void) | null = null;
     let previewEntity: Entity = {
       company_id: "company-1",
       entity_id: "entity exact/id",
@@ -1002,6 +1007,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
         { company_id: "company-1", entity_field_id: "field-5", entity_id: "entity exact/id", system_key: "completion_due_date", name: "Completion due date", field_type: "date", config: {}, value: null, position: 5000, created_timestamp: "", updated_timestamp: "" },
         { company_id: "company-1", entity_field_id: "field-6", entity_id: "entity exact/id", system_key: "color", name: "Color", field_type: "color", config: { options: [{ key: "yellow", label: "Yellow", color: "#facc15" }, { key: "red", label: "Red", color: "#ef4444" }] }, value: "yellow", position: 6000, created_timestamp: "", updated_timestamp: "" },
         { company_id: "company-1", entity_field_id: "field-7", entity_id: "entity exact/id", name: "Escalation note", field_type: "text", config: {}, value: "Call the carrier", position: 7000, created_timestamp: "", updated_timestamp: "" },
+        { company_id: "company-1", entity_field_id: "field-8", entity_id: "entity exact/id", system_key: "assigned_by", name: "Assigned by", field_type: "person", config: {}, value: null, position: 8000, created_timestamp: "", updated_timestamp: "" },
       ],
     };
     await act(async () => root.render(
@@ -1014,13 +1020,13 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
             const body = JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>;
             if (path.includes("/fields/")) {
               const fieldID = decodeURIComponent(path.slice(path.lastIndexOf("/") + 1));
+              if (fieldID === "field-2" && holdSourceNavigationStatusWrite) {
+                holdSourceNavigationStatusWrite = false;
+                sourceNavigationStatusWriteStarted = true;
+                await new Promise<void>((resolve) => { releaseSourceNavigationStatusWrite = resolve; });
+              }
               const currentField = previewEntity.entity_fields.find((field) => field.entity_field_id === fieldID);
               assert.ok(currentField, `field ${fieldID} exists`);
-              if (fieldID === "field-7" && delayNextEscalationWrite) {
-                delayNextEscalationWrite = false;
-                delayedEscalationWriteStarted = true;
-                await new Promise<void>((resolve) => { releaseDelayedEscalationWrite = resolve; });
-              }
               const savedField = {
                 ...currentField,
                 value: body.value as EntityFieldValue,
@@ -1046,6 +1052,9 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
               { company_id: "company-1", user_id: "user-creator", display_name: "Ada Creator", email: "ada@example.test" },
               { company_id: "company-1", user_id: "user-owner", display_name: "Grace Owner", email: "grace@example.test" },
             ] } as T;
+          }
+          if (path.includes("/action-items/") && path.endsWith("/source?company_id=company-1")) {
+            return { source: previewSource } as T;
           }
           return { entity: previewEntity } as T;
         }}
@@ -1075,15 +1084,16 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(entityPreview.style.inset, "", "the compact Action Item has no fullscreen pointer-capturing layer");
     assert.equal(entityPreview.closest<HTMLElement>('[data-mango-modal-layer="true"]')?.dataset.mangoModalFocusTrap, "false", "the compact Action Item does not trap focus");
     assert.match(entityPreview.textContent ?? "", /Contact logistics today\./);
-    assert.match(entityPreview.textContent ?? "", /Created byAda Creator/);
+    assert.doesNotMatch(entityPreview.textContent ?? "", /Created by/, "the compact Action Item hides creator audit metadata");
     assert.match(entityPreview.textContent ?? "", /Created date08\/27\/2026/);
     assert.doesNotMatch(entityPreview.textContent ?? "", /user-(?:creator|owner)/);
     const entityNameInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Action Item title"]');
     const detailsEditor = entityPreview.querySelector<HTMLTextAreaElement>('textarea[aria-label="Action Item details"]');
-    const statusInput = entityPreview.querySelector<HTMLSelectElement>('select[aria-label="Value for Status"]');
+    const statusInput = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Value for Status"]');
     const deliveredInput = entityPreview.querySelector<HTMLSelectElement>('select[aria-label="Value for Delivered"]');
     const analysisDateInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Value for Analysis due date"]');
     const personInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Value for Person in charge"]');
+    const assignedByInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Value for Assigned by"]');
     const completionDateInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Value for Completion due date"]');
     const colorInput = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Value for Color"]');
     const customTextInput = entityPreview.querySelector<HTMLInputElement>('input[aria-label="Value for Escalation note"]');
@@ -1093,38 +1103,65 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(detailsEditor?.value, "Contact logistics today.");
     assert.equal(entityPreview.querySelector('[data-mango-entity-details-rich-editor="true"]'), null, "Action Item details use one plain text field");
     assert.equal(entityPreview.querySelector('button[aria-label^="Save "]'), null, "Action Items never expose manual Save buttons");
-    assert.equal(deliveredInput?.value, "false");
-    assert.equal(statusInput?.value, "in_progress");
-    assert.equal(statusInput?.selectedOptions[0]?.textContent, "In progress");
+    assert.equal(deliveredInput, null, "non-contract fields stay out of the compact layout");
+    assert.match(statusInput?.textContent ?? "", /In progress/);
     assert.equal(analysisDateInput?.value, "08/31/2026");
     assert.equal(personInput?.value, "Grace Owner");
+    assert.equal(assignedByInput?.value, "");
     assert.equal(completionDateInput?.value, "");
     assert.equal(colorInput?.dataset.actionItemColorValue, "yellow");
     assert.match(colorInput?.textContent ?? "", /Yellow/);
     assert.equal(colorInput?.querySelector<HTMLElement>('[data-action-item-color-swatch="true"]')?.style.background, "rgb(250, 204, 21)");
-    assert.equal(customTextInput?.value, "Call the carrier");
-    const creationDetails = entityPreview.querySelector<HTMLElement>('section[aria-label="Action Item creation details"]');
-    assert.equal(creationDetails?.contains(personInput ?? null), true, "Person in charge stays in the lower-left metadata column");
+    assert.equal(customTextInput, null, "custom fields stay out of the exact compact layout");
+    const leftFields = entityPreview.querySelector<HTMLElement>('section[aria-label="Action Item left field column"]');
+    const rightFields = entityPreview.querySelector<HTMLElement>('section[aria-label="Action Item right field column"]');
+    assert.ok(leftFields && rightFields);
+    assert.ok(leftFields.textContent!.indexOf("Person in charge") < leftFields.textContent!.indexOf("Assigned by"));
+    assert.ok(leftFields.textContent!.indexOf("Assigned by") < leftFields.textContent!.indexOf("Created date"));
+    assert.ok(leftFields.textContent!.indexOf("Created date") < leftFields.textContent!.indexOf("Source"));
+    assert.ok(rightFields.textContent!.indexOf("Color") < rightFields.textContent!.indexOf("Analysis due date"));
+    assert.ok(rightFields.textContent!.indexOf("Analysis due date") < rightFields.textContent!.indexOf("Completion due date"));
+    assert.ok(rightFields.textContent!.indexOf("Completion due date") < rightFields.textContent!.indexOf("Status"));
+    const sourceButton = leftFields.querySelector<HTMLButtonElement>('button[aria-label="Open Source Current Source Process"]');
+    assert.ok(sourceButton, "Source projects the current permission-checked label as a resource button");
+    assert.ok(sourceButton.querySelector("svg"), "Source reuses the exact Process icon");
     assert.ok(entityPreview.querySelector('button[aria-label="Choose analysis due date"]'), "Analysis due date reuses the calendar control");
     assert.ok(entityPreview.querySelector('button[aria-label="Choose completion due date"]'), "Completion due date reuses the calendar control");
-    assert.ok(additionalFields && statusFields && (additionalFields.compareDocumentPosition(statusFields) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING), "Status stays at the bottom after custom fields");
+    assert.equal(additionalFields, null);
+    assert.equal(statusFields, null);
     assert.equal(entityPreview.querySelector('[aria-label="Value for Created by"]'), null, "creator is read-only");
     assert.equal(entityPreview.querySelector('[aria-label="Value for Created date"]'), null, "created date is read-only");
     assert.equal(renderedEntityChip.dataset.mangoEntityLabel, "Current Thailand delivery");
     assert.equal(renderedEntityChip.dataset.mangoActionItemColor, "yellow");
     assert.equal(renderedEntityChip.getAttribute("aria-label"), "Open Action Item Current Thailand delivery");
-    assert.equal(previewRequests.length, 2);
+    assert.equal(previewRequests.length, 3);
     const previewURL = new URL(previewRequests[0].path, "https://mango.test");
     assert.equal(previewURL.pathname, "/v1/entities/entity%20exact%2Fid");
     assert.equal(previewURL.searchParams.get("company_id"), "company-1");
     assert.ok(previewRequests[0].init?.signal, "the exact Entity detail read is cancellable");
     assert.equal(new URL(previewRequests[1].path, "https://mango.test").pathname, "/v1/companies/company-1/users");
     assert.ok(previewRequests[1].init?.signal, "the company-user display-name read is cancellable");
+    const sourceURL = new URL(previewRequests[2].path, "https://mango.test");
+    assert.equal(sourceURL.pathname, "/v1/action-items/entity%20exact%2Fid/source");
+    assert.equal(sourceURL.searchParams.get("company_id"), "company-1");
+    assert.ok(previewRequests[2].init?.signal, "the permission-safe Source read is cancellable");
 
-    assert.ok(personInput);
+    assert.ok(personInput && assignedByInput && statusInput);
     const analysisCalendarButton = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Choose analysis due date"]');
     assert.ok(analysisCalendarButton);
     assert.equal(analysisCalendarButton.querySelector("path")?.getAttribute("stroke"), "#38bdf8", "Action Item calendars use the light-blue icon");
+    assignedByInput.value = "Grace";
+    await act(async () => Simulate.change(assignedByInput));
+    const assignedByResults = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Assigned by results"]');
+    assert.ok(assignedByResults, "Assigned by reuses the current-company searchable person picker with field-specific ARIA text");
+    const graceAssignedBy = [...assignedByResults.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+      .find((option) => option.textContent?.includes("Grace Owner"));
+    assert.ok(graceAssignedBy);
+    await act(async () => {
+      graceAssignedBy.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
+      graceAssignedBy.click();
+    });
+
     personInput.value = "Ada";
     await act(async () => Simulate.change(personInput));
     const personResults = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Person in charge results"]');
@@ -1164,9 +1201,49 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     await flushAsyncWork();
     assert.equal(entityPreview.isConnected, true, "using the portaled calendar keeps the Action Item editor open");
     const personWrite = previewRequests.find((request) => request.path.endsWith("/fields/field-4") && request.init?.method === "PUT");
+    const assignedByWrite = previewRequests.find((request) => request.path.endsWith("/fields/field-8") && request.init?.method === "PUT");
     const analysisDateWrite = previewRequests.find((request) => request.path.endsWith("/fields/field-3") && request.init?.method === "PUT");
     assert.equal((JSON.parse(String(personWrite?.init?.body)) as Record<string, unknown>).value, "user-creator", "person search stores the exact user ID");
+    assert.equal((JSON.parse(String(assignedByWrite?.init?.body)) as Record<string, unknown>).value, "user-owner", "Assigned by stores the exact current-company user ID");
     assert.equal((JSON.parse(String(analysisDateWrite?.init?.body)) as Record<string, unknown>).value, "2026-09-02", "the calendar stores the canonical date");
+
+    const statusAnchor = statusInput.parentElement;
+    assert.ok(statusAnchor);
+    Object.defineProperty(statusAnchor, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ left: 980, right: 1180, top: 740, bottom: 774, width: 200, height: 34, x: 980, y: 740, toJSON: () => ({}) }),
+    });
+    await act(async () => statusInput.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+    await flushAsyncWork();
+    let statusOptions = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Status options"]');
+    assert.ok(statusOptions, "Status uses a custom elevated listbox");
+    assert.equal(statusOptions.parentElement, floatingFieldRoot);
+    assert.equal(statusOptions.style.position, "fixed");
+    assert.ok(Number.parseFloat(statusOptions.style.left) + Number.parseFloat(statusOptions.style.width) <= dom.window.innerWidth - 8, "Status listbox stays inside the viewport horizontally");
+    assert.ok(Number.parseFloat(statusOptions.style.top) >= 8, "Status listbox stays inside the viewport vertically");
+    const escapeTarget = dom.window.document.activeElement as HTMLElement;
+    await act(async () => escapeTarget.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })));
+    await flushAsyncWork();
+    assert.equal(dom.window.document.querySelector('[role="listbox"][aria-label="Status options"]'), null, "Escape dismisses Status without changing its key");
+
+    const reopenedStatusInput = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Value for Status"]');
+    assert.ok(reopenedStatusInput);
+    await act(async () => reopenedStatusInput.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true })));
+    await flushAsyncWork();
+    statusOptions = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Status options"]');
+    assert.ok(statusOptions);
+    const focusedStatus = dom.window.document.activeElement as HTMLElement;
+    await act(async () => focusedStatus.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "End", bubbles: true, cancelable: true })));
+    const doneStatus = dom.window.document.activeElement as HTMLButtonElement;
+    assert.equal(doneStatus.textContent?.replace("✓", "").trim(), "Done");
+    assert.match(doneStatus.style.background, /linear-gradient/, "keyboard focus visibly raises the active Status choice");
+    await act(async () => {
+      doneStatus.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
+    await flushAsyncWork();
+    const statusWrite = previewRequests.find((request) => request.path.endsWith("/fields/field-2") && request.init?.method === "PUT");
+    assert.equal((JSON.parse(String(statusWrite?.init?.body)) as Record<string, unknown>).value, "done", "Status keyboard selection keeps the canonical option key and autosaves");
 
     assert.ok(entityNameInput);
     assert.ok(detailsEditor);
@@ -1223,32 +1300,72 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.equal(renderedEntityChip.dataset.mangoActionItemColor, "red");
     assert.equal(renderedEntityChip.getAttribute("aria-label"), "Open Action Item Updated Thailand delivery");
 
-    assert.ok(customTextInput);
-    delayNextEscalationWrite = true;
-    customTextInput.value = "Escalate to the carrier manager";
+    const currentSourceButton = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Open Source Current Source Process"]');
+    const sourceStatusInput = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Value for Status"]');
+    assert.ok(currentSourceButton && sourceStatusInput);
+    await act(async () => sourceStatusInput.click());
+    const sourceStatusOptions = dom.window.document.querySelector<HTMLElement>('[role="listbox"][aria-label="Status options"]');
+    const pendingBeforeSource = [...(sourceStatusOptions?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])]
+      .find((option) => option.textContent?.replace("✓", "").trim() === "Pending");
+    assert.ok(pendingBeforeSource);
+    holdSourceNavigationStatusWrite = true;
+    const pathBeforeSourceNavigation = dom.window.location.pathname;
     await act(async () => {
-      Simulate.change(customTextInput);
-      await new Promise((resolve) => setTimeout(resolve, 550));
+      pendingBeforeSource.click();
+      currentSourceButton.click();
+      await Promise.resolve();
     });
-    assert.equal(delayedEscalationWriteStarted, true, "the close-race test has an Entity-field save in flight");
-    customTextInput.value = "Escalate to the carrier director";
-    await act(async () => Simulate.change(customTextInput));
-    const closeEntityPreview = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Close Action Item details"]');
-    assert.ok(closeEntityPreview);
-    await act(async () => closeEntityPreview.click());
-    assert.ok(dom.window.document.querySelector('[data-mango-entity-reference-preview="true"]'), "the red close button waits for an in-flight save");
+    assert.equal(sourceNavigationStatusWriteStarted, true, "Source navigation flushes a pending Status change immediately");
+    assert.equal(dom.window.location.pathname, pathBeforeSourceNavigation, "Source waits for the field write to finish before navigation");
+    assert.equal(entityPreview.isConnected, true, "the Action Item remains open while its pending field write is in flight");
+    const releaseStatusWrite = releaseSourceNavigationStatusWrite;
+    assert.ok(releaseStatusWrite);
     await act(async () => {
-      releaseDelayedEscalationWrite?.();
-      await new Promise((resolve) => setTimeout(resolve, 20));
+      releaseStatusWrite();
+      await Promise.resolve();
     });
     await flushAsyncWork();
-    const customWrites = previewRequests.filter((request) => request.path.endsWith("/fields/field-7") && request.init?.method === "PUT");
-    assert.deepEqual(
-      customWrites.map((request) => (JSON.parse(String(request.init?.body)) as Record<string, unknown>).value),
-      ["Escalate to the carrier manager", "Escalate to the carrier director"],
-      "the red close button serializes and flushes an edit made during an in-flight save",
-    );
+    const sourceNavigationStatusWrite = previewRequests
+      .filter((request) => request.path.endsWith("/fields/field-2") && request.init?.method === "PUT")
+      .at(-1);
+    assert.equal((JSON.parse(String(sourceNavigationStatusWrite?.init?.body)) as Record<string, unknown>).value, "pending");
+    assert.equal(dom.window.location.pathname, editorEntityRoute({
+      entityType: "logic_gate",
+      entityID: "process-source",
+    }), "Source opens the exact current resource through the established editor route");
     assert.equal(dom.window.document.querySelector('[data-mango-entity-reference-preview="true"]'), null);
+
+    previewSource = {
+      resource_type: "kpi",
+      resource_id: "kpi-source",
+      parent_resource_id: "process-kpi-parent",
+      name: "Current Source KPI",
+    };
+    await act(async () => {
+      openEditorEntityLink({ entityType: "entity", entityID: "entity exact/id", label: "Updated Thailand delivery", isActionItem: true });
+    });
+    await flushAsyncWork();
+    const kpiSourceButton = dom.window.document.querySelector<HTMLButtonElement>('button[aria-label="Open Source Current Source KPI"]');
+    assert.ok(kpiSourceButton);
+    await act(async () => kpiSourceButton.click());
+    await flushAsyncWork();
+    assert.ok(dom.window.document.querySelector('[data-kpi-editor-popup="centered-large"]'), "a KPI Source opens the established KPI editor");
+
+    previewSource = {
+      resource_type: "logic_gate",
+      resource_id: "nested-process-source",
+      name: "Nested Source Process",
+    };
+    await act(async () => {
+      openEditorEntityLink({ entityType: "entity", entityID: "entity exact/id", label: "Updated Thailand delivery", isActionItem: true });
+    });
+    await flushAsyncWork();
+    const nestedSourceButton = dom.window.document.querySelector<HTMLButtonElement>('button[aria-label="Open Source Nested Source Process"]');
+    assert.ok(nestedSourceButton);
+    await act(async () => nestedSourceButton.click());
+    await flushAsyncWork();
+    assert.equal(dom.window.location.pathname, editorEntityRoute({ entityType: "logic_gate", entityID: "nested-process-source" }));
+    assert.equal(dom.window.document.querySelector('[data-kpi-editor-popup="centered-large"]'), null, "non-KPI Source navigation clears the prior KPI popup instead of remounting it over the destination");
 
     modalHarnessContainer = dom.window.document.createElement("div");
     dom.window.document.body.append(modalHarnessContainer);
@@ -1290,6 +1407,19 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     modalHarnessRoot = null;
     modalHarnessContainer.remove();
     modalHarnessContainer = null;
+
+    previewSource = null;
+    await act(async () => {
+      openEditorEntityLink({ entityType: "entity", entityID: "entity exact/id", label: "Updated Thailand delivery", isActionItem: true });
+    });
+    await flushAsyncWork();
+    const unavailableSourcePopover = dom.window.document.querySelector<HTMLElement>('[data-mango-action-item-popover="true"]');
+    const unavailableSource = unavailableSourcePopover?.querySelector<HTMLElement>('[data-action-item-source="true"]');
+    assert.match(unavailableSource?.textContent ?? "", /SourceNot set/, "an unset or inaccessible Source stays neutral");
+    assert.equal(unavailableSource?.querySelector("button"), null, "an unavailable Source is not clickable");
+    assert.doesNotMatch(unavailableSource?.textContent ?? "", /process-source/, "the neutral Source state leaks no hidden identity");
+    await act(async () => unavailableSourcePopover?.querySelector<HTMLButtonElement>('button[aria-label="Close Action Item details"]')?.click());
+    await flushAsyncWork();
 
     previewShouldFail = true;
     await act(async () => {

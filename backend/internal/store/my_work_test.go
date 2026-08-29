@@ -166,6 +166,59 @@ func TestMemoryMyWorkActionItemsUsePersonInChargeNotCreatorAndExposeNoContext(t 
 	}
 }
 
+func TestMemoryMyWorkActionItemPerspectivesUseExactPersonAndAssigner(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "10000000-0000-4000-8000-000000000013"
+	user := mustCreateMyWorkMember(t, repo, companyID, "my-work-perspective-user")
+	other := mustCreateMyWorkMember(t, repo, companyID, "my-work-perspective-other")
+
+	mine := mustCreateActionItemForPIC(t, repo, companyID, other.UserID, user.UserID, "Mine", ActionItemColorYellow, "2026-09-03", ActionItemStatusInProgress)
+	setMyWorkActionField(t, repo, mine, ActionItemAssignedBySystemKey, other.UserID)
+	selfAssigned := mustCreateActionItemForPIC(t, repo, companyID, user.UserID, user.UserID, "Self assigned", ActionItemColorRed, "2026-09-01", ActionItemStatusInProgress)
+	setMyWorkActionField(t, repo, selfAssigned, ActionItemAssignedBySystemKey, user.UserID)
+	delegated := mustCreateActionItemForPIC(t, repo, companyID, user.UserID, other.UserID, "Delegated", ActionItemColorRed, "2026-09-02", ActionItemStatusInProgress)
+	setMyWorkActionField(t, repo, delegated, ActionItemAssignedBySystemKey, user.UserID)
+	unassigned, err := repo.CreateActionItem(ActionItemInput{CompanyID: companyID, Name: "Unassigned", BodyText: "Unassigned", CreatedByUserID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setMyWorkActionField(t, repo, unassigned, ActionItemAssignedBySystemKey, user.UserID)
+	notDelegated := mustCreateActionItemForPIC(t, repo, companyID, other.UserID, other.UserID, "Assigned by other", "", "", ActionItemStatusInProgress)
+	setMyWorkActionField(t, repo, notDelegated, ActionItemAssignedBySystemKey, other.UserID)
+	doneDelegated := mustCreateActionItemForPIC(t, repo, companyID, user.UserID, other.UserID, "Done delegated", ActionItemColorRed, "2026-08-01", "done")
+	setMyWorkActionField(t, repo, doneDelegated, ActionItemAssignedBySystemKey, user.UserID)
+
+	mineResponse, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID,
+		Section: MyWorkSectionActionItems,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mineResponse.ActionItems == nil || mineResponse.ActionItems.Perspective != MyWorkActionItemPerspectiveMine {
+		t.Fatalf("Mine page = %+v", mineResponse.ActionItems)
+	}
+	mineIDs := map[string]bool{}
+	for _, item := range mineResponse.ActionItems.Items {
+		mineIDs[item.EntityID] = true
+	}
+	if len(mineIDs) != 2 || !mineIDs[mine.EntityID] || !mineIDs[selfAssigned.EntityID] {
+		t.Fatalf("Mine IDs = %+v, want exact PIC items including self-assignment", mineResponse.ActionItems.Items)
+	}
+
+	delegatedResponse, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID,
+		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegatedResponse.ActionItems == nil || delegatedResponse.ActionItems.Perspective != MyWorkActionItemPerspectiveDelegated ||
+		len(delegatedResponse.ActionItems.Items) != 1 || delegatedResponse.ActionItems.Items[0].EntityID != delegated.EntityID {
+		t.Fatalf("Delegated page = %+v, want exact non-self, nonnull delegated item", delegatedResponse.ActionItems)
+	}
+}
+
 func TestMemoryMyWorkActionItemsPageByReorderedDescendingGrouping(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "10000000-0000-4000-8000-000000000009"
@@ -376,6 +429,39 @@ func TestMemoryMyWorkUsesWinningRACIRole(t *testing.T) {
 	}
 }
 
+func TestMemoryMyWorkNodesSelectIndependentEffectiveRACIRoles(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "10000000-0000-4000-8000-000000000014"
+	user := mustCreateMyWorkMember(t, repo, companyID, "my-work-node-role-user")
+	wantByRole := map[string]string{}
+	for _, role := range []string{
+		domain.RACIRoleResponsible,
+		domain.RACIRoleAccountable,
+		domain.RACIRoleConsulted,
+		domain.RACIRoleInformed,
+	} {
+		node, err := repo.CreateNode(companyID, role+" node")
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustSetMyWorkDirectRACI(t, repo, companyID, EntityTypeNode, node.NodeID, user.UserID, role)
+		wantByRole[role] = node.NodeID
+	}
+
+	for role, wantNodeID := range wantByRole {
+		response, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+			CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID,
+			Section: MyWorkSectionNodes, Role: role,
+		})
+		if err != nil {
+			t.Fatalf("role %s: %v", role, err)
+		}
+		if response.Nodes == nil || response.Nodes.Role != role || len(response.Nodes.Items) != 1 || response.Nodes.Items[0].NodeID != wantNodeID {
+			t.Fatalf("role %s nodes = %+v, want %s", role, response.Nodes, wantNodeID)
+		}
+	}
+}
+
 func TestMemoryMyWorkFiltersPermissionBeforeNodeLimit(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "10000000-0000-4000-8000-000000000007"
@@ -466,15 +552,26 @@ func TestMyWorkQueryShapesAndCursorBinding(t *testing.T) {
 		t.Fatalf("section response pointers = %+v", nodes)
 	}
 	resourceID := "40000000-0000-4000-8000-000000000001"
-	nodeCursor := encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "2026-09-01", ResourceID: resourceID})
+	nodeCursor := encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: domain.RACIRoleResponsible, Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "2026-09-01", ResourceID: resourceID})
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionProjects, Cursor: nodeCursor}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cross-section cursor error = %v, want ErrInvalid", err)
+	}
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, Role: domain.RACIRoleAccountable, Cursor: nodeCursor}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("cross-Node-role cursor error = %v, want ErrInvalid", err)
 	}
 	processCursor := encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionProcesses, Role: domain.RACIRoleResponsible, Name: "process", ResourceID: resourceID})
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionProcesses, Role: domain.RACIRoleAccountable, Cursor: processCursor}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cross-role cursor error = %v, want ErrInvalid", err)
 	}
-	badDate := encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "not-a-date", ResourceID: resourceID})
+	actionCursor := encodeMyWorkCursor(myWorkCursor{
+		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
+		Grouping: MyWorkDefaultActionItemGrouping, GroupNull: true, GroupInt: 3, DateNull: true,
+		ResourceID: resourceID,
+	})
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveMine, Cursor: actionCursor}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("cross-perspective cursor error = %v, want ErrInvalid", err)
+	}
+	badDate := encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: domain.RACIRoleResponsible, Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "not-a-date", ResourceID: resourceID})
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, Cursor: badDate}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("malformed date cursor error = %v, want ErrInvalid", err)
 	}

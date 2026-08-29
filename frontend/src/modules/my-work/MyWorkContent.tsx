@@ -25,6 +25,7 @@ import { logicGateRACIRolePresentation } from "../logic-gates/raciPresentation.j
 import { homeRACIRoleAccent } from "../../pages/home/homeStyles.js";
 import type {
   MyWorkActionItem,
+  MyWorkActionItemPerspective,
   MyWorkNode,
   MyWorkProcess,
   MyWorkProcessRole,
@@ -78,7 +79,7 @@ type MyWorkResizeA11y = {
 
 const MY_WORK_RESIZER_SIZE = 10;
 const MY_WORK_LOAD_MORE_THRESHOLD = 160;
-const MY_WORK_COLUMN_MIN_WIDTHS: MyWorkColumnWeights = [300, 240, 240];
+const MY_WORK_COLUMN_MIN_WIDTHS: MyWorkColumnWeights = [360, 240, 240];
 const MY_WORK_SECTION_MIN_HEIGHT = 140;
 const MY_WORK_WINDOW_THRESHOLD = 120;
 const MY_WORK_WINDOW_OVERSCAN = 8;
@@ -90,9 +91,13 @@ const DEFAULT_MY_WORK_LAYOUT: MyWorkLayout = {
 export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkContentProps) {
   const {
     state,
+    actionItemPerspective,
+    nodeRole,
     processRole,
     reloadSection,
     loadMore,
+    selectActionItemPerspective,
+    selectNodeRole,
     selectProcessRole,
   } = useMyWorkData(companyID, subjectID, requestJSON);
   const [layout, setLayout] = useState<MyWorkLayout>(() => readMyWorkLayout(companyID));
@@ -249,6 +254,18 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     if (nodesScrollRef.current) nodesScrollRef.current.scrollTop = 0;
     void reloadSection("nodes", next ? undefined : nodeGroupings, true, next);
   };
+  const changeActionItemPerspective = (perspective: MyWorkActionItemPerspective) => {
+    if (actionItemsScrollRef.current) actionItemsScrollRef.current.scrollTop = 0;
+    void selectActionItemPerspective(
+      perspective,
+      actionItemHistory ? undefined : actionItemGroupings,
+      actionItemHistory,
+    );
+  };
+  const changeNodeRole = (role: MyWorkProcessRole) => {
+    if (nodesScrollRef.current) nodesScrollRef.current.scrollTop = 0;
+    void selectNodeRole(role, nodeHistory ? undefined : nodeGroupings, nodeHistory);
+  };
 
   const resizeColumnPair = (dividerIndex: 0 | 1, delta: number): number | undefined => {
     const containerWidth = Math.max(columnsRef.current?.clientWidth ?? 0, columnsRef.current?.scrollWidth ?? 0);
@@ -300,6 +317,10 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
             actions={(
               <div style={sectionActionsStyle}>
                 <HistoryButton selected={actionItemHistory} disabled={state.action_items.loading} onClick={toggleActionItemHistory} />
+                <ActionItemPerspectiveSelector
+                  perspective={actionItemPerspective}
+                  onChange={changeActionItemPerspective}
+                />
                 <UniversalGroupingControls
                   groupings={actionItemGroupings}
                   fieldOptions={MY_WORK_ACTION_ITEM_GROUPING_FIELDS}
@@ -324,7 +345,11 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
               entries={actionItemEntries}
               scrollBodyRef={actionItemsScrollRef}
               rowEstimate={52}
-              emptyLabel={actionItemHistory ? "No completed Action Items." : "No Action Items assigned to you."}
+              emptyLabel={actionItemHistory
+                ? "No completed Action Items."
+                : actionItemPerspective === "delegated"
+                  ? "No Action Items delegated by you."
+                  : "No Action Items assigned to you."}
               renderRow={renderActionItemRow}
             />
           </SectionFrame>
@@ -348,6 +373,11 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
             actions={(
               <div style={sectionActionsStyle}>
                 <HistoryButton selected={nodeHistory} disabled={state.nodes.loading} onClick={toggleNodeHistory} />
+                <MyWorkRACISelector
+                  label="Node RACI role"
+                  role={nodeRole}
+                  onChange={changeNodeRole}
+                />
                 <UniversalGroupingControls
                   groupings={nodeGroupings}
                   fieldOptions={MY_WORK_NODE_GROUPING_FIELDS}
@@ -372,7 +402,9 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
               entries={nodeEntries}
               scrollBodyRef={nodesScrollRef}
               rowEstimate={50}
-              emptyLabel={nodeHistory ? "No completed Nodes." : "No responsible Nodes."}
+              emptyLabel={nodeHistory
+                ? "No completed Nodes."
+                : `No ${PROCESS_ROLE_OPTIONS.find((option) => option.role === nodeRole)?.label ?? "matching"} Nodes.`}
               renderRow={renderNodeRow}
             />
           </SectionFrame>
@@ -395,33 +427,11 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
           icon={<ExplorerEntityIcon kind="logic_gate" />}
           state={state.processes}
           actions={(
-            <div role="radiogroup" aria-label="Process RACI role" style={roleSelectorStyle}>
-              {PROCESS_ROLE_OPTIONS.map((option, index) => (
-                <button
-                  key={option.role}
-                  type="button"
-                  role="radio"
-                  aria-checked={processRole === option.role}
-                  aria-label={option.label}
-                  title={option.label}
-                  tabIndex={processRole === option.role ? 0 : -1}
-                  style={roleButtonStyle(processRole === option.role, logicGateRACIRolePresentation(option.role).accent)}
-                  onClick={() => void selectProcessRole(option.role)}
-                  onKeyDown={(event) => {
-                    const nextIndex = processRoleIndexForKey(event.key, index);
-                    if (nextIndex === null) return;
-                    event.preventDefault();
-                    const nextOption = PROCESS_ROLE_OPTIONS[nextIndex];
-                    event.currentTarget.parentElement
-                      ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]
-                      ?.focus();
-                    void selectProcessRole(nextOption.role);
-                  }}
-                >
-                  {option.letter}
-                </button>
-              ))}
-            </div>
+            <MyWorkRACISelector
+              label="Process RACI role"
+              role={processRole}
+              onChange={(role) => void selectProcessRole(role)}
+            />
           )}
           onRetry={() => void (state.processes.items.length > 0 ? loadMore("processes") : reloadSection("processes"))}
           onLoadMore={() => void loadMore("processes")}
@@ -476,6 +486,92 @@ export function processRoleIndexForKey(key: string, currentIndex: number): numbe
   if (key === "End") return PROCESS_ROLE_OPTIONS.length - 1;
   if (key === "ArrowRight" || key === "ArrowDown") return (currentIndex + 1) % PROCESS_ROLE_OPTIONS.length;
   if (key === "ArrowLeft" || key === "ArrowUp") return (currentIndex - 1 + PROCESS_ROLE_OPTIONS.length) % PROCESS_ROLE_OPTIONS.length;
+  return null;
+}
+
+function MyWorkRACISelector({
+  label,
+  role,
+  onChange,
+}: {
+  label: string;
+  role: MyWorkProcessRole;
+  onChange: (role: MyWorkProcessRole) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} style={roleSelectorStyle}>
+      {PROCESS_ROLE_OPTIONS.map((option, index) => (
+        <button
+          key={option.role}
+          type="button"
+          role="radio"
+          aria-checked={role === option.role}
+          aria-label={option.label}
+          title={option.label}
+          tabIndex={role === option.role ? 0 : -1}
+          style={roleButtonStyle(role === option.role, logicGateRACIRolePresentation(option.role).accent)}
+          onClick={() => onChange(option.role)}
+          onKeyDown={(event) => {
+            const nextIndex = processRoleIndexForKey(event.key, index);
+            if (nextIndex === null) return;
+            event.preventDefault();
+            event.currentTarget.parentElement
+              ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]
+              ?.focus();
+            onChange(PROCESS_ROLE_OPTIONS[nextIndex].role);
+          }}
+        >
+          {option.letter}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function ActionItemPerspectiveSelector({
+  perspective,
+  onChange,
+}: {
+  perspective: MyWorkActionItemPerspective;
+  onChange: (perspective: MyWorkActionItemPerspective) => void;
+}) {
+  const options = [
+    { key: "mine" as const, label: "Mine" },
+    { key: "delegated" as const, label: "Delegated" },
+  ];
+  return (
+    <div role="radiogroup" aria-label="Action Item perspective" style={perspectiveSelectorStyle}>
+      {options.map((option, index) => (
+        <button
+          key={option.key}
+          type="button"
+          role="radio"
+          aria-checked={perspective === option.key}
+          tabIndex={perspective === option.key ? 0 : -1}
+          style={perspectiveButtonStyle(perspective === option.key)}
+          onClick={() => onChange(option.key)}
+          onKeyDown={(event) => {
+            const nextIndex = segmentIndexForKey(event.key, index, options.length);
+            if (nextIndex === null) return;
+            event.preventDefault();
+            event.currentTarget.parentElement
+              ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]
+              ?.focus();
+            onChange(options[nextIndex].key);
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function segmentIndexForKey(key: string, currentIndex: number, length: number): number | null {
+  if (key === "Home") return 0;
+  if (key === "End") return length - 1;
+  if (key === "ArrowLeft" || key === "ArrowUp") return (currentIndex - 1 + length) % length;
+  if (key === "ArrowRight" || key === "ArrowDown") return (currentIndex + 1) % length;
   return null;
 }
 
@@ -922,6 +1018,7 @@ function HistoryButton({ selected, disabled, onClick }: { selected: boolean; dis
       aria-pressed={selected}
       data-my-work-history-selected={selected ? "true" : "false"}
       disabled={disabled}
+      title={selected ? "Close History" : "Open History"}
       onClick={onClick}
       style={historyButtonStyle(selected, disabled)}
     >
@@ -1375,6 +1472,36 @@ const roleSelectorStyle: React.CSSProperties = {
   boxShadow: "inset 2px 2px 5px rgba(148,163,184,0.12), inset -2px -2px 5px rgba(255,255,255,0.92)",
   padding: 3,
 };
+
+const perspectiveSelectorStyle: React.CSSProperties = {
+  display: "inline-flex",
+  minWidth: 0,
+  border: "1px solid rgba(148, 163, 184, 0.20)",
+  borderRadius: 9,
+  background: "linear-gradient(145deg, rgba(255,255,255,0.94), rgba(241,245,249,0.82))",
+  boxShadow: "inset 2px 2px 5px rgba(148,163,184,0.12), inset -2px -2px 5px rgba(255,255,255,0.92)",
+  padding: 2,
+};
+
+function perspectiveButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    height: 24,
+    border: active ? "1px solid rgba(37,99,235,.76)" : "1px solid transparent",
+    borderRadius: 7,
+    background: active
+      ? "linear-gradient(145deg,#3b82f6,#2563eb)"
+      : "transparent",
+    color: active ? "#ffffff" : "#475569",
+    boxShadow: active
+      ? "2px 2px 6px rgba(37,99,235,.24), -1px -1px 4px rgba(255,255,255,.9), inset 1px 1px 0 rgba(255,255,255,.35)"
+      : "none",
+    font: "inherit",
+    fontSize: 9.5,
+    fontWeight: 850,
+    cursor: "pointer",
+    padding: "0 4px",
+  };
+}
 
 function roleButtonStyle(active: boolean, accent: string): React.CSSProperties {
   return {

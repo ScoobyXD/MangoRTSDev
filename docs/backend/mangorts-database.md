@@ -27,9 +27,11 @@ Fresh databases must apply this snapshot only through the guarded migration
 runner with `-mode schema -baseline-migrations -require-empty-database`.
 
 
-### Entities (2026-08-27)
+### Entities and Action Item Source (2026-08-29)
 
-The current Entity system uses five company-scoped tables: `entity_types`, `entity_folders`, `entity_field_types`, `entities`, and `entity_fields`. Folders form a same-company, same-type parent-child tree. Field types belong to an entity type and may be scoped to one folder; they are defaults copied from the type root through the selected folder path when an entity is created. The copied entity fields are independent and may then be added, edited, retyped, reordered, or deleted without changing the defaults.
+The current Entity system uses five general company-scoped tables: `entity_types`, `entity_folders`, `entity_field_types`, `entities`, and `entity_fields`. Folders form a same-company, same-type parent-child tree. Field types belong to an entity type and may be scoped to one folder; they are defaults copied from the type root through the selected folder path when an entity is created. The copied entity fields are independent and may then be added, edited, retyped, reordered, or deleted without changing the defaults.
+
+Action Items also use the dedicated `action_item_sources` table for one optional immutable typed creation endpoint. It stores no display name and is not an Entity Field or `entity_relationships` edge. Migration `backend/db/migrations/20260829_action_item_delegation_source.sql` adds the required nullable Assigned by person field definition, creates and protects Source, and adds endpoint cleanup needed for recycle, restore, and permanent deletion. Existing Action Items keep Assigned by and Source unset. Apply the migration through the normal reviewed migration workflow; do not run it on a live database from an agent task.
 
 Migration `backend/db/migrations/20260827_entities.sql` strictly removes the retired reusable-label `entity_fields` table and `entity_field_assignments`, then creates the new Entity schema. It is a destructive cutover with no compatibility layer or data conversion. Apply it only through the normal reviewed migration workflow before deploying the Entities API. No agent task should apply it to a live database.
 

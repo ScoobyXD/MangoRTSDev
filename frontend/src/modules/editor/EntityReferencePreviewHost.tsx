@@ -5,15 +5,21 @@ import { ActionItemIcon, ExplorerEntityIcon } from "../../icons/index.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
 import {
   getEntityDetail,
+  getActionItemSource,
   updateEntity,
   updateEntityField,
   type Entity,
   type EntityField,
   type EntityFieldValue,
+  type ActionItemSource,
 } from "../entities/entitiesApi.js";
+import { HuddleResourceIcon } from "../huddles/HuddleResourceIcon.js";
+import { KPIIcon } from "../huddles/KPIIcon.js";
+import { KPIEditorPopup, type KPIEditorItem } from "../huddles/LogicGateKPISection.js";
 import {
   EVENT_EDITOR_ENTITY_REFERENCE_OPEN,
   editorEntityActionItemColor,
+  openEditorEntityLink,
   updateRenderedEditorEntityReference,
   type EditorEntityLinkAnchorBounds,
   type EditorEntityLink,
@@ -44,6 +50,7 @@ type EntityReferencePreview = {
   entity: EditorEntityLink;
   anchor?: EditorEntityLinkAnchorBounds;
   detail: Entity | null;
+  actionItemSource: ActionItemSource | null;
   companyUsers: CompanyUser[];
   loading: boolean;
   error: string;
@@ -139,6 +146,7 @@ function previewError(cause: unknown): string {
 
 export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityReferencePreviewHostProps) {
   const [preview, setPreview] = useState<EntityReferencePreview | null>(null);
+  const [kpiSource, setKPISource] = useState<KPIEditorItem | null>(null);
   const [savingTarget, setSavingTarget] = useState("");
   const [saveError, setSaveError] = useState("");
   const requestIDRef = useRef(0);
@@ -156,7 +164,7 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
     requestIDRef.current = requestID;
     setSavingTarget("");
     setSaveError("");
-    setPreview({ requestID, entity, ...(anchor ? { anchor } : {}), detail: null, companyUsers: [], loading: true, error: "" });
+    setPreview({ requestID, entity, ...(anchor ? { anchor } : {}), detail: null, actionItemSource: null, companyUsers: [], loading: true, error: "" });
   }, []);
 
   useEffect(() => {
@@ -190,16 +198,28 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
             if (controller.signal.aborted) return;
           }
         }
+        let actionItemSource: ActionItemSource | null = null;
+        if (isActionItemEntity(detail)) {
+          try {
+            actionItemSource = await getActionItemSource(requestJSON, {
+              companyID,
+              entityID: detail.entity_id,
+              signal: controller.signal,
+            });
+          } catch {
+            if (controller.signal.aborted) return;
+          }
+        }
         if (controller.signal.aborted || requestIDRef.current !== requestID) return;
         syncEntityReferencePresentation(detail);
         setPreview((current) => current?.requestID === requestID
-          ? { ...current, detail, companyUsers, loading: false, error: "" }
+          ? { ...current, detail, actionItemSource, companyUsers, loading: false, error: "" }
           : current);
       })
       .catch((cause) => {
         if (controller.signal.aborted || requestIDRef.current !== requestID) return;
         setPreview((current) => current?.requestID === requestID
-          ? { ...current, detail: null, companyUsers: [], loading: false, error: previewError(cause) }
+          ? { ...current, detail: null, actionItemSource: null, companyUsers: [], loading: false, error: previewError(cause) }
           : current);
       });
     return () => controller.abort();
@@ -211,7 +231,7 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
       if (!current) return null;
       const requestID = requestIDRef.current + 1;
       requestIDRef.current = requestID;
-      return { ...current, requestID, detail: null, companyUsers: [], loading: true, error: "" };
+      return { ...current, requestID, detail: null, actionItemSource: null, companyUsers: [], loading: true, error: "" };
     });
   }, []);
 
@@ -280,7 +300,38 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
       : current);
   }, []);
 
-  if (!preview) return null;
+  const openActionItemSource = (source: ActionItemSource) => {
+    setKPISource(null);
+    close();
+    if (source.resource_type === "node" || source.resource_type === "logic_gate" || source.resource_type === "project") {
+      openEditorEntityLink({ entityType: source.resource_type, entityID: source.resource_id, label: source.name });
+      return;
+    }
+    if (source.resource_type === "huddle_node" || source.resource_type === "huddle_logic_gate") {
+      window.dispatchEvent(new CustomEvent("mangorts:huddle-open", {
+        detail: { resourceType: source.resource_type, resourceID: source.resource_id, name: source.name },
+      }));
+      return;
+    }
+    if (source.parent_resource_id?.trim()) {
+      setKPISource({
+        kpi_id: source.resource_id,
+        logic_gate_id: source.parent_resource_id,
+        name: source.name,
+      });
+    }
+  };
+
+  if (!preview) return kpiSource ? (
+    <KPIEditorPopup
+      companyID={companyID}
+      item={kpiSource}
+      canEdit
+      requestJSON={requestJSON}
+      onSaved={setKPISource}
+      onClose={() => setKPISource(null)}
+    />
+  ) : null;
   const title = preview.detail?.name.trim() || preview.entity.label.trim() || "Entity";
   const fields = [...(preview.detail?.entity_fields ?? [])].sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
   const bodyDocument = entityBodyDocument(preview.detail?.body_json) ?? createEmptyMangoTiptapDocument();
@@ -297,6 +348,7 @@ export function EntityReferencePreviewHost({ companyID, requestJSON }: EntityRef
         preview={preview}
         companyID={companyID}
         requestJSON={requestJSON}
+        onOpenSource={openActionItemSource}
         onRetry={retry}
         onSaved={(saved) => acceptSavedActionItem(preview.requestID, saved)}
         onClose={close}
@@ -474,6 +526,7 @@ function ActionItemReferencePopover({
   requestJSON,
   onRetry,
   onSaved,
+  onOpenSource,
   onClose,
 }: {
   preview: EntityReferencePreview;
@@ -481,6 +534,7 @@ function ActionItemReferencePopover({
   requestJSON: EditorEntityLinkRequest;
   onRetry: () => void;
   onSaved: (entity: Entity) => void;
+  onOpenSource: (source: ActionItemSource) => void;
   onClose: () => void;
 }) {
   if (preview.detail) {
@@ -492,6 +546,8 @@ function ActionItemReferencePopover({
         anchor={preview.anchor}
         companyID={companyID}
         requestJSON={requestJSON}
+        source={preview.actionItemSource}
+        onOpenSource={onOpenSource}
         onSaved={onSaved}
         onClose={onClose}
       />
@@ -556,6 +612,8 @@ function EditableActionItemPopover({
   anchor,
   companyID,
   requestJSON,
+  source,
+  onOpenSource,
   onSaved,
   onClose,
 }: {
@@ -564,6 +622,8 @@ function EditableActionItemPopover({
   anchor?: EditorEntityLinkAnchorBounds;
   companyID: string;
   requestJSON: EditorEntityLinkRequest;
+  source: ActionItemSource | null;
+  onOpenSource: (source: ActionItemSource) => void;
   onSaved: (entity: Entity) => void;
   onClose: () => void;
 }) {
@@ -704,7 +764,7 @@ function EditableActionItemPopover({
     ...draftRef.current,
     fieldValues: { ...draftRef.current.fieldValues, [fieldID]: value },
   });
-  const closeAfterFlush = async () => {
+  const runAfterStableFlush = async (onFlushed: () => void) => {
     while (true) {
       const versionBeforeFlush = changeVersionRef.current;
       if (!(await flushLatest())) return;
@@ -712,28 +772,26 @@ function EditableActionItemPopover({
         versionBeforeFlush === changeVersionRef.current
         && actionItemDraftsEqual(draftRef.current, savedDraftRef.current)
       ) {
-        onClose();
+        onFlushed();
         return;
       }
     }
   };
+  const closeAfterFlush = () => runAfterStableFlush(onClose);
+  const openSourceAfterFlush = (nextSource: ActionItemSource) => runAfterStableFlush(() => onOpenSource(nextSource));
 
   useAppFloatingMenuDismissal(true, popoverRef, () => { void closeAfterFlush(); }, floatingOverlayRootRef);
 
   const orderedFields = [...entity.entity_fields].sort((left, right) => left.position - right.position || left.name.localeCompare(right.name));
   const fieldByKey = new Map(orderedFields.map((field) => [actionItemFieldKey(field), field]));
   const personField = fieldByKey.get("person_in_charge");
+  const assignedByField = fieldByKey.get("assigned_by");
   const colorField = fieldByKey.get("color");
   const analysisDateField = fieldByKey.get("analysis_due_date");
   const completionDateField = fieldByKey.get("completion_due_date");
   const statusField = fieldByKey.get("status");
-  const primaryFields = [personField, colorField, analysisDateField, completionDateField, statusField]
-    .filter((field): field is EntityField => Boolean(field));
-  const primaryFieldIDs = new Set(primaryFields.map((field) => field.entity_field_id));
-  const additionalFields = orderedFields.filter((field) => !primaryFieldIDs.has(field.entity_field_id));
   const color = colorField ? draft.fieldValues[colorField.entity_field_id] : "";
   const saved = !saving && !saveError && actionItemDraftsEqual(draft, savedDraftRef.current);
-  const createdBy = entity.created_by_user_id ? companyUserLabel(companyUsers, entity.created_by_user_id) : "Not set";
   const createdDate = entity.created_timestamp ? formatCalendarDate(entity.created_timestamp) : "Not set";
 
   return (
@@ -777,22 +835,23 @@ function EditableActionItemPopover({
                   style={{ ...editorInputStyle, minHeight: 104, resize: "vertical", padding: "9px 10px", lineHeight: 1.45 }}
                 />
               </label>
-              <div style={{ display: "grid", gridTemplateColumns: "minmax(0,.82fr) minmax(0,1.18fr)", gap: 10, alignItems: "start" }}>
-                <section aria-label="Action Item creation details" style={actionItemMetadataCardStyle}>
-                  <ReadOnlyEntityValue label="Created by" value={createdBy} compact />
-                  <ReadOnlyEntityValue label="Created date" value={createdDate} compact />
-                  {personField && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 10, alignItems: "start" }}>
+                <section aria-label="Action Item left field column" style={actionItemMetadataCardStyle}>
+                  {[personField, assignedByField].map((field) => field ? (
                     <ActionItemFieldControl
-                      field={personField}
-                      value={draft.fieldValues[personField.entity_field_id] ?? ""}
+                      key={field.entity_field_id}
+                      field={field}
+                      value={draft.fieldValues[field.entity_field_id] ?? ""}
                       companyUsers={companyUsers}
-                      onChange={(value) => updateField(personField.entity_field_id, value)}
+                      onChange={(value) => updateField(field.entity_field_id, value)}
                       floatingPortalTarget={floatingPortalTarget}
                     />
-                  )}
+                  ) : null)}
+                  <ReadOnlyEntityValue label="Created date" value={createdDate} compact />
+                  <ActionItemSourceValue source={source} onOpen={(nextSource) => { void openSourceAfterFlush(nextSource); }} />
                 </section>
-                <section aria-label="Action Item responsibility and dates" style={actionItemMetadataCardStyle}>
-                  {[colorField, analysisDateField, completionDateField].map((field) => field ? (
+                <section aria-label="Action Item right field column" style={actionItemMetadataCardStyle}>
+                  {[colorField, analysisDateField, completionDateField, statusField].map((field) => field ? (
                     <ActionItemFieldControl
                       key={field.entity_field_id}
                       field={field}
@@ -804,31 +863,6 @@ function EditableActionItemPopover({
                   ) : null)}
                 </section>
               </div>
-              {additionalFields.length > 0 && (
-                <section aria-label="Additional Action Item fields" style={{ ...actionItemMetadataCardStyle, gridTemplateColumns: "repeat(2,minmax(0,1fr))" }}>
-                  {additionalFields.map((field) => (
-                    <ActionItemFieldControl
-                      key={field.entity_field_id}
-                      field={field}
-                      value={draft.fieldValues[field.entity_field_id] ?? ""}
-                      companyUsers={companyUsers}
-                      onChange={(value) => updateField(field.entity_field_id, value)}
-                      floatingPortalTarget={floatingPortalTarget}
-                    />
-                  ))}
-                </section>
-              )}
-              {statusField && (
-                <section aria-label="Action Item status" style={actionItemMetadataCardStyle}>
-                  <ActionItemFieldControl
-                    field={statusField}
-                    value={draft.fieldValues[statusField.entity_field_id] ?? ""}
-                    companyUsers={companyUsers}
-                    onChange={(value) => updateField(statusField.entity_field_id, value)}
-                    floatingPortalTarget={floatingPortalTarget}
-                  />
-                </section>
-              )}
             </div>
         </div>
         </section>
@@ -865,13 +899,18 @@ function ActionItemFieldControl({
   if (field.field_type === "boolean") {
     control = select(<><option value="">Not set</option><option value="true">Yes</option><option value="false">No</option></>);
   } else if (field.field_type === "choice") {
-    const options = field.config?.options ?? [];
-    const currentConfigured = !value || options.some((option) => option.key === value);
-    control = select(<>
-      <option value="">Not set</option>
-      {!currentConfigured && <option value={value}>{readableOptionKey(value)}</option>}
-      {options.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}
-    </>);
+    return (
+      <div style={editorLabelStyle}>
+        <label htmlFor={id}>{field.name}</label>
+        <ActionItemChoicePicker
+          id={id}
+          field={field}
+          value={value}
+          onChange={onChange}
+          floatingPortalTarget={floatingPortalTarget}
+        />
+      </div>
+    );
   } else if (field.field_type === "color") {
     return (
       <div style={editorLabelStyle}>
@@ -883,7 +922,7 @@ function ActionItemFieldControl({
     return (
       <div style={editorLabelStyle}>
         <label htmlFor={id}>{field.name}</label>
-        <ActionItemPersonPicker id={id} value={value} companyUsers={companyUsers} onChange={onChange} floatingPortalTarget={floatingPortalTarget} />
+        <ActionItemPersonPicker id={id} fieldLabel={field.name} value={value} companyUsers={companyUsers} onChange={onChange} floatingPortalTarget={floatingPortalTarget} />
       </div>
     );
   } else if (field.field_type === "date") {
@@ -909,18 +948,232 @@ function ActionItemFieldControl({
   return <label htmlFor={id} style={editorLabelStyle}>{field.name}{control}</label>;
 }
 
+function ActionItemChoicePicker({
+  id,
+  field,
+  value,
+  onChange,
+  floatingPortalTarget,
+}: {
+  id: string;
+  field: EntityField;
+  value: string;
+  onChange: (value: string) => void;
+  floatingPortalTarget: HTMLDivElement | null;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const pendingFocusIndexRef = useRef(0);
+  const [open, setOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const defaultPortalTarget = useAppOverlayPortalTarget(rootRef.current?.ownerDocument);
+  const portalTarget = floatingPortalTarget ?? defaultPortalTarget;
+  const position = useFloatingLayerPosition(rootRef, open, { width: 240, maxHeight: 210 });
+  const configuredOptions = field.config?.options ?? [];
+  const currentOption = configuredOptions.find((option) => option.key === value);
+  const options = [
+    { key: "", label: "Not set" },
+    ...(!value || currentOption ? [] : [{ key: value, label: readableOptionKey(value) }]),
+    ...configuredOptions.map((option) => ({ key: option.key, label: option.label })),
+  ];
+  const selectedIndex = Math.max(0, options.findIndex((option) => option.key === value));
+
+  const focusOption = (index: number) => {
+    menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]')[index]?.focus();
+  };
+  const openAt = (index: number) => {
+    pendingFocusIndexRef.current = index;
+    setOpen(true);
+  };
+  useAppFloatingMenuDismissal(open, rootRef, () => setOpen(false), menuRef);
+  useEffect(() => {
+    if (!open) return undefined;
+    const ownerWindow = rootRef.current?.ownerDocument.defaultView;
+    if (!ownerWindow) return undefined;
+    const closeBeforeParentPopover = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      setOpen(false);
+      ownerWindow.requestAnimationFrame(() => rootRef.current?.querySelector<HTMLButtonElement>("button")?.focus());
+    };
+    ownerWindow.addEventListener("keydown", closeBeforeParentPopover, true);
+    return () => ownerWindow.removeEventListener("keydown", closeBeforeParentPopover, true);
+  }, [open]);
+  useEffect(() => {
+    if (open && position) focusOption(Math.min(pendingFocusIndexRef.current, options.length - 1));
+  }, [open, options.length, position]);
+
+  const choose = (nextValue: string) => {
+    onChange(nextValue);
+    setOpen(false);
+    window.requestAnimationFrame(() => rootRef.current?.querySelector<HTMLButtonElement>("button")?.focus());
+  };
+  const menu = open && position ? (
+    <div
+      ref={menuRef}
+      id={`${id}-options`}
+      role="listbox"
+      aria-label={`${field.name} options`}
+      style={actionItemChoiceMenuStyle(position)}
+      onKeyDown={(event) => {
+        const optionElements = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+        const currentIndex = Math.max(0, optionElements.indexOf(event.target as HTMLButtonElement));
+        const nextIndex = segmentIndexForChoiceKey(event.key, currentIndex, optionElements.length);
+        if (nextIndex !== null) {
+          event.preventDefault();
+          optionElements[nextIndex]?.focus();
+        } else if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          optionElements[currentIndex]?.click();
+        } else if (event.key === "Escape") {
+          event.preventDefault();
+          setOpen(false);
+          rootRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+        } else if (event.key === "Tab") {
+          setOpen(false);
+        }
+      }}
+    >
+      {options.map((option) => (
+        <ActionItemChoiceOption
+          key={option.key || "not-set"}
+          option={option}
+          selected={option.key === value}
+          onChoose={() => choose(option.key)}
+        />
+      ))}
+    </div>
+  ) : null;
+
+  return (
+    <div ref={rootRef} style={{ position: "relative", minWidth: 0 }}>
+      <button
+        id={id}
+        type="button"
+        aria-label={`Value for ${field.name}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={`${id}-options`}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onClick={() => open ? setOpen(false) : openAt(selectedIndex)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Home" || event.key === "End") {
+            event.preventDefault();
+            const index = event.key === "ArrowUp" || event.key === "End" ? options.length - 1 : 0;
+            openAt(index);
+          }
+        }}
+        style={actionItemChoiceTriggerStyle(focused || open)}
+      >
+        <span>{value ? currentOption?.label || readableOptionKey(value) : "Not set"}</span>
+        <span aria-hidden="true" style={{ color: "#64748b", fontSize: 10 }}>⌄</span>
+      </button>
+      {menu && (portalTarget ? createPortal(menu, portalTarget) : menu)}
+    </div>
+  );
+}
+
+function ActionItemChoiceOption({
+  option,
+  selected,
+  onChoose,
+}: {
+  option: { key: string; label: string };
+  selected: boolean;
+  onChoose: () => void;
+}) {
+  const [active, setActive] = useState(false);
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={selected}
+      tabIndex={-1}
+      onFocus={() => setActive(true)}
+      onBlur={() => setActive(false)}
+      onMouseEnter={() => setActive(true)}
+      onMouseLeave={() => setActive(false)}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onChoose}
+      style={actionItemChoiceOptionStyle(selected, active)}
+    >
+      <span>{option.label}</span>
+      {selected && <span aria-hidden="true">✓</span>}
+    </button>
+  );
+}
+
+function segmentIndexForChoiceKey(key: string, currentIndex: number, length: number): number | null {
+  if (length === 0) return null;
+  if (key === "Home") return 0;
+  if (key === "End") return length - 1;
+  if (key === "ArrowUp" || key === "ArrowLeft") return (currentIndex - 1 + length) % length;
+  if (key === "ArrowDown" || key === "ArrowRight") return (currentIndex + 1) % length;
+  return null;
+}
+
+function ActionItemSourceValue({
+  source,
+  onOpen,
+}: {
+  source: ActionItemSource | null;
+  onOpen: (source: ActionItemSource) => void;
+}) {
+  const usable = Boolean(source && (source.resource_type !== "kpi" || source.parent_resource_id?.trim()));
+  return (
+    <div data-action-item-source="true" style={compactReadOnlyFieldStyle}>
+      <span style={fieldNameStyle}>Source</span>
+      {source && usable ? (
+        <button
+          type="button"
+          aria-label={`Open Source ${source.name}`}
+          title={`Open ${actionItemSourceTypeLabel(source.resource_type)}: ${source.name}`}
+          onClick={() => onOpen(source)}
+          style={actionItemSourceButtonStyle}
+        >
+          <span aria-hidden="true" style={actionItemSourceIconStyle}>{actionItemSourceIcon(source.resource_type)}</span>
+          <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{source.name}</span>
+        </button>
+      ) : (
+        <span style={{ ...readOnlyTextStyle, color: "#94a3b8" }}>{source ? "Source unavailable" : "Not set"}</span>
+      )}
+    </div>
+  );
+}
+
+function actionItemSourceTypeLabel(resourceType: ActionItemSource["resource_type"]): string {
+  if (resourceType === "logic_gate") return "Process";
+  if (resourceType === "huddle_logic_gate") return "Huddle Process";
+  if (resourceType === "huddle_node") return "Huddle Node";
+  if (resourceType === "kpi") return "KPI";
+  return resourceType === "node" ? "Node" : "Project";
+}
+
+function actionItemSourceIcon(resourceType: ActionItemSource["resource_type"]): React.ReactNode {
+  if (resourceType === "huddle_node" || resourceType === "huddle_logic_gate") {
+    return <HuddleResourceIcon type={resourceType} />;
+  }
+  if (resourceType === "kpi") return <KPIIcon size={17} />;
+  return <ExplorerEntityIcon kind={resourceType} />;
+}
+
 function actionItemPersonLabel(user: CompanyUser | undefined): string {
   return user?.display_name?.trim() || user?.email?.trim() || "Company user unavailable";
 }
 
 function ActionItemPersonPicker({
   id,
+  fieldLabel,
   value,
   companyUsers,
   onChange,
   floatingPortalTarget,
 }: {
   id: string;
+  fieldLabel: string;
   value: string;
   companyUsers: readonly CompanyUser[];
   onChange: (value: string) => void;
@@ -954,8 +1207,8 @@ function ActionItemPersonPicker({
     <CompanyUserSearchPicker
       ref={rootRef}
       id={id}
-      inputAriaLabel="Value for Person in charge"
-      resultsAriaLabel="Person in charge results"
+      inputAriaLabel={`Value for ${fieldLabel}`}
+      resultsAriaLabel={`${fieldLabel} results`}
       query={query}
       placeholder="Search company users"
       accent="rgba(148,163,184,.32)"
@@ -1236,6 +1489,11 @@ const actionItemPickerOptionStyle: React.CSSProperties = { width: "100%", minWid
 const actionItemPersonPickerOptionStyle: React.CSSProperties = { ...actionItemPickerOptionStyle, minHeight: 42, border: "1px solid rgba(148,163,184,.16)", borderRadius: 9, background: "linear-gradient(145deg,rgba(255,255,255,.98),rgba(241,245,249,.82))", boxShadow: "2px 2px 7px rgba(148,163,184,.12), -2px -2px 6px rgba(255,255,255,.82), inset 1px 1px 0 rgba(255,255,255,.94)" };
 const actionItemPersonAvatarStyle: React.CSSProperties = { width: 24, height: 24, display: "grid", placeItems: "center", borderRadius: 999, background: "#ccfbf1", color: "#115e59", fontSize: 10, fontWeight: 900 };
 const actionItemColorSwatchStyle = (fill: string): React.CSSProperties => ({ width: 18, height: 18, display: "block", border: "1px solid rgba(15,23,42,.3)", borderRadius: 4, background: fill, boxShadow: "inset 0 1px 0 rgba(255,255,255,.55)" });
+const actionItemSourceButtonStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 34, display: "grid", gridTemplateColumns: "22px minmax(0,1fr)", alignItems: "center", gap: 7, border: "1px solid rgba(14,116,144,.24)", borderRadius: 8, background: "linear-gradient(145deg,rgba(255,255,255,.98),rgba(224,242,254,.78))", color: "#0f172a", boxShadow: "3px 3px 8px rgba(100,116,139,.12), -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.96)", padding: "0 8px", font: "inherit", fontSize: 11, fontWeight: 800, cursor: "pointer", textAlign: "left" };
+const actionItemSourceIconStyle: React.CSSProperties = { width: 22, height: 22, display: "grid", placeItems: "center" };
+const actionItemChoiceTriggerStyle = (focused: boolean): React.CSSProperties => ({ ...editorInputStyle, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: 8, border: focused ? "1px solid rgba(37,99,235,.72)" : editorInputStyle.border, background: "linear-gradient(145deg,#ffffff,#eef2f7)", boxShadow: focused ? "0 0 0 3px rgba(147,197,253,.42), 4px 4px 10px rgba(100,116,139,.14), -3px -3px 8px rgba(255,255,255,.94)" : "3px 3px 8px rgba(100,116,139,.12), -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.96)", cursor: "pointer", textAlign: "left", outline: "none" });
+const actionItemChoiceMenuStyle = (position: { left: number; top: number; width: number; maxHeight: number }): React.CSSProperties => ({ position: "fixed", zIndex: 12060, left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight, overflowY: "auto", pointerEvents: "auto", boxSizing: "border-box", display: "grid", alignContent: "start", gap: 4, padding: 6, border: "1px solid rgba(255,255,255,.92)", borderRadius: 12, background: "linear-gradient(145deg,rgba(255,255,255,.99),rgba(241,245,249,.98))", boxShadow: "12px 14px 32px rgba(71,85,105,.24), -7px -7px 20px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.98)" });
+const actionItemChoiceOptionStyle = (selected: boolean, active: boolean): React.CSSProperties => ({ width: "100%", minHeight: 34, display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", alignItems: "center", gap: 8, border: active ? "1px solid rgba(37,99,235,.46)" : selected ? "1px solid rgba(37,99,235,.28)" : "1px solid transparent", borderRadius: 8, background: active ? "linear-gradient(145deg,#dbeafe,#eff6ff)" : selected ? "linear-gradient(145deg,#eff6ff,#e2e8f0)" : "transparent", color: selected ? "#1d4ed8" : "#0f172a", boxShadow: active ? "3px 3px 8px rgba(37,99,235,.13), -2px -2px 6px rgba(255,255,255,.90), inset 1px 1px 0 rgba(255,255,255,.94)" : "none", padding: "0 9px", font: "inherit", fontSize: 11, fontWeight: selected ? 850 : 750, cursor: "pointer", textAlign: "left", outline: "none" });
 const editorLabelStyle: React.CSSProperties = { display: "grid", gap: 5, color: "#475569", fontSize: 11, fontWeight: 850 };
 const editorInputStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 34, boxSizing: "border-box", border: "1px solid rgba(148,163,184,.32)", borderRadius: 8, background: "#fff", color: "#0f172a", padding: "0 9px", font: "inherit", fontSize: 12 };
 const saveButtonStyle = (disabled: boolean): React.CSSProperties => ({ minHeight: 32, border: 0, borderRadius: 8, background: disabled ? "#cbd5e1" : "#0f766e", color: "#fff", padding: "0 12px", font: "inherit", fontSize: 11, fontWeight: 850, cursor: disabled ? "default" : "pointer" });

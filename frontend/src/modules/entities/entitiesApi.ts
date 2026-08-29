@@ -87,6 +87,21 @@ export type Entity = EntitySummary & {
 };
 
 export type ActionItemColor = "yellow" | "red";
+export const ACTION_ITEM_SOURCE_RESOURCE_TYPES = [
+  "node",
+  "logic_gate",
+  "project",
+  "huddle_node",
+  "huddle_logic_gate",
+  "kpi",
+] as const;
+export type ActionItemSourceResourceType = (typeof ACTION_ITEM_SOURCE_RESOURCE_TYPES)[number];
+export type ActionItemSource = {
+  resource_type: ActionItemSourceResourceType;
+  resource_id: string;
+  name: string;
+  parent_resource_id?: string;
+};
 
 export type EntitySearchInput = {
   companyID: string;
@@ -132,6 +147,10 @@ export async function createActionItem(
     bodyText: string;
     name?: string;
     color: ActionItemColor | null;
+    source?: {
+      resourceType: ActionItemSourceResourceType;
+      resourceID: string;
+    };
   },
 ): Promise<Entity> {
   const response = await requestJSON<{ action_item: Entity }>("/v1/action-items", {
@@ -141,9 +160,27 @@ export async function createActionItem(
       body_text: input.bodyText,
       ...(input.name?.trim() ? { name: input.name.trim() } : {}),
       color: input.color,
+      ...(input.source ? {
+        source: {
+          resource_type: input.source.resourceType,
+          resource_id: input.source.resourceID.trim(),
+        },
+      } : {}),
     },
   });
   return response.action_item;
+}
+
+export async function getActionItemSource(
+  requestJSON: BoundRequestJSON,
+  input: { companyID: string; entityID: string; signal?: AbortSignal },
+): Promise<ActionItemSource | null> {
+  const params = new URLSearchParams({ company_id: input.companyID.trim() });
+  const response = await requestJSON<{ source?: ActionItemSource | null }>(
+    `/v1/action-items/${encodeURIComponent(input.entityID.trim())}/source?${params.toString()}`,
+    { cache: "no-store", signal: input.signal },
+  );
+  return response.source ?? null;
 }
 
 export async function listHuddleNodeActionItems(
