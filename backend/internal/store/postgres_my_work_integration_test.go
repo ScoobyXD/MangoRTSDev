@@ -5,9 +5,103 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 )
+
+func TestPostgresMyWorkNodeHistoryUsesLatestDoneTransitionNotLaterDoneUpdate(t *testing.T) {
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Postgres My Work Node completion order")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := repo.UpsertAuthUser("postgres-my-work-node-completion", "postgres-my-work-node-completion@example.test", "Node completion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := repo.CreateLogicGate(company.CompanyID, "Completion process")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assign := func(nodeID, status string, position int) LogicGateNodeAssignmentResult {
+		t.Helper()
+		result, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+			CompanyID: company.CompanyID, LogicGateID: gate.LogicGateID, NodeID: nodeID, Status: status, Position: position,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	makeResponsible := func(nodeID string) {
+		t.Helper()
+		if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
+			CompanyID: company.CompanyID, ResourceType: EntityTypeNode, ResourceID: nodeID, ActorUserID: user.UserID,
+			Assignments: []ResourceRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: user.UserID}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setEventTime := func(result LogicGateNodeAssignmentResult, timestamp time.Time) {
+		t.Helper()
+		for _, event := range result.Events {
+			if event.Type != "node_updated" {
+				continue
+			}
+			if _, err := db.Exec(`update domain_events set created_timestamp=$3 where company_id=$1::uuid and event_id=$2::uuid`, company.CompanyID, event.EventID, timestamp); err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		t.Fatal("assignment result did not include a Node snapshot event")
+	}
+
+	older, err := repo.CreateNode(company.CompanyID, "Older completion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assign(older.NodeID, "in progress", 1)
+	firstOlderDone := assign(older.NodeID, "done", 1)
+	assign(older.NodeID, "in progress", 1)
+	latestOlderDone := assign(older.NodeID, "done", 1)
+	makeResponsible(older.NodeID)
+
+	newer, err := repo.CreateNode(company.CompanyID, "Newer completion")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assign(newer.NodeID, "in progress", 1)
+	newerDone := assign(newer.NodeID, "done", 1)
+	makeResponsible(newer.NodeID)
+
+	laterOlderUpdate := assign(older.NodeID, "done", 99)
+	firstOlderDoneAt := time.Date(2026, time.August, 26, 9, 0, 0, 0, time.UTC)
+	olderDoneAt := time.Date(2026, time.August, 27, 10, 0, 0, 0, time.UTC)
+	newerDoneAt := time.Date(2026, time.August, 28, 11, 0, 0, 0, time.UTC)
+	laterOlderUpdateAt := time.Date(2026, time.August, 29, 12, 0, 0, 0, time.UTC)
+	setEventTime(firstOlderDone, firstOlderDoneAt)
+	setEventTime(latestOlderDone, olderDoneAt)
+	setEventTime(newerDone, newerDoneAt)
+	setEventTime(laterOlderUpdate, laterOlderUpdateAt)
+
+	history, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, History: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if history.Nodes == nil || len(history.Nodes.Items) != 2 || history.Nodes.Items[0].NodeID != newer.NodeID || history.Nodes.Items[1].NodeID != older.NodeID {
+		t.Fatalf("Node History order = %+v, want newer true completion before later-updated older completion", history.Nodes)
+	}
+	if history.Nodes.Items[0].CompletedTimestamp == nil || !history.Nodes.Items[0].CompletedTimestamp.Equal(newerDoneAt) || history.Nodes.Items[1].CompletedTimestamp == nil || !history.Nodes.Items[1].CompletedTimestamp.Equal(olderDoneAt) {
+		t.Fatalf("Node History completion timestamps = %+v, want %s then %s", history.Nodes.Items, newerDoneAt, olderDoneAt)
+	}
+}
 
 func TestPostgresMyWorkAndStaleRACIQueriesExecuteAgainstCanonicalSchema(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
@@ -72,6 +166,8 @@ where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$4::uu
 		company.CompanyID, actionItem.EntityID, strings.ToUpper(user.UserID), ActionItemPersonInChargeFieldTypeID); err != nil {
 		t.Fatal(err)
 	}
+	completedAction := mustCreatePostgresMyWorkActionItem(t, repo, company.CompanyID, user.UserID, "Postgres completed action", ActionItemColorYellow, "2026-09-05")
+	mustSetPostgresMyWorkActionField(t, repo, completedAction, ActionItemStatusSystemKey, "done")
 
 	parent, err := repo.CreateCompanyUserGroup(company.CompanyID, "", "Postgres Team Parent")
 	if err != nil {
@@ -104,6 +200,20 @@ where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$4::uu
 	}
 	if response.Projects == nil || len(response.Projects.Items) != 1 || response.Projects.Items[0].ProjectID != projectResult.Project.ProjectID {
 		t.Fatalf("Postgres projects = %+v", response.Projects)
+	}
+	historyActions, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, History: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if historyActions.ActionItems == nil || len(historyActions.ActionItems.Items) != 1 || historyActions.ActionItems.Items[0].EntityID != completedAction.EntityID || historyActions.ActionItems.Items[0].CompletedTimestamp == nil || historyActions.ActionItems.Items[0].CompletionDueDateFieldID == "" {
+		t.Fatalf("Postgres Action Item history = %+v", historyActions.ActionItems)
+	}
+	historyNodes, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, History: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if historyNodes.Nodes == nil || len(historyNodes.Nodes.Items) != 1 || historyNodes.Nodes.Items[0].NodeID != doneNode.NodeID || historyNodes.Nodes.Items[0].CompletedTimestamp == nil {
+		t.Fatalf("Postgres Node history = %+v", historyNodes.Nodes)
 	}
 
 	hiddenCandidate, err := repo.CreateNode(company.CompanyID, "Hidden candidate sorts first")

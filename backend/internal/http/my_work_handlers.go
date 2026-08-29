@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"miraeopus/backend/internal/store"
@@ -24,7 +25,7 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 	}
 	for key := range queryValues {
 		switch key {
-		case "company_id", "section", "role", "grouping", "limit", "cursor":
+		case "company_id", "section", "role", "grouping", "limit", "cursor", "history":
 		default:
 			writeError(w, http.StatusBadRequest, "unsupported_my_work_query_param")
 			return
@@ -85,6 +86,28 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	historyValues, historySet := queryValues["history"]
+	if len(historyValues) > 1 {
+		writeError(w, http.StatusBadRequest, "invalid_my_work_history")
+		return
+	}
+	history := false
+	if historySet {
+		parsed, err := strconv.ParseBool(strings.TrimSpace(queryValues.Get("history")))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_my_work_history")
+			return
+		}
+		history = parsed
+	}
+	if history && section != store.MyWorkSectionActionItems && section != store.MyWorkSectionNodes {
+		writeError(w, http.StatusBadRequest, "my_work_history_only_valid_for_action_items_or_nodes")
+		return
+	}
+	if history && groupingSet {
+		writeError(w, http.StatusBadRequest, "my_work_history_cannot_be_grouped")
+		return
+	}
 	limit, ok := parsePositiveLimit(queryValues.Get("limit"), store.MyWorkDefaultLimit, store.MyWorkMaxLimit)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "invalid_limit")
@@ -99,7 +122,7 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(actor.User.UserID)
 	response, err := s.repo.GetMyWork(r.Context(), store.MyWorkQuery{
 		CompanyID: companyID, UserID: userID, ViewerUserID: userID,
-		Section: section, Role: raciRole, Grouping: grouping, Limit: limit, Cursor: cursor,
+		Section: section, Role: raciRole, Grouping: grouping, Limit: limit, Cursor: cursor, History: history,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_my_work_query")

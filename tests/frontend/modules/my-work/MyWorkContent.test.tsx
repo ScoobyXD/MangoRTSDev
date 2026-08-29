@@ -38,8 +38,8 @@ function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
     user_id: "viewer-1",
     action_items: {
       items: [
-        { entity_id: "action-red", name: "Red Action", color: "red", completion_due_date: "2026-09-01" },
-        { entity_id: "action-yellow", name: "Yellow Action", color: "yellow", completion_due_date: "2026-09-02" },
+        { entity_id: "action-red", name: "Red Action", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red" },
+        { entity_id: "action-yellow", name: "Yellow Action", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow" },
       ],
       next_cursor: "actions-old-cursor",
       has_more: true,
@@ -119,8 +119,8 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
           projects: undefined,
           action_items: {
             items: [
-              { entity_id: "action-red", name: "Duplicate Red", color: "red" },
-              { entity_id: "action-page-2", name: "Second Action", color: "yellow", completion_due_date: "2026-09-04" },
+              { entity_id: "action-red", name: "Duplicate Red", color: "red", completion_due_date_field_id: "field-red" },
+              { entity_id: "action-page-2", name: "Second Action", color: "yellow", completion_due_date: "2026-09-04", completion_due_date_field_id: "field-page-2" },
             ],
             has_more: false,
           },
@@ -196,9 +196,13 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     const groupButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Group "]'));
     assert.deepEqual(groupButtons.map((button) => button.getAttribute("aria-label")), ["Group Action Items", "Group Nodes"]);
     assert.deepEqual(groupButtons.map((button) => button.textContent), ["", ""], "both section groupers are icon-only");
+    const historyButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-pressed][data-my-work-history-selected]'));
+    assert.deepEqual(historyButtons.map((button) => button.textContent), ["History", "History"]);
+    assert.deepEqual(historyButtons.map((button) => button.getAttribute("aria-pressed")), ["false", "false"]);
     assert.equal(container.querySelectorAll("[data-my-work-section-icon]").length, 4, "every major section has its exact resource icon");
-    assert.match(container.textContent ?? "", /Completion due date: 09\/01\/2026/);
-    assert.match(container.textContent ?? "", /Due date: 09\/03\/2026/);
+    assert.equal(container.querySelectorAll('[data-my-work-group-field="completion_due_date"], [data-my-work-group-field="due_date"]').length, 0, "date ordering never renders a date group header");
+    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Red Action"]')?.value, "9/1/2026");
+    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Context Node"]')?.value, "9/3/2026");
     assert.doesNotMatch(container.textContent ?? "", /\bPrevious\b|\bNext\b|Page \d/, "cursor pages are never exposed as page controls");
 
     const redActionRow = container.querySelector<HTMLElement>('[data-my-work-target="action-item"][data-my-work-action-item-color="red"]');
@@ -298,11 +302,11 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.equal(nodeRows.length, 2);
     assert.equal(nodeRows[0]?.querySelector("button button"), null, "inline context targets are siblings, never nested buttons");
     assert.deepEqual(
-      Array.from(nodeRows[0]?.querySelectorAll<HTMLButtonElement>("button") ?? []).map((button) => button.dataset.myWorkTarget),
+      Array.from(nodeRows[0]?.querySelectorAll<HTMLButtonElement>("button[data-my-work-target]") ?? []).map((button) => button.dataset.myWorkTarget),
       ["node", "process", "project"],
     );
     assert.deepEqual(
-      Array.from(nodeRows[1]?.querySelectorAll<HTMLButtonElement>("button") ?? []).map((button) => button.dataset.myWorkTarget),
+      Array.from(nodeRows[1]?.querySelectorAll<HTMLButtonElement>("button[data-my-work-target]") ?? []).map((button) => button.dataset.myWorkTarget),
       ["node"],
       "a Node with hidden inline context exposes no context placeholder or target",
     );
@@ -487,7 +491,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
         nodes: undefined,
         processes: undefined,
         projects: undefined,
-        action_items: { items: [{ entity_id: "action-red", name: "Regrouped Red Action", color: "red" }], has_more: false },
+        action_items: { items: [{ entity_id: "action-red", name: "Regrouped Red Action", color: "red", completion_due_date_field_id: "field-red" }], has_more: false },
       }));
       await Promise.resolve();
     });
@@ -511,6 +515,226 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.match(nodeSection?.textContent ?? "", /Context Node/, "regrouping replaces the section with its first cursor page");
     assert.doesNotMatch(nodeSection?.textContent ?? "", /Second Page Node/, "regrouping does not reuse the prior cursor");
     assert.doesNotMatch(nodeSection?.textContent ?? "", /\bPrevious\b|\bNext\b|Page \d/, "Nodes use continuous scrolling instead of paging controls");
+  } finally {
+    if (mountedRoot) await act(async () => mountedRoot?.unmount());
+    for (const restore of restores.reverse()) restore();
+    dom.window.close();
+  }
+});
+
+test("My Work toggles completed History in place, refreshes Action Item edits, and saves inline due dates", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/my-work",
+  });
+  const restores: Restore[] = [];
+  installMyWorkDOMGlobals(dom, restores);
+
+  let mountedRoot: { unmount(): void } | null = null;
+  try {
+    const [{ createRoot }, { Simulate }, { MyWorkContent }, { EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION }] = await Promise.all([
+      import("react-dom/client"),
+      import("react-dom/test-utils"),
+      import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx"),
+      import("../../../../frontend/src/modules/editor/editorEntityLinks.js"),
+    ]);
+    const calls: Array<{ path: string; init?: RequestInit & { json?: unknown } }> = [];
+    let activeActionName = "Active Action";
+    let activeActionDue = "2026-09-01";
+    let activeActionVisible = true;
+    let nodeDue = "2026-09-02";
+    let holdNextActionDueSave = false;
+    let releaseActionDueSave: (() => void) | undefined;
+    const actionDueWrites: Array<string | null> = [];
+    const actionPage = (): MyWorkResponse["action_items"] => ({
+      items: activeActionVisible ? [{
+        entity_id: "action-active",
+        name: activeActionName,
+        completion_due_date: activeActionDue || null,
+        completion_due_date_field_id: "field-action-due",
+      }] : [],
+      has_more: false,
+    });
+    const nodePage = (): MyWorkResponse["nodes"] => ({
+      items: [{ node_id: "node-active", name: "Active Node", due_date: nodeDue || null }],
+      has_more: false,
+    });
+    const requestJSON = async <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      calls.push({ path, init });
+      if (path.startsWith("/v1/entities/") && init?.method === "PUT") {
+        const payload = JSON.parse(String(init.body)) as { value?: string | null };
+        const nextDueDate = payload.value ?? null;
+        actionDueWrites.push(nextDueDate);
+        if (holdNextActionDueSave) {
+          holdNextActionDueSave = false;
+          await new Promise<void>((resolve) => { releaseActionDueSave = resolve; });
+        }
+        activeActionDue = nextDueDate ?? "";
+        return { entity_field: {} } as T;
+      }
+      if (path.startsWith("/v1/nodes/") && init?.method === "PUT") {
+        const payload = init.json as { due_date?: string | null };
+        nodeDue = payload.due_date ?? "";
+        return {} as T;
+      }
+      const url = new URL(path, "http://api.test");
+      const section = url.searchParams.get("section");
+      if (!section) return response({
+        action_items: actionPage(),
+        nodes: nodePage(),
+        processes: { role: "responsible", items: [], has_more: false },
+        projects: { items: [], has_more: false },
+      }) as T;
+      if (section === "action_items") return response({
+        action_items: url.searchParams.get("history") === "true" ? {
+          items: [
+            { entity_id: "action-new", name: "Newest completed Action", completion_due_date_field_id: "field-new", completed_timestamp: "2026-08-29T12:00:00Z" },
+            { entity_id: "action-old", name: "Older completed Action", completion_due_date_field_id: "field-old", completed_timestamp: "2026-08-28T12:00:00Z" },
+          ],
+          has_more: false,
+        } : actionPage(),
+        nodes: undefined,
+        processes: undefined,
+        projects: undefined,
+      }) as T;
+      if (section === "nodes") return response({
+        action_items: undefined,
+        nodes: url.searchParams.get("history") === "true" ? {
+          items: [
+            { node_id: "node-new", name: "Newest completed Node", completed_timestamp: "2026-08-29T11:00:00Z" },
+            { node_id: "node-old", name: "Older completed Node", completed_timestamp: "2026-08-27T11:00:00Z" },
+          ],
+          has_more: false,
+        } : nodePage(),
+        processes: undefined,
+        projects: undefined,
+      }) as T;
+      return response() as T;
+    };
+
+    const container = dom.window.document.getElementById("root");
+    assert.ok(container);
+    const root = createRoot(container);
+    mountedRoot = root;
+    await act(async () => {
+      root.render(<MyWorkContent companyID="company-1" subjectID="viewer-1" requestJSON={requestJSON} />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const actionSection = container.querySelector<HTMLElement>('[data-my-work-section="action_items"]');
+    const nodeSection = container.querySelector<HTMLElement>('[data-my-work-section="nodes"]');
+    assert.ok(actionSection && nodeSection);
+    const actionHistory = actionSection.querySelector<HTMLButtonElement>('button[data-my-work-history-selected]');
+    const nodeHistoryButton = nodeSection.querySelector<HTMLButtonElement>('button[data-my-work-history-selected]');
+    assert.ok(actionHistory && nodeHistoryButton);
+    await act(async () => {
+      actionHistory.click();
+      await Promise.resolve();
+    });
+    assert.equal(actionHistory.getAttribute("aria-pressed"), "true");
+    assert.equal(actionSection.querySelector<HTMLButtonElement>('button[aria-label="Group Action Items"]')?.disabled, true);
+    assert.deepEqual(
+      Array.from(actionSection.querySelectorAll<HTMLElement>('[data-my-work-target="action-item"]')).map((row) => row.textContent?.trim()),
+      ["Newest completed Action", "Older completed Action"],
+    );
+    const actionHistoryURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
+    assert.equal(actionHistoryURL.searchParams.get("history"), "true");
+    assert.equal(actionHistoryURL.searchParams.has("grouping"), false);
+    await act(async () => {
+      actionHistory.click();
+      await Promise.resolve();
+    });
+    assert.equal(actionSection.querySelector<HTMLButtonElement>('button[data-my-work-history-selected]')?.getAttribute("aria-pressed"), "false");
+    assert.match(actionSection.textContent ?? "", /Active Action/);
+
+    await act(async () => {
+      nodeHistoryButton.click();
+      await Promise.resolve();
+    });
+    assert.deepEqual(
+      Array.from(nodeSection.querySelectorAll<HTMLElement>('[data-my-work-target="node"]')).map((row) => row.textContent?.trim()),
+      ["Newest completed Node", "Older completed Node"],
+    );
+    await act(async () => {
+      nodeSection.querySelector<HTMLButtonElement>('button[data-my-work-history-selected]')?.click();
+      await Promise.resolve();
+    });
+
+    activeActionName = "Renamed Action";
+    await act(async () => {
+      dom.window.dispatchEvent(new dom.window.CustomEvent(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, {
+        detail: { entityID: "action-active", label: activeActionName, isActionItem: true, actionItemColor: null },
+      }));
+      await Promise.resolve();
+    });
+    assert.match(actionSection.textContent ?? "", /Renamed Action/, "successful same-page edits refresh the current row immediately");
+    activeActionVisible = false;
+    await act(async () => {
+      dom.window.dispatchEvent(new dom.window.CustomEvent(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, {
+        detail: { entityID: "action-active", label: activeActionName, isActionItem: true, actionItemColor: null },
+      }));
+      await Promise.resolve();
+    });
+    assert.doesNotMatch(actionSection.textContent ?? "", /Renamed Action/, "a newly completed Action Item leaves the normal list immediately");
+
+    activeActionVisible = true;
+    await act(async () => {
+      dom.window.dispatchEvent(new dom.window.CustomEvent(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, {
+        detail: { entityID: "action-active", label: activeActionName, isActionItem: true, actionItemColor: null },
+      }));
+      await Promise.resolve();
+    });
+    const actionDateInput = actionSection.querySelector<HTMLInputElement>('input[aria-label="Due Date for Renamed Action"]');
+    assert.ok(actionDateInput);
+    await act(async () => {
+      actionDateInput.click();
+      await Promise.resolve();
+    });
+    const actionCalendar = dom.window.document.querySelector<HTMLElement>('[data-editor-calendar-popover="Due Date for Renamed Action"]');
+    assert.ok(actionCalendar, "clicking the inline field opens the shared calendar");
+    const valueSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
+    assert.ok(valueSetter);
+    await act(async () => {
+      valueSetter.call(actionDateInput, "9/10/2026");
+      Simulate.change(actionDateInput, { target: { value: "9/10/2026" } });
+      await Promise.resolve();
+    });
+    holdNextActionDueSave = true;
+    await act(async () => {
+      Simulate.blur(actionDateInput);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      Array.from(actionCalendar.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Clear")?.click();
+      await Promise.resolve();
+    });
+    assert.deepEqual(actionDueWrites, ["2026-09-10"], "the selected calendar value waits behind the in-flight typed-date save");
+    assert.ok(releaseActionDueSave);
+    await act(async () => {
+      releaseActionDueSave?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    for (let attempt = 0; attempt < 10 && actionDueWrites.length < 2; attempt += 1) {
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    }
+    assert.deepEqual(actionDueWrites, ["2026-09-10", null], "the later calendar choice is always the final serialized write");
+    assert.equal(activeActionDue, "", "clearing the Action Item date writes null to its exact Completion due date field");
+    assert.equal(actionSection.querySelector<HTMLInputElement>('input[aria-label="Due Date for Renamed Action"]')?.value, "");
+
+    const nodeDateInput = nodeSection.querySelector<HTMLInputElement>('input[aria-label="Due Date for Active Node"]');
+    assert.ok(nodeDateInput);
+    await act(async () => {
+      nodeDateInput.click();
+      await Promise.resolve();
+    });
+    const nodeCalendar = dom.window.document.querySelector<HTMLElement>('[data-editor-calendar-popover="Due Date for Active Node"]');
+    assert.ok(nodeCalendar);
+    await act(async () => {
+      Array.from(nodeCalendar.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent === "Clear")?.click();
+      await Promise.resolve();
+    });
+    assert.equal(nodeDue, "", "clearing the Node date writes null to the exact Node");
+    assert.equal(nodeSection.querySelector<HTMLInputElement>('input[aria-label="Due Date for Active Node"]')?.value, "");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

@@ -80,6 +80,17 @@ func TestMyWorkEndpointDerivesSubjectAndReturnsRequestedTypedSections(t *testing
 	if repo.query.Section != store.MyWorkSectionNodes || repo.query.Grouping != "due_date:desc,priority:asc" {
 		t.Fatalf("grouped repository query = %+v", repo.query)
 	}
+
+	history := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/v1/my-work?company_id="+companyID+"&section=action_items&history=true", nil)
+	request = workItemInboxReadRequestWithActor(request, user.UserID, companyID, domain.RoleCompanyUser, false)
+	handler.ServeHTTP(history, request)
+	if history.Code != http.StatusOK {
+		t.Fatalf("history status = %d body=%s", history.Code, history.Body.String())
+	}
+	if repo.query.Section != store.MyWorkSectionActionItems || !repo.query.History || repo.query.Grouping != "" {
+		t.Fatalf("history repository query = %+v", repo.query)
+	}
 }
 
 func TestMyWorkEndpointRejectsSubjectSpoofingAndInvalidSectionInputs(t *testing.T) {
@@ -112,6 +123,10 @@ func TestMyWorkEndpointRejectsSubjectSpoofingAndInvalidSectionInputs(t *testing.
 		"/v1/my-work?company_id=" + companyID + "&section=nodes&grouping=",
 		"/v1/my-work?company_id=" + companyID + "&section=nodes&grouping=priority:up",
 		"/v1/my-work?company_id=" + companyID + "&section=nodes&grouping=priority:asc,priority:desc",
+		"/v1/my-work?company_id=" + companyID + "&history=true",
+		"/v1/my-work?company_id=" + companyID + "&section=processes&history=true",
+		"/v1/my-work?company_id=" + companyID + "&section=nodes&history=maybe",
+		"/v1/my-work?company_id=" + companyID + "&section=nodes&history=true&grouping=due_date:desc",
 		"/v1/my-work?company_id=" + companyID + "&unknown=value",
 	}
 	for _, path := range cases {

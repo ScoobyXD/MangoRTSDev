@@ -29,10 +29,12 @@ export type MyWorkRowNavigationDirection = "previous" | "next";
 export function flattenMyWorkGroupedDisplayEntries<Item, Field extends string>(
   groups: ReadonlyArray<UniversalNestedGroup<Item, Field>>,
   rowIdentity: (row: Item) => string,
+  hiddenHeaderFields: ReadonlySet<Field> = new Set<Field>(),
 ): Array<MyWorkDisplayEntry<Item, Field>> {
   const entries: Array<MyWorkDisplayEntry<Item, Field>> = [];
 
-  const appendGroup = (group: UniversalNestedGroup<Item, Field>): number => {
+  const appendGroup = (group: UniversalNestedGroup<Item, Field>, visibleDepth: number): number => {
+    const headerHidden = hiddenHeaderFields.has(group.field);
     const header: MyWorkGroupHeaderDisplayEntry<Field> = {
       kind: "group-header",
       entryID: `group:${group.id}`,
@@ -40,13 +42,14 @@ export function flattenMyWorkGroupedDisplayEntries<Item, Field extends string>(
       field: group.field,
       groupKey: group.key,
       label: group.label,
-      depth: group.depth,
+      depth: visibleDepth,
       rowCount: 0,
     };
-    entries.push(header);
+    if (!headerHidden) entries.push(header);
+    const childDepth = headerHidden ? visibleDepth : visibleDepth + 1;
 
     if (group.groups.length > 0) {
-      for (const nested of group.groups) header.rowCount += appendGroup(nested);
+      for (const nested of group.groups) header.rowCount += appendGroup(nested, childDepth);
       return header.rowCount;
     }
 
@@ -57,7 +60,7 @@ export function flattenMyWorkGroupedDisplayEntries<Item, Field extends string>(
         entryID: `${group.id}/row:${rowID}`,
         rowID,
         row,
-        depth: group.depth + 1,
+        depth: childDepth,
         parentGroupID: group.id,
       });
       header.rowCount += 1;
@@ -65,7 +68,7 @@ export function flattenMyWorkGroupedDisplayEntries<Item, Field extends string>(
     return header.rowCount;
   };
 
-  for (const group of groups) appendGroup(group);
+  for (const group of groups) appendGroup(group, 0);
   return entries;
 }
 

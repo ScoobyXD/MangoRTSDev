@@ -173,10 +173,12 @@ type EntitySummary struct {
 }
 
 type MyWorkActionItem struct {
-	EntityID          string  `json:"entity_id"`
-	Name              string  `json:"name"`
-	Color             *string `json:"color,omitempty"`
-	CompletionDueDate *string `json:"completion_due_date,omitempty"`
+	EntityID                 string     `json:"entity_id"`
+	Name                     string     `json:"name"`
+	Color                    *string    `json:"color,omitempty"`
+	CompletionDueDate        *string    `json:"completion_due_date,omitempty"`
+	CompletionDueDateFieldID string     `json:"completion_due_date_field_id"`
+	CompletedTimestamp       *time.Time `json:"completed_timestamp,omitempty"`
 }
 
 type MyWorkProcessReference struct {
@@ -190,12 +192,13 @@ type MyWorkProjectReference struct {
 }
 
 type MyWorkNode struct {
-	NodeID   string                  `json:"node_id"`
-	Name     string                  `json:"name"`
-	Priority *int                    `json:"priority,omitempty"`
-	DueDate  *string                 `json:"due_date,omitempty"`
-	Process  *MyWorkProcessReference `json:"process,omitempty"`
-	Project  *MyWorkProjectReference `json:"project,omitempty"`
+	NodeID             string                  `json:"node_id"`
+	Name               string                  `json:"name"`
+	Priority           *int                    `json:"priority,omitempty"`
+	DueDate            *string                 `json:"due_date,omitempty"`
+	CompletedTimestamp *time.Time              `json:"completed_timestamp,omitempty"`
+	Process            *MyWorkProcessReference `json:"process,omitempty"`
+	Project            *MyWorkProjectReference `json:"project,omitempty"`
 }
 
 type MyWorkProcess struct {

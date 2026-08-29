@@ -3,7 +3,7 @@ import type { SidebarPin } from "./sidebarPins.js";
 export type SidebarPinNodePopupLaunch = {
   nodeID: string;
   nodeTitle: string;
-  initialSidebarFill: true;
+  initialFullscreen: true;
   popupInstanceID: number;
 };
 
@@ -12,7 +12,7 @@ export function sidebarPinNodePopupLaunch(pin: SidebarPin, popupInstanceID = Dat
   return {
     nodeID: pin.id.trim(),
     nodeTitle: pin.name,
-    initialSidebarFill: true,
+    initialFullscreen: true,
     popupInstanceID,
   };
 }

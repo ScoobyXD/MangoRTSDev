@@ -30,7 +30,8 @@ import {
   TextEditorIcon,
 } from "../editor/NodeWorkspaceSurfaceShared.js";
 import type { TextBlockSelectionAnchor, TextBlockSelectionDraft } from "../editor/NodeWorkspaceSurfaceShared.js";
-import type { EditorSaveState } from "../editor/EditorSaveStatusIcon.js";
+import { EditorSavedTimestamp, EditorSaveStatusIcon, type EditorSaveState } from "../editor/EditorSaveStatusIcon.js";
+import { mangoTiptapPendingStorageKey } from "../editor/tiptap/mangoTiptapSync.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
 import type { BareMangoEditorControls } from "./BareMangoEditor.js";
 import {
@@ -356,6 +357,8 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
           const chatOpen = openChatTextBoxIDs.has(textBoxID);
           const selectionAnchor = chatSelectionAnchors[textBoxID];
           const textBoxAttachments = attachmentsByTextBox.get(textBoxID) ?? [];
+          const textBoxSaveStorageKey = mangoTiptapPendingStorageKey({ companyID, resourceType: "huddle_node", resourceID: huddleNodeID, documentID: textBoxID });
+          const textBoxSaveFallback = { status: "saved" as const, updatedTimestamp: textBox.updated_timestamp };
           return (
             <React.Fragment key={textBoxID}>
               <div style={timelineCellFrameStyle}>
@@ -363,12 +366,11 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
               </div>
               <article data-huddle-node-textbox={textBoxID} style={textBoxCardStyle}>
               <div style={textBoxHeaderStyle}>
-                <div aria-hidden="true" />
+                <div data-node-header-save-metadata="true" style={saveMetadataStyle}>
+                  <EditorSaveStatusIcon state={textBoxSaveFallback} storageKey={textBoxSaveStorageKey} compact />
+                  <EditorSavedTimestamp storageKey={textBoxSaveStorageKey} fallbackUpdatedTimestamp={textBox.updated_timestamp} createdTimestamp={textBox.created_timestamp} formatTimestamp={formatTextBlockMetadataTimestamp} />
+                </div>
                 <div data-node-pane-header="editor" style={editorHeaderControlsStyle}>
-                  <span style={activeTextBoxID === textBoxID ? activeEditorBadgeStyle : editorBadgeStyle}>
-                    <TextEditorIcon color="#0f766e" />
-                    <span>Editor</span>
-                  </span>
                   <AttachmentCountDropdown
                     items={textBoxAttachments.map((resourceAttachment) => ({ resourceAttachment }))}
                     apiBase={apiBase}
@@ -395,6 +397,10 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
                       position,
                     })}
                   />
+                  <span style={activeTextBoxID === textBoxID ? activeEditorBadgeStyle : editorBadgeStyle}>
+                    <TextEditorIcon color="#0f766e" />
+                    <span>Editor</span>
+                  </span>
                 </div>
                 <div data-node-pane-header="chat" style={chatHeaderControlsStyle}>
                   <button
@@ -576,6 +582,15 @@ function errorMessage(cause: unknown, fallback: string): string {
   return cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 }
 
+function formatTextBlockMetadataTimestamp(value: string | number | undefined): string {
+  if (value === undefined || value === "") return "";
+  const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const time = new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit" }).format(date);
+  const day = new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric", year: "numeric" }).format(date);
+  return `${time} ${day}`;
+}
+
 const HUDDLE_TEXT_BOX_BODY_HEIGHT = 320;
 const HUDDLE_TEXT_BOX_ROW_HEIGHT = 358;
 const workspaceStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_SHADOW, scrollbarGutter: "stable" };
@@ -585,8 +600,9 @@ const timelineHeaderSpacerStyle: React.CSSProperties = { position: "sticky", top
 const timelineAddButtonStyle: React.CSSProperties = { width: 30, height: 30, borderRadius: 9, border: "1px solid transparent", background: EDITOR_NEU_SURFACE, color: "#0f766e", display: "grid", placeItems: "center", padding: 0, boxShadow: EDITOR_NEU_SHADOW };
 const timelineCellFrameStyle: React.CSSProperties = { minHeight: HUDDLE_TEXT_BOX_ROW_HEIGHT, height: HUDDLE_TEXT_BOX_ROW_HEIGHT };
 const textBoxCardStyle: React.CSSProperties = { minWidth: 0, minHeight: HUDDLE_TEXT_BOX_ROW_HEIGHT, height: HUDDLE_TEXT_BOX_ROW_HEIGHT, display: "grid", gridTemplateRows: `38px ${HUDDLE_TEXT_BOX_BODY_HEIGHT}px`, overflow: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, rgba(255,255,255,.76), rgba(255,255,255,.76)) border-box`, boxShadow: EDITOR_NEU_SHADOW };
-const textBoxHeaderStyle: React.CSSProperties = { minWidth: 0, height: 38, display: "grid", gridTemplateColumns: "44px minmax(200px,1fr) 96px", alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box", borderBottom: "1px solid rgba(15,118,110,.22)", background: "linear-gradient(90deg, rgba(255,241,242,.62), rgba(236,253,245,.42) 52%, rgba(239,246,255,.66))" };
-const editorHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 };
+const textBoxHeaderStyle: React.CSSProperties = { minWidth: 0, height: 38, display: "grid", gridTemplateColumns: "minmax(220px,1fr) auto auto", alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box", borderBottom: "1px solid rgba(15,118,110,.22)", background: "linear-gradient(90deg, rgba(255,241,242,.62), rgba(236,253,245,.42) 52%, rgba(239,246,255,.66))" };
+const saveMetadataStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 6, overflow: "hidden" };
+const editorHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 };
 const chatHeaderControlsStyle: React.CSSProperties = { minWidth: 0, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 5 };
 const editorBadgeStyle: React.CSSProperties = { minHeight: 26, flex: "0 0 auto", borderRadius: 8, border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, background: EDITOR_NEU_SURFACE, color: "#0f766e", display: "inline-flex", alignItems: "center", gap: 5, padding: "0 7px", fontSize: 10.5, fontWeight: 900, boxShadow: EDITOR_NEU_SHADOW };
 const activeEditorBadgeStyle: React.CSSProperties = { ...editorBadgeStyle, border: "1px solid transparent", background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, ${EDITOR_NEU_EDGE_FRAME} border-box` };

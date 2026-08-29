@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 )
@@ -149,11 +150,18 @@ func (r *PostgresRepo) postgresMyWorkActionItems(ctx context.Context, query MyWo
 	sortComponents := myWorkActionSQLSortComponents(groupingTerms)
 	keyset := myWorkSQLKeysetPredicate("$7::boolean", sortComponents, "entity_id", "$13::uuid")
 	orderBy := myWorkSQLOrderBy(sortComponents, "entity_id")
+	if query.History {
+		grouping = ""
+		keyset = `(not $7::boolean or completed_timestamp < $16::timestamptz or (completed_timestamp = $16::timestamptz and entity_id > $13::uuid))`
+		orderBy = "completed_timestamp desc,entity_id"
+	}
 	querySQL := fmt.Sprintf(`
 with candidates as (
   select entity.entity_id,entity.name,
          lower(btrim(coalesce(color.value_jsonb #>> '{}',''))) as color_key,
          completion_due.value_jsonb #>> '{}' as completion_due_date,
+         completion_due.entity_field_id,
+         status.updated_timestamp as completed_timestamp,
          case lower(btrim(coalesce(color.value_jsonb #>> '{}','')))
            when 'red' then 0 when 'yellow' then 1 when '' then 3 else 2 end as color_rank
   from entity_fields person
@@ -172,18 +180,20 @@ with candidates as (
   where person.company_id=$1::uuid
     and person.entity_field_type_id='a17e0000-0000-4000-8000-000000000101'::uuid
     and mangorts_try_uuid(person.value_jsonb #>> '{}')=$2::uuid
-    and lower(btrim(coalesce(status.value_jsonb #>> '{}',''))) not in ('done','complete','completed')
+    and ($15::boolean = (lower(btrim(coalesce(status.value_jsonb #>> '{}',''))) in ('done','complete','completed')))
 )
-select entity_id::text,name,nullif(color_key,''),completion_due_date
+select entity_id::text,name,nullif(color_key,''),completion_due_date,entity_field_id::text,completed_timestamp
 from candidates
 where $8::boolean is not null and $9::integer is not null and $10::text is not null
   and $11::boolean is not null and $12::text is not null and $13::uuid is not null
+  and $16::timestamptz is not null
   and %s
 order by %s
 limit $14`, keyset, orderBy)
 	rows, err := r.db.QueryContext(ctx, querySQL, query.CompanyID, query.UserID, ActionItemEntityTypeID, ActionItemStatusFieldTypeID,
 		ActionItemColorFieldTypeID, ActionItemCompletionDueDateFieldTypeID,
-		query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.GroupText, cursor.DateNull, cursor.Date, myWorkCursorUUID(cursor.ResourceID), query.Limit+1)
+		query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.GroupText, cursor.DateNull, cursor.Date, myWorkCursorUUID(cursor.ResourceID), query.Limit+1,
+		query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp))
 	if err != nil {
 		return domain.MyWorkActionItemPage{}, err
 	}
@@ -191,12 +201,19 @@ limit $14`, keyset, orderBy)
 	items := make([]domain.MyWorkActionItem, 0, query.Limit+1)
 	for rows.Next() {
 		var item domain.MyWorkActionItem
-		var color, due sql.NullString
-		if err := rows.Scan(&item.EntityID, &item.Name, &color, &due); err != nil {
+		var color, due, dueFieldID sql.NullString
+		var completedTimestamp sql.NullTime
+		if err := rows.Scan(&item.EntityID, &item.Name, &color, &due, &dueFieldID, &completedTimestamp); err != nil {
 			return domain.MyWorkActionItemPage{}, err
 		}
 		item.Color = nullStringPointer(color)
 		item.CompletionDueDate = nullStringPointer(due)
+		if dueFieldID.Valid {
+			item.CompletionDueDateFieldID = dueFieldID.String
+		}
+		if query.History && completedTimestamp.Valid {
+			item.CompletedTimestamp = &completedTimestamp.Time
+		}
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -206,8 +223,12 @@ limit $14`, keyset, orderBy)
 	if page.HasMore {
 		page.Items = items[:query.Limit]
 		last := page.Items[len(page.Items)-1]
-		color := strings.ToLower(myWorkOptionalString(last.Color))
-		page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Grouping: grouping, GroupNull: color == "", GroupInt: myWorkColorRank(color), GroupText: color, DateNull: last.CompletionDueDate == nil, Date: myWorkOptionalString(last.CompletionDueDate), ResourceID: last.EntityID})
+		if query.History {
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.EntityID})
+		} else {
+			color := strings.ToLower(myWorkOptionalString(last.Color))
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Grouping: grouping, GroupNull: color == "", GroupInt: myWorkColorRank(color), GroupText: color, DateNull: last.CompletionDueDate == nil, Date: myWorkOptionalString(last.CompletionDueDate), ResourceID: last.EntityID})
+		}
 	}
 	return page, nil
 }
@@ -217,6 +238,11 @@ func (r *PostgresRepo) postgresMyWorkNodes(ctx context.Context, query MyWorkQuer
 	sortComponents := myWorkNodeSQLSortComponents(groupingTerms)
 	keyset := myWorkSQLKeysetPredicate("$5::boolean", sortComponents, "node.node_id", "$10::uuid")
 	orderBy := myWorkSQLOrderBy(sortComponents, "node.node_id")
+	if query.History {
+		grouping = ""
+		keyset = `(not $5::boolean or node.completed_timestamp < $13::timestamptz or (node.completed_timestamp = $13::timestamptz and node.node_id > $10::uuid))`
+		orderBy = "node.completed_timestamp desc,node.node_id"
+	}
 	querySQL := myWorkRACICandidateCTE + `
 , node_raci_targets(resource_type,resource_id) as (
   select 'node'::text,resource_id
@@ -225,7 +251,7 @@ func (r *PostgresRepo) postgresMyWorkNodes(ctx context.Context, query MyWorkQuer
 )
 ` + myWorkSubjectRACIWinnerCTEs("node_raci_targets", "node_raci") + myWorkViewerPermissionCTE + `
 , node_candidates as (
-  select node.company_id,node.node_id,node.name,node.priority,node.due_date
+  select node.company_id,node.node_id,node.name,node.priority,node.due_date,node.created_timestamp
   from node_raci_winners winner
   join nodes node on node.company_id=$1::uuid and node.node_id=winner.resource_id
   left join lateral (
@@ -236,14 +262,15 @@ func (r *PostgresRepo) postgresMyWorkNodes(ctx context.Context, query MyWorkQuer
     limit 1
   ) assignment on true
   where winner.role=$3::text
-    and lower(btrim(coalesce(
+    and $13::timestamptz is not null
+    and $12::boolean = (lower(btrim(coalesce(
       case
         when assignment.is_issue then 'Issue'
         when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusTitleSQL + `
       end,
       nullif(node.status,''),
       ''
-    ))) not in ('done','complete','completed')
+    ))) in ('done','complete','completed'))
 ), node_access_targets(resource_type,resource_id) as (
   select 'node'::text,node_id
   from node_candidates
@@ -254,9 +281,38 @@ func (r *PostgresRepo) postgresMyWorkNodes(ctx context.Context, query MyWorkQuer
   from node_candidates candidate
   join node_access access
     on access.resource_type='node' and access.resource_id=candidate.node_id and access.allowed
+), visible_node_snapshots as (
+  select event.payload #>> '{node,node_id}' as node_id,
+         event.sequence,
+         event.created_timestamp,
+         lower(btrim(coalesce(event.payload #>> '{node,status}',''))) as status
+  from visible_nodes visible
+  join domain_events event
+    on event.company_id=visible.company_id
+   and event.stream_type='workspace'
+   and event.stream_id=visible.company_id::text
+   and event.event_type in ('node_created','node_updated')
+   and event.payload #>> '{node,node_id}'=visible.node_id::text
+  where $12::boolean and jsonb_typeof(event.payload -> 'node')='object'
+), sequenced_node_snapshots as (
+  select snapshot.*,
+         lag(snapshot.status) over (partition by snapshot.node_id order by snapshot.sequence) as previous_status
+  from visible_node_snapshots snapshot
+), latest_node_completions as (
+  select distinct on (snapshot.node_id) snapshot.node_id,snapshot.created_timestamp
+  from sequenced_node_snapshots snapshot
+  where snapshot.status in ('done','complete','completed')
+    and snapshot.previous_status is not null
+    and snapshot.previous_status not in ('done','complete','completed')
+  order by snapshot.node_id,snapshot.sequence desc
+), history_nodes as (
+  select visible.*,
+         coalesce(completion.created_timestamp,visible.created_timestamp) as completed_timestamp
+  from visible_nodes visible
+  left join latest_node_completions completion on completion.node_id=visible.node_id::text
 ), paged_nodes as (
   select *
-  from visible_nodes node
+  from history_nodes node
   where $6::boolean is not null and $7::integer is not null and $8::boolean is not null
     and $9::text is not null and $10::uuid is not null
     and %s
@@ -278,7 +334,8 @@ func (r *PostgresRepo) postgresMyWorkNodes(ctx context.Context, query MyWorkQuer
 `, keyset, orderBy) + myWorkPermissionAccessCTEs("inline_access_targets", "inline") + fmt.Sprintf(`
 select node.node_id::text,node.name,node.priority,node.due_date::text,
        process.logic_gate_id::text,process.name,
-       project.project_id::text,project.name
+       project.project_id::text,project.name,
+       node.completed_timestamp
 from paged_nodes node
 left join lateral (
   select gate.logic_gate_id,gate.header as name
@@ -304,7 +361,7 @@ left join lateral (
 ) project on true
 order by %s
 `, orderBy)
-	rows, err := r.db.QueryContext(ctx, querySQL, query.CompanyID, query.UserID, domain.RACIRoleResponsible, query.ViewerUserID, query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.DateNull, cursor.Date, myWorkCursorUUID(cursor.ResourceID), query.Limit+1)
+	rows, err := r.db.QueryContext(ctx, querySQL, query.CompanyID, query.UserID, domain.RACIRoleResponsible, query.ViewerUserID, query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.DateNull, cursor.Date, myWorkCursorUUID(cursor.ResourceID), query.Limit+1, query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp))
 	if err != nil {
 		return domain.MyWorkNodePage{}, err
 	}
@@ -314,7 +371,8 @@ order by %s
 		var item domain.MyWorkNode
 		var priority sql.NullInt64
 		var due, processID, processName, projectID, projectName sql.NullString
-		if err := rows.Scan(&item.NodeID, &item.Name, &priority, &due, &processID, &processName, &projectID, &projectName); err != nil {
+		var completedTimestamp time.Time
+		if err := rows.Scan(&item.NodeID, &item.Name, &priority, &due, &processID, &processName, &projectID, &projectName, &completedTimestamp); err != nil {
 			return domain.MyWorkNodePage{}, err
 		}
 		if priority.Valid {
@@ -322,6 +380,9 @@ order by %s
 			item.Priority = &value
 		}
 		item.DueDate = nullStringPointer(due)
+		if query.History {
+			item.CompletedTimestamp = &completedTimestamp
+		}
 		if processID.Valid && processName.Valid {
 			item.Process = &domain.MyWorkProcessReference{LogicGateID: processID.String, Name: processName.String}
 		}
@@ -337,7 +398,11 @@ order by %s
 	if page.HasMore {
 		page.Items = items[:query.Limit]
 		last := page.Items[len(page.Items)-1]
-		page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
+		if query.History {
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
+		} else {
+			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
+		}
 	}
 	return page, nil
 }

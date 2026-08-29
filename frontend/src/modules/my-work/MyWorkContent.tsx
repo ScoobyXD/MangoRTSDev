@@ -9,9 +9,14 @@ import {
 import type { BoundRequestJSON } from "../api/requestJSON.js";
 import {
   editorEntityLinkAnchorBounds,
+  EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION,
   openEditorEntityLink,
+  type EditorEntityReferencePresentation,
   type EditorEntityLinkAnchorBounds,
 } from "../editor/editorEntityLinks.js";
+import { EditorCalendarDateInput } from "../editor/EditorFieldControls.js";
+import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "../editor/editorDates.js";
+import { updateEntityField } from "../entities/entitiesApi.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import {
   buildUniversalNestedGroups,
@@ -105,10 +110,14 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   const [nodeGroupings, setNodeGroupings] = useState<MyWorkNodeGrouping[]>(() => (
     DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping }))
   ));
+  const [actionItemHistory, setActionItemHistory] = useState(false);
+  const [nodeHistory, setNodeHistory] = useState(false);
 
   useEffect(() => {
     setActionItemGroupings(DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })));
     setNodeGroupings(DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping })));
+    setActionItemHistory(false);
+    setNodeHistory(false);
   }, [companyID, subjectID]);
 
   useEffect(() => {
@@ -158,18 +167,20 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     nodeGroupings,
     myWorkNodeGroupingAdapter,
   ), [nodeGroupings, state.nodes.items]);
-  const actionItemEntries = useMemo(() => actionItemGroupings.length > 0
-    ? flattenMyWorkGroupedDisplayEntries(actionItemGroups, (item) => item.entity_id)
+  const actionItemEntries = useMemo(() => !actionItemHistory && actionItemGroupings.length > 0
+    ? flattenMyWorkGroupedDisplayEntries(actionItemGroups, (item) => item.entity_id, new Set(["completion_due_date"] as const))
     : flattenMyWorkUngroupedDisplayEntries(state.action_items.items, (item) => item.entity_id), [
     actionItemGroups,
     actionItemGroupings.length,
+    actionItemHistory,
     state.action_items.items,
   ]);
-  const nodeEntries = useMemo(() => nodeGroupings.length > 0
-    ? flattenMyWorkGroupedDisplayEntries(nodeGroups, (item) => item.node_id)
+  const nodeEntries = useMemo(() => !nodeHistory && nodeGroupings.length > 0
+    ? flattenMyWorkGroupedDisplayEntries(nodeGroups, (item) => item.node_id, new Set(["due_date"] as const))
     : flattenMyWorkUngroupedDisplayEntries(state.nodes.items, (item) => item.node_id), [
     nodeGroups,
     nodeGroupings.length,
+    nodeHistory,
     state.nodes.items,
   ]);
   const processEntries = useMemo(() => flattenMyWorkUngroupedDisplayEntries(
@@ -180,10 +191,41 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     state.projects.items,
     (project) => project.project_id,
   ), [state.projects.items]);
-  const renderActionItemRow = useCallback((item: MyWorkActionItem) => <ActionItemRow item={item} />, []);
-  const renderNodeRow = useCallback((item: MyWorkNode) => <NodeRow item={item} />, []);
+  const saveActionItemDueDate = useCallback(async (item: MyWorkActionItem, dueDate: string | null) => {
+    if (!item.completion_due_date_field_id.trim()) throw new Error("Completion due date is unavailable.");
+    await updateEntityField({
+      companyID,
+      entityID: item.entity_id,
+      entityFieldID: item.completion_due_date_field_id,
+      value: dueDate,
+    }, requestJSON);
+    await reloadSection("action_items", actionItemHistory ? undefined : actionItemGroupings, false, actionItemHistory);
+  }, [actionItemGroupings, actionItemHistory, companyID, reloadSection, requestJSON]);
+  const saveNodeDueDate = useCallback(async (item: MyWorkNode, dueDate: string | null) => {
+    await requestJSON(`/v1/nodes/${encodeURIComponent(item.node_id)}`, {
+      method: "PUT",
+      json: { company_id: companyID, due_date: dueDate },
+    });
+    await reloadSection("nodes", nodeHistory ? undefined : nodeGroupings, false, nodeHistory);
+  }, [companyID, nodeGroupings, nodeHistory, reloadSection, requestJSON]);
+  const renderActionItemRow = useCallback((item: MyWorkActionItem) => (
+    <ActionItemRow item={item} onSaveDueDate={(dueDate) => saveActionItemDueDate(item, dueDate)} />
+  ), [saveActionItemDueDate]);
+  const renderNodeRow = useCallback((item: MyWorkNode) => (
+    <NodeRow item={item} onSaveDueDate={(dueDate) => saveNodeDueDate(item, dueDate)} />
+  ), [saveNodeDueDate]);
   const renderProcessRow = useCallback((process: MyWorkProcess) => <ProcessRow process={process} />, []);
   const renderProjectRow = useCallback((project: MyWorkProject) => <ProjectRow project={project} />, []);
+
+  useEffect(() => {
+    const refreshActionItems = (event: Event) => {
+      const detail = (event as CustomEvent<EditorEntityReferencePresentation>).detail;
+      if (!detail?.isActionItem) return;
+      void reloadSection("action_items", actionItemHistory ? undefined : actionItemGroupings, false, actionItemHistory);
+    };
+    window.addEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, refreshActionItems);
+    return () => window.removeEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, refreshActionItems);
+  }, [actionItemGroupings, actionItemHistory, reloadSection]);
 
   const changeActionItemGroupings = (next: MyWorkActionItemGrouping[]) => {
     const normalized = normalizeMyWorkActionItemGroupings(next);
@@ -194,6 +236,18 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     const normalized = normalizeMyWorkNodeGroupings(next);
     setNodeGroupings(normalized);
     void reloadSection("nodes", normalized, true);
+  };
+  const toggleActionItemHistory = () => {
+    const next = !actionItemHistory;
+    setActionItemHistory(next);
+    if (actionItemsScrollRef.current) actionItemsScrollRef.current.scrollTop = 0;
+    void reloadSection("action_items", next ? undefined : actionItemGroupings, true, next);
+  };
+  const toggleNodeHistory = () => {
+    const next = !nodeHistory;
+    setNodeHistory(next);
+    if (nodesScrollRef.current) nodesScrollRef.current.scrollTop = 0;
+    void reloadSection("nodes", next ? undefined : nodeGroupings, true, next);
   };
 
   const resizeColumnPair = (dividerIndex: 0 | 1, delta: number): number | undefined => {
@@ -244,22 +298,25 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
             icon={<ActionItemIcon size={16} />}
             state={state.action_items}
             actions={(
-              <UniversalGroupingControls
-                groupings={actionItemGroupings}
-                fieldOptions={MY_WORK_ACTION_ITEM_GROUPING_FIELDS}
-                onChange={changeActionItemGroupings}
-                buttonLabel="Group Action Items"
-                popoverLabel="Action Item grouping"
-                popoverAlign="end"
-                triggerIcon={<StaggeredGroupingIcon />}
-                iconOnly
-                disabled={state.action_items.loading}
-              />
+              <div style={sectionActionsStyle}>
+                <HistoryButton selected={actionItemHistory} disabled={state.action_items.loading} onClick={toggleActionItemHistory} />
+                <UniversalGroupingControls
+                  groupings={actionItemGroupings}
+                  fieldOptions={MY_WORK_ACTION_ITEM_GROUPING_FIELDS}
+                  onChange={changeActionItemGroupings}
+                  buttonLabel="Group Action Items"
+                  popoverLabel="Action Item grouping"
+                  popoverAlign="end"
+                  triggerIcon={<StaggeredGroupingIcon />}
+                  iconOnly
+                  disabled={state.action_items.loading || actionItemHistory}
+                />
+              </div>
             )}
             onRetry={() => void (state.action_items.items.length > 0
-              ? loadMore("action_items", actionItemGroupings)
-              : reloadSection("action_items", actionItemGroupings))}
-            onLoadMore={() => void loadMore("action_items", actionItemGroupings)}
+              ? loadMore("action_items", actionItemHistory ? undefined : actionItemGroupings, actionItemHistory)
+              : reloadSection("action_items", actionItemHistory ? undefined : actionItemGroupings, false, actionItemHistory))}
+            onLoadMore={() => void loadMore("action_items", actionItemHistory ? undefined : actionItemGroupings, actionItemHistory)}
             scrollBodyRef={actionItemsScrollRef}
           >
             <MyWorkWindowedRows
@@ -267,7 +324,7 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
               entries={actionItemEntries}
               scrollBodyRef={actionItemsScrollRef}
               rowEstimate={52}
-              emptyLabel="No Action Items assigned to you."
+              emptyLabel={actionItemHistory ? "No completed Action Items." : "No Action Items assigned to you."}
               renderRow={renderActionItemRow}
             />
           </SectionFrame>
@@ -289,22 +346,25 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
             icon={<ExplorerEntityIcon kind="node" />}
             state={state.nodes}
             actions={(
-              <UniversalGroupingControls
-                groupings={nodeGroupings}
-                fieldOptions={MY_WORK_NODE_GROUPING_FIELDS}
-                onChange={changeNodeGroupings}
-                buttonLabel="Group Nodes"
-                popoverLabel="Node grouping"
-                popoverAlign="end"
-                triggerIcon={<StaggeredGroupingIcon />}
-                iconOnly
-                disabled={state.nodes.loading}
-              />
+              <div style={sectionActionsStyle}>
+                <HistoryButton selected={nodeHistory} disabled={state.nodes.loading} onClick={toggleNodeHistory} />
+                <UniversalGroupingControls
+                  groupings={nodeGroupings}
+                  fieldOptions={MY_WORK_NODE_GROUPING_FIELDS}
+                  onChange={changeNodeGroupings}
+                  buttonLabel="Group Nodes"
+                  popoverLabel="Node grouping"
+                  popoverAlign="end"
+                  triggerIcon={<StaggeredGroupingIcon />}
+                  iconOnly
+                  disabled={state.nodes.loading || nodeHistory}
+                />
+              </div>
             )}
             onRetry={() => void (state.nodes.items.length > 0
-              ? loadMore("nodes", nodeGroupings)
-              : reloadSection("nodes", nodeGroupings))}
-            onLoadMore={() => void loadMore("nodes", nodeGroupings)}
+              ? loadMore("nodes", nodeHistory ? undefined : nodeGroupings, nodeHistory)
+              : reloadSection("nodes", nodeHistory ? undefined : nodeGroupings, false, nodeHistory))}
+            onLoadMore={() => void loadMore("nodes", nodeHistory ? undefined : nodeGroupings, nodeHistory)}
             scrollBodyRef={nodesScrollRef}
           >
             <MyWorkWindowedRows
@@ -312,7 +372,7 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
               entries={nodeEntries}
               scrollBodyRef={nodesScrollRef}
               rowEstimate={50}
-              emptyLabel="No responsible Nodes."
+              emptyLabel={nodeHistory ? "No completed Nodes." : "No responsible Nodes."}
               renderRow={renderNodeRow}
             />
           </SectionFrame>
@@ -854,33 +914,66 @@ function myWorkDisplayEntryStyle<Item, Field extends string>(
   };
 }
 
-function ActionItemRow({ item }: { item: MyWorkActionItem }) {
-  const color = item.color?.trim().toLowerCase();
-  const pulseClassName = color === "red" || color === "yellow" ? `mango-editor-action-item--${color}` : undefined;
+function HistoryButton({ selected, disabled, onClick }: { selected: boolean; disabled: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
+      aria-label={selected ? "Close History" : "Open History"}
+      aria-pressed={selected}
+      data-my-work-history-selected={selected ? "true" : "false"}
+      disabled={disabled}
+      onClick={onClick}
+      style={historyButtonStyle(selected, disabled)}
+    >
+      <HistoryClockIcon />
+      <span>History</span>
+    </button>
+  );
+}
+
+function HistoryClockIcon() {
+  return (
+    <svg aria-hidden="true" width="16" height="16" viewBox="0 0 20 20" fill="none">
+      <path d="M3.2 6.3V2.9m0 0H6.6m-3.4 0 2.3 2.3A7 7 0 1 1 3 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 5.8v4.5l3 1.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ActionItemRow({ item, onSaveDueDate }: { item: MyWorkActionItem; onSaveDueDate: (dueDate: string | null) => Promise<void> }) {
+  const color = item.color?.trim().toLowerCase();
+  const pulseClassName = color === "red" || color === "yellow" ? `mango-editor-action-item--${color}` : undefined;
+  return (
+    <div
       className="my-work-resource-row"
-      data-my-work-target="action-item"
+      data-my-work-row="action-item"
       data-my-work-action-item-color={color || "none"}
       style={actionItemRowStyle(color)}
-      onClick={(event) => openEditorEntityLink({
-        entityType: "entity",
-        entityID: item.entity_id,
-        label: item.name,
-        isActionItem: true,
-      }, undefined, myWorkActionItemAnchor(event.currentTarget, event))}
     >
-      <span aria-hidden="true" style={actionItemColorBarStyle(color)} />
-      <span className={pulseClassName} style={actionItemIconStyle(color)}><ActionItemIcon className="mango-editor-action-item-icon" size={16} /></span>
-      <span
-        className={color === "red" || color === "yellow" ? `my-work-action-item-title--${color}` : undefined}
-        data-my-work-action-item-title="true"
-        style={actionItemNameStyle(color)}
+      <button
+        type="button"
+        data-my-work-target="action-item"
+        data-my-work-action-item-color={color || "none"}
+        style={actionItemPrimaryButtonStyle}
+        onClick={(event) => openEditorEntityLink({
+          entityType: "entity",
+          entityID: item.entity_id,
+          label: item.name,
+          isActionItem: true,
+        }, undefined, myWorkActionItemAnchor(event.currentTarget, event))}
       >
-        {item.name}
-      </span>
-    </button>
+        <span aria-hidden="true" style={actionItemColorBarStyle(color)} />
+        <span className={pulseClassName} style={actionItemIconStyle(color)}><ActionItemIcon className="mango-editor-action-item-icon" size={16} /></span>
+        <span
+          className={color === "red" || color === "yellow" ? `my-work-action-item-title--${color}` : undefined}
+          data-my-work-action-item-title="true"
+          style={actionItemNameStyle(color)}
+        >
+          {item.name}
+        </span>
+      </button>
+      <InlineDueDateEditor value={item.completion_due_date} resourceLabel={item.name} onSave={onSaveDueDate} />
+    </div>
   );
 }
 
@@ -908,7 +1001,7 @@ export function myWorkActionItemAnchor(
   };
 }
 
-function NodeRow({ item }: { item: MyWorkNode }) {
+function NodeRow({ item, onSaveDueDate }: { item: MyWorkNode; onSaveDueDate: (dueDate: string | null) => Promise<void> }) {
   return (
     <div className="my-work-resource-row" data-my-work-row="node" style={nodeRowStyle}>
       <button
@@ -921,6 +1014,7 @@ function NodeRow({ item }: { item: MyWorkNode }) {
         <span style={resourceNameStyle}>{item.name}</span>
       </button>
       <div style={inlineContextStyle}>
+        <InlineDueDateEditor value={item.due_date} resourceLabel={item.name} onSave={onSaveDueDate} />
         {item.process && (
           <button
             type="button"
@@ -955,6 +1049,69 @@ function NodeRow({ item }: { item: MyWorkNode }) {
         )}
       </div>
     </div>
+  );
+}
+
+function InlineDueDateEditor({ value, resourceLabel, onSave }: {
+  value: string | null | undefined;
+  resourceLabel: string;
+  onSave: (dueDate: string | null) => Promise<void>;
+}) {
+  const formatted = formatNodeDueDateForEditor(value);
+  const [draft, setDraft] = useState(formatted);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const saveVersionRef = useRef(0);
+  useEffect(() => setDraft(formatted), [formatted]);
+  const commit = async (raw: string) => {
+    const normalized = normalizeNodeDueDateDraft(raw);
+    if (normalized === null) {
+      setError("Use a valid month/day/year date.");
+      setDraft(formatted);
+      return;
+    }
+    if (normalized === (value?.trim() ?? "")) {
+      setError("");
+      setDraft(formatNodeDueDateForEditor(normalized));
+      return;
+    }
+    const saveVersion = ++saveVersionRef.current;
+    setSaving(true);
+    setError("");
+    const save = saveQueueRef.current
+      .catch(() => undefined)
+      .then(() => onSave(normalized || null));
+    saveQueueRef.current = save;
+    try {
+      await save;
+      if (saveVersion !== saveVersionRef.current) return;
+      setDraft(formatNodeDueDateForEditor(normalized));
+    } catch (cause) {
+      if (saveVersion !== saveVersionRef.current) return;
+      setError(cause instanceof Error && cause.message.trim() ? cause.message : "Could not change the due date.");
+      setDraft(formatted);
+    } finally {
+      if (saveVersion === saveVersionRef.current) setSaving(false);
+    }
+  };
+  return (
+    <span data-my-work-due-date="true" style={inlineDueDateStyle(Boolean(error))} title={error || undefined}>
+      <span style={inlineDueDateLabelStyle}>Due Date:</span>
+      <EditorCalendarDateInput
+        value={draft}
+        ariaLabel={`Due Date for ${resourceLabel}`}
+        disabled={saving}
+        accent="#0284c7"
+        placeholder="No date"
+        onChange={(next) => { setDraft(next); setError(""); }}
+        onCommit={(next) => void commit(next)}
+        openOnInputClick
+        containerStyle={{ width: 112, gridTemplateColumns: "minmax(0,1fr) 24px" }}
+        inputStyle={{ color: error ? "#b91c1c" : "#075985", fontSize: 10.5, fontWeight: 850, cursor: saving ? "default" : "pointer" }}
+        buttonStyle={{ width: 24, height: 24 }}
+      />
+    </span>
   );
 }
 
@@ -1117,6 +1274,39 @@ const sectionTitleIconStyle: React.CSSProperties = {
   background: "linear-gradient(145deg, #ffffff, #eef2f7)",
   boxShadow: "3px 3px 8px rgba(100,116,139,0.14), -3px -3px 8px rgba(255,255,255,0.94), inset 1px 1px 0 rgba(255,255,255,0.96)",
 };
+
+const sectionActionsStyle: React.CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+};
+
+function historyButtonStyle(selected: boolean, disabled: boolean): React.CSSProperties {
+  return {
+    minWidth: 78,
+    height: 30,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    border: selected ? "1px solid rgba(37,99,235,.72)" : "1px solid rgba(148,163,184,.28)",
+    borderRadius: 9,
+    background: selected
+      ? "linear-gradient(145deg,#2563eb,#1d4ed8)"
+      : "linear-gradient(145deg,#ffffff,#eef2f7)",
+    color: selected ? "#ffffff" : "#334155",
+    boxShadow: selected
+      ? "inset 2px 2px 5px rgba(15,23,42,.22), 0 0 0 2px rgba(147,197,253,.46), 3px 3px 8px rgba(37,99,235,.22)"
+      : "3px 3px 8px rgba(100,116,139,.13), -2px -2px 7px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.96)",
+    font: "inherit",
+    fontSize: 10.5,
+    fontWeight: 900,
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+    padding: "0 8px",
+  };
+}
 
 const sectionBodyStyle: React.CSSProperties = {
   minWidth: 0,
@@ -1293,8 +1483,9 @@ function actionItemRowStyle(color: string | undefined): React.CSSProperties {
   return {
     ...resourceButtonStyle,
     display: "grid",
-    gridTemplateColumns: "5px 29px minmax(0, 1fr)",
-    gap: 9,
+    gridTemplateColumns: "minmax(0,1fr) auto",
+    alignItems: "center",
+    gap: 6,
     border: color === "red"
       ? "1px solid rgba(239,68,68,0.24)"
       : color === "yellow"
@@ -1305,9 +1496,27 @@ function actionItemRowStyle(color: string | undefined): React.CSSProperties {
       : color === "yellow"
         ? "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(254,249,195,0.86))"
         : resourceButtonStyle.background,
-    padding: "7px 9px 7px 6px",
+    cursor: "default",
+    padding: "5px 7px 5px 5px",
   };
 }
+
+const actionItemPrimaryButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 34,
+  display: "grid",
+  gridTemplateColumns: "5px 29px minmax(0,1fr)",
+  alignItems: "center",
+  gap: 9,
+  border: 0,
+  borderRadius: 7,
+  background: "transparent",
+  color: "inherit",
+  font: "inherit",
+  cursor: "pointer",
+  textAlign: "left",
+  padding: "2px 3px 2px 1px",
+};
 
 function actionItemColorBarStyle(color: string | undefined): React.CSSProperties {
   return {
@@ -1387,6 +1596,31 @@ const inlineContextStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 6,
   overflow: "hidden",
+};
+
+function inlineDueDateStyle(error: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    flex: "0 0 auto",
+    minHeight: 31,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    border: `1px solid ${error ? "rgba(239,68,68,.42)" : "rgba(2,132,199,.26)"}`,
+    borderRadius: 9,
+    background: error
+      ? "linear-gradient(145deg,#ffffff,#fef2f2)"
+      : "linear-gradient(145deg,#ffffff,rgba(224,242,254,.72))",
+    boxShadow: "3px 3px 8px rgba(2,132,199,.10), -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.94)",
+    padding: "2px 3px 2px 7px",
+  };
+}
+
+const inlineDueDateLabelStyle: React.CSSProperties = {
+  color: "#475569",
+  fontSize: 10,
+  fontWeight: 900,
+  whiteSpace: "nowrap",
 };
 
 function inlineContextButtonStyle(color: string): React.CSSProperties {

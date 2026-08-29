@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 )
@@ -42,6 +44,94 @@ func TestMemoryMyWorkActionItemsUseExactPersonExcludeDoneAndPageByColorThenDate(
 	}
 	if second.ActionItems.Items[0].Color != nil || second.ActionItems.Items[0].CompletionDueDate != nil {
 		t.Fatalf("missing action grouping values leaked as non-nil: %+v", second.ActionItems.Items[0])
+	}
+}
+
+func TestMemoryMyWorkHistoryReturnsOnlyCompletedAssignedWorkNewestFirst(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "10000000-0000-4000-8000-000000000012"
+	user := mustCreateMyWorkMember(t, repo, companyID, "my-work-history-user")
+	other := mustCreateMyWorkMember(t, repo, companyID, "my-work-history-other")
+	firstDoneAt := time.Date(2026, time.August, 26, 9, 0, 0, 0, time.UTC)
+	olderAt := time.Date(2026, time.August, 27, 10, 0, 0, 0, time.UTC)
+	newerAt := time.Date(2026, time.August, 28, 11, 0, 0, 0, time.UTC)
+	laterSameDoneUpdateAt := time.Date(2026, time.August, 29, 12, 0, 0, 0, time.UTC)
+
+	olderAction := mustCreateAssignedActionItem(t, repo, companyID, user.UserID, "Older completed action", ActionItemColorYellow, "2026-09-03", "done")
+	newerAction := mustCreateAssignedActionItem(t, repo, companyID, user.UserID, "Newer completed action", ActionItemColorRed, "2026-09-04", "done")
+	mustCreateAssignedActionItem(t, repo, companyID, user.UserID, "Still active", "", "", ActionItemStatusInProgress)
+	mustCreateAssignedActionItem(t, repo, companyID, other.UserID, "Other person's completed action", "", "", "done")
+	setMemoryMyWorkActionCompletedAt(t, repo, olderAction, olderAt)
+	setMemoryMyWorkActionCompletedAt(t, repo, newerAction, newerAt)
+
+	first, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, History: true, Limit: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ActionItems == nil || len(first.ActionItems.Items) != 1 || first.ActionItems.Items[0].EntityID != newerAction.EntityID || !first.ActionItems.HasMore || first.ActionItems.NextCursor == "" {
+		t.Fatalf("first Action Item history page = %+v", first.ActionItems)
+	}
+	if first.ActionItems.Items[0].CompletedTimestamp == nil || !first.ActionItems.Items[0].CompletedTimestamp.Equal(newerAt) || first.ActionItems.Items[0].CompletionDueDateFieldID == "" {
+		t.Fatalf("newer Action Item history metadata = %+v", first.ActionItems.Items[0])
+	}
+	second, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, History: true, Limit: 1, Cursor: first.ActionItems.NextCursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ActionItems == nil || len(second.ActionItems.Items) != 1 || second.ActionItems.Items[0].EntityID != olderAction.EntityID || second.ActionItems.HasMore {
+		t.Fatalf("second Action Item history page = %+v", second.ActionItems)
+	}
+
+	gate, err := repo.CreateLogicGate(companyID, "History process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignedNode, _, err := repo.CreateNodeWithWorkspaceEvent(companyID, "Assigned completed node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: assignedNode.NodeID, Status: "in progress"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: assignedNode.NodeID, Status: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: assignedNode.NodeID, Status: "in progress"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: assignedNode.NodeID, Status: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: assignedNode.NodeID, Status: "done", Position: 99}); err != nil {
+		t.Fatal(err)
+	}
+	mustSetMyWorkDirectRACI(t, repo, companyID, EntityTypeNode, assignedNode.NodeID, user.UserID, domain.RACIRoleResponsible)
+	setMemoryMyWorkNodeDoneSnapshotTimes(t, repo, assignedNode.NodeID, []time.Time{firstDoneAt, newerAt, laterSameDoneUpdateAt})
+
+	rawNode, err := repo.CreateNode(companyID, "Legacy raw completed node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustSetMyWorkDirectRACI(t, repo, companyID, EntityTypeNode, rawNode.NodeID, user.UserID, domain.RACIRoleResponsible)
+	repo.mu.Lock()
+	raw := repo.nodes[key(companyID, rawNode.NodeID)]
+	raw.Status = stringPointer("done")
+	raw.CreatedTimestamp = olderAt
+	repo.nodes[key(companyID, rawNode.NodeID)] = raw
+	repo.mu.Unlock()
+
+	nodes, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, History: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nodes.Nodes == nil || len(nodes.Nodes.Items) != 2 || nodes.Nodes.Items[0].NodeID != assignedNode.NodeID || nodes.Nodes.Items[1].NodeID != rawNode.NodeID {
+		t.Fatalf("Node history = %+v", nodes.Nodes)
+	}
+	if nodes.Nodes.Items[0].CompletedTimestamp == nil || !nodes.Nodes.Items[0].CompletedTimestamp.Equal(newerAt) {
+		t.Fatalf("completed Node transition time = %+v, want %s despite later same-Done update", nodes.Nodes.Items[0], newerAt)
+	}
+	if nodes.Nodes.Items[1].CompletedTimestamp == nil || !nodes.Nodes.Items[1].CompletedTimestamp.Equal(olderAt) {
+		t.Fatalf("raw Node created-time fallback = %+v", nodes.Nodes.Items[1])
 	}
 }
 
@@ -535,6 +625,46 @@ func setMyWorkActionFieldRaw(t *testing.T, repo *MemoryRepo, item domain.Entity,
 		}
 	}
 	t.Fatalf("action item field type %q not found", fieldTypeID)
+}
+
+func setMemoryMyWorkActionCompletedAt(t *testing.T, repo *MemoryRepo, item domain.Entity, completedAt time.Time) {
+	t.Helper()
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	for fieldKey, field := range repo.entityFields {
+		if field.CompanyID == item.CompanyID && field.EntityID == item.EntityID && field.EntityFieldTypeID != nil && *field.EntityFieldTypeID == ActionItemStatusFieldTypeID {
+			field.UpdatedTimestamp = completedAt
+			repo.entityFields[fieldKey] = field
+			return
+		}
+	}
+	t.Fatalf("Action Item status field not found")
+}
+
+func setMemoryMyWorkNodeDoneSnapshotTimes(t *testing.T, repo *MemoryRepo, nodeID string, timestamps []time.Time) {
+	t.Helper()
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	type snapshot struct {
+		key   string
+		event domain.DomainEvent
+	}
+	snapshots := make([]snapshot, 0, len(timestamps))
+	for eventKey, event := range repo.domainEvents {
+		node, ok := event.Payload["node"].(domain.Node)
+		if !ok || node.NodeID != nodeID || !myWorkStatusDone(myWorkOptionalString(node.Status)) {
+			continue
+		}
+		snapshots = append(snapshots, snapshot{key: eventKey, event: event})
+	}
+	sort.Slice(snapshots, func(i, j int) bool { return snapshots[i].event.Sequence < snapshots[j].event.Sequence })
+	if len(snapshots) != len(timestamps) {
+		t.Fatalf("completed Node snapshots = %d, want %d", len(snapshots), len(timestamps))
+	}
+	for index, snapshot := range snapshots {
+		snapshot.event.CreatedTimestamp = timestamps[index]
+		repo.domainEvents[snapshot.key] = snapshot.event
+	}
 }
 
 func mustCreateMyWorkGateWithRole(t *testing.T, repo *MemoryRepo, companyID, userID, name, role string) domain.LogicGate {

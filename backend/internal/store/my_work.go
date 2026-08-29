@@ -36,6 +36,7 @@ type MyWorkQuery struct {
 	Grouping     string
 	Limit        int
 	Cursor       string
+	History      bool
 	grouping     []myWorkGroupingTerm
 }
 
@@ -45,17 +46,19 @@ type myWorkGroupingTerm struct {
 }
 
 type myWorkCursor struct {
-	Version    int    `json:"v"`
-	Section    string `json:"section"`
-	Role       string `json:"role,omitempty"`
-	Grouping   string `json:"grouping,omitempty"`
-	GroupNull  bool   `json:"group_null,omitempty"`
-	GroupInt   int    `json:"group_int,omitempty"`
-	GroupText  string `json:"group_text,omitempty"`
-	DateNull   bool   `json:"date_null,omitempty"`
-	Date       string `json:"date,omitempty"`
-	Name       string `json:"name,omitempty"`
-	ResourceID string `json:"resource_id"`
+	Version            int    `json:"v"`
+	Section            string `json:"section"`
+	Role               string `json:"role,omitempty"`
+	Grouping           string `json:"grouping,omitempty"`
+	GroupNull          bool   `json:"group_null,omitempty"`
+	GroupInt           int    `json:"group_int,omitempty"`
+	GroupText          string `json:"group_text,omitempty"`
+	DateNull           bool   `json:"date_null,omitempty"`
+	Date               string `json:"date,omitempty"`
+	History            bool   `json:"history,omitempty"`
+	CompletedTimestamp string `json:"completed_timestamp,omitempty"`
+	Name               string `json:"name,omitempty"`
+	ResourceID         string `json:"resource_id"`
 }
 
 func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) {
@@ -75,6 +78,9 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	default:
 		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 	}
+	if query.History && query.Section != MyWorkSectionActionItems && query.Section != MyWorkSectionNodes {
+		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+	}
 	if query.Role == "" {
 		query.Role = "responsible"
 	}
@@ -88,6 +94,12 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	}
 	switch query.Section {
 	case MyWorkSectionActionItems, MyWorkSectionNodes:
+		if query.History {
+			if query.Grouping != "" {
+				return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+			}
+			break
+		}
 		grouping, terms, err := normalizeMyWorkGrouping(query.Section, query.Grouping)
 		if err != nil {
 			return MyWorkQuery{}, myWorkCursor{}, err
@@ -121,6 +133,19 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 	} else if cursor.Role != "" {
+		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+	}
+	if cursor.History != query.History {
+		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+	}
+	if query.History {
+		completed, err := time.Parse(time.RFC3339Nano, cursor.CompletedTimestamp)
+		if err != nil || completed.IsZero() || cursor.Grouping != "" || cursor.GroupNull || cursor.GroupInt != 0 || cursor.GroupText != "" || cursor.DateNull || cursor.Date != "" || cursor.Name != "" {
+			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+		}
+		return query, cursor, nil
+	}
+	if cursor.CompletedTimestamp != "" {
 		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 	}
 	switch query.Section {
@@ -234,4 +259,30 @@ func myWorkStatusDone(status string) bool {
 	default:
 		return false
 	}
+}
+
+func compareMyWorkHistoryItems(leftCompleted time.Time, leftID string, rightCompleted time.Time, rightID string) int {
+	if !leftCompleted.Equal(rightCompleted) {
+		if leftCompleted.After(rightCompleted) {
+			return -1
+		}
+		return 1
+	}
+	return strings.Compare(leftID, rightID)
+}
+
+func myWorkHistoryItemAfter(completed time.Time, resourceID string, cursor myWorkCursor) bool {
+	cursorCompleted, err := time.Parse(time.RFC3339Nano, cursor.CompletedTimestamp)
+	if err != nil {
+		return false
+	}
+	return compareMyWorkHistoryItems(completed, resourceID, cursorCompleted, cursor.ResourceID) > 0
+}
+
+func myWorkCursorTimestamp(raw string) time.Time {
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Unix(0, 0).UTC()
+	}
+	return parsed
 }
