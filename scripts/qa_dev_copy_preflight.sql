@@ -11,7 +11,7 @@ set local statement_timeout = '30min';
 do $guard$
 declare
   missing_root_count integer;
-  entity_schema_mismatch_count integer;
+  source_schema_mismatch_count integer;
 begin
   if current_setting('server_version_num')::integer < 170000
      or current_setting('server_version_num')::integer >= 180000 then
@@ -40,18 +40,20 @@ begin
      or to_regclass('public.entity_field_types') is null
      or to_regclass('public.entities') is null
      or to_regclass('public.entity_fields') is null
+     or to_regclass('public.entity_relationships') is null
+     or to_regclass('public.huddle_node_textboxes') is null
+     or to_regclass('public.huddle_node_textbox_chats') is null
      or to_regclass('public.schema_migrations') is null then
     raise exception 'STOP: required Mango tables are missing from the raw QA copy';
   end if;
 
-  -- The one-time source bridge is deliberately narrow. Dev currently has the
-  -- exact base Entity schema and no Entity data; the reviewed current Action
-  -- Item and Entity relationship migrations are applied only to this isolated
-  -- raw QA database after sanitization.
+  -- The one-time source bridge is deliberately narrow. Dev must have the exact
+  -- audited current Entity and Huddle Node workspace columns. Physical column
+  -- order is irrelevant; missing or extra columns stop the copy.
   with expected(table_name,column_name) as (
     values
       ('entity_types','company_id'),('entity_types','entity_type_id'),
-      ('entity_types','name'),('entity_types','created_timestamp'),
+      ('entity_types','name'),('entity_types','system_key'),('entity_types','created_timestamp'),
       ('entity_types','updated_timestamp'),
       ('entity_folders','company_id'),('entity_folders','entity_folder_id'),
       ('entity_folders','entity_type_id'),('entity_folders','parent_entity_folder_id'),
@@ -60,42 +62,55 @@ begin
       ('entity_field_types','company_id'),('entity_field_types','entity_field_type_id'),
       ('entity_field_types','entity_type_id'),('entity_field_types','entity_folder_id'),
       ('entity_field_types','name'),('entity_field_types','field_type'),
+      ('entity_field_types','system_key'),('entity_field_types','config_jsonb'),
       ('entity_field_types','position'),('entity_field_types','created_timestamp'),
       ('entity_field_types','updated_timestamp'),
       ('entities','company_id'),('entities','entity_id'),('entities','entity_type_id'),
       ('entities','entity_folder_id'),('entities','name'),('entities','position'),
-      ('entities','body_json'),('entities','revision'),
+      ('entities','body_json'),('entities','revision'),('entities','created_by_user_id'),
       ('entities','created_timestamp'),('entities','updated_timestamp'),
       ('entity_fields','company_id'),('entity_fields','entity_field_id'),
-      ('entity_fields','entity_id'),('entity_fields','name'),
+      ('entity_fields','entity_id'),('entity_fields','entity_field_type_id'),('entity_fields','name'),
       ('entity_fields','field_type'),('entity_fields','value_jsonb'),
       ('entity_fields','position'),('entity_fields','created_timestamp'),
-      ('entity_fields','updated_timestamp')
+      ('entity_fields','updated_timestamp'),
+      ('entity_relationships','company_id'),('entity_relationships','entity_id'),
+      ('entity_relationships','resource_type'),('entity_relationships','resource_id'),
+      ('entity_relationships','created_timestamp'),
+      ('huddle_node_textboxes','company_id'),('huddle_node_textboxes','huddle_node_id'),
+      ('huddle_node_textboxes','textbox_id'),('huddle_node_textboxes','created_timestamp'),
+      ('huddle_node_textboxes','updated_timestamp'),('huddle_node_textboxes','deleted_timestamp'),
+      ('huddle_node_textboxes','display_order'),('huddle_node_textboxes','body_json'),
+      ('huddle_node_textboxes','revision'),('huddle_node_textboxes','title'),
+      ('huddle_node_textbox_chats','company_id'),('huddle_node_textbox_chats','chat_id'),
+      ('huddle_node_textbox_chats','huddle_node_id'),('huddle_node_textbox_chats','textbox_id'),
+      ('huddle_node_textbox_chats','parent_chat_id'),('huddle_node_textbox_chats','selection_quote'),
+      ('huddle_node_textbox_chats','selection_start'),('huddle_node_textbox_chats','selection_end'),
+      ('huddle_node_textbox_chats','author_user_id'),('huddle_node_textbox_chats','author_display_name'),
+      ('huddle_node_textbox_chats','message'),('huddle_node_textbox_chats','edited_timestamp'),
+      ('huddle_node_textbox_chats','entity_links'),('huddle_node_textbox_chats','mentioned_user_ids'),
+      ('huddle_node_textbox_chats','mentioned_group_ids'),('huddle_node_textbox_chats','revision'),
+      ('huddle_node_textbox_chats','created_timestamp'),('huddle_node_textbox_chats','updated_timestamp'),
+      ('huddle_node_textbox_chats','deleted_timestamp')
   ), actual(table_name,column_name) as (
     select table_name::text,column_name::text
     from information_schema.columns
     where table_schema='public'
-      and table_name in ('entity_types','entity_folders','entity_field_types','entities','entity_fields')
+      and table_name in (
+        'entity_types','entity_folders','entity_field_types','entities','entity_fields',
+        'entity_relationships','huddle_node_textboxes','huddle_node_textbox_chats'
+      )
   ), mismatches as (
     (select * from expected except select * from actual)
     union all
     (select * from actual except select * from expected)
   )
-  select count(*) into entity_schema_mismatch_count from mismatches;
+  select count(*) into source_schema_mismatch_count from mismatches;
 
-  if entity_schema_mismatch_count <> 0
+  if source_schema_mismatch_count <> 0
      or to_regclass('public.action_item_huddle_relationships') is not null
-     or to_regclass('public.entity_relationships') is not null
      or to_regclass('public.entity_field_assignments') is not null then
-    raise exception 'STOP: raw QA source is not the audited empty base Entity schema';
-  end if;
-
-  if (select count(*) from public.entity_types) <> 0
-     or (select count(*) from public.entity_folders) <> 0
-     or (select count(*) from public.entity_field_types) <> 0
-     or (select count(*) from public.entities) <> 0
-     or (select count(*) from public.entity_fields) <> 0 then
-    raise exception 'STOP: Dev Entity data changed after the approved read-only audit; reassess before copying';
+    raise exception 'STOP: raw QA source is not the audited current Entity and Huddle workspace schema';
   end if;
 
   if exists (
@@ -104,10 +119,34 @@ begin
       '20260827_entities.sql',
       '20260828_action_items.sql',
       '20260828_entity_relationships.sql',
+      '20260828_huddle_node_workspace.sql',
+      '20260828_z_huddle_logic_gate_attachments.sql',
       '20260828_zz_huddle_logic_gate_action_item_relationships.sql'
     )
   ) then
-    raise exception 'STOP: Dev Entity migration ledger changed after the approved read-only audit';
+    raise exception 'STOP: Dev Entity or Huddle workspace migration ledger changed after the approved read-only audit';
+  end if;
+
+  if exists (
+    select 1
+    from public.entity_relationships relationship
+    left join public.entities entity
+      on entity.company_id = relationship.company_id
+     and entity.entity_id = relationship.entity_id
+    left join public.huddle_nodes huddle_node
+      on relationship.resource_type = 'huddle_node'
+     and huddle_node.company_id = relationship.company_id
+     and huddle_node.huddle_node_id = relationship.resource_id
+    left join public.huddle_logic_gates huddle_logic_gate
+      on relationship.resource_type = 'huddle_logic_gate'
+     and huddle_logic_gate.company_id = relationship.company_id
+     and huddle_logic_gate.huddle_logic_gate_id = relationship.resource_id
+    where entity.entity_id is null
+       or relationship.resource_type not in ('huddle_node','huddle_logic_gate')
+       or (relationship.resource_type = 'huddle_node' and huddle_node.huddle_node_id is null)
+       or (relationship.resource_type = 'huddle_logic_gate' and huddle_logic_gate.huddle_logic_gate_id is null)
+  ) then
+    raise exception 'STOP: Dev Entity relationship has a missing or unsupported exact same-company endpoint';
   end if;
 
   with excluded_root_names(name) as (
@@ -278,6 +317,19 @@ from (values
   ('email_connections', (select count(*)::bigint from public.email_connections)),
   ('email_ingestion_jobs', (select count(*)::bigint from public.email_ingestion_jobs)),
   ('email_archive_jobs', (select count(*)::bigint from public.communications_email_archive_jobs)),
+  ('entity_types', (select count(*)::bigint from public.entity_types)),
+  ('action_item_entities', (
+    select count(*)::bigint
+    from public.entities entity
+    join public.entity_types entity_type
+      on entity_type.company_id = entity.company_id
+     and entity_type.entity_type_id = entity.entity_type_id
+    where entity_type.system_key = 'action_item'
+  )),
+  ('entity_fields', (select count(*)::bigint from public.entity_fields)),
+  ('entity_relationships', (select count(*)::bigint from public.entity_relationships)),
+  ('huddle_node_textboxes', (select count(*)::bigint from public.huddle_node_textboxes)),
+  ('huddle_node_textbox_chats', (select count(*)::bigint from public.huddle_node_textbox_chats)),
   ('domain_events', (select count(*)::bigint from public.domain_events)),
   ('realtime_outbox', (select count(*)::bigint from public.realtime_outbox)),
   ('notifications', (select count(*)::bigint from public.notifications)),

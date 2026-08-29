@@ -43,7 +43,10 @@ begin
      or to_regclass('public.entity_folders') is null
      or to_regclass('public.entity_field_types') is null
      or to_regclass('public.entities') is null
-     or to_regclass('public.entity_fields') is null then
+     or to_regclass('public.entity_fields') is null
+     or to_regclass('public.entity_relationships') is null
+     or to_regclass('public.huddle_node_textboxes') is null
+     or to_regclass('public.huddle_node_textbox_chats') is null then
     raise exception 'STOP: required Mango tables are missing from the raw QA copy';
   end if;
 
@@ -257,11 +260,17 @@ with imported_json_sources(
   select company_id, 'entity', entity_id, 'editor', body_json
   from public.entities
   union all
+  select company_id, 'huddle_node', huddle_node_id, 'editor', body_json
+  from public.huddle_node_textboxes
+  union all
   select company_id, 'node', node_id, 'chat', entity_links
   from public.node_textbox_chats
   union all
   select company_id, 'project', project_id, 'chat', entity_links
   from public.project_textbox_chats
+  union all
+  select company_id, 'huddle_node', huddle_node_id, 'chat', entity_links
+  from public.huddle_node_textbox_chats
 ), imported_objects as (
   select source.company_id,
          source.owner_resource_type,
@@ -596,7 +605,9 @@ delete from public.invitations;
 
 -- Omit any email thread that crossed an excluded boundary, and omit unrelated
 -- mailbox history. Retain only email used by a surviving resource/chat.
-delete from public.email_threads thread
+create temp table qa_omit_email_threads on commit drop as
+select thread.company_id, thread.email_thread_id
+from public.email_threads thread
 where exists (
   select 1 from qa_excluded_email_threads excluded
   where excluded.company_id = thread.company_id
@@ -607,6 +618,47 @@ or not exists (
   where kept.company_id = thread.company_id
     and kept.email_thread_id = thread.email_thread_id
 );
+
+-- Remove dependent selection chats before their exact textbox relationship,
+-- then remove the wide relationship before deleting the thread. The deferred
+-- dependency trigger intentionally rejects the reverse order.
+delete from public.node_textbox_chats chat
+where exists (
+  select 1
+  from public.email_messages message
+  join qa_omit_email_threads omitted
+    on omitted.company_id = message.company_id
+   and omitted.email_thread_id = message.email_thread_id
+  where message.company_id = chat.company_id
+    and message.email_message_id = chat.selection_email_message_id
+);
+
+delete from public.project_textbox_chats chat
+where exists (
+  select 1
+  from public.email_messages message
+  join qa_omit_email_threads omitted
+    on omitted.company_id = message.company_id
+   and omitted.email_thread_id = message.email_thread_id
+  where message.company_id = chat.company_id
+    and message.email_message_id = chat.selection_email_message_id
+);
+
+delete from public.email_relationships relationship
+using qa_omit_email_threads omitted
+where omitted.company_id = relationship.company_id
+  and omitted.email_thread_id = relationship.email_thread_id
+  and relationship.resource_textbox_id is not null;
+
+delete from public.email_relationships relationship
+using qa_omit_email_threads omitted
+where omitted.company_id = relationship.company_id
+  and omitted.email_thread_id = relationship.email_thread_id;
+
+delete from public.email_threads thread
+using qa_omit_email_threads omitted
+where omitted.company_id = thread.company_id
+  and omitted.email_thread_id = thread.email_thread_id;
 
 delete from public.node_textbox_chats chat
 where chat.selection_email_message_id is not null
@@ -842,6 +894,15 @@ where excluded.company_id = endpoint.company_id
   and excluded.resource_type = 'node'
   and excluded.resource_id = endpoint.node_id;
 
+-- Entity relationships are non-owning edges. Remove only an edge whose exact
+-- Huddle endpoint is excluded; preserve the Entity endpoint and its business data.
+delete from public.entity_relationships relationship
+using qa_excluded_resources excluded
+where excluded.company_id = relationship.company_id
+  and excluded.resource_type = relationship.resource_type
+  and excluded.resource_type in ('huddle_node','huddle_logic_gate')
+  and excluded.resource_id = relationship.resource_id;
+
 delete from public.huddle_nodes endpoint
 using qa_excluded_resources excluded
 where excluded.company_id = endpoint.company_id
@@ -944,6 +1005,12 @@ set body_json = coalesce(
   '{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph"}]},"annotations":[]}'::jsonb
 );
 
+update public.huddle_node_textboxes
+set body_json = coalesce(
+  pg_temp.qa_clean_imported_json(company_id, body_json),
+  '{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph"}]},"annotations":[]}'::jsonb
+);
+
 update public.entities
 set body_json = coalesce(
   pg_temp.qa_clean_imported_json(company_id, body_json),
@@ -979,10 +1046,17 @@ delete from public.project_textbox_chats chat
 where coalesce(pg_temp.qa_clean_imported_json(chat.company_id, chat.entity_links), '[]'::jsonb)
       is distinct from coalesce(chat.entity_links, '[]'::jsonb);
 
+delete from public.huddle_node_textbox_chats chat
+where coalesce(pg_temp.qa_clean_imported_json(chat.company_id, chat.entity_links), '[]'::jsonb)
+      is distinct from coalesce(chat.entity_links, '[]'::jsonb);
+
 update public.node_textbox_chats
 set entity_links = coalesce(pg_temp.qa_clean_imported_json(company_id, entity_links), '[]'::jsonb);
 
 update public.project_textbox_chats
+set entity_links = coalesce(pg_temp.qa_clean_imported_json(company_id, entity_links), '[]'::jsonb);
+
+update public.huddle_node_textbox_chats
 set entity_links = coalesce(pg_temp.qa_clean_imported_json(company_id, entity_links), '[]'::jsonb);
 
 update public.logic_gate_textboxes textbox
