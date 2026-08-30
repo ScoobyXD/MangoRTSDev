@@ -74,7 +74,7 @@ E35 - A Huddle Node or Huddle Logic Gate editor save atomically stores one exact
 
 E36 - A Huddle Process Action Item rollup unions its direct Huddle Logic Gate relationships with every relationship from its owned Huddle Nodes and deduplicates each Action Item once.
 
-E37 - Direct Action Item creation from Entities remains allowed and leaves the required Source field value null. Existing Action Items receive the required linked Source field with a null value; no creator, relationship, or editor history is used to guess or backfill it.
+E37 - Direct Action Item creation from Entities remains allowed and leaves the required Source field value null. The forward storage cutover copies each exact legacy Source pair into the required linked field; every existing Action Item without one receives null, and no creator, relationship, label, or editor history is used to guess it.
 
 E38 - Action Item Source is the required protected `source` / `Source` / `resource` Entity Field. Its nullable `value_jsonb` is either null or an object containing only one exact canonical `resource_type` and one exact UUID `resource_id`; supported types are exactly `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, and `kpi`. It stores no copied label, anchor, document identity, or fallback identity.
 

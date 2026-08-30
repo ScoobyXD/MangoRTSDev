@@ -6,7 +6,7 @@ Last updated: 2026-08-29
 2. Person in charge and Assigned by are independent nullable `person` fields. Each nonnull value is the exact `user_id` of a current membership in the Action Item's company.
 3. Assigned by is editable business attribution. It defaults to null and is never inferred or backfilled from `entities.created_by_user_id`.
 4. `entities.created_by_user_id` remains automatic nullable creator audit metadata even though the compact Action Item editor does not display Created by.
-5. Direct Action Item creation from Entities remains allowed and creates the required Source field with a null value. Existing Action Items receive the same required null Source field without any inferred backfill.
+5. Direct Action Item creation from Entities remains allowed and creates the required Source field with a null value. The forward storage cutover copies only an exact legacy Source pair; an existing Action Item without one receives null, and no creator, relationship, label, or editor history is used to invent it.
 6. Highlighted-text Action Item creation is supported only in Node, Process, Project, Huddle Node, Huddle Process, and KPI editors and records that exact owning resource as Source.
 7. Source is the nullable value of the required `source` / `Source` / `resource` system Entity Field. A nonnull value contains exactly `{resource_type, resource_id}` for one canonical same-company endpoint; it is not an `entity_relationships` edge and stores no copied name.
 8. The only Source resource types are `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, and `kpi`.
