@@ -359,6 +359,47 @@ func TestSavedViewsLogicGateKanbanSingleUserView(t *testing.T) {
 	}
 }
 
+func TestSavedViewsMyWorkActionItemPreferencesArePerUserPerspectiveSingletons(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	handler := NewServer(repo).Routes()
+	companyID := "66666666-6666-4666-8666-666666666666"
+	user := mustCreateSavedViewUser(t, repo, "saved-view-my-work", companyID, "my-work@example.com", domain.RoleCompanyUser)
+
+	create := func(surface, name, groupings, settings string) domain.SavedView {
+		t.Helper()
+		body := `{"company_id":"` + companyID + `","surface":"` + surface + `","principal":"user","principal_id":"` + user.UserID + `","name":"` + name + `","groupings":` + groupings + `,"settings":` + settings + `}`
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(body))
+		handler.ServeHTTP(recorder, savedViewRequestWithActor(request, user, companyID, domain.RoleCompanyUser))
+		if recorder.Code != http.StatusCreated {
+			t.Fatalf("save %s status = %d body=%s", surface, recorder.Code, recorder.Body.String())
+		}
+		var view domain.SavedView
+		if err := json.NewDecoder(recorder.Body).Decode(&view); err != nil {
+			t.Fatal(err)
+		}
+		return view
+	}
+
+	mine := create(store.SavedViewSurfaceMyWorkActionItemsMine, "Mine", `[{"field":"color","direction":"asc"}]`, `{"ordering":[{"field":"completion_due_date","direction":"desc"}],"displayed_fields":["status","assigned_by"]}`)
+	updatedMine := create(store.SavedViewSurfaceMyWorkActionItemsMine, "Mine updated", `[{"field":"huddle_process","direction":"asc"}]`, `{"ordering":[],"displayed_fields":[]}`)
+	if updatedMine.SavedViewID != mine.SavedViewID || len(updatedMine.Settings.Ordering) != 0 || len(updatedMine.Settings.DisplayedFields) != 0 {
+		t.Fatalf("updated Mine singleton = %+v, original=%+v", updatedMine, mine)
+	}
+	delegated := create(store.SavedViewSurfaceMyWorkActionItemsDelegated, "Delegated", `[{"field":"color","direction":"asc"},{"field":"huddle_process","direction":"asc"},{"field":"completion_due_date","direction":"asc"}]`, `{"ordering":[{"field":"person_in_charge","direction":"asc"}],"displayed_fields":["person_in_charge","completion_due_date"]}`)
+	if delegated.SavedViewID == mine.SavedViewID || len(delegated.Settings.Ordering) != 1 || delegated.Settings.Ordering[0].Field != "person_in_charge" {
+		t.Fatalf("Delegated preference = %+v", delegated)
+	}
+
+	invalidBody := `{"company_id":"` + companyID + `","surface":"` + store.SavedViewSurfaceMyWorkActionItemsMine + `","principal":"user","principal_id":"` + user.UserID + `","name":"Bad","groupings":[],"settings":{"displayed_fields":["details"]}}`
+	invalidRecorder := httptest.NewRecorder()
+	invalidRequest := httptest.NewRequest(http.MethodPost, "/v1/saved-views", bytes.NewBufferString(invalidBody))
+	handler.ServeHTTP(invalidRecorder, savedViewRequestWithActor(invalidRequest, user, companyID, domain.RoleCompanyUser))
+	if invalidRecorder.Code != http.StatusBadRequest {
+		t.Fatalf("invalid My Work fields status = %d body=%s", invalidRecorder.Code, invalidRecorder.Body.String())
+	}
+}
+
 func TestSavedViewsRejectInvalidPrincipalAndGrouping(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	handler := NewServer(repo).Routes()

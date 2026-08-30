@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BoundRequestJSON } from "../../../../frontend/src/modules/api/requestJSON.js";
-import { fetchMyWork } from "../../../../frontend/src/modules/my-work/myWorkApi.js";
+import {
+  fetchMyWork,
+  fetchMyWorkActionItemSavedView,
+  saveMyWorkActionItemSavedView,
+} from "../../../../frontend/src/modules/my-work/myWorkApi.js";
 
 test("My Work initial read derives its subject from auth and requests all typed sections", async () => {
   const calls: Array<{ path: string; init?: RequestInit }> = [];
@@ -145,12 +149,88 @@ test("Action Item follow-ups carry exactly the selected Mine or Delegated perspe
     perspective: "delegated",
     grouping: [
       { field: "color", direction: "asc" },
+      { field: "huddle_process", direction: "asc" },
       { field: "completion_due_date", direction: "asc" },
-      { field: "person_in_charge", direction: "desc" },
     ],
+    ordering: [{ field: "person_in_charge", direction: "desc" }],
   });
   const url = new URL(requestedPath, "https://mango.test");
   assert.equal(url.searchParams.get("section"), "action_items");
   assert.equal(url.searchParams.get("perspective"), "delegated");
-  assert.equal(url.searchParams.get("grouping"), "color:asc,completion_due_date:asc,person_in_charge:desc");
+  assert.equal(url.searchParams.get("grouping"), "color:asc,huddle_process:asc,completion_due_date:asc");
+  assert.equal(url.searchParams.get("ordering"), "person_in_charge:desc");
+});
+
+test("Action Item ordering uses its distinct query key and rejects grouping overlap", async () => {
+  const paths: string[] = [];
+  const requestJSON: BoundRequestJSON = async <T>(path: string): Promise<T> => {
+    paths.push(path);
+    return { company_id: "company-1", user_id: "viewer-1", action_items: { items: [], has_more: false } } as T;
+  };
+  await fetchMyWork(requestJSON, {
+    companyID: "company-1",
+    section: "action_items",
+    perspective: "mine",
+    grouping: [
+      { field: "color", direction: "asc" },
+      { field: "huddle_process", direction: "asc" },
+      { field: "completion_due_date", direction: "asc" },
+    ],
+    ordering: [],
+  });
+  assert.equal(new URL(paths[0] ?? "", "https://mango.test").searchParams.get("ordering"), "none");
+  await assert.rejects(fetchMyWork(requestJSON, {
+    companyID: "company-1",
+    section: "action_items",
+    perspective: "delegated",
+    grouping: [{ field: "person_in_charge", direction: "asc" }],
+    ordering: [{ field: "person_in_charge", direction: "desc" }],
+  }), /must be distinct/);
+});
+
+test("Action Item saved views use separate Mine and Delegated surfaces with complete settings", async () => {
+  const calls: Array<{ path: string; init?: RequestInit & { json?: unknown } }> = [];
+  const requestJSON: BoundRequestJSON = async <T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+    calls.push({ path, init });
+    if (path.startsWith("/v1/saved-views?")) {
+      const surface = new URL(path, "https://mango.test").searchParams.get("surface");
+      return { saved_views: surface === "my_work_action_items_mine" ? [{ surface, saved_view_id: "mine-view" }] : [] } as T;
+    }
+    return { saved_view_id: "delegated-view", surface: "my_work_action_items_delegated" } as T;
+  };
+
+  const mine = await fetchMyWorkActionItemSavedView(requestJSON, "company-1", "mine");
+  assert.equal(mine?.saved_view_id, "mine-view");
+  await saveMyWorkActionItemSavedView(requestJSON, {
+    companyID: "company-1",
+    userID: "viewer-1",
+    perspective: "delegated",
+    savedViewID: "delegated-view",
+    groupings: [
+      { field: "color", direction: "asc" },
+      { field: "huddle_process", direction: "asc" },
+      { field: "completion_due_date", direction: "asc" },
+    ],
+    ordering: [{ field: "person_in_charge", direction: "asc" }],
+    displayedFields: ["person_in_charge", "completion_due_date"],
+  });
+  assert.equal(calls[1]?.path, "/v1/saved-views/delegated-view");
+  assert.deepEqual(calls[1]?.init?.json, {
+    company_id: "company-1",
+    saved_view_id: "delegated-view",
+    surface: "my_work_action_items_delegated",
+    principal: "user",
+    principal_id: "viewer-1",
+    name: "My Work Delegated",
+    groupings: [
+      { field: "color", direction: "asc" },
+      { field: "huddle_process", direction: "asc" },
+      { field: "completion_due_date", direction: "asc" },
+    ],
+    settings: {
+      ordering: [{ field: "person_in_charge", direction: "asc" }],
+      displayed_fields: ["person_in_charge", "completion_due_date"],
+    },
+    position: 1000,
+  });
 });

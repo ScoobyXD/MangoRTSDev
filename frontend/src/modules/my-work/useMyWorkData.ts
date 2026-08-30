@@ -14,6 +14,7 @@ import {
   type MyWorkResponse,
   type MyWorkSection,
   type MyWorkGroupingSetting,
+  type MyWorkOrderingSetting,
 } from "./myWorkApi.js";
 
 export type MyWorkSectionState<Item> = {
@@ -39,6 +40,7 @@ type SectionRequest = {
   role?: MyWorkProcessRole;
   perspective?: MyWorkActionItemPerspective;
   grouping?: ReadonlyArray<MyWorkGroupingSetting>;
+  ordering?: ReadonlyArray<MyWorkOrderingSetting>;
   clearItems?: boolean;
   append?: boolean;
   history?: boolean;
@@ -128,6 +130,7 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
           ? request.perspective ?? actionItemPerspectiveRef.current
           : undefined,
         grouping: request.grouping,
+        ordering: request.ordering,
         history: request.history,
         limit: request.history ? MY_WORK_HISTORY_PAGE_LIMIT : MY_WORK_PAGE_LIMIT,
         cursor: request.cursor,
@@ -222,12 +225,14 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     grouping?: ReadonlyArray<MyWorkGroupingSetting>,
     clearItems = false,
     history = false,
-  ): Promise<void> => requestSection(section, { grouping, clearItems, history }), [requestSection]);
+    ordering?: ReadonlyArray<MyWorkOrderingSetting>,
+  ): Promise<void> => requestSection(section, { grouping, ordering, clearItems, history }), [requestSection]);
 
   const loadMore = useCallback((
     section: MyWorkSection,
     grouping?: ReadonlyArray<MyWorkGroupingSetting>,
     history = false,
+    ordering?: ReadonlyArray<MyWorkOrderingSetting>,
   ): Promise<void> => {
     const current = stateRef.current[section];
     const activeController = sectionControllersRef.current[section];
@@ -241,6 +246,7 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     return requestSection(section, {
       cursor: current.nextCursor,
       grouping,
+      ordering,
       history,
       append: true,
     });
@@ -250,11 +256,12 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     perspective: MyWorkActionItemPerspective,
     grouping?: ReadonlyArray<MyWorkGroupingSetting>,
     history = false,
+    ordering?: ReadonlyArray<MyWorkOrderingSetting>,
   ): Promise<void> => {
     if (actionItemPerspectiveRef.current === perspective) return Promise.resolve();
     actionItemPerspectiveRef.current = perspective;
     setActionItemPerspective(perspective);
-    return requestSection("action_items", { perspective, grouping, history, clearItems: true });
+    return requestSection("action_items", { perspective, grouping, ordering, history, clearItems: true });
   }, [requestSection]);
 
   const selectNodeRole = useCallback((

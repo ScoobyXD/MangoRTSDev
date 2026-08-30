@@ -188,14 +188,26 @@ type EntitySummary struct {
 }
 
 type MyWorkActionItem struct {
-	EntityID                 string     `json:"entity_id"`
-	Name                     string     `json:"name"`
-	PersonInChargeUserID     string     `json:"person_in_charge_user_id"`
-	PersonInChargeName       string     `json:"person_in_charge_name"`
-	Color                    *string    `json:"color,omitempty"`
-	CompletionDueDate        *string    `json:"completion_due_date,omitempty"`
-	CompletionDueDateFieldID string     `json:"completion_due_date_field_id"`
-	CompletedTimestamp       *time.Time `json:"completed_timestamp,omitempty"`
+	EntityID                 string                        `json:"entity_id"`
+	Name                     string                        `json:"name"`
+	PersonInChargeUserID     string                        `json:"person_in_charge_user_id"`
+	PersonInChargeName       string                        `json:"person_in_charge_name"`
+	AssignedByUserID         string                        `json:"assigned_by_user_id,omitempty"`
+	AssignedByName           string                        `json:"assigned_by_name,omitempty"`
+	CreatedTimestamp         time.Time                     `json:"created_timestamp"`
+	Source                   *ActionItemSourceView         `json:"source,omitempty"`
+	HuddleProcess            *MyWorkHuddleProcessReference `json:"huddle_process,omitempty"`
+	Color                    *string                       `json:"color,omitempty"`
+	AnalysisDueDate          *string                       `json:"analysis_due_date,omitempty"`
+	CompletionDueDate        *string                       `json:"completion_due_date,omitempty"`
+	CompletionDueDateFieldID string                        `json:"completion_due_date_field_id"`
+	Status                   string                        `json:"status"`
+	CompletedTimestamp       *time.Time                    `json:"completed_timestamp,omitempty"`
+}
+
+type MyWorkHuddleProcessReference struct {
+	HuddleLogicGateID string `json:"huddle_logic_gate_id"`
+	Name              string `json:"name"`
 }
 
 type MyWorkProcessReference struct {
@@ -330,8 +342,10 @@ type SavedViewGrouping struct {
 }
 
 type SavedViewSettings struct {
-	DateAddedSortDirection string `json:"date_added_sort_direction,omitempty"`
-	DateAddedSortEnabled   *bool  `json:"date_added_sort_enabled,omitempty"`
+	DateAddedSortDirection string              `json:"date_added_sort_direction,omitempty"`
+	DateAddedSortEnabled   *bool               `json:"date_added_sort_enabled,omitempty"`
+	Ordering               []SavedViewGrouping `json:"ordering"`
+	DisplayedFields        []string            `json:"displayed_fields"`
 }
 
 type SavedView struct {

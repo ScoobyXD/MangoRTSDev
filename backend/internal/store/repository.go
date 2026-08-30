@@ -667,8 +667,10 @@ type SavedViewRepository interface {
 }
 
 const (
-	SavedViewSurfaceUpdates         = "updates"
-	SavedViewSurfaceLogicGateKanban = "logic_gate_kanban"
+	SavedViewSurfaceUpdates                    = "updates"
+	SavedViewSurfaceLogicGateKanban            = "logic_gate_kanban"
+	SavedViewSurfaceMyWorkActionItemsMine      = "my_work_action_items_mine"
+	SavedViewSurfaceMyWorkActionItemsDelegated = "my_work_action_items_delegated"
 
 	SavedViewPrincipalUser  = "user"
 	SavedViewPrincipalGroup = "group"

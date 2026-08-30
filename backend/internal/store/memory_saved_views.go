@@ -60,7 +60,7 @@ func (r *MemoryRepo) UpsertSavedView(input SavedViewInput) (domain.SavedView, er
 	}
 
 	now := time.Now().UTC()
-	if savedViewIsSingleLogicGateKanbanUserView(input) {
+	if savedViewIsSingleUserView(input) {
 		existingKey := ""
 		var existing domain.SavedView
 		for key, candidate := range r.savedViews {
@@ -170,6 +170,8 @@ func (r *MemoryRepo) nextSavedViewPositionLocked(companyID, surface, principal, 
 
 func cloneSavedView(item domain.SavedView) domain.SavedView {
 	item.Groupings = cloneSavedViewGroupings(item.Groupings)
+	item.Settings.Ordering = cloneSavedViewGroupings(item.Settings.Ordering)
+	item.Settings.DisplayedFields = append([]string{}, item.Settings.DisplayedFields...)
 	return item
 }
 

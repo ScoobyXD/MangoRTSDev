@@ -147,24 +147,33 @@ func (r *PostgresRepo) GetMyWork(ctx context.Context, query MyWorkQuery) (domain
 
 func (r *PostgresRepo) postgresMyWorkActionItems(ctx context.Context, query MyWorkQuery, cursor myWorkCursor) (domain.MyWorkActionItemPage, error) {
 	grouping, groupingTerms := myWorkEffectiveGrouping(query, MyWorkSectionActionItems)
-	sortComponents := myWorkActionSQLSortComponents(groupingTerms)
-	keyset := myWorkSQLKeysetPredicate("$7::boolean", sortComponents, "entity_id", "$13::uuid")
+	ordering, orderingTerms := myWorkEffectiveOrdering(query)
+	actionTerms := append(append([]myWorkGroupingTerm{}, groupingTerms...), orderingTerms...)
+	sortComponents := myWorkActionSQLSortComponents(actionTerms)
+	keyset := myWorkSQLKeysetPredicate("$10::boolean", sortComponents, "entity_id", "$21::uuid")
 	orderBy := myWorkSQLOrderBy(sortComponents, "entity_id")
 	if query.History {
 		grouping = ""
-		keyset = `(not $7::boolean or completed_timestamp < $16::timestamptz or (completed_timestamp = $16::timestamptz and entity_id > $13::uuid))`
+		ordering = ""
+		keyset = `(not $10::boolean or completed_timestamp < $24::timestamptz or (completed_timestamp = $24::timestamptz and entity_id > $21::uuid))`
 		orderBy = "completed_timestamp desc,entity_id"
 	}
 	querySQL := fmt.Sprintf(`
-with candidates as (
-  select entity.entity_id,entity.name,
+with recursive action_base as (
+  select entity.entity_id,entity.name,entity.created_timestamp,
          mangorts_try_uuid(person.value_jsonb #>> '{}') as person_in_charge_user_id,
          coalesce(nullif(btrim(person_user.display_name),''),nullif(btrim(person_user.email),''),mangorts_try_uuid(person.value_jsonb #>> '{}')::text) as person_in_charge_name,
          lower(coalesce(nullif(btrim(person_user.display_name),''),nullif(btrim(person_user.email),''),mangorts_try_uuid(person.value_jsonb #>> '{}')::text)) as person_in_charge_sort_name,
+         mangorts_try_uuid(assigned_by.value_jsonb #>> '{}') as assigned_by_user_id,
+         coalesce(nullif(btrim(assigned_user.display_name),''),nullif(btrim(assigned_user.email),''),mangorts_try_uuid(assigned_by.value_jsonb #>> '{}')::text) as assigned_by_name,
          lower(btrim(coalesce(color.value_jsonb #>> '{}',''))) as color_key,
+         analysis_due.value_jsonb #>> '{}' as analysis_due_date,
          completion_due.value_jsonb #>> '{}' as completion_due_date,
          completion_due.entity_field_id,
+         coalesce(status.value_jsonb #>> '{}','') as status,
          status.updated_timestamp as completed_timestamp,
+         lower(btrim(coalesce(source.value_jsonb ->> 'resource_type',''))) as source_resource_type,
+         mangorts_try_uuid(source.value_jsonb ->> 'resource_id') as source_resource_id,
          case lower(btrim(coalesce(color.value_jsonb #>> '{}','')))
            when 'red' then 0 when 'yellow' then 1 when '' then 3 else 2 end as color_rank
   from entity_fields person
@@ -175,56 +184,166 @@ with candidates as (
     on person_user.user_id=mangorts_try_uuid(person.value_jsonb #>> '{}')
   left join entity_fields status
     on status.company_id=entity.company_id and status.entity_id=entity.entity_id
-   and status.entity_field_type_id=$4::uuid
+   and status.entity_field_type_id=$5::uuid
   left join entity_fields assigned_by
     on assigned_by.company_id=entity.company_id and assigned_by.entity_id=entity.entity_id
    and assigned_by.entity_field_type_id='a17e0000-0000-4000-8000-000000000106'::uuid
+  left join users assigned_user
+    on assigned_user.user_id=mangorts_try_uuid(assigned_by.value_jsonb #>> '{}')
   left join entity_fields color
     on color.company_id=entity.company_id and color.entity_id=entity.entity_id
-   and color.entity_field_type_id=$5::uuid
+   and color.entity_field_type_id=$6::uuid
   left join entity_fields completion_due
     on completion_due.company_id=entity.company_id and completion_due.entity_id=entity.entity_id
-   and completion_due.entity_field_type_id=$6::uuid
+   and completion_due.entity_field_type_id=$7::uuid
+  left join entity_fields analysis_due
+    on analysis_due.company_id=entity.company_id and analysis_due.entity_id=entity.entity_id
+   and analysis_due.entity_field_type_id=$8::uuid
+  left join entity_fields source
+    on source.company_id=entity.company_id and source.entity_id=entity.entity_id
+   and source.entity_field_type_id=$9::uuid
   where person.company_id=$1::uuid
     and person.entity_field_type_id='a17e0000-0000-4000-8000-000000000101'::uuid
     and (
-      ($17::text='mine' and mangorts_try_uuid(person.value_jsonb #>> '{}')=$2::uuid)
-      or ($17::text='delegated'
+      ($25::text='mine' and mangorts_try_uuid(person.value_jsonb #>> '{}')=$2::uuid)
+      or ($25::text='delegated'
           and mangorts_try_uuid(assigned_by.value_jsonb #>> '{}')=$2::uuid
           and mangorts_try_uuid(person.value_jsonb #>> '{}') is not null
           and mangorts_try_uuid(person.value_jsonb #>> '{}')<>$2::uuid)
     )
-    and ($15::boolean = (lower(btrim(coalesce(status.value_jsonb #>> '{}',''))) in ('done','complete','completed')))
+    and ($23::boolean = (lower(btrim(coalesce(status.value_jsonb #>> '{}',''))) in ('done','complete','completed')))
+), action_resolved as (
+  select base.*,
+         case base.source_resource_type
+           when 'node' then source_node.name
+           when 'logic_gate' then source_logic_gate.header
+           when 'project' then source_project.name
+           when 'huddle_node' then source_huddle_node.name
+           when 'huddle_logic_gate' then source_huddle_gate.header
+           when 'kpi' then source_kpi.name
+           else null
+         end as source_name,
+         case base.source_resource_type
+           when 'kpi' then case when source_kpi.kpi_id is not null then 'logic_gate'::text end
+           when 'node' then case when source_node.node_id is not null then 'node'::text end
+           when 'logic_gate' then case when source_logic_gate.logic_gate_id is not null then 'logic_gate'::text end
+           when 'project' then case when source_project.project_id is not null then 'project'::text end
+           when 'huddle_node' then case when source_huddle_node.huddle_node_id is not null then 'huddle_node'::text end
+           when 'huddle_logic_gate' then case when source_huddle_gate.huddle_logic_gate_id is not null then 'huddle_logic_gate'::text end
+           else null
+         end as source_access_resource_type,
+         case base.source_resource_type
+           when 'kpi' then source_kpi.logic_gate_id
+           when 'node' then source_node.node_id
+           when 'logic_gate' then source_logic_gate.logic_gate_id
+           when 'project' then source_project.project_id
+           when 'huddle_node' then source_huddle_node.huddle_node_id
+           when 'huddle_logic_gate' then source_huddle_gate.huddle_logic_gate_id
+           else null
+         end as source_access_resource_id,
+         case when base.source_resource_type='kpi' then source_kpi.logic_gate_id end as source_parent_resource_id,
+         source_huddle_owner.huddle_logic_gate_id as huddle_process_id,
+         source_huddle_owner.header as huddle_process_name
+  from action_base base
+  left join nodes source_node
+    on base.source_resource_type='node' and source_node.company_id=$1::uuid and source_node.node_id=base.source_resource_id
+  left join logic_gates source_logic_gate
+    on base.source_resource_type='logic_gate' and source_logic_gate.company_id=$1::uuid and source_logic_gate.logic_gate_id=base.source_resource_id
+  left join projects source_project
+    on base.source_resource_type='project' and source_project.company_id=$1::uuid and source_project.project_id=base.source_resource_id
+  left join huddle_nodes source_huddle_node
+    on base.source_resource_type='huddle_node' and source_huddle_node.company_id=$1::uuid and source_huddle_node.huddle_node_id=base.source_resource_id
+  left join huddle_logic_gates source_huddle_gate
+    on base.source_resource_type='huddle_logic_gate' and source_huddle_gate.company_id=$1::uuid and source_huddle_gate.huddle_logic_gate_id=base.source_resource_id
+  left join kpis source_kpi
+    on base.source_resource_type='kpi' and source_kpi.company_id=$1::uuid and source_kpi.kpi_id=base.source_resource_id
+  left join huddle_logic_gates source_huddle_owner
+    on source_huddle_owner.company_id=$1::uuid
+   and source_huddle_owner.huddle_logic_gate_id=case
+         when base.source_resource_type='huddle_logic_gate' then source_huddle_gate.huddle_logic_gate_id
+         when base.source_resource_type='huddle_node' then source_huddle_node.huddle_logic_gate_id
+         else null
+       end
+), action_source_access_targets(resource_type,resource_id) as (
+  select distinct source_access_resource_type,source_access_resource_id
+  from action_resolved
+  where source_access_resource_type is not null and source_access_resource_id is not null
+), action_huddle_access_targets(resource_type,resource_id) as (
+  select distinct 'huddle_logic_gate'::text,huddle_process_id
+  from action_resolved
+  where huddle_process_id is not null
+)
+`+myWorkViewerPermissionCTE+myWorkPermissionAccessCTEs("action_source_access_targets", "action_source")+myWorkPermissionAccessCTEs("action_huddle_access_targets", "action_huddle")+`
+, candidates as (
+  select resolved.entity_id,resolved.name,resolved.created_timestamp,
+         resolved.person_in_charge_user_id,resolved.person_in_charge_name,resolved.person_in_charge_sort_name,
+         resolved.assigned_by_user_id,resolved.assigned_by_name,resolved.color_key,resolved.analysis_due_date,
+         resolved.completion_due_date,resolved.entity_field_id,resolved.status,resolved.completed_timestamp,resolved.color_rank,
+         case when coalesce(source_access.allowed,false) then resolved.source_resource_type end as visible_source_resource_type,
+         case when coalesce(source_access.allowed,false) then resolved.source_resource_id end as visible_source_resource_id,
+         case when coalesce(source_access.allowed,false) then resolved.source_name end as visible_source_name,
+         case when coalesce(source_access.allowed,false) then resolved.source_parent_resource_id end as visible_source_parent_resource_id,
+		 case when coalesce(source_access.allowed,false) and coalesce(huddle_access.allowed,false) then resolved.huddle_process_id end as huddle_process_id,
+		 case when coalesce(source_access.allowed,false) and coalesce(huddle_access.allowed,false) then resolved.huddle_process_name end as huddle_process_name,
+		 case when coalesce(source_access.allowed,false) and coalesce(huddle_access.allowed,false) then lower(btrim(resolved.huddle_process_name)) end as huddle_process_sort_name
+  from action_resolved resolved
+  left join action_source_access source_access
+    on source_access.resource_type=resolved.source_access_resource_type and source_access.resource_id=resolved.source_access_resource_id
+  left join action_huddle_access huddle_access
+    on huddle_access.resource_type='huddle_logic_gate' and huddle_access.resource_id=resolved.huddle_process_id
 )
 select entity_id::text,name,person_in_charge_user_id::text,person_in_charge_name,person_in_charge_sort_name,
-       nullif(color_key,''),completion_due_date,entity_field_id::text,completed_timestamp
+       assigned_by_user_id::text,assigned_by_name,created_timestamp,
+       nullif(color_key,''),analysis_due_date,completion_due_date,entity_field_id::text,status,completed_timestamp,
+       visible_source_resource_type,visible_source_resource_id::text,visible_source_name,visible_source_parent_resource_id::text,
+       huddle_process_id::text,huddle_process_name,huddle_process_sort_name
 from candidates
-where $8::boolean is not null and $9::integer is not null and $10::text is not null
-  and $11::boolean is not null and $12::text is not null and $13::uuid is not null
-  and $16::timestamptz is not null and $18::text is not null and $19::uuid is not null
+where $10::boolean is not null and $11::boolean is not null and $12::integer is not null and $13::text is not null
+  and $14::boolean is not null and $15::text is not null and $16::uuid is not null
+  and $17::boolean is not null and $18::text is not null and $19::text is not null and $20::uuid is not null
+  and $21::uuid is not null and $24::timestamptz is not null
   and %s
 order by %s
-limit $14`, keyset, orderBy)
-	rows, err := r.db.QueryContext(ctx, querySQL, query.CompanyID, query.UserID, ActionItemEntityTypeID, ActionItemStatusFieldTypeID,
-		ActionItemColorFieldTypeID, ActionItemCompletionDueDateFieldTypeID,
-		query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.GroupText, cursor.DateNull, cursor.Date, myWorkCursorUUID(cursor.ResourceID), query.Limit+1,
-		query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp), query.Perspective,
-		cursor.PersonInChargeName, myWorkCursorUUID(cursor.PersonInChargeID))
+limit $22`, keyset, orderBy)
+	rows, err := r.db.QueryContext(ctx, querySQL,
+		query.CompanyID, query.UserID, ActionItemEntityTypeID, query.ViewerUserID,
+		ActionItemStatusFieldTypeID, ActionItemColorFieldTypeID, ActionItemCompletionDueDateFieldTypeID, ActionItemAnalysisDueDateFieldTypeID, ActionItemSourceFieldTypeID,
+		query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.GroupText,
+		cursor.HuddleProcessNull, cursor.HuddleProcessName, myWorkCursorUUID(cursor.HuddleProcessID),
+		cursor.DateNull, cursor.Date, cursor.PersonInChargeName, myWorkCursorUUID(cursor.PersonInChargeID), myWorkCursorUUID(cursor.ResourceID), query.Limit+1,
+		query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp), query.Perspective)
 	if err != nil {
 		return domain.MyWorkActionItemPage{}, err
 	}
 	defer rows.Close()
 	items := make([]domain.MyWorkActionItem, 0, query.Limit+1)
 	personSortNames := make([]string, 0, query.Limit+1)
+	huddleSortNames := make([]string, 0, query.Limit+1)
 	for rows.Next() {
 		var item domain.MyWorkActionItem
 		var personSortName string
-		var color, due, dueFieldID sql.NullString
+		var assignedByUserID, assignedByName sql.NullString
+		var color, analysisDue, due, dueFieldID sql.NullString
+		var sourceType, sourceID, sourceName, sourceParentID sql.NullString
+		var huddleID, huddleName, huddleSortName sql.NullString
 		var completedTimestamp sql.NullTime
-		if err := rows.Scan(&item.EntityID, &item.Name, &item.PersonInChargeUserID, &item.PersonInChargeName, &personSortName, &color, &due, &dueFieldID, &completedTimestamp); err != nil {
+		if err := rows.Scan(
+			&item.EntityID, &item.Name, &item.PersonInChargeUserID, &item.PersonInChargeName, &personSortName,
+			&assignedByUserID, &assignedByName, &item.CreatedTimestamp,
+			&color, &analysisDue, &due, &dueFieldID, &item.Status, &completedTimestamp,
+			&sourceType, &sourceID, &sourceName, &sourceParentID,
+			&huddleID, &huddleName, &huddleSortName,
+		); err != nil {
 			return domain.MyWorkActionItemPage{}, err
 		}
+		if assignedByUserID.Valid {
+			item.AssignedByUserID = assignedByUserID.String
+		}
+		if assignedByName.Valid {
+			item.AssignedByName = assignedByName.String
+		}
 		item.Color = nullStringPointer(color)
+		item.AnalysisDueDate = nullStringPointer(analysisDue)
 		item.CompletionDueDate = nullStringPointer(due)
 		if dueFieldID.Valid {
 			item.CompletionDueDateFieldID = dueFieldID.String
@@ -232,8 +351,18 @@ limit $14`, keyset, orderBy)
 		if query.History && completedTimestamp.Valid {
 			item.CompletedTimestamp = &completedTimestamp.Time
 		}
+		if sourceType.Valid && sourceID.Valid && sourceName.Valid {
+			item.Source = &domain.ActionItemSourceView{ResourceType: sourceType.String, ResourceID: sourceID.String, Name: sourceName.String}
+			if sourceParentID.Valid {
+				item.Source.ParentResourceID = sourceParentID.String
+			}
+		}
+		if huddleID.Valid && huddleName.Valid {
+			item.HuddleProcess = &domain.MyWorkHuddleProcessReference{HuddleLogicGateID: huddleID.String, Name: huddleName.String}
+		}
 		items = append(items, item)
 		personSortNames = append(personSortNames, personSortName)
+		huddleSortNames = append(huddleSortNames, huddleSortName.String)
 	}
 	if err := rows.Err(); err != nil {
 		return domain.MyWorkActionItemPage{}, err
@@ -246,10 +375,17 @@ limit $14`, keyset, orderBy)
 			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.EntityID})
 		} else {
 			color := strings.ToLower(myWorkOptionalString(last.Color))
-			nextCursor := myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, GroupNull: color == "", GroupInt: myWorkColorRank(color), GroupText: color, DateNull: last.CompletionDueDate == nil, Date: myWorkOptionalString(last.CompletionDueDate), ResourceID: last.EntityID}
-			if myWorkGroupingHasField(groupingTerms, MyWorkActionItemGroupingPersonInCharge) {
+			nextCursor := myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, Ordering: ordering, GroupNull: color == "", GroupInt: myWorkColorRank(color), GroupText: color, DateNull: last.CompletionDueDate == nil, Date: myWorkOptionalString(last.CompletionDueDate), ResourceID: last.EntityID}
+			if myWorkGroupingHasField(actionTerms, MyWorkActionItemGroupingPersonInCharge) {
 				nextCursor.PersonInChargeName = personSortNames[query.Limit-1]
 				nextCursor.PersonInChargeID = last.PersonInChargeUserID
+			}
+			if myWorkGroupingHasField(actionTerms, MyWorkActionItemGroupingHuddleProcess) {
+				nextCursor.HuddleProcessNull = last.HuddleProcess == nil
+				if last.HuddleProcess != nil {
+					nextCursor.HuddleProcessName = huddleSortNames[query.Limit-1]
+					nextCursor.HuddleProcessID = last.HuddleProcess.HuddleLogicGateID
+				}
 			}
 			page.NextCursor = encodeMyWorkCursor(nextCursor)
 		}
@@ -703,19 +839,25 @@ func myWorkActionSQLSortComponents(grouping []myWorkGroupingTerm) []myWorkSQLSor
 		switch term.Field {
 		case MyWorkActionItemGroupingColor:
 			components = append(components,
-				myWorkSQLSortComponent{expression: "(color_key = '')", cursorExpression: "$8::boolean", direction: "asc"},
-				myWorkSQLSortComponent{expression: "color_rank", cursorExpression: "$9::integer", direction: term.Direction},
-				myWorkSQLSortComponent{expression: `color_key collate "C"`, cursorExpression: `$10::text collate "C"`, direction: term.Direction},
+				myWorkSQLSortComponent{expression: "(color_key = '')", cursorExpression: "$11::boolean", direction: "asc"},
+				myWorkSQLSortComponent{expression: "color_rank", cursorExpression: "$12::integer", direction: term.Direction},
+				myWorkSQLSortComponent{expression: `color_key collate "C"`, cursorExpression: `$13::text collate "C"`, direction: term.Direction},
+			)
+		case MyWorkActionItemGroupingHuddleProcess:
+			components = append(components,
+				myWorkSQLSortComponent{expression: "(huddle_process_id is null)", cursorExpression: "$14::boolean", direction: "asc"},
+				myWorkSQLSortComponent{expression: `coalesce(huddle_process_sort_name,'') collate "C"`, cursorExpression: `$15::text collate "C"`, direction: term.Direction},
+				myWorkSQLSortComponent{expression: "coalesce(huddle_process_id,'00000000-0000-0000-0000-000000000000'::uuid)", cursorExpression: "$16::uuid", direction: term.Direction},
 			)
 		case MyWorkActionItemGroupingCompletionDueDate:
 			components = append(components,
-				myWorkSQLSortComponent{expression: "(completion_due_date is null)", cursorExpression: "$11::boolean", direction: "asc"},
-				myWorkSQLSortComponent{expression: "coalesce(completion_due_date::date,date '9999-12-31')", cursorExpression: "coalesce(nullif($12::text,'')::date,date '9999-12-31')", direction: term.Direction},
+				myWorkSQLSortComponent{expression: "(completion_due_date is null)", cursorExpression: "$17::boolean", direction: "asc"},
+				myWorkSQLSortComponent{expression: "coalesce(completion_due_date::date,date '9999-12-31')", cursorExpression: "coalesce(nullif($18::text,'')::date,date '9999-12-31')", direction: term.Direction},
 			)
 		case MyWorkActionItemGroupingPersonInCharge:
 			components = append(components,
-				myWorkSQLSortComponent{expression: `person_in_charge_sort_name collate "C"`, cursorExpression: `$18::text collate "C"`, direction: term.Direction},
-				myWorkSQLSortComponent{expression: "person_in_charge_user_id", cursorExpression: "$19::uuid", direction: term.Direction},
+				myWorkSQLSortComponent{expression: `person_in_charge_sort_name collate "C"`, cursorExpression: `$19::text collate "C"`, direction: term.Direction},
+				myWorkSQLSortComponent{expression: "person_in_charge_user_id", cursorExpression: "$20::uuid", direction: term.Direction},
 			)
 		}
 	}

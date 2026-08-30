@@ -6,7 +6,6 @@ import { buildUniversalNestedGroups } from "../../../../frontend/src/modules/gro
 import type { MyWorkActionItem } from "../../../../frontend/src/modules/my-work/myWorkApi.js";
 import {
   DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS,
-  DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS,
   myWorkActionItemGroupingAdapter,
 } from "../../../../frontend/src/modules/my-work/myWorkGrouping.js";
 import {
@@ -34,15 +33,18 @@ test("My Work display entries preserve canonical group and backend row order", (
     ? `header:${entry.depth}:${entry.label}:${entry.rowCount}`
     : `row:${entry.depth}:${entry.rowID}`), [
     "header:0:Red:2",
-    "header:1:Completion due date: 09/01/2026:2",
-    "row:2:red-first",
-    "row:2:red-second",
+    "header:1:No Huddle process:2",
+    "header:2:Completion due date: 09/01/2026:2",
+    "row:3:red-first",
+    "row:3:red-second",
     "header:0:Yellow:1",
-    "header:1:Completion due date: 09/02/2026:1",
-    "row:2:yellow",
+    "header:1:No Huddle process:1",
+    "header:2:Completion due date: 09/02/2026:1",
+    "row:3:yellow",
     "header:0:No color:1",
-    "header:1:No completion due date:1",
-    "row:2:none",
+    "header:1:No Huddle process:1",
+    "header:2:No completion due date:1",
+    "row:3:none",
   ]);
 
   const rowEntries = entries.filter((entry) => entry.kind === "row");
@@ -88,24 +90,24 @@ test("hidden date headers keep due-date-first batches and nested color boundarie
   ], "removing date headers never regroups rows across date batches");
 });
 
-test("Delegated Action Item rows hide date and person headers and remain completely flat", () => {
+test("Delegated Action Item rows show the same three grouping headings as Mine", () => {
   const rows: MyWorkActionItem[] = [
     { entity_id: "alex", name: "Alex item", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-alex", person_in_charge_user_id: "person-alex", person_in_charge_name: "Alex Morgan" },
     { entity_id: "zoe", name: "Zoe item", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-zoe", person_in_charge_user_id: "person-zoe", person_in_charge_name: "Zoe Chen" },
   ];
   const entries = flattenMyWorkGroupedDisplayEntries(
-    buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter),
+    buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter),
     (row) => row.entity_id,
-    new Set(["completion_due_date", "person_in_charge"] as const),
-    true,
   );
 
   assert.deepEqual(entries.map((entry) => entry.kind === "group-header"
     ? `header:${entry.depth}:${entry.field}:${entry.label}`
     : `row:${entry.depth}:${entry.rowID}`), [
     "header:0:color:Yellow",
-    "row:0:alex",
-    "row:0:zoe",
+    "header:1:huddle_process:No Huddle process",
+    "header:2:completion_due_date:Completion due date: 09/01/2026",
+    "row:3:alex",
+    "row:3:zoe",
   ]);
 });
 

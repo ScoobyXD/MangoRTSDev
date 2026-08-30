@@ -31,8 +31,9 @@
 29. Source is immutable after creation and grants no access. Reads resolve the current endpoint name and disclose its typed identity only to a currently authorized viewer; every unavailable case returns a neutral state without hidden identity.
 30. Inline chip insertion or removal changes only editor content and any derived live Huddle Entity edge. It never creates, rewrites, or clears the Action Item Source field.
 31. Recycling a source endpoint preserves its exact Source field value while reads project it as unavailable, and restoring that exact endpoint makes it resolvable again. Permanent endpoint deletion atomically clears matching Source field values so no stale typed reference remains; this lifecycle cleanup is the only allowed post-creation Source mutation.
+32. My Work derives one optional Huddle process only from immutable Source: an exact `huddle_logic_gate` Source identifies itself, while an exact `huddle_node` Source follows only its required `huddle_nodes.huddle_logic_gate_id`. The projection requires current access to both the exact Source and exact owning Huddle Logic Gate, returns one neutral unavailable/no-process state otherwise, and never consults `entity_relationships`.
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 # Process Story: Huddle snapshots stay fixed while Action Item references roll up live
 
@@ -50,7 +51,7 @@ Removing the final reference removes only that resource edge, and each Huddle No
 
 ↓
 
-When that Action Item was created from highlighted text, its immutable typed Source Entity Field keeps the exact creation resource through chip removal, resolves only current permitted data, stays unavailable while the endpoint is recycled, resolves again after restore, and clears on permanent deletion
+When that Action Item was created from highlighted text, its immutable typed Source Entity Field keeps the exact creation resource through chip removal, resolves only current permitted data, stays unavailable while the endpoint is recycled, resolves again after restore, and clears on permanent deletion; My Work may follow an exact Huddle Node Source's required owner only when both endpoints remain accessible and never substitutes a live inline relationship
 
 # Current Email Relationship Business Logic Laws
 
@@ -566,6 +567,8 @@ The required protected Action Item Entity Field Type and linked Entity Field wit
 Creating an Action Item from highlighted editor text MUST validate the exact live same-company endpoint and the actor's current Edit access and write Source in the same transaction as the Action Item and its other required fields. Direct Entities-page creation and existing Action Items MUST have the required linked Source field with a null value. User and ordinary Entity Field APIs MUST reject every post-creation Source update, and Source MUST remain unchanged when an inline chip or derived `entity_relationships` edge is added or removed.
 
 Source MUST grant no access. A read MAY disclose the current endpoint type, ID, name, and canonical icon only after the viewer's current access is rechecked. An unset, missing, inaccessible, recycled, or permanently deleted source MUST return one neutral unavailable state without disclosing hidden identity. A live source rename MUST appear through current endpoint resolution and MUST NOT rewrite Source.
+
+My Work MAY derive an Action Item's Huddle process only when Source is exactly `huddle_logic_gate`, or when Source is exactly `huddle_node` and that current Huddle Node's required `huddle_logic_gate_id` identifies its owner. It MUST recheck current access to both the Source endpoint and owning Huddle Logic Gate before disclosing or sorting by the process ID or current name. Missing or denied access yields the same neutral no-process value, and `entity_relationships` MUST NOT participate in this derivation.
 
 Recycling a source endpoint MUST preserve the exact Source value while making its projection unavailable. Restoring that exact endpoint MUST make the preserved value resolvable again. Permanent endpoint deletion MUST atomically clear every matching Source field value so no stale typed reference remains; that system lifecycle cleanup is the only permitted post-creation mutation.
 

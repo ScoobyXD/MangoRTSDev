@@ -25,7 +25,7 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 	}
 	for key := range queryValues {
 		switch key {
-		case "company_id", "section", "role", "perspective", "grouping", "limit", "cursor", "history":
+		case "company_id", "section", "role", "perspective", "grouping", "ordering", "limit", "cursor", "history":
 		default:
 			writeError(w, http.StatusBadRequest, "unsupported_my_work_query_param")
 			return
@@ -95,6 +95,18 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	orderingValues, orderingSet := queryValues["ordering"]
+	if len(orderingValues) > 1 {
+		writeError(w, http.StatusBadRequest, "invalid_my_work_ordering")
+		return
+	}
+	ordering := strings.TrimSpace(queryValues.Get("ordering"))
+	if orderingSet {
+		if ordering == "" || section != store.MyWorkSectionActionItems {
+			writeError(w, http.StatusBadRequest, "my_work_ordering_only_valid_for_action_items")
+			return
+		}
+	}
 	historyValues, historySet := queryValues["history"]
 	if len(historyValues) > 1 {
 		writeError(w, http.StatusBadRequest, "invalid_my_work_history")
@@ -113,8 +125,8 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "my_work_history_only_valid_for_action_items_or_nodes")
 		return
 	}
-	if history && groupingSet {
-		writeError(w, http.StatusBadRequest, "my_work_history_cannot_be_grouped")
+	if history && (groupingSet || orderingSet) {
+		writeError(w, http.StatusBadRequest, "my_work_history_cannot_be_grouped_or_ordered")
 		return
 	}
 	limit, ok := parsePositiveLimit(queryValues.Get("limit"), store.MyWorkDefaultLimit, store.MyWorkMaxLimit)
@@ -131,7 +143,7 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(actor.User.UserID)
 	response, err := s.repo.GetMyWork(r.Context(), store.MyWorkQuery{
 		CompanyID: companyID, UserID: userID, ViewerUserID: userID,
-		Section: section, Role: raciRole, Perspective: perspective, Grouping: grouping, Limit: limit, Cursor: cursor, History: history,
+		Section: section, Role: raciRole, Perspective: perspective, Grouping: grouping, Ordering: ordering, Limit: limit, Cursor: cursor, History: history,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_my_work_query")

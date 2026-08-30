@@ -2,10 +2,30 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
+import { Simulate } from "react-dom/test-utils";
 import type { MyWorkResponse } from "../../../../frontend/src/modules/my-work/myWorkApi.js";
 import { getQDBusinessDate } from "../../../../frontend/src/modules/logic-gates/qdRatingsApi.js";
 
 type Restore = () => void;
+
+class FakeDataTransfer {
+  private readonly values = new Map<string, string>();
+  effectAllowed = "all";
+  dropEffect = "none";
+  getData(type: string): string { return this.values.get(type) ?? ""; }
+  setData(type: string, value: string): void { this.values.set(type, value); }
+}
+
+async function dragMyWorkField(source: HTMLElement, target: HTMLElement): Promise<void> {
+  const transfer = new FakeDataTransfer() as unknown as DataTransfer;
+  await act(async () => Simulate.dragStart(source, { dataTransfer: transfer }));
+  await act(async () => {
+    Simulate.dragEnter(target, { dataTransfer: transfer });
+    Simulate.dragOver(target, { dataTransfer: transfer });
+    Simulate.drop(target, { dataTransfer: transfer });
+  });
+  await act(async () => Simulate.dragEnd(source, { dataTransfer: transfer }));
+}
 
 const businessDateKey = getQDBusinessDate().dateKey;
 
@@ -50,8 +70,8 @@ function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
     action_items: {
       perspective: "mine",
       items: [
-        { entity_id: "action-red", name: "Red Action", color: "red", completion_due_date: dateKeyAfter(0), completion_due_date_field_id: "field-red", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One" },
-        { entity_id: "action-yellow", name: "Yellow Action", color: "yellow", completion_due_date: dateKeyAfter(1), completion_due_date_field_id: "field-yellow", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One" },
+        { entity_id: "action-red", name: "Red Action", color: "red", huddle_process: { huddle_logic_gate_id: "huddle-weekly", name: "Weekly Huddle" }, assigned_by_user_id: "assigner-1", assigned_by_name: "Avery Assignor", created_timestamp: "2026-08-20T12:00:00Z", completion_due_date: dateKeyAfter(0), completion_due_date_field_id: "field-red", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One" },
+        { entity_id: "action-yellow", name: "Yellow Action", color: "yellow", huddle_process: { huddle_logic_gate_id: "huddle-weekly", name: "Weekly Huddle" }, assigned_by_user_id: "assigner-1", assigned_by_name: "Avery Assignor", created_timestamp: "2026-08-21T12:00:00Z", completion_due_date: dateKeyAfter(1), completion_due_date_field_id: "field-yellow", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One" },
       ],
       next_cursor: "actions-old-cursor",
       has_more: true,
@@ -129,14 +149,15 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
       import("react-dom/client"),
       import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx"),
     ]);
-    const calls: Array<{ path: string; init?: RequestInit }> = [];
+    const calls: Array<{ path: string; init?: RequestInit & { json?: unknown } }> = [];
     const pendingRoles = new Map<string, (value: MyWorkResponse) => void>();
     let resolveActionGrouping: ((value: MyWorkResponse) => void) | undefined;
     let resolveNodeLoadMore: ((value: MyWorkResponse) => void) | undefined;
     let projectAppendAttempts = 0;
-    const requestJSON = <T,>(path: string, init?: RequestInit): Promise<T> => {
+    const requestJSON = <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
       calls.push({ path, init });
       const url = new URL(path, "http://api.test");
+      if (url.pathname === "/v1/saved-views") return Promise.resolve({ saved_views: [] } as T);
       const section = url.searchParams.get("section");
       if (!section) return Promise.resolve(response() as T);
       if (section === "action_items" && url.searchParams.get("cursor")) {
@@ -164,6 +185,13 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
             has_more: false,
           },
         }) as T);
+      }
+      if (
+        section === "action_items"
+        && url.searchParams.get("grouping") === "color:asc,huddle_process:asc,completion_due_date:asc"
+        && url.searchParams.get("ordering") === "none"
+      ) {
+        return Promise.resolve(response({ nodes: undefined, processes: undefined, projects: undefined }) as T);
       }
       if (section === "action_items" && url.searchParams.has("grouping")) {
         return new Promise<T>((resolve) => {
@@ -231,9 +259,11 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
         </React.Profiler>,
       );
       await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    assert.equal(calls.length, 1);
+    assert.equal(calls.filter((call) => call.path.startsWith("/v1/saved-views?")).length, 2, "Mine and Delegated preferences load independently");
+    assert.equal(calls.filter((call) => call.path.startsWith("/v1/my-work?")).length, 2, "the initial read is followed by one preference-shaped Mine read");
     assert.equal(new URL(calls[0]?.path ?? "", "http://api.test").searchParams.has("section"), false);
     assert.equal(container.querySelector("h1")?.textContent, "My Work");
     assert.deepEqual(
@@ -272,9 +302,9 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     );
     assert.notEqual(middleViewButtons[0]?.style.border, "1px solid transparent", "the selected Processes option has a visible border");
     assert.equal(middleViewButtons[1]?.style.border, "1px solid transparent", "the unselected Nodes option has no selected border");
-    const initialGroupButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Group "]'));
-    assert.deepEqual(initialGroupButtons.map((button) => button.getAttribute("aria-label")), ["Group Action Items"]);
-    assert.deepEqual(initialGroupButtons.map((button) => button.textContent), [""], "the active section grouper is icon-only");
+    const groupButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Group "]'));
+    assert.deepEqual(groupButtons.map((button) => button.getAttribute("aria-label")), ["Group and order Action Items"]);
+    assert.deepEqual(groupButtons.map((button) => button.textContent), [""], "the active section grouper is icon-only");
     const historyButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-pressed][data-my-work-history-selected]'));
     assert.deepEqual(historyButtons.map((button) => button.getAttribute("aria-label")), ["Open History"]);
     assert.deepEqual(historyButtons.map((button) => button.textContent?.trim()), ["History"], "the existing Action Item History label remains beside its icon");
@@ -285,7 +315,15 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     const actionHeaderIconPaths = actionItemsSection?.querySelectorAll<SVGPathElement>('[data-my-work-section-icon="action_items"] svg path');
     assert.equal(actionHeaderIconPaths?.[0]?.getAttribute("stroke"), "#facc15", "only the Action Items header target uses the established yellow outer ring");
     assert.equal(actionHeaderIconPaths?.[1]?.getAttribute("stroke"), "#ef4444", "the Action Items header target uses the established red inner ring");
-    assert.equal(container.querySelectorAll('[data-my-work-group-field="completion_due_date"], [data-my-work-group-field="due_date"]').length, 0, "date ordering never renders a date group header");
+    assert.equal(container.querySelectorAll('[data-my-work-group-field="completion_due_date"]').length, 2, "Completion due date is a visible third Action Item grouping level");
+    assert.equal(container.querySelectorAll('[data-my-work-group-field="due_date"]').length, 0, "Node due dates retain their compact hidden-heading presentation");
+    assert.equal(container.querySelectorAll('button[data-my-work-group-field="huddle_process"][data-my-work-group-key="huddle-weekly"]').length, 2, "permission-safe Huddle process groups are clickable");
+    let openedHuddle: unknown;
+    dom.window.addEventListener("mangorts:huddle-open", ((event: CustomEvent) => { openedHuddle = event.detail; }) as EventListener, { once: true });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[data-my-work-group-field="huddle_process"][data-my-work-group-key="huddle-weekly"]')?.click();
+    });
+    assert.deepEqual(openedHuddle, { resourceType: "huddle_logic_gate", resourceID: "huddle-weekly", name: "Weekly Huddle" });
     assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Red Action"]')?.value, "Due Today");
     assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Yellow Action"]')?.value, "Due Tomorrow");
     assert.equal(container.querySelectorAll('[data-my-work-due-date="true"] button[aria-haspopup="dialog"]').length, 2, "the active Action Item forms keep their calendar controls");
@@ -365,6 +403,10 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     ]);
     assert.deepEqual(separators.map((separator) => separator.getAttribute("aria-orientation")), ["vertical", "vertical"], "only the two column dividers remain");
     assert.equal(separators.every((separator) => separator.tabIndex === 0 && Boolean(separator.getAttribute("aria-controls"))), true);
+    for (const separator of separators) {
+      assert.match(separator.querySelector<HTMLElement>(".my-work-resizer__grip")?.style.background ?? "", /34, 211, 238/, "vertical resize marks start cyan on the neutral track");
+      assert.match(separator.querySelector<HTMLElement>(".my-work-resizer__grip")?.style.background ?? "", /168, 85, 247/, "vertical resize marks finish purple");
+    }
     assert.equal(container.querySelector('[data-my-work-left-column="true"]'), null, "the full-height Action Items column has no nested height split");
     assert.equal(container.querySelector('[data-my-work-resizer="horizontal"]'), null, "no horizontal split handle remains");
 
@@ -463,7 +505,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.equal(nodeSection.querySelector<HTMLButtonElement>('button[aria-label="Group Nodes"]')?.textContent, "", "Node grouping remains icon-only");
     assert.deepEqual(
       Array.from(container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Group "]')).map((button) => button.getAttribute("aria-label")),
-      ["Group Action Items", "Group Nodes"],
+      ["Group and order Action Items", "Group Nodes"],
       "Nodes-only grouping controls appear with the Nodes view",
     );
     assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Due Date for Context Node"]')?.value, "Due in three days");
@@ -534,7 +576,8 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     const actionLoadCall = calls.find((call) => new URL(call.path, "http://api.test").searchParams.get("cursor") === "actions-old-cursor");
     const actionLoadURL = new URL(actionLoadCall?.path ?? "", "http://api.test");
     assert.equal(actionLoadURL.searchParams.get("section"), "action_items");
-    assert.equal(actionLoadURL.searchParams.get("grouping"), "color:asc,completion_due_date:asc");
+    assert.equal(actionLoadURL.searchParams.get("grouping"), "color:asc,huddle_process:asc,completion_due_date:asc");
+    assert.equal(actionLoadURL.searchParams.get("ordering"), "none");
     assert.match(actionScroll.textContent ?? "", /Red Action/);
     assert.match(actionScroll.textContent ?? "", /Second Action/);
     assert.doesNotMatch(actionScroll.textContent ?? "", /Duplicate Red/, "cursor overlap is de-duplicated by exact typed ID");
@@ -665,13 +708,15 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     });
     assert.match(container.textContent ?? "", /Consulted Process/, "the new role may return an ID loaded by the prior role");
 
-    const beforeGroupingCalls = calls.length;
-    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Group Action Items"]')?.click());
-    const actionGroupingDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Action Item grouping"]');
+    const beforeGroupingCalls = calls.filter((call) => call.path.startsWith("/v1/my-work?")).length;
+    await act(async () => groupButtons[0]?.click());
+    const actionGroupingDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Group by"]');
     assert.equal(actionGroupingDialog?.parentElement, dom.window.document.body, "the grouping dialog is portaled above the clipped section");
     assert.equal(actionGroupingDialog?.style.position, "fixed");
     assert.equal(actionGroupingDialog?.style.borderRadius, "14px", "the grouping dialog uses the raised surface treatment");
     assert.match(actionGroupingDialog?.style.boxShadow ?? "", /14px 16px 38px/);
+    assert.ok(actionGroupingDialog?.querySelector('[data-my-work-action-item-ordering="true"]'), "one popover contains a separate Order items by section");
+    assert.match(actionGroupingDialog?.querySelector<HTMLSelectElement>('select[aria-label="Add grouping level"]')?.style.border ?? "", /100, 116, 139/, "Action Item grouping add controls use the neutral slate accent");
     const firstGroupingRow = actionGroupingDialog?.querySelector<HTMLSelectElement>('select[aria-label="Grouping level 1 field"]')?.parentElement?.parentElement;
     assert.equal(firstGroupingRow?.style.borderRadius, "10px", "grouping rows and their level tags are raised surfaces");
     const directionButton = actionGroupingDialog?.querySelector<HTMLButtonElement>('button[aria-label="Sort descending for grouping level 1"]');
@@ -680,10 +725,12 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
       directionButton.click();
       await Promise.resolve();
     });
-    assert.equal(calls.length, beforeGroupingCalls + 1);
-    const actionGroupingURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
+    assert.equal(calls.filter((call) => call.path.startsWith("/v1/my-work?")).length, beforeGroupingCalls + 1);
+    const actionGroupingCall = calls.filter((call) => call.path.startsWith("/v1/my-work?")).at(-1);
+    const actionGroupingURL = new URL(actionGroupingCall?.path ?? "", "http://api.test");
     assert.equal(actionGroupingURL.searchParams.get("section"), "action_items");
-    assert.equal(actionGroupingURL.searchParams.get("grouping"), "color:desc,completion_due_date:asc");
+    assert.equal(actionGroupingURL.searchParams.get("grouping"), "color:desc,huddle_process:asc,completion_due_date:asc");
+    assert.equal(actionGroupingURL.searchParams.get("ordering"), "none");
     const actionSection = container.querySelector<HTMLElement>('[data-my-work-section="action_items"]');
     assert.doesNotMatch(actionSection?.textContent ?? "", /Red Action|Yellow Action/, "regrouping clears the old rows immediately");
     assert.doesNotMatch(actionSection?.textContent ?? "", /\bPrevious\b|\bNext\b|Page \d/, "My Work never exposes page controls");
@@ -697,6 +744,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
       await Promise.resolve();
     });
     assert.match(actionSection?.textContent ?? "", /Regrouped Red Action/, "regrouping may return an ID from the replaced section with fresh presentation data");
+    await act(async () => groupButtons[0]?.click());
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('[data-my-work-middle-view="nodes"]')?.click();
@@ -705,7 +753,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     nodeSection = container.querySelector<HTMLElement>('[data-my-work-section="nodes"]');
     assert.ok(nodeSection);
     assert.equal(container.querySelector('[data-my-work-section="processes"]'), null, "Processes stays unmounted while Node controls are used");
-    const beforeNodeGroupingCalls = calls.length;
+    const beforeNodeGroupingCalls = calls.filter((call) => call.path.startsWith("/v1/my-work?")).length;
     await act(async () => nodeSection?.querySelector<HTMLButtonElement>('button[aria-label="Group Nodes"]')?.click());
     const nodeGroupingDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Node grouping"]');
     const removeNodeDueDate = nodeGroupingDialog?.querySelector<HTMLButtonElement>('button[aria-label="Remove grouping level 2"]');
@@ -714,8 +762,8 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
       removeNodeDueDate.click();
       await Promise.resolve();
     });
-    assert.equal(calls.length, beforeNodeGroupingCalls + 1);
-    const nodeGroupingURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
+    assert.equal(calls.filter((call) => call.path.startsWith("/v1/my-work?")).length, beforeNodeGroupingCalls + 1);
+    const nodeGroupingURL = new URL(calls.filter((call) => call.path.startsWith("/v1/my-work?")).at(-1)?.path ?? "", "http://api.test");
     assert.equal(nodeGroupingURL.searchParams.get("section"), "nodes");
     assert.equal(nodeGroupingURL.searchParams.get("grouping"), "priority:asc");
     assert.equal(nodeGroupingURL.searchParams.has("cursor"), false);
@@ -731,35 +779,38 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     const delegatedURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
     assert.equal(delegatedURL.searchParams.get("section"), "action_items");
     assert.equal(delegatedURL.searchParams.get("perspective"), "delegated");
-    assert.equal(delegatedURL.searchParams.get("grouping"), "color:asc,completion_due_date:asc,person_in_charge:asc", "Delegated loads its automatic three-level grouping stack");
+    assert.equal(delegatedURL.searchParams.get("grouping"), "color:asc,huddle_process:asc,completion_due_date:asc", "Delegated loads the same automatic three-level grouping stack as Mine");
+    assert.equal(delegatedURL.searchParams.get("ordering"), "person_in_charge:asc", "Delegated orders leaf items by Person in charge");
     assert.match(actionSection?.textContent ?? "", /Delegated Action/);
     assert.match(actionSection?.textContent ?? "", /Alex Morgan/, "Delegated shows the Person in charge inline");
     const delegatedPersonLabel = actionSection?.querySelector<HTMLElement>('[data-my-work-person-in-charge="true"]');
     assert.ok(delegatedPersonLabel?.querySelector('[data-my-work-person-in-charge-icon="true"] svg'), "the Person in charge label shows a person icon");
     assert.equal(delegatedPersonLabel?.nextElementSibling?.getAttribute("data-my-work-due-date"), "true", "the Person in charge label sits immediately left of the due date");
     assert.equal(actionSection?.querySelector('[data-my-work-group-field="person_in_charge"]'), null, "Person in charge never renders a group header");
-    assert.equal(actionSection?.querySelector('[data-my-work-entry-kind="row"]')?.getAttribute("style")?.includes("padding-left: 0"), true, "Delegated rows remain flat");
+    assert.equal(actionSection?.querySelector('[data-my-work-entry-kind="row"]')?.getAttribute("style")?.includes("padding-left: 76px"), true, "Delegated rows sit beneath the visible three-level hierarchy");
     assert.equal(perspectiveRadios[1]?.getAttribute("aria-checked"), "true");
     assert.equal(dom.window.document.activeElement, perspectiveRadios[1]);
 
-    await act(async () => actionSection?.querySelector<HTMLButtonElement>('button[aria-label="Group Action Items"]')?.click());
-    const delegatedGroupingDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Action Item grouping"]');
-    const personDirectionButton = delegatedGroupingDialog?.querySelector<HTMLButtonElement>('button[aria-label="Sort descending for grouping level 3"]');
-    assert.ok(personDirectionButton, "Delegated exposes an Asc/Desc control for Person in charge");
+    await act(async () => groupButtons[0]?.click());
+    const delegatedGroupingDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Group by"]');
+    const personDirectionButton = delegatedGroupingDialog?.querySelector<HTMLButtonElement>('button[aria-label="Sort descending for item ordering 1"]');
+    assert.ok(personDirectionButton, "Delegated exposes an independent Asc/Desc leaf-order control for Person in charge");
     await act(async () => {
       personDirectionButton.click();
       await Promise.resolve();
     });
-    const personDirectionURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
-    assert.equal(personDirectionURL.searchParams.get("grouping"), "color:asc,completion_due_date:asc,person_in_charge:desc");
+    const personDirectionURL = new URL(calls.filter((call) => call.path.startsWith("/v1/my-work?")).at(-1)?.path ?? "", "http://api.test");
+    assert.equal(personDirectionURL.searchParams.get("grouping"), "color:asc,huddle_process:asc,completion_due_date:asc");
+    assert.equal(personDirectionURL.searchParams.get("ordering"), "person_in_charge:desc");
 
     await act(async () => {
       perspectiveRadios[0]?.click();
       await Promise.resolve();
     });
-    const mineURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
+    const mineURL = new URL(calls.filter((call) => call.path.startsWith("/v1/my-work?")).at(-1)?.path ?? "", "http://api.test");
     assert.equal(mineURL.searchParams.get("perspective"), "mine");
-    assert.equal(mineURL.searchParams.get("grouping"), "color:desc,completion_due_date:asc", "Mine restores its independent two-level grouping stack");
+    assert.equal(mineURL.searchParams.get("grouping"), "color:desc,huddle_process:asc,completion_due_date:asc", "Mine restores its independent three-level grouping stack");
+    assert.equal(mineURL.searchParams.get("ordering"), "none");
     await act(async () => {
       resolveActionGrouping?.(response({ nodes: undefined, processes: undefined, projects: undefined }));
       await Promise.resolve();
@@ -797,6 +848,137 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
   }
 });
 
+test("My Work loads and persists independent Mine and Delegated row-field orders", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/my-work",
+  });
+  const restores: Restore[] = [];
+  installMyWorkDOMGlobals(dom, restores);
+  let mountedRoot: { unmount(): void } | null = null;
+  try {
+    const [{ createRoot }, { MyWorkContent }] = await Promise.all([
+      import("react-dom/client"),
+      import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx"),
+    ]);
+    const savedWrites: Array<Record<string, unknown>> = [];
+    const item = {
+      entity_id: "action-fields",
+      name: "Field Order Action",
+      color: "red",
+      completion_due_date: "2026-09-01",
+      completion_due_date_field_id: "field-due",
+      person_in_charge_user_id: "person-1",
+      person_in_charge_name: "Person One",
+      assigned_by_user_id: "assigner-1",
+      assigned_by_name: "Assignor One",
+      created_timestamp: "2026-08-20T10:00:00Z",
+      source: { resource_type: "huddle_node", resource_id: "node-1", name: "Source Node", parent_resource_id: "huddle-1" },
+      huddle_process: { huddle_logic_gate_id: "huddle-1", name: "Weekly Huddle" },
+      status: "in_progress",
+    };
+    const requestJSON = <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      const url = new URL(path, "http://api.test");
+      if (url.pathname === "/v1/saved-views" && init?.method !== "PUT") {
+        const surface = url.searchParams.get("surface");
+        const delegated = surface === "my_work_action_items_delegated";
+        return Promise.resolve({
+          saved_views: [{
+            company_id: "company-1",
+            saved_view_id: delegated ? "delegated-view" : "mine-view",
+            surface,
+            principal: "user",
+            principal_id: "viewer-1",
+            name: delegated ? "My Work Delegated" : "My Work Mine",
+            groupings: [
+              { field: "color", direction: "asc" },
+              { field: "huddle_process", direction: "asc" },
+              { field: "completion_due_date", direction: "asc" },
+            ],
+            settings: {
+              ordering: delegated ? [{ field: "person_in_charge", direction: "asc" }] : [],
+              displayed_fields: delegated
+                ? ["huddle_process", "person_in_charge"]
+                : ["source", "assigned_by"],
+            },
+            position: 1000,
+          }],
+        } as T);
+      }
+      if (url.pathname.startsWith("/v1/saved-views/") && init?.method === "PUT") {
+        savedWrites.push(init.json as Record<string, unknown>);
+        return Promise.resolve(init.json as T);
+      }
+      const perspective = url.searchParams.get("perspective") === "delegated" ? "delegated" : "mine";
+      const actionPage = { perspective, items: [item], has_more: false };
+      if (url.searchParams.get("section") === "action_items") {
+        return Promise.resolve(response({
+          action_items: actionPage,
+          nodes: undefined,
+          processes: undefined,
+          projects: undefined,
+        }) as T);
+      }
+      return Promise.resolve(response({
+        action_items: actionPage,
+        nodes: { items: [], has_more: false },
+        processes: { role: "responsible", items: [], has_more: false },
+        projects: { items: [], has_more: false },
+      }) as T);
+    };
+
+    const container = dom.window.document.getElementById("root");
+    assert.ok(container);
+    const root = createRoot(container);
+    mountedRoot = root;
+    await act(async () => {
+      root.render(<MyWorkContent companyID="company-1" subjectID="viewer-1" requestJSON={requestJSON} />);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const actionSection = container.querySelector<HTMLElement>('[data-my-work-section="action_items"]');
+    assert.ok(actionSection);
+    const visibleFieldIDs = () => Array.from(actionSection.querySelectorAll<HTMLElement>(
+      '[data-my-work-row="action-item"] [data-my-work-action-item-field]',
+    )).map((field) => field.dataset.myWorkActionItemField);
+    assert.deepEqual(visibleFieldIDs(), ["source", "assigned_by"], "Mine uses its saved left-to-right field order");
+    const settingsButton = actionSection.querySelector<HTMLButtonElement>('button[data-my-work-action-item-field-settings="true"]');
+    assert.equal(settingsButton?.nextElementSibling?.getAttribute("data-my-work-history-selected"), "false", "row settings sits immediately left of History");
+
+    const delegatedButton = Array.from(actionSection.querySelectorAll<HTMLButtonElement>('[role="radio"]'))
+      .find((button) => button.textContent === "Delegated");
+    await act(async () => {
+      delegatedButton?.click();
+      await Promise.resolve();
+    });
+    assert.deepEqual(visibleFieldIDs(), ["huddle_process", "person_in_charge"], "Delegated uses its own saved field order");
+
+    await act(async () => settingsButton?.click());
+    const huddleField = dom.window.document.querySelector<HTMLElement>(
+      '[data-action-item-inline-field-perspective="delegated"]'
+        + '[data-action-item-inline-field-location="tray"]'
+        + '[data-action-item-inline-field-id="huddle_process"]',
+    );
+    const insertion = dom.window.document.querySelector<HTMLElement>(
+      '[data-action-item-inline-field-insertion-perspective="delegated"]'
+        + '[data-action-item-inline-field-insertion-index="2"]',
+    );
+    assert.ok(huddleField && insertion);
+    await dragMyWorkField(huddleField, insertion);
+    await act(async () => { await Promise.resolve(); });
+    assert.deepEqual(visibleFieldIDs(), ["person_in_charge", "huddle_process"], "dragging the settings tray updates row placement immediately");
+    const delegatedWrite = savedWrites.at(-1);
+    assert.equal(delegatedWrite?.surface, "my_work_action_items_delegated");
+    assert.deepEqual((delegatedWrite?.settings as { displayed_fields?: string[] }).displayed_fields, ["person_in_charge", "huddle_process"]);
+    assert.deepEqual((delegatedWrite?.settings as { ordering?: unknown[] }).ordering, [{ field: "person_in_charge", direction: "asc" }]);
+  } finally {
+    if (mountedRoot) await act(async () => mountedRoot?.unmount());
+    for (const restore of restores.reverse()) restore();
+    dom.window.close();
+  }
+});
+
 test("My Work toggles completed History in place, refreshes Action Item edits, and saves inline due dates", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
@@ -807,9 +989,8 @@ test("My Work toggles completed History in place, refreshes Action Item edits, a
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { Simulate }, { MyWorkContent }, { EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION }] = await Promise.all([
+    const [{ createRoot }, { MyWorkContent }, { EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION }] = await Promise.all([
       import("react-dom/client"),
-      import("react-dom/test-utils"),
       import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx"),
       import("../../../../frontend/src/modules/editor/editorEntityLinks.js"),
     ]);
@@ -855,6 +1036,7 @@ test("My Work toggles completed History in place, refreshes Action Item edits, a
         return {} as T;
       }
       const url = new URL(path, "http://api.test");
+      if (url.pathname === "/v1/saved-views") return { saved_views: [] } as T;
       const section = url.searchParams.get("section");
       if (!section) return response({
         action_items: actionPage(),
@@ -908,7 +1090,7 @@ test("My Work toggles completed History in place, refreshes Action Item edits, a
       await Promise.resolve();
     });
     assert.equal(actionHistory.getAttribute("aria-pressed"), "true");
-    assert.equal(actionSection.querySelector<HTMLButtonElement>('button[aria-label="Group Action Items"]')?.disabled, true);
+    assert.equal(actionSection.querySelector<HTMLButtonElement>('button[aria-label="Group and order Action Items"]')?.disabled, true);
     assert.deepEqual(
       Array.from(actionSection.querySelectorAll<HTMLElement>('[data-my-work-target="action-item"]')).map((row) => row.textContent?.trim()),
       ["Newest completed Action", "Older completed Action"],
@@ -1155,7 +1337,17 @@ test("My Work reloads the same resource ID when the subject changes", async () =
       import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx"),
     ]);
     let initialRequests = 0;
-    const requestJSON = <T,>(_path: string, _init?: RequestInit): Promise<T> => {
+    const requestJSON = <T,>(path: string, _init?: RequestInit): Promise<T> => {
+      const url = new URL(path, "http://api.test");
+      if (url.pathname === "/v1/saved-views") return Promise.resolve({ saved_views: [] } as T);
+      if (url.searchParams.get("section") === "action_items") {
+        return Promise.resolve(response({
+          action_items: { items: [], has_more: false },
+          nodes: undefined,
+          processes: undefined,
+          projects: undefined,
+        }) as T);
+      }
       initialRequests += 1;
       const subjectLabel = initialRequests === 1 ? "First Subject Process" : "Second Subject Process";
       return Promise.resolve(response({
