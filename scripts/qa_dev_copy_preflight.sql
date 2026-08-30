@@ -123,7 +123,8 @@ begin
       '20260828_z_huddle_logic_gate_attachments.sql',
       '20260828_zz_huddle_logic_gate_action_item_relationships.sql',
       '20260829_action_item_delegation_source.sql',
-      '20260829_my_work_node_completion_transition.sql'
+      '20260829_my_work_node_completion_transition.sql',
+      '20260829_z_action_item_source_entity_field.sql'
     )
   ) then
     raise exception 'STOP: Dev Entity or Huddle workspace migration ledger changed after the approved read-only audit';

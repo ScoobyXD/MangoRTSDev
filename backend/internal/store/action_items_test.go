@@ -1,8 +1,11 @@
 package store
 
 import (
+	"bytes"
+	"crypto/sha1"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -114,19 +117,93 @@ func TestEntityRelationshipForwardMigrationAddsExactHuddleLogicGateEndpoints(t *
 	}
 }
 
-func TestActionItemSourceSchemaUsesImmutableResourceFieldWithoutDedicatedTable(t *testing.T) {
-	for _, path := range []string{
-		"../../db/migrations/20260829_action_item_delegation_source.sql",
-		"../../db/schema.sql",
+func TestActionItemSourceHistoricalMigrationRemainsTableBased(t *testing.T) {
+	const historicalPath = "../../db/migrations/20260829_action_item_delegation_source.sql"
+	raw, err := os.ReadFile(historicalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lf := bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
+	lf = bytes.ReplaceAll(lf, []byte("\r"), nil)
+	blob := append([]byte(fmt.Sprintf("blob %d\x00", len(lf))), lf...)
+	if got, want := fmt.Sprintf("%x", sha1.Sum(blob)), "cdbfe46e9c6676d599c2d13b981994e324012a2e"; got != want {
+		t.Fatalf("historical Action Item Source migration Git blob=%s, want shipped 42c57a66 blob %s", got, want)
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	for _, required := range []string{
+		"create table action_item_sources",
+		"create trigger trg_validate_action_item_source",
+		"mangorts_validate_action_item_source",
+		"mangorts_delete_action_item_sources_for_resource",
+		"trg_delete_node_action_item_sources",
+		"trg_delete_logic_gate_action_item_sources",
+		"trg_delete_project_action_item_sources",
+		"trg_delete_huddle_node_action_item_sources",
+		"trg_delete_huddle_logic_gate_action_item_sources",
+		"trg_delete_kpi_action_item_sources",
 	} {
+		if !strings.Contains(normalized, required) {
+			t.Fatalf("historical Action Item Source migration is missing shipped contract %q", required)
+		}
+	}
+	if strings.Contains(normalized, "a17e0000-0000-4000-8000-000000000107") {
+		t.Fatal("historical table-based migration was rewritten to create the canonical Source Entity field")
+	}
+}
+
+func TestActionItemSourceForwardMigrationAndCanonicalSchemaUseOnlyEntityFields(t *testing.T) {
+	const forwardPath = "../../db/migrations/20260829_z_action_item_source_entity_field.sql"
+	forwardRaw, err := os.ReadFile(forwardPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forward := strings.ToLower(strings.Join(strings.Fields(string(forwardRaw)), " "))
+	for _, required := range []string{
+		"drop trigger trg_delete_node_action_item_sources on nodes",
+		"drop trigger trg_delete_logic_gate_action_item_sources on logic_gates",
+		"drop trigger trg_delete_project_action_item_sources on projects",
+		"drop trigger trg_delete_huddle_node_action_item_sources on huddle_nodes",
+		"drop trigger trg_delete_huddle_logic_gate_action_item_sources on huddle_logic_gates",
+		"drop trigger trg_delete_kpi_action_item_sources on kpis",
+		"drop table action_item_sources",
+		"drop function mangorts_validate_action_item_source()",
+		"drop function mangorts_delete_action_item_sources_for_resource()",
+	} {
+		if !strings.Contains(forward, required) {
+			t.Fatalf("forward Action Item Source migration is missing explicit retirement %q", required)
+		}
+	}
+	if strings.Contains(forward, "drop table action_item_sources cascade") ||
+		strings.Contains(forward, "drop function mangorts_validate_action_item_source() cascade") ||
+		strings.Contains(forward, "drop function mangorts_delete_action_item_sources_for_resource() cascade") {
+		t.Fatal("forward Action Item Source migration retires legacy objects with CASCADE")
+	}
+	retirementOrder := []string{
+		"drop trigger trg_delete_node_action_item_sources on nodes",
+		"drop trigger trg_delete_logic_gate_action_item_sources on logic_gates",
+		"drop trigger trg_delete_project_action_item_sources on projects",
+		"drop trigger trg_delete_huddle_node_action_item_sources on huddle_nodes",
+		"drop trigger trg_delete_huddle_logic_gate_action_item_sources on huddle_logic_gates",
+		"drop trigger trg_delete_kpi_action_item_sources on kpis",
+		"drop table action_item_sources",
+		"drop function mangorts_validate_action_item_source()",
+		"drop function mangorts_delete_action_item_sources_for_resource()",
+	}
+	last := -1
+	for _, statement := range retirementOrder {
+		position := strings.Index(forward, statement)
+		if position <= last {
+			t.Fatalf("forward Action Item Source retirement is out of order at %q", statement)
+		}
+		last = position
+	}
+
+	for _, path := range []string{forwardPath, "../../db/schema.sql"} {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
-		if strings.Contains(normalized, "action_item_sources") {
-			t.Fatalf("%s retains the one-off Action Item Source table", path)
-		}
 		for _, required := range []string{
 			"a17e0000-0000-4000-8000-000000000107",
 			"'source','resource'",
@@ -142,6 +219,61 @@ func TestActionItemSourceSchemaUsesImmutableResourceFieldWithoutDedicatedTable(t
 		} {
 			if !strings.Contains(normalized, required) {
 				t.Fatalf("%s is missing Action Item Source lifecycle guard %q", path, required)
+			}
+		}
+	}
+	canonicalRaw, err := os.ReadFile("../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	canonical := strings.ToLower(strings.Join(strings.Fields(string(canonicalRaw)), " "))
+	if strings.Contains(canonical, "action_item_sources") {
+		t.Fatal("canonical schema retains the retired one-off Action Item Source table or helper objects")
+	}
+}
+
+func TestActionItemSourceEntityFieldPreflightIsReadOnlyDBeaverSQL(t *testing.T) {
+	raw, err := os.ReadFile("../../../scripts/action_item_source_entity_field_preflight.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalized := strings.ToLower(strings.Join(strings.Fields(string(raw)), " "))
+	for _, required := range []string{
+		"begin transaction isolation level repeatable read read only;",
+		"current_setting('server_version')",
+		"current_setting('server_version_num')",
+		"170000",
+		"'fresh'",
+		"'prior_applied'",
+		"'final'",
+		"'partial_drift'",
+		"'ready'",
+		"'stop'",
+		"next_action",
+		"except",
+		"count(*)",
+	} {
+		if !strings.Contains(normalized, required) {
+			t.Fatalf("Action Item Source preflight is missing %q", required)
+		}
+	}
+	if strings.Count(normalized, " except ") < 2 {
+		t.Fatal("Action Item Source preflight does not compare exact unordered column sets in both directions")
+	}
+	if strings.Contains(normalized, "ordinal_position") {
+		t.Fatal("Action Item Source preflight treats physical column order as schema drift")
+	}
+	if !strings.HasSuffix(strings.TrimSpace(normalized), "rollback;") {
+		t.Fatal("Action Item Source preflight does not end by rolling back its read-only transaction")
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		trimmed := strings.ToLower(strings.TrimSpace(line))
+		if strings.HasPrefix(trimmed, "\\") {
+			t.Fatalf("Action Item Source preflight contains psql-only command %q", strings.TrimSpace(line))
+		}
+		for _, writePrefix := range []string{"insert ", "update ", "delete ", "alter ", "drop ", "create ", "truncate ", "grant ", "revoke "} {
+			if strings.HasPrefix(trimmed, writePrefix) {
+				t.Fatalf("Action Item Source preflight contains write statement %q", strings.TrimSpace(line))
 			}
 		}
 	}

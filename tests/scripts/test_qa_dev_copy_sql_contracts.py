@@ -272,6 +272,10 @@ class QADevCopySQLContracts(unittest.TestCase):
             "'20260829_my_work_node_completion_transition.sql'",
             self.preflight,
         )
+        self.assertIn(
+            "'20260829_z_action_item_source_entity_field.sql'",
+            self.preflight,
+        )
         self.assertNotIn(
             "to_regclass('public.action_item_huddle_relationships') is null",
             self.sanitizer,
