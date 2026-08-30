@@ -47,9 +47,7 @@ The later human-run conversion/cutover is separate: drain editor writes or enter
 
 ### 20260829 Action Item delegation and Source
 
-`backend/db/migrations/20260829_action_item_delegation_source.sql` is the immutable shipped migration that added Assigned by and the former `action_item_sources` table. `backend/db/migrations/20260829_z_action_item_source_entity_field.sql` is the forward-only cutover to the protected `source` / `Source` / `resource` Entity Field. It copies each exact live or recycled legacy pair, leaves null only when no pair exists, removes the legacy recycle key and objects, and leaves Entity Fields as the sole Source authority. It never infers Source from creator data, copied labels, inline relationships, or editor history.
-
-Run the complete read-only `scripts/action_item_source_entity_field_preflight.sql` in DBeaver before the normal migration task. `FRESH / READY` means run the normal migrator so the historical file and then the forward file execute in order. `PRIOR_APPLIED / READY` means the historical filename is already recorded and only the forward file is pending. `FINAL / READY` means no write is required. `PARTIAL_DRIFT / STOP` means stop and investigate. Never manually rerun or replace the historical file, and never apply this rollout to a live database from an agent task.
+`backend/db/migrations/20260829_action_item_delegation_source.sql` is the immutable shipped migration that added Assigned by and the former `action_item_sources` table. `backend/db/migrations/20260829_z_action_item_source_entity_field.sql` is the forward-only cutover to the protected `source` / `Source` / `resource` Entity Field. This development-only cutover intentionally discards legacy Source rows and recycled Source payloads, creates one null Source field for each existing Action Item, removes the old objects, and leaves Entity Fields as the sole Source authority. Apply it through the normal migration task. Never manually rerun or replace the historical file, and never apply this rollout to a live database from an agent task.
 
 ### 20260829 My Work Node completion transition
 

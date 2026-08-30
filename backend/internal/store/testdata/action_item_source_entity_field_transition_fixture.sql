@@ -326,15 +326,13 @@ before insert or update or delete on public.entity_fields
 for each row execute function public.mangorts_protect_action_item_entity_field();
 
 insert into public.companies(company_id,name) values
-  ('10000000-0000-4000-8000-000000000001','Source transition A'),
-  ('10000000-0000-4000-8000-000000000002','Source transition B');
+  ('10000000-0000-4000-8000-000000000001','Source transition');
 
 insert into public.company_memberships(company_id,user_id) values
   ('10000000-0000-4000-8000-000000000001','11000000-0000-4000-8000-000000000001');
 
 insert into public.entity_types(company_id,entity_type_id,name,system_key) values
-  ('10000000-0000-4000-8000-000000000001','a17e0000-0000-4000-8000-000000000001','Action Item','action_item'),
-  ('10000000-0000-4000-8000-000000000002','a17e0000-0000-4000-8000-000000000001','Action Item','action_item');
+  ('10000000-0000-4000-8000-000000000001','a17e0000-0000-4000-8000-000000000001','Action Item','action_item');
 
 insert into public.entities(company_id,entity_id,entity_type_id,name) values
   ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','a17e0000-0000-4000-8000-000000000001','Live Source Action'),
@@ -373,14 +371,12 @@ join public.entity_field_types template
 insert into public.entity_field_types(
   company_id,entity_field_type_id,entity_type_id,name,field_type,config_jsonb,position
 ) values
-  ('10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001','a17e0000-0000-4000-8000-000000000001','Source','text','{}',20),
-  ('10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000002','a17e0000-0000-4000-8000-000000000001','Assigned by','text','{}',21);
+  ('10000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001','a17e0000-0000-4000-8000-000000000001','Source','text','{}',20);
 
 insert into public.entity_fields(
   company_id,entity_field_id,entity_id,entity_field_type_id,name,field_type,value_jsonb,position
 ) values
-  ('10000000-0000-4000-8000-000000000001','60000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001','Source','text','"custom source"',20),
-  ('10000000-0000-4000-8000-000000000001','60000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000002','Assigned by','text','"custom assigned"',21);
+  ('10000000-0000-4000-8000-000000000001','60000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','50000000-0000-4000-8000-000000000001','Source','text','"custom source"',20);
 
 insert into public.nodes(company_id,node_id,name) values
   ('10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Live Source Node');
