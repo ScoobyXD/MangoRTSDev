@@ -8,23 +8,23 @@ MW2 - My Work always uses the authenticated company member as its subject. Team,
 
 MW3 - The My Work header shows the page title and has no grouping button.
 
-MW4 - Beneath the header, My Work has three columns: an unnamed left column, Processes in the middle, and Projects on the right.
+MW4 - Beneath the header, My Work has three columns: Action Items on the left, one shared Processes or Nodes panel in the middle, and Projects on the right.
 
-MW5 - The left column has no shared Work title or other unified section name. It contains an Action Items section followed by a Nodes section.
+MW5 - The left column is one full-height Action Items section. It has no shared Work title, split, height divider, or separate Nodes panel.
 
-MW6 - Action Items and Nodes are permanent separate top-level sections. Grouping never mixes an Action Item with a Node or moves Nodes above Action Items.
+MW6 - The middle header has a Processes and Nodes toggle at its top-left, using each resource's exact icon and label. Each option uses the same icon surface, label size, and icon-to-label spacing as a normal section title, and the complete toggle keeps one stable non-shrinking size when the selected view or its right-side controls change. Processes is selected by default, the selected option has a clear highlighted border, and the middle panel never shows both lists at once.
 
 MW7 - The Action Items section has one Mine or Delegated perspective. Mine is active by default, and the two perspectives never share or duplicate a self-assigned item.
 
-MW8 - The Nodes section has its own R, A, C, I selector and defaults to Responsible. A Node qualifies only when the subject has the selected current effective winning role, whether it comes directly, through a group or nested group, or through RACI inheritance.
+MW8 - The Nodes view has its own R, A, C, I selector and defaults to Responsible. A Node qualifies only when the subject has the selected current effective winning role, whether it comes directly, through a group or nested group, or through RACI inheritance.
 
 MW9 - Selecting a different Node role replaces only the Node rows. It preserves the Node grouping stack, clears stale rows and cursor state, and requests that exact role from the server.
 
 MW10 - Mine requires exact canonical `person_in_charge` equal to the subject. Delegated requires exact canonical `assigned_by` equal to the subject and a nonnull `person_in_charge` for a different member; creator metadata, Source, and relationships are not assignment sources.
 
-MW11 - The Action Items header places its Mine/Delegated control immediately to the right of the Action Items title. The control is larger than the former compact version, keeps the established elevated segmented-control keyboard/accessibility behavior, and gives the selected segment a light-blue gradient instead of a dark fill. The Nodes header orders its right-side controls as RACI, History, then grouping, so the unchanged established RACI selector sits immediately left of History. Each section owns an independent grouping stack, and both grouping buttons use the approved staggered three-line icon.
+MW11 - The Action Items header places its Mine/Delegated control immediately to the right of the Action Items title. The control keeps the established elevated segmented-control keyboard/accessibility behavior and gives the selected segment a light-blue gradient instead of a dark fill. When Nodes is selected, the middle header orders its right-side controls as RACI, History, then grouping. Action Items and Nodes each own an independent grouping stack, and both grouping buttons use the approved staggered three-line icon.
 
-MW12 - No grouping control outside those two section headers changes either section's grouping stack.
+MW12 - Processes has no History or grouping control. No grouping control outside the Action Items header or active Nodes header changes either section's grouping stack.
 
 MW13 - Mine starts with Color followed by Completion due date. Delegated automatically uses Color, Completion due date closest first, then Person in charge alphabetically; each level keeps its own Asc/Desc control, and switching perspectives restores that perspective's stack.
 
@@ -44,7 +44,7 @@ MW20 - Every Process and Project row is clickable and opens that exact Process o
 
 MW21 - An inline Process or Project reference inside another row is independently clickable and opens that exact resource without also opening the surrounding row.
 
-MW22 - The middle column has its own R, A, C, I selector. It is independent from the Nodes selector, defaults to Responsible, and lists only Processes for which the subject has that current effective winning RACI role.
+MW22 - When Processes is selected, the middle header shows only the Process R, A, C, I selector on its right side. It is independent from the Nodes selector, defaults to Responsible, and lists only Processes for which the subject has that current effective winning RACI role.
 
 MW23 - The right column lists a Project when the subject is a direct member of any currently assigned same-company Team group or a member of any current descendant group beneath that Team. Membership only in an ancestor or unrelated group does not qualify.
 
@@ -72,13 +72,13 @@ MW34 - The normal Nodes list excludes a Node whose current status is Done, Compl
 
 MW35 - An Action Item row exposes only the summary needed to display and open that exact Entity. A Delegated row shows the current Person in charge name in a compact inline label with a person icon, immediately left of the due-date label; Mine shows no person label, and neither perspective derives Process, Project, or other resource context.
 
-MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that section nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated clears only Action Items and loads that perspective's independent grouping stack; switching a Node or Process role clears only that section and preserves its grouping stack.
+MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that visible list nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated clears only Action Items and loads that perspective's independent grouping stack; switching a Node or Process role clears only that section and preserves its grouping stack. Switching the middle view changes both its rows and controls without changing either view's selected role, Node grouping stack, or Node History state. Processes and Nodes keep independent scroll positions while switching views, and both saved positions reset for a new company or subject.
 
 MW37 - A section never requests the same next cursor concurrently, ignores canceled or stale responses, rejects a non-advancing cursor, and never appends the same resource twice.
 
-MW38 - My Work has independently adjustable widths between its three columns and an independently adjustable height between Action Items and Nodes. Every divider supports pointer and keyboard adjustment, remains within usable bounds, and saves the company-specific layout locally.
+MW38 - My Work has independently adjustable widths between its three columns. Its two vertical dividers support pointer and keyboard adjustment, remain within usable bounds, and save the company-specific column layout locally; there is no section-height divider.
 
-MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact icons. Action Items, Nodes, Processes, and Projects each show their exact icon beside the section title. Only the Action Items section-header icon combines the established Action Item colors: its outer ring is Yellow and its inner ring is Red; Action Item row and editor-chip icons still use each item's saved color.
+MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact icons. Action Items and Projects show their exact icon beside the section title, while the middle toggle shows the exact Process and Node icons beside their labels. Only the Action Items section-header icon combines the established Action Item colors: its outer ring is Yellow and its inner ring is Red; Action Item row and editor-chip icons still use each item's saved color.
 
 MW40 - Red Action Item icons and names use the established Huddle red treatment and pulse once per second. Yellow Action Item icons and names use the established Huddle yellow treatment and pulse once every two seconds.
 
@@ -86,7 +86,7 @@ MW41 - Completion due date and Due date remain ordering levels but render no dat
 
 MW42 - The Node and Process role selectors reuse the same established accessible selector and colors: Responsible is orange, Accountable is green, Consulted is blue, and Informed is purple.
 
-MW43 - Each major My Work section is an elevated surface. Every resource row lifts on hover or keyboard focus, and inline Node Process and Project references are independent elevated click targets.
+MW43 - Each visible My Work column is one elevated surface. Every resource row lifts on hover or keyboard focus, and inline Node Process and Project references are independent elevated click targets.
 
 MW44 - Action Item, Node, Process, and Project row names use the readable My Work row type scale. Delegated Action Item rows remain at one flat, unindented depth even when Color headers are visible; other visible nested group levels and their rows remain indented without continuous vertical guide lines.
 
@@ -104,7 +104,7 @@ MW50 - Every universal grouping dialog uses raised grouping rows, raised level t
 
 MW51 - A successful login with no explicit supported return destination opens My Work as the active page. A fresh authenticated load with no valid saved active tab also selects My Work, while explicit supported return destinations and valid saved tabs on ordinary authenticated reloads remain authoritative.
 
-MW52 - Action Items and Nodes each have an independent History toggle in their section header. The button shows the History icon to the left of the word History, exposes its pressed state, and pressing it again returns that section to its normal list in the same space without a popup.
+MW52 - Action Items always has its independent History toggle, while Nodes shows its independent History toggle only when the Nodes middle view is selected. Each button shows the History icon to the left of the word History, exposes its pressed state, and pressing it again returns that list to normal in the same space without a popup.
 
 MW53 - Each History list contains only completed work that still qualifies for that subject and viewer. It is ordered by completion status-change time from newest to oldest, uses exact resource ID as the stable tie-breaker, and keeps cursor pagination bound to History mode.
 
@@ -130,11 +130,15 @@ Mango reads that member's Action Items for the selected Mine or Delegated perspe
 
 ↓
 
-The unnamed left column keeps Action Items above Nodes, shows editable inline due dates, and applies Mine's two-level or Delegated's three-level server-owned ordering while Delegated rows stay flat and show Person in charge inline; all four sections append more permitted rows within their own scroll areas, and either left section may replace its own rows with newest-first History and return in place
+The full-height left column shows Action Items with editable inline due dates and applies Mine's two-level or Delegated's three-level server-owned ordering while Delegated rows stay flat and show Person in charge inline
 
 ↓
 
-The Nodes and Processes selectors both default to Responsible and change independently; each Process row shows four aligned always-visible canonical active-work counts including zeros, while the right column lists Projects whose assigned Team includes that member directly or through a current descendant group
+The middle panel defaults to Processes and switches exclusively between the Process list with its RACI controls and the Nodes list with its RACI, History, and grouping controls; both selectors default to Responsible and change independently, each visible list keeps its own scrolling behavior and state, and each Process row shows four aligned always-visible canonical active-work counts including zeros
+
+↓
+
+The unchanged right column lists Projects whose assigned Team includes that member directly or through a current descendant group
 
 ↓
 

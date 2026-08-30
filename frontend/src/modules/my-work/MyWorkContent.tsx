@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import {
   ActionItemIcon,
@@ -75,9 +75,9 @@ const PROCESS_ROLE_OPTIONS: ReadonlyArray<{ role: MyWorkProcessRole; letter: str
 ];
 
 type MyWorkColumnWeights = [number, number, number];
+type MyWorkMiddleView = "processes" | "nodes";
 type MyWorkLayout = {
   columnWeights: MyWorkColumnWeights;
-  actionItemsRatio: number;
 };
 type MyWorkResizeA11y = {
   minimum: number;
@@ -87,14 +87,12 @@ type MyWorkResizeA11y = {
 
 const MY_WORK_RESIZER_SIZE = 10;
 const MY_WORK_LOAD_MORE_THRESHOLD = 160;
-const MY_WORK_COLUMN_MIN_WIDTHS: MyWorkColumnWeights = [360, 240, 240];
-const MY_WORK_SECTION_MIN_HEIGHT = 140;
+const MY_WORK_COLUMN_MIN_WIDTHS: MyWorkColumnWeights = [360, 512, 240];
 const MY_WORK_WINDOW_THRESHOLD = 120;
 const MY_WORK_WINDOW_OVERSCAN = 8;
 const MY_WORK_PAGE_SCALE = 0.9;
 const DEFAULT_MY_WORK_LAYOUT: MyWorkLayout = {
   columnWeights: normalizedColumnWeights([1.25, 0.9, 0.9]),
-  actionItemsRatio: 0.5,
 };
 
 export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkContentProps) {
@@ -110,14 +108,15 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     selectProcessRole,
   } = useMyWorkData(companyID, subjectID, requestJSON);
   const [layout, setLayout] = useState<MyWorkLayout>(() => readMyWorkLayout(companyID));
-  const [paneMeasurements, setPaneMeasurements] = useState({ columnAvailableWidth: 0, leftAvailableHeight: 0 });
+  const [middleView, setMiddleView] = useState<MyWorkMiddleView>("processes");
+  const [columnAvailableWidth, setColumnAvailableWidth] = useState(0);
   const layoutRef = useRef(layout);
   const columnsRef = useRef<HTMLDivElement>(null);
-  const leftColumnRef = useRef<HTMLDivElement>(null);
   const actionItemsScrollRef = useRef<HTMLDivElement>(null);
   const nodesScrollRef = useRef<HTMLDivElement>(null);
   const processesScrollRef = useRef<HTMLDivElement>(null);
   const projectsScrollRef = useRef<HTMLDivElement>(null);
+  const middleScrollPositionsRef = useRef<Record<MyWorkMiddleView, number>>({ processes: 0, nodes: 0 });
   const [actionItemGroupingStacks, setActionItemGroupingStacks] = useState<Record<MyWorkActionItemPerspective, MyWorkActionItemGrouping[]>>(() => ({
     mine: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
     delegated: DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
@@ -138,7 +137,16 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     setNodeGroupings(DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping })));
     setActionItemHistory(false);
     setNodeHistory(false);
+    middleScrollPositionsRef.current = { processes: 0, nodes: 0 };
+    if (processesScrollRef.current) processesScrollRef.current.scrollTop = 0;
+    if (nodesScrollRef.current) nodesScrollRef.current.scrollTop = 0;
+    setMiddleView("processes");
   }, [companyID, subjectID]);
+
+  useLayoutEffect(() => {
+    const body = middleView === "processes" ? processesScrollRef.current : nodesScrollRef.current;
+    if (body) body.scrollTop = middleScrollPositionsRef.current[middleView];
+  }, [middleView]);
 
   useEffect(() => {
     const nextLayout = readMyWorkLayout(companyID);
@@ -153,23 +161,14 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   useEffect(() => {
     const measure = () => {
       const columnContainer = columnsRef.current;
-      const leftColumn = leftColumnRef.current;
-      const next = {
-        columnAvailableWidth: columnContainer
-          ? Math.max(0, Math.max(columnContainer.clientWidth, columnContainer.scrollWidth) - (MY_WORK_RESIZER_SIZE * 2))
-          : 0,
-        leftAvailableHeight: leftColumn ? Math.max(0, leftColumn.clientHeight - MY_WORK_RESIZER_SIZE) : 0,
-      };
-      setPaneMeasurements((current) => (
-        current.columnAvailableWidth === next.columnAvailableWidth && current.leftAvailableHeight === next.leftAvailableHeight
-          ? current
-          : next
-      ));
+      const next = columnContainer
+        ? Math.max(0, Math.max(columnContainer.clientWidth, columnContainer.scrollWidth) - (MY_WORK_RESIZER_SIZE * 2))
+        : 0;
+      setColumnAvailableWidth((current) => current === next ? current : next);
     };
     measure();
     const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
     if (columnsRef.current) observer?.observe(columnsRef.current);
-    if (leftColumnRef.current) observer?.observe(leftColumnRef.current);
     window.addEventListener("resize", measure);
     return () => {
       observer?.disconnect();
@@ -294,6 +293,12 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     if (nodesScrollRef.current) nodesScrollRef.current.scrollTop = 0;
     void selectNodeRole(role, nodeHistory ? undefined : nodeGroupings, nodeHistory);
   };
+  const changeMiddleView = (nextView: MyWorkMiddleView) => {
+    if (nextView === middleView) return;
+    const body = middleView === "processes" ? processesScrollRef.current : nodesScrollRef.current;
+    middleScrollPositionsRef.current[middleView] = body?.scrollTop ?? 0;
+    setMiddleView(nextView);
+  };
 
   const resizeColumnPair = (dividerIndex: 0 | 1, delta: number): number | undefined => {
     const containerWidth = Math.max(columnsRef.current?.clientWidth ?? 0, columnsRef.current?.scrollWidth ?? 0);
@@ -308,25 +313,12 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     if (columnsRef.current) columnsRef.current.style.gridTemplateColumns = columnGridTemplate(next.columnWeights);
     return columnResizeA11y(next.columnWeights, dividerIndex, availableWidth).current;
   };
-  const resizeLeftSections = (delta: number): number | undefined => {
-    const availableHeight = Math.max(0, (leftColumnRef.current?.clientHeight ?? 0) - MY_WORK_RESIZER_SIZE);
-    if (availableHeight <= 0) return undefined;
-    const current = layoutRef.current;
-    const next = {
-      ...current,
-      actionItemsRatio: resizedSplitRatio(current.actionItemsRatio, delta, availableHeight),
-    };
-    layoutRef.current = next;
-    if (leftColumnRef.current) leftColumnRef.current.style.gridTemplateRows = leftColumnGridTemplate(next.actionItemsRatio);
-    return splitResizeA11y(next.actionItemsRatio, availableHeight).current;
-  };
   const saveLayout = () => {
     setLayout(layoutRef.current);
     writeMyWorkLayout(companyID, layoutRef.current);
   };
-  const actionItemsResizeA11y = splitResizeA11y(layout.actionItemsRatio, paneMeasurements.leftAvailableHeight);
-  const firstColumnResizeA11y = columnResizeA11y(layout.columnWeights, 0, paneMeasurements.columnAvailableWidth);
-  const secondColumnResizeA11y = columnResizeA11y(layout.columnWeights, 1, paneMeasurements.columnAvailableWidth);
+  const firstColumnResizeA11y = columnResizeA11y(layout.columnWeights, 0, columnAvailableWidth);
+  const secondColumnResizeA11y = columnResizeA11y(layout.columnWeights, 1, columnAvailableWidth);
 
   return (
     <div data-my-work-page="true" style={pageStyle}>
@@ -336,71 +328,97 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
       </header>
 
       <div ref={columnsRef} data-my-work-columns="true" style={columnsStyle(layout.columnWeights)}>
-        <div ref={leftColumnRef} data-my-work-left-column="true" style={leftColumnStyle(layout.actionItemsRatio)}>
-          <SectionFrame
+        <SectionFrame
+          section="action_items"
+          title="Action Items"
+          icon={<ActionItemIcon size={16} outerRingColor="#facc15" innerRingColor="#ef4444" />}
+          state={state.action_items}
+          titleAccessory={(
+            <ActionItemPerspectiveSelector
+              perspective={actionItemPerspective}
+              onChange={changeActionItemPerspective}
+            />
+          )}
+          actions={(
+            <div style={sectionActionsStyle}>
+              <HistoryButton selected={actionItemHistory} disabled={state.action_items.loading} onClick={toggleActionItemHistory} />
+              <UniversalGroupingControls
+                groupings={actionItemGroupings}
+                fieldOptions={actionItemPerspective === "delegated"
+                  ? MY_WORK_ACTION_ITEM_GROUPING_FIELDS
+                  : MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS}
+                onChange={changeActionItemGroupings}
+                buttonLabel="Group Action Items"
+                popoverLabel="Action Item grouping"
+                popoverAlign="end"
+                triggerIcon={<StaggeredGroupingIcon />}
+                iconOnly
+                disabled={state.action_items.loading || actionItemHistory}
+              />
+            </div>
+          )}
+          onRetry={() => void (state.action_items.items.length > 0
+            ? loadMore("action_items", actionItemHistory ? undefined : actionItemGroupings, actionItemHistory)
+            : reloadSection("action_items", actionItemHistory ? undefined : actionItemGroupings, false, actionItemHistory))}
+          onLoadMore={() => void loadMore("action_items", actionItemHistory ? undefined : actionItemGroupings, actionItemHistory)}
+          scrollBodyRef={actionItemsScrollRef}
+        >
+          <MyWorkWindowedRows
             section="action_items"
-            title="Action Items"
-            icon={<ActionItemIcon size={16} outerRingColor="#facc15" innerRingColor="#ef4444" />}
-            state={state.action_items}
-            titleAccessory={(
-              <ActionItemPerspectiveSelector
-                perspective={actionItemPerspective}
-                onChange={changeActionItemPerspective}
+            entries={actionItemEntries}
+            scrollBodyRef={actionItemsScrollRef}
+            rowEstimate={52}
+            emptyLabel={actionItemHistory
+              ? "No completed Action Items."
+              : actionItemPerspective === "delegated"
+                ? "No Action Items delegated by you."
+                : "No Action Items assigned to you."}
+            renderRow={renderActionItemRow}
+          />
+        </SectionFrame>
+
+        <MyWorkResizeHandle
+          orientation="vertical"
+          label="Resize Action Items and work view columns"
+          controls={`my-work-action-items-section my-work-${middleView}-section`}
+          valueMin={firstColumnResizeA11y.minimum}
+          valueMax={firstColumnResizeA11y.maximum}
+          valueNow={firstColumnResizeA11y.current}
+          onDelta={(delta) => resizeColumnPair(0, delta)}
+          onCommit={saveLayout}
+        />
+
+        {middleView === "processes" ? (
+          <SectionFrame
+            section="processes"
+            title="Processes"
+            titleControl={<MiddleViewSelector view={middleView} onChange={changeMiddleView} />}
+            state={state.processes}
+            actions={(
+              <MyWorkRACISelector
+                label="Process RACI role"
+                role={processRole}
+                onChange={(role) => void selectProcessRole(role)}
               />
             )}
-            actions={(
-              <div style={sectionActionsStyle}>
-                <HistoryButton selected={actionItemHistory} disabled={state.action_items.loading} onClick={toggleActionItemHistory} />
-                <UniversalGroupingControls
-                  groupings={actionItemGroupings}
-                  fieldOptions={actionItemPerspective === "delegated"
-                    ? MY_WORK_ACTION_ITEM_GROUPING_FIELDS
-                    : MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS}
-                  onChange={changeActionItemGroupings}
-                  buttonLabel="Group Action Items"
-                  popoverLabel="Action Item grouping"
-                  popoverAlign="end"
-                  triggerIcon={<StaggeredGroupingIcon />}
-                  iconOnly
-                  disabled={state.action_items.loading || actionItemHistory}
-                />
-              </div>
-            )}
-            onRetry={() => void (state.action_items.items.length > 0
-              ? loadMore("action_items", actionItemHistory ? undefined : actionItemGroupings, actionItemHistory)
-              : reloadSection("action_items", actionItemHistory ? undefined : actionItemGroupings, false, actionItemHistory))}
-            onLoadMore={() => void loadMore("action_items", actionItemHistory ? undefined : actionItemGroupings, actionItemHistory)}
-            scrollBodyRef={actionItemsScrollRef}
+            onRetry={() => void (state.processes.items.length > 0 ? loadMore("processes") : reloadSection("processes"))}
+            onLoadMore={() => void loadMore("processes")}
+            scrollBodyRef={processesScrollRef}
           >
             <MyWorkWindowedRows
-              section="action_items"
-              entries={actionItemEntries}
-              scrollBodyRef={actionItemsScrollRef}
-              rowEstimate={52}
-              emptyLabel={actionItemHistory
-                ? "No completed Action Items."
-                : actionItemPerspective === "delegated"
-                  ? "No Action Items delegated by you."
-                  : "No Action Items assigned to you."}
-              renderRow={renderActionItemRow}
+              section="processes"
+              entries={processEntries}
+              scrollBodyRef={processesScrollRef}
+              rowEstimate={47}
+              emptyLabel={`No ${PROCESS_ROLE_OPTIONS.find((option) => option.role === processRole)?.label ?? "matching"} Processes.`}
+              renderRow={renderProcessRow}
             />
           </SectionFrame>
-
-          <MyWorkResizeHandle
-            orientation="horizontal"
-            label="Resize Action Items and Nodes"
-            controls="my-work-action-items-section my-work-nodes-section"
-            valueMin={actionItemsResizeA11y.minimum}
-            valueMax={actionItemsResizeA11y.maximum}
-            valueNow={actionItemsResizeA11y.current}
-            onDelta={resizeLeftSections}
-            onCommit={saveLayout}
-          />
-
+        ) : (
           <SectionFrame
             section="nodes"
             title="Nodes"
-            icon={<ExplorerEntityIcon kind="node" />}
+            titleControl={<MiddleViewSelector view={middleView} onChange={changeMiddleView} />}
             state={state.nodes}
             actions={(
               <div style={sectionActionsStyle}>
@@ -440,49 +458,12 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
               renderRow={renderNodeRow}
             />
           </SectionFrame>
-        </div>
+        )}
 
         <MyWorkResizeHandle
           orientation="vertical"
-          label="Resize Action Items and Nodes column and Processes column"
-          controls="my-work-action-items-section my-work-nodes-section my-work-processes-section"
-          valueMin={firstColumnResizeA11y.minimum}
-          valueMax={firstColumnResizeA11y.maximum}
-          valueNow={firstColumnResizeA11y.current}
-          onDelta={(delta) => resizeColumnPair(0, delta)}
-          onCommit={saveLayout}
-        />
-
-        <SectionFrame
-          section="processes"
-          title="Processes"
-          icon={<ExplorerEntityIcon kind="logic_gate" />}
-          state={state.processes}
-          actions={(
-            <MyWorkRACISelector
-              label="Process RACI role"
-              role={processRole}
-              onChange={(role) => void selectProcessRole(role)}
-            />
-          )}
-          onRetry={() => void (state.processes.items.length > 0 ? loadMore("processes") : reloadSection("processes"))}
-          onLoadMore={() => void loadMore("processes")}
-          scrollBodyRef={processesScrollRef}
-        >
-          <MyWorkWindowedRows
-            section="processes"
-            entries={processEntries}
-            scrollBodyRef={processesScrollRef}
-            rowEstimate={47}
-            emptyLabel={`No ${PROCESS_ROLE_OPTIONS.find((option) => option.role === processRole)?.label ?? "matching"} Processes.`}
-            renderRow={renderProcessRow}
-          />
-        </SectionFrame>
-
-        <MyWorkResizeHandle
-          orientation="vertical"
-          label="Resize Processes and Projects columns"
-          controls="my-work-processes-section my-work-projects-section"
+          label="Resize work view and Projects columns"
+          controls={`my-work-${middleView}-section my-work-projects-section`}
           valueMin={secondColumnResizeA11y.minimum}
           valueMax={secondColumnResizeA11y.maximum}
           valueNow={secondColumnResizeA11y.current}
@@ -560,6 +541,47 @@ function MyWorkRACISelector({
   );
 }
 
+function MiddleViewSelector({
+  view,
+  onChange,
+}: {
+  view: MyWorkMiddleView;
+  onChange: (view: MyWorkMiddleView) => void;
+}) {
+  const options = [
+    { key: "processes" as const, label: "Processes", icon: <ExplorerEntityIcon kind="logic_gate" /> },
+    { key: "nodes" as const, label: "Nodes", icon: <ExplorerEntityIcon kind="node" /> },
+  ];
+  return (
+    <div role="radiogroup" aria-label="My Work middle view" data-my-work-middle-view-toggle="true" style={middleViewSelectorStyle}>
+      {options.map((option, index) => (
+        <button
+          key={option.key}
+          type="button"
+          role="radio"
+          aria-checked={view === option.key}
+          tabIndex={view === option.key ? 0 : -1}
+          data-my-work-middle-view={option.key}
+          style={middleViewButtonStyle(view === option.key)}
+          onClick={() => onChange(option.key)}
+          onKeyDown={(event) => {
+            const nextIndex = segmentIndexForKey(event.key, index, options.length);
+            if (nextIndex === null) return;
+            event.preventDefault();
+            event.currentTarget.parentElement
+              ?.querySelectorAll<HTMLButtonElement>('[role="radio"]')[nextIndex]
+              ?.focus();
+            onChange(options[nextIndex].key);
+          }}
+        >
+          <span data-my-work-middle-view-icon={option.key} style={sectionTitleIconStyle}>{option.icon}</span>
+          <span>{option.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ActionItemPerspectiveSelector({
   perspective,
   onChange,
@@ -627,12 +649,6 @@ export function resizedColumnWeights(
   return normalizedColumnWeights(widths);
 }
 
-export function resizedSplitRatio(currentRatio: number, delta: number, availableHeight: number): number {
-  if (!Number.isFinite(delta) || !Number.isFinite(availableHeight) || availableHeight <= 0) return currentRatio;
-  const minimumRatio = Math.min(0.45, MY_WORK_SECTION_MIN_HEIGHT / availableHeight);
-  return clamp(currentRatio + (delta / availableHeight), minimumRatio, 1 - minimumRatio);
-}
-
 export function scrollRemaining(element: Pick<HTMLElement, "scrollHeight" | "scrollTop" | "clientHeight">): number {
   return element.scrollHeight - element.scrollTop - element.clientHeight;
 }
@@ -658,15 +674,6 @@ export function columnResizeA11y(
   };
 }
 
-export function splitResizeA11y(currentRatio: number, availableHeight: number): MyWorkResizeA11y {
-  const minimumRatio = Number.isFinite(availableHeight) && availableHeight > 0
-    ? Math.min(0.45, MY_WORK_SECTION_MIN_HEIGHT / availableHeight)
-    : 0;
-  const minimum = Math.round(minimumRatio * 100);
-  const maximum = Math.round((1 - minimumRatio) * 100);
-  return { minimum, maximum, current: clamp(Math.round(currentRatio * 100), minimum, maximum) };
-}
-
 function normalizedColumnWeights(value: unknown): MyWorkColumnWeights {
   if (!Array.isArray(value) || value.length !== 3) return [1.25 / 3.05, 0.9 / 3.05, 0.9 / 3.05];
   const weights = value.map((candidate) => Number(candidate));
@@ -681,10 +688,8 @@ function readMyWorkLayout(companyID: string): MyWorkLayout {
     const stored = window.localStorage.getItem(myWorkLayoutStorageKey(companyID));
     if (!stored) return DEFAULT_MY_WORK_LAYOUT;
     const parsed = JSON.parse(stored) as Partial<MyWorkLayout>;
-    const actionItemsRatio = Number(parsed.actionItemsRatio);
     return {
       columnWeights: normalizedColumnWeights(parsed.columnWeights),
-      actionItemsRatio: Number.isFinite(actionItemsRatio) ? clamp(actionItemsRatio, 0.15, 0.85) : DEFAULT_MY_WORK_LAYOUT.actionItemsRatio,
     };
   } catch {
     return DEFAULT_MY_WORK_LAYOUT;
@@ -798,8 +803,9 @@ function MyWorkResizeHandle({
 type SectionFrameProps<Item> = {
   section: MyWorkSection;
   title: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   state: MyWorkSectionState<Item>;
+  titleControl?: React.ReactNode;
   titleAccessory?: React.ReactNode;
   actions?: React.ReactNode;
   onRetry: () => void;
@@ -813,6 +819,7 @@ function SectionFrame<Item>({
   title,
   icon,
   state,
+  titleControl,
   titleAccessory,
   actions,
   onRetry,
@@ -840,14 +847,25 @@ function SectionFrame<Item>({
   }, [onLoadMore, state.error, state.hasMore, state.items.length, state.loading, state.nextCursor]);
 
   return (
-    <section id={sectionID} aria-labelledby={titleID} aria-busy={state.loading} data-my-work-section={section} style={sectionStyle(Boolean(state.error))}>
+    <section
+      id={sectionID}
+      aria-label={titleControl ? title : undefined}
+      aria-labelledby={titleControl ? undefined : titleID}
+      aria-busy={state.loading}
+      data-my-work-section={section}
+      style={sectionStyle(Boolean(state.error))}
+    >
       <header style={sectionHeaderStyle}>
         <div style={sectionTitleRegionStyle}>
-          <h2 id={titleID} style={sectionTitleStyle}>
-            <span data-my-work-section-icon={section} style={sectionTitleIconStyle}>{icon}</span>
-            <span>{title}</span>
-          </h2>
-          {titleAccessory}
+          {titleControl ?? (
+            <>
+              <h2 id={titleID} style={sectionTitleStyle}>
+                <span data-my-work-section-icon={section} style={sectionTitleIconStyle}>{icon}</span>
+                <span>{title}</span>
+              </h2>
+              {titleAccessory}
+            </>
+          )}
         </div>
         {actions}
       </header>
@@ -1467,20 +1485,6 @@ function columnGridTemplate(weights: MyWorkColumnWeights): string {
   return `minmax(${MY_WORK_COLUMN_MIN_WIDTHS[0]}px, ${weights[0]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[1]}px, ${weights[1]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[2]}px, ${weights[2]}fr)`;
 }
 
-function leftColumnStyle(actionItemsRatio: number): React.CSSProperties {
-  return {
-    minWidth: 0,
-    minHeight: 0,
-    display: "grid",
-    gridTemplateRows: leftColumnGridTemplate(actionItemsRatio),
-    gap: 0,
-  };
-}
-
-function leftColumnGridTemplate(actionItemsRatio: number): string {
-  return `minmax(${MY_WORK_SECTION_MIN_HEIGHT}px, ${actionItemsRatio}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_SECTION_MIN_HEIGHT}px, ${1 - actionItemsRatio}fr)`;
-}
-
 function sectionStyle(hasError: boolean): React.CSSProperties {
   return {
     minWidth: 0,
@@ -1629,6 +1633,7 @@ function resizeGripStyle(orientation: "horizontal" | "vertical"): React.CSSPrope
 
 const roleSelectorStyle: React.CSSProperties = {
   display: "inline-flex",
+  flex: "0 0 auto",
   gap: 4,
   border: "1px solid rgba(148, 163, 184, 0.20)",
   borderRadius: 9,
@@ -1636,6 +1641,41 @@ const roleSelectorStyle: React.CSSProperties = {
   boxShadow: "inset 2px 2px 5px rgba(148,163,184,0.12), inset -2px -2px 5px rgba(255,255,255,0.92)",
   padding: 3,
 };
+
+const middleViewSelectorStyle: React.CSSProperties = {
+  display: "inline-flex",
+  minWidth: 0,
+  flex: "0 0 auto",
+  gap: 2,
+  border: "1px solid rgba(147,197,253,.52)",
+  borderRadius: 10,
+  background: "linear-gradient(145deg, rgba(255,255,255,0.94), rgba(241,245,249,0.82))",
+  boxShadow: "inset 2px 2px 5px rgba(148,163,184,0.12), inset -2px -2px 5px rgba(255,255,255,0.92)",
+  padding: 2,
+};
+
+function middleViewButtonStyle(active: boolean): React.CSSProperties {
+  return {
+    height: 36,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    border: active ? "1px solid rgba(37,99,235,.78)" : "1px solid transparent",
+    borderRadius: 7,
+    background: active
+      ? "linear-gradient(145deg,#eff6ff,#bfdbfe)"
+      : "transparent",
+    color: active ? "#1d4ed8" : "#475569",
+    boxShadow: active
+      ? "2px 2px 6px rgba(59,130,246,.18), -1px -1px 4px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.76)"
+      : "none",
+    font: "inherit",
+    fontSize: 13,
+    fontWeight: 900,
+    cursor: "pointer",
+    padding: "0 6px",
+  };
+}
 
 const perspectiveSelectorStyle: React.CSSProperties = {
   display: "inline-flex",
