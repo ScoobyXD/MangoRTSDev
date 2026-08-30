@@ -19,9 +19,7 @@ import {
   measureMyWorkDisplayEntry,
   myWorkUnscaledPointerDelta,
   resizedColumnWeights,
-  resizedSplitRatio,
   scrollRemaining,
-  splitResizeA11y,
 } from "../../../../frontend/src/modules/my-work/MyWorkContent.js";
 import type { MyWorkActionItem } from "../../../../frontend/src/modules/my-work/myWorkApi.js";
 
@@ -165,21 +163,18 @@ test("a Process role change clears the old role rows while its replacement is lo
   assert.equal(next.error, "");
 });
 
-test("My Work splitters resize only adjacent panes and keep every pane reachable", () => {
-  const start: [number, number, number] = [0.4, 0.3, 0.3];
-  const first = resizedColumnWeights(start, 0, 80, 1000);
+test("My Work column dividers resize only adjacent columns and keep every column reachable", () => {
+  const start: [number, number, number] = [0.35, 0.35, 0.3];
+  const first = resizedColumnWeights(start, 0, 80, 1600);
   assert.ok(first[0] > start[0]);
   assert.ok(first[1] < start[1]);
   assert.equal(Math.round(first[2] * 1000), Math.round(start[2] * 1000));
 
-  const second = resizedColumnWeights(start, 1, -80, 1000);
+  const second = resizedColumnWeights(start, 1, -80, 1600);
   assert.equal(Math.round(second[0] * 1000), Math.round(start[0] * 1000));
   assert.ok(second[1] < start[1]);
   assert.ok(second[2] > start[2]);
 
-  assert.equal(resizedSplitRatio(0.5, -10000, 800), 0.175);
-  assert.equal(resizedSplitRatio(0.5, 10000, 800), 0.825);
-  assert.deepEqual(splitResizeA11y(0.5, 790), { minimum: 18, maximum: 82, current: 50 });
-  assert.deepEqual(columnResizeA11y(start, 1, 1000), { minimum: 40, maximum: 60, current: 50 });
+  assert.deepEqual(columnResizeA11y(start, 1, 1600), { minimum: 44, maximum: 77, current: 54 });
   assert.equal(scrollRemaining({ scrollHeight: 900, scrollTop: 600, clientHeight: 250 }), 50);
 });
