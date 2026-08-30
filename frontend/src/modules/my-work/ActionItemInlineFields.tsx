@@ -9,13 +9,19 @@ export type ActionItemInlineFieldsProps = {
 
 export function ActionItemInlineFields({ item, displayedFields, renderCompletionDueDate }: ActionItemInlineFieldsProps) {
   return (
-    <div data-my-work-action-item-inline-fields="true" style={fieldsStyle}>
+    <div
+      className="my-work-action-item-inline-fields"
+      data-my-work-action-item-inline-fields="true"
+      aria-label="Action Item inline row fields"
+      tabIndex={displayedFields.length > 1 ? 0 : -1}
+      style={fieldsStyle}
+    >
       {displayedFields.map((field) => (
-        <React.Fragment key={field}>
+        <span key={field} data-my-work-action-item-inline-field-slot={field} style={fieldSlotStyle}>
           {field === "completion_due_date"
             ? renderCompletionDueDate()
             : renderStaticActionItemField(item, field)}
-        </React.Fragment>
+        </span>
       ))}
     </div>
   );
@@ -89,13 +95,24 @@ const fieldsStyle: React.CSSProperties = {
   minWidth: 0,
   maxWidth: "62%",
   display: "flex",
-  flexWrap: "wrap",
+  flexWrap: "nowrap",
   alignItems: "center",
-  justifyContent: "flex-end",
+  justifyContent: "flex-start",
+  overflowX: "auto",
+  overflowY: "hidden",
+  whiteSpace: "nowrap",
+  marginLeft: "auto",
   gap: 6,
+};
+const fieldSlotStyle: React.CSSProperties = {
+  minWidth: 0,
+  flex: "0 0 auto",
+  display: "inline-flex",
+  alignItems: "center",
 };
 const staticFieldStyle: React.CSSProperties = {
   minWidth: 0,
+  flex: "0 0 auto",
   maxWidth: 162,
   minHeight: 31,
   display: "inline-flex",

@@ -8,9 +8,10 @@ export type ActionItemOrderingEditorProps = {
   orderings: ReadonlyArray<MyWorkActionItemOrdering>;
   fieldOptions: ReadonlyArray<{ value: MyWorkActionItemGroupingField; label: string }>;
   onChange: (next: MyWorkActionItemOrdering[]) => void;
+  accent?: string;
 };
 
-export function ActionItemOrderingEditor({ orderings, fieldOptions, onChange }: ActionItemOrderingEditorProps) {
+export function ActionItemOrderingEditor({ orderings, fieldOptions, onChange, accent = "#EA84E5" }: ActionItemOrderingEditorProps) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const usedFields = new Set(orderings.map((ordering) => ordering.field));
   const addableFields = fieldOptions.filter((option) => !usedFields.has(option.value));
@@ -23,7 +24,11 @@ export function ActionItemOrderingEditor({ orderings, fieldOptions, onChange }: 
     if (next) onChange(next);
   };
   return (
-    <section data-my-work-action-item-ordering="true" style={sectionStyle}>
+    <section
+      data-my-work-action-item-ordering="true"
+      data-action-item-view-quadrant="order"
+      style={sectionStyle(accent)}
+    >
       <h3 style={titleStyle}>Order items by</h3>
       <div style={{ display: "grid", gap: 7 }}>
         {orderings.length === 0 && <div style={emptyStyle}>Use stable backend order</div>}
@@ -35,7 +40,7 @@ export function ActionItemOrderingEditor({ orderings, fieldOptions, onChange }: 
             data-my-work-ordering-field={ordering.field}
             draggable={orderings.length > 1}
             tabIndex={orderings.length > 1 ? 0 : -1}
-            style={rowStyle(draggedIndex === index, orderings.length > 1)}
+            style={rowStyle(draggedIndex === index, orderings.length > 1, accent)}
             onDragStart={(event) => {
               event.dataTransfer.effectAllowed = "move";
               event.dataTransfer.setData("text/plain", String(index));
@@ -65,7 +70,7 @@ export function ActionItemOrderingEditor({ orderings, fieldOptions, onChange }: 
             }}
           >
             <span aria-hidden="true" style={gripStyle}>⋮⋮</span>
-            <span aria-hidden="true" style={levelStyle}>{index + 1}</span>
+            <span aria-hidden="true" style={levelStyle(accent)}>{index + 1}</span>
             <select
               aria-label={`Item ordering ${index + 1} field`}
               value={ordering.field}
@@ -145,13 +150,22 @@ export function moveMyWorkActionItemOrdering(
   return next;
 }
 
-const sectionStyle: React.CSSProperties = {
-  display: "grid",
-  gap: 8,
-  borderTop: "1px solid rgba(148,163,184,.22)",
-  marginTop: 10,
-  paddingTop: 10,
-};
+function sectionStyle(accent: string): React.CSSProperties {
+  return {
+    gridArea: "order",
+    minWidth: 0,
+    display: "grid",
+    alignContent: "start",
+    gap: 8,
+    border: `1px solid ${accent}38`,
+    borderTop: `3px solid ${accent}`,
+    borderRadius: 11,
+    background: `linear-gradient(145deg,rgba(255,255,255,.98),${accent}0d)`,
+    padding: 8,
+    boxSizing: "border-box",
+    boxShadow: `3px 4px 10px ${accent}18, -2px -2px 7px rgba(255,255,255,.82), inset 1px 1px 0 rgba(255,255,255,.92)`,
+  };
+}
 
 const titleStyle: React.CSSProperties = { margin: 0, color: "#334155", fontSize: 12, fontWeight: 900 };
 const emptyStyle: React.CSSProperties = {
@@ -191,24 +205,26 @@ const buttonStyle: React.CSSProperties = {
 const removeButtonStyle: React.CSSProperties = { ...buttonStyle, width: 25, padding: 0 };
 const footerStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8 };
 const gripStyle: React.CSSProperties = { color: "#94a3b8", fontSize: 8, fontWeight: 900, letterSpacing: -2 };
-const levelStyle: React.CSSProperties = {
-  width: 21,
-  height: 21,
-  display: "grid",
-  placeItems: "center",
-  borderRadius: 999,
-  background: "#64748b",
-  color: "#fff",
-  fontSize: 9.5,
-  fontWeight: 900,
-};
-function rowStyle(dragging: boolean, draggable: boolean): React.CSSProperties {
+function levelStyle(accent: string): React.CSSProperties {
+  return {
+    width: 21,
+    height: 21,
+    display: "grid",
+    placeItems: "center",
+    borderRadius: 999,
+    background: accent,
+    color: "#fff",
+    fontSize: 9.5,
+    fontWeight: 900,
+  };
+}
+function rowStyle(dragging: boolean, draggable: boolean, accent: string): React.CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns: "14px 22px minmax(0,1fr) 48px 26px",
     alignItems: "center",
     gap: 5,
-    border: "1px solid rgba(148,163,184,.24)",
+    border: `1px solid ${accent}2e`,
     borderRadius: 9,
     background: "linear-gradient(145deg,#ffffff,#f1f5f9)",
     cursor: draggable ? "grab" : "default",

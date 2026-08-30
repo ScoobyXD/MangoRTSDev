@@ -93,13 +93,13 @@ func TestMyWorkEndpointDerivesSubjectAndReturnsRequestedTypedSections(t *testing
 	}
 
 	delegated := httptest.NewRecorder()
-	request = httptest.NewRequest(http.MethodGet, "/v1/my-work?company_id="+companyID+"&section=action_items&perspective=delegated&grouping=color:asc,huddle_process:asc,completion_due_date:asc&ordering=person_in_charge:desc", nil)
+	request = httptest.NewRequest(http.MethodGet, "/v1/my-work?company_id="+companyID+"&section=action_items&perspective=delegated&grouping=color:asc,person_in_charge:asc,huddle_process:asc&ordering=completion_due_date:desc", nil)
 	request = workItemInboxReadRequestWithActor(request, user.UserID, companyID, domain.RoleCompanyUser, false)
 	handler.ServeHTTP(delegated, request)
 	if delegated.Code != http.StatusOK {
 		t.Fatalf("Delegated status = %d body=%s", delegated.Code, delegated.Body.String())
 	}
-	if repo.query.Section != store.MyWorkSectionActionItems || repo.query.Perspective != store.MyWorkActionItemPerspectiveDelegated || repo.query.Grouping != store.MyWorkDefaultDelegatedActionItemGrouping || repo.query.Ordering != "person_in_charge:desc" {
+	if repo.query.Section != store.MyWorkSectionActionItems || repo.query.Perspective != store.MyWorkActionItemPerspectiveDelegated || repo.query.Grouping != store.MyWorkDefaultDelegatedActionItemGrouping || repo.query.Ordering != "completion_due_date:desc" {
 		t.Fatalf("Delegated repository query = %+v", repo.query)
 	}
 

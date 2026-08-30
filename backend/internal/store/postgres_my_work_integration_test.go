@@ -471,14 +471,14 @@ func TestPostgresMyWorkGroupingKeysetsExecuteAcrossPages(t *testing.T) {
 	noColor := mustCreatePostgresMyWorkActionItem(t, repo, company.CompanyID, user.UserID, "No color or date", "", "")
 	grouping := "completion_due_date:desc,color:asc"
 
-	first, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Grouping: grouping, Limit: 2})
+	first, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Grouping: grouping, Ordering: MyWorkGroupingNone, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.ActionItems == nil || len(first.ActionItems.Items) != 2 || first.ActionItems.Items[0].EntityID != yellow.EntityID || first.ActionItems.Items[1].EntityID != redMiddle.EntityID || !first.ActionItems.HasMore {
 		t.Fatalf("first Postgres grouped page = %+v", first.ActionItems)
 	}
-	second, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Grouping: grouping, Limit: 2, Cursor: first.ActionItems.NextCursor})
+	second, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Grouping: grouping, Ordering: MyWorkGroupingNone, Limit: 2, Cursor: first.ActionItems.NextCursor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +634,7 @@ func TestPostgresMyWorkDelegatedPersonGroupingPagesByAuthoritativeNameAndUser(t 
 	descendingQuery := MyWorkQuery{
 		CompanyID: company.CompanyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
 		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
-		Grouping: MyWorkDefaultDelegatedActionItemGrouping, Ordering: "person_in_charge:desc", Limit: 2,
+		Grouping: "color:asc,huddle_process:asc", Ordering: "person_in_charge:desc", Limit: 2,
 	}
 	descendingFirst, err := repo.GetMyWork(context.Background(), descendingQuery)
 	if err != nil {

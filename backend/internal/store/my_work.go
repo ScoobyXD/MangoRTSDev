@@ -25,10 +25,10 @@ const (
 	MyWorkNodeGroupingPriority                = "priority"
 	MyWorkNodeGroupingDueDate                 = "due_date"
 
-	MyWorkDefaultActionItemGrouping          = "color:asc,huddle_process:asc,completion_due_date:asc"
-	MyWorkDefaultDelegatedActionItemGrouping = MyWorkDefaultActionItemGrouping
-	MyWorkDefaultActionItemOrdering          = MyWorkGroupingNone
-	MyWorkDefaultDelegatedActionItemOrdering = "person_in_charge:asc"
+	MyWorkDefaultActionItemGrouping          = "color:asc,huddle_process:asc"
+	MyWorkDefaultDelegatedActionItemGrouping = "color:asc,person_in_charge:asc,huddle_process:asc"
+	MyWorkDefaultActionItemOrdering          = "completion_due_date:asc"
+	MyWorkDefaultDelegatedActionItemOrdering = MyWorkDefaultActionItemOrdering
 	MyWorkDefaultNodeGrouping                = "priority:asc,due_date:asc"
 
 	MyWorkDefaultLimit = 50
