@@ -243,13 +243,32 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     );
     const middleViewToggle = container.querySelector<HTMLElement>('[role="radiogroup"][aria-label="My Work middle view"]');
     const middleViewButtons = Array.from(middleViewToggle?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
+    const middleViewIcons = Array.from(middleViewToggle?.querySelectorAll<HTMLElement>('[data-my-work-middle-view-icon]') ?? []);
+    const actionItemsTitle = container.querySelector<HTMLElement>('[data-my-work-section="action_items"] h2');
+    const actionItemsTitleIcon = container.querySelector<HTMLElement>('[data-my-work-section-icon="action_items"]');
     assert.equal(middleViewToggle?.getAttribute("data-my-work-middle-view-toggle"), "true");
+    assert.ok(actionItemsTitle && actionItemsTitleIcon);
     assert.deepEqual(middleViewButtons.map((button) => button.textContent?.trim()), ["Processes", "Nodes"]);
     assert.deepEqual(middleViewButtons.map((button) => button.getAttribute("aria-checked")), ["true", "false"], "Processes is the default middle view");
     assert.deepEqual(
       middleViewButtons.map((button) => button.querySelector<HTMLElement>("[data-my-work-middle-view-icon]")?.dataset.myWorkMiddleViewIcon),
       ["processes", "nodes"],
       "both toggle choices keep their existing resource icon",
+    );
+    assert.deepEqual(middleViewButtons.map((button) => button.style.height), ["36px", "36px"], "both toggle choices are large enough for normal header icons");
+    assert.deepEqual(middleViewButtons.map((button) => button.style.fontSize), [actionItemsTitle.style.fontSize, actionItemsTitle.style.fontSize], "toggle labels match the normal section-title scale");
+    assert.equal(middleViewToggle?.style.flex, "0 0 auto", "the complete toggle cannot shrink around its header-sized contents");
+    assert.deepEqual(
+      middleViewIcons.map((icon) => [icon.style.width, icon.style.height, icon.style.borderRadius, icon.style.border, icon.style.background, icon.style.boxShadow]),
+      Array.from({ length: 2 }, () => [
+        actionItemsTitleIcon.style.width,
+        actionItemsTitleIcon.style.height,
+        actionItemsTitleIcon.style.borderRadius,
+        actionItemsTitleIcon.style.border,
+        actionItemsTitleIcon.style.background,
+        actionItemsTitleIcon.style.boxShadow,
+      ]),
+      "both toggle icons use the complete normal section-title icon surface",
     );
     assert.notEqual(middleViewButtons[0]?.style.border, "1px solid transparent", "the selected Processes option has a visible border");
     assert.equal(middleViewButtons[1]?.style.border, "1px solid transparent", "the unselected Nodes option has no selected border");
@@ -261,7 +280,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.deepEqual(historyButtons.map((button) => button.textContent?.trim()), ["History"], "the existing Action Item History label remains beside its icon");
     assert.deepEqual(historyButtons.map((button) => button.getAttribute("aria-pressed")), ["false"]);
     assert.match(container.querySelector<HTMLElement>('[data-my-work-columns="true"]')?.style.gridTemplateColumns ?? "", /minmax\(360px,/, "the left column has enough capacity for the established controls and new selectors");
-    assert.match(container.querySelector<HTMLElement>('[data-my-work-columns="true"]')?.style.gridTemplateColumns ?? "", /minmax\(456px,/, "the middle column keeps a safety margin around the full one-row Nodes header");
+    assert.match(container.querySelector<HTMLElement>('[data-my-work-columns="true"]')?.style.gridTemplateColumns ?? "", /minmax\(512px,/, "the middle column keeps a safety margin around the full one-row Nodes header");
     const actionItemsSection = container.querySelector<HTMLElement>('[data-my-work-section="action_items"]');
     const actionHeaderIconPaths = actionItemsSection?.querySelectorAll<SVGPathElement>('[data-my-work-section-icon="action_items"] svg path');
     assert.equal(actionHeaderIconPaths?.[0]?.getAttribute("stroke"), "#facc15", "only the Action Items header target uses the established yellow outer ring");
@@ -420,7 +439,13 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
       "switching selects Nodes as the only middle section",
     );
     const nodeViewButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-my-work-middle-view-toggle="true"] [role="radio"]'));
+    const nodeViewIcons = Array.from(container.querySelectorAll<HTMLElement>('[data-my-work-middle-view-toggle="true"] [data-my-work-middle-view-icon]'));
     assert.deepEqual(nodeViewButtons.map((button) => button.getAttribute("aria-checked")), ["false", "true"]);
+    assert.deepEqual(
+      nodeViewButtons.map((button, index) => [button.style.height, button.style.fontSize, button.style.padding, nodeViewIcons[index]?.style.width, nodeViewIcons[index]?.style.height]),
+      middleViewButtons.map((button, index) => [button.style.height, button.style.fontSize, button.style.padding, middleViewIcons[index]?.style.width, middleViewIcons[index]?.style.height]),
+      "switching views never resizes either header-sized toggle choice",
+    );
     assert.equal(nodeViewButtons[0]?.style.border, "1px solid transparent");
     assert.notEqual(nodeViewButtons[1]?.style.border, "1px solid transparent", "the selected Nodes option gains the visible border");
     assert.equal(container.querySelector('[role="radiogroup"][aria-label="Process RACI role"]'), null, "Nodes view hides Process RACI controls");

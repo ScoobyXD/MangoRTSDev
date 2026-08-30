@@ -12,7 +12,7 @@ MW4 - Beneath the header, My Work has three columns: Action Items on the left, o
 
 MW5 - The left column is one full-height Action Items section. It has no shared Work title, split, height divider, or separate Nodes panel.
 
-MW6 - The middle header has a Processes and Nodes toggle at its top-left, using each resource's exact icon and label. Processes is selected by default, the selected option has a clear highlighted border, and the middle panel never shows both lists at once.
+MW6 - The middle header has a Processes and Nodes toggle at its top-left, using each resource's exact icon and label. Each option uses the same icon surface, label size, and icon-to-label spacing as a normal section title, and the complete toggle keeps one stable non-shrinking size when the selected view or its right-side controls change. Processes is selected by default, the selected option has a clear highlighted border, and the middle panel never shows both lists at once.
 
 MW7 - The Action Items section has one Mine or Delegated perspective. Mine is active by default, and the two perspectives never share or duplicate a self-assigned item.
 

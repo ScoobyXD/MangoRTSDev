@@ -87,7 +87,7 @@ type MyWorkResizeA11y = {
 
 const MY_WORK_RESIZER_SIZE = 10;
 const MY_WORK_LOAD_MORE_THRESHOLD = 160;
-const MY_WORK_COLUMN_MIN_WIDTHS: MyWorkColumnWeights = [360, 456, 240];
+const MY_WORK_COLUMN_MIN_WIDTHS: MyWorkColumnWeights = [360, 512, 240];
 const MY_WORK_WINDOW_THRESHOLD = 120;
 const MY_WORK_WINDOW_OVERSCAN = 8;
 const MY_WORK_PAGE_SCALE = 0.9;
@@ -574,7 +574,7 @@ function MiddleViewSelector({
             onChange(options[nextIndex].key);
           }}
         >
-          <span data-my-work-middle-view-icon={option.key} style={middleViewIconStyle}>{option.icon}</span>
+          <span data-my-work-middle-view-icon={option.key} style={sectionTitleIconStyle}>{option.icon}</span>
           <span>{option.label}</span>
         </button>
       ))}
@@ -1656,10 +1656,10 @@ const middleViewSelectorStyle: React.CSSProperties = {
 
 function middleViewButtonStyle(active: boolean): React.CSSProperties {
   return {
-    height: 30,
+    height: 36,
     display: "inline-flex",
     alignItems: "center",
-    gap: 5,
+    gap: 8,
     border: active ? "1px solid rgba(37,99,235,.78)" : "1px solid transparent",
     borderRadius: 7,
     background: active
@@ -1670,20 +1670,12 @@ function middleViewButtonStyle(active: boolean): React.CSSProperties {
       ? "2px 2px 6px rgba(59,130,246,.18), -1px -1px 4px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.76)"
       : "none",
     font: "inherit",
-    fontSize: 10.5,
+    fontSize: 13,
     fontWeight: 900,
     cursor: "pointer",
     padding: "0 6px",
   };
 }
-
-const middleViewIconStyle: React.CSSProperties = {
-  width: 17,
-  height: 17,
-  display: "grid",
-  placeItems: "center",
-  flex: "0 0 auto",
-};
 
 const perspectiveSelectorStyle: React.CSSProperties = {
   display: "inline-flex",

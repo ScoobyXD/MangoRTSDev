@@ -175,6 +175,6 @@ test("My Work column dividers resize only adjacent columns and keep every column
   assert.ok(second[1] < start[1]);
   assert.ok(second[2] > start[2]);
 
-  assert.deepEqual(columnResizeA11y(start, 1, 1600), { minimum: 44, maximum: 77, current: 54 });
+  assert.deepEqual(columnResizeA11y(start, 1, 1600), { minimum: 45, maximum: 77, current: 54 });
   assert.equal(scrollRemaining({ scrollHeight: 900, scrollTop: 600, clientHeight: 250 }), 50);
 });
