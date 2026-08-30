@@ -50,8 +50,8 @@ function response(overrides: Partial<MyWorkResponse> = {}): MyWorkResponse {
     action_items: {
       perspective: "mine",
       items: [
-        { entity_id: "action-red", name: "Red Action", color: "red", completion_due_date: dateKeyAfter(0), completion_due_date_field_id: "field-red" },
-        { entity_id: "action-yellow", name: "Yellow Action", color: "yellow", completion_due_date: dateKeyAfter(1), completion_due_date_field_id: "field-yellow" },
+        { entity_id: "action-red", name: "Red Action", color: "red", completion_due_date: dateKeyAfter(0), completion_due_date_field_id: "field-red", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One" },
+        { entity_id: "action-yellow", name: "Yellow Action", color: "yellow", completion_due_date: dateKeyAfter(1), completion_due_date_field_id: "field-yellow", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One" },
       ],
       next_cursor: "actions-old-cursor",
       has_more: true,
@@ -146,8 +146,8 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
           projects: undefined,
           action_items: {
             items: [
-              { entity_id: "action-red", name: "Duplicate Red", color: "red", completion_due_date_field_id: "field-red" },
-              { entity_id: "action-page-2", name: "Second Action", color: "yellow", completion_due_date: "2026-09-04", completion_due_date_field_id: "field-page-2" },
+              { entity_id: "action-red", name: "Duplicate Red", color: "red", completion_due_date_field_id: "field-red", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One" },
+              { entity_id: "action-page-2", name: "Second Action", color: "yellow", completion_due_date: "2026-09-04", completion_due_date_field_id: "field-page-2", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One" },
             ],
             has_more: false,
           },
@@ -160,7 +160,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
           projects: undefined,
           action_items: {
             perspective: "delegated",
-            items: [{ entity_id: "action-delegated", name: "Delegated Action", color: "red", completion_due_date_field_id: "field-delegated" }],
+            items: [{ entity_id: "action-delegated", name: "Delegated Action", color: "red", completion_due_date: dateKeyAfter(2), completion_due_date_field_id: "field-delegated", person_in_charge_user_id: "person-alex", person_in_charge_name: "Alex Morgan" }],
             has_more: false,
           },
         }) as T);
@@ -603,7 +603,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
         nodes: undefined,
         processes: undefined,
         projects: undefined,
-        action_items: { items: [{ entity_id: "action-red", name: "Regrouped Red Action", color: "red", completion_due_date_field_id: "field-red" }], has_more: false },
+        action_items: { items: [{ entity_id: "action-red", name: "Regrouped Red Action", color: "red", completion_due_date_field_id: "field-red", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One" }], has_more: false },
       }));
       await Promise.resolve();
     });
@@ -636,10 +636,37 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     const delegatedURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
     assert.equal(delegatedURL.searchParams.get("section"), "action_items");
     assert.equal(delegatedURL.searchParams.get("perspective"), "delegated");
-    assert.equal(delegatedURL.searchParams.get("grouping"), "color:desc,completion_due_date:asc", "perspective preserves the grouping stack");
+    assert.equal(delegatedURL.searchParams.get("grouping"), "color:asc,completion_due_date:asc,person_in_charge:asc", "Delegated loads its automatic three-level grouping stack");
     assert.match(actionSection?.textContent ?? "", /Delegated Action/);
+    assert.match(actionSection?.textContent ?? "", /Alex Morgan/, "Delegated shows the Person in charge inline");
+    assert.equal(actionSection?.querySelector('[data-my-work-group-field="person_in_charge"]'), null, "Person in charge never renders a group header");
+    assert.equal(actionSection?.querySelector('[data-my-work-entry-kind="row"]')?.getAttribute("style")?.includes("padding-left: 0"), true, "Delegated rows remain flat");
     assert.equal(perspectiveRadios[1]?.getAttribute("aria-checked"), "true");
     assert.equal(dom.window.document.activeElement, perspectiveRadios[1]);
+
+    await act(async () => groupButtons[0]?.click());
+    const delegatedGroupingDialog = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="Action Item grouping"]');
+    const personDirectionButton = delegatedGroupingDialog?.querySelector<HTMLButtonElement>('button[aria-label="Sort descending for grouping level 3"]');
+    assert.ok(personDirectionButton, "Delegated exposes an Asc/Desc control for Person in charge");
+    await act(async () => {
+      personDirectionButton.click();
+      await Promise.resolve();
+    });
+    const personDirectionURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
+    assert.equal(personDirectionURL.searchParams.get("grouping"), "color:asc,completion_due_date:asc,person_in_charge:desc");
+
+    await act(async () => {
+      perspectiveRadios[0]?.click();
+      await Promise.resolve();
+    });
+    const mineURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
+    assert.equal(mineURL.searchParams.get("perspective"), "mine");
+    assert.equal(mineURL.searchParams.get("grouping"), "color:desc,completion_due_date:asc", "Mine restores its independent two-level grouping stack");
+    await act(async () => {
+      resolveActionGrouping?.(response({ nodes: undefined, processes: undefined, projects: undefined }));
+      await Promise.resolve();
+    });
+    assert.equal(actionSection?.querySelector('[data-my-work-person-in-charge="true"]'), null, "Mine does not show the delegated person label");
 
     await act(async () => {
       nodeRadios[0]?.focus();
@@ -690,6 +717,8 @@ test("My Work toggles completed History in place, refreshes Action Item edits, a
         name: activeActionName,
         completion_due_date: activeActionDue || null,
         completion_due_date_field_id: "field-action-due",
+        person_in_charge_user_id: "viewer-1",
+        person_in_charge_name: "Viewer One",
       }] : [],
       has_more: false,
     });
@@ -726,8 +755,8 @@ test("My Work toggles completed History in place, refreshes Action Item edits, a
       if (section === "action_items") return response({
         action_items: url.searchParams.get("history") === "true" ? {
           items: [
-            { entity_id: "action-new", name: "Newest completed Action", completion_due_date_field_id: "field-new", completed_timestamp: "2026-08-29T12:00:00Z" },
-            { entity_id: "action-old", name: "Older completed Action", completion_due_date_field_id: "field-old", completed_timestamp: "2026-08-28T12:00:00Z" },
+            { entity_id: "action-new", name: "Newest completed Action", completion_due_date_field_id: "field-new", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One", completed_timestamp: "2026-08-29T12:00:00Z" },
+            { entity_id: "action-old", name: "Older completed Action", completion_due_date_field_id: "field-old", person_in_charge_user_id: "viewer-1", person_in_charge_name: "Viewer One", completed_timestamp: "2026-08-28T12:00:00Z" },
           ],
           has_more: false,
         } : actionPage(),

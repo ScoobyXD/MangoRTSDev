@@ -9,7 +9,7 @@ export type MyWorkProcessRole = (typeof MY_WORK_PROCESS_ROLES)[number];
 export const MY_WORK_ACTION_ITEM_PERSPECTIVES = ["mine", "delegated"] as const;
 export type MyWorkActionItemPerspective = (typeof MY_WORK_ACTION_ITEM_PERSPECTIVES)[number];
 
-export type MyWorkGroupingField = "color" | "completion_due_date" | "priority" | "due_date";
+export type MyWorkGroupingField = "color" | "completion_due_date" | "person_in_charge" | "priority" | "due_date";
 export type MyWorkGroupingSetting = {
   field: MyWorkGroupingField;
   direction: "asc" | "desc";
@@ -27,6 +27,8 @@ export type MyWorkActionItem = {
   color?: string | null;
   completion_due_date?: string | null;
   completion_due_date_field_id: string;
+  person_in_charge_user_id: string;
+  person_in_charge_name: string;
   completed_timestamp?: string;
 };
 
@@ -131,7 +133,7 @@ export function serializeMyWorkGrouping(
   groupings: ReadonlyArray<MyWorkGroupingSetting>,
 ): string {
   const supportedFields = section === "action_items"
-    ? new Set<MyWorkGroupingField>(["color", "completion_due_date"])
+    ? new Set<MyWorkGroupingField>(["color", "completion_due_date", "person_in_charge"])
     : section === "nodes"
       ? new Set<MyWorkGroupingField>(["priority", "due_date"])
       : null;

@@ -1,6 +1,6 @@
 # Action Item Business Logic Laws
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 1. Every company has one required Action Item Entity Type and the seven required fields `person_in_charge`, `assigned_by`, `analysis_due_date`, `completion_due_date`, `status`, `color`, and `source`.
 2. Person in charge and Assigned by are independent nullable `person` fields. Each nonnull value is the exact `user_id` of a current membership in the Action Item's company.
@@ -21,7 +21,7 @@ Last updated: 2026-08-29
 17. New Action Items default Status to In progress. Person in charge, Assigned by, and both due dates start unset. Direct creation starts with Source and Color unset, while editor creation atomically records the exact Source and uses the selected Yellow or Red color.
 18. My Work Mine contains only active Action Items whose exact Person in charge is the current member. Delegated contains only active Action Items whose exact Assigned by is the current member and whose nonnull Person in charge is a different member.
 19. A self-assigned Action Item appears only in Mine. An unassigned Action Item appears in neither Mine nor Delegated, and Done, Complete, or Completed items appear in neither active view.
-20. Perspective filtering, permission checks, color/date ordering, grouping, limits, counts, and cursor pagination are server-owned in that order, and each cursor is bound to its perspective.
+20. Perspective filtering, permission checks, and cursor-wide grouping are server-owned. Mine defaults to Color then Completion due date; Delegated defaults to those levels plus current Person in charge name, exact Person in charge ID, and exact Entity ID as its stable tertiary order, and each cursor is bound to its perspective and full grouping stack.
 
 ## Process Story
 

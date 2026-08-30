@@ -1,6 +1,6 @@
 # My Work Business Logic Laws
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 MW1 - The page is named My Work and is the first built-in item beneath My Tower, immediately above Projects.
 
@@ -26,7 +26,7 @@ MW11 - The Action Items header places its Mine/Delegated control immediately to 
 
 MW12 - No grouping control outside those two section headers changes either section's grouping stack.
 
-MW13 - The first Action Item grouping stack is Color followed by Completion due date.
+MW13 - Mine starts with Color followed by Completion due date. Delegated automatically uses Color, Completion due date closest first, then Person in charge alphabetically; each level keeps its own Asc/Desc control, and switching perspectives restores that perspective's stack.
 
 MW14 - The initial Action Item color order is Red, Yellow, then No color. An Action Item with no color remains visible.
 
@@ -60,7 +60,7 @@ MW28 - Effective RACI and Project Team membership never grant resource access. T
 
 MW29 - Access to a Node does not grant access to its associated Process or Project. An inaccessible inline Process or Project is omitted completely, including its ID, name, hidden count, placeholder, and relationship details, while the accessible Node remains visible.
 
-MW30 - The backend applies the selected Node role or Action Item perspective before permission filtering, sorting, grouping, limits, pagination cursors, has-more decisions, or counts. It binds the role or perspective and grouping stack to that section's cursor; the frontend never filters a limited page locally or receives hidden resources.
+MW30 - The backend applies the selected Node role or Action Item perspective before permission filtering, sorting, grouping, limits, pagination cursors, has-more decisions, or counts. When Delegated groups by Person in charge, it orders the current authoritative member display name with exact Person in charge and Entity IDs as stable tie-breakers, and binds the role or perspective and grouping stack to that section's cursor; the frontend never filters or sorts a limited page locally or receives hidden resources.
 
 MW31 - Opening any My Work resource performs that destination's normal current permission check. A prior My Work response is never proof of continued access.
 
@@ -70,9 +70,9 @@ MW33 - Mine and Delegated both exclude an Action Item whose current canonical St
 
 MW34 - The normal Nodes list excludes a Node whose current status is Done, Complete, or Completed; that Node appears only in Nodes History while it still has the selected effective RACI role and remains permitted.
 
-MW35 - A first-version Action Item row exposes only the Action Item summary needed to display and open that exact Entity. It derives and exposes no Process, Project, or other resource context.
+MW35 - An Action Item row exposes only the summary needed to display and open that exact Entity. A Delegated row also shows the current Person in charge name inline; Mine shows no person label, and neither perspective derives Process, Project, or other resource context.
 
-MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that section nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated, Node role, or Process role clears only that section's stale rows and cursor, reloads only that section, and preserves its grouping stack.
+MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that section nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated clears only Action Items and loads that perspective's independent grouping stack; switching a Node or Process role clears only that section and preserves its grouping stack.
 
 MW37 - A section never requests the same next cursor concurrently, ignores canceled or stale responses, rejects a non-advancing cursor, and never appends the same resource twice.
 
@@ -82,13 +82,13 @@ MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact
 
 MW40 - Red Action Item icons and names use the established Huddle red treatment and pulse once per second. Yellow Action Item icons and names use the established Huddle yellow treatment and pulse once every two seconds.
 
-MW41 - Completion due date and Due date remain available as ordering levels but render no date-group header. Other selected grouping levels and their rows remain visibly nested, and color or priority groups use the established Action Item or Node priority color.
+MW41 - Completion due date and Due date remain ordering levels but render no date-group header. Delegated Person in charge is also an ordering level with no group header; its current name appears only inline on each row. Color and priority groups keep their established colors.
 
 MW42 - The Node and Process role selectors reuse the same established accessible selector and colors: Responsible is orange, Accountable is green, Consulted is blue, and Informed is purple.
 
 MW43 - Each major My Work section is an elevated surface. Every resource row lifts on hover or keyboard focus, and inline Node Process and Project references are independent elevated click targets.
 
-MW44 - Action Item, Node, Process, and Project row names use the readable My Work row type scale. Nested group levels and their rows remain indented without continuous vertical guide lines.
+MW44 - Action Item, Node, Process, and Project row names use the readable My Work row type scale. Delegated Action Item rows remain at one flat, unindented depth even when Color headers are visible; other visible nested group levels and their rows remain indented without continuous vertical guide lines.
 
 MW45 - A colored Action Item keeps its established raised pulsing icon, while its title is plain highlighted text with the same red one-second or yellow two-second pulse and no separate raised chip surface.
 
@@ -130,7 +130,7 @@ Mango reads that member's Action Items for the selected Mine or Delegated perspe
 
 ↓
 
-The unnamed left column keeps Action Items above Nodes, shows editable inline due dates, and applies each normal section's independent ordering/grouping stack while all four sections append more permitted rows within their own scroll areas; either left section may replace its own rows with newest-first History and return in place
+The unnamed left column keeps Action Items above Nodes, shows editable inline due dates, and applies Mine's two-level or Delegated's three-level server-owned ordering while Delegated rows stay flat and show Person in charge inline; all four sections append more permitted rows within their own scroll areas, and either left section may replace its own rows with newest-first History and return in place
 
 ↓
 

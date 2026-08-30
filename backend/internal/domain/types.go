@@ -190,6 +190,8 @@ type EntitySummary struct {
 type MyWorkActionItem struct {
 	EntityID                 string     `json:"entity_id"`
 	Name                     string     `json:"name"`
+	PersonInChargeUserID     string     `json:"person_in_charge_user_id"`
+	PersonInChargeName       string     `json:"person_in_charge_name"`
 	Color                    *string    `json:"color,omitempty"`
 	CompletionDueDate        *string    `json:"completion_due_date,omitempty"`
 	CompletionDueDateFieldID string     `json:"completion_due_date_field_id"`

@@ -30,6 +30,7 @@ export function flattenMyWorkGroupedDisplayEntries<Item, Field extends string>(
   groups: ReadonlyArray<UniversalNestedGroup<Item, Field>>,
   rowIdentity: (row: Item) => string,
   hiddenHeaderFields: ReadonlySet<Field> = new Set<Field>(),
+  flattenRows = false,
 ): Array<MyWorkDisplayEntry<Item, Field>> {
   const entries: Array<MyWorkDisplayEntry<Item, Field>> = [];
 
@@ -60,7 +61,7 @@ export function flattenMyWorkGroupedDisplayEntries<Item, Field extends string>(
         entryID: `${group.id}/row:${rowID}`,
         rowID,
         row,
-        depth: childDepth,
+        depth: flattenRows ? 0 : childDepth,
         parentGroupID: group.id,
       });
       header.rowCount += 1;

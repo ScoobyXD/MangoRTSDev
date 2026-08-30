@@ -20,11 +20,13 @@ const (
 
 	MyWorkActionItemGroupingColor             = "color"
 	MyWorkActionItemGroupingCompletionDueDate = "completion_due_date"
+	MyWorkActionItemGroupingPersonInCharge    = "person_in_charge"
 	MyWorkNodeGroupingPriority                = "priority"
 	MyWorkNodeGroupingDueDate                 = "due_date"
 
-	MyWorkDefaultActionItemGrouping = "color:asc,completion_due_date:asc"
-	MyWorkDefaultNodeGrouping       = "priority:asc,due_date:asc"
+	MyWorkDefaultActionItemGrouping          = "color:asc,completion_due_date:asc"
+	MyWorkDefaultDelegatedActionItemGrouping = "color:asc,completion_due_date:asc,person_in_charge:asc"
+	MyWorkDefaultNodeGrouping                = "priority:asc,due_date:asc"
 
 	MyWorkDefaultLimit = 50
 	MyWorkMaxLimit     = 200
@@ -63,6 +65,8 @@ type myWorkCursor struct {
 	History            bool   `json:"history,omitempty"`
 	CompletedTimestamp string `json:"completed_timestamp,omitempty"`
 	Name               string `json:"name,omitempty"`
+	PersonInChargeName string `json:"person_in_charge_name,omitempty"`
+	PersonInChargeID   string `json:"person_in_charge_user_id,omitempty"`
 	ResourceID         string `json:"resource_id"`
 }
 
@@ -116,7 +120,7 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 			}
 			break
 		}
-		grouping, terms, err := normalizeMyWorkGrouping(query.Section, query.Grouping)
+		grouping, terms, err := normalizeMyWorkGrouping(query.Section, query.Perspective, query.Grouping)
 		if err != nil {
 			return MyWorkQuery{}, myWorkCursor{}, err
 		}
@@ -163,7 +167,7 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	}
 	if query.History {
 		completed, err := time.Parse(time.RFC3339Nano, cursor.CompletedTimestamp)
-		if err != nil || completed.IsZero() || cursor.Grouping != "" || cursor.GroupNull || cursor.GroupInt != 0 || cursor.GroupText != "" || cursor.DateNull || cursor.Date != "" || cursor.Name != "" {
+		if err != nil || completed.IsZero() || cursor.Grouping != "" || cursor.GroupNull || cursor.GroupInt != 0 || cursor.GroupText != "" || cursor.DateNull || cursor.Date != "" || cursor.Name != "" || cursor.PersonInChargeName != "" || cursor.PersonInChargeID != "" {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 		return query, cursor, nil
@@ -176,11 +180,17 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 		if cursor.Grouping != query.Grouping {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
+		personGrouping := myWorkGroupingHasField(query.grouping, MyWorkActionItemGroupingPersonInCharge)
+		personShapeValid := cursor.PersonInChargeName == "" && cursor.PersonInChargeID == ""
+		if personGrouping {
+			personShapeValid = cursor.PersonInChargeName != "" &&
+				cleanUUIDText(cursor.PersonInChargeID) == cursor.PersonInChargeID
+		}
 		colorShapeValid := (cursor.GroupInt == 0 && cursor.GroupText == ActionItemColorRed) ||
 			(cursor.GroupInt == 1 && cursor.GroupText == ActionItemColorYellow) ||
 			(cursor.GroupInt == 2 && cursor.GroupText != "" && cursor.GroupText != ActionItemColorRed && cursor.GroupText != ActionItemColorYellow) ||
 			(cursor.GroupInt == 3 && cursor.GroupText == "")
-		if cursor.GroupNull != (cursor.GroupText == "") || cursor.Name != "" || !colorShapeValid || !validMyWorkCursorDate(cursor) {
+		if cursor.GroupNull != (cursor.GroupText == "") || cursor.Name != "" || !personShapeValid || !colorShapeValid || !validMyWorkCursorDate(cursor) {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 	case MyWorkSectionNodes:
@@ -188,23 +198,27 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 		priorityShapeValid := (cursor.GroupNull && cursor.GroupInt == 0) || (!cursor.GroupNull && cursor.GroupInt >= 1 && cursor.GroupInt <= 5)
-		if cursor.GroupText != "" || cursor.Name != "" || !priorityShapeValid || !validMyWorkCursorDate(cursor) {
+		if cursor.GroupText != "" || cursor.Name != "" || cursor.PersonInChargeName != "" || cursor.PersonInChargeID != "" || !priorityShapeValid || !validMyWorkCursorDate(cursor) {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 	case MyWorkSectionProcesses, MyWorkSectionProjects:
-		if cursor.Grouping != "" || strings.TrimSpace(cursor.Name) == "" || cursor.GroupNull || cursor.GroupInt != 0 || cursor.GroupText != "" || cursor.DateNull || cursor.Date != "" {
+		if cursor.Grouping != "" || strings.TrimSpace(cursor.Name) == "" || cursor.GroupNull || cursor.GroupInt != 0 || cursor.GroupText != "" || cursor.DateNull || cursor.Date != "" || cursor.PersonInChargeName != "" || cursor.PersonInChargeID != "" {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 	}
 	return query, cursor, nil
 }
 
-func normalizeMyWorkGrouping(section, raw string) (string, []myWorkGroupingTerm, error) {
+func normalizeMyWorkGrouping(section, perspective, raw string) (string, []myWorkGroupingTerm, error) {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	if raw == "" {
 		switch section {
 		case MyWorkSectionActionItems:
-			raw = MyWorkDefaultActionItemGrouping
+			if perspective == MyWorkActionItemPerspectiveDelegated {
+				raw = MyWorkDefaultDelegatedActionItemGrouping
+			} else {
+				raw = MyWorkDefaultActionItemGrouping
+			}
 		case MyWorkSectionNodes:
 			raw = MyWorkDefaultNodeGrouping
 		default:
@@ -219,6 +233,9 @@ func normalizeMyWorkGrouping(section, raw string) (string, []myWorkGroupingTerm,
 	case MyWorkSectionActionItems:
 		allowed[MyWorkActionItemGroupingColor] = true
 		allowed[MyWorkActionItemGroupingCompletionDueDate] = true
+		if perspective == MyWorkActionItemPerspectiveDelegated {
+			allowed[MyWorkActionItemGroupingPersonInCharge] = true
+		}
 	case MyWorkSectionNodes:
 		allowed[MyWorkNodeGroupingPriority] = true
 		allowed[MyWorkNodeGroupingDueDate] = true
@@ -253,8 +270,31 @@ func myWorkEffectiveGrouping(query MyWorkQuery, section string) (string, []myWor
 	if query.Section == section && query.Grouping != "" {
 		return query.Grouping, query.grouping
 	}
-	grouping, terms, _ := normalizeMyWorkGrouping(section, "")
+	grouping, terms, _ := normalizeMyWorkGrouping(section, query.Perspective, "")
 	return grouping, terms
+}
+
+func myWorkGroupingHasField(grouping []myWorkGroupingTerm, field string) bool {
+	for _, term := range grouping {
+		if term.Field == field {
+			return true
+		}
+	}
+	return false
+}
+
+func myWorkPersonInChargeName(displayName, email, userID string) string {
+	if name := strings.TrimSpace(displayName); name != "" {
+		return name
+	}
+	if email := strings.TrimSpace(email); email != "" {
+		return email
+	}
+	return cleanUUIDText(userID)
+}
+
+func myWorkPersonInChargeSortName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
 }
 
 func validMyWorkCursorDate(cursor myWorkCursor) bool {

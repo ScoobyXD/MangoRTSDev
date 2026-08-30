@@ -502,6 +502,116 @@ func TestPostgresMyWorkGroupingKeysetsExecuteAcrossPages(t *testing.T) {
 	}
 }
 
+func TestPostgresMyWorkDelegatedPersonGroupingPagesByAuthoritativeNameAndUser(t *testing.T) {
+	db, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Postgres My Work Delegated Person Grouping")
+	if err != nil {
+		t.Fatal(err)
+	}
+	createMember := func(subject, displayName string) domain.User {
+		t.Helper()
+		user, err := repo.UpsertAuthUser(subject, subject+"@example.test", displayName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.AddCompanyMembership(user.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+			t.Fatal(err)
+		}
+		return user
+	}
+	delegator := createMember("postgres-my-work-delegated-person-owner", "Delegator")
+	alphaFirst := createMember("postgres-my-work-delegated-person-alpha-first", "alpha")
+	alphaSecond := createMember("postgres-my-work-delegated-person-alpha-second", "ALPHA")
+	zulu := createMember("postgres-my-work-delegated-person-zulu", "Zulu")
+	if _, err := db.Exec(`update users set display_name='  alpha  ' where user_id=$1::uuid`, alphaFirst.UserID); err != nil {
+		t.Fatal(err)
+	}
+
+	alphaFirstOne := mustCreatePostgresMyWorkDelegatedActionItem(t, repo, company.CompanyID, delegator.UserID, alphaFirst.UserID, "Alpha first one", ActionItemColorRed, "2026-09-01")
+	alphaFirstTwo := mustCreatePostgresMyWorkDelegatedActionItem(t, repo, company.CompanyID, delegator.UserID, alphaFirst.UserID, "Alpha first two", ActionItemColorRed, "2026-09-01")
+	alphaSecondItem := mustCreatePostgresMyWorkDelegatedActionItem(t, repo, company.CompanyID, delegator.UserID, alphaSecond.UserID, "Alpha second", ActionItemColorRed, "2026-09-01")
+	zuluItem := mustCreatePostgresMyWorkDelegatedActionItem(t, repo, company.CompanyID, delegator.UserID, zulu.UserID, "Zulu", ActionItemColorRed, "2026-09-01")
+
+	query := MyWorkQuery{
+		CompanyID: company.CompanyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
+		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated, Limit: 2,
+	}
+	first, err := repo.GetMyWork(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ActionItems == nil || len(first.ActionItems.Items) != 2 || !first.ActionItems.HasMore || first.ActionItems.NextCursor == "" ||
+		first.ActionItems.Items[0].EntityID != alphaFirstOne.EntityID || first.ActionItems.Items[1].EntityID != alphaFirstTwo.EntityID {
+		t.Fatalf("first ascending Postgres delegated page = %+v", first.ActionItems)
+	}
+	for _, item := range first.ActionItems.Items {
+		if item.PersonInChargeUserID != alphaFirst.UserID || item.PersonInChargeName != "alpha" {
+			t.Fatalf("first ascending Postgres delegated identity = %+v", item)
+		}
+	}
+	query.Cursor = first.ActionItems.NextCursor
+	second, err := repo.GetMyWork(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ActionItems == nil || len(second.ActionItems.Items) != 2 || second.ActionItems.HasMore ||
+		second.ActionItems.Items[0].EntityID != alphaSecondItem.EntityID || second.ActionItems.Items[1].EntityID != zuluItem.EntityID ||
+		second.ActionItems.Items[0].PersonInChargeUserID != alphaSecond.UserID || second.ActionItems.Items[0].PersonInChargeName != "ALPHA" ||
+		second.ActionItems.Items[1].PersonInChargeUserID != zulu.UserID || second.ActionItems.Items[1].PersonInChargeName != "Zulu" {
+		t.Fatalf("second ascending Postgres delegated page = %+v", second.ActionItems)
+	}
+
+	descendingQuery := MyWorkQuery{
+		CompanyID: company.CompanyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
+		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
+		Grouping: "color:asc,completion_due_date:asc,person_in_charge:desc", Limit: 2,
+	}
+	descendingFirst, err := repo.GetMyWork(context.Background(), descendingQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descendingFirst.ActionItems == nil || len(descendingFirst.ActionItems.Items) != 2 || !descendingFirst.ActionItems.HasMore ||
+		descendingFirst.ActionItems.Items[0].EntityID != zuluItem.EntityID || descendingFirst.ActionItems.Items[1].EntityID != alphaSecondItem.EntityID {
+		t.Fatalf("first descending Postgres delegated page = %+v", descendingFirst.ActionItems)
+	}
+	descendingQuery.Cursor = descendingFirst.ActionItems.NextCursor
+	descendingSecond, err := repo.GetMyWork(context.Background(), descendingQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descendingSecond.ActionItems == nil || len(descendingSecond.ActionItems.Items) != 2 || descendingSecond.ActionItems.HasMore ||
+		descendingSecond.ActionItems.Items[0].EntityID != alphaFirstOne.EntityID || descendingSecond.ActionItems.Items[1].EntityID != alphaFirstTwo.EntityID {
+		t.Fatalf("second descending Postgres delegated page = %+v", descendingSecond.ActionItems)
+	}
+
+	eAcute := createMember("postgres-my-work-delegated-person-e-acute", "Éclair")
+	eCircumflex := createMember("postgres-my-work-delegated-person-e-circumflex", "Êclair")
+	eAcuteItem := mustCreatePostgresMyWorkDelegatedActionItem(t, repo, company.CompanyID, delegator.UserID, eAcute.UserID, "E acute", ActionItemColorYellow, "2026-09-01")
+	eCircumflexItem := mustCreatePostgresMyWorkDelegatedActionItem(t, repo, company.CompanyID, delegator.UserID, eCircumflex.UserID, "E circumflex", ActionItemColorYellow, "2026-09-01")
+	unicodeQuery := MyWorkQuery{
+		CompanyID: company.CompanyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
+		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
+		Grouping: "color:desc,person_in_charge:asc", Limit: 1,
+	}
+	unicodeFirst, err := repo.GetMyWork(context.Background(), unicodeQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unicodeFirst.ActionItems == nil || len(unicodeFirst.ActionItems.Items) != 1 || !unicodeFirst.ActionItems.HasMore ||
+		unicodeFirst.ActionItems.Items[0].EntityID != eAcuteItem.EntityID {
+		t.Fatalf("first Unicode Postgres delegated page = %+v", unicodeFirst.ActionItems)
+	}
+	unicodeQuery.Cursor = unicodeFirst.ActionItems.NextCursor
+	unicodeSecond, err := repo.GetMyWork(context.Background(), unicodeQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unicodeSecond.ActionItems == nil || len(unicodeSecond.ActionItems.Items) != 1 || !unicodeSecond.ActionItems.HasMore ||
+		unicodeSecond.ActionItems.Items[0].EntityID != eCircumflexItem.EntityID {
+		t.Fatalf("second Unicode Postgres delegated page = %+v", unicodeSecond.ActionItems)
+	}
+}
+
 func TestPostgresMyWorkNodeGroupingKeysetsAndEmptyStackExecute(t *testing.T) {
 	_, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Postgres My Work Node Grouping")
@@ -750,6 +860,14 @@ func mustCreatePostgresMyWorkActionItem(t *testing.T, repo *PostgresRepo, compan
 	if due != "" {
 		mustSetPostgresMyWorkActionField(t, repo, item, ActionItemCompletionDueDateSystemKey, due)
 	}
+	return item
+}
+
+func mustCreatePostgresMyWorkDelegatedActionItem(t *testing.T, repo *PostgresRepo, companyID, delegatorUserID, personInChargeUserID, name, color, due string) domain.Entity {
+	t.Helper()
+	item := mustCreatePostgresMyWorkActionItem(t, repo, companyID, delegatorUserID, name, color, due)
+	mustSetPostgresMyWorkActionField(t, repo, item, ActionItemPersonInChargeSystemKey, personInChargeUserID)
+	mustSetPostgresMyWorkActionField(t, repo, item, ActionItemAssignedBySystemKey, delegatorUserID)
 	return item
 }
 

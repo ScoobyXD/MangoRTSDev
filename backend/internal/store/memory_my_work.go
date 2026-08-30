@@ -54,11 +54,12 @@ func (r *MemoryRepo) GetMyWork(ctx context.Context, query MyWorkQuery) (domain.M
 func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myWorkCursor) domain.MyWorkActionItemPage {
 	grouping, groupingTerms := myWorkEffectiveGrouping(query, MyWorkSectionActionItems)
 	type row struct {
-		item      domain.MyWorkActionItem
-		colorRank int
-		colorKey  string
-		dateNull  bool
-		date      string
+		item           domain.MyWorkActionItem
+		colorRank      int
+		colorKey       string
+		dateNull       bool
+		date           string
+		personSortName string
 	}
 	rows := make([]row, 0)
 	for _, entity := range r.entities {
@@ -71,9 +72,13 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 		if !matchesPerspective || myWorkStatusDone(fields.status) != query.History {
 			continue
 		}
+		person, _ := r.memoryUserByIDLocked(fields.personInCharge)
+		personName := myWorkPersonInChargeName(person.DisplayName, person.Email, fields.personInCharge)
 		item := domain.MyWorkActionItem{
 			EntityID:                 entity.EntityID,
 			Name:                     entity.Name,
+			PersonInChargeUserID:     fields.personInCharge,
+			PersonInChargeName:       personName,
 			CompletionDueDateFieldID: fields.completionDueDateFieldID,
 		}
 		if query.History {
@@ -89,7 +94,11 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 		if fields.completionDueDate != "" {
 			item.CompletionDueDate = stringPointer(fields.completionDueDate)
 		}
-		rows = append(rows, row{item: item, colorRank: myWorkColorRank(fields.color), colorKey: fields.color, dateNull: fields.completionDueDate == "", date: fields.completionDueDate})
+		rows = append(rows, row{
+			item: item, colorRank: myWorkColorRank(fields.color), colorKey: fields.color,
+			dateNull: fields.completionDueDate == "", date: fields.completionDueDate,
+			personSortName: myWorkPersonInChargeSortName(personName),
+		})
 	}
 	if query.History {
 		sort.Slice(rows, func(i, j int) bool {
@@ -101,8 +110,8 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 	} else {
 		sort.Slice(rows, func(i, j int) bool {
 			return compareMyWorkActionValues(
-				rows[i].colorRank, rows[i].colorKey, rows[i].dateNull, rows[i].date, rows[i].item.EntityID,
-				rows[j].colorRank, rows[j].colorKey, rows[j].dateNull, rows[j].date, rows[j].item.EntityID,
+				rows[i].colorRank, rows[i].colorKey, rows[i].dateNull, rows[i].date, rows[i].personSortName, rows[i].item.PersonInChargeUserID, rows[i].item.EntityID,
+				rows[j].colorRank, rows[j].colorKey, rows[j].dateNull, rows[j].date, rows[j].personSortName, rows[j].item.PersonInChargeUserID, rows[j].item.EntityID,
 				groupingTerms,
 			) < 0
 		})
@@ -111,7 +120,7 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 		filtered := rows[:0]
 		for _, item := range rows {
 			if (query.History && myWorkHistoryItemAfter(*item.item.CompletedTimestamp, item.item.EntityID, cursor)) ||
-				(!query.History && compareMyWorkActionCursor(item.colorRank, item.colorKey, item.dateNull, item.date, item.item.EntityID, cursor, groupingTerms) > 0) {
+				(!query.History && compareMyWorkActionCursor(item.colorRank, item.colorKey, item.dateNull, item.date, item.personSortName, item.item.PersonInChargeUserID, item.item.EntityID, cursor, groupingTerms) > 0) {
 				filtered = append(filtered, item)
 			}
 		}
@@ -130,7 +139,12 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 		if query.History {
 			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, History: true, CompletedTimestamp: last.item.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.item.EntityID})
 		} else {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, GroupNull: last.colorKey == "", GroupInt: last.colorRank, GroupText: last.colorKey, DateNull: last.dateNull, Date: last.date, ResourceID: last.item.EntityID})
+			nextCursor := myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, GroupNull: last.colorKey == "", GroupInt: last.colorRank, GroupText: last.colorKey, DateNull: last.dateNull, Date: last.date, ResourceID: last.item.EntityID}
+			if myWorkGroupingHasField(groupingTerms, MyWorkActionItemGroupingPersonInCharge) {
+				nextCursor.PersonInChargeName = last.personSortName
+				nextCursor.PersonInChargeID = last.item.PersonInChargeUserID
+			}
+			page.NextCursor = encodeMyWorkCursor(nextCursor)
 		}
 	}
 	return page
@@ -368,15 +382,15 @@ func myWorkColorRank(color string) int {
 	}
 }
 
-func compareMyWorkActionCursor(colorRank int, colorKey string, dateNull bool, date, resourceID string, cursor myWorkCursor, grouping []myWorkGroupingTerm) int {
+func compareMyWorkActionCursor(colorRank int, colorKey string, dateNull bool, date, personSortName, personUserID, resourceID string, cursor myWorkCursor, grouping []myWorkGroupingTerm) int {
 	return compareMyWorkActionValues(
-		colorRank, colorKey, dateNull, date, resourceID,
-		cursor.GroupInt, cursor.GroupText, cursor.DateNull, cursor.Date, cursor.ResourceID,
+		colorRank, colorKey, dateNull, date, personSortName, personUserID, resourceID,
+		cursor.GroupInt, cursor.GroupText, cursor.DateNull, cursor.Date, cursor.PersonInChargeName, cursor.PersonInChargeID, cursor.ResourceID,
 		grouping,
 	)
 }
 
-func compareMyWorkActionValues(leftRank int, leftColor string, leftDateNull bool, leftDate, leftID string, rightRank int, rightColor string, rightDateNull bool, rightDate, rightID string, grouping []myWorkGroupingTerm) int {
+func compareMyWorkActionValues(leftRank int, leftColor string, leftDateNull bool, leftDate, leftPersonSortName, leftPersonUserID, leftID string, rightRank int, rightColor string, rightDateNull bool, rightDate, rightPersonSortName, rightPersonUserID, rightID string, grouping []myWorkGroupingTerm) int {
 	for _, term := range grouping {
 		var comparison int
 		switch term.Field {
@@ -403,6 +417,11 @@ func compareMyWorkActionValues(leftRank int, leftColor string, leftDateNull bool
 			}
 			if !leftDateNull {
 				comparison = strings.Compare(leftDate, rightDate)
+			}
+		case MyWorkActionItemGroupingPersonInCharge:
+			comparison = strings.Compare(leftPersonSortName, rightPersonSortName)
+			if comparison == 0 {
+				comparison = strings.Compare(leftPersonUserID, rightPersonUserID)
 			}
 		}
 		if comparison != 0 {
