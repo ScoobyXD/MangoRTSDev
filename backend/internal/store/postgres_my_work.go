@@ -158,6 +158,9 @@ func (r *PostgresRepo) postgresMyWorkActionItems(ctx context.Context, query MyWo
 	querySQL := fmt.Sprintf(`
 with candidates as (
   select entity.entity_id,entity.name,
+         mangorts_try_uuid(person.value_jsonb #>> '{}') as person_in_charge_user_id,
+         coalesce(nullif(btrim(person_user.display_name),''),nullif(btrim(person_user.email),''),mangorts_try_uuid(person.value_jsonb #>> '{}')::text) as person_in_charge_name,
+         lower(coalesce(nullif(btrim(person_user.display_name),''),nullif(btrim(person_user.email),''),mangorts_try_uuid(person.value_jsonb #>> '{}')::text)) as person_in_charge_sort_name,
          lower(btrim(coalesce(color.value_jsonb #>> '{}',''))) as color_key,
          completion_due.value_jsonb #>> '{}' as completion_due_date,
          completion_due.entity_field_id,
@@ -168,6 +171,8 @@ with candidates as (
   join entities entity
     on entity.company_id=person.company_id and entity.entity_id=person.entity_id
    and entity.entity_type_id=$3::uuid
+  left join users person_user
+    on person_user.user_id=mangorts_try_uuid(person.value_jsonb #>> '{}')
   left join entity_fields status
     on status.company_id=entity.company_id and status.entity_id=entity.entity_id
    and status.entity_field_type_id=$4::uuid
@@ -191,28 +196,32 @@ with candidates as (
     )
     and ($15::boolean = (lower(btrim(coalesce(status.value_jsonb #>> '{}',''))) in ('done','complete','completed')))
 )
-select entity_id::text,name,nullif(color_key,''),completion_due_date,entity_field_id::text,completed_timestamp
+select entity_id::text,name,person_in_charge_user_id::text,person_in_charge_name,person_in_charge_sort_name,
+       nullif(color_key,''),completion_due_date,entity_field_id::text,completed_timestamp
 from candidates
 where $8::boolean is not null and $9::integer is not null and $10::text is not null
   and $11::boolean is not null and $12::text is not null and $13::uuid is not null
-  and $16::timestamptz is not null
+  and $16::timestamptz is not null and $18::text is not null and $19::uuid is not null
   and %s
 order by %s
 limit $14`, keyset, orderBy)
 	rows, err := r.db.QueryContext(ctx, querySQL, query.CompanyID, query.UserID, ActionItemEntityTypeID, ActionItemStatusFieldTypeID,
 		ActionItemColorFieldTypeID, ActionItemCompletionDueDateFieldTypeID,
 		query.Cursor != "", cursor.GroupNull, cursor.GroupInt, cursor.GroupText, cursor.DateNull, cursor.Date, myWorkCursorUUID(cursor.ResourceID), query.Limit+1,
-		query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp), query.Perspective)
+		query.History, myWorkCursorTimestamp(cursor.CompletedTimestamp), query.Perspective,
+		cursor.PersonInChargeName, myWorkCursorUUID(cursor.PersonInChargeID))
 	if err != nil {
 		return domain.MyWorkActionItemPage{}, err
 	}
 	defer rows.Close()
 	items := make([]domain.MyWorkActionItem, 0, query.Limit+1)
+	personSortNames := make([]string, 0, query.Limit+1)
 	for rows.Next() {
 		var item domain.MyWorkActionItem
+		var personSortName string
 		var color, due, dueFieldID sql.NullString
 		var completedTimestamp sql.NullTime
-		if err := rows.Scan(&item.EntityID, &item.Name, &color, &due, &dueFieldID, &completedTimestamp); err != nil {
+		if err := rows.Scan(&item.EntityID, &item.Name, &item.PersonInChargeUserID, &item.PersonInChargeName, &personSortName, &color, &due, &dueFieldID, &completedTimestamp); err != nil {
 			return domain.MyWorkActionItemPage{}, err
 		}
 		item.Color = nullStringPointer(color)
@@ -224,6 +233,7 @@ limit $14`, keyset, orderBy)
 			item.CompletedTimestamp = &completedTimestamp.Time
 		}
 		items = append(items, item)
+		personSortNames = append(personSortNames, personSortName)
 	}
 	if err := rows.Err(); err != nil {
 		return domain.MyWorkActionItemPage{}, err
@@ -236,7 +246,12 @@ limit $14`, keyset, orderBy)
 			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.EntityID})
 		} else {
 			color := strings.ToLower(myWorkOptionalString(last.Color))
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, GroupNull: color == "", GroupInt: myWorkColorRank(color), GroupText: color, DateNull: last.CompletionDueDate == nil, Date: myWorkOptionalString(last.CompletionDueDate), ResourceID: last.EntityID})
+			nextCursor := myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, GroupNull: color == "", GroupInt: myWorkColorRank(color), GroupText: color, DateNull: last.CompletionDueDate == nil, Date: myWorkOptionalString(last.CompletionDueDate), ResourceID: last.EntityID}
+			if myWorkGroupingHasField(groupingTerms, MyWorkActionItemGroupingPersonInCharge) {
+				nextCursor.PersonInChargeName = personSortNames[query.Limit-1]
+				nextCursor.PersonInChargeID = last.PersonInChargeUserID
+			}
+			page.NextCursor = encodeMyWorkCursor(nextCursor)
 		}
 	}
 	return page, nil
@@ -696,6 +711,11 @@ func myWorkActionSQLSortComponents(grouping []myWorkGroupingTerm) []myWorkSQLSor
 			components = append(components,
 				myWorkSQLSortComponent{expression: "(completion_due_date is null)", cursorExpression: "$11::boolean", direction: "asc"},
 				myWorkSQLSortComponent{expression: "coalesce(completion_due_date::date,date '9999-12-31')", cursorExpression: "coalesce(nullif($12::text,'')::date,date '9999-12-31')", direction: term.Direction},
+			)
+		case MyWorkActionItemGroupingPersonInCharge:
+			components = append(components,
+				myWorkSQLSortComponent{expression: `person_in_charge_sort_name collate "C"`, cursorExpression: `$18::text collate "C"`, direction: term.Direction},
+				myWorkSQLSortComponent{expression: "person_in_charge_user_id", cursorExpression: "$19::uuid", direction: term.Direction},
 			)
 		}
 	}

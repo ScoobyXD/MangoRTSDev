@@ -143,10 +143,14 @@ test("Action Item follow-ups carry exactly the selected Mine or Delegated perspe
     companyID: "company-1",
     section: "action_items",
     perspective: "delegated",
-    grouping: [{ field: "color", direction: "desc" }],
+    grouping: [
+      { field: "color", direction: "asc" },
+      { field: "completion_due_date", direction: "asc" },
+      { field: "person_in_charge", direction: "desc" },
+    ],
   });
   const url = new URL(requestedPath, "https://mango.test");
   assert.equal(url.searchParams.get("section"), "action_items");
   assert.equal(url.searchParams.get("perspective"), "delegated");
-  assert.equal(url.searchParams.get("grouping"), "color:desc");
+  assert.equal(url.searchParams.get("grouping"), "color:asc,completion_due_date:asc,person_in_charge:desc");
 });

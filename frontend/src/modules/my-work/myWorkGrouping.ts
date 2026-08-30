@@ -9,7 +9,10 @@ import type { MyWorkActionItem, MyWorkNode } from "./myWorkApi.js";
 export const MY_WORK_ACTION_ITEM_GROUPING_FIELDS = [
   { value: "color", label: "Color" },
   { value: "completion_due_date", label: "Completion due date" },
+  { value: "person_in_charge", label: "Person in charge" },
 ] as const;
+
+export const MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS = MY_WORK_ACTION_ITEM_GROUPING_FIELDS.slice(0, 2);
 
 export type MyWorkActionItemGroupingField = (typeof MY_WORK_ACTION_ITEM_GROUPING_FIELDS)[number]["value"];
 export type MyWorkActionItemGrouping = UniversalGroupingSetting<MyWorkActionItemGroupingField>;
@@ -17,6 +20,11 @@ export type MyWorkActionItemGrouping = UniversalGroupingSetting<MyWorkActionItem
 export const DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS: MyWorkActionItemGrouping[] = [
   { field: "color", direction: "asc" },
   { field: "completion_due_date", direction: "asc" },
+];
+
+export const DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS: MyWorkActionItemGrouping[] = [
+  ...DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
+  { field: "person_in_charge", direction: "asc" },
 ];
 
 export const MY_WORK_NODE_GROUPING_FIELDS = [
@@ -69,6 +77,12 @@ export function actionItemGroupingValues(
 ): UniversalGroupValue[] {
   if (field === "completion_due_date") {
     return exactDateGroupingValue(item.completion_due_date, "Completion due date", "No completion due date");
+  }
+  if (field === "person_in_charge") {
+    const userID = item.person_in_charge_user_id?.trim() ?? "";
+    const name = item.person_in_charge_name?.trim() || userID;
+    if (!userID) return [{ key: "none", label: "No person in charge", sortValue: "", sortLast: true }];
+    return [{ key: userID, label: name, sortValue: `${name.toLowerCase()}\u0000${userID}` }];
   }
   const color = item.color?.trim().toLowerCase() ?? "";
   if (!color) return [{ key: "none", label: "No color", sortValue: 99, sortLast: true }];

@@ -40,8 +40,10 @@ import type {
 } from "./myWorkApi.js";
 import {
   DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS,
+  DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS,
   DEFAULT_MY_WORK_NODE_GROUPINGS,
   MY_WORK_ACTION_ITEM_GROUPING_FIELDS,
+  MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS,
   MY_WORK_NODE_GROUPING_FIELDS,
   myWorkActionItemGroupingAdapter,
   myWorkNodeGroupingAdapter,
@@ -116,9 +118,11 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   const nodesScrollRef = useRef<HTMLDivElement>(null);
   const processesScrollRef = useRef<HTMLDivElement>(null);
   const projectsScrollRef = useRef<HTMLDivElement>(null);
-  const [actionItemGroupings, setActionItemGroupings] = useState<MyWorkActionItemGrouping[]>(() => (
-    DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping }))
-  ));
+  const [actionItemGroupingStacks, setActionItemGroupingStacks] = useState<Record<MyWorkActionItemPerspective, MyWorkActionItemGrouping[]>>(() => ({
+    mine: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
+    delegated: DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
+  }));
+  const actionItemGroupings = actionItemGroupingStacks[actionItemPerspective];
   const [nodeGroupings, setNodeGroupings] = useState<MyWorkNodeGrouping[]>(() => (
     DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping }))
   ));
@@ -127,7 +131,10 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   const businessDateKey = useMyWorkBusinessDateKey();
 
   useEffect(() => {
-    setActionItemGroupings(DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })));
+    setActionItemGroupingStacks({
+      mine: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
+      delegated: DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
+    });
     setNodeGroupings(DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping })));
     setActionItemHistory(false);
     setNodeHistory(false);
@@ -181,11 +188,19 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     myWorkNodeGroupingAdapter,
   ), [nodeGroupings, state.nodes.items]);
   const actionItemEntries = useMemo(() => !actionItemHistory && actionItemGroupings.length > 0
-    ? flattenMyWorkGroupedDisplayEntries(actionItemGroups, (item) => item.entity_id, new Set(["completion_due_date"] as const))
+    ? flattenMyWorkGroupedDisplayEntries(
+      actionItemGroups,
+      (item) => item.entity_id,
+      new Set(actionItemPerspective === "delegated"
+        ? ["completion_due_date", "person_in_charge"] as const
+        : ["completion_due_date"] as const),
+      actionItemPerspective === "delegated",
+    )
     : flattenMyWorkUngroupedDisplayEntries(state.action_items.items, (item) => item.entity_id), [
     actionItemGroups,
     actionItemGroupings.length,
     actionItemHistory,
+    actionItemPerspective,
     state.action_items.items,
   ]);
   const nodeEntries = useMemo(() => !nodeHistory && nodeGroupings.length > 0
@@ -222,8 +237,13 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     await reloadSection("nodes", nodeHistory ? undefined : nodeGroupings, false, nodeHistory);
   }, [companyID, nodeGroupings, nodeHistory, reloadSection, requestJSON]);
   const renderActionItemRow = useCallback((item: MyWorkActionItem) => (
-    <ActionItemRow item={item} businessDateKey={businessDateKey} onSaveDueDate={(dueDate) => saveActionItemDueDate(item, dueDate)} />
-  ), [businessDateKey, saveActionItemDueDate]);
+    <ActionItemRow
+      item={item}
+      businessDateKey={businessDateKey}
+      showPersonInCharge={actionItemPerspective === "delegated"}
+      onSaveDueDate={(dueDate) => saveActionItemDueDate(item, dueDate)}
+    />
+  ), [actionItemPerspective, businessDateKey, saveActionItemDueDate]);
   const renderNodeRow = useCallback((item: MyWorkNode) => (
     <NodeRow item={item} businessDateKey={businessDateKey} onSaveDueDate={(dueDate) => saveNodeDueDate(item, dueDate)} />
   ), [businessDateKey, saveNodeDueDate]);
@@ -242,7 +262,7 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
 
   const changeActionItemGroupings = (next: MyWorkActionItemGrouping[]) => {
     const normalized = normalizeMyWorkActionItemGroupings(next);
-    setActionItemGroupings(normalized);
+    setActionItemGroupingStacks((current) => ({ ...current, [actionItemPerspective]: normalized }));
     void reloadSection("action_items", normalized, true);
   };
   const changeNodeGroupings = (next: MyWorkNodeGrouping[]) => {
@@ -266,7 +286,7 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     if (actionItemsScrollRef.current) actionItemsScrollRef.current.scrollTop = 0;
     void selectActionItemPerspective(
       perspective,
-      actionItemHistory ? undefined : actionItemGroupings,
+      actionItemHistory ? undefined : actionItemGroupingStacks[perspective],
       actionItemHistory,
     );
   };
@@ -333,7 +353,9 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
                 <HistoryButton selected={actionItemHistory} disabled={state.action_items.loading} onClick={toggleActionItemHistory} />
                 <UniversalGroupingControls
                   groupings={actionItemGroupings}
-                  fieldOptions={MY_WORK_ACTION_ITEM_GROUPING_FIELDS}
+                  fieldOptions={actionItemPerspective === "delegated"
+                    ? MY_WORK_ACTION_ITEM_GROUPING_FIELDS
+                    : MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS}
                   onChange={changeActionItemGroupings}
                   buttonLabel="Group Action Items"
                   popoverLabel="Action Item grouping"
@@ -1056,9 +1078,10 @@ function HistoryClockIcon() {
   );
 }
 
-function ActionItemRow({ item, businessDateKey, onSaveDueDate }: {
+function ActionItemRow({ item, businessDateKey, showPersonInCharge, onSaveDueDate }: {
   item: MyWorkActionItem;
   businessDateKey: string;
+  showPersonInCharge: boolean;
   onSaveDueDate: (dueDate: string | null) => Promise<void>;
 }) {
   const color = item.color?.trim().toLowerCase();
@@ -1092,7 +1115,19 @@ function ActionItemRow({ item, businessDateKey, onSaveDueDate }: {
           {item.name}
         </span>
       </button>
-      <InlineDueDateEditor value={item.completion_due_date} resourceLabel={item.name} businessDateKey={businessDateKey} onSave={onSaveDueDate} />
+      <div style={inlineContextStyle}>
+        <InlineDueDateEditor value={item.completion_due_date} resourceLabel={item.name} businessDateKey={businessDateKey} onSave={onSaveDueDate} />
+        {showPersonInCharge && (
+          <span
+            data-my-work-person-in-charge="true"
+            aria-label={`Person in charge: ${item.person_in_charge_name}`}
+            title={`Person in charge: ${item.person_in_charge_name}`}
+            style={personInChargeLabelStyle}
+          >
+            {item.person_in_charge_name}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -1887,6 +1922,17 @@ const inlineContextStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 6,
   overflow: "hidden",
+};
+
+const personInChargeLabelStyle: React.CSSProperties = {
+  minWidth: 0,
+  maxWidth: 108,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#475569",
+  fontSize: 10.5,
+  fontWeight: 800,
 };
 
 type InlineDueDatePresentation = {

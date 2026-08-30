@@ -219,6 +219,102 @@ func TestMemoryMyWorkActionItemPerspectivesUseExactPersonAndAssigner(t *testing.
 	}
 }
 
+func TestMemoryMyWorkDelegatedPersonGroupingPagesByAuthoritativeNameAndUser(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "10000000-0000-4000-8000-000000000014"
+	delegator := mustCreateMyWorkMember(t, repo, companyID, "my-work-person-grouping-delegator")
+	alphaFirst := mustCreateMyWorkMember(t, repo, companyID, "my-work-person-grouping-alpha-first")
+	alphaSecond := mustCreateMyWorkMember(t, repo, companyID, "my-work-person-grouping-alpha-second")
+	zulu := mustCreateMyWorkMember(t, repo, companyID, "my-work-person-grouping-zulu")
+	setMemoryMyWorkUserProfile(t, repo, alphaFirst.UserID, "  alpha  ", alphaFirst.Email)
+	setMemoryMyWorkUserProfile(t, repo, alphaSecond.UserID, "ALPHA", alphaSecond.Email)
+	setMemoryMyWorkUserProfile(t, repo, zulu.UserID, "Zulu", zulu.Email)
+
+	createDelegated := func(person domain.User, name string) domain.Entity {
+		t.Helper()
+		item := mustCreateActionItemForPIC(t, repo, companyID, delegator.UserID, person.UserID, name, ActionItemColorRed, "2026-09-01", ActionItemStatusInProgress)
+		setMyWorkActionField(t, repo, item, ActionItemAssignedBySystemKey, delegator.UserID)
+		return item
+	}
+	alphaFirstOne := createDelegated(alphaFirst, "Alpha first one")
+	alphaFirstTwo := createDelegated(alphaFirst, "Alpha first two")
+	alphaSecondItem := createDelegated(alphaSecond, "Alpha second")
+	zuluItem := createDelegated(zulu, "Zulu")
+
+	query := MyWorkQuery{
+		CompanyID: companyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
+		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated, Limit: 2,
+	}
+	first, err := repo.GetMyWork(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ActionItems == nil || len(first.ActionItems.Items) != 2 || !first.ActionItems.HasMore || first.ActionItems.NextCursor == "" ||
+		first.ActionItems.Items[0].EntityID != alphaFirstOne.EntityID || first.ActionItems.Items[1].EntityID != alphaFirstTwo.EntityID {
+		t.Fatalf("first ascending delegated page = %+v", first.ActionItems)
+	}
+	for _, item := range first.ActionItems.Items {
+		if item.PersonInChargeUserID != alphaFirst.UserID || item.PersonInChargeName != "alpha" {
+			t.Fatalf("first ascending delegated identity = %+v", item)
+		}
+	}
+	query.Cursor = first.ActionItems.NextCursor
+	second, err := repo.GetMyWork(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ActionItems == nil || len(second.ActionItems.Items) != 2 || second.ActionItems.HasMore ||
+		second.ActionItems.Items[0].EntityID != alphaSecondItem.EntityID || second.ActionItems.Items[1].EntityID != zuluItem.EntityID ||
+		second.ActionItems.Items[0].PersonInChargeUserID != alphaSecond.UserID || second.ActionItems.Items[0].PersonInChargeName != "ALPHA" ||
+		second.ActionItems.Items[1].PersonInChargeUserID != zulu.UserID || second.ActionItems.Items[1].PersonInChargeName != "Zulu" {
+		t.Fatalf("second ascending delegated page = %+v", second.ActionItems)
+	}
+
+	descendingQuery := MyWorkQuery{
+		CompanyID: companyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
+		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
+		Grouping: "color:asc,completion_due_date:asc,person_in_charge:desc", Limit: 2,
+	}
+	descendingFirst, err := repo.GetMyWork(context.Background(), descendingQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descendingFirst.ActionItems == nil || len(descendingFirst.ActionItems.Items) != 2 || !descendingFirst.ActionItems.HasMore ||
+		descendingFirst.ActionItems.Items[0].EntityID != zuluItem.EntityID || descendingFirst.ActionItems.Items[1].EntityID != alphaSecondItem.EntityID {
+		t.Fatalf("first descending delegated page = %+v", descendingFirst.ActionItems)
+	}
+	descendingQuery.Cursor = descendingFirst.ActionItems.NextCursor
+	descendingSecond, err := repo.GetMyWork(context.Background(), descendingQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descendingSecond.ActionItems == nil || len(descendingSecond.ActionItems.Items) != 2 || descendingSecond.ActionItems.HasMore ||
+		descendingSecond.ActionItems.Items[0].EntityID != alphaFirstOne.EntityID || descendingSecond.ActionItems.Items[1].EntityID != alphaFirstTwo.EntityID {
+		t.Fatalf("second descending delegated page = %+v", descendingSecond.ActionItems)
+	}
+}
+
+func TestMyWorkPersonInChargeNameUsesDisplayNameThenEmailThenUUID(t *testing.T) {
+	userID := "20000000-0000-4000-8000-000000000014"
+	for _, test := range []struct {
+		name        string
+		displayName string
+		email       string
+		userID      string
+		want        string
+	}{
+		{name: "display name", displayName: "  Current Name  ", email: "person@example.test", userID: userID, want: "Current Name"},
+		{name: "email", displayName: "  ", email: "  person@example.test  ", userID: userID, want: "person@example.test"},
+		{name: "UUID", displayName: "", email: "", userID: strings.ToUpper(userID), want: userID},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := myWorkPersonInChargeName(test.displayName, test.email, test.userID); got != test.want {
+				t.Fatalf("myWorkPersonInChargeName() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestMemoryMyWorkActionItemsPageByReorderedDescendingGrouping(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "10000000-0000-4000-8000-000000000009"
@@ -588,6 +684,18 @@ func TestMyWorkQueryShapesAndCursorBinding(t *testing.T) {
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveMine, Cursor: actionCursor}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cross-perspective cursor error = %v, want ErrInvalid", err)
 	}
+	delegatedPersonCursor := myWorkCursor{
+		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
+		Grouping: MyWorkDefaultDelegatedActionItemGrouping, GroupNull: true, GroupInt: 3, DateNull: true,
+		PersonInChargeName: "person", PersonInChargeID: user.UserID, ResourceID: resourceID,
+	}
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated, Cursor: encodeMyWorkCursor(delegatedPersonCursor)}); err != nil {
+		t.Fatalf("valid delegated Person-in-charge cursor error = %v", err)
+	}
+	delegatedPersonCursor.PersonInChargeName = ""
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated, Cursor: encodeMyWorkCursor(delegatedPersonCursor)}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("missing Person-in-charge cursor name error = %v, want ErrInvalid", err)
+	}
 	badDate := encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: domain.RACIRoleResponsible, Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "not-a-date", ResourceID: resourceID})
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, Cursor: badDate}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("malformed date cursor error = %v, want ErrInvalid", err)
@@ -618,6 +726,24 @@ func TestMyWorkGroupingValidation(t *testing.T) {
 		if _, _, err := normalizeMyWorkQuery(query); !errors.Is(err, ErrInvalid) {
 			t.Errorf("grouping %q error = %v, want ErrInvalid", raw, err)
 		}
+	}
+	for _, raw := range []string{"person_in_charge:asc", "color:asc,person_in_charge:desc"} {
+		query := base
+		query.Grouping = raw
+		if _, _, err := normalizeMyWorkQuery(query); !errors.Is(err, ErrInvalid) {
+			t.Errorf("Mine grouping %q error = %v, want ErrInvalid", raw, err)
+		}
+	}
+	delegated := base
+	delegated.Perspective = MyWorkActionItemPerspectiveDelegated
+	normalized, _, err := normalizeMyWorkQuery(delegated)
+	if err != nil || normalized.Grouping != MyWorkDefaultDelegatedActionItemGrouping {
+		t.Fatalf("default Delegated grouping = %q err=%v, want %q", normalized.Grouping, err, MyWorkDefaultDelegatedActionItemGrouping)
+	}
+	delegated.Grouping = " PERSON_IN_CHARGE:DESC "
+	normalized, _, err = normalizeMyWorkQuery(delegated)
+	if err != nil || normalized.Grouping != "person_in_charge:desc" {
+		t.Fatalf("explicit Delegated grouping = %q err=%v", normalized.Grouping, err)
 	}
 }
 
@@ -717,6 +843,22 @@ func mustCreateMyWorkMember(t *testing.T, repo *MemoryRepo, companyID, subject s
 		t.Fatal(err)
 	}
 	return user
+}
+
+func setMemoryMyWorkUserProfile(t *testing.T, repo *MemoryRepo, userID, displayName, email string) {
+	t.Helper()
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	for subject, user := range repo.users {
+		if user.UserID != userID {
+			continue
+		}
+		user.DisplayName = displayName
+		user.Email = email
+		repo.users[subject] = user
+		return
+	}
+	t.Fatalf("My Work user %q not found", userID)
 }
 
 func mustCreateAssignedActionItem(t *testing.T, repo *MemoryRepo, companyID, userID, name, color, due, status string) domain.Entity {

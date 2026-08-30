@@ -4,6 +4,7 @@ import test from "node:test";
 import { buildUniversalNestedGroups } from "../../../../frontend/src/modules/grouping/universalGrouping.js";
 import {
   DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS,
+  DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS,
   DEFAULT_MY_WORK_NODE_GROUPINGS,
   myWorkActionItemGroupingAdapter,
   myWorkNodeGroupingAdapter,
@@ -39,9 +40,9 @@ test("My Work density keeps virtual rows and resizer movement in unscaled layout
 
 test("Action Items default to Color then exact Completion due date in Red, Yellow, No color order", () => {
   const groups = buildUniversalNestedGroups([
-    { entity_id: "red", name: "Red", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red" },
-    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02T18:00:00Z", completion_due_date_field_id: "field-yellow" },
-    { entity_id: "none", name: "No color", completion_due_date: null, completion_due_date_field_id: "field-none" },
+    { entity_id: "red", name: "Red", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02T18:00:00Z", completion_due_date_field_id: "field-yellow", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "none", name: "No color", completion_due_date: null, completion_due_date_field_id: "field-none", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
   ], DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter);
 
   assert.deepEqual(groups.map((group) => group.label), ["Red", "Yellow", "No color"]);
@@ -51,11 +52,28 @@ test("Action Items default to Color then exact Completion due date in Red, Yello
   assert.deepEqual(DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => grouping.field), ["color", "completion_due_date"]);
 });
 
+test("Delegated Action Items add Person in charge after Color and Completion due date", () => {
+  const groups = buildUniversalNestedGroups([
+    { entity_id: "alex", name: "Alex item", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-alex", person_in_charge_user_id: "person-alex", person_in_charge_name: "Alex Morgan" },
+    { entity_id: "zoe", name: "Zoe item", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-zoe", person_in_charge_user_id: "person-zoe", person_in_charge_name: "Zoe Chen" },
+  ], DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter);
+
+  assert.deepEqual(DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS, [
+    { field: "color", direction: "asc" },
+    { field: "completion_due_date", direction: "asc" },
+    { field: "person_in_charge", direction: "asc" },
+  ]);
+  assert.deepEqual(groups[0]?.groups[0]?.groups.map((group) => ({ key: group.key, label: group.label })), [
+    { key: "person-alex", label: "Alex Morgan" },
+    { key: "person-zoe", label: "Zoe Chen" },
+  ]);
+});
+
 test("My Work preserves the backend keyset order instead of applying locale or numeric name sorting", () => {
   const authoritativeRows: MyWorkActionItem[] = [
-    { entity_id: "00000000-0000-4000-8000-000000000001", name: "Item 10", color: "red", completion_due_date_field_id: "field-1" },
-    { entity_id: "00000000-0000-4000-8000-000000000002", name: "Älpha", color: "red", completion_due_date_field_id: "field-2" },
-    { entity_id: "00000000-0000-4000-8000-000000000003", name: "Item 2", color: "red", completion_due_date_field_id: "field-3" },
+    { entity_id: "00000000-0000-4000-8000-000000000001", name: "Item 10", color: "red", completion_due_date_field_id: "field-1", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "00000000-0000-4000-8000-000000000002", name: "Älpha", color: "red", completion_due_date_field_id: "field-2", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "00000000-0000-4000-8000-000000000003", name: "Item 2", color: "red", completion_due_date_field_id: "field-3", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
   ];
   const groups = buildUniversalNestedGroups(
     authoritativeRows,

@@ -6,6 +6,7 @@ import { buildUniversalNestedGroups } from "../../../../frontend/src/modules/gro
 import type { MyWorkActionItem } from "../../../../frontend/src/modules/my-work/myWorkApi.js";
 import {
   DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS,
+  DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS,
   myWorkActionItemGroupingAdapter,
 } from "../../../../frontend/src/modules/my-work/myWorkGrouping.js";
 import {
@@ -17,10 +18,10 @@ import {
 
 test("My Work display entries preserve canonical group and backend row order", () => {
   const rows: MyWorkActionItem[] = [
-    { entity_id: "red-first", name: "Red first", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-first" },
-    { entity_id: "red-second", name: "Red second", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-second" },
-    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow" },
-    { entity_id: "none", name: "No color", completion_due_date: null, completion_due_date_field_id: "field-none" },
+    { entity_id: "red-first", name: "Red first", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-first", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "red-second", name: "Red second", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-second", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "none", name: "No color", completion_due_date: null, completion_due_date_field_id: "field-none", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
   ];
   const groups = buildUniversalNestedGroups(
     rows,
@@ -55,9 +56,9 @@ test("My Work display entries preserve canonical group and backend row order", (
 
 test("hidden date headers keep due-date-first batches and nested color boundaries", () => {
   const rows: MyWorkActionItem[] = [
-    { entity_id: "early-red", name: "Early red", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-early-red" },
-    { entity_id: "early-yellow", name: "Early yellow", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-early-yellow" },
-    { entity_id: "late-red", name: "Late red", color: "red", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-late-red" },
+    { entity_id: "early-red", name: "Early red", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-early-red", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "early-yellow", name: "Early yellow", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-early-yellow", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "late-red", name: "Late red", color: "red", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-late-red", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
   ];
   const groups = buildUniversalNestedGroups(rows, [
     { field: "completion_due_date", direction: "asc" },
@@ -87,11 +88,32 @@ test("hidden date headers keep due-date-first batches and nested color boundarie
   ], "removing date headers never regroups rows across date batches");
 });
 
+test("Delegated Action Item rows hide date and person headers and remain completely flat", () => {
+  const rows: MyWorkActionItem[] = [
+    { entity_id: "alex", name: "Alex item", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-alex", person_in_charge_user_id: "person-alex", person_in_charge_name: "Alex Morgan" },
+    { entity_id: "zoe", name: "Zoe item", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-zoe", person_in_charge_user_id: "person-zoe", person_in_charge_name: "Zoe Chen" },
+  ];
+  const entries = flattenMyWorkGroupedDisplayEntries(
+    buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter),
+    (row) => row.entity_id,
+    new Set(["completion_due_date", "person_in_charge"] as const),
+    true,
+  );
+
+  assert.deepEqual(entries.map((entry) => entry.kind === "group-header"
+    ? `header:${entry.depth}:${entry.field}:${entry.label}`
+    : `row:${entry.depth}:${entry.rowID}`), [
+    "header:0:color:Yellow",
+    "row:0:alex",
+    "row:0:zoe",
+  ]);
+});
+
 test("My Work row navigation skips group headers in both directions", () => {
   const rows: MyWorkActionItem[] = [
-    { entity_id: "red-first", name: "Red first", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-first" },
-    { entity_id: "red-second", name: "Red second", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-second" },
-    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow" },
+    { entity_id: "red-first", name: "Red first", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-first", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "red-second", name: "Red second", color: "red", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red-second", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
+    { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
   ];
   const entries = flattenMyWorkGroupedDisplayEntries(
     buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter),
