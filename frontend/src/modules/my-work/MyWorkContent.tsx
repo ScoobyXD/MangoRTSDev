@@ -1078,6 +1078,15 @@ function HistoryClockIcon() {
   );
 }
 
+function PersonInChargeIcon() {
+  return (
+    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" fill="none" style={{ display: "block" }}>
+      <circle cx="8" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.35" />
+      <path d="M3.5 13.5c.45-2.55 2.05-3.8 4.5-3.8s4.05 1.25 4.5 3.8" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function ActionItemRow({ item, businessDateKey, showPersonInCharge, onSaveDueDate }: {
   item: MyWorkActionItem;
   businessDateKey: string;
@@ -1116,7 +1125,6 @@ function ActionItemRow({ item, businessDateKey, showPersonInCharge, onSaveDueDat
         </span>
       </button>
       <div style={inlineContextStyle}>
-        <InlineDueDateEditor value={item.completion_due_date} resourceLabel={item.name} businessDateKey={businessDateKey} onSave={onSaveDueDate} />
         {showPersonInCharge && (
           <span
             data-my-work-person-in-charge="true"
@@ -1124,9 +1132,11 @@ function ActionItemRow({ item, businessDateKey, showPersonInCharge, onSaveDueDat
             title={`Person in charge: ${item.person_in_charge_name}`}
             style={personInChargeLabelStyle}
           >
-            {item.person_in_charge_name}
+            <span data-my-work-person-in-charge-icon="true" style={personInChargeIconStyle}><PersonInChargeIcon /></span>
+            <span style={personInChargeNameStyle}>{item.person_in_charge_name}</span>
           </span>
         )}
+        <InlineDueDateEditor value={item.completion_due_date} resourceLabel={item.name} businessDateKey={businessDateKey} onSave={onSaveDueDate} />
       </div>
     </div>
   );
@@ -1926,13 +1936,40 @@ const inlineContextStyle: React.CSSProperties = {
 
 const personInChargeLabelStyle: React.CSSProperties = {
   minWidth: 0,
-  maxWidth: 108,
+  maxWidth: 148,
+  minHeight: 31,
+  flex: "0 1 auto",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 3,
+  boxSizing: "border-box",
+  border: "1px solid rgba(14,116,144,.34)",
+  borderRadius: 9,
+  background: "linear-gradient(145deg,#ffffff,#ecfeff)",
+  color: "#0e7490",
+  boxShadow: "3px 3px 8px rgba(14,116,144,.12), -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.94)",
+  padding: "2px 8px 2px 4px",
+};
+
+const personInChargeIconStyle: React.CSSProperties = {
+  width: 24,
+  height: 24,
+  flex: "0 0 auto",
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(14,116,144,.30)",
+  borderRadius: 7,
+  background: "#ecfeff",
+  boxShadow: "2px 2px 6px rgba(14,116,144,.12), -2px -2px 6px rgba(255,255,255,.86), inset 1px 1px 0 rgba(255,255,255,.94)",
+};
+
+const personInChargeNameStyle: React.CSSProperties = {
+  minWidth: 0,
   overflow: "hidden",
   textOverflow: "ellipsis",
   whiteSpace: "nowrap",
-  color: "#475569",
   fontSize: 10.5,
-  fontWeight: 800,
+  fontWeight: 850,
 };
 
 type InlineDueDatePresentation = {
