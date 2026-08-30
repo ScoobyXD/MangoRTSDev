@@ -93,13 +93,13 @@ func TestMyWorkEndpointDerivesSubjectAndReturnsRequestedTypedSections(t *testing
 	}
 
 	delegated := httptest.NewRecorder()
-	request = httptest.NewRequest(http.MethodGet, "/v1/my-work?company_id="+companyID+"&section=action_items&perspective=delegated", nil)
+	request = httptest.NewRequest(http.MethodGet, "/v1/my-work?company_id="+companyID+"&section=action_items&perspective=delegated&grouping=color:asc,huddle_process:asc,completion_due_date:asc&ordering=person_in_charge:desc", nil)
 	request = workItemInboxReadRequestWithActor(request, user.UserID, companyID, domain.RoleCompanyUser, false)
 	handler.ServeHTTP(delegated, request)
 	if delegated.Code != http.StatusOK {
 		t.Fatalf("Delegated status = %d body=%s", delegated.Code, delegated.Body.String())
 	}
-	if repo.query.Section != store.MyWorkSectionActionItems || repo.query.Perspective != store.MyWorkActionItemPerspectiveDelegated {
+	if repo.query.Section != store.MyWorkSectionActionItems || repo.query.Perspective != store.MyWorkActionItemPerspectiveDelegated || repo.query.Grouping != store.MyWorkDefaultDelegatedActionItemGrouping || repo.query.Ordering != "person_in_charge:desc" {
 		t.Fatalf("Delegated repository query = %+v", repo.query)
 	}
 
@@ -110,7 +110,7 @@ func TestMyWorkEndpointDerivesSubjectAndReturnsRequestedTypedSections(t *testing
 	if history.Code != http.StatusOK {
 		t.Fatalf("history status = %d body=%s", history.Code, history.Body.String())
 	}
-	if repo.query.Section != store.MyWorkSectionActionItems || !repo.query.History || repo.query.Grouping != "" {
+	if repo.query.Section != store.MyWorkSectionActionItems || !repo.query.History || repo.query.Grouping != "" || repo.query.Ordering != "" {
 		t.Fatalf("history repository query = %+v", repo.query)
 	}
 }
@@ -128,7 +128,7 @@ func TestMyWorkEndpointRejectsSubjectSpoofingAndInvalidSectionInputs(t *testing.
 	}
 	handler := NewServer(base).Routes()
 	malformedDateCursorPayload, _ := json.Marshal(map[string]any{
-		"v": 1, "section": store.MyWorkSectionNodes, "role": domain.RACIRoleResponsible, "grouping": store.MyWorkDefaultNodeGrouping, "group_int": 1, "date": "not-a-date",
+		"v": 2, "section": store.MyWorkSectionNodes, "role": domain.RACIRoleResponsible, "grouping": store.MyWorkDefaultNodeGrouping, "group_int": 1, "date": "not-a-date",
 		"resource_id": "30000000-0000-4000-8000-000000000001",
 	})
 	malformedDateCursor := base64.RawURLEncoding.EncodeToString(malformedDateCursorPayload)
@@ -149,10 +149,16 @@ func TestMyWorkEndpointRejectsSubjectSpoofingAndInvalidSectionInputs(t *testing.
 		"/v1/my-work?company_id=" + companyID + "&section=nodes&grouping=",
 		"/v1/my-work?company_id=" + companyID + "&section=nodes&grouping=priority:up",
 		"/v1/my-work?company_id=" + companyID + "&section=nodes&grouping=priority:asc,priority:desc",
+		"/v1/my-work?company_id=" + companyID + "&ordering=none",
+		"/v1/my-work?company_id=" + companyID + "&section=nodes&ordering=none",
+		"/v1/my-work?company_id=" + companyID + "&section=action_items&ordering=",
+		"/v1/my-work?company_id=" + companyID + "&section=action_items&ordering=color:up",
+		"/v1/my-work?company_id=" + companyID + "&section=action_items&grouping=color:asc&ordering=color:desc",
 		"/v1/my-work?company_id=" + companyID + "&history=true",
 		"/v1/my-work?company_id=" + companyID + "&section=processes&history=true",
 		"/v1/my-work?company_id=" + companyID + "&section=nodes&history=maybe",
 		"/v1/my-work?company_id=" + companyID + "&section=nodes&history=true&grouping=due_date:desc",
+		"/v1/my-work?company_id=" + companyID + "&section=action_items&history=true&ordering=none",
 		"/v1/my-work?company_id=" + companyID + "&unknown=value",
 	}
 	for _, path := range cases {

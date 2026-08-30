@@ -2,7 +2,8 @@ import type React from "react";
 
 export const StaggeredGroupingIcon: React.FC<{ color?: string; size?: number }> = ({ color = "currentColor", size = 16 }) => (
   <svg aria-hidden="true" width={size} height={size} viewBox="0 0 16 16" style={{ display: "block", flex: "0 0 auto" }}>
-    <path d="M2.5 4h11M4.5 8h9M6.5 12h7" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+    <path d="M3 2.1v11.8M1.5 3.7 3 2.1l1.5 1.6M1.5 12.3 3 13.9l1.5-1.6" fill="none" stroke={color} strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M6.2 4h7.8M7.8 8H14M9.4 12H14" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
   </svg>
 );
 

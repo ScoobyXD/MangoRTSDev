@@ -502,6 +502,76 @@ func TestPostgresMyWorkGroupingKeysetsExecuteAcrossPages(t *testing.T) {
 	}
 }
 
+func TestPostgresMyWorkHuddleProcessGroupingAndSourcePermissionExecute(t *testing.T) {
+	_, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Postgres My Work Huddle grouping")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := repo.UpsertAuthUser("postgres-my-work-huddle-grouping", "postgres-my-work-huddle-grouping@example.test", "Huddle Grouping")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	alpha, err := repo.CreateHuddleLogicGate(HuddleCreateInput{CompanyID: company.CompanyID, Name: "Alpha Process"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zulu, err := repo.CreateHuddleLogicGate(HuddleCreateInput{CompanyID: company.CompanyID, Name: "Zulu Process"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphaNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: alpha.HuddleLogicGateID, Name: "Alpha Node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zuluNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: zulu.HuddleLogicGateID, Name: "Zulu Node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphaItem := mustCreatePostgresSourcedMyWorkActionItem(t, repo, company.CompanyID, user.UserID, "Alpha", EntityTypeHuddleNode, alphaNode.HuddleNodeID, "2026-09-01")
+	zuluItem := mustCreatePostgresSourcedMyWorkActionItem(t, repo, company.CompanyID, user.UserID, "Zulu", EntityTypeHuddleNode, zuluNode.HuddleNodeID, "2026-09-01")
+	neutralItem := mustCreatePostgresMyWorkActionItem(t, repo, company.CompanyID, user.UserID, "Neutral", ActionItemColorRed, "2026-09-01")
+
+	query := MyWorkQuery{CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Limit: 2}
+	first, err := repo.GetMyWork(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ActionItems == nil || len(first.ActionItems.Items) != 2 || !first.ActionItems.HasMore || first.ActionItems.Items[0].EntityID != alphaItem.EntityID || first.ActionItems.Items[1].EntityID != zuluItem.EntityID {
+		t.Fatalf("first Postgres Huddle page = %+v", first.ActionItems)
+	}
+	if first.ActionItems.Items[0].Source == nil || first.ActionItems.Items[0].Source.ResourceID != alphaNode.HuddleNodeID || first.ActionItems.Items[0].HuddleProcess == nil || first.ActionItems.Items[0].HuddleProcess.HuddleLogicGateID != alpha.HuddleLogicGateID {
+		t.Fatalf("Postgres Huddle context = %+v", first.ActionItems.Items[0])
+	}
+	query.Cursor = first.ActionItems.NextCursor
+	second, err := repo.GetMyWork(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ActionItems == nil || len(second.ActionItems.Items) != 1 || second.ActionItems.Items[0].EntityID != neutralItem.EntityID || second.ActionItems.Items[0].HuddleProcess != nil {
+		t.Fatalf("second Postgres Huddle page = %+v", second.ActionItems)
+	}
+
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID: company.CompanyID, EntityType: EntityTypeHuddleNode, EntityID: alphaNode.HuddleNodeID,
+		DefaultAccess: EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: user.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: company.CompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range hidden.ActionItems.Items {
+		if item.EntityID == alphaItem.EntityID && (item.Source != nil || item.HuddleProcess != nil) {
+			t.Fatalf("Postgres hidden source leaked Huddle context: %+v", item)
+		}
+	}
+}
+
 func TestPostgresMyWorkDelegatedPersonGroupingPagesByAuthoritativeNameAndUser(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Postgres My Work Delegated Person Grouping")
@@ -564,7 +634,7 @@ func TestPostgresMyWorkDelegatedPersonGroupingPagesByAuthoritativeNameAndUser(t 
 	descendingQuery := MyWorkQuery{
 		CompanyID: company.CompanyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
 		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
-		Grouping: "color:asc,completion_due_date:asc,person_in_charge:desc", Limit: 2,
+		Grouping: MyWorkDefaultDelegatedActionItemGrouping, Ordering: "person_in_charge:desc", Limit: 2,
 	}
 	descendingFirst, err := repo.GetMyWork(context.Background(), descendingQuery)
 	if err != nil {
@@ -591,7 +661,7 @@ func TestPostgresMyWorkDelegatedPersonGroupingPagesByAuthoritativeNameAndUser(t 
 	unicodeQuery := MyWorkQuery{
 		CompanyID: company.CompanyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
 		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
-		Grouping: "color:desc,person_in_charge:asc", Limit: 1,
+		Grouping: "color:desc", Ordering: "person_in_charge:asc", Limit: 1,
 	}
 	unicodeFirst, err := repo.GetMyWork(context.Background(), unicodeQuery)
 	if err != nil {
@@ -868,6 +938,24 @@ func mustCreatePostgresMyWorkDelegatedActionItem(t *testing.T, repo *PostgresRep
 	item := mustCreatePostgresMyWorkActionItem(t, repo, companyID, delegatorUserID, name, color, due)
 	mustSetPostgresMyWorkActionField(t, repo, item, ActionItemPersonInChargeSystemKey, personInChargeUserID)
 	mustSetPostgresMyWorkActionField(t, repo, item, ActionItemAssignedBySystemKey, delegatorUserID)
+	return item
+}
+
+func mustCreatePostgresSourcedMyWorkActionItem(t *testing.T, repo *PostgresRepo, companyID, userID, name, sourceType, sourceID, due string) domain.Entity {
+	t.Helper()
+	color := ActionItemColorRed
+	item, err := repo.CreateActionItem(ActionItemInput{
+		CompanyID: companyID, Name: name, BodyText: name, Color: &color, CreatedByUserID: userID,
+		SourceResourceType: sourceType, SourceResourceID: sourceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustSetPostgresMyWorkActionField(t, repo, item, ActionItemPersonInChargeSystemKey, userID)
+	mustSetPostgresMyWorkActionField(t, repo, item, ActionItemAssignedBySystemKey, userID)
+	mustSetPostgresMyWorkActionField(t, repo, item, ActionItemAnalysisDueDateSystemKey, "2026-08-31")
+	mustSetPostgresMyWorkActionField(t, repo, item, ActionItemCompletionDueDateSystemKey, due)
+	mustSetPostgresMyWorkActionField(t, repo, item, ActionItemStatusSystemKey, ActionItemStatusInProgress)
 	return item
 }
 

@@ -22,11 +22,11 @@ MW9 - Selecting a different Node role replaces only the Node rows. It preserves 
 
 MW10 - Mine requires exact canonical `person_in_charge` equal to the subject. Delegated requires exact canonical `assigned_by` equal to the subject and a nonnull `person_in_charge` for a different member; creator metadata, Source, and relationships are not assignment sources.
 
-MW11 - The Action Items header places its Mine/Delegated control immediately to the right of the Action Items title. The control is larger than the former compact version, keeps the established elevated segmented-control keyboard/accessibility behavior, and gives the selected segment a light-blue gradient instead of a dark fill. The Nodes header orders its right-side controls as RACI, History, then grouping, so the unchanged established RACI selector sits immediately left of History. Each section owns an independent grouping stack, and both grouping buttons use the approved staggered three-line icon.
+MW11 - The Action Items header places its Mine/Delegated control immediately to the right of the Action Items title and orders its right-side controls as inline-field Settings, History, then Group and order. The final button uses the official vertical double-ended arrow beside staggered horizontal lines. The Nodes header orders its right-side controls as RACI, History, then grouping.
 
 MW12 - No grouping control outside those two section headers changes either section's grouping stack.
 
-MW13 - Mine starts with Color followed by Completion due date. Delegated automatically uses Color, Completion due date closest first, then Person in charge alphabetically; each level keeps its own Asc/Desc control, and switching perspectives restores that perspective's stack.
+MW13 - Mine and Delegated each start with the visible hierarchy Color ascending, Huddle process ascending, then Completion due date ascending. Delegated separately orders leaf rows by Person in charge ascending; Mine has no default leaf ordering before the exact Entity ID tie-breaker. Every selected grouping or ordering term has its own Asc/Desc direction, and switching perspectives restores that perspective's saved stacks.
 
 MW14 - The initial Action Item color order is Red, Yellow, then No color. An Action Item with no color remains visible.
 
@@ -48,9 +48,9 @@ MW22 - The middle column has its own R, A, C, I selector. It is independent from
 
 MW23 - The right column lists a Project when the subject is a direct member of any currently assigned same-company Team group or a member of any current descendant group beneath that Team. Membership only in an ancestor or unrelated group does not qualify.
 
-MW24 - My Work reads canonical Nodes, Action Item person fields, RACI, Process relationships, Project relationships, Project Team assignments, and company membership when requested. There is no My Work projection table and no My Work relationship authority.
+MW24 - My Work reads canonical Nodes, Action Item fields and immutable Source, Huddle Node ownership, RACI, Process relationships, Project relationships, Project Team assignments, company membership, and user-owned saved-view preferences when requested. There is no My Work projection table and no My Work relationship authority.
 
-MW25 - My Work is a read surface. Opening, grouping, or viewing My Work never rewrites a Node, Action Item, RACI assignment, Process relationship, Project relationship, Project Team assignment, permission, or source record.
+MW25 - My Work never rewrites a Node, Action Item, Source, Huddle ownership, RACI assignment, Process relationship, Project relationship, Project Team assignment, or permission. Changing personal grouping, ordering, or displayed fields writes only that user's My Work saved-view row.
 
 MW26 - The subject determines which resources qualify for My Work, while the authenticated viewer's current permissions determine which qualifying resources may be disclosed. The subject and viewer are the same authenticated company member in the first version.
 
@@ -60,7 +60,7 @@ MW28 - Effective RACI and Project Team membership never grant resource access. T
 
 MW29 - Access to a Node does not grant access to its associated Process or Project. An inaccessible inline Process or Project is omitted completely, including its ID, name, hidden count, placeholder, and relationship details, while the accessible Node remains visible.
 
-MW30 - The backend applies the selected Node role or Action Item perspective before permission filtering, sorting, grouping, limits, pagination cursors, has-more decisions, or counts. When Delegated groups by Person in charge, it orders the current authoritative member display name with exact Person in charge and Entity IDs as stable tie-breakers, and binds the role or perspective and grouping stack to that section's cursor; the frontend never filters or sorts a limited page locally or receives hidden resources.
+MW30 - The backend applies the selected Node role or Action Item perspective before permission filtering, grouping, leaf ordering, limits, pagination cursors, has-more decisions, or counts. Action Item cursors bind the perspective plus the complete grouping and ordering stacks; current Huddle process name and ID, Person in charge name and ID, and exact Entity ID provide stable keys only when selected. The frontend never filters or sorts a limited page locally or receives hidden resources.
 
 MW31 - Opening any My Work resource performs that destination's normal current permission check. A prior My Work response is never proof of continued access.
 
@@ -70,29 +70,29 @@ MW33 - Mine and Delegated both exclude an Action Item whose current canonical St
 
 MW34 - The normal Nodes list excludes a Node whose current status is Done, Complete, or Completed; that Node appears only in Nodes History while it still has the selected effective RACI role and remains permitted.
 
-MW35 - An Action Item row exposes only the summary needed to display and open that exact Entity. A Delegated row shows the current Person in charge name in a compact inline label with a person icon, immediately left of the due-date label; Mine shows no person label, and neither perspective derives Process, Project, or other resource context.
+MW35 - An Action Item row always exposes its exact ID and title and may expose the compact Person in charge, Assigned by, Created timestamp, permission-safe Source, Color, Analysis due date, Completion due date, Status, and permission-safe Huddle process values. Details is never returned as an inline label. Each perspective renders only its saved displayed-field list in that saved left-to-right order.
 
-MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that section nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated clears only Action Items and loads that perspective's independent grouping stack; switching a Node or Process role clears only that section and preserves its grouping stack.
+MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that section nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated clears only Action Items and loads that perspective's independent grouping, ordering, and displayed-field preferences.
 
 MW37 - A section never requests the same next cursor concurrently, ignores canceled or stale responses, rejects a non-advancing cursor, and never appends the same resource twice.
 
-MW38 - My Work has independently adjustable widths between its three columns and an independently adjustable height between Action Items and Nodes. Every divider supports pointer and keyboard adjustment, remains within usable bounds, and saves the company-specific layout locally.
+MW38 - My Work has independently adjustable widths between its three columns and an independently adjustable height between Action Items and Nodes. Every divider supports pointer and keyboard adjustment, remains within usable bounds, and saves the company-specific layout locally; the compact drag handle uses the established Huddle cyan-to-purple vertical accent instead of a plain gray rectangle.
 
 MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact icons. Action Items, Nodes, Processes, and Projects each show their exact icon beside the section title. Only the Action Items section-header icon combines the established Action Item colors: its outer ring is Yellow and its inner ring is Red; Action Item row and editor-chip icons still use each item's saved color.
 
 MW40 - Red Action Item icons and names use the established Huddle red treatment and pulse once per second. Yellow Action Item icons and names use the established Huddle yellow treatment and pulse once every two seconds.
 
-MW41 - Completion due date and Due date remain ordering levels but render no date-group header. Delegated Person in charge is also an ordering level with no group header; its current name appears only inline on each row. Color and priority groups keep their established colors.
+MW41 - Every Action Item Group by term renders a visible hierarchy header, including Huddle process and Completion due date. An Order items by term changes only row order inside the final group and never creates a header. A permitted Huddle process header opens that exact process; the neutral no-process header is not clickable.
 
 MW42 - The Node and Process role selectors reuse the same established accessible selector and colors: Responsible is orange, Accountable is green, Consulted is blue, and Informed is purple.
 
 MW43 - Each major My Work section is an elevated surface. Every resource row lifts on hover or keyboard focus, and inline Node Process and Project references are independent elevated click targets.
 
-MW44 - Action Item, Node, Process, and Project row names use the readable My Work row type scale. Delegated Action Item rows remain at one flat, unindented depth even when Color headers are visible; other visible nested group levels and their rows remain indented without continuous vertical guide lines.
+MW44 - Action Item, Node, Process, and Project row names use the readable My Work row type scale. Action Item rows follow their visible Color, Huddle process, and Completion due date nesting without continuous vertical guide lines; ordering fields never add indentation.
 
 MW45 - A colored Action Item keeps its established raised pulsing icon, while its title is plain highlighted text with the same red one-second or yellow two-second pulse and no separate raised chip surface.
 
-MW46 - Every universal grouping dialog opens as a fixed elevated overlay anchored to its grouping button. It never becomes a clipped section descendant, changes a section's scroll position, or moves the underlying My Work layout.
+MW46 - Every universal grouping dialog opens as a fixed elevated overlay anchored to its grouping button and separates visible Group by rows from Order items by rows. It never becomes a clipped section descendant, changes a section's scroll position, or moves the underlying My Work layout.
 
 MW47 - Opening an Action Item from My Work anchors the existing exact Action Item editor to the activation point above the current page. The editor and its field cards use the elevated My Work surface treatment and never become a right-side layout column.
 
@@ -120,6 +120,12 @@ MW58 - Only the My Work page content uses the uniform 90-percent visual density 
 
 MW59 - Every Process row always shows the same four right-aligned Request, Pending, In Progress, and Review squares. Counts use the canonical Logic Gate work-status source and the established Pinned colors and order; Backlog and Done are excluded, and an empty status shows `0` in its fixed square instead of disappearing or shifting another status.
 
+MW60 - Mine and Delegated each persist one user-and-company-owned saved-view row. The row stores visible grouping terms in `groupings` and stores leaf `ordering` plus ordered `displayed_fields` in settings; no group principal, board row, local compatibility preference, or second preference table is allowed.
+
+MW61 - The Action Item Settings popover has separate Mine and Delegated sections. Each section contains one ordered shown-on-row tray above one field bank, and pointer click-drag is the only move or reorder command. Dropping between shown fields inserts at that exact position and shifts neighboring fields; dragging back to the bank hides the field, and an empty tray shows no inline labels.
+
+MW62 - The inline-field bank contains Person in charge, Assigned by, Created timestamp, Source, Color, Analysis due date, Completion due date, Status, and Huddle process. The title is always visible outside the bank, Details is never offered, and no editor-field checkmark changes row visibility.
+
 ## Process Story: One person sees assigned work and current company context
 
 A company member logs in without an explicit return destination or opens My Work beneath My Tower
@@ -130,7 +136,7 @@ Mango reads that member's Action Items for the selected Mine or Delegated perspe
 
 ↓
 
-The unnamed left column keeps Action Items above Nodes, shows editable inline due dates, and applies Mine's two-level or Delegated's three-level server-owned ordering while Delegated rows stay flat and show Person in charge inline; all four sections append more permitted rows within their own scroll areas, and either left section may replace its own rows with newest-first History and return in place
+The unnamed left column keeps Action Items above Nodes, shows editable inline due dates, applies the saved visible Color, Huddle process, and Completion due date hierarchy, then applies independent leaf ordering; each perspective renders only its saved left-to-right inline fields, all four sections append more permitted rows within their own scroll areas, and either left section may replace its own rows with newest-first History and return in place
 
 ↓
 
@@ -138,4 +144,4 @@ The Nodes and Processes selectors both default to Responsible and change indepen
 
 ↓
 
-Every displayed Node, Process, Project, and permitted inline reference opens its exact canonical resource, while each Action Item opens only its exact Entity without derived resource context or source-data changes
+Every displayed Node, Process, Project, permitted inline reference, and permitted Huddle process heading opens its exact canonical resource, while each Action Item opens its exact Entity without changing Source, Huddle ownership, or live Entity relationships

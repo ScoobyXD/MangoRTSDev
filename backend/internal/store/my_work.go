@@ -19,13 +19,16 @@ const (
 	MyWorkActionItemPerspectiveDelegated = "delegated"
 
 	MyWorkActionItemGroupingColor             = "color"
+	MyWorkActionItemGroupingHuddleProcess     = "huddle_process"
 	MyWorkActionItemGroupingCompletionDueDate = "completion_due_date"
 	MyWorkActionItemGroupingPersonInCharge    = "person_in_charge"
 	MyWorkNodeGroupingPriority                = "priority"
 	MyWorkNodeGroupingDueDate                 = "due_date"
 
-	MyWorkDefaultActionItemGrouping          = "color:asc,completion_due_date:asc"
-	MyWorkDefaultDelegatedActionItemGrouping = "color:asc,completion_due_date:asc,person_in_charge:asc"
+	MyWorkDefaultActionItemGrouping          = "color:asc,huddle_process:asc,completion_due_date:asc"
+	MyWorkDefaultDelegatedActionItemGrouping = MyWorkDefaultActionItemGrouping
+	MyWorkDefaultActionItemOrdering          = MyWorkGroupingNone
+	MyWorkDefaultDelegatedActionItemOrdering = "person_in_charge:asc"
 	MyWorkDefaultNodeGrouping                = "priority:asc,due_date:asc"
 
 	MyWorkDefaultLimit = 50
@@ -40,10 +43,12 @@ type MyWorkQuery struct {
 	Role         string
 	Perspective  string
 	Grouping     string
+	Ordering     string
 	Limit        int
 	Cursor       string
 	History      bool
 	grouping     []myWorkGroupingTerm
+	ordering     []myWorkGroupingTerm
 }
 
 type myWorkGroupingTerm struct {
@@ -57,6 +62,7 @@ type myWorkCursor struct {
 	Role               string `json:"role,omitempty"`
 	Perspective        string `json:"perspective,omitempty"`
 	Grouping           string `json:"grouping,omitempty"`
+	Ordering           string `json:"ordering,omitempty"`
 	GroupNull          bool   `json:"group_null,omitempty"`
 	GroupInt           int    `json:"group_int,omitempty"`
 	GroupText          string `json:"group_text,omitempty"`
@@ -67,6 +73,9 @@ type myWorkCursor struct {
 	Name               string `json:"name,omitempty"`
 	PersonInChargeName string `json:"person_in_charge_name,omitempty"`
 	PersonInChargeID   string `json:"person_in_charge_user_id,omitempty"`
+	HuddleProcessNull  bool   `json:"huddle_process_null,omitempty"`
+	HuddleProcessName  string `json:"huddle_process_name,omitempty"`
+	HuddleProcessID    string `json:"huddle_process_id,omitempty"`
 	ResourceID         string `json:"resource_id"`
 }
 
@@ -80,6 +89,7 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	rawPerspective := strings.TrimSpace(query.Perspective)
 	query.Perspective = strings.ToLower(rawPerspective)
 	query.Grouping = strings.ToLower(strings.TrimSpace(query.Grouping))
+	query.Ordering = strings.ToLower(strings.TrimSpace(query.Ordering))
 	query.Cursor = strings.TrimSpace(query.Cursor)
 	if query.CompanyID == "" || query.UserID == "" || query.ViewerUserID == "" {
 		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
@@ -115,7 +125,7 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	switch query.Section {
 	case MyWorkSectionActionItems, MyWorkSectionNodes:
 		if query.History {
-			if query.Grouping != "" {
+			if query.Grouping != "" || query.Ordering != "" {
 				return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 			}
 			break
@@ -126,8 +136,18 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 		}
 		query.Grouping = grouping
 		query.grouping = terms
+		if query.Section == MyWorkSectionActionItems {
+			ordering, orderingTerms, err := normalizeMyWorkOrdering(query.Perspective, query.Ordering)
+			if err != nil || myWorkTermsOverlap(terms, orderingTerms) {
+				return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+			}
+			query.Ordering = ordering
+			query.ordering = orderingTerms
+		} else if query.Ordering != "" {
+			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
+		}
 	case "", MyWorkSectionProcesses, MyWorkSectionProjects:
-		if query.Grouping != "" {
+		if query.Grouping != "" || query.Ordering != "" {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 	}
@@ -145,7 +165,7 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 		return query, cursor, nil
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(query.Cursor)
-	if err != nil || json.Unmarshal(payload, &cursor) != nil || cursor.Version != 1 || cursor.Section != query.Section || cleanUUIDText(cursor.ResourceID) == "" {
+	if err != nil || json.Unmarshal(payload, &cursor) != nil || cursor.Version != 2 || cursor.Section != query.Section || cleanUUIDText(cursor.ResourceID) == "" {
 		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 	}
 	if query.Section == MyWorkSectionProcesses || query.Section == MyWorkSectionNodes {
@@ -167,7 +187,7 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	}
 	if query.History {
 		completed, err := time.Parse(time.RFC3339Nano, cursor.CompletedTimestamp)
-		if err != nil || completed.IsZero() || cursor.Grouping != "" || cursor.GroupNull || cursor.GroupInt != 0 || cursor.GroupText != "" || cursor.DateNull || cursor.Date != "" || cursor.Name != "" || cursor.PersonInChargeName != "" || cursor.PersonInChargeID != "" {
+		if err != nil || completed.IsZero() || cursor.Grouping != "" || cursor.Ordering != "" || cursor.GroupNull || cursor.GroupInt != 0 || cursor.GroupText != "" || cursor.DateNull || cursor.Date != "" || cursor.Name != "" || cursor.PersonInChargeName != "" || cursor.PersonInChargeID != "" || cursor.HuddleProcessNull || cursor.HuddleProcessName != "" || cursor.HuddleProcessID != "" {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 		return query, cursor, nil
@@ -177,10 +197,11 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 	}
 	switch query.Section {
 	case MyWorkSectionActionItems:
-		if cursor.Grouping != query.Grouping {
+		if cursor.Grouping != query.Grouping || cursor.Ordering != query.Ordering {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
-		personGrouping := myWorkGroupingHasField(query.grouping, MyWorkActionItemGroupingPersonInCharge)
+		actionTerms := myWorkActionTerms(query)
+		personGrouping := myWorkGroupingHasField(actionTerms, MyWorkActionItemGroupingPersonInCharge)
 		personShapeValid := cursor.PersonInChargeName == "" && cursor.PersonInChargeID == ""
 		if personGrouping {
 			personShapeValid = cursor.PersonInChargeName != "" &&
@@ -190,7 +211,13 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 			(cursor.GroupInt == 1 && cursor.GroupText == ActionItemColorYellow) ||
 			(cursor.GroupInt == 2 && cursor.GroupText != "" && cursor.GroupText != ActionItemColorRed && cursor.GroupText != ActionItemColorYellow) ||
 			(cursor.GroupInt == 3 && cursor.GroupText == "")
-		if cursor.GroupNull != (cursor.GroupText == "") || cursor.Name != "" || !personShapeValid || !colorShapeValid || !validMyWorkCursorDate(cursor) {
+		huddleGrouping := myWorkGroupingHasField(actionTerms, MyWorkActionItemGroupingHuddleProcess)
+		huddleShapeValid := !cursor.HuddleProcessNull && cursor.HuddleProcessName == "" && cursor.HuddleProcessID == ""
+		if huddleGrouping {
+			huddleShapeValid = (cursor.HuddleProcessNull && cursor.HuddleProcessName == "" && cursor.HuddleProcessID == "") ||
+				(!cursor.HuddleProcessNull && strings.TrimSpace(cursor.HuddleProcessName) != "" && cleanUUIDText(cursor.HuddleProcessID) == cursor.HuddleProcessID)
+		}
+		if cursor.GroupNull != (cursor.GroupText == "") || cursor.Name != "" || !personShapeValid || !huddleShapeValid || !colorShapeValid || !validMyWorkCursorDate(cursor) {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 	case MyWorkSectionNodes:
@@ -198,11 +225,11 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 		priorityShapeValid := (cursor.GroupNull && cursor.GroupInt == 0) || (!cursor.GroupNull && cursor.GroupInt >= 1 && cursor.GroupInt <= 5)
-		if cursor.GroupText != "" || cursor.Name != "" || cursor.PersonInChargeName != "" || cursor.PersonInChargeID != "" || !priorityShapeValid || !validMyWorkCursorDate(cursor) {
+		if cursor.Ordering != "" || cursor.GroupText != "" || cursor.Name != "" || cursor.PersonInChargeName != "" || cursor.PersonInChargeID != "" || cursor.HuddleProcessNull || cursor.HuddleProcessName != "" || cursor.HuddleProcessID != "" || !priorityShapeValid || !validMyWorkCursorDate(cursor) {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 	case MyWorkSectionProcesses, MyWorkSectionProjects:
-		if cursor.Grouping != "" || strings.TrimSpace(cursor.Name) == "" || cursor.GroupNull || cursor.GroupInt != 0 || cursor.GroupText != "" || cursor.DateNull || cursor.Date != "" || cursor.PersonInChargeName != "" || cursor.PersonInChargeID != "" {
+		if cursor.Grouping != "" || cursor.Ordering != "" || strings.TrimSpace(cursor.Name) == "" || cursor.GroupNull || cursor.GroupInt != 0 || cursor.GroupText != "" || cursor.DateNull || cursor.Date != "" || cursor.PersonInChargeName != "" || cursor.PersonInChargeID != "" || cursor.HuddleProcessNull || cursor.HuddleProcessName != "" || cursor.HuddleProcessID != "" {
 			return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 		}
 	}
@@ -232,6 +259,7 @@ func normalizeMyWorkGrouping(section, perspective, raw string) (string, []myWork
 	switch section {
 	case MyWorkSectionActionItems:
 		allowed[MyWorkActionItemGroupingColor] = true
+		allowed[MyWorkActionItemGroupingHuddleProcess] = true
 		allowed[MyWorkActionItemGroupingCompletionDueDate] = true
 		if perspective == MyWorkActionItemPerspectiveDelegated {
 			allowed[MyWorkActionItemGroupingPersonInCharge] = true
@@ -266,12 +294,47 @@ func normalizeMyWorkGrouping(section, perspective, raw string) (string, []myWork
 	return strings.Join(canonical, ","), terms, nil
 }
 
+func normalizeMyWorkOrdering(perspective, raw string) (string, []myWorkGroupingTerm, error) {
+	raw = strings.ToLower(strings.TrimSpace(raw))
+	if raw == "" {
+		if perspective == MyWorkActionItemPerspectiveDelegated {
+			raw = MyWorkDefaultDelegatedActionItemOrdering
+		} else {
+			raw = MyWorkDefaultActionItemOrdering
+		}
+	}
+	return normalizeMyWorkGrouping(MyWorkSectionActionItems, perspective, raw)
+}
+
+func myWorkTermsOverlap(left, right []myWorkGroupingTerm) bool {
+	for _, term := range left {
+		if myWorkGroupingHasField(right, term.Field) {
+			return true
+		}
+	}
+	return false
+}
+
 func myWorkEffectiveGrouping(query MyWorkQuery, section string) (string, []myWorkGroupingTerm) {
 	if query.Section == section && query.Grouping != "" {
 		return query.Grouping, query.grouping
 	}
 	grouping, terms, _ := normalizeMyWorkGrouping(section, query.Perspective, "")
 	return grouping, terms
+}
+
+func myWorkEffectiveOrdering(query MyWorkQuery) (string, []myWorkGroupingTerm) {
+	if query.Section == MyWorkSectionActionItems && query.Ordering != "" {
+		return query.Ordering, query.ordering
+	}
+	ordering, terms, _ := normalizeMyWorkOrdering(query.Perspective, "")
+	return ordering, terms
+}
+
+func myWorkActionTerms(query MyWorkQuery) []myWorkGroupingTerm {
+	_, grouping := myWorkEffectiveGrouping(query, MyWorkSectionActionItems)
+	_, ordering := myWorkEffectiveOrdering(query)
+	return append(append([]myWorkGroupingTerm{}, grouping...), ordering...)
 }
 
 func myWorkGroupingHasField(grouping []myWorkGroupingTerm, field string) bool {
@@ -306,7 +369,7 @@ func validMyWorkCursorDate(cursor myWorkCursor) bool {
 }
 
 func encodeMyWorkCursor(cursor myWorkCursor) string {
-	cursor.Version = 1
+	cursor.Version = 2
 	payload, _ := json.Marshal(cursor)
 	return base64.RawURLEncoding.EncodeToString(payload)
 }

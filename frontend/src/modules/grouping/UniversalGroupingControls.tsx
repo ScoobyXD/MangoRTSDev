@@ -354,7 +354,7 @@ export function UniversalGroupingControls<Field extends string>({
               value=""
               aria-label="Add grouping level"
               disabled={addableFields.length === 0}
-              style={addGroupingSelectStyle(addableFields.length === 0)}
+              style={addGroupingSelectStyle(addableFields.length === 0, accent)}
               onChange={(event) => {
                 const field = event.currentTarget.value as Field;
                 if (!field || usedFields.has(field)) return;
@@ -447,7 +447,7 @@ function groupButtonStyle(open: boolean, disabled: boolean, accent: string, icon
     gap: 7,
     border: `1px solid ${open ? accent : "rgba(100, 116, 139, 0.30)"}`,
     borderRadius: 7,
-    background: open ? "#eff6ff" : "rgba(255, 255, 255, 0.96)",
+    background: open ? `linear-gradient(145deg,#ffffff,${accent}14)` : "rgba(255, 255, 255, 0.96)",
     color: disabled ? "#94a3b8" : "#334155",
     font: "inherit",
     fontSize: 12,
@@ -698,14 +698,14 @@ const popoverFooterStyle: React.CSSProperties = {
   gap: 8,
 };
 
-function addGroupingSelectStyle(disabled: boolean): React.CSSProperties {
+function addGroupingSelectStyle(disabled: boolean, accent: string): React.CSSProperties {
   return {
     minWidth: 0,
     height: 32,
-    border: "1px dashed rgba(37, 99, 235, 0.40)",
+    border: `1px dashed ${accent}66`,
     borderRadius: 8,
-    background: disabled ? "rgba(241,245,249,.72)" : "linear-gradient(145deg,#ffffff,#eff6ff)",
-    color: disabled ? "#94a3b8" : "#1d4ed8",
+    background: disabled ? "rgba(241,245,249,.72)" : `linear-gradient(145deg,#ffffff,${accent}14)`,
+    color: disabled ? "#94a3b8" : accent,
     font: "inherit",
     fontSize: 11,
     fontWeight: 850,

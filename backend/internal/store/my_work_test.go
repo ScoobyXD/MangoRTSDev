@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -273,7 +274,7 @@ func TestMemoryMyWorkDelegatedPersonGroupingPagesByAuthoritativeNameAndUser(t *t
 	descendingQuery := MyWorkQuery{
 		CompanyID: companyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
 		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
-		Grouping: "color:asc,completion_due_date:asc,person_in_charge:desc", Limit: 2,
+		Grouping: MyWorkDefaultDelegatedActionItemGrouping, Ordering: "person_in_charge:desc", Limit: 2,
 	}
 	descendingFirst, err := repo.GetMyWork(context.Background(), descendingQuery)
 	if err != nil {
@@ -341,6 +342,156 @@ func TestMemoryMyWorkActionItemsPageByReorderedDescendingGrouping(t *testing.T) 
 	}
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Limit: 2, Cursor: first.ActionItems.NextCursor}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cross-grouping cursor error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestMemoryMyWorkHuddleProcessGroupingUsesImmutableSourceAndCompactFields(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "10000000-0000-4000-8000-000000000015"
+	user := mustCreateMyWorkMember(t, repo, companyID, "my-work-huddle-source-user")
+	alpha, err := repo.CreateHuddleLogicGate(HuddleCreateInput{CompanyID: companyID, Name: "Alpha Process"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zulu, err := repo.CreateHuddleLogicGate(HuddleCreateInput{CompanyID: companyID, Name: "Zulu Process"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphaNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: companyID, OwnerID: alpha.HuddleLogicGateID, Name: "Alpha Huddle Node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	zuluNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: companyID, OwnerID: zulu.HuddleLogicGateID, Name: "Zulu Huddle Node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	alphaNodeItem := mustCreateSourcedMyWorkActionItem(t, repo, companyID, user.UserID, "Alpha node item", EntityTypeHuddleNode, alphaNode.HuddleNodeID, "2026-09-01")
+	alphaDirectItem := mustCreateSourcedMyWorkActionItem(t, repo, companyID, user.UserID, "Alpha direct item", EntityTypeHuddleLogicGate, alpha.HuddleLogicGateID, "2026-09-02")
+	zuluNodeItem := mustCreateSourcedMyWorkActionItem(t, repo, companyID, user.UserID, "Zulu node item", EntityTypeHuddleNode, zuluNode.HuddleNodeID, "2026-09-01")
+	noSourceItem := mustCreateAssignedActionItem(t, repo, companyID, user.UserID, "No Huddle process", ActionItemColorRed, "2026-09-01", ActionItemStatusInProgress)
+
+	query := MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Limit: 2}
+	first, err := repo.GetMyWork(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ActionItems == nil || len(first.ActionItems.Items) != 2 || !first.ActionItems.HasMore ||
+		first.ActionItems.Items[0].EntityID != alphaNodeItem.EntityID || first.ActionItems.Items[1].EntityID != alphaDirectItem.EntityID {
+		t.Fatalf("first Huddle-process page = %+v", first.ActionItems)
+	}
+	alphaNodeRow := first.ActionItems.Items[0]
+	if alphaNodeRow.HuddleProcess == nil || alphaNodeRow.HuddleProcess.HuddleLogicGateID != alpha.HuddleLogicGateID || alphaNodeRow.HuddleProcess.Name != alpha.Header {
+		t.Fatalf("Alpha node Huddle process = %+v", alphaNodeRow.HuddleProcess)
+	}
+	if alphaNodeRow.Source == nil || alphaNodeRow.Source.ResourceType != EntityTypeHuddleNode || alphaNodeRow.Source.ResourceID != alphaNode.HuddleNodeID || alphaNodeRow.Source.Name != alphaNode.Name {
+		t.Fatalf("Alpha node source = %+v", alphaNodeRow.Source)
+	}
+	if alphaNodeRow.AssignedByUserID != user.UserID || alphaNodeRow.AssignedByName == "" || alphaNodeRow.AnalysisDueDate == nil || *alphaNodeRow.AnalysisDueDate != "2026-08-31" || alphaNodeRow.Status != ActionItemStatusInProgress || alphaNodeRow.CreatedTimestamp.IsZero() {
+		t.Fatalf("compact inline fields = %+v", alphaNodeRow)
+	}
+
+	query.Cursor = first.ActionItems.NextCursor
+	second, err := repo.GetMyWork(context.Background(), query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ActionItems == nil || len(second.ActionItems.Items) != 2 || second.ActionItems.HasMore ||
+		second.ActionItems.Items[0].EntityID != zuluNodeItem.EntityID || second.ActionItems.Items[1].EntityID != noSourceItem.EntityID {
+		t.Fatalf("second Huddle-process page = %+v", second.ActionItems)
+	}
+	if second.ActionItems.Items[0].HuddleProcess == nil || second.ActionItems.Items[0].HuddleProcess.HuddleLogicGateID != zulu.HuddleLogicGateID || second.ActionItems.Items[1].HuddleProcess != nil {
+		t.Fatalf("second Huddle-process contexts = %+v", second.ActionItems.Items)
+	}
+}
+
+func TestMemoryMyWorkHuddleProcessRequiresSourceAndOwnerAccess(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "10000000-0000-4000-8000-000000000016"
+	user := mustCreateMyWorkMember(t, repo, companyID, "my-work-hidden-huddle-source-user")
+	gate, err := repo.CreateHuddleLogicGate(HuddleCreateInput{CompanyID: companyID, Name: "Visible owning process"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: companyID, OwnerID: gate.HuddleLogicGateID, Name: "Hidden source node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden := mustCreateSourcedMyWorkActionItem(t, repo, companyID, user.UserID, "Hidden-source action", EntityTypeHuddleNode, node.HuddleNodeID, "2026-09-01")
+	mustCreateAssignedActionItem(t, repo, companyID, user.UserID, "Other neutral action", ActionItemColorRed, "2026-09-01", ActionItemStatusInProgress)
+	setMyWorkDefaultAccess(t, repo, companyID, EntityTypeHuddleNode, node.HuddleNodeID, user.UserID, EntityPermissionNoAccess)
+
+	response, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hiddenRow *domain.MyWorkActionItem
+	for index := range response.ActionItems.Items {
+		if response.ActionItems.Items[index].EntityID == hidden.EntityID {
+			hiddenRow = &response.ActionItems.Items[index]
+		}
+	}
+	if hiddenRow == nil || hiddenRow.Source != nil || hiddenRow.HuddleProcess != nil {
+		t.Fatalf("hidden source row leaked context: %+v", hiddenRow)
+	}
+
+	page, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Limit: 1})
+	if err != nil || page.ActionItems == nil || page.ActionItems.NextCursor == "" {
+		t.Fatalf("neutral cursor page = %+v err=%v", page.ActionItems, err)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(page.ActionItems.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cursor myWorkCursor
+	if err := json.Unmarshal(payload, &cursor); err != nil {
+		t.Fatal(err)
+	}
+	if !cursor.HuddleProcessNull || cursor.HuddleProcessID != "" || cursor.HuddleProcessName != "" {
+		t.Fatalf("neutral cursor leaked Huddle process: %+v", cursor)
+	}
+}
+
+func TestMemoryMyWorkHuddleProcessHidesDeniedOwnerButKeepsVisibleSource(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "10000000-0000-4000-8000-000000000017"
+	user := mustCreateMyWorkMember(t, repo, companyID, "my-work-hidden-huddle-owner-user")
+	gate, err := repo.CreateHuddleLogicGate(HuddleCreateInput{CompanyID: companyID, Name: "Hidden owning process"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: companyID, OwnerID: gate.HuddleLogicGateID, Name: "Visible source node"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourced := mustCreateSourcedMyWorkActionItem(t, repo, companyID, user.UserID, "Visible-source action", EntityTypeHuddleNode, node.HuddleNodeID, "2026-09-01")
+	setMyWorkDefaultAccess(t, repo, companyID, EntityTypeHuddleLogicGate, gate.HuddleLogicGateID, user.UserID, EntityPermissionNoAccess)
+	mustCreateAssignedActionItem(t, repo, companyID, user.UserID, "Later neutral action", ActionItemColorRed, "2026-09-01", ActionItemStatusInProgress)
+
+	page, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID,
+		Section: MyWorkSectionActionItems, Grouping: "huddle_process:asc", Ordering: MyWorkGroupingNone, Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.ActionItems == nil || len(page.ActionItems.Items) != 1 || page.ActionItems.Items[0].EntityID != sourced.EntityID || !page.ActionItems.HasMore {
+		t.Fatalf("owner-denied page = %+v", page.ActionItems)
+	}
+	row := page.ActionItems.Items[0]
+	if row.Source == nil || row.Source.ResourceID != node.HuddleNodeID || row.HuddleProcess != nil {
+		t.Fatalf("owner denial must preserve only the permitted Source: %+v", row)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(page.ActionItems.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cursor myWorkCursor
+	if err := json.Unmarshal(payload, &cursor); err != nil {
+		t.Fatal(err)
+	}
+	if !cursor.HuddleProcessNull || cursor.HuddleProcessID != "" || cursor.HuddleProcessName != "" {
+		t.Fatalf("owner-denied cursor leaked Huddle process: %+v", cursor)
 	}
 }
 
@@ -678,7 +829,7 @@ func TestMyWorkQueryShapesAndCursorBinding(t *testing.T) {
 	}
 	actionCursor := encodeMyWorkCursor(myWorkCursor{
 		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
-		Grouping: MyWorkDefaultActionItemGrouping, GroupNull: true, GroupInt: 3, DateNull: true,
+		Grouping: MyWorkDefaultActionItemGrouping, Ordering: MyWorkDefaultActionItemOrdering, GroupNull: true, GroupInt: 3, HuddleProcessNull: true, DateNull: true,
 		ResourceID: resourceID,
 	})
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveMine, Cursor: actionCursor}); !errors.Is(err, ErrInvalid) {
@@ -686,7 +837,7 @@ func TestMyWorkQueryShapesAndCursorBinding(t *testing.T) {
 	}
 	delegatedPersonCursor := myWorkCursor{
 		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
-		Grouping: MyWorkDefaultDelegatedActionItemGrouping, GroupNull: true, GroupInt: 3, DateNull: true,
+		Grouping: MyWorkDefaultDelegatedActionItemGrouping, Ordering: MyWorkDefaultDelegatedActionItemOrdering, GroupNull: true, GroupInt: 3, HuddleProcessNull: true, DateNull: true,
 		PersonInChargeName: "person", PersonInChargeID: user.UserID, ResourceID: resourceID,
 	}
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated, Cursor: encodeMyWorkCursor(delegatedPersonCursor)}); err != nil {
@@ -734,13 +885,26 @@ func TestMyWorkGroupingValidation(t *testing.T) {
 			t.Errorf("Mine grouping %q error = %v, want ErrInvalid", raw, err)
 		}
 	}
+	explicitOrdering := base
+	explicitOrdering.Grouping = "color:asc"
+	explicitOrdering.Ordering = "completion_due_date:desc"
+	normalized, _, err := normalizeMyWorkQuery(explicitOrdering)
+	if err != nil || normalized.Grouping != "color:asc" || normalized.Ordering != "completion_due_date:desc" {
+		t.Fatalf("separate grouping and ordering = %+v err=%v", normalized, err)
+	}
+	overlap := explicitOrdering
+	overlap.Ordering = "color:desc"
+	if _, _, err := normalizeMyWorkQuery(overlap); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("overlapping grouping and ordering error = %v, want ErrInvalid", err)
+	}
 	delegated := base
 	delegated.Perspective = MyWorkActionItemPerspectiveDelegated
-	normalized, _, err := normalizeMyWorkQuery(delegated)
-	if err != nil || normalized.Grouping != MyWorkDefaultDelegatedActionItemGrouping {
-		t.Fatalf("default Delegated grouping = %q err=%v, want %q", normalized.Grouping, err, MyWorkDefaultDelegatedActionItemGrouping)
+	normalized, _, err = normalizeMyWorkQuery(delegated)
+	if err != nil || normalized.Grouping != MyWorkDefaultDelegatedActionItemGrouping || normalized.Ordering != MyWorkDefaultDelegatedActionItemOrdering {
+		t.Fatalf("default Delegated query = grouping %q ordering %q err=%v", normalized.Grouping, normalized.Ordering, err)
 	}
 	delegated.Grouping = " PERSON_IN_CHARGE:DESC "
+	delegated.Ordering = MyWorkGroupingNone
 	normalized, _, err = normalizeMyWorkQuery(delegated)
 	if err != nil || normalized.Grouping != "person_in_charge:desc" {
 		t.Fatalf("explicit Delegated grouping = %q err=%v", normalized.Grouping, err)
@@ -767,6 +931,25 @@ func TestPostgresMyWorkQueriesKeepSubjectAndViewerResolutionSetBased(t *testing.
 	} {
 		if !strings.Contains(source, required) {
 			t.Fatalf("My Work PostgreSQL query missing set-based contract %q", required)
+		}
+	}
+	actionQueryStart := strings.Index(source, "func (r *PostgresRepo) postgresMyWorkActionItems")
+	actionQueryEnd := strings.Index(source, "func (r *PostgresRepo) postgresMyWorkNodes")
+	if actionQueryStart < 0 || actionQueryEnd <= actionQueryStart {
+		t.Fatal("could not isolate the PostgreSQL My Work Action Items query")
+	}
+	actionQuery := source[actionQueryStart:actionQueryEnd]
+	if strings.Contains(actionQuery, "entity_relationships") {
+		t.Fatal("My Work Huddle grouping must derive only from immutable Action Item Source")
+	}
+	for _, required := range []string{
+		"source_huddle_node.huddle_logic_gate_id",
+		"base.source_resource_type='huddle_node'",
+		"base.source_resource_type='huddle_logic_gate'",
+		"coalesce(source_access.allowed,false) and coalesce(huddle_access.allowed,false)",
+	} {
+		if !strings.Contains(actionQuery, required) {
+			t.Fatalf("My Work Action Item query missing Source/Huddle access contract %q", required)
 		}
 	}
 	nodeQueryStart := strings.Index(source, "func (r *PostgresRepo) postgresMyWorkNodes")
@@ -823,12 +1006,27 @@ func TestMemoryMyWorkPermissionResolutionFailureReturnsNoPartialResponse(t *test
 	repo.mu.Lock()
 	repo.effectiveAccessErr = sentinel
 	repo.mu.Unlock()
-	response, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID})
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("error = %v, want %v", err, sentinel)
-	}
-	if response.ActionItems != nil || response.Nodes != nil || response.Processes != nil || response.Projects != nil {
-		t.Fatalf("partial response returned on permission failure: %+v", response)
+	for _, test := range []struct {
+		name    string
+		section string
+		history bool
+	}{
+		{name: "all sections"},
+		{name: "active Action Items only", section: MyWorkSectionActionItems},
+		{name: "Action Item History only", section: MyWorkSectionActionItems, history: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+				CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID,
+				Section: test.section, History: test.history,
+			})
+			if !errors.Is(err, sentinel) {
+				t.Fatalf("error = %v, want %v", err, sentinel)
+			}
+			if response.ActionItems != nil || response.Nodes != nil || response.Processes != nil || response.Projects != nil {
+				t.Fatalf("partial response returned on permission failure: %+v", response)
+			}
+		})
 	}
 }
 
@@ -880,6 +1078,24 @@ func mustCreateActionItemForPIC(t *testing.T, repo *MemoryRepo, companyID, creat
 	if due != "" {
 		setMyWorkActionField(t, repo, item, ActionItemCompletionDueDateSystemKey, due)
 	}
+	return item
+}
+
+func mustCreateSourcedMyWorkActionItem(t *testing.T, repo *MemoryRepo, companyID, userID, name, sourceType, sourceID, completionDueDate string) domain.Entity {
+	t.Helper()
+	color := ActionItemColorRed
+	item, err := repo.CreateActionItem(ActionItemInput{
+		CompanyID: companyID, Name: name, BodyText: name, Color: &color, CreatedByUserID: userID,
+		SourceResourceType: sourceType, SourceResourceID: sourceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setMyWorkActionField(t, repo, item, ActionItemPersonInChargeSystemKey, userID)
+	setMyWorkActionField(t, repo, item, ActionItemAssignedBySystemKey, userID)
+	setMyWorkActionField(t, repo, item, ActionItemAnalysisDueDateSystemKey, "2026-08-31")
+	setMyWorkActionField(t, repo, item, ActionItemCompletionDueDateSystemKey, completionDueDate)
+	setMyWorkActionField(t, repo, item, ActionItemStatusSystemKey, ActionItemStatusInProgress)
 	return item
 }
 

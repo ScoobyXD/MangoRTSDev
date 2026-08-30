@@ -4,6 +4,7 @@ import {
   ActionItemIcon,
   ExplorerEntityIcon,
   HeaderMyWorkIcon,
+  HeaderSettingsIcon,
   StaggeredGroupingIcon,
 } from "../../icons/index.js";
 import {
@@ -29,8 +30,11 @@ import {
 import { logicGateRACIRolePresentation } from "../logic-gates/raciPresentation.js";
 import { getQDBusinessDate, millisecondsUntilNextQDBusinessDay } from "../logic-gates/qdRatingsApi.js";
 import { homeRACIRoleAccent } from "../../pages/home/homeStyles.js";
+import { createSavedViewID } from "../../pages/home/savedViewsApi.js";
 import type {
   MyWorkActionItem,
+  MyWorkActionItemDisplayFieldID,
+  MyWorkActionItemSavedView,
   MyWorkActionItemPerspective,
   MyWorkNode,
   MyWorkProcess,
@@ -39,19 +43,32 @@ import type {
   MyWorkSection,
 } from "./myWorkApi.js";
 import {
+  fetchMyWorkActionItemSavedView,
+  saveMyWorkActionItemSavedView,
+} from "./myWorkApi.js";
+import {
   DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS,
-  DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS,
+  DEFAULT_MY_WORK_ACTION_ITEM_DISPLAYED_FIELDS,
+  DEFAULT_MY_WORK_ACTION_ITEM_ORDERINGS,
   DEFAULT_MY_WORK_NODE_GROUPINGS,
   MY_WORK_ACTION_ITEM_GROUPING_FIELDS,
+  MY_WORK_ACTION_ITEM_DISPLAY_FIELDS,
   MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS,
   MY_WORK_NODE_GROUPING_FIELDS,
   myWorkActionItemGroupingAdapter,
   myWorkNodeGroupingAdapter,
   normalizeMyWorkActionItemGroupings,
+  normalizeMyWorkActionItemDisplayedFields,
+  normalizeMyWorkActionItemOrderings,
+  normalizeMyWorkActionItemPreferences,
   normalizeMyWorkNodeGroupings,
   type MyWorkActionItemGrouping,
+  type MyWorkActionItemOrdering,
   type MyWorkNodeGrouping,
 } from "./myWorkGrouping.js";
+import { ActionItemInlineFieldSettingsPopover } from "./ActionItemInlineFieldSettingsPopover.js";
+import { ActionItemInlineFields } from "./ActionItemInlineFields.js";
+import { ActionItemOrderingEditor } from "./ActionItemOrderingEditor.js";
 import {
   findAdjacentMyWorkRowEntryIndex,
   findMyWorkDisplayEntryIndex,
@@ -115,30 +132,155 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   const columnsRef = useRef<HTMLDivElement>(null);
   const leftColumnRef = useRef<HTMLDivElement>(null);
   const actionItemsScrollRef = useRef<HTMLDivElement>(null);
+  const actionItemPerspectiveValueRef = useRef(actionItemPerspective);
+  const actionItemFieldSettingsButtonRef = useRef<HTMLButtonElement>(null);
   const nodesScrollRef = useRef<HTMLDivElement>(null);
   const processesScrollRef = useRef<HTMLDivElement>(null);
   const projectsScrollRef = useRef<HTMLDivElement>(null);
   const [actionItemGroupingStacks, setActionItemGroupingStacks] = useState<Record<MyWorkActionItemPerspective, MyWorkActionItemGrouping[]>>(() => ({
     mine: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
-    delegated: DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
+    delegated: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
   }));
   const actionItemGroupings = actionItemGroupingStacks[actionItemPerspective];
+  const [actionItemOrderingStacks, setActionItemOrderingStacks] = useState<Record<
+    MyWorkActionItemPerspective,
+    MyWorkActionItemOrdering[]
+  >>(() => ({
+    mine: DEFAULT_MY_WORK_ACTION_ITEM_ORDERINGS.mine.map((ordering) => ({ ...ordering })),
+    delegated: DEFAULT_MY_WORK_ACTION_ITEM_ORDERINGS.delegated.map((ordering) => ({ ...ordering })),
+  }));
+  const actionItemOrderings = actionItemOrderingStacks[actionItemPerspective];
+  const [actionItemDisplayedFieldStacks, setActionItemDisplayedFieldStacks] = useState<Record<
+    MyWorkActionItemPerspective,
+    MyWorkActionItemDisplayFieldID[]
+  >>(() => ({
+    mine: [...DEFAULT_MY_WORK_ACTION_ITEM_DISPLAYED_FIELDS.mine],
+    delegated: [...DEFAULT_MY_WORK_ACTION_ITEM_DISPLAYED_FIELDS.delegated],
+  }));
+  const actionItemDisplayedFields = actionItemDisplayedFieldStacks[actionItemPerspective];
+  const actionItemSavedViewIDsRef = useRef<Record<MyWorkActionItemPerspective, string>>({
+    mine: createSavedViewID(),
+    delegated: createSavedViewID(),
+  });
+  const actionItemPreferenceLoadVersionRef = useRef(0);
+  const actionItemPreferenceSaveQueuesRef = useRef<Record<MyWorkActionItemPerspective, Promise<void>>>({
+    mine: Promise.resolve(),
+    delegated: Promise.resolve(),
+  });
+  const [actionItemFieldSettingsOpen, setActionItemFieldSettingsOpen] = useState(false);
+  const [actionItemPreferenceError, setActionItemPreferenceError] = useState("");
+  const [actionItemPreferencesReady, setActionItemPreferencesReady] = useState(false);
   const [nodeGroupings, setNodeGroupings] = useState<MyWorkNodeGrouping[]>(() => (
     DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping }))
   ));
   const [actionItemHistory, setActionItemHistory] = useState(false);
+  const actionItemHistoryRef = useRef(actionItemHistory);
   const [nodeHistory, setNodeHistory] = useState(false);
   const businessDateKey = useMyWorkBusinessDateKey();
 
   useEffect(() => {
+    actionItemPerspectiveValueRef.current = actionItemPerspective;
+  }, [actionItemPerspective]);
+
+  useEffect(() => {
+    actionItemHistoryRef.current = actionItemHistory;
+  }, [actionItemHistory]);
+
+  useEffect(() => {
+    actionItemPerspectiveValueRef.current = "mine";
     setActionItemGroupingStacks({
       mine: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
-      delegated: DEFAULT_MY_WORK_DELEGATED_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
+      delegated: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
     });
+    setActionItemOrderingStacks({
+      mine: DEFAULT_MY_WORK_ACTION_ITEM_ORDERINGS.mine.map((ordering) => ({ ...ordering })),
+      delegated: DEFAULT_MY_WORK_ACTION_ITEM_ORDERINGS.delegated.map((ordering) => ({ ...ordering })),
+    });
+    setActionItemDisplayedFieldStacks({
+      mine: [...DEFAULT_MY_WORK_ACTION_ITEM_DISPLAYED_FIELDS.mine],
+      delegated: [...DEFAULT_MY_WORK_ACTION_ITEM_DISPLAYED_FIELDS.delegated],
+    });
+    const nextSavedViewIDs = { mine: createSavedViewID(), delegated: createSavedViewID() };
+    actionItemSavedViewIDsRef.current = nextSavedViewIDs;
+    actionItemPreferenceSaveQueuesRef.current = { mine: Promise.resolve(), delegated: Promise.resolve() };
+    setActionItemFieldSettingsOpen(false);
+    setActionItemPreferenceError("");
+    setActionItemPreferencesReady(false);
     setNodeGroupings(DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping })));
+    actionItemHistoryRef.current = false;
     setActionItemHistory(false);
     setNodeHistory(false);
   }, [companyID, subjectID]);
+
+  useEffect(() => {
+    const loadVersion = ++actionItemPreferenceLoadVersionRef.current;
+    void Promise.all([
+      fetchMyWorkActionItemSavedView(requestJSON, companyID, "mine"),
+      fetchMyWorkActionItemSavedView(requestJSON, companyID, "delegated"),
+    ]).then(([mineSavedView, delegatedSavedView]) => {
+      if (actionItemPreferenceLoadVersionRef.current !== loadVersion) return;
+      const mine = normalizeMyWorkActionItemPreferences(mineSavedView, "mine");
+      const delegated = normalizeMyWorkActionItemPreferences(delegatedSavedView, "delegated");
+      const nextGroupings = { mine: mine.groupings, delegated: delegated.groupings };
+      const nextOrderings = { mine: mine.orderings, delegated: delegated.orderings };
+      const nextDisplayedFields = { mine: mine.displayedFields, delegated: delegated.displayedFields };
+      const nextSavedViewIDs = {
+        mine: savedViewIDOrNew(mineSavedView, actionItemSavedViewIDsRef.current.mine),
+        delegated: savedViewIDOrNew(delegatedSavedView, actionItemSavedViewIDsRef.current.delegated),
+      };
+      actionItemSavedViewIDsRef.current = nextSavedViewIDs;
+      setActionItemGroupingStacks(nextGroupings);
+      setActionItemOrderingStacks(nextOrderings);
+      setActionItemDisplayedFieldStacks(nextDisplayedFields);
+      setActionItemPreferenceError("");
+      setActionItemPreferencesReady(true);
+      const activePerspective = actionItemPerspectiveValueRef.current;
+      if (!actionItemHistoryRef.current) {
+        void reloadSection(
+          "action_items",
+          nextGroupings[activePerspective],
+          true,
+          false,
+          nextOrderings[activePerspective],
+        );
+      }
+    }).catch((cause) => {
+      if (actionItemPreferenceLoadVersionRef.current !== loadVersion) return;
+      setActionItemPreferenceError(errorMessage(cause, "Action Item display settings could not be loaded."));
+      setActionItemPreferencesReady(true);
+    });
+    return () => {
+      if (actionItemPreferenceLoadVersionRef.current === loadVersion) actionItemPreferenceLoadVersionRef.current += 1;
+    };
+  }, [companyID, reloadSection, requestJSON, subjectID]);
+
+  const persistActionItemPreferences = useCallback((
+    perspective: MyWorkActionItemPerspective,
+    groupings: ReadonlyArray<MyWorkActionItemGrouping>,
+    orderings: ReadonlyArray<MyWorkActionItemOrdering>,
+    displayedFields: ReadonlyArray<MyWorkActionItemDisplayFieldID>,
+  ) => {
+    const savedViewID = actionItemSavedViewIDsRef.current[perspective];
+    const save = actionItemPreferenceSaveQueuesRef.current[perspective]
+      .catch(() => undefined)
+      .then(async () => {
+        await saveMyWorkActionItemSavedView(requestJSON, {
+          companyID,
+          userID: subjectID,
+          perspective,
+          savedViewID,
+          groupings,
+          ordering: orderings,
+          displayedFields,
+        });
+        if (actionItemSavedViewIDsRef.current[perspective] === savedViewID) setActionItemPreferenceError("");
+      })
+      .catch((cause) => {
+        if (actionItemSavedViewIDsRef.current[perspective] !== savedViewID) return;
+        setActionItemPreferenceError(errorMessage(cause, "Action Item display settings could not be saved."));
+      });
+    actionItemPreferenceSaveQueuesRef.current[perspective] = save;
+  }, [companyID, requestJSON, subjectID]);
 
   useEffect(() => {
     const nextLayout = readMyWorkLayout(companyID);
@@ -191,16 +333,11 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     ? flattenMyWorkGroupedDisplayEntries(
       actionItemGroups,
       (item) => item.entity_id,
-      new Set(actionItemPerspective === "delegated"
-        ? ["completion_due_date", "person_in_charge"] as const
-        : ["completion_due_date"] as const),
-      actionItemPerspective === "delegated",
     )
     : flattenMyWorkUngroupedDisplayEntries(state.action_items.items, (item) => item.entity_id), [
     actionItemGroups,
     actionItemGroupings.length,
     actionItemHistory,
-    actionItemPerspective,
     state.action_items.items,
   ]);
   const nodeEntries = useMemo(() => !nodeHistory && nodeGroupings.length > 0
@@ -227,8 +364,14 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
       entityFieldID: item.completion_due_date_field_id,
       value: dueDate,
     }, requestJSON);
-    await reloadSection("action_items", actionItemHistory ? undefined : actionItemGroupings, false, actionItemHistory);
-  }, [actionItemGroupings, actionItemHistory, companyID, reloadSection, requestJSON]);
+    await reloadSection(
+      "action_items",
+      actionItemHistory ? undefined : actionItemGroupings,
+      false,
+      actionItemHistory,
+      actionItemHistory ? undefined : actionItemOrderings,
+    );
+  }, [actionItemGroupings, actionItemHistory, actionItemOrderings, companyID, reloadSection, requestJSON]);
   const saveNodeDueDate = useCallback(async (item: MyWorkNode, dueDate: string | null) => {
     await requestJSON(`/v1/nodes/${encodeURIComponent(item.node_id)}`, {
       method: "PUT",
@@ -240,10 +383,10 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     <ActionItemRow
       item={item}
       businessDateKey={businessDateKey}
-      showPersonInCharge={actionItemPerspective === "delegated"}
+      displayedFields={actionItemDisplayedFields}
       onSaveDueDate={(dueDate) => saveActionItemDueDate(item, dueDate)}
     />
-  ), [actionItemPerspective, businessDateKey, saveActionItemDueDate]);
+  ), [actionItemDisplayedFields, businessDateKey, saveActionItemDueDate]);
   const renderNodeRow = useCallback((item: MyWorkNode) => (
     <NodeRow item={item} businessDateKey={businessDateKey} onSaveDueDate={(dueDate) => saveNodeDueDate(item, dueDate)} />
   ), [businessDateKey, saveNodeDueDate]);
@@ -254,16 +397,50 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     const refreshActionItems = (event: Event) => {
       const detail = (event as CustomEvent<EditorEntityReferencePresentation>).detail;
       if (!detail?.isActionItem) return;
-      void reloadSection("action_items", actionItemHistory ? undefined : actionItemGroupings, false, actionItemHistory);
+      void reloadSection(
+        "action_items",
+        actionItemHistory ? undefined : actionItemGroupings,
+        false,
+        actionItemHistory,
+        actionItemHistory ? undefined : actionItemOrderings,
+      );
     };
     window.addEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, refreshActionItems);
     return () => window.removeEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, refreshActionItems);
-  }, [actionItemGroupings, actionItemHistory, reloadSection]);
+  }, [actionItemGroupings, actionItemHistory, actionItemOrderings, reloadSection]);
 
   const changeActionItemGroupings = (next: MyWorkActionItemGrouping[]) => {
-    const normalized = normalizeMyWorkActionItemGroupings(next);
-    setActionItemGroupingStacks((current) => ({ ...current, [actionItemPerspective]: normalized }));
-    void reloadSection("action_items", normalized, true);
+    const perspective = actionItemPerspective;
+    const orderings = actionItemOrderingStacks[perspective];
+    const normalized = normalizeMyWorkActionItemGroupings(
+      next,
+      perspective,
+      new Set(orderings.map((ordering) => ordering.field)),
+    );
+    setActionItemGroupingStacks((current) => ({ ...current, [perspective]: normalized }));
+    void reloadSection("action_items", normalized, true, false, orderings);
+    persistActionItemPreferences(perspective, normalized, orderings, actionItemDisplayedFieldStacks[perspective]);
+  };
+  const changeActionItemOrderings = (next: MyWorkActionItemOrdering[]) => {
+    const perspective = actionItemPerspective;
+    const groupings = actionItemGroupingStacks[perspective];
+    const normalized = normalizeMyWorkActionItemOrderings(next, perspective, groupings);
+    setActionItemOrderingStacks((current) => ({ ...current, [perspective]: normalized }));
+    void reloadSection("action_items", groupings, true, false, normalized);
+    persistActionItemPreferences(perspective, groupings, normalized, actionItemDisplayedFieldStacks[perspective]);
+  };
+  const changeActionItemDisplayedFields = (
+    perspective: MyWorkActionItemPerspective,
+    next: MyWorkActionItemDisplayFieldID[],
+  ) => {
+    const normalized = normalizeMyWorkActionItemDisplayedFields(next, perspective);
+    setActionItemDisplayedFieldStacks((current) => ({ ...current, [perspective]: normalized }));
+    persistActionItemPreferences(
+      perspective,
+      actionItemGroupingStacks[perspective],
+      actionItemOrderingStacks[perspective],
+      normalized,
+    );
   };
   const changeNodeGroupings = (next: MyWorkNodeGrouping[]) => {
     const normalized = normalizeMyWorkNodeGroupings(next);
@@ -272,9 +449,16 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   };
   const toggleActionItemHistory = () => {
     const next = !actionItemHistory;
+    actionItemHistoryRef.current = next;
     setActionItemHistory(next);
     if (actionItemsScrollRef.current) actionItemsScrollRef.current.scrollTop = 0;
-    void reloadSection("action_items", next ? undefined : actionItemGroupings, true, next);
+    void reloadSection(
+      "action_items",
+      next ? undefined : actionItemGroupings,
+      true,
+      next,
+      next ? undefined : actionItemOrderings,
+    );
   };
   const toggleNodeHistory = () => {
     const next = !nodeHistory;
@@ -288,6 +472,7 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
       perspective,
       actionItemHistory ? undefined : actionItemGroupingStacks[perspective],
       actionItemHistory,
+      actionItemHistory ? undefined : actionItemOrderingStacks[perspective],
     );
   };
   const changeNodeRole = (role: MyWorkProcessRole) => {
@@ -350,26 +535,82 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
             )}
             actions={(
               <div style={sectionActionsStyle}>
+                <button
+                  ref={actionItemFieldSettingsButtonRef}
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-expanded={actionItemFieldSettingsOpen}
+                  aria-label="Choose Action Item row fields"
+                  title={actionItemPreferenceError || "Choose Action Item row fields"}
+                  data-my-work-action-item-field-settings="true"
+                  disabled={!actionItemPreferencesReady}
+                  style={actionItemFieldSettingsButtonStyle(
+                    actionItemFieldSettingsOpen,
+                    Boolean(actionItemPreferenceError),
+                    !actionItemPreferencesReady,
+                  )}
+                  onClick={() => setActionItemFieldSettingsOpen((open) => !open)}
+                >
+                  <HeaderSettingsIcon />
+                </button>
+                <ActionItemInlineFieldSettingsPopover<MyWorkActionItemDisplayFieldID>
+                  open={actionItemFieldSettingsOpen}
+                  anchorRef={actionItemFieldSettingsButtonRef}
+                  fields={MY_WORK_ACTION_ITEM_DISPLAY_FIELDS}
+                  mineFieldIDs={actionItemDisplayedFieldStacks.mine}
+                  delegatedFieldIDs={actionItemDisplayedFieldStacks.delegated}
+                  onMineFieldIDsChange={(next) => changeActionItemDisplayedFields("mine", next)}
+                  onDelegatedFieldIDsChange={(next) => changeActionItemDisplayedFields("delegated", next)}
+                  onRequestClose={() => setActionItemFieldSettingsOpen(false)}
+                />
                 <HistoryButton selected={actionItemHistory} disabled={state.action_items.loading} onClick={toggleActionItemHistory} />
                 <UniversalGroupingControls
                   groupings={actionItemGroupings}
-                  fieldOptions={actionItemPerspective === "delegated"
+                  fieldOptions={(actionItemPerspective === "delegated"
                     ? MY_WORK_ACTION_ITEM_GROUPING_FIELDS
-                    : MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS}
+                    : MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS
+                  ).filter((option) => !actionItemOrderings.some((ordering) => ordering.field === option.value))}
                   onChange={changeActionItemGroupings}
-                  buttonLabel="Group Action Items"
-                  popoverLabel="Action Item grouping"
+                  buttonLabel="Group and order Action Items"
+                  popoverLabel="Group by"
                   popoverAlign="end"
                   triggerIcon={<StaggeredGroupingIcon />}
                   iconOnly
-                  disabled={state.action_items.loading || actionItemHistory}
+                  accent="#64748b"
+                  disabled={actionItemHistory || !actionItemPreferencesReady}
+                  additionalContent={(
+                    <ActionItemOrderingEditor
+                      orderings={actionItemOrderings}
+                      fieldOptions={(actionItemPerspective === "delegated"
+                        ? MY_WORK_ACTION_ITEM_GROUPING_FIELDS
+                        : MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS
+                      ).filter((option) => !actionItemGroupings.some((grouping) => grouping.field === option.value))}
+                      onChange={changeActionItemOrderings}
+                    />
+                  )}
                 />
               </div>
             )}
             onRetry={() => void (state.action_items.items.length > 0
-              ? loadMore("action_items", actionItemHistory ? undefined : actionItemGroupings, actionItemHistory)
-              : reloadSection("action_items", actionItemHistory ? undefined : actionItemGroupings, false, actionItemHistory))}
-            onLoadMore={() => void loadMore("action_items", actionItemHistory ? undefined : actionItemGroupings, actionItemHistory)}
+              ? loadMore(
+                "action_items",
+                actionItemHistory ? undefined : actionItemGroupings,
+                actionItemHistory,
+                actionItemHistory ? undefined : actionItemOrderings,
+              )
+              : reloadSection(
+                "action_items",
+                actionItemHistory ? undefined : actionItemGroupings,
+                false,
+                actionItemHistory,
+                actionItemHistory ? undefined : actionItemOrderings,
+              ))}
+            onLoadMore={() => void loadMore(
+              "action_items",
+              actionItemHistory ? undefined : actionItemGroupings,
+              actionItemHistory,
+              actionItemHistory ? undefined : actionItemOrderings,
+            )}
             scrollBodyRef={actionItemsScrollRef}
           >
             <MyWorkWindowedRows
@@ -997,6 +1238,27 @@ function renderMyWorkDisplayEntry<Item, Field extends string>(
 ): React.ReactNode {
   if (entry.kind === "row") return renderRow(entry.row);
   if (section !== "action_items" && section !== "nodes") return null;
+  const content = (
+    <>
+      <span>{entry.label}</span>
+      <span aria-label={`${entry.rowCount} items`} style={groupCountStyle}>{entry.rowCount}</span>
+    </>
+  );
+  if (section === "action_items" && entry.field === "huddle_process" && entry.groupKey !== "none") {
+    return (
+      <button
+        type="button"
+        aria-label={`Open Huddle process ${entry.label}`}
+        data-my-work-group={entry.groupID}
+        data-my-work-group-field={entry.field}
+        data-my-work-group-key={entry.groupKey}
+        style={clickableGroupHeaderStyle(groupHeaderStyle(section, entry.field, entry.groupKey, entry.depth))}
+        onClick={() => openMyWorkHuddleProcess(entry.groupKey, entry.label)}
+      >
+        {content}
+      </button>
+    );
+  }
   return (
     <div
       data-my-work-group={entry.groupID}
@@ -1004,10 +1266,17 @@ function renderMyWorkDisplayEntry<Item, Field extends string>(
       data-my-work-group-key={entry.groupKey}
       style={groupHeaderStyle(section, entry.field, entry.groupKey, entry.depth)}
     >
-      <span>{entry.label}</span>
-      <span aria-label={`${entry.rowCount} items`} style={groupCountStyle}>{entry.rowCount}</span>
+      {content}
     </div>
   );
+}
+
+export function openMyWorkHuddleProcess(resourceID: string, name: string): void {
+  const cleanResourceID = resourceID.trim();
+  if (!cleanResourceID || cleanResourceID === "none") return;
+  window.dispatchEvent(new CustomEvent("mangorts:huddle-open", {
+    detail: { resourceType: "huddle_logic_gate", resourceID: cleanResourceID, name: name.trim() },
+  }));
 }
 
 function estimatedMyWorkEntrySize<Item, Field extends string>(
@@ -1078,19 +1347,10 @@ function HistoryClockIcon() {
   );
 }
 
-function PersonInChargeIcon() {
-  return (
-    <svg aria-hidden="true" width="15" height="15" viewBox="0 0 16 16" fill="none" style={{ display: "block" }}>
-      <circle cx="8" cy="5" r="2.5" stroke="currentColor" strokeWidth="1.35" />
-      <path d="M3.5 13.5c.45-2.55 2.05-3.8 4.5-3.8s4.05 1.25 4.5 3.8" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function ActionItemRow({ item, businessDateKey, showPersonInCharge, onSaveDueDate }: {
+function ActionItemRow({ item, businessDateKey, displayedFields, onSaveDueDate }: {
   item: MyWorkActionItem;
   businessDateKey: string;
-  showPersonInCharge: boolean;
+  displayedFields: ReadonlyArray<MyWorkActionItemDisplayFieldID>;
   onSaveDueDate: (dueDate: string | null) => Promise<void>;
 }) {
   const color = item.color?.trim().toLowerCase();
@@ -1124,20 +1384,19 @@ function ActionItemRow({ item, businessDateKey, showPersonInCharge, onSaveDueDat
           {item.name}
         </span>
       </button>
-      <div style={inlineContextStyle}>
-        {showPersonInCharge && (
-          <span
-            data-my-work-person-in-charge="true"
-            aria-label={`Person in charge: ${item.person_in_charge_name}`}
-            title={`Person in charge: ${item.person_in_charge_name}`}
-            style={personInChargeLabelStyle}
-          >
-            <span data-my-work-person-in-charge-icon="true" style={personInChargeIconStyle}><PersonInChargeIcon /></span>
-            <span style={personInChargeNameStyle}>{item.person_in_charge_name}</span>
-          </span>
+      <ActionItemInlineFields
+        item={item}
+        displayedFields={displayedFields}
+        renderCompletionDueDate={() => (
+          <InlineDueDateEditor
+            fieldID="completion_due_date"
+            value={item.completion_due_date}
+            resourceLabel={item.name}
+            businessDateKey={businessDateKey}
+            onSave={onSaveDueDate}
+          />
         )}
-        <InlineDueDateEditor value={item.completion_due_date} resourceLabel={item.name} businessDateKey={businessDateKey} onSave={onSaveDueDate} />
-      </div>
+      />
     </div>
   );
 }
@@ -1221,7 +1480,8 @@ function NodeRow({ item, businessDateKey, onSaveDueDate }: {
   );
 }
 
-function InlineDueDateEditor({ value, resourceLabel, businessDateKey, onSave }: {
+function InlineDueDateEditor({ fieldID, value, resourceLabel, businessDateKey, onSave }: {
+  fieldID?: MyWorkActionItemDisplayFieldID;
   value: string | null | undefined;
   resourceLabel: string;
   businessDateKey: string;
@@ -1273,7 +1533,13 @@ function InlineDueDateEditor({ value, resourceLabel, businessDateKey, onSave }: 
     }
   };
   return (
-    <span data-my-work-due-date="true" data-my-work-due-date-tone={tone} style={inlineDueDateStyle(presentation)} title={error || undefined}>
+    <span
+      data-my-work-action-item-field={fieldID}
+      data-my-work-due-date="true"
+      data-my-work-due-date-tone={tone}
+      style={inlineDueDateStyle(presentation)}
+      title={error || undefined}
+    >
       <EditorCalendarDateInput
         value={draft}
         displayValue={relativeLabel || `Due Date: ${draft || "No date"}`}
@@ -1569,6 +1835,31 @@ function historyButtonStyle(selected: boolean, disabled: boolean): React.CSSProp
   };
 }
 
+function actionItemFieldSettingsButtonStyle(open: boolean, error: boolean, disabled: boolean): React.CSSProperties {
+  return {
+    width: 30,
+    height: 30,
+    display: "grid",
+    placeItems: "center",
+    border: error
+      ? "1px solid rgba(239,68,68,.46)"
+      : open
+        ? "1px solid rgba(71,85,105,.62)"
+        : "1px solid rgba(148,163,184,.28)",
+    borderRadius: 9,
+    background: open
+      ? "linear-gradient(145deg,#e2e8f0,#f8fafc)"
+      : "linear-gradient(145deg,#ffffff,#eef2f7)",
+    color: error ? "#b91c1c" : "#475569",
+    boxShadow: open
+      ? "inset 2px 2px 5px rgba(100,116,139,.16), inset -2px -2px 5px rgba(255,255,255,.84)"
+      : "3px 3px 8px rgba(100,116,139,.13), -2px -2px 7px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.96)",
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.55 : 1,
+    padding: 0,
+  };
+}
+
 const sectionBodyStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
@@ -1621,7 +1912,9 @@ function resizeGripStyle(orientation: "horizontal" | "vertical"): React.CSSPrope
     maxWidth: orientation === "horizontal" ? "72%" : undefined,
     maxHeight: orientation === "vertical" ? "72%" : undefined,
     borderRadius: 999,
-    background: "linear-gradient(145deg, rgba(148,163,184,0.28), rgba(100,116,139,0.52))",
+    background: orientation === "vertical"
+      ? "linear-gradient(180deg, #22d3ee 0%, #6366f1 52%, #a855f7 100%)"
+      : "linear-gradient(145deg, rgba(148,163,184,0.28), rgba(100,116,139,0.52))",
     boxShadow: "1px 1px 3px rgba(100,116,139,0.20), -1px -1px 2px rgba(255,255,255,0.90)",
     transition: "background 140ms ease, box-shadow 140ms ease, transform 140ms ease",
   };
@@ -1730,6 +2023,19 @@ function groupHeaderStyle(section: "action_items" | "nodes", field: string, key:
     };
   }
   return base;
+}
+
+function clickableGroupHeaderStyle(base: React.CSSProperties): React.CSSProperties {
+  return {
+    ...base,
+    width: "100%",
+    boxSizing: "border-box",
+    font: "inherit",
+    fontSize: base.fontSize,
+    fontWeight: base.fontWeight,
+    cursor: "pointer",
+    textAlign: "left",
+  };
 }
 
 const groupCountStyle: React.CSSProperties = {
@@ -1934,44 +2240,6 @@ const inlineContextStyle: React.CSSProperties = {
   overflow: "hidden",
 };
 
-const personInChargeLabelStyle: React.CSSProperties = {
-  minWidth: 0,
-  maxWidth: 148,
-  minHeight: 31,
-  flex: "0 1 auto",
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 3,
-  boxSizing: "border-box",
-  border: "1px solid rgba(14,116,144,.34)",
-  borderRadius: 9,
-  background: "linear-gradient(145deg,#ffffff,#ecfeff)",
-  color: "#0e7490",
-  boxShadow: "3px 3px 8px rgba(14,116,144,.12), -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.94)",
-  padding: "2px 8px 2px 4px",
-};
-
-const personInChargeIconStyle: React.CSSProperties = {
-  width: 24,
-  height: 24,
-  flex: "0 0 auto",
-  display: "grid",
-  placeItems: "center",
-  border: "1px solid rgba(14,116,144,.30)",
-  borderRadius: 7,
-  background: "#ecfeff",
-  boxShadow: "2px 2px 6px rgba(14,116,144,.12), -2px -2px 6px rgba(255,255,255,.86), inset 1px 1px 0 rgba(255,255,255,.94)",
-};
-
-const personInChargeNameStyle: React.CSSProperties = {
-  minWidth: 0,
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-  fontSize: 10.5,
-  fontWeight: 850,
-};
-
 type InlineDueDatePresentation = {
   accent: string;
   borderColor: string;
@@ -2084,6 +2352,14 @@ function hexWithAlpha(color: string, alpha: number): string {
   if (!match) return color;
   const value = match[1];
   return `rgba(${Number.parseInt(value.slice(0, 2), 16)}, ${Number.parseInt(value.slice(2, 4), 16)}, ${Number.parseInt(value.slice(4, 6), 16)}, ${alpha})`;
+}
+
+function savedViewIDOrNew(savedView: MyWorkActionItemSavedView | null, fallback: string): string {
+  return savedView?.saved_view_id?.trim() || fallback;
+}
+
+function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 }
 
 const emptyStyle: React.CSSProperties = {
