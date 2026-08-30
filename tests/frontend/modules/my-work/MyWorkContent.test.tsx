@@ -639,6 +639,9 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.equal(delegatedURL.searchParams.get("grouping"), "color:asc,completion_due_date:asc,person_in_charge:asc", "Delegated loads its automatic three-level grouping stack");
     assert.match(actionSection?.textContent ?? "", /Delegated Action/);
     assert.match(actionSection?.textContent ?? "", /Alex Morgan/, "Delegated shows the Person in charge inline");
+    const delegatedPersonLabel = actionSection?.querySelector<HTMLElement>('[data-my-work-person-in-charge="true"]');
+    assert.ok(delegatedPersonLabel?.querySelector('[data-my-work-person-in-charge-icon="true"] svg'), "the Person in charge label shows a person icon");
+    assert.equal(delegatedPersonLabel?.nextElementSibling?.getAttribute("data-my-work-due-date"), "true", "the Person in charge label sits immediately left of the due date");
     assert.equal(actionSection?.querySelector('[data-my-work-group-field="person_in_charge"]'), null, "Person in charge never renders a group header");
     assert.equal(actionSection?.querySelector('[data-my-work-entry-kind="row"]')?.getAttribute("style")?.includes("padding-left: 0"), true, "Delegated rows remain flat");
     assert.equal(perspectiveRadios[1]?.getAttribute("aria-checked"), "true");

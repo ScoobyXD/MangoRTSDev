@@ -70,7 +70,7 @@ MW33 - Mine and Delegated both exclude an Action Item whose current canonical St
 
 MW34 - The normal Nodes list excludes a Node whose current status is Done, Complete, or Completed; that Node appears only in Nodes History while it still has the selected effective RACI role and remains permitted.
 
-MW35 - An Action Item row exposes only the summary needed to display and open that exact Entity. A Delegated row also shows the current Person in charge name inline; Mine shows no person label, and neither perspective derives Process, Project, or other resource context.
+MW35 - An Action Item row exposes only the summary needed to display and open that exact Entity. A Delegated row shows the current Person in charge name in a compact inline label with a person icon, immediately left of the due-date label; Mine shows no person label, and neither perspective derives Process, Project, or other resource context.
 
 MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that section nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated clears only Action Items and loads that perspective's independent grouping stack; switching a Node or Process role clears only that section and preserves its grouping stack.
 
