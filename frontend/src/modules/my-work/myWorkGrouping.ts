@@ -25,15 +25,21 @@ export type MyWorkActionItemGroupingField = (typeof MY_WORK_ACTION_ITEM_GROUPING
 export type MyWorkActionItemGrouping = UniversalGroupingSetting<MyWorkActionItemGroupingField>;
 export type MyWorkActionItemOrdering = UniversalGroupingSetting<MyWorkActionItemGroupingField>;
 
-export const DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS: MyWorkActionItemGrouping[] = [
-  { field: "color", direction: "asc" },
-  { field: "huddle_process", direction: "asc" },
-  { field: "completion_due_date", direction: "asc" },
-];
+export const DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS: Record<MyWorkActionItemPerspective, MyWorkActionItemGrouping[]> = {
+  mine: [
+    { field: "color", direction: "asc" },
+    { field: "huddle_process", direction: "asc" },
+  ],
+  delegated: [
+    { field: "color", direction: "asc" },
+    { field: "person_in_charge", direction: "asc" },
+    { field: "huddle_process", direction: "asc" },
+  ],
+};
 
 export const DEFAULT_MY_WORK_ACTION_ITEM_ORDERINGS: Record<MyWorkActionItemPerspective, MyWorkActionItemOrdering[]> = {
-  mine: [],
-  delegated: [{ field: "person_in_charge", direction: "asc" }],
+  mine: [{ field: "completion_due_date", direction: "asc" }],
+  delegated: [{ field: "completion_due_date", direction: "asc" }],
 };
 
 export const MY_WORK_ACTION_ITEM_DISPLAY_FIELDS: ReadonlyArray<{
@@ -55,7 +61,7 @@ export const DEFAULT_MY_WORK_ACTION_ITEM_DISPLAYED_FIELDS: Record<
   MyWorkActionItemPerspective,
   MyWorkActionItemDisplayFieldID[]
 > = {
-  mine: ["assigned_by", "completion_due_date"],
+  mine: ["completion_due_date"],
   delegated: ["person_in_charge", "completion_due_date"],
 };
 
@@ -101,7 +107,7 @@ export function normalizeMyWorkActionItemGroupings(
   excludedFields: ReadonlySet<MyWorkActionItemGroupingField> = new Set(),
 ): MyWorkActionItemGrouping[] {
   const supportedFields = actionItemArrangeFieldSet(perspective, excludedFields);
-  return normalizeGroupingStack(value, supportedFields, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS);
+  return normalizeGroupingStack(value, supportedFields, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS[perspective]);
 }
 
 export function normalizeMyWorkActionItemOrderings(

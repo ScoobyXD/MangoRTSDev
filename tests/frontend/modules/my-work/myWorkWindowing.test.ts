@@ -24,7 +24,7 @@ test("My Work display entries preserve canonical group and backend row order", (
   ];
   const groups = buildUniversalNestedGroups(
     rows,
-    DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS,
+    DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.mine,
     myWorkActionItemGroupingAdapter,
   );
 
@@ -34,17 +34,14 @@ test("My Work display entries preserve canonical group and backend row order", (
     : `row:${entry.depth}:${entry.rowID}`), [
     "header:0:Red:2",
     "header:1:No Huddle process:2",
-    "header:2:Completion due date: 09/01/2026:2",
-    "row:3:red-first",
-    "row:3:red-second",
+    "row:2:red-first",
+    "row:2:red-second",
     "header:0:Yellow:1",
     "header:1:No Huddle process:1",
-    "header:2:Completion due date: 09/02/2026:1",
-    "row:3:yellow",
+    "row:2:yellow",
     "header:0:No color:1",
     "header:1:No Huddle process:1",
-    "header:2:No completion due date:1",
-    "row:3:none",
+    "row:2:none",
   ]);
 
   const rowEntries = entries.filter((entry) => entry.kind === "row");
@@ -90,13 +87,13 @@ test("hidden date headers keep due-date-first batches and nested color boundarie
   ], "removing date headers never regroups rows across date batches");
 });
 
-test("Delegated Action Item rows show the same three grouping headings as Mine", () => {
+test("Delegated Action Item rows use Color, Person in charge, then Huddle process", () => {
   const rows: MyWorkActionItem[] = [
     { entity_id: "alex", name: "Alex item", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-alex", person_in_charge_user_id: "person-alex", person_in_charge_name: "Alex Morgan" },
     { entity_id: "zoe", name: "Zoe item", color: "yellow", completion_due_date: "2026-09-01", completion_due_date_field_id: "field-zoe", person_in_charge_user_id: "person-zoe", person_in_charge_name: "Zoe Chen" },
   ];
   const entries = flattenMyWorkGroupedDisplayEntries(
-    buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter),
+    buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.delegated, myWorkActionItemGroupingAdapter),
     (row) => row.entity_id,
   );
 
@@ -104,11 +101,138 @@ test("Delegated Action Item rows show the same three grouping headings as Mine",
     ? `header:${entry.depth}:${entry.field}:${entry.label}`
     : `row:${entry.depth}:${entry.rowID}`), [
     "header:0:color:Yellow",
-    "header:1:huddle_process:No Huddle process",
-    "header:2:completion_due_date:Completion due date: 09/01/2026",
+    "header:1:person_in_charge:Alex Morgan",
+    "header:2:huddle_process:No Huddle process",
     "row:3:alex",
+    "header:1:person_in_charge:Zoe Chen",
+    "header:2:huddle_process:No Huddle process",
     "row:3:zoe",
   ]);
+});
+
+test("Huddle surfaces include their headings, descendant groups, and rows", () => {
+  const rows: MyWorkActionItem[] = [
+    {
+      entity_id: "weekly-first",
+      name: "Weekly first",
+      color: "yellow",
+      completion_due_date: "2026-09-01",
+      completion_due_date_field_id: "field-weekly-first",
+      person_in_charge_user_id: "person-1",
+      person_in_charge_name: "Person One",
+      huddle_process: { huddle_logic_gate_id: "huddle-weekly", name: "Weekly Huddle" },
+    },
+    {
+      entity_id: "weekly-second",
+      name: "Weekly second",
+      color: "yellow",
+      completion_due_date: "2026-09-01",
+      completion_due_date_field_id: "field-weekly-second",
+      person_in_charge_user_id: "person-1",
+      person_in_charge_name: "Person One",
+      huddle_process: { huddle_logic_gate_id: "huddle-weekly", name: "Weekly Huddle" },
+    },
+  ];
+  const groups = buildUniversalNestedGroups(rows, [
+    { field: "color", direction: "asc" },
+    { field: "huddle_process", direction: "asc" },
+    { field: "completion_due_date", direction: "asc" },
+  ], myWorkActionItemGroupingAdapter);
+  const entries = flattenMyWorkGroupedDisplayEntries(
+    groups,
+    (row) => row.entity_id,
+    new Set(),
+    false,
+    "huddle_process",
+  );
+  const surfaced = entries.filter((entry) => entry.surface?.key === "huddle-weekly");
+
+  assert.deepEqual(surfaced.map((entry) => ({
+    entry: entry.kind === "row" ? `row:${entry.rowID}` : `header:${entry.field}`,
+    surfaceID: entry.surface?.id,
+    surfaceDepth: entry.surface?.depth,
+    edge: entry.surface?.edge,
+  })), [
+    { entry: "header:huddle_process", surfaceID: "my-work/action-items/color:yellow/huddle_process:huddle-weekly", surfaceDepth: 1, edge: "first" },
+    { entry: "header:completion_due_date", surfaceID: "my-work/action-items/color:yellow/huddle_process:huddle-weekly", surfaceDepth: 1, edge: "middle" },
+    { entry: "row:weekly-first", surfaceID: "my-work/action-items/color:yellow/huddle_process:huddle-weekly", surfaceDepth: 1, edge: "middle" },
+    { entry: "row:weekly-second", surfaceID: "my-work/action-items/color:yellow/huddle_process:huddle-weekly", surfaceDepth: 1, edge: "last" },
+  ]);
+  assert.equal(entries[0]?.surface, undefined, "the parent Color heading stays outside the Huddle surface");
+});
+
+test("No-Huddle buckets receive a neutral surface and a lone visible entry uses the only edge", () => {
+  const row: MyWorkActionItem = {
+    entity_id: "without-huddle",
+    name: "Without Huddle",
+    color: "red",
+    completion_due_date: null,
+    completion_due_date_field_id: "field-without-huddle",
+    person_in_charge_user_id: "person-1",
+    person_in_charge_name: "Person One",
+  };
+  const groups = buildUniversalNestedGroups(
+    [row],
+    [{ field: "huddle_process", direction: "asc" }],
+    myWorkActionItemGroupingAdapter,
+  );
+  const visibleEntries = flattenMyWorkGroupedDisplayEntries(
+    groups,
+    (item) => item.entity_id,
+    new Set(),
+    false,
+    "huddle_process",
+  );
+
+  assert.deepEqual(visibleEntries.map((entry) => ({
+    kind: entry.kind,
+    key: entry.surface?.key,
+    edge: entry.surface?.edge,
+  })), [
+    { kind: "group-header", key: "none", edge: "first" },
+    { kind: "row", key: "none", edge: "last" },
+  ]);
+
+  const hiddenHeadingEntries = flattenMyWorkGroupedDisplayEntries(
+    groups,
+    (item) => item.entity_id,
+    new Set(["huddle_process"]),
+    false,
+    "huddle_process",
+  );
+  assert.equal(hiddenHeadingEntries.length, 1);
+  assert.deepEqual(hiddenHeadingEntries[0]?.surface, {
+    id: "my-work/action-items/huddle_process:none",
+    key: "none",
+    depth: 0,
+    edge: "only",
+  });
+});
+
+test("the same Huddle under separate parent groups receives separate surfaces", () => {
+  const huddle = { huddle_logic_gate_id: "huddle-shared", name: "Shared Huddle" };
+  const rows: MyWorkActionItem[] = [
+    { entity_id: "red-shared", name: "Red shared", color: "red", completion_due_date_field_id: "field-red", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One", huddle_process: huddle },
+    { entity_id: "yellow-shared", name: "Yellow shared", color: "yellow", completion_due_date_field_id: "field-yellow", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One", huddle_process: huddle },
+  ];
+  const entries = flattenMyWorkGroupedDisplayEntries(
+    buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.mine, myWorkActionItemGroupingAdapter),
+    (row) => row.entity_id,
+    new Set(),
+    false,
+    "huddle_process",
+  );
+  const huddleHeaders = entries.filter((entry) => entry.kind === "group-header" && entry.field === "huddle_process");
+
+  assert.deepEqual(huddleHeaders.map((entry) => ({
+    key: entry.surface?.key,
+    id: entry.surface?.id,
+    edge: entry.surface?.edge,
+  })), [
+    { key: "huddle-shared", id: "my-work/action-items/color:red/huddle_process:huddle-shared", edge: "first" },
+    { key: "huddle-shared", id: "my-work/action-items/color:yellow/huddle_process:huddle-shared", edge: "first" },
+  ]);
+  assert.notEqual(huddleHeaders[0]?.surface?.id, huddleHeaders[1]?.surface?.id);
 });
 
 test("My Work row navigation skips group headers in both directions", () => {
@@ -118,7 +242,7 @@ test("My Work row navigation skips group headers in both directions", () => {
     { entity_id: "yellow", name: "Yellow", color: "yellow", completion_due_date: "2026-09-02", completion_due_date_field_id: "field-yellow", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
   ];
   const entries = flattenMyWorkGroupedDisplayEntries(
-    buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS, myWorkActionItemGroupingAdapter),
+    buildUniversalNestedGroups(rows, DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.mine, myWorkActionItemGroupingAdapter),
     (row) => row.entity_id,
   );
   const first = entries.findIndex((entry) => entry.kind === "row" && entry.rowID === "red-first");

@@ -36,6 +36,12 @@ export type UniversalGroupingControlsProps<Field extends string> = {
   triggerHidden?: boolean;
   openRequestEventName?: string;
   additionalContent?: React.ReactNode;
+  sideContent?: React.ReactNode;
+  layout?: "stack" | "quadrants";
+  groupingTitle?: string;
+  popoverWidth?: number;
+  popoverEstimatedHeight?: number;
+  triggerTitle?: string;
 };
 
 type GroupingDropTarget = {
@@ -59,6 +65,12 @@ export function UniversalGroupingControls<Field extends string>({
   triggerHidden = false,
   openRequestEventName,
   additionalContent,
+  sideContent,
+  layout = "stack",
+  groupingTitle = "Group by",
+  popoverWidth: requestedPopoverWidth,
+  popoverEstimatedHeight = 330,
+  triggerTitle,
 }: UniversalGroupingControlsProps<Field>) {
   const [open, setOpen] = useState(false);
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -84,7 +96,7 @@ export function UniversalGroupingControls<Field extends string>({
     return !usedFields.has(option.value);
   };
   const addableFields = uniqueFieldOptions.filter(isPrimaryOptionAddable);
-  const popoverWidth = fieldVariant ? 448 : 326;
+  const popoverWidth = requestedPopoverWidth ?? (fieldVariant ? 448 : 326);
 
   useEffect(() => {
     if (!disabled) return;
@@ -100,17 +112,16 @@ export function UniversalGroupingControls<Field extends string>({
       const detail = (event as CustomEvent<Partial<{ left: number; top: number; right: number; bottom: number }>>).detail;
       if (!detail || typeof detail.top !== "number") return;
       const width = popoverWidth;
-      const estimatedHeight = 330;
       const requestedLeft = typeof detail.right === "number" ? detail.right + 8 : (detail.left ?? 8);
       setExternalPopoverPosition({
         left: Math.max(8, Math.min(requestedLeft, window.innerWidth - width - 8)),
-        top: Math.max(8, Math.min(detail.top, window.innerHeight - estimatedHeight - 8)),
+        top: Math.max(8, Math.min(detail.top, window.innerHeight - popoverEstimatedHeight - 8)),
       });
       setOpen(true);
     };
     window.addEventListener(openRequestEventName, handleOpenRequest);
     return () => window.removeEventListener(openRequestEventName, handleOpenRequest);
-  }, [disabled, openRequestEventName, popoverWidth]);
+  }, [disabled, openRequestEventName, popoverEstimatedHeight, popoverWidth]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -168,7 +179,14 @@ export function UniversalGroupingControls<Field extends string>({
     onChange(next);
   };
   const popoverPosition = externalPopoverPosition
-    ?? (triggerAnchor ? groupingPopoverViewportPosition(triggerAnchor, popoverAlign, popoverWidth) : null);
+    ?? (triggerAnchor ? groupingPopoverViewportPosition(
+      triggerAnchor,
+      popoverAlign,
+      popoverWidth,
+      undefined,
+      undefined,
+      popoverEstimatedHeight,
+    ) : null);
 
   return (
     <div ref={rootRef} style={controlsRootStyle(triggerHidden)}>
@@ -180,7 +198,7 @@ export function UniversalGroupingControls<Field extends string>({
           aria-label={iconOnly ? buttonLabel : undefined}
           aria-expanded={open}
           aria-controls={open ? popoverID : undefined}
-          title={iconOnly ? buttonLabel : undefined}
+          title={triggerTitle ?? (iconOnly ? buttonLabel : undefined)}
           disabled={disabled}
           style={groupButtonStyle(open, disabled, accent, iconOnly)}
           onClick={() => {
@@ -220,6 +238,12 @@ export function UniversalGroupingControls<Field extends string>({
             </button>
           </div>
 
+          <div style={popoverBodyStyle(layout)}>
+          <section
+            data-action-item-view-quadrant={layout === "quadrants" ? "group" : undefined}
+            style={groupingSectionStyle(layout, accent)}
+          >
+          {layout === "quadrants" ? <h3 style={quadrantTitleStyle}>{groupingTitle}</h3> : null}
           <div style={groupingStackStyle}>
             {groupings.length === 0 && <div style={emptyStackStyle}>{emptyLabel}</div>}
             {groupings.map((grouping, index) => {
@@ -380,7 +404,10 @@ export function UniversalGroupingControls<Field extends string>({
               Clear all
             </button>
           </div>
+          </section>
           {additionalContent}
+          {layout === "quadrants" ? sideContent : null}
+          </div>
         </div>
       ), overlayTarget)}
     </div>
@@ -483,15 +510,56 @@ export function groupingPopoverViewportPosition(
   width: number,
   viewportWidth = typeof window === "undefined" ? 1200 : window.innerWidth,
   viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight,
+  estimatedHeight = 330,
 ): { left: number; top: number } {
   const gutter = 8;
-  const estimatedHeight = 330;
   const desiredLeft = align === "start" ? anchor.left : anchor.left + anchor.width - width;
   return {
     left: Math.max(gutter, Math.min(desiredLeft, viewportWidth - width - gutter)),
     top: Math.max(gutter, Math.min(anchor.top + anchor.height + 6, viewportHeight - estimatedHeight - gutter)),
   };
 }
+
+function popoverBodyStyle(layout: "stack" | "quadrants"): React.CSSProperties {
+  if (layout === "quadrants") {
+    return {
+      minWidth: 0,
+      display: "grid",
+      gridTemplateAreas: '"group mine" "order delegated"',
+      gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+      alignItems: "stretch",
+      gap: 10,
+    };
+  }
+  return { minWidth: 0, display: "grid", gap: 10 };
+}
+
+function groupingSectionStyle(layout: "stack" | "quadrants", accent: string): React.CSSProperties {
+  if (layout === "quadrants") {
+    return {
+      gridArea: "group",
+      minWidth: 0,
+      display: "grid",
+      alignContent: "start",
+      gap: 8,
+      border: `1px solid ${accent}38`,
+      borderTop: `3px solid ${accent}`,
+      borderRadius: 11,
+      background: `linear-gradient(145deg,rgba(255,255,255,.98),${accent}0d)`,
+      padding: 8,
+      boxSizing: "border-box",
+      boxShadow: `3px 4px 10px ${accent}18, -2px -2px 7px rgba(255,255,255,.82), inset 1px 1px 0 rgba(255,255,255,.92)`,
+    };
+  }
+  return { minWidth: 0, display: "grid", gap: 10 };
+}
+
+const quadrantTitleStyle: React.CSSProperties = {
+  margin: 0,
+  color: "#334155",
+  fontSize: 12,
+  fontWeight: 900,
+};
 
 function groupPopoverStyle(position: { left: number; top: number }, width: number): React.CSSProperties {
   return {

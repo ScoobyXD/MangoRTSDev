@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import React, { act, useRef, useState } from "react";
+import React, { act, useState } from "react";
 import { Simulate } from "react-dom/test-utils";
 import { JSDOM } from "jsdom";
 import type {
   ActionItemInlineFieldDefinition,
-  ActionItemInlineFieldSettingsPopoverProps,
+  ActionItemInlineFieldSettingsProps,
 } from "../../../../frontend/src/modules/my-work/ActionItemInlineFieldSettingsPopover.js";
 
 type FieldID =
@@ -72,7 +72,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
 }
 
 type HarnessProps = Pick<
-  ActionItemInlineFieldSettingsPopoverProps<FieldID>,
+  ActionItemInlineFieldSettingsProps<FieldID>,
   "fields"
 > & {
   initialMine?: FieldID[];
@@ -84,28 +84,22 @@ function Harness({
   initialMine = DEFAULT_MINE,
   initialDelegated = DEFAULT_DELEGATED,
 }: HarnessProps) {
-  const anchorRef = useRef<HTMLButtonElement | null>(null);
   const [mineFieldIDs, setMineFieldIDs] = useState<FieldID[]>(initialMine);
   const [delegatedFieldIDs, setDelegatedFieldIDs] = useState<FieldID[]>(initialDelegated);
   return (
-    <>
-      <button ref={anchorRef} type="button" aria-haspopup="dialog">Fields</button>
-      <ActionItemInlineFieldSettingsPopoverForTest
-        open
-        anchorRef={anchorRef}
-        fields={fields}
-        mineFieldIDs={mineFieldIDs}
-        delegatedFieldIDs={delegatedFieldIDs}
-        onMineFieldIDsChange={setMineFieldIDs}
-        onDelegatedFieldIDsChange={setDelegatedFieldIDs}
-        onRequestClose={() => undefined}
-      />
-    </>
+    <ActionItemInlineFieldSettingsForTest
+      fields={fields}
+      mineFieldIDs={mineFieldIDs}
+      delegatedFieldIDs={delegatedFieldIDs}
+      onMineFieldIDsChange={setMineFieldIDs}
+      onDelegatedFieldIDsChange={setDelegatedFieldIDs}
+      accent="#EA84E5"
+    />
   );
 }
 
-let ActionItemInlineFieldSettingsPopoverForTest:
-  typeof import("../../../../frontend/src/modules/my-work/ActionItemInlineFieldSettingsPopover.js").ActionItemInlineFieldSettingsPopover;
+let ActionItemInlineFieldSettingsForTest:
+  typeof import("../../../../frontend/src/modules/my-work/ActionItemInlineFieldSettingsPopover.js").ActionItemInlineFieldSettings;
 
 type MountedHarness = {
   dom: JSDOM;
@@ -137,7 +131,7 @@ async function mountHarness(input: Omit<HarnessProps, "fields"> = {}): Promise<M
     import("react-dom/client"),
     import("../../../../frontend/src/modules/my-work/ActionItemInlineFieldSettingsPopover.tsx"),
   ]);
-  ActionItemInlineFieldSettingsPopoverForTest = componentModule.ActionItemInlineFieldSettingsPopover;
+  ActionItemInlineFieldSettingsForTest = componentModule.ActionItemInlineFieldSettings;
   const container = dom.window.document.getElementById("root");
   assert.ok(container);
   const root = createRoot(container);
@@ -204,21 +198,33 @@ async function drag(source: HTMLElement, target: HTMLElement, assertPreview = fa
   await act(async () => Simulate.dragEnd(source, { dataTransfer: transfer }));
 }
 
-test("Action Item row-field settings render Mine above Delegated, allow an empty tray, and exclude Details and Title", async () => {
+test("embedded Action Item row-field settings expose the Mine and Delegated quadrants, use the pink accent, allow an empty tray, and exclude Details and Title", async () => {
   const mounted = await mountHarness({ initialMine: [] });
   try {
     const { document } = mounted.dom.window;
-    const dialog = document.querySelector<HTMLElement>('[role="dialog"][data-action-item-inline-field-settings="true"]');
-    assert.ok(dialog);
+    const sections = Array.from(document.querySelectorAll<HTMLElement>("[data-action-item-inline-field-section]"));
     assert.deepEqual(
-      Array.from(dialog.querySelectorAll<HTMLElement>("[data-action-item-inline-field-section]"))
-        .map((section) => section.dataset.actionItemInlineFieldSection),
+      sections.map((section) => section.dataset.actionItemInlineFieldSection),
       ["mine", "delegated"],
     );
-    assert.match(dialog.textContent ?? "", /Mine[\s\S]*Shown on row[\s\S]*Field bank[\s\S]*Delegated/);
-    assert.doesNotMatch(dialog.textContent ?? "", /Details|Title/);
-    assert.equal(dialog.querySelector('input[type="checkbox"]'), null, "field visibility is not represented by checkmarks");
-    assert.doesNotMatch(dialog.textContent ?? "", /✓|✔/);
+    assert.deepEqual(
+      sections.map((section) => section.dataset.actionItemViewQuadrant),
+      ["mine", "delegated"],
+      "the embedded sections identify the top-right Mine and bottom-right Delegated quadrants",
+    );
+    assert.deepEqual(
+      sections.map((section) => section.style.gridArea),
+      ["mine", "delegated"],
+      "the combined popover grid can place Mine above Delegated in the right column",
+    );
+    assert.ok(
+      sections.every((section) => /rgb\(234, 132, 229\)/.test(section.style.borderTop)),
+      "both inline-field quadrants use #EA84E5 as their accent",
+    );
+    assert.match(document.body.textContent ?? "", /Mine inline row fields[\s\S]*Shown on row[\s\S]*Field bank[\s\S]*Delegated inline row fields/);
+    assert.doesNotMatch(document.body.textContent ?? "", /Details|Title/);
+    assert.equal(document.querySelector('input[type="checkbox"]'), null, "field visibility is not represented by checkmarks");
+    assert.doesNotMatch(document.body.textContent ?? "", /✓|✔/);
     assert.equal(trayFieldIDs(document, "mine").length, 0);
     assert.equal(insertion(document, "mine", 0).textContent, "No fields shown");
     assert.equal(field(document, "mine", "bank", "assigned_by").tabIndex, -1, "drag fields are pointer-only, not keyboard reorder controls");

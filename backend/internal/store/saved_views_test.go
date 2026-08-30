@@ -56,12 +56,20 @@ func TestMyWorkSavedViewSchemaContract(t *testing.T) {
 }
 
 func TestMyWorkSavedViewDefaultsValidationAndPerPerspectiveSingleton(t *testing.T) {
-	groupings, ok := NormalizeSavedViewGroupings(SavedViewSurfaceMyWorkActionItemsMine, nil)
-	if !ok || len(groupings) != 3 || groupings[0].Field != MyWorkActionItemGroupingColor || groupings[1].Field != MyWorkActionItemGroupingHuddleProcess || groupings[2].Field != MyWorkActionItemGroupingCompletionDueDate {
-		t.Fatalf("Mine default groupings = %+v ok=%v", groupings, ok)
+	mineGroupings, ok := NormalizeSavedViewGroupings(SavedViewSurfaceMyWorkActionItemsMine, nil)
+	if !ok || len(mineGroupings) != 2 || mineGroupings[0].Field != MyWorkActionItemGroupingColor || mineGroupings[1].Field != MyWorkActionItemGroupingHuddleProcess {
+		t.Fatalf("Mine default groupings = %+v ok=%v", mineGroupings, ok)
+	}
+	mineSettings, ok := NormalizeSavedViewSettings(SavedViewSurfaceMyWorkActionItemsMine, domain.SavedViewSettings{})
+	if !ok || len(mineSettings.Ordering) != 1 || mineSettings.Ordering[0].Field != MyWorkActionItemGroupingCompletionDueDate || len(mineSettings.DisplayedFields) != 1 || mineSettings.DisplayedFields[0] != "completion_due_date" {
+		t.Fatalf("Mine default settings = %+v ok=%v", mineSettings, ok)
+	}
+	delegatedGroupings, ok := NormalizeSavedViewGroupings(SavedViewSurfaceMyWorkActionItemsDelegated, nil)
+	if !ok || len(delegatedGroupings) != 3 || delegatedGroupings[0].Field != MyWorkActionItemGroupingColor || delegatedGroupings[1].Field != MyWorkActionItemGroupingPersonInCharge || delegatedGroupings[2].Field != MyWorkActionItemGroupingHuddleProcess {
+		t.Fatalf("Delegated default groupings = %+v ok=%v", delegatedGroupings, ok)
 	}
 	delegatedSettings, ok := NormalizeSavedViewSettings(SavedViewSurfaceMyWorkActionItemsDelegated, domain.SavedViewSettings{})
-	if !ok || len(delegatedSettings.Ordering) != 1 || delegatedSettings.Ordering[0].Field != MyWorkActionItemGroupingPersonInCharge || len(delegatedSettings.DisplayedFields) != 2 || delegatedSettings.DisplayedFields[0] != "person_in_charge" || delegatedSettings.DisplayedFields[1] != "completion_due_date" {
+	if !ok || len(delegatedSettings.Ordering) != 1 || delegatedSettings.Ordering[0].Field != MyWorkActionItemGroupingCompletionDueDate || len(delegatedSettings.DisplayedFields) != 2 || delegatedSettings.DisplayedFields[0] != "person_in_charge" || delegatedSettings.DisplayedFields[1] != "completion_due_date" {
 		t.Fatalf("Delegated default settings = %+v ok=%v", delegatedSettings, ok)
 	}
 	if _, ok := NormalizeSavedViewSettings(SavedViewSurfaceMyWorkActionItemsMine, domain.SavedViewSettings{DisplayedFields: []string{"details"}}); ok {
@@ -113,7 +121,7 @@ func TestMyWorkSavedViewDefaultsValidationAndPerPerspectiveSingleton(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if delegated.SavedViewID == first.SavedViewID || len(delegated.Settings.Ordering) != 1 || delegated.Settings.Ordering[0].Field != MyWorkActionItemGroupingPersonInCharge {
+	if delegated.SavedViewID == first.SavedViewID || len(delegated.Settings.Ordering) != 1 || delegated.Settings.Ordering[0].Field != MyWorkActionItemGroupingCompletionDueDate {
 		t.Fatalf("Delegated independent defaults = %+v", delegated)
 	}
 

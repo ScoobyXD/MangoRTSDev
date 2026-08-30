@@ -274,7 +274,7 @@ func TestMemoryMyWorkDelegatedPersonGroupingPagesByAuthoritativeNameAndUser(t *t
 	descendingQuery := MyWorkQuery{
 		CompanyID: companyID, UserID: delegator.UserID, ViewerUserID: delegator.UserID,
 		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
-		Grouping: MyWorkDefaultDelegatedActionItemGrouping, Ordering: "person_in_charge:desc", Limit: 2,
+		Grouping: "color:asc,huddle_process:asc", Ordering: "person_in_charge:desc", Limit: 2,
 	}
 	descendingFirst, err := repo.GetMyWork(context.Background(), descendingQuery)
 	if err != nil {
@@ -326,14 +326,14 @@ func TestMemoryMyWorkActionItemsPageByReorderedDescendingGrouping(t *testing.T) 
 	missingDate := mustCreateAssignedActionItem(t, repo, companyID, user.UserID, "Missing date", ActionItemColorRed, "", ActionItemStatusInProgress)
 	grouping := "completion_due_date:desc,color:asc"
 
-	first, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Grouping: grouping, Limit: 2})
+	first, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Grouping: grouping, Ordering: MyWorkGroupingNone, Limit: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.ActionItems == nil || len(first.ActionItems.Items) != 2 || first.ActionItems.Items[0].EntityID != yellow.EntityID || first.ActionItems.Items[1].EntityID != redMiddle.EntityID || !first.ActionItems.HasMore {
 		t.Fatalf("first reordered action page = %+v", first.ActionItems)
 	}
-	second, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Grouping: grouping, Limit: 2, Cursor: first.ActionItems.NextCursor})
+	second, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Grouping: grouping, Ordering: MyWorkGroupingNone, Limit: 2, Cursor: first.ActionItems.NextCursor})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -855,6 +855,10 @@ func TestMyWorkQueryShapesAndCursorBinding(t *testing.T) {
 
 func TestMyWorkGroupingValidation(t *testing.T) {
 	base := MyWorkQuery{CompanyID: "10000000-0000-4000-8000-000000000011", UserID: "20000000-0000-4000-8000-000000000011", ViewerUserID: "20000000-0000-4000-8000-000000000011", Section: MyWorkSectionActionItems}
+	defaultMine, _, err := normalizeMyWorkQuery(base)
+	if err != nil || defaultMine.Grouping != MyWorkDefaultActionItemGrouping || defaultMine.Ordering != MyWorkDefaultActionItemOrdering {
+		t.Fatalf("default Mine query = grouping %q ordering %q err=%v", defaultMine.Grouping, defaultMine.Ordering, err)
+	}
 	valid := []struct {
 		raw       string
 		canonical string
@@ -866,6 +870,7 @@ func TestMyWorkGroupingValidation(t *testing.T) {
 	for _, test := range valid {
 		query := base
 		query.Grouping = test.raw
+		query.Ordering = MyWorkGroupingNone
 		normalized, _, err := normalizeMyWorkQuery(query)
 		if err != nil || normalized.Grouping != test.canonical {
 			t.Errorf("grouping %q normalized to %q err=%v, want %q", test.raw, normalized.Grouping, err, test.canonical)

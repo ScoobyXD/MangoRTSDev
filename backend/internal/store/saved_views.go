@@ -166,19 +166,26 @@ func NormalizeSavedViewSettings(surface string, settings domain.SavedViewSetting
 }
 
 func defaultSavedViewGroupings(surface string) []domain.SavedViewGrouping {
-	if !savedViewSurfaceIsMyWorkActionItems(surface) {
+	switch surface {
+	case SavedViewSurfaceMyWorkActionItemsMine:
+		return []domain.SavedViewGrouping{
+			{Field: MyWorkActionItemGroupingColor, Direction: "asc"},
+			{Field: MyWorkActionItemGroupingHuddleProcess, Direction: "asc"},
+		}
+	case SavedViewSurfaceMyWorkActionItemsDelegated:
+		return []domain.SavedViewGrouping{
+			{Field: MyWorkActionItemGroupingColor, Direction: "asc"},
+			{Field: MyWorkActionItemGroupingPersonInCharge, Direction: "asc"},
+			{Field: MyWorkActionItemGroupingHuddleProcess, Direction: "asc"},
+		}
+	default:
 		return []domain.SavedViewGrouping{}
-	}
-	return []domain.SavedViewGrouping{
-		{Field: MyWorkActionItemGroupingColor, Direction: "asc"},
-		{Field: MyWorkActionItemGroupingHuddleProcess, Direction: "asc"},
-		{Field: MyWorkActionItemGroupingCompletionDueDate, Direction: "asc"},
 	}
 }
 
 func defaultSavedViewOrdering(surface string) []domain.SavedViewGrouping {
-	if surface == SavedViewSurfaceMyWorkActionItemsDelegated {
-		return []domain.SavedViewGrouping{{Field: MyWorkActionItemGroupingPersonInCharge, Direction: "asc"}}
+	if savedViewSurfaceIsMyWorkActionItems(surface) {
+		return []domain.SavedViewGrouping{{Field: MyWorkActionItemGroupingCompletionDueDate, Direction: "asc"}}
 	}
 	return []domain.SavedViewGrouping{}
 }
@@ -187,7 +194,7 @@ func defaultSavedViewDisplayedFields(surface string) []string {
 	if surface == SavedViewSurfaceMyWorkActionItemsDelegated {
 		return []string{"person_in_charge", "completion_due_date"}
 	}
-	return []string{"assigned_by", "completion_due_date"}
+	return []string{"completion_due_date"}
 }
 
 func normalizeSavedViewDisplayedFields(fields []string) ([]string, bool) {

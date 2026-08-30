@@ -1,26 +1,18 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import {
-  useAppOverlayPortalTarget,
-  useAppViewportAnchorRect,
-  type AppViewportAnchorRect,
-} from "../../app/AppModalPortal.js";
-import { MANGO_ACCENT_HEX, MANGO_SURFACE, MANGO_TEXT } from "../../theme.js";
+import React, { useMemo, useState } from "react";
+import { MANGO_TEXT } from "../../theme.js";
 
 export type ActionItemInlineFieldDefinition<FieldID extends string = string> = Readonly<{
   id: FieldID;
   label: string;
 }>;
 
-export type ActionItemInlineFieldSettingsPopoverProps<FieldID extends string = string> = {
-  open: boolean;
-  anchorRef: React.RefObject<HTMLElement | null>;
+export type ActionItemInlineFieldSettingsProps<FieldID extends string = string> = {
   fields: ReadonlyArray<ActionItemInlineFieldDefinition<FieldID>>;
   mineFieldIDs: ReadonlyArray<FieldID>;
   delegatedFieldIDs: ReadonlyArray<FieldID>;
   onMineFieldIDsChange: (next: FieldID[]) => void;
   onDelegatedFieldIDsChange: (next: FieldID[]) => void;
-  onRequestClose: () => void;
+  accent?: string;
 };
 
 type ActionItemPerspective = "mine" | "delegated";
@@ -36,26 +28,15 @@ type ActiveDropTarget =
 
 const FIELD_DRAG_MIME = "application/x-mangorts-action-item-inline-field";
 const RESERVED_FIELD_KEYS = new Set(["detail", "details", "name", "title"]);
-const POPOVER_WIDTH = 392;
-const POPOVER_ESTIMATED_HEIGHT = 430;
 
-export function ActionItemInlineFieldSettingsPopover<FieldID extends string>({
-  open,
-  anchorRef,
+export function ActionItemInlineFieldSettings<FieldID extends string>({
   fields,
   mineFieldIDs,
   delegatedFieldIDs,
   onMineFieldIDsChange,
   onDelegatedFieldIDsChange,
-  onRequestClose,
-}: ActionItemInlineFieldSettingsPopoverProps<FieldID>) {
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const titleID = useId();
-  const anchorRect = useAppViewportAnchorRect(anchorRef, open);
-  const ownerDocument = anchorRef.current?.ownerDocument
-    ?? (typeof document === "undefined" ? null : document);
-  const overlayTarget = useAppOverlayPortalTarget(ownerDocument);
+  accent = "#EA84E5",
+}: ActionItemInlineFieldSettingsProps<FieldID>) {
   const availableFields = useMemo(() => configurableFieldDefinitions(fields), [fields]);
   const availableFieldIDs = useMemo(() => new Set(availableFields.map((field) => field.id)), [availableFields]);
   const normalizedMineFieldIDs = useMemo(
@@ -68,44 +49,6 @@ export function ActionItemInlineFieldSettingsPopover<FieldID extends string>({
   );
   const [draggedField, setDraggedField] = useState<DraggedField<FieldID> | null>(null);
   const [activeDropTarget, setActiveDropTarget] = useState<ActiveDropTarget | null>(null);
-  const close = (restoreFocus: boolean) => {
-    setDraggedField(null);
-    setActiveDropTarget(null);
-    onRequestClose();
-    if (!restoreFocus) return;
-    ownerDocument?.defaultView?.requestAnimationFrame(() => anchorRef.current?.focus({ preventScroll: true }));
-  };
-
-  useEffect(() => {
-    if (!open || !ownerDocument) return undefined;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (target && (popoverRef.current?.contains(target) || anchorRef.current?.contains(target))) return;
-      close(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      close(true);
-    };
-    ownerDocument.addEventListener("pointerdown", handlePointerDown, true);
-    ownerDocument.addEventListener("keydown", handleKeyDown, true);
-    return () => {
-      ownerDocument.removeEventListener("pointerdown", handlePointerDown, true);
-      ownerDocument.removeEventListener("keydown", handleKeyDown, true);
-    };
-  }, [anchorRef, onRequestClose, open, ownerDocument]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const frame = ownerDocument?.defaultView?.requestAnimationFrame(() => closeButtonRef.current?.focus({ preventScroll: true }));
-    return () => {
-      if (frame !== undefined) ownerDocument?.defaultView?.cancelAnimationFrame(frame);
-    };
-  }, [open, ownerDocument]);
-
-  if (!open || !anchorRect || !overlayTarget) return null;
-  const position = actionItemInlineFieldPopoverPosition(anchorRect, ownerDocument?.defaultView);
 
   const startDrag = (
     event: React.DragEvent<HTMLElement>,
@@ -168,11 +111,12 @@ export function ActionItemInlineFieldSettingsPopover<FieldID extends string>({
     return (
       <section
         key={perspective}
-        aria-labelledby={`${titleID}-${perspective}`}
+        aria-label={`${label} inline row fields`}
         data-action-item-inline-field-section={perspective}
-        style={perspectiveSectionStyle}
+        data-action-item-view-quadrant={perspective}
+        style={perspectiveSectionStyle(perspective, accent)}
       >
-        <h3 id={`${titleID}-${perspective}`} style={perspectiveTitleStyle}>{label}</h3>
+        <h3 style={perspectiveTitleStyle}>{label} inline row fields</h3>
         <div style={fieldAreaStyle}>
           <span style={fieldAreaLabelStyle}>Shown on row</span>
           <div
@@ -196,6 +140,7 @@ export function ActionItemInlineFieldSettingsPopover<FieldID extends string>({
                   activeDropTarget?.perspective === perspective
                   && activeDropTarget.location === "tray"
                   && activeDropTarget.index === 0,
+                  accent,
                 )}
                 onDragEnter={(event) => {
                   if (!draggedField || draggedField.perspective !== perspective) return;
@@ -218,6 +163,7 @@ export function ActionItemInlineFieldSettingsPopover<FieldID extends string>({
                     <FieldInsertionTarget
                       perspective={perspective}
                       index={index}
+                      accent={accent}
                       active={activeDropTarget?.perspective === perspective
                         && activeDropTarget.location === "tray"
                         && activeDropTarget.index === index}
@@ -238,6 +184,7 @@ export function ActionItemInlineFieldSettingsPopover<FieldID extends string>({
                 <FieldInsertionTarget
                   perspective={perspective}
                   index={shownFields.length}
+                  accent={accent}
                   active={activeDropTarget?.perspective === perspective
                     && activeDropTarget.location === "tray"
                     && activeDropTarget.index === shownFields.length}
@@ -256,7 +203,7 @@ export function ActionItemInlineFieldSettingsPopover<FieldID extends string>({
             aria-label={`${label} field bank`}
             data-action-item-inline-field-bank={perspective}
             data-action-item-inline-field-bank-active={bankActive ? "true" : undefined}
-            style={fieldBankStyle(bankActive)}
+            style={fieldBankStyle(bankActive, accent)}
             onDragEnter={(event) => {
               if (!draggedField || draggedField.perspective !== perspective || draggedField.source !== "tray") return;
               event.preventDefault();
@@ -288,35 +235,12 @@ export function ActionItemInlineFieldSettingsPopover<FieldID extends string>({
     );
   };
 
-  return createPortal((
-    <div
-      ref={popoverRef}
-      role="dialog"
-      aria-labelledby={titleID}
-      data-action-item-inline-field-settings="true"
-      style={popoverStyle(position)}
-    >
-      <header style={popoverHeaderStyle}>
-        <div style={{ minWidth: 0 }}>
-          <h2 id={titleID} style={popoverTitleStyle}>Action Item row fields</h2>
-          <p style={popoverDescriptionStyle}>Drag fields between each tray and its field bank.</p>
-        </div>
-        <button
-          ref={closeButtonRef}
-          type="button"
-          aria-label="Close Action Item row fields"
-          style={closeButtonStyle}
-          onClick={() => close(true)}
-        >
-          ×
-        </button>
-      </header>
-      <div style={perspectivesStyle}>
-        {renderPerspective("mine", "Mine", normalizedMineFieldIDs, onMineFieldIDsChange)}
-        {renderPerspective("delegated", "Delegated", normalizedDelegatedFieldIDs, onDelegatedFieldIDsChange)}
-      </div>
-    </div>
-  ), overlayTarget);
+  return (
+    <>
+      {renderPerspective("mine", "Mine", normalizedMineFieldIDs, onMineFieldIDsChange)}
+      {renderPerspective("delegated", "Delegated", normalizedDelegatedFieldIDs, onDelegatedFieldIDsChange)}
+    </>
+  );
 }
 
 type FieldChipProps<FieldID extends string> = {
@@ -357,6 +281,7 @@ function FieldChip<FieldID extends string>({
 type FieldInsertionTargetProps = {
   perspective: ActionItemPerspective;
   index: number;
+  accent: string;
   active: boolean;
   canDrop: boolean;
   onActivate: () => void;
@@ -366,6 +291,7 @@ type FieldInsertionTargetProps = {
 function FieldInsertionTarget({
   perspective,
   index,
+  accent,
   active,
   canDrop,
   onActivate,
@@ -377,7 +303,7 @@ function FieldInsertionTarget({
       data-action-item-inline-field-insertion-index={index}
       data-action-item-inline-field-insertion-perspective={perspective}
       data-action-item-inline-field-insertion-active={active ? "true" : undefined}
-      style={fieldInsertionStyle(active)}
+      style={fieldInsertionStyle(active, accent)}
       onDragEnter={(event) => {
         if (!canDrop) return;
         event.preventDefault();
@@ -440,36 +366,21 @@ function fieldIDSetsEqual<FieldID extends string>(left: ReadonlyArray<FieldID>, 
   return left.length === right.length && left.every((fieldID, index) => fieldID === right[index]);
 }
 
-export function actionItemInlineFieldPopoverPosition(
-  anchor: AppViewportAnchorRect,
-  view: Pick<Window, "innerWidth" | "innerHeight"> | null | undefined,
-): { left: number; top: number } {
-  const gutter = 8;
-  const viewportWidth = view?.innerWidth ?? 1200;
-  const viewportHeight = view?.innerHeight ?? 800;
-  const desiredLeft = anchor.left + anchor.width - POPOVER_WIDTH;
+function perspectiveSectionStyle(perspective: ActionItemPerspective, accent: string): React.CSSProperties {
   return {
-    left: Math.max(gutter, Math.min(desiredLeft, viewportWidth - POPOVER_WIDTH - gutter)),
-    top: Math.max(gutter, Math.min(anchor.top + anchor.height + 6, viewportHeight - POPOVER_ESTIMATED_HEIGHT - gutter)),
+    gridArea: perspective,
+    minWidth: 0,
+    display: "grid",
+    alignContent: "start",
+    gap: 7,
+    border: `1px solid ${accent}38`,
+    borderTop: `3px solid ${accent}`,
+    borderRadius: 11,
+    background: `linear-gradient(145deg,rgba(255,255,255,.98),${accent}0d)`,
+    padding: 8,
+    boxShadow: `3px 4px 10px ${accent}18, -2px -2px 7px rgba(255,255,255,.82), inset 1px 1px 0 rgba(255,255,255,.92)`,
   };
 }
-
-const perspectivesStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gap: 9,
-};
-
-const perspectiveSectionStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gap: 7,
-  border: "1px solid rgba(148,163,184,.22)",
-  borderRadius: 11,
-  background: "linear-gradient(145deg,rgba(255,255,255,.96),rgba(248,250,252,.84))",
-  padding: 8,
-  boxShadow: "3px 4px 10px rgba(100,116,139,.10), -2px -2px 7px rgba(255,255,255,.82), inset 1px 1px 0 rgba(255,255,255,.92)",
-};
 
 const perspectiveTitleStyle: React.CSSProperties = {
   margin: 0,
@@ -508,13 +419,13 @@ const shownTrayStyle: React.CSSProperties = {
   boxShadow: "inset 2px 2px 6px rgba(148,163,184,.11), inset -2px -2px 6px rgba(255,255,255,.88)",
 };
 
-function emptyTrayStyle(active: boolean): React.CSSProperties {
+function emptyTrayStyle(active: boolean, accent: string): React.CSSProperties {
   return {
     width: "100%",
     minHeight: 26,
     display: "grid",
     placeItems: "center",
-    border: `1px dashed ${active ? "rgba(71,85,105,.68)" : "rgba(148,163,184,.34)"}`,
+    border: `1px dashed ${active ? accent : "rgba(148,163,184,.34)"}`,
     borderRadius: 7,
     background: active ? "rgba(226,232,240,.62)" : "rgba(248,250,252,.62)",
     color: "#94a3b8",
@@ -523,7 +434,7 @@ function emptyTrayStyle(active: boolean): React.CSSProperties {
   };
 }
 
-function fieldBankStyle(active: boolean): React.CSSProperties {
+function fieldBankStyle(active: boolean, accent: string): React.CSSProperties {
   return {
     minWidth: 0,
     minHeight: 35,
@@ -531,7 +442,7 @@ function fieldBankStyle(active: boolean): React.CSSProperties {
     flexWrap: "wrap",
     alignItems: "center",
     gap: 5,
-    border: `1px dashed ${active ? "rgba(71,85,105,.72)" : "rgba(148,163,184,.34)"}`,
+    border: `1px dashed ${active ? accent : "rgba(148,163,184,.34)"}`,
     borderRadius: 9,
     background: active ? "rgba(226,232,240,.64)" : "rgba(241,245,249,.62)",
     padding: 5,
@@ -572,7 +483,7 @@ const dragGripStyle: React.CSSProperties = {
   letterSpacing: -2,
 };
 
-function fieldInsertionStyle(active: boolean): React.CSSProperties {
+function fieldInsertionStyle(active: boolean, accent: string): React.CSSProperties {
   return {
     width: active ? 34 : 6,
     height: 26,
@@ -580,7 +491,7 @@ function fieldInsertionStyle(active: boolean): React.CSSProperties {
     display: "block",
     borderRadius: 6,
     background: active ? "rgba(71,85,105,.18)" : "transparent",
-    boxShadow: active ? `inset 2px 0 0 ${MANGO_ACCENT_HEX}, inset -2px 0 0 ${MANGO_ACCENT_HEX}` : "none",
+    boxShadow: active ? `inset 2px 0 0 ${accent}, inset -2px 0 0 ${accent}` : "none",
     transition: "width 110ms ease, flex-basis 110ms ease, background 110ms ease",
   };
 }
@@ -591,66 +502,4 @@ const emptyBankStyle: React.CSSProperties = {
   fontSize: 10,
   fontWeight: 750,
   textAlign: "center",
-};
-
-function popoverStyle(position: { left: number; top: number }): React.CSSProperties {
-  return {
-    position: "fixed",
-    left: position.left,
-    top: position.top,
-    zIndex: 10020,
-    width: POPOVER_WIDTH,
-    maxWidth: "calc(100vw - 16px)",
-    maxHeight: `calc(100vh - ${Math.round(position.top) + 8}px)`,
-    overflowY: "auto",
-    display: "grid",
-    gap: 9,
-    border: "1px solid rgba(255,255,255,.88)",
-    borderRadius: 14,
-    background: "linear-gradient(145deg,rgba(255,255,255,.99),rgba(241,245,249,.96))",
-    color: MANGO_TEXT,
-    padding: 10,
-    boxSizing: "border-box",
-    boxShadow: "14px 16px 38px rgba(71,85,105,.20), -8px -8px 24px rgba(255,255,255,.88), inset 1px 1px 0 rgba(255,255,255,.96)",
-  };
-}
-
-const popoverHeaderStyle: React.CSSProperties = {
-  minWidth: 0,
-  display: "flex",
-  alignItems: "start",
-  justifyContent: "space-between",
-  gap: 8,
-};
-
-const popoverTitleStyle: React.CSSProperties = {
-  margin: 0,
-  color: "#334155",
-  fontSize: 13,
-  fontWeight: 900,
-};
-
-const popoverDescriptionStyle: React.CSSProperties = {
-  margin: "2px 0 0",
-  color: "#64748b",
-  fontSize: 9.5,
-  fontWeight: 650,
-};
-
-const closeButtonStyle: React.CSSProperties = {
-  width: 27,
-  height: 27,
-  flex: "0 0 auto",
-  display: "grid",
-  placeItems: "center",
-  border: "1px solid rgba(148,163,184,.24)",
-  borderRadius: 8,
-  background: MANGO_SURFACE,
-  color: "#64748b",
-  font: "inherit",
-  fontSize: 16,
-  fontWeight: 800,
-  cursor: "pointer",
-  padding: 0,
-  boxShadow: "2px 2px 6px rgba(148,163,184,.14), -2px -2px 6px rgba(255,255,255,.86), inset 1px 1px 0 rgba(255,255,255,.94)",
 };

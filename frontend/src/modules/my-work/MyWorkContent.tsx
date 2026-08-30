@@ -4,7 +4,6 @@ import {
   ActionItemIcon,
   ExplorerEntityIcon,
   HeaderMyWorkIcon,
-  HeaderSettingsIcon,
   StaggeredGroupingIcon,
 } from "../../icons/index.js";
 import {
@@ -28,6 +27,7 @@ import {
   buildUniversalNestedGroups,
 } from "../grouping/universalGrouping.js";
 import { logicGateRACIRolePresentation } from "../logic-gates/raciPresentation.js";
+import { HuddleResourceIcon } from "../huddles/HuddleResourceIcon.js";
 import { getQDBusinessDate, millisecondsUntilNextQDBusinessDay } from "../logic-gates/qdRatingsApi.js";
 import { homeRACIRoleAccent } from "../../pages/home/homeStyles.js";
 import { createSavedViewID } from "../../pages/home/savedViewsApi.js";
@@ -66,7 +66,7 @@ import {
   type MyWorkActionItemOrdering,
   type MyWorkNodeGrouping,
 } from "./myWorkGrouping.js";
-import { ActionItemInlineFieldSettingsPopover } from "./ActionItemInlineFieldSettingsPopover.js";
+import { ActionItemInlineFieldSettings } from "./ActionItemInlineFieldSettingsPopover.js";
 import { ActionItemInlineFields } from "./ActionItemInlineFields.js";
 import { ActionItemOrderingEditor } from "./ActionItemOrderingEditor.js";
 import {
@@ -131,14 +131,13 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   const columnsRef = useRef<HTMLDivElement>(null);
   const actionItemsScrollRef = useRef<HTMLDivElement>(null);
   const actionItemPerspectiveValueRef = useRef(actionItemPerspective);
-  const actionItemFieldSettingsButtonRef = useRef<HTMLButtonElement>(null);
   const nodesScrollRef = useRef<HTMLDivElement>(null);
   const processesScrollRef = useRef<HTMLDivElement>(null);
   const projectsScrollRef = useRef<HTMLDivElement>(null);
   const middleScrollPositionsRef = useRef<Record<MyWorkMiddleView, number>>({ processes: 0, nodes: 0 });
   const [actionItemGroupingStacks, setActionItemGroupingStacks] = useState<Record<MyWorkActionItemPerspective, MyWorkActionItemGrouping[]>>(() => ({
-    mine: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
-    delegated: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
+    mine: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.mine.map((grouping) => ({ ...grouping })),
+    delegated: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.delegated.map((grouping) => ({ ...grouping })),
   }));
   const actionItemGroupings = actionItemGroupingStacks[actionItemPerspective];
   const [actionItemOrderingStacks, setActionItemOrderingStacks] = useState<Record<
@@ -166,7 +165,6 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     mine: Promise.resolve(),
     delegated: Promise.resolve(),
   });
-  const [actionItemFieldSettingsOpen, setActionItemFieldSettingsOpen] = useState(false);
   const [actionItemPreferenceError, setActionItemPreferenceError] = useState("");
   const [actionItemPreferencesReady, setActionItemPreferencesReady] = useState(false);
   const [nodeGroupings, setNodeGroupings] = useState<MyWorkNodeGrouping[]>(() => (
@@ -188,8 +186,8 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   useEffect(() => {
     actionItemPerspectiveValueRef.current = "mine";
     setActionItemGroupingStacks({
-      mine: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
-      delegated: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.map((grouping) => ({ ...grouping })),
+      mine: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.mine.map((grouping) => ({ ...grouping })),
+      delegated: DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.delegated.map((grouping) => ({ ...grouping })),
     });
     setActionItemOrderingStacks({
       mine: DEFAULT_MY_WORK_ACTION_ITEM_ORDERINGS.mine.map((ordering) => ({ ...ordering })),
@@ -202,7 +200,6 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     const nextSavedViewIDs = { mine: createSavedViewID(), delegated: createSavedViewID() };
     actionItemSavedViewIDsRef.current = nextSavedViewIDs;
     actionItemPreferenceSaveQueuesRef.current = { mine: Promise.resolve(), delegated: Promise.resolve() };
-    setActionItemFieldSettingsOpen(false);
     setActionItemPreferenceError("");
     setActionItemPreferencesReady(false);
     setNodeGroupings(DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping })));
@@ -332,6 +329,9 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     ? flattenMyWorkGroupedDisplayEntries(
       actionItemGroups,
       (item) => item.entity_id,
+      new Set(),
+      false,
+      "huddle_process",
     )
     : flattenMyWorkUngroupedDisplayEntries(state.action_items.items, (item) => item.entity_id), [
     actionItemGroups,
@@ -526,34 +526,11 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
           )}
           actions={(
             <div style={sectionActionsStyle}>
-              <button
-                ref={actionItemFieldSettingsButtonRef}
-                type="button"
-                aria-haspopup="dialog"
-                aria-expanded={actionItemFieldSettingsOpen}
-                aria-label="Choose Action Item row fields"
-                title={actionItemPreferenceError || "Choose Action Item row fields"}
-                data-my-work-action-item-field-settings="true"
-                disabled={!actionItemPreferencesReady}
-                style={actionItemFieldSettingsButtonStyle(
-                  actionItemFieldSettingsOpen,
-                  Boolean(actionItemPreferenceError),
-                  !actionItemPreferencesReady,
-                )}
-                onClick={() => setActionItemFieldSettingsOpen((open) => !open)}
-              >
-                <HeaderSettingsIcon />
-              </button>
-              <ActionItemInlineFieldSettingsPopover<MyWorkActionItemDisplayFieldID>
-                open={actionItemFieldSettingsOpen}
-                anchorRef={actionItemFieldSettingsButtonRef}
-                fields={MY_WORK_ACTION_ITEM_DISPLAY_FIELDS}
-                mineFieldIDs={actionItemDisplayedFieldStacks.mine}
-                delegatedFieldIDs={actionItemDisplayedFieldStacks.delegated}
-                onMineFieldIDsChange={(next) => changeActionItemDisplayedFields("mine", next)}
-                onDelegatedFieldIDsChange={(next) => changeActionItemDisplayedFields("delegated", next)}
-                onRequestClose={() => setActionItemFieldSettingsOpen(false)}
-              />
+              {actionItemPreferenceError ? (
+                <span role="alert" title={actionItemPreferenceError} style={actionItemPreferenceErrorStyle}>
+                  {actionItemPreferenceError}
+                </span>
+              ) : null}
               <HistoryButton selected={actionItemHistory} disabled={state.action_items.loading} onClick={toggleActionItemHistory} />
               <UniversalGroupingControls
                 groupings={actionItemGroupings}
@@ -562,12 +539,17 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
                   : MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS
                 ).filter((option) => !actionItemOrderings.some((ordering) => ordering.field === option.value))}
                 onChange={changeActionItemGroupings}
-                buttonLabel="Group and order Action Items"
-                popoverLabel="Group by"
+                buttonLabel="Group, order, and choose Action Item row fields"
+                triggerTitle={actionItemPreferenceError || "Group, order, and choose Action Item row fields"}
+                popoverLabel="Action Item view"
+                groupingTitle="Group by"
                 popoverAlign="end"
-                triggerIcon={<StaggeredGroupingIcon />}
+                triggerIcon={<StaggeredGroupingIcon color="#EA84E5" />}
                 iconOnly
-                accent="#64748b"
+                accent="#EA84E5"
+                layout="quadrants"
+                popoverWidth={790}
+                popoverEstimatedHeight={590}
                 disabled={state.action_items.loading || actionItemHistory || !actionItemPreferencesReady}
                 additionalContent={(
                   <ActionItemOrderingEditor
@@ -577,6 +559,17 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
                       : MY_WORK_MINE_ACTION_ITEM_GROUPING_FIELDS
                     ).filter((option) => !actionItemGroupings.some((grouping) => grouping.field === option.value))}
                     onChange={changeActionItemOrderings}
+                    accent="#EA84E5"
+                  />
+                )}
+                sideContent={(
+                  <ActionItemInlineFieldSettings<MyWorkActionItemDisplayFieldID>
+                    fields={MY_WORK_ACTION_ITEM_DISPLAY_FIELDS}
+                    mineFieldIDs={actionItemDisplayedFieldStacks.mine}
+                    delegatedFieldIDs={actionItemDisplayedFieldStacks.delegated}
+                    onMineFieldIDsChange={(next) => changeActionItemDisplayedFields("mine", next)}
+                    onDelegatedFieldIDsChange={(next) => changeActionItemDisplayedFields("delegated", next)}
+                    accent="#EA84E5"
                   />
                 )}
               />
@@ -1205,8 +1198,12 @@ function MyWorkWindowedRowsImpl<Item, Field extends string>({
         {entries.map((entry, index) => (
           <div
             key={entry.entryID}
+            className={entry.surface ? "my-work-huddle-surface-segment" : undefined}
             data-my-work-entry-id={entry.entryID}
             data-my-work-entry-kind={entry.kind}
+            data-my-work-huddle-surface-id={entry.surface?.id}
+            data-my-work-huddle-surface-key={entry.surface?.key}
+            data-my-work-huddle-surface-edge={entry.surface?.edge}
             style={myWorkDisplayEntryStyle(entry, index)}
           >
             {renderMyWorkDisplayEntry(section, entry, renderRow)}
@@ -1233,9 +1230,13 @@ function MyWorkWindowedRowsImpl<Item, Field extends string>({
           <div
             key={virtualEntry.key}
             ref={virtualizer.measureElement}
+            className={entry.surface ? "my-work-huddle-surface-segment" : undefined}
             data-index={virtualEntry.index}
             data-my-work-entry-id={entry.entryID}
             data-my-work-entry-kind={entry.kind}
+            data-my-work-huddle-surface-id={entry.surface?.id}
+            data-my-work-huddle-surface-key={entry.surface?.key}
+            data-my-work-huddle-surface-edge={entry.surface?.edge}
             data-my-work-estimated-size={estimatedSize}
             style={myWorkDisplayEntryStyle(entry, virtualEntry.index, virtualEntry.start)}
           >
@@ -1258,7 +1259,12 @@ function renderMyWorkDisplayEntry<Item, Field extends string>(
   if (section !== "action_items" && section !== "nodes") return null;
   const content = (
     <>
-      <span>{entry.label}</span>
+      {entry.field === "huddle_process" ? (
+        <span data-my-work-huddle-group-label="true" style={huddleGroupLabelStyle(entry.groupKey === "none")}>
+          <HuddleResourceIcon type="huddle_logic_gate" />
+          <span style={huddleGroupNameStyle}>{entry.label}</span>
+        </span>
+      ) : <span>{entry.label}</span>}
       <span aria-label={`${entry.rowCount} items`} style={groupCountStyle}>{entry.rowCount}</span>
     </>
   );
@@ -1322,13 +1328,14 @@ function myWorkDisplayEntryStyle<Item, Field extends string>(
   start?: number,
 ): React.CSSProperties {
   const indentation = entry.depth > 0 ? entry.depth * 25 + (entry.kind === "row" ? 1 : 0) : 0;
-  return {
+  const style: React.CSSProperties & { "--my-work-huddle-surface-indent"?: string } = {
     minWidth: 0,
     width: "100%",
     boxSizing: "border-box",
     paddingTop: entry.kind === "group-header" && entry.depth === 0 && index > 0 ? 2 : 0,
     paddingBottom: 7,
     paddingLeft: indentation,
+    ...(entry.surface && start === undefined ? { position: "relative" as const } : {}),
     ...(start === undefined ? {} : {
       position: "absolute",
       top: 0,
@@ -1336,6 +1343,8 @@ function myWorkDisplayEntryStyle<Item, Field extends string>(
       transform: `translateY(${start}px)`,
     }),
   };
+  if (entry.surface) style["--my-work-huddle-surface-indent"] = `${entry.surface.depth * 25}px`;
+  return style;
 }
 
 function HistoryButton({ selected, disabled, onClick }: { selected: boolean; disabled: boolean; onClick: () => void }) {
@@ -1359,7 +1368,8 @@ function HistoryButton({ selected, disabled, onClick }: { selected: boolean; dis
 function HistoryClockIcon() {
   return (
     <svg aria-hidden="true" width="16" height="16" viewBox="0 0 20 20" fill="none">
-      <path d="M3.2 6.3V2.9m0 0H6.6m-3.4 0 2.3 2.3A7 7 0 1 1 3 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3.4 6.2A7 7 0 1 1 3 10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="m3.4 6.2-.4-3.4 3.4.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
       <path d="M10 5.8v4.5l3 1.7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -1378,7 +1388,7 @@ function ActionItemRow({ item, businessDateKey, displayedFields, onSaveDueDate }
       className="my-work-resource-row"
       data-my-work-row="action-item"
       data-my-work-action-item-color={color || "none"}
-      style={actionItemRowStyle(color)}
+      style={actionItemRowStyle(color, displayedFields.length > 0)}
     >
       <button
         type="button"
@@ -1402,19 +1412,21 @@ function ActionItemRow({ item, businessDateKey, displayedFields, onSaveDueDate }
           {item.name}
         </span>
       </button>
-      <ActionItemInlineFields
-        item={item}
-        displayedFields={displayedFields}
-        renderCompletionDueDate={() => (
-          <InlineDueDateEditor
-            fieldID="completion_due_date"
-            value={item.completion_due_date}
-            resourceLabel={item.name}
-            businessDateKey={businessDateKey}
-            onSave={onSaveDueDate}
-          />
-        )}
-      />
+      {displayedFields.length > 0 ? (
+        <ActionItemInlineFields
+          item={item}
+          displayedFields={displayedFields}
+          renderCompletionDueDate={() => (
+            <InlineDueDateEditor
+              fieldID="completion_due_date"
+              value={item.completion_due_date}
+              resourceLabel={item.name}
+              businessDateKey={businessDateKey}
+              onSave={onSaveDueDate}
+            />
+          )}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1839,31 +1851,6 @@ function historyButtonStyle(selected: boolean, disabled: boolean): React.CSSProp
   };
 }
 
-function actionItemFieldSettingsButtonStyle(open: boolean, error: boolean, disabled: boolean): React.CSSProperties {
-  return {
-    width: 30,
-    height: 30,
-    display: "grid",
-    placeItems: "center",
-    border: error
-      ? "1px solid rgba(239,68,68,.46)"
-      : open
-        ? "1px solid rgba(71,85,105,.62)"
-        : "1px solid rgba(148,163,184,.28)",
-    borderRadius: 9,
-    background: open
-      ? "linear-gradient(145deg,#e2e8f0,#f8fafc)"
-      : "linear-gradient(145deg,#ffffff,#eef2f7)",
-    color: error ? "#b91c1c" : "#475569",
-    boxShadow: open
-      ? "inset 2px 2px 5px rgba(100,116,139,.16), inset -2px -2px 5px rgba(255,255,255,.84)"
-      : "3px 3px 8px rgba(100,116,139,.13), -2px -2px 7px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.96)",
-    cursor: disabled ? "default" : "pointer",
-    opacity: disabled ? 0.55 : 1,
-    padding: 0,
-  };
-}
-
 const sectionBodyStyle: React.CSSProperties = {
   minWidth: 0,
   minHeight: 0,
@@ -2037,6 +2024,7 @@ function groupHeaderStyle(section: "action_items" | "nodes", field: string, key:
       ? "linear-gradient(145deg, rgba(255,255,255,0.94), rgba(226,232,240,0.72))"
       : "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(241,245,249,0.78))",
     color: "#475569",
+    fontFamily: "var(--mango-font-family)",
     fontSize: 11.5,
     fontWeight: 850,
     padding: "0 9px",
@@ -2070,13 +2058,44 @@ function clickableGroupHeaderStyle(base: React.CSSProperties): React.CSSProperti
     ...base,
     width: "100%",
     boxSizing: "border-box",
-    font: "inherit",
+    fontFamily: "var(--mango-font-family)",
+    fontStyle: "normal",
+    lineHeight: 1.2,
     fontSize: base.fontSize,
     fontWeight: base.fontWeight,
     cursor: "pointer",
     textAlign: "left",
   };
 }
+
+function huddleGroupLabelStyle(empty: boolean): React.CSSProperties {
+  return {
+    minWidth: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 7,
+    overflow: "hidden",
+    color: empty ? "#64748b" : "#334155",
+    opacity: empty ? 0.72 : 1,
+  };
+}
+
+const huddleGroupNameStyle: React.CSSProperties = {
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
+const actionItemPreferenceErrorStyle: React.CSSProperties = {
+  maxWidth: 150,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+  color: "#b91c1c",
+  fontSize: 10,
+  fontWeight: 800,
+};
 
 const groupCountStyle: React.CSSProperties = {
   minWidth: 22,
@@ -2161,11 +2180,11 @@ const resourceNameStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-function actionItemRowStyle(color: string | undefined): React.CSSProperties {
+function actionItemRowStyle(color: string | undefined, hasInlineFields: boolean): React.CSSProperties {
   return {
     ...resourceButtonStyle,
     display: "grid",
-    gridTemplateColumns: "minmax(0,1fr) auto",
+    gridTemplateColumns: hasInlineFields ? "minmax(0,1fr) auto" : "minmax(0,1fr)",
     alignItems: "center",
     gap: 6,
     border: color === "red"
