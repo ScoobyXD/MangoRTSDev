@@ -42,6 +42,7 @@ function actionItem(entityID: string, name: string): Entity {
         value: "red", position: 2, created_timestamp: "2026-08-28T12:00:00Z", updated_timestamp: "2026-08-28T12:00:00Z",
       },
     ],
+    source: { resource_type: "huddle_node", resource_id: "node-1", name: "Weekly Huddle" },
   } as Entity;
 }
 
@@ -97,6 +98,7 @@ test("Huddle Action Item panel honors a refresh during initial load and ignores 
         companyID="company-1"
         currentUserID="user-1"
         scope={{ resourceType: "huddle_node", resourceID: "node-1" }}
+        view="huddle_node_created"
         companyUsers={[]}
         requestJSON={requestJSON}
         refreshToken={refreshToken}
@@ -106,7 +108,7 @@ test("Huddle Action Item panel honors a refresh during initial load and ignores 
     await act(async () => root.render(panel(0)));
     await act(async () => { await Promise.resolve(); });
     assert.equal(pending.length, 1);
-    assert.match(savedViewReads[0] ?? "", /surface=huddle_node_action_items/);
+    assert.match(savedViewReads[0] ?? "", /surface=huddle_node_created_action_items/);
 
     await act(async () => root.render(panel(1)));
     assert.equal(pending.length, 2, "a saved-reference refresh must not be dropped during initial load");
@@ -153,8 +155,159 @@ test("Huddle Action Item panel honors a refresh during initial load and ignores 
     });
     assert.equal(savedViewWrites.length, 1);
     const savedPayload = savedViewWrites[0]?.json as { surface?: string; groupings?: Array<{ field?: string; direction?: string }> };
-    assert.equal(savedPayload.surface, "huddle_node_action_items");
+    assert.equal(savedPayload.surface, "huddle_node_created_action_items");
     assert.deepEqual(savedPayload.groupings?.[0], { field: "color", direction: "desc" });
+
+    await act(async () => {
+      dom.window.dispatchEvent(new dom.window.CustomEvent("mangorts:editor-entity-reference-presentation", {
+        detail: { isActionItem: true, entityID: "entity-new" },
+      }));
+      await Promise.resolve();
+    });
+    assert.equal(pending.length, 3, "a local Action Item presentation change refreshes filtered membership");
+    await act(async () => {
+      pending[2]?.({ action_items: [actionItem("entity-local", "Local edit result")] });
+      await Promise.resolve();
+    });
+    assert.match(container.textContent ?? "", /Local edit result/);
+
+    await act(async () => {
+      dom.window.dispatchEvent(new dom.window.Event("focus"));
+      await Promise.resolve();
+    });
+    assert.equal(pending.length, 4, "focus recovery reconciles Action Item lists without a manual refresh");
+    await act(async () => {
+      pending[3]?.({ action_items: [actionItem("entity-focus", "Focus recovery result")] });
+      await Promise.resolve();
+    });
+    assert.match(container.textContent ?? "", /Focus recovery result/);
+
+    await act(async () => {
+      dom.window.document.body.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+      await Promise.resolve();
+    });
+    assert.equal(pending.length, 4, "ordinary typing does not reload Action Item lists");
+  } finally {
+    if (mountedRoot) await act(async () => mountedRoot?.unmount());
+    for (const restore of restores.reverse()) restore();
+    dom.window.close();
+  }
+});
+
+test("Huddle date controls restore failed edits and distinguish selected, reference, and today dates", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    url: "http://localhost/",
+    pretendToBeVisual: true,
+  });
+  const restores: Restore[] = [];
+  for (const name of [
+    "window", "document", "navigator", "self", "Node", "Element", "HTMLElement", "HTMLButtonElement",
+    "HTMLInputElement", "Event", "EventTarget", "MouseEvent", "CustomEvent", "MutationObserver",
+  ] as const) {
+    const value = name === "window" || name === "self"
+      ? dom.window
+      : name === "document"
+        ? dom.window.document
+        : (dom.window as unknown as Record<string, unknown>)[name];
+    installGlobal(name, value, restores);
+  }
+  installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+
+  let mountedRoot: { unmount(): void } | null = null;
+  try {
+    const [{ createRoot }, { EditorCalendarDateInput }, { HuddleNodeDateControl }, { HUDDLE_CALENDAR_THEME }] = await Promise.all([
+      import("react-dom/client"),
+      import("../../../../frontend/src/modules/editor/EditorFieldControls.tsx"),
+      import("../../../../frontend/src/modules/huddles/HuddleNodeDateControl.tsx"),
+      import("../../../../frontend/src/modules/huddles/huddleCalendarTheme.ts"),
+    ]);
+    const container = dom.window.document.getElementById("root");
+    assert.ok(container);
+    const root = createRoot(container);
+    mountedRoot = root;
+
+    let rejectCommit: ((cause: Error) => void) | undefined;
+    await act(async () => root.render(
+      <HuddleNodeDateControl
+        date="2026-08-31"
+        saving={false}
+        onCommit={() => new Promise<void>((_resolve, reject) => { rejectCommit = reject; })}
+      />,
+    ));
+    const persistedDateInput = container.querySelector<HTMLInputElement>('input[aria-label="Huddle Node date"]');
+    assert.equal(persistedDateInput?.value, "8/31/2026");
+    const persistedDateTrigger = container.querySelector<HTMLButtonElement>('button[aria-label="Choose huddle node date"]');
+    assert.ok(persistedDateTrigger);
+    await act(async () => persistedDateTrigger.click());
+    const changedDateButton = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button[aria-label]')]
+      .find((button) => button.getAttribute("aria-label")?.startsWith("September 2, 2026"));
+    assert.ok(changedDateButton);
+    await act(async () => {
+      changedDateButton.click();
+      await Promise.resolve();
+    });
+    assert.equal(persistedDateInput?.value, "9/2/2026", "the pending date is visible optimistically");
+    await act(async () => {
+      rejectCommit?.(new Error("date save failed"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.equal(persistedDateInput?.value, "8/31/2026", "a failed save restores the displayed draft");
+
+    const localDate = (date: Date) => `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+    const isoDate = (date: Date) => [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0"),
+    ].join("-");
+    const labelDate = (date: Date) => date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+    const today = new Date();
+    const reference = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1, 12);
+    const selected = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 2, 12);
+
+    function CalendarHarness() {
+      const [value, setValue] = React.useState(localDate(selected));
+      return (
+        <EditorCalendarDateInput
+          value={value}
+          ariaLabel="Due or Overdue viewing date"
+          iconOnly
+          allowClear={false}
+          referenceDate={isoDate(reference)}
+          referenceLabel="Huddle Node date"
+          theme={HUDDLE_CALENDAR_THEME}
+          floatingPortalTarget={dom.window.document.body}
+          onChange={setValue}
+        />
+      );
+    }
+    await act(async () => root.render(<CalendarHarness />));
+    const viewingDateTrigger = container.querySelector<HTMLButtonElement>('button[aria-label="Choose due or overdue viewing date"]');
+    assert.ok(viewingDateTrigger);
+    assert.equal(container.querySelector("input"), null, "compact mode renders only the calendar icon");
+    await act(async () => viewingDateTrigger.click());
+
+    const selectedDay = dom.window.document.querySelector<HTMLButtonElement>(`button[aria-label^="${labelDate(selected)}"]`);
+    assert.equal(selectedDay?.getAttribute("aria-pressed"), "true", "the temporary viewing date is the selected day");
+    const referenceDay = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button[aria-label]')]
+      .find((button) => button.getAttribute("aria-label")?.startsWith(labelDate(reference)));
+    assert.match(referenceDay?.getAttribute("aria-label") ?? "", /Huddle Node date/);
+    assert.match(referenceDay?.style.boxShadow ?? "", /7c3aed|124, 58, 237/i, "the persisted Node date has a separate reference ring");
+    const todayDay = dom.window.document.querySelector<HTMLButtonElement>('button[aria-current="date"]');
+    assert.match(todayDay?.getAttribute("aria-label") ?? "", /Today/);
+    assert.equal(todayDay?.getAttribute("aria-pressed"), "false", "today remains distinct from the selected date");
+    assert.doesNotMatch(dom.window.document.body.textContent ?? "", /Clear|Reset|Use Huddle Node date/);
+
+    const todayAction = [...dom.window.document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent === "Today");
+    assert.ok(todayAction);
+    await act(async () => todayAction.click());
+    assert.equal(viewingDateTrigger.getAttribute("aria-expanded"), "false");
+    await act(async () => viewingDateTrigger.click());
+    const newlySelectedToday = dom.window.document.querySelector<HTMLButtonElement>('button[aria-current="date"]');
+    assert.equal(newlySelectedToday?.getAttribute("aria-pressed"), "true");
+    assert.equal(newlySelectedToday?.getAttribute("aria-label")?.startsWith(labelDate(today)), true);
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

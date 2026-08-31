@@ -2306,10 +2306,10 @@ export const EditorContent: React.FC<EditorContentProps> = ({ accent, widgetId, 
 
   const logicGateConversionAction = {
     id: "convert-to-huddle",
-    label: "Turn into Huddle Process",
+    label: "Turn into Huddle Board",
     disabled: !linkedEntityCanEdit,
     onSelect: () => {
-      if (!window.confirm("Convert this Process to a Huddle? This cannot be undone.")) return;
+      if (!window.confirm("Convert this Process to a Huddle Board? This cannot be undone.")) return;
       void requestJSON<{ huddle_logic_gate_id: string; header: string }>(`/v1/logic-gates/${encodeURIComponent(linkedNodeID)}/convert-to-huddle`, {
         method: "POST",
         json: { company_id: companyID },

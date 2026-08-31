@@ -78,8 +78,6 @@ type MemoryRepo struct {
 	savedViews                       map[string]domain.SavedView
 	userPinFolders                   map[string]domain.UserPinFolder
 	userPins                         map[string]domain.UserPin
-	raciTabFolders                   map[string]domain.RACITabFolder
-	raciTabItems                     map[string]domain.RACITabItem
 	entityPermissions                map[string]domain.EntityPermission
 	effectiveAccess                  map[string]domain.EffectiveResourceAccess
 	resourcePolicySequence           int64
@@ -197,8 +195,6 @@ func NewMemoryRepo() *MemoryRepo {
 		savedViews:                       map[string]domain.SavedView{},
 		userPinFolders:                   map[string]domain.UserPinFolder{},
 		userPins:                         map[string]domain.UserPin{},
-		raciTabFolders:                   map[string]domain.RACITabFolder{},
-		raciTabItems:                     map[string]domain.RACITabItem{},
 		entityPermissions:                map[string]domain.EntityPermission{},
 		effectiveAccess:                  map[string]domain.EffectiveResourceAccess{},
 		resourcePermissionRevisions:      map[string]int64{},

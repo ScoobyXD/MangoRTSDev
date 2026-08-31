@@ -251,6 +251,48 @@ for update`, companyID, deletedByUserID, strings.Join(itemIDs, ","))
 	if err != nil {
 		return RecycleBinRestoreResult{}, err
 	}
+	boardIDs, err := recyclePayloadUUIDs(mergedPayload["huddle_logic_gates"], "huddle_logic_gate_id")
+	if err != nil {
+		return RecycleBinRestoreResult{}, err
+	}
+	restoredNodeIDs, err := recyclePayloadUUIDs(mergedPayload["huddle_nodes"], "huddle_node_id")
+	if err != nil {
+		return RecycleBinRestoreResult{}, err
+	}
+	boardSet := stringSet(boardIDs)
+	if len(restoredNodeIDs) > 0 {
+		rows, queryErr := tx.QueryContext(ctx, `
+select distinct huddle_logic_gate_id::text
+from huddle_nodes
+where company_id=$1::uuid and huddle_node_id::text=any($2::text[])
+order by huddle_logic_gate_id::text`, companyID, restoredNodeIDs)
+		if queryErr != nil {
+			return RecycleBinRestoreResult{}, queryErr
+		}
+		for rows.Next() {
+			var boardID string
+			if scanErr := rows.Scan(&boardID); scanErr != nil {
+				rows.Close()
+				return RecycleBinRestoreResult{}, scanErr
+			}
+			boardSet[boardID] = true
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			rows.Close()
+			return RecycleBinRestoreResult{}, rowsErr
+		}
+		rows.Close()
+	}
+	boardIDs = sortedMapKeys(boardSet)
+	if len(boardIDs) > 0 {
+		nodeIDs, nodeErr := postgresHuddleNodeIDsForBoardsTx(ctx, tx, companyID, boardIDs)
+		if nodeErr != nil {
+			return RecycleBinRestoreResult{}, nodeErr
+		}
+		if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, companyID, boardIDs, nodeIDs); err != nil {
+			return RecycleBinRestoreResult{}, err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `
 delete from recycle_bin_items
 where company_id=$1::uuid

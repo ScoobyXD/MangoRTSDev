@@ -733,12 +733,6 @@ where excluded.company_id = pin.company_id
   and excluded.resource_type = pin.resource_type
   and excluded.resource_id = pin.resource_id;
 
-delete from public.raci_tabs_items item
-using qa_excluded_resources excluded
-where excluded.company_id = item.company_id
-  and excluded.resource_type = 'logic_gate'
-  and excluded.resource_id = item.logic_gate_id;
-
 delete from public.process_map_placements placement
 where exists (
   select 1 from qa_excluded_resources excluded

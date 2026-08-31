@@ -26,7 +26,7 @@ type RealtimeMessageType =
   | "kanban.changed"
   | "process_map.changed"
   | "logic_gate_qd_rating_updated"
-  | "raci_tabs.changed"
+  | "huddle_action_items.changed"
   | "mailbox.message.changed"
   | "mailbox.folder.changed"
   | "editor.snapshot.required"
@@ -142,12 +142,15 @@ export type RealtimeLogicGateQDRatingUpdatedMessage = RealtimeBaseMessage & {
   ts?: string;
 };
 
-export type RealtimeRACITabsChangedMessage = RealtimeBaseMessage & {
-  type: "raci_tabs.changed";
+export type RealtimeHuddleActionItemsChangedMessage = RealtimeBaseMessage & {
+  type: "huddle_action_items.changed";
   company_id: string;
   scope: string;
   ts?: string;
-};
+} & (
+  | { huddle_node_id: string; huddle_logic_gate_id?: never }
+  | { huddle_logic_gate_id: string; huddle_node_id?: never }
+);
 
 export type RealtimeMailboxMessageChangedMessage = RealtimeBaseMessage & {
   type: "mailbox.message.changed";
@@ -226,7 +229,7 @@ type RealtimeInboundMessage =
   | RealtimeKanbanChangedMessage
   | RealtimeProcessMapChangedMessage
   | RealtimeLogicGateQDRatingUpdatedMessage
-  | RealtimeRACITabsChangedMessage
+  | RealtimeHuddleActionItemsChangedMessage
   | RealtimeMailboxMessageChangedMessage
   | RealtimeMailboxFolderChangedMessage
   | RealtimeEditorSnapshotRequiredMessage
@@ -247,7 +250,7 @@ export type RealtimeSubscriptionHandlers = {
   onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
   onProcessMapChanged?: (message: RealtimeProcessMapChangedMessage) => void;
   onLogicGateQDRatingUpdated?: (message: RealtimeLogicGateQDRatingUpdatedMessage) => void;
-  onRACITabsChanged?: (message: RealtimeRACITabsChangedMessage) => void;
+  onHuddleActionItemsChanged?: (message: RealtimeHuddleActionItemsChangedMessage) => void;
   onMailboxMessageChanged?: (message: RealtimeMailboxMessageChangedMessage) => void;
   onMailboxFolderChanged?: (message: RealtimeMailboxFolderChangedMessage) => void;
   onEditorSnapshotRequired?: (message: RealtimeEditorSnapshotRequiredMessage) => void;
@@ -403,9 +406,20 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
       if (!logicGateID) throw new Error("realtime_logic_gate_id_required");
       return { ...scoped, type, logic_gate_id: logicGateID, ts: stringValue(payload.ts) || undefined };
     }
-    case "raci_tabs.changed": {
+    case "huddle_action_items.changed": {
       const scoped = scopedMessageBase(payload, type);
-      return { ...scoped, type, ts: stringValue(payload.ts) || undefined };
+      const ts = stringValue(payload.ts) || undefined;
+      if (scoped.scope.startsWith("huddle-action-items:")) {
+        const huddleNodeID = stringValue(payload.huddle_node_id);
+        if (!huddleNodeID) throw new Error("realtime_huddle_node_id_required");
+        return { ...scoped, type, huddle_node_id: huddleNodeID, ts };
+      }
+      if (scoped.scope.startsWith("huddle-board-action-items:")) {
+        const huddleLogicGateID = stringValue(payload.huddle_logic_gate_id);
+        if (!huddleLogicGateID) throw new Error("realtime_huddle_logic_gate_id_required");
+        return { ...scoped, type, huddle_logic_gate_id: huddleLogicGateID, ts };
+      }
+      throw new Error("realtime_huddle_action_items_scope_required");
     }
     case "mailbox.message.changed": {
       const scoped = scopedMessageBase(payload, type);
@@ -473,7 +487,33 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 }
 
 export function isSupportedRealtimeScope(scope: string): boolean {
-  return /^(?:notifications:user:[^:]+|raci-tabs:company|process-map:company|chat:node:[^:]+|board:.+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|huddle_logic_gate|huddle_node|kpi|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
+  return /^(?:notifications:user:[^:]+|process-map:company|chat:node:[^:]+|board:.+|huddle-action-items:[^:]+|huddle-board-action-items:[^:]+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|huddle_logic_gate|huddle_node|kpi|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
+}
+
+export function realtimeHuddleActionItemsScope(huddleNodeID: string): string {
+  const cleanHuddleNodeID = huddleNodeID.trim();
+  return cleanHuddleNodeID && !cleanHuddleNodeID.includes(":") ? `huddle-action-items:${cleanHuddleNodeID}` : "";
+}
+
+export function realtimeHuddleBoardActionItemsScope(huddleLogicGateID: string): string {
+  const cleanHuddleLogicGateID = huddleLogicGateID.trim();
+  return cleanHuddleLogicGateID && !cleanHuddleLogicGateID.includes(":")
+    ? `huddle-board-action-items:${cleanHuddleLogicGateID}`
+    : "";
+}
+
+export function matchesHuddleActionItemsRealtimeMessage(
+  message: RealtimeHuddleActionItemsChangedMessage,
+  companyID: string,
+  scope: string,
+  resourceID: string,
+): boolean {
+  const messageResourceID = "huddle_logic_gate_id" in message
+    ? message.huddle_logic_gate_id
+    : message.huddle_node_id;
+  return message.company_id === companyID.trim()
+    && message.scope === scope
+    && messageResourceID === resourceID.trim();
 }
 
 export function realtimePersonalMailboxScope(userID: string, accountEmail: string): string {
@@ -835,8 +875,8 @@ export class MangoRealtimeClient {
         case "logic_gate_qd_rating_updated":
           sub.onLogicGateQDRatingUpdated?.(message);
           break;
-        case "raci_tabs.changed":
-          sub.onRACITabsChanged?.(message);
+        case "huddle_action_items.changed":
+          sub.onHuddleActionItemsChanged?.(message);
           break;
         case "mailbox.message.changed":
           sub.onMailboxMessageChanged?.(message);

@@ -422,25 +422,6 @@ func TestPostgresEntitiesUseSetBasedFolderAncestryAndLiveTemplateLinks(t *testin
 	}
 }
 
-func TestCanonicalSchemaKeepsPostgresRecordLoopVariables(t *testing.T) {
-	schema, err := os.ReadFile(filepath.Join("..", "..", "db", "schema.sql"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	normalizedSchema := strings.ToLower(string(schema))
-	if strings.Count(normalizedSchema, "v_resource record;") < 2 {
-		t.Fatal("canonical schema must declare both RACI resource loop variables with PostgreSQL's record pseudo-type")
-	}
-	if !strings.Contains(normalizedSchema, "v_gate record;") {
-		t.Fatal("canonical schema must declare the RACI gate loop variable with PostgreSQL's record pseudo-type")
-	}
-	for _, invalid := range []string{"v_resource entity;", "v_gate entity;"} {
-		if strings.Contains(normalizedSchema, invalid) {
-			t.Fatalf("canonical schema contains invalid PL/pgSQL declaration %q", invalid)
-		}
-	}
-}
-
 func TestEntitySchemaReadinessUsesExactUnorderedColumnSets(t *testing.T) {
 	expected := map[string][]string{
 		"entity_types":       {"company_id", "entity_type_id", "name", "system_key", "created_timestamp", "updated_timestamp"},
@@ -457,7 +438,9 @@ func TestEntitySchemaReadinessUsesExactUnorderedColumnSets(t *testing.T) {
 		if !exists {
 			t.Fatalf("unexpected Entity exact column contract for %q", contract.table)
 		}
-		assertExactUnorderedColumns(t, contract.table, contract.columns, want)
+		if !matchesExactUnorderedColumns(want, contract.columns) {
+			t.Fatalf("%s exact column contract = %v, want %v", contract.table, contract.columns, want)
+		}
 
 		reversed := append([]string(nil), want...)
 		for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {

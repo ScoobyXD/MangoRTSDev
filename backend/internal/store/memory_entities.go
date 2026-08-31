@@ -529,6 +529,13 @@ func (r *MemoryRepo) UpdateEntity(input EntityInput) (domain.Entity, error) {
 	}
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.entities[itemKey] = item
+	if item.EntityTypeID == ActionItemEntityTypeID {
+		boardIDs := r.memoryHuddleActionItemBoardIDsLocked(item.CompanyID, item.EntityID)
+		nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(item.CompanyID, stringSet(boardIDs))
+		if err := r.enqueueHuddleActionItemsRealtimeLocked(item.CompanyID, boardIDs, nodeIDs); err != nil {
+			return domain.Entity{}, err
+		}
+	}
 	return r.entityDetailLocked(item), nil
 }
 
@@ -593,6 +600,14 @@ func (r *MemoryRepo) CreateEntityField(input EntityFieldInput) (domain.EntityFie
 	}
 	item := domain.EntityField{CompanyID: normalized.CompanyID, EntityFieldID: normalized.EntityFieldID, EntityID: normalized.EntityID, Name: normalized.Name, FieldType: normalized.FieldType, Config: json.RawMessage(`{}`), Value: append([]byte(nil), value...), Position: normalized.Position, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.entityFields[key(item.CompanyID, item.EntityFieldID)] = item
+	if entity := r.entities[key(item.CompanyID, item.EntityID)]; entity.EntityTypeID == ActionItemEntityTypeID {
+		boardIDs := r.memoryHuddleActionItemBoardIDsLocked(item.CompanyID, item.EntityID)
+		nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(item.CompanyID, stringSet(boardIDs))
+		if err := r.enqueueHuddleActionItemsRealtimeLocked(item.CompanyID, boardIDs, nodeIDs); err != nil {
+			delete(r.entityFields, key(item.CompanyID, item.EntityFieldID))
+			return domain.EntityField{}, err
+		}
+	}
 	return cloneEntityField(item), nil
 }
 
@@ -650,6 +665,13 @@ func (r *MemoryRepo) UpdateEntityField(input EntityFieldInput) (domain.EntityFie
 	}
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.entityFields[itemKey] = item
+	if entity := r.entities[key(item.CompanyID, item.EntityID)]; entity.EntityTypeID == ActionItemEntityTypeID {
+		boardIDs := r.memoryHuddleActionItemBoardIDsLocked(item.CompanyID, item.EntityID)
+		nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(item.CompanyID, stringSet(boardIDs))
+		if err := r.enqueueHuddleActionItemsRealtimeLocked(item.CompanyID, boardIDs, nodeIDs); err != nil {
+			return domain.EntityField{}, err
+		}
+	}
 	return cloneEntityField(item), nil
 }
 
@@ -669,6 +691,13 @@ func (r *MemoryRepo) DeleteEntityField(companyID, entityID, entityFieldID string
 		return ErrConflict
 	}
 	delete(r.entityFields, itemKey)
+	if entity := r.entities[key(companyID, entityID)]; entity.EntityTypeID == ActionItemEntityTypeID {
+		boardIDs := r.memoryHuddleActionItemBoardIDsLocked(companyID, entityID)
+		nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(companyID, stringSet(boardIDs))
+		if err := r.enqueueHuddleActionItemsRealtimeLocked(companyID, boardIDs, nodeIDs); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

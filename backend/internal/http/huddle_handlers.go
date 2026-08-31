@@ -297,6 +297,9 @@ func (s *Server) handleHuddleNodeByID(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if s.handleHuddleNodeActionItems(w, r, id, parts) {
+		return
+	}
 	if s.handleHuddleNodeWorkspaceSubresource(w, r, id, parts) {
 		return
 	}
@@ -318,8 +321,9 @@ func (s *Server) handleHuddleNodeByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPut {
 		var req struct {
-			CompanyID string `json:"company_id"`
-			Name      string `json:"name"`
+			CompanyID  string  `json:"company_id"`
+			Name       string  `json:"name"`
+			HuddleDate *string `json:"huddle_date"`
 		}
 		if json.NewDecoder(r.Body).Decode(&req) != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -329,7 +333,7 @@ func (s *Server) handleHuddleNodeByID(w http.ResponseWriter, r *http.Request) {
 		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleNode, id, "huddle_node_not_found") {
 			return
 		}
-		item, err := s.repo.UpdateHuddleNode(store.HuddleUpdateInput{CompanyID: companyID, ResourceID: id, Name: req.Name})
+		item, err := s.repo.UpdateHuddleNode(store.HuddleUpdateInput{CompanyID: companyID, ResourceID: id, Name: req.Name, HuddleDate: req.HuddleDate})
 		if err != nil {
 			writeHuddleError(w, err)
 			return

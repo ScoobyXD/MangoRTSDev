@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"sort"
+	"strings"
 	"time"
 
 	"miraeopus/backend/internal/domain"
@@ -140,6 +141,15 @@ func (r *MemoryRepo) CreateActionItem(input ActionItemInput) (domain.Entity, err
 	for _, field := range entity.EntityFields {
 		r.entityFields[key(field.CompanyID, field.EntityFieldID)] = field
 	}
+	boardIDs := r.memoryHuddleActionItemBoardIDsLocked(entity.CompanyID, entity.EntityID)
+	nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(entity.CompanyID, stringSet(boardIDs))
+	if err := r.enqueueHuddleActionItemsRealtimeLocked(entity.CompanyID, boardIDs, nodeIDs); err != nil {
+		delete(r.entities, key(entity.CompanyID, entity.EntityID))
+		for _, field := range entity.EntityFields {
+			delete(r.entityFields, key(field.CompanyID, field.EntityFieldID))
+		}
+		return domain.Entity{}, err
+	}
 	return r.entityDetailLocked(entity), nil
 }
 
@@ -246,10 +256,11 @@ func (r *MemoryRepo) clearEntityResourceFieldsForMissingResourceLocked(companyID
 	r.clearEntityResourceFieldsForResourceLocked(companyID, resourceType, resourceID)
 }
 
-func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resourceType, resourceID string) {
+func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resourceType, resourceID string) bool {
 	if resourceType != EntityTypeHuddleNode && resourceType != EntityTypeHuddleLogicGate {
-		return
+		return false
 	}
+	changed := false
 	documents := make([]json.RawMessage, 0)
 	for _, document := range r.editorJSONDocuments {
 		if document.Deleted || document.Ref.CompanyID != companyID || document.Ref.ResourceType != resourceType || document.Ref.ResourceID != resourceID {
@@ -272,6 +283,7 @@ func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resource
 		entity, exists := r.entities[key(companyID, relationship.EntityID)]
 		if exists && entity.EntityTypeID == ActionItemEntityTypeID {
 			delete(r.entityRelationships, relationshipKey)
+			changed = true
 		}
 	}
 	now := time.Now().UTC()
@@ -284,12 +296,39 @@ func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resource
 			CompanyID: companyID, EntityID: entityID,
 			ResourceType: resourceType, ResourceID: resourceID, CreatedTimestamp: now,
 		}
+		changed = true
 	}
+	return changed
 }
 
-func (r *MemoryRepo) ListHuddleNodeActionItems(companyID, huddleNodeID string) ([]domain.Entity, error) {
+func (r *MemoryRepo) ListHuddleNodeCreatedActionItems(companyID, huddleNodeID string) ([]domain.Entity, error) {
 	companyID, huddleNodeID = cleanUUIDText(companyID), cleanUUIDText(huddleNodeID)
 	if companyID == "" || huddleNodeID == "" {
+		return nil, ErrInvalid
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, exists := r.huddleNodes[key(companyID, huddleNodeID)]; !exists {
+		return nil, ErrNotFound
+	}
+	items := []domain.Entity{}
+	for _, entity := range r.entities {
+		if entity.CompanyID != companyID || entity.EntityTypeID != ActionItemEntityTypeID {
+			continue
+		}
+		fields := r.memoryActionItemFieldsLocked(companyID, entity.EntityID)
+		if fields.sourceResourceType == EntityTypeHuddleNode && fields.sourceResourceID == huddleNodeID {
+			items = append(items, r.entityDetailLocked(entity))
+		}
+	}
+	sortActionItems(items)
+	return items, nil
+}
+
+func (r *MemoryRepo) ListHuddleNodeDueActionItems(companyID, huddleNodeID, viewingDate string) ([]domain.Entity, error) {
+	companyID, huddleNodeID = cleanUUIDText(companyID), cleanUUIDText(huddleNodeID)
+	viewingDate, err := normalizeHuddleDate(viewingDate)
+	if companyID == "" || huddleNodeID == "" || err != nil {
 		return nil, ErrInvalid
 	}
 	r.mu.RLock()
@@ -298,7 +337,20 @@ func (r *MemoryRepo) ListHuddleNodeActionItems(companyID, huddleNodeID string) (
 	if !exists {
 		return nil, ErrNotFound
 	}
-	return r.listHuddleLogicGateActionItemsLocked(companyID, node.HuddleLogicGateID), nil
+	items := r.listHuddleLogicGateActionItemsLocked(companyID, node.HuddleLogicGateID)
+	filtered := items[:0]
+	for _, item := range items {
+		fields := r.memoryActionItemFieldsLocked(companyID, item.EntityID)
+		if fields.sourceResourceType == EntityTypeHuddleNode && fields.sourceResourceID == huddleNodeID {
+			continue
+		}
+		if fields.completionDueDate == "" || fields.completionDueDate > viewingDate || myWorkStatusDone(fields.status) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	sortHuddleDueActionItems(filtered)
+	return filtered, nil
 }
 
 func (r *MemoryRepo) ListHuddleLogicGateActionItems(companyID, huddleLogicGateID string) ([]domain.Entity, error) {
@@ -344,6 +396,37 @@ func sortActionItems(items []domain.Entity) {
 	sort.Slice(items, func(i, j int) bool {
 		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
 			return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
+		}
+		return items[i].EntityID < items[j].EntityID
+	})
+}
+
+func actionItemFieldText(item domain.Entity, systemKey string) string {
+	for _, field := range item.EntityFields {
+		if field.SystemKey == systemKey {
+			return strings.TrimSpace(myWorkJSONText(field.Value))
+		}
+	}
+	return ""
+}
+
+func actionItemSourceMatches(item domain.Entity, resourceType, resourceID string) bool {
+	for _, field := range item.EntityFields {
+		if field.SystemKey != ActionItemSourceSystemKey {
+			continue
+		}
+		currentType, currentID, ok := decodeActionItemSourceValue(field.Value)
+		return ok && currentType == resourceType && currentID == resourceID
+	}
+	return false
+}
+
+func sortHuddleDueActionItems(items []domain.Entity) {
+	sort.Slice(items, func(i, j int) bool {
+		left := actionItemFieldText(items[i], ActionItemCompletionDueDateSystemKey)
+		right := actionItemFieldText(items[j], ActionItemCompletionDueDateSystemKey)
+		if left != right {
+			return left < right
 		}
 		return items[i].EntityID < items[j].EntityID
 	})

@@ -19,21 +19,22 @@
 17. Each row stores the exact same-company `entities.entity_id`, canonical `resource_type`, and exact source `resource_id`; `entity_id` already determines the Entity Type, so no `entity_type_id` is stored.
 18. One exact Entity and typed Huddle resource pair has one semantic edge. Repeating the relationship or placing the same Entity reference several times in one Huddle resource creates no duplicate row.
 19. Saving a Huddle Node or Huddle Logic Gate editor document atomically derives that exact resource's Action Item edges from all of its live inline references in the same database transaction. Removing one of several saved references keeps the edge, while removing the final saved reference removes only that edge and preserves the Entity.
-20. A Huddle Process Action Item rollup unions the exact Huddle Logic Gate's direct edges with every edge from its owned Huddle Nodes, filters Entities whose Entity Type system key is `action_item`, and deduplicates each Entity once.
-21. A surviving direct Huddle Logic Gate reference or sibling Huddle Node reference keeps the Action Item in that Process rollup. The same Action Item may have edges in several Huddle resources and several Huddle Processes.
-22. Every Huddle Node reads its owning Huddle Logic Gate's current live Action Item rollup. Action Item edges are never copied into the immutable Huddle Node Logic Gate or KPI snapshots.
-23. An Entity relationship grants no permission, RACI role, policy parentage, Entity access, or Huddle access. Reading or changing a Huddle Node's Action Item relationships requires Edit access to that Huddle Node, and reading a Huddle Process rollup directly requires Edit access to that exact Huddle Logic Gate.
-24. Permanent endpoint deletion leaves no stale edge, and recycle/restore preserves every promised exact edge. The table uses no relationship ID, resource registry, copied label, copied body, translated identity, or compatibility identity.
-25. Direct Huddle Logic Gate creation atomically stores the exact resource, its same-ID root Huddle Explorer placement, and its direct policies; typed Huddle Logic Gate attachment relationships use that same exact resource ID and follow its recycle, restore, and permanent-delete lifecycle.
-26. The required Action Item `source` / `Source` / `resource` system Entity Field is the only authority for one Action Item's optional creation provenance and is separate from live inline-reference `entity_relationships`.
-27. One nonnull Source field value contains exactly a canonical `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, or `kpi` `resource_type` and the exact same-company `resource_id`, with no copied label, text anchor, registry, translated identity, or fallback.
-28. Creating an editor Action Item validates the exact live endpoint and the actor's current Edit access, then commits the Entity and all seven required fields, including Source, atomically. Direct Entities-page creation leaves the required Source field value null.
-29. Source is immutable after creation and grants no access. Reads resolve the current endpoint name and disclose its typed identity only to a currently authorized viewer; every unavailable case returns a neutral state without hidden identity.
-30. Inline chip insertion or removal changes only editor content and any derived live Huddle Entity edge. It never creates, rewrites, or clears the Action Item Source field.
-31. Recycling a source endpoint preserves its exact Source field value while reads project it as unavailable, and restoring that exact endpoint makes it resolvable again. Permanent endpoint deletion atomically clears matching Source field values so no stale typed reference remains; this lifecycle cleanup is the only allowed post-creation Source mutation.
-32. My Work derives one optional Huddle process only from immutable Source: an exact `huddle_logic_gate` Source identifies itself, while an exact `huddle_node` Source follows only its required `huddle_nodes.huddle_logic_gate_id`. The projection requires current access to both the exact Source and exact owning Huddle Logic Gate, returns one neutral unavailable/no-process state otherwise, and never consults `entity_relationships`.
+20. A Huddle Board Action Item rollup unions the exact Huddle Logic Gate's direct edges with every edge from its owned Huddle Nodes, filters Entities whose Entity Type system key is `action_item`, and deduplicates each Entity once.
+21. A surviving direct Huddle Logic Gate reference or sibling Huddle Node reference keeps the Action Item in that Board rollup. The same Action Item may have edges in several Huddle resources and several Huddle Boards.
+22. A Huddle Node's **Created in this Huddle Node** section derives only from immutable Action Item Source equal to that exact Huddle Node; it does not derive from `entity_relationships` and includes completed items.
+23. A Huddle Node's **Due or Overdue** section filters its owning Huddle Board's current live rollup to incomplete items whose Completion due date is on or before the temporary viewing date, excludes created-section IDs, and never copies an edge.
+24. An Entity relationship grants no permission, RACI role, policy parentage, Entity access, or Huddle access. Reading or changing a Huddle Node's Action Item relationships requires Edit access to that Huddle Node, and reading a Huddle Board rollup directly requires Edit access to that exact Huddle Logic Gate.
+25. Permanent endpoint deletion leaves no stale edge, and recycle/restore preserves every promised exact edge. The table uses no relationship ID, resource registry, copied label, copied body, translated identity, or compatibility identity.
+26. Direct Huddle Logic Gate creation atomically stores the exact resource, its same-ID root Huddle Explorer placement, and its direct policies; typed Huddle Logic Gate attachment relationships use that same exact resource ID and follow its recycle, restore, and permanent-delete lifecycle.
+27. The required Action Item `source` / `Source` / `resource` system Entity Field is the only authority for one Action Item's optional creation provenance and is separate from live inline-reference `entity_relationships`.
+28. One nonnull Source field value contains exactly a canonical `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, or `kpi` `resource_type` and the exact same-company `resource_id`, with no copied label, text anchor, registry, translated identity, or fallback.
+29. Creating an editor Action Item validates the exact live endpoint and the actor's current Edit access, then commits the Entity and all seven required fields, including Source, atomically. Direct Entities-page creation leaves the required Source field value null.
+30. Source is immutable after creation and grants no access. Reads resolve the current endpoint name and disclose its typed identity only to a currently authorized viewer; every unavailable case returns a neutral state without hidden identity.
+31. Inline chip insertion or removal changes only editor content and any derived live Huddle Entity edge. It never creates, rewrites, or clears the Action Item Source field.
+32. Recycling a source endpoint preserves its exact Source field value while reads project it as unavailable, and restoring that exact endpoint makes it resolvable again. Permanent endpoint deletion atomically clears matching Source field values so no stale typed reference remains; this lifecycle cleanup is the only allowed post-creation Source mutation.
+33. My Work derives one optional Huddle Board only from immutable Source: an exact `huddle_logic_gate` Source identifies itself, while an exact `huddle_node` Source follows only its required `huddle_nodes.huddle_logic_gate_id`. The projection requires current access to both endpoints, returns one neutral unavailable/no-Board state otherwise, and never consults `entity_relationships`.
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
 # Process Story: Huddle snapshots stay fixed while Action Item references roll up live
 
@@ -47,11 +48,11 @@ Later membership changes do not rewrite that Huddle Node, while current source d
 ↓
 Saving an inline Action Item reference in a Huddle Node or its Huddle Logic Gate stores one exact typed `entity_relationships` edge in the same transaction as that editor document; repeated inline references in one resource share the same edge
 ↓
-Removing the final reference removes only that resource edge, and each Huddle Node reads the parent's current deduplicated Action Item rollup by uniting direct Gate edges with live child-Node edges while its Logic Gate and KPI relationship sets remain immutable creation-time snapshots
+Removing the final reference removes only that resource edge, while the Huddle Board rollup remains the current deduplicated union of direct Board edges and live child-Node edges
 
 ↓
 
-When that Action Item was created from highlighted text, its immutable typed Source Entity Field keeps the exact creation resource through chip removal, resolves only current permitted data, stays unavailable while the endpoint is recycled, resolves again after restore, and clears on permanent deletion; My Work may follow an exact Huddle Node Source's required owner only when both endpoints remain accessible and never substitutes a live inline relationship
+When that Action Item was created from highlighted text, immutable Source keeps the exact creation resource through chip removal; the Node's created section uses that provenance, its due section filters the current Board rollup, and My Work follows an exact Huddle Node Source's required owner only when both endpoints remain accessible
 
 # Current Email Relationship Business Logic Laws
 
@@ -371,7 +372,7 @@ Current examples include:
 - A Huddle Logic Gate may own multiple Huddle Nodes, while each Huddle Node has exactly one Huddle Logic Gate.
 - A Huddle Logic Gate may link to multiple normal Logic Gates, a normal Logic Gate may link to multiple Huddle Logic Gates, and one exact pair has at most one live relationship.
 - A Huddle Node may capture multiple Logic Gates and KPIs at creation, and each exact captured tuple has at most one snapshot relationship.
-- An Action Item Entity may be referenced by many Huddle Nodes and appear in many Huddle Process rollups; each exact Entity and Huddle Node pair has at most one live edge.
+- An Action Item Entity may be referenced by many Huddle Nodes and appear in many Huddle Board rollups; each exact Entity and Huddle Node pair has at most one live edge.
 - A normal Logic Gate may own multiple KPIs, while each KPI has exactly one normal Logic Gate.
 - One Huddle Logic Gate has at most one live `huddle_explorer_items` placement, and a Huddle Node has none.
 - One RACI resource/principal pair has exactly one direct role; Responsible, Accountable, Consulted, and Informed each permit multiple typed user or group principals, and group edges expand through live nested membership without copied per-user relationship rows.
@@ -554,9 +555,9 @@ One operational relationship has at most one company-map trace, and a relationsh
 
 `entity_relationships` MUST store the exact same-company `entities.entity_id`, canonical `resource_type`, and exact source `resource_id`. The Entity's own row determines its Entity Type, so the relationship MUST NOT store `entity_type_id`. The supported resource types are exactly `huddle_node`, whose ID MUST equal `huddle_nodes.huddle_node_id`, and `huddle_logic_gate`, whose ID MUST equal `huddle_logic_gates.huddle_logic_gate_id`. One exact typed endpoint pair is one semantic edge, and repeating it MUST converge on that row.
 
-Saving an Action Item reference in a Huddle Node or Huddle Logic Gate MUST derive that exact resource edge in the same transaction as the editor document. Several inline references to the same Entity in one resource MUST share it; removing one reference MUST retain it while another survives, and removing the final reference MUST remove only that resource edge. An Action Item MAY have edges in sibling Huddle Nodes, directly in Huddle Logic Gates, or in resources owned by different Huddle Processes.
+Saving an Action Item reference in a Huddle Node or Huddle Logic Gate MUST derive that exact resource edge in the same transaction as the editor document. Several inline references to the same Entity in one resource MUST share it; removing one reference MUST retain it while another survives, and removing the final reference MUST remove only that resource edge. An Action Item MAY have edges in sibling Huddle Nodes, directly in Huddle Logic Gates, or in resources owned by different Huddle Boards.
 
-The Huddle Process rollup MUST union its exact direct Huddle Logic Gate edges with Huddle Node edges joined through `huddle_nodes.huddle_logic_gate_id`, include only Entities whose Entity Type system key is `action_item`, and deduplicate each Entity once. Every Huddle Node under that owner reads that current rollup live; no rollup edge is copied into Huddle Node snapshot tables, editor JSON, or another projection.
+The Huddle Board rollup MUST union its exact direct Huddle Logic Gate edges with Huddle Node edges joined through `huddle_nodes.huddle_logic_gate_id`, include only Entities whose Entity Type system key is `action_item`, and deduplicate each Entity once. A Huddle Node's created section MUST instead use immutable exact-Node Source provenance. Its due section MUST filter the current Board rollup to incomplete items with a Completion due date on or before the temporary viewing date and exclude created-section IDs. No rollup edge is copied into Huddle Node snapshot tables, editor JSON, or another projection.
 
 Removing an edge MUST preserve both endpoints. Permanent deletion MUST leave no stale edge, while recycling and restoring an endpoint MUST preserve and recreate every promised exact edge. The relationship grants no Entity, Huddle, permission, RACI, or policy-parent access, and its storage MUST NOT add a relationship ID, resource registry, copied display data, translated identity, fallback, or second live authority.
 
@@ -568,7 +569,7 @@ Creating an Action Item from highlighted editor text MUST validate the exact liv
 
 Source MUST grant no access. A read MAY disclose the current endpoint type, ID, name, and canonical icon only after the viewer's current access is rechecked. An unset, missing, inaccessible, recycled, or permanently deleted source MUST return one neutral unavailable state without disclosing hidden identity. A live source rename MUST appear through current endpoint resolution and MUST NOT rewrite Source.
 
-My Work MAY derive an Action Item's Huddle process only when Source is exactly `huddle_logic_gate`, or when Source is exactly `huddle_node` and that current Huddle Node's required `huddle_logic_gate_id` identifies its owner. It MUST recheck current access to both the Source endpoint and owning Huddle Logic Gate before disclosing or sorting by the process ID or current name. Missing or denied access yields the same neutral no-process value, and `entity_relationships` MUST NOT participate in this derivation.
+My Work MAY derive an Action Item's Huddle Board only when Source is exactly `huddle_logic_gate`, or when Source is exactly `huddle_node` and that current Huddle Node's required `huddle_logic_gate_id` identifies its owner. It MUST recheck current access to both endpoints before disclosing or sorting by the Board ID or current name. Missing or denied access yields one neutral no-Board value, and `entity_relationships` MUST NOT participate.
 
 Recycling a source endpoint MUST preserve the exact Source value while making its projection unavailable. Restoring that exact endpoint MUST make the preserved value resolvable again. Permanent endpoint deletion MUST atomically clear every matching Source field value so no stale typed reference remains; that system lifecycle cleanup is the only permitted post-creation mutation.
 
@@ -617,7 +618,7 @@ Account assignment:
   resource_type = logic_gate
   resource_id   = exact logic_gates.logic_gate_id
 
-Action Item collected by a Huddle Process:
+Action Item collected by a Huddle Board:
   company_id    = C
   entity_id     = exact action-item entities.entity_id
   resource_type = huddle_node

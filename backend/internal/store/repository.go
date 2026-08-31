@@ -75,7 +75,6 @@ type Repository interface {
 	ConsolidatedViewRepository
 	SavedViewRepository
 	UserPinRepository
-	RACITabsRepository
 	LogicGateWorkRepository
 	WorkItemReadRepository
 	MyWorkRepository
@@ -116,7 +115,8 @@ type EntitiesRepository interface {
 	CreateActionItem(input ActionItemInput) (domain.Entity, error)
 	GetActionItemSource(companyID, entityID string) (domain.ActionItemSource, error)
 	ListVisibleActionItemSources(companyID, viewerUserID string, entityIDs []string) (map[string]domain.ActionItemSourceView, error)
-	ListHuddleNodeActionItems(companyID, huddleNodeID string) ([]domain.Entity, error)
+	ListHuddleNodeCreatedActionItems(companyID, huddleNodeID string) ([]domain.Entity, error)
+	ListHuddleNodeDueActionItems(companyID, huddleNodeID, viewingDate string) ([]domain.Entity, error)
 	ListHuddleLogicGateActionItems(companyID, huddleLogicGateID string) ([]domain.Entity, error)
 }
 
@@ -668,12 +668,13 @@ type SavedViewRepository interface {
 }
 
 const (
-	SavedViewSurfaceUpdates                    = "updates"
-	SavedViewSurfaceLogicGateKanban            = "logic_gate_kanban"
-	SavedViewSurfaceMyWorkActionItemsMine      = "my_work_action_items_mine"
-	SavedViewSurfaceMyWorkActionItemsDelegated = "my_work_action_items_delegated"
-	SavedViewSurfaceHuddleLogicGateActionItems = "huddle_logic_gate_action_items"
-	SavedViewSurfaceHuddleNodeActionItems      = "huddle_node_action_items"
+	SavedViewSurfaceUpdates                      = "updates"
+	SavedViewSurfaceLogicGateKanban              = "logic_gate_kanban"
+	SavedViewSurfaceMyWorkActionItemsMine        = "my_work_action_items_mine"
+	SavedViewSurfaceMyWorkActionItemsDelegated   = "my_work_action_items_delegated"
+	SavedViewSurfaceHuddleLogicGateActionItems   = "huddle_logic_gate_action_items"
+	SavedViewSurfaceHuddleNodeCreatedActionItems = "huddle_node_created_action_items"
+	SavedViewSurfaceHuddleNodeDueActionItems     = "huddle_node_due_action_items"
 
 	SavedViewPrincipalUser  = "user"
 	SavedViewPrincipalGroup = "group"
@@ -711,71 +712,6 @@ type UserPinRepository interface {
 	DeleteUserPinFolder(input UserPinFolderDeleteInput) error
 	ApplyUserPinLayout(input UserPinLayoutInput) error
 	GroupUserPins(input UserPinGroupInput) (UserPinGroupResult, error)
-}
-
-type RACITabsRepository interface {
-	ListRACITabBranch(input RACITabBranchInput) (domain.RACITabPage, error)
-	GetRACITabLogicGateCounts(input RACITabLogicGateCountsInput) (domain.RACITabStatusCounts, error)
-	CreateRACITabFolder(input RACITabFolderCreateInput) (domain.RACITabFolder, error)
-	RenameRACITabFolder(input RACITabFolderRenameInput) (domain.RACITabFolder, error)
-	DeleteRACITabFolder(input RACITabFolderDeleteInput) error
-	ApplyRACITabLayout(input RACITabLayoutInput) error
-}
-
-type RACITabBranchInput struct {
-	CompanyID      string
-	UserID         string
-	Role           string
-	ParentFolderID string
-	Offset         int
-	Limit          int
-}
-
-type RACITabLogicGateCountsInput struct {
-	CompanyID   string
-	UserID      string
-	LogicGateID string
-}
-
-type RACITabFolderCreateInput struct {
-	CompanyID      string
-	UserID         string
-	Role           string
-	FolderID       string
-	ParentFolderID string
-	Name           string
-}
-
-type RACITabFolderRenameInput struct {
-	CompanyID string
-	UserID    string
-	FolderID  string
-	Name      string
-}
-
-type RACITabFolderDeleteInput struct {
-	CompanyID string
-	UserID    string
-	FolderID  string
-}
-
-const (
-	RACITabLayoutEntryFolder = "folder"
-	RACITabLayoutEntryItem   = "item"
-)
-
-type RACITabLayoutEntry struct {
-	EntryType      string
-	EntryID        string
-	ParentFolderID string
-	Position       int
-}
-
-type RACITabLayoutInput struct {
-	CompanyID string
-	UserID    string
-	Role      string
-	Entries   []RACITabLayoutEntry
 }
 
 type UserPinListInput struct {
@@ -1627,12 +1563,14 @@ type HuddleCreateInput struct {
 	Name      string
 	OwnerID   string
 	ActorID   string
+	Now       time.Time
 }
 
 type HuddleUpdateInput struct {
 	CompanyID  string
 	ResourceID string
 	Name       string
+	HuddleDate *string
 }
 
 type HuddleMoveInput struct {

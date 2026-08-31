@@ -156,6 +156,11 @@ func (r *MemoryRepo) UpdateHuddleLogicGate(input HuddleUpdateInput) (domain.Hudd
 			r.huddleExplorerItems[ik] = placement
 		}
 	}
+	boardIDs := []string{item.HuddleLogicGateID}
+	nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(item.CompanyID, stringSet(boardIDs))
+	if err := r.enqueueHuddleActionItemsRealtimeLocked(item.CompanyID, boardIDs, nodeIDs); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
 	return item, nil
 }
 
@@ -353,13 +358,21 @@ func (r *MemoryRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleNod
 	if input.Name == "" {
 		return domain.HuddleNode{}, ErrInvalid
 	}
+	huddleDate, err := huddleDateForCreate(input.Now)
+	if err != nil {
+		return domain.HuddleNode{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.huddleLogicGates[key(input.CompanyID, input.OwnerID)]; !ok {
 		return domain.HuddleNode{}, ErrNotFound
 	}
-	now := time.Now().UTC()
-	item := domain.HuddleNode{CompanyID: input.CompanyID, HuddleNodeID: newUUIDv7String(), HuddleLogicGateID: input.OwnerID, Name: input.Name, CreatedTimestamp: now, UpdatedTimestamp: now}
+	now := input.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	now = now.UTC()
+	item := domain.HuddleNode{CompanyID: input.CompanyID, HuddleNodeID: newUUIDv7String(), HuddleLogicGateID: input.OwnerID, Name: input.Name, HuddleDate: huddleDate, CreatedTimestamp: now, UpdatedTimestamp: now}
 	r.huddleNodes[key(input.CompanyID, item.HuddleNodeID)] = item
 	textbox := HuddleNodeTextbox{
 		CompanyID: input.CompanyID, HuddleNodeID: item.HuddleNodeID, TextboxID: newUUIDv7String(),
@@ -378,6 +391,11 @@ func (r *MemoryRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleNod
 				r.huddleNodeKPIRelationships[memoryHuddleNodeKPIRelationshipKey(input.CompanyID, item.HuddleNodeID, relationship.LogicGateID, kpi.KPIID)] = domain.HuddleNodeKPIRelationship{CompanyID: input.CompanyID, HuddleNodeID: item.HuddleNodeID, LogicGateID: relationship.LogicGateID, KPIID: kpi.KPIID, CreatedTimestamp: now}
 			}
 		}
+	}
+	boardIDs := []string{item.HuddleLogicGateID}
+	nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(item.CompanyID, stringSet(boardIDs))
+	if err := r.enqueueHuddleActionItemsRealtimeLocked(item.CompanyID, boardIDs, nodeIDs); err != nil {
+		return domain.HuddleNode{}, err
 	}
 	return item, nil
 }
@@ -411,8 +429,16 @@ func (r *MemoryRepo) ListHuddleNodeLogicGateCards(companyID, huddleNodeID string
 }
 func (r *MemoryRepo) UpdateHuddleNode(input HuddleUpdateInput) (domain.HuddleNode, error) {
 	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" {
+	if input.Name == "" && input.HuddleDate == nil {
 		return domain.HuddleNode{}, ErrInvalid
+	}
+	var huddleDate string
+	var err error
+	if input.HuddleDate != nil {
+		huddleDate, err = normalizeHuddleDate(*input.HuddleDate)
+		if err != nil {
+			return domain.HuddleNode{}, err
+		}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -421,9 +447,19 @@ func (r *MemoryRepo) UpdateHuddleNode(input HuddleUpdateInput) (domain.HuddleNod
 	if !ok {
 		return domain.HuddleNode{}, ErrNotFound
 	}
-	item.Name = input.Name
+	if input.Name != "" {
+		item.Name = input.Name
+	}
+	if input.HuddleDate != nil {
+		item.HuddleDate = huddleDate
+	}
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.huddleNodes[k] = item
+	boardIDs := []string{item.HuddleLogicGateID}
+	nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(item.CompanyID, stringSet(boardIDs))
+	if err := r.enqueueHuddleActionItemsRealtimeLocked(item.CompanyID, boardIDs, nodeIDs); err != nil {
+		return domain.HuddleNode{}, err
+	}
 	return item, nil
 }
 func (r *MemoryRepo) DeleteHuddleNode(companyID, id, userID string) error {
@@ -435,6 +471,8 @@ func (r *MemoryRepo) DeleteHuddleNode(companyID, id, userID string) error {
 		return ErrNotFound
 	}
 	before := r.snapshotRecycleStateLocked()
+	beforeOutbox := cloneMap(r.realtimeOutbox)
+	beforeOutboxSequence := r.realtimeOutboxSequence
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeHuddleNode, id)
 	r.retireMemoryAttachmentOwnerLocked(companyID, EntityTypeHuddleNode, id, time.Now().UTC())
 	delete(r.huddleNodes, k)
@@ -475,6 +513,14 @@ func (r *MemoryRepo) DeleteHuddleNode(companyID, id, userID string) error {
 			ObjectID: id, ObjectLabel: item.Name, DeletedByUserID: userID, DeletedTimestamp: now,
 		},
 		Delta: delta, UseDelta: true,
+	}
+	boardIDs := []string{item.HuddleLogicGateID}
+	nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(companyID, stringSet(boardIDs))
+	if err := r.enqueueHuddleActionItemsRealtimeLocked(companyID, boardIDs, nodeIDs); err != nil {
+		r.restoreRecycleSnapshotLocked(before)
+		r.realtimeOutbox = beforeOutbox
+		r.realtimeOutboxSequence = beforeOutboxSequence
+		return err
 	}
 	return nil
 }

@@ -38,7 +38,12 @@ var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
 		MyWorkActionItemGroupingPersonInCharge:    true,
 		MyWorkActionItemGroupingCompletionDueDate: true,
 	},
-	SavedViewSurfaceHuddleNodeActionItems: {
+	SavedViewSurfaceHuddleNodeCreatedActionItems: {
+		MyWorkActionItemGroupingColor:             true,
+		MyWorkActionItemGroupingPersonInCharge:    true,
+		MyWorkActionItemGroupingCompletionDueDate: true,
+	},
+	SavedViewSurfaceHuddleNodeDueActionItems: {
 		MyWorkActionItemGroupingColor:             true,
 		MyWorkActionItemGroupingPersonInCharge:    true,
 		MyWorkActionItemGroupingCompletionDueDate: true,
@@ -69,8 +74,10 @@ func NormalizeSavedViewSurface(surface string) (string, bool) {
 		return SavedViewSurfaceMyWorkActionItemsDelegated, true
 	case SavedViewSurfaceHuddleLogicGateActionItems:
 		return SavedViewSurfaceHuddleLogicGateActionItems, true
-	case SavedViewSurfaceHuddleNodeActionItems:
-		return SavedViewSurfaceHuddleNodeActionItems, true
+	case SavedViewSurfaceHuddleNodeCreatedActionItems:
+		return SavedViewSurfaceHuddleNodeCreatedActionItems, true
+	case SavedViewSurfaceHuddleNodeDueActionItems:
+		return SavedViewSurfaceHuddleNodeDueActionItems, true
 	default:
 		return "", false
 	}
@@ -192,7 +199,7 @@ func defaultSavedViewGroupings(surface string) []domain.SavedViewGrouping {
 			{Field: MyWorkActionItemGroupingPersonInCharge, Direction: "asc"},
 			{Field: MyWorkActionItemGroupingHuddleProcess, Direction: "asc"},
 		}
-	case SavedViewSurfaceHuddleLogicGateActionItems, SavedViewSurfaceHuddleNodeActionItems:
+	case SavedViewSurfaceHuddleLogicGateActionItems, SavedViewSurfaceHuddleNodeCreatedActionItems, SavedViewSurfaceHuddleNodeDueActionItems:
 		return []domain.SavedViewGrouping{
 			{Field: MyWorkActionItemGroupingColor, Direction: "asc"},
 			{Field: MyWorkActionItemGroupingPersonInCharge, Direction: "asc"},
@@ -235,7 +242,7 @@ func savedViewSurfaceIsMyWorkActionItems(surface string) bool {
 }
 
 func savedViewSurfaceIsHuddleActionItems(surface string) bool {
-	return surface == SavedViewSurfaceHuddleLogicGateActionItems || surface == SavedViewSurfaceHuddleNodeActionItems
+	return surface == SavedViewSurfaceHuddleLogicGateActionItems || surface == SavedViewSurfaceHuddleNodeCreatedActionItems || surface == SavedViewSurfaceHuddleNodeDueActionItems
 }
 
 func savedViewSurfaceIsActionItems(surface string) bool {

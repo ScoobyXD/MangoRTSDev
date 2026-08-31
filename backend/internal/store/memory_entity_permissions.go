@@ -11,7 +11,6 @@ type memoryCompanyUserGroupMutationSnapshot struct {
 	recycleState           memoryRecycleBinSnapshot
 	userGroups             map[string]domain.CompanyUserGroup
 	userGroupMembers       map[string]domain.CompanyUserGroupMember
-	raciTabItems           map[string]domain.RACITabItem
 	gvicV2Sequence         int64
 	permissionV2Sequence   int64
 	domainEvents           map[string]domain.DomainEvent
@@ -25,7 +24,6 @@ func (r *MemoryRepo) snapshotCompanyUserGroupMutationLocked() memoryCompanyUserG
 		recycleState:           r.snapshotRecycleStateLocked(),
 		userGroups:             cloneMap(r.userGroups),
 		userGroupMembers:       cloneMap(r.userGroupMembers),
-		raciTabItems:           cloneMap(r.raciTabItems),
 		gvicV2Sequence:         r.gvicV2Sequence,
 		permissionV2Sequence:   r.permissionV2Sequence,
 		domainEvents:           cloneMap(r.domainEvents),
@@ -39,7 +37,6 @@ func (r *MemoryRepo) restoreCompanyUserGroupMutationLocked(snapshot memoryCompan
 	r.restoreRecycleSnapshotLocked(snapshot.recycleState)
 	r.userGroups = cloneMap(snapshot.userGroups)
 	r.userGroupMembers = cloneMap(snapshot.userGroupMembers)
-	r.raciTabItems = cloneMap(snapshot.raciTabItems)
 	r.gvicV2Sequence = snapshot.gvicV2Sequence
 	r.permissionV2Sequence = snapshot.permissionV2Sequence
 	r.domainEvents = cloneMap(snapshot.domainEvents)
@@ -162,7 +159,6 @@ func (r *MemoryRepo) UpdateCompanyUserGroup(companyID, groupID string, parentGro
 			oldAffectedGroupIDs[affectedGroupID] = true
 		}
 		r.syncRACIGroupDependentResourcesForGroupSetLocked(companyID, oldAffectedGroupIDs)
-		r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	}
 	payload := map[string]any{"group_id": groupID}
 	if parentChanged {
@@ -265,7 +261,6 @@ func (r *MemoryRepo) DeleteCompanyUserGroup(companyID, groupID string) error {
 		}
 	}
 	r.syncRACIResourceKeysLocked(companyID, affectedRACIKeys)
-	r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_user_group_deleted", map[string]any{"group_id": groupID})); err != nil {
 		r.restoreCompanyUserGroupMutationLocked(before)
 		return err
@@ -340,7 +335,6 @@ func (r *MemoryRepo) SetCompanyUserGroupMembers(companyID, groupID string, userI
 		items = append(items, r.withCompanyUserGroupMemberUserLocked(member))
 	}
 	sortCompanyUserGroupMembers(items)
-	r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	if _, err := r.appendDomainEventLocked(workspaceDomainEventInput(companyID, "company_user_group_members_updated", map[string]any{"group_id": groupID})); err != nil {
 		r.restoreCompanyUserGroupMutationLocked(before)
 		return nil, err

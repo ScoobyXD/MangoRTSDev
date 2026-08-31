@@ -36,43 +36,44 @@ const (
 )
 
 const (
-	realtimeNotificationScopePrefix    = "notifications:user:"
-	realtimePersonalMailboxScopePrefix = "mailbox:personal:account:"
-	realtimeSharedMailboxScopePrefix   = "mailbox:shared:"
-	realtimeChatScopePrefix            = "chat:node:"
-	realtimeBoardScopePrefix           = "board:"
-	realtimeEditorScopePrefix          = "editor:"
-	realtimeEditorJSONScopePrefix      = "editor-json:"
-	realtimeRACITabsScope              = "raci-tabs:company"
-	realtimeRACITabsScopePrefix        = "raci-tabs:"
-	realtimeProcessMapScope            = "process-map:company"
-	realtimeProcessMapScopePrefix      = "process-map:"
+	realtimeNotificationScopePrefix           = "notifications:user:"
+	realtimePersonalMailboxScopePrefix        = "mailbox:personal:account:"
+	realtimeSharedMailboxScopePrefix          = "mailbox:shared:"
+	realtimeChatScopePrefix                   = "chat:node:"
+	realtimeBoardScopePrefix                  = "board:"
+	realtimeEditorScopePrefix                 = "editor:"
+	realtimeEditorJSONScopePrefix             = "editor-json:"
+	realtimeHuddleActionItemsScopePrefix      = store.HuddleActionItemsRealtimeScopePrefix
+	realtimeHuddleBoardActionItemsScopePrefix = store.HuddleBoardActionItemsRealtimeScopePrefix
+	realtimeProcessMapScope                   = "process-map:company"
+	realtimeProcessMapScopePrefix             = "process-map:"
 )
 
 const (
-	realtimeMessageReady                 = "ready"
-	realtimeMessageSubscribe             = "subscribe"
-	realtimeMessageUnsubscribe           = "unsubscribe"
-	realtimeMessageSubscriptionAccepted  = "subscription.accepted"
-	realtimeMessageSubscriptionRejected  = "subscription.rejected"
-	realtimeMessageNotificationCreated   = "notification.created"
-	realtimeMessageNotificationDeleted   = "notification.deleted"
-	realtimeMessageNotificationsCleared  = "notifications.cleared"
-	realtimeMessageChatCreated           = "chat.message.created"
-	realtimeMessageChatUpdated           = "chat.message.updated"
-	realtimeMessageChatDeleted           = "chat.message.deleted"
-	realtimeMessageKanbanChanged         = "kanban.changed"
-	realtimeMessageMailboxMessageChanged = "mailbox.message.changed"
-	realtimeMessageMailboxFolderChanged  = "mailbox.folder.changed"
-	realtimeMessageEditorDeltaCommitted  = "editor.delta.committed"
-	realtimeMessageEditorDocumentDeleted = "editor.document.deleted"
-	realtimeMessageProcessMapChanged     = "process_map.changed"
-	realtimeMessageHeartbeatChallenge    = "heartbeat.challenge"
-	realtimeMessageHeartbeatResponse     = "heartbeat.response"
-	realtimeMessageHeartbeatConfirmed    = "heartbeat.confirmed"
-	realtimeMessagePing                  = "ping"
-	realtimeMessagePong                  = "pong"
-	realtimeMessageError                 = "error"
+	realtimeMessageReady                    = "ready"
+	realtimeMessageSubscribe                = "subscribe"
+	realtimeMessageUnsubscribe              = "unsubscribe"
+	realtimeMessageSubscriptionAccepted     = "subscription.accepted"
+	realtimeMessageSubscriptionRejected     = "subscription.rejected"
+	realtimeMessageNotificationCreated      = "notification.created"
+	realtimeMessageNotificationDeleted      = "notification.deleted"
+	realtimeMessageNotificationsCleared     = "notifications.cleared"
+	realtimeMessageChatCreated              = "chat.message.created"
+	realtimeMessageChatUpdated              = "chat.message.updated"
+	realtimeMessageChatDeleted              = "chat.message.deleted"
+	realtimeMessageKanbanChanged            = "kanban.changed"
+	realtimeMessageMailboxMessageChanged    = "mailbox.message.changed"
+	realtimeMessageMailboxFolderChanged     = "mailbox.folder.changed"
+	realtimeMessageEditorDeltaCommitted     = "editor.delta.committed"
+	realtimeMessageEditorDocumentDeleted    = "editor.document.deleted"
+	realtimeMessageHuddleActionItemsChanged = store.HuddleActionItemsChangedEventType
+	realtimeMessageProcessMapChanged        = "process_map.changed"
+	realtimeMessageHeartbeatChallenge       = "heartbeat.challenge"
+	realtimeMessageHeartbeatResponse        = "heartbeat.response"
+	realtimeMessageHeartbeatConfirmed       = "heartbeat.confirmed"
+	realtimeMessagePing                     = "ping"
+	realtimeMessagePong                     = "pong"
+	realtimeMessageError                    = "error"
 )
 
 type realtimeOutboundFrame struct {
@@ -427,9 +428,6 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 		}
 		return true, "", nil
 	}
-	if strings.TrimSpace(scope) == realtimeRACITabsScope {
-		return true, "", nil
-	}
 	if userID, accountEmail := realtimePersonalMailboxIdentityFromScope(scope); userID != "" {
 		if userID != strings.TrimSpace(actor.User.UserID) {
 			return false, "access_denied", nil
@@ -460,6 +458,12 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 			return false, "unsupported_scope", nil
 		}
 		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
+	}
+	if huddleNodeID := realtimeHuddleActionItemsNodeIDFromScope(scope); huddleNodeID != "" {
+		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeHuddleNode, huddleNodeID, store.EntityPermissionEdit)
+	}
+	if huddleLogicGateID := realtimeHuddleBoardActionItemsIDFromScope(scope); huddleLogicGateID != "" {
+		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeHuddleLogicGate, huddleLogicGateID, store.EntityPermissionEdit)
 	}
 	if document, ok := realtimeEditorDocumentFromScope(companyID, scope); ok {
 		return s.authorizeRealtimeEntityScope(actor, companyID, document.ResourceType, document.ResourceID, store.EntityPermissionEdit)
@@ -606,6 +610,14 @@ func realtimeChatNodeIDFromScope(scope string) string {
 	return realtimeResourceIDFromScope(scope, realtimeChatScopePrefix)
 }
 
+func realtimeHuddleActionItemsNodeIDFromScope(scope string) string {
+	return realtimeResourceIDFromScope(scope, realtimeHuddleActionItemsScopePrefix)
+}
+
+func realtimeHuddleBoardActionItemsIDFromScope(scope string) string {
+	return realtimeResourceIDFromScope(scope, realtimeHuddleBoardActionItemsScopePrefix)
+}
+
 func realtimeNotificationScope(userID string) string {
 	return realtimeResourceScope(realtimeNotificationScopePrefix, userID)
 }
@@ -690,7 +702,8 @@ func realtimeKnownScopePrefix(scope string) bool {
 		realtimeBoardScopePrefix,
 		realtimeEditorScopePrefix,
 		realtimeEditorJSONScopePrefix,
-		realtimeRACITabsScopePrefix,
+		realtimeHuddleActionItemsScopePrefix,
+		realtimeHuddleBoardActionItemsScopePrefix,
 		realtimeProcessMapScopePrefix,
 	} {
 		if strings.HasPrefix(strings.TrimSpace(scope), prefix) {
@@ -704,9 +717,6 @@ func realtimeScopeType(scope string) string {
 	if realtimeNotificationUserIDFromScope(scope) != "" {
 		return "notifications"
 	}
-	if strings.TrimSpace(scope) == realtimeRACITabsScope {
-		return "raci-tabs"
-	}
 	if strings.TrimSpace(scope) == realtimeProcessMapScope {
 		return "process-map"
 	}
@@ -719,6 +729,9 @@ func realtimeScopeType(scope string) string {
 	}
 	if realtimeBoardIDFromScope(scope) != "" {
 		return "board"
+	}
+	if realtimeHuddleActionItemsNodeIDFromScope(scope) != "" || realtimeHuddleBoardActionItemsIDFromScope(scope) != "" {
+		return "huddle-action-items"
 	}
 	if _, ok := realtimeEditorDocumentFromScope("00000000-0000-0000-0000-000000000000", scope); ok {
 		return "editor"
@@ -741,7 +754,7 @@ func (s *Server) recordRealtimeActiveSubscriptions() {
 		return
 	}
 	counts := s.realtimeRegistry.scopeTypeCounts()
-	for _, scopeType := range []string{"notifications", "mailbox", "chat", "board", "editor", "raci-tabs", "process-map"} {
+	for _, scopeType := range []string{"notifications", "mailbox", "chat", "board", "editor", "huddle-action-items", "process-map"} {
 		s.recordOperationalMetric("realtime.active_subscriptions", scopeType, int64(counts[scopeType]), 0)
 	}
 }

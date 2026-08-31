@@ -193,7 +193,7 @@ export const LogicGateKPISection: React.FC<Props> = ({ companyID, logicGateID, c
       await requestJSON(`/v1/logic-gates/${encodeURIComponent(logicGateID)}/huddle-logic-gates/${encodeURIComponent(item.huddle_logic_gate_id)}?company_id=${encodeURIComponent(companyID)}`, { method: "DELETE" });
       setHuddleLogicGates((current) => current.filter((candidate) => candidate.huddle_logic_gate_id !== item.huddle_logic_gate_id));
     } catch (cause) {
-      setHuddleError(cause instanceof Error ? cause.message : "Could not remove Huddle Process");
+      setHuddleError(cause instanceof Error ? cause.message : "Could not remove Huddle Board");
     }
   };
   const openHuddleLogicGate = (item: HuddleLogicGate) => {
@@ -202,19 +202,19 @@ export const LogicGateKPISection: React.FC<Props> = ({ companyID, logicGateID, c
   const closePopup = () => { if (open) void loadPreview(open); setOpen(null); };
   return (
     <div data-logic-gate-relationship-tray="split" style={relationshipTrayStyle}>
-      <section aria-label="Associated Huddle Processes" style={traySectionStyle}>
-        <div style={sectionHeaderStyle}><span>Huddle Processes</span>{canEdit && <button type="button" aria-label="Add Huddle Process" onClick={openHuddlePicker} style={buttonStyle}>＋</button>}</div>
+      <section aria-label="Associated Huddle Boards" style={traySectionStyle}>
+        <div style={sectionHeaderStyle}><span>Huddle Boards</span>{canEdit && <button type="button" aria-label="Add Huddle Board" onClick={openHuddlePicker} style={buttonStyle}>＋</button>}</div>
         <div style={cardRailStyle}>
           {huddleLogicGates.map((item) => (
             <article key={item.huddle_logic_gate_id} data-logic-gate-huddle-card={item.huddle_logic_gate_id} style={huddleCardStyle}>
-              <button type="button" aria-label={`Open ${item.header} Huddle Process`} onClick={() => openHuddleLogicGate(item)} style={huddleCardButtonStyle}>
+              <button type="button" aria-label={`Open ${item.header} Huddle Board`} onClick={() => openHuddleLogicGate(item)} style={huddleCardButtonStyle}>
                 <HuddleResourceIcon type="huddle_logic_gate" />
                 <strong style={cardTitleStyle}>{item.header}</strong>
               </button>
-              {canEdit && <button type="button" aria-label={`Remove ${item.header} Huddle Process`} onClick={() => void removeHuddleLogicGate(item)} style={removeButtonStyle}>×</button>}
+              {canEdit && <button type="button" aria-label={`Remove ${item.header} Huddle Board`} onClick={() => void removeHuddleLogicGate(item)} style={removeButtonStyle}>×</button>}
             </article>
           ))}
-          {huddleLogicGates.length === 0 && <span style={emptyLabelStyle}>No Huddle Processes</span>}
+          {huddleLogicGates.length === 0 && <span style={emptyLabelStyle}>No Huddle Boards</span>}
         </div>
         {huddleError && <span role="alert" style={errorStyle}>{huddleError}</span>}
       </section>

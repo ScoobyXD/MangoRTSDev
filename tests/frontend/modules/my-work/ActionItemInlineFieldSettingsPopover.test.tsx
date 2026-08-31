@@ -30,7 +30,7 @@ const FIELDS: ReadonlyArray<ActionItemInlineFieldDefinition<FieldID>> = [
   { id: "analysis_due_date", label: "Analysis due date" },
   { id: "completion_due_date", label: "Completion due date" },
   { id: "status", label: "Status" },
-  { id: "huddle_process", label: "Huddle process" },
+  { id: "huddle_process", label: "Huddle Board" },
   { id: "details", label: "Details" },
   { id: "title", label: "Title" },
 ];

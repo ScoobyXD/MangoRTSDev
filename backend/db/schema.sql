@@ -575,174 +575,18 @@ end;
 $$;
 
 
---
--- Name: mangorts_raci_tabs_explorer_folder_changed(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_raci_tabs_explorer_folder_changed() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-begin
-  if old.parent_folder_id is distinct from new.parent_folder_id then
-    perform mangorts_sync_raci_tabs_explorer_subtree(new.company_id,new.folder_id);
-  end if;
-  return null;
-end;
-$$;
 
 
---
--- Name: mangorts_raci_tabs_explorer_item_changed(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_raci_tabs_explorer_item_changed() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-begin
-  if tg_op='DELETE' and old.target_type='logic_gate' then
-    perform mangorts_sync_raci_tabs_logic_gate(old.company_id, old.target_id);
-  elsif tg_op<>'DELETE' then
-    if tg_op='UPDATE' and old.target_type='logic_gate'
-       and (old.company_id,old.target_id,old.target_type)
-           is distinct from
-           (new.company_id,new.target_id,new.target_type) then
-      perform mangorts_sync_raci_tabs_logic_gate(old.company_id,old.target_id);
-    end if;
-    if new.target_type='logic_gate' then
-      perform mangorts_sync_raci_tabs_logic_gate(new.company_id,new.target_id);
-    end if;
-  end if;
-  return null;
-end;
-$$;
 
 
---
--- Name: mangorts_raci_tabs_group_changed(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_raci_tabs_group_changed() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-begin
-  if tg_op='DELETE' then
-    perform mangorts_sync_raci_tabs_group_ancestors(old.company_id,array[old.parent_group_id]);
-  elsif tg_op='UPDATE' and old.parent_group_id is distinct from new.parent_group_id then
-    perform mangorts_sync_raci_tabs_group_ancestors(old.company_id,array[old.parent_group_id]);
-    perform mangorts_sync_raci_tabs_group_ancestors(new.company_id,array[new.parent_group_id]);
-  end if;
-  return null;
-end;
-$$;
 
 
---
--- Name: mangorts_raci_tabs_group_member_changed(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_raci_tabs_group_member_changed() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-begin
-  if tg_op='DELETE' then
-    perform mangorts_sync_raci_tabs_group_ancestors(old.company_id,array[old.group_id]);
-  elsif tg_op='INSERT' then
-    perform mangorts_sync_raci_tabs_group_ancestors(new.company_id,array[new.group_id]);
-  else
-    perform mangorts_sync_raci_tabs_group_ancestors(old.company_id,array[old.group_id]);
-    if (old.company_id,old.group_id) is distinct from (new.company_id,new.group_id) then
-      perform mangorts_sync_raci_tabs_group_ancestors(new.company_id,array[new.group_id]);
-    end if;
-  end if;
-  return null;
-end;
-$$;
 
 
---
--- Name: mangorts_raci_tabs_logic_gate_changed(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_raci_tabs_logic_gate_changed() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-begin
-  if tg_op='DELETE' then
-    perform mangorts_sync_raci_tabs_logic_gate(old.company_id, old.logic_gate_id);
-  else
-    perform mangorts_sync_raci_tabs_logic_gate(new.company_id, new.logic_gate_id);
-  end if;
-  return null;
-end;
-$$;
 
 
---
--- Name: mangorts_raci_tabs_membership_added(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_raci_tabs_membership_added() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-declare
-  v_resource record;
-begin
-  for v_resource in
-    select distinct assignment.resource_type,assignment.resource_id
-    from resource_gvic_assignments assignment
-    where assignment.company_id=new.company_id
-      and assignment.principal_type='user'
-      and assignment.principal_id=new.user_id
-      and assignment.resource_type in ('logic_gate','company_explorer_folder')
-    order by assignment.resource_type,assignment.resource_id
-  loop
-    perform mangorts_sync_raci_tabs_policy_resource(
-      new.company_id,v_resource.resource_type,v_resource.resource_id
-    );
-  end loop;
-  return null;
-end;
-$$;
 
 
---
--- Name: mangorts_raci_tabs_policy_changed(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_raci_tabs_policy_changed() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-declare
-  v_company_id uuid;
-  v_resource_type text;
-  v_resource_id uuid;
-begin
-  if tg_op='UPDATE'
-     and (old.company_id,old.resource_type,old.resource_id)
-         is distinct from
-         (new.company_id,new.resource_type,new.resource_id) then
-    perform mangorts_sync_raci_tabs_policy_resource(old.company_id,old.resource_type,old.resource_id);
-  end if;
-  if tg_op='DELETE' then
-    v_company_id := old.company_id;
-    v_resource_type := old.resource_type;
-    v_resource_id := old.resource_id;
-  else
-    v_company_id := new.company_id;
-    v_resource_type := new.resource_type;
-    v_resource_id := new.resource_id;
-  end if;
-  perform mangorts_sync_raci_tabs_policy_resource(v_company_id,v_resource_type,v_resource_id);
-  return null;
-end;
-$$;
 
 
 --
@@ -770,210 +614,12 @@ end;
 $$;
 
 
---
--- Name: mangorts_sync_raci_tabs_explorer_subtree(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_sync_raci_tabs_explorer_subtree(p_company_id uuid, p_folder_id uuid) RETURNS void
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-declare
-  v_gate record;
-begin
-  for v_gate in
-    with recursive subtree(folder_id) as (
-      select folder.folder_id
-      from company_explorer_folders folder
-      where folder.company_id=p_company_id
-        and folder.folder_id=p_folder_id
-      union all
-      select child.folder_id
-      from subtree parent
-      join company_explorer_folders child
-        on child.company_id=p_company_id
-       and child.parent_folder_id=parent.folder_id
-    )
-    select distinct item.target_id as logic_gate_id
-    from subtree folder
-    join company_explorer_items item
-      on item.company_id=p_company_id
-     and item.parent_folder_id=folder.folder_id
-     and item.target_type='logic_gate'
-    order by item.target_id
-  loop
-    perform mangorts_sync_raci_tabs_logic_gate(p_company_id,v_gate.logic_gate_id);
-  end loop;
-end;
-$$;
 
 
---
--- Name: mangorts_sync_raci_tabs_group_ancestors(uuid, uuid[]); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_sync_raci_tabs_group_ancestors(p_company_id uuid, p_group_ids uuid[]) RETURNS void
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-declare
-  v_resource record;
-begin
-  for v_resource in
-    with recursive ancestors(group_id) as (
-      select distinct seed.group_id
-      from unnest(coalesce(p_group_ids,'{}'::uuid[])) seed(group_id)
-      where seed.group_id is not null
-      union
-      select parent.parent_group_id
-      from ancestors child
-      join company_user_groups parent
-        on parent.company_id=p_company_id
-       and parent.group_id=child.group_id
-      where parent.parent_group_id is not null
-    )
-    select distinct assignment.resource_type,assignment.resource_id
-    from ancestors affected
-    join resource_gvic_assignments assignment
-      on assignment.company_id=p_company_id
-     and assignment.principal_type='group'
-     and assignment.principal_id=affected.group_id
-    where assignment.resource_type in ('logic_gate','company_explorer_folder')
-    order by assignment.resource_type,assignment.resource_id
-  loop
-    perform mangorts_sync_raci_tabs_policy_resource(
-      p_company_id,v_resource.resource_type,v_resource.resource_id
-    );
-  end loop;
-end;
-$$;
 
 
---
--- Name: mangorts_sync_raci_tabs_logic_gate(uuid, uuid); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_sync_raci_tabs_logic_gate(p_company_id uuid, p_logic_gate_id uuid) RETURNS void
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-declare
-  v_name text;
-begin
-  select gate.header
-  into v_name
-  from logic_gates gate
-  where gate.company_id=p_company_id
-    and gate.logic_gate_id=p_logic_gate_id;
-
-  if not found then
-    delete from raci_tabs_items item
-    where item.company_id=p_company_id
-      and item.logic_gate_id=p_logic_gate_id;
-    return;
-  end if;
-
-  with effective as materialized (
-    select assignment.user_id, assignment.role
-    from mangorts_v2_effective_gvic_assignments(
-      p_company_id,
-      'logic_gate',
-      p_logic_gate_id
-    ) assignment
-  ), prepared as (
-    select
-      p_company_id as company_id,
-      effective.user_id,
-      effective.role,
-      p_logic_gate_id as logic_gate_id,
-      case when current_item.role=effective.role then current_item.folder_id else null end as folder_id,
-      v_name as name,
-      case
-        when current_item.role=effective.role then current_item.position
-        else coalesce((
-          select max(sibling.position)
-          from (
-            select folder.position
-            from raci_tabs_folders folder
-            where folder.company_id=p_company_id
-              and folder.user_id=effective.user_id
-              and folder.role=effective.role
-              and folder.parent_folder_id is null
-            union all
-            select item.position
-            from raci_tabs_items item
-            where item.company_id=p_company_id
-              and item.user_id=effective.user_id
-              and item.role=effective.role
-              and item.folder_id is null
-              and item.logic_gate_id<>p_logic_gate_id
-          ) sibling
-        ), 0) + 1000
-      end as position,
-      coalesce(current_item.created_timestamp, now()) as created_timestamp
-    from effective
-    left join raci_tabs_items current_item
-      on current_item.company_id=p_company_id
-     and current_item.user_id=effective.user_id
-     and current_item.logic_gate_id=p_logic_gate_id
-  )
-  insert into raci_tabs_items(
-    company_id, user_id, role, logic_gate_id, folder_id, name, position,
-    created_timestamp, updated_timestamp
-  )
-  select
-    prepared.company_id,
-    prepared.user_id,
-    prepared.role,
-    prepared.logic_gate_id,
-    prepared.folder_id,
-    prepared.name,
-    prepared.position,
-    prepared.created_timestamp,
-    now()
-  from prepared
-  on conflict (company_id, user_id, logic_gate_id) do update
-  set role=excluded.role,
-      folder_id=excluded.folder_id,
-      name=excluded.name,
-      position=excluded.position,
-      updated_timestamp=now()
-  where (raci_tabs_items.role, raci_tabs_items.folder_id, raci_tabs_items.name, raci_tabs_items.position)
-        is distinct from
-        (excluded.role, excluded.folder_id, excluded.name, excluded.position);
-
-  delete from raci_tabs_items item
-  where item.company_id=p_company_id
-    and item.logic_gate_id=p_logic_gate_id
-    and not exists (
-      select 1
-      from mangorts_v2_effective_gvic_assignments(
-        p_company_id,
-        'logic_gate',
-        p_logic_gate_id
-      ) effective
-      where effective.user_id=item.user_id
-    );
-end;
-$$;
 
 
---
--- Name: mangorts_sync_raci_tabs_policy_resource(uuid, text, uuid); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.mangorts_sync_raci_tabs_policy_resource(p_company_id uuid, p_resource_type text, p_resource_id uuid) RETURNS void
-    LANGUAGE plpgsql
-    SET search_path TO 'public', 'pg_temp'
-    AS $$
-begin
-  if p_resource_type='logic_gate' then
-    perform mangorts_sync_raci_tabs_logic_gate(p_company_id,p_resource_id);
-  elsif p_resource_type='company_explorer_folder' then
-    perform mangorts_sync_raci_tabs_explorer_subtree(p_company_id,p_resource_id);
-  end if;
-end;
-$$;
 
 
 --
@@ -4600,6 +4246,7 @@ CREATE TABLE public.huddle_nodes (
     huddle_node_id uuid NOT NULL,
     huddle_logic_gate_id uuid NOT NULL,
     name text NOT NULL,
+    huddle_date date DEFAULT ((statement_timestamp() AT TIME ZONE 'America/Los_Angeles'::text))::date NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT huddle_nodes_name_chk CHECK ((btrim(name) <> ''::text))
@@ -5338,43 +4985,8 @@ CREATE TABLE public.project_textboxes_history (
 );
 
 
---
--- Name: raci_tabs_folders; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.raci_tabs_folders (
-    company_id uuid NOT NULL,
-    folder_id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    role text NOT NULL,
-    parent_folder_id uuid,
-    name text NOT NULL,
-    "position" integer DEFAULT 0 NOT NULL,
-    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT raci_tabs_folders_name_nonblank_chk CHECK ((btrim(name) <> ''::text)),
-    CONSTRAINT raci_tabs_folders_not_self_parent_chk CHECK ((parent_folder_id IS DISTINCT FROM folder_id)),
-    CONSTRAINT raci_tabs_folders_role_chk CHECK ((role = ANY (ARRAY['responsible'::text, 'accountable'::text, 'consulted'::text, 'informed'::text])))
-);
 
 
---
--- Name: raci_tabs_items; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.raci_tabs_items (
-    company_id uuid NOT NULL,
-    user_id uuid NOT NULL,
-    role text NOT NULL,
-    logic_gate_id uuid NOT NULL,
-    folder_id uuid,
-    name text NOT NULL,
-    "position" integer DEFAULT 0 NOT NULL,
-    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT raci_tabs_items_name_nonblank_chk CHECK ((btrim(name) <> ''::text)),
-    CONSTRAINT raci_tabs_items_role_chk CHECK ((role = ANY (ARRAY['responsible'::text, 'accountable'::text, 'consulted'::text, 'informed'::text])))
-);
 
 
 --
@@ -5713,7 +5325,7 @@ CREATE TABLE public.saved_views (
     CONSTRAINT saved_views_name_nonblank_chk CHECK ((btrim(name) <> ''::text)),
     CONSTRAINT saved_views_principal_chk CHECK ((principal = ANY (ARRAY['user'::text, 'group'::text]))),
     CONSTRAINT saved_views_settings_object_chk CHECK ((jsonb_typeof(settings) = 'object'::text)),
-    CONSTRAINT saved_views_surface_chk CHECK ((surface = ANY (ARRAY['updates'::text, 'logic_gate_kanban'::text, 'my_work_action_items_mine'::text, 'my_work_action_items_delegated'::text, 'huddle_logic_gate_action_items'::text, 'huddle_node_action_items'::text])))
+    CONSTRAINT saved_views_surface_chk CHECK ((surface = ANY (ARRAY['updates'::text, 'logic_gate_kanban'::text, 'my_work_action_items_mine'::text, 'my_work_action_items_delegated'::text, 'huddle_logic_gate_action_items'::text, 'huddle_node_created_action_items'::text, 'huddle_node_due_action_items'::text])))
 );
 
 
@@ -6532,28 +6144,10 @@ ALTER TABLE ONLY public.projects
     ADD CONSTRAINT projects_pkey PRIMARY KEY (company_id, project_id);
 
 
---
--- Name: raci_tabs_folders raci_tabs_folders_company_id_user_id_role_folder_id_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raci_tabs_folders
-    ADD CONSTRAINT raci_tabs_folders_company_id_user_id_role_folder_id_key UNIQUE (company_id, user_id, role, folder_id);
 
 
---
--- Name: raci_tabs_folders raci_tabs_folders_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raci_tabs_folders
-    ADD CONSTRAINT raci_tabs_folders_pkey PRIMARY KEY (folder_id);
 
 
---
--- Name: raci_tabs_items raci_tabs_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raci_tabs_items
-    ADD CONSTRAINT raci_tabs_items_pkey PRIMARY KEY (company_id, user_id, logic_gate_id);
 
 
 --
@@ -7579,25 +7173,10 @@ CREATE INDEX idx_projects_company_name ON public.projects USING btree (company_i
 CREATE INDEX idx_projects_name_trgm ON public.projects USING gin (lower(name) public.gin_trgm_ops);
 
 
---
--- Name: idx_raci_tabs_folders_owner_role_parent_position; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_raci_tabs_folders_owner_role_parent_position ON public.raci_tabs_folders USING btree (company_id, user_id, role, parent_folder_id, "position", created_timestamp, name, folder_id);
 
 
---
--- Name: idx_raci_tabs_items_logic_gate; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_raci_tabs_items_logic_gate ON public.raci_tabs_items USING btree (company_id, logic_gate_id, user_id);
 
 
---
--- Name: idx_raci_tabs_items_owner_role_folder_position; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_raci_tabs_items_owner_role_folder_position ON public.raci_tabs_items USING btree (company_id, user_id, role, folder_id, "position", created_timestamp, name, logic_gate_id);
 
 
 --
@@ -7828,7 +7407,7 @@ CREATE UNIQUE INDEX idx_saved_views_logic_gate_kanban_user_single ON public.save
 -- Name: idx_saved_views_action_items_user_single; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX idx_saved_views_action_items_user_single ON public.saved_views USING btree (company_id, surface, principal, principal_id) WHERE ((surface = ANY (ARRAY['my_work_action_items_mine'::text, 'my_work_action_items_delegated'::text, 'huddle_logic_gate_action_items'::text, 'huddle_node_action_items'::text])) AND (principal = 'user'::text));
+CREATE UNIQUE INDEX idx_saved_views_action_items_user_single ON public.saved_views USING btree (company_id, surface, principal, principal_id) WHERE ((surface = ANY (ARRAY['my_work_action_items_mine'::text, 'my_work_action_items_delegated'::text, 'huddle_logic_gate_action_items'::text, 'huddle_node_created_action_items'::text, 'huddle_node_due_action_items'::text])) AND (principal = 'user'::text));
 
 
 --
@@ -8440,60 +8019,20 @@ CREATE CONSTRAINT TRIGGER trg_validate_project_email_chat_relationship AFTER INS
 CREATE TRIGGER trg_validate_resource_operational_relationship BEFORE INSERT OR UPDATE ON public.resource_operational_relationships FOR EACH ROW EXECUTE FUNCTION public.trg_validate_resource_operational_relationship();
 
 
---
--- Name: resource_gvic_assignments trg_zz_raci_tabs_assignment_changed; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_zz_raci_tabs_assignment_changed AFTER INSERT OR DELETE OR UPDATE ON public.resource_gvic_assignments FOR EACH ROW EXECUTE FUNCTION public.mangorts_raci_tabs_policy_changed();
 
 
---
--- Name: company_explorer_folders trg_zz_raci_tabs_explorer_folder_changed; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_zz_raci_tabs_explorer_folder_changed AFTER UPDATE OF parent_folder_id ON public.company_explorer_folders FOR EACH ROW WHEN ((old.parent_folder_id IS DISTINCT FROM new.parent_folder_id)) EXECUTE FUNCTION public.mangorts_raci_tabs_explorer_folder_changed();
 
 
---
--- Name: company_explorer_items trg_zz_raci_tabs_explorer_item_changed; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_zz_raci_tabs_explorer_item_changed AFTER INSERT OR DELETE OR UPDATE OF parent_folder_id, target_id, target_type ON public.company_explorer_items FOR EACH ROW EXECUTE FUNCTION public.mangorts_raci_tabs_explorer_item_changed();
 
 
---
--- Name: company_user_groups trg_zz_raci_tabs_group_changed; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_zz_raci_tabs_group_changed AFTER DELETE OR UPDATE OF parent_group_id ON public.company_user_groups FOR EACH ROW EXECUTE FUNCTION public.mangorts_raci_tabs_group_changed();
 
 
---
--- Name: company_user_group_members trg_zz_raci_tabs_group_member_changed; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_zz_raci_tabs_group_member_changed AFTER INSERT OR DELETE OR UPDATE ON public.company_user_group_members FOR EACH ROW EXECUTE FUNCTION public.mangorts_raci_tabs_group_member_changed();
 
 
---
--- Name: logic_gates trg_zz_raci_tabs_logic_gate_changed; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_zz_raci_tabs_logic_gate_changed AFTER INSERT OR DELETE OR UPDATE OF header ON public.logic_gates FOR EACH ROW EXECUTE FUNCTION public.mangorts_raci_tabs_logic_gate_changed();
 
 
---
--- Name: company_memberships trg_zz_raci_tabs_membership_changed; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_zz_raci_tabs_membership_changed AFTER INSERT ON public.company_memberships FOR EACH ROW EXECUTE FUNCTION public.mangorts_raci_tabs_membership_added();
 
 
---
--- Name: resource_gvic_settings trg_zz_raci_tabs_setting_changed; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_zz_raci_tabs_setting_changed AFTER INSERT OR DELETE OR UPDATE ON public.resource_gvic_settings FOR EACH ROW EXECUTE FUNCTION public.mangorts_raci_tabs_policy_changed();
 
 
 --
@@ -9656,44 +9195,14 @@ ALTER TABLE ONLY public.projects
     ADD CONSTRAINT projects_company_id_fkey FOREIGN KEY (company_id) REFERENCES public.companies(company_id) ON DELETE CASCADE;
 
 
---
--- Name: raci_tabs_folders raci_tabs_folders_company_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raci_tabs_folders
-    ADD CONSTRAINT raci_tabs_folders_company_id_user_id_fkey FOREIGN KEY (company_id, user_id) REFERENCES public.company_memberships(company_id, user_id) ON DELETE CASCADE;
 
 
---
--- Name: raci_tabs_folders raci_tabs_folders_company_id_user_id_role_parent_folder_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raci_tabs_folders
-    ADD CONSTRAINT raci_tabs_folders_company_id_user_id_role_parent_folder_id_fkey FOREIGN KEY (company_id, user_id, role, parent_folder_id) REFERENCES public.raci_tabs_folders(company_id, user_id, role, folder_id) ON DELETE CASCADE;
 
 
---
--- Name: raci_tabs_items raci_tabs_items_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raci_tabs_items
-    ADD CONSTRAINT raci_tabs_items_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
 
 
---
--- Name: raci_tabs_items raci_tabs_items_company_id_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raci_tabs_items
-    ADD CONSTRAINT raci_tabs_items_company_id_user_id_fkey FOREIGN KEY (company_id, user_id) REFERENCES public.company_memberships(company_id, user_id) ON DELETE CASCADE;
 
 
---
--- Name: raci_tabs_items raci_tabs_items_company_id_user_id_role_folder_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raci_tabs_items
-    ADD CONSTRAINT raci_tabs_items_company_id_user_id_role_folder_id_fkey FOREIGN KEY (company_id, user_id, role, folder_id) REFERENCES public.raci_tabs_folders(company_id, user_id, role, folder_id) ON DELETE CASCADE;
 
 
 --

@@ -66,10 +66,6 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 					restore()
 					return domain.DomainEvent{}, err
 				}
-				if err := r.enqueueRACITabsRealtimeForDomainEventsLocked([]domain.DomainEvent{existing}); err != nil {
-					restore()
-					return domain.DomainEvent{}, err
-				}
 				if err := r.enqueueProcessMapRealtimeForDomainEventsLocked([]domain.DomainEvent{existing}); err != nil {
 					restore()
 					return domain.DomainEvent{}, err
@@ -104,10 +100,6 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 	r.updateWorkspaceReadVersionsLocked(item)
 	r.updateLogicGateWorkReadVersionsLocked(item)
 	if err := r.enqueueKanbanRealtimeForDomainEventLocked(item); err != nil {
-		restore()
-		return domain.DomainEvent{}, err
-	}
-	if err := r.enqueueRACITabsRealtimeForDomainEventsLocked([]domain.DomainEvent{item}); err != nil {
 		restore()
 		return domain.DomainEvent{}, err
 	}
@@ -146,10 +138,6 @@ func (r *MemoryRepo) appendDomainEventsLocked(inputs []DomainEventInput) ([]doma
 	r.realtimeOutbox = maps.Clone(beforeOutbox)
 	r.realtimeOutboxSequence = beforeOutboxSequence
 	if err := r.enqueueKanbanRealtimeForDomainEventsLocked(events); err != nil {
-		restore()
-		return nil, err
-	}
-	if err := r.enqueueRACITabsRealtimeForDomainEventsLocked(events); err != nil {
 		restore()
 		return nil, err
 	}

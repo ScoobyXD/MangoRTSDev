@@ -58,13 +58,41 @@ test("Huddle Node overlays and Action Item refreshes stay visible across their o
   assert.doesNotMatch(popup, /zIndex/, "the rendered Huddle popup must not restore a picker-covering stack level inline");
   assert.match(surface, /EVENT_HUDDLE_ACTION_ITEMS_CHANGED/);
   assert.match(surface, /detail: \{ companyID, huddleLogicGateID \}/);
-  assert.match(surface, /detail\.huddleLogicGateID === resource\.resourceID/);
+  assert.match(surface, /detail\.huddleLogicGateID === expectedHuddleLogicGateID/);
   assert.match(surface, /pendingOwningProcessRefreshRef\.current = true/);
   assert.match(surface, /if \(huddleLogicGateID && pendingOwningProcessRefreshRef\.current\)/);
   assert.match(surface, /useRef\(resource\.huddleLogicGateID\?\.trim\(\) \?\? ""\)/);
   assert.match(surface, /huddleLogicGateID: resource\.resourceID/);
   assert.match(surface, /loadRequestIDRef\.current !== requestID/);
   assert.match(editor, /if \(source === "canonical"\) callbacksRef\.current\.onCanonicalDocumentChange\?\.\(normalizedCanonical\);\s*else callbacksRef\.current\.onDocumentSnapshotChange\?\.\(normalizedCanonical\);/);
+});
+
+test("Huddle Node realtime and page recovery reread the persisted date and reference state", () => {
+  const surface = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleResourceSurface.tsx"), "utf8");
+  const loadStart = surface.indexOf("const load = useCallback");
+  const pageRecoveryHandler = surface.indexOf("const refreshFocusedHuddleNode");
+  const pageRecoveryStart = surface.lastIndexOf("useEffect(() => {", pageRecoveryHandler);
+  const realtimeStart = surface.indexOf("const refreshRealtimeState");
+  const realtimeEnd = surface.indexOf("}, [apiBase, companyID, isGate, load, resource.resourceID]);", realtimeStart);
+  const load = surface.slice(loadStart, pageRecoveryStart);
+  const pageRecovery = surface.slice(pageRecoveryStart, realtimeStart);
+  const realtime = surface.slice(realtimeStart, realtimeEnd);
+
+  assert.ok(loadStart >= 0 && pageRecoveryHandler > loadStart && pageRecoveryStart > loadStart && realtimeStart > pageRecoveryStart && realtimeEnd > realtimeStart);
+  assert.match(load, /savedHuddleNodeDateRef\.current = loadedDate/);
+  assert.match(load, /setHuddleNodeDate\(loadedDate\)/);
+  assert.match(load, /setHuddleNodeViewingDate\(\(current\) => reconcileHuddleNodeViewingDate\(/);
+  assert.match(pageRecovery, /if \(isGate\) return undefined/);
+  assert.match(pageRecovery, /const refreshFocusedHuddleNode = \(\) => void load\(\)/);
+  assert.match(pageRecovery, /document\.visibilityState === "visible"[\s\S]+void load\(\)/);
+  assert.match(pageRecovery, /window\.addEventListener\("focus", refreshFocusedHuddleNode\)/);
+  assert.match(pageRecovery, /document\.addEventListener\("visibilitychange", refreshVisibleHuddleNode\)/);
+  assert.match(pageRecovery, /window\.removeEventListener\("focus", refreshFocusedHuddleNode\)/);
+  assert.match(pageRecovery, /document\.removeEventListener\("visibilitychange", refreshVisibleHuddleNode\)/);
+  assert.match(realtime, /setActionItemsRefreshToken\(\(current\) => current \+ 1\)/);
+  assert.match(realtime, /if \(!isGate\) void load\(\)/);
+  assert.match(realtime, /matchesHuddleActionItemsRealtimeMessage[\s\S]+refreshRealtimeState\(\)/);
+  assert.match(realtime, /onRecover: refreshRealtimeState/);
 });
 
 test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, RACI controls, icon actions, and raised sidebar rows", () => {
@@ -75,6 +103,7 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   const actionItemHelpers = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/huddleActionItems.ts"), "utf8");
   const actionItemRows = readFileSync(resolve(process.cwd(), "frontend/src/modules/action-items/ActionItemRow.tsx"), "utf8");
   const nodeWorkspace = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleNodeWorkspace.tsx"), "utf8");
+  const nodeDateControl = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleNodeDateControl.tsx"), "utf8");
   const editorParts = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/NodeWorkspaceSurfaceParts.tsx"), "utf8");
   const mangoEditor = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
   const cards = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleLogicGateCards.tsx"), "utf8");
@@ -110,10 +139,10 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.match(surface, /data-huddle-node-snapshot="true"/);
   assert.match(surface, /useState<"action_items" \| "processes">\("action_items"\)/);
   assert.match(surface, /useState<"action_items" \| "process_snapshot">\("action_items"\)/);
-  assert.match(surface, /ariaLabel="Huddle Process middle view"/);
+  assert.match(surface, /ariaLabel="Huddle Board middle view"/);
   assert.match(surface, /ariaLabel="Huddle Node detail view"/);
   assert.match(surface, /scope=\{\{ resourceType: "huddle_logic_gate", resourceID: resource\.resourceID \}\}/);
-  assert.match(surface, /scope=\{\{ resourceType: "huddle_node", resourceID: resource\.resourceID \}\}/);
+  assert.match(actionItems, /scope=\{\{ resourceType: "huddle_node", resourceID: props\.huddleNodeID \}\}/);
   assert.match(surface, /<HuddleNodeWorkspace/);
   assert.match(surface, /<HuddleActionItemsPanel/);
   assert.match(nodeWorkspace, /data-huddle-node-workspace="node-tools-without-email"/);
@@ -152,7 +181,7 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.match(actionItems, /refreshToken/);
   assert.match(actionItems, /loadRequestIDRef\.current !== requestID/);
   assert.match(actionItems, /EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION/);
-  assert.match(actionItems, /itemsRef\.current\.some/);
+  assert.doesNotMatch(actionItems, /itemsRef\.current\.some/, "an Action Item edit can make an item enter a filtered section");
   assert.match(actionItems, /<UniversalGroupingControls/);
   assert.match(actionItems, /<ActionItemOrderingEditor/);
   assert.match(actionItems, /<ActionItemInlineFieldSettingsSection/);
@@ -167,7 +196,16 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.match(actionItems, /<div aria-hidden="true" \/>/);
   assert.doesNotMatch(actionItemHelpers, /localStorage|actionItemGroupingStorageKey/);
   assert.match(actionItemHelpers, /huddle_logic_gate_action_items/);
-  assert.match(actionItemHelpers, /huddle_node_action_items/);
+  assert.match(actionItemHelpers, /huddle_node_created_action_items/);
+  assert.match(actionItemHelpers, /huddle_node_due_action_items/);
+  assert.doesNotMatch(actionItemHelpers, /["']huddle_node_action_items["']/);
+  assert.match(actionItems, /Created in this Huddle Node/);
+  assert.match(actionItems, /Due or Overdue/);
+  assert.match(actionItems, /excludedItemIDs=\{createdItemIDs\}/);
+  assert.match(actionItems, /referenceLabel="Huddle Node date"/);
+  assert.match(nodeDateControl, /data-huddle-node-date-control="true"/);
+  assert.match(nodeWorkspace, /<HuddleNodeDateControl/);
+  assert.match(nodeDateControl, /<EditorCalendarDateInput/);
   assert.match(actionItemRows, /<ActionItemIcon/);
   assert.match(actionItemRows, /mango-editor-action-item--\$\{color\}/);
   assert.match(actionItems, /openEditorEntityLink\(/);
@@ -203,10 +241,10 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
 
   assert.match(explorer, /data-sidebar-huddles-surface="elevated"/);
   assert.match(explorer, /data-huddle-row-raised/);
-  assert.match(explorer, /<HuddlePeopleIcon/);
+  assert.match(explorer, /<HuddleBoardIcon/);
   assert.match(explorer, /<HuddleResourceIcon type=\{item\.resource_type\}/);
   assert.match(explorer, /resource_type: "huddle_logic_gate"/);
-  assert.match(explorer, /aria-label="Create Huddle Process"/);
+  assert.match(explorer, /aria-label="Create Huddle Board"/);
   assert.match(explorer, /requestJSON<\{ huddle_logic_gate: HuddleLogicGate \}>\("\/v1\/huddle-logic-gates"/);
   assert.match(explorer, /method: "POST"/);
   assert.match(explorer, /json: \{ company_id: companyID, header \}/);
@@ -215,6 +253,12 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.doesNotMatch(explorer, /visibleItems/);
   assert.match(explorer, /onClick=\{\(\) => openItem\(item\)\}/);
   assert.doesNotMatch(explorer, /onDoubleClick=\{\(\) => openItem\(item\)\}/);
+  assert.match(explorer, /Open in new browser tab/);
+  assert.match(explorer, /Remove from Huddle Boards/);
+  assert.match(explorer, /Delete empty folder/);
+  assert.match(explorer, /HUDDLE_EXPLORER_DRAG_MIME/);
+  assert.match(explorer, /folderIsDescendant/);
+  assert.doesNotMatch(explorer, /<select|Move \$\{folder\.name\}|Move \$\{item\.name\}/);
   assert.match(surface, /name: "New Huddle Node"/);
   assert.doesNotMatch(surface, /window\.prompt\("Huddle Node name"/);
   assert.match(surface, /onClick=\{\(\) => onOpenNode\(/);

@@ -330,7 +330,7 @@ where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$4::uu
 	if response.Processes == nil || len(response.Processes.Items) != 1 || response.Processes.Items[0].LogicGateID != gate.LogicGateID {
 		t.Fatalf("Postgres processes = %+v", response.Processes)
 	}
-	if counts := response.Processes.Items[0].StatusCounts; counts != (domain.RACITabStatusCounts{InProgress: 1}) {
+	if counts := response.Processes.Items[0].StatusCounts; counts != (domain.MyWorkProcessStatusCounts{InProgress: 1}) {
 		t.Fatalf("Postgres process counts = %+v, want only the active In Progress Node", counts)
 	}
 	if response.Projects == nil || len(response.Projects.Items) != 1 || response.Projects.Items[0].ProjectID != projectResult.Project.ProjectID {
@@ -484,7 +484,7 @@ func TestPostgresMyWorkSelectedSubjectIntersectsViewerPermissions(t *testing.T) 
 	if viewerResult.Processes == nil || len(viewerResult.Processes.Items) != 1 || viewerResult.Processes.Items[0].LogicGateID != visible.LogicGateID {
 		t.Fatalf("selected-subject viewer result = %+v, want only visible process", viewerResult.Processes)
 	}
-	if counts := viewerResult.Processes.Items[0].StatusCounts; counts != (domain.RACITabStatusCounts{Pending: 1}) {
+	if counts := viewerResult.Processes.Items[0].StatusCounts; counts != (domain.MyWorkProcessStatusCounts{Pending: 1}) {
 		t.Fatalf("selected-subject viewer counts = %+v, want only viewer-visible Node", counts)
 	}
 	subjectResult, err := repo.GetMyWork(context.Background(), MyWorkQuery{
@@ -497,11 +497,11 @@ func TestPostgresMyWorkSelectedSubjectIntersectsViewerPermissions(t *testing.T) 
 	if subjectResult.Processes == nil || len(subjectResult.Processes.Items) != 2 {
 		t.Fatalf("selected subject's own result = %+v, want both processes", subjectResult.Processes)
 	}
-	subjectCounts := map[string]domain.RACITabStatusCounts{}
+	subjectCounts := map[string]domain.MyWorkProcessStatusCounts{}
 	for _, item := range subjectResult.Processes.Items {
 		subjectCounts[item.LogicGateID] = item.StatusCounts
 	}
-	if counts := subjectCounts[visible.LogicGateID]; counts != (domain.RACITabStatusCounts{Pending: 1, Review: 1}) {
+	if counts := subjectCounts[visible.LogicGateID]; counts != (domain.MyWorkProcessStatusCounts{Pending: 1, Review: 1}) {
 		t.Fatalf("selected subject's own counts = %+v, want both Nodes", counts)
 	}
 }

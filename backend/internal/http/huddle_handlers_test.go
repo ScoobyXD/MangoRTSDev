@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -49,6 +50,57 @@ func TestCreateHuddleLogicGateCreatesRootExplorerPlacement(t *testing.T) {
 	placement := explorer.Items[0]
 	if placement.ParentFolderID != nil || placement.ResourceType != store.EntityTypeHuddleLogicGate || placement.ResourceID != payload.HuddleLogicGate.HuddleLogicGateID {
 		t.Fatalf("root Huddle placement=%+v", placement)
+	}
+}
+
+func TestCreateHuddleNodeIgnoresClientDateAndUsesLosAngelesBusinessDate(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	const companyID = "69696969-6969-4696-8696-696969696969"
+	user := mustCreateUserPinUser(t, repo, "huddle-node-date-owner", companyID, "huddle-node-date@example.com", domain.RoleCompanyAdmin)
+	boardID := createHuddleLogicGateForHTTPTest(t, repo, companyID)
+	location, err := time.LoadLocation(store.HuddleBusinessTimeZone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now().In(location).Format(time.DateOnly)
+	body, err := json.Marshal(map[string]any{
+		"company_id": companyID, "huddle_logic_gate_id": boardID, "name": "Today",
+		"huddle_date": "1999-01-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/huddle-nodes", bytes.NewReader(body))
+	response := httptest.NewRecorder()
+	handler := NewServer(repo).Routes()
+	handler.ServeHTTP(response, userPinRequestWithActor(request, user, companyID, domain.RoleCompanyAdmin))
+	after := time.Now().In(location).Format(time.DateOnly)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created domain.HuddleNode
+	if err := json.NewDecoder(response.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created.HuddleDate == "1999-01-01" || (created.HuddleDate != before && created.HuddleDate != after) {
+		t.Fatalf("created Huddle date=%q, want server-selected Los Angeles date %q or %q", created.HuddleDate, before, after)
+	}
+	updateBody, err := json.Marshal(map[string]any{"company_id": companyID, "huddle_date": "0000-01-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateRequest := httptest.NewRequest(http.MethodPut, "/v1/huddle-nodes/"+created.HuddleNodeID, bytes.NewReader(updateBody))
+	updateResponse := httptest.NewRecorder()
+	handler.ServeHTTP(updateResponse, userPinRequestWithActor(updateRequest, user, companyID, domain.RoleCompanyAdmin))
+	if updateResponse.Code != http.StatusBadRequest {
+		t.Fatalf("year-zero date update status=%d body=%s, want 400", updateResponse.Code, updateResponse.Body.String())
+	}
+	stored, err := repo.GetHuddleNode(companyID, created.HuddleNodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.HuddleDate != created.HuddleDate {
+		t.Fatalf("rejected year-zero update changed Huddle date from %q to %q", created.HuddleDate, stored.HuddleDate)
 	}
 }
 

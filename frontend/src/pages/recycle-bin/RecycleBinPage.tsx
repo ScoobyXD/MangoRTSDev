@@ -5,6 +5,7 @@ import { getActiveCompanyID } from "../../auth/currentCompany.js";
 import { ExplorerRowIcon } from "../../icons/index.js";
 import { resolveExplorerClickSelection } from "../../modules/company-explorer/treePresentation.js";
 import { emitExplorerContextUpdated } from "../../modules/dashboardEvents.js";
+import { HuddleResourceIcon } from "../../modules/huddles/HuddleResourceIcon.js";
 import { listCompanyUserGroups, listCompanyUsers, type CompanyUser, type CompanyUserGroup, type CompanyUserGroupMember } from "../../modules/communications/communicationsApi.js";
 import {
   listRecycleBinItems,
@@ -412,10 +413,10 @@ function recycleBinUserLabel(user: CompanyUser | undefined, fallbackUserID: stri
 
 function formatObjectKind(kind: RecycleBinObjectKind, folderKind?: string): string {
   if (kind === "logic_gate") return "Process";
-  if (kind === "huddle_logic_gate") return "Huddle Process";
+  if (kind === "huddle_logic_gate") return "Huddle Board";
   if (kind === "huddle_node") return "Huddle Node";
-  if (kind === "huddle_explorer_folder") return "Huddles folder";
-  if (kind === "huddle_explorer_item") return "Huddles placement";
+  if (kind === "huddle_explorer_folder") return "Huddle Boards folder";
+  if (kind === "huddle_explorer_item") return "Huddle Boards placement";
   if (kind === "kpi") return "KPI";
   if (kind === "folder") return folderKind ? `${formatObjectKind(folderKind as RecycleBinObjectKind)} folder` : "Folder";
   if (kind === "kanban") return "Kanban";
@@ -455,7 +456,11 @@ function RecycleIcon(): React.ReactElement {
 function ObjectKindIcon({ kind }: { kind: RecycleBinObjectKind }): React.ReactElement {
   return (
     <span aria-hidden="true" style={recycleObjectIconStyle}>
-      <ExplorerRowIcon kind={kind === "huddle_node" ? "node" : kind === "huddle_logic_gate" || kind === "kpi" ? "logic_gate" : kind === "huddle_explorer_folder" || kind === "huddle_explorer_item" ? "folder" : kind} />
+      {kind === "huddle_logic_gate" || kind === "huddle_explorer_item"
+        ? <HuddleResourceIcon type="huddle_logic_gate" />
+        : kind === "huddle_node"
+          ? <HuddleResourceIcon type="huddle_node" />
+          : <ExplorerRowIcon kind={kind === "kpi" ? "logic_gate" : kind === "huddle_explorer_folder" ? "folder" : kind} />}
     </span>
   );
 }

@@ -231,9 +231,16 @@ type MyWorkNode struct {
 }
 
 type MyWorkProcess struct {
-	LogicGateID  string              `json:"logic_gate_id"`
-	Name         string              `json:"name"`
-	StatusCounts RACITabStatusCounts `json:"status_counts"`
+	LogicGateID  string                    `json:"logic_gate_id"`
+	Name         string                    `json:"name"`
+	StatusCounts MyWorkProcessStatusCounts `json:"status_counts"`
+}
+
+type MyWorkProcessStatusCounts struct {
+	Request    int `json:"request"`
+	Pending    int `json:"pending"`
+	InProgress int `json:"in_progress"`
+	Review     int `json:"review"`
 }
 
 type MyWorkProject struct {
@@ -388,54 +395,6 @@ type UserPinFolder struct {
 type UserPinTree struct {
 	PinFolders []UserPinFolder `json:"pin_folders"`
 	UserPins   []UserPin       `json:"user_pins"`
-}
-
-type RACITabStatusCounts struct {
-	Request    int `json:"request"`
-	Pending    int `json:"pending"`
-	InProgress int `json:"in_progress"`
-	Review     int `json:"review"`
-}
-
-type RACITabItem struct {
-	CompanyID        string              `json:"company_id"`
-	UserID           string              `json:"user_id"`
-	Role             string              `json:"role"`
-	LogicGateID      string              `json:"logic_gate_id"`
-	FolderID         *string             `json:"folder_id"`
-	Name             string              `json:"name"`
-	Position         int                 `json:"position"`
-	CreatedTimestamp time.Time           `json:"created_timestamp"`
-	UpdatedTimestamp time.Time           `json:"updated_timestamp"`
-	StatusCounts     RACITabStatusCounts `json:"status_counts"`
-}
-
-type RACITabFolder struct {
-	CompanyID        string              `json:"company_id"`
-	FolderID         string              `json:"folder_id"`
-	UserID           string              `json:"user_id"`
-	Role             string              `json:"role"`
-	ParentFolderID   *string             `json:"parent_folder_id"`
-	Name             string              `json:"name"`
-	Position         int                 `json:"position"`
-	CreatedTimestamp time.Time           `json:"created_timestamp"`
-	UpdatedTimestamp time.Time           `json:"updated_timestamp"`
-	HasChildren      bool                `json:"has_children"`
-	StatusCounts     RACITabStatusCounts `json:"status_counts"`
-}
-
-type RACITabRow struct {
-	RowKind string         `json:"row_kind"`
-	Folder  *RACITabFolder `json:"folder,omitempty"`
-	Item    *RACITabItem   `json:"item,omitempty"`
-}
-
-type RACITabPage struct {
-	Role           string              `json:"role"`
-	ParentFolderID *string             `json:"parent_folder_id"`
-	Rows           []RACITabRow        `json:"rows"`
-	StatusCounts   RACITabStatusCounts `json:"status_counts"`
-	NextCursor     string              `json:"next_cursor,omitempty"`
 }
 
 type EntityPermission struct {
@@ -1054,6 +1013,7 @@ type HuddleNode struct {
 	HuddleNodeID      string    `json:"huddle_node_id"`
 	HuddleLogicGateID string    `json:"huddle_logic_gate_id"`
 	Name              string    `json:"name"`
+	HuddleDate        string    `json:"huddle_date"`
 	CreatedTimestamp  time.Time `json:"created_timestamp"`
 	UpdatedTimestamp  time.Time `json:"updated_timestamp"`
 }

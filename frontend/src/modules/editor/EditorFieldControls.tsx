@@ -255,6 +255,33 @@ type EditorCalendarDateInputProps = {
   buttonStyle?: React.CSSProperties;
   floatingPortalTarget?: Element | DocumentFragment | null;
   openOnInputClick?: boolean;
+  theme?: Partial<EditorCalendarTheme>;
+  referenceDate?: string;
+  referenceLabel?: string;
+  iconOnly?: boolean;
+  allowClear?: boolean;
+};
+
+export type EditorCalendarTheme = {
+  accent: string;
+  secondary: string;
+  panelTint: string;
+  heading: string;
+  navigationBorder: string;
+  navigationTint: string;
+  navigationText: string;
+  todayText: string;
+};
+
+const DEFAULT_EDITOR_CALENDAR_THEME: EditorCalendarTheme = {
+  accent: "#0f766e",
+  secondary: "#38bdf8",
+  panelTint: "rgba(239,246,255,.96)",
+  heading: "#1e3a5f",
+  navigationBorder: "rgba(125,211,252,.46)",
+  navigationTint: "#e0f2fe",
+  navigationText: "#0284c7",
+  todayText: "#0369a1",
 };
 
 /** Shared editable date text plus the app's elevated calendar picker. */
@@ -275,6 +302,11 @@ export function EditorCalendarDateInput({
   buttonStyle,
   floatingPortalTarget,
   openOnInputClick = false,
+  theme,
+  referenceDate,
+  referenceLabel = "Reference date",
+  iconOnly = false,
+  allowClear = true,
 }: EditorCalendarDateInputProps) {
   const containerRef = useRef<HTMLSpanElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -285,7 +317,13 @@ export function EditorCalendarDateInput({
   const defaultPortalTarget = useAppOverlayPortalTarget(containerRef.current?.ownerDocument);
   const portalTarget = floatingPortalTarget ?? defaultPortalTarget;
   const position = useFloatingLayerPosition(containerRef, open, { width: 302, maxHeight: 382 });
+  const calendarTheme: EditorCalendarTheme = {
+    ...DEFAULT_EDITOR_CALENDAR_THEME,
+    accent,
+    ...theme,
+  };
   const selectedDate = normalizeNodeDueDateDraft(value) ?? "";
+  const normalizedReferenceDate = normalizeNodeDueDateDraft(referenceDate ?? "") ?? "";
   const today = calendarDateKey(new Date());
   const days = React.useMemo(() => calendarMonthDays(visibleMonth), [visibleMonth]);
   const commit = (next: string) => onCommit?.(next);
@@ -302,8 +340,8 @@ export function EditorCalendarDateInput({
     setOpen(false);
   };
   return (
-    <span ref={containerRef} style={{ position: "relative", display: "inline-grid", gridTemplateColumns: "minmax(0, 1fr) 24px", alignItems: "center", width: "100%", ...containerStyle }}>
-      <input
+    <span ref={containerRef} style={{ position: "relative", display: "inline-grid", gridTemplateColumns: iconOnly ? "24px" : "minmax(0, 1fr) 24px", alignItems: "center", width: iconOnly ? 24 : "100%", ...containerStyle }}>
+      {!iconOnly && <input
         id={id}
         value={displayValue && !editing ? displayValue : value}
         disabled={disabled}
@@ -334,7 +372,7 @@ export function EditorCalendarDateInput({
         placeholder={placeholder}
         aria-label={ariaLabel}
         style={{ width: "100%", minWidth: 0, border: "1px solid transparent", borderRight: "none", background: "transparent", color: "inherit", font: "inherit", padding: 0, outline: "none", caretColor: disabled ? "transparent" : "auto", cursor: disabled ? "default" : "text", ...inputStyle }}
-      />
+      />}
       <button
         type="button"
         title={`Choose ${pickerLabel.toLocaleLowerCase()}`}
@@ -349,9 +387,9 @@ export function EditorCalendarDateInput({
           setVisibleMonth(calendarMonthForValue(value));
           setOpen((current) => !current);
         }}
-        style={{ width: 24, height: 24, border: `1px solid ${open ? `${accent}88` : ruleColor}`, borderRadius: 7, background: open ? `linear-gradient(145deg, #ffffff, ${accent}18)` : panelBackground, color: accent, display: "grid", placeItems: "center", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.46 : 1, padding: 0, boxShadow: open ? `3px 3px 8px ${accent}24, -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.96)` : "2px 2px 6px rgba(148,163,184,.14), -2px -2px 6px rgba(255,255,255,.86), inset 1px 1px 0 rgba(255,255,255,.94)", ...buttonStyle }}
+        style={{ width: 24, height: 24, border: `1px solid ${open ? `${calendarTheme.accent}88` : ruleColor}`, borderRadius: 7, background: open ? `linear-gradient(145deg, #ffffff, ${calendarTheme.accent}18)` : panelBackground, color: calendarTheme.accent, display: "grid", placeItems: "center", cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.46 : 1, padding: 0, boxShadow: open ? `3px 3px 8px ${calendarTheme.accent}24, -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.96)` : "2px 2px 6px rgba(148,163,184,.14), -2px -2px 6px rgba(255,255,255,.86), inset 1px 1px 0 rgba(255,255,255,.94)", ...buttonStyle }}
       >
-        <CalendarIcon color={accent} />
+        <CalendarIcon color={calendarTheme.accent} />
       </button>
       {open && position && portalTarget && createPortal(
         <div
@@ -360,12 +398,12 @@ export function EditorCalendarDateInput({
           role="dialog"
           aria-label={`Choose ${pickerLabel.toLocaleLowerCase()}`}
           data-editor-calendar-popover={ariaLabel}
-          style={{ position: "fixed", zIndex: 12060, left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight, overflowY: "auto", pointerEvents: "auto", boxSizing: "border-box", display: "grid", gap: 10, padding: 12, border: "1px solid rgba(255,255,255,.92)", borderRadius: 16, background: "linear-gradient(145deg,rgba(255,255,255,.99),rgba(239,246,255,.96))", color: "#0f172a", boxShadow: "14px 16px 38px rgba(71,85,105,.22), -8px -8px 24px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.98)" }}
+          style={{ position: "fixed", zIndex: 12060, left: position.left, top: position.top, width: position.width, maxHeight: position.maxHeight, overflowY: "auto", pointerEvents: "auto", boxSizing: "border-box", display: "grid", gap: 10, padding: 12, border: "1px solid rgba(255,255,255,.92)", borderRadius: 16, background: `linear-gradient(145deg,rgba(255,255,255,.99),${calendarTheme.panelTint})`, color: "#0f172a", boxShadow: "14px 16px 38px rgba(71,85,105,.22), -8px -8px 24px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.98)" }}
         >
           <div style={{ display: "grid", gridTemplateColumns: "32px minmax(0,1fr) 32px", alignItems: "center", gap: 8 }}>
-            <button type="button" aria-label="Previous month" onClick={() => setVisibleMonth((month) => new Date(month.getFullYear(), month.getMonth() - 1, 1))} style={calendarNavigationButtonStyle}>‹</button>
-            <strong aria-live="polite" style={{ textAlign: "center", color: "#1e3a5f", fontSize: 13, fontWeight: 900 }}>{visibleMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
-            <button type="button" aria-label="Next month" onClick={() => setVisibleMonth((month) => new Date(month.getFullYear(), month.getMonth() + 1, 1))} style={calendarNavigationButtonStyle}>›</button>
+            <button type="button" aria-label="Previous month" onClick={() => setVisibleMonth((month) => new Date(month.getFullYear(), month.getMonth() - 1, 1))} style={calendarNavigationButtonStyle(calendarTheme)}>‹</button>
+            <strong aria-live="polite" style={{ textAlign: "center", color: calendarTheme.heading, fontSize: 13, fontWeight: 900 }}>{visibleMonth.toLocaleDateString(undefined, { month: "long", year: "numeric" })}</strong>
+            <button type="button" aria-label="Next month" onClick={() => setVisibleMonth((month) => new Date(month.getFullYear(), month.getMonth() + 1, 1))} style={calendarNavigationButtonStyle(calendarTheme)}>›</button>
           </div>
           <div aria-hidden="true" style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, color: "#64748b", fontSize: 10, fontWeight: 900, textAlign: "center" }}>
             {(["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const).map((day) => <span key={day}>{day}</span>)}
@@ -374,24 +412,27 @@ export function EditorCalendarDateInput({
             {days.map((day) => {
               const selected = day.key === selectedDate;
               const isToday = day.key === today;
+              const isReferenceDate = day.key === normalizedReferenceDate;
+              const dateLabel = day.date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" });
+              const accessibleLabel = [dateLabel, isToday ? "Today" : "", isReferenceDate ? referenceLabel : ""].filter(Boolean).join(", ");
               return (
                 <button
                   key={day.key}
                   type="button"
-                  aria-label={day.date.toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
+                  aria-label={accessibleLabel}
                   aria-pressed={selected}
                   aria-current={isToday ? "date" : undefined}
                   onClick={() => chooseDate(day.key)}
-                  style={calendarDayButtonStyle(selected, isToday, day.inMonth, accent)}
+                  style={calendarDayButtonStyle(selected, isToday, isReferenceDate, day.inMonth, calendarTheme)}
                 >
                   {day.date.getDate()}
                 </button>
               );
             })}
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, paddingTop: 2 }}>
-            <button type="button" onClick={() => { onChange(""); commit(""); setOpen(false); }} style={calendarFooterButtonStyle}>Clear</button>
-            <button type="button" onClick={() => chooseDate(today)} style={{ ...calendarFooterButtonStyle, color: "#0369a1" }}>Today</button>
+          <div style={{ display: "flex", justifyContent: allowClear ? "space-between" : "flex-end", gap: 8, paddingTop: 2 }}>
+            {allowClear && <button type="button" onClick={() => { onChange(""); commit(""); setOpen(false); }} style={calendarFooterButtonStyle}>Clear</button>}
+            <button type="button" onClick={() => chooseDate(today)} style={{ ...calendarFooterButtonStyle, color: calendarTheme.todayText }}>Today</button>
           </div>
         </div>,
         portalTarget,
@@ -400,36 +441,51 @@ export function EditorCalendarDateInput({
   );
 }
 
-const calendarNavigationButtonStyle: React.CSSProperties = {
-  width: 32,
-  height: 30,
-  border: "1px solid rgba(125,211,252,.46)",
-  borderRadius: 9,
-  background: "linear-gradient(145deg,#ffffff,#e0f2fe)",
-  color: "#0284c7",
-  font: "inherit",
-  fontSize: 20,
-  fontWeight: 800,
-  lineHeight: 1,
-  cursor: "pointer",
-  padding: 0,
-  boxShadow: "3px 3px 8px rgba(100,116,139,.14), -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.96)",
-};
+function calendarNavigationButtonStyle(theme: EditorCalendarTheme): React.CSSProperties {
+  return {
+    width: 32,
+    height: 30,
+    border: `1px solid ${theme.navigationBorder}`,
+    borderRadius: 9,
+    background: `linear-gradient(145deg,#ffffff,${theme.navigationTint})`,
+    color: theme.navigationText,
+    font: "inherit",
+    fontSize: 20,
+    fontWeight: 800,
+    lineHeight: 1,
+    cursor: "pointer",
+    padding: 0,
+    boxShadow: "3px 3px 8px rgba(100,116,139,.14), -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.96)",
+  };
+}
 
-function calendarDayButtonStyle(selected: boolean, today: boolean, inMonth: boolean, accent: string): React.CSSProperties {
+function calendarDayButtonStyle(
+  selected: boolean,
+  today: boolean,
+  referenceDate: boolean,
+  inMonth: boolean,
+  theme: EditorCalendarTheme,
+): React.CSSProperties {
+  const baseShadow = selected
+    ? `3px 4px 9px ${theme.accent}38, inset 1px 1px 0 rgba(255,255,255,.46)`
+    : inMonth
+      ? "2px 2px 5px rgba(148,163,184,.11), -2px -2px 5px rgba(255,255,255,.80), inset 1px 1px 0 rgba(255,255,255,.92)"
+      : "none";
   return {
     minWidth: 0,
     height: 30,
-    border: selected ? `1px solid ${accent}` : today ? `1px solid ${accent}88` : "1px solid transparent",
+    border: selected ? `1px solid ${theme.accent}` : today ? `1px solid ${theme.accent}88` : "1px solid transparent",
     borderRadius: 8,
-    background: selected ? `linear-gradient(145deg,${accent},#38bdf8)` : inMonth ? "linear-gradient(145deg,#ffffff,#f1f5f9)" : "transparent",
+    background: selected ? `linear-gradient(145deg,${theme.accent},${theme.secondary})` : inMonth ? "linear-gradient(145deg,#ffffff,#f1f5f9)" : "transparent",
     color: selected ? "#ffffff" : inMonth ? "#1e293b" : "#94a3b8",
     font: "inherit",
     fontSize: 11,
     fontWeight: selected || today ? 900 : 700,
     cursor: "pointer",
     padding: 0,
-    boxShadow: selected ? `3px 4px 9px ${accent}38, inset 1px 1px 0 rgba(255,255,255,.46)` : inMonth ? "2px 2px 5px rgba(148,163,184,.11), -2px -2px 5px rgba(255,255,255,.80), inset 1px 1px 0 rgba(255,255,255,.92)" : "none",
+    boxShadow: referenceDate
+      ? `${baseShadow === "none" ? "" : `${baseShadow}, `}0 0 0 2px ${theme.secondary}`
+      : baseShadow,
   };
 }
 

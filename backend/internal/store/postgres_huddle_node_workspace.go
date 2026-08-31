@@ -35,7 +35,7 @@ func (r *PostgresRepo) GetHuddleNodeWorkspace(companyID, huddleNodeID string) (H
 select company_id::text,huddle_node_id::text,textbox_id::text,title,display_order,revision,created_timestamp,updated_timestamp
 from huddle_node_textboxes
 where company_id=$1::uuid and huddle_node_id=$2::uuid and deleted_timestamp is null
-order by display_order,textbox_id`, companyID, huddleNodeID)
+order by display_order desc,textbox_id desc`, companyID, huddleNodeID)
 	if err != nil {
 		return HuddleNodeWorkspace{}, err
 	}

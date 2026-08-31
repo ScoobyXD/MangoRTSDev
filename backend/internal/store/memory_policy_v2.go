@@ -468,7 +468,6 @@ func (r *MemoryRepo) PutResourceRACIPolicy(input ResourceRACIPolicyUpdateInput) 
 	if strings.TrimSpace(input.IdempotencyKey) != "" {
 		r.policyV2Idempotency[idempotencyKey] = true
 	}
-	r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	return after, []domain.DomainEvent{event}, nil
 }
 

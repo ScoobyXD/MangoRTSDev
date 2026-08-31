@@ -1148,7 +1148,7 @@ function ActionItemSourceValue({
 
 function actionItemSourceTypeLabel(resourceType: ActionItemSource["resource_type"]): string {
   if (resourceType === "logic_gate") return "Process";
-  if (resourceType === "huddle_logic_gate") return "Huddle Process";
+  if (resourceType === "huddle_logic_gate") return "Huddle Board";
   if (resourceType === "huddle_node") return "Huddle Node";
   if (resourceType === "kpi") return "KPI";
   return resourceType === "node" ? "Node" : "Project";

@@ -163,7 +163,8 @@ where surface in (
   'my_work_action_items_mine',
   'my_work_action_items_delegated',
   'huddle_logic_gate_action_items',
-  'huddle_node_action_items'
+  'huddle_node_created_action_items',
+  'huddle_node_due_action_items'
 ) and principal='user'
 do update
 set name=excluded.name,

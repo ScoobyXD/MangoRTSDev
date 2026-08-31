@@ -460,7 +460,7 @@ func TestPostgresEntityRelationshipHuddleLifecycle(t *testing.T) {
 		t.Fatalf("two exact Huddle Node relationships = %d, want 2", got)
 	}
 	for _, huddleNodeID := range []string{firstNode.HuddleNodeID, secondNode.HuddleNodeID} {
-		items, listErr := repo.ListHuddleNodeActionItems(company.CompanyID, huddleNodeID)
+		items, listErr := listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, huddleNodeID)
 		if listErr != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
 			t.Fatalf("deduped first Process items for %s = %+v, err=%v", huddleNodeID, items, listErr)
 		}
@@ -474,16 +474,16 @@ func TestPostgresEntityRelationshipHuddleLifecycle(t *testing.T) {
 	thirdRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, thirdNode.HuddleNodeID, "Weekly notes")
 	commitActionItemEditorTestDocument(t, repo, thirdRef, actor.UserID, 0, "postgres-other-process-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
 	firstSecondClear := commitActionItemEditorTestDocument(t, repo, firstRef, actor.UserID, firstReadd.Revision, "postgres-clear-first-node")
-	items, err := repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	items, err := listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("remaining same-Process reference items=%+v err=%v", items, err)
 	}
 	commitActionItemEditorTestDocument(t, repo, secondRef, actor.UserID, secondCommit.Revision, "postgres-clear-second-node")
-	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	items, err = listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("removed final first Process reference items=%+v err=%v", items, err)
 	}
-	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, thirdNode.HuddleNodeID)
+	items, err = listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, thirdNode.HuddleNodeID)
 	if err != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
 		t.Fatalf("second Process reference items=%+v err=%v", items, err)
 	}
@@ -563,7 +563,7 @@ func TestPostgresEntityRelationshipHuddleLifecycle(t *testing.T) {
 	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, actor.UserID, []string{processRecycleID, firstNodeRecycleID}); err != nil {
 		t.Fatal(err)
 	}
-	restoredItems, err := repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	restoredItems, err := listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(restoredItems) != 1 || restoredItems[0].EntityID != created.EntityID {
 		t.Fatalf("restored Huddle Process and Node action items = %+v, err = %v", restoredItems, err)
 	}

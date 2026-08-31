@@ -8,10 +8,14 @@ import {
   HUDDLE_ACTION_ITEM_SAVED_VIEW_SURFACES,
   actionItemReferenceIDs,
   fetchHuddleActionItemSavedView,
+  filterHuddleNodeDueActionItems,
+  huddleActionItemWasCreatedInNode,
   huddleActionItemGroupingValues,
+  huddleActionItemOrderingsForView,
   listHuddleActionItems,
   normalizeHuddleActionItemDisplayedFields,
   normalizeHuddleActionItemPreferences,
+  reconcileHuddleNodeViewingDate,
   saveHuddleActionItemSavedView,
   sortHuddleActionItems,
   toHuddleActionItemPresentation,
@@ -90,10 +94,11 @@ test("Huddle Action Items separate grouping, leaf ordering, and inline field def
   assert.deepEqual(normalizeHuddleActionItemDisplayedFields([]), [], "an explicit empty tray stays empty");
 });
 
-test("Huddle Process and Huddle Node saved views are independent user-owned surfaces", async () => {
+test("Huddle Board and both Huddle Node sections use independent user-owned saved-view surfaces", async () => {
   assert.deepEqual(HUDDLE_ACTION_ITEM_SAVED_VIEW_SURFACES, {
     huddle_logic_gate: "huddle_logic_gate_action_items",
-    huddle_node: "huddle_node_action_items",
+    huddle_node_created: "huddle_node_created_action_items",
+    huddle_node_due: "huddle_node_due_action_items",
   });
   const calls: Array<{ path: string; init?: RequestInit & { json?: unknown } }> = [];
   const savedView = (surface: HuddleActionItemSavedView["surface"]): HuddleActionItemSavedView => ({
@@ -109,27 +114,33 @@ test("Huddle Process and Huddle Node saved views are independent user-owned surf
   });
   const requestJSON = async <T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
     calls.push({ path, init });
-    const surface = path.includes("huddle_node_action_items") ? "huddle_node_action_items" : "huddle_logic_gate_action_items";
+    const surface = path.includes("huddle_node_created_action_items")
+      ? "huddle_node_created_action_items"
+      : path.includes("huddle_node_due_action_items")
+        ? "huddle_node_due_action_items"
+        : "huddle_logic_gate_action_items";
     if ((init?.method ?? "GET") === "GET") return { saved_views: [savedView(surface)] } as T;
     return savedView((init?.json as { surface: HuddleActionItemSavedView["surface"] }).surface) as T;
   };
 
-  const processView = await fetchHuddleActionItemSavedView(requestJSON, "company-1", "huddle_logic_gate");
-  const nodeView = await fetchHuddleActionItemSavedView(requestJSON, "company-1", "huddle_node");
-  assert.equal(processView?.surface, "huddle_logic_gate_action_items");
-  assert.equal(nodeView?.surface, "huddle_node_action_items");
+  const boardView = await fetchHuddleActionItemSavedView(requestJSON, "company-1", "huddle_logic_gate");
+  const createdView = await fetchHuddleActionItemSavedView(requestJSON, "company-1", "huddle_node_created");
+  const dueView = await fetchHuddleActionItemSavedView(requestJSON, "company-1", "huddle_node_due");
+  assert.equal(boardView?.surface, "huddle_logic_gate_action_items");
+  assert.equal(createdView?.surface, "huddle_node_created_action_items");
+  assert.equal(dueView?.surface, "huddle_node_due_action_items");
 
   await saveHuddleActionItemSavedView(requestJSON, {
     companyID: "company-1",
     userID: "user-1",
-    scopeType: "huddle_node",
+    view: "huddle_node_created",
     savedViewID: "11111111-1111-4111-8111-111111111111",
     groupings: DEFAULT_HUDDLE_ACTION_ITEM_GROUPINGS,
     orderings: DEFAULT_HUDDLE_ACTION_ITEM_ORDERINGS,
     displayedFields: DEFAULT_HUDDLE_ACTION_ITEM_DISPLAYED_FIELDS,
   });
-  assert.equal((calls[2]?.init?.json as { surface?: string }).surface, "huddle_node_action_items");
-  assert.equal((calls[2]?.init?.json as { principal?: string }).principal, "user");
+  assert.equal((calls[3]?.init?.json as { surface?: string }).surface, "huddle_node_created_action_items");
+  assert.equal((calls[3]?.init?.json as { principal?: string }).principal, "user");
 });
 
 test("Huddle Action Items reuse My Work projection, semantic grouping, and due-date leaf ordering", () => {
@@ -164,7 +175,63 @@ test("Huddle Action Items reuse My Work projection, semantic grouping, and due-d
   );
 });
 
-test("Huddle Action Items request the exact Node or Process relationship scope", async () => {
+test("Huddle Node sections keep Source provenance separate from the current due rollup", () => {
+  const item = (entityID: string, completionDueDate: string, status: string, sourceID = "node-source") => ({
+    ...rawItem,
+    entity_id: entityID,
+    source: { resource_type: "huddle_node" as const, resource_id: sourceID, name: "Source" },
+    entity_fields: rawItem.entity_fields.map((field) => field.system_key === "completion_due_date"
+      ? { ...field, value: completionDueDate }
+      : field.system_key === "status"
+        ? { ...field, value: status }
+        : field),
+  });
+  const createdAndDone = item("created-done", "2026-08-01", "done");
+  assert.equal(huddleActionItemWasCreatedInNode(createdAndDone, "node-source"), true, "completed items remain in the created section");
+  assert.equal(huddleActionItemWasCreatedInNode(createdAndDone, "other-node"), false);
+
+  const due = item("due", "2026-09-03", "in_progress", "sibling-node");
+  const future = item("future", "2026-09-04", "pending", "sibling-node");
+  const completed = item("completed", "2026-09-01", "completed", "sibling-node");
+  const excludedCreated = item("created-here", "2026-09-01", "pending");
+  assert.deepEqual(
+    filterHuddleNodeDueActionItems(
+      [future, completed, excludedCreated, due],
+      "2026-09-03",
+      new Set(["created-here"]),
+    ).map((candidate) => candidate.entity_id),
+    ["due"],
+  );
+  assert.deepEqual(huddleActionItemOrderingsForView("huddle_node_due", [
+    { field: "color", direction: "desc" },
+    { field: "completion_due_date", direction: "desc" },
+    { field: "person_in_charge", direction: "asc" },
+  ]), [
+    { field: "completion_due_date", direction: "asc" },
+    { field: "color", direction: "desc" },
+    { field: "person_in_charge", direction: "asc" },
+  ], "the due section always forces oldest due date first and preserves secondary orderings");
+  assert.deepEqual(huddleActionItemOrderingsForView("huddle_node_created", [
+    { field: "completion_due_date", direction: "desc" },
+  ]), [{ field: "completion_due_date", direction: "desc" }], "the created section keeps its own ordering choice");
+});
+
+test("a temporary Huddle Node viewing date initializes once and survives realtime or page recovery", () => {
+  const initial = reconcileHuddleNodeViewingDate("", "", "node-1", "2026-08-31");
+  assert.equal(initial, "2026-08-31");
+  assert.equal(
+    reconcileHuddleNodeViewingDate("node-1", "2026-09-15", "node-1", "2026-09-01"),
+    "2026-09-15",
+    "a same-Node realtime, focus, or visibility reload updates the persisted reference without overwriting the temporary choice",
+  );
+  assert.equal(
+    reconcileHuddleNodeViewingDate("node-1", "2026-09-15", "node-2", "2026-10-02"),
+    "2026-10-02",
+    "opening another Node starts from that Node's persisted date",
+  );
+});
+
+test("Huddle Action Items request exact Board, created-Source, and due-rollup scopes", async () => {
   const paths: string[] = [];
   const requestJSON = async <T>(path: string): Promise<T> => {
     paths.push(path);
@@ -172,14 +239,23 @@ test("Huddle Action Items request the exact Node or Process relationship scope",
   };
   assert.deepEqual(await listHuddleActionItems(requestJSON, {
     companyID: "company-1",
-    scope: { resourceType: "huddle_node", resourceID: "node-1" },
+    scope: { resourceType: "huddle_node", resourceID: "node-source" },
+    view: "huddle_node_created",
+  }), [rawItem]);
+  assert.deepEqual(await listHuddleActionItems(requestJSON, {
+    companyID: "company-1",
+    scope: { resourceType: "huddle_node", resourceID: "node-source" },
+    view: "huddle_node_due",
+    viewingDate: "2026-09-03",
   }), [rawItem]);
   await listHuddleActionItems(requestJSON, {
     companyID: "company-1",
     scope: { resourceType: "huddle_logic_gate", resourceID: "huddle-1" },
+    view: "huddle_logic_gate",
   });
   assert.deepEqual(paths, [
-    "/v1/action-items?company_id=company-1&huddle_node_id=node-1",
+    "/v1/huddle-nodes/node-source/action-items?company_id=company-1&scope=created",
+    "/v1/huddle-nodes/node-source/action-items?company_id=company-1&scope=due&viewing_date=2026-09-03",
     "/v1/action-items?company_id=company-1&huddle_logic_gate_id=huddle-1",
   ]);
 });

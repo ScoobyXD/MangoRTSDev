@@ -56,6 +56,7 @@ import {
   type HuddleNodeTextBox,
   type HuddleNodeWorkspaceRequest,
 } from "./huddleNodeWorkspaceApi.js";
+import { HuddleNodeDateControl } from "./HuddleNodeDateControl.js";
 
 type HuddleNodeWorkspaceProps = {
   apiBase: string;
@@ -65,6 +66,9 @@ type HuddleNodeWorkspaceProps = {
   companyUsers: CompanyUser[];
   requestJSON: HuddleNodeWorkspaceRequest;
   controls: BareMangoEditorControls;
+  huddleDate: string;
+  huddleDateSaving: boolean;
+  onHuddleDateCommit: (value: string) => Promise<void>;
   onError: (message: string) => void;
   onActionItemsChanged: () => void;
   onActiveTextBoxIDChange?: (textBoxID: string) => void;
@@ -78,6 +82,9 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
   companyUsers,
   requestJSON,
   controls,
+  huddleDate,
+  huddleDateSaving,
+  onHuddleDateCommit,
   onError,
   onActionItemsChanged,
   onActiveTextBoxIDChange,
@@ -372,7 +379,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
             <PlusIcon color="#0f766e" />
           </button>
         </div>
-        <div aria-hidden="true" style={timelineHeaderSpacerStyle} />
+        <HuddleNodeDateControl date={huddleDate} saving={huddleDateSaving} onCommit={onHuddleDateCommit} />
         {textBoxes.length === 0 && <div style={emptyStyle}>No text boxes yet.</div>}
         {textBoxes.map((textBox, index) => {
           const textBoxID = textBox.textbox_id;
@@ -617,7 +624,6 @@ function formatTextBlockMetadataTimestamp(value: string | number | undefined): s
 const workspaceStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, overflowY: "auto", overflowX: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 12, background: EDITOR_NEU_PANEL_BACKGROUND, boxShadow: EDITOR_NEU_SHADOW, scrollbarGutter: "stable" };
 const timelineGridStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateColumns: "34px minmax(0,1fr)", columnGap: 4, rowGap: 12, alignItems: "start", alignContent: "start", padding: "0 14px 38px" };
 const timelineHeaderControlStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 44, minHeight: 38, padding: "0 0 7px", background: EDITOR_NEU_PANEL_BACKGROUND, display: "flex", alignItems: "flex-start", justifyContent: "flex-start" };
-const timelineHeaderSpacerStyle: React.CSSProperties = { position: "sticky", top: 0, zIndex: 43, minHeight: 38, background: EDITOR_NEU_PANEL_BACKGROUND };
 const timelineAddButtonStyle: React.CSSProperties = { width: 30, height: 30, borderRadius: 9, border: "1px solid transparent", background: EDITOR_NEU_SURFACE, color: "#0f766e", display: "grid", placeItems: "center", padding: 0, boxShadow: EDITOR_NEU_SHADOW };
 const textBoxCardStyle: React.CSSProperties = { minWidth: 0, display: "grid", gridTemplateRows: "38px minmax(0,1fr)", overflow: "hidden", border: `1px solid ${EDITOR_NEU_SOFT_BORDER}`, borderRadius: 14, background: `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, rgba(255,255,255,.76), rgba(255,255,255,.76)) border-box`, boxShadow: EDITOR_NEU_SHADOW };
 const textBoxHeaderStyle: React.CSSProperties = { minWidth: 0, height: 38, display: "grid", gridTemplateColumns: "minmax(220px,1fr) auto auto", alignItems: "center", gap: 4, padding: "4px 6px", boxSizing: "border-box", borderBottom: "1px solid rgba(15,118,110,.22)", background: "linear-gradient(90deg, rgba(255,241,242,.62), rgba(236,253,245,.42) 52%, rgba(239,246,255,.66))" };

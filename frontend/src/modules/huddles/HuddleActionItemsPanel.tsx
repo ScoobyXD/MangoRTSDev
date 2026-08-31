@@ -9,6 +9,8 @@ import {
   openEditorEntityLink,
   type EditorEntityReferencePresentation,
 } from "../editor/editorEntityLinks.js";
+import { EditorCalendarDateInput } from "../editor/EditorFieldControls.js";
+import { normalizeNodeDueDateDraft } from "../editor/editorDates.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import { buildUniversalNestedGroups } from "../grouping/universalGrouping.js";
 import { ActionItemInlineFieldSettingsSection } from "../my-work/ActionItemInlineFieldSettingsPopover.js";
@@ -24,7 +26,9 @@ import {
   HUDDLE_ACTION_ITEM_ARRANGE_FIELDS,
   HUDDLE_ACTION_ITEM_DISPLAY_FIELDS,
   fetchHuddleActionItemSavedView,
+  filterHuddleNodeDueActionItems,
   huddleActionItemGroupingValues,
+  huddleActionItemOrderingsForView,
   listHuddleActionItems,
   normalizeHuddleActionItemDisplayedFields,
   normalizeHuddleActionItemGroupings,
@@ -40,7 +44,9 @@ import {
   type HuddleActionItemOrdering,
   type HuddleActionItemPreferences,
   type HuddleActionItemScope,
+  type HuddleActionItemView,
 } from "./huddleActionItems.js";
+import { HUDDLE_CALENDAR_THEME } from "./huddleCalendarTheme.js";
 
 type RequestJSON = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
 
@@ -51,6 +57,14 @@ export function HuddleActionItemsPanel({
   companyUsers,
   requestJSON,
   refreshToken,
+  view,
+  title = "Action Items",
+  emptyLabel = "No Action Items yet.",
+  viewingDate = "",
+  referenceDate = "",
+  onViewingDateChange,
+  excludedItemIDs = new Set<string>(),
+  onItemIDsChange,
 }: {
   companyID: string;
   currentUserID: string;
@@ -58,6 +72,14 @@ export function HuddleActionItemsPanel({
   companyUsers: CompanyUser[];
   requestJSON: RequestJSON;
   refreshToken: number;
+  view: HuddleActionItemView;
+  title?: string;
+  emptyLabel?: string;
+  viewingDate?: string;
+  referenceDate?: string;
+  onViewingDateChange?: (value: string) => void;
+  excludedItemIDs?: ReadonlySet<string>;
+  onItemIDsChange?: (itemIDs: ReadonlySet<string>) => void;
 }) {
   const [items, setItems] = useState<HuddleActionItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -70,7 +92,6 @@ export function HuddleActionItemsPanel({
   const [displayedFields, setDisplayedFields] = useState<HuddleActionItemDisplayFieldID[]>(() => [
     ...DEFAULT_HUDDLE_ACTION_ITEM_DISPLAYED_FIELDS,
   ]);
-  const itemsRef = useRef<HuddleActionItem[]>([]);
   const hasLoadedRef = useRef(false);
   const loadRequestIDRef = useRef(0);
   const preferenceLoadIDRef = useRef(0);
@@ -89,13 +110,20 @@ export function HuddleActionItemsPanel({
     if (hasLoadedRef.current) setRefreshing(true);
     else setLoading(true);
     setError("");
+    if (view === "huddle_node_due" && !normalizeNodeDueDateDraft(viewingDate)) {
+      setItems([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     try {
       const nextItems = await listHuddleActionItems(requestJSON, {
         companyID,
         scope: { resourceType: scopeResourceType, resourceID: scopeResourceID },
+        view,
+        viewingDate,
       });
       if (loadRequestIDRef.current !== requestID) return;
-      itemsRef.current = nextItems;
       setItems(nextItems);
       hasLoadedRef.current = true;
     } catch (cause) {
@@ -107,12 +135,11 @@ export function HuddleActionItemsPanel({
         setRefreshing(false);
       }
     }
-  }, [companyID, requestJSON, scopeResourceID, scopeResourceType]);
+  }, [companyID, requestJSON, scopeResourceID, scopeResourceType, view, viewingDate]);
 
   useEffect(() => {
     observedRefreshTokenRef.current = latestRefreshTokenRef.current;
     hasLoadedRef.current = false;
-    itemsRef.current = [];
     setItems([]);
     setRefreshing(false);
     void load();
@@ -129,7 +156,6 @@ export function HuddleActionItemsPanel({
     const refreshEditedActionItem = (event: Event) => {
       const presentation = (event as CustomEvent<EditorEntityReferencePresentation>).detail;
       if (!presentation?.isActionItem) return;
-      if (!itemsRef.current.some((item) => item.entity_id === presentation.entityID)) return;
       void load();
     };
     window.addEventListener(EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION, refreshEditedActionItem);
@@ -137,7 +163,20 @@ export function HuddleActionItemsPanel({
   }, [load]);
 
   useEffect(() => {
-    const context = `${companyID.trim()}:${currentUserID.trim()}:${scopeResourceType}`;
+    const refreshVisiblePage = () => void load();
+    const refreshVisibleDocument = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", refreshVisiblePage);
+    document.addEventListener("visibilitychange", refreshVisibleDocument);
+    return () => {
+      window.removeEventListener("focus", refreshVisiblePage);
+      document.removeEventListener("visibilitychange", refreshVisibleDocument);
+    };
+  }, [load]);
+
+  useEffect(() => {
+    const context = `${companyID.trim()}:${currentUserID.trim()}:${view}`;
     const loadID = preferenceLoadIDRef.current + 1;
     preferenceLoadIDRef.current = loadID;
     preferenceContextRef.current = context;
@@ -148,12 +187,16 @@ export function HuddleActionItemsPanel({
     setDisplayedFields([...DEFAULT_HUDDLE_ACTION_ITEM_DISPLAYED_FIELDS]);
     setPreferenceError("");
     setPreferencesReady(false);
-    void fetchHuddleActionItemSavedView(requestJSON, companyID, scopeResourceType).then((savedView) => {
+    void fetchHuddleActionItemSavedView(requestJSON, companyID, view).then((savedView) => {
       if (preferenceLoadIDRef.current !== loadID || preferenceContextRef.current !== context) return;
       const next = normalizeHuddleActionItemPreferences(savedView);
+      const nextOrderings = huddleActionItemOrderingsForView(view, next.orderings);
       preferenceSavedViewIDRef.current = savedView?.saved_view_id?.trim() || preferenceSavedViewIDRef.current;
-      setGroupings(next.groupings);
-      setOrderings(next.orderings);
+      setGroupings(normalizeHuddleActionItemGroupings(
+        next.groupings,
+        new Set(nextOrderings.map((ordering) => ordering.field)),
+      ));
+      setOrderings(nextOrderings);
       setDisplayedFields(next.displayedFields);
       setPreferencesReady(true);
     }).catch((cause) => {
@@ -164,16 +207,16 @@ export function HuddleActionItemsPanel({
     return () => {
       if (preferenceLoadIDRef.current === loadID) preferenceLoadIDRef.current += 1;
     };
-  }, [companyID, currentUserID, requestJSON, scopeResourceType]);
+  }, [companyID, currentUserID, requestJSON, view]);
 
   const persistPreferences = useCallback((next: HuddleActionItemPreferences) => {
-    const context = `${companyID.trim()}:${currentUserID.trim()}:${scopeResourceType}`;
+    const context = `${companyID.trim()}:${currentUserID.trim()}:${view}`;
     const savedViewID = preferenceSavedViewIDRef.current;
     const save = preferenceSaveQueueRef.current.catch(() => undefined).then(async () => {
       await saveHuddleActionItemSavedView(requestJSON, {
         companyID,
         userID: currentUserID,
-        scopeType: scopeResourceType,
+        view,
         savedViewID,
         groupings: next.groupings,
         orderings: next.orderings,
@@ -187,7 +230,7 @@ export function HuddleActionItemsPanel({
       setPreferenceError(errorMessage(cause, "Action Item display settings could not be saved."));
     });
     preferenceSaveQueueRef.current = save;
-  }, [companyID, currentUserID, requestJSON, scopeResourceType]);
+  }, [companyID, currentUserID, requestJSON, view]);
 
   const changeGroupings = (next: HuddleActionItemGrouping[]) => {
     const normalized = normalizeHuddleActionItemGroupings(next, new Set(orderings.map((item) => item.field)));
@@ -195,7 +238,8 @@ export function HuddleActionItemsPanel({
     persistPreferences({ groupings: normalized, orderings, displayedFields });
   };
   const changeOrderings = (next: HuddleActionItemOrdering[]) => {
-    const normalized = normalizeHuddleActionItemOrderings(next, new Set(groupings.map((item) => item.field)));
+    const normalizedOrderings = normalizeHuddleActionItemOrderings(next, new Set(groupings.map((item) => item.field)));
+    const normalized = huddleActionItemOrderingsForView(view, normalizedOrderings);
     setOrderings(normalized);
     persistPreferences({ groupings, orderings: normalized, displayedFields });
   };
@@ -205,16 +249,31 @@ export function HuddleActionItemsPanel({
     persistPreferences({ groupings, orderings, displayedFields: normalized });
   };
 
+  const visibleItems = useMemo(
+    () => view === "huddle_node_due"
+      ? filterHuddleNodeDueActionItems(items, viewingDate, excludedItemIDs)
+      : items.filter((item) => !excludedItemIDs.has(item.entity_id)),
+    [excludedItemIDs, items, view, viewingDate],
+  );
+  const visibleItemIDSignature = useMemo(
+    () => visibleItems.map((item) => item.entity_id).sort().join("\n"),
+    [visibleItems],
+  );
+  useEffect(() => {
+    if (!onItemIDsChange) return undefined;
+    onItemIDsChange(new Set(visibleItemIDSignature ? visibleItemIDSignature.split("\n") : []));
+    return () => onItemIDsChange(new Set());
+  }, [onItemIDsChange, visibleItemIDSignature]);
   const presentationItems = useMemo(
-    () => items.map((item) => toHuddleActionItemPresentation(item, companyUsers)),
-    [companyUsers, items],
+    () => visibleItems.map((item) => toHuddleActionItemPresentation(item, companyUsers)),
+    [companyUsers, visibleItems],
   );
   const groups = useMemo(() => buildUniversalNestedGroups(presentationItems, groupings, {
-    rootID: `huddle-action-items:${scopeResourceType}:${scopeResourceID}`,
+    rootID: `huddle-action-items:${view}:${scopeResourceID}`,
     rowKey: (item) => item.entity_id,
     getValues: huddleActionItemGroupingValues,
     sortRows: (rows) => sortHuddleActionItems(rows, orderings),
-  }), [groupings, orderings, presentationItems, scopeResourceID, scopeResourceType]);
+  }), [groupings, orderings, presentationItems, scopeResourceID, view]);
   const entries = useMemo(() => groupings.length > 0
     ? flattenMyWorkGroupedDisplayEntries(
       groups,
@@ -231,15 +290,36 @@ export function HuddleActionItemsPanel({
     undefined,
     editorEntityLinkAnchorBounds(target),
   );
-  const scopeLabel = scopeResourceType === "huddle_node" ? "Huddle Node" : "Huddle Process";
+  const scopeLabel = view === "huddle_logic_gate"
+    ? "Huddle Board"
+    : view === "huddle_node_created"
+      ? "Created in this Huddle Node"
+      : "Due or Overdue";
 
   return (
-    <section aria-label="Live Action Items" data-huddle-action-items="live" style={panelStyle}>
+    <section aria-label={title} data-huddle-action-items="live" data-huddle-action-item-view={view} style={panelStyle}>
       <header style={headerStyle}>
-        <strong>Action Items</strong>
+        <strong>{title}</strong>
         <div style={headerActionsStyle}>
           {preferenceError ? <span role="alert" title={preferenceError} style={preferenceErrorStyle}>!</span> : null}
           {refreshing && <span aria-live="polite" style={refreshingLabelStyle}>Refreshing</span>}
+          {view === "huddle_node_due" && onViewingDateChange ? (
+            <EditorCalendarDateInput
+              value={viewingDate}
+              ariaLabel="Due or Overdue viewing date"
+              accent={HUDDLE_CALENDAR_THEME.accent}
+              theme={HUDDLE_CALENDAR_THEME}
+              referenceDate={referenceDate}
+              referenceLabel="Huddle Node date"
+              iconOnly
+              allowClear={false}
+              onChange={(next) => {
+                const normalized = normalizeNodeDueDateDraft(next);
+                if (normalized) onViewingDateChange(normalized);
+              }}
+              buttonStyle={{ width: 28, height: 28 }}
+            />
+          ) : null}
           <UniversalGroupingControls<HuddleActionItemArrangeField>
             groupings={groupings}
             fieldOptions={HUDDLE_ACTION_ITEM_ARRANGE_FIELDS.filter(
@@ -274,21 +354,23 @@ export function HuddleActionItemsPanel({
                 fieldIDs={displayedFields}
                 onFieldIDsChange={changeDisplayedFields}
                 label={scopeLabel}
-                sectionID={scopeResourceType}
+                sectionID={view}
                 accent="#EA84E5"
                 gridArea="1 / 2 / 3 / 3"
               />
             )}
           />
-          <button type="button" aria-label="Refresh Action Items" title="Refresh Action Items" onClick={() => void load()} style={refreshButtonStyle}>↻</button>
+          {view === "huddle_logic_gate" ? (
+            <button type="button" aria-label="Refresh Action Items" title="Refresh Action Items" onClick={() => void load()} style={refreshButtonStyle}>↻</button>
+          ) : null}
         </div>
       </header>
 
       {error ? <div role="alert" style={errorStyle}>{error}</div> : <div aria-hidden="true" />}
       <div style={listStyle}>
         {loading && <div style={emptyStyle}>Loading Action Items</div>}
-        {!loading && items.length === 0 && <div style={emptyStyle}>No Action Items yet.</div>}
-        {!loading && items.length > 0 && entries.map((entry, index) => (
+        {!loading && visibleItems.length === 0 && <div style={emptyStyle}>{emptyLabel}</div>}
+        {!loading && visibleItems.length > 0 && entries.map((entry, index) => (
           <div
             key={entry.entryID}
             className={entry.surface ? "my-work-huddle-surface-segment" : undefined}
@@ -322,6 +404,51 @@ export function HuddleActionItemsPanel({
         ))}
       </div>
     </section>
+  );
+}
+
+export function HuddleNodeActionItemsColumn(props: {
+  companyID: string;
+  currentUserID: string;
+  huddleNodeID: string;
+  companyUsers: CompanyUser[];
+  requestJSON: RequestJSON;
+  refreshToken: number;
+  huddleNodeDate: string;
+  viewingDate: string;
+  onViewingDateChange: (value: string) => void;
+}) {
+  const [createdItemIDs, setCreatedItemIDs] = useState<ReadonlySet<string>>(() => new Set());
+  return (
+    <div aria-label="Huddle Node Action Items" data-huddle-node-action-item-sections="true" style={nodeSectionsStyle}>
+      <HuddleActionItemsPanel
+        companyID={props.companyID}
+        currentUserID={props.currentUserID}
+        scope={{ resourceType: "huddle_node", resourceID: props.huddleNodeID }}
+        view="huddle_node_created"
+        title="Created in this Huddle Node"
+        emptyLabel="No Action Items were created in this Huddle Node."
+        companyUsers={props.companyUsers}
+        requestJSON={props.requestJSON}
+        refreshToken={props.refreshToken}
+        onItemIDsChange={setCreatedItemIDs}
+      />
+      <HuddleActionItemsPanel
+        companyID={props.companyID}
+        currentUserID={props.currentUserID}
+        scope={{ resourceType: "huddle_node", resourceID: props.huddleNodeID }}
+        view="huddle_node_due"
+        title="Due or Overdue"
+        emptyLabel="No incomplete Action Items are due by this date."
+        companyUsers={props.companyUsers}
+        requestJSON={props.requestJSON}
+        refreshToken={props.refreshToken}
+        viewingDate={props.viewingDate}
+        referenceDate={props.huddleNodeDate}
+        onViewingDateChange={props.onViewingDateChange}
+        excludedItemIDs={createdItemIDs}
+      />
+    </div>
   );
 }
 
@@ -408,4 +535,13 @@ const groupCountStyle: React.CSSProperties = {
   textAlign: "center",
   padding: "1px 5px",
   opacity: 0.72,
+};
+
+const nodeSectionsStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "minmax(0,1fr) minmax(0,1fr)",
+  gap: 8,
+  overflow: "hidden",
 };

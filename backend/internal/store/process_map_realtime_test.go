@@ -482,7 +482,7 @@ func TestPostgresDomainEventBatchHelperDoesNotEnqueueRealtime(t *testing.T) {
 		t.Fatal("appendDomainEventBatchTx source block terminator not found")
 	}
 	block := text[start : start+end]
-	if strings.Contains(block, "enqueueKanbanRealtime") || strings.Contains(block, "enqueueRACITabsRealtime") || strings.Contains(block, "enqueueProcessMapRealtime") {
+	if strings.Contains(block, "enqueueKanbanRealtime") || strings.Contains(block, "enqueueProcessMapRealtime") {
 		t.Error("record-batch helper must not enqueue realtime; appendDomainEventsTx owns one coalesced producer pass")
 	}
 }
@@ -531,8 +531,8 @@ func TestMemoryCompanyUserGroupMutationsAtomicallyInvalidateProcessMap(t *testin
 				}
 			}
 		}
-		if scopeCounts[processMapRealtimeScope] != 1 || scopeCounts[raciTabsRealtimeScope] != 1 || len(repo.realtimeOutbox) != 2 {
-			t.Fatalf("%s outbox scopes = %+v, want one Process Map and one RACI Tabs row", wantEventType, scopeCounts)
+		if scopeCounts[processMapRealtimeScope] != 1 || len(repo.realtimeOutbox) != 1 {
+			t.Fatalf("%s outbox scopes = %+v, want one Process Map row", wantEventType, scopeCounts)
 		}
 		if got := repo.workspaceReadVersions[workspaceReadVersionMemoryKey(companyID, "process-map", "")]; got != 1 {
 			t.Fatalf("%s Process Map read version = %d, want 1", wantEventType, got)

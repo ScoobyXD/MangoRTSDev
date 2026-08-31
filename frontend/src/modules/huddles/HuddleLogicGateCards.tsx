@@ -42,7 +42,7 @@ export const HuddleLogicGateCards: React.FC<{
           {onRemove && (
             <button
               type="button"
-              aria-label={`Remove ${item.header} from Huddle Process`}
+              aria-label={`Remove ${item.header} from Huddle Board`}
               title="Remove Process"
               onClick={() => onRemove(item)}
               style={removeButtonStyle}
