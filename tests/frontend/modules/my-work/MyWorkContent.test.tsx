@@ -313,8 +313,8 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.match(container.querySelector<HTMLElement>('[data-my-work-columns="true"]')?.style.gridTemplateColumns ?? "", /minmax\(512px,/, "the middle column keeps a safety margin around the full one-row Nodes header");
     const actionItemsSection = container.querySelector<HTMLElement>('[data-my-work-section="action_items"]');
     const actionHeaderIconPaths = actionItemsSection?.querySelectorAll<SVGPathElement>('[data-my-work-section-icon="action_items"] svg path');
-    assert.equal(actionHeaderIconPaths?.[0]?.getAttribute("stroke"), "#facc15", "only the Action Items header target uses the established yellow outer ring");
-    assert.equal(actionHeaderIconPaths?.[1]?.getAttribute("stroke"), "#ef4444", "the Action Items header target uses the established red inner ring");
+    assert.equal(actionHeaderIconPaths?.[0]?.getAttribute("stroke"), "#22d3ee", "the Action Items header target uses the cyan outer ring");
+    assert.equal(actionHeaderIconPaths?.[1]?.getAttribute("stroke"), "#6366f1", "the Action Items header target uses the indigo inner ring");
     assert.equal(container.querySelectorAll('[data-my-work-group-field="completion_due_date"]').length, 0, "Completion due date orders rows without creating a visible group header");
     assert.equal(container.querySelectorAll('[data-my-work-group-field="due_date"]').length, 0, "Node due dates retain their compact hidden-heading presentation");
     assert.equal(container.querySelectorAll('button[data-my-work-group-field="huddle_process"][data-my-work-group-key="huddle-weekly"]').length, 2, "permission-safe Huddle process groups are clickable");
@@ -340,7 +340,9 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.equal(tomorrowInput?.parentElement?.querySelector("svg path")?.getAttribute("stroke"), "#ef4444", "Due Tomorrow calendar is red");
     assert.equal(todayInput?.style.gridColumn, "2", "due-date text follows the calendar control");
     assert.equal(todayInput?.parentElement?.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')?.style.gridColumn, "1", "the calendar button is the left column");
-    assert.equal(todayInput?.parentElement?.style.width, "116px", "relative labels use the compact width");
+    assert.equal(todayInput?.parentElement?.style.width, "120px", "relative labels have enough room for the complete phrase");
+    assert.equal(todayInput?.closest<HTMLElement>('[data-my-work-due-date]')?.style.width, "130px", "the complete relative due-date pill is measured inside its row");
+    assert.equal(todayInput?.closest<HTMLElement>('[data-my-work-due-date]')?.style.boxSizing, "border-box", "due-date pill chrome is included in its measured width");
     const relativeCalendarButton = container.querySelector<HTMLButtonElement>('[data-my-work-row="action-item"][data-my-work-action-item-color="red"] [data-my-work-due-date="true"] button[aria-haspopup="dialog"]');
     assert.ok(relativeCalendarButton);
     await act(async () => {
@@ -385,8 +387,8 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.deepEqual(perspectiveRadios.map((button) => button.getAttribute("aria-checked")), ["true", "false"]);
     assert.equal(perspectiveGroup?.previousElementSibling?.tagName, "H2", "Mine / Delegated sits immediately to the right of the Action Items title");
     assert.deepEqual(perspectiveRadios.map((button) => button.style.height), ["27px", "27px"], "the perspective segments use the larger target");
-    assert.match(perspectiveRadios[0]?.style.background ?? "", /239, 246, 255/, "the selected perspective uses the light-blue gradient");
-    assert.equal(perspectiveRadios[0]?.style.color, "rgb(29, 78, 216)", "the selected perspective avoids the former dark fill");
+    assert.match(perspectiveRadios[0]?.style.background ?? "", /240, 249, 255/, "the selected perspective uses the soft light-blue gradient");
+    assert.equal(perspectiveRadios[0]?.style.color, "rgb(51, 65, 85)", "the selected perspective uses calm slate text");
     const initialProcessRoleGroup = container.querySelector<HTMLElement>('[role="radiogroup"][aria-label="Process RACI role"]');
     const initialProcessRadios = Array.from(initialProcessRoleGroup?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
     assert.deepEqual(initialProcessRadios.map((button) => button.getAttribute("aria-label")), ["Responsible", "Accountable", "Consulted", "Informed"]);
@@ -522,7 +524,8 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.equal(soonInput?.parentElement?.querySelector("svg path")?.getAttribute("stroke"), "#eab308", "two- and three-day calendars are yellow");
     assert.equal(standardInput?.parentElement?.querySelector("svg path")?.getAttribute("stroke"), "#8b5cf6", "ordinary and empty dates keep the purple calendar");
     assert.match(standardInput?.value ?? "", /^Due Date: /, "ordinary dates keep the label after the left-side calendar");
-    assert.equal(standardInput?.parentElement?.style.width, "126px", "ordinary dates fit their complete icon-first label without extra outer spacing");
+    assert.equal(standardInput?.parentElement?.style.width, "136px", "ordinary dates have enough room for a complete icon-first label");
+    assert.equal(standardInput?.closest<HTMLElement>('[data-my-work-due-date]')?.style.width, "146px", "the complete ordinary due-date pill is measured inside its row");
 
     const nodeRows = Array.from(container.querySelectorAll<HTMLElement>('[data-my-work-row="node"]'));
     assert.equal(nodeRows.length, 2);
@@ -965,6 +968,11 @@ test("My Work loads and persists independent Mine and Delegated row-field orders
     assert.equal(inlineRail?.tabIndex, 0, "a multi-label rail can receive keyboard focus for horizontal scrolling");
     assert.equal(inlineRail?.style.overflowX, "auto", "too many selected labels stay on one horizontal rail");
     assert.equal(inlineRail?.style.marginLeft, "auto", "the inline label rail stays against the right edge");
+    assert.equal(inlineRail?.style.flex, "0 1 auto", "the rail keeps its natural width unless the complete field list is too wide");
+    assert.equal(inlineRail?.style.maxWidth, "62%", "oversized label lists leave usable room for the Action Item title");
+    const actionItemRow = inlineRail?.closest<HTMLElement>('[data-my-work-row="action-item"]');
+    assert.equal(actionItemRow?.style.display, "flex", "the row measures the rail cap against the whole row instead of its own grid slot");
+    assert.equal(actionItemRow?.querySelector<HTMLElement>('[data-my-work-target="action-item"]')?.style.flex, "1 1 0%", "the title yields only the space that the right-pinned labels need");
     const settingsButton = actionSection.querySelector<HTMLButtonElement>('button[aria-label="Group, order, and choose Action Item row fields"]');
     assert.equal(actionSection.querySelector('[data-my-work-action-item-field-settings="true"]'), null, "row-field settings live only in the grouper");
 

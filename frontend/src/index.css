@@ -1651,6 +1651,12 @@ dialog.mango-project-document-pane::backdrop {
   display: none;
 }
 
+[data-my-work-action-item-perspective]:focus-visible,
+[data-my-work-middle-view]:focus-visible {
+  outline: 2px solid #0284c7;
+  outline-offset: 1px;
+}
+
 .my-work-huddle-surface-segment {
   isolation: isolate;
 }

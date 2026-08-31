@@ -93,6 +93,7 @@ function PersonIcon() {
 
 const fieldsStyle: React.CSSProperties = {
   minWidth: 0,
+  flex: "0 1 auto",
   maxWidth: "62%",
   display: "flex",
   flexWrap: "nowrap",

@@ -516,7 +516,7 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
         <SectionFrame
           section="action_items"
           title="Action Items"
-          icon={<ActionItemIcon size={16} outerRingColor="#facc15" innerRingColor="#ef4444" />}
+          icon={<ActionItemIcon size={16} outerRingColor="#22d3ee" innerRingColor="#6366f1" />}
           state={state.action_items}
           titleAccessory={(
             <ActionItemPerspectiveSelector
@@ -836,6 +836,7 @@ function ActionItemPerspectiveSelector({
           role="radio"
           aria-checked={perspective === option.key}
           tabIndex={perspective === option.key ? 0 : -1}
+          data-my-work-action-item-perspective={option.key}
           style={perspectiveButtonStyle(perspective === option.key)}
           onClick={() => onChange(option.key)}
           onKeyDown={(event) => {
@@ -1388,7 +1389,7 @@ function ActionItemRow({ item, businessDateKey, displayedFields, onSaveDueDate }
       className="my-work-resource-row"
       data-my-work-row="action-item"
       data-my-work-action-item-color={color || "none"}
-      style={actionItemRowStyle(color, displayedFields.length > 0)}
+      style={actionItemRowStyle(color)}
     >
       <button
         type="button"
@@ -1562,12 +1563,13 @@ function InlineDueDateEditor({ fieldID, value, resourceLabel, businessDateKey, o
       if (saveVersion === saveVersionRef.current) setSaving(false);
     }
   };
+  const editorWidth = relativeLabel ? 120 : 136;
   return (
     <span
       data-my-work-action-item-field={fieldID}
       data-my-work-due-date="true"
       data-my-work-due-date-tone={tone}
-      style={inlineDueDateStyle(presentation)}
+      style={inlineDueDateStyle(presentation, editorWidth)}
       title={error || undefined}
     >
       <EditorCalendarDateInput
@@ -1582,7 +1584,7 @@ function InlineDueDateEditor({ fieldID, value, resourceLabel, businessDateKey, o
         onChange={(next) => { setDraft(next); setError(""); }}
         onCommit={(next) => void commit(next)}
         openOnInputClick
-        containerStyle={{ width: relativeLabel ? 116 : 126, gridTemplateColumns: "24px minmax(0,1fr)", columnGap: 2 }}
+        containerStyle={{ width: editorWidth, gridTemplateColumns: "24px minmax(0,1fr)", columnGap: 2 }}
         inputStyle={{ gridColumn: "2", gridRow: "1", color: presentation.textColor, fontSize: 10.5, fontWeight: 850, cursor: saving ? "default" : "pointer" }}
         buttonStyle={{ gridColumn: "1", gridRow: "1", width: 24, height: 24 }}
       />
@@ -1940,14 +1942,14 @@ function middleViewButtonStyle(active: boolean): React.CSSProperties {
     display: "inline-flex",
     alignItems: "center",
     gap: 8,
-    border: active ? "1px solid rgba(37,99,235,.78)" : "1px solid transparent",
+    border: active ? "1px solid rgba(125,211,252,.60)" : "1px solid transparent",
     borderRadius: 7,
     background: active
-      ? "linear-gradient(145deg,#eff6ff,#bfdbfe)"
+      ? "linear-gradient(145deg,#ffffff 0%,#f0f9ff 48%,#e0f2fe 100%)"
       : "transparent",
-    color: active ? "#1d4ed8" : "#475569",
+    color: active ? "#334155" : "#475569",
     boxShadow: active
-      ? "2px 2px 6px rgba(59,130,246,.18), -1px -1px 4px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.76)"
+      ? "2px 2px 6px rgba(14,165,233,.10), -1px -1px 4px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.88)"
       : "none",
     font: "inherit",
     fontSize: 13,
@@ -1961,9 +1963,9 @@ const perspectiveSelectorStyle: React.CSSProperties = {
   display: "inline-flex",
   minWidth: 0,
   flex: "0 0 auto",
-  border: "1px solid rgba(147,197,253,.52)",
+  border: "1px solid rgba(186,230,253,.66)",
   borderRadius: 10,
-  background: "linear-gradient(145deg, rgba(255,255,255,0.94), rgba(241,245,249,0.82))",
+  background: "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(240,249,255,0.88))",
   boxShadow: "inset 2px 2px 5px rgba(148,163,184,0.12), inset -2px -2px 5px rgba(255,255,255,0.92)",
   padding: 3,
 };
@@ -1971,14 +1973,14 @@ const perspectiveSelectorStyle: React.CSSProperties = {
 function perspectiveButtonStyle(active: boolean): React.CSSProperties {
   return {
     height: 27,
-    border: active ? "1px solid rgba(96,165,250,.72)" : "1px solid transparent",
+    border: active ? "1px solid rgba(125,211,252,.60)" : "1px solid transparent",
     borderRadius: 7,
     background: active
-      ? "linear-gradient(145deg,#eff6ff,#bfdbfe)"
+      ? "linear-gradient(145deg,#ffffff 0%,#f0f9ff 48%,#e0f2fe 100%)"
       : "transparent",
-    color: active ? "#1d4ed8" : "#475569",
+    color: active ? "#334155" : "#475569",
     boxShadow: active
-      ? "2px 2px 6px rgba(59,130,246,.16), -1px -1px 4px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.76)"
+      ? "2px 2px 6px rgba(14,165,233,.10), -1px -1px 4px rgba(255,255,255,.94), inset 1px 1px 0 rgba(255,255,255,.88)"
       : "none",
     font: "inherit",
     fontSize: 10.5,
@@ -2180,11 +2182,10 @@ const resourceNameStyle: React.CSSProperties = {
   fontWeight: 800,
 };
 
-function actionItemRowStyle(color: string | undefined, hasInlineFields: boolean): React.CSSProperties {
+function actionItemRowStyle(color: string | undefined): React.CSSProperties {
   return {
     ...resourceButtonStyle,
-    display: "grid",
-    gridTemplateColumns: hasInlineFields ? "minmax(0,1fr) auto" : "minmax(0,1fr)",
+    display: "flex",
     alignItems: "center",
     gap: 6,
     border: color === "red"
@@ -2204,6 +2205,7 @@ function actionItemRowStyle(color: string | undefined, hasInlineFields: boolean)
 
 const actionItemPrimaryButtonStyle: React.CSSProperties = {
   minWidth: 0,
+  flex: "1 1 0%",
   minHeight: 34,
   display: "grid",
   gridTemplateColumns: "5px 29px minmax(0,1fr)",
@@ -2335,9 +2337,10 @@ function inlineDueDatePresentation(tone: "urgent" | "soon" | "standard", error: 
   };
 }
 
-function inlineDueDateStyle(presentation: InlineDueDatePresentation): React.CSSProperties {
+function inlineDueDateStyle(presentation: InlineDueDatePresentation, editorWidth: number): React.CSSProperties {
   return {
     minWidth: 0,
+    width: editorWidth + 10,
     flex: "0 0 auto",
     minHeight: 31,
     display: "inline-flex",
@@ -2347,6 +2350,7 @@ function inlineDueDateStyle(presentation: InlineDueDatePresentation): React.CSSP
     borderRadius: 9,
     background: presentation.background,
     boxShadow: `3px 3px 8px ${presentation.shadowColor}, -2px -2px 7px rgba(255,255,255,.92), inset 1px 1px 0 rgba(255,255,255,.94)`,
+    boxSizing: "border-box",
     padding: "2px 4px",
   };
 }
