@@ -25,7 +25,7 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 	}
 	for key := range queryValues {
 		switch key {
-		case "company_id", "section", "role", "perspective", "grouping", "ordering", "limit", "cursor", "history":
+		case "company_id", "subject_user_id", "section", "role", "perspective", "grouping", "ordering", "limit", "cursor", "history":
 		default:
 			writeError(w, http.StatusBadRequest, "unsupported_my_work_query_param")
 			return
@@ -140,9 +140,34 @@ func (s *Server) handleMyWork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := strings.TrimSpace(actor.User.UserID)
+	viewerUserID := strings.ToLower(strings.TrimSpace(actor.User.UserID))
+	subjectUserID := viewerUserID
+	subjectValues, subjectSet := queryValues["subject_user_id"]
+	if subjectSet {
+		if len(subjectValues) != 1 {
+			writeError(w, http.StatusBadRequest, "invalid_my_work_subject")
+			return
+		}
+		subjectUserID = strings.ToLower(strings.TrimSpace(subjectValues[0]))
+		if !isCanonicalUUID(subjectUserID) {
+			writeError(w, http.StatusBadRequest, "invalid_my_work_subject")
+			return
+		}
+		if subjectUserID != viewerUserID {
+			if _, err := s.repo.GetCompanyUser(companyID, subjectUserID); errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "my_work_subject_not_found")
+				return
+			} else if errors.Is(err, store.ErrInvalid) {
+				writeError(w, http.StatusBadRequest, "invalid_my_work_subject")
+				return
+			} else if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_verify_my_work_subject")
+				return
+			}
+		}
+	}
 	response, err := s.repo.GetMyWork(r.Context(), store.MyWorkQuery{
-		CompanyID: companyID, UserID: userID, ViewerUserID: userID,
+		CompanyID: companyID, UserID: subjectUserID, ViewerUserID: viewerUserID,
 		Section: section, Role: raciRole, Perspective: perspective, Grouping: grouping, Ordering: ordering, Limit: limit, Cursor: cursor, History: history,
 	})
 	if errors.Is(err, store.ErrInvalid) {

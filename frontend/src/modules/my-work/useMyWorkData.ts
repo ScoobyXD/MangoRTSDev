@@ -66,7 +66,17 @@ function errorMessage(cause: unknown): string {
   return cause instanceof Error && cause.message.trim() ? cause.message : "My Work could not be loaded.";
 }
 
-export function useMyWorkData(companyID: string, subjectID: string, requestJSON: BoundRequestJSON) {
+export function useMyWorkData(
+  companyID: string,
+  viewerUserID: string,
+  subjectUserID: string,
+  requestJSON: BoundRequestJSON,
+) {
+  const requestScopeKey = JSON.stringify([
+    companyID.trim(),
+    viewerUserID.trim(),
+    subjectUserID.trim() || viewerUserID.trim(),
+  ]);
   const [state, setState] = useState<MyWorkDataState>(createInitialState);
   const [actionItemPerspective, setActionItemPerspective] = useState<MyWorkActionItemPerspective>("mine");
   const [nodeRole, setNodeRole] = useState<MyWorkProcessRole>("responsible");
@@ -75,6 +85,8 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
   const actionItemPerspectiveRef = useRef(actionItemPerspective);
   const nodeRoleRef = useRef(nodeRole);
   const processRoleRef = useRef(processRole);
+  const stateScopeKeyRef = useRef(requestScopeKey);
+  const stateRequestJSONRef = useRef(requestJSON);
   const initialControllerRef = useRef<AbortController | null>(null);
   const sectionControllersRef = useRef<Partial<Record<MyWorkSection, AbortController>>>({});
   const requestVersionsRef = useRef<Record<MyWorkSection, number>>({
@@ -120,6 +132,7 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     try {
       const response = await fetchMyWork(requestJSON, {
         companyID,
+        subjectUserID,
         section,
         role: section === "nodes"
           ? request.role ?? nodeRoleRef.current
@@ -137,6 +150,7 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
         signal: controller.signal,
       });
       if (controller.signal.aborted || requestVersionsRef.current[section] !== version) return;
+      assertMyWorkResponseScope(response, companyID, subjectUserID || viewerUserID);
       const page = response[section] as MyWorkPage<MyWorkItem> | undefined;
       if (!page) throw new Error(`My Work response omitted ${section}.`);
       const nextCursor = page.next_cursor?.trim() ?? "";
@@ -165,7 +179,7 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     } finally {
       if (sectionControllersRef.current[section] === controller) delete sectionControllersRef.current[section];
     }
-  }, [companyID, requestJSON]);
+  }, [companyID, requestJSON, subjectUserID, viewerUserID]);
 
   useEffect(() => {
     initialControllerRef.current?.abort();
@@ -187,19 +201,26 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     setActionItemPerspective("mine");
     setNodeRole("responsible");
     setProcessRole("responsible");
-    setState({
-      action_items: { ...createInitialState().action_items, loading: true },
-      nodes: { ...createInitialState().nodes, loading: true },
-      processes: { ...createInitialState().processes, loading: true },
-      projects: { ...createInitialState().projects, loading: true },
-    });
+    const initialState = createInitialState();
+    const loadingState: MyWorkDataState = {
+      action_items: { ...initialState.action_items, loading: true },
+      nodes: { ...initialState.nodes, loading: true },
+      processes: { ...initialState.processes, loading: true },
+      projects: { ...initialState.projects, loading: true },
+    };
+    stateScopeKeyRef.current = requestScopeKey;
+    stateRequestJSONRef.current = requestJSON;
+    stateRef.current = loadingState;
+    setState(loadingState);
 
     void fetchMyWork(requestJSON, {
       companyID,
+      subjectUserID,
       limit: MY_WORK_PAGE_LIMIT,
       signal: controller.signal,
     }).then((response) => {
       if (controller.signal.aborted) return;
+      assertMyWorkResponseScope(response, companyID, subjectUserID || viewerUserID);
       const preparedResponse = prepareInitialResponse(
         response,
         versions,
@@ -218,7 +239,7 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
       Object.values(sectionControllersRef.current).forEach((sectionController) => sectionController?.abort());
       seenItemKeysRef.current = createSectionSets();
     };
-  }, [companyID, requestJSON, subjectID]);
+  }, [companyID, requestJSON, requestScopeKey, subjectUserID, viewerUserID]);
 
   const reloadSection = useCallback((
     section: MyWorkSection,
@@ -282,17 +303,34 @@ export function useMyWorkData(companyID: string, subjectID: string, requestJSON:
     return requestSection("processes", { role, clearItems: true });
   }, [requestSection]);
 
+  const stateMatchesRequestScope = stateScopeKeyRef.current === requestScopeKey
+    && stateRequestJSONRef.current === requestJSON;
   return {
-    state,
-    actionItemPerspective,
-    nodeRole,
-    processRole,
+    state: stateMatchesRequestScope ? state : createInitialState(),
+    actionItemPerspective: stateMatchesRequestScope ? actionItemPerspective : "mine",
+    nodeRole: stateMatchesRequestScope ? nodeRole : "responsible",
+    processRole: stateMatchesRequestScope ? processRole : "responsible",
     reloadSection,
     loadMore,
     selectActionItemPerspective,
     selectNodeRole,
     selectProcessRole,
   };
+}
+
+export function assertMyWorkResponseScope(
+  response: Pick<MyWorkResponse, "company_id" | "user_id">,
+  companyID: string,
+  subjectUserID: string,
+): void {
+  const expectedCompanyID = companyID.trim();
+  const expectedSubjectUserID = subjectUserID.trim();
+  if (!expectedCompanyID || response.company_id?.trim() !== expectedCompanyID) {
+    throw new Error("My Work response company scope did not match the request.");
+  }
+  if (!expectedSubjectUserID || response.user_id?.trim() !== expectedSubjectUserID) {
+    throw new Error("My Work response subject scope did not match the request.");
+  }
 }
 
 function createCursorSets(): Record<MyWorkSection, Set<string>> {

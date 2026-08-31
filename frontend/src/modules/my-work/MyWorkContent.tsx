@@ -69,6 +69,7 @@ import {
 } from "./myWorkGrouping.js";
 import { ActionItemInlineFieldSettings } from "./ActionItemInlineFieldSettingsPopover.js";
 import { ActionItemOrderingEditor } from "./ActionItemOrderingEditor.js";
+import { MyWorkPersonPicker, type MyWorkPersonSelection } from "./MyWorkPersonPicker.js";
 import {
   findAdjacentMyWorkRowEntryIndex,
   findMyWorkDisplayEntryIndex,
@@ -113,6 +114,22 @@ const DEFAULT_MY_WORK_LAYOUT: MyWorkLayout = {
 };
 
 export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkContentProps) {
+  const viewerUserID = subjectID.trim();
+  const subjectScopeKey = `${companyID.trim()}:${viewerUserID}`;
+  const [subjectSelection, setSubjectSelection] = useState<MyWorkPersonSelection & { scopeKey: string }>(() => ({
+    scopeKey: subjectScopeKey,
+    userID: viewerUserID,
+    label: "",
+  }));
+  const activeSubjectSelection = subjectSelection.scopeKey === subjectScopeKey
+    ? subjectSelection
+    : { scopeKey: subjectScopeKey, userID: viewerUserID, label: "" };
+  const selectedSubjectID = activeSubjectSelection.userID.trim() || viewerUserID;
+  const targetSubjectUserID = selectedSubjectID && selectedSubjectID !== viewerUserID ? selectedSubjectID : "";
+  const selectedSubjectIsViewer = !targetSubjectUserID;
+  const selectedSubjectLabel = selectedSubjectIsViewer
+    ? "you"
+    : activeSubjectSelection.label.trim() || "the selected person";
   const {
     state,
     actionItemPerspective,
@@ -123,7 +140,7 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     selectActionItemPerspective,
     selectNodeRole,
     selectProcessRole,
-  } = useMyWorkData(companyID, subjectID, requestJSON);
+  } = useMyWorkData(companyID, viewerUserID, targetSubjectUserID, requestJSON);
   const [layout, setLayout] = useState<MyWorkLayout>(() => readMyWorkLayout(companyID));
   const [middleView, setMiddleView] = useState<MyWorkMiddleView>("processes");
   const [columnAvailableWidth, setColumnAvailableWidth] = useState(0);
@@ -176,12 +193,22 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   const businessDateKey = useMyWorkBusinessDateKey();
 
   useEffect(() => {
+    setSubjectSelection({ scopeKey: subjectScopeKey, userID: viewerUserID, label: "" });
+  }, [subjectScopeKey, viewerUserID]);
+
+  useEffect(() => {
     actionItemPerspectiveValueRef.current = actionItemPerspective;
   }, [actionItemPerspective]);
 
   useEffect(() => {
     actionItemHistoryRef.current = actionItemHistory;
   }, [actionItemHistory]);
+
+  useEffect(() => {
+    const nextSavedViewIDs = { mine: createSavedViewID(), delegated: createSavedViewID() };
+    actionItemSavedViewIDsRef.current = nextSavedViewIDs;
+    actionItemPreferenceSaveQueuesRef.current = { mine: Promise.resolve(), delegated: Promise.resolve() };
+  }, [companyID, subjectID]);
 
   useEffect(() => {
     actionItemPerspectiveValueRef.current = "mine";
@@ -197,9 +224,6 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
       mine: [...DEFAULT_MY_WORK_ACTION_ITEM_DISPLAYED_FIELDS.mine],
       delegated: [...DEFAULT_MY_WORK_ACTION_ITEM_DISPLAYED_FIELDS.delegated],
     });
-    const nextSavedViewIDs = { mine: createSavedViewID(), delegated: createSavedViewID() };
-    actionItemSavedViewIDsRef.current = nextSavedViewIDs;
-    actionItemPreferenceSaveQueuesRef.current = { mine: Promise.resolve(), delegated: Promise.resolve() };
     setActionItemPreferenceError("");
     setActionItemPreferencesReady(false);
     setNodeGroupings(DEFAULT_MY_WORK_NODE_GROUPINGS.map((grouping) => ({ ...grouping })));
@@ -207,10 +231,12 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
     setActionItemHistory(false);
     setNodeHistory(false);
     middleScrollPositionsRef.current = { processes: 0, nodes: 0 };
+    if (actionItemsScrollRef.current) actionItemsScrollRef.current.scrollTop = 0;
     if (processesScrollRef.current) processesScrollRef.current.scrollTop = 0;
     if (nodesScrollRef.current) nodesScrollRef.current.scrollTop = 0;
+    if (projectsScrollRef.current) projectsScrollRef.current.scrollTop = 0;
     setMiddleView("processes");
-  }, [companyID, subjectID]);
+  }, [companyID, selectedSubjectID]);
 
   useLayoutEffect(() => {
     const body = middleView === "processes" ? processesScrollRef.current : nodesScrollRef.current;
@@ -523,6 +549,13 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
       <header style={pageHeaderStyle}>
         <span style={pageHeaderIconStyle}><HeaderMyWorkIcon color="#2563eb" /></span>
         <h1 style={pageTitleStyle}>My Work</h1>
+        <MyWorkPersonPicker
+          companyID={companyID}
+          viewerUserID={viewerUserID}
+          selectedUserID={selectedSubjectID}
+          requestJSON={requestJSON}
+          onSelect={(selection) => setSubjectSelection({ ...selection, scopeKey: subjectScopeKey })}
+        />
       </header>
 
       <div ref={columnsRef} data-my-work-columns="true" style={columnsStyle(layout.columnWeights)}>
@@ -618,8 +651,8 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
             emptyLabel={actionItemHistory
               ? "No completed Action Items."
               : actionItemPerspective === "delegated"
-                ? "No Action Items delegated by you."
-                : "No Action Items assigned to you."}
+                ? `No Action Items delegated by ${selectedSubjectLabel}.`
+                : `No Action Items assigned to ${selectedSubjectLabel}.`}
             renderRow={renderActionItemRow}
           />
         </SectionFrame>
@@ -732,7 +765,9 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
             entries={projectEntries}
             scrollBodyRef={projectsScrollRef}
             rowEstimate={47}
-            emptyLabel="No visible Projects assigned to your Project Teams."
+            emptyLabel={selectedSubjectIsViewer
+              ? "No visible Projects assigned to your Project Teams."
+              : `No visible Projects assigned to ${possessiveLabel(selectedSubjectLabel)} Project Teams.`}
             renderRow={renderProjectRow}
           />
         </SectionFrame>
@@ -960,6 +995,10 @@ function myWorkLayoutStorageKey(companyID: string): string {
 function clamp(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) return minimum;
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+function possessiveLabel(label: string): string {
+  return /s$/i.test(label.trim()) ? `${label.trim()}'` : `${label.trim()}'s`;
 }
 
 function MyWorkResizeHandle({

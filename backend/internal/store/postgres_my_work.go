@@ -372,7 +372,7 @@ limit $22`, keyset, orderBy)
 		page.Items = items[:query.Limit]
 		last := page.Items[len(page.Items)-1]
 		if query.History {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.EntityID})
+			page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.EntityID})
 		} else {
 			color := strings.ToLower(myWorkOptionalString(last.Color))
 			nextCursor := myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, Ordering: ordering, GroupNull: color == "", GroupInt: myWorkColorRank(color), GroupText: color, DateNull: last.CompletionDueDate == nil, Date: myWorkOptionalString(last.CompletionDueDate), ResourceID: last.EntityID}
@@ -387,7 +387,7 @@ limit $22`, keyset, orderBy)
 					nextCursor.HuddleProcessID = last.HuddleProcess.HuddleLogicGateID
 				}
 			}
-			page.NextCursor = encodeMyWorkCursor(nextCursor)
+			page.NextCursor = encodeMyWorkCursor(query, nextCursor)
 		}
 	}
 	return page, nil
@@ -531,9 +531,9 @@ order by %s
 		page.Items = items[:query.Limit]
 		last := page.Items[len(page.Items)-1]
 		if query.History {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
+			page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
 		} else {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
+			page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
 		}
 	}
 	return page, nil
@@ -568,7 +568,14 @@ func (r *PostgresRepo) postgresMyWorkProcesses(ctx context.Context, query MyWork
   where not $5::boolean or (lower(header) collate "C",logic_gate_id)>($6::text collate "C",$7::uuid)
   order by lower(header) collate "C",logic_gate_id
   limit $8
-), process_counts as (
+), process_count_node_targets(resource_type,resource_id) as (
+  select distinct 'node'::text,projection.node_id
+  from visible_process_page page
+  join kanban_board_projection projection
+    on projection.company_id=$1::uuid and projection.logic_gate_id=page.logic_gate_id
+)
+` + myWorkPermissionAccessCTEs("process_count_node_targets", "process_count_node") + `
+, process_counts as (
   select
     page.logic_gate_id,
     count(*) filter (where projection.status_rank=0)::integer as request_count,
@@ -576,8 +583,10 @@ func (r *PostgresRepo) postgresMyWorkProcesses(ctx context.Context, query MyWork
     count(*) filter (where projection.status_rank=3)::integer as in_progress_count,
     count(*) filter (where projection.status_rank=4)::integer as review_count
   from visible_process_page page
-  left join kanban_board_projection projection
+  join kanban_board_projection projection
     on projection.company_id=$1::uuid and projection.logic_gate_id=page.logic_gate_id
+  join process_count_node_access node_access
+    on node_access.resource_type='node' and node_access.resource_id=projection.node_id and node_access.allowed
   group by page.logic_gate_id
 )
 select page.logic_gate_id::text,page.header,lower(page.header),
@@ -623,7 +632,7 @@ order by lower(page.header) collate "C",page.logic_gate_id`
 	}
 	if page.HasMore {
 		last := resultRows[len(resultRows)-1]
-		page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionProcesses, Role: query.Role, Name: last.sortKey, ResourceID: last.item.LogicGateID})
+		page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionProcesses, Role: query.Role, Name: last.sortKey, ResourceID: last.item.LogicGateID})
 	}
 	return page, nil
 }
@@ -695,7 +704,7 @@ limit $7`
 	}
 	if page.HasMore {
 		last := resultRows[len(resultRows)-1]
-		page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionProjects, Name: last.sortKey, ResourceID: last.item.ProjectID})
+		page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionProjects, Name: last.sortKey, ResourceID: last.item.ProjectID})
 	}
 	return page, nil
 }

@@ -160,7 +160,7 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 	if page.HasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
 		if query.History {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, History: true, CompletedTimestamp: last.item.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.item.EntityID})
+			page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, History: true, CompletedTimestamp: last.item.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.item.EntityID})
 		} else {
 			nextCursor := myWorkCursor{Section: MyWorkSectionActionItems, Perspective: query.Perspective, Grouping: grouping, Ordering: ordering, GroupNull: last.colorKey == "", GroupInt: last.colorRank, GroupText: last.colorKey, DateNull: last.dateNull, Date: last.date, ResourceID: last.item.EntityID}
 			if myWorkGroupingHasField(actionTerms, MyWorkActionItemGroupingPersonInCharge) {
@@ -172,7 +172,7 @@ func (r *MemoryRepo) memoryMyWorkActionItemsLocked(query MyWorkQuery, cursor myW
 				nextCursor.HuddleProcessName = last.huddleSortName
 				nextCursor.HuddleProcessID = last.huddleID
 			}
-			page.NextCursor = encodeMyWorkCursor(nextCursor)
+			page.NextCursor = encodeMyWorkCursor(query, nextCursor)
 		}
 	}
 	return page
@@ -367,9 +367,9 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 	if page.HasMore && len(rows) > 0 {
 		last := rows[len(rows)-1]
 		if query.History {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
+			page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, History: true, CompletedTimestamp: last.CompletedTimestamp.Format(time.RFC3339Nano), ResourceID: last.NodeID})
 		} else {
-			page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
+			page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionNodes, Role: query.Role, Grouping: grouping, GroupNull: last.Priority == nil, GroupInt: myWorkOptionalInt(last.Priority), DateNull: last.DueDate == nil, Date: myWorkOptionalString(last.DueDate), ResourceID: last.NodeID})
 		}
 	}
 	return page
@@ -377,7 +377,15 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 
 func (r *MemoryRepo) memoryMyWorkProcessesLocked(query MyWorkQuery, cursor myWorkCursor) domain.MyWorkProcessPage {
 	items := make([]domain.MyWorkProcess, 0)
-	countsByLogicGateID := r.memoryRACITabLogicGateCountsLocked(query.CompanyID)
+	countsByLogicGateID := map[string]domain.RACITabStatusCounts{}
+	for _, assignment := range r.nodeLogicGateAssignments {
+		if assignment.CompanyID != query.CompanyID || !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeNode, assignment.NodeID, EntityPermissionEdit) {
+			continue
+		}
+		counts := countsByLogicGateID[assignment.LogicGateID]
+		addRACITabStatusCounts(&counts, raciTabCountsForStatus(assignment.StatusKey))
+		countsByLogicGateID[assignment.LogicGateID] = counts
+	}
 	for _, gate := range r.logicGates {
 		if gate.CompanyID != query.CompanyID || !r.gvicEffectiveUserHasRoleLocked(query.CompanyID, EntityTypeLogicGate, gate.LogicGateID, query.UserID, query.Role) {
 			continue
@@ -406,7 +414,7 @@ func (r *MemoryRepo) memoryMyWorkProcessesLocked(query MyWorkQuery, cursor myWor
 	page.Items = append(page.Items, items...)
 	if page.HasMore && len(items) > 0 {
 		last := items[len(items)-1]
-		page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionProcesses, Role: query.Role, Name: strings.ToLower(last.Name), ResourceID: last.LogicGateID})
+		page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionProcesses, Role: query.Role, Name: strings.ToLower(last.Name), ResourceID: last.LogicGateID})
 	}
 	return page
 }
@@ -437,7 +445,7 @@ func (r *MemoryRepo) memoryMyWorkProjectsLocked(query MyWorkQuery, cursor myWork
 	page.Items = append(page.Items, items...)
 	if page.HasMore && len(items) > 0 {
 		last := items[len(items)-1]
-		page.NextCursor = encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionProjects, Name: strings.ToLower(last.Name), ResourceID: last.ProjectID})
+		page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionProjects, Name: strings.ToLower(last.Name), ResourceID: last.ProjectID})
 	}
 	return page
 }

@@ -49,3 +49,13 @@ test("My Work is a lazy authenticated static page with persisted page identity",
   assert.match(myWorkPage, /requestJSON=\{appRequestJSON\}/);
   assert.match(persistence, /id: "view-my-work", name: "My Work", page: "my-work", frames: \[\]/);
 });
+
+test("Auth loading and login states exclude the authenticated My Work shell", () => {
+  const auth = readFileSync("frontend/src/auth/AuthGate.tsx", "utf8");
+  const loadingBranch = auth.indexOf("if (loading) return");
+  const loginBranch = auth.indexOf("if (!me || isAuthPath(normalizedPath))");
+  const myWorkBranch = auth.indexOf('if (normalizedPath === "/my-work")');
+  assert.ok(loadingBranch >= 0 && loginBranch > loadingBranch && myWorkBranch > loginBranch);
+  assert.doesNotMatch(auth.slice(loadingBranch, loginBranch), /LazyAppLayout/);
+  assert.doesNotMatch(auth.slice(loginBranch, myWorkBranch), /initialPage="my-work"/);
+});

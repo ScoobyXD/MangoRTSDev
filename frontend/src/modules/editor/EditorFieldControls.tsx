@@ -129,6 +129,7 @@ type CompanyUserSearchPickerProps = {
   placeholder: string;
   accent?: string;
   autoFocus?: boolean;
+  activeDescendant?: string;
   showResults: boolean;
   hasResults: boolean;
   emptyMessage: React.ReactNode;
@@ -153,6 +154,7 @@ export const CompanyUserSearchPicker = React.forwardRef<HTMLDivElement, CompanyU
   placeholder,
   accent,
   autoFocus,
+  activeDescendant,
   showResults,
   hasResults,
   emptyMessage,
@@ -192,6 +194,7 @@ export const CompanyUserSearchPicker = React.forwardRef<HTMLDivElement, CompanyU
         aria-haspopup="listbox"
         aria-expanded={showResults}
         aria-controls={`${id}-options`}
+        aria-activedescendant={showResults ? activeDescendant : undefined}
         onFocus={onInputFocus}
         onChange={(event) => onQueryChange(event.currentTarget.value)}
         onKeyDown={onInputKeyDown}

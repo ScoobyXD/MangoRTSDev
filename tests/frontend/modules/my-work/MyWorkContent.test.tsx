@@ -59,6 +59,20 @@ function installMyWorkDOMGlobals(dom: JSDOM, restores: Restore[]) {
         : (dom.window as unknown as Record<string, unknown>)[name];
     installGlobal(name, value, restores);
   }
+  const inputPrototype = dom.window.HTMLElement.prototype as unknown as {
+    attachEvent?: () => void;
+    detachEvent?: () => void;
+  };
+  const attachEvent = inputPrototype.attachEvent;
+  const detachEvent = inputPrototype.detachEvent;
+  inputPrototype.attachEvent = () => undefined;
+  inputPrototype.detachEvent = () => undefined;
+  restores.push(() => {
+    if (attachEvent) inputPrototype.attachEvent = attachEvent;
+    else delete inputPrototype.attachEvent;
+    if (detachEvent) inputPrototype.detachEvent = detachEvent;
+    else delete inputPrototype.detachEvent;
+  });
   installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
 }
@@ -881,6 +895,8 @@ test("My Work loads and persists independent Mine and Delegated row-field orders
       import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx"),
     ]);
     const savedWrites: Array<Record<string, unknown>> = [];
+    const savedViewReadPaths: string[] = [];
+    const myWorkReadPaths: string[] = [];
     const item = {
       entity_id: "action-fields",
       name: "Field Order Action",
@@ -898,7 +914,17 @@ test("My Work loads and persists independent Mine and Delegated row-field orders
     };
     const requestJSON = <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
       const url = new URL(path, "http://api.test");
+      if (url.pathname === "/v1/companies/company-1/users") {
+        return Promise.resolve({ users: [
+          { company_id: "company-1", user_id: "viewer-1", display_name: "Viewer One", email: "viewer@example.com" },
+          { company_id: "company-1", user_id: "person-2", display_name: "Subject Two", email: "subject@example.com" },
+        ] } as T);
+      }
+      if (url.pathname === "/v1/companies/company-1/user-groups") {
+        return Promise.resolve({ groups: [], members: [] } as T);
+      }
       if (url.pathname === "/v1/saved-views" && init?.method !== "PUT") {
+        savedViewReadPaths.push(path);
         const surface = url.searchParams.get("surface");
         const delegated = surface === "my_work_action_items_delegated";
         return Promise.resolve({
@@ -928,10 +954,13 @@ test("My Work loads and persists independent Mine and Delegated row-field orders
         savedWrites.push(init.json as Record<string, unknown>);
         return Promise.resolve(init.json as T);
       }
+      myWorkReadPaths.push(path);
+      const responseUserID = url.searchParams.get("subject_user_id") ?? "viewer-1";
       const perspective = url.searchParams.get("perspective") === "delegated" ? "delegated" : "mine";
       const actionPage = { perspective, items: [item], has_more: false };
       if (url.searchParams.get("section") === "action_items") {
         return Promise.resolve(response({
+          user_id: responseUserID,
           action_items: actionPage,
           nodes: undefined,
           processes: undefined,
@@ -939,6 +968,7 @@ test("My Work loads and persists independent Mine and Delegated row-field orders
         }) as T);
       }
       return Promise.resolve(response({
+        user_id: responseUserID,
         action_items: actionPage,
         nodes: { items: [], has_more: false },
         processes: { role: "responsible", items: [], has_more: false },
@@ -973,6 +1003,99 @@ test("My Work loads and persists independent Mine and Delegated row-field orders
     const actionItemRow = inlineRail?.closest<HTMLElement>('[data-my-work-row="action-item"]');
     assert.equal(actionItemRow?.style.display, "flex", "the row measures the rail cap against the whole row instead of its own grid slot");
     assert.equal(actionItemRow?.querySelector<HTMLElement>('[data-my-work-target="action-item"]')?.style.flex, "1 1 0%", "the title yields only the space that the right-pinned labels need");
+    const pageHeader = container.querySelector<HTMLElement>("header");
+    const headerPeopleSearch = pageHeader?.querySelector<HTMLElement>('[data-my-work-header-search="people"]');
+    assert.ok(pageHeader && headerPeopleSearch);
+    assert.ok(headerPeopleSearch.querySelector('input[aria-label="Search company people"]'));
+    assert.ok(headerPeopleSearch.querySelector('[data-my-work-people-button="true"]'), "the people icon and search live in the real My Work header");
+
+    const preSelectionDelegated = actionSection.querySelector<HTMLButtonElement>('[data-my-work-action-item-perspective="delegated"]');
+    await act(async () => {
+      preSelectionDelegated?.click();
+      await Promise.resolve();
+    });
+    const preSelectionActionHistory = actionSection.querySelector<HTMLButtonElement>('button[data-my-work-history-selected]');
+    await act(async () => {
+      preSelectionActionHistory?.click();
+      await Promise.resolve();
+    });
+    const preSelectionProcessRole = container.querySelector<HTMLButtonElement>(
+      '[role="radiogroup"][aria-label="Process RACI role"] [aria-label="Consulted"]',
+    );
+    await act(async () => {
+      preSelectionProcessRole?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-my-work-middle-view="nodes"]')?.click();
+      await Promise.resolve();
+    });
+    const preSelectionNodeRole = container.querySelector<HTMLButtonElement>(
+      '[role="radiogroup"][aria-label="Node RACI role"] [aria-label="Accountable"]',
+    );
+    const preSelectionNodeHistory = container.querySelector<HTMLButtonElement>(
+      '[data-my-work-section="nodes"] button[data-my-work-history-selected]',
+    );
+    await act(async () => {
+      preSelectionNodeRole?.click();
+      await Promise.resolve();
+      preSelectionNodeHistory?.click();
+      await Promise.resolve();
+    });
+    const savedViewReadsBeforeSubjectSelection = savedViewReadPaths.length;
+    const peopleButton = container.querySelector<HTMLButtonElement>('[data-my-work-people-button="true"]');
+    await act(async () => {
+      peopleButton?.click();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const subjectOption = Array.from(dom.window.document.querySelectorAll<HTMLButtonElement>('[data-my-work-person-option="true"]'))
+      .find((option) => option.textContent?.includes("Subject Two"));
+    assert.ok(subjectOption);
+    await act(async () => {
+      subjectOption.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.match(container.textContent ?? "", /Viewing Subject Two/);
+    assert.ok(myWorkReadPaths.some((path) => (
+      new URL(path, "http://api.test").searchParams.get("subject_user_id") === "person-2"
+    )), "the selected subject scopes My Work reads");
+    const selectedSubjectSavedViewReads = savedViewReadPaths.slice(savedViewReadsBeforeSubjectSelection);
+    assert.equal(selectedSubjectSavedViewReads.length, 2, "the viewer's Mine and Delegated preferences reload for a new subject");
+    assert.ok(selectedSubjectSavedViewReads.every((path) => !path.includes("person-2")), "saved-view reads never use the selected subject identity");
+    assert.deepEqual(visibleFieldIDs(), ["source", "assigned_by"], "the viewer's Mine preferences reapply for the selected subject");
+    const selectedSubjectReadPaths = myWorkReadPaths.filter((path) => (
+      new URL(path, "http://api.test").searchParams.get("subject_user_id") === "person-2"
+    ));
+    assert.ok(selectedSubjectReadPaths.some((path) => !new URL(path, "http://api.test").searchParams.has("section")), "selection starts a fresh all-section read");
+    const selectedSubjectActionRead = selectedSubjectReadPaths.find((path) => (
+      new URL(path, "http://api.test").searchParams.get("section") === "action_items"
+    ));
+    assert.ok(selectedSubjectActionRead, "viewer preferences reload the selected subject's Action Items");
+    const selectedSubjectActionURL = new URL(selectedSubjectActionRead, "http://api.test");
+    assert.equal(selectedSubjectActionURL.searchParams.get("grouping"), "color:asc,huddle_process:asc,completion_due_date:asc");
+    assert.equal(selectedSubjectActionURL.searchParams.get("ordering"), "none");
+    assert.ok(selectedSubjectReadPaths.every((path) => !new URL(path, "http://api.test").searchParams.has("cursor")), "old-subject cursors never cross the selection boundary");
+    assert.equal(actionSection.querySelector('[data-my-work-action-item-perspective="mine"]')?.getAttribute("aria-checked"), "true");
+    assert.equal(actionSection.querySelector('button[data-my-work-history-selected]')?.getAttribute("aria-pressed"), "false");
+    assert.equal(container.querySelector('[data-my-work-middle-view="processes"]')?.getAttribute("aria-checked"), "true");
+    assert.equal(container.querySelector(
+      '[role="radiogroup"][aria-label="Process RACI role"] [aria-label="Responsible"]',
+    )?.getAttribute("aria-checked"), "true");
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-my-work-middle-view="nodes"]')?.click();
+      await Promise.resolve();
+    });
+    assert.equal(container.querySelector(
+      '[role="radiogroup"][aria-label="Node RACI role"] [aria-label="Responsible"]',
+    )?.getAttribute("aria-checked"), "true");
+    assert.equal(container.querySelector(
+      '[data-my-work-section="nodes"] button[data-my-work-history-selected]',
+    )?.getAttribute("aria-pressed"), "false");
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-my-work-middle-view="processes"]')?.click();
+      await Promise.resolve();
+    });
     const settingsButton = actionSection.querySelector<HTMLButtonElement>('button[aria-label="Group, order, and choose Action Item row fields"]');
     assert.equal(actionSection.querySelector('[data-my-work-action-item-field-settings="true"]'), null, "row-field settings live only in the grouper");
 
@@ -1002,6 +1125,8 @@ test("My Work loads and persists independent Mine and Delegated row-field orders
     assert.deepEqual(visibleFieldIDs(), ["person_in_charge", "huddle_process"], "dragging the settings tray updates row placement immediately");
     const delegatedWrite = savedWrites.at(-1);
     assert.equal(delegatedWrite?.surface, "my_work_action_items_delegated");
+    assert.equal(delegatedWrite?.principal_id, "viewer-1", "the authenticated viewer still owns settings while another subject is selected");
+    assert.notEqual(delegatedWrite?.principal_id, "person-2");
     assert.deepEqual((delegatedWrite?.settings as { displayed_fields?: string[] }).displayed_fields, ["person_in_charge", "huddle_process"]);
     assert.deepEqual((delegatedWrite?.settings as { ordering?: unknown[] }).ordering, [{ field: "person_in_charge", direction: "asc" }]);
   } finally {
@@ -1369,11 +1494,13 @@ test("My Work reloads the same resource ID when the subject changes", async () =
       import("../../../../frontend/src/modules/my-work/MyWorkContent.tsx"),
     ]);
     let initialRequests = 0;
+    let authenticatedViewerID = "viewer-1";
     const requestJSON = <T,>(path: string, _init?: RequestInit): Promise<T> => {
       const url = new URL(path, "http://api.test");
       if (url.pathname === "/v1/saved-views") return Promise.resolve({ saved_views: [] } as T);
       if (url.searchParams.get("section") === "action_items") {
         return Promise.resolve(response({
+          user_id: authenticatedViewerID,
           action_items: { items: [], has_more: false },
           nodes: undefined,
           processes: undefined,
@@ -1383,6 +1510,7 @@ test("My Work reloads the same resource ID when the subject changes", async () =
       initialRequests += 1;
       const subjectLabel = initialRequests === 1 ? "First Subject Process" : "Second Subject Process";
       return Promise.resolve(response({
+        user_id: authenticatedViewerID,
         action_items: { items: [], has_more: false },
         nodes: { items: [], has_more: false },
         processes: {
@@ -1408,6 +1536,7 @@ test("My Work reloads the same resource ID when the subject changes", async () =
     firstSubjectProcessScroll.scrollTop = 245;
 
     await act(async () => {
+      authenticatedViewerID = "viewer-2";
       root.render(<MyWorkContent companyID="company-1" subjectID="viewer-2" requestJSON={requestJSON} />);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
