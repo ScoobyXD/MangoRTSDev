@@ -8,7 +8,6 @@ import {
   getActionItemSource,
   listAllEntitiesForType,
   listEntities,
-  listHuddleNodeActionItems,
   searchEntities,
   updateEntity,
   updateEntityField,
@@ -171,27 +170,6 @@ test("listEntities can request only entities at the type root", async () => {
   const params = new URL(requestedPath, "http://mangorts.test").searchParams;
   assert.equal(params.has("entity_folder_id"), true);
   assert.equal(params.get("entity_folder_id"), "");
-});
-
-test("listHuddleNodeActionItems reads the exact company and Huddle Node scope", async () => {
-  let requestedPath = "";
-  let requestedSignal: AbortSignal | null | undefined;
-  const signal = new AbortController().signal;
-  const requestJSON: BoundRequestJSON = async <T,>(path: string, init?: RequestInit): Promise<T> => {
-    requestedPath = path;
-    requestedSignal = init?.signal;
-    return { action_items: [{ ...entitySummary("action-item-1"), entity_type_name: "Action Item", entity_fields: [] }] } as T;
-  };
-
-  const loaded = await listHuddleNodeActionItems(requestJSON, {
-    companyID: "company-1",
-    huddleNodeID: "huddle-node-1",
-    signal,
-  });
-
-  assert.equal(requestedPath, "/v1/action-items?company_id=company-1&huddle_node_id=huddle-node-1");
-  assert.equal(requestedSignal, signal);
-  assert.equal(loaded[0]?.entity_id, "action-item-1");
 });
 
 test("field-type create and update serialize choice/color config without changing its option keys", async () => {

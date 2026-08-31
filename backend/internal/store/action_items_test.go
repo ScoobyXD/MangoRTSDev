@@ -639,6 +639,26 @@ func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) 
 	}, ErrNotFound)
 }
 
+func TestPostgresVisibleActionItemSourcesUseOneBatchedPermissionProjection(t *testing.T) {
+	raw, err := os.ReadFile("postgres_action_items.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := extractFunctionSourceForTest(t, string(raw), "func (r *PostgresRepo) ListVisibleActionItemSources")
+	for _, required := range []string{
+		"field.entity_id::text=any($2::text[])",
+		"myWorkViewerPermissionCTE",
+		`myWorkPermissionAccessCTEs("action_source_access_targets", "action_source")`,
+	} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("batched visible Source projection missing %q", required)
+		}
+	}
+	if strings.Count(body, ".QueryContext(") != 1 || strings.Contains(body, "GetActionItemSource(") || strings.Contains(body, "mangorts_user_can_access_resource") {
+		t.Fatalf("visible Source projection must use one set-based permission query:\n%s", body)
+	}
+}
+
 func TestMemoryActionItemSourceRecycleRestoreAndPermanentDelete(t *testing.T) {
 	repo := NewMemoryRepo()
 	actor, company := createActionItemTestCompany(t, repo, "action-item-source-lifecycle")

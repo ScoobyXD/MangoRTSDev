@@ -77,15 +77,47 @@ type HarnessProps = Pick<
 > & {
   initialMine?: FieldID[];
   initialDelegated?: FieldID[];
+  mode?: "wrapper" | "section" | "row";
 };
 
 function Harness({
   fields,
   initialMine = DEFAULT_MINE,
   initialDelegated = DEFAULT_DELEGATED,
+  mode = "wrapper",
 }: HarnessProps) {
   const [mineFieldIDs, setMineFieldIDs] = useState<FieldID[]>(initialMine);
   const [delegatedFieldIDs, setDelegatedFieldIDs] = useState<FieldID[]>(initialDelegated);
+  const [openedItemID, setOpenedItemID] = useState("");
+  if (mode === "section") {
+    return (
+      <ActionItemInlineFieldSettingsSectionForTest
+        fields={fields}
+        fieldIDs={mineFieldIDs}
+        onFieldIDsChange={setMineFieldIDs}
+        label="Huddle"
+        sectionID="huddle"
+        accent="#EA84E5"
+      />
+    );
+  }
+  if (mode === "row") {
+    return (
+      <>
+        <ActionItemRowForTest
+          item={{
+            entity_id: "action-1",
+            name: "Confirm launch date",
+            color: "red",
+            completion_due_date: "2026-08-30",
+          }}
+          displayedFields={["completion_due_date"]}
+          onOpen={(item) => setOpenedItemID(item.entity_id)}
+        />
+        <output data-opened-action-item={openedItemID} />
+      </>
+    );
+  }
   return (
     <ActionItemInlineFieldSettingsForTest
       fields={fields}
@@ -100,6 +132,10 @@ function Harness({
 
 let ActionItemInlineFieldSettingsForTest:
   typeof import("../../../../frontend/src/modules/my-work/ActionItemInlineFieldSettingsPopover.js").ActionItemInlineFieldSettings;
+let ActionItemInlineFieldSettingsSectionForTest:
+  typeof import("../../../../frontend/src/modules/my-work/ActionItemInlineFieldSettingsPopover.js").ActionItemInlineFieldSettingsSection;
+let ActionItemRowForTest:
+  typeof import("../../../../frontend/src/modules/action-items/ActionItemRow.js").ActionItemRow;
 
 type MountedHarness = {
   dom: JSDOM;
@@ -127,11 +163,14 @@ async function mountHarness(input: Omit<HarnessProps, "fields"> = {}): Promise<M
   }
   installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
   installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
-  const [{ createRoot }, componentModule] = await Promise.all([
+  const [{ createRoot }, componentModule, rowModule] = await Promise.all([
     import("react-dom/client"),
     import("../../../../frontend/src/modules/my-work/ActionItemInlineFieldSettingsPopover.tsx"),
+    import("../../../../frontend/src/modules/action-items/ActionItemRow.tsx"),
   ]);
   ActionItemInlineFieldSettingsForTest = componentModule.ActionItemInlineFieldSettings;
+  ActionItemInlineFieldSettingsSectionForTest = componentModule.ActionItemInlineFieldSettingsSection;
+  ActionItemRowForTest = rowModule.ActionItemRow;
   const container = dom.window.document.getElementById("root");
   assert.ok(container);
   const root = createRoot(container);
@@ -148,7 +187,7 @@ async function unmountHarness({ dom, root, restores }: MountedHarness) {
 
 function field(
   document: Document,
-  perspective: "mine" | "delegated",
+  perspective: string,
   location: "tray" | "bank",
   fieldID: FieldID,
 ): HTMLElement {
@@ -161,7 +200,7 @@ function field(
   return element;
 }
 
-function insertion(document: Document, perspective: "mine" | "delegated", index: number): HTMLElement {
+function insertion(document: Document, perspective: string, index: number): HTMLElement {
   const element = document.querySelector<HTMLElement>(
     `[data-action-item-inline-field-insertion-perspective="${perspective}"]`
       + `[data-action-item-inline-field-insertion-index="${index}"]`,
@@ -170,13 +209,13 @@ function insertion(document: Document, perspective: "mine" | "delegated", index:
   return element;
 }
 
-function bank(document: Document, perspective: "mine" | "delegated"): HTMLElement {
+function bank(document: Document, perspective: string): HTMLElement {
   const element = document.querySelector<HTMLElement>(`[data-action-item-inline-field-bank="${perspective}"]`);
   assert.ok(element, `${perspective} should expose a field bank`);
   return element;
 }
 
-function trayFieldIDs(document: Document, perspective: "mine" | "delegated"): string[] {
+function trayFieldIDs(document: Document, perspective: string): string[] {
   return Array.from(document.querySelectorAll<HTMLElement>(
     `[data-action-item-inline-field-perspective="${perspective}"]`
       + `[data-action-item-inline-field-location="tray"]`,
@@ -228,6 +267,43 @@ test("embedded Action Item row-field settings expose the Mine and Delegated quad
     assert.equal(trayFieldIDs(document, "mine").length, 0);
     assert.equal(insertion(document, "mine", 0).textContent, "No fields shown");
     assert.equal(field(document, "mine", "bank", "assigned_by").tabIndex, -1, "drag fields are pointer-only, not keyboard reorder controls");
+  } finally {
+    await unmountHarness(mounted);
+  }
+});
+
+test("the reusable single-scope section keeps the mandatory drag-only tray and bank behavior", async () => {
+  const mounted = await mountHarness({ mode: "section" });
+  try {
+    const { document } = mounted.dom.window;
+    assert.equal(document.querySelectorAll("[data-action-item-inline-field-section]").length, 1);
+    assert.equal(document.querySelector("[data-action-item-inline-field-section]")?.getAttribute("data-action-item-inline-field-section"), "huddle");
+    assert.deepEqual(trayFieldIDs(document, "huddle"), DEFAULT_MINE);
+    assert.equal(document.querySelector('input[type="checkbox"]'), null);
+    await drag(field(document, "huddle", "bank", "status"), insertion(document, "huddle", 1));
+    assert.deepEqual(trayFieldIDs(document, "huddle"), ["assigned_by", "status", "completion_due_date"]);
+  } finally {
+    await unmountHarness(mounted);
+  }
+});
+
+test("the shared Action Item row keeps semantic presentation and renders a static completion date without a live editor", async () => {
+  const mounted = await mountHarness({ mode: "row" });
+  try {
+    const { document } = mounted.dom.window;
+    const row = document.querySelector<HTMLElement>('[data-action-item-row="action-1"]');
+    assert.ok(row);
+    assert.equal(row.dataset.myWorkRow, "action-item", "My Work keeps its existing row contract");
+    assert.equal(row.dataset.actionItemColor, "red");
+    assert.equal(row.querySelector('[data-action-item-title="true"]')?.classList.contains("my-work-action-item-title--red"), true);
+    assert.equal(
+      row.querySelector('[data-action-item-field="completion_due_date"]')?.getAttribute("aria-label"),
+      "Completion due: 08/30/2026",
+    );
+    const openTarget = row.querySelector<HTMLButtonElement>('[data-action-item-target="action-1"]');
+    assert.ok(openTarget);
+    await act(async () => Simulate.click(openTarget));
+    assert.equal(document.querySelector("output")?.getAttribute("data-opened-action-item"), "action-1");
   } finally {
     await unmountHarness(mounted);
   }

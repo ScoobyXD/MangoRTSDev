@@ -5713,7 +5713,7 @@ CREATE TABLE public.saved_views (
     CONSTRAINT saved_views_name_nonblank_chk CHECK ((btrim(name) <> ''::text)),
     CONSTRAINT saved_views_principal_chk CHECK ((principal = ANY (ARRAY['user'::text, 'group'::text]))),
     CONSTRAINT saved_views_settings_object_chk CHECK ((jsonb_typeof(settings) = 'object'::text)),
-    CONSTRAINT saved_views_surface_chk CHECK ((surface = ANY (ARRAY['updates'::text, 'logic_gate_kanban'::text, 'my_work_action_items_mine'::text, 'my_work_action_items_delegated'::text])))
+    CONSTRAINT saved_views_surface_chk CHECK ((surface = ANY (ARRAY['updates'::text, 'logic_gate_kanban'::text, 'my_work_action_items_mine'::text, 'my_work_action_items_delegated'::text, 'huddle_logic_gate_action_items'::text, 'huddle_node_action_items'::text])))
 );
 
 
@@ -7825,10 +7825,10 @@ CREATE UNIQUE INDEX idx_saved_views_logic_gate_kanban_user_single ON public.save
 
 
 --
--- Name: idx_saved_views_my_work_action_items_user_single; Type: INDEX; Schema: public; Owner: -
+-- Name: idx_saved_views_action_items_user_single; Type: INDEX; Schema: public; Owner: -
 --
 
-CREATE UNIQUE INDEX idx_saved_views_my_work_action_items_user_single ON public.saved_views USING btree (company_id, surface, principal, principal_id) WHERE ((surface = ANY (ARRAY['my_work_action_items_mine'::text, 'my_work_action_items_delegated'::text])) AND (principal = 'user'::text));
+CREATE UNIQUE INDEX idx_saved_views_action_items_user_single ON public.saved_views USING btree (company_id, surface, principal, principal_id) WHERE ((surface = ANY (ARRAY['my_work_action_items_mine'::text, 'my_work_action_items_delegated'::text, 'huddle_logic_gate_action_items'::text, 'huddle_node_action_items'::text])) AND (principal = 'user'::text));
 
 
 --

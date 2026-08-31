@@ -15,16 +15,24 @@ export type ActionItemInlineFieldSettingsProps<FieldID extends string = string> 
   accent?: string;
 };
 
-type ActionItemPerspective = "mine" | "delegated";
+export type ActionItemInlineFieldSettingsSectionProps<FieldID extends string = string> = {
+  fields: ReadonlyArray<ActionItemInlineFieldDefinition<FieldID>>;
+  fieldIDs: ReadonlyArray<FieldID>;
+  onFieldIDsChange: (next: FieldID[]) => void;
+  label: string;
+  sectionID: string;
+  accent?: string;
+  gridArea?: string;
+};
+
 type FieldLocation = "tray" | "bank";
 type DraggedField<FieldID extends string> = {
-  perspective: ActionItemPerspective;
   fieldID: FieldID;
   source: FieldLocation;
 };
 type ActiveDropTarget =
-  | { perspective: ActionItemPerspective; location: "tray"; index: number }
-  | { perspective: ActionItemPerspective; location: "bank" };
+  | { location: "tray"; index: number }
+  | { location: "bank" };
 
 const FIELD_DRAG_MIME = "application/x-mangorts-action-item-inline-field";
 const RESERVED_FIELD_KEYS = new Set(["detail", "details", "name", "title"]);
@@ -37,28 +45,63 @@ export function ActionItemInlineFieldSettings<FieldID extends string>({
   onDelegatedFieldIDsChange,
   accent = "#EA84E5",
 }: ActionItemInlineFieldSettingsProps<FieldID>) {
+  return (
+    <>
+      <ActionItemInlineFieldSettingsSection
+        fields={fields}
+        fieldIDs={mineFieldIDs}
+        onFieldIDsChange={onMineFieldIDsChange}
+        label="Mine"
+        sectionID="mine"
+        gridArea="mine"
+        accent={accent}
+      />
+      <ActionItemInlineFieldSettingsSection
+        fields={fields}
+        fieldIDs={delegatedFieldIDs}
+        onFieldIDsChange={onDelegatedFieldIDsChange}
+        label="Delegated"
+        sectionID="delegated"
+        gridArea="delegated"
+        accent={accent}
+      />
+    </>
+  );
+}
+
+export function ActionItemInlineFieldSettingsSection<FieldID extends string>({
+  fields,
+  fieldIDs,
+  onFieldIDsChange,
+  label,
+  sectionID,
+  accent = "#EA84E5",
+  gridArea,
+}: ActionItemInlineFieldSettingsSectionProps<FieldID>) {
   const availableFields = useMemo(() => configurableFieldDefinitions(fields), [fields]);
   const availableFieldIDs = useMemo(() => new Set(availableFields.map((field) => field.id)), [availableFields]);
-  const normalizedMineFieldIDs = useMemo(
-    () => normalizeShownFieldIDs(mineFieldIDs, availableFieldIDs),
-    [availableFieldIDs, mineFieldIDs],
-  );
-  const normalizedDelegatedFieldIDs = useMemo(
-    () => normalizeShownFieldIDs(delegatedFieldIDs, availableFieldIDs),
-    [availableFieldIDs, delegatedFieldIDs],
+  const shownFieldIDs = useMemo(
+    () => normalizeShownFieldIDs(fieldIDs, availableFieldIDs),
+    [availableFieldIDs, fieldIDs],
   );
   const [draggedField, setDraggedField] = useState<DraggedField<FieldID> | null>(null);
   const [activeDropTarget, setActiveDropTarget] = useState<ActiveDropTarget | null>(null);
+  const shownSet = new Set(shownFieldIDs);
+  const shownFields = shownFieldIDs.flatMap((fieldID) => {
+    const field = availableFields.find((candidate) => candidate.id === fieldID);
+    return field ? [field] : [];
+  });
+  const bankFields = availableFields.filter((field) => !shownSet.has(field.id));
+  const bankActive = activeDropTarget?.location === "bank";
 
   const startDrag = (
     event: React.DragEvent<HTMLElement>,
-    perspective: ActionItemPerspective,
     fieldID: FieldID,
     source: FieldLocation,
   ) => {
-    const next: DraggedField<FieldID> = { perspective, fieldID, source };
+    const next: DraggedField<FieldID> = { fieldID, source };
     event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData(FIELD_DRAG_MIME, `${perspective}:${String(fieldID)}`);
+    event.dataTransfer.setData(FIELD_DRAG_MIME, `${sectionID}:${String(fieldID)}`);
     setDraggedField(next);
     setActiveDropTarget(null);
   };
@@ -70,181 +113,138 @@ export function ActionItemInlineFieldSettings<FieldID extends string>({
 
   const dropIntoTray = (
     event: React.DragEvent<HTMLElement>,
-    perspective: ActionItemPerspective,
     insertionIndex: number,
-    shownFieldIDs: ReadonlyArray<FieldID>,
-    onChange: (next: FieldID[]) => void,
   ) => {
-    if (!draggedField || draggedField.perspective !== perspective) return;
+    if (!draggedField) return;
     event.preventDefault();
     const next = insertShownField(shownFieldIDs, draggedField.fieldID, insertionIndex);
-    if (!fieldIDSetsEqual(shownFieldIDs, next)) onChange(next);
+    if (!fieldIDSetsEqual(shownFieldIDs, next)) onFieldIDsChange(next);
     finishDrag();
   };
 
   const dropIntoBank = (
     event: React.DragEvent<HTMLElement>,
-    perspective: ActionItemPerspective,
-    shownFieldIDs: ReadonlyArray<FieldID>,
-    onChange: (next: FieldID[]) => void,
   ) => {
-    if (!draggedField || draggedField.perspective !== perspective || draggedField.source !== "tray") return;
+    if (!draggedField || draggedField.source !== "tray") return;
     event.preventDefault();
     const next = shownFieldIDs.filter((fieldID) => fieldID !== draggedField.fieldID);
-    if (!fieldIDSetsEqual(shownFieldIDs, next)) onChange(next);
+    if (!fieldIDSetsEqual(shownFieldIDs, next)) onFieldIDsChange(next);
     finishDrag();
   };
 
-  const renderPerspective = (
-    perspective: ActionItemPerspective,
-    label: string,
-    shownFieldIDs: ReadonlyArray<FieldID>,
-    onChange: (next: FieldID[]) => void,
-  ) => {
-    const shownSet = new Set(shownFieldIDs);
-    const shownFields = shownFieldIDs.flatMap((fieldID) => {
-      const field = availableFields.find((candidate) => candidate.id === fieldID);
-      return field ? [field] : [];
-    });
-    const bankFields = availableFields.filter((field) => !shownSet.has(field.id));
-    const bankActive = activeDropTarget?.perspective === perspective && activeDropTarget.location === "bank";
-    return (
-      <section
-        key={perspective}
-        aria-label={`${label} inline row fields`}
-        data-action-item-inline-field-section={perspective}
-        data-action-item-view-quadrant={perspective}
-        style={perspectiveSectionStyle(perspective, accent)}
-      >
-        <h3 style={perspectiveTitleStyle}>{label} inline row fields</h3>
-        <div style={fieldAreaStyle}>
-          <span style={fieldAreaLabelStyle}>Shown on row</span>
-          <div
-            role="list"
-            aria-label={`${label} fields shown on row`}
-            data-action-item-inline-field-tray={perspective}
-            style={shownTrayStyle}
-          >
-            {shownFields.length === 0 ? (
-              <div
-                data-action-item-inline-field-insertion-index="0"
-                data-action-item-inline-field-insertion-perspective={perspective}
-                data-action-item-inline-field-insertion-active={
-                  activeDropTarget?.perspective === perspective
-                  && activeDropTarget.location === "tray"
-                  && activeDropTarget.index === 0
-                    ? "true"
-                    : undefined
-                }
-                style={emptyTrayStyle(
-                  activeDropTarget?.perspective === perspective
-                  && activeDropTarget.location === "tray"
-                  && activeDropTarget.index === 0,
-                  accent,
-                )}
-                onDragEnter={(event) => {
-                  if (!draggedField || draggedField.perspective !== perspective) return;
-                  event.preventDefault();
-                  setActiveDropTarget({ perspective, location: "tray", index: 0 });
-                }}
-                onDragOver={(event) => {
-                  if (!draggedField || draggedField.perspective !== perspective) return;
-                  event.preventDefault();
-                  event.dataTransfer.dropEffect = "move";
-                }}
-                onDrop={(event) => dropIntoTray(event, perspective, 0, shownFieldIDs, onChange)}
-              >
-                No fields shown
-              </div>
-            ) : (
-              <>
-                {shownFields.map((field, index) => (
-                  <React.Fragment key={field.id}>
-                    <FieldInsertionTarget
-                      perspective={perspective}
-                      index={index}
-                      accent={accent}
-                      active={activeDropTarget?.perspective === perspective
-                        && activeDropTarget.location === "tray"
-                        && activeDropTarget.index === index}
-                      canDrop={draggedField?.perspective === perspective}
-                      onActivate={() => setActiveDropTarget({ perspective, location: "tray", index })}
-                      onDrop={(event) => dropIntoTray(event, perspective, index, shownFieldIDs, onChange)}
-                    />
-                    <FieldChip
-                      perspective={perspective}
-                      field={field}
-                      location="tray"
-                      dragging={draggedField?.perspective === perspective && draggedField.fieldID === field.id}
-                      onDragStart={(event) => startDrag(event, perspective, field.id, "tray")}
-                      onDragEnd={finishDrag}
-                    />
-                  </React.Fragment>
-                ))}
-                <FieldInsertionTarget
-                  perspective={perspective}
-                  index={shownFields.length}
-                  accent={accent}
-                  active={activeDropTarget?.perspective === perspective
-                    && activeDropTarget.location === "tray"
-                    && activeDropTarget.index === shownFields.length}
-                  canDrop={draggedField?.perspective === perspective}
-                  onActivate={() => setActiveDropTarget({ perspective, location: "tray", index: shownFields.length })}
-                  onDrop={(event) => dropIntoTray(event, perspective, shownFields.length, shownFieldIDs, onChange)}
-                />
-              </>
-            )}
-          </div>
-        </div>
-        <div style={fieldAreaStyle}>
-          <span style={fieldAreaLabelStyle}>Field bank</span>
-          <div
-            role="list"
-            aria-label={`${label} field bank`}
-            data-action-item-inline-field-bank={perspective}
-            data-action-item-inline-field-bank-active={bankActive ? "true" : undefined}
-            style={fieldBankStyle(bankActive, accent)}
-            onDragEnter={(event) => {
-              if (!draggedField || draggedField.perspective !== perspective || draggedField.source !== "tray") return;
-              event.preventDefault();
-              setActiveDropTarget({ perspective, location: "bank" });
-            }}
-            onDragOver={(event) => {
-              if (!draggedField || draggedField.perspective !== perspective || draggedField.source !== "tray") return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-            }}
-            onDrop={(event) => dropIntoBank(event, perspective, shownFieldIDs, onChange)}
-          >
-            {bankFields.length > 0
-              ? bankFields.map((field) => (
-                <FieldChip
-                  key={field.id}
-                  perspective={perspective}
-                  field={field}
-                  location="bank"
-                  dragging={draggedField?.perspective === perspective && draggedField.fieldID === field.id}
-                  onDragStart={(event) => startDrag(event, perspective, field.id, "bank")}
-                  onDragEnd={finishDrag}
-                />
-              ))
-              : <span style={emptyBankStyle}>All available fields are shown</span>}
-          </div>
-        </div>
-      </section>
-    );
-  };
-
   return (
-    <>
-      {renderPerspective("mine", "Mine", normalizedMineFieldIDs, onMineFieldIDsChange)}
-      {renderPerspective("delegated", "Delegated", normalizedDelegatedFieldIDs, onDelegatedFieldIDsChange)}
-    </>
+    <section
+      aria-label={`${label} inline row fields`}
+      data-action-item-inline-field-section={sectionID}
+      data-action-item-view-quadrant={gridArea ?? sectionID}
+      style={perspectiveSectionStyle(gridArea, accent)}
+    >
+      <h3 style={perspectiveTitleStyle}>{label} inline row fields</h3>
+      <div style={fieldAreaStyle}>
+        <span style={fieldAreaLabelStyle}>Shown on row</span>
+        <div
+          role="list"
+          aria-label={`${label} fields shown on row`}
+          data-action-item-inline-field-tray={sectionID}
+          style={shownTrayStyle}
+        >
+          {shownFields.length === 0 ? (
+            <div
+              data-action-item-inline-field-insertion-index="0"
+              data-action-item-inline-field-insertion-perspective={sectionID}
+              data-action-item-inline-field-insertion-active={activeDropTarget?.location === "tray" && activeDropTarget.index === 0 ? "true" : undefined}
+              style={emptyTrayStyle(activeDropTarget?.location === "tray" && activeDropTarget.index === 0, accent)}
+              onDragEnter={(event) => {
+                if (!draggedField) return;
+                event.preventDefault();
+                setActiveDropTarget({ location: "tray", index: 0 });
+              }}
+              onDragOver={(event) => {
+                if (!draggedField) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => dropIntoTray(event, 0)}
+            >
+              No fields shown
+            </div>
+          ) : (
+            <>
+              {shownFields.map((field, index) => (
+                <React.Fragment key={field.id}>
+                  <FieldInsertionTarget
+                    perspective={sectionID}
+                    index={index}
+                    accent={accent}
+                    active={activeDropTarget?.location === "tray" && activeDropTarget.index === index}
+                    canDrop={Boolean(draggedField)}
+                    onActivate={() => setActiveDropTarget({ location: "tray", index })}
+                    onDrop={(event) => dropIntoTray(event, index)}
+                  />
+                  <FieldChip
+                    perspective={sectionID}
+                    field={field}
+                    location="tray"
+                    dragging={draggedField?.fieldID === field.id}
+                    onDragStart={(event) => startDrag(event, field.id, "tray")}
+                    onDragEnd={finishDrag}
+                  />
+                </React.Fragment>
+              ))}
+              <FieldInsertionTarget
+                perspective={sectionID}
+                index={shownFields.length}
+                accent={accent}
+                active={activeDropTarget?.location === "tray" && activeDropTarget.index === shownFields.length}
+                canDrop={Boolean(draggedField)}
+                onActivate={() => setActiveDropTarget({ location: "tray", index: shownFields.length })}
+                onDrop={(event) => dropIntoTray(event, shownFields.length)}
+              />
+            </>
+          )}
+        </div>
+      </div>
+      <div style={fieldAreaStyle}>
+        <span style={fieldAreaLabelStyle}>Field bank</span>
+        <div
+          role="list"
+          aria-label={`${label} field bank`}
+          data-action-item-inline-field-bank={sectionID}
+          data-action-item-inline-field-bank-active={bankActive ? "true" : undefined}
+          style={fieldBankStyle(bankActive, accent)}
+          onDragEnter={(event) => {
+            if (!draggedField || draggedField.source !== "tray") return;
+            event.preventDefault();
+            setActiveDropTarget({ location: "bank" });
+          }}
+          onDragOver={(event) => {
+            if (!draggedField || draggedField.source !== "tray") return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "move";
+          }}
+          onDrop={dropIntoBank}
+        >
+          {bankFields.length > 0
+            ? bankFields.map((field) => (
+              <FieldChip
+                key={field.id}
+                perspective={sectionID}
+                field={field}
+                location="bank"
+                dragging={draggedField?.fieldID === field.id}
+                onDragStart={(event) => startDrag(event, field.id, "bank")}
+                onDragEnd={finishDrag}
+              />
+            ))
+            : <span style={emptyBankStyle}>All available fields are shown</span>}
+        </div>
+      </div>
+    </section>
   );
 }
 
 type FieldChipProps<FieldID extends string> = {
-  perspective: ActionItemPerspective;
+  perspective: string;
   field: ActionItemInlineFieldDefinition<FieldID>;
   location: FieldLocation;
   dragging: boolean;
@@ -279,7 +279,7 @@ function FieldChip<FieldID extends string>({
 }
 
 type FieldInsertionTargetProps = {
-  perspective: ActionItemPerspective;
+  perspective: string;
   index: number;
   accent: string;
   active: boolean;
@@ -366,9 +366,9 @@ function fieldIDSetsEqual<FieldID extends string>(left: ReadonlyArray<FieldID>, 
   return left.length === right.length && left.every((fieldID, index) => fieldID === right[index]);
 }
 
-function perspectiveSectionStyle(perspective: ActionItemPerspective, accent: string): React.CSSProperties {
+function perspectiveSectionStyle(gridArea: string | undefined, accent: string): React.CSSProperties {
   return {
-    gridArea: perspective,
+    ...(gridArea ? { gridArea } : {}),
     minWidth: 0,
     display: "grid",
     alignContent: "start",

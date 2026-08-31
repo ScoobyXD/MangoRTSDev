@@ -10,6 +10,11 @@ import (
 	"miraeopus/backend/internal/store"
 )
 
+type huddleActionItemView struct {
+	domain.Entity
+	Source *domain.ActionItemSourceView `json:"source,omitempty"`
+}
+
 func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/v1/action-items" {
 		writeError(w, http.StatusNotFound, "action_item_not_found")
@@ -64,7 +69,8 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, map[string]any{"action_item": redactActionItemSourceEntity(item)})
 	case http.MethodGet:
 		companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
-		if _, ok := s.requireAccountCompanyAccess(w, r, companyID); !ok {
+		actor, ok := s.requireAccountCompanyAccess(w, r, companyID)
+		if !ok {
 			return
 		}
 		huddleNodeID := strings.TrimSpace(r.URL.Query().Get("huddle_node_id"))
@@ -90,13 +96,35 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 			writeEntityError(w, itemsErr, "failed_to_list_action_items")
 			return
 		}
-		for index := range items {
-			items[index] = redactActionItemSourceEntity(items[index])
+		views, err := s.huddleActionItemViews(companyID, actor.User.UserID, items)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed_to_resolve_action_item_sources")
+			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"action_items": items})
+		writeJSON(w, http.StatusOK, map[string]any{"action_items": views})
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
+}
+
+func (s *Server) huddleActionItemViews(companyID, viewerUserID string, items []domain.Entity) ([]huddleActionItemView, error) {
+	entityIDs := make([]string, 0, len(items))
+	for _, item := range items {
+		entityIDs = append(entityIDs, item.EntityID)
+	}
+	sources, err := s.repo.ListVisibleActionItemSources(companyID, viewerUserID, entityIDs)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]huddleActionItemView, 0, len(items))
+	for _, item := range items {
+		view := huddleActionItemView{Entity: redactActionItemSourceEntity(item)}
+		if source, ok := sources[item.EntityID]; ok {
+			view.Source = &source
+		}
+		views = append(views, view)
+	}
+	return views, nil
 }
 
 func (s *Server) handleActionItemSource(w http.ResponseWriter, r *http.Request) {

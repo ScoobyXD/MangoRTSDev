@@ -33,9 +33,19 @@ var savedViewGroupingFieldsBySurface = map[string]map[string]bool{
 		MyWorkActionItemGroupingCompletionDueDate: true,
 		MyWorkActionItemGroupingPersonInCharge:    true,
 	},
+	SavedViewSurfaceHuddleLogicGateActionItems: {
+		MyWorkActionItemGroupingColor:             true,
+		MyWorkActionItemGroupingPersonInCharge:    true,
+		MyWorkActionItemGroupingCompletionDueDate: true,
+	},
+	SavedViewSurfaceHuddleNodeActionItems: {
+		MyWorkActionItemGroupingColor:             true,
+		MyWorkActionItemGroupingPersonInCharge:    true,
+		MyWorkActionItemGroupingCompletionDueDate: true,
+	},
 }
 
-var myWorkDisplayedFields = map[string]bool{
+var actionItemDisplayedFields = map[string]bool{
 	"person_in_charge":    true,
 	"assigned_by":         true,
 	"created_timestamp":   true,
@@ -57,6 +67,10 @@ func NormalizeSavedViewSurface(surface string) (string, bool) {
 		return SavedViewSurfaceMyWorkActionItemsMine, true
 	case SavedViewSurfaceMyWorkActionItemsDelegated:
 		return SavedViewSurfaceMyWorkActionItemsDelegated, true
+	case SavedViewSurfaceHuddleLogicGateActionItems:
+		return SavedViewSurfaceHuddleLogicGateActionItems, true
+	case SavedViewSurfaceHuddleNodeActionItems:
+		return SavedViewSurfaceHuddleNodeActionItems, true
 	default:
 		return "", false
 	}
@@ -124,7 +138,7 @@ func NormalizeSavedViewSettings(surface string, settings domain.SavedViewSetting
 		return domain.SavedViewSettings{}, false
 	}
 	dateAddedDirection := strings.TrimSpace(settings.DateAddedSortDirection)
-	if savedViewSurfaceIsMyWorkActionItems(surface) {
+	if savedViewSurfaceIsActionItems(surface) {
 		if dateAddedDirection != "" || settings.DateAddedSortEnabled != nil {
 			return domain.SavedViewSettings{}, false
 		}
@@ -140,7 +154,7 @@ func NormalizeSavedViewSettings(surface string, settings domain.SavedViewSetting
 		if displayedFields == nil {
 			displayedFields = defaultSavedViewDisplayedFields(surface)
 		}
-		displayedFields, ok = normalizeSavedViewDisplayedFields(displayedFields)
+		displayedFields, ok = normalizeSavedViewDisplayedFields(surface, displayedFields)
 		if !ok {
 			return domain.SavedViewSettings{}, false
 		}
@@ -178,31 +192,36 @@ func defaultSavedViewGroupings(surface string) []domain.SavedViewGrouping {
 			{Field: MyWorkActionItemGroupingPersonInCharge, Direction: "asc"},
 			{Field: MyWorkActionItemGroupingHuddleProcess, Direction: "asc"},
 		}
+	case SavedViewSurfaceHuddleLogicGateActionItems, SavedViewSurfaceHuddleNodeActionItems:
+		return []domain.SavedViewGrouping{
+			{Field: MyWorkActionItemGroupingColor, Direction: "asc"},
+			{Field: MyWorkActionItemGroupingPersonInCharge, Direction: "asc"},
+		}
 	default:
 		return []domain.SavedViewGrouping{}
 	}
 }
 
 func defaultSavedViewOrdering(surface string) []domain.SavedViewGrouping {
-	if savedViewSurfaceIsMyWorkActionItems(surface) {
+	if savedViewSurfaceIsActionItems(surface) {
 		return []domain.SavedViewGrouping{{Field: MyWorkActionItemGroupingCompletionDueDate, Direction: "asc"}}
 	}
 	return []domain.SavedViewGrouping{}
 }
 
 func defaultSavedViewDisplayedFields(surface string) []string {
-	if surface == SavedViewSurfaceMyWorkActionItemsDelegated {
+	if surface == SavedViewSurfaceMyWorkActionItemsDelegated || savedViewSurfaceIsHuddleActionItems(surface) {
 		return []string{"person_in_charge", "completion_due_date"}
 	}
 	return []string{"completion_due_date"}
 }
 
-func normalizeSavedViewDisplayedFields(fields []string) ([]string, bool) {
+func normalizeSavedViewDisplayedFields(surface string, fields []string) ([]string, bool) {
 	out := make([]string, 0, len(fields))
 	seen := map[string]bool{}
 	for _, raw := range fields {
 		field := strings.TrimSpace(raw)
-		if !myWorkDisplayedFields[field] || seen[field] {
+		if !actionItemDisplayedFields[field] || (savedViewSurfaceIsHuddleActionItems(surface) && field == "huddle_process") || seen[field] {
 			return nil, false
 		}
 		seen[field] = true
@@ -215,8 +234,16 @@ func savedViewSurfaceIsMyWorkActionItems(surface string) bool {
 	return surface == SavedViewSurfaceMyWorkActionItemsMine || surface == SavedViewSurfaceMyWorkActionItemsDelegated
 }
 
+func savedViewSurfaceIsHuddleActionItems(surface string) bool {
+	return surface == SavedViewSurfaceHuddleLogicGateActionItems || surface == SavedViewSurfaceHuddleNodeActionItems
+}
+
+func savedViewSurfaceIsActionItems(surface string) bool {
+	return savedViewSurfaceIsMyWorkActionItems(surface) || savedViewSurfaceIsHuddleActionItems(surface)
+}
+
 func savedViewSurfaceIsSingleUser(surface string) bool {
-	return surface == SavedViewSurfaceLogicGateKanban || savedViewSurfaceIsMyWorkActionItems(surface)
+	return surface == SavedViewSurfaceLogicGateKanban || savedViewSurfaceIsActionItems(surface)
 }
 
 func normalizeSavedViewGroupingDirection(direction string) (string, bool) {
@@ -266,7 +293,7 @@ func normalizeSavedViewInput(input SavedViewInput) (SavedViewInput, bool) {
 	if !ok {
 		return SavedViewInput{}, false
 	}
-	if savedViewSurfaceIsMyWorkActionItems(surface) && savedViewGroupingsOverlap(groupings, settings.Ordering) {
+	if savedViewSurfaceIsActionItems(surface) && savedViewGroupingsOverlap(groupings, settings.Ordering) {
 		return SavedViewInput{}, false
 	}
 	input.CompanyID = companyID

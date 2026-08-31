@@ -166,6 +166,39 @@ func (r *MemoryRepo) GetActionItemSource(companyID, entityID string) (domain.Act
 	return domain.ActionItemSource{}, ErrNotFound
 }
 
+func (r *MemoryRepo) ListVisibleActionItemSources(companyID, viewerUserID string, entityIDs []string) (map[string]domain.ActionItemSourceView, error) {
+	companyID, viewerUserID = cleanUUIDText(companyID), cleanUUIDText(viewerUserID)
+	if companyID == "" || viewerUserID == "" {
+		return nil, ErrInvalid
+	}
+	entityIDs = cleanUUIDTextSlice(entityIDs)
+	visible := make(map[string]domain.ActionItemSourceView)
+	if len(entityIDs) == 0 {
+		return visible, nil
+	}
+	wanted := make(map[string]bool, len(entityIDs))
+	for _, entityID := range entityIDs {
+		wanted[entityID] = true
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, field := range r.entityFields {
+		if field.CompanyID != companyID || !wanted[field.EntityID] || optionalEntityIDValue(field.EntityFieldTypeID) != ActionItemSourceFieldTypeID {
+			continue
+		}
+		resourceType, resourceID, ok := decodeActionItemSourceValue(field.Value)
+		if !ok {
+			continue
+		}
+		source, _ := r.memoryMyWorkActionItemContextLocked(companyID, viewerUserID, resourceType, resourceID)
+		if source != nil {
+			visible[field.EntityID] = *source
+		}
+	}
+	return visible, nil
+}
+
 func (r *MemoryRepo) actionItemSourceResourceExistsLocked(companyID, resourceType, resourceID string) bool {
 	resourceKey := key(companyID, resourceID)
 	switch resourceType {

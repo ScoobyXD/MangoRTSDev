@@ -45,11 +45,16 @@
 43. The Huddle Logic Gate editor uses the canonical 500 ms autosave, Universal Picker references, selection Action Item control, and typed S3 inline-image attachment path used by normal supported Mango editors.
 44. A Huddle Logic Gate attachment uses `resource_type='huddle_logic_gate'` and the exact Huddle Logic Gate ID; no normal Logic Gate, Huddle Node, or generic compatibility owner is substituted.
 45. The Action Items view unions direct Action Item relationships for the exact Huddle Logic Gate with relationships from every owned Huddle Node, deduplicates each Action Item once, and remains valid when the Process owns no Huddle Nodes.
-46. Action Items default to grouping by Person in charge and then Completion Due Date, with the existing universal grouping controls available for composition and sort direction.
-47. Refreshing the Action Items view keeps the current rows visible and does not reload or remount the Huddle editor.
-48. Each committed Huddle Logic Gate editor save atomically replaces that Gate's exact Action Item `entity_relationships` set from its saved inline references; removing the final saved reference removes only that Gate edge and preserves the Entity.
+46. The Huddle Process and Huddle Node Action Item views use the same shared rollup panel. The Process invocation carries the exact `huddle_logic_gate` type and this Huddle Logic Gate's literal ID; presentation changes never create, copy, or rewrite an Action Item relationship.
+47. Each user and company owns one Huddle Process Action Item saved view, independent of that user's Huddle Node Action Item saved view. Visible grouping terms are stored in `groupings`, while leaf `ordering` and ordered `displayed_fields` are stored in settings; browser-only compatibility preferences are not used.
+48. The Huddle Process saved view defaults to visible Color then Person in charge groups, separately orders leaf rows by Completion due date, and initially shows Person in charge then Completion due date. Huddle process is neither a grouping nor an inline label because this view is already scoped to one exact Process.
+49. Every selected grouping term renders a visible hierarchy header. The final selected grouping level places its heading and member rows inside an elevated surface. An ordering term changes only leaf-row order inside that final group and never creates a header; with no ordering term, rows keep the stable backend order.
+50. Selected inline fields render in saved left-to-right order on one nonwrapping rail against the row's right edge. Complete pills remain inside the row when they fit; only a genuinely oversized selected set scrolls horizontally from its first saved field, and the title yields before the rail is displaced.
+51. Every listed Action Item keeps the shared Action Item icon and the Action Item's semantic red or yellow row color treatment. A Source inline label names the exact current endpoint only when the viewer has current access; otherwise it shows the same neutral no-source value as My Work without exposing hidden identity.
+52. Refreshing the Action Items view keeps the current rows visible and does not reload or remount the Huddle editor.
+53. Each committed Huddle Logic Gate editor save atomically replaces that Gate's exact Action Item `entity_relationships` set from its saved inline references; removing the final saved reference removes only that Gate edge and preserves the Entity.
 
-Last updated: 2026-08-28
+Last updated: 2026-08-30
 
 # Process Story: Create a Huddle Process and manage its live work
 
@@ -57,6 +62,6 @@ An editor creates a Huddle Process from the sidebar or converts an eligible Proc
 ↓
 Mango atomically stores the exact Huddle Process, direct policy, and Huddle Explorer placement
 ↓
-The shared editor autosaves text, references, and typed S3 images while the middle view opens on current Action Items
+The shared editor autosaves text, references, and typed S3 images while the middle view opens the shared exact-scope Action Item rollup panel with the user's Huddle Process saved view
 ↓
 The Process view may still link normal Processes, and every Huddle Node keeps its fixed creation-time Process and KPI snapshot

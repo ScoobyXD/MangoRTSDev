@@ -1,25 +1,55 @@
 import React from "react";
-import type { MyWorkActionItem, MyWorkActionItemDisplayFieldID } from "./myWorkApi.js";
 
-export type ActionItemInlineFieldsProps = {
-  item: MyWorkActionItem;
-  displayedFields: ReadonlyArray<MyWorkActionItemDisplayFieldID>;
-  renderCompletionDueDate: () => React.ReactNode;
+export const ACTION_ITEM_INLINE_FIELD_IDS = [
+  "person_in_charge",
+  "assigned_by",
+  "created_timestamp",
+  "source",
+  "color",
+  "analysis_due_date",
+  "completion_due_date",
+  "status",
+  "huddle_process",
+] as const;
+
+export type ActionItemInlineFieldID = (typeof ACTION_ITEM_INLINE_FIELD_IDS)[number];
+
+export type ActionItemInlineFieldItem = {
+  person_in_charge_name?: string | null;
+  assigned_by_name?: string | null;
+  created_timestamp?: string | null;
+  source?: { name?: string | null } | null;
+  color?: string | null;
+  analysis_due_date?: string | null;
+  completion_due_date?: string | null;
+  status?: string | null;
+  huddle_process?: { name?: string | null } | null;
 };
 
-export function ActionItemInlineFields({ item, displayedFields, renderCompletionDueDate }: ActionItemInlineFieldsProps) {
+export type ActionItemInlineFieldsProps<Item extends ActionItemInlineFieldItem = ActionItemInlineFieldItem> = {
+  item: Item;
+  displayedFields: ReadonlyArray<ActionItemInlineFieldID>;
+  renderCompletionDueDate?: (item: Item) => React.ReactNode;
+};
+
+export function ActionItemInlineFields<Item extends ActionItemInlineFieldItem>({
+  item,
+  displayedFields,
+  renderCompletionDueDate,
+}: ActionItemInlineFieldsProps<Item>) {
   return (
     <div
-      className="my-work-action-item-inline-fields"
+      className="action-item-inline-fields my-work-action-item-inline-fields"
+      data-action-item-inline-fields="true"
       data-my-work-action-item-inline-fields="true"
       aria-label="Action Item inline row fields"
       tabIndex={displayedFields.length > 1 ? 0 : -1}
       style={fieldsStyle}
     >
       {displayedFields.map((field) => (
-        <span key={field} data-my-work-action-item-inline-field-slot={field} style={fieldSlotStyle}>
-          {field === "completion_due_date"
-            ? renderCompletionDueDate()
+        <span key={field} data-my-work-action-item-inline-field-slot={field} data-action-item-inline-field-slot={field} style={fieldSlotStyle}>
+          {field === "completion_due_date" && renderCompletionDueDate
+            ? renderCompletionDueDate(item)
             : renderStaticActionItemField(item, field)}
         </span>
       ))}
@@ -28,13 +58,14 @@ export function ActionItemInlineFields({ item, displayedFields, renderCompletion
 }
 
 function renderStaticActionItemField(
-  item: MyWorkActionItem,
-  field: Exclude<MyWorkActionItemDisplayFieldID, "completion_due_date">,
+  item: ActionItemInlineFieldItem,
+  field: ActionItemInlineFieldID,
 ): React.ReactNode {
   if (field === "person_in_charge") {
     const name = item.person_in_charge_name?.trim() || "No person in charge";
     return (
       <span
+        data-action-item-field={field}
         data-my-work-action-item-field={field}
         data-my-work-person-in-charge="true"
         aria-label={`Person in charge: ${name}`}
@@ -49,6 +80,7 @@ function renderStaticActionItemField(
   const presentation = fieldPresentation(item, field);
   return (
     <span
+      data-action-item-field={field}
       data-my-work-action-item-field={field}
       aria-label={`${presentation.label}: ${presentation.value}`}
       title={`${presentation.label}: ${presentation.value}`}
@@ -61,19 +93,20 @@ function renderStaticActionItemField(
 }
 
 function fieldPresentation(
-  item: MyWorkActionItem,
-  field: Exclude<MyWorkActionItemDisplayFieldID, "person_in_charge" | "completion_due_date">,
+  item: ActionItemInlineFieldItem,
+  field: Exclude<ActionItemInlineFieldID, "person_in_charge">,
 ): { label: string; value: string } {
   if (field === "assigned_by") return { label: "Assigned by", value: item.assigned_by_name?.trim() || "Unknown" };
-  if (field === "created_timestamp") return { label: "Created", value: formatMyWorkInlineDate(item.created_timestamp) };
+  if (field === "created_timestamp") return { label: "Created", value: formatActionItemInlineDate(item.created_timestamp) };
   if (field === "source") return { label: "Source", value: item.source?.name?.trim() || "No source" };
   if (field === "color") return { label: "Color", value: titleCaseLabel(item.color) || "No color" };
-  if (field === "analysis_due_date") return { label: "Analysis due", value: formatMyWorkInlineDate(item.analysis_due_date) };
+  if (field === "analysis_due_date") return { label: "Analysis due", value: formatActionItemInlineDate(item.analysis_due_date) };
+  if (field === "completion_due_date") return { label: "Completion due", value: formatActionItemInlineDate(item.completion_due_date) };
   if (field === "status") return { label: "Status", value: titleCaseLabel(item.status) || "No status" };
   return { label: "Huddle process", value: item.huddle_process?.name?.trim() || "No Huddle process" };
 }
 
-export function formatMyWorkInlineDate(value: string | null | undefined): string {
+export function formatActionItemInlineDate(value: string | null | undefined): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value?.trim() ?? "");
   return match ? `${match[2]}/${match[3]}/${match[1]}` : "No date";
 }

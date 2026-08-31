@@ -188,21 +188,6 @@ export async function getActionItemSource(
   return response.source ?? null;
 }
 
-export async function listHuddleNodeActionItems(
-  requestJSON: BoundRequestJSON,
-  input: { companyID: string; huddleNodeID: string; signal?: AbortSignal },
-): Promise<Entity[]> {
-  const params = new URLSearchParams({
-    company_id: input.companyID,
-    huddle_node_id: input.huddleNodeID,
-  });
-  const response = await requestJSON<{ action_items?: Entity[] }>(`/v1/action-items?${params.toString()}`, {
-    cache: "no-store",
-    signal: input.signal,
-  });
-  return response.action_items ?? [];
-}
-
 export async function listEntityTypes(companyID: string): Promise<EntityType[]> {
   const params = new URLSearchParams({ company_id: companyID });
   const response = await apiFetchJSON<{ entity_types?: EntityType[] }>(`/v1/entity-types?${params.toString()}`, { cache: "no-store" });
