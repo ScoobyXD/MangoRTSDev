@@ -154,6 +154,15 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.match(nodeWorkspace, /<TimelineCell/);
   assert.match(nodeWorkspace, /<PlusIcon/);
   assert.match(nodeWorkspace, /data-huddle-node-header-timeline-control="true"/);
+  assert.match(nodeWorkspace, /data-node-text-box-header="true"/);
+  assert.match(nodeWorkspace, /className="mango-editor-header-scroll"/);
+  assert.match(nodeWorkspace, /<PlusIcon color=\{MANGO_ACCENT_HEX\}/);
+  assert.match(nodeWorkspace, /<TimelineCell accent=\{MANGO_ACCENT_HEX\}/);
+  assert.match(nodeWorkspace, /surfaceText=\{MANGO_TEXT\}/);
+  assert.match(nodeWorkspace, /HUDDLE_NODE_RULE_COLOR = "rgba\(148, 163, 184, 0\.18\)"/);
+  assert.match(nodeWorkspace, /const timelineHeaderControlStyle:[^\n]+background: EDITOR_NEU_SURFACE/);
+  assert.match(nodeWorkspace, /const textBoxHeaderContentStyle:[^\n]+minWidth: 448/);
+  assert.doesNotMatch(nodeWorkspace, /#0f766e|rgba\(15,118,110/);
   assert.match(nodeWorkspace, /<TextBlockActionsMenu/);
   assert.match(nodeWorkspace, /<DeleteTextBlockConfirmationModal/);
   assert.match(nodeWorkspace, /attachmentsEnabled=\{false\}/);
@@ -203,6 +212,10 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.match(actionItems, /Due or Overdue/);
   assert.match(actionItems, /excludedItemIDs=\{createdItemIDs\}/);
   assert.match(actionItems, /referenceLabel="Huddle Node date"/);
+  assert.match(actionItems, /data-huddle-viewing-date-control="true"/);
+  assert.match(actionItems, /data-huddle-viewing-date-label="true"/);
+  assert.match(actionItems, /role="status"/);
+  assert.match(actionItems, /formatNodeDueDateForEditor\(viewingDate\)/);
   assert.match(nodeDateControl, /data-huddle-node-date-control="true"/);
   assert.match(nodeWorkspace, /<HuddleNodeDateControl/);
   assert.match(nodeDateControl, /<EditorCalendarDateInput/);
