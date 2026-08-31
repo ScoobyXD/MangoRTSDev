@@ -245,12 +245,10 @@ test("My Work directory results cannot cross an auth-session request boundary", 
     const oldRequest: BoundRequestJSON = <T,>(path: string): Promise<T> => new Promise<T>((resolve) => {
       oldResolvers.push((value) => resolve(value as T));
     });
-    const newRequest: BoundRequestJSON = async <T,>(path: string): Promise<T> => {
-      if (path.endsWith("/users")) {
-        return { users: [{ company_id: "company-1", user_id: "viewer-2", display_name: "Fresh Session" }] } as T;
-      }
-      return { groups: [], members: [] } as T;
-    };
+    const newResolvers: Array<(value: unknown) => void> = [];
+    const newRequest: BoundRequestJSON = <T,>(path: string): Promise<T> => new Promise<T>((resolve) => {
+      newResolvers.push((value) => resolve(value as T));
+    });
     const container = dom.window.document.getElementById("root") as HTMLElement;
     mountedRoot = createRoot(container);
     await act(async () => mountedRoot?.render(
@@ -267,7 +265,13 @@ test("My Work directory results cannot cross an auth-session request boundary", 
     await flushDOM();
     button = container.querySelector<HTMLButtonElement>("[data-my-work-people-button=true]") as HTMLButtonElement;
     await act(async () => button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
-    await flushDOM(100);
+    await flushDOM();
+    assert.equal(newResolvers.length, 2);
+    await act(async () => {
+      newResolvers[0]?.({ users: [{ company_id: "company-1", user_id: "viewer-2", display_name: "Fresh Session" }] });
+      newResolvers[1]?.({ groups: [], members: [] });
+    });
+    await flushDOM();
     assert.match(dom.window.document.body.textContent ?? "", /Fresh Session/);
 
     const oldData = directory();
