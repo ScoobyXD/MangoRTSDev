@@ -109,6 +109,111 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("${qasecretarn}:password::", self.copy_launcher)
         self.assertNotIn("get-secret-value", self.copy_launcher)
 
+    def test_hosted_copy_preserves_the_preflighted_node_completion_projection(self) -> None:
+        self.assertNotIn(
+            'backend/db/migrations/20260829_my_work_node_completion_transition.sql',
+            self.copy_entrypoint,
+        )
+        self.assertIn("latest_node_completions", self.preflight)
+        self.assertIn(
+            "node.completion_transition_timestamp is distinct from projected.transition_timestamp",
+            self.preflight,
+        )
+        self.assertIn("immutable event projection", self.preflight)
+        preflight = self.copy_entrypoint.index(
+            'qa_psql "$qa_raw_database" --file "$app_root/scripts/qa_dev_copy_preflight.sql"'
+        )
+        sanitizer = self.copy_entrypoint.index(
+            'qa_psql "$qa_raw_database" --file "$app_root/scripts/qa_dev_copy_sanitize.sql"'
+        )
+        raw_checksum = self.copy_entrypoint.index(
+            'raw_node_completion_sha="$(node_completion_sha256 "$qa_raw_database")"'
+        )
+        self.assertLess(preflight, sanitizer)
+        self.assertLess(sanitizer, raw_checksum)
+        self.assertIn("sha256sum", self.copy_entrypoint)
+        self.assertIn(
+            '[[ "$next_node_completion_sha" == "$raw_node_completion_sha" ]]',
+            self.copy_entrypoint,
+        )
+        self.assertIn(
+            '[[ "$final_node_completion_sha" != "$raw_node_completion_sha" ]]',
+            self.copy_entrypoint,
+        )
+
+    def test_node_completion_checksum_rejects_partial_query_and_hash_failures(self) -> None:
+        if os.name == "nt":
+            bash_candidates = (
+                Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe",
+                Path(os.environ.get("ProgramW6432", r"C:\Program Files")) / "Git" / "bin" / "bash.exe",
+            )
+            bash = next((str(candidate) for candidate in bash_candidates if candidate.is_file()), None)
+        else:
+            bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("Bash is unavailable for the checksum failure contract")
+
+        entrypoint = COPY_ENTRYPOINT.read_text(encoding="utf-8").replace("\r\n", "\n")
+        function_match = re.search(
+            r"(?ms)^node_completion_sha256\(\) \{.*?^\}\n",
+            entrypoint,
+        )
+        self.assertIsNotNone(function_match)
+        harness = f"""#!/usr/bin/env bash
+set -uo pipefail
+fail() {{ printf 'STOP: %s\\n' "$*" >&2; return 1; }}
+case "$1" in
+  success)
+    qa_psql() {{ printf 'complete-row\\n'; return 0; }}
+    sha256sum() {{ printf '%064d  -\\n' 0; return 0; }}
+    ;;
+  query_failure)
+    qa_psql() {{ printf 'partial-row\\n'; return 7; }}
+    sha256sum() {{ printf '%064d  -\\n' 0; return 0; }}
+    ;;
+  hash_failure)
+    qa_psql() {{ printf 'complete-row\\n'; return 0; }}
+    sha256sum() {{ return 8; }}
+    ;;
+  malformed_hash)
+    qa_psql() {{ printf 'complete-row\\n'; return 0; }}
+    sha256sum() {{ printf 'not-a-checksum  -\\n'; return 0; }}
+    ;;
+  *) exit 64 ;;
+esac
+{function_match.group(0)}
+if checksum="$(node_completion_sha256 fixture)"; then
+  printf 'success:%s\\n' "$checksum"
+  exit 0
+fi
+printf 'failure\\n'
+exit 9
+"""
+        def run_mode(mode: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [bash, "-s", "--", mode],
+                input=harness,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+        success = run_mode("success")
+        if os.name == "nt" and "couldn't create signal pipe" in success.stderr.lower():
+            self.skipTest("Windows sandbox blocked Git Bash process setup")
+        self.assertEqual(success.returncode, 0, success.stderr)
+        self.assertEqual(success.stdout.strip(), f"success:{'0' * 64}")
+
+        for mode, expected_error in (
+            ("query_failure", "could not calculate"),
+            ("hash_failure", "could not calculate"),
+            ("malformed_hash", "checksum is invalid"),
+        ):
+            with self.subTest(mode=mode):
+                failed = run_mode(mode)
+                self.assertEqual(failed.returncode, 9, failed.stdout)
+                self.assertIn(expected_error, failed.stderr.lower())
+
     def test_hosted_copy_uses_an_explicit_qa_primary_identity_token(self) -> None:
         primary_token_sql = "case when pg_is_in_recovery() then 'recovery' else 'primary' end"
         self.assertIn(primary_token_sql, self.copy_entrypoint)
@@ -246,7 +351,11 @@ class QADevCopySQLContracts(unittest.TestCase):
         )
         self.assertIn("select * from expected except select * from actual", self.preflight)
         self.assertIn("select * from actual except select * from expected", self.preflight)
-        for retired_table in ("action_item_huddle_relationships", "entity_field_assignments"):
+        for retired_table in (
+            "action_item_huddle_relationships",
+            "action_item_sources",
+            "entity_field_assignments",
+        ):
             self.assertIn(
                 f"to_regclass('public.{retired_table}') is not null",
                 self.preflight,
@@ -535,6 +644,9 @@ class QADevCopySQLContracts(unittest.TestCase):
             "a company is missing its exact required action item entity type",
             "a company is missing an exact required action item field template",
             "an action item entity is missing a required linked field",
+            "a resource field is not the exact action item source",
+            "an action item field template shadows a reserved label or system key",
+            "completion transition timestamp disagrees with current completion status",
             "person_in_charge",
             "assigned_by",
             "source",
@@ -687,6 +799,13 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
         ordinary_entity = "90000000-0000-4000-8000-000000000003"
         allowed_parent = "90000000-0000-4000-8000-000000000004"
         excluded_child = "90000000-0000-4000-8000-000000000005"
+        self.run_sql("create table public.action_item_sources(legacy_id uuid primary key);")
+        legacy_source_error = self.run_sql_failure(self.script_sql(PREFLIGHT))
+        self.assertIn(
+            "raw qa source is not the audited current entity and huddle workspace schema",
+            legacy_source_error,
+        )
+        self.run_sql("drop table public.action_item_sources;")
         missing_manifest_error = self.run_sql_failure(self.script_sql(PREFLIGHT))
         self.assertIn(
             "audited excluded explorer folder identities are missing",
@@ -733,6 +852,32 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
               ('{bridge_company}','019e8fbe-f567-7000-b483-e855cc8f46a6',null,'9. Legal'),
               ('{bridge_company}','019e481f-3f20-767e-8c2a-5b37fca774ad',null,'FO'),
               ('{bridge_company}','{excluded_child}','019e481c-8883-709c-ab8a-732ab4cc905d','Renamed private child');
+            """
+        )
+
+        self.run_sql(
+            f"""
+            set session_replication_role = replica;
+            insert into public.nodes(
+              company_id,node_id,name,status,created_timestamp,completion_transition_timestamp
+            ) values (
+              '{bridge_company}','90000000-0000-4000-8000-000000000006',
+              'Stale completion projection','done',
+              '2026-08-29 10:00:00+00','2026-08-29 11:00:00+00'
+            );
+            set session_replication_role = origin;
+            """
+        )
+        stale_completion_error = self.run_sql_failure(self.script_sql(PREFLIGHT))
+        self.assertIn("immutable event projection", stale_completion_error)
+        self.run_sql(
+            f"""
+            set session_replication_role = replica;
+            update public.nodes
+            set completion_transition_timestamp=created_timestamp
+            where company_id='{bridge_company}'
+              and node_id='90000000-0000-4000-8000-000000000006';
+            set session_replication_role = origin;
             """
         )
 
@@ -1268,6 +1413,114 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
 
         verifier = self.verifier_sql()
         self.run_sql(verifier)
+
+        self.run_sql(
+            f"""
+            set session_replication_role = replica;
+            insert into public.entity_field_types(
+              company_id,entity_field_type_id,entity_type_id,entity_folder_id,
+              name,field_type,system_key,config_jsonb,position
+            ) values (
+              '{company_a}','71000000-0000-4000-8000-000000000001','{ordinary_type_a}',null,
+              'Legacy Resource','resource',null,'{{}}'::jsonb,99
+            );
+            set session_replication_role = origin;
+            """
+        )
+        resource_template_error = self.run_sql_failure(verifier)
+        self.assertIn("a resource field is not the exact action item source", resource_template_error)
+        self.run_sql(
+            f"""
+            delete from public.entity_field_types
+            where company_id='{company_a}'
+              and entity_field_type_id='71000000-0000-4000-8000-000000000001';
+            """
+        )
+
+        self.run_sql(
+            f"""
+            set session_replication_role = replica;
+            insert into public.entity_fields(
+              company_id,entity_field_id,entity_id,entity_field_type_id,
+              name,field_type,value_jsonb,position
+            ) values (
+              '{company_a}','71000000-0000-4000-8000-000000000002','{allowed_entity}',null,
+              'Legacy Resource','resource',null,99
+            );
+            set session_replication_role = origin;
+            """
+        )
+        resource_field_error = self.run_sql_failure(verifier)
+        self.assertIn("a resource field is not the exact action item source", resource_field_error)
+        self.run_sql(
+            f"""
+            delete from public.entity_fields
+            where company_id='{company_a}'
+              and entity_field_id='71000000-0000-4000-8000-000000000002';
+            """
+        )
+
+        self.run_sql(
+            f"""
+            insert into public.entity_folders(
+              company_id,entity_folder_id,entity_type_id,parent_entity_folder_id,name,position
+            ) values (
+              '{company_a}','71000000-0000-4000-8000-000000000003',
+              'a17e0000-0000-4000-8000-000000000001',null,'Reserved shadow fixture',99
+            );
+            set session_replication_role = replica;
+            insert into public.entity_field_types(
+              company_id,entity_field_type_id,entity_type_id,entity_folder_id,
+              name,field_type,system_key,config_jsonb,position
+            ) values (
+              '{company_a}','71000000-0000-4000-8000-000000000004',
+              'a17e0000-0000-4000-8000-000000000001',
+              '71000000-0000-4000-8000-000000000003',
+              'Assigned by','text',null,'{{}}'::jsonb,99
+            );
+            set session_replication_role = origin;
+            """
+        )
+        reserved_shadow_error = self.run_sql_failure(verifier)
+        self.assertIn(
+            "an action item field template shadows a reserved label or system key",
+            reserved_shadow_error,
+        )
+        self.run_sql(
+            f"""
+            delete from public.entity_field_types
+            where company_id='{company_a}'
+              and entity_field_type_id='71000000-0000-4000-8000-000000000004';
+            delete from public.entity_folders
+            where company_id='{company_a}'
+              and entity_folder_id='71000000-0000-4000-8000-000000000003';
+            """
+        )
+
+        self.run_sql(
+            f"""
+            set session_replication_role = replica;
+            insert into public.nodes(
+              company_id,node_id,name,status,created_timestamp,completion_transition_timestamp
+            ) values (
+              '{company_a}','71000000-0000-4000-8000-000000000005',
+              'Missing completion projection','done',now(),null
+            );
+            set session_replication_role = origin;
+            """
+        )
+        completion_error = self.run_sql_failure(verifier)
+        self.assertIn(
+            "a node completion transition timestamp disagrees with current completion status",
+            completion_error,
+        )
+        self.run_sql(
+            f"""
+            delete from public.nodes
+            where company_id='{company_a}'
+              and node_id='71000000-0000-4000-8000-000000000005';
+            """
+        )
 
         self.run_sql(
             """

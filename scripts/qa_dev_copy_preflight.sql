@@ -33,6 +33,8 @@ begin
      or to_regclass('public.huddle_explorer_folders') is null
      or to_regclass('public.company_explorer_items') is null
      or to_regclass('public.huddle_explorer_items') is null
+     or to_regclass('public.nodes') is null
+     or to_regclass('public.domain_events') is null
      or to_regclass('public.users') is null
      or to_regclass('public.attachments') is null
      or to_regclass('public.entity_types') is null
@@ -45,6 +47,70 @@ begin
      or to_regclass('public.huddle_node_textbox_chats') is null
      or to_regclass('public.schema_migrations') is null then
     raise exception 'STOP: required Mango tables are missing from the raw QA copy';
+  end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema='public'
+      and table_name='nodes'
+      and column_name='completion_transition_timestamp'
+      and data_type='timestamp with time zone'
+      and is_nullable='YES'
+      and column_default is null
+  ) then
+    raise exception 'STOP: Dev Nodes are missing the exact completion transition timestamp column';
+  end if;
+
+  if exists (
+    with node_snapshots as (
+      select event.company_id,
+             event.payload #>> '{node,node_id}' as node_id,
+             event.sequence,
+             event.created_timestamp,
+             lower(btrim(coalesce(event.payload #>> '{node,status}',''))) as status
+      from public.domain_events event
+      where event.stream_type='workspace'
+        and event.stream_id=event.company_id::text
+        and event.event_type in ('node_created','node_updated')
+        and jsonb_typeof(event.payload->'node')='object'
+        and (event.payload->'node') ? 'status'
+        and btrim(coalesce(event.payload #>> '{node,node_id}',''))<>''
+    ), sequenced_node_snapshots as (
+      select snapshot.*,
+             lag(snapshot.status) over (
+               partition by snapshot.company_id,snapshot.node_id
+               order by snapshot.sequence
+             ) as previous_status
+      from node_snapshots snapshot
+    ), latest_node_completions as (
+      select distinct on (snapshot.company_id,snapshot.node_id)
+             snapshot.company_id,snapshot.node_id,snapshot.created_timestamp
+      from sequenced_node_snapshots snapshot
+      where snapshot.status in ('done','complete','completed')
+        and snapshot.previous_status is not null
+        and snapshot.previous_status not in ('done','complete','completed')
+      order by snapshot.company_id,snapshot.node_id,snapshot.sequence desc
+    ), projected as (
+      select node.company_id,node.node_id,
+             case
+               when lower(btrim(coalesce(node.status,''))) in ('done','complete','completed')
+                 then coalesce(completion.created_timestamp,node.created_timestamp)
+               else null
+             end as transition_timestamp
+      from public.nodes node
+      left join latest_node_completions completion
+        on completion.company_id=node.company_id
+       and completion.node_id=node.node_id::text
+    )
+    select 1
+    from public.nodes node
+    join projected
+      on projected.company_id=node.company_id
+     and projected.node_id=node.node_id
+    where node.completion_transition_timestamp is distinct from projected.transition_timestamp
+  ) then
+    raise exception 'STOP: Dev Node completion transition timestamps disagree with the immutable event projection';
   end if;
 
   -- The one-time source bridge is deliberately narrow. Dev must have the exact
@@ -109,6 +175,7 @@ begin
 
   if source_schema_mismatch_count <> 0
      or to_regclass('public.action_item_huddle_relationships') is not null
+     or to_regclass('public.action_item_sources') is not null
      or to_regclass('public.entity_field_assignments') is not null then
     raise exception 'STOP: raw QA source is not the audited current Entity and Huddle workspace schema';
   end if;
