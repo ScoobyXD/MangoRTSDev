@@ -52,6 +52,7 @@ begin
 
   if to_regclass('public.company_explorer_folders') is null
      or to_regclass('public.huddle_explorer_folders') is null
+     or to_regclass('public.nodes') is null
      or to_regclass('public.users') is null
      or to_regclass('public.attachments') is null
      or to_regclass('public.entity_types') is null
@@ -65,6 +66,20 @@ begin
      or to_regclass('public.action_item_huddle_relationships') is not null
      or to_regclass('public.schema_migrations') is null then
     raise exception 'STOP: required canonical Mango tables are missing';
+  end if;
+
+  if exists (
+    select 1
+    from public.nodes node
+    where (
+      lower(btrim(coalesce(node.status,''))) in ('done','complete','completed')
+      and node.completion_transition_timestamp is null
+    ) or (
+      lower(btrim(coalesce(node.status,''))) not in ('done','complete','completed')
+      and node.completion_transition_timestamp is not null
+    )
+  ) then
+    raise exception 'STOP: a Node completion transition timestamp disagrees with current completion status';
   end if;
 
   with expected(table_name,column_name) as (
@@ -474,6 +489,35 @@ begin
   end if;
 
   if exists (
+    with required(entity_field_type_id,system_key,name,field_type) as (
+      values
+        ('a17e0000-0000-4000-8000-000000000101'::uuid,'person_in_charge','Person in charge','person'),
+        ('a17e0000-0000-4000-8000-000000000106'::uuid,'assigned_by','Assigned by','person'),
+        ('a17e0000-0000-4000-8000-000000000102'::uuid,'analysis_due_date','Analysis due date','date'),
+        ('a17e0000-0000-4000-8000-000000000103'::uuid,'completion_due_date','Completion due date','date'),
+        ('a17e0000-0000-4000-8000-000000000104'::uuid,'status','Status','choice'),
+        ('a17e0000-0000-4000-8000-000000000105'::uuid,'color','Color','color'),
+        ('a17e0000-0000-4000-8000-000000000107'::uuid,'source','Source','resource')
+    )
+    select 1
+    from public.entity_field_types template
+    join public.entity_types entity_type
+      on entity_type.company_id = template.company_id
+     and entity_type.entity_type_id = template.entity_type_id
+     and entity_type.system_key = 'action_item'
+    join required
+      on lower(btrim(template.name)) = lower(required.name)
+      or template.system_key = required.system_key
+    where template.entity_field_type_id is distinct from required.entity_field_type_id
+       or template.entity_folder_id is not null
+       or template.system_key is distinct from required.system_key
+       or template.name is distinct from required.name
+       or template.field_type is distinct from required.field_type
+  ) then
+    raise exception 'STOP: an Action Item field template shadows a reserved label or system key';
+  end if;
+
+  if exists (
     with required(entity_field_type_id,name,field_type) as (
       values
         ('a17e0000-0000-4000-8000-000000000101'::uuid,'Person in charge','person'),
@@ -502,6 +546,41 @@ begin
     )
   ) then
     raise exception 'STOP: an Action Item Entity is missing a required linked field';
+  end if;
+
+  if exists (
+    select 1
+    from public.entity_field_types template
+    left join public.entity_types entity_type
+      on entity_type.company_id=template.company_id
+     and entity_type.entity_type_id=template.entity_type_id
+    where template.field_type='resource'
+      and (
+        template.entity_field_type_id is distinct from 'a17e0000-0000-4000-8000-000000000107'::uuid
+        or template.entity_type_id is distinct from 'a17e0000-0000-4000-8000-000000000001'::uuid
+        or template.entity_folder_id is not null
+        or template.name is distinct from 'Source'
+        or template.system_key is distinct from 'source'
+        or template.config_jsonb is distinct from '{}'::jsonb
+        or entity_type.system_key is distinct from 'action_item'
+      )
+  ) or exists (
+    select 1
+    from public.entity_fields field
+    left join public.entities entity
+      on entity.company_id=field.company_id
+     and entity.entity_id=field.entity_id
+    left join public.entity_types entity_type
+      on entity_type.company_id=entity.company_id
+     and entity_type.entity_type_id=entity.entity_type_id
+    where field.field_type='resource'
+      and (
+        field.entity_field_type_id is distinct from 'a17e0000-0000-4000-8000-000000000107'::uuid
+        or field.name is distinct from 'Source'
+        or entity_type.system_key is distinct from 'action_item'
+      )
+  ) then
+    raise exception 'STOP: a resource field is not the exact Action Item Source';
   end if;
 
   if exists (
