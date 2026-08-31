@@ -784,6 +784,19 @@ where company_id=$1::uuid and entity_id=$2::uuid`, normalized.CompanyID, normali
 	if err != nil {
 		return domain.Entity{}, err
 	}
+	if entityTypeID == ActionItemEntityTypeID {
+		boardIDs, err := postgresHuddleActionItemBoardIDsTx(ctx, tx, normalized.CompanyID, normalized.EntityID)
+		if err != nil {
+			return domain.Entity{}, err
+		}
+		nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, normalized.CompanyID, boardIDs)
+		if err != nil {
+			return domain.Entity{}, err
+		}
+		if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, normalized.CompanyID, boardIDs, nodeIDs); err != nil {
+			return domain.Entity{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Entity{}, err
 	}
@@ -862,6 +875,17 @@ from inserted`, normalized.CompanyID, normalized.EntityFieldID, normalized.Entit
 	if err != nil {
 		return domain.EntityField{}, mapEntitiesPostgresError(err)
 	}
+	boardIDs, err := postgresHuddleActionItemBoardIDsTx(ctx, tx, normalized.CompanyID, normalized.EntityID)
+	if err != nil {
+		return domain.EntityField{}, err
+	}
+	nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, normalized.CompanyID, boardIDs)
+	if err != nil {
+		return domain.EntityField{}, err
+	}
+	if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, normalized.CompanyID, boardIDs, nodeIDs); err != nil {
+		return domain.EntityField{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.EntityField{}, err
 	}
@@ -936,6 +960,17 @@ left join entity_field_types field_type
 	if err != nil {
 		return domain.EntityField{}, mapEntitiesPostgresError(err)
 	}
+	boardIDs, err := postgresHuddleActionItemBoardIDsTx(ctx, tx, normalized.CompanyID, normalized.EntityID)
+	if err != nil {
+		return domain.EntityField{}, err
+	}
+	nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, normalized.CompanyID, boardIDs)
+	if err != nil {
+		return domain.EntityField{}, err
+	}
+	if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, normalized.CompanyID, boardIDs, nodeIDs); err != nil {
+		return domain.EntityField{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.EntityField{}, err
 	}
@@ -978,6 +1013,17 @@ for update of field`, companyID, entityID, entityFieldID).Scan(&entityFieldTypeI
 	}
 	if count == 0 {
 		return ErrNotFound
+	}
+	boardIDs, err := postgresHuddleActionItemBoardIDsTx(ctx, tx, companyID, entityID)
+	if err != nil {
+		return err
+	}
+	nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, companyID, boardIDs)
+	if err != nil {
+		return err
+	}
+	if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, companyID, boardIDs, nodeIDs); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

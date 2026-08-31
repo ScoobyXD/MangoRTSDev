@@ -335,10 +335,10 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.equal(actionHeaderIconPaths?.[1]?.getAttribute("stroke"), "#6366f1", "the Action Items header target uses the indigo inner ring");
     assert.equal(container.querySelectorAll('[data-my-work-group-field="completion_due_date"]').length, 0, "Completion due date orders rows without creating a visible group header");
     assert.equal(container.querySelectorAll('[data-my-work-group-field="due_date"]').length, 0, "Node due dates retain their compact hidden-heading presentation");
-    assert.equal(container.querySelectorAll('button[data-my-work-group-field="huddle_process"][data-my-work-group-key="huddle-weekly"]').length, 2, "permission-safe Huddle process groups are clickable");
+    assert.equal(container.querySelectorAll('button[data-my-work-group-field="huddle_process"][data-my-work-group-key="huddle-weekly"]').length, 2, "permission-safe Huddle Board groups are clickable");
     assert.equal(container.querySelector('[data-my-work-action-item-field-settings="true"]'), null, "the separate row-field gear is removed");
     const huddleHeading = container.querySelector<HTMLElement>('button[data-my-work-group-field="huddle_process"]');
-    assert.ok(huddleHeading?.querySelector('[data-my-work-huddle-group-label="true"] svg'), "the official Huddle Process icon appears before its name");
+    assert.ok(huddleHeading?.querySelector('[data-my-work-huddle-group-label="true"] svg'), "the official Huddle Board icon appears before its name");
     assert.equal(huddleHeading?.style.fontFamily, "var(--mango-font-family)", "Huddle headings use the app font");
     assert.ok(container.querySelector('[data-my-work-huddle-surface-id][data-my-work-huddle-surface-edge="first"]'), "each Huddle bucket begins an elevated surface");
     let openedHuddle: unknown;
@@ -811,7 +811,7 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     const delegatedURL = new URL(calls.at(-1)?.path ?? "", "http://api.test");
     assert.equal(delegatedURL.searchParams.get("section"), "action_items");
     assert.equal(delegatedURL.searchParams.get("perspective"), "delegated");
-    assert.equal(delegatedURL.searchParams.get("grouping"), "color:asc,person_in_charge:asc,huddle_process:asc", "Delegated loads Color, Person in charge, then Huddle process");
+    assert.equal(delegatedURL.searchParams.get("grouping"), "color:asc,person_in_charge:asc,huddle_process:asc", "Delegated loads Color, Person in charge, then Huddle Board");
     assert.equal(delegatedURL.searchParams.get("ordering"), "completion_due_date:asc", "Delegated orders leaf items by Completion due date");
     assert.match(actionSection?.textContent ?? "", /Delegated Action/);
     assert.match(actionSection?.textContent ?? "", /Alex Morgan/, "Delegated shows the Person in charge inline");

@@ -9,10 +9,13 @@ import { shouldBlockRealtimeMutation, type RealtimeHealthStatus } from "../../..
 import {
   computeRealtimeReconnectDelayMs,
   isSupportedRealtimeScope,
+  matchesHuddleActionItemsRealtimeMessage,
   MangoRealtimeClient,
   parseRealtimeMessage,
   realtimeEditorScope,
   realtimeEditorJSONScope,
+  realtimeHuddleActionItemsScope,
+  realtimeHuddleBoardActionItemsScope,
   realtimePersonalMailboxScope,
   realtimeSharedMailboxScope,
   realtimeWebSocketURL,
@@ -20,12 +23,12 @@ import {
   type RealtimeChatMessageUpdatedMessage,
   type RealtimeChatMessageDeletedMessage,
   type RealtimeKanbanChangedMessage,
+  type RealtimeHuddleActionItemsChangedMessage,
   type RealtimeLogicGateQDRatingUpdatedMessage,
   type RealtimeMailboxFolderChangedMessage,
   type RealtimeMailboxMessageChangedMessage,
   type RealtimeNotificationCreatedMessage,
   type RealtimeProcessMapChangedMessage,
-  type RealtimeRACITabsChangedMessage,
 } from "../../../../frontend/src/modules/realtime/realtimeWebSocket.js";
 
 test("parses retained product and scoped mailbox message families", () => {
@@ -136,13 +139,45 @@ test("parses retained product and scoped mailbox message families", () => {
   })) as RealtimeLogicGateQDRatingUpdatedMessage;
   assert.equal(qdRating.logic_gate_id, "gate-1");
 
-  const raciTabs = parseRealtimeMessage(JSON.stringify({
-    type: "raci_tabs.changed",
+  const huddleNodeActionItems = parseRealtimeMessage(JSON.stringify({
+    type: "huddle_action_items.changed",
     company_id: "company-1",
-    scope: "raci-tabs:company",
-  })) as RealtimeRACITabsChangedMessage;
-  assert.equal(raciTabs.company_id, "company-1");
-  assert.equal(raciTabs.scope, "raci-tabs:company");
+    scope: "huddle-action-items:node-1",
+    huddle_node_id: " node-1 ",
+  })) as RealtimeHuddleActionItemsChangedMessage;
+  assert.equal(huddleNodeActionItems.huddle_node_id, "node-1");
+
+  const huddleBoardActionItems = parseRealtimeMessage(JSON.stringify({
+    type: "huddle_action_items.changed",
+    company_id: "company-1",
+    scope: "huddle-board-action-items:board-1",
+    huddle_logic_gate_id: " board-1 ",
+  })) as RealtimeHuddleActionItemsChangedMessage;
+  assert.equal(huddleBoardActionItems.huddle_logic_gate_id, "board-1");
+  assert.equal(matchesHuddleActionItemsRealtimeMessage(
+    huddleBoardActionItems,
+    "company-1",
+    "huddle-board-action-items:board-1",
+    "board-1",
+  ), true);
+  assert.equal(matchesHuddleActionItemsRealtimeMessage(
+    huddleBoardActionItems,
+    "other-company",
+    "huddle-board-action-items:board-1",
+    "board-1",
+  ), false, "a different company cannot invalidate the open Board");
+  assert.equal(matchesHuddleActionItemsRealtimeMessage(
+    huddleBoardActionItems,
+    "company-1",
+    "huddle-board-action-items:other-board",
+    "board-1",
+  ), false, "a sibling realtime scope cannot invalidate the open Board");
+  assert.throws(() => parseRealtimeMessage(JSON.stringify({
+    type: "huddle_action_items.changed",
+    company_id: "company-1",
+    scope: "huddle-board-action-items:board-1",
+    huddle_node_id: "node-1",
+  })), /realtime_huddle_logic_gate_id_required/);
 
   const mailboxMessage = parseRealtimeMessage(JSON.stringify({
     type: "mailbox.message.changed",
@@ -216,7 +251,12 @@ test("allows only exact notification, mailbox, node-chat, board, and editor scop
   assert.equal(isSupportedRealtimeScope("notifications:user:user-1"), true);
   assert.equal(isSupportedRealtimeScope("chat:node:node-1"), true);
   assert.equal(isSupportedRealtimeScope("board:logic-gate:gate-1"), true);
-  assert.equal(isSupportedRealtimeScope("raci-tabs:company"), true);
+  assert.equal(realtimeHuddleActionItemsScope(" node-1 "), "huddle-action-items:node-1");
+  assert.equal(realtimeHuddleBoardActionItemsScope(" board-1 "), "huddle-board-action-items:board-1");
+  assert.equal(isSupportedRealtimeScope("huddle-action-items:node-1"), true);
+  assert.equal(isSupportedRealtimeScope("huddle-board-action-items:board-1"), true);
+  assert.equal(isSupportedRealtimeScope("huddle-board-action-items:board-1:extra"), false);
+  assert.equal(isSupportedRealtimeScope("raci-tabs:company"), false);
   assert.equal(isSupportedRealtimeScope("process-map:company"), true);
   assert.equal(isSupportedRealtimeScope("process-map:user:user-1"), false);
   assert.equal(isSupportedRealtimeScope("raci-tabs:user:user-1"), false);
@@ -306,6 +346,8 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     let board = 0;
     let boardAcceptances = 0;
     let mailbox = 0;
+    let huddleNodeActionItems = 0;
+    let huddleBoardActionItems = 0;
     const unsubNotifications = client.subscribe("notifications:user:user-1", { onAccepted: () => { notificationAcceptances += 1; }, onNotificationCreated: () => { notifications += 1; } });
     const unsubChat = client.subscribe("chat:node:node-1", {
       onAccepted: () => { chatAcceptances += 1; },
@@ -314,13 +356,19 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     });
     const unsubBoard = client.subscribe("board:logic-gate:gate-1", { onAccepted: () => { boardAcceptances += 1; }, onKanbanChanged: () => { board += 1; } });
     const unsubMailbox = client.subscribe("mailbox:personal:account:user-1:owner@example.com", { onMailboxMessageChanged: () => { mailbox += 1; } });
+    const unsubHuddleNodeActionItems = client.subscribe("huddle-action-items:huddle-node-1", {
+      onHuddleActionItemsChanged: () => { huddleNodeActionItems += 1; },
+    });
+    const unsubHuddleBoardActionItems = client.subscribe("huddle-board-action-items:huddle-board-1", {
+      onHuddleActionItemsChanged: () => { huddleBoardActionItems += 1; },
+    });
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
 
     assert.equal(sockets.length, 1);
     assert.equal(client.currentConnectionID(), "connection-1");
     assert.equal(client.currentConnectionCorrelation(), "correlation-1");
     const subscriptions = sockets[0].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe");
-    assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
+    assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "huddle-action-items:huddle-node-1", "huddle-board-action-items:huddle-board-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
 
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });
@@ -385,12 +433,16 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.updated", company_id: "company-1", scope: "chat:node:node-1", node_id: "node-1", block_id: "block-1", message_id: "m-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "kanban.changed", company_id: "company-1", scope: "board:logic-gate:gate-1", board_id: "logic-gate:gate-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "mailbox.message.changed", company_id: "company-1", scope: "mailbox:personal:account:user-1:owner@example.com", trigger: "message.created", message_id: "mail-1" }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "huddle_action_items.changed", company_id: "company-1", scope: "huddle-action-items:huddle-node-1", huddle_node_id: "huddle-node-1" }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "huddle_action_items.changed", company_id: "company-1", scope: "huddle-board-action-items:huddle-board-1", huddle_logic_gate_id: "huddle-board-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.created", company_id: "company-1", scope: "chat:node:other", node_id: "other", block_id: "block-1", message_id: "m-2" }) });
 
     assert.equal(notifications, 1);
     assert.equal(chat, 2);
     assert.equal(board, 1);
     assert.equal(mailbox, 1);
+    assert.equal(huddleNodeActionItems, 1);
+    assert.equal(huddleBoardActionItems, 1);
 
     sockets[0].close();
     assert.equal(client.currentConnectionID(), undefined, "a closed socket cannot leave an obsolete write origin");
@@ -410,7 +462,7 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     assert.equal(sockets.length, 2);
     assert.equal(client.currentConnectionID(), "connection-2");
     assert.equal(client.currentConnectionCorrelation(), "correlation-2");
-    assert.deepEqual(sockets[1].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe").map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
+    assert.deepEqual(sockets[1].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe").map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "huddle-action-items:huddle-node-1", "huddle-board-action-items:huddle-board-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "board:logic-gate:gate-1" }) });
@@ -431,6 +483,8 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     unsubChat();
     unsubBoard();
     unsubMailbox();
+    unsubHuddleNodeActionItems();
+    unsubHuddleBoardActionItems();
     client.close();
   } finally {
     globalThis.WebSocket = originalWebSocket;
@@ -727,14 +781,14 @@ test("frontend source inventory contains only retained narrow scope families", (
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-	assert.equal(subscriptionSources.length, 12);
+  assert.equal(subscriptionSources.length, 12);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/AppSidebarChrome.tsx",
-    "app/AppSidebarRACITabsSection.tsx",
     "app/NotificationRealtimeBridge.tsx",
 		"modules/editor/EditorContent.tsx",
 		"modules/editor/NodeWorkspaceSurfaceParts.tsx",
     "modules/editor/tiptap/MangoTiptapEditor.tsx",
+    "modules/huddles/HuddleResourceSurface.tsx",
     "modules/kanban/KanbanContent.tsx",
     "modules/logic-gates/qdRatingsApi.ts",
     "modules/process-map/ProcessMapSurface.tsx",

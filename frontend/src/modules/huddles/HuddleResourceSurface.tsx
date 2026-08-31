@@ -16,6 +16,7 @@ import {
 } from "../editor/NodeWorkspaceSurfaceShared";
 import type { EditorTabID } from "../editor/editorTabs";
 import { mangoTiptapPendingStorageKey } from "../editor/tiptap/mangoTiptapSync";
+import { normalizeNodeDueDateDraft } from "../editor/editorDates.js";
 import { UniversalEntityPicker, type UniversalEntityPickerAnchor } from "../editor/UniversalEntityPicker";
 import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordStore";
 import type { LogicGateRACIAssignment, LogicGateRACIPrincipalType, LogicGateRACIRole } from "../logic-gates/types";
@@ -24,15 +25,22 @@ import { EntityPermissionsDialog } from "../permissions/EntityPermissionsDialog"
 import { HierarchyBreadcrumb } from "../hierarchy/HierarchyBreadcrumb.js";
 import { emitExplorerContextUpdated } from "../dashboardEvents.js";
 import {
+  matchesHuddleActionItemsRealtimeMessage,
+  realtimeHuddleActionItemsScope,
+  realtimeHuddleBoardActionItemsScope,
+  subscribeRealtimeScope,
+} from "../realtime/realtimeWebSocket.js";
+import {
   BareMangoEditorDocument,
   BareMangoEditorToolbar,
   useBareMangoEditorControls,
 } from "./BareMangoEditor";
 import { HuddleResourceIcon } from "./HuddleResourceIcon";
-import { HuddleActionItemsPanel } from "./HuddleActionItemsPanel";
+import { HuddleActionItemsPanel, HuddleNodeActionItemsColumn } from "./HuddleActionItemsPanel";
 import {
   actionItemReferenceIDs,
   EVENT_HUDDLE_ACTION_ITEMS_CHANGED,
+  reconcileHuddleNodeViewingDate,
   transitionActionItemReferenceRefresh,
   type ActionItemReferenceRefreshEvent,
   type ActionItemReferenceRefreshState,
@@ -48,7 +56,7 @@ export type HuddleOpenResource = { resourceType: HuddleResourceType; resourceID:
 export type HuddleRequestJSON = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
 
 type HuddleGate = { company_id: string; huddle_logic_gate_id: string; header: string };
-type HuddleNode = { company_id: string; huddle_node_id: string; huddle_logic_gate_id: string; name: string };
+type HuddleNode = { company_id: string; huddle_node_id: string; huddle_logic_gate_id: string; name: string; huddle_date: string };
 type RACIPolicy = {
   effective_assignment_mode?: "inherited" | "customized";
   gvic_assignments?: LogicGateRACIAssignment[];
@@ -86,6 +94,8 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const loadRequestIDRef = useRef(0);
   const owningHuddleLogicGateIDRef = useRef(resource.huddleLogicGateID?.trim() ?? "");
   const pendingOwningProcessRefreshRef = useRef(false);
+  const savedHuddleNodeDateRef = useRef("");
+  const viewingDateInitializedNodeRef = useRef("");
   const [name, setName] = useState(resource.name);
   const [savedName, setSavedName] = useState(resource.name);
   const [nodes, setNodes] = useState<HuddleNode[]>([]);
@@ -102,6 +112,9 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const [columnLayout, setColumnLayout] = useState<HuddleColumnLayout>(DEFAULT_HUDDLE_COLUMN_LAYOUT);
   const [nodeLeftFraction, setNodeLeftFraction] = useState(0.62);
   const [activeHuddleNodeTextBoxID, setActiveHuddleNodeTextBoxID] = useState("");
+  const [huddleNodeDate, setHuddleNodeDate] = useState("");
+  const [huddleNodeViewingDate, setHuddleNodeViewingDate] = useState("");
+  const [huddleNodeDateSaving, setHuddleNodeDateSaving] = useState(false);
   const [actionItemsRefreshToken, setActionItemsRefreshToken] = useState(0);
   const [gateMiddleView, setGateMiddleView] = useState<"action_items" | "processes">("action_items");
   const [nodeRightView, setNodeRightView] = useState<"action_items" | "process_snapshot">("action_items");
@@ -113,10 +126,13 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
     }));
   }, [companyID]);
   const refreshActionItems = useCallback(() => {
-    setActionItemsRefreshToken((current) => current + 1);
-    if (isGate) return;
+    if (isGate) {
+      setActionItemsRefreshToken((current) => current + 1);
+      return;
+    }
     const huddleLogicGateID = owningHuddleLogicGateIDRef.current;
     if (!huddleLogicGateID) {
+      setActionItemsRefreshToken((current) => current + 1);
       pendingOwningProcessRefreshRef.current = true;
       return;
     }
@@ -140,10 +156,10 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
     gateActionItemReferenceRefreshRef.current = undefined;
   }, [resource.resourceID, resource.resourceType]);
   useEffect(() => {
-    if (!isGate) return undefined;
     const refreshProcessActionItems = (event: Event) => {
       const detail = (event as CustomEvent<HuddleActionItemsChangedDetail>).detail;
-      if (detail?.companyID === companyID && detail.huddleLogicGateID === resource.resourceID) {
+      const expectedHuddleLogicGateID = isGate ? resource.resourceID : owningHuddleLogicGateIDRef.current;
+      if (detail?.companyID === companyID && expectedHuddleLogicGateID && detail.huddleLogicGateID === expectedHuddleLogicGateID) {
         setActionItemsRefreshToken((current) => current + 1);
       }
     };
@@ -186,6 +202,20 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       const loadedName = isGate ? (item as HuddleGate).header : (item as HuddleNode).name;
       setName(loadedName);
       setSavedName(loadedName);
+      if (!isGate) {
+        const loadedDate = normalizeNodeDueDateDraft((item as HuddleNode).huddle_date);
+        if (!loadedDate) throw new Error("Huddle Node date is missing");
+        savedHuddleNodeDateRef.current = loadedDate;
+        setHuddleNodeDate(loadedDate);
+        const initializedNodeID = viewingDateInitializedNodeRef.current;
+        setHuddleNodeViewingDate((current) => reconcileHuddleNodeViewingDate(
+          initializedNodeID,
+          current,
+          resource.resourceID,
+          loadedDate,
+        ));
+        viewingDateInitializedNodeRef.current = resource.resourceID;
+      }
       setRaci(policy.gvic_assignments ?? []);
       setRaciRevision(policy.revision ?? "");
       setCompanyUsers(usersPayload.users ?? []);
@@ -199,7 +229,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       }
     } catch (cause) {
       if (loadRequestIDRef.current !== requestID) return;
-      setError(cause instanceof Error ? cause.message : "Could not load Huddle");
+      setError(cause instanceof Error ? cause.message : `Could not load ${isGate ? "Huddle Board" : "Huddle Node"}`);
     }
   }, [companyID, isGate, notifyOwningProcessActionItemsChanged, requestJSON, resource.resourceID, resource.resourceType]);
 
@@ -208,9 +238,47 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
     return () => { loadRequestIDRef.current += 1; };
   }, [load]);
   useEffect(() => {
+    if (isGate) return undefined;
+    const refreshFocusedHuddleNode = () => void load();
+    const refreshVisibleHuddleNode = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", refreshFocusedHuddleNode);
+    document.addEventListener("visibilitychange", refreshVisibleHuddleNode);
+    return () => {
+      window.removeEventListener("focus", refreshFocusedHuddleNode);
+      document.removeEventListener("visibilitychange", refreshVisibleHuddleNode);
+    };
+  }, [isGate, load]);
+  useEffect(() => {
+    if (typeof WebSocket === "undefined") return undefined;
+    const expectedResourceID = resource.resourceID.trim();
+    const scope = isGate
+      ? realtimeHuddleBoardActionItemsScope(expectedResourceID)
+      : realtimeHuddleActionItemsScope(expectedResourceID);
+    if (!scope) return undefined;
+    const refreshRealtimeState = () => {
+      setActionItemsRefreshToken((current) => current + 1);
+      if (!isGate) void load();
+    };
+    return subscribeRealtimeScope(apiBase, companyID, scope, {
+      onHuddleActionItemsChanged: (message) => {
+        if (matchesHuddleActionItemsRealtimeMessage(message, companyID, scope, expectedResourceID)) {
+          refreshRealtimeState();
+        }
+      },
+      onRecover: refreshRealtimeState,
+    });
+  }, [apiBase, companyID, isGate, load, resource.resourceID]);
+  useEffect(() => {
     setGateMiddleView("action_items");
     setNodeRightView("action_items");
     setActiveHuddleNodeTextBoxID("");
+    savedHuddleNodeDateRef.current = "";
+    viewingDateInitializedNodeRef.current = "";
+    setHuddleNodeDate("");
+    setHuddleNodeViewingDate("");
+    setHuddleNodeDateSaving(false);
     owningHuddleLogicGateIDRef.current = resource.resourceType === "huddle_node"
       ? resource.huddleLogicGateID?.trim() ?? ""
       : "";
@@ -235,7 +303,40 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       if (isGate) emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
     } catch (cause) {
       setName(savedName);
-      setError(cause instanceof Error ? cause.message : "Could not rename Huddle");
+      setError(cause instanceof Error ? cause.message : `Could not rename ${isGate ? "Huddle Board" : "Huddle Node"}`);
+    }
+  };
+
+  const saveHuddleNodeDate = async (value: string) => {
+    if (isGate || huddleNodeDateSaving) return;
+    const nextDate = normalizeNodeDueDateDraft(value);
+    if (!nextDate) {
+      setHuddleNodeDate(savedHuddleNodeDateRef.current);
+      return;
+    }
+    if (nextDate === savedHuddleNodeDateRef.current) {
+      setHuddleNodeDate(nextDate);
+      return;
+    }
+    const previousDate = savedHuddleNodeDateRef.current;
+    setHuddleNodeDate(nextDate);
+    setHuddleNodeDateSaving(true);
+    try {
+      const item = await requestJSON<HuddleNode>(`/v1/huddle-nodes/${encodeURIComponent(resource.resourceID)}`, {
+        method: "PUT",
+        json: { company_id: companyID, huddle_date: nextDate },
+      });
+      const committedDate = normalizeNodeDueDateDraft(item.huddle_date);
+      if (!committedDate) throw new Error("huddle_node_date_missing");
+      savedHuddleNodeDateRef.current = committedDate;
+      setHuddleNodeDate(committedDate);
+      refreshActionItems();
+    } catch (cause) {
+      setHuddleNodeDate(previousDate);
+      setError(cause instanceof Error ? cause.message : "Could not update the Huddle Node date");
+      throw cause;
+    } finally {
+      setHuddleNodeDateSaving(false);
     }
   };
 
@@ -366,7 +467,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       onDeleted?.();
       onClose();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not delete Huddle");
+      setError(cause instanceof Error ? cause.message : `Could not delete ${isGate ? "Huddle Board" : "Huddle Node"}`);
     }
   };
 
@@ -423,7 +524,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
 
   return (
     <section
-      aria-label={isGate ? "Huddle Process" : "Huddle Node"}
+      aria-label={isGate ? "Huddle Board" : "Huddle Node"}
       data-huddle-resource-surface={resource.resourceType}
       data-huddle-fullscreen={fullscreen ? "true" : undefined}
       style={surfaceStyle}
@@ -441,7 +542,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
         </div>
         <div aria-label="Huddle actions" style={actionGroupStyle}>
           <button type="button" title="Move to Recycle Bin" aria-label="Move to Recycle Bin" onClick={() => void deleteResource()} style={{ ...iconButtonStyle, color: "#be123c" }}><HeaderRecycleBinIcon /></button>
-          <button type="button" title={`Pin ${isGate ? "Huddle Process" : "Huddle Node"}`} aria-label={`Pin ${isGate ? "Huddle Process" : "Huddle Node"}`} onClick={() => requestAppSidebarPin({ id: resource.resourceID, kind: resource.resourceType, name })} style={iconButtonStyle}><PinToSidebarIcon /></button>
+          <button type="button" title={`Pin ${isGate ? "Huddle Board" : "Huddle Node"}`} aria-label={`Pin ${isGate ? "Huddle Board" : "Huddle Node"}`} onClick={() => requestAppSidebarPin({ id: resource.resourceID, kind: resource.resourceType, name })} style={iconButtonStyle}><PinToSidebarIcon /></button>
           <button type="button" title={fullscreen ? "Exit fullscreen" : "Fullscreen"} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} aria-pressed={fullscreen} onClick={onToggleFullscreen} style={iconButtonStyle}><FullscreenIcon active={fullscreen} /></button>
           <button type="button" title="Close" aria-label="Close" onClick={onClose} style={closeButtonStyle}>X</button>
         </div>
@@ -456,11 +557,11 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
           resourceID={resource.resourceID}
         />
         <div style={identityTitleRowStyle}>
-          <strong aria-label={isGate ? "Huddle Process" : "Huddle Node"} title={isGate ? "Huddle Process" : "Huddle Node"} style={identityLabelStyle}>
+          <strong aria-label={isGate ? "Huddle Board" : "Huddle Node"} title={isGate ? "Huddle Board" : "Huddle Node"} style={identityLabelStyle}>
             <HuddleResourceIcon type={resource.resourceType} />
           </strong>
           <input
-            aria-label={isGate ? "Huddle Process title" : "Huddle Node title"}
+            aria-label={isGate ? "Huddle Board title" : "Huddle Node title"}
             value={name}
             onChange={(event) => setName(event.target.value)}
             onBlur={() => void saveName()}
@@ -527,6 +628,9 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
             companyUsers={companyUsers}
             requestJSON={requestJSON}
             controls={editorControls}
+            huddleDate={huddleNodeDate}
+            huddleDateSaving={huddleNodeDateSaving}
+            onHuddleDateCommit={saveHuddleNodeDate}
             onError={setError}
             onActionItemsChanged={refreshActionItems}
             onActiveTextBoxIDChange={setActiveHuddleNodeTextBoxID}
@@ -534,9 +638,9 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
         )}
         <div role="separator" aria-label={isGate ? "Resize Huddle editor and middle columns" : "Resize Huddle Node workspace and detail columns"} aria-orientation="vertical" onPointerDown={isGate ? (event) => startGateResize(0, event) : startNodeResize} style={columnResizeHandleStyle}><span style={columnResizeGripStyle} /></div>
         {isGate ? (
-          <div aria-label="Huddle Process middle view" style={viewColumnStyle}>
+          <div aria-label="Huddle Board middle view" style={viewColumnStyle}>
             <HuddleViewToggle
-              ariaLabel="Huddle Process middle view"
+              ariaLabel="Huddle Board middle view"
               value={gateMiddleView}
               options={[{ id: "action_items", label: "Action Items" }, { id: "processes", label: "Processes" }]}
               onChange={(value) => setGateMiddleView(value === "processes" ? "processes" : "action_items")}
@@ -546,12 +650,13 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
                 companyID={companyID}
                 currentUserID={currentUserID}
                 scope={{ resourceType: "huddle_logic_gate", resourceID: resource.resourceID }}
+                view="huddle_logic_gate"
                 companyUsers={companyUsers}
                 requestJSON={requestJSON}
                 refreshToken={actionItemsRefreshToken}
               />
             ) : (
-              <section aria-label="Huddle Processes" style={relationshipColumnStyle}>
+              <section aria-label="Huddle Board Processes" style={relationshipColumnStyle}>
                 <div style={relationshipColumnHeaderStyle}>
                   <strong>Processes</strong>
                   <button type="button" aria-label="Add Process" title="Add Process" onClick={openLogicGatePicker} style={createNodeButtonStyle}>+</button>
@@ -575,13 +680,16 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
               onChange={(value) => setNodeRightView(value === "process_snapshot" ? "process_snapshot" : "action_items")}
             />
             {nodeRightView === "action_items" ? (
-              <HuddleActionItemsPanel
+              <HuddleNodeActionItemsColumn
                 companyID={companyID}
                 currentUserID={currentUserID}
-                scope={{ resourceType: "huddle_node", resourceID: resource.resourceID }}
+                huddleNodeID={resource.resourceID}
                 companyUsers={companyUsers}
                 requestJSON={requestJSON}
                 refreshToken={actionItemsRefreshToken}
+                huddleNodeDate={huddleNodeDate}
+                viewingDate={huddleNodeViewingDate}
+                onViewingDateChange={setHuddleNodeViewingDate}
               />
             ) : (
               <section aria-label={`${name} Process snapshot`} data-huddle-node-snapshot="true" style={relationshipColumnStyle}>
@@ -651,7 +759,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
         <UniversalEntityPicker
           companyID={companyID}
           requestJSON={requestJSON}
-          sourceLabel="Huddle Process"
+          sourceLabel="Huddle Board"
           linkTargetTypes={["logic_gate"]}
           initialMode="link"
           initialCategory="logic_gate"

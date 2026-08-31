@@ -156,7 +156,7 @@ func scanHuddleLogicGate(row interface{ Scan(...any) error }) (domain.HuddleLogi
 }
 func scanHuddleNode(row interface{ Scan(...any) error }) (domain.HuddleNode, error) {
 	var v domain.HuddleNode
-	err := row.Scan(&v.CompanyID, &v.HuddleNodeID, &v.HuddleLogicGateID, &v.Name, &v.CreatedTimestamp, &v.UpdatedTimestamp)
+	err := row.Scan(&v.CompanyID, &v.HuddleNodeID, &v.HuddleLogicGateID, &v.Name, &v.HuddleDate, &v.CreatedTimestamp, &v.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = ErrNotFound
 	}
@@ -195,7 +195,28 @@ func (r *PostgresRepo) UpdateHuddleLogicGate(input HuddleUpdateInput) (domain.Hu
 	if input.Name == "" {
 		return domain.HuddleLogicGate{}, ErrInvalid
 	}
-	return scanHuddleLogicGate(r.db.QueryRow(`update huddle_logic_gates set header=$3,updated_timestamp=statement_timestamp() where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid returning company_id::text,huddle_logic_gate_id::text,header,created_timestamp,updated_timestamp`, input.CompanyID, input.ResourceID, input.Name))
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	defer tx.Rollback()
+	item, err := scanHuddleLogicGate(tx.QueryRowContext(ctx, `update huddle_logic_gates set header=$3,updated_timestamp=statement_timestamp() where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid returning company_id::text,huddle_logic_gate_id::text,header,created_timestamp,updated_timestamp`, input.CompanyID, input.ResourceID, input.Name))
+	if err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	boardIDs := []string{item.HuddleLogicGateID}
+	nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, item.CompanyID, boardIDs)
+	if err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, item.CompanyID, boardIDs, nodeIDs); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
+	return item, nil
 }
 
 func scanHuddleLogicGateCards(rows *sql.Rows) ([]domain.HuddleLogicGateCard, error) {
@@ -317,7 +338,7 @@ func (r *PostgresRepo) DeleteHuddleLogicGateRelationship(input HuddleLogicGateRe
 }
 
 func (r *PostgresRepo) ListHuddleNodes(companyID, ownerID string) ([]domain.HuddleNode, error) {
-	rows, err := r.db.Query(`select company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,created_timestamp,updated_timestamp from huddle_nodes where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid order by created_timestamp,huddle_node_id`, companyID, ownerID)
+	rows, err := r.db.Query(`select company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,huddle_date::text,created_timestamp,updated_timestamp from huddle_nodes where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid order by created_timestamp,huddle_node_id`, companyID, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -337,6 +358,10 @@ func (r *PostgresRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleN
 	if input.Name == "" {
 		return domain.HuddleNode{}, ErrInvalid
 	}
+	huddleDate, err := huddleDateForCreate(input.Now)
+	if err != nil {
+		return domain.HuddleNode{}, err
+	}
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -344,7 +369,7 @@ func (r *PostgresRepo) CreateHuddleNode(input HuddleCreateInput) (domain.HuddleN
 	}
 	defer tx.Rollback()
 	id := newUUIDv7String()
-	v, err := scanHuddleNode(tx.QueryRowContext(ctx, `insert into huddle_nodes(company_id,huddle_node_id,huddle_logic_gate_id,name) values($1::uuid,$2::uuid,$3::uuid,$4) returning company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,created_timestamp,updated_timestamp`, input.CompanyID, id, input.OwnerID, input.Name))
+	v, err := scanHuddleNode(tx.QueryRowContext(ctx, `insert into huddle_nodes(company_id,huddle_node_id,huddle_logic_gate_id,name,huddle_date) values($1::uuid,$2::uuid,$3::uuid,$4,$5::date) returning company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,huddle_date::text,created_timestamp,updated_timestamp`, input.CompanyID, id, input.OwnerID, input.Name, huddleDate))
 	if err != nil {
 		return domain.HuddleNode{}, err
 	}
@@ -372,13 +397,21 @@ join kpis kpi on kpi.company_id=relationship.company_id and kpi.logic_gate_id=re
 where relationship.company_id=$1::uuid and relationship.huddle_logic_gate_id=$2::uuid`, input.CompanyID, input.OwnerID, id); err != nil {
 		return domain.HuddleNode{}, err
 	}
+	boardIDs := []string{v.HuddleLogicGateID}
+	nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, v.CompanyID, boardIDs)
+	if err != nil {
+		return domain.HuddleNode{}, err
+	}
+	if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, v.CompanyID, boardIDs, nodeIDs); err != nil {
+		return domain.HuddleNode{}, err
+	}
 	if err = tx.Commit(); err != nil {
 		return domain.HuddleNode{}, err
 	}
 	return v, nil
 }
 func (r *PostgresRepo) GetHuddleNode(companyID, id string) (domain.HuddleNode, error) {
-	return scanHuddleNode(r.db.QueryRow(`select company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,created_timestamp,updated_timestamp from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id))
+	return scanHuddleNode(r.db.QueryRow(`select company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,huddle_date::text,created_timestamp,updated_timestamp from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id))
 }
 
 func (r *PostgresRepo) ListHuddleNodeLogicGateCards(companyID, huddleNodeID string) ([]domain.HuddleLogicGateCard, error) {
@@ -406,10 +439,39 @@ order by lower(gate.header),gate.logic_gate_id,kpi.created_timestamp,kpi.kpi_id`
 }
 func (r *PostgresRepo) UpdateHuddleNode(input HuddleUpdateInput) (domain.HuddleNode, error) {
 	input.Name = strings.TrimSpace(input.Name)
-	if input.Name == "" {
+	if input.Name == "" && input.HuddleDate == nil {
 		return domain.HuddleNode{}, ErrInvalid
 	}
-	return scanHuddleNode(r.db.QueryRow(`update huddle_nodes set name=$3,updated_timestamp=statement_timestamp() where company_id=$1::uuid and huddle_node_id=$2::uuid returning company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,created_timestamp,updated_timestamp`, input.CompanyID, input.ResourceID, input.Name))
+	var huddleDate string
+	if input.HuddleDate != nil {
+		normalized, err := normalizeHuddleDate(*input.HuddleDate)
+		if err != nil {
+			return domain.HuddleNode{}, err
+		}
+		huddleDate = normalized
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.HuddleNode{}, err
+	}
+	defer tx.Rollback()
+	item, err := scanHuddleNode(tx.QueryRowContext(ctx, `update huddle_nodes set name=coalesce(nullif($3,''),name),huddle_date=coalesce(nullif($4::text,'')::date,huddle_date),updated_timestamp=statement_timestamp() where company_id=$1::uuid and huddle_node_id=$2::uuid returning company_id::text,huddle_node_id::text,huddle_logic_gate_id::text,name,huddle_date::text,created_timestamp,updated_timestamp`, input.CompanyID, input.ResourceID, input.Name, huddleDate))
+	if err != nil {
+		return domain.HuddleNode{}, err
+	}
+	boardIDs := []string{item.HuddleLogicGateID}
+	nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, item.CompanyID, boardIDs)
+	if err != nil {
+		return domain.HuddleNode{}, err
+	}
+	if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, item.CompanyID, boardIDs, nodeIDs); err != nil {
+		return domain.HuddleNode{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.HuddleNode{}, err
+	}
+	return item, nil
 }
 func (r *PostgresRepo) ListKPIs(companyID, ownerID string) ([]domain.KPI, error) {
 	rows, err := r.db.Query(`select company_id::text,kpi_id::text,logic_gate_id::text,name,created_timestamp,updated_timestamp from kpis where company_id=$1::uuid and logic_gate_id=$2::uuid order by created_timestamp,kpi_id`, companyID, ownerID)
@@ -571,6 +633,7 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 	}
 	defer tx.Rollback()
 	table, labelExpression, where := "", "", ""
+	var actionItemBoardIDs []string
 	switch kind {
 	case "huddle_logic_gate":
 		table = "huddle_logic_gates"
@@ -587,6 +650,14 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 		table = "huddle_nodes"
 		labelExpression = "name"
 		where = `company_id=$1::uuid and huddle_node_id=$2::uuid`
+		var actionItemBoardID string
+		if err = tx.QueryRowContext(ctx, `select huddle_logic_gate_id::text from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, id).Scan(&actionItemBoardID); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		actionItemBoardIDs = []string{actionItemBoardID}
 	case "kpi":
 		table = "kpis"
 		labelExpression = "name"
@@ -705,6 +776,15 @@ func (r *PostgresRepo) deleteHuddleObject(companyID, kind, id, userID string) er
 	}
 	if _, err = tx.ExecContext(ctx, `delete from `+table+` where `+where, companyID, id); err != nil {
 		return err
+	}
+	if len(actionItemBoardIDs) > 0 {
+		nodeIDs, nodeErr := postgresHuddleNodeIDsForBoardsTx(ctx, tx, companyID, actionItemBoardIDs)
+		if nodeErr != nil {
+			return nodeErr
+		}
+		if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, companyID, actionItemBoardIDs, nodeIDs); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }

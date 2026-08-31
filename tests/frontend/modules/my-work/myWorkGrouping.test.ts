@@ -37,7 +37,7 @@ test("My Work density keeps virtual rows and resizer movement in unscaled layout
   assert.match(source, /const nextValue = onDelta\(delta\);/, "keyboard steps remain in layout pixels");
 });
 
-test("Mine Action Items default to Color then Huddle process and order leaves by Completion due date", () => {
+test("Mine Action Items default to Color then Huddle Board and order leaves by Completion due date", () => {
   const groups = buildUniversalNestedGroups([
     { entity_id: "red", name: "Red", color: "red", huddle_process: { huddle_logic_gate_id: "huddle-a", name: "Alpha Huddle" }, completion_due_date: "2026-09-01", completion_due_date_field_id: "field-red", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
     { entity_id: "yellow", name: "Yellow", color: "yellow", huddle_process: { huddle_logic_gate_id: "huddle-b", name: "Beta Huddle" }, completion_due_date: "2026-09-02T18:00:00Z", completion_due_date_field_id: "field-yellow", person_in_charge_user_id: "person-1", person_in_charge_name: "Person One" },
@@ -48,14 +48,14 @@ test("Mine Action Items default to Color then Huddle process and order leaves by
   assert.deepEqual(groups[0]?.groups.map((group) => group.label), ["Alpha Huddle"]);
   assert.deepEqual(groups[0]?.groups[0]?.rows.map((row) => row.entity_id), ["red"]);
   assert.deepEqual(groups[1]?.groups[0]?.rows.map((row) => row.entity_id), ["yellow"]);
-  assert.deepEqual(groups[2]?.groups.map((group) => group.label), ["No Huddle process"]);
+  assert.deepEqual(groups[2]?.groups.map((group) => group.label), ["No Huddle Board"]);
   assert.deepEqual(DEFAULT_MY_WORK_ACTION_ITEM_GROUPINGS.mine.map((grouping) => grouping.field), ["color", "huddle_process"]);
   assert.deepEqual(DEFAULT_MY_WORK_ACTION_ITEM_ORDERINGS.mine, [
     { field: "completion_due_date", direction: "asc" },
   ]);
 });
 
-test("Delegated Action Items default to Color, Person in charge, then Huddle process and order leaves by Completion due date", () => {
+test("Delegated Action Items default to Color, Person in charge, then Huddle Board and order leaves by Completion due date", () => {
   const groups = buildUniversalNestedGroups([
     { entity_id: "alex", name: "Alex item", color: "yellow", huddle_process: { huddle_logic_gate_id: "huddle-a", name: "Alpha Huddle" }, completion_due_date: "2026-09-01", completion_due_date_field_id: "field-alex", person_in_charge_user_id: "person-alex", person_in_charge_name: "Alex Morgan" },
     { entity_id: "zoe", name: "Zoe item", color: "yellow", huddle_process: { huddle_logic_gate_id: "huddle-a", name: "Alpha Huddle" }, completion_due_date: "2026-09-01", completion_due_date_field_id: "field-zoe", person_in_charge_user_id: "person-zoe", person_in_charge_name: "Zoe Chen" },

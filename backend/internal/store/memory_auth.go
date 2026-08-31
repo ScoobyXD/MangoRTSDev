@@ -296,8 +296,6 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 		return existingMembership, nil
 	}
 	beforeMemberships := cloneMemoryMap(r.memberships)
-	beforeRACITabFolders := cloneMemoryMap(r.raciTabFolders)
-	beforeRACITabItems := cloneMemoryMap(r.raciTabItems)
 	beforeDomainEvents := cloneMemoryMap(r.domainEvents)
 	beforeWorkspaceReadVersions := cloneMemoryMap(r.workspaceReadVersions)
 	beforeRealtimeOutbox := cloneMemoryMap(r.realtimeOutbox)
@@ -315,14 +313,11 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 		membership.CreatedTimestamp = existingMembership.CreatedTimestamp
 	}
 	r.memberships[membershipKeyValue] = membership
-	r.reconcileMemoryRACITabsCompanyLocked(companyID)
 	hasGlobalAccess := memoryUserHasDevAdminMembershipLocked(r.memberships, user.UserID)
 	affectedCompanyIDs := memoryMembershipAffectedCompanyIDsLocked(r.companies, companyID, hadGlobalAccess != hasGlobalAccess)
 	r.advancePolicyGroupMembershipVersionsLocked(affectedCompanyIDs)
 	if _, err := r.appendDomainEventsLocked(companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, user.UserID)); err != nil {
 		r.memberships = beforeMemberships
-		r.raciTabFolders = beforeRACITabFolders
-		r.raciTabItems = beforeRACITabItems
 		r.domainEvents = beforeDomainEvents
 		r.workspaceReadVersions = beforeWorkspaceReadVersions
 		r.realtimeOutbox = beforeRealtimeOutbox
@@ -633,8 +628,6 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	folderSharesSnapshot := cloneMemoryMap(r.folderShares)
 	emailConnectionsSnapshot := cloneMemoryMap(r.emailConnections)
 	effectiveAccessSnapshot := cloneMemoryMap(r.effectiveAccess)
-	raciTabFoldersSnapshot := cloneMemoryMap(r.raciTabFolders)
-	raciTabItemsSnapshot := cloneMemoryMap(r.raciTabItems)
 	raciMatrixProjectionRowsSnapshot := cloneMemoryMap(r.RACIMatrixProjectionRows)
 	domainEventsSnapshot := cloneMemoryMap(r.domainEvents)
 	workspaceReadVersionsSnapshot := cloneMemoryMap(r.workspaceReadVersions)
@@ -657,8 +650,6 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 		r.folderShares = folderSharesSnapshot
 		r.emailConnections = emailConnectionsSnapshot
 		r.effectiveAccess = effectiveAccessSnapshot
-		r.raciTabFolders = raciTabFoldersSnapshot
-		r.raciTabItems = raciTabItemsSnapshot
 		r.RACIMatrixProjectionRows = raciMatrixProjectionRowsSnapshot
 		r.domainEvents = domainEventsSnapshot
 		r.workspaceReadVersions = workspaceReadVersionsSnapshot
@@ -679,16 +670,6 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	r.clearLogicGateAssignmentMemberReferencesLocked(companyID, userID)
 	r.clearEntityMemberReferencesLocked(companyID, userID)
 	delete(r.memberships, membershipKey(companyID, userID))
-	for folderKey, folder := range r.raciTabFolders {
-		if folder.CompanyID == companyID && folder.UserID == userID {
-			delete(r.raciTabFolders, folderKey)
-		}
-	}
-	for itemKey, item := range r.raciTabItems {
-		if item.CompanyID == companyID && item.UserID == userID {
-			delete(r.raciTabItems, itemKey)
-		}
-	}
 	for memberKey, member := range r.userGroupMembers {
 		if member.CompanyID == companyID && member.UserID == userID {
 			delete(r.userGroupMembers, memberKey)
@@ -844,16 +825,6 @@ func (r *MemoryRepo) DeleteCompanyUser(companyID, userID string, deleteIdentity 
 	for rowKey, row := range r.RACIMatrixProjectionRows {
 		if row.UserID == userID {
 			delete(r.RACIMatrixProjectionRows, rowKey)
-		}
-	}
-	for folderKey, folder := range r.raciTabFolders {
-		if folder.UserID == userID {
-			delete(r.raciTabFolders, folderKey)
-		}
-	}
-	for itemKey, item := range r.raciTabItems {
-		if item.UserID == userID {
-			delete(r.raciTabItems, itemKey)
 		}
 	}
 	r.clearQDRatingUserReferencesLocked(userID)
@@ -1037,8 +1008,6 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 	beforeUsers := cloneMemoryMap(r.users)
 	beforeMemberships := cloneMemoryMap(r.memberships)
 	beforeInvitations := cloneMemoryMap(r.invitations)
-	beforeRACITabFolders := cloneMemoryMap(r.raciTabFolders)
-	beforeRACITabItems := cloneMemoryMap(r.raciTabItems)
 	beforeDomainEvents := cloneMemoryMap(r.domainEvents)
 	beforeWorkspaceReadVersions := cloneMemoryMap(r.workspaceReadVersions)
 	beforeRealtimeOutbox := cloneMemoryMap(r.realtimeOutbox)
@@ -1047,8 +1016,6 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 		r.users = beforeUsers
 		r.memberships = beforeMemberships
 		r.invitations = beforeInvitations
-		r.raciTabFolders = beforeRACITabFolders
-		r.raciTabItems = beforeRACITabItems
 		r.domainEvents = beforeDomainEvents
 		r.workspaceReadVersions = beforeWorkspaceReadVersions
 		r.realtimeOutbox = beforeRealtimeOutbox
@@ -1081,7 +1048,6 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 		CreatedTimestamp: now,
 		UpdatedTimestamp: now,
 	}
-	r.reconcileMemoryRACITabsCompanyLocked(invitation.CompanyID)
 	invitation.Status = domain.InvitationStatusAccepted
 	invitation.AcceptedByUserID = &user.UserID
 	invitation.AcceptedTimestamp = &now

@@ -1,36 +1,43 @@
 # Action Item Business Logic Laws
 
-Last updated: 2026-08-30
-
 1. Every company has one required Action Item Entity Type and the seven required fields `person_in_charge`, `assigned_by`, `analysis_due_date`, `completion_due_date`, `status`, `color`, and `source`.
-2. Person in charge and Assigned by are independent nullable `person` fields. Each nonnull value is the exact `user_id` of a current membership in the Action Item's company.
-3. Assigned by is editable business attribution. It defaults to null and is never inferred or backfilled from `entities.created_by_user_id`.
-4. `entities.created_by_user_id` remains automatic nullable creator audit metadata even though the compact Action Item editor does not display Created by.
-5. Direct Action Item creation from Entities remains allowed and creates the required Source field with a null value.
-6. Highlighted-text Action Item creation is supported only in Node, Process, Project, Huddle Node, Huddle Process, and KPI editors and records that exact owning resource as Source.
-7. Source is the nullable value of the required `source` / `Source` / `resource` system Entity Field. A nonnull value contains exactly `{resource_type, resource_id}` for one canonical same-company endpoint; it is not an `entity_relationships` edge and stores no copied name.
+2. Person in charge and Assigned by are independent nullable `person` fields whose nonnull value is one exact current company user ID.
+3. Assigned by is editable attribution, defaults to null, and is never inferred from creator audit metadata.
+4. `entities.created_by_user_id` remains automatic nullable audit metadata even though the compact editor does not display Created by.
+5. Direct Entities creation remains allowed and creates the required Source field with a null value.
+6. Highlighted-text creation is supported in Node, Logic Gate, Project, Huddle Node, Huddle Board, and KPI editors and records that exact owner as immutable Source.
+7. Source is the nullable protected `source` / `Source` / `resource` Entity Field and contains only one canonical same-company `{resource_type, resource_id}` pair.
 8. The only Source resource types are `node`, `logic_gate`, `project`, `huddle_node`, `huddle_logic_gate`, and `kpi`.
-9. Action Item creation validates the exact same-company source endpoint and the actor's current Edit access and commits the Action Item and all seven required fields, including Source, in one transaction.
-10. Source grants no access. A viewer receives a clickable Source only while the exact endpoint exists and the viewer has current access; activating it opens that exact current resource through the established resource-opening behavior. Otherwise the UI shows a neutral unavailable or Not set state without the hidden type, ID, or name.
-11. A displayed Source resolves the endpoint's current name and canonical icon. Renaming the source changes the displayed name without rewriting Source.
-12. Removing or moving an inline Action Item chip never changes Source. The chip's live Huddle relationship and the Action Item's creation-provenance field have separate meanings.
-13. Recycling a source endpoint preserves the exact Source field value but projects it as unavailable. Restoring that exact endpoint makes the current Source available again; permanently deleting it atomically clears matching Source values so no stale typed reference remains. This lifecycle cleanup is the only allowed post-creation Source mutation.
-14. Details is the full-width field at the top of the compact editor. Beneath it are exactly two four-row columns: Person in charge, Assigned by, Created date, Source on the left; Color, Analysis due date, Completion due date, Status on the right.
-15. Created date and Source are read-only. Person in charge and Assigned by use the same current-company searchable person picker with field-specific labels and accessible text.
-16. Status uses the elevated custom choice listbox, visibly responds to hover and focus, supports keyboard selection and dismissal, preserves the exact `in_progress`, `pending`, and `done` keys, and keeps the existing serialized autosave behavior.
-17. New Action Items default Status to In progress. Person in charge, Assigned by, and both due dates start unset. Direct creation starts with Source and Color unset, while editor creation atomically records the exact Source and uses the selected Yellow or Red color.
-18. My Work Mine contains only active Action Items whose exact Person in charge is the current member. Delegated contains only active Action Items whose exact Assigned by is the current member and whose nonnull Person in charge is a different member.
-19. A self-assigned Action Item appears only in Mine. An unassigned Action Item appears in neither Mine nor Delegated, and Done, Complete, or Completed items appear in neither active view.
-20. Grouping and leaf ordering are separate server-owned stacks. Mine defaults to visible Color then Huddle process groups and orders leaves by Completion due date. Delegated defaults to visible Color, Person in charge, then Huddle process groups and orders leaves by Completion due date.
-21. Huddle process grouping derives only from immutable Source: a `huddle_logic_gate` Source uses that exact process, and a `huddle_node` Source follows only its required `huddle_logic_gate_id`. The process ID and current name are disclosed only when the viewer can access both the exact Source and owning process; every other case uses one neutral no-process group and `entity_relationships` is never consulted.
-22. My Work Action Item rows may receive only the compact inline fields Person in charge, Assigned by, Created timestamp, Source, Color, Analysis due date, Completion due date, Status, and Huddle process. Details is never an inline field, and unavailable Source or Huddle identity is omitted without a hidden ID or name. Selected labels render in one saved left-to-right row and never stack vertically.
-23. Huddle Process and Huddle Node Action Item views use the same shared rollup panel. Each panel invocation carries its exact Huddle resource type and literal ID, reads the existing canonical Process rollup, and never creates, copies, or rewrites an `entity_relationships` edge when presentation preferences change.
-24. Huddle Action Item presentation is stored in user-and-company-owned saved views. Huddle Process and Huddle Node use separate saved-view surfaces; visible grouping terms are stored in `groupings`, while leaf `ordering` and ordered `displayed_fields` are stored in settings. No browser-only preference or second preference table is an authority.
-25. Both Huddle surfaces default to visible Color then Person in charge groups, separately order leaf rows by Completion due date, and initially show Person in charge then Completion due date. Huddle process is neither a Huddle grouping nor an inline label because the list is already scoped to one exact Process.
-26. Every selected Huddle grouping term renders a visible hierarchy header. The final selected grouping level contains its heading and member rows in an elevated surface. An ordering term changes only leaf-row order inside that final group and never creates a header; with no ordering term, rows keep the stable backend order.
-27. Huddle inline fields render in saved left-to-right order on one nonwrapping rail against the row's right edge. Complete pills remain inside the row when they fit; only a genuinely oversized selected set scrolls horizontally from its first saved field, and the title yields before the rail is displaced.
-28. Huddle Action Item rows keep the shared Action Item icon and the Action Item's semantic red or yellow row color treatment. A Source inline label names the exact current endpoint only when the viewer has current access; otherwise it shows the same neutral no-source value as My Work without exposing a hidden type, ID, or name.
+9. Editor creation validates the exact source and current Edit access and commits the Action Item and all required fields atomically.
+10. Source grants no access and resolves its current name and icon only for a currently authorized viewer; every unavailable case returns one neutral state without hidden identity.
+11. Renaming a source changes its display without rewriting Source, and adding, removing, or moving an inline chip never changes Source.
+12. Recycling preserves Source while making it unavailable, restore resolves it again, and permanent deletion atomically clears matching values.
+13. Details is the full-width field at the top of the compact editor; the remaining existing editable and read-only fields retain their two-column layout and autosave behavior.
+14. Created date and Source are read-only, both person fields use the current-company picker, and Status preserves the exact `in_progress`, `pending`, and `done` keys.
+15. New Action Items default to In progress; both people and due dates start unset; direct creation starts with Source and Color unset while editor creation records its exact Source and chosen Yellow or Red.
+16. My Work Mine contains only active Action Items assigned to the current subject; Delegated contains only active Action Items assigned by that subject to another person.
+17. A self-assigned item appears only in Mine, an unassigned item appears in neither perspective, and done or completed items appear in neither active view.
+18. My Work grouping and leaf ordering are separate server-owned stacks with the established defaults and user-owned singleton saved views.
+19. My Work's Huddle Board grouping derives only from immutable Source: an exact `huddle_logic_gate` Source identifies itself and an exact `huddle_node` Source follows only its required owner.
+20. My Work rows may expose only the compact approved inline fields; Details is never inline and unavailable Source or Huddle Board identity leaks no hidden data.
+21. The Huddle Board Action Item view reads the exact Board's current canonical rollup and keeps its existing cumulative behavior.
+22. A Huddle Node has two Action Item views: **Created in this Huddle Node** and **Due or Overdue**.
+23. Created-in-this-Node reads immutable exact Huddle Node Source provenance, not live `entity_relationships`, and includes completed items.
+24. Due-or-Overdue starts from the owning Board's current direct-plus-owned-Node rollup, deduplicates it, and excludes every ID already in the created section.
+25. Due-or-Overdue includes only incomplete items with a nonempty Completion due date on or before its temporary viewing date; Analysis due date never qualifies.
+26. Due-or-Overdue orders leaves by oldest Completion due date first inside each final group and globally with no grouping.
+27. The temporary viewing date starts from persisted Huddle Node date on open, changes only the lower list, is not a historical snapshot, and is never persisted in the Node or `saved_views`.
+28. The three Huddle Action Item surfaces are the Board singleton `huddle_logic_gate_action_items`, the Node-created singleton `huddle_node_created_action_items`, and the Node-due singleton `huddle_node_due_action_items`.
+29. Each Huddle surface is one row per company and user across every resource of that surface and stores no Board or Node ID.
+30. The obsolete `huddle_node_action_items` surface and its rows are deleted without compatibility fallback or guessed inheritance.
+31. Huddle grouping terms are stored in `groupings`, while leaf `ordering` and ordered `displayed_fields` are stored in settings; duplicates and grouping/ordering overlap are rejected.
+32. Every Huddle section independently owns loading, error, empty, grouping, ordering, displayed fields, and automatic canonical refresh state.
+33. Huddle lists reconcile after relevant Source, relationship, title, Completion due date, status, listed-field, Node-date, sibling, Board, and realtime changes; ordinary typing does not reload them and stale reads cannot win.
+34. Every selected grouping renders a visible hierarchy header, ordering affects only final leaves, and selected inline fields render in one saved nonwrapping rail.
+35. Huddle rows keep the shared Action Item icon, semantic red/yellow treatment, clickable exact item identity, and permission-safe Source presentation.
+
+Last updated: 2026-08-31
 
 ## Process Story
 
-An authorized editor selection creates one Action Item and its exact typed Source atomically. The later editor save inserts the normal inline Entity chip. The compact editor and My Work resolve current Source and owning Huddle process names only for an authorized viewer, while Mine and Delegated read current fields directly and keep visible grouping separate from leaf ordering. Huddle Process and Huddle Node reuse one exact-scope rollup panel, load their independent saved views, and render permission-safe grouped rows without changing relationship truth.
+An authorized editor selection creates one Action Item and its immutable exact Source atomically. Huddle Board Action Items continue to use the current canonical rollup. A Huddle Node separately shows every item created from that exact Node and the owning Board's current incomplete work due by a temporary viewing date, with duplicate IDs shown only in the created section. Three independent user-owned saved-view surfaces control presentation without changing Source or relationship truth.

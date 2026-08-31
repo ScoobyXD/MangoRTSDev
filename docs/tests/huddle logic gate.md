@@ -1,67 +1,57 @@
-# Current Huddle Logic Gate Business Logic Laws
+# Current Huddle Board Business Logic Laws
 
-1. A Huddle Logic Gate is stored in `huddle_logic_gates` with `company_id`, `huddle_logic_gate_id`, `header`, `body_json`, `created_timestamp`, and `updated_timestamp`.
+1. A Huddle Board is stored canonically in `huddle_logic_gates` with exact company, Huddle Logic Gate ID, header, body JSON, and timestamps.
 2. `body_json` stores one document through the existing Mango TipTap JSON editor contract.
-3. A Huddle Logic Gate uses the exact resource type `huddle_logic_gate` and the exact `huddle_logic_gates.huddle_logic_gate_id` everywhere it is referenced.
-4. A Huddle Logic Gate may be created directly from the Huddles sidebar or by converting an eligible normal Logic Gate.
-5. The normal Logic Gate **More editor actions** menu contains **Turn into Huddle Logic Gate** for an actor allowed to edit that Logic Gate.
-6. Conversion is allowed only when the current Logic Gate editor document is empty, the Kanban board has no Node cards or assignments, and the Logic Gate owns zero KPIs.
-7. Default empty Kanban columns do not block conversion; only actual Node work on the board blocks conversion.
-8. A failed conversion response lists every blocker that is currently nonempty: the editor, the Kanban board, and/or the KPIs.
-9. The conversion command rechecks all three blockers on the backend inside one database transaction.
-10. A successful conversion inserts one `huddle_logic_gates` row with the same UUID as the old `logic_gates.logic_gate_id`, copies the old Logic Gate header, and starts `body_json` as the standard empty TipTap document.
-11. A successful conversion preserves the exact direct RACI assignments and permission settings by changing their typed owner from `logic_gate` to `huddle_logic_gate` without changing the UUID or principals.
-12. A successful conversion removes the old Company Explorer placement and creates one root Huddle Explorer item with `huddle_type='huddle_logic_gate'` and the same exact UUID.
-13. A successful conversion permanently removes the old normal Logic Gate row and all old Logic Gate-only storage, including current editor rows, editor history, email links, attachments, input/output links, Kanban storage, and other old relationships.
-14. Conversion does not call the normal Logic Gate deletion command and does not create a Recycle Bin item.
-15. Conversion is irreversible; the product provides no command to turn a Huddle Logic Gate back into a normal Logic Gate.
-16. A Huddle Logic Gate opens on its own `/huddle-logic-gates/{huddle_logic_gate_id}` page while the application left sidebar remains visible.
-17. The page header shows the existing Huddle Logic Gate icon and a separate live-derived clickable Huddle hierarchy breadcrumb instead of a fixed **Huddle Logic Gate:** label. The current editable `huddle_logic_gates.header` stays separate from the breadcrumb and keeps its existing save behavior.
-18. The page reuses the normal Node and Logic Gate RACI role cards, people-and-group picker, Editor tab, Permissions tab, shared Mango editor toolbar, and canonical Saved, Pending, and Failed state in its top header area.
-19. The shared editor toolbar includes the existing font size, bold, underline, italic, strikethrough, highlight, alignment, alphabetical list, numerical list, dense bullet list, checklist, and table controls, and the title surface is no wider than the shared RACI row.
-20. Pin, fullscreen, delete, and close are compact icon actions in the top-right header instead of text buttons.
-21. The page has three horizontally resizable columns: the TipTap editor on the left, a middle view toggle that defaults to Action Items and may show related Processes, and Huddle Nodes on the right.
-22. `huddle_logic_gate_relationships` is the only live authority that links a Huddle Logic Gate to a normal Logic Gate, and each row stores the literal `company_id`, `huddle_logic_gate_id`, and `logic_gate_id`.
-23. A Huddle Logic Gate may link to many normal Logic Gates, and the same normal Logic Gate may link to many Huddle Logic Gates.
-24. One exact Huddle Logic Gate and normal Logic Gate pair has at most one row, and repeating the link command is idempotent.
-25. Adding or removing a Logic Gate relationship changes only that relationship and does not create, delete, copy, or grant access to either endpoint or any KPI.
-26. The middle column uses one two-section card for every currently linked Logic Gate: the top shows the Logic Gate and the bottom shows small cards for that Logic Gate's current KPIs.
-27. The middle-column plus button opens the existing Universal Picker in locked `##` link mode with the Logic Gate tab active; the Node, Project, and Email tabs remain visible but disabled.
-28. Choosing a Logic Gate in that picker creates only the exact `huddle_logic_gate_relationships` row and inserts no editor text or generic relationship.
-29. Removing a Logic Gate card deletes only the exact relationship and does not rewrite any previously created Huddle Node snapshot.
-30. The middle column reads the current Logic Gate header and current KPI set when it loads; it uses no background stream and no copied display payload.
-31. The right column contains a **Create Huddle Node** action that immediately creates **New Huddle Node** without a prompt, and one single-click card for each Huddle Node owned by this Huddle Logic Gate.
-32. Huddle Logic Gates use the existing RACI and permission tables with direct typed ownership, but do not expose **Apply to descendants** or **Apply to descendants including customized** actions.
-33. Deleting a Huddle Logic Gate is blocked while it owns any Huddle Nodes.
-34. Deleting an empty Huddle Logic Gate moves it, its live Logic Gate relationships, direct Entity relationships, restorable direct policies, and Huddle Explorer placement to the Recycle Bin; restoring it reuses the same UUID and exact relationships.
-35. Realtime current-audience resolution recognizes `huddle_logic_gate` and resolves its users from that Huddle Logic Gate's direct typed permission policy.
-36. Single-clicking the normal Logic Gate section of a middle-column card opens that exact Logic Gate on its normal full-page route.
-37. Single-clicking a KPI section of a middle-column card opens that exact KPI in the shared KPI editor popup.
-38. A normal Logic Gate shows its currently related Huddle Logic Gates by reading the same live relationship rows in the reverse direction.
-39. The normal Logic Gate's Huddle plus button opens the shared Universal Picker in locked `##` mode with only Huddle Logic Gates enabled, and choosing one creates the same exact idempotent relationship edge.
-40. Every Huddle Logic Gate card on a normal Logic Gate shows the shared Huddle Logic Gate icon and current header, and opening or removing that card never copies or deletes either endpoint.
-41. KPI cards shown inside Huddle Logic Gate and Huddle Node cards use the shared orange, red, and yellow KPI chart icon.
-42. Direct creation atomically inserts one Huddle Logic Gate with the standard empty TipTap document, its direct policy settings, and one root Huddle Explorer item using the same exact UUID.
-43. The Huddle Logic Gate editor uses the canonical 500 ms autosave, Universal Picker references, selection Action Item control, and typed S3 inline-image attachment path used by normal supported Mango editors.
-44. A Huddle Logic Gate attachment uses `resource_type='huddle_logic_gate'` and the exact Huddle Logic Gate ID; no normal Logic Gate, Huddle Node, or generic compatibility owner is substituted.
-45. The Action Items view unions direct Action Item relationships for the exact Huddle Logic Gate with relationships from every owned Huddle Node, deduplicates each Action Item once, and remains valid when the Process owns no Huddle Nodes.
-46. The Huddle Process and Huddle Node Action Item views use the same shared rollup panel. The Process invocation carries the exact `huddle_logic_gate` type and this Huddle Logic Gate's literal ID; presentation changes never create, copy, or rewrite an Action Item relationship.
-47. Each user and company owns one Huddle Process Action Item saved view, independent of that user's Huddle Node Action Item saved view. Visible grouping terms are stored in `groupings`, while leaf `ordering` and ordered `displayed_fields` are stored in settings; browser-only compatibility preferences are not used.
-48. The Huddle Process saved view defaults to visible Color then Person in charge groups, separately orders leaf rows by Completion due date, and initially shows Person in charge then Completion due date. Huddle process is neither a grouping nor an inline label because this view is already scoped to one exact Process.
-49. Every selected grouping term renders a visible hierarchy header. The final selected grouping level places its heading and member rows inside an elevated surface. An ordering term changes only leaf-row order inside that final group and never creates a header; with no ordering term, rows keep the stable backend order.
-50. Selected inline fields render in saved left-to-right order on one nonwrapping rail against the row's right edge. Complete pills remain inside the row when they fit; only a genuinely oversized selected set scrolls horizontally from its first saved field, and the title yields before the rail is displaced.
-51. Every listed Action Item keeps the shared Action Item icon and the Action Item's semantic red or yellow row color treatment. A Source inline label names the exact current endpoint only when the viewer has current access; otherwise it shows the same neutral no-source value as My Work without exposing hidden identity.
-52. Refreshing the Action Items view keeps the current rows visible and does not reload or remount the Huddle editor. A saved Action Item reference change from an open owned Huddle Node refreshes this live Process view immediately without a page reload.
-53. Each committed Huddle Logic Gate editor save atomically replaces that Gate's exact Action Item `entity_relationships` set from its saved inline references; removing the final saved reference removes only that Gate edge and preserves the Entity.
+3. Internal references keep the exact `huddle_logic_gate` type and `huddle_logic_gates.huddle_logic_gate_id`; the product displays **Huddle Board** and **Huddle Boards**.
+4. Every visible Huddle Board surface uses one shared Board/columns icon; no people-plus-Logic-Gate composite remains.
+5. A Huddle Board may be created directly from the Huddle Boards sidebar or by converting an eligible normal Logic Gate.
+6. The normal Logic Gate action menu contains **Turn into Huddle Board** for an actor allowed to edit that Logic Gate.
+7. Conversion is allowed only when the editor document is empty, the Kanban board has no Node cards or assignments, and the Logic Gate owns no KPIs.
+8. Default empty Kanban columns do not block conversion, and a failure lists every current editor, board, or KPI blocker.
+9. The conversion command rechecks every blocker inside one database transaction.
+10. Conversion inserts one `huddle_logic_gates` row with the same UUID and header and starts its body as the standard empty TipTap document.
+11. Conversion preserves exact direct RACI assignments and permission settings by changing only their typed owner to `huddle_logic_gate`.
+12. Conversion removes the old Company Explorer placement, creates one same-ID root Huddle Explorer item, and permanently removes obsolete normal-Logic-Gate-only storage.
+13. Conversion creates no Recycle Bin item and is irreversible.
+14. A Huddle Board opens on `/huddle-logic-gates/{huddle_logic_gate_id}` while the application sidebar remains visible.
+15. The page header shows the shared Board icon, a live clickable Huddle hierarchy breadcrumb, the editable Board title, RACI cards, permissions, and compact pin, fullscreen, delete, and close actions.
+16. The page reuses the shared RACI picker, Editor and Permissions tabs, Mango editor toolbar, and Saved, Pending, and Failed state.
+17. The page has three horizontally resizable columns: its editor, a middle Action Items or related-Logic-Gates view, and Huddle Nodes.
+18. `huddle_logic_gate_relationships` is the only live authority linking a Huddle Board to normal Logic Gates and stores literal same-company IDs.
+19. A Huddle Board may link to many normal Logic Gates, one normal Logic Gate may link to many Boards, and one exact pair has one idempotent row.
+20. Adding or removing a relationship changes only that edge and never copies, deletes, or grants access to an endpoint or KPI.
+21. The related-Logic-Gates view shows each current Logic Gate with its current KPI cards and stores no copied display payload.
+22. Its plus action uses the Universal Picker in locked `##` Logic Gate mode and creates only the exact typed relationship.
+23. Removing a related Logic Gate never rewrites a previously created Huddle Node snapshot.
+24. The Huddle Nodes column contains **Create Huddle Node**, immediately creates **New Huddle Node**, and lists every exact owned Huddle Node.
+25. A Huddle Board and each Huddle Node use direct typed RACI and permission policies and expose no descendant-application actions.
+26. Deleting a Huddle Board is blocked while it owns any Huddle Nodes.
+27. Deleting an empty Huddle Board recycles its resource, live Logic Gate relationships, direct Entity relationships, direct policies, attachments, and Explorer placement for exact-ID restore.
+28. An open Huddle Board subscribes only to `huddle-board-action-items:{huddle_logic_gate_id}`; admission and delivery require current Edit access to that exact Board, and a matching compact invalidation triggers a canonical reread rather than carrying list data.
+29. Clicking a related Logic Gate or KPI opens that exact canonical resource without changing any Huddle relationship or snapshot.
+30. A normal Logic Gate reads its related Huddle Boards through the same relationship rows and uses the shared Board icon and current Board title.
+31. Direct Board creation atomically inserts the standard empty document, direct policy settings, and same-ID root Huddle Explorer placement.
+32. The Board editor uses canonical 500 ms autosave, Universal Picker references, selection Action Item creation, and typed S3 inline-image attachments.
+33. A Board attachment uses `resource_type='huddle_logic_gate'` and the exact Board ID; no compatibility owner is substituted.
+34. The Board Action Items view unions direct Board Action Item relationships with all owned Huddle Node relationships and deduplicates each exact item once.
+35. The Board Action Items view keeps its existing cumulative behavior and never filters by Huddle Node date.
+36. Every company/user has at most one `saved_views.surface='huddle_logic_gate_action_items'` row, displayed as **Huddle Board Action Items**, and that preference applies across all Boards.
+37. Board grouping terms stay in `groupings`; leaf `ordering` and ordered `displayed_fields` stay in settings, with no browser-only preference authority.
+38. Board Action Items default to visible Color then Person in charge groups, Completion due date leaf ordering, and Person in charge then Completion due date inline fields.
+39. Grouping creates visible hierarchy, ordering affects only final leaves, and inline fields keep saved left-to-right order in one nonwrapping rail.
+40. Every listed item keeps the shared Action Item icon, semantic red/yellow treatment, exact Entity identity, and permission-safe Source presentation.
+41. Board Action Items automatically reconcile after relevant local canonical commits and established realtime invalidation while older overlapping reads cannot replace newer results.
+42. Each committed Board editor save atomically replaces that exact Board's Action Item `entity_relationships` set from saved inline references.
+43. Removing the final saved reference removes only the exact Board edge and preserves the Action Item Entity and immutable Source.
 
-Last updated: 2026-08-30
+Last updated: 2026-08-31
 
-# Process Story: Create a Huddle Process and manage its live work
+# Process Story: Create a Huddle Board and manage its live work
 
-An editor creates a Huddle Process from the sidebar or converts an eligible Process
+An editor creates a Huddle Board from the sidebar or converts an eligible Logic Gate
 ↓
-Mango atomically stores the exact Huddle Process, direct policy, and Huddle Explorer placement
+Mango atomically stores the exact canonical Huddle Logic Gate identity, direct policy, and Huddle Explorer placement
 ↓
-The shared editor autosaves text, references, and typed S3 images while the middle view opens the shared exact-scope Action Item rollup panel with the user's Huddle Process saved view
+The shared editor autosaves text, references, and typed attachments while the Action Items view reads the exact current Board rollup with the user's Board-wide presentation preference
 ↓
-The Process view may still link normal Processes, and every Huddle Node keeps its fixed creation-time Process and KPI snapshot
+The Board may link normal Logic Gates, every Huddle Node keeps its fixed creation-time Logic Gate/KPI snapshot, and no presentation control changes relationship truth

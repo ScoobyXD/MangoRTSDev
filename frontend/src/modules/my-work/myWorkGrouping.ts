@@ -14,7 +14,7 @@ import {
 
 export const MY_WORK_ACTION_ITEM_GROUPING_FIELDS = [
   { value: "color", label: "Color" },
-  { value: "huddle_process", label: "Huddle process" },
+  { value: "huddle_process", label: "Huddle Board" },
   { value: "completion_due_date", label: "Completion due date" },
   { value: "person_in_charge", label: "Person in charge" },
 ] as const;
@@ -54,7 +54,7 @@ export const MY_WORK_ACTION_ITEM_DISPLAY_FIELDS: ReadonlyArray<{
   { id: "analysis_due_date", label: "Analysis due date" },
   { id: "completion_due_date", label: "Completion due date" },
   { id: "status", label: "Status" },
-  { id: "huddle_process", label: "Huddle process" },
+  { id: "huddle_process", label: "Huddle Board" },
 ];
 
 export const DEFAULT_MY_WORK_ACTION_ITEM_DISPLAYED_FIELDS: Record<
@@ -187,7 +187,7 @@ export function actionItemGroupingValues(
   if (field === "huddle_process") {
     const processID = item.huddle_process?.huddle_logic_gate_id?.trim() ?? "";
     const name = item.huddle_process?.name?.trim() ?? "";
-    if (!processID || !name) return [{ key: "none", label: "No Huddle process", sortValue: "", sortLast: true }];
+    if (!processID || !name) return [{ key: "none", label: "No Huddle Board", sortValue: "", sortLast: true }];
     return [{ key: processID, label: name, sortValue: `${name.toLowerCase()}\u0000${processID}` }];
   }
   if (field === "person_in_charge") {

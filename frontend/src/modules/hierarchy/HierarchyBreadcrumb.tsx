@@ -33,7 +33,7 @@ type HuddleExplorerFindRequest = {
 };
 
 function rootLabel(kind: HierarchyPathKind): string {
-  return kind === "huddle_explorer" ? "Huddles" : "Workspace";
+  return kind === "huddle_explorer" ? "Huddle Boards" : "Workspace";
 }
 
 function segmentResourceID(segment: HierarchyPathSegment): string {

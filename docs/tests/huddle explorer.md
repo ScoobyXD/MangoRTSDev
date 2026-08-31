@@ -1,30 +1,44 @@
-# Current Huddle Explorer Business Logic Laws
+# Current Huddle Boards Explorer Business Logic Laws
 
-1. The left sidebar contains one **Huddles** section between Tower and Entities with a Huddle people icon in its heading.
-2. Huddle Explorer is separate from Company Explorer and uses `huddle_explorer_folders` and `huddle_explorer_items` as its only Huddle Logic Gate placement authorities.
-3. `huddle_explorer_folders` contains `company_id`, `folder_id`, `parent_folder_id`, `name`, `created_date`, and `updated_date`.
-4. A Huddle Explorer folder may have a null parent for a root folder or the exact `folder_id` of another folder in the same company.
-5. Huddle Explorer folder nesting rejects self-parenting, cross-company parents, and cycles.
-6. `huddle_explorer_items` contains `company_id`, `huddle_explorer_item_id`, `resource_huddle_resource_id`, `huddle_type`, `parent_folder_id`, `created_date`, and `updated_date`.
-7. `resource_huddle_resource_id` is the literal `huddle_logic_gate_id`; no translated or registry ID is allowed.
-8. The `huddle_type` column remains required for future Huddle resource types and currently accepts only `huddle_logic_gate`.
-9. One Huddle Logic Gate may have at most one live Huddle Explorer item in a company, and a Huddle Node may have none.
-10. A Huddle Explorer item may have a null parent for root placement or the exact `folder_id` of a Huddle Explorer folder in the same company.
-11. Directly creating a Huddle Logic Gate or converting a normal Logic Gate creates one root Huddle Explorer item for that exact Huddle Logic Gate in the same transaction.
-12. Creating, updating, deleting, or restoring a Huddle Node never creates or restores a Huddle Explorer item.
-13. Huddle Explorer supports creating, renaming, nesting, moving, and deleting folders, and moving Huddle Logic Gate items between its folders and root.
-14. The left-sidebar Huddles section displays every Huddle Explorer item, and one click on a row opens that exact Huddle Logic Gate route.
-15. Search Explorer can return Huddle Logic Gates and Huddle Nodes using their exact Huddle types and IDs.
-16. Huddle Logic Gates and Huddle Nodes never receive Company Explorer item rows.
-17. Deleting only a Huddle Explorer item recycles only that placement and does not delete or recycle the underlying Huddle Logic Gate.
-18. Deleting a Huddle Logic Gate removes its live Huddle Explorer item as part of the resource's Recycle Bin payload, and restore recreates that exact typed placement; Huddle Node recycle payloads contain no Explorer item.
-19. A Huddle Explorer folder must be empty before it can be deleted; an empty deleted folder goes to the Recycle Bin and restores with the same folder ID and parent.
-20. Huddle Explorer placement and folder nesting do not grant access and do not create RACI or permission parentage in the first version.
-21. Huddle Explorer ordering uses existing row dates and names; the first version has no custom position or ordering model.
-22. Huddle rows match the Pinned section's text scale, color, spacing, raised hover treatment, and elevated section surface.
-23. A visible Huddle Logic Gate row combines the normal Logic Gate icon with a Huddle people icon instead of using a separate replacement resource icon.
-24. A Huddle Logic Gate or Huddle Node title surface derives its breadcrumb from the current canonical Huddle Explorer placement and exact Huddle ownership when read; no database column, copied full path, or client cache becomes path authority. A Huddle Node follows its owning Huddle Logic Gate's visible placement and adds that Gate as its final ancestor.
-25. A Huddle breadcrumb shows the clickable Huddles root followed by every fully visible ancestor, excludes the current item's editable title, and omits the whole hierarchy path when any required ancestor is missing, hidden, recycled, cyclic, or too deep to resolve safely. Clicking a folder reveals that exact Huddle Explorer branch, clicking a Huddle Logic Gate opens that exact Gate, and a committed same-window hierarchy change refreshes mounted breadcrumbs.
-26. The Huddles section provides separate direct actions for creating a root Huddle Logic Gate and creating a folder; successful Huddle Logic Gate creation opens that exact new resource.
+1. The application sidebar order is Pinned, Huddle Boards, Tower, then Organization.
+2. The **Huddle Boards** heading and every Huddle Board row use the shared Board/columns icon; Huddle Nodes retain the existing Node icon.
+3. Huddle Explorer is separate from Company Explorer and uses `huddle_explorer_folders` and `huddle_explorer_items` as its only Huddle Board placement authorities.
+4. `huddle_explorer_folders` contains exact company, folder, optional parent-folder, name, and timestamp values.
+5. A folder may be at root or under one exact same-company Huddle folder and must reject self-parenting, cross-company parents, and cycles.
+6. `huddle_explorer_items.resource_huddle_resource_id` is the literal `huddle_logic_gates.huddle_logic_gate_id`; no translated or registry identity is allowed.
+7. The retained `huddle_type` is exactly `huddle_logic_gate` for every live item, and a Huddle Node has no Huddle Explorer item.
+8. One Huddle Board has at most one live Huddle Explorer placement, at root or under one exact same-company folder.
+9. Directly creating or converting a Huddle Board creates its same-ID root placement in the same transaction.
+10. Creating, updating, deleting, or restoring a Huddle Node never creates or restores a Huddle Explorer item.
+11. The Huddle Boards section header exposes exactly two direct actions labeled **+ Board** and **+ Folder**.
+12. Successful Board creation opens that exact new Huddle Board.
+13. The section shell, text scale, spacing, row hover, and elevation follow the Pinned section.
+14. Folder rows follow Company Explorer presentation: plain disclosure chevron, folder icon, title, normal indentation, and no boxy fieldset or corner container.
+15. No Huddle folder or Board row shows a Root selector, plus button, pencil button, or X button.
+16. Dragging a folder or Huddle Board may reparent it to root or an exact folder through the canonical Explorer move command.
+17. Drag-and-drop preserves the existing deterministic date-and-name ordering and adds no custom position schema.
+18. Folder drop validation preserves same-company ownership and cycle protections and performs no partial invalid move.
+19. A Huddle Board context menu contains exactly **Open in new browser tab**, **Rename**, and **Remove from Huddle Boards**.
+20. Open in new browser tab uses the existing deep-link route and applies only to Board rows; folders receive no invented route.
+21. Rename updates only the exact selected Board or folder through its established command.
+22. Remove from Huddle Boards recycles only the canonical Explorer placement, matching the former placement X behavior, and never deletes the Board or any Huddle Node.
+23. Actual **Delete Huddle Board** remains available only inside the Huddle Board resource surface.
+24. A folder context menu contains exactly **Create folder inside**, **Rename**, and **Delete empty folder**.
+25. Folder deletion is allowed only when the folder is empty, recycles only that folder, and never recursively removes a subtree or contained resource.
+26. Recycle and restore preserve the exact promised Board placement or empty folder identity and parent without creating a second authority.
+27. Huddle placement and folder nesting grant no permission, RACI role, or policy parentage.
+28. Clicking a Board row opens the exact Board; search can return Huddle Boards and Huddle Nodes using their canonical internal types and IDs.
+29. Breadcrumbs derive from current placement and exact Huddle Node ownership, hide an unsafe or inaccessible path, and preserve established reveal and hierarchy-change refresh behavior.
+30. Huddle Boards and Huddle Nodes never receive Company Explorer item rows.
 
-Last updated: 2026-08-28
+Last updated: 2026-08-31
+
+# Process Story: Huddle Boards use one simple draggable sidebar tree
+
+An editor creates a Huddle Board or folder from the Huddle Boards header
+↓
+Mango stores one exact Huddle Explorer placement or folder relationship and renders it with the shared Board or folder icon
+↓
+The user drags rows to reparent them or opens the row-specific context menu for rename, placement-only removal, new-tab opening, or empty-folder actions
+↓
+Every action keeps Huddle resource identity, Huddle Node ownership, permissions, RACI, breadcrumbs, recycle, and deterministic ordering under their existing canonical authorities

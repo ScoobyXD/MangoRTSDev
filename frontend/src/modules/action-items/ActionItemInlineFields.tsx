@@ -103,7 +103,7 @@ function fieldPresentation(
   if (field === "analysis_due_date") return { label: "Analysis due", value: formatActionItemInlineDate(item.analysis_due_date) };
   if (field === "completion_due_date") return { label: "Completion due", value: formatActionItemInlineDate(item.completion_due_date) };
   if (field === "status") return { label: "Status", value: titleCaseLabel(item.status) || "No status" };
-  return { label: "Huddle process", value: item.huddle_process?.name?.trim() || "No Huddle process" };
+  return { label: "Huddle Board", value: item.huddle_process?.name?.trim() || "No Huddle Board" };
 }
 
 export function formatActionItemInlineDate(value: string | null | undefined): string {

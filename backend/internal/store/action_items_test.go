@@ -9,9 +9,23 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 )
+
+type huddleRollupTestRepository interface {
+	GetHuddleNode(companyID, huddleNodeID string) (domain.HuddleNode, error)
+	ListHuddleLogicGateActionItems(companyID, huddleLogicGateID string) ([]domain.Entity, error)
+}
+
+func listHuddleNodeOwnerRollupForTest(repo huddleRollupTestRepository, companyID, huddleNodeID string) ([]domain.Entity, error) {
+	node, err := repo.GetHuddleNode(companyID, huddleNodeID)
+	if err != nil {
+		return nil, err
+	}
+	return repo.ListHuddleLogicGateActionItems(companyID, node.HuddleLogicGateID)
+}
 
 func TestEntityRelationshipMigrationUsesExactHuddleNodesWithoutCompatibilityBackfill(t *testing.T) {
 	historical, err := os.ReadFile("../../db/migrations/20260828_action_items.sql")
@@ -217,7 +231,7 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 	}
 
 	for _, huddleNodeID := range []string{firstNode.HuddleNodeID, secondNode.HuddleNodeID} {
-		items, err := repo.ListHuddleNodeActionItems(company.CompanyID, huddleNodeID)
+		items, err := listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, huddleNodeID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -279,7 +293,7 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 		t.Fatal("second Huddle Node saved reference did not create its exact edge")
 	}
 	for _, huddleNodeID := range []string{firstNode.HuddleNodeID, secondNode.HuddleNodeID} {
-		items, listErr := repo.ListHuddleNodeActionItems(company.CompanyID, huddleNodeID)
+		items, listErr := listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, huddleNodeID)
 		if listErr != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
 			t.Fatalf("deduped sibling Huddle Node rollup for %s = %+v, err=%v", huddleNodeID, items, listErr)
 		}
@@ -303,21 +317,21 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 	}
 	otherRef := createActionItemEditorTestTextbox(t, repo, company.CompanyID, otherNode.HuddleNodeID, "Weekly notes")
 	commitActionItemEditorTestDocument(t, repo, otherRef, user.UserID, 0, "other-process-reference", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
-	items, err := repo.ListHuddleNodeActionItems(company.CompanyID, otherNode.HuddleNodeID)
+	items, err := listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, otherNode.HuddleNodeID)
 	if err != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
 		t.Fatalf("second Huddle Process items=%+v err=%v", items, err)
 	}
 	firstSecondClear := commitActionItemEditorTestDocument(t, repo, firstRef, user.UserID, firstReadd.Revision, "clear-first-node")
-	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	items, err = listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
 		t.Fatalf("second Node reference should keep first Process rollup=%+v err=%v", items, err)
 	}
 	commitActionItemEditorTestDocument(t, repo, secondRef, user.UserID, secondCommit.Revision, "clear-second-node")
-	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	items, err = listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("removing final first Process reference items=%+v err=%v", items, err)
 	}
-	items, err = repo.ListHuddleNodeActionItems(company.CompanyID, otherNode.HuddleNodeID)
+	items, err = listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, otherNode.HuddleNodeID)
 	if err != nil || len(items) != 1 || items[0].EntityID != created.EntityID {
 		t.Fatalf("other Process reference changed=%+v err=%v", items, err)
 	}
@@ -350,7 +364,7 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, user.UserID, []string{firstNodeRecycleID}); err != nil {
 		t.Fatal(err)
 	}
-	restoredItems, err := repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	restoredItems, err := listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(restoredItems) != 1 || restoredItems[0].EntityID != created.EntityID {
 		t.Fatalf("restored Huddle Node action items=%+v err=%v", restoredItems, err)
 	}
@@ -383,9 +397,171 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 	if _, err := repo.RestoreRecycleBinItems(company.CompanyID, user.UserID, []string{processRecycleID, firstNodeRecycleID}); err != nil {
 		t.Fatal(err)
 	}
-	restoredItems, err = repo.ListHuddleNodeActionItems(company.CompanyID, firstNode.HuddleNodeID)
+	restoredItems, err = listHuddleNodeOwnerRollupForTest(repo, company.CompanyID, firstNode.HuddleNodeID)
 	if err != nil || len(restoredItems) != 1 || restoredItems[0].EntityID != created.EntityID {
 		t.Fatalf("restored Huddle Process and Node action items=%+v err=%v", restoredItems, err)
+	}
+}
+
+func TestMemoryHuddleNodeCreatedAndDueActionItemSurfacesStayDistinct(t *testing.T) {
+	repo := NewMemoryRepo()
+	user, company := createActionItemTestCompany(t, repo, "huddle-node-surface-owner")
+	gate, err := repo.CreateLogicGate(company.CompanyID, "Daily")
+	if err != nil {
+		t.Fatal(err)
+	}
+	board, err := repo.ConvertLogicGateToHuddle(company.CompanyID, gate.LogicGateID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: board.HuddleLogicGateID, Name: "Current", ActorID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	siblingNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: board.HuddleLogicGateID, Name: "Sibling", ActorID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	create := func(name, sourceType, sourceID string) domain.Entity {
+		t.Helper()
+		item, createErr := repo.CreateActionItem(ActionItemInput{
+			CompanyID: company.CompanyID, BodyText: name, CreatedByUserID: user.UserID,
+			SourceResourceType: sourceType, SourceResourceID: sourceID,
+		})
+		if createErr != nil {
+			t.Fatal(createErr)
+		}
+		return item
+	}
+	setField := func(item domain.Entity, systemKey, rawValue string) {
+		t.Helper()
+		for _, field := range item.EntityFields {
+			if field.SystemKey != systemKey {
+				continue
+			}
+			if _, updateErr := repo.UpdateEntityField(EntityFieldInput{
+				CompanyID: company.CompanyID, EntityID: item.EntityID, EntityFieldID: field.EntityFieldID,
+				Value: json.RawMessage(rawValue), ValueSet: true,
+			}); updateErr != nil {
+				t.Fatal(updateErr)
+			}
+			return
+		}
+		t.Fatalf("Action Item %s is missing field %s", item.EntityID, systemKey)
+	}
+	link := func(item domain.Entity, resourceType, resourceID string) {
+		t.Helper()
+		repo.entityRelationships[entityRelationshipKey(company.CompanyID, item.EntityID, resourceType, resourceID)] = domain.EntityRelationship{
+			CompanyID: company.CompanyID, EntityID: item.EntityID,
+			ResourceType: resourceType, ResourceID: resourceID, CreatedTimestamp: time.Now().UTC(),
+		}
+	}
+
+	createdHere := create("Created here and complete", EntityTypeHuddleNode, currentNode.HuddleNodeID)
+	setField(createdHere, ActionItemStatusSystemKey, `"done"`)
+	setField(createdHere, ActionItemCompletionDueDateSystemKey, `"2026-08-01"`)
+	link(createdHere, EntityTypeHuddleLogicGate, board.HuddleLogicGateID)
+
+	siblingDue := create("Sibling due", EntityTypeHuddleNode, siblingNode.HuddleNodeID)
+	setField(siblingDue, ActionItemCompletionDueDateSystemKey, `"2026-08-30"`)
+	link(siblingDue, EntityTypeHuddleNode, siblingNode.HuddleNodeID)
+	directDue := create("Direct Board due", "", "")
+	setField(directDue, ActionItemCompletionDueDateSystemKey, `"2026-08-31"`)
+	link(directDue, EntityTypeHuddleLogicGate, board.HuddleLogicGateID)
+	future := create("Future", "", "")
+	setField(future, ActionItemCompletionDueDateSystemKey, `"2026-09-01"`)
+	link(future, EntityTypeHuddleLogicGate, board.HuddleLogicGateID)
+	completed := create("Completed elsewhere", "", "")
+	setField(completed, ActionItemCompletionDueDateSystemKey, `"2026-08-15"`)
+	setField(completed, ActionItemStatusSystemKey, `"done"`)
+	link(completed, EntityTypeHuddleLogicGate, board.HuddleLogicGateID)
+
+	createdItems, err := repo.ListHuddleNodeCreatedActionItems(company.CompanyID, currentNode.HuddleNodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(createdItems) != 1 || createdItems[0].EntityID != createdHere.EntityID {
+		t.Fatalf("created surface = %+v, want completed exact-Source item", createdItems)
+	}
+
+	dueItems, err := repo.ListHuddleNodeDueActionItems(company.CompanyID, currentNode.HuddleNodeID, "2026-08-31")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dueIDs := map[string]bool{}
+	for _, item := range dueItems {
+		dueIDs[item.EntityID] = true
+	}
+	if len(dueIDs) != 2 || !dueIDs[siblingDue.EntityID] || !dueIDs[directDue.EntityID] {
+		t.Fatalf("due surface IDs = %v, want sibling and direct Board due items", dueIDs)
+	}
+	for _, excluded := range []domain.Entity{createdHere, future, completed} {
+		if dueIDs[excluded.EntityID] {
+			t.Fatalf("due surface included excluded item %q", excluded.Name)
+		}
+	}
+	if _, err := repo.ListHuddleNodeDueActionItems(company.CompanyID, currentNode.HuddleNodeID, "2026-8-31"); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("invalid viewing date error = %v, want ErrInvalid", err)
+	}
+}
+
+func TestMemoryActionItemSourceCannotMoveBetweenHuddleNodes(t *testing.T) {
+	repo := NewMemoryRepo()
+	user, company := createActionItemTestCompany(t, repo, "immutable-huddle-source")
+	gate, err := repo.CreateLogicGate(company.CompanyID, "Immutable Source")
+	if err != nil {
+		t.Fatal(err)
+	}
+	board, err := repo.ConvertLogicGateToHuddle(company.CompanyID, gate.LogicGateID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: board.HuddleLogicGateID, Name: "First", ActorID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: board.HuddleLogicGateID, Name: "Second", ActorID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	item, err := repo.CreateActionItem(ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Keep immutable provenance", CreatedByUserID: user.UserID,
+		SourceResourceType: EntityTypeHuddleNode, SourceResourceID: first.HuddleNodeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sourceField domain.EntityField
+	for _, field := range item.EntityFields {
+		if field.SystemKey == ActionItemSourceSystemKey {
+			sourceField = field
+		}
+	}
+	if sourceField.EntityFieldID == "" {
+		t.Fatal("Action Item Source field is missing")
+	}
+	nextSource, err := json.Marshal(map[string]string{"resource_type": EntityTypeHuddleNode, "resource_id": second.HuddleNodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.UpdateEntityField(EntityFieldInput{
+		CompanyID: company.CompanyID, EntityID: item.EntityID, EntityFieldID: sourceField.EntityFieldID,
+		Value: nextSource, ValueSet: true,
+	}); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Source mutation error = %v, want ErrConflict", err)
+	}
+	source, err := repo.GetActionItemSource(company.CompanyID, item.EntityID)
+	if err != nil || source.ResourceType != EntityTypeHuddleNode || source.ResourceID != first.HuddleNodeID {
+		t.Fatalf("Source after rejected mutation = %+v err=%v", source, err)
+	}
+	firstItems, err := repo.ListHuddleNodeCreatedActionItems(company.CompanyID, first.HuddleNodeID)
+	if err != nil || len(firstItems) != 1 || firstItems[0].EntityID != item.EntityID {
+		t.Fatalf("original Created list = %+v err=%v", firstItems, err)
+	}
+	secondItems, err := repo.ListHuddleNodeCreatedActionItems(company.CompanyID, second.HuddleNodeID)
+	if err != nil || len(secondItems) != 0 {
+		t.Fatalf("new Node Created list = %+v err=%v", secondItems, err)
 	}
 }
 

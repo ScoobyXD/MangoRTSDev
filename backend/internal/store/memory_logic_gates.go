@@ -278,7 +278,6 @@ func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string
 	}
 	r.syncRACIMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 	r.syncProjectManagementTimelineProjectionForLogicGateLocked(companyID, logicGateID)
-	r.reconcileMemoryRACITabsLogicGateLocked(item)
 	return r.withLogicGateRACILocked(item), nil
 }
 
@@ -633,12 +632,6 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string, preser
 			delete(r.emailNodeLinks, linkKey)
 		}
 	}
-	for itemKey, item := range r.raciTabItems {
-		if item.CompanyID == companyID && item.LogicGateID == logicGateID {
-			delete(r.raciTabItems, itemKey)
-		}
-	}
-
 	return nil
 }
 
@@ -838,7 +831,6 @@ func (r *MemoryRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGat
 	defer r.mu.Unlock()
 	beforeGates := maps.Clone(r.logicGates)
 	beforeBoards := maps.Clone(r.kanbanBoards)
-	beforeRACITabItems := maps.Clone(r.raciTabItems)
 	beforeRACIProjection := maps.Clone(r.RACIMatrixProjectionRows)
 	beforeTimelineItems := maps.Clone(r.projectTimelineItems)
 	beforeTimelineProjection := maps.Clone(r.projectTimelineProjection)
@@ -857,13 +849,11 @@ func (r *MemoryRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGat
 	}
 	r.syncRACIMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 	r.syncProjectManagementTimelineProjectionForLogicGateLocked(companyID, logicGateID)
-	r.reconcileMemoryRACITabsLogicGateLocked(item)
 	item = r.withLogicGateRACILocked(item)
 	event, err := r.appendDomainEventLocked(logicGateUpdatedWorkspaceEventInput(item))
 	if err != nil {
 		r.logicGates = beforeGates
 		r.kanbanBoards = beforeBoards
-		r.raciTabItems = beforeRACITabItems
 		r.RACIMatrixProjectionRows = beforeRACIProjection
 		r.projectTimelineItems = beforeTimelineItems
 		r.projectTimelineProjection = beforeTimelineProjection

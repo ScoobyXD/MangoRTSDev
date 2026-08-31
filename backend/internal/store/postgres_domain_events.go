@@ -188,9 +188,6 @@ func (r *PostgresRepo) appendDomainEventTx(ctx context.Context, tx *sql.Tx, inpu
 	if err := r.enqueueKanbanRealtimeForDomainEventTx(ctx, tx, item); err != nil {
 		return domain.DomainEvent{}, err
 	}
-	if err := r.enqueueRACITabsRealtimeForDomainEventsTx(ctx, tx, []domain.DomainEvent{item}); err != nil {
-		return domain.DomainEvent{}, err
-	}
 	if err := r.enqueueProcessMapRealtimeForDomainEventsTx(ctx, tx, []domain.DomainEvent{item}); err != nil {
 		return domain.DomainEvent{}, err
 	}
@@ -225,9 +222,6 @@ func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inp
 			return nil, err
 		}
 		if err := r.enqueueKanbanRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
-			return nil, err
-		}
-		if err := r.enqueueRACITabsRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
 			return nil, err
 		}
 		if err := r.enqueueProcessMapRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
@@ -265,9 +259,6 @@ func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inp
 		start = end
 	}
 	if err := r.enqueueKanbanRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
-		return nil, err
-	}
-	if err := r.enqueueRACITabsRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
 		return nil, err
 	}
 	if err := r.enqueueProcessMapRealtimeForDomainEventsTx(ctx, tx, events); err != nil {

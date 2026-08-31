@@ -233,6 +233,17 @@ join entity_field_types template
 	if err != nil {
 		return domain.Entity{}, err
 	}
+	boardIDs, err := postgresHuddleActionItemBoardIDsTx(ctx, tx, normalized.CompanyID, entityID)
+	if err != nil {
+		return domain.Entity{}, err
+	}
+	nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, normalized.CompanyID, boardIDs)
+	if err != nil {
+		return domain.Entity{}, err
+	}
+	if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, normalized.CompanyID, boardIDs, nodeIDs); err != nil {
+		return domain.Entity{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Entity{}, err
 	}
@@ -435,7 +446,7 @@ func lockPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx
 	return err
 }
 
-func syncPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {
+func syncPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) (bool, error) {
 	var rows *sql.Rows
 	var err error
 	switch ref.ResourceType {
@@ -446,35 +457,35 @@ from huddle_node_textboxes
 where company_id=$1::uuid and huddle_node_id=$2::uuid and deleted_timestamp is null`, ref.CompanyID, ref.ResourceID)
 	case EntityTypeHuddleLogicGate:
 		if ref.DocumentID != ref.ResourceID {
-			return ErrInvalid
+			return false, ErrInvalid
 		}
 		rows, err = tx.QueryContext(ctx, `
 select body_json
 from huddle_logic_gates
 where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid and deleted_timestamp is null`, ref.CompanyID, ref.ResourceID)
 	default:
-		return nil
+		return false, nil
 	}
 	if err != nil {
-		return err
+		return false, err
 	}
 	documents := make([]json.RawMessage, 0)
 	for rows.Next() {
 		var body []byte
 		if err := rows.Scan(&body); err != nil {
 			rows.Close()
-			return err
+			return false, err
 		}
 		documents = append(documents, append(json.RawMessage(nil), body...))
 	}
 	if err := rows.Close(); err != nil {
-		return err
+		return false, err
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return false, err
 	}
 	actionItemIDs := entityReferenceIDsFromEditorDocuments(documents)
-	if _, err := tx.ExecContext(ctx, `
+	deleteResult, err := tx.ExecContext(ctx, `
 delete from entity_relationships relationship
 using entities entity, entity_types entity_type
 where relationship.company_id=$1::uuid
@@ -485,11 +496,17 @@ where relationship.company_id=$1::uuid
   and entity_type.company_id=entity.company_id
   and entity_type.entity_type_id=entity.entity_type_id
   and entity_type.system_key=$4::text
-  and not (relationship.entity_id::text=any($5::text[]))`, ref.CompanyID, ref.ResourceType, ref.ResourceID, ActionItemEntityTypeSystemKey, actionItemIDs); err != nil {
-		return mapEntitiesPostgresError(err)
+  and not (relationship.entity_id::text=any($5::text[]))`, ref.CompanyID, ref.ResourceType, ref.ResourceID, ActionItemEntityTypeSystemKey, actionItemIDs)
+	if err != nil {
+		return false, mapEntitiesPostgresError(err)
 	}
+	deleted, err := deleteResult.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	changed := deleted > 0
 	if len(actionItemIDs) > 0 {
-		if _, err := tx.ExecContext(ctx, `
+		insertResult, err := tx.ExecContext(ctx, `
 insert into entity_relationships (company_id, entity_id, resource_type, resource_id)
 select $1::uuid, entity.entity_id, $2::text, $3::uuid
 from unnest($4::text[]) as input(entity_id)
@@ -498,16 +515,86 @@ join entities entity
 join entity_types entity_type
   on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
 where entity_type.system_key=$5::text
-on conflict (company_id, entity_id, resource_type, resource_id) do nothing`, ref.CompanyID, ref.ResourceType, ref.ResourceID, actionItemIDs, ActionItemEntityTypeSystemKey); err != nil {
-			return mapEntitiesPostgresError(err)
+on conflict (company_id, entity_id, resource_type, resource_id) do nothing`, ref.CompanyID, ref.ResourceType, ref.ResourceID, actionItemIDs, ActionItemEntityTypeSystemKey)
+		if err != nil {
+			return false, mapEntitiesPostgresError(err)
 		}
+		inserted, err := insertResult.RowsAffected()
+		if err != nil {
+			return false, err
+		}
+		changed = changed || inserted > 0
 	}
-	return nil
+	return changed, nil
 }
 
-func (r *PostgresRepo) ListHuddleNodeActionItems(companyID, huddleNodeID string) ([]domain.Entity, error) {
+func (r *PostgresRepo) ListHuddleNodeCreatedActionItems(companyID, huddleNodeID string) ([]domain.Entity, error) {
 	companyID, huddleNodeID = cleanUUIDText(companyID), cleanUUIDText(huddleNodeID)
 	if companyID == "" || huddleNodeID == "" {
+		return nil, ErrInvalid
+	}
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	var exists bool
+	err = tx.QueryRowContext(ctx, `select exists(select 1 from huddle_nodes where company_id=$1::uuid and huddle_node_id=$2::uuid)`, companyID, huddleNodeID).Scan(&exists)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrNotFound
+	}
+	rows, err := tx.QueryContext(ctx, `
+select entity.entity_id::text
+from entities entity
+join entity_types entity_type
+  on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
+join entity_fields source
+  on source.company_id=entity.company_id and source.entity_id=entity.entity_id
+ and source.entity_field_type_id=$3::uuid
+where entity.company_id=$1::uuid
+  and entity_type.system_key=$4::text
+  and source.value_jsonb=jsonb_build_object('resource_type',$5::text,'resource_id',$2::text)
+order by entity.created_timestamp,entity.entity_id`, companyID, huddleNodeID, ActionItemSourceFieldTypeID, ActionItemEntityTypeSystemKey, EntityTypeHuddleNode)
+	if err != nil {
+		return nil, err
+	}
+	entityIDs := []string{}
+	for rows.Next() {
+		var entityID string
+		if err := rows.Scan(&entityID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		entityIDs = append(entityIDs, entityID)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	items := make([]domain.Entity, 0, len(entityIDs))
+	for _, entityID := range entityIDs {
+		item, loadErr := getPostgresEntity(ctx, tx, companyID, entityID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		items = append(items, item)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *PostgresRepo) ListHuddleNodeDueActionItems(companyID, huddleNodeID, viewingDate string) ([]domain.Entity, error) {
+	companyID, huddleNodeID = cleanUUIDText(companyID), cleanUUIDText(huddleNodeID)
+	viewingDate, dateErr := normalizeHuddleDate(viewingDate)
+	if companyID == "" || huddleNodeID == "" || dateErr != nil {
 		return nil, ErrInvalid
 	}
 	ctx := context.Background()
@@ -531,10 +618,23 @@ where company_id=$1::uuid and huddle_node_id=$2::uuid`, companyID, huddleNodeID)
 	if err != nil {
 		return nil, err
 	}
+	filtered := items[:0]
+	for _, item := range items {
+		if actionItemSourceMatches(item, EntityTypeHuddleNode, huddleNodeID) {
+			continue
+		}
+		dueDate := actionItemFieldText(item, ActionItemCompletionDueDateSystemKey)
+		status := actionItemFieldText(item, ActionItemStatusSystemKey)
+		if dueDate == "" || dueDate > viewingDate || myWorkStatusDone(status) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	sortHuddleDueActionItems(filtered)
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	return items, nil
+	return filtered, nil
 }
 
 func (r *PostgresRepo) ListHuddleLogicGateActionItems(companyID, huddleLogicGateID string) ([]domain.Entity, error) {

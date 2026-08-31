@@ -29,9 +29,9 @@ func (r *MemoryRepo) GetHuddleNodeWorkspace(companyID, huddleNodeID string) (Hud
 	}
 	sort.Slice(workspace.Textboxes, func(i, j int) bool {
 		if workspace.Textboxes[i].DisplayOrder != workspace.Textboxes[j].DisplayOrder {
-			return workspace.Textboxes[i].DisplayOrder < workspace.Textboxes[j].DisplayOrder
+			return workspace.Textboxes[i].DisplayOrder > workspace.Textboxes[j].DisplayOrder
 		}
-		return workspace.Textboxes[i].TextboxID < workspace.Textboxes[j].TextboxID
+		return workspace.Textboxes[i].TextboxID > workspace.Textboxes[j].TextboxID
 	})
 	sort.Slice(workspace.Chats, func(i, j int) bool {
 		if !workspace.Chats[i].CreatedTimestamp.Equal(workspace.Chats[j].CreatedTimestamp) {

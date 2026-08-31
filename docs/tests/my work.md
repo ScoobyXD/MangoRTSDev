@@ -26,7 +26,7 @@ MW11 - The Action Items header places its Mine/Delegated control immediately to 
 
 MW12 - Processes has no History or grouping control. No grouping control outside the Action Items header or active Nodes header changes either section's grouping stack.
 
-MW13 - Mine starts with the visible hierarchy Color ascending then Huddle process ascending and separately orders leaf rows by Completion due date ascending. Delegated starts with Color ascending, Person in charge ascending, then Huddle process ascending and separately orders leaf rows by Completion due date ascending. Every selected grouping or ordering term has its own Asc/Desc direction, and switching perspectives restores that perspective's saved stacks.
+MW13 - Mine starts with the visible hierarchy Color ascending then Huddle Board ascending and separately orders leaf rows by Completion due date ascending. Delegated starts with Color ascending, Person in charge ascending, then Huddle Board ascending and separately orders leaf rows by Completion due date ascending. Every selected grouping or ordering term has its own Asc/Desc direction, and switching perspectives restores that perspective's saved stacks.
 
 MW14 - The initial Action Item color order is Red, Yellow, then No color. An Action Item with no color remains visible.
 
@@ -60,7 +60,7 @@ MW28 - Effective RACI and Project Team membership never grant resource access. T
 
 MW29 - Access to a Node does not grant access to its associated Process or Project. An inaccessible inline Process or Project is omitted completely, including its ID, name, hidden count, placeholder, and relationship details, while the accessible Node remains visible.
 
-MW30 - The backend applies the selected subject, Node role, or Action Item perspective before the signed-in viewer's permission filter, grouping, leaf ordering, limits, pagination cursors, has-more decisions, or counts. Action Item cursors bind the perspective plus the complete grouping and ordering stacks; current Huddle process name and ID, Person in charge name and ID, and exact Entity ID provide stable keys only when selected. The frontend never filters or sorts My Work rows locally or receives hidden resources.
+MW30 - The backend applies the selected subject, Node role, or Action Item perspective before the signed-in viewer's permission filter, grouping, leaf ordering, limits, pagination cursors, has-more decisions, or counts. Action Item cursors bind the perspective plus the complete grouping and ordering stacks; current Huddle Board name and ID, Person in charge name and ID, and exact Entity ID provide stable keys only when selected. The frontend never filters or sorts My Work rows locally or receives hidden resources.
 
 MW31 - Opening any My Work resource performs that destination's normal current permission check. A prior My Work response is never proof of continued access.
 
@@ -70,7 +70,7 @@ MW33 - Mine and Delegated both exclude an Action Item whose current canonical St
 
 MW34 - The normal Nodes list excludes a Node whose current status is Done, Complete, or Completed; that Node appears only in Nodes History while it still has the selected effective RACI role and remains permitted.
 
-MW35 - An Action Item row always exposes its exact ID and title and may expose the compact Person in charge, Assigned by, Created timestamp, permission-safe Source, Color, Analysis due date, Completion due date, Status, and permission-safe Huddle process values. Details is never returned as an inline label. Mine initially displays only Completion due date; Delegated initially displays Person in charge then Completion due date. Each perspective renders only its saved displayed-field list in that saved left-to-right order in one nonwrapping horizontal rail against the row's right edge; a fitting label rail stays completely inside the row, an oversized rail starts with the first saved field and scrolls horizontally, labels never stack vertically, and the title truncates before the label rail is displaced.
+MW35 - An Action Item row always exposes its exact ID and title and may expose the compact Person in charge, Assigned by, Created timestamp, permission-safe Source, Color, Analysis due date, Completion due date, Status, and permission-safe Huddle Board values. Details is never returned as an inline label. Mine initially displays only Completion due date; Delegated initially displays Person in charge then Completion due date. Each perspective renders only its saved displayed-field list in that saved left-to-right order in one nonwrapping horizontal rail against the row's right edge; a fitting label rail stays completely inside the row, an oversized rail starts with the first saved field and scrolls horizontally, labels never stack vertically, and the title truncates before the label rail is displaced.
 
 MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that visible list nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated clears only Action Items and loads the signed-in viewer's independent grouping, ordering, and displayed-field preferences; switching a Node or Process role clears only that view and preserves its applicable grouping state. Switching the middle view changes both its rows and controls without changing either view's selected role, the Node grouping stack, or Node History state. Processes and Nodes keep independent scroll positions while switching views, and both saved positions reset for a new company or subject.
 
@@ -82,7 +82,7 @@ MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact
 
 MW40 - Red Action Item icons and names use the established Huddle red treatment and pulse once per second. Yellow Action Item icons and names use the established Huddle yellow treatment and pulse once every two seconds.
 
-MW41 - Every Action Item Group by term renders a visible hierarchy header, including Huddle process and Completion due date when selected. An Order items by term changes only row order inside the final group and never creates a header. A Huddle process group uses the normal app font, shows the canonical Huddle Process icon immediately before the process name, and places that heading plus all of its member rows inside one elevated surface. Several processes render as separately spaced elevated surfaces. A permitted process heading opens that exact process; the neutral no-process heading is not clickable and owns its own neutral elevated surface.
+MW41 - Every Action Item Group by term renders a visible hierarchy header, including Huddle Board and Completion due date when selected. An Order items by term changes only row order inside the final group and never creates a header. A Huddle Board group uses the normal app font, shows the shared Board icon immediately before the Board name, and places that heading plus all member rows inside one elevated surface. Several Boards render as separately spaced elevated surfaces. A permitted Board heading opens that exact Board; the neutral no-Board heading is not clickable and owns its own neutral elevated surface.
 
 MW42 - The Node and Process role selectors reuse the same established accessible selector and colors: Responsible is orange, Accountable is green, Consulted is blue, and Informed is purple.
 
@@ -124,7 +124,7 @@ MW60 - Mine and Delegated each persist one signed-in-viewer-and-company-owned sa
 
 MW61 - The combined Action Items dialog's top-right Mine quadrant and bottom-right Delegated quadrant each contain one ordered shown-on-row tray above one field bank. Pointer click-drag is the only move or reorder command. Dropping between shown fields inserts at that exact position and shifts neighboring fields; dragging back to the bank hides the field, and an empty tray shows no inline labels.
 
-MW62 - The inline-field bank contains Person in charge, Assigned by, Created timestamp, Source, Color, Analysis due date, Completion due date, Status, and Huddle process. The title is always visible outside the bank, Details is never offered, and no editor-field checkmark changes row visibility.
+MW62 - The inline-field bank contains Person in charge, Assigned by, Created timestamp, Source, Color, Analysis due date, Completion due date, Status, and Huddle Board. The title is always visible outside the bank, Details is never offered, and no editor-field checkmark changes row visibility.
 
 MW63 - The people picker lists only current company members under the existing current Team and group hierarchy. A member in multiple groups appears under each directly assigned group, and a member with no group appears once under No team.
 

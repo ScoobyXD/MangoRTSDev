@@ -493,8 +493,22 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 		return EditorJSONCommit{}, err
 	}
 	if input.Document.ResourceType == EntityTypeHuddleNode || input.Document.ResourceType == EntityTypeHuddleLogicGate {
-		if err := syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
+		changed, err := syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document)
+		if err != nil {
 			return EditorJSONCommit{}, err
+		}
+		if changed {
+			boardIDs, err := postgresHuddleActionItemBoardIDsForResourceTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID)
+			if err != nil {
+				return EditorJSONCommit{}, err
+			}
+			nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, input.Document.CompanyID, boardIDs)
+			if err != nil {
+				return EditorJSONCommit{}, err
+			}
+			if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, input.Document.CompanyID, boardIDs, nodeIDs); err != nil {
+				return EditorJSONCommit{}, err
+			}
 		}
 	}
 	reason := "tiptap_json_committed"
@@ -583,8 +597,22 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		return EditorJSONCommit{}, err
 	}
 	if input.Document.ResourceType == EntityTypeHuddleNode || input.Document.ResourceType == EntityTypeHuddleLogicGate {
-		if err := syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
+		changed, err := syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document)
+		if err != nil {
 			return EditorJSONCommit{}, err
+		}
+		if changed {
+			boardIDs, err := postgresHuddleActionItemBoardIDsForResourceTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID)
+			if err != nil {
+				return EditorJSONCommit{}, err
+			}
+			nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, input.Document.CompanyID, boardIDs)
+			if err != nil {
+				return EditorJSONCommit{}, err
+			}
+			if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, input.Document.CompanyID, boardIDs, nodeIDs); err != nil {
+				return EditorJSONCommit{}, err
+			}
 		}
 	}
 	if input.Document.ResourceType == EntityTypeNode {

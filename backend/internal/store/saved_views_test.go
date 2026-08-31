@@ -63,19 +63,23 @@ func TestHuddleActionItemSavedViewSchemaContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	migration, err := os.ReadFile("../../db/migrations/20260830_z_huddle_action_item_preferences.sql")
+	migration, err := os.ReadFile("../../db/migrations/20260831_huddle_node_dates_and_action_item_views.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, source := range map[string]string{"canonical schema": string(canonical), "migration": string(migration)} {
 		for _, required := range []string{
 			SavedViewSurfaceHuddleLogicGateActionItems,
-			SavedViewSurfaceHuddleNodeActionItems,
+			SavedViewSurfaceHuddleNodeCreatedActionItems,
+			SavedViewSurfaceHuddleNodeDueActionItems,
 			"idx_saved_views_action_items_user_single",
 		} {
 			if !strings.Contains(source, required) {
 				t.Fatalf("%s missing %q", name, required)
 			}
+		}
+		if strings.Contains(source, "'huddle_node_action_items'") && name == "canonical schema" {
+			t.Fatalf("%s still allows retired Huddle Node Action Items surface", name)
 		}
 	}
 }
@@ -160,7 +164,7 @@ func TestMyWorkSavedViewDefaultsValidationAndPerPerspectiveSingleton(t *testing.
 }
 
 func TestHuddleActionItemSavedViewDefaultsValidationAndIndependentSingletons(t *testing.T) {
-	for _, surface := range []string{SavedViewSurfaceHuddleLogicGateActionItems, SavedViewSurfaceHuddleNodeActionItems} {
+	for _, surface := range []string{SavedViewSurfaceHuddleLogicGateActionItems, SavedViewSurfaceHuddleNodeCreatedActionItems, SavedViewSurfaceHuddleNodeDueActionItems} {
 		groupings, ok := NormalizeSavedViewGroupings(surface, nil)
 		if !ok || len(groupings) != 2 || groupings[0] != (domain.SavedViewGrouping{Field: MyWorkActionItemGroupingColor, Direction: "asc"}) || groupings[1] != (domain.SavedViewGrouping{Field: MyWorkActionItemGroupingPersonInCharge, Direction: "asc"}) {
 			t.Fatalf("%s default groupings = %+v ok=%v", surface, groupings, ok)
@@ -198,7 +202,7 @@ func TestHuddleActionItemSavedViewDefaultsValidationAndIndependentSingletons(t *
 		t.Fatal(err)
 	}
 	processInput := SavedViewInput{
-		CompanyID: companyID, Surface: SavedViewSurfaceHuddleLogicGateActionItems, Principal: SavedViewPrincipalUser, PrincipalID: user.UserID, Name: "Huddle Process Action Items",
+		CompanyID: companyID, Surface: SavedViewSurfaceHuddleLogicGateActionItems, Principal: SavedViewPrincipalUser, PrincipalID: user.UserID, Name: "Huddle Board Action Items",
 		Groupings: []domain.SavedViewGrouping{{Field: MyWorkActionItemGroupingColor, Direction: "desc"}},
 		Settings: domain.SavedViewSettings{
 			Ordering:        []domain.SavedViewGrouping{{Field: MyWorkActionItemGroupingCompletionDueDate, Direction: "desc"}},
@@ -219,28 +223,37 @@ func TestHuddleActionItemSavedViewDefaultsValidationAndIndependentSingletons(t *
 		t.Fatalf("Huddle Process singleton update = %+v, first=%+v", secondProcess, firstProcess)
 	}
 
-	node, err := repo.UpsertSavedView(SavedViewInput{
-		CompanyID: companyID, Surface: SavedViewSurfaceHuddleNodeActionItems, Principal: SavedViewPrincipalUser, PrincipalID: user.UserID, Name: "Huddle Node Action Items",
+	created, err := repo.UpsertSavedView(SavedViewInput{
+		CompanyID: companyID, Surface: SavedViewSurfaceHuddleNodeCreatedActionItems, Principal: SavedViewPrincipalUser, PrincipalID: user.UserID, Name: "Huddle Node Created Action Items",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if node.SavedViewID == firstProcess.SavedViewID || !equalStrings(node.Settings.DisplayedFields, []string{"person_in_charge", "completion_due_date"}) {
-		t.Fatalf("Huddle Node independent singleton defaults = %+v", node)
+	if created.SavedViewID == firstProcess.SavedViewID || !equalStrings(created.Settings.DisplayedFields, []string{"person_in_charge", "completion_due_date"}) {
+		t.Fatalf("Huddle Node Created independent singleton defaults = %+v", created)
 	}
-	for _, surface := range []string{SavedViewSurfaceHuddleLogicGateActionItems, SavedViewSurfaceHuddleNodeActionItems} {
+	due, err := repo.UpsertSavedView(SavedViewInput{
+		CompanyID: companyID, Surface: SavedViewSurfaceHuddleNodeDueActionItems, Principal: SavedViewPrincipalUser, PrincipalID: user.UserID, Name: "Huddle Node Due Action Items",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if due.SavedViewID == firstProcess.SavedViewID || due.SavedViewID == created.SavedViewID {
+		t.Fatalf("Huddle Node Due saved view did not receive an independent singleton ID: %+v", due)
+	}
+	for _, surface := range []string{SavedViewSurfaceHuddleLogicGateActionItems, SavedViewSurfaceHuddleNodeCreatedActionItems, SavedViewSurfaceHuddleNodeDueActionItems} {
 		items, err := repo.ListSavedViews(SavedViewListInput{CompanyID: companyID, ViewerUserID: user.UserID, Surface: surface})
 		if err != nil || len(items) != 1 {
 			t.Fatalf("%s saved views = %+v err=%v", surface, items, err)
 		}
 	}
 	if _, err := repo.UpsertSavedView(SavedViewInput{
-		CompanyID: companyID, Surface: SavedViewSurfaceHuddleNodeActionItems, Principal: SavedViewPrincipalGroup, PrincipalID: user.UserID, Name: "Invalid shared Huddle view",
+		CompanyID: companyID, Surface: SavedViewSurfaceHuddleNodeCreatedActionItems, Principal: SavedViewPrincipalGroup, PrincipalID: user.UserID, Name: "Invalid shared Huddle view",
 	}); err != ErrInvalid {
 		t.Fatalf("Huddle group-principal error = %v, want ErrInvalid", err)
 	}
 	if _, err := repo.UpsertSavedView(SavedViewInput{
-		CompanyID: companyID, Surface: SavedViewSurfaceHuddleNodeActionItems, Principal: SavedViewPrincipalUser, PrincipalID: user.UserID, Name: "Overlapping Huddle view",
+		CompanyID: companyID, Surface: SavedViewSurfaceHuddleNodeDueActionItems, Principal: SavedViewPrincipalUser, PrincipalID: user.UserID, Name: "Overlapping Huddle view",
 		Groupings: []domain.SavedViewGrouping{{Field: MyWorkActionItemGroupingColor, Direction: "asc"}},
 		Settings:  domain.SavedViewSettings{Ordering: []domain.SavedViewGrouping{{Field: MyWorkActionItemGroupingColor, Direction: "desc"}}},
 	}); err != ErrInvalid {

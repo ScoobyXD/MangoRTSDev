@@ -66,7 +66,7 @@ describe("deepLinkRoutes", () => {
     });
   });
 
-  it("round-trips the dedicated Huddle Logic Gate page route", () => {
+  it("round-trips the dedicated Huddle Board page route", () => {
     const path = buildHuddleLogicGateRoute("huddle gate/42");
     assert.equal(path, "/huddle-logic-gates/huddle%20gate%2F42");
     assert.deepEqual(parseDeepLinkRoute(path), {

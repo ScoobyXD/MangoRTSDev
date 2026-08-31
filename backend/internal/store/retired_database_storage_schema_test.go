@@ -158,3 +158,33 @@ func TestRetiredDatabaseStorageIsAbsentFromCanonicalSchemaAndStrictlyDropped(t *
 		}
 	}
 }
+
+func TestRetiredRACITabsStorageAndFunctionsAreAbsentFromCanonicalSchema(t *testing.T) {
+	schemaBytes, err := os.ReadFile("../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationBytes, err := os.ReadFile("../../db/migrations/20260831_z_retire_raci_tabs.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := strings.ToLower(string(schemaBytes))
+	migration := strings.ToLower(string(migrationBytes))
+	for _, retired := range []string{
+		"raci_tabs_items", "raci_tabs_folders", "mangorts_sync_raci_tabs_logic_gate",
+		"mangorts_sync_raci_tabs_policy_resource", "mangorts_raci_tabs_policy_changed",
+		"trg_zz_raci_tabs_assignment_changed", "trg_zz_raci_tabs_membership_changed",
+	} {
+		if strings.Contains(schema, retired) {
+			t.Errorf("canonical schema retains retired RACI Tabs object %q", retired)
+		}
+		if !strings.Contains(migration, retired) {
+			t.Errorf("RACI Tabs retirement migration does not remove %q", retired)
+		}
+	}
+	for _, retained := range []string{"resource_gvic_settings", "resource_gvic_assignments", "mangorts_v2_effective_gvic_assignments"} {
+		if !strings.Contains(schema, retained) {
+			t.Errorf("canonical RACI authority %q was removed with the sidebar projection", retained)
+		}
+	}
+}

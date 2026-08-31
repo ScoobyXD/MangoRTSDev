@@ -229,7 +229,13 @@ func (r *MemoryRepo) CommitEditorJSONDocument(input EditorJSONCommitInput) (Edit
 	document.UpdatedTimestamp = now
 	r.editorJSONDocuments[key] = document
 	if input.Document.ResourceType == EntityTypeHuddleNode || input.Document.ResourceType == EntityTypeHuddleLogicGate {
-		r.syncHuddleActionItemRelationshipsLocked(input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID)
+		if r.syncHuddleActionItemRelationshipsLocked(input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID) {
+			boardIDs := r.memoryHuddleActionItemBoardIDsForResourceLocked(input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID)
+			nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(input.Document.CompanyID, stringSet(boardIDs))
+			if err := r.enqueueHuddleActionItemsRealtimeLocked(input.Document.CompanyID, boardIDs, nodeIDs); err != nil {
+				return EditorJSONCommit{}, err
+			}
+		}
 	}
 	r.editorJSONOperations[key] = append(r.editorJSONOperations[key], memoryEditorJSONOperation{
 		OperationID: input.OperationID, ClientID: input.ClientID, BaseRevision: input.BaseRevision,
@@ -326,7 +332,13 @@ func (r *MemoryRepo) DeleteEditorJSONDocument(input EditorJSONDeleteInput) (Edit
 	document.CollaborationEpoch = newUUIDv7String()
 	r.editorJSONDocuments[key] = document
 	if ref.ResourceType == EntityTypeHuddleNode || ref.ResourceType == EntityTypeHuddleLogicGate {
-		r.syncHuddleActionItemRelationshipsLocked(ref.CompanyID, ref.ResourceType, ref.ResourceID)
+		if r.syncHuddleActionItemRelationshipsLocked(ref.CompanyID, ref.ResourceType, ref.ResourceID) {
+			boardIDs := r.memoryHuddleActionItemBoardIDsForResourceLocked(ref.CompanyID, ref.ResourceType, ref.ResourceID)
+			nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(ref.CompanyID, stringSet(boardIDs))
+			if err := r.enqueueHuddleActionItemsRealtimeLocked(ref.CompanyID, boardIDs, nodeIDs); err != nil {
+				return EditorJSONCommit{}, err
+			}
+		}
 	}
 	r.editorJSONOperations[key] = append(r.editorJSONOperations[key], memoryEditorJSONOperation{
 		OperationID: input.OperationID, ClientID: input.ClientID, BaseRevision: input.BaseRevision,

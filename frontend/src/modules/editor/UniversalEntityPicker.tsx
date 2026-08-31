@@ -139,11 +139,11 @@ const categoryOptions: Array<{ type: UniversalEntityPickerEntityType; label: str
   { type: "project", label: "Projects" },
   { type: "entity", label: "Entities" },
   { type: "email_message", label: "Emails" },
-  { type: "huddle_logic_gate", label: "Huddles" },
+  { type: "huddle_logic_gate", label: "Huddle Boards" },
 ];
 
 function pickerEntityTypeLabel(type: UniversalEntityPickerEntityType): string {
-  return type === "huddle_logic_gate" ? "Huddle Process" : editorEntityTypeLabel(type);
+  return type === "huddle_logic_gate" ? "Huddle Board" : editorEntityTypeLabel(type);
 }
 
 export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (props) => {

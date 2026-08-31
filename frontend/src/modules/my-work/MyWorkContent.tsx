@@ -1327,7 +1327,7 @@ function renderMyWorkDisplayEntry<Item, Field extends string>(
     return (
       <button
         type="button"
-        aria-label={`Open Huddle process ${entry.label}`}
+        aria-label={`Open Huddle Board ${entry.label}`}
         data-my-work-group={entry.groupID}
         data-my-work-group-field={entry.field}
         data-my-work-group-key={entry.groupKey}

@@ -170,7 +170,7 @@ func TestMemoryHuddleNodeWorkspaceCreateReadChatRevisionAndDelete(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(workspace.Textboxes) != 3 || workspace.Textboxes[0].TextboxID != defaultTextbox.TextboxID || workspace.Textboxes[1].TextboxID != firstTextboxID || workspace.Textboxes[2].TextboxID != secondTextboxID {
+	if len(workspace.Textboxes) != 3 || workspace.Textboxes[0].TextboxID != secondTextboxID || workspace.Textboxes[1].TextboxID != firstTextboxID || workspace.Textboxes[2].TextboxID != defaultTextbox.TextboxID {
 		t.Fatalf("ordered workspace textboxes=%+v", workspace.Textboxes)
 	}
 	if len(workspace.Chats) != 2 {

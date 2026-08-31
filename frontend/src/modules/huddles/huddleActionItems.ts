@@ -3,6 +3,8 @@ import type { ActionItemSource, Entity, EntityField } from "../entities/entities
 import type { UniversalGroupValue, UniversalGroupingSetting } from "../grouping/universalGrouping.js";
 import type { MyWorkActionItem, MyWorkActionItemDisplayFieldID } from "../my-work/myWorkApi.js";
 import { actionItemGroupingValues as myWorkActionItemGroupingValues } from "../my-work/myWorkGrouping.js";
+import { normalizeNodeDueDateDraft } from "../editor/editorDates.js";
+import { getUniversalStatusGroupValue } from "../grouping/universalStatusGrouping.js";
 
 export const EVENT_HUDDLE_ACTION_ITEMS_CHANGED = "mangorts:huddle-action-items-changed";
 export type HuddleActionItemsChangedDetail = {
@@ -53,11 +55,13 @@ export type HuddleActionItemScope =
 
 export const HUDDLE_ACTION_ITEM_SAVED_VIEW_SURFACES = {
   huddle_logic_gate: "huddle_logic_gate_action_items",
-  huddle_node: "huddle_node_action_items",
+  huddle_node_created: "huddle_node_created_action_items",
+  huddle_node_due: "huddle_node_due_action_items",
 } as const;
+export type HuddleActionItemView = keyof typeof HUDDLE_ACTION_ITEM_SAVED_VIEW_SURFACES;
 export type HuddleActionItemSavedViewSurface = (
   typeof HUDDLE_ACTION_ITEM_SAVED_VIEW_SURFACES
-)[HuddleActionItemScope["resourceType"]];
+)[HuddleActionItemView];
 
 export type HuddleActionItem = Entity & { source?: ActionItemSource };
 export type HuddleActionItemSavedView = {
@@ -91,26 +95,50 @@ const DISPLAY_FIELD_SET = new Set<HuddleActionItemDisplayFieldID>(
 
 export async function listHuddleActionItems(
   requestJSON: HuddleActionItemsRequest,
-  input: { companyID: string; scope: HuddleActionItemScope; signal?: AbortSignal },
+  input: {
+    companyID: string;
+    scope: HuddleActionItemScope;
+    view: HuddleActionItemView;
+    viewingDate?: string;
+    signal?: AbortSignal;
+  },
 ): Promise<HuddleActionItem[]> {
   const params = new URLSearchParams({ company_id: input.companyID });
-  params.set(
-    input.scope.resourceType === "huddle_node" ? "huddle_node_id" : "huddle_logic_gate_id",
-    input.scope.resourceID,
-  );
-  const response = await requestJSON<{ action_items?: HuddleActionItem[] }>(`/v1/action-items?${params.toString()}`, {
+  let path: string;
+  if (input.view === "huddle_logic_gate") {
+    if (input.scope.resourceType !== "huddle_logic_gate") throw new Error("huddle_action_item_view_scope_mismatch");
+    params.set("huddle_logic_gate_id", input.scope.resourceID);
+    path = `/v1/action-items?${params.toString()}`;
+  } else {
+    if (input.scope.resourceType !== "huddle_node") throw new Error("huddle_action_item_view_scope_mismatch");
+    params.set("scope", input.view === "huddle_node_created" ? "created" : "due");
+    if (input.view === "huddle_node_due") {
+      const viewingDate = normalizeNodeDueDateDraft(input.viewingDate ?? "");
+      if (!viewingDate) throw new Error("huddle_action_item_viewing_date_required");
+      params.set("viewing_date", viewingDate);
+    }
+    path = `/v1/huddle-nodes/${encodeURIComponent(input.scope.resourceID.trim())}/action-items?${params.toString()}`;
+  }
+  const response = await requestJSON<{ action_items?: HuddleActionItem[] }>(path, {
     cache: "no-store",
     signal: input.signal,
   });
-  return response.action_items ?? [];
+  const items = response.action_items ?? [];
+  if (input.view === "huddle_node_created") {
+    return items.filter((item) => huddleActionItemWasCreatedInNode(item, input.scope.resourceID));
+  }
+  if (input.view === "huddle_node_due") {
+    return filterHuddleNodeDueActionItems(items, input.viewingDate ?? "");
+  }
+  return items;
 }
 
 export async function fetchHuddleActionItemSavedView(
   requestJSON: HuddleActionItemsRequest,
   companyID: string,
-  scopeType: HuddleActionItemScope["resourceType"],
+  view: HuddleActionItemView,
 ): Promise<HuddleActionItemSavedView | null> {
-  const surface = HUDDLE_ACTION_ITEM_SAVED_VIEW_SURFACES[scopeType];
+  const surface = HUDDLE_ACTION_ITEM_SAVED_VIEW_SURFACES[view];
   const params = new URLSearchParams({ company_id: companyID.trim(), surface });
   const response = await requestJSON<{ saved_views?: HuddleActionItemSavedView[] }>(
     `/v1/saved-views?${params.toString()}`,
@@ -124,14 +152,19 @@ export async function saveHuddleActionItemSavedView(
   input: {
     companyID: string;
     userID: string;
-    scopeType: HuddleActionItemScope["resourceType"];
+    view: HuddleActionItemView;
     savedViewID: string;
     groupings: ReadonlyArray<HuddleActionItemGrouping>;
     orderings: ReadonlyArray<HuddleActionItemOrdering>;
     displayedFields: ReadonlyArray<HuddleActionItemDisplayFieldID>;
   },
 ): Promise<HuddleActionItemSavedView> {
-  const surface = HUDDLE_ACTION_ITEM_SAVED_VIEW_SURFACES[input.scopeType];
+  const surface = HUDDLE_ACTION_ITEM_SAVED_VIEW_SURFACES[input.view];
+  const name = input.view === "huddle_logic_gate"
+    ? "Huddle Board Action Items"
+    : input.view === "huddle_node_created"
+      ? "Created in this Huddle Node"
+      : "Due or Overdue Huddle Node Action Items";
   return requestJSON<HuddleActionItemSavedView>(`/v1/saved-views/${encodeURIComponent(input.savedViewID.trim())}`, {
     method: "PUT",
     json: {
@@ -140,12 +173,55 @@ export async function saveHuddleActionItemSavedView(
       surface,
       principal: "user",
       principal_id: input.userID.trim(),
-      name: input.scopeType === "huddle_node" ? "Huddle Node Action Items" : "Huddle Process Action Items",
+      name,
       groupings: input.groupings,
       settings: { ordering: input.orderings, displayed_fields: input.displayedFields },
       position: 1000,
     },
   });
+}
+
+export function huddleActionItemWasCreatedInNode(item: HuddleActionItem, huddleNodeID: string): boolean {
+  return item.source?.resource_type === "huddle_node"
+    && item.source.resource_id.trim() === huddleNodeID.trim();
+}
+
+export function filterHuddleNodeDueActionItems(
+  items: ReadonlyArray<HuddleActionItem>,
+  viewingDate: string,
+  excludedItemIDs: ReadonlySet<string> = new Set(),
+): HuddleActionItem[] {
+  const cutoff = normalizeNodeDueDateDraft(viewingDate);
+  if (!cutoff) return [];
+  return items.filter((item) => {
+    if (excludedItemIDs.has(item.entity_id)) return false;
+    const dueDate = normalizeNodeDueDateDraft(actionItemFieldString(item, "completion_due_date"));
+    if (!dueDate || dueDate > cutoff) return false;
+    return getUniversalStatusGroupValue(actionItemFieldString(item, "status")).key !== "done";
+  });
+}
+
+export function reconcileHuddleNodeViewingDate(
+  initializedNodeID: string,
+  currentViewingDate: string,
+  openNodeID: string,
+  persistedHuddleDate: string,
+): string {
+  if (initializedNodeID.trim() === openNodeID.trim()) return currentViewingDate;
+  return normalizeNodeDueDateDraft(persistedHuddleDate) ?? "";
+}
+
+export function huddleActionItemOrderingsForView(
+  view: HuddleActionItemView,
+  orderings: ReadonlyArray<HuddleActionItemOrdering>,
+): HuddleActionItemOrdering[] {
+  if (view !== "huddle_node_due") return orderings.map((ordering) => ({ ...ordering }));
+  return [
+    { field: "completion_due_date", direction: "asc" },
+    ...orderings
+      .filter((ordering) => ordering.field !== "completion_due_date")
+      .map((ordering) => ({ ...ordering })),
+  ];
 }
 
 export function normalizeHuddleActionItemPreferences(value: unknown): HuddleActionItemPreferences {

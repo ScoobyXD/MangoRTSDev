@@ -63,7 +63,7 @@ func processMapParentPointer(value string) *string {
 // plan as PostgreSQL. Nothing is mutated until every placement and translated
 // reparent trace has passed the shared coordinate checks.
 func (r *MemoryRepo) syncAutomaticMemoryProcessMapPlacementLocked(companyID, resourceType, resourceID string, parentID *string) (bool, error) {
-	parentValue := strings.TrimSpace(pointerString(parentID))
+	parentValue := strings.TrimSpace(pointerStringValue(parentID))
 	placements := make([]domain.ProcessMapPlacement, 0, len(r.processMapPlacements))
 	for _, placement := range r.processMapPlacements {
 		if placement.CompanyID == companyID {
@@ -154,7 +154,7 @@ func (r *MemoryRepo) deleteAutomaticMemoryProcessMapPlacementLocked(companyID, r
 
 func (r *MemoryRepo) syncMemoryProcessMapParentToExplorerLocked(companyID, resourceType, resourceID string, parentID *string, now time.Time) bool {
 	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
-	parentValue := pointerString(parentID)
+	parentValue := pointerStringValue(parentID)
 	childEntityID := resourceID
 	changed := false
 	position := 0
@@ -167,7 +167,7 @@ func (r *MemoryRepo) syncMemoryProcessMapParentToExplorerLocked(companyID, resou
 		}
 		position = folder.Position
 		created = folder.CreatedTimestamp
-		if pointerString(folder.ParentFolderID) != parentValue {
+		if pointerStringValue(folder.ParentFolderID) != parentValue {
 			folder.ParentFolderID = processMapParentPointer(parentValue)
 			folder.UpdatedTimestamp = now
 			r.folders[folderKey] = folder

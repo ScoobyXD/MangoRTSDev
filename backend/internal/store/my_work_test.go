@@ -638,7 +638,7 @@ func TestMemoryMyWorkProcessesRoleAndNestedProjectTeamRemainPermissionFiltered(t
 	if responsible.Processes == nil || responsible.Processes.Role != domain.RACIRoleResponsible || len(responsible.Processes.Items) != 1 || responsible.Processes.Items[0].LogicGateID != responsibleGate.LogicGateID {
 		t.Fatalf("responsible processes = %+v", responsible.Processes)
 	}
-	if counts := responsible.Processes.Items[0].StatusCounts; counts != (domain.RACITabStatusCounts{Request: 1, Pending: 1, InProgress: 1, Review: 1}) {
+	if counts := responsible.Processes.Items[0].StatusCounts; counts != (domain.MyWorkProcessStatusCounts{Request: 1, Pending: 1, InProgress: 1, Review: 1}) {
 		t.Fatalf("responsible process counts = %+v", counts)
 	}
 	accountable, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionProcesses, Role: domain.RACIRoleAccountable})
@@ -648,7 +648,7 @@ func TestMemoryMyWorkProcessesRoleAndNestedProjectTeamRemainPermissionFiltered(t
 	if accountable.Processes == nil || len(accountable.Processes.Items) != 1 || accountable.Processes.Items[0].LogicGateID != accountableGate.LogicGateID {
 		t.Fatalf("accountable processes = %+v", accountable.Processes)
 	}
-	if accountable.Processes.Items[0].StatusCounts != (domain.RACITabStatusCounts{}) {
+	if accountable.Processes.Items[0].StatusCounts != (domain.MyWorkProcessStatusCounts{}) {
 		t.Fatalf("empty accountable process counts = %+v", accountable.Processes.Items[0].StatusCounts)
 	}
 	projects, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionProjects})
@@ -913,7 +913,7 @@ func TestMemoryMyWorkSelectedSubjectProcessCountsExcludeViewerHiddenNodes(t *tes
 	if viewerResult.Processes == nil || len(viewerResult.Processes.Items) != 1 {
 		t.Fatalf("selected-subject viewer processes = %+v", viewerResult.Processes)
 	}
-	if counts := viewerResult.Processes.Items[0].StatusCounts; counts != (domain.RACITabStatusCounts{Pending: 1}) {
+	if counts := viewerResult.Processes.Items[0].StatusCounts; counts != (domain.MyWorkProcessStatusCounts{Pending: 1}) {
 		t.Fatalf("selected-subject viewer counts = %+v, want only visible Node", counts)
 	}
 	subjectResult, err := repo.GetMyWork(context.Background(), MyWorkQuery{
@@ -923,7 +923,7 @@ func TestMemoryMyWorkSelectedSubjectProcessCountsExcludeViewerHiddenNodes(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	if subjectResult.Processes == nil || len(subjectResult.Processes.Items) != 1 || subjectResult.Processes.Items[0].StatusCounts != (domain.RACITabStatusCounts{Pending: 1, Review: 1}) {
+	if subjectResult.Processes == nil || len(subjectResult.Processes.Items) != 1 || subjectResult.Processes.Items[0].StatusCounts != (domain.MyWorkProcessStatusCounts{Pending: 1, Review: 1}) {
 		t.Fatalf("selected subject's own counts = %+v, want both Nodes", subjectResult.Processes)
 	}
 }

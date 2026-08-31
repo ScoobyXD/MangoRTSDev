@@ -117,6 +117,9 @@ KB48 - Saved Logic Gate Kanban views persist the user's optional grouping stack 
 KB49 - The saved optional grouping stack from one Logic Gate must apply when the same user opens another Logic Gate Kanban board.
 KB50 - Another user in the same company can choose different optional Logic Gate Kanban groupings, Date Added enabled state, and Date Added sort direction without changing the first user's saved Logic Gate Kanban view row.
 KB51 - If a user has no Logic Gate Kanban saved view row, the board defaults to Priority ascending grouping with Date Added enabled descending (newest first) until the user changes grouping or Date Added sort settings.
+KB51A - The same generic `saved_views` authority also stores the three user-owned Huddle Action Item singleton surfaces: `huddle_logic_gate_action_items`, `huddle_node_created_action_items`, and `huddle_node_due_action_items`.
+KB51B - Each Huddle Action Item surface is one row per company and user across every Huddle resource of that surface, stores no resource ID, and validates its own allowed grouping, ordering, and displayed-field settings.
+KB51C - The obsolete `huddle_node_action_items` surface and rows are removed instead of being retained as a compatibility preference or copied to either new Huddle Node surface.
 
 ### Card Provenance Footer
 

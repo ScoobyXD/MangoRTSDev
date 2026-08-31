@@ -239,6 +239,26 @@ func (r *MemoryRepo) RestoreRecycleBinItems(companyID, deletedByUserID string, i
 	if err != nil {
 		return RecycleBinRestoreResult{}, err
 	}
+	boardSet := map[string]bool{}
+	for _, item := range items {
+		switch item.ObjectKind {
+		case EntityTypeHuddleLogicGate:
+			if _, exists := r.huddleLogicGates[key(companyID, item.ObjectID)]; exists {
+				boardSet[item.ObjectID] = true
+			}
+		case EntityTypeHuddleNode:
+			if node, exists := r.huddleNodes[key(companyID, item.ObjectID)]; exists {
+				boardSet[node.HuddleLogicGateID] = true
+			}
+		}
+	}
+	boardIDs := sortedMapKeys(boardSet)
+	if len(boardIDs) > 0 {
+		nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(companyID, boardSet)
+		if err := r.enqueueHuddleActionItemsRealtimeLocked(companyID, boardIDs, nodeIDs); err != nil {
+			return RecycleBinRestoreResult{}, err
+		}
+	}
 	for _, item := range items {
 		delete(r.recycleBin, key(companyID, item.RecycleBinItemID))
 	}

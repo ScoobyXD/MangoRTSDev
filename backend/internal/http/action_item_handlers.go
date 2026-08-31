@@ -73,25 +73,15 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		huddleNodeID := strings.TrimSpace(r.URL.Query().Get("huddle_node_id"))
 		huddleLogicGateID := strings.TrimSpace(r.URL.Query().Get("huddle_logic_gate_id"))
-		if (huddleNodeID == "") == (huddleLogicGateID == "") {
-			writeError(w, http.StatusBadRequest, "exactly_one_huddle_scope_required")
+		if huddleLogicGateID == "" || strings.TrimSpace(r.URL.Query().Get("huddle_node_id")) != "" {
+			writeError(w, http.StatusBadRequest, "huddle_logic_gate_scope_required")
 			return
 		}
-		var itemsErr error
-		var items []domain.Entity
-		if huddleNodeID != "" {
-			if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleNode, huddleNodeID, "huddle_node_not_found") {
-				return
-			}
-			items, itemsErr = s.repo.ListHuddleNodeActionItems(companyID, huddleNodeID)
-		} else {
-			if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleLogicGate, huddleLogicGateID, "huddle_logic_gate_not_found") {
-				return
-			}
-			items, itemsErr = s.repo.ListHuddleLogicGateActionItems(companyID, huddleLogicGateID)
+		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleLogicGate, huddleLogicGateID, "huddle_logic_gate_not_found") {
+			return
 		}
+		items, itemsErr := s.repo.ListHuddleLogicGateActionItems(companyID, huddleLogicGateID)
 		if itemsErr != nil {
 			writeEntityError(w, itemsErr, "failed_to_list_action_items")
 			return
@@ -105,6 +95,56 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
+}
+
+func (s *Server) handleHuddleNodeActionItems(w http.ResponseWriter, r *http.Request, huddleNodeID string, parts []string) bool {
+	if len(parts) != 2 || parts[1] != "action-items" {
+		return false
+	}
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return true
+	}
+	companyID := strings.TrimSpace(r.URL.Query().Get("company_id"))
+	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeHuddleNode, huddleNodeID, "huddle_node_not_found") {
+		return true
+	}
+	actor, ok := authenticatedActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return true
+	}
+	var items []domain.Entity
+	var err error
+	switch strings.TrimSpace(r.URL.Query().Get("scope")) {
+	case "created":
+		if strings.TrimSpace(r.URL.Query().Get("viewing_date")) != "" {
+			writeError(w, http.StatusBadRequest, "viewing_date_only_valid_for_due_scope")
+			return true
+		}
+		items, err = s.repo.ListHuddleNodeCreatedActionItems(companyID, huddleNodeID)
+	case "due":
+		viewingDate := strings.TrimSpace(r.URL.Query().Get("viewing_date"))
+		if viewingDate == "" {
+			writeError(w, http.StatusBadRequest, "viewing_date_required")
+			return true
+		}
+		items, err = s.repo.ListHuddleNodeDueActionItems(companyID, huddleNodeID, viewingDate)
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_huddle_node_action_item_scope")
+		return true
+	}
+	if err != nil {
+		writeHuddleError(w, err)
+		return true
+	}
+	views, err := s.huddleActionItemViews(companyID, actor.User.UserID, items)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_resolve_action_item_sources")
+		return true
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"action_items": views})
+	return true
 }
 
 func (s *Server) huddleActionItemViews(companyID, viewerUserID string, items []domain.Entity) ([]huddleActionItemView, error) {

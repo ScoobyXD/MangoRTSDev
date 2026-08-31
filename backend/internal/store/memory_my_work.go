@@ -377,13 +377,13 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 
 func (r *MemoryRepo) memoryMyWorkProcessesLocked(query MyWorkQuery, cursor myWorkCursor) domain.MyWorkProcessPage {
 	items := make([]domain.MyWorkProcess, 0)
-	countsByLogicGateID := map[string]domain.RACITabStatusCounts{}
+	countsByLogicGateID := map[string]domain.MyWorkProcessStatusCounts{}
 	for _, assignment := range r.nodeLogicGateAssignments {
 		if assignment.CompanyID != query.CompanyID || !r.userHasEffectiveAccessLocked(query.CompanyID, query.ViewerUserID, EntityTypeNode, assignment.NodeID, EntityPermissionEdit) {
 			continue
 		}
 		counts := countsByLogicGateID[assignment.LogicGateID]
-		addRACITabStatusCounts(&counts, raciTabCountsForStatus(assignment.StatusKey))
+		addMyWorkProcessStatusCounts(&counts, myWorkProcessCountsForStatus(assignment.StatusKey))
 		countsByLogicGateID[assignment.LogicGateID] = counts
 	}
 	for _, gate := range r.logicGates {
@@ -417,6 +417,28 @@ func (r *MemoryRepo) memoryMyWorkProcessesLocked(query MyWorkQuery, cursor myWor
 		page.NextCursor = encodeMyWorkCursor(query, myWorkCursor{Section: MyWorkSectionProcesses, Role: query.Role, Name: strings.ToLower(last.Name), ResourceID: last.LogicGateID})
 	}
 	return page
+}
+
+func addMyWorkProcessStatusCounts(target *domain.MyWorkProcessStatusCounts, source domain.MyWorkProcessStatusCounts) {
+	target.Request += source.Request
+	target.Pending += source.Pending
+	target.InProgress += source.InProgress
+	target.Review += source.Review
+}
+
+func myWorkProcessCountsForStatus(status string) domain.MyWorkProcessStatusCounts {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "request", "requested":
+		return domain.MyWorkProcessStatusCounts{Request: 1}
+	case "pending":
+		return domain.MyWorkProcessStatusCounts{Pending: 1}
+	case "in_progress", "in progress", "inprogress":
+		return domain.MyWorkProcessStatusCounts{InProgress: 1}
+	case "review":
+		return domain.MyWorkProcessStatusCounts{Review: 1}
+	default:
+		return domain.MyWorkProcessStatusCounts{}
+	}
 }
 
 func (r *MemoryRepo) memoryMyWorkProjectsLocked(query MyWorkQuery, cursor myWorkCursor) domain.MyWorkProjectPage {

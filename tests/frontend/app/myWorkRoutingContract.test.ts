@@ -2,20 +2,27 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-test("My Work is the first Tower row and Projects is immediately second", () => {
+test("sidebar orders Pinned, Huddle Boards, Tower, and Organization while Tower omits RACI trees", () => {
   const source = readFileSync("frontend/src/app/AppSidebarChrome.tsx", "utf8");
+  const pinnedStart = source.indexOf("<AppSidebarPinnedSection");
+  const huddleBoardsStart = source.indexOf("<HuddleExplorerSection", pinnedStart);
   const towerStart = source.indexOf('aria-label="Tower"');
+  const organizationStart = source.indexOf('aria-label="Organization"');
+  const hiddenSectionStart = source.indexOf("{!explorerSearchActive && (");
+  const hiddenSectionEnd = source.indexOf("</>", towerStart);
+  assert.ok(pinnedStart >= 0 && huddleBoardsStart > pinnedStart && towerStart > huddleBoardsStart && organizationStart > towerStart);
+  assert.ok(hiddenSectionStart >= 0 && hiddenSectionEnd > hiddenSectionStart);
+  assert.ok(pinnedStart > hiddenSectionStart && towerStart < hiddenSectionEnd, "Pinned, Huddle Boards, and Tower stay hidden while Explorer search is active");
   const towerEnd = source.indexOf("</section>", towerStart);
   assert.ok(towerStart >= 0 && towerEnd > towerStart);
   const tower = source.slice(towerStart, towerEnd);
   const myWork = tower.indexOf('label="My Work"');
   const projects = tower.indexOf('label="Projects"');
-  const raciTabs = tower.indexOf("<AppSidebarRACITabsSection");
   const processMap = tower.indexOf('label="Process Map"');
   assert.ok(myWork >= 0);
   assert.ok(projects > myWork);
-  assert.ok(raciTabs > projects);
-  assert.ok(processMap > raciTabs);
+  assert.ok(processMap > projects);
+  assert.doesNotMatch(source, /AppSidebarRACITabsSection|raci-tabs:company/);
   assert.match(tower, /<AppSidebarButton\s+label="My Work"[\s\S]*?icon=\{<HeaderMyWorkIcon color="#2563eb" \/>\}[\s\S]*?elevated[\s\S]*?onClick=\{\(\) => onPageSelect\("my-work"\)\}/);
   assert.match(tower, /<AppSidebarElevatedActionButton\s+label="Projects"[\s\S]*?icon=\{<HeaderProjectManagementIcon color="#3b82f6" \/>\}[\s\S]*?actionLabel="Edit Projects view"[\s\S]*?onAction=\{requestProjectViewSettings\}/);
   assert.doesNotMatch(tower, /HomeBuiltInViewSidebarRow/);

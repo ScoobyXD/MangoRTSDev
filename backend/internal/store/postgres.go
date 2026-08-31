@@ -31,7 +31,7 @@ var requiredApplicationTables = []string{
 	"project_textboxes", "project_textbox_chats", "logic_gate_textboxes", "logic_gate_textboxes_history",
 	"scorecards",
 	"entity_types", "entity_folders", "entity_field_types", "entities", "entity_fields",
-	"entity_relationships", "huddle_node_textboxes", "huddle_node_textbox_chats",
+	"entity_relationships", "huddle_nodes", "huddle_node_textboxes", "huddle_node_textbox_chats",
 }
 
 func NewPostgresRepo(db *sql.DB) *PostgresRepo {
@@ -89,6 +89,7 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		{"scorecards", "cost_rating"},
 		{"scorecards", "delivery_rating"},
 		{"scorecards", "rated_created_timestamp"},
+		{"huddle_nodes", "huddle_date"},
 	}
 	for _, required := range requiredColumns {
 		var exists bool
@@ -125,6 +126,18 @@ select to_regclass('public.entity_field_assignments') is not null
 	}
 	if obsoleteEntityFieldAssignmentStorage {
 		return fmt.Errorf("application schema is not ready: obsolete entity field assignment table remains")
+	}
+	var obsoleteRACITabsStorage bool
+	if err := r.db.QueryRow(`
+select to_regclass('public.raci_tabs_items') is not null
+    or to_regclass('public.raci_tabs_folders') is not null
+    or to_regprocedure('public.mangorts_sync_raci_tabs_logic_gate(uuid,uuid)') is not null
+    or to_regprocedure('public.mangorts_raci_tabs_policy_changed()') is not null
+`).Scan(&obsoleteRACITabsStorage); err != nil {
+		return err
+	}
+	if obsoleteRACITabsStorage {
+		return fmt.Errorf("application schema is not ready: obsolete RACI Tabs projection remains")
 	}
 	return nil
 }

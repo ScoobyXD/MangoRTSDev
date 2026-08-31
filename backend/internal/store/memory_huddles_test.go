@@ -161,7 +161,7 @@ func TestMemoryHuddleLifecycleKeepsTypedIdentityAndRecycleRestore(t *testing.T) 
 		t.Fatalf("restored node = %+v, err=%v", restored, err)
 	}
 	workspace, err := repo.GetHuddleNodeWorkspace(companyID, node.HuddleNodeID)
-	if err != nil || len(workspace.Textboxes) != 2 || workspace.Textboxes[1].TextboxID != textbox.TextboxID || len(workspace.Chats) != 1 || workspace.Chats[0].Message != "Follow up" {
+	if err != nil || len(workspace.Textboxes) != 2 || workspace.Textboxes[0].TextboxID != textbox.TextboxID || len(workspace.Chats) != 1 || workspace.Chats[0].Message != "Follow up" {
 		t.Fatalf("restored Huddle Node workspace = %+v, err=%v", workspace, err)
 	}
 	tree, err = repo.ListHuddleExplorer(companyID)
@@ -171,6 +171,105 @@ func TestMemoryHuddleLifecycleKeepsTypedIdentityAndRecycleRestore(t *testing.T) 
 	restoredPolicy, err := repo.GetResourceRACIPolicy(companyID, EntityTypeHuddleNode, node.HuddleNodeID)
 	if err != nil || len(restoredPolicy.RACIAssignments) != 1 || restoredPolicy.RACIAssignments[0].Role != domain.RACIRoleAccountable {
 		t.Fatalf("restored Huddle Node RACI = %+v, err=%v", restoredPolicy, err)
+	}
+}
+
+func TestMemoryHuddleNodeCreateUsesLosAngelesBusinessDateAndUpdateIsStrict(t *testing.T) {
+	repo := NewMemoryRepo()
+	const companyID = "11111111-1111-4111-8111-111111111111"
+	const boardID = "22222222-2222-4222-8222-222222222222"
+	repo.huddleLogicGates[key(companyID, boardID)] = domain.HuddleLogicGate{
+		CompanyID: companyID, HuddleLogicGateID: boardID, Header: "Daily",
+	}
+
+	beforeMidnight, err := repo.CreateHuddleNode(HuddleCreateInput{
+		CompanyID: companyID, OwnerID: boardID, Name: "Before midnight",
+		Now: time.Date(2026, time.January, 1, 7, 59, 59, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if beforeMidnight.HuddleDate != "2025-12-31" {
+		t.Fatalf("before-midnight Huddle date = %q, want 2025-12-31", beforeMidnight.HuddleDate)
+	}
+
+	atMidnight, err := repo.CreateHuddleNode(HuddleCreateInput{
+		CompanyID: companyID, OwnerID: boardID, Name: "At midnight",
+		Now: time.Date(2026, time.January, 1, 8, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if atMidnight.HuddleDate != "2026-01-01" {
+		t.Fatalf("at-midnight Huddle date = %q, want 2026-01-01", atMidnight.HuddleDate)
+	}
+
+	changedDate := "2026-02-03"
+	updated, err := repo.UpdateHuddleNode(HuddleUpdateInput{
+		CompanyID: companyID, ResourceID: atMidnight.HuddleNodeID, HuddleDate: &changedDate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.HuddleDate != changedDate || updated.Name != atMidnight.Name {
+		t.Fatalf("date-only update = %+v", updated)
+	}
+	invalidDate := "2026-2-3"
+	if _, err := repo.UpdateHuddleNode(HuddleUpdateInput{
+		CompanyID: companyID, ResourceID: atMidnight.HuddleNodeID, HuddleDate: &invalidDate,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("non-ISO Huddle date error = %v, want ErrInvalid", err)
+	}
+	yearZero := "0000-01-01"
+	if _, err := repo.UpdateHuddleNode(HuddleUpdateInput{
+		CompanyID: companyID, ResourceID: atMidnight.HuddleNodeID, HuddleDate: &yearZero,
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("year-zero Huddle date error = %v, want ErrInvalid", err)
+	}
+	stored, err := repo.GetHuddleNode(companyID, atMidnight.HuddleNodeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.HuddleDate != changedDate {
+		t.Fatalf("invalid update changed Huddle date to %q", stored.HuddleDate)
+	}
+}
+
+func TestHuddleNodeDateMigrationBackfillsAndRequiresLosAngelesDate(t *testing.T) {
+	migration, err := os.ReadFile("../../db/migrations/20260831_huddle_node_dates_and_action_item_views.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizedMigration := strings.ToLower(strings.Join(strings.Fields(string(migration)), " "))
+	for _, required := range []string{
+		"add column if not exists huddle_date date",
+		"set huddle_date=(created_timestamp at time zone 'america/los_angeles')::date",
+		"update recycle_bin_items item set restore_payload=jsonb_set(",
+		"jsonb_array_elements(item.restore_payload->'huddle_nodes') with ordinality",
+		"to_jsonb(((node->>'created_timestamp')::timestamptz at time zone 'america/los_angeles')::date)",
+		"else node",
+		"alter column huddle_date set default ((statement_timestamp() at time zone 'america/los_angeles')::date)",
+		"alter column huddle_date set not null",
+	} {
+		if !strings.Contains(normalizedMigration, required) {
+			t.Fatalf("Huddle date migration missing %q", required)
+		}
+	}
+
+	canonical, err := os.ReadFile("../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	normalizedCanonical := strings.ToLower(strings.Join(strings.Fields(string(canonical)), " "))
+	if !strings.Contains(normalizedCanonical, "huddle_date date default ((statement_timestamp() at time zone 'america/los_angeles'::text))::date not null") {
+		t.Fatal("canonical Huddle Node schema does not require the Los Angeles business-date default")
+	}
+	postgresSource, err := os.ReadFile("postgres_huddles.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(postgresSource), "coalesce(nullif($4::text,'')::date,huddle_date)") {
+		t.Fatal("Postgres Huddle Node name-only update does not preserve its date")
 	}
 }
 

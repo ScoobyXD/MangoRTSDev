@@ -6,7 +6,6 @@ import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMe
 import { AppModalPortal } from "./AppModalPortal";
 import FrameRightClickMenu from "./framerightclickmenu";
 import { AppSidebarPinnedSection } from "./AppSidebarPinnedSection";
-import { AppSidebarRACITabsSection } from "./AppSidebarRACITabsSection";
 import { HeaderAccountManagerIcon, HeaderExplorerIcon, HeaderMapIcon, HeaderMyWorkIcon, HeaderProjectManagementIcon, HeaderSharedTriageIcon, HeaderTeamsIcon, HeaderTriageIcon, HeaderUpdatesIcon } from "../icons/index.js";
 import { MangoWordmark } from "../icons/index.js";
 import { UI_THEME } from "./frameLayoutTypes";
@@ -1371,6 +1370,8 @@ export function AppSidebar({
         onPinDragLeave={onPinDragLeave}
       />
 
+      <HuddleExplorerSection apiBase={apiBase} companyID={companyID} currentUserID={currentUserID} />
+
       <section style={appSidebarNavSectionStyle} aria-label="Tower">
         <AppSidebarSectionHeader label="Tower" />
         <AppSidebarButton
@@ -1391,19 +1392,6 @@ export function AppSidebar({
           onPreload={preloadProjectManagementSurface}
           actionLabel="Edit Projects view"
           onAction={requestProjectViewSettings}
-        />
-        <AppSidebarRACITabsSection
-          apiBase={apiBase}
-          companyID={companyID}
-          onOpenLogicGate={(logicGateID, name) => onPinOpen({
-            pinID: "",
-            id: logicGateID,
-            kind: "logic_gate",
-            parentFolderID: "",
-            name,
-            position: 0,
-            createdTimestamp: "",
-          })}
         />
         <AppSidebarButton
           label="Process Map"
@@ -1429,10 +1417,6 @@ export function AppSidebar({
 
         </>
       )}
-
-      <div hidden={explorerSearchActive}>
-        <HuddleExplorerSection apiBase={apiBase} companyID={companyID} currentUserID={currentUserID} />
-      </div>
 
       {!explorerSearchActive && (
         <>

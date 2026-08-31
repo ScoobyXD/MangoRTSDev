@@ -160,7 +160,7 @@ test("breadcrumb fetches on mount, exposes the full accessible path, and uses ex
   }
 });
 
-test("Huddle breadcrumb root, folder, and owner Process are clickable", async () => {
+test("Huddle breadcrumb root, folder, and owner Huddle Board are clickable", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
   const restores: Restore[] = [];
   for (const name of ["window", "document", "navigator", "self", "Node", "Element", "HTMLElement", "HTMLButtonElement", "Event", "EventTarget", "MouseEvent", "CustomEvent"] as const) {
@@ -344,6 +344,199 @@ test("matching Huddle breadcrumb navigation clears active Explorer search withou
   }
 });
 
+test("Huddle Boards tree uses context menus and canonical root/folder reparent commands", async () => {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
+  const restores: Restore[] = [];
+  for (const name of [
+    "window", "document", "navigator", "self", "Node", "Element", "HTMLElement", "HTMLButtonElement",
+    "Event", "EventTarget", "MouseEvent", "KeyboardEvent", "CustomEvent",
+  ] as const) {
+    const value = name === "window" || name === "self" ? dom.window : name === "document" ? dom.window.document : (dom.window as unknown as Record<string, unknown>)[name];
+    installGlobal(name, value, restores);
+  }
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  const scrollDescriptor = Object.getOwnPropertyDescriptor(dom.window.HTMLElement.prototype, "scrollIntoView");
+  Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => undefined });
+  restores.push(() => {
+    if (scrollDescriptor) Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", scrollDescriptor);
+    else delete (dom.window.HTMLElement.prototype as unknown as Record<string, unknown>).scrollIntoView;
+  });
+
+  const calls: Array<{ path: string; method: string; json?: Record<string, unknown> }> = [];
+  const tree = {
+    folders: [
+      { company_id: "company-1", folder_id: "folder-a", parent_folder_id: null, name: "Operations" },
+      { company_id: "company-1", folder_id: "folder-b", parent_folder_id: "folder-a", name: "Daily" },
+      { company_id: "company-1", folder_id: "folder-empty", parent_folder_id: null, name: "Empty" },
+    ],
+    items: [{ company_id: "company-1", item_id: "item-board", parent_folder_id: null, resource_type: "huddle_logic_gate", resource_id: "board-1", name: "Weekly Board" }],
+  };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input, init) => {
+    const url = new URL(typeof input === "string" ? input : input.url);
+    const method = (init?.method ?? "GET").toUpperCase();
+    const body = typeof init?.body === "string" && init.body ? JSON.parse(init.body) as Record<string, unknown> : undefined;
+    calls.push({ path: url.pathname, method, json: body });
+    const payload = method === "GET" && url.pathname === "/v1/huddle-explorer" ? tree : { status: "ok" };
+    return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const openCalls: Array<[string | URL | undefined, string | undefined, string | undefined]> = [];
+  const openDescriptor = Object.getOwnPropertyDescriptor(dom.window, "open");
+  Object.defineProperty(dom.window, "open", {
+    configurable: true,
+    value: (url?: string | URL, target?: string, features?: string) => {
+      openCalls.push([url, target, features]);
+      return null;
+    },
+  });
+
+  const dataTransfer = () => {
+    const values = new Map<string, string>();
+    return {
+      effectAllowed: "uninitialized",
+      dropEffect: "none",
+      getData: (type: string) => values.get(type) ?? "",
+      setData: (type: string, value: string) => { values.set(type, value); },
+    } as unknown as DataTransfer;
+  };
+  const dispatchDrag = (target: Element, type: string, transfer: DataTransfer) => {
+    const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "dataTransfer", { configurable: true, value: transfer });
+    target.dispatchEvent(event);
+  };
+
+  const container = dom.window.document.getElementById("root");
+  assert.ok(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(<HuddleExplorerSection apiBase="https://api.test" companyID="company-1" currentUserID="user-1" />);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+
+    const section = container.querySelector<HTMLElement>('section[aria-label="Huddle Boards"]');
+    assert.ok(section);
+    assert.match(section.textContent ?? "", /Huddle Boards/);
+    assert.match(section.textContent ?? "", /\+ Board/);
+    assert.match(section.textContent ?? "", /\+ Folder/);
+    assert.equal(section.querySelector("select"), null, "row Root selectors are removed");
+    const boardRow = section.querySelector<HTMLElement>('[data-huddle-explorer-row="huddle_logic_gate"]');
+    const folderARow = section.querySelector<HTMLElement>('[data-huddle-explorer-row="folder"]');
+    assert.ok(boardRow && folderARow);
+    assert.equal(boardRow.querySelectorAll(":scope > button").length, 1, "a Board row has no inline remove or edit buttons");
+    assert.equal(folderARow.querySelectorAll(":scope > button").length, 2, "a folder row keeps only disclosure and title controls");
+
+    await act(async () => {
+      boardRow.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }));
+    });
+    let boardMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Huddle Board actions"]');
+    assert.ok(boardMenu);
+    assert.deepEqual(Array.from(boardMenu.querySelectorAll("button")).map((button) => button.textContent?.trim()), [
+      "Open in new browser tab", "Rename", "Remove from Huddle Boards",
+    ]);
+    await act(async () => {
+      Array.from(boardMenu.querySelectorAll("button")).find((button) => button.textContent?.includes("Open in new"))?.click();
+    });
+    assert.deepEqual(openCalls[0], ["/huddle-logic-gates/board-1", "_blank", "noopener,noreferrer"]);
+
+    await act(async () => {
+      boardRow.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }));
+    });
+    boardMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Huddle Board actions"]');
+    await act(async () => {
+      Array.from(boardMenu?.querySelectorAll("button") ?? []).find((button) => button.textContent?.includes("Remove from"))?.click();
+    });
+    const confirmation = dom.window.document.querySelector<HTMLElement>('[data-mango-confirm-action-menu="true"]');
+    assert.ok(confirmation);
+    assert.match(confirmation.textContent ?? "", /will not be deleted/);
+    await act(async () => {
+      Array.from(confirmation.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Remove")?.click();
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+    assert.ok(calls.some((call) => call.method === "DELETE" && call.path === "/v1/huddle-explorer/items/item-board"), "Board removal deletes only the Explorer placement endpoint");
+    assert.equal(calls.some((call) => call.method === "DELETE" && call.path === "/v1/huddle-logic-gates/board-1"), false);
+
+    const emptyFolderRow = Array.from(section.querySelectorAll<HTMLElement>('[data-huddle-explorer-row="folder"]'))
+      .find((row) => row.textContent?.includes("Empty"));
+    assert.ok(emptyFolderRow);
+    await act(async () => {
+      emptyFolderRow.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 55, clientY: 65 }));
+    });
+    const folderMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Huddle Board folder actions"]');
+    assert.ok(folderMenu);
+    assert.deepEqual(Array.from(folderMenu.querySelectorAll("button")).map((button) => button.textContent?.trim()), [
+      "Create folder inside", "Rename", "Delete empty folder",
+    ]);
+    const emptyFolderDelete = Array.from(folderMenu.querySelectorAll("button")).find((button) => button.textContent?.trim() === "Delete empty folder");
+    assert.equal(emptyFolderDelete?.disabled, false, "an empty folder can be recycled");
+    await act(async () => {
+      folderARow.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 60, clientY: 70 }));
+    });
+    const nonEmptyFolderMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Huddle Board folder actions"]');
+    const nonEmptyFolderDelete = Array.from(nonEmptyFolderMenu?.querySelectorAll("button") ?? []).find((button) => button.textContent?.trim() === "Delete empty folder");
+    assert.equal(nonEmptyFolderDelete?.disabled, true, "a folder with contents cannot be recycled");
+
+    const boardTransfer = dataTransfer();
+    await act(async () => {
+      dispatchDrag(boardRow, "dragstart", boardTransfer);
+      dispatchDrag(folderARow, "dragover", boardTransfer);
+      dispatchDrag(folderARow, "drop", boardTransfer);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+    assert.ok(calls.some((call) => call.method === "PUT" && call.path === "/v1/huddle-explorer/items/item-board" && call.json?.parent_folder_id === "folder-a"));
+
+    let folderBRow = Array.from(section.querySelectorAll<HTMLElement>('[data-huddle-explorer-row="folder"]'))
+      .find((row) => row.textContent?.includes("Daily"));
+    if (!folderBRow) {
+      await act(async () => {
+        section.querySelector<HTMLButtonElement>('[data-huddle-folder-id="folder-a"]')?.click();
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+      });
+      folderBRow = Array.from(section.querySelectorAll<HTMLElement>('[data-huddle-explorer-row="folder"]'))
+        .find((row) => row.textContent?.includes("Daily"));
+    }
+    assert.ok(folderBRow);
+    const folderBTransfer = dataTransfer();
+    await act(async () => {
+      dispatchDrag(folderBRow, "dragstart", folderBTransfer);
+    });
+    const rootDropTarget = section.querySelector<HTMLElement>('[data-huddle-root-drop-target="true"]');
+    assert.ok(rootDropTarget, "dragging reveals a deliberate root target");
+    await act(async () => {
+      dispatchDrag(rootDropTarget, "dragover", folderBTransfer);
+      dispatchDrag(rootDropTarget, "drop", folderBTransfer);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+    assert.ok(calls.some((call) => call.method === "PUT" && call.path === "/v1/huddle-explorer/folders/folder-b" && call.json?.parent_folder_id === ""), "the explicit root target moves a folder to root");
+
+    const folderAPutCount = calls.filter((call) => call.method === "PUT" && call.path === "/v1/huddle-explorer/folders/folder-a").length;
+    const boardDropTransfer = dataTransfer();
+    await act(async () => {
+      dispatchDrag(folderARow, "dragstart", boardDropTransfer);
+      dispatchDrag(boardRow, "dragover", boardDropTransfer);
+      dispatchDrag(boardRow, "drop", boardDropTransfer);
+      dispatchDrag(folderARow, "dragend", boardDropTransfer);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+    assert.equal(calls.filter((call) => call.method === "PUT" && call.path === "/v1/huddle-explorer/folders/folder-a").length, folderAPutCount, "a drop on a Board row does not bubble into a root move");
+
+    const folderATransfer = dataTransfer();
+    await act(async () => {
+      dispatchDrag(folderARow, "dragstart", folderATransfer);
+      dispatchDrag(folderBRow, "dragover", folderATransfer);
+      dispatchDrag(folderBRow, "drop", folderATransfer);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+    assert.equal(calls.filter((call) => call.method === "PUT" && call.path === "/v1/huddle-explorer/folders/folder-a").length, folderAPutCount, "a folder cannot be dropped into its descendant");
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    if (openDescriptor) Object.defineProperty(dom.window, "open", openDescriptor);
+    restores.reverse().forEach((restore) => restore());
+    dom.window.close();
+  }
+});
+
 test("title headers keep editable titles separate and use existing entity icons", () => {
   const linkedPanels = source("frontend/src/modules/editor/EditorLinkedDocumentPanels.tsx");
   const editor = source("frontend/src/modules/editor/EditorContent.tsx");
@@ -351,6 +544,7 @@ test("title headers keep editable titles separate and use existing entity icons"
   const huddle = source("frontend/src/modules/huddles/HuddleResourceSurface.tsx");
   const huddleExplorer = source("frontend/src/modules/huddles/HuddleExplorerSection.tsx");
   const sidebar = source("frontend/src/app/AppSidebarChrome.tsx");
+  const recycleBin = source("frontend/src/pages/recycle-bin/RecycleBinPage.tsx");
   const homePopups = source("frontend/src/pages/home/HomeParts.tsx");
   const updates = source("frontend/src/pages/home/UpdatesView.tsx");
   const kanbanOverlays = source("frontend/src/modules/kanban/KanbanOverlays.tsx");
@@ -367,10 +561,12 @@ test("title headers keep editable titles separate and use existing entity icons"
 
   assert.match(huddle, /<HierarchyBreadcrumb[\s\S]*kind="huddle_explorer"/);
   assert.match(huddle, /<HuddleResourceIcon type=\{resource\.resourceType\}/);
-  assert.doesNotMatch(huddle, /\{isGate \? "Huddle Process:" : "Huddle Node:"\}/);
+  assert.doesNotMatch(huddle, /Huddle Process/);
   assert.match(huddle, /\[isGate \? "header" : "name"\]: clean/, "Huddle title persistence remains on its own source field");
+  assert.match(recycleBin, /kind === "huddle_logic_gate" \|\| kind === "huddle_explorer_item"[\s\S]*<HuddleResourceIcon type="huddle_logic_gate"/);
+  assert.match(recycleBin, /kind === "huddle_node"[\s\S]*<HuddleResourceIcon type="huddle_node"/);
 
-  assert.match(sidebar, /<div hidden=\{explorerSearchActive\}>\s*<HuddleExplorerSection/);
+  assert.match(sidebar, /\{!explorerSearchActive && \([\s\S]*<AppSidebarPinnedSection[\s\S]*<HuddleExplorerSection[\s\S]*aria-label="Tower"/);
   assert.match(sidebar, /useExplorerSearchQuery\(companyID\)/);
   assert.match(sidebar, /onBeforeHierarchyNavigate=\{onHierarchyNavigate \?\? onClose\}/);
   assert.match(homePopups, /onBeforeHierarchyNavigate=\{onClose\}/);

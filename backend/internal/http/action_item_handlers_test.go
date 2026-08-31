@@ -39,10 +39,6 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondNode, err := repo.CreateHuddleNode(store.HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: process.HuddleLogicGateID, Name: "Second", ActorID: user.UserID})
-	if err != nil {
-		t.Fatal(err)
-	}
 	handler := NewServer(repo).Routes()
 
 	createBody, _ := json.Marshal(map[string]any{
@@ -64,7 +60,7 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 		t.Fatalf("created action item=%+v", created.ActionItem)
 	}
 
-	listRequest := httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&huddle_node_id="+secondNode.HuddleNodeID, nil)
+	listRequest := httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&huddle_logic_gate_id="+process.HuddleLogicGateID, nil)
 	processListRequest := httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&huddle_logic_gate_id="+process.HuddleLogicGateID, nil)
 	listResponse := httptest.NewRecorder()
 	handler.ServeHTTP(listResponse, requestWithActorForTest(listRequest, user, company.CompanyID))
@@ -149,8 +145,8 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 	retiredSyncBody, _ := json.Marshal(map[string]any{"company_id": company.CompanyID, "action_item_ids": []string{created.ActionItem.EntityID}})
 	retiredSyncResponse := httptest.NewRecorder()
 	handler.ServeHTTP(retiredSyncResponse, requestWithActorForTest(httptest.NewRequest(http.MethodPut, "/v1/huddle-nodes/"+firstNode.HuddleNodeID+"/action-items", bytes.NewReader(retiredSyncBody)), user, company.CompanyID))
-	if retiredSyncResponse.Code != http.StatusNotFound {
-		t.Fatalf("retired sync endpoint status=%d body=%s, want 404", retiredSyncResponse.Code, retiredSyncResponse.Body.String())
+	if retiredSyncResponse.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("read-only Huddle Node Action Items endpoint status=%d body=%s, want 405", retiredSyncResponse.Code, retiredSyncResponse.Body.String())
 	}
 	unknownFieldBody, _ := json.Marshal(map[string]any{"company_id": company.CompanyID, "body_text": "No implicit attachment", "huddle_node_id": firstNode.HuddleNodeID})
 	unknownFieldResponse := httptest.NewRecorder()
@@ -170,6 +166,94 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 	handler.ServeHTTP(bothScopesResponse, requestWithActorForTest(bothScopesRequest, user, company.CompanyID))
 	if bothScopesResponse.Code != http.StatusBadRequest {
 		t.Fatalf("both Huddle scopes status=%d body=%s", bothScopesResponse.Code, bothScopesResponse.Body.String())
+	}
+}
+
+func TestHuddleNodeActionItemRoutesReturnCreatedAndDueSurfaces(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	const subject = "huddle-node-action-item-route-owner"
+	user, err := repo.UpsertAuthUser(subject, "huddle-route-owner@example.com", "Route Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	company, err := repo.CreateCompany("Huddle Node Action Item routes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(subject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := repo.CreateLogicGate(company.CompanyID, "Daily")
+	if err != nil {
+		t.Fatal(err)
+	}
+	board, err := repo.ConvertLogicGateToHuddle(company.CompanyID, gate.LogicGateID, user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := repo.CreateHuddleNode(store.HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: board.HuddleLogicGateID, Name: "Current", ActorID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sibling, err := repo.CreateHuddleNode(store.HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: board.HuddleLogicGateID, Name: "Sibling", ActorID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := repo.CreateActionItem(store.ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Created in current Node", CreatedByUserID: user.UserID,
+		SourceResourceType: store.EntityTypeHuddleNode, SourceResourceID: current.HuddleNodeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	due, err := repo.CreateActionItem(store.ActionItemInput{CompanyID: company.CompanyID, BodyText: "Due from sibling", CreatedByUserID: user.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range due.EntityFields {
+		if field.SystemKey != store.ActionItemCompletionDueDateSystemKey {
+			continue
+		}
+		if _, err := repo.UpdateEntityField(store.EntityFieldInput{
+			CompanyID: company.CompanyID, EntityID: due.EntityID, EntityFieldID: field.EntityFieldID,
+			Value: json.RawMessage(`"2026-08-31"`), ValueSet: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	textbox, err := repo.CreateHuddleNodeTextbox(store.HuddleNodeTextboxCreateInput{CompanyID: company.CompanyID, HuddleNodeID: sibling.HuddleNodeID, Title: "Sibling due"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitActionItemHTTPTestDocument(t, repo, store.EditorJSONDocumentRef{
+		CompanyID: company.CompanyID, ResourceType: store.EntityTypeHuddleNode,
+		ResourceID: sibling.HuddleNodeID, DocumentID: textbox.TextboxID,
+	}, user.UserID, 0, "route-due-reference", due.EntityID)
+
+	handler := NewServer(repo).Routes()
+	get := func(scopeQuery string) (int, []domain.Entity, string) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, "/v1/huddle-nodes/"+current.HuddleNodeID+"/action-items?company_id="+company.CompanyID+"&"+scopeQuery, nil)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, requestWithActorForTest(request, user, company.CompanyID))
+		var payload struct {
+			ActionItems []domain.Entity `json:"action_items"`
+		}
+		if response.Code == http.StatusOK {
+			if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return response.Code, payload.ActionItems, response.Body.String()
+	}
+	if status, items, body := get("scope=created"); status != http.StatusOK || len(items) != 1 || items[0].EntityID != created.EntityID {
+		t.Fatalf("created route status=%d items=%+v body=%s", status, items, body)
+	}
+	if status, items, body := get("scope=due&viewing_date=2026-08-31"); status != http.StatusOK || len(items) != 1 || items[0].EntityID != due.EntityID {
+		t.Fatalf("due route status=%d items=%+v body=%s", status, items, body)
+	}
+	if status, _, body := get("scope=due"); status != http.StatusBadRequest {
+		t.Fatalf("due route without viewing date status=%d body=%s", status, body)
 	}
 }
 
@@ -248,7 +332,7 @@ func TestHuddleActionItemListsProjectOnlyVisibleSources(t *testing.T) {
 		return payload.ActionItems, body
 	}
 
-	visibleItems, visibleBody := get("huddle_node_id=" + huddleNode.HuddleNodeID)
+	visibleItems, visibleBody := get("huddle_logic_gate_id=" + process.HuddleLogicGateID)
 	if len(visibleItems) != 1 || visibleItems[0].EntityID != actionItem.EntityID || visibleItems[0].Name != actionItem.Name {
 		t.Fatalf("visible Huddle Action Items = %+v", visibleItems)
 	}
@@ -351,7 +435,7 @@ func TestActionItemHandlersRequireExactHuddleNodeAccess(t *testing.T) {
 	}
 
 	listResponse := httptest.NewRecorder()
-	handler.ServeHTTP(listResponse, withActor(httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&huddle_node_id="+node.HuddleNodeID, nil)))
+	handler.ServeHTTP(listResponse, withActor(httptest.NewRequest(http.MethodGet, "/v1/huddle-nodes/"+node.HuddleNodeID+"/action-items?company_id="+company.CompanyID+"&scope=created", nil)))
 	if listResponse.Code != http.StatusNotFound {
 		t.Fatalf("restricted list status=%d body=%s, want 404", listResponse.Code, listResponse.Body.String())
 	}
@@ -360,7 +444,7 @@ func TestActionItemHandlersRequireExactHuddleNodeAccess(t *testing.T) {
 	if processListResponse.Code != http.StatusNotFound {
 		t.Fatalf("restricted Process list status=%d body=%s, want 404", processListResponse.Code, processListResponse.Body.String())
 	}
-	items, err := repo.ListHuddleNodeActionItems(company.CompanyID, node.HuddleNodeID)
+	items, err := repo.ListHuddleLogicGateActionItems(company.CompanyID, process.HuddleLogicGateID)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("restricted request created Action Items=%+v err=%v", items, err)
 	}

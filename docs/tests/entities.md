@@ -72,7 +72,7 @@ E34 - Yellow inline Action Item references pulse once every two seconds and red 
 
 E35 - A Huddle Node or Huddle Logic Gate editor save atomically stores one exact typed `entity_relationships` row per distinct referenced Action Item Entity across that resource's live document set. Several references share that row, removing one reference keeps a sibling reference's row, and removing the final saved reference removes only that row; it never deletes the Entity or changes the immutable Action Item Source field.
 
-E36 - A Huddle Process Action Item rollup unions its direct Huddle Logic Gate relationships with every relationship from its owned Huddle Nodes and deduplicates each Action Item once.
+E36 - A Huddle Board Action Item rollup unions its direct Huddle Logic Gate relationships with every relationship from its owned Huddle Nodes and deduplicates each Action Item once.
 
 E37 - Direct Action Item creation from Entities remains allowed and leaves the required Source field value null.
 

@@ -21,7 +21,7 @@ async function flushAsyncWork(rounds = 8) {
   });
 }
 
-test("Logic Gate relationship tray links Huddles and opens a KPI from one click anywhere on its card", async () => {
+test("Logic Gate relationship tray links Huddle Boards and opens a KPI from one click anywhere on its card", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -97,17 +97,17 @@ test("Logic Gate relationship tray links Huddles and opens a KPI from one click 
 
     assert.equal(container.querySelector('[data-logic-gate-relationship-tray="split"]')?.getAttribute("data-logic-gate-relationship-tray"), "split");
     const huddleCard = container.querySelector<HTMLElement>('[data-logic-gate-huddle-card="huddle-1"]');
-    assert.ok(huddleCard, "the linked Huddle Logic Gate should use its own card");
-    assert.ok(huddleCard.querySelector("svg"), "the Huddle Logic Gate card should show its Huddle icon");
+    assert.ok(huddleCard, "the linked Huddle Board should use its own card");
+    assert.ok(huddleCard.querySelector("svg"), "the Huddle Board card should show its Board icon");
     assert.match(huddleCard.textContent ?? "", /Weekly Leadership/);
 
-    const huddlePlus = container.querySelector<HTMLButtonElement>('button[aria-label="Add Huddle Process"]');
+    const huddlePlus = container.querySelector<HTMLButtonElement>('button[aria-label="Add Huddle Board"]');
     assert.ok(huddlePlus);
     await act(async () => huddlePlus.click());
     await flushAsyncWork();
     const huddleOption = [...dom.window.document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
       .find((option) => option.textContent?.includes("Weekly Leadership"));
-    assert.ok(huddleOption, "the shared Universal Picker should list visible Huddle Logic Gates");
+    assert.ok(huddleOption, "the shared Universal Picker should list visible Huddle Boards");
     await act(async () => huddleOption.click());
     await flushAsyncWork();
     assert.deepEqual(calls.find((call) => call.path.endsWith("/huddle-logic-gates/huddle-1") && call.method === "PUT")?.json, { company_id: "company-1" });
