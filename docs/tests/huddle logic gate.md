@@ -51,7 +51,7 @@
 49. Every selected grouping term renders a visible hierarchy header. The final selected grouping level places its heading and member rows inside an elevated surface. An ordering term changes only leaf-row order inside that final group and never creates a header; with no ordering term, rows keep the stable backend order.
 50. Selected inline fields render in saved left-to-right order on one nonwrapping rail against the row's right edge. Complete pills remain inside the row when they fit; only a genuinely oversized selected set scrolls horizontally from its first saved field, and the title yields before the rail is displaced.
 51. Every listed Action Item keeps the shared Action Item icon and the Action Item's semantic red or yellow row color treatment. A Source inline label names the exact current endpoint only when the viewer has current access; otherwise it shows the same neutral no-source value as My Work without exposing hidden identity.
-52. Refreshing the Action Items view keeps the current rows visible and does not reload or remount the Huddle editor.
+52. Refreshing the Action Items view keeps the current rows visible and does not reload or remount the Huddle editor. A saved Action Item reference change from an open owned Huddle Node refreshes this live Process view immediately without a page reload.
 53. Each committed Huddle Logic Gate editor save atomically replaces that Gate's exact Action Item `entity_relationships` set from its saved inline references; removing the final saved reference removes only that Gate edge and preserves the Entity.
 
 Last updated: 2026-08-30

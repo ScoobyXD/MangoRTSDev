@@ -104,6 +104,7 @@ type MyWorkResizeA11y = {
 };
 
 const MY_WORK_RESIZER_SIZE = 10;
+const MY_WORK_EDGE_GAP = 12;
 const MY_WORK_LOAD_MORE_THRESHOLD = 160;
 const MY_WORK_COLUMN_MIN_WIDTHS: MyWorkColumnWeights = [360, 512, 240];
 const MY_WORK_WINDOW_THRESHOLD = 120;
@@ -771,6 +772,7 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
             renderRow={renderProjectRow}
           />
         </SectionFrame>
+        <div aria-hidden="true" data-my-work-right-inset="true" />
       </div>
     </div>
   );
@@ -1753,12 +1755,12 @@ function columnsStyle(weights: MyWorkColumnWeights): React.CSSProperties {
     gap: 0,
     overflowX: "auto",
     overflowY: "hidden",
-    padding: 12,
+    padding: `${MY_WORK_EDGE_GAP}px 0 ${MY_WORK_EDGE_GAP}px ${MY_WORK_EDGE_GAP}px`,
   };
 }
 
 function columnGridTemplate(weights: MyWorkColumnWeights): string {
-  return `minmax(${MY_WORK_COLUMN_MIN_WIDTHS[0]}px, ${weights[0]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[1]}px, ${weights[1]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[2]}px, ${weights[2]}fr)`;
+  return `minmax(${MY_WORK_COLUMN_MIN_WIDTHS[0]}px, ${weights[0]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[1]}px, ${weights[1]}fr) ${MY_WORK_RESIZER_SIZE}px minmax(${MY_WORK_COLUMN_MIN_WIDTHS[2]}px, ${weights[2]}fr) ${MY_WORK_EDGE_GAP}px`;
 }
 
 function sectionStyle(hasError: boolean): React.CSSProperties {

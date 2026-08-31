@@ -538,8 +538,8 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
         mime_type: "image/png",
         byte_size: 2048,
         sha256: "google-docs-image-sha256",
-        original_width: 546,
-        original_height: 427,
+        original_width: 840,
+        original_height: 126,
         source_kind: "editor_paste",
         created_timestamp: "2026-07-29T16:00:00Z",
       };
@@ -1198,6 +1198,26 @@ test("mounted JSON editor batches full-document work, pins pending work, and use
     const pastedImageFrame = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="google-docs-paste-image"]');
     assert.ok(pastedImageFrame);
     assert.equal(pastedImageFrame.style.justifyContent, "flex-start", "a pasted image follows the default left toolbar alignment");
+    await act(async () => {
+      pastedImageFrame.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await waitFor(() => pastedImageFrame.dataset.selected === "true", "the newly pasted image should be selectable");
+    assert.equal(pastedImageFrame.querySelectorAll("[data-mango-tiptap-image-resize-handle]").length, 8);
+    await waitFor(() => Boolean(pastedImageFrame.querySelector("img")), "the short-wide pasted image should load");
+    const pastedImage = pastedImageFrame.querySelector<HTMLImageElement>("img");
+    assert.equal(pastedImage?.style.width, "840px");
+    assert.equal(pastedImage?.style.height, "auto", "the rendered height must shrink with a width-constrained image");
+    assert.equal(pastedImage?.style.aspectRatio, "840 / 126", "the frame must keep the source image ratio without blank bands");
+    assert.equal(pastedImage?.style.minHeight, "", "a short screenshot must not receive artificial vertical space");
+
+    const existingImageAfterPaste = activeProseMirror.querySelector<HTMLElement>('[data-mango-attachment-id="image-1"]');
+    assert.ok(existingImageAfterPaste);
+    await act(async () => {
+      existingImageAfterPaste.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
+    });
+    await waitFor(() => existingImageAfterPaste.dataset.selected === "true", "an existing image should remain selectable after another paste");
+    assert.equal(existingImageAfterPaste.querySelectorAll("[data-mango-tiptap-image-resize-handle]").length, 8);
+    assert.notEqual(pastedImageFrame.dataset.selected, "true");
 
     await waitFor(() => postStarted, "the complete mixed rich paste must reach the normal durable document save");
     assert.match(JSON.stringify(postedDocument), /Google Docs text before/);

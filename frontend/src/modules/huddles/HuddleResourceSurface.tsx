@@ -32,9 +32,11 @@ import { HuddleResourceIcon } from "./HuddleResourceIcon";
 import { HuddleActionItemsPanel } from "./HuddleActionItemsPanel";
 import {
   actionItemReferenceIDs,
+  EVENT_HUDDLE_ACTION_ITEMS_CHANGED,
   transitionActionItemReferenceRefresh,
   type ActionItemReferenceRefreshEvent,
   type ActionItemReferenceRefreshState,
+  type HuddleActionItemsChangedDetail,
 } from "./huddleActionItems";
 import { HuddleLogicGateCards, type HuddleLogicGateCardItem, type HuddleLogicGateKPIItem } from "./HuddleLogicGateCards";
 import { HuddleNodeWorkspace } from "./HuddleNodeWorkspace";
@@ -42,7 +44,7 @@ import { KPIEditorPopup, type KPIEditorItem } from "./LogicGateKPISection";
 import { DEFAULT_HUDDLE_COLUMN_LAYOUT, resizeHuddleColumns, type HuddleColumnLayout } from "./huddleColumnLayout";
 
 export type HuddleResourceType = "huddle_logic_gate" | "huddle_node";
-export type HuddleOpenResource = { resourceType: HuddleResourceType; resourceID: string; name: string };
+export type HuddleOpenResource = { resourceType: HuddleResourceType; resourceID: string; name: string; huddleLogicGateID?: string };
 export type HuddleRequestJSON = <T>(path: string, init?: RequestInit & { json?: unknown }) => Promise<T>;
 
 type HuddleGate = { company_id: string; huddle_logic_gate_id: string; header: string };
@@ -81,6 +83,9 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const editorControls = useBareMangoEditorControls();
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const gateActionItemReferenceRefreshRef = useRef<ActionItemReferenceRefreshState | undefined>(undefined);
+  const loadRequestIDRef = useRef(0);
+  const owningHuddleLogicGateIDRef = useRef(resource.huddleLogicGateID?.trim() ?? "");
+  const pendingOwningProcessRefreshRef = useRef(false);
   const [name, setName] = useState(resource.name);
   const [savedName, setSavedName] = useState(resource.name);
   const [nodes, setNodes] = useState<HuddleNode[]>([]);
@@ -102,7 +107,21 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   const [nodeRightView, setNodeRightView] = useState<"action_items" | "process_snapshot">("action_items");
   const [error, setError] = useState("");
   const isGate = resource.resourceType === "huddle_logic_gate";
-  const refreshActionItems = useCallback(() => setActionItemsRefreshToken((current) => current + 1), []);
+  const notifyOwningProcessActionItemsChanged = useCallback((huddleLogicGateID: string) => {
+    window.dispatchEvent(new CustomEvent<HuddleActionItemsChangedDetail>(EVENT_HUDDLE_ACTION_ITEMS_CHANGED, {
+      detail: { companyID, huddleLogicGateID },
+    }));
+  }, [companyID]);
+  const refreshActionItems = useCallback(() => {
+    setActionItemsRefreshToken((current) => current + 1);
+    if (isGate) return;
+    const huddleLogicGateID = owningHuddleLogicGateIDRef.current;
+    if (!huddleLogicGateID) {
+      pendingOwningProcessRefreshRef.current = true;
+      return;
+    }
+    notifyOwningProcessActionItemsChanged(huddleLogicGateID);
+  }, [isGate, notifyOwningProcessActionItemsChanged]);
   const recordGateActionItemReferenceEvent = useCallback((event: ActionItemReferenceRefreshEvent) => {
     const result = transitionActionItemReferenceRefresh(gateActionItemReferenceRefreshRef.current, event);
     gateActionItemReferenceRefreshRef.current = result.state;
@@ -120,6 +139,17 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   useEffect(() => {
     gateActionItemReferenceRefreshRef.current = undefined;
   }, [resource.resourceID, resource.resourceType]);
+  useEffect(() => {
+    if (!isGate) return undefined;
+    const refreshProcessActionItems = (event: Event) => {
+      const detail = (event as CustomEvent<HuddleActionItemsChangedDetail>).detail;
+      if (detail?.companyID === companyID && detail.huddleLogicGateID === resource.resourceID) {
+        setActionItemsRefreshToken((current) => current + 1);
+      }
+    };
+    window.addEventListener(EVENT_HUDDLE_ACTION_ITEMS_CHANGED, refreshProcessActionItems);
+    return () => window.removeEventListener(EVENT_HUDDLE_ACTION_ITEMS_CHANGED, refreshProcessActionItems);
+  }, [companyID, isGate, resource.resourceID]);
   const saveStateStorageKey = isGate || activeHuddleNodeTextBoxID ? mangoTiptapPendingStorageKey({
     companyID,
     resourceType: isGate ? "huddle_logic_gate" : "huddle_node",
@@ -128,17 +158,31 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
   }) : undefined;
 
   const load = useCallback(async () => {
+    const requestID = loadRequestIDRef.current + 1;
+    loadRequestIDRef.current = requestID;
     setError("");
     try {
+      const itemRequest = (isGate
+        ? requestJSON<HuddleGate>(`/v1/huddle-logic-gates/${encodeURIComponent(resource.resourceID)}?company_id=${encodeURIComponent(companyID)}`)
+        : requestJSON<HuddleNode>(`/v1/huddle-nodes/${encodeURIComponent(resource.resourceID)}?company_id=${encodeURIComponent(companyID)}`))
+        .then((item) => {
+          if (loadRequestIDRef.current !== requestID || isGate) return item;
+          const huddleLogicGateID = (item as HuddleNode).huddle_logic_gate_id.trim();
+          owningHuddleLogicGateIDRef.current = huddleLogicGateID;
+          if (huddleLogicGateID && pendingOwningProcessRefreshRef.current) {
+            pendingOwningProcessRefreshRef.current = false;
+            notifyOwningProcessActionItemsChanged(huddleLogicGateID);
+          }
+          return item;
+        });
       const [item, policy, usersPayload, groupsPayload, cardsPayload] = await Promise.all([
-        isGate
-          ? requestJSON<HuddleGate>(`/v1/huddle-logic-gates/${encodeURIComponent(resource.resourceID)}?company_id=${encodeURIComponent(companyID)}`)
-          : requestJSON<HuddleNode>(`/v1/huddle-nodes/${encodeURIComponent(resource.resourceID)}?company_id=${encodeURIComponent(companyID)}`),
+        itemRequest,
         requestJSON<RACIPolicy>(`/v1/resources/${resource.resourceType}/${encodeURIComponent(resource.resourceID)}/gvic?company_id=${encodeURIComponent(companyID)}`),
         requestJSON<{ users?: CompanyUser[] }>(`/v1/companies/${encodeURIComponent(companyID)}/users`),
         requestJSON<{ groups?: CompanyUserGroup[]; members?: CompanyUserGroupMember[] }>(`/v1/companies/${encodeURIComponent(companyID)}/user-groups`),
         requestJSON<{ logic_gates?: HuddleLogicGateCardItem[] }>(`${isGate ? "/v1/huddle-logic-gates" : "/v1/huddle-nodes"}/${encodeURIComponent(resource.resourceID)}/logic-gates?company_id=${encodeURIComponent(companyID)}`),
       ]);
+      if (loadRequestIDRef.current !== requestID) return;
       const loadedName = isGate ? (item as HuddleGate).header : (item as HuddleNode).name;
       setName(loadedName);
       setSavedName(loadedName);
@@ -150,19 +194,28 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
       setLogicGateCards(cardsPayload.logic_gates ?? []);
       if (isGate) {
         const data = await requestJSON<{ huddle_nodes?: HuddleNode[] }>(`/v1/huddle-logic-gates/${encodeURIComponent(resource.resourceID)}/nodes?company_id=${encodeURIComponent(companyID)}`);
+        if (loadRequestIDRef.current !== requestID) return;
         setNodes(data.huddle_nodes ?? []);
       }
     } catch (cause) {
+      if (loadRequestIDRef.current !== requestID) return;
       setError(cause instanceof Error ? cause.message : "Could not load Huddle");
     }
-  }, [companyID, isGate, requestJSON, resource.resourceID, resource.resourceType]);
+  }, [companyID, isGate, notifyOwningProcessActionItemsChanged, requestJSON, resource.resourceID, resource.resourceType]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadRequestIDRef.current += 1; };
+  }, [load]);
   useEffect(() => {
     setGateMiddleView("action_items");
     setNodeRightView("action_items");
     setActiveHuddleNodeTextBoxID("");
-  }, [resource.resourceID, resource.resourceType]);
+    owningHuddleLogicGateIDRef.current = resource.resourceType === "huddle_node"
+      ? resource.huddleLogicGateID?.trim() ?? ""
+      : "";
+    pendingOwningProcessRefreshRef.current = false;
+  }, [resource.huddleLogicGateID, resource.resourceID, resource.resourceType]);
 
   const saveName = async () => {
     const clean = name.trim();
@@ -559,7 +612,7 @@ export const HuddleResourceSurface: React.FC<HuddleResourceSurfaceProps> = ({
                     type="button"
                     data-huddle-node-card={node.huddle_node_id}
                     title="Click to open Huddle Node"
-                    onClick={() => onOpenNode({ resourceType: "huddle_node", resourceID: node.huddle_node_id, name: node.name })}
+                    onClick={() => onOpenNode({ resourceType: "huddle_node", resourceID: node.huddle_node_id, name: node.name, huddleLogicGateID: resource.resourceID })}
                     style={nodeCardStyle}
                   >
                     <HuddleResourceIcon type="huddle_node" />
@@ -723,4 +776,4 @@ const nodeColumnHeaderStyle: React.CSSProperties = { display: "flex", alignItems
 const createNodeButtonStyle: React.CSSProperties = { ...iconButtonStyle, width: 28, height: 28, fontSize: 18, lineHeight: 1 };
 const emptyNodesStyle: React.CSSProperties = { padding: "12px 9px", color: "#64748b", fontSize: 12, fontWeight: 650 };
 const nodeCardStyle: React.CSSProperties = { width: "100%", minWidth: 0, minHeight: 40, display: "grid", gridTemplateColumns: "32px minmax(0,1fr)", alignItems: "center", gap: 7, border: "1px solid rgba(148,163,184,.22)", borderRadius: 10, background: EDITOR_NEU_SURFACE, color: "#111827", padding: "7px 10px", textAlign: "left", font: "inherit", fontSize: 12, fontWeight: 750, cursor: "pointer", boxShadow: "3px 4px 10px rgba(148,163,184,.18), -3px -3px 9px rgba(255,255,255,.82)" };
-const popupBackdropStyle: React.CSSProperties = { position: "fixed", zIndex: 11900, background: "rgba(15,23,42,.18)", borderRadius: 16 };
+const popupBackdropStyle: React.CSSProperties = { position: "fixed", background: "rgba(15,23,42,.18)", borderRadius: 16 };

@@ -16,6 +16,7 @@ import {
 } from "../editorAttachmentPreparation.js";
 import {
   EDITOR_IMAGE_NODE_ATTRIBUTE,
+  createEditorImageDataFromFile,
   editorAttachmentImageSource,
   readEditorImageData,
   type EditorImageData,
@@ -90,19 +91,30 @@ async function uploadClipboardImageFile(
   request: EditorRichClipboardImageRequest,
   file: File,
 ): Promise<EditorImageData> {
-  const uploaded = await withPreparedEditorAttachmentResource(context.prepareResource, () => uploadMangoAttachment(context.requestJSON, {
-    companyID: context.companyID,
-    resourceType: context.resourceType,
-    resourceID: context.resourceID,
-    file,
-    sourceKind: "editor_paste",
-    relationshipKind: "inline_image",
-    informationID: context.informationID,
-    editorSurface: context.editorSurface,
-    expectedRevision: context.expectedResourceRevision?.(),
-    onResourceRevision: context.onResourceRevision,
-  }), context.mutationLifecycle);
-  return resolvedAttachmentImageData(uploaded.attachment, request, file);
+  const measured = request.width && request.height
+    ? undefined
+    : await createEditorImageDataFromFile(file, 840);
+  try {
+    const uploaded = await withPreparedEditorAttachmentResource(context.prepareResource, () => uploadMangoAttachment(context.requestJSON, {
+      companyID: context.companyID,
+      resourceType: context.resourceType,
+      resourceID: context.resourceID,
+      file,
+      sourceKind: "editor_paste",
+      relationshipKind: "inline_image",
+      informationID: context.informationID,
+      editorSurface: context.editorSurface,
+      expectedRevision: context.expectedResourceRevision?.(),
+      onResourceRevision: context.onResourceRevision,
+    }), context.mutationLifecycle);
+    return resolvedAttachmentImageData(uploaded.attachment, measured ? {
+      ...request,
+      width: measured.width,
+      height: measured.height,
+    } : request, file);
+  } finally {
+    if (measured?.src.startsWith("blob:")) URL.revokeObjectURL(measured.src);
+  }
 }
 
 export async function resolveMangoTiptapRichClipboardImage(

@@ -325,6 +325,10 @@ test("My Work keeps sections isolated, removes stale role rows, and opens exact 
     assert.deepEqual(historyButtons.map((button) => button.getAttribute("aria-pressed")), ["false"]);
     assert.match(container.querySelector<HTMLElement>('[data-my-work-columns="true"]')?.style.gridTemplateColumns ?? "", /minmax\(360px,/, "the left column has enough capacity for the established controls and new selectors");
     assert.match(container.querySelector<HTMLElement>('[data-my-work-columns="true"]')?.style.gridTemplateColumns ?? "", /minmax\(512px,/, "the middle column keeps a safety margin around the full one-row Nodes header");
+    const rightInset = container.querySelector<HTMLElement>('[data-my-work-right-inset="true"]');
+    assert.ok(rightInset, "the rightmost elevated column keeps a real trailing scroll inset");
+    assert.match(rightInset.parentElement?.style.gridTemplateColumns ?? "", / 12px$/, "the trailing inset remains part of the scrollable grid width");
+    assert.equal(rightInset.parentElement?.lastElementChild, rightInset, "nothing can render beyond the right inset and be clipped");
     const actionItemsSection = container.querySelector<HTMLElement>('[data-my-work-section="action_items"]');
     const actionHeaderIconPaths = actionItemsSection?.querySelectorAll<SVGPathElement>('[data-my-work-section-icon="action_items"] svg path');
     assert.equal(actionHeaderIconPaths?.[0]?.getAttribute("stroke"), "#22d3ee", "the Action Items header target uses the cyan outer ring");
