@@ -10,7 +10,7 @@ import {
   type EditorEntityReferencePresentation,
 } from "../editor/editorEntityLinks.js";
 import { EditorCalendarDateInput } from "../editor/EditorFieldControls.js";
-import { normalizeNodeDueDateDraft } from "../editor/editorDates.js";
+import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "../editor/editorDates.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import { buildUniversalNestedGroups } from "../grouping/universalGrouping.js";
 import { ActionItemInlineFieldSettingsSection } from "../my-work/ActionItemInlineFieldSettingsPopover.js";
@@ -304,21 +304,32 @@ export function HuddleActionItemsPanel({
           {preferenceError ? <span role="alert" title={preferenceError} style={preferenceErrorStyle}>!</span> : null}
           {refreshing && <span aria-live="polite" style={refreshingLabelStyle}>Refreshing</span>}
           {view === "huddle_node_due" && onViewingDateChange ? (
-            <EditorCalendarDateInput
-              value={viewingDate}
-              ariaLabel="Due or Overdue viewing date"
-              accent={HUDDLE_CALENDAR_THEME.accent}
-              theme={HUDDLE_CALENDAR_THEME}
-              referenceDate={referenceDate}
-              referenceLabel="Huddle Node date"
-              iconOnly
-              allowClear={false}
-              onChange={(next) => {
-                const normalized = normalizeNodeDueDateDraft(next);
-                if (normalized) onViewingDateChange(normalized);
-              }}
-              buttonStyle={{ width: 28, height: 28 }}
-            />
+            <span data-huddle-viewing-date-control="true" style={viewingDateControlStyle}>
+              <EditorCalendarDateInput
+                value={viewingDate}
+                ariaLabel="Due or Overdue viewing date"
+                accent={HUDDLE_CALENDAR_THEME.accent}
+                theme={HUDDLE_CALENDAR_THEME}
+                referenceDate={referenceDate}
+                referenceLabel="Huddle Node date"
+                iconOnly
+                allowClear={false}
+                onChange={(next) => {
+                  const normalized = normalizeNodeDueDateDraft(next);
+                  if (normalized) onViewingDateChange(normalized);
+                }}
+                buttonStyle={{ width: 28, height: 28 }}
+              />
+              <span
+                data-huddle-viewing-date-label="true"
+                role="status"
+                aria-label={`Active viewing date ${formatNodeDueDateForEditor(viewingDate)}`}
+                aria-live="polite"
+                style={viewingDateLabelStyle}
+              >
+                {formatNodeDueDateForEditor(viewingDate)}
+              </span>
+            </span>
           ) : null}
           <UniversalGroupingControls<HuddleActionItemArrangeField>
             groupings={groupings}
@@ -476,6 +487,8 @@ const panelStyle: React.CSSProperties = {
 };
 const headerStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0 3px 6px", color: "#243047", fontSize: 14 };
 const headerActionsStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5 };
+const viewingDateControlStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 5 };
+const viewingDateLabelStyle: React.CSSProperties = { minHeight: 28, display: "inline-flex", alignItems: "center", boxSizing: "border-box", border: "1px solid rgba(234,132,229,.32)", borderRadius: 7, background: "rgba(255,255,255,.92)", color: "#5b21b6", padding: "0 8px", fontSize: 10.5, fontWeight: 850, whiteSpace: "nowrap", boxShadow: "2px 2px 6px rgba(124,58,237,.10), -2px -2px 6px rgba(255,255,255,.86)" };
 const refreshingLabelStyle: React.CSSProperties = { color: "#64748b", fontSize: 9, fontWeight: 700 };
 const preferenceErrorStyle: React.CSSProperties = { color: "#b91c1c", fontSize: 12, fontWeight: 900 };
 const refreshButtonStyle: React.CSSProperties = { width: 28, height: 28, border: "1px solid rgba(100,116,139,.25)", borderRadius: 7, background: "#fff", color: "#334155", cursor: "pointer", fontSize: 17 };

@@ -216,11 +216,12 @@ test("Huddle date controls restore failed edits and distinguish selected, refere
 
   let mountedRoot: { unmount(): void } | null = null;
   try {
-    const [{ createRoot }, { EditorCalendarDateInput }, { HuddleNodeDateControl }, { HUDDLE_CALENDAR_THEME }] = await Promise.all([
+    const [{ createRoot }, { EditorCalendarDateInput }, { HuddleNodeDateControl }, { HUDDLE_CALENDAR_THEME }, { HuddleActionItemsPanel }] = await Promise.all([
       import("react-dom/client"),
       import("../../../../frontend/src/modules/editor/EditorFieldControls.tsx"),
       import("../../../../frontend/src/modules/huddles/HuddleNodeDateControl.tsx"),
       import("../../../../frontend/src/modules/huddles/huddleCalendarTheme.ts"),
+      import("../../../../frontend/src/modules/huddles/HuddleActionItemsPanel.tsx"),
     ]);
     const container = dom.window.document.getElementById("root");
     assert.ok(container);
@@ -308,6 +309,59 @@ test("Huddle date controls restore failed edits and distinguish selected, refere
     const newlySelectedToday = dom.window.document.querySelector<HTMLButtonElement>('button[aria-current="date"]');
     assert.equal(newlySelectedToday?.getAttribute("aria-pressed"), "true");
     assert.equal(newlySelectedToday?.getAttribute("aria-label")?.startsWith(labelDate(today)), true);
+
+    const requestJSON = <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      if (path.startsWith("/v1/saved-views?")) return Promise.resolve({ saved_views: [] } as T);
+      if (path.startsWith("/v1/saved-views/") && init?.method === "PUT") return Promise.resolve(init.json as T);
+      return Promise.resolve({ action_items: [] } as T);
+    };
+    function DuePanelHarness() {
+      const [value, setValue] = React.useState("2026-09-03");
+      return (
+        <HuddleActionItemsPanel
+          companyID="company-1"
+          currentUserID="user-1"
+          scope={{ resourceType: "huddle_node", resourceID: "node-1" }}
+          view="huddle_node_due"
+          title="Due or Overdue"
+          companyUsers={[]}
+          requestJSON={requestJSON}
+          refreshToken={0}
+          viewingDate={value}
+          referenceDate="2026-09-01"
+          onViewingDateChange={setValue}
+        />
+      );
+    }
+    await act(async () => {
+      root.render(<DuePanelHarness />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const viewingDateControl = container.querySelector<HTMLElement>('[data-huddle-viewing-date-control="true"]');
+    const dueCalendarButton = viewingDateControl?.querySelector<HTMLButtonElement>('button[aria-label="Choose due or overdue viewing date"]');
+    const viewingDateLabel = viewingDateControl?.querySelector<HTMLElement>('[data-huddle-viewing-date-label="true"]');
+    const groupingButton = container.querySelector<HTMLButtonElement>('button[aria-label="Group, order, and choose Action Item row fields"]');
+    assert.ok(viewingDateControl);
+    assert.ok(dueCalendarButton);
+    assert.ok(viewingDateLabel);
+    assert.ok(groupingButton);
+    assert.equal(viewingDateControl.querySelector("input"), null, "the header keeps a compact icon-only calendar");
+    assert.equal(viewingDateLabel.textContent, "9/3/2026", "the active viewing date is written beside the calendar");
+    assert.equal(viewingDateLabel.getAttribute("role"), "status");
+    assert.equal(viewingDateLabel.getAttribute("aria-label"), "Active viewing date 9/3/2026");
+    assert.ok(Boolean(dueCalendarButton.compareDocumentPosition(viewingDateLabel) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING), "the calendar precedes the visible date");
+    assert.ok(Boolean(viewingDateLabel.compareDocumentPosition(groupingButton) & dom.window.Node.DOCUMENT_POSITION_FOLLOWING), "the date precedes the grouping control");
+
+    await act(async () => dueCalendarButton.click());
+    const newViewingDateButton = [...dom.window.document.querySelectorAll<HTMLButtonElement>('button[aria-label]')]
+      .find((button) => button.getAttribute("aria-label")?.startsWith("September 5, 2026"));
+    assert.ok(newViewingDateButton);
+    await act(async () => {
+      newViewingDateButton.click();
+      await Promise.resolve();
+    });
+    assert.equal(container.querySelector('[data-huddle-viewing-date-label="true"]')?.textContent, "9/5/2026", "calendar selection updates the visible viewing date");
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();
