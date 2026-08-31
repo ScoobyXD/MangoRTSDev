@@ -919,14 +919,19 @@ function resolveEditorImageDisplaySize(image: HTMLImageElement, maxDisplayWidth:
   if (preferredHeight && preferredHeight > 0 && (!preferredWidth || preferredWidth <= 0)) width = Math.round(preferredHeight * naturalAspectRatio);
 
   const maxWidth = Math.max(MIN_EDITOR_IMAGE_WIDTH_PX, Math.min(maxDisplayWidth || MAX_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX));
-  const scale = Math.min(1, maxWidth / Math.max(1, width), MAX_EDITOR_IMAGE_HEIGHT_PX / Math.max(1, height));
-  width = Math.round(width * scale);
-  height = Math.round(height * scale);
+  const shrinkScale = Math.min(1, maxWidth / Math.max(1, width), MAX_EDITOR_IMAGE_HEIGHT_PX / Math.max(1, height));
+  width = Math.max(1, Math.round(width * shrinkScale));
+  height = Math.max(1, Math.round(height * shrinkScale));
 
-  return {
-    width: clampEditorImageSize(width, MIN_EDITOR_IMAGE_WIDTH_PX, maxWidth),
-    height: clampEditorImageSize(height, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX),
-  };
+  const growScale = Math.min(
+    maxWidth / width,
+    MAX_EDITOR_IMAGE_HEIGHT_PX / height,
+    Math.max(1, MIN_EDITOR_IMAGE_WIDTH_PX / width, MIN_EDITOR_IMAGE_HEIGHT_PX / height),
+  );
+  width = Math.max(1, Math.round(width * growScale));
+  height = Math.max(1, Math.round(height * growScale));
+
+  return { width, height };
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {

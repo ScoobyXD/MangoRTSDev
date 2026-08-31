@@ -46,6 +46,27 @@ test("Huddle Node text boxes reuse the normal Node viewport-height rule", () => 
   assert.doesNotMatch(huddleNodeWorkspace, /HUDDLE_TEXT_BOX_(?:BODY|ROW)_HEIGHT/);
 });
 
+test("Huddle Node overlays and Action Item refreshes stay visible across their owning Process", () => {
+  const surface = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleResourceSurface.tsx"), "utf8");
+  const editor = readFileSync(resolve(process.cwd(), "frontend/src/modules/editor/tiptap/MangoTiptapEditor.tsx"), "utf8");
+  const backdrop = surface.match(/const popupBackdropStyle:[^;]+;/)?.[0] ?? "";
+  const popup = surface.slice(surface.indexOf("<AppModalPortal"), surface.indexOf("</AppModalPortal>") + "</AppModalPortal>".length);
+
+  assert.match(popup, /data-huddle-node-popup="almost-fullscreen"/);
+  assert.ok(backdrop, "the Huddle popup backdrop declaration must remain covered by this test");
+  assert.doesNotMatch(backdrop, /zIndex/, "the popup must not cover the picker in its own modal layer");
+  assert.doesNotMatch(popup, /zIndex/, "the rendered Huddle popup must not restore a picker-covering stack level inline");
+  assert.match(surface, /EVENT_HUDDLE_ACTION_ITEMS_CHANGED/);
+  assert.match(surface, /detail: \{ companyID, huddleLogicGateID \}/);
+  assert.match(surface, /detail\.huddleLogicGateID === resource\.resourceID/);
+  assert.match(surface, /pendingOwningProcessRefreshRef\.current = true/);
+  assert.match(surface, /if \(huddleLogicGateID && pendingOwningProcessRefreshRef\.current\)/);
+  assert.match(surface, /useRef\(resource\.huddleLogicGateID\?\.trim\(\) \?\? ""\)/);
+  assert.match(surface, /huddleLogicGateID: resource\.resourceID/);
+  assert.match(surface, /loadRequestIDRef\.current !== requestID/);
+  assert.match(editor, /if \(source === "canonical"\) callbacksRef\.current\.onCanonicalDocumentChange\?\.\(normalizedCanonical\);\s*else callbacksRef\.current\.onDocumentSnapshotChange\?\.\(normalizedCanonical\);/);
+});
+
 test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, RACI controls, icon actions, and raised sidebar rows", () => {
   const page = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleLogicGatePage.tsx"), "utf8");
   const surface = readFileSync(resolve(process.cwd(), "frontend/src/modules/huddles/HuddleResourceSurface.tsx"), "utf8");

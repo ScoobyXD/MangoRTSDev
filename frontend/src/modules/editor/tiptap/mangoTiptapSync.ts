@@ -547,6 +547,8 @@ export class MangoTiptapSync {
     incrementEditorRuntimeMetric("recovery_requests");
     await this.captureScheduledSnapshot();
     if (this.initialRecoveryComplete && this.hasUnsavedLocalEdits()) return;
+    const recoveryGeneration = this.generation;
+    const recoveryRevision = this.revision;
     let recoveryStorageAvailable = true;
     const [record, canonical] = await Promise.all([
       readExactMangoTiptapPending(this.storageKey, this.options.traceContext).then((value) => {
@@ -561,6 +563,7 @@ export class MangoTiptapSync {
         editorTraceContext: this.options.traceContext,
       }),
     ]);
+    if (this.generation !== recoveryGeneration || this.revision !== recoveryRevision || this.hasUnsavedLocalEdits()) return;
     const canonicalDocument = requireSnapshotDocument(canonical);
     this.revision = canonical.revision;
     if (record) {

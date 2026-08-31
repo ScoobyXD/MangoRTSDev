@@ -214,3 +214,18 @@ test("Huddle Action Item rollups refresh only after a saved reference-set change
   assert.equal(apply({ type: "canonical", signature: "item-2" }), false);
   assert.equal(apply({ type: "removed" }), true);
 });
+
+test("a stale canonical Huddle snapshot cannot erase a local Action Item refresh", () => {
+  let state: ActionItemReferenceRefreshState | undefined;
+  const apply = (event: Parameters<typeof transitionActionItemReferenceRefresh>[1]) => {
+    const result = transitionActionItemReferenceRefresh(state, event);
+    state = result.state;
+    return result.refresh;
+  };
+
+  assert.equal(apply({ type: "snapshot", signature: "" }), false);
+  assert.equal(apply({ type: "snapshot", signature: "item-1" }), false);
+  assert.equal(apply({ type: "canonical", signature: "" }), false);
+  assert.equal(apply({ type: "saved" }), true, "the durable local relationship must refresh after the stale read");
+  assert.equal(state?.notifiedSignature, "item-1");
+});

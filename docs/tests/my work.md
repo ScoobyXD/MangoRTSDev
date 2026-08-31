@@ -140,6 +140,8 @@ MW68 - Changing the selected subject clears every prior subject row, cursor, and
 
 MW69 - Changing the company or auth session cancels or invalidates outstanding My Work and directory reads, clears prior member and work data, and prevents a late response from rendering or repopulating a current-session cache.
 
+MW70 - The three elevated My Work columns keep visible top, bottom, left, and right insets inside the page. Horizontal overflow includes a real trailing inset after Projects so its rounded edge and shadow are never cut off.
+
 ## Process Story: A viewer securely sees another member's work
 
 A company member opens My Work beneath My Tower and sees their own perspective by default

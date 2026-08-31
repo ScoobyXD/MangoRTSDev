@@ -60,7 +60,7 @@ Last updated: 2026-08-27
 
 UP1 - Mango has one shared Universal picker implementation. Node, Logic Gate, and Project Tiptap editors, the Node header linker, the selected-email placement toolbar, Project Attach email, and the one Process Map header must not implement separate picker search, keyboard, category, or mode behavior.
 
-UP2 - Typing `#` with a collapsed caret in an active Node, Logic Gate, or Project Tiptap editor opens the picker at the trigger position and focuses the picker's single search input. The trigger remains owned by that exact document and selection until the picker selects, cancels, or becomes stale.
+UP2 - Typing `#` with a collapsed caret in an active Node, Logic Gate, Project, Huddle Logic Gate, or Huddle Node Tiptap editor opens the picker at the trigger position and focuses the picker's single search input. A Huddle Node picker remains visible above its popup. The trigger remains owned by that exact document and selection until the picker selects, cancels, or becomes stale.
 
 UP3 - The selected My Triage or Shared Triage email launcher opens the picker in `##` link mode. Project Attach email opens in `##` link mode with Emails selected. The Node header linker opens the same picker in `##` link mode with all legal Node targets, including Emails; the Node header has no separate Attach email button or picker. Ordinary editor hashtag entry starts in `#` reference mode.
 

@@ -4,6 +4,12 @@ import type { UniversalGroupValue, UniversalGroupingSetting } from "../grouping/
 import type { MyWorkActionItem, MyWorkActionItemDisplayFieldID } from "../my-work/myWorkApi.js";
 import { actionItemGroupingValues as myWorkActionItemGroupingValues } from "../my-work/myWorkGrouping.js";
 
+export const EVENT_HUDDLE_ACTION_ITEMS_CHANGED = "mangorts:huddle-action-items-changed";
+export type HuddleActionItemsChangedDetail = {
+  companyID: string;
+  huddleLogicGateID: string;
+};
+
 export const HUDDLE_ACTION_ITEM_ARRANGE_FIELDS = [
   { value: "color", label: "Color" },
   { value: "person_in_charge", label: "Person in charge" },
@@ -354,6 +360,9 @@ export function transitionActionItemReferenceRefresh(
   if (event.type === "canonical") {
     if (!state) return { state: { signature: event.signature, notifiedSignature: event.signature, dirty: false }, refresh: false };
     const refresh = state.notifiedSignature !== event.signature;
+    if (state.dirty && event.signature !== state.signature) {
+      return { state: { ...state, notifiedSignature: event.signature }, refresh };
+    }
     return { state: { signature: event.signature, notifiedSignature: event.signature, dirty: false }, refresh };
   }
   if (!state?.dirty) return { state, refresh: false };

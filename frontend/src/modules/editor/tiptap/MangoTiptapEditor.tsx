@@ -633,6 +633,9 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
     }).catch((cause) => attachmentContext.onError?.(cause instanceof Error ? cause.message : "Unable to download image"));
   }, [attachmentContext, attributes.attachmentId, attributes.filename]);
 
+  const imageWidth = resizingDimensions?.width || attributes.displayWidth || attributes.width;
+  const imageHeight = resizingDimensions?.height || attributes.displayHeight || attributes.height;
+
   return (
     <div
       ref={rootRef}
@@ -660,10 +663,10 @@ export const MangoAuthenticatedImage: React.FC<AuthenticatedImageProps> = ({
             style={{
               display: "block",
               maxWidth: "100%",
-              width: resizingDimensions?.width || attributes.displayWidth || attributes.width || undefined,
+              width: imageWidth || undefined,
               minWidth: 32,
-              minHeight: 32,
-              height: resizingDimensions?.height || attributes.displayHeight || undefined,
+              height: imageWidth && imageHeight ? "auto" : imageHeight || undefined,
+              aspectRatio: imageWidth && imageHeight ? `${imageWidth} / ${imageHeight}` : undefined,
               objectFit: "contain",
               borderRadius: 6,
               outline: selected ? "2px solid #0ea5e9" : "none",
@@ -782,6 +785,7 @@ function attachmentNodeViewExtension(
       return ReactNodeViewRenderer(ImageNodeView, {
         className: "mango-tiptap-image-placement",
         attrs: ({ node }) => mangoTiptapImagePlacementDOMAttributes(node.attrs),
+        trackNodeViewPosition: true,
         stopEvent: ({ event }) => {
           const target = event.target instanceof Element ? event.target : null;
           if (target?.closest("button")) return true;
@@ -1110,19 +1114,16 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
         const normalizedCanonical = documentWithUniqueBlockIDs(stableCanonical);
         if (editor) {
           const canonicalNode = editor.schema.nodeFromJSON(normalizedCanonical.document);
-          if (editor.state.doc.eq(canonicalNode)) {
-            currentDocumentRef.current = normalizedCanonical;
-            callbacksRef.current.onDocumentSnapshotChange?.(normalizedCanonical);
-            if (source === "canonical") callbacksRef.current.onCanonicalDocumentChange?.(normalizedCanonical);
-            setError("");
-            return;
+          if (!editor.state.doc.eq(canonicalNode)) {
+            editor.commands.setContent(normalizedCanonical.document, { emitUpdate: false, errorOnInvalidContent: true });
+            setDocument(normalizedCanonical);
           }
-          editor.commands.setContent(normalizedCanonical.document, { emitUpdate: false, errorOnInvalidContent: true });
+        } else {
+          setDocument(normalizedCanonical);
         }
-        setDocument(normalizedCanonical);
         currentDocumentRef.current = normalizedCanonical;
-        callbacksRef.current.onDocumentSnapshotChange?.(normalizedCanonical);
         if (source === "canonical") callbacksRef.current.onCanonicalDocumentChange?.(normalizedCanonical);
+        else callbacksRef.current.onDocumentSnapshotChange?.(normalizedCanonical);
         setError("");
       },
       onAnnotations: (canonicalAnnotations) => publishAnnotationPositions(canonicalAnnotations),

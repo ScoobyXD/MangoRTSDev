@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { JSDOM } from "jsdom";
+import { sha256HexToBase64 } from "../../../../frontend/src/modules/attachments/attachmentHash.js";
 import {
   durableEditorAttachmentInformationID,
 } from "../../../../frontend/src/modules/editor/editorAttachmentPreparation.js";
@@ -15,6 +16,7 @@ import {
   prepareMangoTiptapRichClipboardHTML,
   readMangoTiptapClipboardPaste,
   readMangoTiptapInsertionAlignment,
+  resolveMangoTiptapRichClipboardImage,
 } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapRichClipboard.js";
 import { handleMangoTiptapTableClipboardPaste } from "../../../../frontend/src/modules/editor/tiptap/mangoTiptapTable.js";
 import { sanitizeEditorDocumentHTML } from "../../../../frontend/src/modules/editor/richTextEditing.js";
@@ -172,6 +174,134 @@ test("plain clipboard text and a file-backed image become one durable paste", as
     editor?.destroy();
     restore();
     dom.window.close();
+  }
+});
+
+test("a file-backed short-wide screenshot keeps its measured ratio through durable upload", async () => {
+  const imageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Image");
+  const xhrDescriptor = Object.getOwnPropertyDescriptor(globalThis, "XMLHttpRequest");
+  const createObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+  const revokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+  const revoked: string[] = [];
+  try {
+    class ShortWideImage {
+      naturalWidth = 2400;
+      naturalHeight = 40;
+      private loadListener: (() => void) | undefined;
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+        if (type !== "load") return;
+        this.loadListener = () => typeof listener === "function"
+          ? listener(new Event("load"))
+          : listener.handleEvent(new Event("load"));
+      }
+      set src(_value: string) {
+        queueMicrotask(() => this.loadListener?.());
+      }
+    }
+    class SuccessfulUploadXHR {
+      upload = { onprogress: null as ((event: ProgressEvent<EventTarget>) => void) | null };
+      status = 0;
+      withCredentials = true;
+      timeout = 0;
+      onload: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      ontimeout: (() => void) | null = null;
+      onabort: (() => void) | null = null;
+      open() {}
+      setRequestHeader() {}
+      getResponseHeader() { return null; }
+      send(body: Document | XMLHttpRequestBodyInit | null) {
+        this.upload.onprogress?.({ loaded: body instanceof Blob ? body.size : 0 } as ProgressEvent<EventTarget>);
+        this.status = 200;
+        queueMicrotask(() => this.onload?.());
+      }
+      abort() { this.onabort?.(); }
+    }
+    Object.defineProperty(globalThis, "Image", { configurable: true, writable: true, value: ShortWideImage });
+    Object.defineProperty(globalThis, "XMLHttpRequest", { configurable: true, writable: true, value: SuccessfulUploadXHR });
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:short-wide" });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: (value: string) => { revoked.push(value); } });
+
+    const emptySHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    let completedUploads = 0;
+    const requestJSON = async <T,>(path: string): Promise<T> => {
+      if (path === "/v1/attachments/upload-policy") return {
+        directUploadEnabled: true,
+        maxFileBytes: 1024,
+        singlePutMaxBytes: 1024,
+        multipartPartBytes: 1024,
+        maxConcurrentParts: 1,
+        intentLifetimeSeconds: 60,
+      } as T;
+      if (path === "/v1/attachments/upload-intents") return {
+        uploadIntentId: "intent-short-wide",
+        attachmentId: "attachment-short-wide",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        upload: {
+          strategy: "single",
+          method: "PUT",
+          url: "https://storage.mango.test/short-wide",
+          requiredHeaders: {
+            "content-type": "image/png",
+            "x-amz-checksum-sha256": sha256HexToBase64(emptySHA256),
+          },
+        },
+      } as T;
+      if (path.endsWith("/complete")) {
+        completedUploads += 1;
+        return {
+          attachment: {
+            company_id: "company-1",
+            attachment_id: "attachment-short-wide",
+            original_filename: "short-wide.png",
+            mime_type: "image/png",
+            byte_size: 0,
+            sha256: emptySHA256,
+            source_kind: "editor_paste",
+            created_timestamp: "2026-08-30T12:00:00Z",
+          },
+          resource_attachment: {
+            resource_attachment_id: "link-short-wide",
+            company_id: "company-1",
+            resource_type: "node",
+            resource_id: "node-1",
+            attachment_id: "attachment-short-wide",
+            relationship_kind: "inline_image",
+            created_timestamp: "2026-08-30T12:00:00Z",
+          },
+        } as T;
+      }
+      throw new Error(`unexpected_request:${path}`);
+    };
+    const file = Object.assign(new Blob([], { type: "image/png" }), {
+      name: "short-wide.png",
+      lastModified: 42,
+    }) as File;
+    const result = await resolveMangoTiptapRichClipboardImage({
+      index: 0,
+      sourceKind: "blob",
+      source: "blob:clipboard-short-wide",
+      filename: file.name,
+    }, file, {
+      requestJSON,
+      apiBase: "",
+      companyID: "company-1",
+      resourceType: "node",
+      resourceID: "node-1",
+    });
+
+    assert.equal(completedUploads, 1);
+    assert.deepEqual({ width: result.width, height: result.height }, { width: 840, height: 14 });
+    assert.deepEqual(revoked, ["blob:short-wide"]);
+  } finally {
+    if (imageDescriptor) Object.defineProperty(globalThis, "Image", imageDescriptor);
+    else delete (globalThis as Record<string, unknown>).Image;
+    if (xhrDescriptor) Object.defineProperty(globalThis, "XMLHttpRequest", xhrDescriptor);
+    else delete (globalThis as Record<string, unknown>).XMLHttpRequest;
+    if (createObjectURLDescriptor) Object.defineProperty(URL, "createObjectURL", createObjectURLDescriptor);
+    else delete (URL as unknown as Record<string, unknown>).createObjectURL;
+    if (revokeObjectURLDescriptor) Object.defineProperty(URL, "revokeObjectURL", revokeObjectURLDescriptor);
+    else delete (URL as unknown as Record<string, unknown>).revokeObjectURL;
   }
 });
 

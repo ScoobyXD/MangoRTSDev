@@ -2666,6 +2666,97 @@ test("visible refresh waits for an active recovery and then reads canonical stat
   }
 });
 
+test("canonical recovery cannot apply a read that began before newer local work", async () => {
+  const previous = {
+    indexedDB: globalThis.indexedDB,
+    IDBKeyRange: globalThis.IDBKeyRange,
+    sessionStorage: globalThis.sessionStorage,
+  };
+  Object.defineProperty(globalThis, "indexedDB", { configurable: true, value: fakeIndexedDB });
+  Object.defineProperty(globalThis, "IDBKeyRange", { configurable: true, value: IDBKeyRange });
+  Object.defineProperty(globalThis, "sessionStorage", { configurable: true, value: new MemoryStorage() });
+
+  let markPendingReadStarted: () => void = () => undefined;
+  let releasePendingRead: () => void = () => undefined;
+  const pendingReadStarted = new Promise<void>((resolve) => { markPendingReadStarted = resolve; });
+  const pendingReadBlocked = new Promise<void>((resolve) => { releasePendingRead = resolve; });
+  let markAcknowledgedReadStarted: () => void = () => undefined;
+  let releaseAcknowledgedRead: () => void = () => undefined;
+  const acknowledgedReadStarted = new Promise<void>((resolve) => { markAcknowledgedReadStarted = resolve; });
+  const acknowledgedReadBlocked = new Promise<void>((resolve) => { releaseAcknowledgedRead = resolve; });
+  const staleCanonical: MangoTiptapSnapshot = {
+    revision: 0,
+    schema_version: 1,
+    document: createEmptyMangoTiptapDocument(),
+  };
+  const appliedCanonical: MangoTiptapDocument[] = [];
+  const postedDocuments: MangoTiptapDocument[] = [];
+  let canonicalReads = 0;
+  let saveRevision = 0;
+  const request = async <T>(_path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+    if (init?.method === "POST") {
+      const body = init.json as { operation_id: string; document: MangoTiptapDocument };
+      postedDocuments.push(body.document);
+      saveRevision += 1;
+      return saveAcknowledgement(body.operation_id, saveRevision) as T;
+    }
+    canonicalReads += 1;
+    if (canonicalReads === 2) {
+      markPendingReadStarted();
+      await pendingReadBlocked;
+    } else if (canonicalReads === 3) {
+      markAcknowledgedReadStarted();
+      await acknowledgedReadBlocked;
+    }
+    return staleCanonical as T;
+  };
+  const sync = new MangoTiptapSync({
+    companyID: "company-recovery-fence",
+    resourceType: "huddle_node",
+    resourceID: "huddle-node-recovery-fence",
+    documentID: "textbox-recovery-fence",
+    requestJSON: request,
+    onDocument: (document, source) => {
+      if (source === "canonical") appliedCanonical.push(document);
+    },
+    batchMs: 60_000,
+    maxBatchMs: 60_000,
+  });
+  try {
+    await sync.start();
+    assert.equal(appliedCanonical.length, 1);
+    appliedCanonical.length = 0;
+
+    const pendingLocal = richDocument("pending local Action Item reference");
+    const pendingRecovery = sync.recover();
+    await pendingReadStarted;
+    sync.schedule(pendingLocal);
+    releasePendingRead();
+    await pendingRecovery;
+    assert.deepEqual(appliedCanonical, [], "a stale read must not replace a still-pending local generation");
+    await sync.flush();
+    assert.deepEqual(postedDocuments, [pendingLocal]);
+
+    const acknowledgedLocal = richDocument("acknowledged local Action Item reference");
+    const acknowledgedRecovery = sync.recover();
+    await acknowledgedReadStarted;
+    sync.schedule(acknowledgedLocal);
+    await sync.flush();
+    assert.deepEqual(postedDocuments, [pendingLocal, acknowledgedLocal]);
+    releaseAcknowledgedRead();
+    await acknowledgedRecovery;
+    assert.deepEqual(appliedCanonical, [], "a stale read must stay discarded after the newer local save is acknowledged");
+  } finally {
+    releasePendingRead();
+    releaseAcknowledgedRead();
+    await sync.shutdown();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete (globalThis as Record<string, unknown>)[key];
+      else Object.defineProperty(globalThis, key, { configurable: true, value });
+    }
+  }
+});
+
 test("exact realtime scope exists only while the document is visibly eligible", async () => {
   const previous = {
     indexedDB: globalThis.indexedDB,
