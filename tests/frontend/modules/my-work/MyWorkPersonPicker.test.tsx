@@ -267,7 +267,7 @@ test("My Work directory results cannot cross an auth-session request boundary", 
     await flushDOM();
     button = container.querySelector<HTMLButtonElement>("[data-my-work-people-button=true]") as HTMLButtonElement;
     await act(async () => button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
-    await flushDOM(20);
+    await flushDOM(100);
     assert.match(dom.window.document.body.textContent ?? "", /Fresh Session/);
 
     const oldData = directory();

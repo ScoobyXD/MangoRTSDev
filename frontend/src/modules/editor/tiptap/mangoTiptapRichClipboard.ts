@@ -91,9 +91,15 @@ async function uploadClipboardImageFile(
   request: EditorRichClipboardImageRequest,
   file: File,
 ): Promise<EditorImageData> {
-  const measured = request.width && request.height
-    ? undefined
-    : await createEditorImageDataFromFile(file, 840);
+  let measured: EditorImageData | undefined;
+  if (!request.width || !request.height) {
+    try {
+      measured = await createEditorImageDataFromFile(file, 840);
+    } catch {
+      // Display metadata is optional. A browser clipboard image that cannot be
+      // decoded through a temporary object URL must still use the durable upload.
+    }
+  }
   try {
     const uploaded = await withPreparedEditorAttachmentResource(context.prepareResource, () => uploadMangoAttachment(context.requestJSON, {
       companyID: context.companyID,

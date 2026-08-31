@@ -205,8 +205,8 @@ export function readEditorImageData(source: HTMLElement): EditorImageData | null
   } else if (!isSafeEditorImageSource(src)) {
     return null;
   }
-  const width = readSafeStylePixels(source.style.width.trim() || image?.getAttribute("width")?.trim() || "", 220, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
-  const height = readSafeStylePixels(source.style.height.trim() || image?.getAttribute("height")?.trim() || "", 160, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
+  const width = readSafeStylePixels(source.style.width.trim() || image?.getAttribute("width")?.trim() || "", 220, 1, MAX_EDITOR_IMAGE_WIDTH_PX);
+  const height = readSafeStylePixels(source.style.height.trim() || image?.getAttribute("height")?.trim() || "", 160, 1, MAX_EDITOR_IMAGE_HEIGHT_PX);
   const floatSide = readEditorImageFloatSide(source);
   const marginLeft = readEditorImageInlineOffset(source);
   const marginTop = readSafeStylePixels(source.style.marginTop, DEFAULT_EDITOR_IMAGE_MARGIN_TOP_PX, -5_000, 5_000);
@@ -779,8 +779,8 @@ export function getEditorImageCursorForInteraction(interaction: EditorImagePoint
 }
 
 export function readEditorImageAspectRatio(frame: HTMLElement, fallbackRatio = 1): number {
-  const width = readSafeStylePixels(frame.style.width, 0, MIN_EDITOR_IMAGE_WIDTH_PX, MAX_EDITOR_IMAGE_WIDTH_PX);
-  const height = readSafeStylePixels(frame.style.height, 0, MIN_EDITOR_IMAGE_HEIGHT_PX, MAX_EDITOR_IMAGE_HEIGHT_PX);
+  const width = readSafeStylePixels(frame.style.width, 0, 1, MAX_EDITOR_IMAGE_WIDTH_PX);
+  const height = readSafeStylePixels(frame.style.height, 0, 1, MAX_EDITOR_IMAGE_HEIGHT_PX);
   if (width > 0 && height > 0) return width / height;
   const image = frame.querySelector("img[src]") as HTMLImageElement | null;
   const naturalWidth = image?.naturalWidth ?? 0;
@@ -807,8 +807,23 @@ export async function createEditorImageDataFromFile(file: File, maxDisplayWidth:
   if (typeof URL === "undefined" || typeof URL.createObjectURL !== "function") throw new Error("failed_to_prepare_image");
   const objectURL = URL.createObjectURL(file);
   try {
-    const image = await loadImage(objectURL);
-    const dimensions = resolveEditorImageDisplaySize(image, maxDisplayWidth);
+    let naturalWidth: number;
+    let naturalHeight: number;
+    try {
+      const image = await loadImage(objectURL);
+      naturalWidth = image.naturalWidth;
+      naturalHeight = image.naturalHeight;
+    } catch (cause) {
+      if (typeof createImageBitmap !== "function") throw cause;
+      const bitmap = await createImageBitmap(file);
+      try {
+        naturalWidth = bitmap.width;
+        naturalHeight = bitmap.height;
+      } finally {
+        bitmap.close();
+      }
+    }
+    const dimensions = resolveEditorImageDisplaySizeFromDimensions(naturalWidth, naturalHeight, maxDisplayWidth);
     return { src: objectURL, width: dimensions.width, height: dimensions.height };
   } catch (cause) {
     URL.revokeObjectURL(objectURL);
@@ -887,11 +902,6 @@ function readOptionalImageDimension(value: string, minValue: number, maxValue: n
   return Math.max(minValue, Math.min(maxValue, Math.round(parsed)));
 }
 
-function clampImageDimension(value: number, minValue: number): number {
-  const maxValue = minValue === MIN_EDITOR_IMAGE_HEIGHT_PX ? MAX_EDITOR_IMAGE_HEIGHT_PX : MAX_EDITOR_IMAGE_WIDTH_PX;
-  return clampEditorImageSize(value, minValue, maxValue);
-}
-
 function clampImageOffset(value: number): number {
   return clampEditorImageOffset(value, 5_000);
 }
@@ -901,16 +911,20 @@ function clampImageVerticalOffset(value: number): number {
 }
 
 function applyEditorImageFrameSize(frame: HTMLElement, width: number, height: number) {
-  const nextWidth = clampImageDimension(width, MIN_EDITOR_IMAGE_WIDTH_PX);
-  const nextHeight = clampImageDimension(height, MIN_EDITOR_IMAGE_HEIGHT_PX);
+  const nextWidth = clampEditorImageSize(width, 1, MAX_EDITOR_IMAGE_WIDTH_PX);
+  const nextHeight = clampEditorImageSize(height, 1, MAX_EDITOR_IMAGE_HEIGHT_PX);
   frame.style.width = `${nextWidth}px`;
   frame.style.height = `${nextHeight}px`;
   frame.style.aspectRatio = `${nextWidth} / ${nextHeight}`;
 }
 
 function resolveEditorImageDisplaySize(image: HTMLImageElement, maxDisplayWidth: number, preferredWidth?: number, preferredHeight?: number): { width: number; height: number } {
-  const naturalWidth = Math.max(1, image.naturalWidth || preferredWidth || maxDisplayWidth || 220);
-  const naturalHeight = Math.max(1, image.naturalHeight || preferredHeight || naturalWidth);
+  return resolveEditorImageDisplaySizeFromDimensions(image.naturalWidth, image.naturalHeight, maxDisplayWidth, preferredWidth, preferredHeight);
+}
+
+function resolveEditorImageDisplaySizeFromDimensions(naturalImageWidth: number, naturalImageHeight: number, maxDisplayWidth: number, preferredWidth?: number, preferredHeight?: number): { width: number; height: number } {
+  const naturalWidth = Math.max(1, naturalImageWidth || preferredWidth || maxDisplayWidth || 220);
+  const naturalHeight = Math.max(1, naturalImageHeight || preferredHeight || naturalWidth);
   const naturalAspectRatio = naturalWidth / naturalHeight;
   let width = preferredWidth && preferredWidth > 0 ? preferredWidth : Math.min(naturalWidth, maxDisplayWidth, MAX_EDITOR_IMAGE_WIDTH_PX);
   let height = preferredHeight && preferredHeight > 0 ? preferredHeight : Math.round(width / naturalAspectRatio);
