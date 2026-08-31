@@ -247,7 +247,9 @@ test("My Work directory results cannot cross an auth-session request boundary", 
     });
     let releaseNewDirectory = () => undefined;
     const newDirectoryReady = new Promise<void>((resolve) => { releaseNewDirectory = resolve; });
+    let newRequestCount = 0;
     const newRequest: BoundRequestJSON = async <T,>(path: string): Promise<T> => {
+      newRequestCount += 1;
       await newDirectoryReady;
       if (path.endsWith("/users")) {
         return { users: [{ company_id: "company-1", user_id: "viewer-2", display_name: "Fresh Session" }] } as T;
@@ -268,9 +270,13 @@ test("My Work directory results cannot cross an auth-session request boundary", 
       <MyWorkPersonPicker companyID="company-1" viewerUserID="viewer-2" selectedUserID="viewer-2" requestJSON={newRequest} onSelect={() => undefined} />,
     ));
     await flushDOM();
-    button = container.querySelector<HTMLButtonElement>("[data-my-work-people-button=true]") as HTMLButtonElement;
-    await act(async () => button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
+    const requestCountBeforeFocus = newRequestCount;
+    const input = container.querySelector<HTMLInputElement>("input[role=combobox]") as HTMLInputElement;
+    await act(async () => Simulate.focus(input));
     await flushDOM();
+    assert.equal(input.getAttribute("aria-expanded"), "true");
+    assert.equal(newRequestCount, requestCountBeforeFocus + 2);
+    assert.match(dom.window.document.body.textContent ?? "", /Loading company people/);
     await act(async () => {
       releaseNewDirectory();
       await newDirectoryReady;
