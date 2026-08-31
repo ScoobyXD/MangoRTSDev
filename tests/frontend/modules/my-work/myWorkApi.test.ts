@@ -35,10 +35,30 @@ test("My Work initial read derives its subject from auth and requests all typed 
   assert.equal(url.searchParams.has("perspective"), false);
   assert.equal(url.searchParams.get("limit"), "100");
   assert.equal(url.searchParams.has("section"), false);
+  assert.equal(url.searchParams.has("subject_user_id"), false, "self reads keep the established current-user request");
   assert.equal(url.searchParams.has("user_id"), false);
   assert.equal(url.searchParams.has("target_user_id"), false);
   assert.equal(calls[0]?.init?.signal, signal);
   assert.equal(calls[0]?.init?.cache, "no-store");
+});
+
+test("My Work sends the selected subject only through the narrow subject contract", async () => {
+  let requestedPath = "";
+  const requestJSON: BoundRequestJSON = async <T>(path: string): Promise<T> => {
+    requestedPath = path;
+    return { company_id: "company-1", user_id: "person-2", projects: { items: [], has_more: false } } as T;
+  };
+
+  await fetchMyWork(requestJSON, {
+    companyID: "company-1",
+    subjectUserID: " person-2 ",
+    section: "projects",
+  });
+
+  const url = new URL(requestedPath, "https://mango.test");
+  assert.equal(url.searchParams.get("subject_user_id"), "person-2");
+  assert.equal(url.searchParams.has("user_id"), false);
+  assert.equal(url.searchParams.has("target_user_id"), false);
 });
 
 test("My Work follow-ups request only the affected section and its opaque cursor", async () => {

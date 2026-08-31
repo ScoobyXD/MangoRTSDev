@@ -148,6 +148,10 @@ const componentTests = [
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/my-work/MyWorkContent.test.js"),
   },
   {
+    source: resolve(repoRoot, "tests/frontend/modules/my-work/MyWorkPersonPicker.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/my-work/MyWorkPersonPicker.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/my-work/ActionItemInlineFieldSettingsPopover.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/my-work/ActionItemInlineFieldSettingsPopover.test.js"),
   },

@@ -1,6 +1,6 @@
 # Backend Workspace Read and Cache Notes
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 ## Action Item and My Work contracts
 
@@ -8,7 +8,7 @@ Last updated: 2026-08-29
 
 `GET /v1/action-items/{entity_id}/source?company_id={company_id}` returns the current permission-safe Source projection or `null`. It resolves the current resource name and never returns a hidden, missing, recycled, permanently deleted, or unset identity.
 
-`GET /v1/my-work` accepts `role` only with the `nodes` or `processes` section and accepts `perspective=mine|delegated` only with the `action_items` section. Node and Process roles default independently to Responsible, Action Items default to Mine, and each selector value is bound to its section cursor.
+`GET /v1/my-work` accepts one optional canonical `subject_user_id`. When omitted, the subject is the authenticated viewer. A selected subject must be a current member of the requested company; that subject determines work candidacy while the authenticated viewer continues to determine resource access and permission-safe inline context. Process status counts include only child Nodes the viewer may access. The legacy `user_id` and `target_user_id` parameters remain invalid. The endpoint accepts `role` only with the `nodes` or `processes` section and accepts `perspective=mine|delegated` only with the `action_items` section. Node and Process roles default independently to Responsible, Action Items default to Mine, and every cursor is bound to its company, subject, viewer, section, selector, grouping, ordering, and History mode.
 
 ## Current workspace snapshot contract
 

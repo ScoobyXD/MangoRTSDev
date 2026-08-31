@@ -408,6 +408,104 @@ where company_id=$1::uuid and entity_id=$2::uuid and entity_field_type_id=$4::uu
 	}
 }
 
+func TestPostgresMyWorkSelectedSubjectIntersectsViewerPermissions(t *testing.T) {
+	_, repo := openPostgresProcessMapIntegration(t)
+	company, err := repo.CreateCompany("Postgres My Work selected subject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	subject, err := repo.UpsertAuthUser("postgres-my-work-selected-subject", "selected-subject@example.test", "Selected Subject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := repo.UpsertAuthUser("postgres-my-work-selected-viewer", "selected-viewer@example.test", "Selected Viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range []domain.User{subject, viewer} {
+		if _, err := repo.AddCompanyMembership(user.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+			t.Fatal(err)
+		}
+	}
+	visible, err := repo.CreateLogicGate(company.CompanyID, "Visible selected-subject process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := repo.CreateLogicGate(company.CompanyID, "Hidden selected-subject process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, gate := range []domain.LogicGate{visible, hidden} {
+		if _, err := repo.SetResourceRACIAssignments(ResourceRACIAssignmentUpdateInput{
+			CompanyID: company.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: gate.LogicGateID, ActorUserID: subject.UserID,
+			Assignments: []ResourceRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: EntityPermissionSubjectUser, PrincipalID: subject.UserID}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID: company.CompanyID, EntityType: EntityTypeLogicGate, EntityID: hidden.LogicGateID,
+		DefaultAccess: EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: subject.UserID,
+		Permissions: []EntityPermissionInput{{SubjectType: EntityPermissionSubjectUser, SubjectID: subject.UserID, AccessLevel: EntityPermissionEdit}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	visibleNode, err := repo.CreateNode(company.CompanyID, "Visible selected-subject count")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hiddenNode, err := repo.CreateNode(company.CompanyID, "Hidden selected-subject count")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, assignment := range []LogicGateNodeAssignmentInput{
+		{CompanyID: company.CompanyID, LogicGateID: visible.LogicGateID, NodeID: visibleNode.NodeID, Status: LogicGateWorkStatusPending},
+		{CompanyID: company.CompanyID, LogicGateID: visible.LogicGateID, NodeID: hiddenNode.NodeID, Status: LogicGateWorkStatusReview},
+	} {
+		if _, err := repo.AssignNodeToLogicGateStatus(assignment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID: company.CompanyID, EntityType: EntityTypeNode, EntityID: hiddenNode.NodeID,
+		DefaultAccess: EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: subject.UserID,
+		Permissions: []EntityPermissionInput{{SubjectType: EntityPermissionSubjectUser, SubjectID: subject.UserID, AccessLevel: EntityPermissionEdit}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	viewerResult, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: company.CompanyID, UserID: subject.UserID, ViewerUserID: viewer.UserID,
+		Section: MyWorkSectionProcesses, Role: domain.RACIRoleResponsible,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if viewerResult.Processes == nil || len(viewerResult.Processes.Items) != 1 || viewerResult.Processes.Items[0].LogicGateID != visible.LogicGateID {
+		t.Fatalf("selected-subject viewer result = %+v, want only visible process", viewerResult.Processes)
+	}
+	if counts := viewerResult.Processes.Items[0].StatusCounts; counts != (domain.RACITabStatusCounts{Pending: 1}) {
+		t.Fatalf("selected-subject viewer counts = %+v, want only viewer-visible Node", counts)
+	}
+	subjectResult, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: company.CompanyID, UserID: subject.UserID, ViewerUserID: subject.UserID,
+		Section: MyWorkSectionProcesses, Role: domain.RACIRoleResponsible,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subjectResult.Processes == nil || len(subjectResult.Processes.Items) != 2 {
+		t.Fatalf("selected subject's own result = %+v, want both processes", subjectResult.Processes)
+	}
+	subjectCounts := map[string]domain.RACITabStatusCounts{}
+	for _, item := range subjectResult.Processes.Items {
+		subjectCounts[item.LogicGateID] = item.StatusCounts
+	}
+	if counts := subjectCounts[visible.LogicGateID]; counts != (domain.RACITabStatusCounts{Pending: 1, Review: 1}) {
+		t.Fatalf("selected subject's own counts = %+v, want both Nodes", counts)
+	}
+}
+
 func TestPostgresMyWorkNamedKeysetUsesExactDatabaseSortKey(t *testing.T) {
 	_, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Postgres My Work Cursor")

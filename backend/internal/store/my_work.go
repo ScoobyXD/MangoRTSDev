@@ -58,6 +58,9 @@ type myWorkGroupingTerm struct {
 
 type myWorkCursor struct {
 	Version            int    `json:"v"`
+	CompanyID          string `json:"company_id"`
+	SubjectUserID      string `json:"subject_user_id"`
+	ViewerUserID       string `json:"viewer_user_id"`
 	Section            string `json:"section"`
 	Role               string `json:"role,omitempty"`
 	Perspective        string `json:"perspective,omitempty"`
@@ -165,7 +168,9 @@ func normalizeMyWorkQuery(query MyWorkQuery) (MyWorkQuery, myWorkCursor, error) 
 		return query, cursor, nil
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(query.Cursor)
-	if err != nil || json.Unmarshal(payload, &cursor) != nil || cursor.Version != 2 || cursor.Section != query.Section || cleanUUIDText(cursor.ResourceID) == "" {
+	if err != nil || json.Unmarshal(payload, &cursor) != nil || cursor.Version != 3 ||
+		cursor.CompanyID != query.CompanyID || cursor.SubjectUserID != query.UserID || cursor.ViewerUserID != query.ViewerUserID ||
+		cursor.Section != query.Section || cleanUUIDText(cursor.ResourceID) == "" {
 		return MyWorkQuery{}, myWorkCursor{}, ErrInvalid
 	}
 	if query.Section == MyWorkSectionProcesses || query.Section == MyWorkSectionNodes {
@@ -368,8 +373,11 @@ func validMyWorkCursorDate(cursor myWorkCursor) bool {
 	return err == nil && parsed.Format("2006-01-02") == cursor.Date
 }
 
-func encodeMyWorkCursor(cursor myWorkCursor) string {
-	cursor.Version = 2
+func encodeMyWorkCursor(query MyWorkQuery, cursor myWorkCursor) string {
+	cursor.Version = 3
+	cursor.CompanyID = cleanUUIDText(query.CompanyID)
+	cursor.SubjectUserID = cleanUUIDText(query.UserID)
+	cursor.ViewerUserID = cleanUUIDText(query.ViewerUserID)
 	payload, _ := json.Marshal(cursor)
 	return base64.RawURLEncoding.EncodeToString(payload)
 }

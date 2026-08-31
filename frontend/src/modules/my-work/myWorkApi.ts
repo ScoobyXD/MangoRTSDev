@@ -134,6 +134,7 @@ export type MyWorkResponse = {
 
 export type FetchMyWorkInput = {
   companyID: string;
+  subjectUserID?: string;
   section?: MyWorkSection;
   role?: MyWorkProcessRole;
   perspective?: MyWorkActionItemPerspective;
@@ -176,6 +177,7 @@ export async function fetchMyWork(
     throw new Error("My Work history cannot be grouped or ordered.");
   }
   const params = new URLSearchParams({ company_id: input.companyID.trim() });
+  if (input.subjectUserID?.trim()) params.set("subject_user_id", input.subjectUserID.trim());
   if (input.section) params.set("section", input.section);
   if ((input.section === "nodes" || input.section === "processes") && input.role) params.set("role", input.role);
   if (input.section === "action_items" && input.perspective) params.set("perspective", input.perspective);

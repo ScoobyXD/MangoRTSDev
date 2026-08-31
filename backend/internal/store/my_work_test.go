@@ -660,6 +660,274 @@ func TestMemoryMyWorkProcessesRoleAndNestedProjectTeamRemainPermissionFiltered(t
 	}
 }
 
+func TestMemoryMyWorkSelectedSubjectSectionsUseViewerPermissionsAndBoundCursor(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "10000000-0000-4000-8000-000000000018"
+	subject := mustCreateMyWorkMember(t, repo, companyID, "my-work-section-subject")
+	viewer := mustCreateMyWorkMember(t, repo, companyID, "my-work-section-viewer")
+	privateToSubject := func(resourceType, resourceID string) {
+		t.Helper()
+		if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+			CompanyID: companyID, EntityType: resourceType, EntityID: resourceID,
+			DefaultAccess: EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: subject.UserID,
+			Permissions: []EntityPermissionInput{{SubjectType: EntityPermissionSubjectUser, SubjectID: subject.UserID, AccessLevel: EntityPermissionEdit}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	visibleHuddle, err := repo.CreateHuddleLogicGate(HuddleCreateInput{CompanyID: companyID, Name: "Visible Action Process"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	visibleHuddleNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: companyID, OwnerID: visibleHuddle.HuddleLogicGateID, Name: "Visible Action Source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hiddenHuddle, err := repo.CreateHuddleLogicGate(HuddleCreateInput{CompanyID: companyID, Name: "Hidden Action Process"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hiddenHuddleNode, err := repo.CreateHuddleNode(HuddleCreateInput{CompanyID: companyID, OwnerID: hiddenHuddle.HuddleLogicGateID, Name: "Hidden Action Source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateToSubject(EntityTypeHuddleLogicGate, hiddenHuddle.HuddleLogicGateID)
+	privateToSubject(EntityTypeHuddleNode, hiddenHuddleNode.HuddleNodeID)
+	visibleAction := mustCreateSourcedMyWorkActionItem(t, repo, companyID, subject.UserID, "Visible subject action", EntityTypeHuddleNode, visibleHuddleNode.HuddleNodeID, "2026-09-01")
+	hiddenContextAction := mustCreateSourcedMyWorkActionItem(t, repo, companyID, subject.UserID, "Hidden-context subject action", EntityTypeHuddleNode, hiddenHuddleNode.HuddleNodeID, "2026-09-02")
+	mustCreateAssignedActionItem(t, repo, companyID, viewer.UserID, "Viewer-only action", ActionItemColorRed, "2026-09-03", ActionItemStatusInProgress)
+
+	actionQuery := MyWorkQuery{
+		CompanyID: companyID, UserID: subject.UserID, ViewerUserID: viewer.UserID,
+		Section: MyWorkSectionActionItems, Limit: 1,
+	}
+	firstActionPage, err := repo.GetMyWork(context.Background(), actionQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstActionPage.ActionItems == nil || len(firstActionPage.ActionItems.Items) != 1 || firstActionPage.ActionItems.Items[0].EntityID != visibleAction.EntityID || !firstActionPage.ActionItems.HasMore || firstActionPage.ActionItems.NextCursor == "" {
+		t.Fatalf("selected-subject first Action Item page = %+v", firstActionPage.ActionItems)
+	}
+	if row := firstActionPage.ActionItems.Items[0]; row.Source == nil || row.Source.ResourceID != visibleHuddleNode.HuddleNodeID || row.HuddleProcess == nil || row.HuddleProcess.HuddleLogicGateID != visibleHuddle.HuddleLogicGateID {
+		t.Fatalf("viewer-visible Action Item context = %+v", row)
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(firstActionPage.ActionItems.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var generatedCursor myWorkCursor
+	if err := json.Unmarshal(payload, &generatedCursor); err != nil {
+		t.Fatal(err)
+	}
+	if generatedCursor.CompanyID != companyID || generatedCursor.SubjectUserID != subject.UserID || generatedCursor.ViewerUserID != viewer.UserID {
+		t.Fatalf("selected-subject cursor identity = %+v", generatedCursor)
+	}
+	actionQuery.Cursor = firstActionPage.ActionItems.NextCursor
+	secondActionPage, err := repo.GetMyWork(context.Background(), actionQuery)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondActionPage.ActionItems == nil || len(secondActionPage.ActionItems.Items) != 1 || secondActionPage.ActionItems.Items[0].EntityID != hiddenContextAction.EntityID || secondActionPage.ActionItems.HasMore {
+		t.Fatalf("selected-subject second Action Item page = %+v", secondActionPage.ActionItems)
+	}
+	if row := secondActionPage.ActionItems.Items[0]; row.Source != nil || row.HuddleProcess != nil {
+		t.Fatalf("viewer-hidden Action Item context leaked = %+v", row)
+	}
+	wrongViewer := actionQuery
+	wrongViewer.ViewerUserID = subject.UserID
+	if _, err := repo.GetMyWork(context.Background(), wrongViewer); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("cross-viewer generated cursor error = %v, want ErrInvalid", err)
+	}
+	wrongSubject := actionQuery
+	wrongSubject.UserID = viewer.UserID
+	if _, err := repo.GetMyWork(context.Background(), wrongSubject); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("cross-subject generated cursor error = %v, want ErrInvalid", err)
+	}
+	subjectActions, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: subject.UserID, ViewerUserID: subject.UserID, Section: MyWorkSectionActionItems,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundHiddenContext := false
+	for _, row := range subjectActions.ActionItems.Items {
+		if row.EntityID == hiddenContextAction.EntityID {
+			foundHiddenContext = row.Source != nil && row.HuddleProcess != nil
+		}
+	}
+	if len(subjectActions.ActionItems.Items) != 2 || !foundHiddenContext {
+		t.Fatalf("selected subject's own Action Items = %+v, want both subject rows and private context", subjectActions.ActionItems)
+	}
+
+	subjectTeam, err := repo.CreateCompanyUserGroup(companyID, "", "Subject team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewerTeam, err := repo.CreateCompanyUserGroup(companyID, "", "Viewer team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, subjectTeam.GroupID, []string{subject.UserID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.SetCompanyUserGroupMembers(companyID, viewerTeam.GroupID, []string{viewer.UserID}); err != nil {
+		t.Fatal(err)
+	}
+	createTeamProject := func(name, teamID string) domain.Project {
+		t.Helper()
+		result, err := repo.CreateProject(ProjectInput{CompanyID: companyID, Name: name, Status: "active", Health: "on_track", TeamIDs: []string{teamID}, TeamIDsSet: true})
+		if err != nil || result.Project == nil {
+			t.Fatalf("CreateProject %q: %+v %v", name, result, err)
+		}
+		return *result.Project
+	}
+	visibleProject := createTeamProject("Visible subject project", subjectTeam.GroupID)
+	hiddenProject := createTeamProject("Hidden subject project", subjectTeam.GroupID)
+	viewerOnlyProject := createTeamProject("Viewer-only project", viewerTeam.GroupID)
+	privateToSubject(EntityTypeProject, hiddenProject.ProjectID)
+
+	hiddenInlineProcess, err := repo.CreateLogicGate(companyID, "Hidden inline process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	privateToSubject(EntityTypeLogicGate, hiddenInlineProcess.LogicGateID)
+	visibleNode, err := repo.CreateNode(companyID, "Visible subject Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: hiddenInlineProcess.LogicGateID, NodeID: visibleNode.NodeID, Status: LogicGateWorkStatusPending}); err != nil {
+		t.Fatal(err)
+	}
+	mustSetMyWorkDirectRACI(t, repo, companyID, EntityTypeNode, visibleNode.NodeID, subject.UserID, domain.RACIRoleResponsible)
+	setMyWorkDefaultAccess(t, repo, companyID, EntityTypeNode, visibleNode.NodeID, subject.UserID, EntityPermissionEdit)
+	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{CompanyID: companyID, ProjectID: hiddenProject.ProjectID, ResourceType: EntityTypeNode, ResourceID: visibleNode.NodeID}); err != nil {
+		t.Fatal(err)
+	}
+	hiddenNode, err := repo.CreateNode(companyID, "Hidden subject Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustSetMyWorkDirectRACI(t, repo, companyID, EntityTypeNode, hiddenNode.NodeID, subject.UserID, domain.RACIRoleResponsible)
+	privateToSubject(EntityTypeNode, hiddenNode.NodeID)
+	viewerOnlyNode, err := repo.CreateNode(companyID, "Viewer-only Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustSetMyWorkDirectRACI(t, repo, companyID, EntityTypeNode, viewerOnlyNode.NodeID, viewer.UserID, domain.RACIRoleResponsible)
+
+	viewerNodes, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: subject.UserID, ViewerUserID: viewer.UserID, Section: MyWorkSectionNodes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if viewerNodes.Nodes == nil || len(viewerNodes.Nodes.Items) != 1 || viewerNodes.Nodes.Items[0].NodeID != visibleNode.NodeID {
+		t.Fatalf("selected-subject viewer Nodes = %+v, want only visible subject-qualified Node", viewerNodes.Nodes)
+	}
+	if row := viewerNodes.Nodes.Items[0]; row.Process != nil || row.Project != nil {
+		t.Fatalf("viewer-hidden inline Node references leaked = %+v", row)
+	}
+	subjectNodes, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: subject.UserID, ViewerUserID: subject.UserID, Section: MyWorkSectionNodes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundVisibleNode, foundHiddenNode := false, false
+	for _, row := range subjectNodes.Nodes.Items {
+		switch row.NodeID {
+		case visibleNode.NodeID:
+			foundVisibleNode = row.Process != nil && row.Process.LogicGateID == hiddenInlineProcess.LogicGateID && row.Project != nil && row.Project.ProjectID == hiddenProject.ProjectID
+		case hiddenNode.NodeID:
+			foundHiddenNode = true
+		case viewerOnlyNode.NodeID:
+			t.Fatalf("viewer-qualified Node leaked into subject's work: %+v", row)
+		}
+	}
+	if len(subjectNodes.Nodes.Items) != 2 || !foundVisibleNode || !foundHiddenNode {
+		t.Fatalf("selected subject's own Nodes = %+v", subjectNodes.Nodes)
+	}
+
+	viewerProjects, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: subject.UserID, ViewerUserID: viewer.UserID, Section: MyWorkSectionProjects,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if viewerProjects.Projects == nil || len(viewerProjects.Projects.Items) != 1 || viewerProjects.Projects.Items[0].ProjectID != visibleProject.ProjectID {
+		t.Fatalf("selected-subject viewer Projects = %+v, want only visible subject-team Project", viewerProjects.Projects)
+	}
+	subjectProjects, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: subject.UserID, ViewerUserID: subject.UserID, Section: MyWorkSectionProjects,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectIDs := map[string]bool{}
+	for _, row := range subjectProjects.Projects.Items {
+		projectIDs[row.ProjectID] = true
+	}
+	if len(subjectProjects.Projects.Items) != 2 || !projectIDs[visibleProject.ProjectID] || !projectIDs[hiddenProject.ProjectID] || projectIDs[viewerOnlyProject.ProjectID] {
+		t.Fatalf("selected subject's own Projects = %+v, want only subject-team Projects", subjectProjects.Projects)
+	}
+}
+
+func TestMemoryMyWorkSelectedSubjectProcessCountsExcludeViewerHiddenNodes(t *testing.T) {
+	repo := NewMemoryRepo()
+	companyID := "10000000-0000-4000-8000-000000000009"
+	subject := mustCreateMyWorkMember(t, repo, companyID, "my-work-count-subject")
+	viewer := mustCreateMyWorkMember(t, repo, companyID, "my-work-count-viewer")
+	gate := mustCreateMyWorkGateWithRole(t, repo, companyID, subject.UserID, "Selected subject counts", domain.RACIRoleResponsible)
+	visibleNode, err := repo.CreateNode(companyID, "Visible counted node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hiddenNode, err := repo.CreateNode(companyID, "Hidden counted node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, assignment := range []LogicGateNodeAssignmentInput{
+		{CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: visibleNode.NodeID, Status: LogicGateWorkStatusPending},
+		{CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: hiddenNode.NodeID, Status: LogicGateWorkStatusReview},
+	} {
+		if _, err := repo.AssignNodeToLogicGateStatus(assignment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID: companyID, EntityType: EntityTypeNode, EntityID: hiddenNode.NodeID,
+		DefaultAccess: EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: subject.UserID,
+		Permissions: []EntityPermissionInput{{SubjectType: EntityPermissionSubjectUser, SubjectID: subject.UserID, AccessLevel: EntityPermissionEdit}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	viewerResult, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: subject.UserID, ViewerUserID: viewer.UserID,
+		Section: MyWorkSectionProcesses, Role: domain.RACIRoleResponsible,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if viewerResult.Processes == nil || len(viewerResult.Processes.Items) != 1 {
+		t.Fatalf("selected-subject viewer processes = %+v", viewerResult.Processes)
+	}
+	if counts := viewerResult.Processes.Items[0].StatusCounts; counts != (domain.RACITabStatusCounts{Pending: 1}) {
+		t.Fatalf("selected-subject viewer counts = %+v, want only visible Node", counts)
+	}
+	subjectResult, err := repo.GetMyWork(context.Background(), MyWorkQuery{
+		CompanyID: companyID, UserID: subject.UserID, ViewerUserID: subject.UserID,
+		Section: MyWorkSectionProcesses, Role: domain.RACIRoleResponsible,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if subjectResult.Processes == nil || len(subjectResult.Processes.Items) != 1 || subjectResult.Processes.Items[0].StatusCounts != (domain.RACITabStatusCounts{Pending: 1, Review: 1}) {
+		t.Fatalf("selected subject's own counts = %+v, want both Nodes", subjectResult.Processes)
+	}
+}
+
 func TestMemoryMyWorkUsesWinningRACIRole(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "10000000-0000-4000-8000-000000000006"
@@ -816,18 +1084,19 @@ func TestMyWorkQueryShapesAndCursorBinding(t *testing.T) {
 		t.Fatalf("section response pointers = %+v", nodes)
 	}
 	resourceID := "40000000-0000-4000-8000-000000000001"
-	nodeCursor := encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: domain.RACIRoleResponsible, Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "2026-09-01", ResourceID: resourceID})
+	cursorQuery := MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID}
+	nodeCursor := encodeMyWorkCursor(cursorQuery, myWorkCursor{Section: MyWorkSectionNodes, Role: domain.RACIRoleResponsible, Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "2026-09-01", ResourceID: resourceID})
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionProjects, Cursor: nodeCursor}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cross-section cursor error = %v, want ErrInvalid", err)
 	}
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, Role: domain.RACIRoleAccountable, Cursor: nodeCursor}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cross-Node-role cursor error = %v, want ErrInvalid", err)
 	}
-	processCursor := encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionProcesses, Role: domain.RACIRoleResponsible, Name: "process", ResourceID: resourceID})
+	processCursor := encodeMyWorkCursor(cursorQuery, myWorkCursor{Section: MyWorkSectionProcesses, Role: domain.RACIRoleResponsible, Name: "process", ResourceID: resourceID})
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionProcesses, Role: domain.RACIRoleAccountable, Cursor: processCursor}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cross-role cursor error = %v, want ErrInvalid", err)
 	}
-	actionCursor := encodeMyWorkCursor(myWorkCursor{
+	actionCursor := encodeMyWorkCursor(cursorQuery, myWorkCursor{
 		Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated,
 		Grouping: MyWorkDefaultActionItemGrouping, Ordering: MyWorkDefaultActionItemOrdering, GroupNull: true, GroupInt: 3, HuddleProcessNull: true, DateNull: true,
 		ResourceID: resourceID,
@@ -840,16 +1109,39 @@ func TestMyWorkQueryShapesAndCursorBinding(t *testing.T) {
 		Grouping: MyWorkDefaultDelegatedActionItemGrouping, Ordering: MyWorkDefaultDelegatedActionItemOrdering, GroupNull: true, GroupInt: 3, HuddleProcessNull: true, DateNull: true,
 		PersonInChargeName: "person", PersonInChargeID: user.UserID, ResourceID: resourceID,
 	}
-	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated, Cursor: encodeMyWorkCursor(delegatedPersonCursor)}); err != nil {
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated, Cursor: encodeMyWorkCursor(cursorQuery, delegatedPersonCursor)}); err != nil {
 		t.Fatalf("valid delegated Person-in-charge cursor error = %v", err)
 	}
 	delegatedPersonCursor.PersonInChargeName = ""
-	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated, Cursor: encodeMyWorkCursor(delegatedPersonCursor)}); !errors.Is(err, ErrInvalid) {
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionActionItems, Perspective: MyWorkActionItemPerspectiveDelegated, Cursor: encodeMyWorkCursor(cursorQuery, delegatedPersonCursor)}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("missing Person-in-charge cursor name error = %v, want ErrInvalid", err)
 	}
-	badDate := encodeMyWorkCursor(myWorkCursor{Section: MyWorkSectionNodes, Role: domain.RACIRoleResponsible, Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "not-a-date", ResourceID: resourceID})
+	badDate := encodeMyWorkCursor(cursorQuery, myWorkCursor{Section: MyWorkSectionNodes, Role: domain.RACIRoleResponsible, Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "not-a-date", ResourceID: resourceID})
 	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, Cursor: badDate}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("malformed date cursor error = %v, want ErrInvalid", err)
+	}
+	otherSubjectID := "20000000-0000-4000-8000-000000000081"
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: otherSubjectID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, Cursor: nodeCursor}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("cross-subject cursor error = %v, want ErrInvalid", err)
+	}
+	otherViewerID := "20000000-0000-4000-8000-000000000082"
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: otherViewerID, Section: MyWorkSectionNodes, Cursor: nodeCursor}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("cross-viewer cursor error = %v, want ErrInvalid", err)
+	}
+	otherCompanyID := "10000000-0000-4000-8000-000000000081"
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: otherCompanyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, Cursor: nodeCursor}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("cross-company cursor error = %v, want ErrInvalid", err)
+	}
+	legacyPayload, err := json.Marshal(myWorkCursor{
+		Version: 2, Section: MyWorkSectionNodes, Role: domain.RACIRoleResponsible,
+		Grouping: MyWorkDefaultNodeGrouping, GroupInt: 1, Date: "2026-09-01", ResourceID: resourceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyCursor := base64.RawURLEncoding.EncodeToString(legacyPayload)
+	if _, err := repo.GetMyWork(context.Background(), MyWorkQuery{CompanyID: companyID, UserID: user.UserID, ViewerUserID: user.UserID, Section: MyWorkSectionNodes, Cursor: legacyCursor}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("legacy cursor version error = %v, want ErrInvalid", err)
 	}
 }
 
@@ -970,6 +1262,21 @@ func TestPostgresMyWorkQueriesKeepSubjectAndViewerResolutionSetBased(t *testing.
 	pageIndex := strings.Index(nodeQuery, "), paged_nodes as (")
 	if permissionIndex < 0 || pageIndex < 0 || permissionIndex >= pageIndex {
 		t.Fatal("My Work Node permission filtering must remain before paged_nodes")
+	}
+	processQueryStart := strings.Index(source, "func (r *PostgresRepo) postgresMyWorkProcesses")
+	processQueryEnd := strings.Index(source, "func (r *PostgresRepo) postgresMyWorkProjects")
+	if processQueryStart < 0 || processQueryEnd <= processQueryStart {
+		t.Fatal("could not isolate the PostgreSQL My Work Processes query")
+	}
+	processQuery := source[processQueryStart:processQueryEnd]
+	for _, required := range []string{
+		"process_count_node_targets(resource_type,resource_id)",
+		`myWorkPermissionAccessCTEs("process_count_node_targets", "process_count_node")`,
+		"node_access.resource_id=projection.node_id and node_access.allowed",
+	} {
+		if !strings.Contains(processQuery, required) {
+			t.Fatalf("My Work Process counts missing viewer-visible Node contract %q", required)
+		}
 	}
 }
 

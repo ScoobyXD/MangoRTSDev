@@ -4,9 +4,9 @@ Last updated: 2026-08-30
 
 MW1 - The page is named My Work and is the first built-in item beneath My Tower, immediately above Projects.
 
-MW2 - My Work always uses the authenticated company member as its subject. Team, Company, and another-person subjects do not appear; Action Items instead expose the exact Mine and Delegated perspectives defined below.
+MW2 - My Work defaults to the signed-in company member as its subject. An optional canonical `subject_user_id` may select any current member of the same company; omitting it or choosing the signed-in member uses the existing self path, and a missing or cross-company subject is never accepted.
 
-MW3 - The My Work header shows the page title and has no grouping button.
+MW3 - The My Work header shows the page title and places the established people-icon button directly within its header search area. The button opens the company people picker, and the header has no grouping button.
 
 MW4 - Beneath the header, My Work has three columns: Action Items on the left, one shared Processes or Nodes panel in the middle, and Projects on the right.
 
@@ -48,11 +48,11 @@ MW22 - When Processes is selected, the middle header shows only the Process R, A
 
 MW23 - The right column lists a Project when the subject is a direct member of any currently assigned same-company Team group or a member of any current descendant group beneath that Team. Membership only in an ancestor or unrelated group does not qualify.
 
-MW24 - My Work reads canonical Nodes, Action Item fields and immutable Source, Huddle Node ownership, RACI, Process relationships, Project relationships, Project Team assignments, company membership, and user-owned saved-view preferences when requested. There is no My Work projection table and no My Work relationship authority.
+MW24 - My Work reads canonical Nodes, Action Item fields and immutable Source, Huddle Node ownership, RACI, Process relationships, Project relationships, Project Team assignments, company membership, and the signed-in viewer's saved-view preferences when requested. There is no My Work projection table and no My Work relationship authority.
 
-MW25 - My Work never rewrites a Node, Action Item, Source, Huddle ownership, RACI assignment, Process relationship, Project relationship, Project Team assignment, or permission. Changing personal grouping, ordering, or displayed fields writes only that user's My Work saved-view row.
+MW25 - My Work never rewrites a Node, Action Item, Source, Huddle ownership, RACI assignment, Process relationship, Project relationship, Project Team assignment, or permission. Changing grouping, ordering, or displayed fields writes only the signed-in viewer's My Work saved-view row and never the selected subject's row.
 
-MW26 - The subject determines which resources qualify for My Work, while the authenticated viewer's current permissions determine which qualifying resources may be disclosed. The subject and viewer are the same authenticated company member in the first version.
+MW26 - The selected subject determines which resources qualify for My Work, while the signed-in viewer's current permissions determine which qualifying resources may be disclosed. Selecting another subject never changes the viewer, permission principal, or saved-view owner.
 
 MW27 - A qualifying Node, Process, or Project is shown only when the authenticated viewer has current effective access to that exact resource. Action Item visibility follows the current company-scoped Entity access contract.
 
@@ -60,7 +60,7 @@ MW28 - Effective RACI and Project Team membership never grant resource access. T
 
 MW29 - Access to a Node does not grant access to its associated Process or Project. An inaccessible inline Process or Project is omitted completely, including its ID, name, hidden count, placeholder, and relationship details, while the accessible Node remains visible.
 
-MW30 - The backend applies the selected Node role or Action Item perspective before permission filtering, grouping, leaf ordering, limits, pagination cursors, has-more decisions, or counts. Action Item cursors bind the perspective plus the complete grouping and ordering stacks; current Huddle process name and ID, Person in charge name and ID, and exact Entity ID provide stable keys only when selected. The frontend never filters or sorts a limited page locally or receives hidden resources.
+MW30 - The backend applies the selected subject, Node role, or Action Item perspective before the signed-in viewer's permission filter, grouping, leaf ordering, limits, pagination cursors, has-more decisions, or counts. Action Item cursors bind the perspective plus the complete grouping and ordering stacks; current Huddle process name and ID, Person in charge name and ID, and exact Entity ID provide stable keys only when selected. The frontend never filters or sorts My Work rows locally or receives hidden resources.
 
 MW31 - Opening any My Work resource performs that destination's normal current permission check. A prior My Work response is never proof of continued access.
 
@@ -72,9 +72,9 @@ MW34 - The normal Nodes list excludes a Node whose current status is Done, Compl
 
 MW35 - An Action Item row always exposes its exact ID and title and may expose the compact Person in charge, Assigned by, Created timestamp, permission-safe Source, Color, Analysis due date, Completion due date, Status, and permission-safe Huddle process values. Details is never returned as an inline label. Mine initially displays only Completion due date; Delegated initially displays Person in charge then Completion due date. Each perspective renders only its saved displayed-field list in that saved left-to-right order in one nonwrapping horizontal rail against the row's right edge; a fitting label rail stays completely inside the row, an oversized rail starts with the first saved field and scrolls horizontally, labels never stack vertically, and the title truncates before the label rail is displaced.
 
-MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that visible list nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated clears only Action Items and loads that perspective's independent grouping, ordering, and displayed-field preferences; switching a Node or Process role clears only that view and preserves its applicable grouping state. Switching the middle view changes both its rows and controls without changing either view's selected role, the Node grouping stack, or Node History state. Processes and Nodes keep independent scroll positions while switching views, and both saved positions reset for a new company or subject.
+MW36 - Action Items, Nodes, Processes, and Projects each append their own next bounded cursor page when that visible list nears its scroll boundary. Each Action Item or Node History request reads 12 records, including its first request. My Work shows no Previous, Next, or page-number controls, and loading one section never replaces or reloads another section. Switching Mine/Delegated clears only Action Items and loads the signed-in viewer's independent grouping, ordering, and displayed-field preferences; switching a Node or Process role clears only that view and preserves its applicable grouping state. Switching the middle view changes both its rows and controls without changing either view's selected role, the Node grouping stack, or Node History state. Processes and Nodes keep independent scroll positions while switching views, and both saved positions reset for a new company or subject.
 
-MW37 - A section never requests the same next cursor concurrently, ignores canceled or stale responses, rejects a non-advancing cursor, and never appends the same resource twice.
+MW37 - A section never requests the same next cursor concurrently, ignores canceled or stale responses, rejects a non-advancing cursor, and never appends the same resource twice. A response from an older company, subject, viewer, or auth session never replaces or extends the current view.
 
 MW38 - My Work has independently adjustable widths between its three columns. Its two vertical dividers support pointer and keyboard adjustment, remain within usable bounds, and save the company-specific column layout locally; there is no section-height divider. Each compact vertical drag handle uses the established Huddle cyan-to-purple accent instead of a plain gray rectangle.
 
@@ -118,34 +118,48 @@ MW57 - After a same-page Action Item editor successfully renames an item or chan
 
 MW58 - Only the My Work page content uses the uniform 90-percent visual density shown by browser zoom at 90 percent. Its compensated page bounds still fill the available workspace, while the shared left sidebar keeps its normal size and interaction behavior.
 
-MW59 - Every Process row always shows the same four right-aligned Request, Pending, In Progress, and Review squares. Counts use the canonical Logic Gate work-status source and the established Pinned colors and order; Backlog and Done are excluded, and an empty status shows `0` in its fixed square instead of disappearing or shifting another status.
+MW59 - Every Process row always shows the same four right-aligned Request, Pending, In Progress, and Review squares. Counts use only canonical Logic Gate Nodes the signed-in viewer may currently access, so a hidden Node never affects a disclosed count. The squares keep the established Pinned colors and order; Backlog and Done are excluded, and an empty status shows `0` in its fixed square instead of disappearing or shifting another status.
 
-MW60 - Mine and Delegated each persist one user-and-company-owned saved-view row. The row stores visible grouping terms in `groupings` and stores leaf `ordering` plus ordered `displayed_fields` in settings; no group principal, board row, local compatibility preference, or second preference table is allowed.
+MW60 - Mine and Delegated each persist one signed-in-viewer-and-company-owned saved-view row. The row stores visible grouping terms in `groupings` and stores leaf `ordering` plus ordered `displayed_fields` in settings; selecting another subject never reads or writes that subject's private preference row, and no group principal, board row, local compatibility preference, or second preference table is allowed.
 
 MW61 - The combined Action Items dialog's top-right Mine quadrant and bottom-right Delegated quadrant each contain one ordered shown-on-row tray above one field bank. Pointer click-drag is the only move or reorder command. Dropping between shown fields inserts at that exact position and shifts neighboring fields; dragging back to the bank hides the field, and an empty tray shows no inline labels.
 
 MW62 - The inline-field bank contains Person in charge, Assigned by, Created timestamp, Source, Color, Analysis due date, Completion due date, Status, and Huddle process. The title is always visible outside the bank, Details is never offered, and no editor-field checkmark changes row visibility.
 
-## Process Story: One person sees assigned work and current company context
+MW63 - The people picker lists only current company members under the existing current Team and group hierarchy. A member in multiple groups appears under each directly assigned group, and a member with no group appears once under No team.
 
-A company member logs in without an explicit return destination or opens My Work beneath My Tower
+MW64 - People search matches current member names and email addresses while preserving their Team and group headings. It filters only the directory and never filters loaded My Work rows.
 
-↓
+MW65 - Selecting a directory member changes only the My Work subject. The picker always provides one clear signed-in-member choice that returns to My Work from the viewer's own perspective.
 
-Mango reads that member's Action Items for the selected Mine or Delegated perspective and Nodes for the independently selected effective RACI role, applies current permissions, and selects either active work or completed History before any result is grouped or cursor-bounded
+MW66 - The people button, search, grouped results, and selection reuse the established popover, avatar, focus, keyboard, and navigation behavior. Opening focuses the search, arrow keys navigate visible members, Enter selects, and Escape closes and returns focus to the people button.
 
-↓
+MW67 - Each My Work cursor binds the company, selected subject, signed-in viewer, section, role or perspective, History mode, grouping, and ordering that produced it. A cursor from any different scope is rejected without returning rows or reference metadata.
 
-The full-height left column shows Action Items with editable inline due dates, applies the perspective's saved visible grouping hierarchy (Mine defaults to Color then Huddle process; Delegated defaults to Color, Person in charge, then Huddle process), then applies its independent Completion-due-date default leaf ordering, and renders only its saved inline fields in one left-to-right row; Action Items History replaces and restores rows in that same section
+MW68 - Changing the selected subject clears every prior subject row, cursor, and saved scroll position; resets transient role, perspective, History, and Node grouping controls to their established defaults; and reloads every section for the new subject. It reapplies only the signed-in viewer's saved Action Item grouping, ordering, and displayed fields and never reads or preserves the selected subject's preferences.
 
-↓
+MW69 - Changing the company or auth session cancels or invalidates outstanding My Work and directory reads, clears prior member and work data, and prevents a late response from rendering or repopulating a current-session cache.
 
-The middle panel defaults to Processes and switches exclusively between the Process list with its RACI controls and the Nodes list with its RACI, History, and grouping controls; both selectors default to Responsible and change independently, each visible list keeps its own scrolling behavior and state, and each Process row shows four aligned always-visible canonical active-work counts including zeros
+## Process Story: A viewer securely sees another member's work
 
-↓
-
-The unchanged right column lists Projects whose assigned Team includes that member directly or through a current descendant group
+A company member opens My Work beneath My Tower and sees their own perspective by default
 
 ↓
 
-Every displayed Node, Process, Project, permitted inline reference, and permitted Huddle process heading opens its exact canonical resource, while each Action Item opens its exact Entity without changing Source, Huddle ownership, or live Entity relationships
+The viewer may open the people control, search the current company directory under its existing Team and group hierarchy, and select another current member or return to their own perspective
+
+↓
+
+Mango qualifies Action Items, Nodes, Processes, and Projects from the selected subject, applies the signed-in viewer's current permissions before grouping, ordering, counting, or cursor pagination, and reads only the viewer's saved presentation preferences
+
+↓
+
+The four sections keep their established perspective, role, History, grouping, ordering, inline-label, pagination, refresh, and realtime behavior while inaccessible rows, headings, counts, cursors, and references remain absent
+
+↓
+
+Changing the subject starts fresh section reads and prevents an older subject or auth-session response from appearing
+
+↓
+
+Every displayed resource still performs its normal current permission check when opened
