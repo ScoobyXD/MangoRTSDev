@@ -152,6 +152,13 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 	if source.CompanyID != company.CompanyID || source.EntityID != created.EntityID || source.ResourceType != EntityTypeNode || source.ResourceID != sourceNode.NodeID {
 		t.Fatalf("stored source=%+v, want exact company/entity/type/resource", source)
 	}
+	visibleSources, err := repo.ListVisibleActionItemSources(company.CompanyID, member.UserID, []string{created.EntityID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if visible := visibleSources[created.EntityID]; visible.ResourceType != EntityTypeNode || visible.ResourceID != sourceNode.NodeID || visible.Name != sourceNode.Title {
+		t.Fatalf("batched visible source=%+v", visible)
+	}
 	for _, field := range created.EntityFields {
 		if field.SystemKey != ActionItemSourceSystemKey {
 			continue
@@ -249,6 +256,19 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 	}
 	if persisted, err := repo.GetActionItemSource(company.CompanyID, created.EntityID); err != nil || persisted.ResourceType != EntityTypeNode || persisted.ResourceID != sourceNode.NodeID {
 		t.Fatalf("immutable Source after rejected writes=%+v err=%v", persisted, err)
+	}
+	if _, err := repo.SetEntityPermissions(EntityPermissionUpdateInput{
+		CompanyID: company.CompanyID, EntityType: EntityTypeNode, EntityID: sourceNode.NodeID,
+		DefaultAccess: EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hiddenSources, err := repo.ListVisibleActionItemSources(company.CompanyID, member.UserID, []string{created.EntityID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := hiddenSources[created.EntityID]; exists {
+		t.Fatalf("batched Source projection exposed inaccessible Source: %+v", hiddenSources)
 	}
 }
 

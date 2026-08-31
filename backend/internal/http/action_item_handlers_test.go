@@ -173,6 +173,132 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 	}
 }
 
+func TestHuddleActionItemListsProjectOnlyVisibleSources(t *testing.T) {
+	repo := store.NewMemoryRepo()
+	owner, err := repo.UpsertAuthUser("huddle-action-item-source-owner", "huddle-source-owner@example.com", "Huddle Source Owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	member, err := repo.UpsertAuthUser("huddle-action-item-source-member", "huddle-source-member@example.com", "Huddle Source Member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	company, err := repo.CreateCompany("Huddle Action Item Source List")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(owner.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(member.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	gate, err := repo.CreateLogicGate(company.CompanyID, "Source projection Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := repo.ConvertLogicGateToHuddle(company.CompanyID, gate.LogicGateID, owner.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	huddleNode, err := repo.CreateHuddleNode(store.HuddleCreateInput{CompanyID: company.CompanyID, OwnerID: process.HuddleLogicGateID, Name: "Source projection Node", ActorID: owner.UserID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceNode, err := repo.CreateNode(company.CompanyID, "Visible source Node")
+	if err != nil {
+		t.Fatal(err)
+	}
+	actionItem, err := repo.CreateActionItem(store.ActionItemInput{
+		CompanyID: company.CompanyID, BodyText: "Action Item with Source", CreatedByUserID: owner.UserID,
+		SourceResourceType: store.EntityTypeNode, SourceResourceID: sourceNode.NodeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	textbox, err := repo.CreateHuddleNodeTextbox(store.HuddleNodeTextboxCreateInput{CompanyID: company.CompanyID, HuddleNodeID: huddleNode.HuddleNodeID, Title: "Source projection notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitActionItemHTTPTestDocument(t, repo, store.EditorJSONDocumentRef{
+		CompanyID: company.CompanyID, ResourceType: store.EntityTypeHuddleNode, ResourceID: huddleNode.HuddleNodeID, DocumentID: textbox.TextboxID,
+	}, owner.UserID, 0, "huddle-source-projection", actionItem.EntityID)
+
+	type listedActionItem struct {
+		domain.Entity
+		Source *domain.ActionItemSourceView `json:"source"`
+	}
+	countedRepo := &actionItemSourceBatchCountingRepo{Repository: repo}
+	handler := NewServer(countedRepo).Routes()
+	get := func(scopeQuery string) ([]listedActionItem, string) {
+		t.Helper()
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/v1/action-items?company_id="+company.CompanyID+"&"+scopeQuery, nil)
+		handler.ServeHTTP(response, requestWithActorForTest(request, member, company.CompanyID))
+		if response.Code != http.StatusOK {
+			t.Fatalf("Huddle Action Item list status=%d body=%s", response.Code, response.Body.String())
+		}
+		var payload struct {
+			ActionItems []listedActionItem `json:"action_items"`
+		}
+		body := response.Body.String()
+		if err := json.Unmarshal([]byte(body), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.ActionItems, body
+	}
+
+	visibleItems, visibleBody := get("huddle_node_id=" + huddleNode.HuddleNodeID)
+	if len(visibleItems) != 1 || visibleItems[0].EntityID != actionItem.EntityID || visibleItems[0].Name != actionItem.Name {
+		t.Fatalf("visible Huddle Action Items = %+v", visibleItems)
+	}
+	visibleSource := visibleItems[0].Source
+	if visibleSource == nil || visibleSource.ResourceType != store.EntityTypeNode || visibleSource.ResourceID != sourceNode.NodeID || visibleSource.Name != sourceNode.Title {
+		t.Fatalf("visible Huddle Action Item Source = %+v", visibleSource)
+	}
+	assertHuddleActionItemSourceJSONField(t, visibleBody, true)
+	for _, field := range visibleItems[0].EntityFields {
+		if field.SystemKey == store.ActionItemSourceSystemKey && string(field.Value) != "null" {
+			t.Fatalf("raw Action Item Source field leaked through Huddle list: %s", field.Value)
+		}
+	}
+
+	if _, err := repo.SetEntityPermissions(store.EntityPermissionUpdateInput{
+		CompanyID: company.CompanyID, EntityType: store.EntityTypeNode, EntityID: sourceNode.NodeID,
+		DefaultAccess: store.EntityPermissionNoAccess, DefaultAccessSet: true, ActorUserID: owner.UserID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	hiddenItems, hiddenBody := get("huddle_logic_gate_id=" + process.HuddleLogicGateID)
+	if len(hiddenItems) != 1 || hiddenItems[0].EntityID != actionItem.EntityID || hiddenItems[0].Source != nil {
+		t.Fatalf("hidden-source Huddle Action Items = %+v", hiddenItems)
+	}
+	if strings.Contains(hiddenBody, sourceNode.NodeID) || strings.Contains(hiddenBody, sourceNode.Title) {
+		t.Fatalf("hidden Huddle Action Item Source leaked identity: %s", hiddenBody)
+	}
+	assertHuddleActionItemSourceJSONField(t, hiddenBody, false)
+	if countedRepo.batchCalls != 2 || countedRepo.singleCalls != 0 {
+		t.Fatalf("Huddle Source repository calls: batch=%d single=%d, want batch=2 single=0", countedRepo.batchCalls, countedRepo.singleCalls)
+	}
+}
+
+func assertHuddleActionItemSourceJSONField(t *testing.T, body string, want bool) {
+	t.Helper()
+	var payload struct {
+		ActionItems []map[string]json.RawMessage `json:"action_items"`
+	}
+	if err := json.Unmarshal([]byte(body), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.ActionItems) != 1 {
+		t.Fatalf("Huddle Action Item JSON items = %d, want 1", len(payload.ActionItems))
+	}
+	_, got := payload.ActionItems[0]["source"]
+	if got != want {
+		t.Fatalf("Huddle Action Item top-level Source field present=%v, want %v: %s", got, want, body)
+	}
+}
+
 func TestActionItemHandlersRequireExactHuddleNodeAccess(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	owner, err := repo.UpsertAuthUser("action-item-access-owner", "owner-access@example.com", "Owner")
@@ -474,4 +600,20 @@ type actionItemDeniedAccessRepo struct {
 
 func (actionItemDeniedAccessRepo) UserHasEffectiveAccess(_, _, _, _, _ string) (bool, error) {
 	return false, nil
+}
+
+type actionItemSourceBatchCountingRepo struct {
+	store.Repository
+	batchCalls  int
+	singleCalls int
+}
+
+func (r *actionItemSourceBatchCountingRepo) ListVisibleActionItemSources(companyID, viewerUserID string, entityIDs []string) (map[string]domain.ActionItemSourceView, error) {
+	r.batchCalls++
+	return r.Repository.ListVisibleActionItemSources(companyID, viewerUserID, entityIDs)
+}
+
+func (r *actionItemSourceBatchCountingRepo) GetActionItemSource(companyID, entityID string) (domain.ActionItemSource, error) {
+	r.singleCalls++
+	return r.Repository.GetActionItemSource(companyID, entityID)
 }

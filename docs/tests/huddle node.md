@@ -19,7 +19,7 @@
 17. The popup opens almost full screen while leaving the application sidebar visible and provides compact pin, fullscreen, delete, and close actions.
 18. The popup header keeps the Huddle Node icon, live Huddle breadcrumb, editable Huddle Node name, RACI cards, and Permissions controls.
 19. Clicking a captured normal Logic Gate opens that Logic Gate, and clicking a captured KPI opens the shared KPI editor without changing the snapshot.
-20. The right column shows the owning Huddle Logic Gate's current live Action Item rollup and refreshes only when saved Action Item references change, a canonical remote reference set changes, or a listed Action Item is edited; ordinary typing never reloads the rollup or editor, and an older overlapping response never replaces a newer one.
+20. The right column uses the same shared Action Item rollup panel as the Huddle Process view. Its invocation carries the exact `huddle_node` type and this Huddle Node's literal ID, reads the owning Huddle Logic Gate's current live rollup, and refreshes only when saved Action Item references change, a canonical remote reference set changes, or a listed Action Item is edited; ordinary typing never reloads the rollup or editor, and an older overlapping response never replaces a newer one.
 21. Each Huddle Node editor save atomically derives `entity_relationships` from all live text boxes and stores one exact same-company Action Item Entity to Huddle Node edge for each Action Item that the Node currently references.
 22. Several inline references to the same Action Item in one Huddle Node share one relationship row.
 23. Removing one of several references keeps the row, while removing the final reference removes only that Node edge and preserves the company-wide Action Item Entity.
@@ -29,15 +29,18 @@
 27. Highlighting text in a supported editor may create a yellow or red Action Item, seed its Details from that text, and replace the selection with one inline Entity label for the exact created Entity.
 28. A yellow inline Action Item label pulses once every two seconds and a red label once every second; reduced-motion preference disables that animation.
 29. Clicking an inline or listed Action Item opens the shared compact editor inside that activation point's Huddle modal layer, with one autosaving title, plain Details text, read-only creator metadata, a lower-left searchable current-company Person in charge picker, shared Node text-and-calendar controls for both dates, color options with a square swatch and label, status, a red close X that flushes pending work, and no Save button.
-30. Action Item grouping settings are personal browser state. The default grouping is Person in charge and then Completion Due Date.
-31. Action Item dates display as month/day/year, missing people and dates sort last, and clicking a listed Action Item opens that exact editable Entity.
+30. Each user and company owns one Huddle Node Action Item saved view, independent of that user's Huddle Process Action Item saved view. Visible grouping terms are stored in `groupings`, while leaf `ordering` and ordered `displayed_fields` are stored in settings; browser-only compatibility preferences are not used.
+31. The Huddle Node saved view defaults to visible Color then Person in charge groups, separately orders leaf rows by Completion due date, and initially shows Person in charge then Completion due date. Huddle process is neither a grouping nor an inline label because this view is already scoped to one exact Process. Dates display as month/day/year, missing people and dates sort last, and clicking a listed Action Item opens that exact editable Entity.
 32. Huddle Node deletion moves the Node, its text boxes, chats, snapshot edges, Entity relationships, attachments, and restorable direct policies to the Recycle Bin; restore reuses the same IDs and creates no Huddle Explorer placement.
 33. A Huddle Node cannot exist without its owning Huddle Logic Gate and never receives a Company Explorer or Huddle Explorer placement row.
 34. Realtime audience resolution recognizes `huddle_node` and follows only that Huddle Node's existing exact permission policy.
-35. Every Action Item row and inline label uses the shared target-and-arrow icon, black label text, and a fully filled yellow or red surface without a visible color-name suffix.
+35. Every listed Action Item keeps the shared Action Item icon and the Action Item's semantic red or yellow row color treatment, with black label text and no visible color-name suffix.
 36. The Action Item editor is clamped to the visible viewport and opens to the left when the right side lacks room.
+37. Every selected grouping term renders a visible hierarchy header. The final selected grouping level places its heading and member rows inside an elevated surface. An ordering term changes only leaf-row order inside that final group and never creates a header; with no ordering term, rows keep the stable backend order.
+38. Selected inline fields render in saved left-to-right order on one nonwrapping rail against the row's right edge. Complete pills remain inside the row when they fit; only a genuinely oversized selected set scrolls horizontally from its first saved field, and the title yields before the rail is displaced.
+39. A Source inline label names the exact current endpoint only when the viewer has current access; otherwise it shows the same neutral no-source value as My Work without exposing a hidden type, ID, or name. Saving grouping, ordering, or displayed fields changes only the user-owned saved view and never creates, copies, or rewrites an `entity_relationships` edge.
 
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 # Process Story: A Huddle Node edits current meeting work while fixed Process cards and live Action Items remain separate
 
@@ -49,4 +52,4 @@ The left column provides normal rich-text text boxes, attachments, chats, linker
 ↓
 Inline Action Item references create exact Entity-to-Huddle-Node edges, and removing the final reference removes only that Node edge
 ↓
-The right column derives the owning Huddle Logic Gate's current deduplicated Action Items from direct Gate edges and every live child-Node edge, while the Process and KPI snapshot stays fixed
+The right column uses the shared exact-node-scope rollup panel and the user's independent Huddle Node saved view to present the owning Huddle Logic Gate's current deduplicated Action Items, while the Process and KPI snapshot stays fixed

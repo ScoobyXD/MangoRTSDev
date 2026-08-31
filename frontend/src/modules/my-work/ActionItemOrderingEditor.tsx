@@ -1,26 +1,32 @@
 import React, { useState } from "react";
-import type {
-  MyWorkActionItemGroupingField,
-  MyWorkActionItemOrdering,
-} from "./myWorkGrouping.js";
 
-export type ActionItemOrderingEditorProps = {
-  orderings: ReadonlyArray<MyWorkActionItemOrdering>;
-  fieldOptions: ReadonlyArray<{ value: MyWorkActionItemGroupingField; label: string }>;
-  onChange: (next: MyWorkActionItemOrdering[]) => void;
+export type ActionItemOrdering<Field extends string = string> = Readonly<{
+  field: Field;
+  direction: "asc" | "desc";
+}>;
+
+export type ActionItemOrderingEditorProps<Field extends string = string> = {
+  orderings: ReadonlyArray<ActionItemOrdering<Field>>;
+  fieldOptions: ReadonlyArray<{ value: Field; label: string }>;
+  onChange: (next: ActionItemOrdering<Field>[]) => void;
   accent?: string;
 };
 
-export function ActionItemOrderingEditor({ orderings, fieldOptions, onChange, accent = "#EA84E5" }: ActionItemOrderingEditorProps) {
+export function ActionItemOrderingEditor<Field extends string>({
+  orderings,
+  fieldOptions,
+  onChange,
+  accent = "#EA84E5",
+}: ActionItemOrderingEditorProps<Field>) {
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const usedFields = new Set(orderings.map((ordering) => ordering.field));
   const addableFields = fieldOptions.filter((option) => !usedFields.has(option.value));
-  const replace = (index: number, next: MyWorkActionItemOrdering) => {
+  const replace = (index: number, next: ActionItemOrdering<Field>) => {
     if (next.field !== orderings[index]?.field && usedFields.has(next.field)) return;
     onChange(orderings.map((ordering, candidateIndex) => candidateIndex === index ? { ...next } : { ...ordering }));
   };
   const move = (sourceIndex: number, targetIndex: number) => {
-    const next = moveMyWorkActionItemOrdering(orderings, sourceIndex, targetIndex);
+    const next = moveActionItemOrdering(orderings, sourceIndex, targetIndex);
     if (next) onChange(next);
   };
   return (
@@ -76,7 +82,7 @@ export function ActionItemOrderingEditor({ orderings, fieldOptions, onChange, ac
               value={ordering.field}
               style={selectStyle}
               onChange={(event) => replace(index, {
-                field: event.currentTarget.value as MyWorkActionItemGroupingField,
+                field: event.currentTarget.value as Field,
                 direction: ordering.direction,
               })}
             >
@@ -115,7 +121,7 @@ export function ActionItemOrderingEditor({ orderings, fieldOptions, onChange, ac
           disabled={addableFields.length === 0}
           style={{ ...selectStyle, flex: "1 1 auto", opacity: addableFields.length === 0 ? 0.52 : 1 }}
           onChange={(event) => {
-            const field = event.currentTarget.value as MyWorkActionItemGroupingField;
+            const field = event.currentTarget.value as Field;
             if (!field || usedFields.has(field)) return;
             onChange([...orderings.map((ordering) => ({ ...ordering })), { field, direction: "asc" }]);
           }}
@@ -136,11 +142,11 @@ export function ActionItemOrderingEditor({ orderings, fieldOptions, onChange, ac
   );
 }
 
-export function moveMyWorkActionItemOrdering(
-  orderings: ReadonlyArray<MyWorkActionItemOrdering>,
+export function moveActionItemOrdering<Field extends string>(
+  orderings: ReadonlyArray<ActionItemOrdering<Field>>,
   sourceIndex: number,
   targetIndex: number,
-): MyWorkActionItemOrdering[] | null {
+): ActionItemOrdering<Field>[] | null {
   if (sourceIndex < 0 || targetIndex < 0 || sourceIndex >= orderings.length || targetIndex >= orderings.length) return null;
   if (sourceIndex === targetIndex) return null;
   const next = orderings.map((ordering) => ({ ...ordering }));

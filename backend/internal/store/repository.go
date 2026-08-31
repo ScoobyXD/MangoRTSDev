@@ -115,6 +115,7 @@ type EntitiesRepository interface {
 	DeleteEntityField(companyID, entityID, entityFieldID string) error
 	CreateActionItem(input ActionItemInput) (domain.Entity, error)
 	GetActionItemSource(companyID, entityID string) (domain.ActionItemSource, error)
+	ListVisibleActionItemSources(companyID, viewerUserID string, entityIDs []string) (map[string]domain.ActionItemSourceView, error)
 	ListHuddleNodeActionItems(companyID, huddleNodeID string) ([]domain.Entity, error)
 	ListHuddleLogicGateActionItems(companyID, huddleLogicGateID string) ([]domain.Entity, error)
 }
@@ -671,6 +672,8 @@ const (
 	SavedViewSurfaceLogicGateKanban            = "logic_gate_kanban"
 	SavedViewSurfaceMyWorkActionItemsMine      = "my_work_action_items_mine"
 	SavedViewSurfaceMyWorkActionItemsDelegated = "my_work_action_items_delegated"
+	SavedViewSurfaceHuddleLogicGateActionItems = "huddle_logic_gate_action_items"
+	SavedViewSurfaceHuddleNodeActionItems      = "huddle_node_action_items"
 
 	SavedViewPrincipalUser  = "user"
 	SavedViewPrincipalGroup = "group"

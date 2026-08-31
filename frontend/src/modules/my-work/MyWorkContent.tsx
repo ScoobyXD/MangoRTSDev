@@ -12,6 +12,7 @@ import {
   type SidebarLogicGateStatusCounts,
 } from "../../app/sidebarLogicGateStatusCounts.js";
 import type { BoundRequestJSON } from "../api/requestJSON.js";
+import { ActionItemRow } from "../action-items/ActionItemRow.js";
 import {
   editorEntityLinkAnchorBounds,
   EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION,
@@ -67,7 +68,6 @@ import {
   type MyWorkNodeGrouping,
 } from "./myWorkGrouping.js";
 import { ActionItemInlineFieldSettings } from "./ActionItemInlineFieldSettingsPopover.js";
-import { ActionItemInlineFields } from "./ActionItemInlineFields.js";
 import { ActionItemOrderingEditor } from "./ActionItemOrderingEditor.js";
 import {
   findAdjacentMyWorkRowEntryIndex,
@@ -381,9 +381,22 @@ export function MyWorkContent({ companyID, subjectID, requestJSON }: MyWorkConte
   const renderActionItemRow = useCallback((item: MyWorkActionItem) => (
     <ActionItemRow
       item={item}
-      businessDateKey={businessDateKey}
       displayedFields={actionItemDisplayedFields}
-      onSaveDueDate={(dueDate) => saveActionItemDueDate(item, dueDate)}
+      onOpen={(actionItem, target, activation) => openEditorEntityLink({
+        entityType: "entity",
+        entityID: actionItem.entity_id,
+        label: actionItem.name,
+        isActionItem: true,
+      }, undefined, myWorkActionItemAnchor(target, activation))}
+      renderCompletionDueDate={(actionItem) => (
+        <InlineDueDateEditor
+          fieldID="completion_due_date"
+          value={actionItem.completion_due_date}
+          resourceLabel={actionItem.name}
+          businessDateKey={businessDateKey}
+          onSave={(dueDate) => saveActionItemDueDate(actionItem, dueDate)}
+        />
+      )}
     />
   ), [actionItemDisplayedFields, businessDateKey, saveActionItemDueDate]);
   const renderNodeRow = useCallback((item: MyWorkNode) => (
@@ -1376,62 +1389,6 @@ function HistoryClockIcon() {
   );
 }
 
-function ActionItemRow({ item, businessDateKey, displayedFields, onSaveDueDate }: {
-  item: MyWorkActionItem;
-  businessDateKey: string;
-  displayedFields: ReadonlyArray<MyWorkActionItemDisplayFieldID>;
-  onSaveDueDate: (dueDate: string | null) => Promise<void>;
-}) {
-  const color = item.color?.trim().toLowerCase();
-  const pulseClassName = color === "red" || color === "yellow" ? `mango-editor-action-item--${color}` : undefined;
-  return (
-    <div
-      className="my-work-resource-row"
-      data-my-work-row="action-item"
-      data-my-work-action-item-color={color || "none"}
-      style={actionItemRowStyle(color)}
-    >
-      <button
-        type="button"
-        data-my-work-target="action-item"
-        data-my-work-action-item-color={color || "none"}
-        style={actionItemPrimaryButtonStyle}
-        onClick={(event) => openEditorEntityLink({
-          entityType: "entity",
-          entityID: item.entity_id,
-          label: item.name,
-          isActionItem: true,
-        }, undefined, myWorkActionItemAnchor(event.currentTarget, event))}
-      >
-        <span aria-hidden="true" style={actionItemColorBarStyle(color)} />
-        <span className={pulseClassName} style={actionItemIconStyle(color)}><ActionItemIcon className="mango-editor-action-item-icon" size={16} /></span>
-        <span
-          className={color === "red" || color === "yellow" ? `my-work-action-item-title--${color}` : undefined}
-          data-my-work-action-item-title="true"
-          style={actionItemNameStyle(color)}
-        >
-          {item.name}
-        </span>
-      </button>
-      {displayedFields.length > 0 ? (
-        <ActionItemInlineFields
-          item={item}
-          displayedFields={displayedFields}
-          renderCompletionDueDate={() => (
-            <InlineDueDateEditor
-              fieldID="completion_due_date"
-              value={item.completion_due_date}
-              resourceLabel={item.name}
-              businessDateKey={businessDateKey}
-              onSave={onSaveDueDate}
-            />
-          )}
-        />
-      ) : null}
-    </div>
-  );
-}
-
 export function myWorkActionItemAnchor(
   row: Element,
   activation: Pick<React.MouseEvent<HTMLElement>, "clientX" | "clientY" | "detail">,
@@ -2181,88 +2138,6 @@ const resourceNameStyle: React.CSSProperties = {
   fontSize: 13,
   fontWeight: 800,
 };
-
-function actionItemRowStyle(color: string | undefined): React.CSSProperties {
-  return {
-    ...resourceButtonStyle,
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    border: color === "red"
-      ? "1px solid rgba(239,68,68,0.24)"
-      : color === "yellow"
-        ? "1px solid rgba(202,138,4,0.26)"
-        : resourceButtonStyle.border,
-    background: color === "red"
-      ? "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(254,226,226,0.84))"
-      : color === "yellow"
-        ? "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(254,249,195,0.86))"
-        : resourceButtonStyle.background,
-    cursor: "default",
-    padding: "5px 7px 5px 5px",
-  };
-}
-
-const actionItemPrimaryButtonStyle: React.CSSProperties = {
-  minWidth: 0,
-  flex: "1 1 0%",
-  minHeight: 34,
-  display: "grid",
-  gridTemplateColumns: "5px 29px minmax(0,1fr)",
-  alignItems: "center",
-  gap: 9,
-  border: 0,
-  borderRadius: 7,
-  background: "transparent",
-  color: "inherit",
-  font: "inherit",
-  cursor: "pointer",
-  textAlign: "left",
-  padding: "2px 3px 2px 1px",
-};
-
-function actionItemColorBarStyle(color: string | undefined): React.CSSProperties {
-  return {
-    width: 5,
-    height: "100%",
-    minHeight: 34,
-    borderRadius: 999,
-    background: color === "red" ? "#ef4444" : color === "yellow" ? "#facc15" : "#cbd5e1",
-    boxShadow: color === "red"
-      ? "0 0 9px rgba(239,68,68,0.28)"
-      : color === "yellow"
-        ? "0 0 9px rgba(250,204,21,0.30)"
-        : "none",
-  };
-}
-
-function actionItemIconStyle(color: string | undefined): React.CSSProperties {
-  const colored = color === "red" || color === "yellow";
-  return {
-    width: 29,
-    height: 29,
-    display: "grid",
-    placeItems: "center",
-    border: colored ? "1px solid var(--mango-entity-chip-border)" : "1px solid rgba(100,116,139,0.24)",
-    borderRadius: 9,
-    background: colored ? "var(--mango-entity-chip-background)" : "linear-gradient(145deg, #ffffff, #e2e8f0)",
-    color: colored ? "#111827" : "#64748b",
-    boxShadow: colored
-      ? "inset 1px 1px 0 rgba(255,255,255,0.84), 0 2px 7px var(--mango-entity-chip-shadow)"
-      : "3px 3px 7px rgba(100,116,139,0.14), -2px -2px 6px rgba(255,255,255,0.92)",
-    flex: "0 0 auto",
-  };
-}
-
-function actionItemNameStyle(color: string | undefined): React.CSSProperties {
-  return {
-    ...resourceNameStyle,
-    width: "fit-content",
-    maxWidth: "100%",
-    color: color === "red" ? "#991b1b" : color === "yellow" ? "#713f12" : "#1e293b",
-    padding: "4px 0",
-  };
-}
 
 const nodeRowStyle: React.CSSProperties = {
   minWidth: 0,

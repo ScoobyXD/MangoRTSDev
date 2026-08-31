@@ -315,6 +315,108 @@ where field.company_id=$1::uuid and field.entity_id=$2::uuid
 	return source, nil
 }
 
+func (r *PostgresRepo) ListVisibleActionItemSources(companyID, viewerUserID string, entityIDs []string) (map[string]domain.ActionItemSourceView, error) {
+	companyID, viewerUserID = cleanUUIDText(companyID), cleanUUIDText(viewerUserID)
+	if companyID == "" || viewerUserID == "" {
+		return nil, ErrInvalid
+	}
+	entityIDs = cleanUUIDTextSlice(entityIDs)
+	visible := make(map[string]domain.ActionItemSourceView)
+	if len(entityIDs) == 0 {
+		return visible, nil
+	}
+	rows, err := r.db.QueryContext(context.Background(), `
+with recursive action_source_base as (
+  select field.entity_id,
+         lower(btrim(coalesce(field.value_jsonb ->> 'resource_type',''))) as resource_type,
+         mangorts_try_uuid(field.value_jsonb ->> 'resource_id') as resource_id
+  from entity_fields field
+  join entities entity
+    on entity.company_id=field.company_id and entity.entity_id=field.entity_id
+  join entity_types entity_type
+    on entity_type.company_id=entity.company_id and entity_type.entity_type_id=entity.entity_type_id
+  where field.company_id=$1::uuid
+    and field.entity_id::text=any($2::text[])
+    and field.entity_field_type_id=$3::uuid
+    and field.value_jsonb is not null
+    and entity_type.system_key=$5::text
+), action_source_resolved as (
+  select base.entity_id,base.resource_type,base.resource_id,
+         case base.resource_type
+           when 'node' then source_node.name
+           when 'logic_gate' then source_logic_gate.header
+           when 'project' then source_project.name
+           when 'huddle_node' then source_huddle_node.name
+           when 'huddle_logic_gate' then source_huddle_gate.header
+           when 'kpi' then source_kpi.name
+           else null
+         end as source_name,
+         case base.resource_type
+           when 'kpi' then case when source_kpi.kpi_id is not null then 'logic_gate'::text end
+           when 'node' then case when source_node.node_id is not null then 'node'::text end
+           when 'logic_gate' then case when source_logic_gate.logic_gate_id is not null then 'logic_gate'::text end
+           when 'project' then case when source_project.project_id is not null then 'project'::text end
+           when 'huddle_node' then case when source_huddle_node.huddle_node_id is not null then 'huddle_node'::text end
+           when 'huddle_logic_gate' then case when source_huddle_gate.huddle_logic_gate_id is not null then 'huddle_logic_gate'::text end
+           else null
+         end as access_resource_type,
+         case base.resource_type
+           when 'kpi' then source_kpi.logic_gate_id
+           when 'node' then source_node.node_id
+           when 'logic_gate' then source_logic_gate.logic_gate_id
+           when 'project' then source_project.project_id
+           when 'huddle_node' then source_huddle_node.huddle_node_id
+           when 'huddle_logic_gate' then source_huddle_gate.huddle_logic_gate_id
+           else null
+         end as access_resource_id,
+         case when base.resource_type='kpi' then source_kpi.logic_gate_id end as parent_resource_id
+  from action_source_base base
+  left join nodes source_node
+    on base.resource_type='node' and source_node.company_id=$1::uuid and source_node.node_id=base.resource_id
+  left join logic_gates source_logic_gate
+    on base.resource_type='logic_gate' and source_logic_gate.company_id=$1::uuid and source_logic_gate.logic_gate_id=base.resource_id
+  left join projects source_project
+    on base.resource_type='project' and source_project.company_id=$1::uuid and source_project.project_id=base.resource_id
+  left join huddle_nodes source_huddle_node
+    on base.resource_type='huddle_node' and source_huddle_node.company_id=$1::uuid and source_huddle_node.huddle_node_id=base.resource_id
+  left join huddle_logic_gates source_huddle_gate
+    on base.resource_type='huddle_logic_gate' and source_huddle_gate.company_id=$1::uuid and source_huddle_gate.huddle_logic_gate_id=base.resource_id
+  left join kpis source_kpi
+    on base.resource_type='kpi' and source_kpi.company_id=$1::uuid and source_kpi.kpi_id=base.resource_id
+), action_source_access_targets(resource_type,resource_id) as (
+  select distinct access_resource_type,access_resource_id
+  from action_source_resolved
+  where access_resource_type is not null and access_resource_id is not null
+)
+`+myWorkViewerPermissionCTE+myWorkPermissionAccessCTEs("action_source_access_targets", "action_source")+`
+select source.entity_id::text,source.resource_type,source.resource_id::text,source.source_name,source.parent_resource_id::text
+from action_source_resolved source
+join action_source_access access
+  on access.resource_type=source.access_resource_type and access.resource_id=source.access_resource_id
+where source.source_name is not null and access.allowed
+order by source.entity_id`, companyID, entityIDs, ActionItemSourceFieldTypeID, viewerUserID, ActionItemEntityTypeSystemKey)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var entityID string
+		var source domain.ActionItemSourceView
+		var parentResourceID sql.NullString
+		if err := rows.Scan(&entityID, &source.ResourceType, &source.ResourceID, &source.Name, &parentResourceID); err != nil {
+			return nil, err
+		}
+		if parentResourceID.Valid {
+			source.ParentResourceID = parentResourceID.String
+		}
+		visible[entityID] = source
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return visible, nil
+}
+
 func lockPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {
 	var query string
 	switch ref.ResourceType {

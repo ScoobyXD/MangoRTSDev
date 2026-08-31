@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActionItemIcon } from "../../icons/ActionItemIcon.js";
+import { StaggeredGroupingIcon } from "../../icons/NavigationIcons.js";
+import { createSavedViewID } from "../../pages/home/savedViewsApi.js";
+import { ActionItemRow } from "../action-items/ActionItemRow.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
-import type { Entity } from "../entities/entitiesApi.js";
 import {
   EVENT_EDITOR_ENTITY_REFERENCE_PRESENTATION,
   editorEntityLinkAnchorBounds,
@@ -9,23 +10,35 @@ import {
   type EditorEntityReferencePresentation,
 } from "../editor/editorEntityLinks.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
-import { buildUniversalNestedGroups, type UniversalNestedGroup } from "../grouping/universalGrouping.js";
+import { buildUniversalNestedGroups } from "../grouping/universalGrouping.js";
+import { ActionItemInlineFieldSettingsSection } from "../my-work/ActionItemInlineFieldSettingsPopover.js";
+import { ActionItemOrderingEditor } from "../my-work/ActionItemOrderingEditor.js";
 import {
-  ACTION_ITEM_GROUPING_FIELDS,
-  DEFAULT_ACTION_ITEM_GROUPINGS,
-  actionItemColor,
-  actionItemColorHex,
-  actionItemFieldOptionLabel,
-  actionItemFieldString,
-  actionItemGroupingStorageKey,
-  actionItemGroupingValues,
-  actionItemPersonLabel,
-  formatActionItemDate,
+  flattenMyWorkGroupedDisplayEntries,
+  flattenMyWorkUngroupedDisplayEntries,
+} from "../my-work/myWorkWindowing.js";
+import {
+  DEFAULT_HUDDLE_ACTION_ITEM_DISPLAYED_FIELDS,
+  DEFAULT_HUDDLE_ACTION_ITEM_GROUPINGS,
+  DEFAULT_HUDDLE_ACTION_ITEM_ORDERINGS,
+  HUDDLE_ACTION_ITEM_ARRANGE_FIELDS,
+  HUDDLE_ACTION_ITEM_DISPLAY_FIELDS,
+  fetchHuddleActionItemSavedView,
+  huddleActionItemGroupingValues,
   listHuddleActionItems,
-  normalizeActionItemGroupings,
-  sortActionItems,
-  type ActionItemGrouping,
-  type ActionItemGroupingField,
+  normalizeHuddleActionItemDisplayedFields,
+  normalizeHuddleActionItemGroupings,
+  normalizeHuddleActionItemOrderings,
+  normalizeHuddleActionItemPreferences,
+  saveHuddleActionItemSavedView,
+  sortHuddleActionItems,
+  toHuddleActionItemPresentation,
+  type HuddleActionItem,
+  type HuddleActionItemArrangeField,
+  type HuddleActionItemDisplayFieldID,
+  type HuddleActionItemGrouping,
+  type HuddleActionItemOrdering,
+  type HuddleActionItemPreferences,
   type HuddleActionItemScope,
 } from "./huddleActionItems.js";
 
@@ -46,14 +59,24 @@ export function HuddleActionItemsPanel({
   requestJSON: RequestJSON;
   refreshToken: number;
 }) {
-  const [items, setItems] = useState<Entity[]>([]);
+  const [items, setItems] = useState<HuddleActionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
-  const [groupings, setGroupings] = useState<ActionItemGrouping[]>(() => readGroupings(companyID, currentUserID));
-  const itemsRef = useRef<Entity[]>([]);
+  const [preferenceError, setPreferenceError] = useState("");
+  const [preferencesReady, setPreferencesReady] = useState(false);
+  const [groupings, setGroupings] = useState<HuddleActionItemGrouping[]>(() => cloneDefaults(DEFAULT_HUDDLE_ACTION_ITEM_GROUPINGS));
+  const [orderings, setOrderings] = useState<HuddleActionItemOrdering[]>(() => cloneDefaults(DEFAULT_HUDDLE_ACTION_ITEM_ORDERINGS));
+  const [displayedFields, setDisplayedFields] = useState<HuddleActionItemDisplayFieldID[]>(() => [
+    ...DEFAULT_HUDDLE_ACTION_ITEM_DISPLAYED_FIELDS,
+  ]);
+  const itemsRef = useRef<HuddleActionItem[]>([]);
   const hasLoadedRef = useRef(false);
   const loadRequestIDRef = useRef(0);
+  const preferenceLoadIDRef = useRef(0);
+  const preferenceSavedViewIDRef = useRef(createSavedViewID());
+  const preferenceSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const preferenceContextRef = useRef("");
   const latestRefreshTokenRef = useRef(refreshToken);
   const observedRefreshTokenRef = useRef(refreshToken);
   latestRefreshTokenRef.current = refreshToken;
@@ -77,7 +100,7 @@ export function HuddleActionItemsPanel({
       hasLoadedRef.current = true;
     } catch (cause) {
       if (loadRequestIDRef.current !== requestID) return;
-      setError(cause instanceof Error ? cause.message : "Could not load Action Items");
+      setError(errorMessage(cause, "Could not load Action Items"));
     } finally {
       if (loadRequestIDRef.current === requestID) {
         setLoading(false);
@@ -114,138 +137,275 @@ export function HuddleActionItemsPanel({
   }, [load]);
 
   useEffect(() => {
-    setGroupings(readGroupings(companyID, currentUserID));
-  }, [companyID, currentUserID]);
+    const context = `${companyID.trim()}:${currentUserID.trim()}:${scopeResourceType}`;
+    const loadID = preferenceLoadIDRef.current + 1;
+    preferenceLoadIDRef.current = loadID;
+    preferenceContextRef.current = context;
+    preferenceSavedViewIDRef.current = createSavedViewID();
+    preferenceSaveQueueRef.current = Promise.resolve();
+    setGroupings(cloneDefaults(DEFAULT_HUDDLE_ACTION_ITEM_GROUPINGS));
+    setOrderings(cloneDefaults(DEFAULT_HUDDLE_ACTION_ITEM_ORDERINGS));
+    setDisplayedFields([...DEFAULT_HUDDLE_ACTION_ITEM_DISPLAYED_FIELDS]);
+    setPreferenceError("");
+    setPreferencesReady(false);
+    void fetchHuddleActionItemSavedView(requestJSON, companyID, scopeResourceType).then((savedView) => {
+      if (preferenceLoadIDRef.current !== loadID || preferenceContextRef.current !== context) return;
+      const next = normalizeHuddleActionItemPreferences(savedView);
+      preferenceSavedViewIDRef.current = savedView?.saved_view_id?.trim() || preferenceSavedViewIDRef.current;
+      setGroupings(next.groupings);
+      setOrderings(next.orderings);
+      setDisplayedFields(next.displayedFields);
+      setPreferencesReady(true);
+    }).catch((cause) => {
+      if (preferenceLoadIDRef.current !== loadID || preferenceContextRef.current !== context) return;
+      setPreferenceError(errorMessage(cause, "Action Item display settings could not be loaded."));
+      setPreferencesReady(true);
+    });
+    return () => {
+      if (preferenceLoadIDRef.current === loadID) preferenceLoadIDRef.current += 1;
+    };
+  }, [companyID, currentUserID, requestJSON, scopeResourceType]);
 
-  const updateGroupings = (next: ActionItemGrouping[]) => {
-    const normalized = normalizeActionItemGroupings(next);
+  const persistPreferences = useCallback((next: HuddleActionItemPreferences) => {
+    const context = `${companyID.trim()}:${currentUserID.trim()}:${scopeResourceType}`;
+    const savedViewID = preferenceSavedViewIDRef.current;
+    const save = preferenceSaveQueueRef.current.catch(() => undefined).then(async () => {
+      await saveHuddleActionItemSavedView(requestJSON, {
+        companyID,
+        userID: currentUserID,
+        scopeType: scopeResourceType,
+        savedViewID,
+        groupings: next.groupings,
+        orderings: next.orderings,
+        displayedFields: next.displayedFields,
+      });
+      if (preferenceContextRef.current === context && preferenceSavedViewIDRef.current === savedViewID) {
+        setPreferenceError("");
+      }
+    }).catch((cause) => {
+      if (preferenceContextRef.current !== context || preferenceSavedViewIDRef.current !== savedViewID) return;
+      setPreferenceError(errorMessage(cause, "Action Item display settings could not be saved."));
+    });
+    preferenceSaveQueueRef.current = save;
+  }, [companyID, currentUserID, requestJSON, scopeResourceType]);
+
+  const changeGroupings = (next: HuddleActionItemGrouping[]) => {
+    const normalized = normalizeHuddleActionItemGroupings(next, new Set(orderings.map((item) => item.field)));
     setGroupings(normalized);
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(actionItemGroupingStorageKey(companyID, currentUserID), JSON.stringify(normalized));
+    persistPreferences({ groupings: normalized, orderings, displayedFields });
+  };
+  const changeOrderings = (next: HuddleActionItemOrdering[]) => {
+    const normalized = normalizeHuddleActionItemOrderings(next, new Set(groupings.map((item) => item.field)));
+    setOrderings(normalized);
+    persistPreferences({ groupings, orderings: normalized, displayedFields });
+  };
+  const changeDisplayedFields = (next: HuddleActionItemDisplayFieldID[]) => {
+    const normalized = normalizeHuddleActionItemDisplayedFields(next);
+    setDisplayedFields(normalized);
+    persistPreferences({ groupings, orderings, displayedFields: normalized });
   };
 
-  const groups = useMemo(() => buildUniversalNestedGroups(items, groupings, {
+  const presentationItems = useMemo(
+    () => items.map((item) => toHuddleActionItemPresentation(item, companyUsers)),
+    [companyUsers, items],
+  );
+  const groups = useMemo(() => buildUniversalNestedGroups(presentationItems, groupings, {
     rootID: `huddle-action-items:${scopeResourceType}:${scopeResourceID}`,
     rowKey: (item) => item.entity_id,
-    getValues: (item, field) => actionItemGroupingValues(item, field, companyUsers),
-    sortRows: sortActionItems,
-  }), [companyUsers, groupings, items, scopeResourceID, scopeResourceType]);
+    getValues: huddleActionItemGroupingValues,
+    sortRows: (rows) => sortHuddleActionItems(rows, orderings),
+  }), [groupings, orderings, presentationItems, scopeResourceID, scopeResourceType]);
+  const entries = useMemo(() => groupings.length > 0
+    ? flattenMyWorkGroupedDisplayEntries(
+      groups,
+      (item) => item.entity_id,
+      new Set<HuddleActionItemArrangeField>(),
+      false,
+      groupings[groupings.length - 1]?.field,
+    )
+    : flattenMyWorkUngroupedDisplayEntries(sortHuddleActionItems(presentationItems, orderings), (item) => item.entity_id),
+  [groupings.length, groups, orderings, presentationItems]);
 
-  const openItem = (item: Entity, target: HTMLButtonElement) => openEditorEntityLink(
+  const openItem = (item: { entity_id: string; name: string }, target: HTMLButtonElement) => openEditorEntityLink(
     { entityType: "entity", entityID: item.entity_id, label: item.name, isActionItem: true },
     undefined,
     editorEntityLinkAnchorBounds(target),
   );
-
-  const renderRow = (item: Entity, key: string) => {
-    const color = actionItemColor(item);
-    const colorHex = actionItemColorHex(item);
-    const status = actionItemFieldOptionLabel(item, "status") || "In progress";
-    const dueDate = actionItemFieldString(item, "completion_due_date");
-    const pulseClassName = color === "yellow" || color === "red" ? `mango-editor-action-item--${color}` : undefined;
-    return (
-      <button key={key} type="button" data-huddle-action-item={item.entity_id} onClick={(event) => openItem(item, event.currentTarget)} style={itemButtonStyle(color)}>
-        <span aria-hidden="true" style={colorBarStyle(colorHex)} />
-        <span className={pulseClassName} style={itemIconBadgeStyle(color)}><ActionItemIcon className="mango-editor-action-item-icon" size={15} /></span>
-        <span style={itemBodyStyle}>
-          <strong style={itemNameStyle}>{item.name}</strong>
-          <span style={itemMetaStyle}>
-            <span>{actionItemPersonLabel(item, companyUsers)}</span>
-            <span>{formatActionItemDate(item.created_timestamp)}</span>
-            <span>{dueDate ? `Due ${formatActionItemDate(dueDate)}` : "No completion due date"}</span>
-            <span>{status}</span>
-          </span>
-        </span>
-      </button>
-    );
-  };
-
-  const renderGroups = (nestedGroups: Array<UniversalNestedGroup<Entity, ActionItemGroupingField>>): React.ReactNode => nestedGroups.map((group) => (
-    <section key={group.id} data-huddle-action-item-group={group.field} style={groupSectionStyle(group.depth)}>
-      <div style={groupHeaderStyle}>
-        <span style={groupAxisStyle}>{groupingFieldLabel(group.field)}</span>
-        <strong style={groupLabelStyle}>{group.label}</strong>
-        <span style={groupCountStyle}>{collectRows(group).length}</span>
-      </div>
-      <div style={groupContentsStyle}>
-        {group.groups.length > 0
-          ? renderGroups(group.groups)
-          : group.rows.map((item) => renderRow(item, `${group.id}:${item.entity_id}`))}
-      </div>
-    </section>
-  ));
+  const scopeLabel = scopeResourceType === "huddle_node" ? "Huddle Node" : "Huddle Process";
 
   return (
     <section aria-label="Live Action Items" data-huddle-action-items="live" style={panelStyle}>
       <header style={headerStyle}>
         <strong>Action Items</strong>
         <div style={headerActionsStyle}>
+          {preferenceError ? <span role="alert" title={preferenceError} style={preferenceErrorStyle}>!</span> : null}
           {refreshing && <span aria-live="polite" style={refreshingLabelStyle}>Refreshing</span>}
-          <UniversalGroupingControls<ActionItemGroupingField>
+          <UniversalGroupingControls<HuddleActionItemArrangeField>
             groupings={groupings}
-            fieldOptions={ACTION_ITEM_GROUPING_FIELDS}
-            onChange={updateGroupings}
-            buttonLabel="Group"
-            popoverLabel="Action Item grouping"
-            accent="#f59e0b"
+            fieldOptions={HUDDLE_ACTION_ITEM_ARRANGE_FIELDS.filter(
+              (option) => !orderings.some((ordering) => ordering.field === option.value),
+            )}
+            onChange={changeGroupings}
+            buttonLabel="Group, order, and choose Action Item row fields"
+            triggerTitle={preferenceError || "Group, order, and choose Action Item row fields"}
+            popoverLabel={`${scopeLabel} Action Item view`}
+            groupingTitle="Group by"
+            popoverAlign="end"
+            triggerIcon={<StaggeredGroupingIcon color="#EA84E5" />}
+            iconOnly
+            accent="#EA84E5"
+            layout="quadrants"
+            popoverWidth={790}
+            popoverEstimatedHeight={590}
+            disabled={!preferencesReady}
+            additionalContent={(
+              <ActionItemOrderingEditor<HuddleActionItemArrangeField>
+                orderings={orderings}
+                fieldOptions={HUDDLE_ACTION_ITEM_ARRANGE_FIELDS.filter(
+                  (option) => !groupings.some((grouping) => grouping.field === option.value),
+                )}
+                onChange={changeOrderings}
+                accent="#EA84E5"
+              />
+            )}
+            sideContent={(
+              <ActionItemInlineFieldSettingsSection<HuddleActionItemDisplayFieldID>
+                fields={HUDDLE_ACTION_ITEM_DISPLAY_FIELDS}
+                fieldIDs={displayedFields}
+                onFieldIDsChange={changeDisplayedFields}
+                label={scopeLabel}
+                sectionID={scopeResourceType}
+                accent="#EA84E5"
+                gridArea="1 / 2 / 3 / 3"
+              />
+            )}
           />
           <button type="button" aria-label="Refresh Action Items" title="Refresh Action Items" onClick={() => void load()} style={refreshButtonStyle}>↻</button>
         </div>
       </header>
 
-      {error
-        ? <div role="alert" style={errorStyle}>{error}</div>
-        : <div aria-hidden="true" />}
+      {error ? <div role="alert" style={errorStyle}>{error}</div> : <div aria-hidden="true" />}
       <div style={listStyle}>
         {loading && <div style={emptyStyle}>Loading Action Items</div>}
         {!loading && items.length === 0 && <div style={emptyStyle}>No Action Items yet.</div>}
-        {!loading && items.length > 0 && (groupings.length > 0
-          ? renderGroups(groups)
-          : sortActionItems(items).map((item) => renderRow(item, item.entity_id)))}
+        {!loading && items.length > 0 && entries.map((entry, index) => (
+          <div
+            key={entry.entryID}
+            className={entry.surface ? "my-work-huddle-surface-segment" : undefined}
+            data-huddle-action-item-entry={entry.entryID}
+            data-huddle-action-item-entry-kind={entry.kind}
+            data-my-work-huddle-surface-id={entry.surface?.id}
+            data-my-work-huddle-surface-key={entry.surface?.key}
+            data-my-work-huddle-surface-edge={entry.surface?.edge}
+            style={entryStyle(entry.depth, entry.kind, index, entry.surface?.depth)}
+          >
+            {entry.kind === "group-header" ? (
+              <div
+                data-huddle-action-item-group={entry.groupID}
+                data-huddle-action-item-group-field={entry.field}
+                data-huddle-action-item-group-key={entry.groupKey}
+                style={groupHeaderStyle(entry.field, entry.groupKey, entry.depth)}
+              >
+                <span>{entry.label}</span>
+                <span aria-label={`${entry.rowCount} items`} style={groupCountStyle}>{entry.rowCount}</span>
+              </div>
+            ) : (
+              <div data-huddle-action-item={entry.row.entity_id}>
+                <ActionItemRow
+                  item={entry.row}
+                  displayedFields={displayedFields}
+                  onOpen={(item, target) => openItem(item, target)}
+                />
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </section>
   );
 }
 
-function readGroupings(companyID: string, userID: string): ActionItemGrouping[] {
-  if (typeof window === "undefined") return DEFAULT_ACTION_ITEM_GROUPINGS.map((item) => ({ ...item }));
-  const stored = window.localStorage.getItem(actionItemGroupingStorageKey(companyID, userID));
-  if (stored === null) return DEFAULT_ACTION_ITEM_GROUPINGS.map((item) => ({ ...item }));
-  try {
-    return normalizeActionItemGroupings(JSON.parse(stored));
-  } catch {
-    return DEFAULT_ACTION_ITEM_GROUPINGS.map((item) => ({ ...item }));
-  }
+function cloneDefaults<Field extends string>(
+  defaults: ReadonlyArray<{ field: Field; direction: "asc" | "desc" }>,
+): Array<{ field: Field; direction: "asc" | "desc" }> {
+  return defaults.map((item) => ({ ...item }));
 }
 
-function groupingFieldLabel(field: ActionItemGroupingField): string {
-  return ACTION_ITEM_GROUPING_FIELDS.find((option) => option.value === field)?.label ?? field;
+function errorMessage(cause: unknown, fallback: string): string {
+  return cause instanceof Error && cause.message.trim() ? cause.message : fallback;
 }
 
-function collectRows(group: UniversalNestedGroup<Entity, ActionItemGroupingField>): Entity[] {
-  if (group.rows.length > 0) return group.rows;
-  const byID = new Map<string, Entity>();
-  for (const child of group.groups) for (const item of collectRows(child)) byID.set(item.entity_id, item);
-  return [...byID.values()];
-}
-
-const panelStyle: React.CSSProperties = { minWidth: 0, minHeight: 0, display: "grid", gridTemplateRows: "40px auto minmax(0,1fr)", overflow: "hidden", padding: 9, border: "1px solid rgba(255,255,255,.84)", borderRadius: 12, background: "rgba(248,250,252,.88)", boxShadow: "4px 4px 12px rgba(148,163,184,.18), -4px -4px 12px rgba(255,255,255,.82)" };
+const panelStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 0,
+  display: "grid",
+  gridTemplateRows: "40px auto minmax(0,1fr)",
+  overflow: "hidden",
+  padding: 9,
+  border: "1px solid rgba(255,255,255,.84)",
+  borderRadius: 12,
+  background: "rgba(248,250,252,.88)",
+  boxShadow: "4px 4px 12px rgba(148,163,184,.18), -4px -4px 12px rgba(255,255,255,.82)",
+};
 const headerStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0 3px 6px", color: "#243047", fontSize: 14 };
 const headerActionsStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5 };
 const refreshingLabelStyle: React.CSSProperties = { color: "#64748b", fontSize: 9, fontWeight: 700 };
+const preferenceErrorStyle: React.CSSProperties = { color: "#b91c1c", fontSize: 12, fontWeight: 900 };
 const refreshButtonStyle: React.CSSProperties = { width: 28, height: 28, border: "1px solid rgba(100,116,139,.25)", borderRadius: 7, background: "#fff", color: "#334155", cursor: "pointer", fontSize: 17 };
 const errorStyle: React.CSSProperties = { marginBottom: 6, padding: "6px 8px", borderRadius: 7, background: "#fee2e2", color: "#b91c1c", fontSize: 11, fontWeight: 700 };
-const listStyle: React.CSSProperties = { minHeight: 0, overflowY: "auto", display: "grid", alignContent: "start", gap: 7, padding: "2px" };
+const listStyle: React.CSSProperties = { minHeight: 0, overflowY: "auto", display: "grid", alignContent: "start", gap: 0, padding: "2px" };
 const emptyStyle: React.CSSProperties = { padding: "12px 8px", color: "#64748b", fontSize: 12, fontWeight: 650 };
-const groupSectionStyle = (depth: number): React.CSSProperties => ({ display: "grid", gap: 5, marginLeft: depth > 0 ? 9 : 0, paddingLeft: depth > 0 ? 7 : 0, borderLeft: depth > 0 ? "2px solid rgba(148,163,184,.22)" : 0 });
-const groupHeaderStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, minHeight: 24, color: "#475569", fontSize: 10 };
-const groupAxisStyle: React.CSSProperties = { fontWeight: 750, textTransform: "uppercase", letterSpacing: ".04em" };
-const groupLabelStyle: React.CSSProperties = { color: "#1e293b", fontSize: 11 };
-const groupCountStyle: React.CSSProperties = { marginLeft: "auto", minWidth: 20, padding: "1px 5px", borderRadius: 999, background: "rgba(148,163,184,.14)", textAlign: "center" };
-const groupContentsStyle: React.CSSProperties = { display: "grid", gap: 6 };
-const itemButtonStyle = (color: string): React.CSSProperties => ({ width: "100%", minWidth: 0, display: "grid", gridTemplateColumns: "5px 26px minmax(0,1fr)", alignItems: "center", gap: 8, border: "1px solid rgba(148,163,184,.24)", borderRadius: 9, background: color === "yellow" ? "rgba(254,249,195,.86)" : color === "red" ? "rgba(254,226,226,.86)" : "#fff", color: "#111827", padding: "7px 8px 7px 5px", textAlign: "left", cursor: "pointer" });
-const colorBarStyle = (color: string): React.CSSProperties => ({ width: 5, height: "100%", minHeight: 34, borderRadius: 999, background: color });
-const itemIconBadgeStyle = (color: string): React.CSSProperties => ({ width: 26, height: 26, display: "grid", placeItems: "center", border: `1px solid ${color === "yellow" ? "rgba(161,98,7,.82)" : color === "red" ? "rgba(153,27,27,.84)" : "rgba(100,116,139,.28)"}`, borderRadius: 8, background: color === "yellow" ? "#facc15" : color === "red" ? "#ef4444" : "#e2e8f0", color: "#111827" });
-const itemBodyStyle: React.CSSProperties = { minWidth: 0, display: "grid", gap: 4 };
-const itemNameStyle: React.CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 12 };
-const itemMetaStyle: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: "3px 7px", color: "#64748b", fontSize: 9, textTransform: "capitalize" };
+
+function entryStyle(
+  depth: number,
+  kind: "group-header" | "row",
+  index: number,
+  surfaceDepth?: number,
+): React.CSSProperties {
+  const style: React.CSSProperties & { "--my-work-huddle-surface-indent"?: string } = {
+    minWidth: 0,
+    position: surfaceDepth === undefined ? undefined : "relative",
+    paddingTop: kind === "group-header" && depth === 0 && index > 0 ? 2 : 0,
+    paddingBottom: 7,
+    paddingLeft: depth > 0 ? depth * 25 + (kind === "row" ? 1 : 0) : 0,
+  };
+  if (surfaceDepth !== undefined) style["--my-work-huddle-surface-indent"] = `${surfaceDepth * 25}px`;
+  return style;
+}
+
+function groupHeaderStyle(field: HuddleActionItemArrangeField, key: string, depth: number): React.CSSProperties {
+  const base: React.CSSProperties = {
+    minWidth: 0,
+    minHeight: 29,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+    border: "1px solid rgba(148,163,184,0.16)",
+    borderRadius: 8,
+    background: depth === 0
+      ? "linear-gradient(145deg, rgba(255,255,255,0.94), rgba(226,232,240,0.72))"
+      : "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(241,245,249,0.78))",
+    color: "#475569",
+    fontSize: 11.5,
+    fontWeight: 850,
+    padding: "0 9px",
+    boxShadow: "3px 3px 8px rgba(100,116,139,0.09), -2px -2px 6px rgba(255,255,255,0.88), inset 1px 1px 0 rgba(255,255,255,0.90)",
+  };
+  if (field !== "color" || (key !== "red" && key !== "yellow")) return base;
+  return key === "red"
+    ? { ...base, border: "1px solid rgba(239,68,68,.36)", background: "linear-gradient(145deg,rgba(255,255,255,.94),rgba(239,68,68,.22))", color: "#991b1b" }
+    : { ...base, border: "1px solid rgba(250,204,21,.40)", background: "linear-gradient(145deg,rgba(255,255,255,.94),rgba(250,204,21,.24))", color: "#854d0e" };
+}
+
+const groupCountStyle: React.CSSProperties = {
+  minWidth: 22,
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.58)",
+  color: "inherit",
+  fontSize: 10.5,
+  fontWeight: 900,
+  textAlign: "center",
+  padding: "1px 5px",
+  opacity: 0.72,
+};

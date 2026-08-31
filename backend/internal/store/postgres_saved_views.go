@@ -110,8 +110,8 @@ func (r *PostgresRepo) UpsertSavedView(input SavedViewInput) (domain.SavedView, 
 	if input.Surface == SavedViewSurfaceLogicGateKanban && input.Principal == SavedViewPrincipalUser {
 		return r.upsertSingleLogicGateKanbanSavedView(input, groupingsJSON, settingsJSON, position)
 	}
-	if savedViewSurfaceIsMyWorkActionItems(input.Surface) && input.Principal == SavedViewPrincipalUser {
-		return r.upsertSingleMyWorkActionItemsSavedView(input, groupingsJSON, settingsJSON, position)
+	if savedViewSurfaceIsActionItems(input.Surface) && input.Principal == SavedViewPrincipalUser {
+		return r.upsertSingleActionItemsSavedView(input, groupingsJSON, settingsJSON, position)
 	}
 	item, err := scanSavedView(r.db.QueryRowContext(context.Background(), `
 insert into saved_views (
@@ -153,13 +153,18 @@ returning company_id::text, saved_view_id::text, surface, principal, principal_i
 	return item, err
 }
 
-func (r *PostgresRepo) upsertSingleMyWorkActionItemsSavedView(input SavedViewInput, groupingsJSON, settingsJSON []byte, position int) (domain.SavedView, error) {
+func (r *PostgresRepo) upsertSingleActionItemsSavedView(input SavedViewInput, groupingsJSON, settingsJSON []byte, position int) (domain.SavedView, error) {
 	item, err := scanSavedView(r.db.QueryRowContext(context.Background(), `
 insert into saved_views (
   company_id,saved_view_id,surface,principal,principal_id,name,groupings,settings,position,created_timestamp,updated_timestamp
 ) values ($1::uuid,$2::uuid,$3,$4,$5::uuid,$6,$7::jsonb,$8::jsonb,$9,now(),now())
 on conflict (company_id, surface, principal, principal_id)
-where surface in ('my_work_action_items_mine','my_work_action_items_delegated') and principal='user'
+where surface in (
+  'my_work_action_items_mine',
+  'my_work_action_items_delegated',
+  'huddle_logic_gate_action_items',
+  'huddle_node_action_items'
+) and principal='user'
 do update
 set name=excluded.name,
     groupings=excluded.groupings,
@@ -291,7 +296,7 @@ func scanSavedView(row interface{ Scan(dest ...any) error }) (domain.SavedView, 
 	if !ok {
 		return domain.SavedView{}, ErrInvalid
 	}
-	if savedViewSurfaceIsMyWorkActionItems(item.Surface) && savedViewGroupingsOverlap(item.Groupings, settings.Ordering) {
+	if savedViewSurfaceIsActionItems(item.Surface) && savedViewGroupingsOverlap(item.Groupings, settings.Ordering) {
 		return domain.SavedView{}, ErrInvalid
 	}
 	item.Settings = settings
