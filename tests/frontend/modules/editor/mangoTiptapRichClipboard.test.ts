@@ -177,25 +177,32 @@ test("plain clipboard text and a file-backed image become one durable paste", as
   }
 });
 
-test("a file-backed short-wide screenshot keeps its measured ratio through durable upload", async () => {
+test("a file-backed short-wide screenshot keeps its ratio and uploads when optional measurement fails", async () => {
   const imageDescriptor = Object.getOwnPropertyDescriptor(globalThis, "Image");
   const xhrDescriptor = Object.getOwnPropertyDescriptor(globalThis, "XMLHttpRequest");
+  const createImageBitmapDescriptor = Object.getOwnPropertyDescriptor(globalThis, "createImageBitmap");
   const createObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
   const revokeObjectURLDescriptor = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
   const revoked: string[] = [];
+  let bitmapDecodeShouldFail = false;
+  let bitmapDecodeCount = 0;
+  let closedBitmapCount = 0;
   try {
     class ShortWideImage {
+      static fail = false;
       naturalWidth = 2400;
       naturalHeight = 40;
       private loadListener: (() => void) | undefined;
+      private errorListener: (() => void) | undefined;
       addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
-        if (type !== "load") return;
-        this.loadListener = () => typeof listener === "function"
-          ? listener(new Event("load"))
-          : listener.handleEvent(new Event("load"));
+        const invoke = () => typeof listener === "function"
+          ? listener(new Event(type))
+          : listener.handleEvent(new Event(type));
+        if (type === "load") this.loadListener = invoke;
+        if (type === "error") this.errorListener = invoke;
       }
       set src(_value: string) {
-        queueMicrotask(() => this.loadListener?.());
+        queueMicrotask(() => ShortWideImage.fail ? this.errorListener?.() : this.loadListener?.());
       }
     }
     class SuccessfulUploadXHR {
@@ -219,6 +226,19 @@ test("a file-backed short-wide screenshot keeps its measured ratio through durab
     }
     Object.defineProperty(globalThis, "Image", { configurable: true, writable: true, value: ShortWideImage });
     Object.defineProperty(globalThis, "XMLHttpRequest", { configurable: true, writable: true, value: SuccessfulUploadXHR });
+    Object.defineProperty(globalThis, "createImageBitmap", {
+      configurable: true,
+      writable: true,
+      value: async () => {
+        bitmapDecodeCount += 1;
+        if (bitmapDecodeShouldFail) throw new Error("failed_to_decode_bitmap");
+        return {
+          width: 2400,
+          height: 40,
+          close: () => { closedBitmapCount += 1; },
+        } as ImageBitmap;
+      },
+    });
     Object.defineProperty(URL, "createObjectURL", { configurable: true, value: () => "blob:short-wide" });
     Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: (value: string) => { revoked.push(value); } });
 
@@ -292,12 +312,72 @@ test("a file-backed short-wide screenshot keeps its measured ratio through durab
 
     assert.equal(completedUploads, 1);
     assert.deepEqual({ width: result.width, height: result.height }, { width: 840, height: 14 });
-    assert.deepEqual(revoked, ["blob:short-wide"]);
+    const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://mango.test/" });
+    const restoreDOM = installDOM(dom);
+    try {
+      const prepared = await prepareMangoTiptapRichClipboardHTML(
+        dom.window.document,
+        '<p><img src="blob:clipboard-short-wide" alt="short-wide.png"></p>',
+        "left",
+        async () => result,
+      );
+      assert.match(prepared.html, /data-width="840"/);
+      assert.match(prepared.html, /data-height="14"/, "clipboard preparation must not clamp the measured ratio to a taller frame");
+
+      ShortWideImage.fail = true;
+      const paste = readMangoTiptapClipboardPaste(dom.window.document, {
+        files: [file] as unknown as FileList,
+        getData: () => "",
+      });
+      assert.ok(paste);
+      const importedAfterMeasurementFailure = await prepareMangoTiptapRichClipboardHTML(
+        dom.window.document,
+        paste.html,
+        "left",
+        (request) => resolveMangoTiptapRichClipboardImage(request, paste.matchingFiles[request.index], {
+          requestJSON,
+          apiBase: "",
+          companyID: "company-1",
+          resourceType: "node",
+          resourceID: "node-1",
+        }),
+      );
+      assert.equal(importedAfterMeasurementFailure.importedImageCount, 1);
+      assert.equal(importedAfterMeasurementFailure.failedImageCount, 0);
+      assert.match(importedAfterMeasurementFailure.html, /data-attachment-id="attachment-short-wide"/);
+      assert.match(importedAfterMeasurementFailure.html, /data-width="840"/);
+      assert.match(importedAfterMeasurementFailure.html, /data-height="14"/);
+    } finally {
+      restoreDOM();
+      dom.window.close();
+    }
+    assert.equal(bitmapDecodeCount, 1);
+    assert.equal(closedBitmapCount, 1);
+
+    bitmapDecodeShouldFail = true;
+    const importedWhenAllMeasurementFails = await resolveMangoTiptapRichClipboardImage({
+      index: 0,
+      sourceKind: "blob",
+      source: "blob:clipboard-short-wide",
+      filename: file.name,
+    }, file, {
+      requestJSON,
+      apiBase: "",
+      companyID: "company-1",
+      resourceType: "node",
+      resourceID: "node-1",
+    });
+    assert.equal(importedWhenAllMeasurementFails.attachmentID, "attachment-short-wide");
+    assert.equal(completedUploads, 3, "optional bitmap decoding must never prevent the durable upload");
+    assert.equal(bitmapDecodeCount, 2);
+    assert.deepEqual(revoked, ["blob:short-wide", "blob:short-wide", "blob:short-wide"]);
   } finally {
     if (imageDescriptor) Object.defineProperty(globalThis, "Image", imageDescriptor);
     else delete (globalThis as Record<string, unknown>).Image;
     if (xhrDescriptor) Object.defineProperty(globalThis, "XMLHttpRequest", xhrDescriptor);
     else delete (globalThis as Record<string, unknown>).XMLHttpRequest;
+    if (createImageBitmapDescriptor) Object.defineProperty(globalThis, "createImageBitmap", createImageBitmapDescriptor);
+    else delete (globalThis as Record<string, unknown>).createImageBitmap;
     if (createObjectURLDescriptor) Object.defineProperty(URL, "createObjectURL", createObjectURLDescriptor);
     else delete (URL as unknown as Record<string, unknown>).createObjectURL;
     if (revokeObjectURLDescriptor) Object.defineProperty(URL, "revokeObjectURL", revokeObjectURLDescriptor);
