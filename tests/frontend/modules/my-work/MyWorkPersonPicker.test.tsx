@@ -62,6 +62,14 @@ async function flushDOM(milliseconds = 0): Promise<void> {
   });
 }
 
+async function waitForDOM(condition: () => boolean, message: string, timeoutMilliseconds = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (!condition()) {
+    if (Date.now() >= deadline) assert.fail(message);
+    await flushDOM(10);
+  }
+}
+
 function directory(companyID = "company-1"): MyWorkPersonDirectory {
   return {
     users: [
@@ -263,8 +271,11 @@ test("My Work directory results cannot cross an auth-session request boundary", 
     ));
     let button = container.querySelector<HTMLButtonElement>("[data-my-work-people-button=true]") as HTMLButtonElement;
     await act(async () => button.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
-    await flushDOM();
-    assert.equal(oldResolvers.length, 2);
+    const oldInput = container.querySelector<HTMLInputElement>("input[role=combobox]") as HTMLInputElement;
+    await waitForDOM(
+      () => oldResolvers.length === 2 && dom.window.document.activeElement === oldInput,
+      "the original directory request and scheduled input focus should settle before the auth session changes",
+    );
 
     await act(async () => mountedRoot?.render(
       <MyWorkPersonPicker companyID="company-1" viewerUserID="viewer-2" selectedUserID="viewer-2" requestJSON={newRequest} onSelect={() => undefined} />,
@@ -273,7 +284,10 @@ test("My Work directory results cannot cross an auth-session request boundary", 
     const requestCountBeforeFocus = newRequestCount;
     const input = container.querySelector<HTMLInputElement>("input[role=combobox]") as HTMLInputElement;
     await act(async () => Simulate.focus(input));
-    await flushDOM();
+    await waitForDOM(
+      () => newRequestCount === requestCountBeforeFocus + 2,
+      "focusing the picker should start both directory requests for the new auth session",
+    );
     assert.equal(input.getAttribute("aria-expanded"), "true");
     assert.equal(newRequestCount, requestCountBeforeFocus + 2);
     assert.match(dom.window.document.body.textContent ?? "", /Loading company people/);
