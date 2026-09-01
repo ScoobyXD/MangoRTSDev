@@ -306,6 +306,7 @@ test("QA Actions has no RDS access", () => {
   assert.doesNotMatch(qaIAM, /rds:/);
   assert.doesNotMatch(qaDeployPolicy, /rds:/);
   assert.doesNotMatch(moduleIAM, /"rds:\*"/);
+  assert.doesNotMatch(qaWorkflow, /\baws\s+rds\b/);
   assert.doesNotMatch(sharedDeployPolicy, /secretsmanager:GetSecretValue/);
 });
 
