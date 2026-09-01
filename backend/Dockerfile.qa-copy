@@ -1,23 +1,9 @@
-FROM golang:1.23 AS build
-
-WORKDIR /src/backend
-COPY backend/go.mod backend/go.sum ./
-RUN go mod download
-COPY backend/ ./
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/miraeopus-migrate ./cmd/miraeopus-migrate
-
 FROM postgres:17.11-bookworm
 
 ARG MANGORTS_GIT_COMMIT
 RUN printf '%s\n' "$MANGORTS_GIT_COMMIT" | grep -Eq '^[0-9a-f]{40}$' \
     && install -d -o postgres -g postgres -m 0700 /work
 
-WORKDIR /app
-COPY --from=build /out/miraeopus-migrate /usr/local/bin/miraeopus-migrate
-COPY --from=build /src/backend/db /app/backend/db
-COPY --chown=postgres:postgres scripts/qa_dev_copy_preflight.sql /app/scripts/qa_dev_copy_preflight.sql
-COPY --chown=postgres:postgres scripts/qa_dev_copy_sanitize.sql /app/scripts/qa_dev_copy_sanitize.sql
-COPY --chown=postgres:postgres scripts/qa_dev_copy_verify.sql /app/scripts/qa_dev_copy_verify.sql
 COPY --chmod=0555 scripts/qa_fargate_copy_entrypoint.sh /usr/local/bin/mangorts-qa-copy
 
 ENV MANGORTS_QA_COPY_IMAGE_COMMIT=$MANGORTS_GIT_COMMIT

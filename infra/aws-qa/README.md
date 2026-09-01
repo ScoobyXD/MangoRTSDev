@@ -75,12 +75,14 @@ migration images, registers both task definitions, and forces API desired count
 zero, worker disabled, and schema confirmation false. It stops without publishing
 the frontend or running application smoke tests. A human can then run the guarded
 database audit/bootstrap/audit sequence with the reported migration task ARN.
-The current one-time setup sanitizes a private raw Dev copy, imports only its
-data into a fresh canonical next database, and swaps that verified database into
-the stable name. It never copies Dev `schema_migrations` or attachment rows; see
+The current one-time copy foundation restores the full Dev schema objects and
+data into one fresh timestamped, inactive database on the QA RDS instance,
+omitting only ownership and grants through the required restore flags. It does not
+sanitize data, rewrite identities, bootstrap a different schema, verify parity,
+or replace the stable `mangorts_qa` database; see
 `docs/infra/mangorts-qa-environment-runbook.md`.
 
-After schema and sanitized-data verification, set
+Only after a later approved phase adds verification and cutover may an operator set
 `TF_EMAIL_SCHEMA_MIGRATED=true`, explicitly keep
 `TF_EMAIL_WORKER_ENABLED=false`, and run `deploy-qa.yml` with stage `deploy` for
 the base site. Configure the separate QA Nylas app and secret ARNs later. The

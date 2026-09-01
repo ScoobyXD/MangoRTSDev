@@ -153,8 +153,6 @@ test("QA project, environment, and DNS names cannot be changed by GitHub variabl
   assert.doesNotMatch(qaWorkflow, /TF_(?:ROOT_DOMAIN_NAME|APP_SUBDOMAIN|API_SUBDOMAIN|ORIGIN_SUBDOMAIN)/);
   assert.match(qaChecks, /check "qa_identity_is_hard_locked"/);
   assert.match(qaPreflight, /\[string\]\$PostgresBin/);
-  assert.match(qaPreflight, /\[string\]\$JonatQaEmail/);
-  assert.match(qaPreflight, /jonathankim829@gmail\.com/);
   assert.match(qaPreflight, /"aws", "gh", "git", "terraform"/);
   assert.match(qaPreflight, /"psql\.exe", "createdb\.exe", "dropdb\.exe", "pg_dump\.exe", "pg_restore\.exe"/);
 });
