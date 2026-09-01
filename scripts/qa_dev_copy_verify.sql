@@ -61,11 +61,24 @@ begin
      or to_regclass('public.entities') is null
      or to_regclass('public.entity_fields') is null
      or to_regclass('public.entity_relationships') is null
+     or to_regclass('public.huddle_nodes') is null
      or to_regclass('public.huddle_node_textboxes') is null
      or to_regclass('public.huddle_node_textbox_chats') is null
-     or to_regclass('public.action_item_huddle_relationships') is not null
      or to_regclass('public.schema_migrations') is null then
     raise exception 'STOP: required canonical Mango tables are missing';
+  end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema='public'
+      and table_name='huddle_nodes'
+      and column_name='huddle_date'
+      and data_type='date'
+      and is_nullable='NO'
+      and column_default='((statement_timestamp() AT TIME ZONE ''America/Los_Angeles''::text))::date'
+  ) then
+    raise exception 'STOP: Huddle Nodes are missing the exact required Los Angeles Huddle date column';
   end if;
 
   if exists (
@@ -109,6 +122,10 @@ begin
       ('entity_relationships','company_id'),('entity_relationships','entity_id'),
       ('entity_relationships','resource_type'),('entity_relationships','resource_id'),
       ('entity_relationships','created_timestamp'),
+      ('huddle_nodes','company_id'),('huddle_nodes','huddle_node_id'),
+      ('huddle_nodes','huddle_logic_gate_id'),('huddle_nodes','name'),
+      ('huddle_nodes','huddle_date'),('huddle_nodes','created_timestamp'),
+      ('huddle_nodes','updated_timestamp'),
       ('huddle_node_textboxes','company_id'),('huddle_node_textboxes','huddle_node_id'),
       ('huddle_node_textboxes','textbox_id'),('huddle_node_textboxes','created_timestamp'),
       ('huddle_node_textboxes','updated_timestamp'),('huddle_node_textboxes','deleted_timestamp'),
@@ -130,7 +147,7 @@ begin
     where table_schema='public'
       and table_name in (
         'entity_types','entity_folders','entity_field_types','entities','entity_fields',
-        'entity_relationships','huddle_node_textboxes','huddle_node_textbox_chats'
+        'entity_relationships','huddle_nodes','huddle_node_textboxes','huddle_node_textbox_chats'
       )
   ), mismatches as (
     (select * from expected except select * from actual)
@@ -139,8 +156,50 @@ begin
   )
   select count(*) into canonical_schema_mismatch_count from mismatches;
 
-  if canonical_schema_mismatch_count <> 0 then
-    raise exception 'STOP: current Entity or Huddle workspace schema columns do not match the exact unordered canonical sets';
+  if canonical_schema_mismatch_count <> 0
+     or to_regclass('public.action_item_huddle_relationships') is not null
+     or to_regclass('public.action_item_sources') is not null
+     or to_regclass('public.entity_field_assignments') is not null
+     or to_regclass('public.raci_tabs_folders') is not null
+     or to_regclass('public.raci_tabs_items') is not null
+     or exists (
+       select 1
+       from pg_trigger catalog_trigger
+       join pg_class relation on relation.oid=catalog_trigger.tgrelid
+       join pg_namespace relation_schema on relation_schema.oid=relation.relnamespace
+       where relation_schema.nspname='public'
+         and not catalog_trigger.tgisinternal
+         and catalog_trigger.tgname in (
+           'trg_zz_raci_tabs_assignment_changed',
+           'trg_zz_raci_tabs_explorer_folder_changed',
+           'trg_zz_raci_tabs_explorer_item_changed',
+           'trg_zz_raci_tabs_group_changed',
+           'trg_zz_raci_tabs_group_member_changed',
+           'trg_zz_raci_tabs_logic_gate_changed',
+           'trg_zz_raci_tabs_membership_changed',
+           'trg_zz_raci_tabs_setting_changed'
+         )
+     )
+     or exists (
+       select 1
+       from pg_proc routine
+       join pg_namespace routine_schema on routine_schema.oid=routine.pronamespace
+       where routine_schema.nspname='public'
+         and routine.proname in (
+           'mangorts_raci_tabs_explorer_folder_changed',
+           'mangorts_raci_tabs_explorer_item_changed',
+           'mangorts_raci_tabs_group_changed',
+           'mangorts_raci_tabs_group_member_changed',
+           'mangorts_raci_tabs_logic_gate_changed',
+           'mangorts_raci_tabs_membership_added',
+           'mangorts_raci_tabs_policy_changed',
+           'mangorts_sync_raci_tabs_group_ancestors',
+           'mangorts_sync_raci_tabs_policy_resource',
+           'mangorts_sync_raci_tabs_explorer_subtree',
+           'mangorts_sync_raci_tabs_logic_gate'
+         )
+     ) then
+    raise exception 'STOP: current Entity, Huddle, or retired RACI schema does not match the exact canonical contract';
   end if;
 end
 $guard$;
@@ -278,8 +337,9 @@ begin
      or exists (select 1 from public.realtime_outbox)
      or exists (select 1 from public.domain_events)
      or exists (select 1 from public.recycle_bin_items)
+     or exists (select 1 from public.saved_views)
      or exists (select 1 from public.workspace_read_versions) then
-    raise exception 'STOP: imported job/event/delivery/recycle state remains';
+    raise exception 'STOP: imported job/event/delivery/recycle/saved-view state remains';
   end if;
 
   if exists (
@@ -1040,7 +1100,8 @@ from (values
   ('domain_events', (select count(*)::bigint from public.domain_events)),
   ('realtime_outbox', (select count(*)::bigint from public.realtime_outbox)),
   ('notifications', (select count(*)::bigint from public.notifications)),
-  ('recycle_bin_items', (select count(*)::bigint from public.recycle_bin_items))
+  ('recycle_bin_items', (select count(*)::bigint from public.recycle_bin_items)),
+  ('saved_views', (select count(*)::bigint from public.saved_views))
 ) checks(check_name, row_count)
 order by check_name;
 

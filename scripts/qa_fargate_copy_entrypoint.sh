@@ -34,27 +34,39 @@ qa_psql() {
     --dbname "$database" --no-password --no-psqlrc --set ON_ERROR_STOP=on "$@"
 }
 
-node_completion_sha256() {
+preserved_business_data_sha256() {
   local database="$1"
   local checksum_output
   local checksum
   if ! checksum_output="$(
     qa_psql "$database" --command "copy (
-      select company_id::text,
-             node_id::text,
-             status,
-             extract(epoch from created_timestamp)::text,
-             coalesce(extract(epoch from completion_transition_timestamp)::text,'')
-      from public.nodes
-      order by company_id,node_id
+      select projection_type,company_id,resource_id,value_1,value_2,value_3
+      from (
+        select 'huddle_node_date'::text as projection_type,
+               company_id::text as company_id,
+               huddle_node_id::text as resource_id,
+               huddle_date::text as value_1,
+               ''::text as value_2,
+               ''::text as value_3
+        from public.huddle_nodes
+        union all
+        select 'node_completion'::text,
+               company_id::text,
+               node_id::text,
+               status,
+               extract(epoch from created_timestamp)::text,
+               coalesce(extract(epoch from completion_transition_timestamp)::text,'')
+        from public.nodes
+      ) projection
+      order by projection_type,company_id,resource_id
     ) to stdout with (format csv,force_quote *);" | sha256sum
   )"; then
-    printf 'STOP: could not calculate Node completion projection checksum\n' >&2
+    printf 'STOP: could not calculate preserved business data checksum\n' >&2
     return 1
   fi
   checksum="${checksum_output%% *}"
   if [[ ! "$checksum" =~ ^[0-9a-f]{64}$ ]]; then
-    printf 'STOP: Node completion projection checksum is invalid\n' >&2
+    printf 'STOP: preserved business data checksum is invalid\n' >&2
     return 1
   fi
   printf '%s\n' "$checksum"
@@ -295,7 +307,7 @@ PGPASSWORD="$QA_DB_PASSWORD" pg_restore \
 qa_psql "$QA_RAW_DATABASE" --file "$app_root/scripts/qa_dev_copy_preflight.sql"
 qa_psql "$QA_RAW_DATABASE" --file "$app_root/scripts/qa_dev_copy_sanitize.sql"
 qa_psql "$QA_RAW_DATABASE" --file "$app_root/scripts/qa_dev_copy_verify.sql"
-raw_node_completion_sha="$(node_completion_sha256 "$QA_RAW_DATABASE")"
+raw_business_data_sha="$(preserved_business_data_sha256 "$QA_RAW_DATABASE")"
 
 PGPASSWORD="$QA_DB_PASSWORD" pg_dump \
   --host "$QA_DB_HOST" --port "$QA_DB_PORT" --username "$QA_DB_USER" \
@@ -337,8 +349,8 @@ PGPASSWORD="$QA_DB_PASSWORD" pg_restore \
 set_user_triggers "$QA_NEXT_DATABASE" enable
 
 qa_psql "$QA_NEXT_DATABASE" --file "$app_root/scripts/qa_dev_copy_verify.sql"
-next_node_completion_sha="$(node_completion_sha256 "$QA_NEXT_DATABASE")"
-[[ "$next_node_completion_sha" == "$raw_node_completion_sha" ]] || fail "restored next database changed the exact Node completion projection"
+next_business_data_sha="$(preserved_business_data_sha256 "$QA_NEXT_DATABASE")"
+[[ "$next_business_data_sha" == "$raw_business_data_sha" ]] || fail "restored next database changed the exact preserved business data projection"
 
 parity_audit="$(run_migrator "$QA_NEXT_DATABASE" -mode audit 2>&1)"
 printf '%s\n' "$parity_audit"
@@ -399,12 +411,12 @@ if ! qa_psql "$QA_STABLE_DATABASE" --file "$app_root/scripts/qa_dev_copy_verify.
   fail "CRITICAL: post-cutover data verification and automatic rollback both failed; manual recovery is required"
 fi
 
-final_node_completion_sha="$(node_completion_sha256 "$QA_STABLE_DATABASE")"
-if [[ "$final_node_completion_sha" != "$raw_node_completion_sha" ]]; then
+final_business_data_sha="$(preserved_business_data_sha256 "$QA_STABLE_DATABASE")"
+if [[ "$final_business_data_sha" != "$raw_business_data_sha" ]]; then
   if rollback_cutover; then
-    fail "post-cutover Node completion projection changed; original QA was restored"
+    fail "post-cutover preserved business data projection changed; original QA was restored"
   fi
-  fail "CRITICAL: post-cutover Node completion projection changed and automatic rollback failed; manual recovery is required"
+  fail "CRITICAL: post-cutover preserved business data projection changed and automatic rollback failed; manual recovery is required"
 fi
 
 final_audit="$(run_migrator "$QA_STABLE_DATABASE" -mode audit 2>&1)"
@@ -425,7 +437,7 @@ unset DEV_DB_PASSWORD QA_DB_PASSWORD PGPASSWORD
 printf 'QA_COPY_STATUS=success\n'
 printf 'QA_COPY_RELEASE_COMMIT=%s\n' "$EXPECTED_GIT_COMMIT"
 printf 'QA_COPY_SCHEMA_INVENTORY_SHA256=%s\n' "$baseline_schema_sha"
-printf 'QA_COPY_NODE_COMPLETION_SHA256=%s\n' "$raw_node_completion_sha"
+printf 'QA_COPY_BUSINESS_DATA_SHA256=%s\n' "$raw_business_data_sha"
 printf 'QA_COPY_REPOSITORY_SCHEMA_SHA256=%s\n' "$baseline_repository_sha"
 printf 'QA_COPY_COMPANY_ID=%s\n' "$qa_company_id"
 printf 'QA_COPY_ROLLBACK_DATABASE=%s\n' "$QA_ROLLBACK_DATABASE"
