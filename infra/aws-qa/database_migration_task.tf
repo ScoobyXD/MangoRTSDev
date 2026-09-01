@@ -37,7 +37,7 @@ resource "aws_ecs_task_definition" "database_migration" {
       secrets = [
         {
           name      = "DB_PASSWORD"
-          valueFrom = "${aws_db_instance.qa.master_user_secret[0].secret_arn}:password::"
+          valueFrom = var.database_managed_password_bootstrap ? "${aws_db_instance.qa.master_user_secret[0].secret_arn}:password::" : trimspace(var.database_password_secret_arn)
         }
       ]
 

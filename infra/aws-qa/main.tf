@@ -28,8 +28,8 @@ module "platform" {
   managed_db_port                     = aws_db_instance.qa.port
   managed_db_name                     = var.database_name
   managed_db_user                     = var.database_user
-  managed_db_password_secret_arn      = aws_db_instance.qa.master_user_secret[0].secret_arn
-  managed_db_password_secret_json_key = "password"
+  managed_db_password_secret_arn      = var.database_managed_password_bootstrap ? aws_db_instance.qa.master_user_secret[0].secret_arn : trimspace(var.database_password_secret_arn)
+  managed_db_password_secret_json_key = var.database_managed_password_bootstrap ? "password" : ""
   managed_db_security_group_id        = aws_security_group.database.id
 
   backend_image_uri     = var.backend_image_uri

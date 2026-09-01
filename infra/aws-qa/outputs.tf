@@ -163,9 +163,9 @@ output "database_user" {
   value       = aws_db_instance.qa.username
 }
 
-output "database_master_user_secret_arn" {
-  description = "RDS-managed Secrets Manager ARN for the QA PostgreSQL master password."
-  value       = aws_db_instance.qa.master_user_secret[0].secret_arn
+output "database_password_secret_arn" {
+  description = "Secrets Manager ARN used by QA PostgreSQL clients. Established QA uses the customer-managed non-rotating secret."
+  value       = var.database_managed_password_bootstrap ? aws_db_instance.qa.master_user_secret[0].secret_arn : trimspace(var.database_password_secret_arn)
 }
 
 output "database_security_group_id" {
