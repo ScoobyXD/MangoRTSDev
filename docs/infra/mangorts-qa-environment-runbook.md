@@ -335,11 +335,12 @@ Stop if the export is older than 24 hours, is not PostgreSQL 17.x, or its
 repository fingerprint/commit differs from the release. The Dev catalog hash is
 evidence about the read-only source; it is not the expected QA target hash.
 `qa_dev_copy_preflight.sql` permits only the audited exact current Entity and
-Huddle Node workspace column sets, rejects obsolete Entity tables, validates
-every current Entity relationship endpoint, and requires the corresponding
-20260827/20260828/20260829 Dev ledger rows to remain absent. It also requires
-the exact Node completion-transition column and rejects the legacy Action Item
-Source table. Current allowed Entity,
+Huddle Node workspace column sets, including the exact nonnull Los Angeles
+`huddle_date` contract. It rejects obsolete Entity, legacy Action Item Source,
+and retired RACI Tabs tables, routines, and triggers; validates every current
+Entity relationship endpoint; and requires the corresponding
+20260827/20260828/20260829/20260831 Dev ledger rows to remain absent. It also
+requires the exact Node completion-transition column. Current allowed Entity,
 Action Item, relationship, document, and chat rows are source business data;
 their aggregate counts are reported without printing their contents. If the
 schema or relationship shape changes, stop and reassess. Do not run
@@ -396,8 +397,9 @@ RDS free storage, and repeats the storage and stopped-writer checks immediately
 before launch. During the fresh data restore, only public user triggers are
 temporarily disabled; constraint triggers stay active, and the verifier requires
 every public user trigger to be enabled again before cutover. The task also
-requires the exact ordered Node completion-projection SHA-256 from sanitized raw
-to match both the next database and the stable post-cutover database.
+requires one exact ordered SHA-256 over the retained Node completion projection
+and editable Huddle dates from sanitized raw to match both the next database and
+the stable post-cutover database.
 
 The temporary Dev secret must be less than 24 hours old, contain only JSON keys
 `username` and `password`, use the exact prefix
@@ -469,11 +471,12 @@ Assert-NativeSuccess "restore into exact QA raw database"
 Run the read-only preflight, one-transaction sanitizer, and read-only verifier
 against this exact isolated raw database. The preflight compares every Node
 completion timestamp to immutable event history before sanitization removes
-that history. Do not rerun the Entity, Action Item, Node completion, Entity
-relationship, Huddle workspace, or canonical reconciliation migrations in the
-raw database: the audited source already has that current DDL and data
-projection, and its ledger is deliberately excluded. The fresh next database
-owns the complete repository migration set.
+that history and requires every Huddle date to have the exact current physical
+contract. Do not rerun the Entity, Action Item, Node completion, Entity
+relationship, Huddle workspace/date, RACI retirement, or canonical
+reconciliation migrations in the raw database: the audited source already has
+that current DDL and business data, and its ledger is deliberately excluded.
+The fresh next database owns the complete repository migration set.
 
 ```powershell
 foreach ($sqlFile in @(
@@ -487,22 +490,34 @@ foreach ($sqlFile in @(
   Assert-NativeSuccess "run $sqlFile against exact QA raw database"
 }
 
-function Get-QaNodeCompletionSHA256([string]$Database) {
+function Get-QaPreservedBusinessDataSHA256([string]$Database) {
   $copySQL = @"
 COPY (
-  SELECT company_id::text,
-         node_id::text,
-         status,
-         extract(epoch FROM created_timestamp)::text,
-         coalesce(extract(epoch FROM completion_transition_timestamp)::text,'')
-  FROM public.nodes
-  ORDER BY company_id,node_id
+  SELECT projection_type,company_id,resource_id,value_1,value_2,value_3
+  FROM (
+    SELECT 'huddle_node_date'::text AS projection_type,
+           company_id::text AS company_id,
+           huddle_node_id::text AS resource_id,
+           huddle_date::text AS value_1,
+           ''::text AS value_2,
+           ''::text AS value_3
+    FROM public.huddle_nodes
+    UNION ALL
+    SELECT 'node_completion'::text,
+           company_id::text,
+           node_id::text,
+           status,
+           extract(epoch FROM created_timestamp)::text,
+           coalesce(extract(epoch FROM completion_transition_timestamp)::text,'')
+    FROM public.nodes
+  ) projection
+  ORDER BY projection_type,company_id,resource_id
 ) TO STDOUT WITH (FORMAT csv, FORCE_QUOTE *);
 "@
   $rows = @(& $psql --host $qaHost --port $qaPort --username $qaUser `
     --dbname $Database --no-password --no-psqlrc --set ON_ERROR_STOP=on `
     --command $copySQL)
-  Assert-NativeSuccess "read exact Node completion projection from $Database"
+  Assert-NativeSuccess "read exact preserved business data projection from $Database"
   $canonical = if ($rows.Count -eq 0) { "" } else { [string]::Join("`n", $rows) + "`n" }
   $algorithm = [Security.Cryptography.SHA256]::Create()
   try {
@@ -512,7 +527,7 @@ COPY (
     $algorithm.Dispose()
   }
 }
-$rawNodeCompletionSHA256 = Get-QaNodeCompletionSHA256 $rawDatabase
+$rawBusinessDataSHA256 = Get-QaPreservedBusinessDataSHA256 $rawDatabase
 ```
 
 Stop on any error or unexpected count. Export data only, excluding the Dev
@@ -627,9 +642,9 @@ Assert-NativeSuccess "restore sanitized data into exact QA next database"
   --dbname $nextDatabase --no-password --no-psqlrc `
   --set ON_ERROR_STOP=on --file .\scripts\qa_dev_copy_verify.sql
 Assert-NativeSuccess "verify exact QA next database"
-$nextNodeCompletionSHA256 = Get-QaNodeCompletionSHA256 $nextDatabase
-if ($nextNodeCompletionSHA256 -cne $rawNodeCompletionSHA256) {
-  throw "Restored next database changed the exact Node completion projection"
+$nextBusinessDataSHA256 = Get-QaPreservedBusinessDataSHA256 $nextDatabase
+if ($nextBusinessDataSHA256 -cne $rawBusinessDataSHA256) {
+  throw "Restored next database changed the exact preserved business data projection"
 }
 
 .\scripts\qa_run_database_task.ps1 @qaDatabaseTask `
@@ -765,9 +780,9 @@ if (-not $qaDatabaseTask.Remove("DatabaseNameOverride")) {
   --dbname mangorts_qa --no-password --no-psqlrc `
   --set ON_ERROR_STOP=on --file .\scripts\qa_dev_copy_verify.sql
 Assert-NativeSuccess "verify cut-over QA database"
-$finalNodeCompletionSHA256 = Get-QaNodeCompletionSHA256 "mangorts_qa"
-if ($finalNodeCompletionSHA256 -cne $rawNodeCompletionSHA256) {
-  throw "Post-cutover database changed the exact Node completion projection; restore rollback"
+$finalBusinessDataSHA256 = Get-QaPreservedBusinessDataSHA256 "mangorts_qa"
+if ($finalBusinessDataSHA256 -cne $rawBusinessDataSHA256) {
+  throw "Post-cutover database changed the exact preserved business data projection; restore rollback"
 }
 ```
 

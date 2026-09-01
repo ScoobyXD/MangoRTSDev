@@ -43,6 +43,7 @@ begin
      or to_regclass('public.entities') is null
      or to_regclass('public.entity_fields') is null
      or to_regclass('public.entity_relationships') is null
+     or to_regclass('public.huddle_nodes') is null
      or to_regclass('public.huddle_node_textboxes') is null
      or to_regclass('public.huddle_node_textbox_chats') is null
      or to_regclass('public.schema_migrations') is null then
@@ -60,6 +61,19 @@ begin
       and column_default is null
   ) then
     raise exception 'STOP: Dev Nodes are missing the exact completion transition timestamp column';
+  end if;
+
+  if not exists (
+    select 1
+    from information_schema.columns
+    where table_schema='public'
+      and table_name='huddle_nodes'
+      and column_name='huddle_date'
+      and data_type='date'
+      and is_nullable='NO'
+      and column_default='((statement_timestamp() AT TIME ZONE ''America/Los_Angeles''::text))::date'
+  ) then
+    raise exception 'STOP: Dev Huddle Nodes are missing the exact required Los Angeles Huddle date column';
   end if;
 
   if exists (
@@ -143,6 +157,10 @@ begin
       ('entity_relationships','company_id'),('entity_relationships','entity_id'),
       ('entity_relationships','resource_type'),('entity_relationships','resource_id'),
       ('entity_relationships','created_timestamp'),
+      ('huddle_nodes','company_id'),('huddle_nodes','huddle_node_id'),
+      ('huddle_nodes','huddle_logic_gate_id'),('huddle_nodes','name'),
+      ('huddle_nodes','huddle_date'),('huddle_nodes','created_timestamp'),
+      ('huddle_nodes','updated_timestamp'),
       ('huddle_node_textboxes','company_id'),('huddle_node_textboxes','huddle_node_id'),
       ('huddle_node_textboxes','textbox_id'),('huddle_node_textboxes','created_timestamp'),
       ('huddle_node_textboxes','updated_timestamp'),('huddle_node_textboxes','deleted_timestamp'),
@@ -164,7 +182,7 @@ begin
     where table_schema='public'
       and table_name in (
         'entity_types','entity_folders','entity_field_types','entities','entity_fields',
-        'entity_relationships','huddle_node_textboxes','huddle_node_textbox_chats'
+        'entity_relationships','huddle_nodes','huddle_node_textboxes','huddle_node_textbox_chats'
       )
   ), mismatches as (
     (select * from expected except select * from actual)
@@ -176,8 +194,47 @@ begin
   if source_schema_mismatch_count <> 0
      or to_regclass('public.action_item_huddle_relationships') is not null
      or to_regclass('public.action_item_sources') is not null
-     or to_regclass('public.entity_field_assignments') is not null then
-    raise exception 'STOP: raw QA source is not the audited current Entity and Huddle workspace schema';
+     or to_regclass('public.entity_field_assignments') is not null
+     or to_regclass('public.raci_tabs_folders') is not null
+     or to_regclass('public.raci_tabs_items') is not null
+     or exists (
+       select 1
+       from pg_trigger catalog_trigger
+       join pg_class relation on relation.oid=catalog_trigger.tgrelid
+       join pg_namespace relation_schema on relation_schema.oid=relation.relnamespace
+       where relation_schema.nspname='public'
+         and not catalog_trigger.tgisinternal
+         and catalog_trigger.tgname in (
+           'trg_zz_raci_tabs_assignment_changed',
+           'trg_zz_raci_tabs_explorer_folder_changed',
+           'trg_zz_raci_tabs_explorer_item_changed',
+           'trg_zz_raci_tabs_group_changed',
+           'trg_zz_raci_tabs_group_member_changed',
+           'trg_zz_raci_tabs_logic_gate_changed',
+           'trg_zz_raci_tabs_membership_changed',
+           'trg_zz_raci_tabs_setting_changed'
+         )
+     )
+     or exists (
+       select 1
+       from pg_proc routine
+       join pg_namespace routine_schema on routine_schema.oid=routine.pronamespace
+       where routine_schema.nspname='public'
+         and routine.proname in (
+           'mangorts_raci_tabs_explorer_folder_changed',
+           'mangorts_raci_tabs_explorer_item_changed',
+           'mangorts_raci_tabs_group_changed',
+           'mangorts_raci_tabs_group_member_changed',
+           'mangorts_raci_tabs_logic_gate_changed',
+           'mangorts_raci_tabs_membership_added',
+           'mangorts_raci_tabs_policy_changed',
+           'mangorts_sync_raci_tabs_group_ancestors',
+           'mangorts_sync_raci_tabs_policy_resource',
+           'mangorts_sync_raci_tabs_explorer_subtree',
+           'mangorts_sync_raci_tabs_logic_gate'
+         )
+     ) then
+    raise exception 'STOP: raw QA source is not the audited current Entity, Huddle, and retired RACI schema';
   end if;
 
   if exists (
@@ -191,10 +248,12 @@ begin
       '20260828_zz_huddle_logic_gate_action_item_relationships.sql',
       '20260829_action_item_delegation_source.sql',
       '20260829_my_work_node_completion_transition.sql',
-      '20260829_z_action_item_source_entity_field.sql'
+      '20260829_z_action_item_source_entity_field.sql',
+      '20260831_huddle_node_dates_and_action_item_views.sql',
+      '20260831_z_retire_raci_tabs.sql'
     )
   ) then
-    raise exception 'STOP: Dev Entity or Huddle workspace migration ledger changed after the approved read-only audit';
+    raise exception 'STOP: Dev migration ledger changed after the approved read-only audit';
   end if;
 
   if exists (

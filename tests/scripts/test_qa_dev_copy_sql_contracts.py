@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
@@ -109,7 +110,7 @@ class QADevCopySQLContracts(unittest.TestCase):
         self.assertIn("${qasecretarn}:password::", self.copy_launcher)
         self.assertNotIn("get-secret-value", self.copy_launcher)
 
-    def test_hosted_copy_preserves_the_preflighted_node_completion_projection(self) -> None:
+    def test_hosted_copy_preserves_the_preflighted_business_data_projection(self) -> None:
         self.assertNotIn(
             'backend/db/migrations/20260829_my_work_node_completion_transition.sql',
             self.copy_entrypoint,
@@ -127,21 +128,31 @@ class QADevCopySQLContracts(unittest.TestCase):
             'qa_psql "$qa_raw_database" --file "$app_root/scripts/qa_dev_copy_sanitize.sql"'
         )
         raw_checksum = self.copy_entrypoint.index(
-            'raw_node_completion_sha="$(node_completion_sha256 "$qa_raw_database")"'
+            'raw_business_data_sha="$(preserved_business_data_sha256 "$qa_raw_database")"'
         )
         self.assertLess(preflight, sanitizer)
         self.assertLess(sanitizer, raw_checksum)
         self.assertIn("sha256sum", self.copy_entrypoint)
+        self.assertIn("'huddle_node_date'::text", self.copy_entrypoint)
+        self.assertIn("huddle_date::text", self.copy_entrypoint)
         self.assertIn(
-            '[[ "$next_node_completion_sha" == "$raw_node_completion_sha" ]]',
+            '[[ "$next_business_data_sha" == "$raw_business_data_sha" ]]',
             self.copy_entrypoint,
         )
         self.assertIn(
-            '[[ "$final_node_completion_sha" != "$raw_node_completion_sha" ]]',
+            '[[ "$final_business_data_sha" != "$raw_business_data_sha" ]]',
+            self.copy_entrypoint,
+        )
+        self.assertIn(
+            'next_business_data_sha="$(preserved_business_data_sha256 "$qa_next_database")"',
+            self.copy_entrypoint,
+        )
+        self.assertIn(
+            'final_business_data_sha="$(preserved_business_data_sha256 "$qa_stable_database")"',
             self.copy_entrypoint,
         )
 
-    def test_node_completion_checksum_rejects_partial_query_and_hash_failures(self) -> None:
+    def test_business_data_checksum_rejects_partial_query_and_hash_failures(self) -> None:
         if os.name == "nt":
             bash_candidates = (
                 Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "bash.exe",
@@ -155,7 +166,7 @@ class QADevCopySQLContracts(unittest.TestCase):
 
         entrypoint = COPY_ENTRYPOINT.read_text(encoding="utf-8").replace("\r\n", "\n")
         function_match = re.search(
-            r"(?ms)^node_completion_sha256\(\) \{.*?^\}\n",
+            r"(?ms)^preserved_business_data_sha256\(\) \{.*?^\}\n",
             entrypoint,
         )
         self.assertIsNotNone(function_match)
@@ -182,7 +193,7 @@ case "$1" in
   *) exit 64 ;;
 esac
 {function_match.group(0)}
-if checksum="$(node_completion_sha256 fixture)"; then
+if checksum="$(preserved_business_data_sha256 fixture)"; then
   printf 'success:%s\\n' "$checksum"
   exit 0
 fi
@@ -344,9 +355,9 @@ exit 9
         self.assertIn("lower(current_database()) ~ '(dev|prod)'", self.preflight)
         self.assertIn("lower(current_database()) ~ '(dev|prod)'", self.sanitizer)
 
-    def test_preflight_pins_the_audited_current_entity_and_huddle_source(self) -> None:
+    def test_preflight_pins_the_audited_current_entity_huddle_and_raci_source(self) -> None:
         self.assertIn(
-            "raw qa source is not the audited current entity and huddle workspace schema",
+            "raw qa source is not the audited current entity, huddle, and retired raci schema",
             self.preflight,
         )
         self.assertIn("select * from expected except select * from actual", self.preflight)
@@ -355,6 +366,8 @@ exit 9
             "action_item_huddle_relationships",
             "action_item_sources",
             "entity_field_assignments",
+            "raci_tabs_folders",
+            "raci_tabs_items",
         ):
             self.assertIn(
                 f"to_regclass('public.{retired_table}') is not null",
@@ -362,11 +375,46 @@ exit 9
             )
         for required_table in (
             "entity_relationships",
+            "huddle_nodes",
             "huddle_node_textboxes",
             "huddle_node_textbox_chats",
         ):
             self.assertIn(f"to_regclass('public.{required_table}') is null", self.preflight)
         self.assertIn("action_item_entities", self.preflight)
+        self.assertIn("('huddle_nodes','huddle_date')", self.preflight)
+        self.assertIn("and data_type='date'", self.preflight)
+        self.assertIn("and is_nullable='no'", self.preflight)
+        self.assertIn(
+            "and column_default='((statement_timestamp() at time zone ''america/los_angeles''::text))::date'",
+            self.preflight,
+        )
+        for retired_trigger in (
+            "trg_zz_raci_tabs_assignment_changed",
+            "trg_zz_raci_tabs_explorer_folder_changed",
+            "trg_zz_raci_tabs_explorer_item_changed",
+            "trg_zz_raci_tabs_group_changed",
+            "trg_zz_raci_tabs_group_member_changed",
+            "trg_zz_raci_tabs_logic_gate_changed",
+            "trg_zz_raci_tabs_membership_changed",
+            "trg_zz_raci_tabs_setting_changed",
+        ):
+            self.assertIn(f"'{retired_trigger}'", self.preflight)
+            self.assertIn(f"'{retired_trigger}'", self.verify)
+        for retired_routine in (
+            "mangorts_raci_tabs_explorer_folder_changed",
+            "mangorts_raci_tabs_explorer_item_changed",
+            "mangorts_raci_tabs_group_changed",
+            "mangorts_raci_tabs_group_member_changed",
+            "mangorts_raci_tabs_logic_gate_changed",
+            "mangorts_raci_tabs_membership_added",
+            "mangorts_raci_tabs_policy_changed",
+            "mangorts_sync_raci_tabs_group_ancestors",
+            "mangorts_sync_raci_tabs_policy_resource",
+            "mangorts_sync_raci_tabs_explorer_subtree",
+            "mangorts_sync_raci_tabs_logic_gate",
+        ):
+            self.assertIn(f"'{retired_routine}'", self.preflight)
+            self.assertIn(f"'{retired_routine}'", self.verify)
         self.assertIn("'20260827_entities.sql'", self.preflight)
         self.assertIn("'20260828_action_items.sql'", self.preflight)
         self.assertIn("'20260828_entity_relationships.sql'", self.preflight)
@@ -385,6 +433,11 @@ exit 9
             "'20260829_z_action_item_source_entity_field.sql'",
             self.preflight,
         )
+        self.assertIn(
+            "'20260831_huddle_node_dates_and_action_item_views.sql'",
+            self.preflight,
+        )
+        self.assertIn("'20260831_z_retire_raci_tabs.sql'", self.preflight)
         self.assertNotIn(
             "to_regclass('public.action_item_huddle_relationships') is null",
             self.sanitizer,
@@ -578,8 +631,10 @@ exit 9
             "realtime_outbox",
             "domain_events",
             "recycle_bin_items",
+            "saved_views",
         ):
             self.assertIn(f"delete from public.{table};", self.sanitizer)
+            self.assertIn(f"exists (select 1 from public.{table})", self.verify)
 
     def test_sanitizer_preserves_repository_migration_ownership(self) -> None:
         self.assertIn("delete from public.schema_migrations", self.sanitizer)
@@ -793,6 +848,65 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
         self.assertEqual(fields[:3], expected_fields, identity)
         self.assertEqual(fields[3], "primary", identity)
 
+    def test_business_data_projection_digest_tracks_huddle_dates(self) -> None:
+        entrypoint = COPY_ENTRYPOINT.read_text(encoding="utf-8").replace("\r\n", "\n")
+        function_match = re.search(
+            r"(?ms)^preserved_business_data_sha256\(\) \{.*?^\}\n",
+            entrypoint,
+        )
+        self.assertIsNotNone(function_match)
+        projection_match = re.search(
+            r'qa_psql "\$database" --command "(copy \(.*?\) to stdout with \(format csv,force_quote \*\);)" \| sha256sum',
+            function_match.group(0),
+            re.DOTALL | re.IGNORECASE,
+        )
+        self.assertIsNotNone(projection_match)
+
+        company_id = "91000000-0000-4000-8000-000000000001"
+        huddle_logic_gate_id = "91000000-0000-4000-8000-000000000002"
+        huddle_node_id = "91000000-0000-4000-8000-000000000003"
+        self.run_sql(
+            f"""
+            insert into public.companies(company_id,name)
+            values ('{company_id}','Business Data Digest Fixture');
+            insert into public.huddle_logic_gates(company_id,huddle_logic_gate_id,header)
+            values ('{company_id}','{huddle_logic_gate_id}','Digest Fixture Huddle');
+            insert into public.huddle_nodes(
+              company_id,huddle_node_id,huddle_logic_gate_id,name,huddle_date
+            ) values (
+              '{company_id}','{huddle_node_id}','{huddle_logic_gate_id}',
+              'Digest Fixture Huddle Node','2026-08-15'
+            );
+            """
+        )
+        projection_sql = projection_match.group(1)
+        before = self.run_sql(projection_sql)
+        self.assertIn(huddle_node_id, before)
+        self.assertIn("2026-08-15", before)
+
+        self.run_sql(
+            f"""
+            update public.huddle_nodes
+            set huddle_date='2026-08-16'
+            where company_id='{company_id}' and huddle_node_id='{huddle_node_id}';
+            """
+        )
+        after = self.run_sql(projection_sql)
+        before_digest = hashlib.sha256(before.encode("utf-8")).hexdigest()
+        after_digest = hashlib.sha256(after.encode("utf-8")).hexdigest()
+        self.assertNotEqual(before_digest, after_digest)
+        self.assertIn("2026-08-16", after)
+
+        self.run_sql(
+            f"""
+            delete from public.huddle_nodes
+            where company_id='{company_id}' and huddle_node_id='{huddle_node_id}';
+            delete from public.huddle_logic_gates
+            where company_id='{company_id}' and huddle_logic_gate_id='{huddle_logic_gate_id}';
+            delete from public.companies where company_id='{company_id}';
+            """
+        )
+
     def test_audited_current_entity_schema_preserves_allowed_data(self) -> None:
         bridge_company = AUDITED_EXCLUDED_COMPANY_ID
         ordinary_type = "90000000-0000-4000-8000-000000000002"
@@ -802,10 +916,84 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
         self.run_sql("create table public.action_item_sources(legacy_id uuid primary key);")
         legacy_source_error = self.run_sql_failure(self.script_sql(PREFLIGHT))
         self.assertIn(
-            "raw qa source is not the audited current entity and huddle workspace schema",
+            "raw qa source is not the audited current entity, huddle, and retired raci schema",
             legacy_source_error,
         )
         self.run_sql("drop table public.action_item_sources;")
+        guard_company = "90000000-0000-4000-8000-000000000001"
+        self.run_sql(
+            f"insert into public.companies(company_id,name) values ('{guard_company}','Schema Guard Fixture');"
+        )
+
+        for retired_table in ("raci_tabs_folders", "raci_tabs_items"):
+            self.run_sql(f"create table public.{retired_table}(legacy_id uuid primary key);")
+            for script in (PREFLIGHT, VERIFY):
+                with self.subTest(retired_table=retired_table, script=script.name):
+                    retired_table_error = self.run_sql_failure(self.script_sql(script))
+                    self.assertIn("retired raci schema", retired_table_error)
+            self.run_sql(f"drop table public.{retired_table};")
+
+        self.run_sql(
+            """
+            create function public.mangorts_raci_tabs_group_changed()
+            returns trigger language plpgsql as $$ begin return new; end $$;
+            """
+        )
+        for script in (PREFLIGHT, VERIFY):
+            with self.subTest(retired_routine=script.name):
+                retired_routine_error = self.run_sql_failure(self.script_sql(script))
+                self.assertIn("retired raci schema", retired_routine_error)
+        self.run_sql("drop function public.mangorts_raci_tabs_group_changed();")
+
+        self.run_sql(
+            """
+            create function public.qa_copy_test_raci_trigger()
+            returns trigger language plpgsql as $$ begin return new; end $$;
+            create trigger trg_zz_raci_tabs_group_changed
+            after insert on public.companies
+            for each row execute function public.qa_copy_test_raci_trigger();
+            """
+        )
+        for script in (PREFLIGHT, VERIFY):
+            with self.subTest(retired_trigger=script.name):
+                retired_trigger_error = self.run_sql_failure(self.script_sql(script))
+                self.assertIn("retired raci schema", retired_trigger_error)
+        self.run_sql(
+            """
+            drop trigger trg_zz_raci_tabs_group_changed on public.companies;
+            drop function public.qa_copy_test_raci_trigger();
+            """
+        )
+
+        self.run_sql(
+            """
+            alter table public.huddle_nodes alter column huddle_date drop default;
+            alter table public.huddle_nodes alter column huddle_date drop not null;
+            """
+        )
+        for script in (PREFLIGHT, VERIFY):
+            with self.subTest(huddle_date_metadata=script.name):
+                huddle_date_error = self.run_sql_failure(self.script_sql(script))
+                self.assertIn("exact required los angeles huddle date column", huddle_date_error)
+        self.run_sql(
+            """
+            alter table public.huddle_nodes
+              alter column huddle_date set default ((statement_timestamp() at time zone 'America/Los_Angeles')::date),
+              alter column huddle_date set not null;
+            """
+        )
+
+        for migration in (
+            "20260831_huddle_node_dates_and_action_item_views.sql",
+            "20260831_z_retire_raci_tabs.sql",
+        ):
+            self.run_sql(f"insert into public.schema_migrations(version) values ('{migration}');")
+            with self.subTest(unexpected_migration=migration):
+                migration_error = self.run_sql_failure(self.script_sql(PREFLIGHT))
+                self.assertIn("migration ledger changed after the approved read-only audit", migration_error)
+            self.run_sql(f"delete from public.schema_migrations where version='{migration}';")
+
+        self.run_sql(f"delete from public.companies where company_id='{guard_company}';")
         missing_manifest_error = self.run_sql_failure(self.script_sql(PREFLIGHT))
         self.assertIn(
             "audited excluded explorer folder identities are missing",
@@ -1083,20 +1271,20 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
             values ('{company_a}','{excluded_huddle}','Excluded Fixture Huddle');
 
             insert into public.huddle_nodes(
-              company_id,huddle_node_id,huddle_logic_gate_id,name
+              company_id,huddle_node_id,huddle_logic_gate_id,name,huddle_date
             ) values (
               '{company_a}','{excluded_huddle_node}','{excluded_huddle}',
-              'Excluded Fixture Huddle Node'
+              'Excluded Fixture Huddle Node','2026-08-14'
             );
 
             insert into public.huddle_logic_gates(company_id,huddle_logic_gate_id,header)
             values ('{company_a}','{surviving_huddle}','Surviving Fixture Huddle');
 
             insert into public.huddle_nodes(
-              company_id,huddle_node_id,huddle_logic_gate_id,name
+              company_id,huddle_node_id,huddle_logic_gate_id,name,huddle_date
             ) values (
               '{company_a}','{surviving_huddle_node}','{surviving_huddle}',
-              'Surviving Fixture Huddle Node'
+              'Surviving Fixture Huddle Node','2026-08-15'
             );
 
             insert into public.huddle_node_textboxes(
@@ -1396,6 +1584,9 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
                  where company_id='{company_a}' and entity_id='{action_entity}'
                    and entity_field_type_id='a17e0000-0000-4000-8000-000000000107'
                    and value_jsonb=jsonb_build_object('resource_type','huddle_node','resource_id','{surviving_huddle_node}')),
+              (select huddle_date='2026-08-15'::date
+                 from public.huddle_nodes
+                where company_id='{company_a}' and huddle_node_id='{surviving_huddle_node}'),
               (select count(*) from public.entities
                  where company_id='{company_a}' and entity_id='{action_entity}');
             """
@@ -1407,7 +1598,7 @@ class QADevCopyPostgresIntegration(unittest.TestCase):
                 "1", "0", "0", "1", "1", "0", "0",
                 "t", "f", "f", "f", "0", "1", "0", "t",
                 "t", "f", "f", "f", "t", "t",
-                "t", "f", "f", "f", "0", "1", "0", "0", "1", "1",
+                "t", "f", "f", "f", "0", "1", "0", "0", "1", "t", "1",
             ],
         )
 
