@@ -7,9 +7,7 @@ param(
   [string]$ExpectedAwsAccountID,
   [string]$TerraformDirectory = "",
   [Parameter(Mandatory = $true)]
-  [string]$PostgresBin,
-  [Parameter(Mandatory = $true)]
-  [string]$JonatQaEmail
+  [string]$PostgresBin
 )
 
 Set-StrictMode -Version Latest
@@ -37,38 +35,11 @@ function Assert-NativeSuccess {
   }
 }
 
-function Assert-ExactEmailAddress {
-  param(
-    [Parameter(Mandatory = $true)][string]$Value,
-    [Parameter(Mandatory = $true)][string]$Label
-  )
-
-  $candidate = $Value.Trim()
-  if ($candidate -eq "" -or $candidate -cne $candidate.ToLowerInvariant()) {
-    throw "$Label must be a nonblank lowercase email address."
-  }
-  if ($candidate.Contains("*") -or $candidate.StartsWith("@")) {
-    throw "$Label must be one exact address, not a wildcard or domain."
-  }
-  try {
-    $parsed = [System.Net.Mail.MailAddress]::new($candidate)
-  } catch {
-    throw "$Label is not a valid email address."
-  }
-  if ($parsed.Address -cne $candidate) {
-    throw "$Label must contain only the exact email address."
-  }
-}
-
 if ([string]::IsNullOrWhiteSpace($AwsProfile) -or $AwsProfile -match '(?i)prod') {
   throw "Refusing a blank or production-named AWS profile: $AwsProfile"
 }
 if ($AwsRegion -notmatch '^[a-z]{2}-[a-z]+-\d$') {
   throw "AwsRegion is invalid: $AwsRegion"
-}
-Assert-ExactEmailAddress -Value $JonatQaEmail -Label "JonatQaEmail"
-if ($JonatQaEmail -cne "jonathankim829@gmail.com") {
-  throw "JonatQaEmail must be Jonat's approved normalized QA address."
 }
 
 $terraformPath = (Resolve-Path -LiteralPath $TerraformDirectory).Path
@@ -82,12 +53,11 @@ $requiredPaths = @(
   (Join-Path $repoRoot "backend/db/schema.sql"),
   (Join-Path $repoRoot "backend/db/migrations"),
   (Join-Path $repoRoot "backend/Dockerfile.migrations"),
+  (Join-Path $repoRoot "backend/Dockerfile.qa-copy"),
   (Join-Path $repoRoot "backend/cmd/miraeopus-migrate"),
   (Join-Path $repoRoot "scripts/export_schema_inventory.ps1"),
   (Join-Path $repoRoot "scripts/qa_run_database_task.ps1"),
-  (Join-Path $repoRoot "scripts/qa_dev_copy_preflight.sql"),
-  (Join-Path $repoRoot "scripts/qa_dev_copy_sanitize.sql"),
-  (Join-Path $repoRoot "scripts/qa_dev_copy_verify.sql")
+  (Join-Path $repoRoot "scripts/qa_fargate_copy_entrypoint.sh")
 )
 foreach ($path in $requiredPaths) {
   if (-not (Test-Path -LiteralPath $path)) {
@@ -137,4 +107,3 @@ Write-Host "AWS region: $AwsRegion"
 Write-Host "GitHub repository: $repository"
 Write-Host "Terraform root: $terraformPath"
 Write-Host "PostgreSQL client root: $resolvedPostgresBin"
-Write-Host "Jonat QA email: $JonatQaEmail"

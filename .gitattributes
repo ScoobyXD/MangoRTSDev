@@ -1,1 +1,2 @@
 backend/db/schema.sql text eol=lf
+scripts/qa_fargate_copy_entrypoint.sh text eol=lf
