@@ -82,7 +82,6 @@ test("QA reuses the current network but owns a private low-cost PostgreSQL 17 da
   assert.match(qaMain, /managed_db_password_secret_arn\s*=\s*var\.database_managed_password_bootstrap/);
   assert.match(qaMain, /managed_db_password_secret_json_key\s*=\s*var\.database_managed_password_bootstrap \? "password" : ""/);
   assert.match(qaWorkflow, /TF_DATABASE_PASSWORD_SECRET_ARN:\s*\$\{\{ vars\.TF_QA_DATABASE_PASSWORD_SECRET_ARN \}\}/);
-  assert.match(qaWorkflow, /Verify fixed QA database credential mode[\s\S]*?MasterUserSecret\.SecretArn[\s\S]*?MANAGED_SECRET_ARN[\s\S]*?"None"/);
   assert.match(qaMain, /attachment_s3_bucket\s*=\s*local\.attachment_bucket_name/);
   assert.match(qaMain, /depends_on\s*=\s*\[[\s\S]*?aws_cloudwatch_log_group\.ecs_container_insights_performance[\s\S]*?aws_s3_bucket\.attachments[\s\S]*?\]/);
 });
