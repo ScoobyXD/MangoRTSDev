@@ -279,23 +279,6 @@ jobs:
             exit 1
           fi
 
-      - name: Verify fixed QA database credential mode
-        run: |
-          set -euo pipefail
-          read -r DATABASE_STATUS MANAGED_SECRET_ARN <<< "$(aws rds describe-db-instances \
-            --region "$AWS_REGION" \
-            --db-instance-identifier mangorts-qa-postgres \
-            --query 'DBInstances[0].[DBInstanceStatus,MasterUserSecret.SecretArn]' \
-            --output text)"
-          if [[ "$DATABASE_STATUS" != "available" ]]; then
-            echo "QA RDS must be available before deployment." >&2
-            exit 1
-          fi
-          if [[ "$MANAGED_SECRET_ARN" != "None" ]]; then
-            echo "QA RDS unexpectedly has AWS-managed password rotation enabled." >&2
-            exit 1
-          fi
-
       - name: Terraform init
         working-directory: ${{ env.TF_DIR }}
         run: terraform init -backend-config=backend.hcl

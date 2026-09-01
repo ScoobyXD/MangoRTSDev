@@ -44,10 +44,10 @@ password while disabling RDS credential management, remove the bootstrap
 override, and then set the exact ARN. Omitting the ARN in established QA stops
 Terraform instead of silently re-enabling rotation.
 Terraform intentionally ignores later password-mode updates because it never
-receives the hidden password used for the human transition. It still stops if
-RDS exposes a managed master-user secret again.
-The QA-specific checked-in RDS policy lets the GitHub QA deploy role read RDS
-inventory for Terraform refreshes but grants no RDS write action.
+receives the hidden password used for the human transition. A reviewed local-SSO
+refresh stops if RDS exposes a managed master-user secret again. The GitHub QA
+deploy role intentionally has no RDS permission; application deployments rely
+on the protected fixed-secret ARN and the reviewed Terraform state.
 
 The shared account-wide foundation policy is not attached to QA. The QA GitHub
 role can read only exact QA resources. Its only account-wide reads are ECR login
