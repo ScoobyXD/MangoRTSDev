@@ -97,6 +97,7 @@ jobs:
           TF_DATABASE_MAX_ALLOCATED_STORAGE_GB: ${{ vars.TF_DATABASE_MAX_ALLOCATED_STORAGE_GB || '0' }}
           TF_DATABASE_BACKUP_RETENTION_DAYS: ${{ vars.TF_DATABASE_BACKUP_RETENTION_DAYS || '1' }}
           TF_DATABASE_DELETION_PROTECTION: ${{ vars.TF_DATABASE_DELETION_PROTECTION || 'true' }}
+          TF_DATABASE_PASSWORD_SECRET_ARN: ${{ vars.TF_QA_DATABASE_PASSWORD_SECRET_ARN }}
           TF_QA_COMPANY_ID: ${{ vars.TF_QA_COMPANY_ID }}
           TF_EMAIL_SCHEMA_MIGRATED: ${{ vars.TF_EMAIL_SCHEMA_MIGRATED || 'false' }}
           TF_EMAIL_WORKER_ENABLED: ${{ vars.TF_EMAIL_WORKER_ENABLED || 'false' }}
@@ -127,6 +128,7 @@ jobs:
           : "${TF_VPC_ID:?Set QA GitHub variable TF_VPC_ID}"
           : "${TF_PUBLIC_SUBNET_IDS:?Set QA GitHub variable TF_PUBLIC_SUBNET_IDS as a JSON array}"
           : "${TF_PRIVATE_SUBNET_IDS:?Set QA GitHub variable TF_PRIVATE_SUBNET_IDS as a JSON array}"
+          : "${TF_DATABASE_PASSWORD_SECRET_ARN:?Set QA GitHub variable TF_QA_DATABASE_PASSWORD_SECRET_ARN to the fixed QA database password secret ARN}"
           : "${TF_QA_COMPANY_ID:?Set QA GitHub variable TF_QA_COMPANY_ID}"
           : "${TF_ORIGIN_VERIFY_SECRET:?Set QA GitHub secret ORIGIN_VERIFY_SECRET}"
           : "${TF_GITHUB_OIDC_PROVIDER_ARN:?Set QA GitHub variable TF_GITHUB_OIDC_PROVIDER_ARN to the existing account provider}"
@@ -231,6 +233,7 @@ jobs:
           database_max_allocated_storage_gb = $TF_DATABASE_MAX_ALLOCATED_STORAGE_GB
           database_backup_retention_days = $TF_DATABASE_BACKUP_RETENTION_DAYS
           database_deletion_protection = $TF_DATABASE_DELETION_PROTECTION
+          database_password_secret_arn = $(json_string "$TF_DATABASE_PASSWORD_SECRET_ARN")
           backend_image_uri = ""
           migration_image_uri = ""
           deploy_revision = $(json_string "$GITHUB_SHA")
@@ -273,6 +276,23 @@ jobs:
             --output text | tr '\t' '\n' | sort -u | wc -l)"
           if [[ "$PRIVATE_AZ_COUNT" -lt 2 ]]; then
             echo "QA RDS requires private subnets in at least two Availability Zones." >&2
+            exit 1
+          fi
+
+      - name: Verify fixed QA database credential mode
+        run: |
+          set -euo pipefail
+          read -r DATABASE_STATUS MANAGED_SECRET_ARN <<< "$(aws rds describe-db-instances \
+            --region "$AWS_REGION" \
+            --db-instance-identifier mangorts-qa-postgres \
+            --query 'DBInstances[0].[DBInstanceStatus,MasterUserSecret.SecretArn]' \
+            --output text)"
+          if [[ "$DATABASE_STATUS" != "available" ]]; then
+            echo "QA RDS must be available before deployment." >&2
+            exit 1
+          fi
+          if [[ "$MANAGED_SECRET_ARN" != "None" ]]; then
+            echo "QA RDS unexpectedly has AWS-managed password rotation enabled." >&2
             exit 1
           fi
 

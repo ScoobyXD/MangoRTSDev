@@ -73,8 +73,16 @@ test("QA reuses the current network but owns a private low-cost PostgreSQL 17 da
   assert.match(qaVariables, /variable "default_company_id"[\s\S]*?default_company_id must be a UUID/);
   assert.match(qaDatabase, /multi_az\s*=\s*false/);
   assert.match(qaDatabase, /publicly_accessible\s*=\s*false/);
-  assert.match(qaDatabase, /manage_master_user_password\s*=\s*true/);
-  assert.match(qaMain, /managed_db_password_secret_json_key\s*=\s*"password"/);
+  assert.match(qaVariables, /variable "database_password_secret_arn"[\s\S]*?default\s*=\s*""/);
+  assert.match(qaVariables, /variable "database_managed_password_bootstrap"[\s\S]*?default\s*=\s*false/);
+  assert.match(qaDatabase, /manage_master_user_password\s*=\s*var\.database_managed_password_bootstrap/);
+  assert.match(qaDatabase, /var\.database_managed_password_bootstrap[\s\S]*?trimspace\(var\.database_password_secret_arn\) == ""[\s\S]*?trimspace\(var\.database_password_secret_arn\) != ""/);
+  assert.match(qaDatabase, /ignore_changes\s*=\s*\[manage_master_user_password\]/);
+  assert.match(qaDatabase, /length\(self\.master_user_secret\) == 0/);
+  assert.match(qaMain, /managed_db_password_secret_arn\s*=\s*var\.database_managed_password_bootstrap/);
+  assert.match(qaMain, /managed_db_password_secret_json_key\s*=\s*var\.database_managed_password_bootstrap \? "password" : ""/);
+  assert.match(qaWorkflow, /TF_DATABASE_PASSWORD_SECRET_ARN:\s*\$\{\{ vars\.TF_QA_DATABASE_PASSWORD_SECRET_ARN \}\}/);
+  assert.match(qaWorkflow, /Verify fixed QA database credential mode[\s\S]*?MasterUserSecret\.SecretArn[\s\S]*?MANAGED_SECRET_ARN[\s\S]*?"None"/);
   assert.match(qaMain, /attachment_s3_bucket\s*=\s*local\.attachment_bucket_name/);
   assert.match(qaMain, /depends_on\s*=\s*\[[\s\S]*?aws_cloudwatch_log_group\.ecs_container_insights_performance[\s\S]*?aws_s3_bucket\.attachments[\s\S]*?\]/);
 });
@@ -349,7 +357,7 @@ test("QA deploy permissions exclude account-wide IAM, Route53, S3, and WAF mutat
 test("the migration task is defined but never run automatically", () => {
   assert.match(qaMigration, /resource "aws_ecs_task_definition" "database_migration"/);
   assert.match(qaMigration, /command\s*=\s*\["-mode", "audit"\]/);
-  assert.match(qaMigration, /master_user_secret\[0\]\.secret_arn\}:password::/);
+  assert.match(qaMigration, /valueFrom\s*=\s*var\.database_managed_password_bootstrap \?/);
   assert.match(qaWorkflow, /Dockerfile\.migrations/);
   assert.doesNotMatch(qaWorkflow, /aws ecs run-task|-mode schema|-baseline-migrations/);
 });

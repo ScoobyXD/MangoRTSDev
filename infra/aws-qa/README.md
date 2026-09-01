@@ -8,9 +8,10 @@ DNS stays in the QA account instead of using the authoritative production zone.
 
 QA owns separate CloudFront/ALB/ECS, Cognito, frontend and attachment buckets,
 SQS queues, one email worker, Valkey, WAF, Container Insights, CloudWatch alarms,
-IAM roles, and a private Single-AZ PostgreSQL 17 RDS instance. The RDS password
-is generated and managed by RDS in Secrets Manager; no database password belongs
-in tfvars.
+IAM roles, and a private Single-AZ PostgreSQL 17 RDS instance. Established QA
+uses one customer-managed Secrets Manager password with automatic rotation off,
+matching Dev's stable credential behavior. Only its ARN belongs in tfvars; the
+password value never does.
 
 Use a unique S3 backend key (`mangorts/qa/terraform.tfstate`). Never reuse the
 dev or prod state key. QA requires Terraform 1.10 or newer and native S3 state
@@ -35,8 +36,18 @@ currently adds `$0.50/month` plus normal query charges; see
 [Route 53 pricing](https://aws.amazon.com/route53/pricing/).
 
 The first local-admin apply owns creation of the QA RDS instance and subnet
-group. The QA-specific checked-in RDS policy lets the GitHub QA deploy role read
-RDS inventory for Terraform refreshes but grants no RDS write action.
+group. Initial creation requires the explicit
+`database_managed_password_bootstrap=true` override and an empty
+`database_password_secret_arn`. Before starting the API, a human operator must
+create `mangorts/qa/db-password`, set that hidden value as the RDS master
+password while disabling RDS credential management, remove the bootstrap
+override, and then set the exact ARN. Omitting the ARN in established QA stops
+Terraform instead of silently re-enabling rotation.
+Terraform intentionally ignores later password-mode updates because it never
+receives the hidden password used for the human transition. It still stops if
+RDS exposes a managed master-user secret again.
+The QA-specific checked-in RDS policy lets the GitHub QA deploy role read RDS
+inventory for Terraform refreshes but grants no RDS write action.
 
 The shared account-wide foundation policy is not attached to QA. The QA GitHub
 role can read only exact QA resources. Its only account-wide reads are ECR login
@@ -67,7 +78,7 @@ read-only `-mode audit`; fresh initialization requires a human to start it with
 the explicit override `-mode schema -baseline-migrations`. The guarded helper may
 target only the stable QA database or a timestamped `mangorts_qa_next_*` database
 on this same RDS instance. The task uses the same private subnets, ECS security
-group, and RDS-managed password as the API.
+group, and fixed customer-managed password secret as the API.
 After the infrastructure-only apply creates ECR, set
 `TF_EMAIL_SCHEMA_MIGRATED=false` and run `deploy-qa.yml` with stage
 `bootstrap-images`. That explicit stage builds and pushes immutable backend and

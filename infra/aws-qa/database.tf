@@ -30,9 +30,11 @@ resource "aws_db_instance" "qa" {
   storage_type          = "gp3"
   storage_encrypted     = true
 
-  db_name                     = var.database_name
-  username                    = var.database_user
-  manage_master_user_password = true
+  db_name  = var.database_name
+  username = var.database_user
+  # RDS-managed credentials are an explicit one-time bootstrap mode. Omitting
+  # the fixed secret cannot silently turn rotation back on for established QA.
+  manage_master_user_password = var.database_managed_password_bootstrap
   port                        = 5432
 
   db_subnet_group_name   = aws_db_subnet_group.qa.name
@@ -58,6 +60,24 @@ resource "aws_db_instance" "qa" {
   })
 
   lifecycle {
+    # The human credential transition supplies the hidden password directly to
+    # RDS. Terraform must not replay that transition without the password.
+    ignore_changes = [manage_master_user_password]
+
+    precondition {
+      condition = (
+        var.database_managed_password_bootstrap
+        ? trimspace(var.database_password_secret_arn) == ""
+        : trimspace(var.database_password_secret_arn) != ""
+      )
+      error_message = "Set database_password_secret_arn for established QA. Use database_managed_password_bootstrap=true with an empty ARN only for initial database creation."
+    }
+
+    postcondition {
+      condition     = var.database_managed_password_bootstrap || length(self.master_user_secret) == 0
+      error_message = "Established QA unexpectedly has an RDS-managed password secret. Stop and restore the fixed customer-managed credential before deploying."
+    }
+
     precondition {
       condition     = length(var.private_subnet_ids) >= 2
       error_message = "QA PostgreSQL requires at least two existing private subnets in the shared VPC."

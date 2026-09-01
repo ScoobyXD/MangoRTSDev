@@ -85,6 +85,26 @@ variable "database_user" {
   default     = "mangorts_app"
 }
 
+variable "database_managed_password_bootstrap" {
+  description = "Explicitly allow RDS-managed credentials only while creating a brand-new QA database. Established QA must leave this false."
+  type        = bool
+  default     = false
+}
+
+variable "database_password_secret_arn" {
+  description = "Customer-managed, non-rotating Secrets Manager secret containing the raw QA PostgreSQL password. Required unless database_managed_password_bootstrap is explicitly true."
+  type        = string
+  default     = ""
+
+  validation {
+    condition = (
+      trimspace(var.database_password_secret_arn) == "" ||
+      can(regex("^arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:mangorts/qa/db-password-[A-Za-z0-9]+$", trimspace(var.database_password_secret_arn)))
+    )
+    error_message = "database_password_secret_arn must be empty for initial bootstrap or the exact mangorts/qa/db-password Secrets Manager ARN."
+  }
+}
+
 variable "database_backup_retention_days" {
   description = "Automated backup retention for the synthetic QA database."
   type        = number

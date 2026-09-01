@@ -10,7 +10,9 @@ public_subnet_ids  = ["subnet-aaaaaaaaaaaaaaaaa", "subnet-bbbbbbbbbbbbbbbbb"]
 private_subnet_ids = ["subnet-ccccccccccccccccc", "subnet-ddddddddddddddddd"]
 
 # Lowest-cost isolated database defaults: private PostgreSQL 17, Single-AZ,
-# 20 GiB gp3, RDS-managed password, no Performance Insights or enhanced monitoring.
+# 20 GiB gp3, fixed customer-managed password secret, no Performance Insights
+# or enhanced monitoring. Leave the ARN empty only for the initial RDS-managed
+# bootstrap, then perform the documented human credential transition.
 database_engine_version          = "17.7"
 database_instance_class          = "db.t4g.micro"
 database_allocated_storage_gb    = 20
@@ -18,6 +20,8 @@ database_max_allocated_storage_gb = 0
 database_backup_retention_days   = 1
 database_deletion_protection     = true
 database_name                    = "mangorts_qa"
+database_managed_password_bootstrap = false
+database_password_secret_arn     = "arn:aws:secretsmanager:us-west-1:123456789012:secret:mangorts/qa/db-password-replace"
 
 # This example shows the final production-shaped QA state. Replace image and
 # Nylas placeholders before using it. The README lists the explicit overrides
