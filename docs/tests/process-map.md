@@ -177,11 +177,15 @@
 175. An applied reset MUST remove every operational relationship for the selected company and its dependent saved trace in the same transaction as the rebuilt geometry; it MUST preserve source resources, Explorer structure, permissions, assignments, unrelated relationship types, and other companies.
 176. A reset MUST preserve existing placement identities and creation timestamps, advance each changed placement revision exactly once, leave unchanged placements untouched, and publish the existing typed geometry and relationship-deletion events.
 177. A reset MUST stop on an unsupported PostgreSQL version, a missing capacity migration, invalid source structure, overlapping or collapsed geometry, or insufficient access without committing any part of the reset.
+178. The Windows dev reset MUST target company `11111111-1111-1111-1111-111111111111` using the existing dev database configuration and the `mangorts-dev` AWS profile.
+179. Email-based reset actor lookup MUST resolve exactly one same-company user with the `dev_admin` role and MUST reject a missing, ambiguous, or non-admin match.
+180. Interactive reset MUST display the company, resolved actor, and affected counts before requiring the operator to enter `RESET`; any other input or end of input MUST leave the database unchanged.
+181. Interactive reset MUST retain and apply the exact reviewed preview token automatically and MUST stop without retrying when that preview becomes stale.
 Last updated: 2026-09-02
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` and sees one continuous company canvas with the saved layout intact. An explicit operator reset can replace an old layout once and clear its operational connections; ordinary reads and restarts preserve the result. Newly placed Folders and Processes form rows of up to six inside their exact Explorer parent, with smaller nested maps visible inside larger Folders. The user zooms smoothly from the overview into readable, selectable details; moving or resizing a Folder keeps its subtree and internal connectors together, and crossing a boundary uses the canonical Explorer move. Opening a Process editor and closing it returns to the same underlying map.
+An authorized user opens `/process-map` and sees one continuous company canvas with the saved layout intact. To replace an old dev layout once, the operator starts the Windows launcher, reviews the company and connection counts, and confirms the reset; the launcher supplies the IDs and preview token automatically. Ordinary reads and restarts preserve the result. Newly placed Folders and Processes form rows of up to six inside their exact Explorer parent, with smaller nested maps visible inside larger Folders. The user zooms smoothly from the overview into readable, selectable details; moving or resizing a Folder keeps its subtree and internal connectors together, and crossing a boundary uses the canonical Explorer move. Opening a Process editor and closing it returns to the same underlying map.
 
 The default root size is `14 × 8^8` by `8 × 8^8`. At Folder level `L`, the preferred size is `14 × 8^(9-L)` by `8 × 8^(9-L)`. Each step reduces both dimensions eightfold, giving a 64-fold area reduction:
 
@@ -205,18 +209,14 @@ An operator must apply `20260902_process_map_nested_layout_capacity.sql` before 
 
 ## Scenario: Reset an existing company map once
 
-The human-run `backend/cmd/mango-process-map-reset` tool uses the normal backend `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_NAME`, and `DB_SSLMODE` settings. It accepts the operator's existing `DB_PASSWORD` environment value or PostgreSQL password file; credentials must not be pasted into command arguments or committed files. On this Windows machine, run it inside Ubuntu WSL with the database settings and any localhost tunnel available in that same environment. Agents may test against a disposable database, but the live run belongs to a human under `docs/security/database-agent-access-contract.md`.
+Run this exact command in a new Windows PowerShell terminal; the backend may keep running:
 
-From the backend directory, preview using the exact company ID and an actor who can edit the entire map:
-
-```sh
-/usr/local/go/bin/go run ./cmd/mango-process-map-reset --company-id COMPANY_UUID --actor-user-id USER_UUID
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\Users\Jonat\MangoRTSDev\scripts\start_local_cognito_backend.ps1" -ResetProcessMap
 ```
 
-The JSON output names the company, counts Folders, Processes, geometry changes, operational relationships and saved traces, and supplies `plan_token`. Preview changes no database state. The relationship count includes operational relationships without a visible trace or currently mapped endpoint. If the reported company and counts are correct, apply that exact preview:
+The launcher uses the existing `infra/aws-dev/terraform.tfvars` database settings and the protected database secret through the `mangorts-dev` AWS profile. If its SSO session has expired, complete the AWS browser sign-in when prompted. It does not start or stop the API, load the local Nylas configuration, export AWS credentials, or access ECS or provider secrets. The reset runs natively on Windows; Ubuntu/WSL is used only for repository Go tests. Temporary database environment settings are restored when the launcher finishes.
 
-```sh
-/usr/local/go/bin/go run ./cmd/mango-process-map-reset --company-id COMPANY_UUID --actor-user-id USER_UUID --apply --expect-plan PREVIEW_TOKEN
-```
+The target company is already `11111111-1111-1111-1111-111111111111`. The command resolves `jonathankim829@gmail.com` to the existing same-company dev admin's exact user ID, previews the reset without writing, and displays the company, actor, PostgreSQL version, and affected counts. The connection count includes operational relationships without a visible trace or currently mapped endpoint. Review that output and enter `RESET` once to apply; any other input cancels. The command keeps the current preview token in memory and supplies it automatically. There are no UUID or token placeholders to fill in.
 
-Apply acquires the normal Explorer, policy, and map locks, rechecks access and the preview, and commits the rebuilt geometry and connection deletion together. A stale preview or invalid layout stops the operation; rerun preview after resolving the reported problem. Existing placement IDs and creation timestamps survive. Ordinary map events invalidate cached geometry, and reopening the map fits the camera to the rebuilt layout. Later manual edits remain saved, and newly created items continue the same automatic layout. This command changes no schema and does not run on startup. Label clipping is separate rendering behavior and is not repaired by the reset.
+Apply acquires the normal Explorer, policy, and map locks, rechecks access and the preview, and commits the rebuilt geometry and connection deletion together. A stale preview or invalid layout stops the operation without an automatic retry; run the same command again to review a new preview. After successful application, reload Process Map. Existing placement IDs and creation timestamps survive, later manual edits remain saved, and new items continue the same automatic layout. This command changes no schema and never runs on ordinary startup. Label clipping is separate rendering behavior and is not repaired by the reset. Agents may test against a disposable database, but the live run belongs to a human under `docs/security/database-agent-access-contract.md`.

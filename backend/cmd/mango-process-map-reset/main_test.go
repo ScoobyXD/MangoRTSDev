@@ -51,24 +51,121 @@ func TestParseCommandRejectsMissingOrNoncanonicalUUIDs(t *testing.T) {
 	}
 }
 
+func TestActorEmailAndInteractiveFlags(t *testing.T) {
+	args := []string{"--company-id", testCompanyID, "--actor-email", " JonathanKim829@Gmail.com ", "--interactive"}
+	cfg, err := parseCommandConfig(args)
+	if err != nil || cfg.ActorEmail != "jonathankim829@gmail.com" || cfg.ActorUserID != "" || !cfg.Interactive || cfg.Apply {
+		t.Fatalf("interactive email config = %+v, error=%v", cfg, err)
+	}
+	for _, extra := range [][]string{
+		{"--actor-user-id", testActorID}, {"--apply"}, {"--apply=false"},
+		{"--expect-plan", testPlanToken}, {"--expect-plan", ""},
+	} {
+		if _, err := parseCommandConfig(append(append([]string{}, args...), extra...)); err == nil {
+			t.Fatalf("conflicting interactive flags accepted: %v", extra)
+		}
+	}
+	for _, email := range []string{"not-an-email", "Jonathan <jonathankim829@gmail.com>"} {
+		if _, err := parseCommandConfig([]string{"--company-id", testCompanyID, "--actor-email", email}); err == nil {
+			t.Fatal("malformed actor email accepted")
+		}
+	}
+}
+
+func TestInteractiveResetRequiresConfirmationAndReusesExactPreviewToken(t *testing.T) {
+	for _, test := range []struct {
+		name, answer string
+		wantCalls    int
+	}{
+		{"confirmed", "RESET\n", 2}, {"Windows enter", "RESET\r\n", 2},
+		{"EOF", "", 1}, {"EOF after RESET", "RESET", 1},
+		{"declined", "no\n", 1}, {"lowercase", "reset\n", 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := commandConfig{ProcessMapResetInput: store.ProcessMapResetInput{CompanyID: testCompanyID, ActorUserID: testActorID}, Interactive: true}
+			actor := resetActor{UserID: testActorID, Email: "jonathankim829@gmail.com", DisplayName: "Jonathan", Role: "dev_admin"}
+			var calls []store.ProcessMapResetInput
+			reset := func(_ context.Context, input store.ProcessMapResetInput) (store.ProcessMapResetResult, error) {
+				calls = append(calls, input)
+				return store.ProcessMapResetResult{
+					CompanyID: testCompanyID, CompanyName: "Original dev company", ServerVersion: "17.7", PlanToken: testPlanToken,
+					FolderCount: 8, ProcessCount: 14, ChangedPlacements: 22, RelationshipCount: 7, TraceCount: 6, Applied: input.Apply,
+				}, nil
+			}
+			var output bytes.Buffer
+			if err := runConfiguredReset(context.Background(), cfg, actor, strings.NewReader(test.answer), &output, reset); err != nil {
+				t.Fatal(err)
+			}
+			if len(calls) != test.wantCalls || calls[0].Apply || calls[0].ExpectedPlanToken != "" {
+				t.Fatalf("reset calls = %+v, want %d with read-only preview first", calls, test.wantCalls)
+			}
+			for _, required := range []string{"Original dev company", actor.Email, actor.UserID, `"relationships_to_delete": 7`, "Type RESET"} {
+				if !strings.Contains(output.String(), required) {
+					t.Fatalf("preview omitted %q: %s", required, output.String())
+				}
+			}
+			if test.wantCalls == 2 {
+				if !calls[1].Apply || calls[1].ExpectedPlanToken != testPlanToken || calls[1].CompanyID != testCompanyID || calls[1].ActorUserID != testActorID {
+					t.Fatalf("apply changed the reviewed identity or token: %+v", calls[1])
+				}
+				if !strings.Contains(output.String(), "Reset complete. Reload Process Map.") {
+					t.Fatal("successful interactive reset omitted completion instruction")
+				}
+			} else if !strings.Contains(output.String(), "Canceled; no reset applied.") {
+				t.Fatal("canceled reset omitted cancellation result")
+			}
+		})
+	}
+}
+
+func TestInteractiveResetStopsOnChangedPlanOrExpiredContext(t *testing.T) {
+	for _, expire := range []bool{false, true} {
+		cfg := commandConfig{ProcessMapResetInput: store.ProcessMapResetInput{CompanyID: testCompanyID, ActorUserID: testActorID}, Interactive: true}
+		ctx, cancel := context.WithCancel(context.Background())
+		calls := 0
+		reset := func(_ context.Context, input store.ProcessMapResetInput) (store.ProcessMapResetResult, error) {
+			calls++
+			if calls == 1 {
+				if expire {
+					cancel()
+				}
+				return store.ProcessMapResetResult{PlanToken: testPlanToken, ServerVersion: "17.7"}, nil
+			}
+			if calls != 2 || !input.Apply || input.ExpectedPlanToken != testPlanToken {
+				t.Fatalf("changed plan triggered an unexpected retry: %+v", input)
+			}
+			return store.ProcessMapResetResult{ServerVersion: "17.7"}, store.ErrProcessMapResetStalePlan
+		}
+		var output bytes.Buffer
+		err := runConfiguredReset(ctx, cfg, resetActor{UserID: testActorID}, strings.NewReader("RESET\nRESET\n"), &output, reset)
+		cancel()
+		if err == nil || strings.Contains(output.String(), "Reset complete") {
+			t.Fatalf("changed/expired plan did not stop: error=%v output=%s", err, output.String())
+		}
+		if expire && calls != 1 || !expire && calls != 2 {
+			t.Fatalf("changed/expired plan made %d calls", calls)
+		}
+	}
+}
+
 func TestRunHelpAndInvalidInputsNeverReadDatabaseSettings(t *testing.T) {
 	noEnvironment := func(string) string {
 		t.Fatal("must not inspect database settings")
 		return ""
 	}
 	var output bytes.Buffer
-	if err := run(context.Background(), []string{"--help"}, noEnvironment, &output); err != nil || !strings.Contains(output.String(), "--expect-plan") {
+	if err := run(context.Background(), []string{"--help"}, noEnvironment, strings.NewReader(""), &output); err != nil || !strings.Contains(output.String(), "--expect-plan") {
 		t.Fatalf("help output = %q, error=%v", output.String(), err)
 	}
-	if err := run(context.Background(), []string{"--apply"}, noEnvironment, &output); err == nil {
+	if err := run(context.Background(), []string{"--apply"}, noEnvironment, strings.NewReader(""), &output); err == nil {
 		t.Fatal("missing scope accepted")
 	}
-	if err := run(context.Background(), append(testCommandArgs(), "--apply", "--expect-plan", strings.Repeat("g", 64)), noEnvironment, &output); err == nil {
+	if err := run(context.Background(), append(testCommandArgs(), "--apply", "--expect-plan", strings.Repeat("g", 64)), noEnvironment, strings.NewReader(""), &output); err == nil {
 		t.Fatal("malformed token accepted before loading database settings")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := run(ctx, testCommandArgs(), noEnvironment, &output); err == nil || !strings.Contains(err.Error(), "canceled") {
+	if err := run(ctx, testCommandArgs(), noEnvironment, strings.NewReader(""), &output); err == nil || !strings.Contains(err.Error(), "canceled") {
 		t.Fatalf("canceled command error = %v", err)
 	}
 }
