@@ -40,6 +40,15 @@ function runBackendGoTests() {
   );
 }
 
+if (process.platform === "win32") {
+  console.log("\n=== Process Map Windows launcher tests ===");
+  execFileSync(
+    "powershell.exe",
+    ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", resolve(repoRoot, "tests/scripts/test_process_map_reset_launcher.ps1")],
+    { cwd: repoRoot, stdio: "inherit" },
+  );
+}
+
 run("Frontend relationship semantics tests", "npm run test:node-relationships", resolve(repoRoot, "frontend"));
 run("Frontend production build", "npm run build", resolve(repoRoot, "frontend"));
 run("Email SQS disposable PostgreSQL contract", "node scripts/test_email_sqs_delivery_postgres.mjs", repoRoot);

@@ -11,7 +11,8 @@ param(
   [string]$NylasFrontendRedirectURL = "http://localhost:5173/communications",
   [switch]$SkipCredentialExport,
   [switch]$SkipNylas,
-  [switch]$StopExisting
+  [switch]$StopExisting,
+  [switch]$ResetProcessMap
 )
 
 $ErrorActionPreference = "Stop"
@@ -32,7 +33,7 @@ $MangoLocalNylasAPIKeySecretArn = ""
 $MangoLocalNylasStateSecretArn = ""
 $MangoLocalNylasWebhookSecret = ""
 $MangoLocalNylasWebhookSecretArn = ""
-if (Test-Path -LiteralPath $localConfigPath) {
+if (-not $ResetProcessMap -and (Test-Path -LiteralPath $localConfigPath)) {
   . $localConfigPath
 }
 if ($MangoLocalNylasWebhookSecret -eq "<local-webhook-secret>") {
@@ -161,6 +162,23 @@ function Get-SecretStringValue {
   return $secret.Trim()
 }
 
+function Set-LocalDatabaseEnvironment {
+  $dbHost = Get-TfvarString -Name "existing_db_host" -Path $tfvarsPath
+  $dbName = Get-TfvarString -Name "existing_db_name" -Path $tfvarsPath
+  $dbUser = Get-TfvarString -Name "existing_db_user" -Path $tfvarsPath
+  $dbPasswordSecretArn = Get-TfvarString -Name "existing_db_password_secret_arn" -Path $tfvarsPath
+  $dbPassword = Get-SecretStringValue -SecretID $dbPasswordSecretArn -PropertyNames @("password", "DB_PASSWORD", "db_password", "PGPASSWORD")
+
+  $env:DB_HOST = $dbHost
+  $env:DB_PORT = "5432"
+  $env:DB_NAME = $dbName
+  $env:DB_USER = $dbUser
+  $env:DB_PASSWORD = $dbPassword.Trim()
+  $env:DB_SSLMODE = "require"
+  $env:PGPASSWORD = $env:DB_PASSWORD
+  $env:PGSSLMODE = $env:DB_SSLMODE
+}
+
 function Join-URLPath {
   param(
     [string]$BaseURL,
@@ -252,11 +270,65 @@ function Get-ContainerSecretReference {
   return [string]$item.valueFrom
 }
 
+if ($ResetProcessMap) {
+  if ($PSBoundParameters.ContainsKey("AwsProfile") -and $AwsProfile.Trim() -ne "mangorts-dev") {
+    throw "The Process Map reset uses only the mangorts-dev AWS profile."
+  }
+  $AwsProfile = "mangorts-dev"
+  if ((Get-OptionalTfvarString -Name "environment" -Path $tfvarsPath -Default "dev") -ne "dev") {
+    throw "The Process Map reset requires the dev database configuration."
+  }
+  if ($StopExisting) {
+    throw "Run -ResetProcessMap without -StopExisting; the backend can keep running."
+  }
+}
+
 $awsProfileArgs = @()
 if (-not [string]::IsNullOrWhiteSpace($AwsProfile)) {
   $AwsProfile = $AwsProfile.Trim()
   $awsProfileArgs = @("--profile", $AwsProfile)
-  $env:AWS_PROFILE = $AwsProfile
+  if (-not $ResetProcessMap) {
+    $env:AWS_PROFILE = $AwsProfile
+  }
+}
+
+if ($ResetProcessMap) {
+  Get-Command aws, go -ErrorAction Stop | Out-Null
+  $resetSessionReady = & {
+    $ErrorActionPreference = "Continue"
+    & aws sts get-caller-identity @awsProfileArgs --region $AwsRegion --output json *> $null
+    $LASTEXITCODE -eq 0
+  }
+  if (-not $resetSessionReady) {
+    Write-Host "Sign in to the existing mangorts-dev AWS SSO profile to reset the dev map."
+    & aws sso login @awsProfileArgs
+    if ($LASTEXITCODE -ne 0) {
+      throw "AWS SSO sign-in failed. Run this same reset command again after signing in."
+    }
+  }
+
+  $resetPreviousEnvironment = @{}
+  foreach ($name in @("DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD", "DB_SSLMODE", "PGPASSWORD", "PGSSLMODE")) {
+    $resetPreviousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+  }
+  try {
+    Set-LocalDatabaseEnvironment
+    Write-Host "Preparing the original dev company map reset for jonathankim829@gmail.com."
+    Push-Location (Join-Path $repoRoot "backend")
+    try {
+      & go run ./cmd/mango-process-map-reset --company-id 11111111-1111-1111-1111-111111111111 --actor-email jonathankim829@gmail.com --interactive
+      if ($LASTEXITCODE -ne 0) {
+        throw "Process Map reset failed. See the command's message above."
+      }
+    } finally {
+      Pop-Location
+    }
+  } finally {
+    foreach ($name in $resetPreviousEnvironment.Keys) {
+      [Environment]::SetEnvironmentVariable($name, $resetPreviousEnvironment[$name], "Process")
+    }
+  }
+  return
 }
 
 if (-not $SkipCredentialExport) {
@@ -273,12 +345,7 @@ if (-not [string]::IsNullOrWhiteSpace($localTunnelURL) -and -not $PSBoundParamet
   $NylasRedirectURI = Join-URLPath -BaseURL $localTunnelURL -Path "/nylas/oauth/callback"
 }
 
-$dbHost = Get-TfvarString -Name "existing_db_host" -Path $tfvarsPath
-$dbName = Get-TfvarString -Name "existing_db_name" -Path $tfvarsPath
-$dbUser = Get-TfvarString -Name "existing_db_user" -Path $tfvarsPath
-$dbPasswordSecretArn = Get-TfvarString -Name "existing_db_password_secret_arn" -Path $tfvarsPath
-
-$dbPassword = Get-SecretStringValue -SecretID $dbPasswordSecretArn -PropertyNames @("password", "DB_PASSWORD", "db_password", "PGPASSWORD")
+Set-LocalDatabaseEnvironment
 
 $projectName = Get-OptionalTfvarString -Name "project_name" -Path $tfvarsPath -Default "mangorts"
 $environmentName = Get-OptionalTfvarString -Name "environment" -Path $tfvarsPath -Default "dev"
@@ -405,15 +472,6 @@ $env:COGNITO_USER_POOL_ID = $CognitoUserPoolID
 $env:COGNITO_CLIENT_ID = $CognitoClientID
 $env:COGNITO_TOKEN_USE = "access,id"
 
-$env:DB_HOST = $dbHost
-$env:DB_PORT = "5432"
-$env:DB_NAME = $dbName
-$env:DB_USER = $dbUser
-$env:DB_PASSWORD = $dbPassword.Trim()
-$env:DB_SSLMODE = "require"
-$env:PGPASSWORD = $env:DB_PASSWORD
-$env:PGSSLMODE = $env:DB_SSLMODE
-
 Remove-Item Env:\NYLAS_CLIENT_ID -ErrorAction SilentlyContinue
 Remove-Item Env:\NYLAS_API_KEY -ErrorAction SilentlyContinue
 Remove-Item Env:\NYLAS_API_BASE_URL -ErrorAction SilentlyContinue
@@ -452,7 +510,7 @@ if ($StopExisting) {
 }
 
 Write-Host "Starting local MangoRTS API with Cognito auth and Postgres."
-Write-Host "DB host: $dbHost"
+Write-Host "DB host: $env:DB_HOST"
 Write-Host "Cognito user pool: $CognitoUserPoolID"
 Write-Host "Allowed origin: $AllowedOrigin"
 Write-Host "App URL: $appURL"
