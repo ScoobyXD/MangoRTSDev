@@ -722,20 +722,6 @@ returning company_id::text,resource_type,resource_id::text,map_parent_folder_id:
 		item.CompanyID, item.ResourceType, item.ResourceID, parentID, item.GridX, item.GridY, item.GridWidth, item.GridHeight))
 }
 
-const (
-	postgresAutomaticProcessMapRootFolderWidth    = processMapAutomaticRootFolderWidth
-	postgresAutomaticProcessMapRootFolderHeight   = processMapAutomaticRootFolderHeight
-	postgresAutomaticProcessMapNestedFolderWidth  = processMapAutomaticNestedFolderWidth
-	postgresAutomaticProcessMapNestedFolderHeight = processMapAutomaticNestedFolderHeight
-	postgresAutomaticProcessMapProcessWidth       = processMapAutomaticProcessWidth
-	postgresAutomaticProcessMapProcessHeight      = processMapAutomaticProcessHeight
-	postgresAutomaticProcessMapPadding            = processMapAutomaticFolderPadding
-	postgresAutomaticProcessMapGap                = processMapAutomaticChildGap
-	postgresAutomaticProcessMapRootGap            = processMapAutomaticRootGap
-	postgresAutomaticProcessMapFolderHeaderHeight = processMapAutomaticFolderHeaderHeight
-	postgresAutomaticProcessMapSectionGap         = processMapAutomaticSectionGap
-)
-
 func postgresAutomaticProcessMapPlacementsTx(ctx context.Context, tx *sql.Tx, companyID string) ([]domain.ProcessMapPlacement, error) {
 	rows, err := tx.QueryContext(ctx, `
 select company_id::text,resource_type,resource_id::text,map_parent_folder_id::text,
@@ -813,14 +799,13 @@ set map_parent_folder_id=excluded.map_parent_folder_id,
 	return nil
 }
 
-func postgresTranslateAutomaticProcessMapTracesTx(
+func postgresSaveAutomaticProcessMapTracesTx(
 	ctx context.Context,
 	tx *sql.Tx,
 	companyID string,
 	traces []domain.ProcessMapTrace,
-	deltaX, deltaY int,
 ) error {
-	if len(traces) == 0 || deltaX == 0 && deltaY == 0 {
+	if len(traces) == 0 {
 		return nil
 	}
 	type translatedTrace struct {
@@ -830,13 +815,7 @@ func postgresTranslateAutomaticProcessMapTracesTx(
 	translated := make([]translatedTrace, 0, len(traces))
 	for _, trace := range traces {
 		points := cloneProcessMapRoutePoints(trace.RoutePoints)
-		for index := range points {
-			points[index].X += deltaX
-			points[index].Y += deltaY
-			if !validProcessMapCoordinate(points[index].X) || !validProcessMapCoordinate(points[index].Y) {
-				return ErrInvalid
-			}
-		}
+
 		translated = append(translated, translatedTrace{
 			RelationshipID: trace.ResourceOperationalRelationshipID,
 			RoutePoints:    points,
@@ -846,7 +825,7 @@ func postgresTranslateAutomaticProcessMapTracesTx(
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `
+	_, err = tx.ExecContext(ctx, `
 with translated as (
   select relationship_id,route_points
   from jsonb_to_recordset($2::jsonb) item(relationship_id uuid,route_points jsonb)
@@ -857,17 +836,12 @@ set route_points=translated.route_points,
     updated_timestamp=statement_timestamp()
 from translated
 where trace.company_id=$1::uuid
-  and trace.resource_operational_relationship_id=translated.relationship_id`, companyID, string(payload))
+  and trace.resource_operational_relationship_id=translated.relationship_id
+  and trace.route_points is distinct from translated.route_points`, companyID, string(payload))
 	if err != nil {
 		return err
 	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if count != int64(len(translated)) {
-		return ErrNotFound
-	}
+
 	return nil
 }
 
@@ -877,7 +851,7 @@ where trace.company_id=$1::uuid
 func postgresSyncAutomaticProcessMapPlacementTx(
 	ctx context.Context,
 	tx *sql.Tx,
-	companyID, resourceType, resourceID, parentID string,
+	companyID, resourceType, resourceID, parentID, permissionUserID string,
 ) (bool, error) {
 	if err := postgresLockProcessMapCompanyTx(ctx, tx, companyID); err != nil {
 		return false, err
@@ -893,24 +867,50 @@ func postgresSyncAutomaticProcessMapPlacementTx(
 	if len(plan.Placements) == 0 {
 		return false, nil
 	}
-
-	internalTraces := []domain.ProcessMapTrace{}
-	if (plan.ReparentedFolderDeltaX != 0 || plan.ReparentedFolderDeltaY != 0) && len(plan.ReparentedFolderMembers) > 0 {
-		internalTraces, err = postgresInternalProcessMapTracesTx(ctx, tx, companyID, plan.ReparentedFolderMembers)
-		if err != nil {
+	if permissionUserID != "" {
+		resources := make([]domain.ProcessMapResourceRef, 0, len(plan.Placements))
+		for _, placement := range plan.Placements {
+			if !plan.Created || placement.ResourceType != resourceType || placement.ResourceID != resourceID {
+				resources = append(resources, domain.ProcessMapResourceRef{ResourceType: placement.ResourceType, ResourceID: placement.ResourceID})
+			}
+		}
+		for _, transform := range plan.Transforms {
+			for _, member := range transform.Members {
+				if !plan.Created || member.ResourceType != resourceType || member.ResourceID != resourceID {
+					resources = append(resources, member)
+				}
+			}
+		}
+		if err := postgresRequireProcessMapResourcesTx(ctx, tx, companyID, permissionUserID, resources); err != nil {
 			return false, err
 		}
 	}
-	if err := postgresTranslateAutomaticProcessMapTracesTx(
-		ctx,
-		tx,
-		companyID,
-		internalTraces,
-		plan.ReparentedFolderDeltaX,
-		plan.ReparentedFolderDeltaY,
-	); err != nil {
+
+	transformedTraces := map[string]domain.ProcessMapTrace{}
+	for _, transform := range plan.Transforms {
+		traces, err := postgresInternalProcessMapTracesTx(ctx, tx, companyID, transform.Members)
+		if err != nil {
+			return false, err
+		}
+		for _, trace := range traces {
+			if previous, ok := transformedTraces[trace.ResourceOperationalRelationshipID]; ok {
+				trace = previous
+			}
+			trace.RoutePoints = processMapScaleRoutePointsWithinFolder(trace.RoutePoints, transform.Source, transform.Target)
+			transformedTraces[trace.ResourceOperationalRelationshipID] = trace
+		}
+	}
+	traces := make([]domain.ProcessMapTrace, 0, len(transformedTraces))
+	for _, trace := range transformedTraces {
+		if !validProcessMapRoutePoints(trace.RoutePoints) {
+			return false, ErrInvalid
+		}
+		traces = append(traces, trace)
+	}
+	if err := postgresSaveAutomaticProcessMapTracesTx(ctx, tx, companyID, traces); err != nil {
 		return false, err
 	}
+
 	if err := postgresSaveAutomaticProcessMapPlacementsTx(ctx, tx, companyID, plan.Placements); err != nil {
 		return false, err
 	}
@@ -922,7 +922,7 @@ func (r *PostgresRepo) syncAutomaticProcessMapPlacementTx(
 	tx *sql.Tx,
 	companyID, resourceType, resourceID, parentID, actorUserID string,
 ) error {
-	changed, err := postgresSyncAutomaticProcessMapPlacementTx(ctx, tx, companyID, resourceType, resourceID, parentID)
+	changed, err := postgresSyncAutomaticProcessMapPlacementTx(ctx, tx, companyID, resourceType, resourceID, parentID, actorUserID)
 	if err != nil || !changed {
 		return err
 	}

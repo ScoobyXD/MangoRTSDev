@@ -701,6 +701,11 @@ for update`, input.CompanyID, targetType, targetID).Scan(&previousParentID); err
 	}
 	var itemID string
 	var createdTimestamp, updatedTimestamp sql.NullTime
+	if targetType == EntityTypeLogicGate {
+		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, input.CompanyID, domain.ProcessMapResourceTypeProcess, targetID, targetParentID, input.ActorUserID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	err = tx.QueryRowContext(ctx, `
 insert into company_explorer_items (
   company_id,
@@ -722,11 +727,6 @@ returning item_id::text, created_timestamp, updated_timestamp`,
 	).Scan(&itemID, &createdTimestamp, &updatedTimestamp)
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
-	}
-	if targetType == EntityTypeLogicGate {
-		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, input.CompanyID, domain.ProcessMapResourceTypeProcess, targetID, targetParentID, input.ActorUserID); err != nil {
-			return CompanyExplorerV2Row{}, err
-		}
 	}
 	if parentChanged {
 		payload := map[string]any{
@@ -820,6 +820,11 @@ for update`, input.CompanyID, input.EdgeID).Scan(&targetType, &targetID, &previo
 		}
 	}
 
+	if targetType == EntityTypeLogicGate {
+		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, input.CompanyID, domain.ProcessMapResourceTypeProcess, targetID, targetParentID, input.ActorUserID); err != nil {
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	err = tx.QueryRowContext(ctx, `
 update company_explorer_items
 set parent_folder_id=$3::uuid,
@@ -833,11 +838,6 @@ returning target_type, target_id::text`, input.CompanyID, input.EdgeID, parentFo
 	}
 	if err != nil {
 		return CompanyExplorerV2Row{}, err
-	}
-	if targetType == EntityTypeLogicGate {
-		if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, input.CompanyID, domain.ProcessMapResourceTypeProcess, targetID, targetParentID, input.ActorUserID); err != nil {
-			return CompanyExplorerV2Row{}, err
-		}
 	}
 	if parentChanged {
 		payload := map[string]any{

@@ -295,7 +295,7 @@ func (r *MemoryRepo) CreateCompanyExplorerV2Folder(input CompanyExplorerV2Folder
 		parentID := parent.EntityID
 		mapParentID = &parentID
 	}
-	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, entity.EntityID, mapParentID); err != nil {
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, entity.EntityID, mapParentID, input.PermissionUserID); err != nil {
 		r.restoreProcessMapMutationLocked(beforeMutation)
 		return CompanyExplorerV2Row{}, err
 	}
@@ -378,6 +378,17 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 		audienceResources = r.processMapAccessResourcesLocked(input.CompanyID, resourceType, resourceID)
 		beforeAudience = r.processMapAccessAudienceLocked(input.CompanyID, audienceResources)
 	}
+	if child.EntityType == CompanyExplorerV2EntityLogicGate {
+		var mapParentID *string
+		if parent.EntityType == CompanyExplorerV2EntityFolder {
+			parentID := parent.EntityID
+			mapParentID = &parentID
+		}
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID, input.PermissionUserID); err != nil {
+			r.restoreProcessMapMutationLocked(beforeMutation)
+			return CompanyExplorerV2Row{}, err
+		}
+	}
 	for edgeKey, existing := range r.companyExplorerV2Edges {
 		if existing.CompanyID == input.CompanyID && existing.ChildEntityID == child.EntityID {
 			delete(r.companyExplorerV2Edges, edgeKey)
@@ -385,17 +396,6 @@ func (r *MemoryRepo) UpsertCompanyExplorerV2Edge(input CompanyExplorerV2EdgeInpu
 	}
 	r.companyExplorerV2Edges[key(edge.CompanyID, edge.EdgeID)] = edge
 	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
-	if child.EntityType == CompanyExplorerV2EntityLogicGate {
-		var mapParentID *string
-		if parent.EntityType == CompanyExplorerV2EntityFolder {
-			parentID := parent.EntityID
-			mapParentID = &parentID
-		}
-		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID); err != nil {
-			r.restoreProcessMapMutationLocked(beforeMutation)
-			return CompanyExplorerV2Row{}, err
-		}
-	}
 	if parentChanged {
 		childResourceID := child.ResourceID
 		if childResourceID == "" {
@@ -465,13 +465,6 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 		audienceResources = r.processMapAccessResourcesLocked(input.CompanyID, resourceType, resourceID)
 		beforeAudience = r.processMapAccessAudienceLocked(input.CompanyID, audienceResources)
 	}
-	oldEdgeKey := key(input.CompanyID, edge.EdgeID)
-	edge.ParentEntityID = input.ParentEntityID
-	edge.EdgeID = companyExplorerV2EdgeID(input.CompanyID, input.ParentEntityID, child.EntityID)
-	edge.UpdatedTimestamp = time.Now().UTC()
-	delete(r.companyExplorerV2Edges, oldEdgeKey)
-	r.companyExplorerV2Edges[key(input.CompanyID, edge.EdgeID)] = edge
-	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
 	var mapParentID *string
 	if parent.EntityType == CompanyExplorerV2EntityFolder {
 		parentID := parent.EntityID
@@ -479,16 +472,23 @@ func (r *MemoryRepo) MoveCompanyExplorerV2Edge(input CompanyExplorerV2MoveEdgeIn
 	}
 	switch child.EntityType {
 	case CompanyExplorerV2EntityFolder:
-		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, child.EntityID, mapParentID); err != nil {
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeFolder, child.EntityID, mapParentID, input.PermissionUserID); err != nil {
 			r.restoreProcessMapMutationLocked(beforeMutation)
 			return CompanyExplorerV2Row{}, err
 		}
 	case CompanyExplorerV2EntityLogicGate:
-		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID); err != nil {
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, child.ResourceID, mapParentID, input.PermissionUserID); err != nil {
 			r.restoreProcessMapMutationLocked(beforeMutation)
 			return CompanyExplorerV2Row{}, err
 		}
 	}
+	oldEdgeKey := key(input.CompanyID, edge.EdgeID)
+	edge.ParentEntityID = input.ParentEntityID
+	edge.EdgeID = companyExplorerV2EdgeID(input.CompanyID, input.ParentEntityID, child.EntityID)
+	edge.UpdatedTimestamp = time.Now().UTC()
+	delete(r.companyExplorerV2Edges, oldEdgeKey)
+	r.companyExplorerV2Edges[key(input.CompanyID, edge.EdgeID)] = edge
+	r.shadowCompanyExplorerV2EdgeToLegacyLocked(parent, child, edge)
 	if parentChanged {
 		childResourceID := child.ResourceID
 		if childResourceID == "" {

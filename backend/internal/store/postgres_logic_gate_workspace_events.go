@@ -8,7 +8,7 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func (r *PostgresRepo) CreateLogicGateWithWorkspaceEvent(companyID, header string) (domain.LogicGate, domain.DomainEvent, error) {
+func (r *PostgresRepo) CreateLogicGateWithWorkspaceEvent(companyID, header, actorUserID string) (domain.LogicGate, domain.DomainEvent, error) {
 	ctx := context.Background()
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -33,7 +33,7 @@ func (r *PostgresRepo) CreateLogicGateWithWorkspaceEvent(companyID, header strin
 	}); err != nil {
 		return domain.LogicGate{}, domain.DomainEvent{}, err
 	}
-	if _, _, err := r.placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, item.CompanyID, EntityTypeLogicGate, item.LogicGateID, "", false); err != nil {
+	if _, _, err := r.placeCompanyExplorerItemInDefaultFolderTx(ctx, tx, item.CompanyID, EntityTypeLogicGate, item.LogicGateID, actorUserID, false); err != nil {
 		return domain.LogicGate{}, domain.DomainEvent{}, err
 	}
 	event, err := r.appendDomainEventTx(ctx, tx, logicGateCreatedWorkspaceEventInput(item, workItemAssignmentEventMetadata{}))

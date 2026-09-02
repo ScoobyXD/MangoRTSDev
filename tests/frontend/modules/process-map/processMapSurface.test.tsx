@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Layer } from "@deck.gl/core";
+import { OrthographicViewport, type Layer } from "../../../../frontend/node_modules/@deck.gl/core/dist/index.js";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { JSDOM } from "jsdom";
@@ -458,6 +458,51 @@ test("name-visible normal LOD keeps Process scorecards, controls, and drag movem
     assert.ok(mounted.container.querySelector(".process-map-qd-card"), "dragging keeps the pinned scorecard attached");
   } finally {
     await mounted.cleanup();
+  }
+});
+
+test("deep gates retain accurate pointer movement, resizing, and pinned cards near both world limits", async () => {
+  for (const origin of [-800_000_000, 800_000_000]) {
+    const process = placement("deep-gate", origin, origin, 14, 8);
+    const saved = { ...process };
+    const mounted = await mountProcessMapForBehavior(() => undefined, {
+      process,
+      sceneBounds: { min_x: origin, min_y: origin, max_x: origin + 14, max_y: origin + 8 },
+    });
+    try {
+      const key = `logic_gate:${process.resource_id}`;
+      const view = readProcessMapDeckGLTestProps().viewState;
+      const viewport = new OrthographicViewport({ width: 1_000, height: 700, target: view.target as [number, number, number], zoom: view.zoom as number });
+      const pointer = (x: number, y: number) => viewport.unproject(viewport.project([origin + x, origin + y]), { targetZ: 0 });
+      await mounted.clickPlacement(process);
+      const overlay = mounted.container.querySelector<HTMLElement>(".process-map-qd-overlay");
+      assert.ok(overlay);
+      const topRight = viewport.project([origin + 14, origin]);
+      assert.ok(Math.abs(parseFloat(overlay.style.left) - topRight[0] - 22) < 0.001);
+      assert.ok(Math.abs(parseFloat(overlay.style.top) - topRight[1]) < 0.001);
+      await act(async () => {
+        readProcessMapDeckGLTestProps().onDragStart({ object: { kind: "placement", key, placement: process }, coordinate: pointer(1, 1) }, { stopPropagation: () => undefined });
+      });
+      await act(async () => { readProcessMapDeckGLTestProps().onDrag({ coordinate: pointer(4.2, 3.2) }); });
+      const moved = mountedPlacementBodies(key)[0] as MountedPlacementDatum & { polygon: number[][] };
+      assert.deepEqual(moved.polygon, [[origin + 3, origin + 2], [origin + 17, origin + 2], [origin + 17, origin + 10], [origin + 3, origin + 10]]);
+      const scale = 2 ** (view.zoom as number);
+      assert.ok(Math.abs(parseFloat(overlay.style.left) - topRight[0] - 22 - 3 * scale) < 0.001, "the pinned card follows the snapped drag");
+      await act(async () => {
+        mounted.container.querySelector(".process-map-surface")!.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      });
+      await act(async () => {
+        readProcessMapDeckGLTestProps().onDragStart({ object: { kind: "resize", key, placement: process, horizontal: "east", vertical: "south" }, coordinate: pointer(14, 8) }, { stopPropagation: () => undefined });
+      });
+      await act(async () => { readProcessMapDeckGLTestProps().onDrag({ coordinate: pointer(16.2, 9.2) }); });
+      const resized = mountedPlacementBodies(key)[0] as MountedPlacementDatum & { polygon: number[][] };
+      assert.deepEqual(resized.polygon, [[origin, origin], [origin + 16, origin], [origin + 16, origin + 9], [origin, origin + 9]]);
+      const anchors = currentDeckLayer("process-map-edit-anchors").props.data as Array<{ position: number[] }>;
+      assert.deepEqual(anchors.map((item) => item.position), [[origin, origin + 4.5], [origin + 16, origin + 4.5]]);
+      assert.deepEqual(process, saved, "camera and transient gestures do not rewrite saved manual geometry");
+    } finally {
+      await mounted.cleanup();
+    }
   }
 });
 
@@ -995,7 +1040,7 @@ test("whole-company tile rendering keeps every placement perceptible without lea
   assert.deepEqual(getLabelColor((labels.props.data as Array<{ color?: number[] }>)[0]), [30, 41, 59, 245]);
 });
 
-test("large Folder labels stay in their six-unit title band while Process labels remain centered", () => {
+test("large Folder labels stay in their proportional title band while Process labels remain centered", () => {
   const folder = placement("folder-label", 0, 0, 80, 60, "company_explorer_folder");
   const process = placement("process-label", 100, 0, 80, 60);
   const tileData: ProcessMapTileResponse = {
@@ -1011,7 +1056,7 @@ test("large Folder labels stay in their six-unit title band while Process labels
   const folderLabel = labels.find((item) => item.text === folder.name);
   const processLabel = labels.find((item) => item.text === process.name);
   assert.ok(folderLabel && processLabel);
-  assert.equal(folderLabel.position[1], folder.grid_y + 3, "the fitted editing label stays centered in the six-unit title band");
+  assert.equal(folderLabel.position[1], folder.grid_y + 3.5, "the fitted editing label stays centered in the proportional title band");
   assert.equal(processLabel.position[1], process.grid_y + process.grid_height / 2);
   assert.deepEqual(labels.map((item) => item.text), [folder.name, process.name], "labels show source names without redundant type captions");
   assert.equal(labelsLayer.props.pickable, true, "a Folder name is a direct selection and move target");
@@ -1053,15 +1098,15 @@ test("large Folder labels stay in their six-unit title band while Process labels
     },
   }));
   const editFolderLabel = (layerByID(editLayers, "process-map-edit-labels").props.data as Array<{ position: [number, number] }>)[0];
-  assert.equal(editFolderLabel.position[1], folder.grid_y + 3, "the selected overlay uses the same six-unit title band");
+  assert.equal(editFolderLabel.position[1], folder.grid_y + 3.5, "the selected overlay uses the same proportional title band");
 
-  const normalFolder = placement("normal-folder-label", 0, 0, 80, 40, "company_explorer_folder");
+  const normalFolder = placement("normal-folder-label", 0, 0, 80, 48, "company_explorer_folder");
   const normalTileData: ProcessMapTileResponse = {
     z: 22, x: 0, y: 0, process_map_read_version: 11, byteLength: 1,
     placements: [normalFolder],
     traces: [],
   };
-  const normalTile = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 2 })), "process-map-spatial-tiles");
+  const normalTile = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 1.9 })), "process-map-spatial-tiles");
   const normalTileLayers = (normalTile.props.renderSubLayers as typeof render)({
     id: "normal-selected-label",
     data: normalTileData,
@@ -1075,7 +1120,7 @@ test("large Folder labels stay in their six-unit title band while Process labels
     removedPlacementKeys: new Set(),
   };
   const normalEditLayers = buildProcessMapLayers(buildOptions({
-    settledPixelsPerGridUnit: 2,
+    settledPixelsPerGridUnit: 1.9,
     presentation: normalPresentation,
     editedPlacementKeys: new Set(normalPresentation.placements.keys()),
     editOverlay: {
@@ -1262,6 +1307,47 @@ test("placement and Process-card text stay horizontally clipped inside their rec
   }
 });
 
+test("nested Folder title bands scale with geometry and respect existing manually positioned children", () => {
+  for (const factor of [8 ** 8, 8 ** 4, 8]) {
+    const folder = placement("scaled-folder", 500_000_000, -800_000_000, 14 * factor, 8 * factor, "company_explorer_folder");
+    const child = { ...placement("scaled-child", folder.grid_x + factor / 4, folder.grid_y + factor, 14 * factor / 8, factor), map_parent_folder_id: folder.resource_id };
+    const scale = 128 / folder.grid_height;
+    const renderLabels = (currentChild: ProcessMapVisiblePlacement) => {
+      const placements = [folder, currentChild];
+      const key = `company_explorer_folder:${folder.resource_id}`;
+      const presentation: ProcessMapPresentationState = {
+        placements: new Map(placements.map((item) => [`${item.resource_type}:${item.resource_id}`, item])), traces: new Map(), removedPlacementKeys: new Set(),
+      };
+      const tiled = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: scale })), "process-map-spatial-tiles");
+      const render = tiled.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
+      const tileLayers = render({
+        id: "scaled",
+        data: { z: 22, x: 0, y: 0, process_map_read_version: 11, byteLength: 1, placements, traces: [] },
+        tile: { boundingBox: [[folder.grid_x, folder.grid_y], [folder.grid_x + folder.grid_width, folder.grid_y + folder.grid_height]] },
+      });
+      const selected = buildProcessMapLayers(buildOptions({
+        settledPixelsPerGridUnit: scale, presentation, editedPlacementKeys: new Set([key]),
+        editOverlay: {
+          placements: [folder], traces: [], selectedPlacementKey: key, selectedTraceID: null,
+          connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
+        },
+      }));
+      return [layerByID(tileLayers, "scaled-labels"), layerByID(selected, "process-map-edit-labels")]
+        .map((layer) => (layer.props.data as Array<PlacementLabelDatum & { size: number }>).find((item) => item.text === folder.name));
+    };
+    for (const label of renderLabels(child)) {
+      assert.ok(label, "each nested Folder has a readable title at the same projected size");
+      const halfHeight = label.size / scale / 2;
+      assert.ok(label.position[1] - halfHeight >= folder.grid_y);
+      assert.ok(label.position[1] + halfHeight <= child.grid_y);
+      assertPlacementLabelHorizontalContentBox(folder, label);
+    }
+    const manuallyPlaced = { ...child, grid_y: folder.grid_y + 6 };
+    assert.deepEqual(renderLabels(manuallyPlaced), [undefined, undefined], "a saved child close to the top suppresses an overlapping title without moving the child");
+    assert.equal(manuallyPlaced.grid_y, folder.grid_y + 6);
+  }
+});
+
 test("declared presentation ceilings suppress labels and waypoints above authorized detail", () => {
   const wholeProcess = { ...placement("whole", 10, 10), presentation: "whole" as const, name: "Must stay hidden" };
   const tileData: ProcessMapTileResponse = {
@@ -1383,14 +1469,14 @@ test("Folder move and delete acknowledgements clear only previews from their own
 });
 
 test("selected name-visible Folder keeps a non-pickable elevated surface behind its contents and controls", () => {
-  const folder = placement("Folder", 10, 20, 12, 8, "company_explorer_folder");
-  const child = { ...placement("Child", 12, 22, 4, 2), map_parent_folder_id: folder.resource_id };
+  const folder = placement("Folder", 10, 20, 112, 64, "company_explorer_folder");
+  const child = { ...placement("Child", 14, 32, 14, 8), map_parent_folder_id: folder.resource_id };
   const key = "company_explorer_folder:Folder";
   const presentation: ProcessMapPresentationState = {
     placements: new Map([[key, folder], ["logic_gate:Child", child]]), traces: new Map(), removedPlacementKeys: new Set(),
   };
   const layers = buildProcessMapLayers(buildOptions({
-    settledPixelsPerGridUnit: 4,
+    settledPixelsPerGridUnit: 1.45,
     presentation,
     editedPlacementKeys: new Set([key]),
     editOverlay: {
@@ -2226,7 +2312,7 @@ test("representative large-company transport and presentation stay byte-, reques
       },
       tile: { boundingBox: [[0, 0], [PROCESS_MAP_TILE_SIZE, PROCESS_MAP_TILE_SIZE]] },
     });
-    assert.equal(placementVisits, representative.placements.length, "presentation construction visits each placement once");
+    assert.equal(placementVisits, representative.placements.length * 2, "one child-top index and one rendering pass keep construction linear");
     assert.equal(traceVisits, representative.traces.length, "presentation construction visits each trace once");
     const labelData = layerByID(presentationLayers, "representative-large-tile-labels").props.data as Array<{ text: string }>;
     const pickableDatumCount = presentationLayers
@@ -2234,10 +2320,10 @@ test("representative large-company transport and presentation stay byte-, reques
       .reduce((total, layer) => total + ((layer.props.data as unknown[])?.length ?? 0), 0);
     const visiblePlacementCount = representative.placements.filter((item) => !item.restricted).length;
     const visibleFolderCount = representative.placements.filter((item) => !item.restricted && item.resource_type === "company_explorer_folder").length;
-    assert.equal(labelData.length, representative.placements.length, "normal LOD contributes one bounded label datum per displayable placement");
+    assert.equal(labelData.length, representative.placements.length - visibleFolderCount, "24px folders keep their boxes while their title bands are too short for text");
     assert.equal(
       pickableDatumCount,
-      visiblePlacementCount * 5 - visibleFolderCount + representative.placements.length + representative.traces.length,
+      visiblePlacementCount * 5 - visibleFolderCount + representative.placements.length - visibleFolderCount + representative.traces.length,
       "visual Folder surfaces add no pick datum while names, permission-safe placeholders, fences, Process bodies, and continuous static trace paths remain bounded",
     );
     const labelBytes = labelData.reduce((total, datum) => total + encodedBytes(datum.text), 0);

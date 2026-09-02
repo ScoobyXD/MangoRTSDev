@@ -48,38 +48,75 @@ order by placement.resource_type,placement.resource_id`, companyID)
 	return result
 }
 
+// Historical migration fixtures keep the old full-size child coordinates. They
+// must not consume the current automatic layout's finite integer nesting budget.
+func setProcessMapActualSizeHistoricalGeometry(t *testing.T, repo *PostgresRepo, companyID string) {
+	t.Helper()
+	if _, err := repo.db.Exec(`
+update process_map_placements
+set grid_x=0,grid_y=0,
+    grid_width=case when resource_type='company_explorer_folder' then 24 else 14 end,
+    grid_height=case when resource_type='company_explorer_folder' then 16 else 8 end
+where company_id=$1::uuid`, companyID); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func extendProcessMapActualSizeLargeDeepFixture(t *testing.T, repo *PostgresRepo, companyID, largeParentID, deepParentID string) {
 	t.Helper()
-	for index := 0; index < 72; index++ {
-		process, err := repo.CreateLogicGate(companyID, fmt.Sprintf("Actual-size large sibling %03d", index+1))
+	createHistoricalProcess := func(parentID, name string, position int) {
+		t.Helper()
+		process, err := repo.CreateLogicGate(companyID, name)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, largeParentID, EntityTypeLogicGate, process.LogicGateID, 20000+(index+1)*1000); err != nil {
+		if _, err := repo.db.Exec(`
+update company_explorer_items
+set parent_folder_id=$3::uuid,position=$4
+where company_id=$1::uuid and target_type='logic_gate' and target_id=$2::uuid`,
+			companyID, process.LogicGateID, parentID, position); err != nil {
 			t.Fatal(err)
 		}
+		if _, err := repo.db.Exec(`
+update process_map_placements
+set map_parent_folder_id=$3::uuid,grid_x=0,grid_y=0,grid_width=14,grid_height=8
+where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
+			companyID, process.LogicGateID, parentID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for index := 0; index < 72; index++ {
+		createHistoricalProcess(largeParentID, fmt.Sprintf("Actual-size large sibling %03d", index+1), 20000+(index+1)*1000)
 	}
 
 	parentID := deepParentID
 	for depth := 0; depth < 24; depth++ {
-		folder, err := repo.CreateCompanyExplorerFolder(companyID, parentID, "logic_gate", fmt.Sprintf("Actual-size deep continuation %02d", depth+1))
+		folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", fmt.Sprintf("Actual-size deep continuation %02d", depth+1))
 		if err != nil {
 			t.Fatal(err)
 		}
-		process, err := repo.CreateLogicGate(companyID, fmt.Sprintf("Actual-size deep Process %02d", depth+1))
-		if err != nil {
+		if _, err := repo.db.Exec(`
+update company_explorer_folders
+set parent_folder_id=$3::uuid
+where company_id=$1::uuid and folder_id=$2::uuid`,
+			companyID, folder.FolderID, parentID); err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, folder.FolderID, EntityTypeLogicGate, process.LogicGateID, 1000); err != nil {
+		if _, err := repo.db.Exec(`
+update process_map_placements
+set map_parent_folder_id=$3::uuid,grid_x=0,grid_y=0,grid_width=24,grid_height=16
+where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`,
+			companyID, folder.FolderID, parentID); err != nil {
 			t.Fatal(err)
 		}
+		createHistoricalProcess(folder.FolderID, fmt.Sprintf("Actual-size deep Process %02d", depth+1), 1000)
 		parentID = folder.FolderID
 	}
 }
-
 func TestPostgresProcessMapActualSizeLayoutMigrationPreservesDimensionsAndSupersedesHistory(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
 	companyID, _, mixedRootID, nestedMixedID, _ := createProcessMapSquareMigrationFixture(t, repo)
+	setProcessMapActualSizeHistoricalGeometry(t, repo, companyID)
 	extendProcessMapActualSizeLargeDeepFixture(t, repo, companyID, mixedRootID, nestedMixedID)
 
 	var largeSiblingCount, maximumNestedDepth int
@@ -469,6 +506,7 @@ where company_id=$1::uuid and scope='process-map' and resource_key=''`, companyI
 			if _, err := repo.db.Exec(schemaMigrationsTableSQLForProcessMapTest()); err != nil {
 				t.Fatal(err)
 			}
+			setProcessMapActualSizeHistoricalGeometry(t, repo, company.CompanyID)
 			testCase.mutate(t, repo, company.CompanyID)
 			assertProcessMapActualSizeMigrationRefusal(t, repo, company.CompanyID, testCase.wanted)
 		})
@@ -507,6 +545,7 @@ func TestPostgresProcessMapActualSizeLayoutMigrationRejectsUnsafeParentageAtomic
 	if err != nil {
 		t.Fatal(err)
 	}
+	setProcessMapActualSizeHistoricalGeometry(t, repo, company.CompanyID)
 	if _, err := db.Exec(schemaMigrationsTableSQLForProcessMapTest()); err != nil {
 		t.Fatal(err)
 	}

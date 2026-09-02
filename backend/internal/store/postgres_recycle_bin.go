@@ -424,6 +424,7 @@ order by item.position,item.target_id`, companyID, strings.Join(logicGateIDs, ",
 			placement.resourceType,
 			placement.resourceID,
 			placement.parentID,
+			actorUserID,
 		)
 		if err != nil {
 			return nil, err

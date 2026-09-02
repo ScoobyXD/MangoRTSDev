@@ -9,20 +9,6 @@ import (
 	"time"
 )
 
-const (
-	memoryProcessMapRootFolderWidth    = processMapAutomaticRootFolderWidth
-	memoryProcessMapRootFolderHeight   = processMapAutomaticRootFolderHeight
-	memoryProcessMapNestedFolderWidth  = processMapAutomaticNestedFolderWidth
-	memoryProcessMapNestedFolderHeight = processMapAutomaticNestedFolderHeight
-	memoryProcessMapProcessWidth       = processMapAutomaticProcessWidth
-	memoryProcessMapProcessHeight      = processMapAutomaticProcessHeight
-	memoryProcessMapRootGap            = processMapAutomaticRootGap
-	memoryProcessMapChildGap           = processMapAutomaticChildGap
-	memoryProcessMapFolderPadding      = processMapAutomaticFolderPadding
-	memoryProcessMapFolderHeaderHeight = processMapAutomaticFolderHeaderHeight
-	memoryProcessMapSectionGap         = processMapAutomaticSectionGap
-)
-
 func processMapPlacementMemoryKey(companyID, resourceType, resourceID string) string {
 	return companyID + ":" + resourceType + ":" + resourceID
 }
@@ -60,9 +46,9 @@ func processMapParentPointer(value string) *string {
 }
 
 // syncAutomaticMemoryProcessMapPlacementLocked applies the same validated pure
-// plan as PostgreSQL. Nothing is mutated until every placement and translated
-// reparent trace has passed the shared coordinate checks.
-func (r *MemoryRepo) syncAutomaticMemoryProcessMapPlacementLocked(companyID, resourceType, resourceID string, parentID *string) (bool, error) {
+// plan as PostgreSQL. Nothing is mutated until every placement and transformed
+// internal trace has passed the shared coordinate checks.
+func (r *MemoryRepo) syncAutomaticMemoryProcessMapPlacementLocked(companyID, resourceType, resourceID string, parentID *string, permissionUserID string) (bool, error) {
 	parentValue := strings.TrimSpace(pointerStringValue(parentID))
 	placements := make([]domain.ProcessMapPlacement, 0, len(r.processMapPlacements))
 	for _, placement := range r.processMapPlacements {
@@ -77,36 +63,53 @@ func (r *MemoryRepo) syncAutomaticMemoryProcessMapPlacementLocked(companyID, res
 	if len(plan.Placements) == 0 {
 		return false, nil
 	}
-
-	moved := make(map[string]bool, len(plan.ReparentedFolderMembers))
-	for _, member := range plan.ReparentedFolderMembers {
-		moved[processMapPlacementMemoryKey(companyID, member.ResourceType, member.ResourceID)] = true
+	if permissionUserID != "" {
+		checked := map[domain.ProcessMapResourceRef]bool{}
+		requireEdit := func(resource domain.ProcessMapResourceRef) bool {
+			if checked[resource] || plan.Created && resource.ResourceType == resourceType && resource.ResourceID == resourceID {
+				return true
+			}
+			checked[resource] = true
+			return r.processMapResourceAllowedLocked(companyID, permissionUserID, resource.ResourceType, resource.ResourceID)
+		}
+		for _, placement := range plan.Placements {
+			if !requireEdit(domain.ProcessMapResourceRef{ResourceType: placement.ResourceType, ResourceID: placement.ResourceID}) {
+				return false, ErrNotFound
+			}
+		}
+		for _, transform := range plan.Transforms {
+			for _, member := range transform.Members {
+				if !requireEdit(member) {
+					return false, ErrNotFound
+				}
+			}
+		}
 	}
-	translatedTraces := map[string]domain.ProcessMapTrace{}
-	if (plan.ReparentedFolderDeltaX != 0 || plan.ReparentedFolderDeltaY != 0) && len(moved) > 0 {
+
+	transformedTraces := map[string]domain.ProcessMapTrace{}
+	for _, transform := range plan.Transforms {
+		members := make(map[string]bool, len(transform.Members))
+		for _, member := range transform.Members {
+			members[processMapPlacementMemoryKey(companyID, member.ResourceType, member.ResourceID)] = true
+		}
 		for traceKey, trace := range r.processMapTraces {
 			if trace.CompanyID != companyID {
 				continue
 			}
-			relationship, ok := r.resourceOperationalRelationships[traceKey]
-			if !ok {
-				relationship, ok = r.resourceOperationalRelationships[key(companyID, trace.ResourceOperationalRelationshipID)]
-			}
-			if !ok || !moved[processMapPlacementMemoryKey(companyID, relationship.Source.ResourceType, relationship.Source.ResourceID)] ||
-				!moved[processMapPlacementMemoryKey(companyID, relationship.Target.ResourceType, relationship.Target.ResourceID)] {
+			relationship, ok := r.resourceOperationalRelationships[key(companyID, trace.ResourceOperationalRelationshipID)]
+			if !ok || !members[processMapPlacementMemoryKey(companyID, relationship.Source.ResourceType, relationship.Source.ResourceID)] || !members[processMapPlacementMemoryKey(companyID, relationship.Target.ResourceType, relationship.Target.ResourceID)] {
 				continue
 			}
-			trace = cloneProcessMapTrace(trace)
-			for index := range trace.RoutePoints {
-				x := trace.RoutePoints[index].X + plan.ReparentedFolderDeltaX
-				y := trace.RoutePoints[index].Y + plan.ReparentedFolderDeltaY
-				if !validProcessMapCoordinate(x) || !validProcessMapCoordinate(y) {
-					return false, ErrInvalid
-				}
-				trace.RoutePoints[index].X = x
-				trace.RoutePoints[index].Y = y
+			if previous, ok := transformedTraces[traceKey]; ok {
+				trace = previous
 			}
-			translatedTraces[traceKey] = trace
+			trace.RoutePoints = processMapScaleRoutePointsWithinFolder(trace.RoutePoints, transform.Source, transform.Target)
+			transformedTraces[traceKey] = trace
+		}
+	}
+	for _, trace := range transformedTraces {
+		if !validProcessMapRoutePoints(trace.RoutePoints) {
+			return false, ErrInvalid
 		}
 	}
 
@@ -126,7 +129,10 @@ func (r *MemoryRepo) syncAutomaticMemoryProcessMapPlacementLocked(companyID, res
 		placement.UpdatedTimestamp = now
 		r.processMapPlacements[placementKey] = cloneProcessMapPlacement(placement)
 	}
-	for traceKey, trace := range translatedTraces {
+	for traceKey, trace := range transformedTraces {
+		if slices.Equal(trace.RoutePoints, r.processMapTraces[traceKey].RoutePoints) {
+			continue
+		}
 		trace.Revision++
 		trace.UpdatedTimestamp = now
 		r.processMapTraces[traceKey] = trace

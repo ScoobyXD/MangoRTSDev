@@ -159,7 +159,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 				continue
 			}
 			parentID := folderItem.FolderID
-			if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, mapping.EntityID, &parentID); err != nil {
+			if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(input.CompanyID, domain.ProcessMapResourceTypeProcess, mapping.EntityID, &parentID, input.CreatorUserID); err != nil {
 				r.restoreProcessMapMutationLocked(beforeMutation)
 				return WorkspaceEntityBatchResult{}, err
 			}

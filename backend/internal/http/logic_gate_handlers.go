@@ -99,8 +99,12 @@ func (s *Server) handleLogicGates(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_and_header_required")
 		return
 	}
-	item, event, err := s.repo.CreateLogicGateWithWorkspaceEvent(req.CompanyID, req.Header)
+	item, event, err := s.repo.CreateLogicGateWithWorkspaceEvent(req.CompanyID, req.Header, s.entityPermissionActorUserID(r, req.CompanyID))
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed_to_create_logic_gate")
 		return
 	}

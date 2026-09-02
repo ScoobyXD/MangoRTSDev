@@ -86,7 +86,7 @@ func TestProcessMapPolicyParentAndCompanyMembershipSQLContract(t *testing.T) {
 }
 
 func TestProcessMapRepositoryCoordinateAndBoundedReadContract(t *testing.T) {
-	if ProcessMapMaxRoutePoints != 256 || ProcessMapMinCoordinate != -1_000_000_000 || ProcessMapMaxCoordinate != 1_000_000_000 || ProcessMapMaxDimension != 1_000_000 {
+	if ProcessMapMaxRoutePoints != 256 || ProcessMapMinCoordinate != -1_000_000_000 || ProcessMapMaxCoordinate != 1_000_000_000 || ProcessMapMaxDimension != 250_000_000 {
 		t.Fatalf("unexpected V3 geometry bounds: route=%d coordinate=%d..%d dimension=%d", ProcessMapMaxRoutePoints, ProcessMapMinCoordinate, ProcessMapMaxCoordinate, ProcessMapMaxDimension)
 	}
 	if _, ok := processMapTileBounds(ProcessMapMaxTileZoom+1, 0, 0); ok {

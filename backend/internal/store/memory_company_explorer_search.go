@@ -79,14 +79,14 @@ func (r *MemoryRepo) syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID
 	if strings.TrimSpace(companyID) == "" || folders.UnfiledFolderID == "" || folders.ProjectsFolderID == "" || folders.LogicGatesFolderID == "" {
 		return nil
 	}
-	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.UnfiledFolderID, nil); err != nil {
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.UnfiledFolderID, nil, ""); err != nil {
 		return err
 	}
 	parentID := folders.UnfiledFolderID
-	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.ProjectsFolderID, &parentID); err != nil {
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.ProjectsFolderID, &parentID, ""); err != nil {
 		return err
 	}
-	_, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.LogicGatesFolderID, &parentID)
+	_, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, folders.LogicGatesFolderID, &parentID, "")
 	return err
 }
 

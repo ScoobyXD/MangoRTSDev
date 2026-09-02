@@ -4738,7 +4738,7 @@ CREATE TABLE public.process_map_placements (
     CONSTRAINT process_map_placements_parent_not_self_chk CHECK (((resource_type <> 'company_explorer_folder'::text) OR (map_parent_folder_id IS NULL) OR (map_parent_folder_id <> resource_id))),
     CONSTRAINT process_map_placements_resource_type_chk CHECK ((resource_type = ANY (ARRAY['company_explorer_folder'::text, 'logic_gate'::text]))),
     CONSTRAINT process_map_placements_revision_positive_chk CHECK ((revision > 0)),
-    CONSTRAINT process_map_placements_geometry_chk CHECK (((grid_x >= '-1000000000'::integer) AND (grid_y >= '-1000000000'::integer) AND (grid_width > 0) AND (grid_width <= 1000000) AND (grid_height > 0) AND (grid_height <= 1000000) AND (((grid_x)::bigint + grid_width) <= 1000000000) AND (((grid_y)::bigint + grid_height) <= 1000000000))),
+    CONSTRAINT process_map_placements_geometry_chk CHECK (((grid_x >= '-1000000000'::integer) AND (grid_y >= '-1000000000'::integer) AND (grid_width > 0) AND (grid_width <= 250000000) AND (grid_height > 0) AND (grid_height <= 250000000) AND (((grid_x)::bigint + grid_width) <= 1000000000) AND (((grid_y)::bigint + grid_height) <= 1000000000))),
     CONSTRAINT process_map_placements_timestamps_chk CHECK ((updated_timestamp >= created_timestamp))
 );
 

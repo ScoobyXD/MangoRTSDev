@@ -166,7 +166,7 @@ func TestPostgresProcessMapRepositoryLifecycle(t *testing.T) {
 		t.Fatalf("global scene = %+v err=%v", scene, err)
 	}
 	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{CompanyID: company.CompanyID, PermissionUserID: admin.UserID, Z: 0, X: 0, Y: 0})
-	if err != nil || len(tile.Placements) != 6 || len(tile.Traces) != 1 || len(tile.Traces[0].PathFragments) == 0 {
+	if err != nil || len(tile.Placements) != 3 || len(tile.Traces) != 1 || len(tile.Traces[0].PathFragments) == 0 {
 		t.Fatalf("global tile = %+v err=%v", tile, err)
 	}
 	if _, err := repo.GetProcessMapScene(ctx, ProcessMapSceneQuery{CompanyID: company.CompanyID, PermissionUserID: outsider.UserID}); !errors.Is(err, ErrNotFound) {
@@ -515,7 +515,7 @@ where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
 		return left.x < right.x+right.width+gap && left.x+left.width+gap > right.x &&
 			left.y < right.y+right.height+gap && left.y+left.height+gap > right.y
 	}
-	if conflictsWithGap(afterRootA, afterRootB, postgresAutomaticProcessMapRootGap) {
+	if conflictsWithGap(afterRootA, afterRootB, processMapAutomaticRootGap) {
 		t.Fatalf("automatic roots lack the required gap after growth: A=%+v B=%+v", afterRootA, afterRootB)
 	}
 	if afterProcessB.x-beforeProcessB.x != afterRootB.x-beforeRootB.x ||
@@ -525,17 +525,8 @@ where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
 	if afterLaterFolder != beforeLaterFolder {
 		t.Fatalf("deep growth changed manual sibling geometry or revision: before=%+v after=%+v", beforeLaterFolder, afterLaterFolder)
 	}
-	if afterProcessA.x <= beforeProcessA.x || afterProcessA.y != beforeProcessA.y ||
-		afterProcessA.width != beforeProcessA.width || afterProcessA.height != beforeProcessA.height {
-		t.Fatalf("deep growth did not make the minimal horizontal Process-section shift: before=%+v after=%+v", beforeProcessA, afterProcessA)
-	}
-	if afterGrowingFolder.x == beforeGrowingFolder.x && afterGrowingFolder.y == beforeGrowingFolder.y ||
-		conflictsWithGap(afterGrowingFolder, afterLaterFolder, postgresAutomaticProcessMapGap) {
-		t.Fatalf("affected growing Folder was not relocated safely: before=%+v after=%+v sibling=%+v Process=%+v", beforeGrowingFolder, afterGrowingFolder, afterLaterFolder, afterProcessA)
-	}
-	folderRight := max(afterGrowingFolder.x+afterGrowingFolder.width, afterLaterFolder.x+afterLaterFolder.width)
-	if afterProcessA.x < folderRight+postgresAutomaticProcessMapSectionGap {
-		t.Fatalf("deep growth did not preserve the Folder/Process section gap: Folder right=%d Process=%+v", folderRight, afterProcessA)
+	if afterProcessA != beforeProcessA || afterProcessB != beforeProcessB || afterRootB != beforeRootB || afterGrowingFolder != beforeGrowingFolder {
+		t.Fatalf("descendant creation changed saved geometry: process A=%+v process B=%+v root B=%+v ancestor=%+v", afterProcessA, afterProcessB, afterRootB, afterGrowingFolder)
 	}
 	var traceAfter string
 	var traceRevisionAfter int64
@@ -555,7 +546,7 @@ where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`,
 	}
 }
 
-func TestPostgresAutomaticProcessMapPlacementStopsAtUnchangedParent(t *testing.T) {
+func TestPostgresProcessMapAutomaticPlacementStopsAtUnchangedParent(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Process Map unchanged parent")
 	if err != nil {
@@ -624,7 +615,7 @@ where company_id=$1::uuid and resource_type='company_explorer_folder' and resour
 	}
 }
 
-func TestPostgresAutomaticProcessMapPlacementPreservesVerticallySeparatedRoot(t *testing.T) {
+func TestPostgresProcessMapAutomaticPlacementPreservesVerticallySeparatedRoot(t *testing.T) {
 	ctx := context.Background()
 	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Process Map vertical root preservation")
@@ -665,7 +656,7 @@ where company_id=$1::uuid and resource_type='company_explorer_folder' and resour
 	rootBGeometry := readGeometry(rootB.FolderID)
 	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
 		company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, rootB.FolderID, nil,
-		1, 100, rootBGeometry.width, rootBGeometry.height,
+		readGeometry(rootA.FolderID).x+1, readGeometry(rootA.FolderID).y+readGeometry(rootA.FolderID).height+100, rootBGeometry.width, rootBGeometry.height,
 	)); err != nil {
 		t.Fatal(err)
 	}
@@ -688,7 +679,7 @@ where company_id=$1::uuid and resource_type='company_explorer_folder' and resour
 	}
 }
 
-func TestPostgresAutomaticProcessMapPlacementPreservesStaggeredSeparatedRoot(t *testing.T) {
+func TestPostgresProcessMapAutomaticPlacementPreservesStaggeredSeparatedRoot(t *testing.T) {
 	ctx := context.Background()
 	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Process Map staggered root preservation")
@@ -730,7 +721,7 @@ where company_id=$1::uuid and resource_type='company_explorer_folder' and resour
 	rootBGeometry := readGeometry(rootB.FolderID)
 	var farX int
 	if err := db.QueryRow(`
-select coalesce(max(grid_x+grid_width),0)+1000
+select coalesce(max(grid_x+grid_width),0)+29360128+1000
 from process_map_placements
 where company_id=$1::uuid and map_parent_folder_id is null
   and not (resource_type='company_explorer_folder' and resource_id=$2::uuid)`, company.CompanyID, rootB.FolderID).Scan(&farX); err != nil {
@@ -756,7 +747,7 @@ where company_id=$1::uuid and map_parent_folder_id is null
 	if afterRootB != manualRootB {
 		t.Fatalf("staggered horizontal separation did not preserve manual root: before=%+v after=%+v", manualRootB, afterRootB)
 	}
-	if afterRootA.y+afterRootA.height <= afterRootB.y || afterRootA.x+afterRootA.width+postgresAutomaticProcessMapRootGap >= afterRootB.x {
+	if afterRootA.y+afterRootA.height <= afterRootB.y || afterRootA.x+afterRootA.width+processMapAutomaticRootGap >= afterRootB.x {
 		t.Fatalf("staggered fixture is not vertically close and horizontally separated: A=%+v B=%+v", afterRootA, afterRootB)
 	}
 }
@@ -1722,7 +1713,7 @@ func TestPostgresProcessMapSceneTilePrivacyMatchesMemory(t *testing.T) {
 		t.Fatalf("permission-safe scene = %+v err=%v", scene, err)
 	}
 	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{CompanyID: company.CompanyID, PermissionUserID: viewer.UserID, Z: 0, X: 0, Y: 0})
-	if err != nil || len(tile.Placements) != 5 || len(tile.Traces) != 0 {
+	if err != nil || len(tile.Placements) != 2 || len(tile.Traces) != 0 {
 		t.Fatalf("permission-safe tile = %+v err=%v", tile, err)
 	}
 	wire, err := json.Marshal(tile)

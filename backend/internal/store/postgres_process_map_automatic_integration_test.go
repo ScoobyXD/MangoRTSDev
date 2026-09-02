@@ -69,11 +69,15 @@ func TestPostgresProcessMapAutomaticPlacementMatchesMemoryPlacementAndTracePlan(
 	if err != nil {
 		t.Fatal(err)
 	}
+	destination, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootB.FolderID, "logic_gate", "Deeper destination")
+	if err != nil {
+		t.Fatal(err)
+	}
 	moving, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootA.FolderID, "logic_gate", "Moving")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.CreateCompanyExplorerFolder(company.CompanyID, rootB.FolderID, "logic_gate", "Irregular sibling"); err != nil {
+	if _, err := repo.CreateCompanyExplorerFolder(company.CompanyID, destination.FolderID, "logic_gate", "Irregular sibling"); err != nil {
 		t.Fatal(err)
 	}
 	insideA, _ := repo.CreateLogicGate(company.CompanyID, "Inside A")
@@ -116,12 +120,13 @@ func TestPostgresProcessMapAutomaticPlacementMatchesMemoryPlacementAndTracePlan(
 		memory.resourceOperationalRelationships[relationshipKey] = relationship
 		memory.processMapTraces[relationshipKey] = postgresAutomaticTestTrace(t, db, company.CompanyID, relationship.ResourceOperationalRelationshipID)
 	}
-	targetParentID := rootB.FolderID
+	targetParentID := destination.FolderID
 	changed, err := memory.syncAutomaticMemoryProcessMapPlacementLocked(
 		company.CompanyID,
 		domain.ProcessMapResourceTypeFolder,
 		moving.FolderID,
 		&targetParentID,
+		"",
 	)
 	if err != nil || !changed {
 		t.Fatalf("Memory automatic plan changed=%t err=%v", changed, err)
@@ -177,9 +182,9 @@ func TestPostgresProcessMapExplorerAutomaticPlacementFailureRollsBackWholeComman
 	}
 	if _, err := db.Exec(`
 update process_map_placements
-set grid_x=$3-grid_width,grid_y=0,revision=revision+1,updated_timestamp=statement_timestamp()
+set grid_width=1,grid_height=1,revision=revision+1,updated_timestamp=statement_timestamp()
 where company_id=$1::uuid and resource_type='company_explorer_folder' and resource_id=$2::uuid`,
-		company.CompanyID, target.FolderID, ProcessMapMaxCoordinate); err != nil {
+		company.CompanyID, target.FolderID); err != nil {
 		t.Fatal(err)
 	}
 	readSnapshot := func() string {
@@ -199,8 +204,8 @@ select jsonb_build_object(
 	}
 	before := readSnapshot()
 	_, err = repo.MoveCompanyExplorerFolder(company.CompanyID, moving.FolderID, &target.FolderID, 0, admin.UserID, admin.UserID)
-	if !errors.Is(err, ErrInvalid) {
-		t.Fatalf("move error = %v, want %v", err, ErrInvalid)
+	if !errors.Is(err, ErrProcessMapContainment) {
+		t.Fatalf("move error = %v, want %v", err, ErrProcessMapContainment)
 	}
 	if after := readSnapshot(); after != before {
 		t.Fatalf("failed automatic placement changed durable state:\nbefore=%s\nafter=%s", before, after)

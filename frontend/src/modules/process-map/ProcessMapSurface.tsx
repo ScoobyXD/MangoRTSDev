@@ -628,7 +628,6 @@ function placementBounds(placement: ProcessMapPlacement): ProcessMapBounds {
 }
 
 const PROCESS_MAP_LABEL_INSET_PX = 6;
-const PROCESS_MAP_FOLDER_TITLE_BAND_HEIGHT = 6;
 const PROCESS_MAP_UNCLIPPED_TEXT_BOX: [number, number, number, number] = [0, 0, -1, -1];
 
 function processMapPlacementLabelContentBox(
@@ -650,11 +649,30 @@ function processMapFolderLabelY(
   pixelsPerGridUnit: number,
   editing: boolean,
   labelSize: number,
+  childTop: number | undefined,
 ): number | null {
   const scale = Math.max(Number.MIN_VALUE, pixelsPerGridUnit);
-  if (PROCESS_MAP_FOLDER_TITLE_BAND_HEIGHT * scale < labelSize) return null;
+  const titleBandHeight = Math.min(
+    Math.max(1, Math.floor((bounds.max_y - bounds.min_y) / 8)),
+    childTop === undefined ? Number.POSITIVE_INFINITY : childTop - bounds.min_y,
+  );
+  if (titleBandHeight * scale < labelSize) return null;
   const preferredOffset = (editing ? 18 : 10) / scale;
-  return bounds.min_y + Math.min(PROCESS_MAP_FOLDER_TITLE_BAND_HEIGHT / 2, preferredOffset);
+  return bounds.min_y + Math.min(titleBandHeight / 2, preferredOffset);
+}
+
+function processMapChildTopByFolder(
+  placements: Iterable<ProcessMapPlacement>,
+  transform: ProcessMapPlacementTransform | null,
+): Map<string, number> {
+  const childTopByFolder = new Map<string, number>();
+  for (const placement of placements) {
+    if (placement.restricted || !placement.map_parent_folder_id) continue;
+    const geometry = processMapPlacementGeometryForTransform(placement, transform);
+    const parentID = placement.map_parent_folder_id;
+    childTopByFolder.set(parentID, Math.min(childTopByFolder.get(parentID) ?? Number.POSITIVE_INFINITY, geometry.grid_y));
+  }
+  return childTopByFolder;
 }
 
 function scoreCardTextColor(rating: "green" | "yellow" | "red" | null | undefined): [number, number, number, number] {
@@ -760,6 +778,7 @@ function renderTileSubLayers(
 ): Layer[] {
   if (!props.data) return [];
   const tile = tileBounds(props.tile.boundingBox);
+  const childTopByFolder = processMapChildTopByFolder(props.data.placements, null);
   const folderShadows: PolygonDatum[] = [];
   const folderSurfaces: PolygonDatum[] = [];
   const fences: PathDatum[] = [];
@@ -809,7 +828,7 @@ function renderTileSubLayers(
     if (lod !== "whole") {
       const labelSize = lod === "editing" ? 13 : 11;
       const folderLabelY = placement.resource_type === "company_explorer_folder"
-        ? processMapFolderLabelY(bounds, options.settledPixelsPerGridUnit, lod === "editing", labelSize)
+        ? processMapFolderLabelY(bounds, options.settledPixelsPerGridUnit, lod === "editing", labelSize, childTopByFolder.get(placement.resource_id))
         : null;
       if (placement.resource_type !== "company_explorer_folder" || folderLabelY !== null) {
         const labelPosition: [number, number] = placement.resource_type === "company_explorer_folder"
@@ -884,7 +903,9 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
   if (options.editOverlay.connectionPreview) {
     const start = processMapOutputAnchor(options.editOverlay.connectionPreview.source);
     const end = options.editOverlay.connectionPreview.point;
-    const route = defaultProcessMapRoutePoints(start, end);
+    const route = defaultProcessMapRoutePoints(options.editOverlay.connectionPreview.source, {
+      grid_x: end.x, grid_y: end.y, grid_width: 0, grid_height: 0,
+    });
     paths.push(...staticTracePaths(
       [processMapOrthogonalPathPoints(start, route, end)],
       PROCESS_MAP_TRACE_WIDTH_PX,
@@ -897,6 +918,7 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
 }
 
 function editPlacementLayers(options: ProcessMapLayerBuildOptions): { backdrops: Layer[]; foreground: Layer[] } {
+  const childTopByFolder = processMapChildTopByFolder(options.presentation.placements.values(), options.editOverlay.placementTransform);
   const folderShadows: PolygonDatum[] = [];
   const folderSurfaces: PolygonDatum[] = [];
   const processShadows: PolygonDatum[] = [];
@@ -945,7 +967,7 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): { backdrops:
     if (lod !== "whole") {
       const labelSize = lod === "editing" ? 13 : 11;
       const folderLabelY = placement.resource_type === "company_explorer_folder"
-        ? processMapFolderLabelY(bounds, options.settledPixelsPerGridUnit, lod === "editing", labelSize)
+        ? processMapFolderLabelY(bounds, options.settledPixelsPerGridUnit, lod === "editing", labelSize, childTopByFolder.get(placement.resource_id))
         : null;
       if (placement.resource_type !== "company_explorer_folder" || folderLabelY !== null) {
         const labelPosition: [number, number] = [
@@ -1948,8 +1970,8 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     const canonicalGeneration = canonicalGenerationRef.current;
     const operationGeneration = nextOperation(operationKey);
     const routePoints = defaultProcessMapRoutePoints(
-      processMapOutputAnchor(current.source),
-      processMapInputAnchor(target),
+      current.source,
+      target,
     );
     try {
       const envelope = await postProcessMapRelationship(apiBase, companyID, current.source, target, routePoints);
