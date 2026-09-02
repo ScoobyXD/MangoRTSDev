@@ -899,10 +899,10 @@ export const MangoTiptapEditor: React.FC<MangoTiptapEditorProps> = ({
   const [selectionAction, setSelectionAction] = useState<MangoTiptapSelectionAction | null>(null);
   const [creatingSelectionNode, setCreatingSelectionNode] = useState(false);
   const [creatingSelectionActionItem, setCreatingSelectionActionItem] = useState<ActionItemColor | null>(null);
-  const actionItemOwner = JSON.stringify([companyID, resourceType, resourceID, documentID]);
+  const actionItemOwner = useMemo(() => ({ companyID, resourceType, resourceID, documentID }), [companyID, resourceType, resourceID, documentID]);
   const actionItemOwnerRef = useRef(actionItemOwner);
   actionItemOwnerRef.current = actionItemOwner;
-  const [pendingActionItem, setPendingActionItem] = useState<{ selection: MangoTiptapSelectionAction; color: ActionItemColor; owner: string } | null>(null);
+  const [pendingActionItem, setPendingActionItem] = useState<{ selection: MangoTiptapSelectionAction; color: ActionItemColor; owner: typeof actionItemOwner } | null>(null);
   const [renderedAnnotations, setRenderedAnnotations] = useState<readonly MangoTiptapAnnotation[]>(annotations);
   const [tableActive, setTableActive] = useState(false);
   const [activeTableFrame, setActiveTableFrame] = useState<MangoTiptapTableFrame | null>(null);
