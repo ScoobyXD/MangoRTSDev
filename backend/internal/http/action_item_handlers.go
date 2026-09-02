@@ -23,11 +23,13 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		var request struct {
-			CompanyID string  `json:"company_id"`
-			BodyText  string  `json:"body_text"`
-			Name      string  `json:"name"`
-			Color     *string `json:"color"`
-			Source    *struct {
+			CompanyID         string  `json:"company_id"`
+			BodyText          string  `json:"body_text"`
+			Name              string  `json:"name"`
+			Color             *string `json:"color"`
+			AnalysisDueDate   string  `json:"analysis_due_date"`
+			CompletionDueDate string  `json:"completion_due_date"`
+			Source            *struct {
 				ResourceType string `json:"resource_type"`
 				ResourceID   string `json:"resource_id"`
 			} `json:"source"`
@@ -57,6 +59,7 @@ func (s *Server) handleActionItems(w http.ResponseWriter, r *http.Request) {
 			CompanyID: companyID, Name: request.Name, BodyText: request.BodyText,
 			Color: request.Color, CreatedByUserID: actor.User.UserID,
 			SourceResourceType: sourceType, SourceResourceID: sourceID,
+			AnalysisDueDate: request.AnalysisDueDate, CompletionDueDate: request.CompletionDueDate,
 		})
 		if errors.Is(err, store.ErrPrincipalNotInCompany) {
 			writeError(w, http.StatusForbidden, "company_access_denied")

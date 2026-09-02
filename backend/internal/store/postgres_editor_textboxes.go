@@ -492,24 +492,8 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 	if err := updatePostgresEditorTextboxTx(ctx, tx, storage, input.Document, nextBody, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if input.Document.ResourceType == EntityTypeHuddleNode || input.Document.ResourceType == EntityTypeHuddleLogicGate {
-		changed, err := syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document)
-		if err != nil {
-			return EditorJSONCommit{}, err
-		}
-		if changed {
-			boardIDs, err := postgresHuddleActionItemBoardIDsForResourceTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID)
-			if err != nil {
-				return EditorJSONCommit{}, err
-			}
-			nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, input.Document.CompanyID, boardIDs)
-			if err != nil {
-				return EditorJSONCommit{}, err
-			}
-			if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, input.Document.CompanyID, boardIDs, nodeIDs); err != nil {
-				return EditorJSONCommit{}, err
-			}
-		}
+	if err := r.syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
+		return EditorJSONCommit{}, err
 	}
 	reason := "tiptap_json_committed"
 	if merged {
@@ -596,24 +580,8 @@ func deletePostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONDelete
 		input.Document.DocumentID, nextRevision, now); err != nil {
 		return EditorJSONCommit{}, err
 	}
-	if input.Document.ResourceType == EntityTypeHuddleNode || input.Document.ResourceType == EntityTypeHuddleLogicGate {
-		changed, err := syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document)
-		if err != nil {
-			return EditorJSONCommit{}, err
-		}
-		if changed {
-			boardIDs, err := postgresHuddleActionItemBoardIDsForResourceTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceType, input.Document.ResourceID)
-			if err != nil {
-				return EditorJSONCommit{}, err
-			}
-			nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, input.Document.CompanyID, boardIDs)
-			if err != nil {
-				return EditorJSONCommit{}, err
-			}
-			if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, input.Document.CompanyID, boardIDs, nodeIDs); err != nil {
-				return EditorJSONCommit{}, err
-			}
-		}
+	if err := r.syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, input.Document); err != nil {
+		return EditorJSONCommit{}, err
 	}
 	if input.Document.ResourceType == EntityTypeNode {
 		if err := retireNodeTextboxAttachmentRelationshipsTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceID, input.Document.DocumentID); err != nil {

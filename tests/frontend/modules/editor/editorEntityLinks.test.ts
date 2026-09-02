@@ -260,7 +260,7 @@ test("the shared Tiptap selection toolbar exposes one keyboard-operable yellow/r
   assert.match(source, /aria-label=\{`Create \$\{color\} Action Item from highlighted text\.`\}/);
   assert.match(source, /<ActionItemIcon size=\{16\} \/>/);
   assert.doesNotMatch(source, /label\.slice\(0, 1\)/);
-  assert.match(source, /createActionItemEntityFromSelection\(\{[\s\S]*source: \{ resourceType, resourceID \}[\s\S]*\}, action\.quote, color\)/);
+  assert.match(source, /createActionItemEntityFromSelection\(\{[\s\S]*source: \{ resourceType, resourceID \}[\s\S]*\}, action\.quote, color, dueDates\)/);
   assert.match(previewHost, /<KPIEditorPopup[\s\S]*item=\{kpiSource\}[\s\S]*canEdit/);
   assert.match(previewHost, /kpi_id: source\.resource_id,[\s\S]*logic_gate_id: source\.parent_resource_id/);
   assert.match(css, /\.mango-editor-action-item--yellow[\s\S]*animation: mango-editor-action-item-pulse 2s/);
@@ -305,13 +305,14 @@ test("selection Action Item creation sends the exact body, normalized name, chos
         },
       } as T;
     },
-  }, "  Escalate\n delayed   shipment  ", "yellow");
+  }, "  Escalate\n delayed   shipment  ", "yellow", { completionDueDate: "2026-09-10" });
 
   assert.deepEqual(submittedJSON, {
     company_id: "company-1",
     body_text: "  Escalate\n delayed   shipment  ",
     name: "Escalate delayed shipment",
     color: "yellow",
+    completion_due_date: "2026-09-10",
     source: { resource_type: "huddle_node", resource_id: "huddle-node-1" },
   });
   assert.deepEqual(entity, {
@@ -323,6 +324,8 @@ test("selection Action Item creation sends the exact body, normalized name, chos
     actionItemColor: "yellow",
   });
   assert.equal(normalizeEditorSelectionActionItemName(`  ${"x".repeat(240)}  `), "x".repeat(200));
+  assert.equal(normalizeEditorSelectionActionItemName("🚦".repeat(240)), "🚦".repeat(200));
+  assert.equal(normalizeEditorSelectionActionItemName("完成".repeat(120)), "完成".repeat(100));
 });
 
 test("legacy entity chips preserve identity, type styling, and routes", () => {

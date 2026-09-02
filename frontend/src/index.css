@@ -1158,6 +1158,18 @@ button, input, textarea, select {
   white-space: nowrap;
 }
 
+.mango-editor-entity-link[data-mango-action-item="true"] {
+  max-width: 100%;
+  white-space: normal;
+}
+
+.mango-editor-entity-link[data-mango-action-item="true"] .mango-editor-entity-label {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @keyframes mango-editor-action-item-pulse {
   0%, 100% {
     box-shadow: inset 1px 1px 0 rgba(255,255,255,0.84), 0 2px 7px var(--mango-entity-chip-shadow), 0 0 0 0 transparent;

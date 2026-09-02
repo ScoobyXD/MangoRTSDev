@@ -123,7 +123,7 @@ func TestMemoryHuddleRelationshipRemovalAndBoardMoveInvalidateOldAndNewBoards(t 
 	}
 	oldBoard, oldNode := createBoardAndNode("Old")
 	newBoard, newNode := createBoardAndNode("New")
-	item, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Move me", CreatedByUserID: user.UserID})
+	item, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Move me", CreatedByUserID: user.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}

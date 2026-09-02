@@ -215,6 +215,11 @@ func (r *MemoryRepo) RestoreRecycleBinItems(companyID, deletedByUserID string, i
 		return RecycleBinRestoreResult{}, ErrNotFound
 	}
 	r.restoreRecycleSnapshotLocked(restoredState)
+	for relationshipKey, relationship := range r.entityRelationships {
+		if _, exists := r.entities[key(relationship.CompanyID, relationship.EntityID)]; !exists {
+			delete(r.entityRelationships, relationshipKey)
+		}
+	}
 	now := time.Now().UTC()
 	for _, target := range targets {
 		if target.Kind != EntityTypeNode && target.Kind != EntityTypeProject {

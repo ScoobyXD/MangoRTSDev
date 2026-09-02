@@ -1,5 +1,6 @@
 import React from "react";
 import { ActionItemIcon } from "../../icons/ActionItemIcon.js";
+import { getUniversalStatusGroupValue } from "../grouping/universalStatusGrouping.js";
 import {
   ActionItemInlineFields,
   type ActionItemInlineFieldID,
@@ -30,6 +31,7 @@ export function ActionItemRow<Item extends ActionItemRowItem>({
   renderCompletionDueDate,
 }: ActionItemRowProps<Item>) {
   const color = item.color?.trim().toLowerCase();
+  const completed = getUniversalStatusGroupValue(item.status ?? "").key === "done";
   const pulseClassName = color === "red" || color === "yellow" ? `mango-editor-action-item--${color}` : undefined;
   return (
     <div
@@ -38,7 +40,8 @@ export function ActionItemRow<Item extends ActionItemRowItem>({
       data-my-work-row="action-item"
       data-action-item-color={color || "none"}
       data-my-work-action-item-color={color || "none"}
-      style={actionItemRowStyle(color)}
+      data-action-item-completed={completed}
+      style={actionItemRowStyle(completed ? "green" : color)}
     >
       <button
         type="button"
@@ -97,16 +100,20 @@ function actionItemRowStyle(color: string | undefined): React.CSSProperties {
     display: "flex",
     alignItems: "center",
     gap: 6,
-    border: color === "red"
-      ? "1px solid rgba(239,68,68,0.24)"
-      : color === "yellow"
-        ? "1px solid rgba(202,138,4,0.26)"
-        : resourceButtonStyle.border,
-    background: color === "red"
-      ? "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(254,226,226,0.84))"
-      : color === "yellow"
-        ? "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(254,249,195,0.86))"
-        : resourceButtonStyle.background,
+    border: color === "green"
+      ? "1px solid rgba(34,197,94,0.30)"
+      : color === "red"
+        ? "1px solid rgba(239,68,68,0.24)"
+        : color === "yellow"
+          ? "1px solid rgba(202,138,4,0.26)"
+          : resourceButtonStyle.border,
+    background: color === "green"
+      ? "linear-gradient(145deg, rgba(240,253,244,0.98), rgba(187,247,208,0.86))"
+      : color === "red"
+        ? "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(254,226,226,0.84))"
+        : color === "yellow"
+          ? "linear-gradient(145deg, rgba(255,255,255,0.96), rgba(254,249,195,0.86))"
+          : resourceButtonStyle.background,
     cursor: "default",
     padding: "5px 7px 5px 5px",
   };

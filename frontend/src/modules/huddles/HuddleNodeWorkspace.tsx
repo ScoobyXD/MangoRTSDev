@@ -308,6 +308,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
         selectionEnd: selectionAnchor?.endOffset,
       });
       setChats((current) => [...current, created]);
+      onActionItemsChanged();
       setChatDrafts((current) => ({ ...current, [textBoxID]: "" }));
       setChatDraftEntityLinks((current) => ({ ...current, [textBoxID]: [] }));
       setChatReplyTargets((current) => ({ ...current, [textBoxID]: "" }));
@@ -341,6 +342,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
         mentionedGroupIDs: existing.mentioned_group_ids,
       });
       setChats((current) => current.map((item) => item.chat_id === chatID ? updated : item));
+      onActionItemsChanged();
     } catch (cause) {
       onError(errorMessage(cause, "Could not edit the chat message"));
       throw cause;
@@ -353,6 +355,7 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
     try {
       await deleteHuddleNodeChat(requestJSON, { companyID, huddleNodeID, chatID, revision: existing.revision });
       setChats((current) => current.filter((item) => item.chat_id !== chatID));
+      onActionItemsChanged();
     } catch (cause) {
       onError(errorMessage(cause, "Could not delete the chat message"));
     }
@@ -506,6 +509,8 @@ export const HuddleNodeWorkspace: React.FC<HuddleNodeWorkspaceProps> = ({
                       apiBase={apiBase}
                       companyID={companyID}
                       entityRequestJSON={requestJSON}
+                      actionItemSource={{ resourceType: "huddle_node", resourceID: huddleNodeID }}
+                      onActionItemCreated={onActionItemsChanged}
                       messages={textBoxChats}
                       hideHeader
                       selectionAnchor={selectionAnchor}

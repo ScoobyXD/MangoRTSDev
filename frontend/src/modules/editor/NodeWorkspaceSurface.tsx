@@ -3566,6 +3566,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
                     apiBase={apiBase}
                     companyID={companyID}
                     entityRequestJSON={requestJSON}
+                    actionItemSource={{ resourceType: "node", resourceID: nodeID }}
                     messages={messages}
                     hideHeader
                     selectionAnchor={selectionAnchor}

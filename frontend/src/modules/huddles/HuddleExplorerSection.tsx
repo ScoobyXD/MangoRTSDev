@@ -15,7 +15,7 @@ type HuddleLogicGate = { company_id: string; huddle_logic_gate_id: string; heade
 type DragEntry = { kind: "folder" | "item"; id: string };
 type ContextMenuState =
   | { kind: "folder"; folder: Folder; x: number; y: number }
-  | { kind: "item"; item: Item; x: number; y: number };
+  | { kind: "item" | "move-item"; item: Item; x: number; y: number };
 type ConfirmationState =
   | { kind: "folder"; folder: Folder; position: ConfirmActionMenuPosition }
   | { kind: "item"; item: Item; position: ConfirmActionMenuPosition };
@@ -32,15 +32,18 @@ function readDraggedEntry(dataTransfer: DataTransfer): DragEntry | null {
   return null;
 }
 
-function folderIsDescendant(folders: Folder[], candidateFolderID: string, ancestorFolderID: string): boolean {
-  let cursor = candidateFolderID.trim();
+function folderPath(folders: Folder[], folderID: string): Folder[] {
+  let cursor = folderID.trim();
+  const path: Folder[] = [];
   const visited = new Set<string>();
   while (cursor && !visited.has(cursor)) {
-    if (cursor === ancestorFolderID) return true;
     visited.add(cursor);
-    cursor = folders.find((folder) => folder.folder_id === cursor)?.parent_folder_id?.trim() ?? "";
+    const folder = folders.find((candidate) => candidate.folder_id === cursor);
+    if (!folder) break;
+    path.push(folder);
+    cursor = folder.parent_folder_id?.trim() ?? "";
   }
-  return false;
+  return path.reverse();
 }
 
 export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: string; currentUserID: string }> = ({ apiBase, companyID, currentUserID }) => {
@@ -196,7 +199,8 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
     await requestJSON(`/v1/huddle-explorer/items/${encodeURIComponent(item.item_id)}`, { method: "PUT", json: { company_id: companyID, parent_folder_id: parentFolderID } });
   };
   const moveEntry = async (entry: DragEntry, parentFolderID: string) => {
-    if (entry.kind === "folder" && parentFolderID && folderIsDescendant(folders, parentFolderID, entry.id)) return;
+    const destinationPath = folderPath(folders, parentFolderID);
+    if (entry.kind === "folder" && destinationPath.some((folder) => folder.folder_id === entry.id)) return;
     await runMutation(async () => {
       if (entry.kind === "folder") {
         const folder = folders.find((candidate) => candidate.folder_id === entry.id);
@@ -208,7 +212,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
         await moveItem(item, parentFolderID);
       }
       emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
-      if (parentFolderID) setExpanded((current) => new Set([...current, parentFolderID]));
+      if (parentFolderID) setExpanded((current) => new Set([...current, ...destinationPath.map((folder) => folder.folder_id)]));
       await load();
     }, "Could not move Huddle Boards entry");
   };
@@ -247,7 +251,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
   };
   const draggedEntry = (event: React.DragEvent<HTMLElement>) => readDraggedEntry(event.dataTransfer) ?? draggingEntryRef.current;
   const canDropInsideFolder = (entry: DragEntry | null, folderID: string) => Boolean(entry)
-    && !(entry?.kind === "folder" && folderIsDescendant(folders, folderID, entry.id));
+    && !(entry?.kind === "folder" && folderPath(folders, folderID).some((folder) => folder.folder_id === entry.id));
   const folderIsEmpty = (folder: Folder) => !folders.some((candidate) => (candidate.parent_folder_id ?? "") === folder.folder_id)
     && !items.some((candidate) => (candidate.parent_folder_id ?? "") === folder.folder_id);
 
@@ -376,7 +380,19 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
         <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} ariaLabel="Huddle Board actions" onClose={() => setContextMenu(null)} width={202}>
           <button type="button" style={menuButtonStyle} onClick={() => { openItemInNewTab(contextMenu.item); setContextMenu(null); }}>Open in new browser tab</button>
           <button type="button" style={menuButtonStyle} onClick={() => { const item = contextMenu.item; setContextMenu(null); void renameItem(item); }}>Rename</button>
+          <button type="button" aria-haspopup="menu" style={menuButtonStyle} onClick={() => setContextMenu({ ...contextMenu, kind: "move-item" })}>Move to…</button>
           <button type="button" style={{ ...menuButtonStyle, color: "#be123c" }} onClick={() => { setConfirmation({ kind: "item", item: contextMenu.item, position: { x: contextMenu.x, y: contextMenu.y } }); setContextMenu(null); }}>Remove from Huddle Boards</button>
+        </FrameRightClickMenu>
+      )}
+      {contextMenu?.kind === "move-item" && (
+        <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} ariaLabel="Move Huddle Board" onClose={() => setContextMenu(null)} width={260} overflow="auto">
+          <div style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700 }}>Move “{contextMenu.item.name}” to</div>
+          <button type="button" disabled={!contextMenu.item.parent_folder_id} style={menuButtonStyle} onClick={() => { const item = contextMenu.item; setContextMenu(null); void moveEntry({ kind: "item", id: item.item_id }, ""); }}>Huddle Boards (top level)</button>
+          {folders.map((folder) => (
+            <button key={folder.folder_id} type="button" disabled={contextMenu.item.parent_folder_id === folder.folder_id} style={menuButtonStyle} onClick={() => { const item = contextMenu.item; setContextMenu(null); void moveEntry({ kind: "item", id: item.item_id }, folder.folder_id); }}>
+              {folderPath(folders, folder.folder_id).map((ancestor) => ancestor.name).join(" / ")}
+            </button>
+          ))}
         </FrameRightClickMenu>
       )}
       {contextMenu?.kind === "folder" && (

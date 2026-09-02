@@ -3604,6 +3604,7 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
                                 apiBase={apiBase}
                                 companyID={companyID}
                                 entityRequestJSON={attachmentRequestJSON}
+                                actionItemSource={{ resourceType: "project", resourceID: projectID }}
                                 messages={chatMessagesByBlockID.get(block.id) ?? []}
                                 selectionAnchor={chatSelectionAnchors[block.id]}
                                 composerDestination={chatSelectionAnchors[block.id]?.source === "email" ? {

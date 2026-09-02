@@ -236,7 +236,7 @@ export function normalizeEditorSelectionNodeTitle(value: string): string {
 }
 
 export function normalizeEditorSelectionActionItemName(value: string): string {
-  return normalizeEditorSelectionNodeTitle(value).slice(0, 200).trim();
+  return Array.from(value.replace(/\s+/g, " ").trim()).slice(0, 200).join("").trim();
 }
 
 export function readActiveEntityLinkDraft(value: string, caretIndex: number | null): ActiveEntityLinkDraft | null {
@@ -342,6 +342,7 @@ export async function createActionItemEntityFromSelection(
   },
   selectedText: string,
   color: ActionItemColor,
+  dueDates: { analysisDueDate?: string; completionDueDate?: string },
 ): Promise<EditorEntityLink> {
   const name = normalizeEditorSelectionActionItemName(selectedText);
   if (!name) throw new Error("selection_action_item_name_empty");
@@ -350,6 +351,7 @@ export async function createActionItemEntityFromSelection(
     bodyText: selectedText,
     name,
     color,
+    ...dueDates,
     source: context.source,
   });
   return {

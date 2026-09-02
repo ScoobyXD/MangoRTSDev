@@ -15,7 +15,7 @@ function installGlobal(name: string, value: unknown, restores: Restore[]) {
   });
 }
 
-function actionItem(entityID: string, name: string): Entity {
+function actionItem(entityID: string, name: string, color = "red", status = "in_progress"): Entity {
   return {
     company_id: "company-1",
     entity_id: entityID,
@@ -39,12 +39,95 @@ function actionItem(entityID: string, name: string): Entity {
       {
         company_id: "company-1", entity_field_id: `${entityID}-color`, entity_id: entityID,
         system_key: "color", name: "Color", field_type: "color", config: {},
-        value: "red", position: 2, created_timestamp: "2026-08-28T12:00:00Z", updated_timestamp: "2026-08-28T12:00:00Z",
+        value: color, position: 2, created_timestamp: "2026-08-28T12:00:00Z", updated_timestamp: "2026-08-28T12:00:00Z",
+      },
+      {
+        company_id: "company-1", entity_field_id: `${entityID}-status`, entity_id: entityID,
+        system_key: "status", name: "Status", field_type: "choice", config: {},
+        value: status, position: 3, created_timestamp: "2026-08-28T12:00:00Z", updated_timestamp: "2026-08-28T12:00:00Z",
       },
     ],
     source: { resource_type: "huddle_node", resource_id: "node-1", name: "Weekly Huddle" },
   } as Entity;
 }
+
+test("Huddle Board hides completed rows until checked and keeps green completion separate from light color", async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+    url: "http://localhost/", pretendToBeVisual: true,
+  });
+  const restores: Restore[] = [];
+  for (const name of [
+    "window", "document", "navigator", "self", "Node", "Element", "HTMLElement", "HTMLButtonElement",
+    "HTMLInputElement", "Event", "EventTarget", "MouseEvent", "CustomEvent", "MutationObserver",
+  ] as const) {
+    installGlobal(name, name === "window" || name === "self" ? dom.window : name === "document"
+      ? dom.window.document : (dom.window as unknown as Record<string, unknown>)[name], restores);
+  }
+  installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
+  installGlobal("localStorage", dom.window.localStorage, restores);
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  let mountedRoot: { unmount(): void } | null = null;
+  try {
+    const [{ createRoot }, { HuddleActionItemsPanel }] = await Promise.all([
+      import("react-dom/client"), import("../../../../frontend/src/modules/huddles/HuddleActionItemsPanel.tsx"),
+    ]);
+    const items = [
+      actionItem("open-red", "Open red"),
+      actionItem("done-red", "Done red", "red", "done"),
+      actionItem("done-yellow", "Done yellow", "yellow", "completed"),
+    ];
+    const reads: string[] = [];
+    const requestJSON = <T,>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> => {
+      assert.ok(!init?.method, "temporary completion filtering must not write a saved view");
+      reads.push(path);
+      return Promise.resolve((path.startsWith("/v1/saved-views?") ? { saved_views: [{
+        saved_view_id: "view-1", surface: "huddle_logic_gate_action_items", groupings: [{ field: "color", direction: "desc" }], settings: {},
+      }] } : { action_items: items }) as T);
+    };
+    const container = dom.window.document.getElementById("root")!;
+    const root = createRoot(container);
+    mountedRoot = root;
+    const panel = (resourceID: string, view: "huddle_logic_gate" | "huddle_node_created" = "huddle_logic_gate") => (
+      <HuddleActionItemsPanel companyID="company-1" currentUserID="user-1"
+        scope={{ resourceType: view === "huddle_logic_gate" ? "huddle_logic_gate" : "huddle_node", resourceID }}
+        view={view} companyUsers={[]} requestJSON={requestJSON} refreshToken={0} />
+    );
+    await act(async () => root.render(panel("board-1")));
+    const checkbox = container.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    assert.ok(checkbox);
+    assert.equal(checkbox.checked, false);
+    assert.equal(checkbox.closest("label")?.textContent?.trim(), "Show completed");
+    assert.deepEqual([...container.querySelectorAll<HTMLElement>("[data-action-item-row]")].map((row) => row.dataset.actionItemRow), ["open-red"]);
+    const groupingControl = container.querySelector('button[aria-label="Group, order, and choose Action Item row fields"]');
+    assert.ok(groupingControl);
+    assert.equal(checkbox.closest("label")?.nextElementSibling?.contains(groupingControl), true, "completion toggle sits beside the existing grouping control");
+    const initialReads = reads.length;
+    await act(async () => checkbox.click());
+    assert.equal(reads.length, initialReads, "completion filtering uses the loaded Board rollup");
+    assert.deepEqual([...container.querySelectorAll<HTMLElement>("[data-huddle-action-item-group-key]")].map((group) => group.dataset.huddleActionItemGroupKey), ["yellow", "red"]);
+    for (const color of ["red", "yellow"]) {
+      const row = container.querySelector<HTMLElement>(`[data-action-item-row="done-${color}"]`);
+      assert.ok(row);
+      assert.equal(row.dataset.actionItemCompleted, "true");
+      assert.equal(row.dataset.actionItemColor, color);
+      assert.match(row.style.background, /187,\s*247,\s*208/);
+      assert.ok(row.querySelector(`.mango-editor-action-item--${color} .mango-editor-action-item-icon`));
+    }
+    assert.equal(container.querySelector<HTMLElement>('[data-action-item-row="open-red"]')?.dataset.actionItemCompleted, "false");
+    await act(async () => checkbox.click());
+    assert.equal(container.querySelector('[data-action-item-row="done-red"]'), null);
+    await act(async () => checkbox.click());
+    await act(async () => root.render(panel("board-2")));
+    assert.equal(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked, false, "opening another Board defaults to incomplete items");
+    await act(async () => root.render(panel("node-1", "huddle_node_created")));
+    assert.equal(container.querySelector('input[type="checkbox"]'), null);
+    assert.equal(container.querySelectorAll("[data-action-item-row]").length, 3, "created-in-Node history still includes completed items");
+  } finally {
+    if (mountedRoot) await act(async () => mountedRoot?.unmount());
+    for (const restore of restores.reverse()) restore();
+    dom.window.close();
+  }
+});
 
 test("Huddle Action Item panel honors a refresh during initial load and ignores the stale response", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {

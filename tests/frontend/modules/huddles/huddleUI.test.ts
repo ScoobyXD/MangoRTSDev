@@ -270,7 +270,7 @@ test("Huddle UI uses the routed page, shared Huddle relationship cards, picker, 
   assert.match(explorer, /Remove from Huddle Boards/);
   assert.match(explorer, /Delete empty folder/);
   assert.match(explorer, /HUDDLE_EXPLORER_DRAG_MIME/);
-  assert.match(explorer, /folderIsDescendant/);
+  assert.match(explorer, /folderPath/);
   assert.doesNotMatch(explorer, /<select|Move \$\{folder\.name\}|Move \$\{item\.name\}/);
   assert.match(surface, /name: "New Huddle Node"/);
   assert.doesNotMatch(surface, /window\.prompt\("Huddle Node name"/);

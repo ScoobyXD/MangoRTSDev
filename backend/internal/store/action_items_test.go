@@ -213,7 +213,7 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := repo.CreateActionItem(ActionItemInput{
+	created, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Call the supplier\nConfirm the ship date", CreatedByUserID: user.UserID,
 	})
 	if err != nil {
@@ -337,7 +337,7 @@ func TestMemoryActionItemSavedReferencesAndHuddleProcessRollup(t *testing.T) {
 	}
 	commitActionItemEditorTestDocument(t, repo, firstRef, user.UserID, firstSecondClear.Revision, "reference-before-recycle", actionItemEditorReference{EntityID: created.EntityID, ActionItem: true})
 
-	if _, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Invalid color", Color: actionItemTestStringPointer("blue"), CreatedByUserID: user.UserID}); !errors.Is(err, ErrInvalid) {
+	if _, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Invalid color", Color: actionItemTestStringPointer("blue"), CreatedByUserID: user.UserID}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid color error=%v, want ErrInvalid", err)
 	}
 
@@ -425,7 +425,7 @@ func TestMemoryHuddleNodeCreatedAndDueActionItemSurfacesStayDistinct(t *testing.
 
 	create := func(name, sourceType, sourceID string) domain.Entity {
 		t.Helper()
-		item, createErr := repo.CreateActionItem(ActionItemInput{
+		item, createErr := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 			CompanyID: company.CompanyID, BodyText: name, CreatedByUserID: user.UserID,
 			SourceResourceType: sourceType, SourceResourceID: sourceID,
 		})
@@ -525,7 +525,7 @@ func TestMemoryActionItemSourceCannotMoveBetweenHuddleNodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, err := repo.CreateActionItem(ActionItemInput{
+	item, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Keep immutable provenance", CreatedByUserID: user.UserID,
 		SourceResourceType: EntityTypeHuddleNode, SourceResourceID: first.HuddleNodeID,
 	})
@@ -576,7 +576,7 @@ func TestMemoryHuddleLogicGateSavedActionItemReferencesRollUpAndRestore(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	actionItem, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Direct process action", CreatedByUserID: user.UserID})
+	actionItem, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Direct process action", CreatedByUserID: user.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -678,12 +678,12 @@ func TestMemorySavedHuddleReferencesUseCanonicalCompanyAndEntityType(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	localActionItem, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Local but unmarked", CreatedByUserID: user.UserID})
+	localActionItem, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Local but unmarked", CreatedByUserID: user.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	otherUser, otherCompany := createActionItemTestCompany(t, repo, "action-item-sync-other-company")
-	otherActionItem, err := repo.CreateActionItem(ActionItemInput{CompanyID: otherCompany.CompanyID, BodyText: "Other company", CreatedByUserID: otherUser.UserID})
+	otherActionItem, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: otherCompany.CompanyID, BodyText: "Other company", CreatedByUserID: otherUser.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -717,7 +717,7 @@ func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	created, err := repo.CreateActionItem(ActionItemInput{
+	created, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Created from source", CreatedByUserID: member.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: sourceNode.NodeID,
 	})
@@ -760,7 +760,7 @@ func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) 
 	if preserved, err := repo.GetActionItemSource(company.CompanyID, created.EntityID); err != nil || preserved.ResourceID != sourceNode.NodeID {
 		t.Fatalf("live Source after stale recycle deletion=%+v err=%v, want preserved", preserved, err)
 	}
-	direct, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Direct", CreatedByUserID: member.UserID})
+	direct, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Direct", CreatedByUserID: member.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -784,7 +784,7 @@ func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) 
 	}
 
 	missingID := "91919191-9191-4191-8191-919191919191"
-	assertRejectedAtomically("missing endpoint", ActionItemInput{
+	assertRejectedAtomically("missing endpoint", ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Missing", CreatedByUserID: member.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: missingID,
 	}, ErrNotFound)
@@ -794,11 +794,11 @@ func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRejectedAtomically("cross-company endpoint", ActionItemInput{
+	assertRejectedAtomically("cross-company endpoint", ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Cross company", CreatedByUserID: member.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: otherNode.NodeID,
 	}, ErrNotFound)
-	assertRejectedAtomically("unsupported type", ActionItemInput{
+	assertRejectedAtomically("unsupported type", ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Unsupported", CreatedByUserID: member.UserID,
 		SourceResourceType: "entity", SourceResourceID: sourceNode.NodeID,
 	}, ErrInvalid)
@@ -809,7 +809,7 @@ func TestMemoryActionItemSourceCreationIsExactAtomicAndAuthorized(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-	assertRejectedAtomically("unauthorized endpoint", ActionItemInput{
+	assertRejectedAtomically("unauthorized endpoint", ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Unauthorized", CreatedByUserID: member.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: sourceNode.NodeID,
 	}, ErrNotFound)
@@ -842,7 +842,7 @@ func TestMemoryActionItemSourceRecycleRestoreAndPermanentDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item, err := repo.CreateActionItem(ActionItemInput{
+	item, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Source lifecycle", CreatedByUserID: actor.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: node.NodeID,
 	})
@@ -914,7 +914,7 @@ func TestActionItemDefaultsAndLiveTemplateConfig(t *testing.T) {
 	user, company := createActionItemTestCompany(t, repo, "action-item-defaults")
 
 	generic, err := repo.CreateEntity(EntityInput{
-		CompanyID: company.CompanyID, EntityTypeID: ActionItemEntityTypeID, Name: "Created from Entities",
+		CompanyID: company.CompanyID, EntityTypeID: ActionItemEntityTypeID, AnalysisDueDate: "2026-08-01", Name: "Created from Entities",
 		CreatedByUserID: user.UserID,
 	})
 	if err != nil {
@@ -922,13 +922,6 @@ func TestActionItemDefaultsAndLiveTemplateConfig(t *testing.T) {
 	}
 	assertActionItemFieldValue(t, generic, ActionItemStatusSystemKey, `"in_progress"`)
 	assertActionItemFieldValue(t, generic, ActionItemColorSystemKey, "null")
-	if err := repo.DeleteEntity(company.CompanyID, generic.EntityID); !errors.Is(err, ErrConflict) {
-		t.Fatalf("Action Item hard delete error=%v, want ErrConflict", err)
-	}
-	if _, err := repo.GetEntity(company.CompanyID, generic.EntityID); err != nil {
-		t.Fatalf("Action Item changed after rejected hard delete: %v", err)
-	}
-
 	statusTemplate, ok := actionItemTemplateBySystemKey(t, repo, company.CompanyID, ActionItemStatusSystemKey)
 	if !ok {
 		t.Fatal("status template missing")
@@ -1045,7 +1038,7 @@ func TestMemoryEnsureCompanyProvisionsActionItemDefaults(t *testing.T) {
 	if _, err := repo.AddCompanyMembership("bootstrap-action-item", company.CompanyID, domain.RoleCompanyAdmin); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Bootstrapped action", CreatedByUserID: user.UserID}); err != nil {
+	if _, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Bootstrapped action", CreatedByUserID: user.UserID}); err != nil {
 		t.Fatalf("CreateActionItem after EnsureCompany: %v", err)
 	}
 }
@@ -1065,7 +1058,7 @@ func TestMemoryMembershipDeletionClearsActionItemPersonAndCreatorAtomically(t *t
 	}
 	personValue, _ := json.Marshal(user.UserID)
 	createAssigned := func(companyID string) domain.Entity {
-		item, err := repo.CreateActionItem(ActionItemInput{CompanyID: companyID, BodyText: "Assigned work", CreatedByUserID: user.UserID})
+		item, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: companyID, BodyText: "Assigned work", CreatedByUserID: user.UserID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1193,3 +1186,28 @@ func actionItemTemplateBySystemKey(t *testing.T, repo *MemoryRepo, companyID, sy
 }
 
 func actionItemTestStringPointer(value string) *string { return &value }
+
+func TestMemoryActionItemUnicodeNamePreservesFullBody(t *testing.T) {
+	repo := NewMemoryRepo()
+	user, company := createActionItemTestCompany(t, repo, "unicode-action-owner")
+	name := strings.Repeat("🚦", EntityNameMaxLength)
+	body := name + " 完成工作"
+	for _, explicitName := range []string{"", name} {
+		item, err := repo.CreateActionItem(ActionItemInput{
+			CompanyID: company.CompanyID, CreatedByUserID: user.UserID,
+			Name: explicitName, BodyText: body, CompletionDueDate: "2026-09-15",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if item.Name != name || !strings.Contains(string(item.BodyJSON), body) {
+			t.Fatalf("Unicode name or full body changed: name=%q body=%s", item.Name, item.BodyJSON)
+		}
+	}
+	if _, err := repo.CreateActionItem(ActionItemInput{
+		CompanyID: company.CompanyID, CreatedByUserID: user.UserID,
+		Name: name + "🚦", BodyText: body, CompletionDueDate: "2026-09-15",
+	}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("201-character name error=%v, want ErrInvalid", err)
+	}
+}

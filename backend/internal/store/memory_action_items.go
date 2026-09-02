@@ -115,6 +115,12 @@ func (r *MemoryRepo) CreateActionItem(input ActionItemInput) (domain.Entity, err
 			return domain.Entity{}, ErrConflict
 		}
 		value := actionItemInitialFieldValue(template.SystemKey, normalized.Color)
+		if template.SystemKey == ActionItemAnalysisDueDateSystemKey {
+			value = actionItemDateValue(normalized.AnalysisDueDate)
+		}
+		if template.SystemKey == ActionItemCompletionDueDateSystemKey {
+			value = actionItemDateValue(normalized.CompletionDueDate)
+		}
 		if template.SystemKey == ActionItemSourceSystemKey {
 			value = actionItemSourceValue(normalized.SourceResourceType, normalized.SourceResourceID)
 		}
@@ -256,9 +262,9 @@ func (r *MemoryRepo) clearEntityResourceFieldsForMissingResourceLocked(companyID
 	r.clearEntityResourceFieldsForResourceLocked(companyID, resourceType, resourceID)
 }
 
-func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resourceType, resourceID string) bool {
+func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resourceType, resourceID string) error {
 	if resourceType != EntityTypeHuddleNode && resourceType != EntityTypeHuddleLogicGate {
-		return false
+		return nil
 	}
 	changed := false
 	documents := make([]json.RawMessage, 0)
@@ -269,6 +275,17 @@ func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resource
 		documents = append(documents, document.JSONDocument)
 	}
 	desiredIDs := entityReferenceIDsFromEditorDocuments(documents)
+	if resourceType == EntityTypeHuddleNode {
+		chatLinks := []json.RawMessage{}
+		for _, chat := range r.huddleNodeTextboxChats[key(companyID, resourceID)] {
+			ref := EditorJSONDocumentRef{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, DocumentID: chat.TextboxID}
+			if r.editorJSONDocuments[editorJSONMemoryKey(ref)].Deleted {
+				continue
+			}
+			chatLinks = append(chatLinks, chat.EntityLinks)
+		}
+		desiredIDs = append(desiredIDs, entityReferenceIDsFromChatLinks(chatLinks)...)
+	}
 	desired := make(map[string]bool, len(desiredIDs))
 	for _, entityID := range desiredIDs {
 		entity, exists := r.entities[key(companyID, entityID)]
@@ -298,7 +315,12 @@ func (r *MemoryRepo) syncHuddleActionItemRelationshipsLocked(companyID, resource
 		}
 		changed = true
 	}
-	return changed
+	if changed {
+		boardIDs := r.memoryHuddleActionItemBoardIDsForResourceLocked(companyID, resourceType, resourceID)
+		nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(companyID, stringSet(boardIDs))
+		return r.enqueueHuddleActionItemsRealtimeLocked(companyID, boardIDs, nodeIDs)
+	}
+	return nil
 }
 
 func (r *MemoryRepo) ListHuddleNodeCreatedActionItems(companyID, huddleNodeID string) ([]domain.Entity, error) {

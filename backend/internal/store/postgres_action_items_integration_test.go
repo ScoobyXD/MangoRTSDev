@@ -34,7 +34,7 @@ func TestPostgresActionItemSourceEndpointLockOrdersConcurrentPermanentDelete(t *
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	input := ActionItemInput{
+	input := ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, CreatedByUserID: actor.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: node.NodeID,
 	}
@@ -113,7 +113,7 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := repo.CreateActionItem(ActionItemInput{
+	created, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Created from the source node", CreatedByUserID: member.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: sourceNode.NodeID,
 	})
@@ -172,7 +172,7 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 		break
 	}
 
-	direct, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Created directly", CreatedByUserID: member.UserID})
+	direct, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Created directly", CreatedByUserID: member.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,19 +225,19 @@ func TestPostgresActionItemSourceCreationAndDatabaseGuards(t *testing.T) {
 			t.Fatalf("%s partially wrote a Source: count=%d, want %d", name, got, sourceCount)
 		}
 	}
-	assertRejectedAtomically("cross-company endpoint", ActionItemInput{
+	assertRejectedAtomically("cross-company endpoint", ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Cross-company source", CreatedByUserID: member.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: otherNode.NodeID,
 	}, ErrNotFound)
-	assertRejectedAtomically("wrong exact endpoint type", ActionItemInput{
+	assertRejectedAtomically("wrong exact endpoint type", ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Wrong source type", CreatedByUserID: member.UserID,
 		SourceResourceType: EntityTypeProject, SourceResourceID: sourceNode.NodeID,
 	}, ErrNotFound)
-	assertRejectedAtomically("unsupported endpoint type", ActionItemInput{
+	assertRejectedAtomically("unsupported endpoint type", ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Unsupported source type", CreatedByUserID: member.UserID,
 		SourceResourceType: "entity", SourceResourceID: sourceNode.NodeID,
 	}, ErrInvalid)
-	assertRejectedAtomically("unauthorized endpoint", ActionItemInput{
+	assertRejectedAtomically("unauthorized endpoint", ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Unauthorized source", CreatedByUserID: member.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: restrictedNode.NodeID,
 	}, ErrNotFound)
@@ -290,7 +290,7 @@ func TestPostgresActionItemSourceRecycleRestoreAndPermanentDelete(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	nodeActionItem, err := repo.CreateActionItem(ActionItemInput{
+	nodeActionItem, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Node source lifecycle", CreatedByUserID: actor.UserID,
 		SourceResourceType: EntityTypeNode, SourceResourceID: node.NodeID,
 	})
@@ -322,7 +322,7 @@ func TestPostgresActionItemSourceRecycleRestoreAndPermanentDelete(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	kpiActionItem, err := repo.CreateActionItem(ActionItemInput{
+	kpiActionItem, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "KPI source lifecycle", CreatedByUserID: actor.UserID,
 		SourceResourceType: EntityTypeKPI, SourceResourceID: kpi.KPIID,
 	})
@@ -402,7 +402,7 @@ func TestPostgresEntityRelationshipHuddleLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Call the supplier", CreatedByUserID: actor.UserID})
+	created, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Call the supplier", CreatedByUserID: actor.UserID})
 	if err != nil {
 		t.Fatalf("CreateActionItem: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestPostgresHuddleLogicGateActionItemRelationshipLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	process := createPostgresActionItemHuddleProcess(t, repo, company.CompanyID, actor.UserID, "Direct Process")
-	actionItem, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Direct gate action", CreatedByUserID: actor.UserID})
+	actionItem, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Direct gate action", CreatedByUserID: actor.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}

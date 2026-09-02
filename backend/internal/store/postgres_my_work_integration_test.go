@@ -287,7 +287,7 @@ func TestPostgresMyWorkAndStaleRACIQueriesExecuteAgainstCanonicalSchema(t *testi
 		t.Fatal(err)
 	}
 
-	actionItem, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, Name: "Uppercase PIC", BodyText: "Uppercase PIC", CreatedByUserID: other.UserID})
+	actionItem, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, Name: "Uppercase PIC", BodyText: "Uppercase PIC", CreatedByUserID: other.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -978,7 +978,7 @@ func TestPostgresMyWorkPersonInChargePlan(t *testing.T) {
 	if _, err := repo.AddCompanyMembership(other.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.CreateActionItem(ActionItemInput{CompanyID: company.CompanyID, BodyText: "Seed definitions", CreatedByUserID: user.UserID}); err != nil {
+	if _, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Seed definitions", CreatedByUserID: user.UserID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`
@@ -1016,7 +1016,7 @@ where company_id=$1::uuid
 
 func mustCreatePostgresMyWorkActionItem(t *testing.T, repo *PostgresRepo, companyID, userID, name, color, due string) domain.Entity {
 	t.Helper()
-	item, err := repo.CreateActionItem(ActionItemInput{CompanyID: companyID, Name: name, BodyText: name, CreatedByUserID: userID})
+	item, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: companyID, Name: name, BodyText: name, CreatedByUserID: userID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1042,7 +1042,7 @@ func mustCreatePostgresMyWorkDelegatedActionItem(t *testing.T, repo *PostgresRep
 func mustCreatePostgresSourcedMyWorkActionItem(t *testing.T, repo *PostgresRepo, companyID, userID, name, sourceType, sourceID, due string) domain.Entity {
 	t.Helper()
 	color := ActionItemColorRed
-	item, err := repo.CreateActionItem(ActionItemInput{
+	item, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: companyID, Name: name, BodyText: name, Color: &color, CreatedByUserID: userID,
 		SourceResourceType: sourceType, SourceResourceID: sourceID,
 	})

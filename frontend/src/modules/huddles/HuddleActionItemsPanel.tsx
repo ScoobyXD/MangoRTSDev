@@ -13,6 +13,7 @@ import { EditorCalendarDateInput } from "../editor/EditorFieldControls.js";
 import { formatNodeDueDateForEditor, normalizeNodeDueDateDraft } from "../editor/editorDates.js";
 import { UniversalGroupingControls } from "../grouping/UniversalGroupingControls.js";
 import { buildUniversalNestedGroups } from "../grouping/universalGrouping.js";
+import { getUniversalStatusGroupValue } from "../grouping/universalStatusGrouping.js";
 import { ActionItemInlineFieldSettingsSection } from "../my-work/ActionItemInlineFieldSettingsPopover.js";
 import { ActionItemOrderingEditor } from "../my-work/ActionItemOrderingEditor.js";
 import {
@@ -25,6 +26,7 @@ import {
   DEFAULT_HUDDLE_ACTION_ITEM_ORDERINGS,
   HUDDLE_ACTION_ITEM_ARRANGE_FIELDS,
   HUDDLE_ACTION_ITEM_DISPLAY_FIELDS,
+  actionItemFieldString,
   fetchHuddleActionItemSavedView,
   filterHuddleNodeDueActionItems,
   huddleActionItemGroupingValues,
@@ -86,6 +88,7 @@ export function HuddleActionItemsPanel({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [preferenceError, setPreferenceError] = useState("");
+  const [showCompleted, setShowCompleted] = useState(false);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [groupings, setGroupings] = useState<HuddleActionItemGrouping[]>(() => cloneDefaults(DEFAULT_HUDDLE_ACTION_ITEM_GROUPINGS));
   const [orderings, setOrderings] = useState<HuddleActionItemOrdering[]>(() => cloneDefaults(DEFAULT_HUDDLE_ACTION_ITEM_ORDERINGS));
@@ -141,6 +144,7 @@ export function HuddleActionItemsPanel({
     observedRefreshTokenRef.current = latestRefreshTokenRef.current;
     hasLoadedRef.current = false;
     setItems([]);
+    setShowCompleted(false);
     setRefreshing(false);
     void load();
     return () => { loadRequestIDRef.current += 1; };
@@ -252,8 +256,9 @@ export function HuddleActionItemsPanel({
   const visibleItems = useMemo(
     () => view === "huddle_node_due"
       ? filterHuddleNodeDueActionItems(items, viewingDate, excludedItemIDs)
-      : items.filter((item) => !excludedItemIDs.has(item.entity_id)),
-    [excludedItemIDs, items, view, viewingDate],
+      : items.filter((item) => !excludedItemIDs.has(item.entity_id)
+        && (view !== "huddle_logic_gate" || showCompleted || getUniversalStatusGroupValue(actionItemFieldString(item, "status")).key !== "done")),
+    [excludedItemIDs, items, showCompleted, view, viewingDate],
   );
   const visibleItemIDSignature = useMemo(
     () => visibleItems.map((item) => item.entity_id).sort().join("\n"),
@@ -330,6 +335,12 @@ export function HuddleActionItemsPanel({
                 {formatNodeDueDateForEditor(viewingDate)}
               </span>
             </span>
+          ) : null}
+          {view === "huddle_logic_gate" ? (
+            <label style={showCompletedStyle}>
+              <input type="checkbox" checked={showCompleted} onChange={(event) => setShowCompleted(event.currentTarget.checked)} />
+              Show completed
+            </label>
           ) : null}
           <UniversalGroupingControls<HuddleActionItemArrangeField>
             groupings={groupings}
@@ -487,6 +498,7 @@ const panelStyle: React.CSSProperties = {
 };
 const headerStyle: React.CSSProperties = { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "0 3px 6px", color: "#243047", fontSize: 14 };
 const headerActionsStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5 };
+const showCompletedStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, color: "#475569", fontSize: 11, whiteSpace: "nowrap", cursor: "pointer" };
 const viewingDateControlStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 5 };
 const viewingDateLabelStyle: React.CSSProperties = { minHeight: 28, display: "inline-flex", alignItems: "center", boxSizing: "border-box", border: "1px solid rgba(234,132,229,.32)", borderRadius: 7, background: "rgba(255,255,255,.92)", color: "#5b21b6", padding: "0 8px", fontSize: 10.5, fontWeight: 850, whiteSpace: "nowrap", boxShadow: "2px 2px 6px rgba(124,58,237,.10), -2px -2px 6px rgba(255,255,255,.86)" };
 const refreshingLabelStyle: React.CSSProperties = { color: "#64748b", fontSize: 9, fontWeight: 700 };
