@@ -260,7 +260,9 @@ Automatic placement creates, infers, changes, and deletes no operational edge; t
 ↓
 Deleting a selected trace still removes its exact operational edge and dependent geometry without deleting either endpoint, while endpoint deletion and recycle continue to follow their exact typed lifecycle contracts
 
-Last updated: 2026-08-28
+An explicitly invoked company-map operator reset validates a fresh layout from Explorer, checks Edit access across the affected resources, and commits that layout together with removal of the company's operational edges and dependent traces; it preserves source resources, Explorer organization, policies, and other relationship meanings.
+
+Last updated: 2026-09-02
 
 # Relationship Business Logic Laws
 
@@ -548,6 +550,8 @@ Explorer structural create, move, removal, deletion, recycle, and restore comman
 `resource_operational_relationships` MUST be the sole canonical authority for directed Folder-to-Folder, Folder-to-Process, Process-to-Folder, and Process-to-Process operational flow. Every row stores the exact same-company typed source and target IDs, rejects a self-edge, and has one semantic edge for one exact directed endpoint pair; repeating the same creation command returns or reuses that edge instead of inserting a duplicate. Every create transport MUST carry `source` and `target` as objects containing exactly `{resource_type, resource_id}` and MUST NOT carry a placement, label, geometry, permission, or alternate endpoint identity.
 
 The source and target of an operational relationship are immutable. Changing either endpoint or reversing direction deletes the old edge and its trace before creating a new edge and trace. The Process-to-Process meaning formerly owned by `logic_gate_relationships` MUST move through one forward-only cutover before `resource_operational_relationships` becomes live authority, with no dual writer, compatibility reader, fallback, or second live Process-flow authority afterward. Removing one operational edge deletes neither endpoint, placement, permission, RACI assignment, nor organizational parent.
+
+An explicitly invoked operator reset MAY delete all operational edges for one exact company, including unrouted edges and edges with unmapped endpoints, in the same transaction as replacing that company's map geometry. It MUST validate a current read-only preview and Edit access to every mapped resource and deleted edge endpoint, preserve every source resource, Explorer parent, permission, assignment, and other relationship meaning, and publish the existing typed deletion events. Ordinary automatic placement, deployment, and restart MUST NOT invoke this operation.
 
 ### Law 36 — Process Map traces are dependent geometry, not relationship authority
 

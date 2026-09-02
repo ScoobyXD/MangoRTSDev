@@ -722,14 +722,17 @@ returning company_id::text,resource_type,resource_id::text,map_parent_folder_id:
 		item.CompanyID, item.ResourceType, item.ResourceID, parentID, item.GridX, item.GridY, item.GridWidth, item.GridHeight))
 }
 
-func postgresAutomaticProcessMapPlacementsTx(ctx context.Context, tx *sql.Tx, companyID string) ([]domain.ProcessMapPlacement, error) {
+func postgresAutomaticProcessMapPlacementsTx(ctx context.Context, tx *sql.Tx, companyID string, forUpdate bool) ([]domain.ProcessMapPlacement, error) {
+	lock := ""
+	if forUpdate {
+		lock = " for update"
+	}
 	rows, err := tx.QueryContext(ctx, `
 select company_id::text,resource_type,resource_id::text,map_parent_folder_id::text,
        grid_x,grid_y,grid_width,grid_height,revision,created_timestamp,updated_timestamp
 from process_map_placements
 where company_id=$1::uuid
-order by resource_type,resource_id
-for update`, companyID)
+order by resource_type,resource_id`+lock, companyID)
 	if err != nil {
 		return nil, err
 	}
@@ -856,7 +859,7 @@ func postgresSyncAutomaticProcessMapPlacementTx(
 	if err := postgresLockProcessMapCompanyTx(ctx, tx, companyID); err != nil {
 		return false, err
 	}
-	placements, err := postgresAutomaticProcessMapPlacementsTx(ctx, tx, companyID)
+	placements, err := postgresAutomaticProcessMapPlacementsTx(ctx, tx, companyID, true)
 	if err != nil {
 		return false, err
 	}

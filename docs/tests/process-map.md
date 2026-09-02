@@ -157,7 +157,7 @@
 155. A successful Folder group move or resize MUST advance every changed placement revision and every transformed internal trace revision and update timestamp exactly once, and its committed HTTP response MUST contain every changed placement and trace row plus the new company Process Map read version so the initiating client can reconcile without guessing or waiting for its own realtime echo.
 156. User-initiated Folder deletion from Process Map MUST call the canonical Company Explorer target-deletion command, inherit that command's protection, authorization, recycle, and subtree-cleanup behavior, and change nothing when that command denies the deletion.
 157. A tile's z/x/y, company read version, actor, permission generation, and response-contract version MUST fully identify its server payload: the server MUST return a conservative permission-safe presentation superset for the whole integer-z interval, and the client MUST choose each object's exact settled LOD from projected screen size without issuing another request merely because fractional zoom crossed a visual threshold.
-158. Deploying the nested layout MUST preserve existing saved layouts and MUST NOT run a bulk relayout or introduce a reset command.
+158. Deploying or restarting the app MUST preserve existing saved layouts; only an explicitly invoked company-scoped operator reset MAY replace the complete saved layout and clear its operational connections.
 159. Every Process Map deck.gl path used for Folder fences, Process or restricted outlines, saved or selected traces, connection previews, or selected Folder fences MUST explicitly use two-coordinate Cartesian XY positions and MUST NOT rely on deck.gl's three-coordinate default or invent a stored Z coordinate.
 160. A newly created root placement MUST default to 234,881,024 by 134,217,728, with root rows positioned to keep six default items and their gaps inside the signed company-world bounds.
 161. Automatic nested placement MUST prefer one eighth of its parent's width and height while keeping the item and its entire subtree proportionally scaled and visibly contained.
@@ -169,11 +169,19 @@
 167. An automatic fit initiated by a user MUST require current Edit access to every existing placement whose geometry changes and MUST reject the complete structural command when any required access is denied.
 168. Automatic placement MUST count the actual last row after deletion and MUST NOT append a seventh item to a full row.
 169. Folder labels MUST use their proportional title band, stay above visible direct children, and retain screen-sized text; newly drawn reverse connectors MUST derive their clearance from endpoint dimensions without rewriting saved route points.
+170. The operator reset MUST derive every Folder and placed Process from canonical Company Explorer and rebuild fresh geometry with the same automatic placement planner, completing each sibling group before its descendants.
+171. The operator reset MUST preserve Explorer sibling order by position, creation timestamp, name, and exact resource ID while arranging supported Folders and Processes together in rows of at most six.
+172. A reset preview MUST use a read-only database transaction and report the company, PostgreSQL version, affected counts, maximum Folder depth, and a token for the exact source and planned state.
+173. Preview and apply MUST require the actor's current Edit access to every mapped resource and every operational relationship endpoint affected by the reset, including unmapped endpoints.
+174. Applying a reset MUST reject a missing or changed preview token and MUST validate the complete resulting geometry before any layout or connection change commits.
+175. An applied reset MUST remove every operational relationship for the selected company and its dependent saved trace in the same transaction as the rebuilt geometry; it MUST preserve source resources, Explorer structure, permissions, assignments, unrelated relationship types, and other companies.
+176. A reset MUST preserve existing placement identities and creation timestamps, advance each changed placement revision exactly once, leave unchanged placements untouched, and publish the existing typed geometry and relationship-deletion events.
+177. A reset MUST stop on an unsupported PostgreSQL version, a missing capacity migration, invalid source structure, overlapping or collapsed geometry, or insufficient access without committing any part of the reset.
 Last updated: 2026-09-02
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` and sees one continuous company canvas with the saved layout intact. Newly placed Folders and Processes form rows of up to six inside their exact Explorer parent, with smaller nested maps visible inside larger Folders. The user zooms smoothly from the overview into readable, selectable details; moving or resizing a Folder keeps its subtree and internal connectors together, and crossing a boundary uses the canonical Explorer move. Opening a Process editor and closing it returns to the same underlying map.
+An authorized user opens `/process-map` and sees one continuous company canvas with the saved layout intact. An explicit operator reset can replace an old layout once and clear its operational connections; ordinary reads and restarts preserve the result. Newly placed Folders and Processes form rows of up to six inside their exact Explorer parent, with smaller nested maps visible inside larger Folders. The user zooms smoothly from the overview into readable, selectable details; moving or resizing a Folder keeps its subtree and internal connectors together, and crossing a boundary uses the canonical Explorer move. Opening a Process editor and closing it returns to the same underlying map.
 
 The default root size is `14 × 8^8` by `8 × 8^8`. At Folder level `L`, the preferred size is `14 × 8^(9-L)` by `8 × 8^(9-L)`. Each step reduces both dimensions eightfold, giving a 64-fold area reduction:
 
@@ -194,3 +202,21 @@ With regular children of the same aspect ratio at their preferred sizes, a Folde
 Six default roots with five gaps of 29,360,128 span 1,556,086,784 units, centered from −778,043,392 to +778,043,392 inside the two-billion-unit world. Coordinates remain signed integers between −1,000,000,000 and +1,000,000,000; each rectangle's far edges must also fit. The dimension cap is 250,000,000. Larger values do not increase placement count or the storage used by PostgreSQL's existing four-byte integer columns, but map extent and zoom affect tile coverage and serialized payload sizes. Drawing cost depends mainly on visible objects and tile work. The camera range remains −24 through +20 and tile zoom remains 0 through 22. At zoom +4, a 14 × 8 gate occupies 224 × 128 screen pixels. The renderer computes screen coordinates from the camera-relative position; pointer edits round back to integers, with exact halves toward positive infinity. Intermediate fitting calculations may use fractions, but saved rectangle edges and manual waypoints remain integers.
 
 An operator must apply `20260902_process_map_nested_layout_capacity.sql` before deploying these defaults; it raises only the dimension constraint. Deployment, reads, and same-parent Explorer reordering preserve saved geometry. Reparenting scales and places the moved subtree; a required capacity fit can also transform its destination siblings. These transforms preserve relative arrangements and reject collapsed or invalid final geometry atomically.
+
+## Scenario: Reset an existing company map once
+
+The human-run `backend/cmd/mango-process-map-reset` tool uses the normal backend `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_NAME`, and `DB_SSLMODE` settings. It accepts the operator's existing `DB_PASSWORD` environment value or PostgreSQL password file; credentials must not be pasted into command arguments or committed files. On this Windows machine, run it inside Ubuntu WSL with the database settings and any localhost tunnel available in that same environment. Agents may test against a disposable database, but the live run belongs to a human under `docs/security/database-agent-access-contract.md`.
+
+From the backend directory, preview using the exact company ID and an actor who can edit the entire map:
+
+```sh
+/usr/local/go/bin/go run ./cmd/mango-process-map-reset --company-id COMPANY_UUID --actor-user-id USER_UUID
+```
+
+The JSON output names the company, counts Folders, Processes, geometry changes, operational relationships and saved traces, and supplies `plan_token`. Preview changes no database state. The relationship count includes operational relationships without a visible trace or currently mapped endpoint. If the reported company and counts are correct, apply that exact preview:
+
+```sh
+/usr/local/go/bin/go run ./cmd/mango-process-map-reset --company-id COMPANY_UUID --actor-user-id USER_UUID --apply --expect-plan PREVIEW_TOKEN
+```
+
+Apply acquires the normal Explorer, policy, and map locks, rechecks access and the preview, and commits the rebuilt geometry and connection deletion together. A stale preview or invalid layout stops the operation; rerun preview after resolving the reported problem. Existing placement IDs and creation timestamps survive. Ordinary map events invalidate cached geometry, and reopening the map fits the camera to the rebuilt layout. Later manual edits remain saved, and newly created items continue the same automatic layout. This command changes no schema and does not run on startup. Label clipping is separate rendering behavior and is not repaired by the reset.
