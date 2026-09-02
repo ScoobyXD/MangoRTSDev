@@ -48,6 +48,8 @@ type ActionItemInput struct {
 	CreatedByUserID    string
 	SourceResourceType string
 	SourceResourceID   string
+	AnalysisDueDate    string
+	CompletionDueDate  string
 }
 
 func normalizeActionItemInput(input ActionItemInput) (ActionItemInput, error) {
@@ -57,7 +59,9 @@ func normalizeActionItemInput(input ActionItemInput) (ActionItemInput, error) {
 	input.SourceResourceID = cleanUUIDText(input.SourceResourceID)
 	input.BodyText = strings.TrimSpace(input.BodyText)
 	input.Name = strings.TrimSpace(input.Name)
-	if input.CompanyID == "" || input.CreatedByUserID == "" || input.BodyText == "" || len(input.Name) > EntityNameMaxLength {
+	input.AnalysisDueDate = strings.TrimSpace(input.AnalysisDueDate)
+	input.CompletionDueDate = strings.TrimSpace(input.CompletionDueDate)
+	if input.CompanyID == "" || input.CreatedByUserID == "" || input.BodyText == "" || utf8.RuneCountInString(input.Name) > EntityNameMaxLength {
 		return ActionItemInput{}, ErrInvalid
 	}
 	if (input.SourceResourceType == "") != (input.SourceResourceID == "") {
@@ -80,7 +84,50 @@ func normalizeActionItemInput(input ActionItemInput) (ActionItemInput, error) {
 		}
 		input.Color = &color
 	}
+	if err := validateActionItemDueDates(input.AnalysisDueDate, input.CompletionDueDate); err != nil {
+		return ActionItemInput{}, err
+	}
 	return input, nil
+}
+
+func actionItemDateValue(date string) json.RawMessage {
+	if date == "" {
+		return nil
+	}
+	value, _ := json.Marshal(date)
+	return value
+}
+
+func validateActionItemDueDates(analysis, completion string) error {
+	if analysis == "" && completion == "" {
+		return ErrActionItemDueDateRequired
+	}
+	for _, date := range []string{analysis, completion} {
+		if _, err := normalizeEntityFieldValue(EntityFieldTypeDate, actionItemDateValue(date)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateActionItemEntityDueDate(entity domain.Entity, changedFieldID string, changedValue json.RawMessage) error {
+	if entity.EntityTypeID != ActionItemEntityTypeID {
+		return nil
+	}
+	for _, field := range entity.EntityFields {
+		if field.SystemKey != ActionItemAnalysisDueDateSystemKey && field.SystemKey != ActionItemCompletionDueDateSystemKey {
+			continue
+		}
+		value := field.Value
+		if field.EntityFieldID == changedFieldID {
+			value = changedValue
+		}
+		var date string
+		if json.Unmarshal(value, &date) == nil && date != "" {
+			return nil
+		}
+	}
+	return ErrActionItemDueDateRequired
 }
 
 func deriveActionItemName(bodyText string) string {
@@ -270,4 +317,23 @@ func entityReferenceIDsFromEditorDocuments(documents []json.RawMessage) []string
 	}
 	sort.Strings(result)
 	return result
+}
+
+func entityReferenceIDsFromChatLinks(chatLinks []json.RawMessage) []string {
+	ids := []string{}
+	for _, raw := range chatLinks {
+		var links []struct {
+			EntityType string `json:"entity_type"`
+			EntityID   string `json:"entity_id"`
+		}
+		if json.Unmarshal(raw, &links) != nil {
+			continue
+		}
+		for _, link := range links {
+			if link.EntityType == "entity" {
+				ids = append(ids, link.EntityID)
+			}
+		}
+	}
+	return normalizeUniqueUUIDs(ids)
 }

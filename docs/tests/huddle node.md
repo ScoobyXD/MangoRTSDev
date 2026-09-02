@@ -47,16 +47,18 @@
 45. Groupings stay in `groupings`; leaf `ordering` and ordered `displayed_fields` stay in settings, with duplicate terms and grouping/ordering overlap rejected.
 46. Each section automatically reconciles after Action Item creation, canonical inline-reference changes, listed-field changes, Huddle Node date changes, Board or sibling membership changes, and established realtime invalidation.
 47. Ordinary rich-text typing does not reload either list, and request generations prevent an older overlapping read from replacing a newer result.
-48. Huddle Node editor saves atomically derive exact `entity_relationships` from all live text boxes; repeated references share one row and removing the last reference removes only that edge.
+48. Huddle Node editor and chat saves or deletions atomically derive exact `entity_relationships` from all live text boxes and saved chats; repeated references share one row and removing the last reference removes only that edge.
 49. The Board rollup remains the union of direct Board edges and all owned Huddle Node edges; no Action Item ID is copied into snapshot tables or another relationship authority.
 50. Highlighted text may create a yellow or red Action Item, seed Details, preserve the exact Huddle Node Source, and replace the selection with one inline Entity label.
 51. Clicking an inline or listed Action Item opens the shared compact autosaving editor with existing fields, accessible controls, viewport clamping, and no Save button.
-52. Listed rows keep the shared Action Item icon, semantic red/yellow treatment, permission-safe Source label, selected grouping hierarchy, and one ordered nonwrapping inline-field rail.
+52. Completed rows are green while retaining their original red or yellow Action Item icon, permission-safe Source label, selected grouping hierarchy, and ordered nonwrapping inline fields.
 53. Huddle Node deletion moves the Node, date, text boxes, chats, snapshot edges, Entity relationships, attachments, and restorable direct policies to the Recycle Bin; restore reuses the same IDs and date and creates no Huddle Explorer placement.
 54. A Huddle Node cannot exist without its owning Huddle Board and never receives a Company Explorer or Huddle Explorer placement row.
 55. An open Huddle Node subscribes only to `huddle-action-items:{huddle_node_id}`; admission and delivery require current Edit access to that exact Node, and a matching compact invalidation triggers a canonical reread rather than carrying list data.
+56. Deleting an Action Item permanently removes its Entity fields and relationships through existing company authorization, refreshes affected lists, and leaves its Huddle resources intact.
+57. Restoring a Huddle Node restores captured relationships only for Action Items that still exist and never recreates a deleted Action Item or stale edge.
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 # Process Story: One dated Huddle Node records created work and current due work separately
 

@@ -1,4 +1,4 @@
-# Current Email Chat Business Logic Laws
+# Current Chat Business Logic Laws
 
 1. A highlighted-email chat and any chat that creates a new email grouping target one exact stored email message; an ordinary root chat or reply in an existing grouping targets that grouping's exact Node and text box only.
 2. A normal email-to-Node relationship does not require a text box or chat.
@@ -45,9 +45,18 @@
 43. The Project-wide email column uses the same highlighted-email destination contract. An unlinked exact internal message defaults to **Existing Project · New Text Box**; clicking an eligible timeline textbox moves the same unsent composer to **Existing Project · Existing Text Box**, and the first send atomically creates or reuses that one owner-local exact-message relationship and chat. Several messages may share the textbox, but the permanent Project document is never eligible.
 44. A separate Node message-header drop may create an exact message-to-textbox relationship without creating a chat, and it does not change any highlighted-chat destination or composer state.
 45. The X beside one exact message in a Node or Project textbox may remove that message-to-textbox relationship only when no chat in the textbox is anchored to the message; rejection leaves the relationship, chats, color, and composer state unchanged.
+46. An editor may create a yellow or red Action Item from selected chat text or a whole comment in an exact Node, Project, or Huddle Node using that owner's current Edit access and immutable Action Item Source.
+47. Chat Action Item creation requires an analysis due date or completion due date before saving and preserves the complete selected body text.
+48. Cancelling Action Item creation creates nothing and preserves both the original chat and draft.
+49. Creating an Action Item from a posted comment preserves that comment and stages its reference in a reply draft; only Send posts the reply.
+50. Converting a chat draft preserves existing references outside the selection and retains the original text when its length exceeds the Action Item name limit.
+51. A Huddle Node's saved chat references and textbox references jointly determine its live Action Item relationships; an unsent chat reference does not enter the Huddle Board rollup.
+52. An owner or draft change during creation must not insert a reference into the changed chat; after successful creation the creation dialog closes and any retry must reuse the existing Action Item.
 
-Last updated: 2026-08-18
+Last updated: 2026-09-02
 
 # General Process Story
 
 A user opens an email and Mango reads every accessible Node-and-text-box chat grouping for its stored thread, keeps Nodes stable, and shows each Node's chat groupings in text-box order. A highlighted-text chat shows its quote above one explicit destination, defaults only when the message state is unambiguous, and lets the user choose, change, or dismiss a softly framed Node or text-box grouping without writing anything. A Project uses the same pending-destination rule inside its own timeline textboxes. **New chat** and replies already know their text box. Only Send atomically creates the exact missing resource, text box, email relationship, and chat allowed by the selected route; a separate exact-message header drop may create its typed textbox edge, while the Show email X may remove that edge under the guarded relationship rules.
+
+An editor can also choose yellow or red beside a comment or chat draft, review its full text, enter a due date, and save an Action Item with the exact owner as Source. The reference is staged in the composer; sending it uses the existing chat command and updates the Huddle Board's live rollup when the owner is a Huddle Node.

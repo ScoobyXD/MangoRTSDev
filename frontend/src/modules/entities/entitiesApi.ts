@@ -152,6 +152,8 @@ export async function createActionItem(
     bodyText: string;
     name?: string;
     color: ActionItemColor | null;
+    analysisDueDate?: string;
+    completionDueDate?: string;
     source?: {
       resourceType: ActionItemSourceResourceType;
       resourceID: string;
@@ -165,6 +167,8 @@ export async function createActionItem(
       body_text: input.bodyText,
       ...(input.name?.trim() ? { name: input.name.trim() } : {}),
       color: input.color,
+      ...(input.analysisDueDate ? { analysis_due_date: input.analysisDueDate } : {}),
+      ...(input.completionDueDate ? { completion_due_date: input.completionDueDate } : {}),
       ...(input.source ? {
         source: {
           resource_type: input.source.resourceType,
@@ -376,6 +380,8 @@ export async function createEntity(input: {
   name: string;
   position?: number;
   bodyJSON?: unknown;
+  analysisDueDate?: string;
+  completionDueDate?: string;
 }): Promise<Entity> {
   const response = await apiFetchJSON<{ entity: Entity }>("/v1/entities", {
     method: "POST",
@@ -386,6 +392,8 @@ export async function createEntity(input: {
       name: input.name,
       position: input.position,
       body_json: input.bodyJSON,
+      analysis_due_date: input.analysisDueDate,
+      completion_due_date: input.completionDueDate,
     }),
   });
   return response.entity;
@@ -414,9 +422,9 @@ export async function updateEntity(input: {
   return response.entity;
 }
 
-export async function deleteEntity(companyID: string, entityID: string): Promise<void> {
+export async function deleteEntity(companyID: string, entityID: string, requestJSON: BoundRequestJSON = apiFetchJSON): Promise<void> {
   const params = new URLSearchParams({ company_id: companyID });
-  await apiFetchJSON(`/v1/entities/${encodeURIComponent(entityID)}?${params.toString()}`, { method: "DELETE" });
+  await requestJSON(`/v1/entities/${encodeURIComponent(entityID)}?${params.toString()}`, { method: "DELETE" });
 }
 
 export async function createEntityField(input: {

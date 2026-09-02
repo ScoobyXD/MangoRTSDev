@@ -215,12 +215,14 @@ select $1::uuid, input.entity_field_id::uuid, $2::uuid, template.entity_field_ty
 	         when 'status' then template.config_jsonb->'default'
 	         when 'color' then $5::jsonb
 	         when 'source' then $6::jsonb
+	         when 'analysis_due_date' then $7::jsonb
+	         when 'completion_due_date' then $8::jsonb
 	         else null
        end,
        template.position
 from unnest($3::text[], $4::text[]) as input(entity_field_id, entity_field_type_id)
 join entity_field_types template
-  on template.company_id=$1::uuid and template.entity_field_type_id=input.entity_field_type_id::uuid`, normalized.CompanyID, entityID, fieldIDs, fieldTypeIDs, colorValue, sourceValue)
+  on template.company_id=$1::uuid and template.entity_field_type_id=input.entity_field_type_id::uuid`, normalized.CompanyID, entityID, fieldIDs, fieldTypeIDs, colorValue, sourceValue, actionItemDateValue(normalized.AnalysisDueDate), actionItemDateValue(normalized.CompletionDueDate))
 	if err != nil {
 		return domain.Entity{}, mapEntitiesPostgresError(err)
 	}
@@ -446,45 +448,58 @@ func lockPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx
 	return err
 }
 
-func syncPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) (bool, error) {
+func (r *PostgresRepo) syncPostgresHuddleActionItemRelationshipsTx(ctx context.Context, tx *sql.Tx, ref EditorJSONDocumentRef) error {
 	var rows *sql.Rows
 	var err error
 	switch ref.ResourceType {
 	case EntityTypeHuddleNode:
 		rows, err = tx.QueryContext(ctx, `
-select body_json
+select body_json, null::jsonb as entity_links
 from huddle_node_textboxes
-where company_id=$1::uuid and huddle_node_id=$2::uuid and deleted_timestamp is null`, ref.CompanyID, ref.ResourceID)
+where company_id=$1::uuid and huddle_node_id=$2::uuid and deleted_timestamp is null
+union all
+select null::jsonb, chat.entity_links
+from huddle_node_textbox_chats chat
+join huddle_node_textboxes textbox
+  on textbox.company_id=chat.company_id and textbox.huddle_node_id=chat.huddle_node_id and textbox.textbox_id=chat.textbox_id
+where chat.company_id=$1::uuid and chat.huddle_node_id=$2::uuid
+  and chat.deleted_timestamp is null and textbox.deleted_timestamp is null`, ref.CompanyID, ref.ResourceID)
 	case EntityTypeHuddleLogicGate:
 		if ref.DocumentID != ref.ResourceID {
-			return false, ErrInvalid
+			return ErrInvalid
 		}
 		rows, err = tx.QueryContext(ctx, `
-select body_json
+select body_json, null::jsonb as entity_links
 from huddle_logic_gates
 where company_id=$1::uuid and huddle_logic_gate_id=$2::uuid and deleted_timestamp is null`, ref.CompanyID, ref.ResourceID)
 	default:
-		return false, nil
+		return nil
 	}
 	if err != nil {
-		return false, err
+		return err
 	}
 	documents := make([]json.RawMessage, 0)
+	chatLinks := make([]json.RawMessage, 0)
 	for rows.Next() {
-		var body []byte
-		if err := rows.Scan(&body); err != nil {
+		var body, links []byte
+		if err := rows.Scan(&body, &links); err != nil {
 			rows.Close()
-			return false, err
+			return err
 		}
-		documents = append(documents, append(json.RawMessage(nil), body...))
+		if len(body) > 0 {
+			documents = append(documents, append(json.RawMessage(nil), body...))
+		}
+		if len(links) > 0 {
+			chatLinks = append(chatLinks, append(json.RawMessage(nil), links...))
+		}
 	}
 	if err := rows.Close(); err != nil {
-		return false, err
+		return err
 	}
 	if err := rows.Err(); err != nil {
-		return false, err
+		return err
 	}
-	actionItemIDs := entityReferenceIDsFromEditorDocuments(documents)
+	actionItemIDs := normalizeUniqueUUIDs(append(entityReferenceIDsFromEditorDocuments(documents), entityReferenceIDsFromChatLinks(chatLinks)...))
 	deleteResult, err := tx.ExecContext(ctx, `
 delete from entity_relationships relationship
 using entities entity, entity_types entity_type
@@ -498,11 +513,11 @@ where relationship.company_id=$1::uuid
   and entity_type.system_key=$4::text
   and not (relationship.entity_id::text=any($5::text[]))`, ref.CompanyID, ref.ResourceType, ref.ResourceID, ActionItemEntityTypeSystemKey, actionItemIDs)
 	if err != nil {
-		return false, mapEntitiesPostgresError(err)
+		return mapEntitiesPostgresError(err)
 	}
 	deleted, err := deleteResult.RowsAffected()
 	if err != nil {
-		return false, err
+		return err
 	}
 	changed := deleted > 0
 	if len(actionItemIDs) > 0 {
@@ -517,15 +532,26 @@ join entity_types entity_type
 where entity_type.system_key=$5::text
 on conflict (company_id, entity_id, resource_type, resource_id) do nothing`, ref.CompanyID, ref.ResourceType, ref.ResourceID, actionItemIDs, ActionItemEntityTypeSystemKey)
 		if err != nil {
-			return false, mapEntitiesPostgresError(err)
+			return mapEntitiesPostgresError(err)
 		}
 		inserted, err := insertResult.RowsAffected()
 		if err != nil {
-			return false, err
+			return err
 		}
 		changed = changed || inserted > 0
 	}
-	return changed, nil
+	if changed {
+		boardIDs, err := postgresHuddleActionItemBoardIDsForResourceTx(ctx, tx, ref.CompanyID, ref.ResourceType, ref.ResourceID)
+		if err != nil {
+			return err
+		}
+		nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, ref.CompanyID, boardIDs)
+		if err != nil {
+			return err
+		}
+		return r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, ref.CompanyID, boardIDs, nodeIDs)
+	}
+	return nil
 }
 
 func (r *PostgresRepo) ListHuddleNodeCreatedActionItems(companyID, huddleNodeID string) ([]domain.Entity, error) {

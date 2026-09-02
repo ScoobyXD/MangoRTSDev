@@ -471,6 +471,14 @@ func (r *MemoryRepo) CreateEntity(input EntityInput) (domain.Entity, error) {
 	r.entities[key(item.CompanyID, item.EntityID)] = item
 	for position, fieldType := range resolvedFieldTypes {
 		value, err := entityFieldTypeDefaultValue(fieldType.FieldType, fieldType.Config)
+		if item.EntityTypeID == ActionItemEntityTypeID {
+			switch fieldType.SystemKey {
+			case ActionItemAnalysisDueDateSystemKey:
+				value = actionItemDateValue(normalized.AnalysisDueDate)
+			case ActionItemCompletionDueDateSystemKey:
+				value = actionItemDateValue(normalized.CompletionDueDate)
+			}
+		}
 		if err != nil {
 			delete(r.entities, key(item.CompanyID, item.EntityID))
 			return domain.Entity{}, err
@@ -507,6 +515,9 @@ func (r *MemoryRepo) UpdateEntity(input EntityInput) (domain.Entity, error) {
 	item, exists := r.entities[itemKey]
 	if !exists {
 		return domain.Entity{}, ErrNotFound
+	}
+	if err := validateActionItemEntityDueDate(r.entityDetailLocked(item), "", nil); err != nil {
+		return domain.Entity{}, err
 	}
 	if normalized.EntityFolderSet {
 		if err := r.validateEntityFolderForTypeLocked(item.CompanyID, item.EntityTypeID, normalized.EntityFolderID); err != nil {
@@ -552,7 +563,11 @@ func (r *MemoryRepo) DeleteEntity(companyID, entityID string) error {
 		return ErrNotFound
 	}
 	if item.EntityTypeID == ActionItemEntityTypeID {
-		return ErrConflict
+		boardIDs := r.memoryHuddleActionItemBoardIDsLocked(companyID, entityID)
+		nodeIDs := r.memoryHuddleNodeIDsForBoardSetLocked(companyID, stringSet(boardIDs))
+		if err := r.enqueueHuddleActionItemsRealtimeLocked(companyID, boardIDs, nodeIDs); err != nil {
+			return err
+		}
 	}
 	for fieldKey, field := range r.entityFields {
 		if field.CompanyID == companyID && field.EntityID == entityID {
@@ -662,6 +677,9 @@ func (r *MemoryRepo) UpdateEntityField(input EntityFieldInput) (domain.EntityFie
 	}
 	if normalized.PositionSet {
 		item.Position = normalized.Position
+	}
+	if err := validateActionItemEntityDueDate(r.entityDetailLocked(r.entities[key(item.CompanyID, item.EntityID)]), item.EntityFieldID, item.Value); err != nil {
+		return domain.EntityField{}, err
 	}
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.entityFields[itemKey] = item

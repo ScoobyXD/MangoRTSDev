@@ -80,7 +80,7 @@ MW38 - My Work has independently adjustable widths between its three columns. It
 
 MW39 - My Work and Projects are full-size elevated sidebar tabs with their exact icons. Action Items and Projects show their exact icon beside the section title, while the middle toggle shows the exact Process and Node icons beside their labels. The Action Items section-header icon uses a cyan outer ring and indigo inner ring; Action Item row and editor-chip icons still use each item's saved semantic color.
 
-MW40 - Red Action Item icons and names use the established Huddle red treatment and pulse once per second. Yellow Action Item icons and names use the established Huddle yellow treatment and pulse once every two seconds.
+MW40 - Red Action Item icons and names use the established Huddle red treatment and pulse once per second. Yellow Action Item icons and names use the established Huddle yellow treatment and pulse once every two seconds. Completed Action Item rows are green while preserving their stored Color and original light icon.
 
 MW41 - Every Action Item Group by term renders a visible hierarchy header, including Huddle Board and Completion due date when selected. An Order items by term changes only row order inside the final group and never creates a header. A Huddle Board group uses the normal app font, shows the shared Board icon immediately before the Board name, and places that heading plus all member rows inside one elevated surface. Several Boards render as separately spaced elevated surfaces. A permitted Board heading opens that exact Board; the neutral no-Board heading is not clickable and owns its own neutral elevated surface.
 

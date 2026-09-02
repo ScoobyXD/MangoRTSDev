@@ -839,11 +839,19 @@ on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
 		}
 		selectColumns = strings.Join(selected, ", ")
 	}
+	restoredRowFilter := ""
+	if tableName == "entity_relationships" {
+		restoredRowFilter = `where exists (
+  select 1 from entities entity
+  where entity.company_id=restored_row.company_id and entity.entity_id=restored_row.entity_id
+)`
+	}
 	query := fmt.Sprintf(`
 insert into %s (%s) overriding system value
 select %s
 from jsonb_populate_recordset(null::%s, coalesce($1::jsonb, '[]'::jsonb)) restored_row
-on conflict do nothing`, tableName, columnList, selectColumns, tableName)
+%s
+on conflict do nothing`, tableName, columnList, selectColumns, tableName, restoredRowFilter)
 	if _, err := tx.ExecContext(ctx, query, string(rows)); err != nil {
 		return err
 	}

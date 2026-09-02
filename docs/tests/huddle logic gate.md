@@ -34,17 +34,20 @@
 32. The Board editor uses canonical 500 ms autosave, Universal Picker references, selection Action Item creation, and typed S3 inline-image attachments.
 33. A Board attachment uses `resource_type='huddle_logic_gate'` and the exact Board ID; no compatibility owner is substituted.
 34. The Board Action Items view unions direct Board Action Item relationships with all owned Huddle Node relationships and deduplicates each exact item once.
-35. The Board Action Items view keeps its existing cumulative behavior and never filters by Huddle Node date.
+35. The Board Action Items view hides completed items by default and never filters by Huddle Node date.
 36. Every company/user has at most one `saved_views.surface='huddle_logic_gate_action_items'` row, displayed as **Huddle Board Action Items**, and that preference applies across all Boards.
 37. Board grouping terms stay in `groupings`; leaf `ordering` and ordered `displayed_fields` stay in settings, with no browser-only preference authority.
 38. Board Action Items default to visible Color then Person in charge groups, Completion due date leaf ordering, and Person in charge then Completion due date inline fields.
 39. Grouping creates visible hierarchy, ordering affects only final leaves, and inline fields keep saved left-to-right order in one nonwrapping rail.
-40. Every listed item keeps the shared Action Item icon, semantic red/yellow treatment, exact Entity identity, and permission-safe Source presentation.
+40. A completed Action Item row is green while retaining its original red or yellow icon, stored Color value, exact Entity identity, and permission-safe Source presentation.
 41. Board Action Items automatically reconcile after relevant local canonical commits and established realtime invalidation while older overlapping reads cannot replace newer results.
 42. Each committed Board editor save atomically replaces that exact Board's Action Item `entity_relationships` set from saved inline references.
 43. Removing the final saved reference removes only the exact Board edge and preserves the Action Item Entity and immutable Source.
+44. The **Show completed** checkbox sits beside the Board grouping control and includes completed items only while checked.
+45. Completion filtering runs before existing grouping and ordering, changes no saved preference or relationship, and resets to off when a Board opens.
+46. Deleting an Action Item uses existing company-authorized Entity deletion, removes its exact fields and relationships, and refreshes affected Board and Huddle Node lists.
 
-Last updated: 2026-08-31
+Last updated: 2026-09-01
 
 # Process Story: Create a Huddle Board and manage its live work
 
@@ -52,6 +55,6 @@ An editor creates a Huddle Board from the sidebar or converts an eligible Logic 
 ↓
 Mango atomically stores the exact canonical Huddle Logic Gate identity, direct policy, and Huddle Explorer placement
 ↓
-The shared editor autosaves text, references, and typed attachments while the Action Items view reads the exact current Board rollup with the user's Board-wide presentation preference
+The shared editor autosaves text, references, and typed attachments while the Action Items view groups the current incomplete Board rollup; Show completed includes green completed rows while preserving their original light icons
 ↓
 The Board may link normal Logic Gates, every Huddle Node keeps its fixed creation-time Logic Gate/KPI snapshot, and no presentation control changes relationship truth

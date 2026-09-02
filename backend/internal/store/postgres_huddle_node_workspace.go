@@ -142,6 +142,10 @@ func (r *PostgresRepo) UpsertHuddleNodeTextboxChat(input HuddleNodeTextboxChatIn
 		return HuddleNodeTextboxChat{}, err
 	}
 	defer tx.Rollback()
+	ref := EditorJSONDocumentRef{CompanyID: input.CompanyID, ResourceType: EntityTypeHuddleNode, ResourceID: input.HuddleNodeID}
+	if err := lockPostgresHuddleActionItemRelationshipsTx(ctx, tx, ref); err != nil {
+		return HuddleNodeTextboxChat{}, err
+	}
 	var textboxExists bool
 	if err := tx.QueryRowContext(ctx, `select exists(
   select 1 from huddle_node_textboxes
@@ -228,6 +232,9 @@ where company_id=$1::uuid and huddle_node_id=$2::uuid and chat_id=$3::uuid`, inp
 	if err != nil {
 		return HuddleNodeTextboxChat{}, err
 	}
+	if err := r.syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, ref); err != nil {
+		return HuddleNodeTextboxChat{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return HuddleNodeTextboxChat{}, err
 	}
@@ -271,6 +278,10 @@ func (r *PostgresRepo) DeleteHuddleNodeTextboxChat(input HuddleNodeTextboxChatDe
 		return err
 	}
 	defer tx.Rollback()
+	ref := EditorJSONDocumentRef{CompanyID: input.CompanyID, ResourceType: EntityTypeHuddleNode, ResourceID: input.HuddleNodeID}
+	if err := lockPostgresHuddleActionItemRelationshipsTx(ctx, tx, ref); err != nil {
+		return err
+	}
 	var currentRevision int64
 	var currentAuthorUserID string
 	err = tx.QueryRowContext(ctx, `
@@ -291,6 +302,9 @@ for update`, input.CompanyID, input.HuddleNodeID, input.ChatID).Scan(&currentRev
 		return ErrVersionConflict
 	}
 	if _, err = tx.ExecContext(ctx, `delete from huddle_node_textbox_chats where company_id=$1::uuid and huddle_node_id=$2::uuid and chat_id=$3::uuid`, input.CompanyID, input.HuddleNodeID, input.ChatID); err != nil {
+		return err
+	}
+	if err := r.syncPostgresHuddleActionItemRelationshipsTx(ctx, tx, ref); err != nil {
 		return err
 	}
 	return tx.Commit()

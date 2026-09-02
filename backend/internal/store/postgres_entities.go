@@ -616,7 +616,9 @@ returning company_id::text, entity_id::text, entity_type_id::text, $10::text, en
 insert into entity_fields (company_id, entity_field_id, entity_id, entity_field_type_id, name, field_type, value_jsonb, position)
 select $1::uuid, input.entity_field_id::uuid, $2::uuid, template.entity_field_type_id,
        template.name, template.field_type,
-       case when template.field_type in ('choice','color')
+       case when template.system_key='analysis_due_date' then $5::jsonb
+            when template.system_key='completion_due_date' then $6::jsonb
+            when template.field_type in ('choice','color')
             then nullif(template.config_jsonb->'default', 'null'::jsonb)
             else null
        end,
@@ -624,7 +626,7 @@ select $1::uuid, input.entity_field_id::uuid, $2::uuid, template.entity_field_ty
 from unnest($3::text[], $4::text[])
      with ordinality as input(entity_field_id, entity_field_type_id, ordinality)
 join entity_field_types template
-  on template.company_id=$1::uuid and template.entity_field_type_id=input.entity_field_type_id::uuid`, item.CompanyID, item.EntityID, fieldIDs, fieldTypeIDs)
+  on template.company_id=$1::uuid and template.entity_field_type_id=input.entity_field_type_id::uuid`, item.CompanyID, item.EntityID, fieldIDs, fieldTypeIDs, actionItemDateValue(normalized.AnalysisDueDate), actionItemDateValue(normalized.CompletionDueDate))
 	if err != nil {
 		return domain.Entity{}, mapEntitiesPostgresError(err)
 	}
@@ -760,6 +762,15 @@ func (r *PostgresRepo) UpdateEntity(input EntityInput) (domain.Entity, error) {
 	if err != nil {
 		return domain.Entity{}, err
 	}
+	if entityTypeID == ActionItemEntityTypeID {
+		current, err := getPostgresEntity(ctx, tx, normalized.CompanyID, normalized.EntityID)
+		if err != nil {
+			return domain.Entity{}, err
+		}
+		if err := validateActionItemEntityDueDate(current, "", nil); err != nil {
+			return domain.Entity{}, err
+		}
+	}
 	if normalized.EntityFolderSet {
 		if err := validatePostgresEntityFolderForType(ctx, tx, normalized.CompanyID, entityTypeID, normalized.EntityFolderID); err != nil {
 			return domain.Entity{}, err
@@ -827,7 +838,17 @@ for update`, companyID, entityID).Scan(&entityTypeID)
 		return err
 	}
 	if entityTypeID == ActionItemEntityTypeID {
-		return ErrConflict
+		boardIDs, err := postgresHuddleActionItemBoardIDsTx(ctx, tx, companyID, entityID)
+		if err != nil {
+			return err
+		}
+		nodeIDs, err := postgresHuddleNodeIDsForBoardsTx(ctx, tx, companyID, boardIDs)
+		if err != nil {
+			return err
+		}
+		if err := r.enqueueHuddleActionItemsRealtimeTx(ctx, tx, companyID, boardIDs, nodeIDs); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `delete from entities where company_id=$1::uuid and entity_id=$2::uuid`, companyID, entityID); err != nil {
 		return mapEntitiesPostgresError(err)
@@ -903,6 +924,13 @@ func (r *PostgresRepo) UpdateEntityField(input EntityFieldInput) (domain.EntityF
 		return domain.EntityField{}, err
 	}
 	defer tx.Rollback()
+	// Serialize changes to the same item so two date clears cannot both succeed.
+	var entityTypeID string
+	if err := tx.QueryRowContext(ctx, `select entity_type_id::text from entities where company_id=$1::uuid and entity_id=$2::uuid for update`, normalized.CompanyID, normalized.EntityID).Scan(&entityTypeID); errors.Is(err, sql.ErrNoRows) {
+		return domain.EntityField{}, ErrNotFound
+	} else if err != nil {
+		return domain.EntityField{}, err
+	}
 	current, err := scanEntityField(tx.QueryRowContext(ctx, `
 select field.company_id::text, field.entity_field_id::text, field.entity_id::text, field.entity_field_type_id::text,
        coalesce(field_type.system_key, ''), field.name, field.field_type, coalesce(field_type.config_jsonb, '{}'::jsonb),
@@ -937,6 +965,15 @@ for update of field`, normalized.CompanyID, normalized.EntityID, normalized.Enti
 	}
 	if fieldType == EntityFieldTypePerson && value != nil {
 		if err := validatePostgresEntityPersonValue(ctx, tx, normalized.CompanyID, value); err != nil {
+			return domain.EntityField{}, err
+		}
+	}
+	if entityTypeID == ActionItemEntityTypeID {
+		entity, err := getPostgresEntity(ctx, tx, normalized.CompanyID, normalized.EntityID)
+		if err != nil {
+			return domain.EntityField{}, err
+		}
+		if err := validateActionItemEntityDueDate(entity, current.EntityFieldID, value); err != nil {
 			return domain.EntityField{}, err
 		}
 	}

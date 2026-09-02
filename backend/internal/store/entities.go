@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"miraeopus/backend/internal/domain"
 )
@@ -72,20 +73,22 @@ type EntityListQuery struct {
 }
 
 type EntityInput struct {
-	CompanyID       string
-	EntityID        string
-	EntityTypeID    string
-	EntityFolderID  *string
-	EntityFolderSet bool
-	Name            string
-	NameSet         bool
-	Position        int
-	PositionSet     bool
-	BodyJSON        json.RawMessage
-	BodySet         bool
-	BaseRevision    int64
-	BaseRevisionSet bool
-	CreatedByUserID string
+	CompanyID         string
+	EntityID          string
+	EntityTypeID      string
+	EntityFolderID    *string
+	EntityFolderSet   bool
+	Name              string
+	NameSet           bool
+	Position          int
+	PositionSet       bool
+	BodyJSON          json.RawMessage
+	BodySet           bool
+	BaseRevision      int64
+	BaseRevisionSet   bool
+	CreatedByUserID   string
+	AnalysisDueDate   string
+	CompletionDueDate string
 }
 
 type EntityFieldInput struct {
@@ -211,6 +214,13 @@ func normalizeEntityInput(input EntityInput, update bool) (EntityInput, error) {
 	input.EntityID = cleanUUIDText(input.EntityID)
 	input.EntityTypeID = cleanUUIDText(input.EntityTypeID)
 	input.Name = strings.TrimSpace(input.Name)
+	input.AnalysisDueDate = strings.TrimSpace(input.AnalysisDueDate)
+	input.CompletionDueDate = strings.TrimSpace(input.CompletionDueDate)
+	if !update && input.EntityTypeID == ActionItemEntityTypeID {
+		if err := validateActionItemDueDates(input.AnalysisDueDate, input.CompletionDueDate); err != nil {
+			return EntityInput{}, err
+		}
+	}
 	rawCreatedByUserID := strings.TrimSpace(input.CreatedByUserID)
 	input.CreatedByUserID = cleanUUIDText(rawCreatedByUserID)
 	folder, err := normalizeOptionalEntityID(input.EntityFolderID)
@@ -218,7 +228,7 @@ func normalizeEntityInput(input EntityInput, update bool) (EntityInput, error) {
 		return EntityInput{}, err
 	}
 	input.EntityFolderID = folder
-	if input.CompanyID == "" || (update && input.EntityID == "") || (!update && (input.EntityTypeID == "" || input.Name == "")) || (rawCreatedByUserID != "" && input.CreatedByUserID == "") || len(input.Name) > EntityNameMaxLength || (input.PositionSet && input.Position < 0) || input.BaseRevision < 0 {
+	if input.CompanyID == "" || (update && input.EntityID == "") || (!update && (input.EntityTypeID == "" || input.Name == "")) || (rawCreatedByUserID != "" && input.CreatedByUserID == "") || utf8.RuneCountInString(input.Name) > EntityNameMaxLength || (input.PositionSet && input.Position < 0) || input.BaseRevision < 0 {
 		return EntityInput{}, ErrInvalid
 	}
 	if update && !input.NameSet && !input.EntityFolderSet && !input.PositionSet && !input.BodySet {

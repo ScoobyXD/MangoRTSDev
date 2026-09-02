@@ -146,6 +146,9 @@ func (r *MemoryRepo) UpsertHuddleNodeTextboxChat(input HuddleNodeTextboxChatInpu
 		item.EditedTimestamp = &now
 	}
 	r.huddleNodeTextboxChats[bucketKey][item.ChatID] = item
+	if err := r.syncHuddleActionItemRelationshipsLocked(input.CompanyID, EntityTypeHuddleNode, input.HuddleNodeID); err != nil {
+		return HuddleNodeTextboxChat{}, err
+	}
 	return item, nil
 }
 
@@ -184,5 +187,5 @@ func (r *MemoryRepo) DeleteHuddleNodeTextboxChat(input HuddleNodeTextboxChatDele
 	for chatID := range remove {
 		delete(r.huddleNodeTextboxChats[bucketKey], chatID)
 	}
-	return nil
+	return r.syncHuddleActionItemRelationshipsLocked(input.CompanyID, EntityTypeHuddleNode, input.HuddleNodeID)
 }

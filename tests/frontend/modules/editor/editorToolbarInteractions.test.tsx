@@ -1297,9 +1297,30 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
       company_id: "company-1",
       value: "red",
     });
-    assert.ok(previewRequests.indexOf(entityWrite) < previewRequests.indexOf(colorWrite), "the debounced queue serializes the Entity revision write before field writes");
+    assert.ok(previewRequests.indexOf(colorWrite) < previewRequests.indexOf(entityWrite), "field writes finish before the Entity revision write");
     assert.equal(renderedEntityChip.dataset.mangoActionItemColor, "red");
     assert.equal(renderedEntityChip.getAttribute("aria-label"), "Open Action Item Updated Thailand delivery");
+
+    assert.ok(analysisDateInput && completionDateInput);
+    const writesBeforeDateClear = previewRequests.filter((request) => request.init?.method === "PUT").length;
+    await act(async () => {
+      analysisDateInput.value = "";
+      Simulate.change(analysisDateInput);
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
+    await flushAsyncWork();
+    assert.match(entityPreview.textContent ?? "", /Enter an analysis due date or completion due date/);
+    assert.equal(previewRequests.filter((request) => request.init?.method === "PUT").length, writesBeforeDateClear, "clearing the last date sends no partial save");
+    const replacementStart = previewRequests.length;
+    await act(async () => {
+      completionDateInput.value = "09/03/2026";
+      Simulate.change(completionDateInput);
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
+    await flushAsyncWork();
+    const replacementWrites = previewRequests.slice(replacementStart).filter((request) => request.init?.method === "PUT");
+    assert.deepEqual(replacementWrites.map((request) => request.path.split("/").at(-1)), ["field-5", "field-3"], "the replacement completion date saves before clearing the analysis date");
+    assert.doesNotMatch(entityPreview.textContent ?? "", /Enter an analysis due date or completion due date/);
 
     const currentSourceButton = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Open Source Current Source Process"]');
     const sourceStatusInput = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Value for Status"]');
@@ -1419,8 +1440,37 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     assert.match(unavailableSource?.textContent ?? "", /SourceNot set/, "an unset or inaccessible Source stays neutral");
     assert.equal(unavailableSource?.querySelector("button"), null, "an unavailable Source is not clickable");
     assert.doesNotMatch(unavailableSource?.textContent ?? "", /process-source/, "the neutral Source state leaks no hidden identity");
-    await act(async () => unavailableSourcePopover?.querySelector<HTMLButtonElement>('button[aria-label="Close Action Item details"]')?.click());
+    assert.ok(unavailableSourcePopover);
+    const deleteStart = previewRequests.length;
+    holdSourceNavigationStatusWrite = true;
+    await act(async () => unavailableSourcePopover.querySelector<HTMLButtonElement>('button[aria-label="Value for Status"]')?.click());
+    const deletionDoneOption = [...dom.window.document.querySelectorAll<HTMLButtonElement>('[role="listbox"][aria-label="Status options"] [role="option"]')].find((option) => option.textContent?.includes("Done"));
+    assert.ok(deletionDoneOption);
+    await act(async () => {
+      deletionDoneOption.click();
+      await new Promise((resolve) => setTimeout(resolve, 550));
+    });
     await flushAsyncWork();
+    const deletionTitleInput = unavailableSourcePopover.querySelector<HTMLInputElement>('input[aria-label="Action Item title"]');
+    const deleteButton = [...unavailableSourcePopover.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Delete Action Item");
+    assert.ok(deletionTitleInput && deleteButton);
+    dom.window.confirm = () => true;
+    await act(async () => {
+      deletionTitleInput.value = "Discard this queued rename";
+      Simulate.change(deletionTitleInput);
+      deleteButton.click();
+      unavailableSourcePopover.querySelector<HTMLButtonElement>('button[aria-label="Close Action Item details"]')?.click();
+    });
+    assert.equal(previewRequests.slice(deleteStart).some((request) => request.init?.method === "DELETE"), false, "deletion waits for the active save");
+    const releaseDeletionSave = releaseSourceNavigationStatusWrite;
+    assert.ok(releaseDeletionSave);
+    await act(async () => {
+      releaseDeletionSave();
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    await flushAsyncWork();
+    assert.deepEqual(previewRequests.slice(deleteStart).filter((request) => request.init?.method === "PUT" || request.init?.method === "DELETE").map((request) => request.init?.method), ["PUT", "DELETE"], "deletion discards the queued rename without any save racing DELETE");
+    assert.equal(dom.window.document.querySelector('[data-mango-action-item-popover="true"]'), null);
 
     previewEntity = {
       ...previewEntity,

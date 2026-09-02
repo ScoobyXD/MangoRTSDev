@@ -353,13 +353,15 @@ func (s *Server) handleEntities(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"entities": items})
 	case http.MethodPost:
 		var request struct {
-			CompanyID      string          `json:"company_id"`
-			EntityID       string          `json:"entity_id"`
-			EntityTypeID   string          `json:"entity_type_id"`
-			EntityFolderID json.RawMessage `json:"entity_folder_id"`
-			Name           string          `json:"name"`
-			Position       *int            `json:"position"`
-			BodyJSON       json.RawMessage `json:"body_json"`
+			CompanyID         string          `json:"company_id"`
+			EntityID          string          `json:"entity_id"`
+			EntityTypeID      string          `json:"entity_type_id"`
+			EntityFolderID    json.RawMessage `json:"entity_folder_id"`
+			Name              string          `json:"name"`
+			Position          *int            `json:"position"`
+			BodyJSON          json.RawMessage `json:"body_json"`
+			AnalysisDueDate   string          `json:"analysis_due_date"`
+			CompletionDueDate string          `json:"completion_due_date"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_json")
@@ -375,6 +377,7 @@ func (s *Server) handleEntities(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		input := store.EntityInput{CompanyID: request.CompanyID, EntityID: request.EntityID, EntityTypeID: request.EntityTypeID, EntityFolderID: folderID, Name: request.Name, CreatedByUserID: actor.User.UserID}
+		input.AnalysisDueDate, input.CompletionDueDate = request.AnalysisDueDate, request.CompletionDueDate
 		if request.Position != nil {
 			input.Position, input.PositionSet = *request.Position, true
 		}
@@ -622,6 +625,8 @@ func optionalNonnegativeQueryInt(r *http.Request, name string) (int, error) {
 
 func writeEntityError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, store.ErrActionItemDueDateRequired):
+		writeError(w, http.StatusBadRequest, store.ErrActionItemDueDateRequired.Error())
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_entity_request")
 	case errors.Is(err, store.ErrNotFound):

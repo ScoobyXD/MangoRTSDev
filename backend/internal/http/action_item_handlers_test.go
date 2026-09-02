@@ -40,9 +40,15 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewServer(repo).Routes()
+	missingDatesBody, _ := json.Marshal(map[string]any{"company_id": company.CompanyID, "body_text": "Needs a date"})
+	missingDatesResponse := httptest.NewRecorder()
+	handler.ServeHTTP(missingDatesResponse, requestWithActorForTest(httptest.NewRequest(http.MethodPost, "/v1/action-items", bytes.NewReader(missingDatesBody)), user, company.CompanyID))
+	if missingDatesResponse.Code != http.StatusBadRequest || !strings.Contains(missingDatesResponse.Body.String(), "Enter an analysis due date or completion due date.") {
+		t.Fatalf("missing date response=%d %s", missingDatesResponse.Code, missingDatesResponse.Body.String())
+	}
 
 	createBody, _ := json.Marshal(map[string]any{
-		"company_id": company.CompanyID, "body_text": "Escalate the shipment", "color": "yellow",
+		"company_id": company.CompanyID, "analysis_due_date": "2026-08-01", "body_text": "Escalate the shipment", "color": "yellow",
 	})
 	createRequest := httptest.NewRequest(http.MethodPost, "/v1/action-items", bytes.NewReader(createBody))
 	createResponse := httptest.NewRecorder()
@@ -104,7 +110,7 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 		t.Fatalf("direct Process rollup=%+v", listed.ActionItems)
 	}
 	secondCreateBody, _ := json.Marshal(map[string]any{
-		"company_id": company.CompanyID, "body_text": "Confirm the revised ship date", "color": nil,
+		"company_id": company.CompanyID, "analysis_due_date": "2026-08-01", "body_text": "Confirm the revised ship date", "color": nil,
 	})
 	secondCreateResponse := httptest.NewRecorder()
 	handler.ServeHTTP(secondCreateResponse, requestWithActorForTest(httptest.NewRequest(http.MethodPost, "/v1/action-items", bytes.NewReader(secondCreateBody)), user, company.CompanyID))
@@ -148,7 +154,7 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 	if retiredSyncResponse.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("read-only Huddle Node Action Items endpoint status=%d body=%s, want 405", retiredSyncResponse.Code, retiredSyncResponse.Body.String())
 	}
-	unknownFieldBody, _ := json.Marshal(map[string]any{"company_id": company.CompanyID, "body_text": "No implicit attachment", "huddle_node_id": firstNode.HuddleNodeID})
+	unknownFieldBody, _ := json.Marshal(map[string]any{"company_id": company.CompanyID, "analysis_due_date": "2026-08-01", "body_text": "No implicit attachment", "huddle_node_id": firstNode.HuddleNodeID})
 	unknownFieldResponse := httptest.NewRecorder()
 	handler.ServeHTTP(unknownFieldResponse, requestWithActorForTest(httptest.NewRequest(http.MethodPost, "/v1/action-items", bytes.NewReader(unknownFieldBody)), user, company.CompanyID))
 	if unknownFieldResponse.Code != http.StatusBadRequest {
@@ -199,14 +205,14 @@ func TestHuddleNodeActionItemRoutesReturnCreatedAndDueSurfaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := repo.CreateActionItem(store.ActionItemInput{
+	created, err := repo.CreateActionItem(store.ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Created in current Node", CreatedByUserID: user.UserID,
 		SourceResourceType: store.EntityTypeHuddleNode, SourceResourceID: current.HuddleNodeID,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	due, err := repo.CreateActionItem(store.ActionItemInput{CompanyID: company.CompanyID, BodyText: "Due from sibling", CreatedByUserID: user.UserID})
+	due, err := repo.CreateActionItem(store.ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: company.CompanyID, BodyText: "Due from sibling", CreatedByUserID: user.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,7 +299,7 @@ func TestHuddleActionItemListsProjectOnlyVisibleSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actionItem, err := repo.CreateActionItem(store.ActionItemInput{
+	actionItem, err := repo.CreateActionItem(store.ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: company.CompanyID, BodyText: "Action Item with Source", CreatedByUserID: owner.UserID,
 		SourceResourceType: store.EntityTypeNode, SourceResourceID: sourceNode.NodeID,
 	})
@@ -426,7 +432,7 @@ func TestActionItemHandlersRequireExactHuddleNodeAccess(t *testing.T) {
 	}
 
 	createBody, _ := json.Marshal(map[string]any{
-		"company_id": company.CompanyID, "body_text": "Company-wide action item", "color": "red",
+		"company_id": company.CompanyID, "analysis_due_date": "2026-08-01", "body_text": "Company-wide action item", "color": "red",
 	})
 	createResponse := httptest.NewRecorder()
 	handler.ServeHTTP(createResponse, withActor(httptest.NewRequest(http.MethodPost, "/v1/action-items", bytes.NewReader(createBody))))
@@ -521,9 +527,9 @@ func TestActionItemSourceHTTPResolvesCurrentNameAndHidesUnavailableIdentity(t *t
 	}
 
 	createdResponse := post(map[string]any{
-		"company_id": company.CompanyID,
-		"body_text":  "Created from highlighted source",
-		"color":      "yellow",
+		"company_id":        company.CompanyID,
+		"analysis_due_date": "2026-08-01", "body_text": "Created from highlighted source",
+		"color": "yellow",
 		"source": map[string]any{
 			"resource_type": store.EntityTypeNode,
 			"resource_id":   sourceNode.NodeID,
@@ -594,7 +600,7 @@ func TestActionItemSourceHTTPResolvesCurrentNameAndHidesUnavailableIdentity(t *t
 	}
 	beforeRejected := len(listActionItems())
 	rejected := post(map[string]any{
-		"company_id": company.CompanyID, "body_text": "Unauthorized source", "color": "red",
+		"company_id": company.CompanyID, "analysis_due_date": "2026-08-01", "body_text": "Unauthorized source", "color": "red",
 		"source": map[string]any{"resource_type": store.EntityTypeNode, "resource_id": sourceNode.NodeID},
 	})
 	if rejected.Code != http.StatusNotFound {
@@ -610,7 +616,7 @@ func TestActionItemSourceHTTPResolvesCurrentNameAndHidesUnavailableIdentity(t *t
 		t.Fatal(err)
 	}
 	crossCompany := post(map[string]any{
-		"company_id": company.CompanyID, "body_text": "Cross-company source", "color": "red",
+		"company_id": company.CompanyID, "analysis_due_date": "2026-08-01", "body_text": "Cross-company source", "color": "red",
 		"source": map[string]any{"resource_type": store.EntityTypeNode, "resource_id": otherNode.NodeID},
 	})
 	if crossCompany.Code != http.StatusNotFound || strings.Contains(crossCompany.Body.String(), otherNode.NodeID) {
@@ -631,7 +637,7 @@ func TestActionItemSourceHTTPResolvesCurrentNameAndHidesUnavailableIdentity(t *t
 		t.Fatalf("ordinary recycled Entity GET leaked raw Source identity: %s", body)
 	}
 
-	directResponse := post(map[string]any{"company_id": company.CompanyID, "body_text": "Direct source unset", "color": nil})
+	directResponse := post(map[string]any{"company_id": company.CompanyID, "analysis_due_date": "2026-08-01", "body_text": "Direct source unset", "color": nil})
 	if directResponse.Code != http.StatusCreated {
 		t.Fatalf("direct create status=%d body=%s", directResponse.Code, directResponse.Body.String())
 	}

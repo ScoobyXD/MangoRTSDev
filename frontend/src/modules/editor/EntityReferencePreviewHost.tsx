@@ -5,6 +5,7 @@ import { ActionItemIcon, ExplorerEntityIcon } from "../../icons/index.js";
 import type { CompanyUser } from "../communications/communicationsApi.js";
 import {
   getEntityDetail,
+  deleteEntity,
   getActionItemSource,
   updateEntity,
   updateEntityField,
@@ -632,6 +633,8 @@ function EditableActionItemPopover({
   const [draft, setDraft] = useState(initialDraft);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
   const entityRef = useRef(entity);
   const draftRef = useRef(initialDraft);
   const savedDraftRef = useRef(initialDraft);
@@ -659,6 +662,11 @@ function EditableActionItemPopover({
     setSaveError("");
     try {
       if (!cleanName) throw new Error("Action Item title is required.");
+      const hasDueDate = latestEntity.entity_fields.some((field) => (
+        (field.system_key === "analysis_due_date" || field.system_key === "completion_due_date")
+        && Boolean(target.fieldValues[field.entity_field_id]?.trim())
+      ));
+      if (!hasDueDate) throw new Error("Enter an analysis due date or completion due date.");
       const nextSaved: ActionItemDraft = {
         name: previouslySaved.name,
         details: previouslySaved.details,
@@ -667,26 +675,12 @@ function EditableActionItemPopover({
       const nameChanged = target.name !== previouslySaved.name;
       const detailsChanged = target.details !== previouslySaved.details;
 
-      if (nameChanged || detailsChanged) {
-        const saved = await updateEntity({
-          companyID,
-          entityID: latestEntity.entity_id,
-          name: cleanName,
-          ...(detailsChanged ? { bodyJSON: plainEntityBodyJSON(target.details, latestEntity.body_json) } : {}),
-          baseRevision: latestEntity.revision,
-        }, requestJSON);
-        latestEntity = saved;
-        nextSaved.name = target.name;
-        nextSaved.details = target.details;
-        entityRef.current = latestEntity;
-        savedDraftRef.current = {
-          ...nextSaved,
-          fieldValues: { ...nextSaved.fieldValues },
-        };
-        onSaved(latestEntity);
-      }
-
-      for (const field of latestEntity.entity_fields) {
+      // Set a replacement due date before clearing the old one or saving other changes.
+      const fieldsToSave = [...latestEntity.entity_fields].sort((left, right) => {
+        const setsDate = (field: EntityField) => field.field_type === "date" && Boolean(target.fieldValues[field.entity_field_id]?.trim());
+        return Number(setsDate(right)) - Number(setsDate(left));
+      });
+      for (const field of fieldsToSave) {
         if (field.field_type === "resource") continue;
         const rawValue = target.fieldValues[field.entity_field_id] ?? "";
         if (rawValue === previouslySaved.fieldValues[field.entity_field_id]) continue;
@@ -711,6 +705,25 @@ function EditableActionItemPopover({
         onSaved(latestEntity);
       }
 
+      if (nameChanged || detailsChanged) {
+        const saved = await updateEntity({
+          companyID,
+          entityID: latestEntity.entity_id,
+          name: cleanName,
+          ...(detailsChanged ? { bodyJSON: plainEntityBodyJSON(target.details, latestEntity.body_json) } : {}),
+          baseRevision: latestEntity.revision,
+        }, requestJSON);
+        latestEntity = saved;
+        nextSaved.name = target.name;
+        nextSaved.details = target.details;
+        entityRef.current = latestEntity;
+        savedDraftRef.current = {
+          ...nextSaved,
+          fieldValues: { ...nextSaved.fieldValues },
+        };
+        onSaved(latestEntity);
+      }
+
       savedDraftRef.current = nextSaved;
       entityRef.current = latestEntity;
       return true;
@@ -724,6 +737,7 @@ function EditableActionItemPopover({
 
   const flushLatest = useCallback(async (): Promise<boolean> => {
     while (true) {
+      if (deletingRef.current) return false;
       if (saveTimerRef.current !== null) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
@@ -745,6 +759,7 @@ function EditableActionItemPopover({
   }, [saveCurrentDraft]);
 
   const scheduleSave = useCallback((next: ActionItemDraft) => {
+    if (deletingRef.current) return;
     draftRef.current = next;
     setDraft(next);
     changeVersionRef.current += 1;
@@ -759,6 +774,26 @@ function EditableActionItemPopover({
   useEffect(() => () => {
     if (saveTimerRef.current !== null) clearTimeout(saveTimerRef.current);
   }, []);
+
+  const removeActionItem = async () => {
+    if (deletingRef.current || !window.confirm("Permanently delete this Action Item?")) return;
+    deletingRef.current = true;
+    if (saveTimerRef.current !== null) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    setDeleting(true);
+    try {
+      await savePromiseRef.current;
+      await deleteEntity(companyID, entity.entity_id, requestJSON);
+      syncEntityReferencePresentation(entityRef.current);
+      onClose();
+    } catch (cause) {
+      setSaveError(previewError(cause));
+      deletingRef.current = false;
+      setDeleting(false);
+    }
+  };
 
   const updateName = (name: string) => scheduleSave({ ...draftRef.current, name });
   const updateDetails = (details: string) => scheduleSave({ ...draftRef.current, details });
@@ -816,6 +851,7 @@ function EditableActionItemPopover({
               value={draft.name}
               maxLength={200}
               aria-label="Action Item title"
+              disabled={deleting}
               onChange={(event) => updateName(event.currentTarget.value)}
               style={{ ...editorInputStyle, minHeight: 36, fontSize: 14, fontWeight: 850 }}
             />
@@ -824,7 +860,7 @@ function EditableActionItemPopover({
             </span>
             <button type="button" aria-label="Close Action Item details" onClick={() => void closeAfterFlush()} style={actionItemCloseButtonStyle}>×</button>
         </header>
-        <div style={actionItemPopoverBodyStyle}>
+        <fieldset disabled={deleting} style={{ ...actionItemPopoverBodyStyle, border: 0, margin: 0, minWidth: 0 }}>
             <div style={{ display: "grid", gap: 12 }}>
               {saveError && <div role="alert" data-mango-entity-save-error="true" style={saveErrorStyle}>{saveError}</div>}
               <label style={editorLabelStyle}>
@@ -866,7 +902,8 @@ function EditableActionItemPopover({
                 </section>
               </div>
             </div>
-        </div>
+            <button type="button" disabled={deleting} onClick={() => void removeActionItem()} style={{ ...actionItemCloseButtonStyle, width: "auto", marginTop: 12, padding: "6px 10px", color: "#b91c1c" }}>{deleting ? "Deleting…" : "Delete Action Item"}</button>
+        </fieldset>
         </section>
         <div
           ref={setFloatingOverlayRoot}

@@ -179,7 +179,7 @@ func TestMemoryMyWorkActionItemPerspectivesUseExactPersonAndAssigner(t *testing.
 	setMyWorkActionField(t, repo, selfAssigned, ActionItemAssignedBySystemKey, user.UserID)
 	delegated := mustCreateActionItemForPIC(t, repo, companyID, user.UserID, other.UserID, "Delegated", ActionItemColorRed, "2026-09-02", ActionItemStatusInProgress)
 	setMyWorkActionField(t, repo, delegated, ActionItemAssignedBySystemKey, user.UserID)
-	unassigned, err := repo.CreateActionItem(ActionItemInput{CompanyID: companyID, Name: "Unassigned", BodyText: "Unassigned", CreatedByUserID: user.UserID})
+	unassigned, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: companyID, Name: "Unassigned", BodyText: "Unassigned", CreatedByUserID: user.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1378,7 +1378,7 @@ func mustCreateAssignedActionItem(t *testing.T, repo *MemoryRepo, companyID, use
 
 func mustCreateActionItemForPIC(t *testing.T, repo *MemoryRepo, companyID, creatorUserID, personInChargeUserID, name, color, due, status string) domain.Entity {
 	t.Helper()
-	item, err := repo.CreateActionItem(ActionItemInput{CompanyID: companyID, Name: name, BodyText: name, CreatedByUserID: creatorUserID})
+	item, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01", CompanyID: companyID, Name: name, BodyText: name, CreatedByUserID: creatorUserID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1396,7 +1396,7 @@ func mustCreateActionItemForPIC(t *testing.T, repo *MemoryRepo, companyID, creat
 func mustCreateSourcedMyWorkActionItem(t *testing.T, repo *MemoryRepo, companyID, userID, name, sourceType, sourceID, completionDueDate string) domain.Entity {
 	t.Helper()
 	color := ActionItemColorRed
-	item, err := repo.CreateActionItem(ActionItemInput{
+	item, err := repo.CreateActionItem(ActionItemInput{AnalysisDueDate: "2026-08-01",
 		CompanyID: companyID, Name: name, BodyText: name, Color: &color, CreatedByUserID: userID,
 		SourceResourceType: sourceType, SourceResourceID: sourceID,
 	})
