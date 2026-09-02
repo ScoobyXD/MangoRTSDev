@@ -431,8 +431,11 @@ test("Huddle Boards tree uses context menus and canonical root/folder reparent c
     let boardRow = section.querySelector<HTMLElement>('[data-huddle-explorer-row="huddle_logic_gate"]');
     const folderARow = section.querySelector<HTMLElement>('[data-huddle-explorer-row="folder"]');
     assert.ok(boardRow && folderARow);
-    assert.equal(boardRow.querySelectorAll(":scope > button").length, 1, "a Board row has no inline remove or edit buttons");
-    assert.equal(folderARow.querySelectorAll(":scope > button").length, 2, "a folder row keeps only disclosure and title controls");
+    assert.equal(boardRow.querySelector("button"), null, "the Board title is plain content inside the draggable row, like Company Explorer");
+    assert.equal(boardRow.draggable, true);
+    assert.equal(boardRow.getAttribute("role"), "button");
+    assert.equal(boardRow.tabIndex, 0, "Board opening remains keyboard accessible");
+    assert.equal(folderARow.querySelectorAll(":scope > button").length, 1, "only the folder disclosure uses a native button");
 
     await act(async () => {
       boardRow.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }));
@@ -440,45 +443,57 @@ test("Huddle Boards tree uses context menus and canonical root/folder reparent c
     let boardMenu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Huddle Board actions"]');
     assert.ok(boardMenu);
     assert.deepEqual(Array.from(boardMenu.querySelectorAll("button")).map((button) => button.textContent?.trim()), [
-      "Open in new browser tab", "Rename", "Move to…", "Remove from Huddle Boards",
+      "Open in new browser tab", "Rename", "Remove from Huddle Boards",
     ]);
     await act(async () => {
       Array.from(boardMenu.querySelectorAll("button")).find((button) => button.textContent?.includes("Open in new"))?.click();
     });
     assert.deepEqual(openCalls[0], ["/huddle-logic-gates/board-1", "_blank", "noopener,noreferrer"]);
 
-    const openMoveMenu = async () => {
+    const rootDropTarget = section.querySelector<HTMLElement>('[data-huddle-root-drop-target="true"]');
+    assert.ok(rootDropTarget?.textContent?.includes("Huddle Boards"), "the section heading is the stable top-level drop target");
+    assert.doesNotMatch(section.textContent ?? "", /Move to/);
+    let openedBoardCount = 0;
+    dom.window.addEventListener("mangorts:huddle-open", () => { openedBoardCount += 1; });
+    const dragBoardTo = async (target: HTMLElement) => {
       const currentBoard = section.querySelector<HTMLElement>('[data-huddle-explorer-row="huddle_logic_gate"]');
       assert.ok(currentBoard);
+      const transfer = dataTransfer();
+      const title = currentBoard.querySelector("span span");
+      assert.ok(title);
       await act(async () => {
-        currentBoard.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }));
+        dispatchDrag(title, "dragstart", transfer);
       });
+      assert.equal(currentBoard.style.opacity, "0.55", "the source row dims like Company Explorer");
+      assert.equal(transfer.effectAllowed, "move");
+      assert.equal(transfer.getData("text/plain"), "Weekly Board");
+      const readData = transfer.getData;
+      transfer.getData = () => "";
       await act(async () => {
-        Array.from(dom.window.document.querySelectorAll<HTMLButtonElement>('[aria-label="Huddle Board actions"] button'))
-          .find((button) => button.textContent === "Move to…")?.click();
+        dispatchDrag(target, "dragover", transfer);
       });
-      const menu = dom.window.document.querySelector<HTMLElement>('[role="menu"][aria-label="Move Huddle Board"]');
-      assert.ok(menu);
-      return menu;
+      assert.equal(transfer.dropEffect, "move", "dragover works while the browser protects drag payload data");
+      assert.equal(target.dataset.huddleDropActive, "true");
+      assert.equal(target.style.background, "rgba(100, 116, 139, 0.16)", "drop target feedback matches Company Explorer");
+      transfer.getData = readData;
+      await act(async () => {
+        dispatchDrag(target, "drop", transfer);
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+      });
+      assert.equal(section.querySelector('[data-huddle-root-drop-target="true"]'), rootDropTarget, "dragging never inserts or shifts the root target");
+      assert.equal(section.querySelector('[data-huddle-drop-active="true"]'), null);
     };
-    let moveMenu = await openMoveMenu();
-    assert.equal(moveMenu.querySelector<HTMLButtonElement>("button")?.disabled, true, "the Board's current root is disabled");
-    await act(async () => {
-      Array.from(moveMenu.querySelectorAll("button")).find((button) => button.textContent === "Operations / Daily")?.click();
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
-    });
-    assert.equal(tree.items[0].parent_folder_id, "folder-b", "the menu persists the exact selected nested folder");
+    await dragBoardTo(folderARow);
+    assert.equal(tree.items[0].parent_folder_id, "folder-a", "dropping on a collapsed folder persists the move and opens it");
+    const nestedFolderRow = section.querySelector('[data-huddle-folder-id="folder-b"]')?.closest<HTMLElement>('[data-huddle-explorer-row="folder"]');
+    assert.ok(nestedFolderRow);
+    await dragBoardTo(nestedFolderRow);
+    assert.equal(tree.items[0].parent_folder_id, "folder-b", "dragging persists the exact nested folder");
     assert.equal(tree.items.length, 1, "moving keeps one placement for the same Board");
     boardRow = section.querySelector<HTMLElement>('[data-huddle-explorer-row="huddle_logic_gate"]');
-    const nestedFolderRow = section.querySelector('[data-huddle-folder-id="folder-b"]')?.closest('[data-huddle-explorer-row="folder"]');
     assert.ok(boardRow && nestedFolderRow?.parentElement?.contains(boardRow), "saved nested placement is visible with both ancestors expanded");
 
-    moveMenu = await openMoveMenu();
-    assert.equal(Array.from(moveMenu.querySelectorAll("button")).find((button) => button.textContent === "Operations / Daily")?.disabled, true);
-    await act(async () => {
-      Array.from(moveMenu.querySelectorAll("button")).find((button) => button.textContent === "Huddle Boards (top level)")?.click();
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
-    });
+    await dragBoardTo(rootDropTarget);
     assert.equal(tree.items[0].parent_folder_id, null, "moving out clears only the saved folder placement");
     boardRow = section.querySelector<HTMLElement>('[data-huddle-explorer-row="huddle_logic_gate"]');
     assert.ok(boardRow);
@@ -486,14 +501,35 @@ test("Huddle Boards tree uses context menus and canonical root/folder reparent c
     assert.equal(tree.items[0].resource_id, "board-1", "moving keeps the exact underlying Board identity");
 
     rejectNextBoardMove = true;
-    moveMenu = await openMoveMenu();
-    await act(async () => {
-      Array.from(moveMenu.querySelectorAll("button")).find((button) => button.textContent === "Operations")?.click();
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
-    });
+    await dragBoardTo(folderARow);
     assert.match(section.querySelector('[role="alert"]')?.textContent ?? "", /Board move denied/);
     assert.equal(tree.items[0].parent_folder_id, null, "a rejected move preserves the saved placement");
     assert.equal(boardRow.parentElement, folderARow.parentElement?.parentElement, "a rejected move preserves the displayed placement");
+    assert.equal(openedBoardCount, 0, "dragging never opens the Board");
+    await act(async () => { boardRow.click(); });
+    assert.equal(openedBoardCount, 1, "a normal click still opens the Board");
+    await act(async () => { boardRow.dispatchEvent(new dom.window.KeyboardEvent("keydown", { bubbles: true, key: "Enter" })); });
+    assert.equal(openedBoardCount, 2, "Enter still opens the Board");
+
+    const beforeCancelledDrag = calls.filter((call) => call.method === "PUT").length;
+    const cancelledTransfer = dataTransfer();
+    await act(async () => {
+      dispatchDrag(boardRow, "dragstart", cancelledTransfer);
+      dispatchDrag(folderARow, "dragover", cancelledTransfer);
+    });
+    await act(async () => { dispatchDrag(boardRow, "dragend", cancelledTransfer); });
+    assert.equal(boardRow.style.opacity, "1");
+    assert.equal(section.querySelector('[data-huddle-drop-active="true"]'), null, "cancelling clears target feedback");
+    assert.equal(calls.filter((call) => call.method === "PUT").length, beforeCancelledDrag, "cancelling makes no move request");
+
+    const unchangedTransfer = dataTransfer();
+    await act(async () => {
+      dispatchDrag(boardRow, "dragstart", unchangedTransfer);
+      dispatchDrag(rootDropTarget, "dragover", unchangedTransfer);
+      dispatchDrag(rootDropTarget, "drop", unchangedTransfer);
+    });
+    assert.equal(unchangedTransfer.dropEffect, "none", "the current parent is not offered as a new destination");
+    assert.equal(calls.filter((call) => call.method === "PUT").length, beforeCancelledDrag, "dropping in the current parent makes no move request");
 
     await act(async () => {
       boardRow.dispatchEvent(new dom.window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 50 }));
@@ -540,7 +576,7 @@ test("Huddle Boards tree uses context menus and canonical root/folder reparent c
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
     });
     assert.ok(calls.some((call) => call.method === "PUT" && call.path === "/v1/huddle-explorer/items/item-board" && call.json?.parent_folder_id === "folder-a"));
-    assert.equal(tree.items[0].parent_folder_id, "folder-a", "dragging still persists the destination after using the move menu");
+    assert.equal(tree.items[0].parent_folder_id, "folder-a", "dragging persists the destination after other sidebar actions");
     boardRow = section.querySelector<HTMLElement>('[data-huddle-explorer-row="huddle_logic_gate"]');
     assert.ok(boardRow);
 
@@ -559,8 +595,7 @@ test("Huddle Boards tree uses context menus and canonical root/folder reparent c
     await act(async () => {
       dispatchDrag(folderBRow, "dragstart", folderBTransfer);
     });
-    const rootDropTarget = section.querySelector<HTMLElement>('[data-huddle-root-drop-target="true"]');
-    assert.ok(rootDropTarget, "dragging reveals a deliberate root target");
+    assert.equal(section.querySelector('[data-huddle-root-drop-target="true"]'), rootDropTarget);
     await act(async () => {
       dispatchDrag(rootDropTarget, "dragover", folderBTransfer);
       dispatchDrag(rootDropTarget, "drop", folderBTransfer);

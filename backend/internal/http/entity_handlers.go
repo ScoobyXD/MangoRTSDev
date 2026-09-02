@@ -625,8 +625,6 @@ func optionalNonnegativeQueryInt(r *http.Request, name string) (int, error) {
 
 func writeEntityError(w http.ResponseWriter, err error, fallback string) {
 	switch {
-	case errors.Is(err, store.ErrActionItemDueDateRequired):
-		writeError(w, http.StatusBadRequest, store.ErrActionItemDueDateRequired.Error())
 	case errors.Is(err, store.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "invalid_entity_request")
 	case errors.Is(err, store.ErrNotFound):

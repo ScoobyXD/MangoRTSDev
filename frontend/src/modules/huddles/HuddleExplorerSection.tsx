@@ -15,7 +15,7 @@ type HuddleLogicGate = { company_id: string; huddle_logic_gate_id: string; heade
 type DragEntry = { kind: "folder" | "item"; id: string };
 type ContextMenuState =
   | { kind: "folder"; folder: Folder; x: number; y: number }
-  | { kind: "item" | "move-item"; item: Item; x: number; y: number };
+  | { kind: "item"; item: Item; x: number; y: number };
 type ConfirmationState =
   | { kind: "folder"; folder: Folder; position: ConfirmActionMenuPosition }
   | { kind: "item"; item: Item; position: ConfirmActionMenuPosition };
@@ -55,7 +55,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
   const [selectedRowID, setSelectedRowID] = useState("");
   const [pendingRevealRowID, setPendingRevealRowID] = useState<string | null>(null);
   const [raisedRowID, setRaisedRowID] = useState("");
-  const [dragActive, setDragActive] = useState(false);
+  const [draggingRowID, setDraggingRowID] = useState("");
   const [dropFolderID, setDropFolderID] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null);
@@ -190,27 +190,19 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
       await load();
     }, "Could not delete folder");
   };
-  const moveFolder = async (folder: Folder, parentFolderID: string) => {
-    if ((folder.parent_folder_id ?? "") === parentFolderID) return;
-    await requestJSON(`/v1/huddle-explorer/folders/${encodeURIComponent(folder.folder_id)}`, { method: "PUT", json: { company_id: companyID, parent_folder_id: parentFolderID } });
-  };
-  const moveItem = async (item: Item, parentFolderID: string) => {
-    if ((item.parent_folder_id ?? "") === parentFolderID) return;
-    await requestJSON(`/v1/huddle-explorer/items/${encodeURIComponent(item.item_id)}`, { method: "PUT", json: { company_id: companyID, parent_folder_id: parentFolderID } });
+  const canDropEntry = (entry: DragEntry | null, parentFolderID: string) => {
+    if (!entry) return false;
+    const source = entry.kind === "folder"
+      ? folders.find((folder) => folder.folder_id === entry.id)
+      : items.find((item) => item.item_id === entry.id);
+    return Boolean(source) && (source?.parent_folder_id ?? "") !== parentFolderID
+      && !(entry.kind === "folder" && folderPath(folders, parentFolderID).some((folder) => folder.folder_id === entry.id));
   };
   const moveEntry = async (entry: DragEntry, parentFolderID: string) => {
+    if (!canDropEntry(entry, parentFolderID)) return;
     const destinationPath = folderPath(folders, parentFolderID);
-    if (entry.kind === "folder" && destinationPath.some((folder) => folder.folder_id === entry.id)) return;
     await runMutation(async () => {
-      if (entry.kind === "folder") {
-        const folder = folders.find((candidate) => candidate.folder_id === entry.id);
-        if (!folder) return;
-        await moveFolder(folder, parentFolderID);
-      } else {
-        const item = items.find((candidate) => candidate.item_id === entry.id);
-        if (!item) return;
-        await moveItem(item, parentFolderID);
-      }
+      await requestJSON(`/v1/huddle-explorer/${entry.kind === "folder" ? "folders" : "items"}/${encodeURIComponent(entry.id)}`, { method: "PUT", json: { company_id: companyID, parent_folder_id: parentFolderID } });
       emitExplorerContextUpdated({ companyID, kind: "huddle_explorer" });
       if (parentFolderID) setExpanded((current) => new Set([...current, ...destinationPath.map((folder) => folder.folder_id)]));
       await load();
@@ -238,20 +230,45 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
     const opened = window.open(buildHuddleLogicGateRoute(item.resource_id), "_blank", "noopener,noreferrer");
     if (opened) opened.opener = null;
   };
-  const beginDrag = (event: React.DragEvent<HTMLElement>, entry: DragEntry) => {
+  const beginDrag = (event: React.DragEvent<HTMLElement>, entry: DragEntry, label: string) => {
     draggingEntryRef.current = entry;
-    setDragActive(true);
+    setDraggingRowID(`${entry.kind}:${entry.id}`);
+    setSelectedRowID(`${entry.kind}:${entry.id}`);
+    setContextMenu(null);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData(HUDDLE_EXPLORER_DRAG_MIME, JSON.stringify(entry));
+    event.dataTransfer.setData("text/plain", label);
   };
   const clearDrag = () => {
     draggingEntryRef.current = null;
-    setDragActive(false);
+    setDraggingRowID("");
     setDropFolderID(null);
   };
   const draggedEntry = (event: React.DragEvent<HTMLElement>) => readDraggedEntry(event.dataTransfer) ?? draggingEntryRef.current;
-  const canDropInsideFolder = (entry: DragEntry | null, folderID: string) => Boolean(entry)
-    && !(entry?.kind === "folder" && folderPath(folders, folderID).some((folder) => folder.folder_id === entry.id));
+  const handleDragOver = (event: React.DragEvent<HTMLElement>, parentFolderID: string) => {
+    if (!canDropEntry(draggedEntry(event), parentFolderID)) {
+      event.dataTransfer.dropEffect = "none";
+      setDropFolderID(null);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setDropFolderID(parentFolderID);
+  };
+  const handleDragLeave = (event: React.DragEvent<HTMLElement>, parentFolderID: string) => {
+    const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
+    if (related && event.currentTarget.contains(related)) return;
+    setDropFolderID((current) => current === parentFolderID ? null : current);
+  };
+  const handleDrop = (event: React.DragEvent<HTMLElement>, parentFolderID: string) => {
+    const entry = draggedEntry(event);
+    clearDrag();
+    if (!entry || !canDropEntry(entry, parentFolderID)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void moveEntry(entry, parentFolderID);
+  };
   const folderIsEmpty = (folder: Folder) => !folders.some((candidate) => (candidate.parent_folder_id ?? "") === folder.folder_id)
     && !items.some((candidate) => (candidate.parent_folder_id ?? "") === folder.folder_id);
 
@@ -271,33 +288,17 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
               data-huddle-drop-active={dropActive ? "true" : undefined}
               onMouseEnter={() => setRaisedRowID(rowID)}
               onMouseLeave={() => setRaisedRowID((current) => current === rowID ? "" : current)}
+              onClick={() => { setSelectedRowID(rowID); toggleFolder(folder.folder_id); }}
               onContextMenu={(event) => { event.preventDefault(); setContextMenu({ kind: "folder", folder, x: event.clientX, y: event.clientY }); }}
-              onDragStart={(event) => beginDrag(event, { kind: "folder", id: folder.folder_id })}
+              onDragStart={(event) => beginDrag(event, { kind: "folder", id: folder.folder_id }, folder.name)}
               onDragEnd={clearDrag}
-              onDragOver={(event) => {
-                if (!canDropInsideFolder(draggedEntry(event), folder.folder_id)) return;
-                event.preventDefault();
-                event.stopPropagation();
-                event.dataTransfer.dropEffect = "move";
-                setDropFolderID(folder.folder_id);
-              }}
-              onDragLeave={(event) => {
-                const related = event.relatedTarget instanceof Node ? event.relatedTarget : null;
-                if (related && event.currentTarget.contains(related)) return;
-                setDropFolderID((current) => current === folder.folder_id ? null : current);
-              }}
-              onDrop={(event) => {
-                const entry = draggedEntry(event);
-                if (!canDropInsideFolder(entry, folder.folder_id) || !entry) return;
-                event.preventDefault();
-                event.stopPropagation();
-                clearDrag();
-                void moveEntry(entry, folder.folder_id);
-              }}
-              style={{ ...rowStyle(raised, dropActive), paddingLeft: 3 + depth * 14 }}
+              onDragOver={(event) => handleDragOver(event, folder.folder_id)}
+              onDragLeave={(event) => handleDragLeave(event, folder.folder_id)}
+              onDrop={(event) => handleDrop(event, folder.folder_id)}
+              style={{ ...rowStyle(raised, dropActive), paddingLeft: 3 + depth * 14, opacity: draggingRowID === rowID ? 0.55 : 1 }}
             >
-              <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${folder.name}`} onClick={() => toggleFolder(folder.folder_id)} style={disclosureButtonStyle}><ExplorerDisclosureIcon open={open} color="#475569" /></button>
-              <button type="button" data-huddle-folder-id={folder.folder_id} aria-current={selectedRowID === rowID ? "location" : undefined} title="Click to expand or collapse; right-click for folder actions; drag to move" onClick={() => { setSelectedRowID(rowID); toggleFolder(folder.folder_id); }} style={folderNameButtonStyle}><ExplorerRowIcon kind="folder" /><span style={rowTextStyle}>{folder.name}</span></button>
+              <button type="button" draggable={false} aria-label={`${open ? "Collapse" : "Expand"} ${folder.name}`} onClick={(event) => { event.stopPropagation(); toggleFolder(folder.folder_id); }} style={disclosureButtonStyle}><ExplorerDisclosureIcon open={open} color="#475569" /></button>
+              <span role="button" tabIndex={0} data-huddle-folder-id={folder.folder_id} aria-current={selectedRowID === rowID ? "location" : undefined} title="Click to expand or collapse; right-click for folder actions; drag to move" onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelectedRowID(rowID); toggleFolder(folder.folder_id); } }} style={folderNameStyle}><ExplorerRowIcon kind="folder" /><span style={rowTextStyle}>{folder.name}</span></span>
             </div>
             {open && <div style={folderContentsStyle}>{renderLevel(folder.folder_id, depth + 1)}</div>}
           </div>
@@ -310,19 +311,25 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
           <div
             key={item.item_id}
             draggable
+            role="button"
+            tabIndex={0}
+            title="Click to open; right-click for Huddle Board actions; drag to a folder or the Huddle Boards heading to move"
             data-huddle-explorer-row={item.resource_type}
+            data-huddle-item-id={item.item_id}
             data-huddle-row-raised={raisedRowID === rowID ? "true" : undefined}
             onMouseEnter={() => setRaisedRowID(rowID)}
             onMouseLeave={() => setRaisedRowID((current) => current === rowID ? "" : current)}
+            onClick={() => openItem(item)}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openItem(item); } }}
             onContextMenu={(event) => { event.preventDefault(); setContextMenu({ kind: "item", item, x: event.clientX, y: event.clientY }); }}
-            onDragStart={(event) => beginDrag(event, { kind: "item", id: item.item_id })}
+            onDragStart={(event) => beginDrag(event, { kind: "item", id: item.item_id }, item.name)}
             onDragEnd={clearDrag}
-            style={{ ...itemRowStyle(raised), paddingLeft: 18 + depth * 14 }}
+            style={{ ...itemRowStyle(raised), paddingLeft: 18 + depth * 14, opacity: draggingRowID === rowID ? 0.55 : 1 }}
           >
-            <button type="button" title="Click to open; right-click for Huddle Board actions; drag to move" onClick={() => openItem(item)} style={itemNameButtonStyle}>
+            <span style={itemNameStyle}>
               <HuddleResourceIcon type={item.resource_type} />
               <span style={rowTextStyle}>{item.name}</span>
-            </button>
+            </span>
           </div>
         );
       })}
@@ -335,9 +342,17 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
       tabIndex={-1}
       aria-label="Huddle Boards"
       data-sidebar-huddles-surface="elevated"
-      style={sectionStyle(dropFolderID === "")}
+      style={sectionStyle}
     >
-      <div style={headerStyle}>
+      <div
+        data-huddle-root-drop-target="true"
+        title="Drop a Huddle Board or folder here to move it to the top level"
+        data-huddle-drop-active={dropFolderID === "" ? "true" : undefined}
+        onDragOver={(event) => handleDragOver(event, "")}
+        onDragLeave={(event) => handleDragLeave(event, "")}
+        onDrop={(event) => handleDrop(event, "")}
+        style={{ ...headerStyle, background: dropFolderID === "" ? dropRowBackground : undefined }}
+      >
         <span style={headerTitleStyle}><HuddleBoardIcon color="#6d28d9" size={15} /><span>Huddle Boards</span></span>
         <span style={headerLineStyle} />
         <span style={headerActionsStyle}>
@@ -346,32 +361,6 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
         </span>
       </div>
       {error && <span role="alert" style={errorStyle}>{error}</span>}
-      {dragActive && (
-        <div
-          role="group"
-          aria-label="Move to Huddle Boards root"
-          data-huddle-root-drop-target="true"
-          style={rootDropZoneStyle(dropFolderID === "")}
-          onDragOver={(event) => {
-            if (!draggedEntry(event)) return;
-            event.preventDefault();
-            event.stopPropagation();
-            event.dataTransfer.dropEffect = "move";
-            setDropFolderID("");
-          }}
-          onDragLeave={() => setDropFolderID((current) => current === "" ? null : current)}
-          onDrop={(event) => {
-            const entry = draggedEntry(event);
-            if (!entry) return;
-            event.preventDefault();
-            event.stopPropagation();
-            clearDrag();
-            void moveEntry(entry, "");
-          }}
-        >
-          Move to root
-        </div>
-      )}
       <div style={treeStyle}>
         {renderLevel("", 0)}
         {folders.length + items.length === 0 && <span style={emptyStyle}>No Huddle Boards yet</span>}
@@ -380,19 +369,7 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
         <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} ariaLabel="Huddle Board actions" onClose={() => setContextMenu(null)} width={202}>
           <button type="button" style={menuButtonStyle} onClick={() => { openItemInNewTab(contextMenu.item); setContextMenu(null); }}>Open in new browser tab</button>
           <button type="button" style={menuButtonStyle} onClick={() => { const item = contextMenu.item; setContextMenu(null); void renameItem(item); }}>Rename</button>
-          <button type="button" aria-haspopup="menu" style={menuButtonStyle} onClick={() => setContextMenu({ ...contextMenu, kind: "move-item" })}>Move to…</button>
           <button type="button" style={{ ...menuButtonStyle, color: "#be123c" }} onClick={() => { setConfirmation({ kind: "item", item: contextMenu.item, position: { x: contextMenu.x, y: contextMenu.y } }); setContextMenu(null); }}>Remove from Huddle Boards</button>
-        </FrameRightClickMenu>
-      )}
-      {contextMenu?.kind === "move-item" && (
-        <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} ariaLabel="Move Huddle Board" onClose={() => setContextMenu(null)} width={260} overflow="auto">
-          <div style={{ padding: "6px 12px", fontSize: 12, fontWeight: 700 }}>Move “{contextMenu.item.name}” to</div>
-          <button type="button" disabled={!contextMenu.item.parent_folder_id} style={menuButtonStyle} onClick={() => { const item = contextMenu.item; setContextMenu(null); void moveEntry({ kind: "item", id: item.item_id }, ""); }}>Huddle Boards (top level)</button>
-          {folders.map((folder) => (
-            <button key={folder.folder_id} type="button" disabled={contextMenu.item.parent_folder_id === folder.folder_id} style={menuButtonStyle} onClick={() => { const item = contextMenu.item; setContextMenu(null); void moveEntry({ kind: "item", id: item.item_id }, folder.folder_id); }}>
-              {folderPath(folders, folder.folder_id).map((ancestor) => ancestor.name).join(" / ")}
-            </button>
-          ))}
         </FrameRightClickMenu>
       )}
       {contextMenu?.kind === "folder" && (
@@ -443,23 +420,20 @@ export const HuddleExplorerSection: React.FC<{ apiBase: string; companyID: strin
   );
 };
 
-function sectionStyle(dropActive: boolean): React.CSSProperties {
-  const surfaceShadow = "4px 5px 14px rgba(148,163,184,.2), -3px -3px 10px rgba(255,255,255,.82), inset 1px 1px 0 rgba(255,255,255,.76)";
-  return { flex: "0 0 auto", minWidth: 0, display: "grid", gap: 6, margin: "0 1px 8px", padding: "8px 7px 9px", border: "1px solid rgba(148,163,184,.24)", borderRadius: 11, background: "linear-gradient(145deg,rgba(255,255,255,.92),rgba(248,250,252,.78))", boxShadow: dropActive ? `${surfaceShadow}, 0 0 0 2px rgba(109,40,217,.16)` : surfaceShadow, transition: "box-shadow 140ms ease" };
-}
-const headerStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center", gap: 8, padding: "0 1px 0 2px", color: "#111827", fontSize: 12, fontWeight: 650 };
+const sectionStyle: React.CSSProperties = { flex: "0 0 auto", minWidth: 0, display: "grid", gap: 6, margin: "0 1px 8px", padding: "8px 7px 9px", border: "1px solid rgba(148,163,184,.24)", borderRadius: 11, background: "linear-gradient(145deg,rgba(255,255,255,.92),rgba(248,250,252,.78))", boxShadow: "4px 5px 14px rgba(148,163,184,.2), -3px -3px 10px rgba(255,255,255,.82), inset 1px 1px 0 rgba(255,255,255,.76)" };
+const headerStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "auto minmax(0,1fr) auto", alignItems: "center", gap: 8, padding: "0 1px 0 2px", color: "#111827", fontSize: 12, fontWeight: 650, borderRadius: 7 };
 const headerTitleStyle: React.CSSProperties = { display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" };
 const headerLineStyle: React.CSSProperties = { minWidth: 0, height: 1, background: "rgba(15,23,42,.12)" };
 const headerActionsStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 4 };
 const addButtonStyle: React.CSSProperties = { minWidth: 58, height: 22, border: "1px solid rgba(100,116,139,.25)", borderRadius: 5, background: "rgba(255,255,255,.74)", color: "#334155", cursor: "pointer", padding: "0 6px", font: "inherit", fontSize: 10.5, fontWeight: 700 };
 const treeStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3 };
-function rootDropZoneStyle(active: boolean): React.CSSProperties { return { minHeight: 24, display: "grid", placeItems: "center", border: `1px dashed ${active ? "rgba(109,40,217,.65)" : "rgba(100,116,139,.34)"}`, borderRadius: 7, background: active ? "rgba(109,40,217,.08)" : "rgba(248,250,252,.68)", color: active ? "#6d28d9" : "#64748b", fontSize: 10.5, fontWeight: 750, transition: "background 120ms ease,border-color 120ms ease" }; }
+const dropRowBackground = "rgba(100, 116, 139, 0.16)";
 const folderContentsStyle: React.CSSProperties = { minWidth: 0, display: "grid", alignContent: "start", gap: 3 };
-function rowStyle(raised: boolean, dropActive = false): React.CSSProperties { return { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "14px minmax(0,1fr)", alignItems: "center", gap: 2, borderRadius: 8, background: dropActive ? "rgba(109,40,217,.08)" : raised ? "rgba(255,255,255,.78)" : "transparent", boxShadow: dropActive ? "inset 0 0 0 1px rgba(109,40,217,.34)" : raised ? "0 5px 12px rgba(100,116,139,.18), 0 1px 3px rgba(15,23,42,.08)" : "none", transform: raised ? "translateY(-2px)" : "translateY(0)", cursor: "grab", transition: "background 120ms ease,box-shadow 140ms ease,transform 120ms ease" }; }
+function rowStyle(raised: boolean, dropActive = false): React.CSSProperties { return { minWidth: 0, minHeight: 29, display: "grid", gridTemplateColumns: "14px minmax(0,1fr)", alignItems: "center", gap: 2, borderRadius: 8, background: dropActive ? dropRowBackground : raised ? "rgba(255,255,255,.78)" : "transparent", boxShadow: raised ? "0 5px 12px rgba(100,116,139,.18), 0 1px 3px rgba(15,23,42,.08)" : "none", transform: raised ? "translateY(-2px)" : "translateY(0)", cursor: "grab", userSelect: "none", transition: "background 120ms ease,box-shadow 140ms ease,transform 120ms ease" }; }
 function itemRowStyle(raised: boolean): React.CSSProperties { return { ...rowStyle(raised), gridTemplateColumns: "minmax(0,1fr)" }; }
 const disclosureButtonStyle: React.CSSProperties = { width: 14, height: 22, display: "grid", placeItems: "center", border: 0, background: "transparent", cursor: "pointer", padding: 0 };
-const folderNameButtonStyle: React.CSSProperties = { minWidth: 0, height: 29, display: "grid", gridTemplateColumns: "17px minmax(0,1fr)", alignItems: "center", gap: 5, border: 0, background: "transparent", color: "#111827", cursor: "pointer", padding: "0 3px", textAlign: "left", font: "inherit", fontSize: 11.5, fontWeight: 700 };
-const itemNameButtonStyle: React.CSSProperties = { ...folderNameButtonStyle, gridTemplateColumns: "32px minmax(0,1fr)", fontWeight: 600 };
+const folderNameStyle: React.CSSProperties = { minWidth: 0, height: 29, display: "grid", gridTemplateColumns: "17px minmax(0,1fr)", alignItems: "center", gap: 5, color: "#111827", padding: "0 3px", textAlign: "left", font: "inherit", fontSize: 11.5, fontWeight: 700 };
+const itemNameStyle: React.CSSProperties = { ...folderNameStyle, gridTemplateColumns: "32px minmax(0,1fr)", fontWeight: 600 };
 const rowTextStyle: React.CSSProperties = { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const emptyStyle: React.CSSProperties = { minHeight: 34, display: "flex", alignItems: "center", padding: "0 6px", color: "rgba(15,23,42,.48)", fontSize: 11, fontWeight: 600 };
 const errorStyle: React.CSSProperties = { margin: "0 2px", color: "#be123c", fontSize: 10.5, fontWeight: 700, lineHeight: 1.3 };

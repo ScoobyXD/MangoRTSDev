@@ -8,13 +8,13 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func TestMemoryActionItemDueDates(t *testing.T) {
+func TestMemoryActionItemDueDatesAreOptional(t *testing.T) {
 	repo := NewMemoryRepo()
 	user, company := createActionItemTestCompany(t, repo, "action-item-dates")
 	assertActionItemDueDates(t, repo, company.CompanyID, user.UserID)
 }
 
-func TestPostgresActionItemDueDates(t *testing.T) {
+func TestPostgresActionItemDueDatesAreOptional(t *testing.T) {
 	_, repo := openPostgresProcessMapIntegration(t)
 	user, err := repo.UpsertAuthUser("action-item-dates", "dates@example.test", "Date owner")
 	if err != nil {
@@ -32,11 +32,24 @@ func TestPostgresActionItemDueDates(t *testing.T) {
 
 func assertActionItemDueDates(t *testing.T, repo Repository, companyID, userID string) {
 	t.Helper()
-	if _, err := repo.CreateActionItem(ActionItemInput{CompanyID: companyID, BodyText: "Missing dates", CreatedByUserID: userID}); !errors.Is(err, ErrActionItemDueDateRequired) {
-		t.Fatalf("missing date on Action Item create: %v", err)
+	undated, err := repo.CreateActionItem(ActionItemInput{CompanyID: companyID, BodyText: "No due date", CreatedByUserID: userID})
+	if err != nil {
+		t.Fatalf("undated Action Item create: %v", err)
 	}
-	if _, err := repo.CreateEntity(EntityInput{CompanyID: companyID, EntityTypeID: ActionItemEntityTypeID, Name: "Missing dates", CreatedByUserID: userID}); !errors.Is(err, ErrActionItemDueDateRequired) {
-		t.Fatalf("missing date on Entities create: %v", err)
+	assertActionItemFieldValue(t, undated, ActionItemAnalysisDueDateSystemKey, "null")
+	assertActionItemFieldValue(t, undated, ActionItemCompletionDueDateSystemKey, "null")
+	if _, err := repo.UpdateEntity(EntityInput{CompanyID: companyID, EntityID: undated.EntityID, Name: "Still optional", NameSet: true}); err != nil {
+		t.Fatalf("undated Action Item edit: %v", err)
+	}
+	for _, field := range undated.EntityFields {
+		if field.SystemKey == ActionItemStatusSystemKey {
+			if _, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: companyID, EntityID: undated.EntityID, EntityFieldID: field.EntityFieldID, ValueSet: true, Value: json.RawMessage(`"done"`)}); err != nil {
+				t.Fatalf("complete undated Action Item: %v", err)
+			}
+		}
+	}
+	if _, err := repo.CreateEntity(EntityInput{CompanyID: companyID, EntityTypeID: ActionItemEntityTypeID, Name: "No due date", CreatedByUserID: userID}); err != nil {
+		t.Fatalf("undated Entities create: %v", err)
 	}
 	if _, err := repo.CreateActionItem(ActionItemInput{CompanyID: companyID, BodyText: "Invalid date", CreatedByUserID: userID, AnalysisDueDate: "2026-02-30"}); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("invalid calendar date: %v", err)
@@ -56,24 +69,21 @@ func assertActionItemDueDates(t *testing.T, repo Repository, companyID, userID s
 		}
 	}
 	clearAnalysis := EntityFieldInput{CompanyID: companyID, EntityID: item.EntityID, EntityFieldID: analysisID, ValueSet: true, Value: json.RawMessage(`null`)}
-	if _, err := repo.UpdateEntityField(clearAnalysis); !errors.Is(err, ErrActionItemDueDateRequired) {
+	if _, err := repo.UpdateEntityField(clearAnalysis); err != nil {
 		t.Fatalf("clearing only due date: %v", err)
 	}
-	unchanged, err := repo.GetEntity(companyID, item.EntityID)
+	cleared, err := repo.GetEntity(companyID, item.EntityID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertActionItemFieldValue(t, unchanged, ActionItemAnalysisDueDateSystemKey, `"2026-09-02"`)
+	assertActionItemFieldValue(t, cleared, ActionItemAnalysisDueDateSystemKey, "null")
 	if _, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: companyID, EntityID: item.EntityID, EntityFieldID: completionID, ValueSet: true, Value: json.RawMessage(`"2026-09-03"`)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.UpdateEntityField(clearAnalysis); err != nil {
-		t.Fatalf("clearing analysis with completion present: %v", err)
-	}
-	if _, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: companyID, EntityID: item.EntityID, EntityFieldID: completionID, ValueSet: true, Value: json.RawMessage(`null`)}); !errors.Is(err, ErrActionItemDueDateRequired) {
+	if _, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: companyID, EntityID: item.EntityID, EntityFieldID: completionID, ValueSet: true, Value: json.RawMessage(`null`)}); err != nil {
 		t.Fatalf("clearing remaining completion: %v", err)
 	}
-	if _, err := repo.UpdateEntity(EntityInput{CompanyID: companyID, EntityID: item.EntityID, Name: "Still dated", NameSet: true}); err != nil {
+	if _, err := repo.UpdateEntity(EntityInput{CompanyID: companyID, EntityID: item.EntityID, Name: "Dates cleared", NameSet: true}); err != nil {
 		t.Fatal(err)
 	}
 	direct, err := repo.CreateEntity(EntityInput{CompanyID: companyID, EntityTypeID: ActionItemEntityTypeID, Name: "Completion only", CreatedByUserID: userID, CompletionDueDate: "2026-09-04"})
@@ -81,22 +91,4 @@ func assertActionItemDueDates(t *testing.T, repo Repository, companyID, userID s
 		t.Fatal(err)
 	}
 	assertActionItemFieldValue(t, direct, ActionItemCompletionDueDateSystemKey, `"2026-09-04"`)
-
-	if _, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: companyID, EntityID: item.EntityID, EntityFieldID: analysisID, ValueSet: true, Value: json.RawMessage(`"2026-09-02"`)}); err != nil {
-		t.Fatal(err)
-	}
-	start := make(chan struct{})
-	results := make(chan error, 2)
-	for _, fieldID := range []string{analysisID, completionID} {
-		go func() {
-			<-start
-			_, err := repo.UpdateEntityField(EntityFieldInput{CompanyID: companyID, EntityID: item.EntityID, EntityFieldID: fieldID, ValueSet: true, Value: json.RawMessage(`null`)})
-			results <- err
-		}()
-	}
-	close(start)
-	first, second := <-results, <-results
-	if !((first == nil && errors.Is(second, ErrActionItemDueDateRequired)) || (second == nil && errors.Is(first, ErrActionItemDueDateRequired))) {
-		t.Fatalf("concurrent clears must keep one date: %v, %v", first, second)
-	}
 }

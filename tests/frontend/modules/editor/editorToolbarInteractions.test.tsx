@@ -1309,8 +1309,9 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
       await new Promise((resolve) => setTimeout(resolve, 550));
     });
     await flushAsyncWork();
-    assert.match(entityPreview.textContent ?? "", /Enter an analysis due date or completion due date/);
-    assert.equal(previewRequests.filter((request) => request.init?.method === "PUT").length, writesBeforeDateClear, "clearing the last date sends no partial save");
+    assert.equal(entityPreview.querySelector('[role="alert"]'), null);
+    assert.equal(previewRequests.filter((request) => request.init?.method === "PUT").length, writesBeforeDateClear + 1, "the last due date can be cleared and saved");
+    assert.equal(JSON.parse(String(previewRequests.at(-1)?.init?.body)).value, null);
     const replacementStart = previewRequests.length;
     await act(async () => {
       completionDateInput.value = "09/03/2026";
@@ -1319,7 +1320,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     });
     await flushAsyncWork();
     const replacementWrites = previewRequests.slice(replacementStart).filter((request) => request.init?.method === "PUT");
-    assert.deepEqual(replacementWrites.map((request) => request.path.split("/").at(-1)), ["field-5", "field-3"], "the replacement completion date saves before clearing the analysis date");
+    assert.deepEqual(replacementWrites.map((request) => request.path.split("/").at(-1)), ["field-5"], "an optional completion date saves independently");
     assert.doesNotMatch(entityPreview.textContent ?? "", /Enter an analysis due date or completion due date/);
 
     const currentSourceButton = entityPreview.querySelector<HTMLButtonElement>('button[aria-label="Open Source Current Source Process"]');
@@ -1452,8 +1453,10 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     });
     await flushAsyncWork();
     const deletionTitleInput = unavailableSourcePopover.querySelector<HTMLInputElement>('input[aria-label="Action Item title"]');
-    const deleteButton = [...unavailableSourcePopover.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Delete Action Item");
+    const deleteButton = unavailableSourcePopover.querySelector<HTMLButtonElement>('header button[aria-label="Delete Action Item"]');
     assert.ok(deletionTitleInput && deleteButton);
+    assert.ok(deleteButton.querySelector("svg"), "the header delete action is a trash icon");
+    assert.equal(deleteButton.textContent, "", "the old full-width Delete Action Item button is removed");
     dom.window.confirm = () => true;
     await act(async () => {
       deletionTitleInput.value = "Discard this queued rename";

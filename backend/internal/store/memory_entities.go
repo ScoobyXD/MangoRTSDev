@@ -516,9 +516,6 @@ func (r *MemoryRepo) UpdateEntity(input EntityInput) (domain.Entity, error) {
 	if !exists {
 		return domain.Entity{}, ErrNotFound
 	}
-	if err := validateActionItemEntityDueDate(r.entityDetailLocked(item), "", nil); err != nil {
-		return domain.Entity{}, err
-	}
 	if normalized.EntityFolderSet {
 		if err := r.validateEntityFolderForTypeLocked(item.CompanyID, item.EntityTypeID, normalized.EntityFolderID); err != nil {
 			return domain.Entity{}, err
@@ -677,9 +674,6 @@ func (r *MemoryRepo) UpdateEntityField(input EntityFieldInput) (domain.EntityFie
 	}
 	if normalized.PositionSet {
 		item.Position = normalized.Position
-	}
-	if err := validateActionItemEntityDueDate(r.entityDetailLocked(r.entities[key(item.CompanyID, item.EntityID)]), item.EntityFieldID, item.Value); err != nil {
-		return domain.EntityField{}, err
 	}
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.entityFields[itemKey] = item

@@ -51,7 +51,7 @@ function actionItem(entityID: string, name: string, color = "red", status = "in_
   } as Entity;
 }
 
-test("Huddle Board hides completed rows until checked and keeps green completion separate from light color", async () => {
+test("Huddle Board switches between incomplete and completed rows while preserving light color and grouping", async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     url: "http://localhost/", pretendToBeVisual: true,
   });
@@ -71,7 +71,7 @@ test("Huddle Board hides completed rows until checked and keeps green completion
     const [{ createRoot }, { HuddleActionItemsPanel }] = await Promise.all([
       import("react-dom/client"), import("../../../../frontend/src/modules/huddles/HuddleActionItemsPanel.tsx"),
     ]);
-    const items = [
+    let items = [
       actionItem("open-red", "Open red"),
       actionItem("done-red", "Done red", "red", "done"),
       actionItem("done-yellow", "Done yellow", "yellow", "completed"),
@@ -104,6 +104,7 @@ test("Huddle Board hides completed rows until checked and keeps green completion
     const initialReads = reads.length;
     await act(async () => checkbox.click());
     assert.equal(reads.length, initialReads, "completion filtering uses the loaded Board rollup");
+    assert.deepEqual([...container.querySelectorAll<HTMLElement>("[data-action-item-row]")].map((row) => row.dataset.actionItemRow), ["done-yellow", "done-red"], "checked shows only completed rows in the saved group order");
     assert.deepEqual([...container.querySelectorAll<HTMLElement>("[data-huddle-action-item-group-key]")].map((group) => group.dataset.huddleActionItemGroupKey), ["yellow", "red"]);
     for (const color of ["red", "yellow"]) {
       const row = container.querySelector<HTMLElement>(`[data-action-item-row="done-${color}"]`);
@@ -113,15 +114,21 @@ test("Huddle Board hides completed rows until checked and keeps green completion
       assert.match(row.style.background, /187,\s*247,\s*208/);
       assert.ok(row.querySelector(`.mango-editor-action-item--${color} .mango-editor-action-item-icon`));
     }
-    assert.equal(container.querySelector<HTMLElement>('[data-action-item-row="open-red"]')?.dataset.actionItemCompleted, "false");
+    assert.equal(container.querySelector('[data-action-item-row="open-red"]'), null);
     await act(async () => checkbox.click());
     assert.equal(container.querySelector('[data-action-item-row="done-red"]'), null);
+    assert.equal(container.querySelector<HTMLElement>('[data-action-item-row="open-red"]')?.dataset.actionItemCompleted, "false");
     await act(async () => checkbox.click());
     await act(async () => root.render(panel("board-2")));
     assert.equal(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked, false, "opening another Board defaults to incomplete items");
     await act(async () => root.render(panel("node-1", "huddle_node_created")));
     assert.equal(container.querySelector('input[type="checkbox"]'), null);
     assert.equal(container.querySelectorAll("[data-action-item-row]").length, 3, "created-in-Node history still includes completed items");
+    items = [];
+    await act(async () => root.render(panel("empty-board")));
+    assert.match(container.textContent ?? "", /No incomplete Action Items\./);
+    await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click());
+    assert.match(container.textContent ?? "", /No completed Action Items\./);
   } finally {
     if (mountedRoot) await act(async () => mountedRoot?.unmount());
     for (const restore of restores.reverse()) restore();

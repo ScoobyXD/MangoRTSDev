@@ -257,7 +257,7 @@ export function HuddleActionItemsPanel({
     () => view === "huddle_node_due"
       ? filterHuddleNodeDueActionItems(items, viewingDate, excludedItemIDs)
       : items.filter((item) => !excludedItemIDs.has(item.entity_id)
-        && (view !== "huddle_logic_gate" || showCompleted || getUniversalStatusGroupValue(actionItemFieldString(item, "status")).key !== "done")),
+        && (view !== "huddle_logic_gate" || (getUniversalStatusGroupValue(actionItemFieldString(item, "status")).key === "done") === showCompleted)),
     [excludedItemIDs, items, showCompleted, view, viewingDate],
   );
   const visibleItemIDSignature = useMemo(
@@ -391,7 +391,9 @@ export function HuddleActionItemsPanel({
       {error ? <div role="alert" style={errorStyle}>{error}</div> : <div aria-hidden="true" />}
       <div style={listStyle}>
         {loading && <div style={emptyStyle}>Loading Action Items</div>}
-        {!loading && visibleItems.length === 0 && <div style={emptyStyle}>{emptyLabel}</div>}
+        {!loading && visibleItems.length === 0 && <div style={emptyStyle}>{view === "huddle_logic_gate"
+          ? showCompleted ? "No completed Action Items." : "No incomplete Action Items."
+          : emptyLabel}</div>}
         {!loading && visibleItems.length > 0 && entries.map((entry, index) => (
           <div
             key={entry.entryID}

@@ -762,15 +762,6 @@ func (r *PostgresRepo) UpdateEntity(input EntityInput) (domain.Entity, error) {
 	if err != nil {
 		return domain.Entity{}, err
 	}
-	if entityTypeID == ActionItemEntityTypeID {
-		current, err := getPostgresEntity(ctx, tx, normalized.CompanyID, normalized.EntityID)
-		if err != nil {
-			return domain.Entity{}, err
-		}
-		if err := validateActionItemEntityDueDate(current, "", nil); err != nil {
-			return domain.Entity{}, err
-		}
-	}
 	if normalized.EntityFolderSet {
 		if err := validatePostgresEntityFolderForType(ctx, tx, normalized.CompanyID, entityTypeID, normalized.EntityFolderID); err != nil {
 			return domain.Entity{}, err
@@ -924,13 +915,6 @@ func (r *PostgresRepo) UpdateEntityField(input EntityFieldInput) (domain.EntityF
 		return domain.EntityField{}, err
 	}
 	defer tx.Rollback()
-	// Serialize changes to the same item so two date clears cannot both succeed.
-	var entityTypeID string
-	if err := tx.QueryRowContext(ctx, `select entity_type_id::text from entities where company_id=$1::uuid and entity_id=$2::uuid for update`, normalized.CompanyID, normalized.EntityID).Scan(&entityTypeID); errors.Is(err, sql.ErrNoRows) {
-		return domain.EntityField{}, ErrNotFound
-	} else if err != nil {
-		return domain.EntityField{}, err
-	}
 	current, err := scanEntityField(tx.QueryRowContext(ctx, `
 select field.company_id::text, field.entity_field_id::text, field.entity_id::text, field.entity_field_type_id::text,
        coalesce(field_type.system_key, ''), field.name, field.field_type, coalesce(field_type.config_jsonb, '{}'::jsonb),
@@ -965,15 +949,6 @@ for update of field`, normalized.CompanyID, normalized.EntityID, normalized.Enti
 	}
 	if fieldType == EntityFieldTypePerson && value != nil {
 		if err := validatePostgresEntityPersonValue(ctx, tx, normalized.CompanyID, value); err != nil {
-			return domain.EntityField{}, err
-		}
-	}
-	if entityTypeID == ActionItemEntityTypeID {
-		entity, err := getPostgresEntity(ctx, tx, normalized.CompanyID, normalized.EntityID)
-		if err != nil {
-			return domain.EntityField{}, err
-		}
-		if err := validateActionItemEntityDueDate(entity, current.EntityFieldID, value); err != nil {
 			return domain.EntityField{}, err
 		}
 	}

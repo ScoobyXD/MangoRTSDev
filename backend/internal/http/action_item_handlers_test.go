@@ -40,11 +40,17 @@ func TestActionItemHandlersCreateAndListByHuddleProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewServer(repo).Routes()
-	missingDatesBody, _ := json.Marshal(map[string]any{"company_id": company.CompanyID, "body_text": "Needs a date"})
+	missingDatesBody, _ := json.Marshal(map[string]any{"company_id": company.CompanyID, "body_text": "No due date"})
 	missingDatesResponse := httptest.NewRecorder()
 	handler.ServeHTTP(missingDatesResponse, requestWithActorForTest(httptest.NewRequest(http.MethodPost, "/v1/action-items", bytes.NewReader(missingDatesBody)), user, company.CompanyID))
-	if missingDatesResponse.Code != http.StatusBadRequest || !strings.Contains(missingDatesResponse.Body.String(), "Enter an analysis due date or completion due date.") {
-		t.Fatalf("missing date response=%d %s", missingDatesResponse.Code, missingDatesResponse.Body.String())
+	if missingDatesResponse.Code != http.StatusCreated {
+		t.Fatalf("undated creation response=%d %s", missingDatesResponse.Code, missingDatesResponse.Body.String())
+	}
+	undatedEntity := entitiesHTTPJSON(t, handler, user, company.CompanyID, http.MethodPost, "/v1/entities", map[string]any{
+		"company_id": company.CompanyID, "entity_type_id": store.ActionItemEntityTypeID, "name": "Direct undated Action Item",
+	})
+	if undatedEntity.Code != http.StatusCreated {
+		t.Fatalf("undated Entities creation response=%d %s", undatedEntity.Code, undatedEntity.Body.String())
 	}
 
 	createBody, _ := json.Marshal(map[string]any{
