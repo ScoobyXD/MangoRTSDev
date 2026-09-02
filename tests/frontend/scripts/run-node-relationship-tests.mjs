@@ -121,6 +121,10 @@ const testFiles = [
 ];
 const componentTests = [
   {
+    source: resolve(repoRoot, "tests/frontend/app/appModalPortal.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/app/appModalPortal.test.js"),
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/hierarchy/hierarchyBreadcrumb.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/hierarchy/hierarchyBreadcrumb.test.js"),
   },

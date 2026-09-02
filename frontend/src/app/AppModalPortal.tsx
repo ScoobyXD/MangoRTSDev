@@ -76,12 +76,38 @@ const MODAL_FOCUSABLE_SELECTOR = [
 ].join(",");
 const APP_MODAL_LAYER_SELECTOR = '[data-mango-modal-layer="true"]';
 
-function activeAppModalLayer(targetDocument: Document, excludedLayer?: HTMLElement): HTMLElement | null {
-  const layers = Array.from(targetDocument.querySelectorAll<HTMLElement>(APP_MODAL_LAYER_SELECTOR))
+function appModalLayers(targetDocument: Document, excludedLayer?: HTMLElement): HTMLElement[] {
+  return Array.from(targetDocument.querySelectorAll<HTMLElement>(APP_MODAL_LAYER_SELECTOR))
     .filter((layer) => layer !== excludedLayer);
-  const trappingLayers = layers.filter((layer) => layer.dataset.mangoModalFocusTrap === "true");
-  const activeLayers = trappingLayers.length > 0 ? trappingLayers : layers;
-  return activeLayers[activeLayers.length - 1] ?? null;
+}
+
+function activeAppModalFocusLayer(targetDocument: Document): HTMLElement | null {
+  for (let layer = activeAppModalLayer(targetDocument); layer; layer = layer.parentElement?.closest<HTMLElement>(APP_MODAL_LAYER_SELECTOR) ?? null) {
+    if (layer.dataset.mangoModalFocusTrap === "true") return layer;
+  }
+  return null;
+}
+
+function activeAppModalLayer(targetDocument: Document, excludedLayer?: HTMLElement): HTMLElement | null {
+  const children = new Map<HTMLElement | null, HTMLElement[]>();
+  for (const layer of appModalLayers(targetDocument, excludedLayer)) {
+    const parent = layer.parentElement?.closest<HTMLElement>(APP_MODAL_LAYER_SELECTOR) ?? null;
+    const siblings = children.get(parent) ?? [];
+    siblings.push(layer);
+    children.set(parent, siblings);
+  }
+  // Follow CSS stacking one scope at a time: a nested dialog cannot overtake
+  // a sibling above its parent. Modeless descendants still handle Escape
+  // before their owning parent, whose boundary continues to contain focus.
+  let activeLayer: HTMLElement | null = null;
+  for (;;) {
+    const siblings: HTMLElement[] = children.get(activeLayer) ?? [];
+    const trappingSiblings = siblings.filter((layer) => layer.dataset.mangoModalFocusTrap === "true");
+    const activeSiblings = trappingSiblings.length > 0 ? trappingSiblings : siblings;
+    const nextLayer = activeSiblings[activeSiblings.length - 1];
+    if (!nextLayer) return activeLayer;
+    activeLayer = nextLayer;
+  }
 }
 
 /** Prevent background floating surfaces from consuming Escape ahead of the active modal. */
@@ -192,6 +218,7 @@ export const AppModalPortal: React.FC<AppModalPortalProps> = ({
   onRequestClose,
 }) => {
   const targetDocument = ownerDocument ?? (typeof document === "undefined" ? null : document);
+  const parentLayer = React.useContext(AppOverlayPortalTargetContext);
   const restoreFocusRef = React.useRef<HTMLElement | null>(null);
   const trappingSessionRef = React.useRef(false);
   if (trapFocus && !trappingSessionRef.current && targetDocument) {
@@ -210,13 +237,13 @@ export const AppModalPortal: React.FC<AppModalPortalProps> = ({
     if (!layer || !targetDocument) return undefined;
     const previousFocus = trapFocus ? restoreFocusRef.current : null;
     const isTopLayer = () => activeAppModalLayer(targetDocument) === layer;
+    const ownsFocus = () => activeAppModalFocusLayer(targetDocument) === layer;
     const focusFirst = () => (appModalFocusableElements(layer)[0] ?? layer).focus({ preventScroll: true });
     const focusLayerIfNeeded = () => {
-      if (trapFocus && !layer.contains(targetDocument.activeElement)) focusFirst();
+      if (trapFocus && ownsFocus() && !layer.contains(targetDocument.activeElement)) focusFirst();
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (!isTopLayer()) return;
-      if (event.key === "Escape" && !event.defaultPrevented && (trapFocus || onRequestCloseRef.current)) {
+      if (event.key === "Escape" && isTopLayer() && !event.defaultPrevented && (trapFocus || onRequestCloseRef.current)) {
         event.preventDefault();
         event.stopImmediatePropagation();
         onRequestCloseRef.current?.();
@@ -224,7 +251,7 @@ export const AppModalPortal: React.FC<AppModalPortalProps> = ({
       }
       // Inner controls such as the unified editor own Tab after preventing its
       // default action. The modal trap must only cycle focus for unclaimed Tab.
-      if (!trapFocus || event.key !== "Tab" || event.defaultPrevented) return;
+      if (!trapFocus || event.key !== "Tab" || event.defaultPrevented || !ownsFocus()) return;
       const focusable = appModalFocusableElements(layer);
       if (focusable.length === 0) {
         event.preventDefault();
@@ -240,7 +267,7 @@ export const AppModalPortal: React.FC<AppModalPortalProps> = ({
       focusable[nextIndex]?.focus({ preventScroll: true });
     };
     const onFocusIn = (event: FocusEvent) => {
-      if (!trapFocus || !isTopLayer() || layer.contains(event.target as Node)) return;
+      if (!trapFocus || !ownsFocus() || layer.contains(event.target as Node)) return;
       focusFirst();
     };
     targetDocument.addEventListener("keydown", onKeyDown);
@@ -271,9 +298,9 @@ export const AppModalPortal: React.FC<AppModalPortalProps> = ({
       style={{ position: "relative", zIndex: trapFocus ? APP_MODAL_LAYER_Z_INDEX : APP_MODAL_LAYER_Z_INDEX - 10, isolation: "isolate" }}
     >
       <AppOverlayPortalTargetContext.Provider value={layerElement}>
-        {children}
+        {layerElement && children}
       </AppOverlayPortalTargetContext.Provider>
     </div>,
-    targetDocument.body,
+    parentLayer?.ownerDocument === targetDocument ? parentLayer : targetDocument.body,
   );
 };

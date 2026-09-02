@@ -1558,6 +1558,20 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     ));
   }, []);
 
+  const openProcessMapNodeOverlay = useCallback((selection: { logicGateID: string; nodeID: string }) => {
+    const nodeID = selection.nodeID.trim();
+    if (!nodeID) return;
+    setProcessMapLogicGateOverlay((current) => (
+      current?.logicGateID === selection.logicGateID ? { ...current, nodeID } : current
+    ));
+  }, []);
+
+  const closeProcessMapNodeOverlay = useCallback((selection: { logicGateID: string }) => {
+    setProcessMapLogicGateOverlay((current) => (
+      current?.logicGateID === selection.logicGateID ? { ...current, nodeID: undefined } : current
+    ));
+  }, []);
+
   const openLogicGateArenaNodeRoute = useCallback((selection: { logicGateID: string; nodeID: string }) => {
     if (!onNavigate) return;
     onNavigate(buildLogicGateRoute(selection.logicGateID, selection.nodeID));
@@ -2356,6 +2370,8 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
                     frames={processMapLogicGateOverlayFrames}
                     updateFrames={setProcessMapLogicGateOverlayFrames}
                     targetLogicGate={processMapLogicGateOverlay}
+                    onNodeOpen={openProcessMapNodeOverlay}
+                    onNodeClose={closeProcessMapNodeOverlay}
                     onLogicGateTitleChange={handleProcessMapLogicGateOverlayTitleChange}
                   />
                 </React.Suspense>
