@@ -181,6 +181,9 @@
 179. Email-based reset actor lookup MUST resolve exactly one same-company user with the `dev_admin` role and MUST reject a missing, ambiguous, or non-admin match.
 180. Interactive reset MUST display the company, resolved actor, and affected counts before requiring the operator to enter `RESET`; any other input or end of input MUST leave the database unchanged.
 181. Interactive reset MUST retain and apply the exact reviewed preview token automatically and MUST stop without retrying when that preview becomes stale.
+182. Double-clicking a Kanban Node inside the Process popup MUST open that Node above the Process popup and allow interaction with both the Node and its parent Process.
+183. A Kanban refresh MUST preserve the Process popup's open Node until the user closes it or selects another Node.
+184. Escape MUST close the innermost open popup first; closing a Node MUST leave its Process popup open, and closing the Process MUST return to the unchanged Process Map URL and canvas.
 Last updated: 2026-09-02
 
 # Process Story: One company canvas moves from overview to Process work

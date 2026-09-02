@@ -258,6 +258,12 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
   assert.match(app, /UNIFIED_NODE_SHELL_CLOSE_BUTTON_TEMPLATE_STYLE/);
   assert.match(app, /aria-label=\{`\$\{processMapLogicGateOverlay\.label\} Process`\}/);
   assert.match(app, /title="Close Process"/);
+  const processPopup = app.slice(app.indexOf("{isProcessMapView && processMapLogicGateOverlay && ("));
+  assert.match(processPopup, /onNodeOpen=\{openProcessMapNodeOverlay\}/);
+  assert.match(processPopup, /onNodeClose=\{closeProcessMapNodeOverlay\}/);
+  const processNodeHandlers = app.slice(app.indexOf("const openProcessMapNodeOverlay ="), app.indexOf("const openLogicGateArenaNodeRoute ="));
+  assert.match(processNodeHandlers, /setProcessMapLogicGateOverlay/);
+  assert.doesNotMatch(processNodeHandlers, /onNavigate|buildLogicGateRoute/);
   assert.match(shell, /background: "linear-gradient\(135deg, #ff5a6b, #ef334e\)"/);
 });
 
