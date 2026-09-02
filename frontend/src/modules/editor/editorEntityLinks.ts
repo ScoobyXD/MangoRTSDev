@@ -342,7 +342,6 @@ export async function createActionItemEntityFromSelection(
   },
   selectedText: string,
   color: ActionItemColor,
-  dueDates: { analysisDueDate?: string; completionDueDate?: string },
 ): Promise<EditorEntityLink> {
   const name = normalizeEditorSelectionActionItemName(selectedText);
   if (!name) throw new Error("selection_action_item_name_empty");
@@ -351,7 +350,6 @@ export async function createActionItemEntityFromSelection(
     bodyText: selectedText,
     name,
     color,
-    ...dueDates,
     source: context.source,
   });
   return {

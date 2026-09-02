@@ -328,7 +328,7 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                   <AddButton disabled={busy} label="Add folder" />
                 </form>
                 <form
-                  style={selectedTypeIsActionItem ? { ...inlineCreateStyle, gridTemplateColumns: "minmax(0,1fr)" } : inlineCreateStyle}
+                  style={inlineCreateStyle}
                   onSubmit={(event) => {
                     event.preventDefault();
                     const form = event.currentTarget;
@@ -340,11 +340,7 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                         entityTypeID: selectedTypeID,
                         entityFolderID: selectedFolderID,
                         name,
-                        ...(selectedTypeIsActionItem ? {
-                          bodyJSON: entityBodyFromText(name),
-                          analysisDueDate: formText(form, "analysis_due_date"),
-                          completionDueDate: formText(form, "completion_due_date"),
-                        } : {}),
+                        ...(selectedTypeIsActionItem ? { bodyJSON: entityBodyFromText(name) } : {}),
                       });
                       form.reset();
                       await loadCatalog(selectedTypeID);
@@ -354,11 +350,6 @@ export function EntitiesContent({ accent = "#0f766e" }: { accent?: string }) {
                   }}
                 >
                   <input name="name" maxLength={200} placeholder={selectedFolder ? `Entity in ${selectedFolder.name}` : "Entity at type root"} aria-label="New entity name" style={inputStyle} disabled={busy} />
-                  {selectedTypeIsActionItem && <div style={{ display: "grid", gap: 6 }}>
-                    <span style={{ fontSize: 11 }}>Enter at least one due date.</span>
-                    <label style={labelStyle}>Analysis due date<input type="date" name="analysis_due_date" style={inputStyle} disabled={busy} /></label>
-                    <label style={labelStyle}>Completion due date<input type="date" name="completion_due_date" style={inputStyle} disabled={busy} /></label>
-                  </div>}
                   <AddButton disabled={busy} label="Add entity" />
                 </form>
               </div>

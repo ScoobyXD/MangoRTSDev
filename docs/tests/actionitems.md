@@ -14,13 +14,13 @@
 12. Recycling preserves Source while making it unavailable, restore resolves it again, and permanent deletion atomically clears matching values.
 13. Details is the full-width field at the top of the compact editor; the remaining existing editable and read-only fields retain their two-column layout and autosave behavior.
 14. Created date and Source are read-only, both person fields use the current-company picker, and Status preserves the exact `in_progress`, `pending`, and `done` keys.
-15. Every Action Item creation or save requires at least one valid Analysis due date or Completion due date; clearing the final date is rejected without saving changes. New items default to In progress and both people unset; direct creation leaves Source and Color unset while highlighted-text creation records its exact Source and chosen Yellow or Red.
+15. Analysis and Completion due dates are optional and may both be cleared; any supplied date must be valid.
 16. My Work Mine contains only active Action Items assigned to the current subject; Delegated contains only active Action Items assigned by that subject to another person.
 17. A self-assigned item appears only in Mine, an unassigned item appears in neither perspective, and done or completed items appear in neither active view.
 18. My Work grouping and leaf ordering are separate server-owned stacks with the established defaults and user-owned singleton saved views.
 19. My Work's Huddle Board grouping derives only from immutable Source: an exact `huddle_logic_gate` Source identifies itself and an exact `huddle_node` Source follows only its required owner.
 20. My Work rows may expose only the compact approved inline fields; Details is never inline and unavailable Source or Huddle Board identity leaks no hidden data.
-21. The Huddle Board Action Item view reads the exact Board's current canonical rollup and hides completed items unless the temporary Show completed checkbox beside its filter is checked; other filters still apply.
+21. The Huddle Board Action Item view shows only incomplete items when Show completed is unchecked and only completed items when checked; other filters still apply.
 22. A Huddle Node has two Action Item views: **Created in this Huddle Node** and **Due or Overdue**.
 23. Created-in-this-Node reads immutable exact Huddle Node Source provenance, not live `entity_relationships`, and includes completed items.
 24. Due-or-Overdue starts from the owning Board's current direct-plus-owned-Node rollup, deduplicates it, and excludes every ID already in the created section.
@@ -35,14 +35,16 @@
 33. Huddle lists reconcile after relevant Source, relationship, title, Completion due date, status, listed-field, Node-date, sibling, Board, and realtime changes; ordinary typing does not reload them and stale reads cannot win.
 34. Every selected grouping renders a visible hierarchy header, ordering affects only final leaves, and selected inline fields render in one saved nonwrapping rail.
 35. Completed Action Item rows have a green background while their original red or yellow icon and Color field remain unchanged.
-
 36. A company member may permanently delete an Action Item through the existing Entity delete command; its fields and exact relationships are removed, surviving resources remain, and Entity deletion has no Recycle Bin restore.
 37. Converting highlighted text preserves the complete Details text; selections longer than the 200 Unicode-character title limit retain their source text with an appended reference, and Action Item chips wrap without an ellipsis.
 38. Creating from a posted chat preserves that message and stages an Action Item reference in a reply; sending the reply saves the reference and includes it in the Huddle Board rollup where applicable.
-39. Creation keeps the exact owner captured when the form opened; if the owner or source text changes after creation succeeds, the form closes and the existing item remains available without offering a duplicate creation retry.
+39. Creation keeps the exact owner and selected text captured when the color is clicked; a changed owner or source text prevents insertion into the changed content after creation succeeds.
+40. Yellow and red creation actions appear only for highlighted editor or chat text and create immediately without a due-date form.
+41. The compact Action Item popup exposes deletion through a trash icon in its top-right header beside Close.
+42. New items default to In progress with both people and dates unset; direct creation leaves Source and Color unset while selection creation records its exact Source and chosen color.
 
 Last updated: 2026-09-01
 
 ## Process Story
 
-An authorized editor or chat selection opens the shared creation form and creates one Action Item with at least one due date and its immutable exact Source atomically. Huddle Boards use the current canonical rollup from saved editor and chat references, with completed items hidden until Show completed is checked. A Huddle Node separately shows every item created from that exact Node and the owning Board's current incomplete work due by a temporary viewing date, with duplicate IDs shown only in the created section. Three independent user-owned saved-view surfaces control presentation without changing Source or relationship truth.
+An authorized user highlights editor or chat text and clicks yellow or red to create an Action Item immediately with its exact immutable Source. Dates can be added or cleared later in the compact popup, whose top-right trash icon deletes the item. The Board checkbox switches between incomplete work and completed work. A Huddle Node separately shows all items created from that Node and incomplete Board work due by its temporary viewing date.

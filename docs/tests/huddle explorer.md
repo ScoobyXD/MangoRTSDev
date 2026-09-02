@@ -15,10 +15,10 @@
 13. The section shell, text scale, spacing, row hover, and elevation follow the Pinned section.
 14. Folder rows follow Company Explorer presentation: plain disclosure chevron, folder icon, title, normal indentation, and no boxy fieldset or corner container.
 15. No Huddle folder or Board row shows a Root selector, plus button, pencil button, or X button.
-16. Dragging a folder or Huddle Board may reparent it to root or an exact folder through the canonical Explorer move command; a Board's **Move to…** menu uses that same command and offers the top level and full folder paths.
+16. Dragging a folder or Huddle Board onto a folder row moves it into that exact folder through the canonical Explorer move command.
 17. Drag-and-drop preserves the existing deterministic date-and-name ordering and adds no custom position schema.
 18. Folder drop validation preserves same-company ownership and cycle protections and performs no partial invalid move.
-19. A Huddle Board context menu contains exactly **Open in new browser tab**, **Rename**, **Move to…**, and **Remove from Huddle Boards**.
+19. A Huddle Board context menu contains exactly **Open in new browser tab**, **Rename**, and **Remove from Huddle Boards**.
 20. Open in new browser tab uses the existing deep-link route and applies only to Board rows; folders receive no invented route.
 21. Rename updates only the exact selected Board or folder through its established command.
 22. Remove from Huddle Boards recycles only the canonical Explorer placement, matching the former placement X behavior, and never deletes the Board or any Huddle Node.
@@ -31,6 +31,9 @@
 29. Breadcrumbs derive from current placement and exact Huddle Node ownership, hide an unsafe or inaccessible path, and preserve established reveal and hierarchy-change refresh behavior.
 30. Huddle Boards and Huddle Nodes never receive Company Explorer item rows.
 31. A successful Board move reloads its saved placement and expands the destination's folder ancestry; a failed move shows the error and keeps the current placement.
+32. Dragging a folder or Board onto the existing **Huddle Boards** heading moves it to the top level without adding a temporary drop row.
+33. Dragging uses Company Explorer's native row behavior, dimmed source, and highlighted destination; a drag never opens the Board.
+34. Cancelling a drag, dropping into the current parent, or using an invalid destination makes no move request.
 
 Last updated: 2026-09-01
 
@@ -40,6 +43,6 @@ An editor creates a Huddle Board or folder from the Huddle Boards header
 ↓
 Mango stores one exact Huddle Explorer placement or folder relationship and renders it with the shared Board or folder icon
 ↓
-The user drags rows or chooses a Board's **Move to…** destination to reparent it; the same row-specific context menu keeps rename, placement-only removal, new-tab opening, and empty-folder actions
+The user drags a row onto a folder to move it inside, or onto the Huddle Boards heading to move it back to the top level; the row-specific context menu keeps rename, placement-only removal, new-tab opening, and empty-folder actions
 ↓
 Every action keeps Huddle resource identity, Huddle Node ownership, permissions, RACI, breadcrumbs, recycle, and deterministic ordering under their existing canonical authorities

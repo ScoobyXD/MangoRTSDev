@@ -662,11 +662,6 @@ function EditableActionItemPopover({
     setSaveError("");
     try {
       if (!cleanName) throw new Error("Action Item title is required.");
-      const hasDueDate = latestEntity.entity_fields.some((field) => (
-        (field.system_key === "analysis_due_date" || field.system_key === "completion_due_date")
-        && Boolean(target.fieldValues[field.entity_field_id]?.trim())
-      ));
-      if (!hasDueDate) throw new Error("Enter an analysis due date or completion due date.");
       const nextSaved: ActionItemDraft = {
         name: previouslySaved.name,
         details: previouslySaved.details,
@@ -675,12 +670,7 @@ function EditableActionItemPopover({
       const nameChanged = target.name !== previouslySaved.name;
       const detailsChanged = target.details !== previouslySaved.details;
 
-      // Set a replacement due date before clearing the old one or saving other changes.
-      const fieldsToSave = [...latestEntity.entity_fields].sort((left, right) => {
-        const setsDate = (field: EntityField) => field.field_type === "date" && Boolean(target.fieldValues[field.entity_field_id]?.trim());
-        return Number(setsDate(right)) - Number(setsDate(left));
-      });
-      for (const field of fieldsToSave) {
+      for (const field of latestEntity.entity_fields) {
         if (field.field_type === "resource") continue;
         const rawValue = target.fieldValues[field.entity_field_id] ?? "";
         if (rawValue === previouslySaved.fieldValues[field.entity_field_id]) continue;
@@ -858,7 +848,14 @@ function EditableActionItemPopover({
             <span role="status" style={{ color: saveError ? "#b91c1c" : saving ? "#64748b" : saved ? "#15803d" : "#92400e", fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>
               {saveError ? "Not saved" : saving ? "Saving…" : saved ? "Saved" : "Pending"}
             </span>
-            <button type="button" aria-label="Close Action Item details" onClick={() => void closeAfterFlush()} style={actionItemCloseButtonStyle}>×</button>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <button type="button" aria-label="Delete Action Item" title="Delete Action Item" aria-busy={deleting || undefined} disabled={deleting} onClick={() => void removeActionItem()} style={{ ...actionItemCloseButtonStyle, display: "grid", placeItems: "center" }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M3 6h18M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M5 6l1 14h12l1-14M10 10v6M14 10v6" />
+                </svg>
+              </button>
+              <button type="button" aria-label="Close Action Item details" disabled={deleting} onClick={() => void closeAfterFlush()} style={actionItemCloseButtonStyle}>×</button>
+            </div>
         </header>
         <fieldset disabled={deleting} style={{ ...actionItemPopoverBodyStyle, border: 0, margin: 0, minWidth: 0 }}>
             <div style={{ display: "grid", gap: 12 }}>
@@ -902,7 +899,6 @@ function EditableActionItemPopover({
                 </section>
               </div>
             </div>
-            <button type="button" disabled={deleting} onClick={() => void removeActionItem()} style={{ ...actionItemCloseButtonStyle, width: "auto", marginTop: 12, padding: "6px 10px", color: "#b91c1c" }}>{deleting ? "Deleting…" : "Delete Action Item"}</button>
         </fieldset>
         </section>
         <div

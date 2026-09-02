@@ -99,35 +99,12 @@ func actionItemDateValue(date string) json.RawMessage {
 }
 
 func validateActionItemDueDates(analysis, completion string) error {
-	if analysis == "" && completion == "" {
-		return ErrActionItemDueDateRequired
-	}
 	for _, date := range []string{analysis, completion} {
 		if _, err := normalizeEntityFieldValue(EntityFieldTypeDate, actionItemDateValue(date)); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-func validateActionItemEntityDueDate(entity domain.Entity, changedFieldID string, changedValue json.RawMessage) error {
-	if entity.EntityTypeID != ActionItemEntityTypeID {
-		return nil
-	}
-	for _, field := range entity.EntityFields {
-		if field.SystemKey != ActionItemAnalysisDueDateSystemKey && field.SystemKey != ActionItemCompletionDueDateSystemKey {
-			continue
-		}
-		value := field.Value
-		if field.EntityFieldID == changedFieldID {
-			value = changedValue
-		}
-		var date string
-		if json.Unmarshal(value, &date) == nil && date != "" {
-			return nil
-		}
-	}
-	return ErrActionItemDueDateRequired
 }
 
 func deriveActionItemName(bodyText string) string {

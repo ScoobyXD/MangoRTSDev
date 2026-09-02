@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom";
 import type { EditorChatEntityLink } from "../../../../frontend/src/modules/editor/chatEntityLinks.js";
 import type { ActionItemSourceResourceType } from "../../../../frontend/src/modules/entities/entitiesApi.js";
 
-test("chat conversion requires a date, preserves cancelled and long text, and stages exact-owner replies without sending", { timeout: 8_000 }, async () => {
+test("highlighted chat text immediately creates undated items and safely stages exact-owner references", { timeout: 8_000 }, async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { pretendToBeVisual: true, url: "http://localhost/" });
   const restores: Array<() => void> = [];
   const install = (name: string, value: unknown) => {
@@ -20,6 +20,7 @@ test("chat conversion requires a date, preserves cancelled and long text, and st
   install("IS_REACT_ACT_ENVIRONMENT", true);
   Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", { configurable: true, value: () => undefined });
   Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { configurable: true, value: () => undefined });
+  Object.defineProperty(dom.window.Range.prototype, "getBoundingClientRect", { configurable: true, value: () => ({ left: 20, right: 160, top: 40, bottom: 60, width: 140, height: 20 }) });
   let root: { unmount(): void } | undefined;
   try {
     const [{ createRoot }, { Simulate }, { ChatPane }] = await Promise.all([
@@ -58,35 +59,38 @@ test("chat conversion requires a date, preserves cancelled and long text, and st
       assert.ok(button, selector);
       await act(async () => { button.click(); });
     };
-    const submit = async () => {
-      const form = dom.window.document.querySelector<HTMLFormElement>('form[role="dialog"]');
-      assert.ok(form);
-      await act(async () => { Simulate.submit(form); });
+    const selectionToolbar = () => container.querySelector('[aria-label="Create an Action Item from highlighted chat text"]');
+    const selectDraft = async (from: number, to: number) => {
+      const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Chat message"]')!;
+      await act(async () => { textarea.focus(); textarea.setSelectionRange(from, to); Simulate.mouseUp(textarea); });
     };
-    const setDate = async (label: string) => {
-      const input = dom.window.document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
-      assert.ok(input);
-      await act(async () => { input.value = "2026-09-15"; Simulate.change(input); });
+    const selectComment = async (from = 0, to = commentText.length) => {
+      const body = container.querySelector<HTMLElement>('[data-chat-message-text="comment"]')!;
+      const text = body.firstElementChild!.firstChild!;
+      const range = dom.window.document.createRange();
+      range.setStart(text, from); range.setEnd(text, to);
+      const selection = dom.window.document.getSelection()!;
+      await act(async () => { selection.removeAllRanges(); selection.addRange(range); Simulate.mouseUp(body); });
     };
     await act(async () => { mounted.render(<Harness resourceType="node" editable={false} />); });
-    assert.equal(container.querySelector('[aria-label="Create red Action Item from comment"]'), null);
+    await selectComment();
+    assert.equal(selectionToolbar(), null, "read-only chats cannot create Action Items");
     await act(async () => { mounted.render(<Harness resourceType="node" />); });
-    const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Chat message"]')!;
-    textarea.setSelectionRange(7, 7 + selectedText.length);
-    await click('[aria-label="Create red Action Item from chat draft"]');
-    assert.ok(dom.window.document.querySelector('[role="dialog"]')!.textContent!.includes(selectedText));
-    await submit();
+    assert.equal(selectionToolbar(), null, "nonempty comments and drafts show no always-visible controls");
+    assert.equal(container.querySelector('[aria-label="Create yellow Action Item from comment"]'), null);
+    await selectDraft(7, 7 + selectedText.length);
+    assert.ok(selectionToolbar());
+    await act(async () => { dom.window.document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    assert.equal(selectionToolbar(), null);
     assert.equal(requests.length, 0);
-    assert.match(dom.window.document.querySelector('[role="alert"]')!.textContent!, /analysis due date or completion due date/);
-    await click('form[role="dialog"] button[type="button"]');
     assert.equal(latestDraft, originalDraft);
     assert.equal(latestLinks.length, 0);
-    textarea.setSelectionRange(7, 7 + selectedText.length);
-    await click('[aria-label="Create red Action Item from chat draft"]');
-    await setDate("Analysis due date");
-    await submit();
+    await selectDraft(7, 7 + selectedText.length);
+    await click('[aria-label="Create red Action Item from highlighted chat text"]');
     assert.equal(requests[0].body_text, selectedText);
-    assert.equal(requests[0].analysis_due_date, "2026-09-15");
+    assert.equal("analysis_due_date" in requests[0], false);
+    assert.equal("completion_due_date" in requests[0], false);
+    assert.equal(dom.window.document.querySelector('[role="dialog"]'), null);
     assert.equal(requests[0].color, "red");
     assert.deepEqual(requests[0].source, { resource_type: "node", resource_id: "node-id" });
     assert.ok(latestDraft.includes(selectedText), "long selected text is retained beside the reference");
@@ -94,12 +98,13 @@ test("chat conversion requires a date, preserves cancelled and long text, and st
     assert.equal(sends, 0);
     for (const resourceType of ["project", "huddle_node"] as const) {
       await act(async () => { mounted.render(<Harness key={resourceType} resourceType={resourceType} />); });
-      await click('[aria-label="Create yellow Action Item from comment"]');
-      await setDate("Completion due date");
-      await submit();
+      assert.equal(selectionToolbar(), null);
+      await selectComment(2, 24);
+      await click('[aria-label="Create yellow Action Item from highlighted chat text"]');
       const payload = requests.at(-1)!;
-      assert.equal(payload.body_text, commentText);
-      assert.equal(payload.completion_due_date, "2026-09-15");
+      assert.equal(payload.body_text, commentText.slice(2, 24), "only highlighted comment text is converted");
+      assert.equal("analysis_due_date" in payload, false);
+      assert.equal("completion_due_date" in payload, false);
       assert.equal(payload.color, "yellow");
       assert.deepEqual(payload.source, { resource_type: resourceType, resource_id: `${resourceType}-id` });
       assert.ok(container.querySelector('[data-node-chat-message-id="comment"]')!.textContent!.includes(commentText));
@@ -109,37 +114,35 @@ test("chat conversion requires a date, preserves cancelled and long text, and st
       assert.equal(sends, 0, "creating does not send a chat");
     }
     await act(async () => { mounted.render(<Harness key="owner-race" resourceType="node" />); });
-    await click('[aria-label="Create yellow Action Item from comment"]');
-    await setDate("Completion due date");
+    await selectComment();
+    assert.ok(selectionToolbar());
     await act(async () => { mounted.render(<Harness key="owner-race" resourceType="project" />); });
-    await submit();
-    assert.equal(requests.length, 3, "owner switch before Save creates nothing");
-    assert.match(dom.window.document.querySelector('[role="alert"]')!.textContent!, /chat changed/);
-    await click('form[role="dialog"] button[type="button"]');
+    assert.equal(selectionToolbar(), null, "owner changes discard previous selection controls");
+    assert.equal(requests.length, 3);
 
     deferRequest = true;
-    await click('[aria-label="Create yellow Action Item from comment"]');
-    await setDate("Completion due date");
-    await submit();
+    await selectComment();
+    await click('[aria-label="Create yellow Action Item from highlighted chat text"]');
     assert.equal(requests.length, 4);
+    await selectComment();
+    assert.equal(selectionToolbar(), null, "an in-flight request cannot create a duplicate");
     await act(async () => { mounted.render(<Harness key="owner-race" resourceType="huddle_node" />); });
     await act(async () => { finishRequest!(); });
-    assert.equal(dom.window.document.querySelector('form[role="dialog"]'), null, "successful creation closes Save even when reference insertion is unsafe");
+    assert.equal(selectionToolbar(), null);
     assert.equal(latestDraft, originalDraft);
     assert.equal(latestLinks.length, 0, "no reference leaks into the new owner");
     assert.equal(latestReply, "");
     assert.match(container.textContent!, /Action Item was created, but the chat changed/);
 
-    await click('[aria-label="Create red Action Item from chat draft"]');
-    await setDate("Analysis due date");
-    await submit();
+    await selectDraft(0, originalDraft.length);
+    await click('[aria-label="Create red Action Item from highlighted chat text"]');
     const changedDraft = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Chat message"]')!;
     await act(async () => { changedDraft.value = "Changed while saving"; Simulate.change(changedDraft); });
     await act(async () => { finishRequest!(); });
     assert.equal(latestDraft, "Changed while saving", "response does not overwrite a newer draft");
     assert.equal(latestLinks.length, 0);
     assert.equal(dom.window.document.querySelector('form[role="dialog"]'), null);
-    assert.equal(requests.length, 5, "successful response has no retryable Save that creates duplicates");
+    assert.equal(requests.length, 5);
   } finally {
     if (root) await act(async () => root!.unmount());
     dom.window.close();

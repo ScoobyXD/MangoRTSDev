@@ -43,7 +43,7 @@
 41. Board Action Items automatically reconcile after relevant local canonical commits and established realtime invalidation while older overlapping reads cannot replace newer results.
 42. Each committed Board editor save atomically replaces that exact Board's Action Item `entity_relationships` set from saved inline references.
 43. Removing the final saved reference removes only the exact Board edge and preserves the Action Item Entity and immutable Source.
-44. The **Show completed** checkbox sits beside the Board grouping control and includes completed items only while checked.
+44. The **Show completed** checkbox sits beside the Board grouping control; checked shows only completed items and unchecked shows only incomplete items.
 45. Completion filtering runs before existing grouping and ordering, changes no saved preference or relationship, and resets to off when a Board opens.
 46. Deleting an Action Item uses existing company-authorized Entity deletion, removes its exact fields and relationships, and refreshes affected Board and Huddle Node lists.
 
@@ -55,6 +55,6 @@ An editor creates a Huddle Board from the sidebar or converts an eligible Logic 
 ↓
 Mango atomically stores the exact canonical Huddle Logic Gate identity, direct policy, and Huddle Explorer placement
 ↓
-The shared editor autosaves text, references, and typed attachments while the Action Items view groups the current incomplete Board rollup; Show completed includes green completed rows while preserving their original light icons
+The shared editor autosaves text, references, and typed attachments while the Action Items view groups the current incomplete Board rollup; Show completed switches to only green completed rows while preserving their original light icons
 ↓
 The Board may link normal Logic Gates, every Huddle Node keeps its fixed creation-time Logic Gate/KPI snapshot, and no presentation control changes relationship truth

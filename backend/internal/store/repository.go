@@ -12,7 +12,6 @@ import (
 var (
 	ErrNotFound                         = errors.New("not found")
 	ErrInvalid                          = errors.New("invalid")
-	ErrActionItemDueDateRequired        = errors.New("Enter an analysis due date or completion due date.")
 	ErrAlreadyExists                    = errors.New("already exists")
 	ErrConflict                         = errors.New("conflict")
 	ErrVersionConflict                  = errors.New("version conflict")

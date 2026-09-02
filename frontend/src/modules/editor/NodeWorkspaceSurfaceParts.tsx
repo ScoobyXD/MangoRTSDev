@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { AppModalPortal, useAppFloatingMenuDismissal, useAppOverlayPortalTarget, useAppViewportAnchorRect } from "../../app/AppModalPortal.js";
 import { ConfirmActionMenu, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu.js";
 import { ActionItemIcon, ExplorerEntityIcon } from "../../icons/index.js";
-import { ActionItemSelectionDialog, type ActionItemDueDates } from "../action-items/ActionItemSelectionDialog.js";
 import type { ActionItemColor, ActionItemSourceResourceType } from "../entities/entitiesApi.js";
 import { deleteEmailDraft, downloadEmailAttachment, ensureEmailReplyDraft, getEmailDraft, getEmailSignature, getNodeEmailMessage, getNodeEmailThread, getProjectEmailMessage, getProjectEmailThread, invalidateNodeEmailThreadCache, isEmailDraftRevisionConflict, listEmailReplyDraftsBySource, saveEmailDraft, sendEmail, type CommunicationsEmailDraft, type CommunicationsEmailDraftScope, type EmailAddress, type EmailAttachment, type EmailMessage, type SaveCommunicationsEmailDraftInput } from "../communications/communicationsApi";
 import { CalendarInviteCard } from "../communications/CalendarInviteCard";
@@ -22,6 +21,7 @@ import {
   type EditorChatEntityLink,
 } from "./chatEntityLinks.js";
 import { createActionItemEntityFromSelection, editorEntityTypeLabel, normalizeEditorSelectionActionItemName, openEditorEntityLink, readActiveEntityLinkDraft, searchEditorEntityLinks, type ActiveEntityLinkDraft, type EditorEntityLink, type EditorEntityLinkRequest, type EditorSearchableEntityType } from "./editorEntityLinks.js";
+import { calculateEditorSelectionActionPosition } from "./editorSelectionActions.js";
 import { editorChatAttachmentsReadyForSubmit } from "./nodeTextBlockAttachments.js";
 import type { EditorSaveState } from "./EditorSaveStatusIcon.js";
 import type { EditorScrollMemory } from "./editorScroll";
@@ -827,6 +827,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const chatPaneRef = useRef<HTMLDivElement | null>(null);
+  const creatingActionItemRef = useRef(false);
   const composerMentionOverlayRef = useRef<HTMLDivElement | null>(null);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const previousMessageIDsRef = useRef(new Set(messages.map((message) => message.id)));
@@ -912,49 +914,73 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const [entityOptions, setEntityOptions] = useState<EditorEntityLink[]>([]);
   const [entitySearchPending, setEntitySearchPending] = useState(false);
   const [entitySearchError, setEntitySearchError] = useState("");
-  const [pendingActionItem, setPendingActionItem] = useState<{ text: string; color: ActionItemColor; messageID?: string; from: number; to: number; draft: string; owner: string } | null>(null);
+  const [actionItemSelection, setActionItemSelection] = useState<{ text: string; messageID?: string; from: number; to: number; draft: string; owner: string; x: number; y: number } | null>(null);
   const [actionItemNotice, setActionItemNotice] = useState<{ message: string; pendingSend: boolean } | null>(null);
   const canCreateActionItem = composerEditable && Boolean(actionItemSource && entityRequestJSON && companyID && onDraftEntityLinksChange);
   const actionItemOwner = JSON.stringify([companyID, actionItemSource?.resourceType, actionItemSource?.resourceID, blockID]);
   const actionItemContextRef = useRef({ owner: actionItemOwner, draft, draftEntityLinks, canCreateActionItem });
   actionItemContextRef.current = { owner: actionItemOwner, draft, draftEntityLinks, canCreateActionItem };
-  const beginChatActionItem = (color: ActionItemColor, message?: EditorTextBlockChatMessage, body?: HTMLElement | null) => {
-    if (!canCreateActionItem) return;
-    const selection = body?.ownerDocument.getSelection();
-    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
-    const selectedMessageText = range && !range.collapsed && body?.contains(range.commonAncestorContainer) ? selection!.toString() : "";
+  useAppFloatingMenuDismissal(Boolean(actionItemSelection), chatPaneRef, () => setActionItemSelection(null));
+  const captureChatSelection = (target: EventTarget | null) => {
+    setActionItemSelection(null);
+    const pane = chatPaneRef.current;
+    if (!canCreateActionItem || creatingActionItemRef.current || !pane || activeTab !== "chat") return;
     const textarea = textareaRef.current;
-    const from = !message && textarea && textarea.selectionEnd > textarea.selectionStart ? textarea.selectionStart : 0;
-    const to = !message && textarea && textarea.selectionEnd > textarea.selectionStart ? textarea.selectionEnd : draft.length;
-    const text = message ? selectedMessageText || message.message : draft.slice(from, to);
-    if (!text.trim()) return;
-    setActionItemNotice(null);
-    setPendingActionItem({ text, color, messageID: message?.id, from, to, draft, owner: actionItemOwner });
-  };
-  const saveChatActionItem = async (dueDates: ActionItemDueDates) => {
-    const pending = pendingActionItem;
-    if (!pending || !canCreateActionItem || !actionItemSource || !entityRequestJSON || !companyID) return;
-    if (draft !== pending.draft || pending.owner !== actionItemOwner) throw new Error("The chat changed. Cancel and select the text again.");
-    const entity = await createActionItemEntityFromSelection({ companyID, requestJSON: entityRequestJSON, source: actionItemSource }, pending.text, pending.color, dueDates);
-    setPendingActionItem((current) => current === pending ? null : current);
-    const current = actionItemContextRef.current;
-    if (!textareaRef.current || !current.canCreateActionItem || current.owner !== pending.owner || current.draft !== pending.draft) {
-      setActionItemNotice({ message: "The Action Item was created, but the chat changed. Link the existing Action Item with #.", pendingSend: false });
-      return;
+    let text = "", messageID: string | undefined, from = 0, to = 0, rect: DOMRect;
+    if (textarea && target === textarea) {
+      from = textarea.selectionStart;
+      to = textarea.selectionEnd;
+      text = draft.slice(from, to);
+      rect = textarea.getBoundingClientRect();
+    } else {
+      const selection = pane.ownerDocument.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (!range || range.collapsed) return;
+      const ancestor = range.commonAncestorContainer instanceof Element ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+      const body = ancestor?.closest<HTMLElement>("[data-chat-message-text]");
+      if (!body || !pane.contains(body) || !body.contains(range.startContainer) || !body.contains(range.endContainer)) return;
+      messageID = body.dataset.chatMessageText;
+      if (!messageID) return;
+      text = range.toString();
+      rect = range.getBoundingClientRect();
     }
-    const preserveSelection = pending.text.replace(/\s+/g, " ").trim().length > normalizeEditorSelectionActionItemName(pending.text).length;
-    const next = replaceEditorChatEntityDraft(draft, current.draftEntityLinks, {
-      start: pending.messageID ? draft.length : preserveSelection ? pending.to : pending.from,
-      end: pending.messageID ? draft.length : pending.to,
-      query: "",
-      trigger: "#",
-    }, entity);
-    onDraftChange(next.message);
-    onDraftEntityLinksChange?.(next.entityLinks);
-    if (pending.messageID) onReply(pending.messageID);
-    setActionItemNotice({ message: "Action Item created. Send the chat to post its reference.", pendingSend: true });
-    onActionItemCreated?.();
-    textareaRef.current?.focus();
+    if (!text.trim()) return;
+    const paneRect = pane.getBoundingClientRect();
+    const position = calculateEditorSelectionActionPosition({ rect, isForwardSelection: true, boundaryWidth: pane.clientWidth, containerLeft: paneRect.left, containerTop: paneRect.top, rightInset: 40 });
+    setActionItemSelection({ text, messageID, from, to, draft, owner: actionItemOwner, x: position.left, y: Math.min(position.top, Math.max(6, pane.clientHeight - 36)) });
+  };
+  const createChatActionItem = async (color: ActionItemColor) => {
+    const pending = actionItemSelection;
+    if (!pending || creatingActionItemRef.current || !canCreateActionItem || !actionItemSource || !entityRequestJSON || !companyID) return;
+    setActionItemSelection(null);
+    setActionItemNotice(null);
+    creatingActionItemRef.current = true;
+    try {
+      if (draft !== pending.draft || pending.owner !== actionItemOwner) throw new Error("The chat changed. Select the text again.");
+      const entity = await createActionItemEntityFromSelection({ companyID, requestJSON: entityRequestJSON, source: actionItemSource }, pending.text, color);
+      const current = actionItemContextRef.current;
+      if (!textareaRef.current || !current.canCreateActionItem || current.owner !== pending.owner || current.draft !== pending.draft) {
+        setActionItemNotice({ message: "The Action Item was created, but the chat changed. Link the existing Action Item with #.", pendingSend: false });
+        return;
+      }
+      const preserveSelection = pending.text.replace(/\s+/g, " ").trim().length > normalizeEditorSelectionActionItemName(pending.text).length;
+      const next = replaceEditorChatEntityDraft(draft, current.draftEntityLinks, {
+        start: pending.messageID ? draft.length : preserveSelection ? pending.to : pending.from,
+        end: pending.messageID ? draft.length : pending.to,
+        query: "",
+        trigger: "#",
+      }, entity);
+      onDraftChange(next.message);
+      onDraftEntityLinksChange?.(next.entityLinks);
+      if (pending.messageID) onReply(pending.messageID);
+      setActionItemNotice({ message: "Action Item created. Send the chat to post its reference.", pendingSend: true });
+      onActionItemCreated?.();
+      textareaRef.current?.focus();
+    } catch (cause) {
+      setActionItemNotice({ message: cause instanceof Error ? cause.message : "Could not create the Action Item.", pendingSend: false });
+    } finally {
+      creatingActionItemRef.current = false;
+    }
   };
   const mentionOptions = useMemo(() => {
     if (!activeMentionDraft) return [];
@@ -1281,12 +1307,18 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   return (
     <>
       <div
+        ref={chatPaneRef}
         data-node-chat-block-id={blockID}
         onMouseDown={(event) => {
           event.stopPropagation();
+          setActionItemSelection(null);
           if (!showingEmail) onFocus();
         }}
+        onMouseUp={(event) => captureChatSelection(event.target)}
+        onKeyUp={(event) => { if (event.key !== "Escape") captureChatSelection(event.target); }}
+        onScrollCapture={() => setActionItemSelection(null)}
         style={{
+          position: "relative",
           minWidth: 0,
           height: fillHeight ? "100%" : height,
           marginTop: 0,
@@ -1483,7 +1515,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                                   onEdit={onEditMessage}
                                   onDelete={onDeleteMessage}
                                   onPreviewImage={setPreviewAttachment}
-                                  onCreateActionItem={canCreateActionItem ? beginChatActionItem : undefined}
                                 />
                               ))}
                             </div>
@@ -1582,10 +1613,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               ) : <span aria-hidden="true" />}
             </div>
           )}
-          {canCreateActionItem && draft.trim() && <div role="group" aria-label="Create an Action Item from chat text" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
-            <span>Action Item from selected text:</span>
-            {(["yellow", "red"] as const).map((color) => <button key={color} type="button" aria-label={`Create ${color} Action Item from chat draft`} title={`Create ${color} Action Item from selected text or the whole draft`} onMouseDown={(event) => event.preventDefault()} onClick={() => beginChatActionItem(color)} style={{ background: color === "yellow" ? "#facc15" : "#ef4444", border: 0, borderRadius: 4, padding: "4px 6px", cursor: "pointer" }}><ActionItemIcon size={14} /></button>)}
-          </div>}
           {actionItemNotice && (!actionItemNotice.pendingSend || draft.trim()) && <div role="status" style={{ fontSize: 11 }}>{actionItemNotice.message}</div>}
           {draftAttachments.length > 0 && (
             <DraftAttachmentList
@@ -1969,8 +1996,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
             style={{ cursor: editable ? "ns-resize" : "default", borderTop: `1px solid ${ruleColor}`, background: active ? "rgba(100,116,139,0.10)" : "rgba(100,116,139,0.08)" }}
           />
         )}
+        {canCreateActionItem && actionItemSelection?.owner === actionItemOwner && actionItemSelection.draft === draft && !showingEmail && <div role="group" aria-label="Create an Action Item from highlighted chat text" onMouseDown={(event) => { event.preventDefault(); event.stopPropagation(); }} onMouseUp={(event) => event.stopPropagation()} onKeyUp={(event) => event.stopPropagation()} style={{ position: "absolute", left: actionItemSelection.x, top: actionItemSelection.y, zIndex: 12, display: "flex", gap: 3, padding: 3, borderRadius: 7, border: "1px solid #bae6fd", background: "white", boxShadow: "0 8px 24px rgba(15,23,42,.14)" }}>
+          {(["yellow", "red"] as const).map((color) => <button key={color} type="button" aria-label={`Create ${color} Action Item from highlighted chat text`} title={`Create ${color} Action Item from highlighted chat text`} onClick={() => void createChatActionItem(color)} style={{ background: color === "yellow" ? "#facc15" : "#ef4444", border: 0, borderRadius: 4, padding: "5px 7px", cursor: "pointer" }}><ActionItemIcon size={14} /></button>)}
+        </div>}
       </div>
-      {pendingActionItem && <ActionItemSelectionDialog text={pendingActionItem.text} color={pendingActionItem.color} onSave={saveChatActionItem} onCancel={() => setPendingActionItem(null)} />}
       {previewAttachment && (
         <ImageAttachmentPreviewModal
           attachment={previewAttachment}
@@ -2004,7 +2033,6 @@ type ChatThreadItemProps = {
   onEdit: (messageID: string, message: string) => Promise<void>;
   onDelete: (messageID: string) => void;
   onPreviewImage: (attachment: EditorChatAttachment) => void;
-  onCreateActionItem?: (color: ActionItemColor, message: EditorTextBlockChatMessage, body: HTMLElement | null) => void;
 };
 
 const MentionAndLinkText: React.FC<{ text: string; users: MentionableCompanyUser[] }> = ({ text, users }) => {
@@ -2069,7 +2097,7 @@ const MentionHighlightedText: React.FC<{ text: string; users: MentionableCompany
   );
 };
 
-const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, apiBase, companyID, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onEdit, onDelete, onPreviewImage, onCreateActionItem }) => {
+const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibling, apiBase, companyID, currentUserID, editable, activeMessageID, companyUsers, accent, surfaceText, ruleColor, collapsedThreadIDs, onToggleCollapse, onActivate, onNavigate, onReply, onEdit, onDelete, onPreviewImage }) => {
   const { message, children } = node;
   const hasChildren = children.length > 0;
   const collapsed = collapsedThreadIDs.has(message.id);
@@ -2082,7 +2110,6 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
   const [editing, setEditing] = useState(false);
   const [editDraft, setEditDraft] = useState(message.message);
   const [savingEdit, setSavingEdit] = useState(false);
-  const messageBodyRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!editing) setEditDraft(message.message);
   }, [editing, message.message]);
@@ -2227,7 +2254,7 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               <span style={{ color: "rgba(51,65,85,0.56)", fontSize: 9, fontWeight: 700 }}>Ctrl+Enter to save</span>
             </div>
           </div>
-        ) : message.message ? <div ref={messageBodyRef}><MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} entityLinks={message.entityLinks} /></div> : null}
+        ) : message.message ? <div data-chat-message-text={message.id}><MentionHighlightedText text={message.message} users={companyUsers} color={surfaceText} entityLinks={message.entityLinks} /></div> : null}
         {message.attachments.length > 0 && <ChatAttachmentList attachments={message.attachments} apiBase={apiBase} companyID={companyID} surfaceText={surfaceText} strokeColor={ruleColor} onPreviewImage={onPreviewImage} />}
         <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           {editable && (
@@ -2251,9 +2278,6 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               Edit
             </button>
           )}
-          {onCreateActionItem && message.message.trim() && !editing && <span role="group" aria-label="Create an Action Item from this comment" style={{ display: "inline-flex", gap: 3 }}>
-            {(["yellow", "red"] as const).map((color) => <button key={color} type="button" aria-label={`Create ${color} Action Item from comment`} title={`Create ${color} Action Item from selected text or the whole comment`} onMouseDown={(event) => event.preventDefault()} onClick={(event) => { event.stopPropagation(); onCreateActionItem(color, message, messageBodyRef.current); }} style={{ background: color === "yellow" ? "#facc15" : "#ef4444", border: 0, borderRadius: 4, padding: "3px 5px", cursor: "pointer" }}><ActionItemIcon size={13} /></button>)}
-          </span>}
           {canDelete && (
             <button
               type="button"
@@ -2307,7 +2331,6 @@ const ChatThreadItem: React.FC<ChatThreadItemProps> = ({ node, depth, isLastSibl
               onEdit={onEdit}
               onDelete={onDelete}
               onPreviewImage={onPreviewImage}
-              onCreateActionItem={onCreateActionItem}
             />
           ))}
         </div>
