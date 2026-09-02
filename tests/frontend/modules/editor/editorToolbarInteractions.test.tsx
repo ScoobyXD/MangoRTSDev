@@ -1192,7 +1192,7 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     const nextMonthButton = analysisCalendar.querySelector<HTMLButtonElement>('button[aria-label="Next month"]');
     assert.ok(nextMonthButton);
     await act(async () => nextMonthButton.click());
-    const septemberSecond = analysisCalendar.querySelector<HTMLButtonElement>('button[aria-label="September 2, 2026"]');
+    const septemberSecond = analysisCalendar.querySelector<HTMLButtonElement>('button[aria-label^="September 2, 2026"]');
     assert.ok(septemberSecond);
     await act(async () => {
       septemberSecond.dispatchEvent(new dom.window.MouseEvent("pointerdown", { bubbles: true, cancelable: true }));
