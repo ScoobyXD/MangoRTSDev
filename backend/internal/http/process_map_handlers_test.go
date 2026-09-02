@@ -183,6 +183,23 @@ func TestProcessMapHTTPSceneTilePrivacyETagAndCutover(t *testing.T) {
 	fixture := newProcessMapHTTPFixture(t)
 	fixture.putPlacement(t, fixture.admin, fixture.processA, 0, 0, 10, 8)
 	fixture.putPlacement(t, fixture.admin, fixture.processB, 100, 20, 90, 70)
+	// Keep visible folders compact so the hidden Process's real right and
+	// bottom edges would expand the scene if the privacy projection leaked them.
+	folders, err := fixture.repo.ListCompanyExplorerFolders(fixture.companyID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, folder := range folders {
+		if folder.ParentFolderID != nil || folder.FolderKind == "communications" {
+			continue
+		}
+		if _, err := fixture.repo.PutProcessMapPlacement(context.Background(), store.ProcessMapPlacementPutInput{
+			CompanyID: fixture.companyID, ResourceType: domain.ProcessMapResourceTypeFolder, ResourceID: folder.FolderID,
+			GridWidth: 32, GridHeight: 52, ActorUserID: fixture.admin.UserID, PermissionUserID: fixture.admin.UserID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	relationshipBody, _ := json.Marshal(map[string]any{
 		"company_id": fixture.companyID,
 		"source":     map[string]any{"resource_type": domain.ProcessMapResourceTypeProcess, "resource_id": fixture.processA.LogicGateID},

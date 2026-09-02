@@ -605,6 +605,9 @@ select exists(select 1 from descendants where folder_id=$3::uuid)`, companyID, f
 			return domain.CompanyExplorerFolder{}, err
 		}
 	}
+	if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, folderID, targetParentID, actorUserID); err != nil {
+		return domain.CompanyExplorerFolder{}, err
+	}
 	var item domain.CompanyExplorerFolder
 	var parentOut sql.NullString
 	if err := tx.QueryRowContext(ctx, `
@@ -631,9 +634,6 @@ returning company_id::text, folder_id::text, parent_folder_id::text, name, defau
 	}
 	if parentOut.Valid {
 		item.ParentFolderID = &parentOut.String
-	}
-	if err := r.syncAutomaticProcessMapPlacementTx(ctx, tx, companyID, domain.ProcessMapResourceTypeFolder, folderID, parentOut.String, actorUserID); err != nil {
-		return domain.CompanyExplorerFolder{}, err
 	}
 	payload := map[string]any{"folder_id": folderID, "parent_entity_id": parentOut.String}
 	if parentChanged {

@@ -22,22 +22,15 @@ const (
 	ProcessMapMaxCameraZoom    = 20
 	ProcessMapMinCoordinate    = -1_000_000_000
 	ProcessMapMaxCoordinate    = 1_000_000_000
-	ProcessMapMaxDimension     = 1_000_000
+	ProcessMapMaxDimension     = 250_000_000
 )
 
+// Eight reductions by eight leave a 14-by-8 gate inside eight folder levels.
 const (
-	processMapAutomaticRootFolderWidth    = 32
-	processMapAutomaticRootFolderHeight   = 24
-	processMapAutomaticNestedFolderWidth  = 24
-	processMapAutomaticNestedFolderHeight = 16
-	processMapAutomaticProcessWidth       = 14
-	processMapAutomaticProcessHeight      = 8
-	processMapAutomaticRootGap            = 8
-	processMapAutomaticChildGap           = 2
-	processMapAutomaticFolderPadding      = 2
-	processMapAutomaticFolderHeaderHeight = 6
-	processMapAutomaticSectionGap         = 4
-	processMapAutomaticCandidateLimit     = 256
+	processMapAutomaticRootFolderWidth  = 14 * (1 << 24)
+	processMapAutomaticRootFolderHeight = 8 * (1 << 24)
+	processMapAutomaticRootGap          = processMapAutomaticRootFolderWidth / 8
+	processMapAutomaticRowSize          = 6
 )
 
 const (
@@ -312,163 +305,54 @@ func compareProcessMapPlacements(a, b domain.ProcessMapPlacement) int {
 	return strings.Compare(a.ResourceID, b.ResourceID)
 }
 
-type processMapPositionCandidate struct {
-	x int
-	y int
-}
-
-// processMapSquareBiasedCandidates keeps candidate growth linear in the number
-// of existing rectangles. The right and lower edges preserve actual sizes,
-// while the two append candidates guarantee a non-overlapping frontier when a
-// valid coordinate remains.
-func processMapSquareBiasedCandidates(
-	placements []domain.ProcessMapPlacement,
-	startX, startY, gap, width, height int,
-) []processMapPositionCandidate {
-	seen := map[processMapPositionCandidate]bool{}
-	candidates := make([]processMapPositionCandidate, 0, len(placements)*4+3)
-	add := func(x, y int) {
-		candidate := processMapPositionCandidate{x: x, y: y}
-		if x < startX || y < startY || seen[candidate] || !validProcessMapGeometry(x, y, width, height) {
-			return
-		}
-		seen[candidate] = true
-		candidates = append(candidates, candidate)
-	}
-
-	add(startX, startY)
-	maxRight, maxBottom := startX, startY
-	for _, placement := range placements {
-		right := placement.GridX + placement.GridWidth + gap
-		bottom := placement.GridY + placement.GridHeight + gap
-		maxRight = max(maxRight, right)
-		maxBottom = max(maxBottom, bottom)
-		add(right, placement.GridY)
-		add(placement.GridX, bottom)
-		add(right, startY)
-		add(startX, bottom)
-	}
-	add(maxRight, startY)
-	add(startX, maxBottom)
-
-	minX, minY := int64(startX), int64(startY)
-	maxX, maxY := int64(startX), int64(startY)
-	for _, placement := range placements {
-		minX = min(minX, int64(placement.GridX))
-		minY = min(minY, int64(placement.GridY))
-		maxX = max(maxX, int64(placement.GridX)+int64(placement.GridWidth))
-		maxY = max(maxY, int64(placement.GridY)+int64(placement.GridHeight))
-	}
-	score := func(point processMapPositionCandidate) (int64, int64, int64) {
-		candidateMaxX := max(maxX, int64(point.x)+int64(width))
-		candidateMaxY := max(maxY, int64(point.y)+int64(height))
-		footprintWidth, footprintHeight := candidateMaxX-minX, candidateMaxY-minY
-		imbalance := footprintWidth - footprintHeight
-		if imbalance < 0 {
-			imbalance = -imbalance
-		}
-		return max(footprintWidth, footprintHeight), imbalance, footprintWidth * footprintHeight
-	}
-	sort.Slice(candidates, func(i, j int) bool {
-		iSide, iImbalance, iArea := score(candidates[i])
-		jSide, jImbalance, jArea := score(candidates[j])
-		if iSide != jSide {
-			return iSide < jSide
-		}
-		if iImbalance != jImbalance {
-			return iImbalance < jImbalance
-		}
-		if iArea != jArea {
-			return iArea < jArea
-		}
-		if candidates[i].y != candidates[j].y {
-			return candidates[i].y < candidates[j].y
-		}
-		return candidates[i].x < candidates[j].x
-	})
-	if len(candidates) <= processMapAutomaticCandidateLimit {
-		return candidates
-	}
-
-	// Keep the best square-biased frontier bounded, while reserving the two
-	// append positions that always clear every existing rectangle on one axis.
-	bounded := append([]processMapPositionCandidate{}, candidates[:processMapAutomaticCandidateLimit-2]...)
-	boundedSet := make(map[processMapPositionCandidate]bool, len(bounded)+2)
-	for _, candidate := range bounded {
-		boundedSet[candidate] = true
-	}
-	for _, candidate := range []processMapPositionCandidate{{x: maxRight, y: startY}, {x: startX, y: maxBottom}} {
-		if validProcessMapGeometry(candidate.x, candidate.y, width, height) && !boundedSet[candidate] {
-			bounded = append(bounded, candidate)
-			boundedSet[candidate] = true
-		}
-	}
-	if len(bounded) > processMapAutomaticCandidateLimit {
-		bounded = bounded[:processMapAutomaticCandidateLimit]
-	}
-	return bounded
-}
-
-// processMapSquareBiasedPosition finds the smallest practical square footprint
-// for one new or displaced rectangle without rewriting separated geometry. It
-// evaluates only the bounded actual-size frontier instead of an exhaustive
-// cross-product of every X and Y edge.
-func processMapSquareBiasedPosition(
-	placements []domain.ProcessMapPlacement,
-	startX, startY, gap, width, height int,
-) (int, int, bool) {
-	minX, minY := int64(startX), int64(startY)
-	maxX, maxY := int64(startX), int64(startY)
-	for _, placement := range placements {
-		minX = min(minX, int64(placement.GridX))
-		minY = min(minY, int64(placement.GridY))
-		maxX = max(maxX, int64(placement.GridX)+int64(placement.GridWidth))
-		maxY = max(maxY, int64(placement.GridY)+int64(placement.GridHeight))
-	}
-
-	bestX, bestY := 0, 0
-	bestSide, bestImbalance, bestArea := int64(math.MaxInt64), int64(math.MaxInt64), int64(math.MaxInt64)
-	found := false
-	for _, point := range processMapSquareBiasedCandidates(placements, startX, startY, gap, width, height) {
-		candidate := domain.ProcessMapPlacement{GridX: point.x, GridY: point.y, GridWidth: width, GridHeight: height}
-		blocked := false
-		for _, obstacle := range placements {
-			if processMapPlacementsConflictWithGap(candidate, obstacle, gap) {
-				blocked = true
-				break
-			}
-		}
-		if blocked {
-			continue
-		}
-
-		candidateMaxX := max(maxX, int64(point.x)+int64(width))
-		candidateMaxY := max(maxY, int64(point.y)+int64(height))
-		footprintWidth, footprintHeight := candidateMaxX-minX, candidateMaxY-minY
-		side := max(footprintWidth, footprintHeight)
-		area := footprintWidth * footprintHeight
-		imbalance := footprintWidth - footprintHeight
-		if imbalance < 0 {
-			imbalance = -imbalance
-		}
-		if !found || side < bestSide ||
-			side == bestSide && imbalance < bestImbalance ||
-			side == bestSide && imbalance == bestImbalance && area < bestArea ||
-			side == bestSide && imbalance == bestImbalance && area == bestArea && (point.y < bestY || point.y == bestY && point.x < bestX) {
-			bestX, bestY = point.x, point.y
-			bestSide, bestImbalance, bestArea = side, imbalance, area
-			found = true
-		}
-	}
-	return bestX, bestY, found
+// Each transform uses the same saved integer coordinates as manual folder resize.
+// Members include only the moving contents, so crossing trace routes stay fixed.
+type processMapAutomaticTransform struct {
+	Source  domain.ProcessMapPlacement
+	Target  domain.ProcessMapPlacement
+	Members []domain.ProcessMapResourceRef
 }
 
 type processMapAutomaticPlacementPlan struct {
-	Placements              []domain.ProcessMapPlacement
-	Created                 bool
-	ReparentedFolderMembers []domain.ProcessMapResourceRef
-	ReparentedFolderDeltaX  int
-	ReparentedFolderDeltaY  int
+	Placements []domain.ProcessMapPlacement
+	Created    bool
+	Transforms []processMapAutomaticTransform
+}
+
+// processMapRowPosition appends to the last row of at most six saved siblings.
+// Existing manual positions are obstacles, never replaced with generated slots.
+func processMapRowPosition(siblings []domain.ProcessMapPlacement, startX, startY, gap, width, height int) (int, int) {
+	siblings = append([]domain.ProcessMapPlacement(nil), siblings...)
+	sort.Slice(siblings, func(i, j int) bool { return compareProcessMapPlacements(siblings[i], siblings[j]) < 0 })
+	x, y := startX, startY
+	bottom := startY - gap
+	for _, sibling := range siblings {
+		bottom = max(bottom, sibling.GridY+sibling.GridHeight)
+	}
+	if len(siblings) > 0 {
+		lastRowY := siblings[len(siblings)-1].GridY
+		rowStart := len(siblings) - 1
+		for rowStart > 0 && siblings[rowStart-1].GridY == lastRowY {
+			rowStart--
+		}
+		if len(siblings)-rowStart < processMapAutomaticRowSize {
+			y = lastRowY
+			for _, sibling := range siblings[rowStart:] {
+				x = max(x, sibling.GridX+sibling.GridWidth+gap)
+			}
+		} else {
+			y = bottom + gap
+		}
+	}
+	candidate := domain.ProcessMapPlacement{GridX: x, GridY: y, GridWidth: width, GridHeight: height}
+	for _, sibling := range siblings {
+		if processMapPlacementsConflictWithGap(candidate, sibling, 0) {
+			// An irregular manual obstacle may cross several rows. One new row
+			// below their bounds is sufficient; no candidate-search loop is needed.
+			return startX, bottom + gap
+		}
+	}
+	return x, y
 }
 
 func processMapAutomaticPlacementKey(resourceType, resourceID string) string {
@@ -539,422 +423,193 @@ func processMapAutomaticDescendantKeys(
 	return result, false
 }
 
-func processMapAutomaticTranslateDescendants(
-	placements map[string]domain.ProcessMapPlacement,
-	children map[string][]string,
-	folderID string,
-	deltaX, deltaY int,
-) error {
-	if deltaX == 0 && deltaY == 0 {
-		return nil
-	}
-	descendants, cycle := processMapAutomaticDescendantKeys(placements, children, folderID)
-	if cycle {
-		return ErrProcessMapCycle
-	}
-	for _, descendantKey := range descendants {
-		descendant := placements[descendantKey]
-		descendant.GridX += deltaX
-		descendant.GridY += deltaY
-		placements[descendantKey] = descendant
-	}
-	return nil
+func processMapAutomaticInterior(parent domain.ProcessMapPlacement) (domain.ProcessMapPlacement, int) {
+	gap := max(1, min(parent.GridWidth, parent.GridHeight)/32)
+	header := max(1, parent.GridHeight/8)
+	return domain.ProcessMapPlacement{
+		GridX: parent.GridX + gap, GridY: parent.GridY + header,
+		GridWidth: parent.GridWidth - 2*gap, GridHeight: parent.GridHeight - header - gap,
+	}, gap
 }
 
-func processMapAutomaticPosition(
-	placements map[string]domain.ProcessMapPlacement,
-	children map[string][]string,
-	targetKey, resourceType, parentID string,
-	width, height int,
-) (int, int, error) {
-	if parentID == "" {
-		folders := []domain.ProcessMapPlacement{}
-		processes := []domain.ProcessMapPlacement{}
-		for _, childKey := range children[""] {
-			if childKey == targetKey {
-				continue
-			}
-			root := placements[childKey]
-			if root.ResourceType == domain.ProcessMapResourceTypeFolder {
-				folders = append(folders, root)
-			} else if root.ResourceType == domain.ProcessMapResourceTypeProcess {
-				processes = append(processes, root)
-			}
-		}
-		section := folders
-		startX := 0
-		if resourceType == domain.ProcessMapResourceTypeProcess {
-			section = processes
-			if len(folders) > 0 {
-				folderRight := folders[0].GridX + folders[0].GridWidth
-				for _, folder := range folders[1:] {
-					folderRight = max(folderRight, folder.GridX+folder.GridWidth)
-				}
-				startX = folderRight + max(processMapAutomaticSectionGap, processMapAutomaticRootGap)
-			}
-			if len(processes) > 0 {
-				minimumProcessX := processes[0].GridX
-				for _, process := range processes[1:] {
-					minimumProcessX = min(minimumProcessX, process.GridX)
-				}
-				startX = max(startX, minimumProcessX)
-			}
-		}
-		x, y, ok := processMapSquareBiasedPosition(section, startX, 0, processMapAutomaticRootGap, width, height)
-		if !ok {
-			return 0, 0, ErrInvalid
-		}
-		return x, y, nil
+func processMapAutomaticFit(source, interior domain.ProcessMapPlacement) domain.ProcessMapPlacement {
+	scale := min(1.0, min(float64(interior.GridWidth)/float64(source.GridWidth), float64(interior.GridHeight)/float64(source.GridHeight)))
+	return domain.ProcessMapPlacement{
+		GridX: interior.GridX, GridY: interior.GridY,
+		GridWidth:  int(math.Floor(float64(source.GridWidth) * scale)),
+		GridHeight: int(math.Floor(float64(source.GridHeight) * scale)),
 	}
-
-	parentKey := processMapAutomaticPlacementKey(domain.ProcessMapResourceTypeFolder, parentID)
-	parent, ok := placements[parentKey]
-	if !ok {
-		return 0, 0, ErrNotFound
-	}
-	folders := []domain.ProcessMapPlacement{}
-	processes := []domain.ProcessMapPlacement{}
-	for _, childKey := range children[parentID] {
-		if childKey == targetKey {
-			continue
-		}
-		child := placements[childKey]
-		if child.ResourceType == domain.ProcessMapResourceTypeFolder {
-			folders = append(folders, child)
-		} else if child.ResourceType == domain.ProcessMapResourceTypeProcess {
-			processes = append(processes, child)
-		}
-	}
-	childStartX := parent.GridX + processMapAutomaticFolderPadding
-	childStartY := parent.GridY + processMapAutomaticFolderHeaderHeight
-	section := folders
-	startX := childStartX
-	if resourceType == domain.ProcessMapResourceTypeProcess {
-		section = processes
-		if len(folders) > 0 {
-			folderRight := folders[0].GridX + folders[0].GridWidth
-			for _, folder := range folders[1:] {
-				folderRight = max(folderRight, folder.GridX+folder.GridWidth)
-			}
-			startX = max(childStartX, folderRight) + processMapAutomaticSectionGap
-		}
-		if len(processes) > 0 {
-			minimumProcessX := processes[0].GridX
-			for _, process := range processes[1:] {
-				minimumProcessX = min(minimumProcessX, process.GridX)
-			}
-			startX = max(startX, minimumProcessX)
-		}
-	}
-	x, y, ok := processMapSquareBiasedPosition(section, startX, childStartY, processMapAutomaticChildGap, width, height)
-	if !ok {
-		return 0, 0, ErrInvalid
-	}
-	return x, y, nil
 }
 
-func processMapAutomaticSetParentIndex(children map[string][]string, placementKey, oldParentID, newParentID string) {
-	if oldParentID == newParentID {
-		return
-	}
-	oldChildren := children[oldParentID]
-	for index, childKey := range oldChildren {
-		if childKey == placementKey {
-			children[oldParentID] = append(oldChildren[:index], oldChildren[index+1:]...)
-			break
+func processMapAutomaticTransformMembers(
+	placements map[string]domain.ProcessMapPlacement, keys []string,
+	source, target domain.ProcessMapPlacement,
+) (processMapAutomaticTransform, error) {
+	transform := processMapAutomaticTransform{Source: source, Target: target}
+	for _, key := range keys {
+		item := processMapScalePlacementWithinFolder(placements[key], source, target)
+		// Intermediate row positions may extend past the world before the whole
+		// child group is fitted into its parent. Validate final bounds in the plan.
+		if item.GridWidth <= 0 || item.GridHeight <= 0 {
+			return processMapAutomaticTransform{}, ErrProcessMapContainment
 		}
+		placements[key] = item
+		transform.Members = append(transform.Members, domain.ProcessMapResourceRef{ResourceType: item.ResourceType, ResourceID: item.ResourceID})
 	}
-	children[newParentID] = append(children[newParentID], placementKey)
-	sort.Strings(children[newParentID])
+	return transform, nil
 }
 
 func planAutomaticProcessMapPlacement(
 	companyID, resourceType, resourceID, parentID string,
 	input []domain.ProcessMapPlacement,
 ) (processMapAutomaticPlacementPlan, error) {
-	plan := processMapAutomaticPlacementPlan{Placements: []domain.ProcessMapPlacement{}, ReparentedFolderMembers: []domain.ProcessMapResourceRef{}}
+	plan := processMapAutomaticPlacementPlan{Placements: []domain.ProcessMapPlacement{}}
 	placements := make(map[string]domain.ProcessMapPlacement, len(input)+1)
 	original := make(map[string]domain.ProcessMapPlacement, len(input))
 	for _, item := range input {
 		if item.CompanyID != companyID {
 			continue
 		}
-		item = processMapAutomaticClonePlacement(item)
-		placementKey := processMapAutomaticPlacementKey(item.ResourceType, item.ResourceID)
-		placements[placementKey] = item
-		original[placementKey] = processMapAutomaticClonePlacement(item)
+		key := processMapAutomaticPlacementKey(item.ResourceType, item.ResourceID)
+		placements[key] = processMapAutomaticClonePlacement(item)
+		original[key] = item
 	}
-	children := processMapAutomaticChildrenIndex(placements)
 	targetKey := processMapAutomaticPlacementKey(resourceType, resourceID)
 	current, exists := placements[targetKey]
 	plan.Created = !exists
 	if exists && processMapAutomaticParentID(current) == parentID {
 		return plan, nil
 	}
-	if parentID != "" {
-		if _, ok := placements[processMapAutomaticPlacementKey(domain.ProcessMapResourceTypeFolder, parentID)]; !ok {
-			return processMapAutomaticPlacementPlan{}, ErrNotFound
-		}
-	}
 
-	reparentedKeys := []string{}
-	if exists && resourceType == domain.ProcessMapResourceTypeFolder {
-		reparentedKeys = append(reparentedKeys, targetKey)
-		descendants, cycle := processMapAutomaticDescendantKeys(placements, children, resourceID)
-		if cycle {
+	seen := map[string]bool{}
+	for ancestorID := parentID; ancestorID != ""; {
+		if seen[ancestorID] || resourceType == domain.ProcessMapResourceTypeFolder && ancestorID == resourceID {
 			return processMapAutomaticPlacementPlan{}, ErrProcessMapCycle
 		}
-		for _, descendantKey := range descendants {
-			descendant := placements[descendantKey]
-			if descendant.ResourceType == domain.ProcessMapResourceTypeFolder && descendant.ResourceID == parentID {
-				return processMapAutomaticPlacementPlan{}, ErrProcessMapCycle
-			}
+		seen[ancestorID] = true
+		ancestor, ok := placements[processMapAutomaticPlacementKey(domain.ProcessMapResourceTypeFolder, ancestorID)]
+		if !ok {
+			return processMapAutomaticPlacementPlan{}, ErrNotFound
 		}
-		reparentedKeys = append(reparentedKeys, descendants...)
+		ancestorID = processMapAutomaticParentID(ancestor)
 	}
 
-	target := current
-	if !exists {
-		target = domain.ProcessMapPlacement{
-			CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID,
-			GridWidth: processMapAutomaticProcessWidth, GridHeight: processMapAutomaticProcessHeight,
+	children := processMapAutomaticChildrenIndex(placements)
+	width, height := processMapAutomaticRootFolderWidth, processMapAutomaticRootFolderHeight
+	gap := processMapAutomaticRootGap
+	startX := -(processMapAutomaticRowSize*width + (processMapAutomaticRowSize-1)*gap) / 2
+	startY := 0
+	var parent, interior domain.ProcessMapPlacement
+	if parentID != "" {
+		parent = placements[processMapAutomaticPlacementKey(domain.ProcessMapResourceTypeFolder, parentID)]
+		interior, gap = processMapAutomaticInterior(parent)
+		if interior.GridWidth <= 0 || interior.GridHeight <= 0 {
+			return processMapAutomaticPlacementPlan{}, ErrProcessMapContainment
 		}
+		startX, startY = interior.GridX, interior.GridY
+		width, height = max(2, parent.GridWidth/8), max(1, parent.GridHeight/8)
 		if resourceType == domain.ProcessMapResourceTypeFolder {
-			target.GridWidth = processMapAutomaticNestedFolderWidth
-			target.GridHeight = processMapAutomaticNestedFolderHeight
-			if parentID == "" {
-				target.GridWidth = processMapAutomaticRootFolderWidth
-				target.GridHeight = processMapAutomaticRootFolderHeight
-			}
+			height = max(2, height)
 		}
 	}
-	if resourceType == domain.ProcessMapResourceTypeFolder && parentID == "" {
-		target.GridWidth = max(target.GridWidth, processMapAutomaticRootFolderWidth)
-		target.GridHeight = max(target.GridHeight, processMapAutomaticRootFolderHeight)
+
+	target := domain.ProcessMapPlacement{CompanyID: companyID, ResourceType: resourceType, ResourceID: resourceID, GridWidth: width, GridHeight: height}
+	if exists {
+		target = current
+		scale := min(float64(width)/float64(current.GridWidth), float64(height)/float64(current.GridHeight))
+		target.GridWidth = int(math.Floor(float64(current.GridWidth) * scale))
+		target.GridHeight = int(math.Floor(float64(current.GridHeight) * scale))
 	}
-	gridX, gridY, err := processMapAutomaticPosition(placements, children, targetKey, resourceType, parentID, target.GridWidth, target.GridHeight)
-	if err != nil {
-		return processMapAutomaticPlacementPlan{}, err
-	}
-	oldParentID := processMapAutomaticParentID(target)
-	deltaX, deltaY := gridX-target.GridX, gridY-target.GridY
-	if exists && resourceType == domain.ProcessMapResourceTypeFolder {
-		if err := processMapAutomaticTranslateDescendants(placements, children, resourceID, deltaX, deltaY); err != nil {
-			return processMapAutomaticPlacementPlan{}, err
+	siblings := make([]domain.ProcessMapPlacement, 0, len(children[parentID]))
+	for _, key := range children[parentID] {
+		if key != targetKey {
+			siblings = append(siblings, placements[key])
 		}
 	}
+	target.GridX, target.GridY = processMapRowPosition(siblings, startX, startY, gap, target.GridWidth, target.GridHeight)
 	if parentID == "" {
 		target.MapParentFolderID = nil
 	} else {
 		parentCopy := parentID
 		target.MapParentFolderID = &parentCopy
 	}
-	target.GridX, target.GridY = gridX, gridY
-	placements[targetKey] = target
-	processMapAutomaticSetParentIndex(children, targetKey, oldParentID, parentID)
-
-	childKey := targetKey
-	ancestorID := parentID
-	seenAncestors := map[string]bool{}
-	for ancestorID != "" {
-		if seenAncestors[ancestorID] {
+	if exists && resourceType == domain.ProcessMapResourceTypeFolder {
+		keys, cycle := processMapAutomaticDescendantKeys(placements, children, resourceID)
+		if cycle {
 			return processMapAutomaticPlacementPlan{}, ErrProcessMapCycle
 		}
-		seenAncestors[ancestorID] = true
-		parentKey := processMapAutomaticPlacementKey(domain.ProcessMapResourceTypeFolder, ancestorID)
-		parent, ok := placements[parentKey]
-		if !ok {
-			return processMapAutomaticPlacementPlan{}, ErrNotFound
+		keys = append(keys, targetKey)
+		transform, err := processMapAutomaticTransformMembers(placements, keys, current, target)
+		if err != nil {
+			return processMapAutomaticPlacementPlan{}, err
 		}
-		child := placements[childKey]
-		conflicts := false
-		for _, siblingKey := range children[ancestorID] {
-			if siblingKey == childKey {
-				continue
-			}
-			sibling := placements[siblingKey]
-			if sibling.ResourceType == child.ResourceType {
-				conflicts = conflicts || processMapPlacementsConflictWithGap(child, sibling, processMapAutomaticChildGap)
+		plan.Transforms = append(plan.Transforms, transform)
+	}
+	placements[targetKey] = target
+	if oldParentID := processMapAutomaticParentID(current); exists && oldParentID != parentID {
+		for i, key := range children[oldParentID] {
+			if key == targetKey {
+				children[oldParentID] = append(children[oldParentID][:i], children[oldParentID][i+1:]...)
+				break
 			}
 		}
-		if conflicts {
-			nextX, nextY, err := processMapAutomaticPosition(placements, children, childKey, child.ResourceType, ancestorID, child.GridWidth, child.GridHeight)
+	}
+	children[parentID] = append(children[parentID], targetKey)
+
+	{
+		if parentID == "" {
+			interior = domain.ProcessMapPlacement{
+				GridX: ProcessMapMinCoordinate, GridY: ProcessMapMinCoordinate,
+				GridWidth:  ProcessMapMaxCoordinate - ProcessMapMinCoordinate,
+				GridHeight: ProcessMapMaxCoordinate - ProcessMapMinCoordinate,
+			}
+		}
+		content := processMapPlacementBounds(target)
+		for _, sibling := range siblings {
+			content.MinX = min(content.MinX, sibling.GridX)
+			content.MinY = min(content.MinY, sibling.GridY)
+			content.MaxX = max(content.MaxX, sibling.GridX+sibling.GridWidth)
+			content.MaxY = max(content.MaxY, sibling.GridY+sibling.GridHeight)
+		}
+		if !processMapBoundsContain(processMapPlacementBounds(interior), content) {
+			source := domain.ProcessMapPlacement{GridX: content.MinX, GridY: content.MinY, GridWidth: content.MaxX - content.MinX, GridHeight: content.MaxY - content.MinY}
+			fitted := processMapAutomaticFit(source, interior)
+			if parentID == "" {
+				// Keep the root arrangement in place until a world edge requires
+				// movement, and shrink it only when its span exceeds the world.
+				fitted.GridX = max(ProcessMapMinCoordinate, min(source.GridX, ProcessMapMaxCoordinate-fitted.GridWidth))
+				fitted.GridY = max(ProcessMapMinCoordinate, min(source.GridY, ProcessMapMaxCoordinate-fitted.GridHeight))
+			}
+			keys, cycle := processMapAutomaticDescendantKeys(placements, children, parentID)
+			if cycle {
+				return processMapAutomaticPlacementPlan{}, ErrProcessMapCycle
+			}
+			transform, err := processMapAutomaticTransformMembers(placements, keys, source, fitted)
 			if err != nil {
 				return processMapAutomaticPlacementPlan{}, err
 			}
-			moveX, moveY := nextX-child.GridX, nextY-child.GridY
-			if child.ResourceType == domain.ProcessMapResourceTypeFolder {
-				if err := processMapAutomaticTranslateDescendants(placements, children, child.ResourceID, moveX, moveY); err != nil {
-					return processMapAutomaticPlacementPlan{}, err
-				}
-			}
-			child.GridX, child.GridY = nextX, nextY
-			placements[childKey] = child
+			plan.Transforms = append(plan.Transforms, transform)
 		}
-
-		folderRight, processLeft := 0, 0
-		hasFolders, hasProcesses := false, false
-		processKeys := []string{}
-		for _, directChildKey := range children[ancestorID] {
-			directChild := placements[directChildKey]
-			if directChild.ResourceType == domain.ProcessMapResourceTypeFolder {
-				right := directChild.GridX + directChild.GridWidth
-				if !hasFolders || right > folderRight {
-					folderRight = right
-				}
-				hasFolders = true
-			} else if directChild.ResourceType == domain.ProcessMapResourceTypeProcess {
-				processKeys = append(processKeys, directChildKey)
-				if !hasProcesses || directChild.GridX < processLeft {
-					processLeft = directChild.GridX
-				}
-				hasProcesses = true
-			}
-		}
-		if hasFolders && hasProcesses && processLeft < folderRight+processMapAutomaticSectionGap {
-			shiftX := folderRight + processMapAutomaticSectionGap - processLeft
-			for _, processKey := range processKeys {
-				process := placements[processKey]
-				process.GridX += shiftX
-				placements[processKey] = process
-			}
-		}
-
-		requiredWidth, requiredHeight := parent.GridWidth, parent.GridHeight
-		for _, directChildKey := range children[ancestorID] {
-			directChild := placements[directChildKey]
-			requiredWidth = max(requiredWidth, directChild.GridX+directChild.GridWidth-parent.GridX+processMapAutomaticFolderPadding)
-			requiredHeight = max(requiredHeight, directChild.GridY+directChild.GridHeight-parent.GridY+processMapAutomaticFolderPadding)
-		}
-		if requiredWidth == parent.GridWidth && requiredHeight == parent.GridHeight {
-			break
-		}
-		parent.GridWidth, parent.GridHeight = requiredWidth, requiredHeight
-		placements[parentKey] = parent
-		childKey = parentKey
-		ancestorID = processMapAutomaticParentID(parent)
 	}
 
-	folderRootKeys := []string{}
-	processRootKeys := []string{}
-	for _, rootKey := range children[""] {
-		if placements[rootKey].ResourceType == domain.ProcessMapResourceTypeFolder {
-			folderRootKeys = append(folderRootKeys, rootKey)
-		} else if placements[rootKey].ResourceType == domain.ProcessMapResourceTypeProcess {
-			processRootKeys = append(processRootKeys, rootKey)
-		}
-	}
-	layoutRootSection := func(rootKeys []string, startX, startY int) error {
-		sort.Slice(rootKeys, func(i, j int) bool {
-			return compareProcessMapPlacements(placements[rootKeys[i]], placements[rootKeys[j]]) < 0
-		})
-		placedRoots := []domain.ProcessMapPlacement{}
-		for _, rootKey := range rootKeys {
-			root := placements[rootKey]
-			conflicts := false
-			for _, previous := range placedRoots {
-				if processMapPlacementsConflictWithGap(root, previous, processMapAutomaticRootGap) {
-					conflicts = true
-					break
-				}
-			}
-			if conflicts {
-				nextX, nextY, ok := processMapSquareBiasedPosition(placedRoots, startX, startY, processMapAutomaticRootGap, root.GridWidth, root.GridHeight)
-				if !ok {
-					return ErrInvalid
-				}
-				moveX, moveY := nextX-root.GridX, nextY-root.GridY
-				if root.ResourceType == domain.ProcessMapResourceTypeFolder {
-					if err := processMapAutomaticTranslateDescendants(placements, children, root.ResourceID, moveX, moveY); err != nil {
-						return err
-					}
-				}
-				root.GridX, root.GridY = nextX, nextY
-				placements[rootKey] = root
-			}
-			placedRoots = append(placedRoots, root)
-		}
-		return nil
-	}
-	sectionMinimum := func(rootKeys []string) (int, int) {
-		minimumX, minimumY := 0, 0
-		for index, rootKey := range rootKeys {
-			root := placements[rootKey]
-			if index == 0 || root.GridX < minimumX {
-				minimumX = root.GridX
-			}
-			if index == 0 || root.GridY < minimumY {
-				minimumY = root.GridY
-			}
-		}
-		return minimumX, minimumY
-	}
-	folderStartX, folderStartY := sectionMinimum(folderRootKeys)
-	if err := layoutRootSection(folderRootKeys, folderStartX, folderStartY); err != nil {
-		return processMapAutomaticPlacementPlan{}, err
-	}
-
-	processStartX, processStartY := sectionMinimum(processRootKeys)
-	if len(folderRootKeys) > 0 && len(processRootKeys) > 0 {
-		folderRight := placements[folderRootKeys[0]].GridX + placements[folderRootKeys[0]].GridWidth
-		for _, folderKey := range folderRootKeys[1:] {
-			folder := placements[folderKey]
-			folderRight = max(folderRight, folder.GridX+folder.GridWidth)
-		}
-		requiredProcessLeft := folderRight + max(processMapAutomaticSectionGap, processMapAutomaticRootGap)
-		if processStartX < requiredProcessLeft {
-			shiftX := requiredProcessLeft - processStartX
-			for _, processKey := range processRootKeys {
-				process := placements[processKey]
-				process.GridX += shiftX
-				placements[processKey] = process
-			}
-			processStartX = requiredProcessLeft
-		}
-	}
-	if err := layoutRootSection(processRootKeys, processStartX, processStartY); err != nil {
-		return processMapAutomaticPlacementPlan{}, err
-	}
-
-	for _, placement := range placements {
-		if !validProcessMapGeometry(placement.GridX, placement.GridY, placement.GridWidth, placement.GridHeight) {
+	for key, item := range placements {
+		if !validProcessMapGeometry(item.GridX, item.GridY, item.GridWidth, item.GridHeight) {
 			return processMapAutomaticPlacementPlan{}, ErrInvalid
 		}
-		parentID := processMapAutomaticParentID(placement)
-		if parentID == "" {
-			continue
+		if parentID := processMapAutomaticParentID(item); parentID != "" {
+			parent, ok := placements[processMapAutomaticPlacementKey(domain.ProcessMapResourceTypeFolder, parentID)]
+			if !ok {
+				return processMapAutomaticPlacementPlan{}, ErrNotFound
+			}
+			if !processMapBoundsContain(processMapPlacementBounds(parent), processMapPlacementBounds(item)) {
+				return processMapAutomaticPlacementPlan{}, ErrProcessMapContainment
+			}
 		}
-		parent, ok := placements[processMapAutomaticPlacementKey(domain.ProcessMapResourceTypeFolder, parentID)]
-		if !ok {
-			return processMapAutomaticPlacementPlan{}, ErrNotFound
-		}
-		if !processMapBoundsContain(processMapPlacementBounds(parent), processMapPlacementBounds(placement)) {
-			return processMapAutomaticPlacementPlan{}, ErrProcessMapContainment
-		}
-	}
-
-	for placementKey, placement := range placements {
-		before, existed := original[placementKey]
-		if !existed || !processMapAutomaticGeometryEqual(before, placement) {
-			plan.Placements = append(plan.Placements, processMapAutomaticClonePlacement(placement))
+		if before, existed := original[key]; !existed || !processMapAutomaticGeometryEqual(before, item) {
+			plan.Placements = append(plan.Placements, item)
 		}
 	}
 	sort.Slice(plan.Placements, func(i, j int) bool { return compareProcessMapPlacements(plan.Placements[i], plan.Placements[j]) < 0 })
-	if exists && resourceType == domain.ProcessMapResourceTypeFolder {
-		finalTarget := placements[targetKey]
-		plan.ReparentedFolderDeltaX = finalTarget.GridX - current.GridX
-		plan.ReparentedFolderDeltaY = finalTarget.GridY - current.GridY
-		for _, placementKey := range reparentedKeys {
-			member := placements[placementKey]
-			plan.ReparentedFolderMembers = append(plan.ReparentedFolderMembers, domain.ProcessMapResourceRef{ResourceType: member.ResourceType, ResourceID: member.ResourceID})
-		}
-		sort.Slice(plan.ReparentedFolderMembers, func(i, j int) bool {
-			if plan.ReparentedFolderMembers[i].ResourceType != plan.ReparentedFolderMembers[j].ResourceType {
-				return plan.ReparentedFolderMembers[i].ResourceType < plan.ReparentedFolderMembers[j].ResourceType
-			}
-			return plan.ReparentedFolderMembers[i].ResourceID < plan.ReparentedFolderMembers[j].ResourceID
-		})
-	}
 	return plan, nil
 }
 

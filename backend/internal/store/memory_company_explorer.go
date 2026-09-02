@@ -119,7 +119,7 @@ func (r *MemoryRepo) CreateCompanyExplorerFolder(companyID, parentFolderID, fold
 	}
 	r.folders[key(companyID, item.FolderID)] = item
 	r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID, now)
-	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID); err != nil {
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID, ""); err != nil {
 		r.restoreProcessMapMutationLocked(beforeMutation)
 		return domain.CompanyExplorerFolder{}, err
 	}
@@ -445,6 +445,7 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	beforeMutation := r.snapshotProcessMapMutationLocked()
 
 	item, ok := r.folders[key(companyID, folderID)]
 	if !ok || item.FolderKind == "communications" {
@@ -507,22 +508,21 @@ func (r *MemoryRepo) MoveCompanyExplorerFolder(companyID, folderID string, paren
 		}
 	}
 
-	beforeMutation := r.snapshotProcessMapMutationLocked()
 	audienceResources := []domain.ProcessMapResourceRef(nil)
 	beforeAudience := processMapAccessAudience(nil)
 	if parentChanged {
 		audienceResources = r.processMapAccessResourcesLocked(companyID, domain.ProcessMapResourceTypeFolder, folderID)
 		beforeAudience = r.processMapAccessAudienceLocked(companyID, audienceResources)
 	}
+	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, parent, permissionUserID); err != nil {
+		r.restoreProcessMapMutationLocked(beforeMutation)
+		return domain.CompanyExplorerFolder{}, err
+	}
 	item.ParentFolderID = parent
 	item.Position = position
 	item.UpdatedTimestamp = time.Now().UTC()
 	r.folders[key(companyID, item.FolderID)] = item
 	r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID, item.UpdatedTimestamp)
-	if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeFolder, item.FolderID, item.ParentFolderID); err != nil {
-		r.restoreProcessMapMutationLocked(beforeMutation)
-		return domain.CompanyExplorerFolder{}, err
-	}
 	payload := map[string]any{"folder_id": folderID, "parent_entity_id": targetParentID}
 	if parentChanged {
 		markProcessMapProtectedGeometryChanged(payload, beforeAudience, r.processMapAccessAudienceLocked(companyID, audienceResources))
@@ -956,7 +956,7 @@ func (r *MemoryRepo) assignCompanyExplorerFolderItemLocked(companyID, folderID, 
 	if itemType == EntityTypeLogicGate {
 		parentID := folderID
 		r.syncMemoryProcessMapParentToExplorerLocked(companyID, domain.ProcessMapResourceTypeProcess, itemID, &parentID, now)
-		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, itemID, &parentID); err != nil {
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, itemID, &parentID, ""); err != nil {
 			return domain.CompanyExplorerFolderItem{}, nil, err
 		}
 	}

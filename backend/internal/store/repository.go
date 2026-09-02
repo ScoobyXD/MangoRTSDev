@@ -583,7 +583,7 @@ type WorkGraphRepository interface {
 
 type LogicGateRepository interface {
 	CreateLogicGate(companyID, header string) (domain.LogicGate, error)
-	CreateLogicGateWithWorkspaceEvent(companyID, header string) (domain.LogicGate, domain.DomainEvent, error)
+	CreateLogicGateWithWorkspaceEvent(companyID, header, actorUserID string) (domain.LogicGate, domain.DomainEvent, error)
 	UpdateLogicGateHeader(companyID, logicGateID, header string) (domain.LogicGate, error)
 	UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGateID, header string) (domain.LogicGate, domain.DomainEvent, error)
 	ListLogicGates(companyID string) ([]domain.LogicGate, error)

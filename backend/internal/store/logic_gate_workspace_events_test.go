@@ -12,7 +12,7 @@ func TestMemoryLogicGateWorkspaceEventsAreAtomic(t *testing.T) {
 	t.Run("create", func(t *testing.T) {
 		repo := NewMemoryRepo()
 		repo.domainEventAppendErr = forced
-		if _, _, err := repo.CreateLogicGateWithWorkspaceEvent(companyID, "not committed"); !errors.Is(err, forced) {
+		if _, _, err := repo.CreateLogicGateWithWorkspaceEvent(companyID, "not committed", ""); !errors.Is(err, forced) {
 			t.Fatalf("CreateLogicGateWithWorkspaceEvent error = %v, want forced failure", err)
 		}
 		if gates, _ := repo.ListLogicGates(companyID); len(gates) != 0 {
@@ -28,7 +28,7 @@ func TestMemoryLogicGateWorkspaceEventsAreAtomic(t *testing.T) {
 
 	t.Run("update and mounted board", func(t *testing.T) {
 		repo := NewMemoryRepo()
-		gate, event, err := repo.CreateLogicGateWithWorkspaceEvent(companyID, "original")
+		gate, event, err := repo.CreateLogicGateWithWorkspaceEvent(companyID, "original", "")
 		if err != nil {
 			t.Fatalf("CreateLogicGateWithWorkspaceEvent: %v", err)
 		}

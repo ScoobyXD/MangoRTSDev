@@ -6,7 +6,7 @@ export const PROCESS_MAP_PROCESS_MIN_WIDTH = 2;
 export const PROCESS_MAP_PROCESS_MIN_HEIGHT = 1;
 export const PROCESS_MAP_FOLDER_MIN_WIDTH = 2;
 export const PROCESS_MAP_FOLDER_MIN_HEIGHT = 2;
-export const PROCESS_MAP_MAX_DIMENSION = 1_000_000;
+export const PROCESS_MAP_MAX_DIMENSION = 250_000_000;
 export const PROCESS_MAP_RESTRICTED_WIDTH = 4;
 export const PROCESS_MAP_RESTRICTED_HEIGHT = 3;
 export const PROCESS_MAP_TILE_SIZE = 256;
@@ -294,15 +294,22 @@ export function orthogonalizeProcessMapRoutePoints(points: readonly ProcessMapGr
 }
 
 export function defaultProcessMapRoutePoints(
-  source: ProcessMapGridPoint,
-  target: ProcessMapGridPoint,
+  sourcePlacement: ProcessMapPlacementGeometry,
+  targetPlacement: ProcessMapPlacementGeometry,
 ): ProcessMapGridPoint[] {
+  const source = processMapOutputAnchor(sourcePlacement);
+  const target = processMapInputAnchor(targetPlacement);
   const sourceY = snapProcessMapGridCoordinate(source.y);
   const targetY = snapProcessMapGridCoordinate(target.y);
   if (source.x >= target.x) {
-    const sourceExitX = snapProcessMapGridCoordinate(source.x + 2);
-    const targetEntryX = snapProcessMapGridCoordinate(target.x - 2);
-    const clearanceY = snapProcessMapGridCoordinate(Math.floor(Math.min(source.y, target.y)) - 3);
+    const sourceClearance = Math.max(1, snapProcessMapGridCoordinate(sourcePlacement.grid_height / 4));
+    const targetClearance = Math.max(1, snapProcessMapGridCoordinate(targetPlacement.grid_height / 4));
+    const sourceExitX = snapProcessMapGridCoordinate(source.x + sourceClearance);
+    const targetEntryX = snapProcessMapGridCoordinate(target.x - targetClearance);
+    const clearanceY = snapProcessMapGridCoordinate(Math.min(
+      sourcePlacement.grid_y - sourceClearance,
+      targetPlacement.grid_y - targetClearance,
+    ));
     return normalizeProcessMapRoutePoints([
       { x: sourceExitX, y: sourceY },
       { x: sourceExitX, y: clearanceY },

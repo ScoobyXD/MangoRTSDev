@@ -129,7 +129,7 @@ func TestPostgresRealtimeHuddleAndKPIAudienceResolution(t *testing.T) {
 	if _, err := repo.AddCompanyMembership("realtime-pg-huddle-user", company.CompanyID, "company_admin"); err != nil {
 		t.Fatal(err)
 	}
-	logicGate, _, err := repo.CreateLogicGateWithWorkspaceEvent(company.CompanyID, "KPI owner")
+	logicGate, _, err := repo.CreateLogicGateWithWorkspaceEvent(company.CompanyID, "KPI owner", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 
 	t.Run("Logic Gate create update and mounted board", func(t *testing.T) {
 		forceRealtimeOutboxEvent(t, db, "kanban.changed", true)
-		if _, _, err := repo.CreateLogicGateWithWorkspaceEvent(company.CompanyID, "rolled back"); err == nil {
+		if _, _, err := repo.CreateLogicGateWithWorkspaceEvent(company.CompanyID, "rolled back", ""); err == nil {
 			t.Fatal("Logic Gate create succeeded with forced outbox failure")
 		}
 		if got := countPostgresRows(t, db, "select count(*) from logic_gates where company_id=$1::uuid and header='rolled back'", company.CompanyID); got != 0 {
@@ -200,7 +200,7 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 		}
 
 		forceRealtimeOutboxEvent(t, db, "kanban.changed", false)
-		gate, event, err := repo.CreateLogicGateWithWorkspaceEvent(company.CompanyID, "committed")
+		gate, event, err := repo.CreateLogicGateWithWorkspaceEvent(company.CompanyID, "committed", "")
 		if err != nil || event.Type != "logic_gate_created" {
 			t.Fatalf("committed Logic Gate = %+v event=%+v err=%v", gate, event, err)
 		}

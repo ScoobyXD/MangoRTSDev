@@ -252,7 +252,7 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 	r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, item.LogicGateID, false)
 	if folderItem, ok := r.folderItems[folderItemKey(companyID, EntityTypeLogicGate, item.LogicGateID)]; ok {
 		parentID := folderItem.FolderID
-		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, item.LogicGateID, &parentID); err != nil {
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, item.LogicGateID, &parentID, ""); err != nil {
 			r.restoreProcessMapMutationLocked(beforeMutation)
 			return domain.LogicGate{}, err
 		}
@@ -791,7 +791,7 @@ func (r *MemoryRepo) GetLogicGateDetails(companyID, logicGateID string) (domain.
 		Information: info,
 	}, nil
 }
-func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header string) (domain.LogicGate, domain.DomainEvent, error) {
+func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header, actorUserID string) (domain.LogicGate, domain.DomainEvent, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	beforeMutation := r.snapshotProcessMapMutationLocked()
@@ -818,7 +818,7 @@ func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header string)
 	r.placeCompanyExplorerItemInDefaultFolderLocked(companyID, EntityTypeLogicGate, item.LogicGateID, false)
 	if folderItem, ok := r.folderItems[folderItemKey(companyID, EntityTypeLogicGate, item.LogicGateID)]; ok {
 		parentID := folderItem.FolderID
-		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, item.LogicGateID, &parentID); err != nil {
+		if _, err := r.syncAutomaticMemoryProcessMapPlacementLocked(companyID, domain.ProcessMapResourceTypeProcess, item.LogicGateID, &parentID, actorUserID); err != nil {
 			r.restoreProcessMapMutationLocked(beforeMutation)
 			return domain.LogicGate{}, domain.DomainEvent{}, err
 		}

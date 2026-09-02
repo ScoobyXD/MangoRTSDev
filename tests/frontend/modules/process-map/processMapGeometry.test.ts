@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   defaultProcessMapRoutePoints,
+  PROCESS_MAP_MAX_DIMENSION,
   fitProcessMapViewState,
   normalizeProcessMapRoutePoints,
   orthogonalizeProcessMapRoutePoints,
@@ -182,6 +183,28 @@ test("initial fit centers the complete permission-safe bounds and remains finite
   assert.ok(Number.isFinite(empty.zoom));
 });
 
+test("the integer nested map fits continuously from its large root to a fourteen-by-eight gate", () => {
+  assert.equal(PROCESS_MAP_MAX_DIMENSION, 250_000_000);
+  for (const origin of [-800_000_000, 500_000_000]) {
+    let x = origin;
+    let y = origin;
+    let previousZoom = Number.NEGATIVE_INFINITY;
+    for (let depth = 0; depth <= 8; depth += 1) {
+      const factor = 8 ** (8 - depth);
+      const item = { grid_x: x, grid_y: y, grid_width: 14 * factor, grid_height: 8 * factor };
+      const fitted = fitProcessMapViewState(processMapPlacementBounds(item), { width: 1_000, height: 700 }, { padding: 80 });
+      assert.ok(fitted.zoom > previousZoom, "each smaller map remains reachable in the same camera range");
+      assert.ok(fitted.zoom > fitted.minZoom && fitted.zoom < fitted.maxZoom);
+      assert.equal(processMapPlacementLOD(item, 2 ** fitted.zoom), "editing");
+      assert.deepEqual(processMapInputAnchor(item), { x, y: y + item.grid_height / 2 });
+      assert.deepEqual(processMapOutputAnchor(item), { x: x + item.grid_width, y: y + item.grid_height / 2 });
+      previousZoom = fitted.zoom;
+      x += Math.max(1, Math.floor(item.grid_width / 32));
+      y += Math.max(1, Math.floor(item.grid_height / 8));
+    }
+  }
+});
+
 test("deck non-geographic tile indexing exactly matches the backend z/x/y world spans", () => {
   const tileSize = 256;
   const maxTileZoom = 22;
@@ -230,18 +253,37 @@ test("trace rendering removes only monotonic collinear points and preserves reve
 });
 
 test("new trace routes leave the output before bending and approach the input horizontally", () => {
-  const source = { x: 7, y: 2.5 };
-  const target = { x: 20, y: 11 };
-  const route = defaultProcessMapRoutePoints(source, target);
+  const sourcePlacement = { grid_x: 0, grid_y: 0, grid_width: 7, grid_height: 5 };
+  const targetPlacement = { grid_x: 20, grid_y: 7, grid_width: 7, grid_height: 8 };
+  const source = processMapOutputAnchor(sourcePlacement);
+  const target = processMapInputAnchor(targetPlacement);
+  const route = defaultProcessMapRoutePoints(sourcePlacement, targetPlacement);
   const path = processMapOrthogonalPathPoints(source, route, target);
   assert.ok(path[1].x > source.x && path[1].y === source.y, "the first visible segment exits right from the output");
   assert.ok(path[path.length - 2]?.y === target.y && path[path.length - 2]?.x < target.x, "the last visible segment approaches the left input horizontally");
   assert.ok(path.slice(1).every((point, index) => point.x === path[index].x || point.y === path[index].y));
 
-  const reverseTarget = { x: -10, y: 15 };
-  const reversePath = processMapOrthogonalPathPoints(source, defaultProcessMapRoutePoints(source, reverseTarget), reverseTarget);
+  const reversePlacement = { ...targetPlacement, grid_x: -10, grid_y: 11 };
+  const reverseTarget = processMapInputAnchor(reversePlacement);
+  const reversePath = processMapOrthogonalPathPoints(source, defaultProcessMapRoutePoints(sourcePlacement, reversePlacement), reverseTarget);
   assert.ok(reversePath[1].x > source.x && reversePath[1].y === source.y, "reverse routes also clear the source before turning");
   assert.ok(reversePath.slice(1).every((point, index) => point.x === reversePath[index].x || point.y === reversePath[index].y));
+});
+
+test("reverse trace clearance follows differently sized endpoint rectangles at every nested scale", () => {
+  for (const factor of [1, 8, 8 ** 7]) {
+    const source = { grid_x: 300_000_000, grid_y: -800_000_000, grid_width: 14 * factor, grid_height: 8 * factor };
+    const target = { grid_x: source.grid_x - 40 * factor, grid_y: source.grid_y + 4 * factor, grid_width: 28 * factor, grid_height: 16 * factor };
+    const route = defaultProcessMapRoutePoints(source, target);
+    assert.ok(route.every((point) => Number.isSafeInteger(point.x) && Number.isSafeInteger(point.y)));
+    assert.equal(route[0].x, source.grid_x + source.grid_width + 2 * factor);
+    assert.equal(route[route.length - 1].x, target.grid_x - 4 * factor);
+    assert.ok(route[1].y < source.grid_y && route[1].y < target.grid_y, "the detour clears both actual top edges");
+    const path = processMapOrthogonalPathPoints(processMapOutputAnchor(source), route, processMapInputAnchor(target));
+    assert.deepEqual(path[0], processMapOutputAnchor(source));
+    assert.deepEqual(path[path.length - 1], processMapInputAnchor(target));
+    assert.ok(path.slice(1).every((point, index) => point.x === path[index].x || point.y === path[index].y));
+  }
 });
 
 test("manual resize keeps distinct minimum dimensions", () => {
