@@ -27,6 +27,67 @@
   --mango-text: #111827;
 }
 
+.mango-assistant {
+  position: fixed;
+  right: 10px;
+  z-index: 115;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.mango-assistant-panel {
+  width: min(760px, 100%);
+  min-width: 0;
+  pointer-events: auto;
+  color: #111827;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 12px;
+  background: linear-gradient(145deg, #fff, #f6f7fb);
+  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.14), inset 1px 1px 0 #fff;
+}
+
+.mango-assistant button {
+  padding: 6px 9px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 7px;
+  color: #334155;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.mango-assistant button:disabled { opacity: 0.5; cursor: default; }
+.mango-assistant :focus-visible { outline: 2px solid #0891b2; outline-offset: 2px; }
+.mango-assistant-composer { display: flex; align-items: center; gap: 6px; padding: 7px; }
+.mango-assistant-composer input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  height: 32px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}
+
+.mango-assistant .mango-assistant-toggle { width: 28px; padding: 5px; border-color: transparent; background: transparent; font-size: 18px; }
+.mango-assistant .mango-assistant-send { min-height: 32px; background: #475569; color: #fff; }
+.mango-assistant-transcript { border-bottom: 1px solid rgba(148, 163, 184, 0.25); }
+.mango-assistant-transcript header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 9px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); font-size: 12px; }
+.mango-assistant-transcript header strong { flex: 1; }
+.mango-assistant-messages { max-height: min(42vh, 360px); overflow-y: auto; overscroll-behavior: contain; padding: 12px; }
+.mango-assistant-message { margin-bottom: 12px; padding: 10px; font-size: 13px; line-height: 1.5; }
+.mango-assistant-message:last-child { margin-bottom: 0; }
+.mango-assistant-message strong { display: block; font-size: 11px; color: #64748b; margin-bottom: 3px; }
+.mango-assistant-message p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mango-assistant-question { background: #eaf0f6; border-radius: 8px; margin-left: 10%; }
+.mango-assistant-hint { color: #64748b; font-size: 12px; }
+.mango-assistant-availability { padding: 0 12px 8px; max-height: 40px; overflow-y: auto; font-size: 11px; line-height: 16px; color: #64748b; }
+
 /* Lock app viewport to full-screen and prevent browser scrollbars. */
 html, body, #root {
   width: 100%;
