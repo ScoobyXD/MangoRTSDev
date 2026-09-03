@@ -2,8 +2,6 @@ import type { SidebarPinTree } from "./sidebarPins.js";
 import {
   KANBAN_LOGIC_GATE_PENDING_COLOR,
   KANBAN_LOGIC_GATE_REQUESTED_COLOR,
-  type KanbanCard,
-  type KanbanColumn,
 } from "../modules/kanban/shared.js";
 
 export type SidebarLogicGateStatusKey = "request" | "pending" | "inProgress" | "review";
@@ -32,17 +30,11 @@ export function emptySidebarLogicGateStatusCounts(): SidebarLogicGateStatusCount
 }
 
 export function countSidebarLogicGateStatuses(
-  contents: { columns: Array<Pick<KanbanColumn, "column_id" | "title">>; cards: Array<Pick<KanbanCard, "column_id">> },
+  contents: { nodes: ReadonlyArray<{ status: string }> },
 ): SidebarLogicGateStatusCounts {
-  const statusByColumnID = new Map<string, SidebarLogicGateStatusKey>();
-  for (const column of contents.columns) {
-    const status = sidebarLogicGateStatusKey(column.column_id) ?? sidebarLogicGateStatusKey(column.title);
-    if (status) statusByColumnID.set(column.column_id, status);
-  }
-
   const counts = emptySidebarLogicGateStatusCounts();
-  for (const card of contents.cards) {
-    const status = statusByColumnID.get(card.column_id) ?? sidebarLogicGateStatusKey(card.column_id);
+  for (const node of contents.nodes) {
+    const status = sidebarLogicGateStatusKey(node.status);
     if (status) counts[status] += 1;
   }
   return counts;

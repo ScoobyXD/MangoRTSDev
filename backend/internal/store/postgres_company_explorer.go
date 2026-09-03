@@ -775,7 +775,6 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	directLogicGateIDs := map[string]bool{}
 	projectIDs := map[string]bool{}
 	directProjectIDs := map[string]bool{}
-	kanbanBoardIDs := map[string]bool{}
 	recycleRoots := make([]companyExplorerRecycleRootScope, 0, len(targets))
 
 	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.resolve_targets")
@@ -885,9 +884,6 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 		for projectID := range targetScope.ProjectIDs {
 			projectIDs[projectID] = true
 		}
-		for boardID := range targetScope.KanbanBoardIDs {
-			kanbanBoardIDs[boardID] = true
-		}
 		recycleRoots = append(recycleRoots, companyExplorerRecycleRootScope{Target: target, Scope: targetScope})
 	}
 	stop()
@@ -953,7 +949,6 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	appendSorted("node", nodeIDs)
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("project", projectIDs)
-	appendSorted("kanban", kanbanBoardIDs)
 	eventInputs := companyExplorerTargetWorkspaceEventInputs(companyID, result.Targets, false)
 	for index := range eventInputs {
 		eventInputs[index].ActorUserID = deletedByUserID
@@ -966,7 +961,6 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 
 	recycleCandidates := make([]companyExplorerRecycleRootScope, 0, len(recycleRoots))
 	for index := range recycleRoots {
-		recycleRoots[index].Scope.addLogicGateBoards()
 		recycleCandidates = append(recycleCandidates, recycleRoots[index])
 	}
 	if len(recycleCandidates) > 0 {
@@ -1001,14 +995,6 @@ func (r *PostgresRepo) deleteCompanyExplorerTargets(companyID string, targets []
 	for logicGateID := range logicGateIDs {
 		err := postgresDeleteLogicGateWithDependentProjectionsTx(ctx, tx, companyID, logicGateID)
 		if err != nil {
-			stop()
-			return CompanyExplorerDeleteResult{}, err
-		}
-	}
-	stop()
-	stop = observeTiming(ctx, "repo.DeleteCompanyExplorerTargets.kanban_delete")
-	for boardID := range kanbanBoardIDs {
-		if err := postgresDeleteKanbanBoardTx(ctx, tx, companyID, boardID); err != nil {
 			stop()
 			return CompanyExplorerDeleteResult{}, err
 		}
@@ -1160,7 +1146,6 @@ func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 	defer observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.total")()
 
 	if deleteProjectionRows {
-
 		stop := observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.project_timeline_projection_delete")
 		if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			stop()
@@ -1188,18 +1173,6 @@ func postgresDeleteNodeRowsTx(ctx context.Context, tx *sql.Tx, companyID, nodeID
 		return err
 	}
 	stop()
-	if deleteProjectionRows {
-		stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.kanban_projection_delete")
-		if _, err := tx.ExecContext(ctx,
-			`delete from kanban_board_projection
-			 where company_id=$1 and node_id=$2`,
-			companyID, nodeID,
-		); err != nil {
-			stop()
-			return err
-		}
-		stop()
-	}
 	stop = observeTiming(ctx, "repo.postgresDeleteNodeRowsTx.node_delete")
 	deleted, err := tx.ExecContext(ctx,
 		`delete from nodes
@@ -1268,7 +1241,6 @@ func postgresDeleteLogicGateRowsTx(ctx context.Context, tx *sql.Tx, companyID, l
 	}
 
 	if deleteProjectionRows {
-
 		if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return err
 		}
@@ -1287,11 +1259,6 @@ where company_id=$1::uuid and logic_gate_id=$2::uuid`, companyID, logicGateID); 
 		companyID, logicGateID,
 	); err != nil {
 		return err
-	}
-	if deleteProjectionRows {
-		if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
-			return err
-		}
 	}
 	if _, err := tx.ExecContext(ctx, `delete from email_relationships
 where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`, companyID, logicGateID); err != nil {
@@ -1320,13 +1287,6 @@ where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uui
 		return ErrNotFound
 	}
 	return nil
-}
-
-func postgresDeleteKanbanBoardTx(ctx context.Context, tx *sql.Tx, companyID, boardID string) error {
-	if LogicGateIDFromKanbanBoardID(boardID) != "" {
-		return nil
-	}
-	return ErrNotFound
 }
 
 func assignCompanyExplorerFolderItemSQL(ctx context.Context, tx *sql.Tx, companyID, folderID, itemType, itemID string, position int) (domain.CompanyExplorerFolderItem, []string, error) {
@@ -1516,9 +1476,6 @@ func (r *PostgresRepo) AssignCompanyExplorerFolderItems(companyID string, assign
 
 func (r *PostgresRepo) ListCompanyExplorerFolderItems(companyID, folderID, itemType string) ([]domain.CompanyExplorerFolderItem, error) {
 	ctx := context.Background()
-	if itemType == "kanban" {
-		return []domain.CompanyExplorerFolderItem{}, nil
-	}
 	var folderParam any
 	if folderID != "" {
 		folderParam = folderID
@@ -1567,9 +1524,6 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItems(companyID, folderID
 	userID = cleanUUIDText(userID)
 	if companyID == "" || userID == "" {
 		return nil, ErrInvalid
-	}
-	if itemType == "kanban" {
-		return []domain.CompanyExplorerFolderItem{}, nil
 	}
 	var folderParam any
 	if folderID != "" {
@@ -1629,9 +1583,6 @@ func (r *PostgresRepo) ListCompanyExplorerFolderItemsInFolderSubtree(companyID, 
 	if folderID == "" {
 		return r.ListCompanyExplorerFolderItems(companyID, "", itemType)
 	}
-	if itemType == "kanban" {
-		return []domain.CompanyExplorerFolderItem{}, nil
-	}
 	var itemTypeParam any
 	if strings.TrimSpace(itemType) != "" {
 		itemTypeParam = strings.TrimSpace(itemType)
@@ -1687,9 +1638,6 @@ func (r *PostgresRepo) ListVisibleCompanyExplorerFolderItemsInFolderSubtree(comp
 	}
 	if folderID == "" {
 		return r.ListVisibleCompanyExplorerFolderItems(companyID, "", itemType, userID)
-	}
-	if itemType == "kanban" {
-		return []domain.CompanyExplorerFolderItem{}, nil
 	}
 	var itemTypeParam any
 	if strings.TrimSpace(itemType) != "" {

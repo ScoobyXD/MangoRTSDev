@@ -749,29 +749,28 @@ $$;
 --
 
 CREATE FUNCTION public.mangorts_trg_bump_logic_gate_work_from_resource() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
+    LANGUAGE plpgsql AS $$
 begin
-  if tg_op='INSERT' then
-    if new.resource_type='logic_gate' then
-      perform mangorts_bump_logic_gate_work_version(new.company_id, new.resource_id);
-    end if;
-    return new;
-  elsif tg_op='DELETE' then
+  if tg_op<>'INSERT' then
     if old.resource_type='logic_gate' then
-      perform mangorts_bump_logic_gate_work_version(old.company_id, old.resource_id);
+      perform mangorts_bump_logic_gate_work_version(old.company_id,old.resource_id);
+    elsif old.resource_type='node' then
+      perform mangorts_bump_logic_gate_work_versions_for_node(old.company_id,old.resource_id);
+    elsif old.resource_type='company_explorer_folder' then
+      perform mangorts_bump_logic_gate_work_versions_for_folder(old.company_id,old.resource_id);
     end if;
-    return old;
   end if;
-  if old.resource_type='logic_gate' then
-    perform mangorts_bump_logic_gate_work_version(old.company_id, old.resource_id);
+  if tg_op='INSERT' or (tg_op='UPDATE' and
+      (new.company_id,new.resource_type,new.resource_id) is distinct from (old.company_id,old.resource_type,old.resource_id)) then
+    if new.resource_type='logic_gate' then
+      perform mangorts_bump_logic_gate_work_version(new.company_id,new.resource_id);
+    elsif new.resource_type='node' then
+      perform mangorts_bump_logic_gate_work_versions_for_node(new.company_id,new.resource_id);
+    elsif new.resource_type='company_explorer_folder' then
+      perform mangorts_bump_logic_gate_work_versions_for_folder(new.company_id,new.resource_id);
+    end if;
   end if;
-  if (new.company_id, new.resource_type, new.resource_id)
-       is distinct from (old.company_id, old.resource_type, old.resource_id)
-     and new.resource_type='logic_gate' then
-    perform mangorts_bump_logic_gate_work_version(new.company_id, new.resource_id);
-  end if;
-  return new;
+  return null;
 end;
 $$;
 
@@ -2475,12 +2474,13 @@ $$;
 --
 
 CREATE FUNCTION public.trg_validate_resource_operational_relationship() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
+    LANGUAGE plpgsql AS $$
 declare
   locked_count integer;
+  source_owner_id uuid;
+  target_owner_id uuid;
 begin
-  if tg_op = 'UPDATE' and (
+  if tg_op='UPDATE' and (
     new.company_id is distinct from old.company_id
     or new.resource_operational_relationship_id is distinct from old.resource_operational_relationship_id
     or new.source_resource_type is distinct from old.source_resource_type
@@ -2490,57 +2490,54 @@ begin
   ) then
     raise exception 'process_map_relationship_endpoints_immutable' using errcode='23514';
   end if;
-
-  if new.source_resource_type not in ('company_explorer_folder', 'logic_gate')
-     or new.target_resource_type not in ('company_explorer_folder', 'logic_gate') then
+  if new.source_resource_type not in ('company_explorer_folder','logic_gate','process_step')
+     or new.target_resource_type not in ('company_explorer_folder','logic_gate','process_step')
+     or (new.source_resource_type='process_step')<>(new.target_resource_type='process_step') then
     raise exception 'invalid_process_map_resource_type' using errcode='23514';
   end if;
-  if new.source_resource_type = new.target_resource_type
-     and new.source_resource_id = new.target_resource_id then
+  if new.source_resource_type=new.target_resource_type and new.source_resource_id=new.target_resource_id then
     raise exception 'process_map_relationship_self_edge' using errcode='23514';
   end if;
-
-  if new.source_resource_type = 'company_explorer_folder'
-     and new.target_resource_type = 'company_explorer_folder' then
+  if new.source_resource_type='process_step' then
+    perform 1 from process_steps
+    where company_id=new.company_id and process_step_id in (new.source_resource_id,new.target_resource_id)
+    order by process_step_id for key share;
+    get diagnostics locked_count=row_count;
+    if locked_count<>2 then
+      raise exception 'process_step_endpoint_not_found' using errcode='23503';
+    end if;
+    select logic_gate_id into source_owner_id from process_steps
+    where company_id=new.company_id and process_step_id=new.source_resource_id;
+    select logic_gate_id into target_owner_id from process_steps
+    where company_id=new.company_id and process_step_id=new.target_resource_id;
+    if source_owner_id<>target_owner_id then
+      raise exception 'process_step_relationship_cross_process' using errcode='23514';
+    end if;
+  elsif new.source_resource_type='company_explorer_folder' and new.target_resource_type='company_explorer_folder' then
     perform 1 from company_explorer_folders
-    where company_id = new.company_id
-      and folder_id in (new.source_resource_id, new.target_resource_id)
+    where company_id=new.company_id and folder_id in (new.source_resource_id,new.target_resource_id)
     order by folder_id for key share;
-    get diagnostics locked_count = row_count;
-    if locked_count <> 2 then
+    get diagnostics locked_count=row_count;
+    if locked_count<>2 then
       raise exception 'process_map_endpoint_not_found' using errcode='23503';
     end if;
-  elsif new.source_resource_type = 'logic_gate'
-        and new.target_resource_type = 'logic_gate' then
+  elsif new.source_resource_type='logic_gate' and new.target_resource_type='logic_gate' then
     perform 1 from logic_gates
-    where company_id = new.company_id
-      and logic_gate_id in (new.source_resource_id, new.target_resource_id)
+    where company_id=new.company_id and logic_gate_id in (new.source_resource_id,new.target_resource_id)
     order by logic_gate_id for key share;
-    get diagnostics locked_count = row_count;
-    if locked_count <> 2 then
+    get diagnostics locked_count=row_count;
+    if locked_count<>2 then
       raise exception 'process_map_endpoint_not_found' using errcode='23503';
     end if;
   else
     perform 1 from company_explorer_folders
-    where company_id = new.company_id
-      and folder_id = case
-        when new.source_resource_type = 'company_explorer_folder' then new.source_resource_id
-        else new.target_resource_id
-      end
+    where company_id=new.company_id and folder_id=case when new.source_resource_type='company_explorer_folder' then new.source_resource_id else new.target_resource_id end
     for key share;
-    if not found then
-      raise exception 'process_map_endpoint_not_found' using errcode='23503';
-    end if;
+    if not found then raise exception 'process_map_endpoint_not_found' using errcode='23503'; end if;
     perform 1 from logic_gates
-    where company_id = new.company_id
-      and logic_gate_id = case
-        when new.source_resource_type = 'logic_gate' then new.source_resource_id
-        else new.target_resource_id
-      end
+    where company_id=new.company_id and logic_gate_id=case when new.source_resource_type='logic_gate' then new.source_resource_id else new.target_resource_id end
     for key share;
-    if not found then
-      raise exception 'process_map_endpoint_not_found' using errcode='23503';
-    end if;
+    if not found then raise exception 'process_map_endpoint_not_found' using errcode='23503'; end if;
   end if;
   return new;
 end;
@@ -4286,49 +4283,6 @@ CREATE TABLE public.invitations (
 
 
 --
--- Name: kanban_board_projection; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.kanban_board_projection (
-    company_id uuid NOT NULL,
-    logic_gate_id uuid NOT NULL,
-    node_id uuid NOT NULL,
-    status text NOT NULL,
-    column_id text NOT NULL,
-    "position" integer NOT NULL,
-    title text NOT NULL,
-    priority smallint,
-    is_issue boolean DEFAULT false NOT NULL,
-    due_date date,
-    node_created_timestamp timestamp with time zone NOT NULL,
-    node_updated_timestamp timestamp with time zone NOT NULL,
-    assignment_id uuid NOT NULL,
-    assignment_created_timestamp timestamp with time zone NOT NULL,
-    assignment_updated_timestamp timestamp with time zone NOT NULL,
-    compatibility_board_id text NOT NULL,
-    compatibility_card_id uuid NOT NULL,
-    projection_updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
-    accounts jsonb DEFAULT '[]'::jsonb NOT NULL,
-    requested_by_user_id uuid,
-    placed_by_user_id uuid,
-    status_rank smallint GENERATED ALWAYS AS (
-CASE
-    WHEN (lower(replace(replace(btrim(status), '_'::text, ' '::text), '-'::text, ' '::text)) = ANY (ARRAY['requested'::text, 'request'::text, 'requests'::text, 'r'::text])) THEN 0
-    WHEN (lower(replace(replace(btrim(status), '_'::text, ' '::text), '-'::text, ' '::text)) = ANY (ARRAY['backlog'::text, 'backlogs'::text, 'b'::text])) THEN 1
-    WHEN (lower(replace(replace(btrim(status), '_'::text, ' '::text), '-'::text, ' '::text)) = ANY (ARRAY['pending'::text, 'p'::text])) THEN 2
-    WHEN (lower(replace(replace(btrim(status), '_'::text, ' '::text), '-'::text, ' '::text)) = ANY (ARRAY['in progress'::text, 'inprogress'::text, 'ip'::text])) THEN 3
-    WHEN (lower(replace(replace(btrim(status), '_'::text, ' '::text), '-'::text, ' '::text)) = 'review'::text) THEN 4
-    WHEN (lower(replace(replace(btrim(status), '_'::text, ' '::text), '-'::text, ' '::text)) = ANY (ARRAY['done'::text, 'd'::text])) THEN 5
-    ELSE 2
-END) STORED,
-    CONSTRAINT kanban_board_projection_accounts_array_chk CHECK ((jsonb_typeof(accounts) = 'array'::text)),
-    CONSTRAINT kanban_board_projection_priority_chk CHECK (((priority IS NULL) OR ((priority >= 1) AND (priority <= 5)))),
-    CONSTRAINT kanban_board_projection_status_nonblank_chk CHECK ((btrim(status) <> ''::text)),
-    CONSTRAINT kanban_board_projection_title_nonblank_chk CHECK ((btrim(title) <> ''::text))
-);
-
-
---
 -- Name: kpis; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -4451,18 +4405,14 @@ CREATE TABLE public.node_logic_gate_assignments (
     company_id uuid NOT NULL,
     node_id uuid NOT NULL,
     logic_gate_id uuid NOT NULL,
-    status_key text NOT NULL,
-    column_id text NOT NULL,
+    process_step_id uuid,
     is_issue boolean DEFAULT false NOT NULL,
     "position" integer NOT NULL,
-    compatibility_board_id text NOT NULL,
-    compatibility_card_id uuid NOT NULL,
     version bigint DEFAULT 1 NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     requested_by_user_id uuid,
     placed_by_user_id uuid,
-    CONSTRAINT node_logic_gate_assignments_status_key_chk CHECK ((btrim(status_key) <> ''::text)),
     CONSTRAINT node_logic_gate_assignments_version_positive_chk CHECK ((version > 0))
 );
 
@@ -5193,7 +5143,7 @@ CREATE TABLE public.resource_gvic_assignments (
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT resource_gvic_assignments_raci_role_chk CHECK ((role = ANY (ARRAY['responsible'::text, 'accountable'::text, 'consulted'::text, 'informed'::text]))),
-    CONSTRAINT resource_gvic_assignments_resource_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'shared_triage_folder'::text, 'shared_inbox'::text, 'huddle_logic_gate'::text, 'huddle_node'::text]))),
+    CONSTRAINT resource_gvic_assignments_resource_type_chk CHECK ((resource_type = ANY (ARRAY['node'::text, 'logic_gate'::text, 'project'::text, 'company_explorer_folder'::text, 'shared_inbox_folder'::text, 'shared_inbox'::text, 'huddle_logic_gate'::text, 'huddle_node'::text]))),
     CONSTRAINT resource_gvic_assignments_v2_staging_principal_type_chk CHECK ((principal_type = ANY (ARRAY['user'::text, 'group'::text])))
 );
 
@@ -5244,9 +5194,10 @@ CREATE TABLE public.resource_operational_relationships (
     target_resource_type text NOT NULL,
     target_resource_id uuid NOT NULL,
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT resource_operational_relationships_step_pair_chk CHECK ((source_resource_type='process_step')=(target_resource_type='process_step')),
     CONSTRAINT resource_operational_relationships_not_self_chk CHECK (((source_resource_type <> target_resource_type) OR (source_resource_id <> target_resource_id))),
-    CONSTRAINT resource_operational_relationships_source_type_chk CHECK ((source_resource_type = ANY (ARRAY['company_explorer_folder'::text, 'logic_gate'::text]))),
-    CONSTRAINT resource_operational_relationships_target_type_chk CHECK ((target_resource_type = ANY (ARRAY['company_explorer_folder'::text, 'logic_gate'::text])))
+    CONSTRAINT resource_operational_relationships_source_type_chk CHECK ((source_resource_type = ANY (ARRAY['company_explorer_folder'::text, 'logic_gate'::text, 'process_step'::text]))),
+    CONSTRAINT resource_operational_relationships_target_type_chk CHECK ((target_resource_type = ANY (ARRAY['company_explorer_folder'::text, 'logic_gate'::text, 'process_step'::text])))
 );
 
 
@@ -5814,14 +5765,6 @@ ALTER TABLE ONLY public.invitations
 
 ALTER TABLE ONLY public.invitations
     ADD CONSTRAINT invitations_token_hash_key UNIQUE (token_hash);
-
-
---
--- Name: kanban_board_projection kanban_board_projection_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.kanban_board_projection
-    ADD CONSTRAINT kanban_board_projection_pkey PRIMARY KEY (company_id, logic_gate_id, node_id);
 
 
 --
@@ -6747,27 +6690,6 @@ CREATE UNIQUE INDEX idx_invitations_one_pending_company_email ON public.invitati
 
 
 --
--- Name: idx_kanban_board_projection_hot_read; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_kanban_board_projection_hot_read ON public.kanban_board_projection USING btree (company_id, logic_gate_id, status_rank, "position", assignment_created_timestamp, assignment_id);
-
-
---
--- Name: idx_kanban_board_projection_node; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_kanban_board_projection_node ON public.kanban_board_projection USING btree (company_id, node_id);
-
-
---
--- Name: idx_kanban_board_projection_updated; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_kanban_board_projection_updated ON public.kanban_board_projection USING btree (company_id, logic_gate_id, projection_updated_timestamp DESC, node_id);
-
-
---
 -- Name: idx_kpis_logic_gate; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6800,20 +6722,6 @@ CREATE INDEX idx_logic_gates_header_trgm ON public.logic_gates USING gin (lower(
 --
 
 CREATE INDEX idx_node_account_assignments_account ON public.node_account_assignments USING btree (company_id, account_id, node_id);
-
-
---
--- Name: idx_node_logic_gate_assignments_compat_card; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX idx_node_logic_gate_assignments_compat_card ON public.node_logic_gate_assignments USING btree (company_id, compatibility_board_id, compatibility_card_id);
-
-
---
--- Name: idx_node_logic_gate_assignments_logic_gate_position; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_node_logic_gate_assignments_logic_gate_position ON public.node_logic_gate_assignments USING btree (company_id, logic_gate_id, column_id, "position", updated_timestamp DESC);
 
 
 --
@@ -7582,7 +7490,7 @@ CREATE TRIGGER trg_logic_gate_work_version_memberships AFTER INSERT OR DELETE OR
 -- Name: nodes trg_logic_gate_work_version_nodes; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER trg_logic_gate_work_version_nodes AFTER UPDATE OF name, due_date, priority ON public.nodes FOR EACH ROW EXECUTE FUNCTION public.mangorts_trg_bump_logic_gate_work_from_node();
+CREATE TRIGGER trg_logic_gate_work_version_nodes AFTER UPDATE OF name, due_date, priority, status ON public.nodes FOR EACH ROW EXECUTE FUNCTION public.mangorts_trg_bump_logic_gate_work_from_node();
 
 
 --
@@ -7590,13 +7498,6 @@ CREATE TRIGGER trg_logic_gate_work_version_nodes AFTER UPDATE OF name, due_date,
 --
 
 CREATE TRIGGER trg_logic_gate_work_version_permissions AFTER INSERT OR DELETE OR UPDATE ON public.resource_permissions FOR EACH ROW EXECUTE FUNCTION public.mangorts_trg_bump_logic_gate_work_from_resource();
-
-
---
--- Name: kanban_board_projection trg_logic_gate_work_version_projection; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_logic_gate_work_version_projection AFTER INSERT OR DELETE OR UPDATE ON public.kanban_board_projection FOR EACH ROW EXECUTE FUNCTION public.mangorts_trg_bump_logic_gate_work_from_gate_row();
 
 
 --
@@ -8684,22 +8585,6 @@ ALTER TABLE ONLY public.invitations
 
 
 --
--- Name: kanban_board_projection kanban_board_projection_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.kanban_board_projection
-    ADD CONSTRAINT kanban_board_projection_company_id_logic_gate_id_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE;
-
-
---
--- Name: kanban_board_projection kanban_board_projection_company_id_node_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.kanban_board_projection
-    ADD CONSTRAINT kanban_board_projection_company_id_node_id_fkey FOREIGN KEY (company_id, node_id) REFERENCES public.nodes(company_id, node_id) ON DELETE CASCADE;
-
-
---
 -- Name: kpis kpis_company_id_logic_gate_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -9408,3 +9293,102 @@ ALTER TABLE ONLY public.shared_inboxes
 --
 -- PostgreSQL database dump complete
 --
+
+-- Process-owned steps and exact Node placement.
+CREATE TABLE public.process_steps (
+    company_id uuid NOT NULL,
+    process_step_id uuid NOT NULL,
+    logic_gate_id uuid NOT NULL,
+    name text NOT NULL,
+    position integer NOT NULL,
+    created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT process_steps_pkey PRIMARY KEY (company_id, process_step_id),
+    CONSTRAINT process_steps_owner_identity_key UNIQUE (company_id, logic_gate_id, process_step_id),
+    CONSTRAINT process_steps_owner_fkey FOREIGN KEY (company_id, logic_gate_id) REFERENCES public.logic_gates(company_id, logic_gate_id) ON DELETE CASCADE,
+    CONSTRAINT process_steps_name_chk CHECK (length(btrim(name)) BETWEEN 1 AND 500),
+    CONSTRAINT process_steps_position_chk CHECK (position >= 0),
+    CONSTRAINT process_steps_timestamps_chk CHECK (updated_timestamp >= created_timestamp)
+);
+
+CREATE INDEX idx_process_steps_owner_position ON public.process_steps (company_id, logic_gate_id, position, process_step_id);
+CREATE INDEX idx_node_logic_gate_assignments_logic_gate_position ON public.node_logic_gate_assignments (company_id, logic_gate_id, process_step_id, position, node_id);
+ALTER TABLE public.node_logic_gate_assignments ADD CONSTRAINT node_logic_gate_assignments_step_fkey
+  FOREIGN KEY (company_id, logic_gate_id, process_step_id)
+  REFERENCES public.process_steps(company_id, logic_gate_id, process_step_id)
+  ON DELETE SET NULL (process_step_id);
+
+CREATE FUNCTION public.trg_process_step_owner_immutable() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+begin
+  if (new.company_id,new.process_step_id,new.logic_gate_id)
+       is distinct from (old.company_id,old.process_step_id,old.logic_gate_id) then
+    raise exception 'process_step_owner_immutable' using errcode='23514';
+  end if;
+  return new;
+end;
+$$;
+
+CREATE FUNCTION public.trg_process_step_cleanup() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+begin
+  update node_logic_gate_assignments
+  set process_step_id=null,version=version+1,updated_timestamp=statement_timestamp()
+  where company_id=old.company_id and process_step_id=old.process_step_id;
+  delete from resource_operational_relationships
+  where company_id=old.company_id
+    and ((source_resource_type='process_step' and source_resource_id=old.process_step_id)
+      or (target_resource_type='process_step' and target_resource_id=old.process_step_id));
+  return old;
+end;
+$$;
+
+CREATE FUNCTION public.trg_process_step_relationship_work_version() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+declare
+  source_row jsonb := case when tg_op='DELETE' then to_jsonb(old) else to_jsonb(new) end;
+  owner_id uuid;
+begin
+  if source_row->>'source_resource_type'='process_step' then
+    select logic_gate_id into owner_id from process_steps
+    where company_id=(source_row->>'company_id')::uuid
+      and process_step_id=(source_row->>'source_resource_id')::uuid;
+    if found then
+      perform mangorts_bump_logic_gate_work_version((source_row->>'company_id')::uuid,owner_id);
+    end if;
+  end if;
+  return null;
+end;
+$$;
+
+CREATE FUNCTION public.trg_process_map_trace_endpoint_types() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+begin
+  perform 1 from resource_operational_relationships
+  where company_id=new.company_id
+    and resource_operational_relationship_id=new.resource_operational_relationship_id
+    and source_resource_type in ('company_explorer_folder','logic_gate')
+    and target_resource_type in ('company_explorer_folder','logic_gate')
+  for key share;
+  if not found then
+    raise exception 'process_map_trace_endpoint_type_invalid' using errcode='23514';
+  end if;
+  return new;
+end;
+$$;
+
+CREATE TRIGGER trg_process_step_owner_immutable BEFORE UPDATE ON public.process_steps
+  FOR EACH ROW EXECUTE FUNCTION public.trg_process_step_owner_immutable();
+CREATE TRIGGER trg_process_step_cleanup BEFORE DELETE ON public.process_steps
+  FOR EACH ROW EXECUTE FUNCTION public.trg_process_step_cleanup();
+CREATE TRIGGER trg_logic_gate_work_version_steps AFTER INSERT OR UPDATE OR DELETE ON public.process_steps
+  FOR EACH ROW EXECUTE FUNCTION public.mangorts_trg_bump_logic_gate_work_from_gate_row();
+CREATE TRIGGER trg_process_step_relationship_work_version AFTER INSERT OR UPDATE OR DELETE ON public.resource_operational_relationships
+  FOR EACH ROW EXECUTE FUNCTION public.trg_process_step_relationship_work_version();
+CREATE TRIGGER trg_process_map_trace_endpoint_types BEFORE INSERT OR UPDATE ON public.process_map_traces
+  FOR EACH ROW EXECUTE FUNCTION public.trg_process_map_trace_endpoint_types();
+
+CREATE TRIGGER trg_logic_gate_work_version_permission_settings AFTER INSERT OR UPDATE OR DELETE ON public.resource_permission_settings
+  FOR EACH ROW EXECUTE FUNCTION public.mangorts_trg_bump_logic_gate_work_from_resource();
+CREATE TRIGGER trg_logic_gate_work_version_gvic_settings AFTER INSERT OR UPDATE OR DELETE ON public.resource_gvic_settings
+  FOR EACH ROW EXECUTE FUNCTION public.mangorts_trg_bump_logic_gate_work_from_resource();

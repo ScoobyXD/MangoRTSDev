@@ -145,11 +145,8 @@ func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionRACIAndAssignme
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	repo.mu.Lock()
-	delete(repo.kanbanCards, boardKey(companyID, LogicGateKanbanBoardID(logicGate.LogicGateID)))
-	repo.mu.Unlock()
 
-	view, err := repo.GetLogicGateView(companyID, logicGate.LogicGateID)
+	view, err := repo.GetLogicGateView(companyID, logicGate.LogicGateID, "")
 	if err != nil {
 		t.Fatalf("GetLogicGateView: %v", err)
 	}
@@ -162,11 +159,11 @@ func TestMemoryConsolidatedLogicGateViewIncludesDetailsProjectionRACIAndAssignme
 	if view.RACIAssignmentCount != 1 || len(view.RACIAssignments) != 1 || view.RACIAssignments[0].UserID != responsible.UserID {
 		t.Fatalf("logic gate view RACI = %+v, want responsible assignment", view.RACIAssignments)
 	}
-	if view.AssignmentCount != 1 || len(view.Work.Cards) != 1 || view.Work.Cards[0].NodeID != node.NodeID {
-		t.Fatalf("logic gate view work = %+v, want assignment-backed work card", view.Work.Cards)
+	if view.AssignmentCount != 1 || len(view.Work.Nodes) != 1 || view.Work.Nodes[0].NodeID != node.NodeID {
+		t.Fatalf("logic gate view work = %+v, want assignment-backed work card", view.Work.Nodes)
 	}
-	if len(view.Work.Cards) != 1 || view.Work.Cards[0].ColumnID != LogicGateWorkStatusDone {
-		t.Fatalf("logic gate synthesized cards = %+v, want done card from assignment", view.Work.Cards)
+	if len(view.Work.Nodes) != 1 || view.Work.Nodes[0].Status != "Done" {
+		t.Fatalf("logic gate synthesized cards = %+v, want done card from assignment", view.Work.Nodes)
 	}
 }
 

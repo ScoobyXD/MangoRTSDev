@@ -41,7 +41,7 @@ func TestRACIMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 	if createPayload.LogicGate == nil || createPayload.LogicGate.Header != "Matrix-created gate" {
 		t.Fatalf("created logic gate = %+v, want Matrix-created gate", createPayload.LogicGate)
 	}
-	if createPayload.Assignment == nil || createPayload.Assignment.LogicGateID != createPayload.LogicGate.LogicGateID || createPayload.Assignment.StatusKey != store.LogicGateWorkStatusPending {
+	if createPayload.Assignment == nil || createPayload.Assignment.LogicGateID != createPayload.LogicGate.LogicGateID || createPayload.Node.Status == nil || *createPayload.Node.Status != "Pending" {
 		t.Fatalf("created assignment = %+v, want pending assignment in created gate", createPayload.Assignment)
 	}
 	if len(createPayload.RACIMatrixProjectionRows) != 0 {
@@ -82,7 +82,7 @@ func TestRACIMatrixNodeCreateAndMoveV2IgnoresStaleSourceHint(t *testing.T) {
 		t.Fatalf("move status = %d body=%s, want 200", moveRec.Code, moveRec.Body.String())
 	}
 	movePayload := decodeLogicGateWorkMutationPayloadForTest(t, moveRec)
-	if movePayload.Assignment.LogicGateID != targetGate.LogicGate.LogicGateID || movePayload.Assignment.StatusKey != store.LogicGateWorkStatusDone {
+	if movePayload.Assignment.LogicGateID != targetGate.LogicGate.LogicGateID || movePayload.Node.Status == nil || *movePayload.Node.Status != "Done" {
 		t.Fatalf("move assignment = %+v, want done in target gate", movePayload.Assignment)
 	}
 	if len(movePayload.RACIMatrixProjectionRows) != 0 {
@@ -170,7 +170,6 @@ type RACIMatrixNodeCreatePayloadForTest struct {
 	Node                     domain.Node                        `json:"node"`
 	LogicGate                *domain.LogicGate                  `json:"logic_gate"`
 	Assignment               *domain.NodeLogicGateAssignment    `json:"assignment"`
-	Card                     *domain.KanbanCard                 `json:"card"`
 	FolderItems              []domain.CompanyExplorerFolderItem `json:"folder_items"`
 	RACIMatrixProjectionRows []store.RACIMatrixProjectionRow    `json:"gvic_projection_rows"`
 }

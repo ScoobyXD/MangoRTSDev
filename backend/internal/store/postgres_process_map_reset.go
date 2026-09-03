@@ -193,7 +193,7 @@ where conrelid=to_regclass('public.process_map_placements')
 	if err := postgresSaveAutomaticProcessMapPlacementsTx(ctx, tx, result.CompanyID, changed); err != nil {
 		return result, err
 	}
-	deleted, err := tx.ExecContext(ctx, `delete from resource_operational_relationships where company_id=$1::uuid`, result.CompanyID)
+	deleted, err := tx.ExecContext(ctx, `delete from resource_operational_relationships where company_id=$1::uuid and source_resource_type in ('logic_gate','company_explorer_folder') and target_resource_type in ('logic_gate','company_explorer_folder')`, result.CompanyID)
 	if err != nil {
 		return result, err
 	}
@@ -267,7 +267,7 @@ func postgresProcessMapResetConnectionsTx(ctx context.Context, tx *sql.Tx, compa
 	rows, err := tx.QueryContext(ctx, `
 select company_id::text,resource_operational_relationship_id::text,source_resource_type,source_resource_id::text,
        target_resource_type,target_resource_id::text,created_timestamp
-from resource_operational_relationships where company_id=$1::uuid
+from resource_operational_relationships where company_id=$1::uuid and source_resource_type in ('logic_gate','company_explorer_folder') and target_resource_type in ('logic_gate','company_explorer_folder')
 order by resource_operational_relationship_id`+lock, companyID)
 	if err != nil {
 		return nil, nil, err

@@ -51,7 +51,8 @@ func (r *MemoryRepo) CreateRACIMatrixNode(input RACIMatrixNodeCreateInput) (RACI
 			LogicGateID:         logicGateID,
 			NodeID:              input.NodeID,
 			Status:              input.Status,
-			ColumnID:            input.ColumnID,
+			ProcessStepID:input.ProcessStepID,
+ ProcessStepIDSet:input.ProcessStepIDSet,
 			NodeTitle:           input.Title,
 			CreateNodeTitle:     input.Title,
 			DescriptionSnapshot: input.DescriptionSnapshot,
@@ -67,10 +68,8 @@ func (r *MemoryRepo) CreateRACIMatrixNode(input RACIMatrixNodeCreateInput) (RACI
 			return RACIMatrixNodeCreateResult{}, err
 		}
 		assignment := assignmentResult.Assignment
-		card := assignmentResult.Card
 		result.Node = assignmentResult.Node
 		result.Assignment = &assignment
-		result.Card = &card
 		result.Events = append(result.Events, assignmentResult.Events...)
 		r.mu.RLock()
 		if folderItem, ok := r.folderItems[folderItemKey(input.CompanyID, "node", input.NodeID)]; ok {

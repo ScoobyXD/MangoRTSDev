@@ -242,7 +242,6 @@ func (r *MemoryRepo) CreateLogicGate(companyID, header string) (domain.LogicGate
 		CreatedTimestamp: time.Now().UTC(),
 	}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
-	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
 	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
 	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(companyID)
 	if err := r.syncMemoryDefaultFolderProcessMapPlacementsLocked(companyID, defaultFolders); err != nil {
@@ -270,12 +269,7 @@ func (r *MemoryRepo) UpdateLogicGateHeader(companyID, logicGateID, header string
 	}
 	item.Header = header
 	r.logicGates[k] = item
-	boardKeyValue := boardKey(companyID, LogicGateKanbanBoardID(logicGateID))
-	if board, ok := r.kanbanBoards[boardKeyValue]; ok && board.LogicGateID != nil {
-		board.Title = normalizeKanbanBoardTitle(board.BoardID, header)
-		board.UpdatedTimestamp = time.Now().UTC()
-		r.kanbanBoards[boardKeyValue] = board
-	}
+
 	r.syncRACIMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 	r.syncProjectManagementTimelineProjectionForLogicGateLocked(companyID, logicGateID)
 	return r.withLogicGateRACILocked(item), nil
@@ -613,20 +607,12 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string, preser
 		r.syncRACIMatrixProjectionForNodeLocked(companyID, nodeID)
 	}
 	delete(r.folderItems, folderItemKey(companyID, "logic_gate", logicGateID))
-	for boardKeyValue, board := range r.kanbanBoards {
-		if board.CompanyID != companyID || board.LogicGateID == nil || *board.LogicGateID != logicGateID {
-			continue
+
+	for _, step := range r.processSteps {
+		if step.CompanyID == companyID && step.LogicGateID == logicGateID {
+			r.deleteProcessStepLocked(companyID, step.ProcessStepID)
 		}
-		delete(r.kanbanCards, boardKeyValue)
-		delete(r.kanbanColumns, boardKeyValue)
-		delete(r.kanbanBoards, boardKeyValue)
-		delete(r.folderItems, folderItemKey(companyID, "kanban", board.BoardID))
 	}
-	defaultBoardID := LogicGateKanbanBoardID(logicGateID)
-	delete(r.kanbanCards, boardKey(companyID, defaultBoardID))
-	delete(r.kanbanColumns, boardKey(companyID, defaultBoardID))
-	delete(r.kanbanBoards, boardKey(companyID, defaultBoardID))
-	delete(r.folderItems, folderItemKey(companyID, "kanban", defaultBoardID))
 	for linkKey, link := range r.emailNodeLinks {
 		if link.CompanyID == companyID && link.LogicGateID == logicGateID {
 			delete(r.emailNodeLinks, linkKey)
@@ -796,17 +782,12 @@ func (r *MemoryRepo) CreateLogicGateWithWorkspaceEvent(companyID, header, actorU
 	defer r.mu.Unlock()
 	beforeMutation := r.snapshotProcessMapMutationLocked()
 	beforeGates := maps.Clone(r.logicGates)
-	beforeBoards := maps.Clone(r.kanbanBoards)
-	beforeColumns := maps.Clone(r.kanbanColumns)
 	item := domain.LogicGate{CompanyID: companyID, LogicGateID: newUUIDv7String(), Header: header, DefaultAccess: ResourceDefaultAccessEdit, CreatedTimestamp: time.Now().UTC()}
 	r.logicGates[key(companyID, item.LogicGateID)] = item
-	r.ensureLogicGateKanbanBoardLocked(companyID, item.LogicGateID, item.Header)
 	item = r.withLogicGateRACILocked(item)
 	event, err := r.appendDomainEventLocked(logicGateCreatedWorkspaceEventInput(item, workItemAssignmentEventMetadata{}))
 	if err != nil {
 		r.logicGates = beforeGates
-		r.kanbanBoards = beforeBoards
-		r.kanbanColumns = beforeColumns
 		return domain.LogicGate{}, domain.DomainEvent{}, err
 	}
 	r.ensureCompanyExplorerV2CompanyGraphLocked(companyID)
@@ -830,7 +811,6 @@ func (r *MemoryRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGat
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	beforeGates := maps.Clone(r.logicGates)
-	beforeBoards := maps.Clone(r.kanbanBoards)
 	beforeRACIProjection := maps.Clone(r.RACIMatrixProjectionRows)
 	beforeTimelineItems := maps.Clone(r.projectTimelineItems)
 	beforeTimelineProjection := maps.Clone(r.projectTimelineProjection)
@@ -841,19 +821,13 @@ func (r *MemoryRepo) UpdateLogicGateHeaderWithWorkspaceEvent(companyID, logicGat
 	}
 	item.Header = header
 	r.logicGates[k] = item
-	boardKeyValue := boardKey(companyID, LogicGateKanbanBoardID(logicGateID))
-	if board, ok := r.kanbanBoards[boardKeyValue]; ok && board.LogicGateID != nil {
-		board.Title = normalizeKanbanBoardTitle(board.BoardID, header)
-		board.UpdatedTimestamp = time.Now().UTC()
-		r.kanbanBoards[boardKeyValue] = board
-	}
+
 	r.syncRACIMatrixProjectionForLogicGateLocked(companyID, logicGateID)
 	r.syncProjectManagementTimelineProjectionForLogicGateLocked(companyID, logicGateID)
 	item = r.withLogicGateRACILocked(item)
 	event, err := r.appendDomainEventLocked(logicGateUpdatedWorkspaceEventInput(item))
 	if err != nil {
 		r.logicGates = beforeGates
-		r.kanbanBoards = beforeBoards
 		r.RACIMatrixProjectionRows = beforeRACIProjection
 		r.projectTimelineItems = beforeTimelineItems
 		r.projectTimelineProjection = beforeTimelineProjection

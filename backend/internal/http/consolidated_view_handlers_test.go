@@ -96,7 +96,7 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 		t.Fatalf("SetEntityPermissions hidden node: %v", err)
 	}
 
-	guardedRepo := &phase5ForbiddenLegacyAndKanbanReadsRepo{Repository: repo}
+	guardedRepo := &phase5ForbiddenLegacyReadsRepo{Repository: repo}
 	server := NewServer(guardedRepo)
 	defer server.Close()
 	handler := server.Routes()
@@ -131,9 +131,6 @@ func TestNodeViewV2EffectiveAccessAndNoLeak(t *testing.T) {
 	}
 	if guardedRepo.legacyAccessReadCount != 0 {
 		t.Fatalf("node view used legacy access reads %d times", guardedRepo.legacyAccessReadCount)
-	}
-	if guardedRepo.kanbanReadCount != 0 {
-		t.Fatalf("node view used Kanban read methods %d times", guardedRepo.kanbanReadCount)
 	}
 }
 
@@ -300,7 +297,7 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		t.Fatalf("SetEntityPermissions hidden logic gate: %v", err)
 	}
 
-	guardedRepo := &phase5ForbiddenLegacyAndKanbanReadsRepo{Repository: repo}
+	guardedRepo := &phase5ForbiddenLegacyReadsRepo{Repository: repo}
 	server := NewServer(guardedRepo)
 	defer server.Close()
 	handler := server.Routes()
@@ -316,8 +313,8 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 		t.Fatalf("default logic gate view included work payload: %s", viewBody)
 	}
 	viewWithWork, _ := getLogicGateViewV2ForTestWithQuery(t, handler, companyID, logicGate.LogicGateID, viewer, "include_work=1", http.StatusOK)
-	if viewWithWork.NodeCount != 1 || len(viewWithWork.Work.Cards) != 1 || viewWithWork.Work.Cards[0].NodeID != assignedNode.NodeID {
-		t.Fatalf("logic gate work cards = %+v, want assigned node through explicit include_work", viewWithWork.Work.Cards)
+	if viewWithWork.NodeCount != 1 || len(viewWithWork.Work.Nodes) != 1 || viewWithWork.Work.Nodes[0].NodeID != assignedNode.NodeID {
+		t.Fatalf("logic gate work cards = %+v, want assigned node through explicit include_work", viewWithWork.Work.Nodes)
 	}
 
 	getLogicGateViewV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
@@ -336,9 +333,6 @@ func TestLogicGateViewV2EffectiveAccessContextualNodesAndNoLeak(t *testing.T) {
 	}
 	if guardedRepo.legacyAccessReadCount != 0 {
 		t.Fatalf("logic gate view used legacy access reads %d times", guardedRepo.legacyAccessReadCount)
-	}
-	if guardedRepo.kanbanReadCount != 0 {
-		t.Fatalf("logic gate view used Kanban read methods %d times", guardedRepo.kanbanReadCount)
 	}
 }
 
@@ -391,35 +385,19 @@ func getLogicGateViewV2ForTestWithQuery(t *testing.T, handler http.Handler, comp
 	return view, body
 }
 
-type phase5ForbiddenLegacyAndKanbanReadsRepo struct {
+type phase5ForbiddenLegacyReadsRepo struct {
 	store.Repository
 	legacyAccessReadCount int
-	kanbanReadCount       int
 }
 
-func (r *phase5ForbiddenLegacyAndKanbanReadsRepo) ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error) {
+func (r *phase5ForbiddenLegacyReadsRepo) ListAccessibleEntityIDs(companyID, entityType, userID, accessLevel string, entityIDs []string) (map[string]bool, error) {
 	r.legacyAccessReadCount++
 	return nil, store.ErrInvalid
 }
 
-func (r *phase5ForbiddenLegacyAndKanbanReadsRepo) UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error) {
+func (r *phase5ForbiddenLegacyReadsRepo) UserCanAccessEntity(companyID, entityType, entityID, userID, accessLevel string) (bool, error) {
 	r.legacyAccessReadCount++
 	return false, store.ErrInvalid
-}
-
-func (r *phase5ForbiddenLegacyAndKanbanReadsRepo) ListKanbanBoards(companyID string, query store.KanbanBoardQuery) ([]domain.KanbanBoard, error) {
-	r.kanbanReadCount++
-	return nil, store.ErrInvalid
-}
-
-func (r *phase5ForbiddenLegacyAndKanbanReadsRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
-	r.kanbanReadCount++
-	return nil, store.ErrInvalid
-}
-
-func (r *phase5ForbiddenLegacyAndKanbanReadsRepo) ListKanbanCards(companyID, boardID string, query store.KanbanCardQuery) ([]domain.KanbanCard, error) {
-	r.kanbanReadCount++
-	return nil, store.ErrInvalid
 }
 
 type nodeViewReadPathCountingRepo struct {

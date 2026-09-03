@@ -8,7 +8,6 @@ import type {
   CompanyExplorerFolder,
   CompanyExplorerFolderItem,
 } from "../folders/companyExplorerFolders.js";
-import type { KanbanBoard, KanbanBoardsUpdatedDetail } from "../kanban/shared.js";
 import type { ProjectRecord } from "../project-management/projectManagementApi.js";
 import type { CompanyExplorerSearchResult, CompanyExplorerV2Row } from "./companyExplorerLazyApi.js";
 import type { CommittedEntityTitleUpdate } from "../realtime/committedEntityTitleUpdates.js";
@@ -26,7 +25,6 @@ type CompanyExplorerStoreState = {
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
   projects: ProjectRecord[];
-  kanbanBoards: KanbanBoard[];
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   rows: CompanyExplorerV2Row[];
@@ -37,8 +35,6 @@ type CompanyExplorerStoreAction =
   | { type: "resetSnapshot" }
   | { type: "applySnapshot"; snapshot: CompanyExplorerSnapshotPayload }
   | { type: "mergeSnapshot"; snapshot: CompanyExplorerSnapshotPayload }
-  | { type: "setKanbanBoards"; boards: KanbanBoard[] }
-  | { type: "applyKanbanBoardsUpdated"; companyID: string; detail?: KanbanBoardsUpdatedDetail }
   | { type: "upsertFolder"; folder: CompanyExplorerFolder }
   | { type: "replaceFolder"; folder: CompanyExplorerFolder }
   | { type: "upsertFolderItems"; folderItems: CompanyExplorerFolderItem[] }
@@ -56,7 +52,6 @@ type CompanyExplorerStoreAction =
       deletedNodeIDs: ReadonlySet<string>;
       deletedLogicGateIDs: ReadonlySet<string>;
       deletedProjectIDs: ReadonlySet<string>;
-      deletedKanbanBoardIDs: ReadonlySet<string>;
     }
   | { type: "restore"; state: CompanyExplorerStoreState };
 
@@ -66,7 +61,6 @@ export function createCompanyExplorerStoreState(): CompanyExplorerStoreState {
     nodes: [],
     logicGates: [],
     projects: [],
-    kanbanBoards: [],
     folders: [],
     folderItems: [],
     rows: [],
@@ -112,10 +106,6 @@ export function reduceCompanyExplorerStore(
         rows: upsertCompanyExplorerV2Rows(state.rows, action.snapshot.rows ?? []),
         folderSnapshotLoaded: true,
       };
-    case "setKanbanBoards":
-      return { ...state, kanbanBoards: sortKanbanBoards(action.boards) };
-    case "applyKanbanBoardsUpdated":
-      return applyKanbanBoardsUpdated(state, action.companyID, action.detail);
     case "upsertFolder":
       return { ...state, folders: upsertByID(state.folders, action.folder, (folder) => folder.folder_id) };
     case "replaceFolder":
@@ -239,11 +229,6 @@ export function reconcileCompanyExplorerSearchResultTitles(
   return changed ? next : results;
 }
 
-export function shouldRefreshKanbanBoardsAfterUpdate(detail: KanbanBoardsUpdatedDetail | undefined, companyID: string): boolean {
-  if (detail?.companyID && detail.companyID !== companyID) return false;
-  return !detail?.deletedBoardID && !detail?.board;
-}
-
 
 export function companyExplorerBranchHasMaterializedRows(
   rows: CompanyExplorerV2Row[],
@@ -266,28 +251,6 @@ export function shouldLoadCompanyExplorerBranchChildren(input: {
   return !companyExplorerBranchHasMaterializedRows(input.rows, input.parentEntityID);
 }
 
-function applyKanbanBoardsUpdated(
-  state: CompanyExplorerStoreState,
-  companyID: string,
-  detail: KanbanBoardsUpdatedDetail | undefined,
-): CompanyExplorerStoreState {
-  if (detail?.companyID && detail.companyID !== companyID) return state;
-  if (detail?.deletedBoardID) {
-    return {
-      ...state,
-      kanbanBoards: state.kanbanBoards.filter((board) => board.board_id !== detail.deletedBoardID),
-      folderItems: state.folderItems.filter((item) => item.item_type !== "kanban" || item.item_id !== detail.deletedBoardID),
-    };
-  }
-  if (detail?.board) {
-    return {
-      ...state,
-      kanbanBoards: upsertKanbanBoard(state.kanbanBoards, detail.board),
-    };
-  }
-  return state;
-}
-
 function removeDeletedEntities(
   state: CompanyExplorerStoreState,
   action: Extract<CompanyExplorerStoreAction, { type: "removeDeletedEntities" }>,
@@ -298,7 +261,6 @@ function removeDeletedEntities(
     nodes: state.nodes.filter((node) => !action.deletedNodeIDs.has(node.node_id)),
     logicGates: state.logicGates.filter((logicGate) => !action.deletedLogicGateIDs.has(logicGate.logic_gate_id)),
     projects: state.projects.filter((project) => !action.deletedProjectIDs.has(project.project_id)),
-    kanbanBoards: state.kanbanBoards.filter((board) => !action.deletedKanbanBoardIDs.has(board.board_id)),
     rows: state.rows.filter((row) =>
       !action.deletedFolderIDs.has(row.entity_id)
       && !action.deletedFolderIDs.has(row.parent_entity_id ?? "")
@@ -311,7 +273,6 @@ function removeDeletedEntities(
       && (item.item_type !== "node" || !action.deletedNodeIDs.has(item.item_id))
       && (item.item_type !== "logic_gate" || !action.deletedLogicGateIDs.has(item.item_id))
       && (item.item_type !== "project" || !action.deletedProjectIDs.has(item.item_id))
-      && (item.item_type !== "kanban" || !action.deletedKanbanBoardIDs.has(item.item_id))
     ),
   };
 }
@@ -386,19 +347,4 @@ function upsertCompanyExplorerV2Rows(
     next = updated;
   }
   return next;
-}
-
-function upsertKanbanBoard(previous: KanbanBoard[], board: KanbanBoard): KanbanBoard[] {
-  return sortKanbanBoards([
-    ...previous.filter((item) => item.board_id !== board.board_id),
-    board,
-  ]);
-}
-
-function sortKanbanBoards(boards: KanbanBoard[]): KanbanBoard[] {
-  return [...boards].sort((a, b) => (
-    a.position - b.position ||
-    a.created_timestamp.localeCompare(b.created_timestamp) ||
-    a.board_id.localeCompare(b.board_id)
-  ));
 }

@@ -5,8 +5,24 @@ import (
 	"errors"
 	"miraeopus/backend/internal/store"
 	"net/http"
+	"strconv"
 	"strings"
 )
+
+func parsePositiveLimit(raw string, fallback int, maximum int) (int, bool) {
+	value := fallback
+	if strings.TrimSpace(raw) != "" {
+		parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || parsed <= 0 {
+			return 0, false
+		}
+		value = parsed
+	}
+	if value > maximum {
+		value = maximum
+	}
+	return value, true
+}
 
 func parseOptionalBoolField(fields map[string]json.RawMessage, key string) (bool, bool, bool) {
 	raw, ok := fields[key]
@@ -83,209 +99,6 @@ func optionalStringPointer(value *string) *string {
 	return &trimmed
 }
 
-func (s *Server) handleWorkItemLogicGateAssignments(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	var fields map[string]json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	companyID, companyIDSet, ok := parseOptionalStringField(fields, "company_id")
-	if !ok || !companyIDSet || companyID == nil || strings.TrimSpace(*companyID) == "" {
-		writeError(w, http.StatusBadRequest, "company_id_required")
-		return
-	}
-	logicGateID, logicGateIDSet, ok := parseOptionalStringField(fields, "logic_gate_id")
-	if !ok || !logicGateIDSet || logicGateID == nil || strings.TrimSpace(*logicGateID) == "" {
-		writeError(w, http.StatusBadRequest, "logic_gate_id_required")
-		return
-	}
-	nodeID, nodeIDSet, ok := parseOptionalStringField(fields, "node_id")
-	if !ok || !nodeIDSet || nodeID == nil || strings.TrimSpace(*nodeID) == "" {
-		writeError(w, http.StatusBadRequest, "node_id_required")
-		return
-	}
-
-	input := store.LogicGateNodeAssignmentInput{
-		CompanyID:   strings.TrimSpace(*companyID),
-		LogicGateID: strings.TrimSpace(*logicGateID),
-		NodeID:      strings.TrimSpace(*nodeID),
-	}
-	if status, set, ok := parseOptionalStringField(fields, "status"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_status")
-		return
-	} else if set && status != nil {
-		input.Status = *status
-	}
-	if columnID, set, ok := parseOptionalStringField(fields, "column_id"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_column_id")
-		return
-	} else if set && columnID != nil {
-		input.ColumnID = *columnID
-	}
-	if nodeTitle, set, ok := parseOptionalStringField(fields, "node_title"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_node_title")
-		return
-	} else if set && nodeTitle != nil {
-		input.NodeTitle = *nodeTitle
-	}
-	if description, set, ok := parseOptionalStringField(fields, "description_snapshot"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_description_snapshot")
-		return
-	} else if set && description != nil {
-		input.DescriptionSnapshot = *description
-	}
-	if _, present := fields["assignee_policy"]; present {
-		writeError(w, http.StatusBadRequest, "unsupported_assignee_policy")
-		return
-	}
-	if priority, set, ok := parseOptionalPriorityField(fields); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_priority")
-		return
-	} else if set {
-		input.Priority = priority
-		input.PrioritySet = true
-	}
-	if position, set, ok := parseOptionalNonNegativeIntField(fields, "position"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_position")
-		return
-	} else if set {
-		input.Position = position
-	}
-	if isIssue, set, ok := parseOptionalBoolField(fields, "is_issue"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_is_issue")
-		return
-	} else if set {
-		input.IsIssue = isIssue
-		input.IsIssueSet = true
-	}
-	if !s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, s.entityPermissionActorUserID(r, input.CompanyID), input.LogicGateID, store.EntityPermissionEdit) {
-		return
-	}
-
-	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
-	result, err := s.kanban.AssignNodeToLogicGateStatus(input)
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment")
-		return
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "logic_gate_column_or_node_not_found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_assign_logic_gate_node")
-		return
-	}
-	s.publishCommittedWorkspaceEvents(result.Events)
-	s.projectCommittedNotificationEvents(result.Events)
-	writeJSON(w, http.StatusOK, result)
-}
-
-func (s *Server) handleWorkItemLogicGateAssignmentMove(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
-		return
-	}
-	var fields map[string]json.RawMessage
-	if err := json.NewDecoder(r.Body).Decode(&fields); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_json")
-		return
-	}
-	companyID, present, ok := parseRequiredStringJSONField(fields, "company_id")
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid_company_id")
-		return
-	}
-	if !present {
-		writeError(w, http.StatusBadRequest, "company_id_required")
-		return
-	}
-	logicGateID, present, ok := parseRequiredStringJSONField(fields, "logic_gate_id")
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid_logic_gate_id")
-		return
-	}
-	if !present {
-		writeError(w, http.StatusBadRequest, "logic_gate_id_required")
-		return
-	}
-	nodeID, present, ok := parseRequiredStringJSONField(fields, "node_id")
-	if !ok {
-		writeError(w, http.StatusBadRequest, "invalid_node_id")
-		return
-	}
-	if !present {
-		writeError(w, http.StatusBadRequest, "node_id_required")
-		return
-	}
-
-	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID}
-	if fromLogicGateID, set, ok := parseOptionalStringField(fields, "from_logic_gate_id"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_from_logic_gate_id")
-		return
-	} else if set && fromLogicGateID != nil {
-		input.FromLogicGateID = *fromLogicGateID
-	}
-	if status, set, ok := parseOptionalStringField(fields, "status"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_status")
-		return
-	} else if set && status != nil {
-		input.Status = *status
-	}
-	if columnID, set, ok := parseOptionalStringField(fields, "column_id"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_column_id")
-		return
-	} else if set && columnID != nil {
-		input.ColumnID = *columnID
-	}
-	if _, present := fields["assignee_policy"]; present {
-		writeError(w, http.StatusBadRequest, "unsupported_assignee_policy")
-		return
-	}
-	if priority, set, ok := parseOptionalPriorityField(fields); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_priority")
-		return
-	} else if set {
-		input.Priority = priority
-		input.PrioritySet = true
-	}
-	if position, set, ok := parseOptionalNonNegativeIntField(fields, "position"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_position")
-		return
-	} else if set {
-		input.Position = position
-	}
-	userID := s.entityPermissionActorUserID(r, input.CompanyID)
-	if !s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, userID, input.LogicGateID, store.EntityPermissionEdit) {
-		return
-	}
-	if !s.requireLogicGateWorkExistingSourceEditAccess(w, r, input.CompanyID, input.LogicGateID, input.NodeID) {
-		return
-	}
-
-	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
-	result, err := s.kanban.MoveLogicGateNodeAssignment(input)
-	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_move")
-		return
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "logic_gate_assignment_not_found")
-		return
-	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_move_logic_gate_assignment")
-		return
-	}
-	s.publishCommittedWorkspaceEvents(result.Events)
-	s.projectCommittedNotificationEvents(result.Events)
-	writeJSON(w, http.StatusOK, result)
-}
-
 func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
@@ -342,7 +155,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentRemove(w http.ResponseWriter, 
 	}
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
-	result, err := s.kanban.RemoveLogicGateNodeAssignment(input)
+	result, err := s.repo.RemoveLogicGateNodeAssignment(input)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_remove")
 		return
@@ -415,7 +228,7 @@ func (s *Server) handleWorkItemLogicGateAssignmentIssue(w http.ResponseWriter, r
 	}
 
 	input.ActorUserID, input.IdempotencyKey = workItemAssignmentRequestEventMetadata(r)
-	result, err := s.kanban.SetLogicGateNodeAssignmentIssue(input)
+	result, err := s.repo.SetLogicGateNodeAssignmentIssue(input)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_assignment_issue")
 		return

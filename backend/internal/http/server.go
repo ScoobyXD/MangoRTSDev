@@ -4,7 +4,6 @@ import (
 	"context"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/emailqueue"
-	"miraeopus/backend/internal/modules/kanban"
 	"miraeopus/backend/internal/notifications"
 	"miraeopus/backend/internal/realtime"
 	"miraeopus/backend/internal/store"
@@ -76,7 +75,6 @@ type Server struct {
 	realtimeSpineRecoveryRetryTimer        *time.Timer
 	realtimeSpineRecoveryRetryGeneration   uint64
 	notifications                          *notifications.Service
-	kanban                                 *kanban.Service
 	notificationCleanupCancel              context.CancelFunc
 	notificationCleanupInterval            time.Duration
 	notificationRetentionDuration          time.Duration
@@ -206,7 +204,6 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		realtimeSpineDedupe:                newRealtimeEventDeduper(4096),
 		realtimeSpineInitialBackplaneReady: make(chan struct{}),
 		notifications:                      notifications.NewService(repo),
-		kanban:                             kanban.NewService(repo),
 		notificationCleanupInterval:        notificationCleanupInterval,
 		notificationRetentionDuration:      notificationRetentionDuration,
 		notificationCleanupLimit:           notificationCleanupLimit,
@@ -373,7 +370,6 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/recycle-bin/restore", s.handleRecycleBinRestore)
 	mux.HandleFunc("/v1/recycle-bin/delete", s.handleRecycleBinPermanentDelete)
 	mux.HandleFunc("/v1/workspace/entity-batches", s.handleWorkspaceEntityBatches)
-	mux.HandleFunc("/v1/logic-gate-arena", s.handleLogicGateArena)
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
 	mux.HandleFunc("/v1/process-map/scene", s.handleProcessMapScene)
@@ -399,19 +395,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/work-items/my-nodes", s.handleWorkItemMyNodes)
 	mux.HandleFunc("/v1/work-items/my-logic-gates", s.handleWorkItemMyLogicGates)
 	mux.HandleFunc("/v1/work-items/gvic-matrix-projection", s.handleWorkItemRACIMatrixProjection)
-	mux.HandleFunc("/v1/work-items/logic-gate-assignments/move", s.handleWorkItemLogicGateAssignmentMove)
 	mux.HandleFunc("/v1/work-items/logic-gate-assignments/remove", s.handleWorkItemLogicGateAssignmentRemove)
 	mux.HandleFunc("/v1/work-items/logic-gate-assignments/issue", s.handleWorkItemLogicGateAssignmentIssue)
-	mux.HandleFunc("/v1/work-items/logic-gate-assignments", s.handleWorkItemLogicGateAssignments)
 	mux.HandleFunc("/v1/project-management/timeline", s.handleProjectManagementTimelineProjection)
 	mux.HandleFunc("/v1/project-management/timeline-items", s.handleProjectManagementTimelineItems)
 	mux.HandleFunc("/v1/project-management/timeline-items/", s.handleProjectManagementTimelineItemByID)
-	mux.HandleFunc("/v1/kanban/boards", s.handleKanbanBoards)
-	mux.HandleFunc("/v1/kanban/boards/", s.handleKanbanBoardByID)
-	mux.HandleFunc("/v1/kanban/columns", s.handleKanbanColumns)
-	mux.HandleFunc("/v1/kanban/columns/", s.handleKanbanColumnByID)
-	mux.HandleFunc("/v1/kanban/cards", s.handleKanbanCards)
-	mux.HandleFunc("/v1/kanban/cards/", s.handleKanbanCardByID)
 	return s.withHTTPMetrics(s.withRequestLimits(s.withAuth(mux)))
 }
 

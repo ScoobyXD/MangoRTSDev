@@ -254,12 +254,12 @@ func normalizeProjectScopedNodeLogicGateAssignment(input *ProjectScopedNodeLogic
 	item := ProjectScopedNodeLogicGateAssignmentInput{
 		LogicGateID: cleanUUIDText(input.LogicGateID),
 		Status:      strings.TrimSpace(input.Status),
-		ColumnID:    strings.TrimSpace(input.ColumnID),
+		ProcessStepID:normalizeOptionalStringPointer(input.ProcessStepID),
 		Position:    input.Position,
 		Priority:    cloneIntPointer(input.Priority),
 		IsIssue:     cloneBoolPointer(input.IsIssue),
 	}
-	if item.LogicGateID == "" && item.Status == "" && item.ColumnID == "" && item.Priority == nil && item.IsIssue == nil {
+	if item.LogicGateID == "" && item.Status == "" && item.ProcessStepID == nil && item.Priority == nil && item.IsIssue == nil {
 		return nil, nil
 	}
 	if item.LogicGateID == "" {

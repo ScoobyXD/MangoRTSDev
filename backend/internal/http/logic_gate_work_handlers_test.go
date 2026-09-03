@@ -95,23 +95,16 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		t.Fatalf("viewer lacks contextual node visibility for assigned node")
 	}
 
-	guardedRepo := &logicGateWorkForbiddenKanbanReadsRepo{Repository: repo}
-	server := NewServer(guardedRepo)
+	server := NewServer(repo)
 	defer server.Close()
 	handler := server.Routes()
 
 	work := getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, viewer, http.StatusOK)
-	if len(work.Cards) != 1 || work.Cards[0].NodeID != visibleNode.NodeID {
-		t.Fatalf("viewer work cards = %+v, want assigned node without node grant", work.Cards)
+	if len(work.Nodes) != 1 || work.Nodes[0].NodeID != visibleNode.NodeID {
+		t.Fatalf("viewer work cards = %+v, want assigned node without node grant", work.Nodes)
 	}
-	if len(work.Columns) != 6 ||
-		work.Columns[0].ColumnID != store.LogicGateWorkStatusRequested ||
-		work.Columns[1].ColumnID != store.LogicGateWorkStatusBacklog ||
-		work.Columns[2].ColumnID != store.LogicGateWorkStatusPending ||
-		work.Columns[3].ColumnID != store.LogicGateWorkStatusInProgress ||
-		work.Columns[4].ColumnID != store.LogicGateWorkStatusReview ||
-		work.Columns[5].ColumnID != store.LogicGateWorkStatusDone {
-		t.Fatalf("columns = %+v, want canonical status columns", work.Columns)
+	if len(work.Steps) != 0 || len(work.Relationships) != 0 {
+		t.Fatalf("new Process has unexpected steps or relationships: %+v", work)
 	}
 	if !work.Permissions.CanEdit {
 		t.Fatalf("member permissions = %+v, want the single positive edit outcome", work.Permissions)
@@ -120,9 +113,6 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, admin, http.StatusOK)
 	getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, blocked, http.StatusNotFound)
 	getLogicGateWorkV2ForTest(t, handler, companyID, hiddenGate.LogicGateID, viewer, http.StatusNotFound)
-	if guardedRepo.kanbanReadCount != 0 {
-		t.Fatalf("v2 work read used Kanban read methods %d times", guardedRepo.kanbanReadCount)
-	}
 
 	postPayload := map[string]any{
 		"company_id": companyID,
@@ -138,11 +128,8 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		t.Fatalf("editor POST status = %d body=%s, want 201", postRecord.Code, postRecord.Body.String())
 	}
 	postResult := decodeLogicGateWorkMutationPayloadForTest(t, postRecord)
-	if postResult.Assignment.NodeID != mutableNode.NodeID || postResult.Assignment.StatusKey != store.LogicGateWorkStatusPending {
+	if postResult.Assignment.NodeID != mutableNode.NodeID || postResult.Node.Status == nil || *postResult.Node.Status != "Pending" {
 		t.Fatalf("POST assignment = %+v, want pending mutable node", postResult.Assignment)
-	}
-	if postResult.Card.ColumnID != store.LogicGateWorkStatusPending {
-		t.Fatalf("POST card column = %q, want %q", postResult.Card.ColumnID, store.LogicGateWorkStatusPending)
 	}
 
 	clientGeneratedNodeID := "019e476d-ee56-7aaa-aaaa-aaaaaaaaaaaa"
@@ -165,22 +152,19 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 	if createNodeResult.Node.NodeID != clientGeneratedNodeID || createNodeResult.Node.Title != "Created from Kanban" {
 		t.Fatalf("created node = %+v, want client-generated node", createNodeResult.Node)
 	}
-	if createNodeResult.Card.NodeID != clientGeneratedNodeID || createNodeResult.Assignment.StatusKey != store.LogicGateWorkStatusDone {
-		t.Fatalf("created assignment/card = %+v / %+v, want done client-generated node", createNodeResult.Assignment, createNodeResult.Card)
-	}
-	if createNodeResult.Card.ColumnID != store.LogicGateWorkStatusDone {
-		t.Fatalf("created card column = %q, want %q", createNodeResult.Card.ColumnID, store.LogicGateWorkStatusDone)
+	if createNodeResult.Assignment.NodeID != clientGeneratedNodeID || createNodeResult.Node.Status == nil || *createNodeResult.Node.Status != "Done" {
+		t.Fatalf("created result = %+v, want Done client-generated Node", createNodeResult)
 	}
 	afterCreate := getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
 	createdVisible := false
-	for _, card := range afterCreate.Cards {
+	for _, card := range afterCreate.Nodes {
 		if card.NodeID == clientGeneratedNodeID {
 			createdVisible = true
 			break
 		}
 	}
 	if !createdVisible {
-		t.Fatalf("created client-generated node missing from v2 work response: %+v", afterCreate.Cards)
+		t.Fatalf("created client-generated node missing from v2 work response: %+v", afterCreate.Nodes)
 	}
 
 	putPayload := map[string]any{
@@ -196,11 +180,8 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		t.Fatalf("editor PUT status = %d body=%s, want 200", putRecord.Code, putRecord.Body.String())
 	}
 	putResult := decodeLogicGateWorkMutationPayloadForTest(t, putRecord)
-	if putResult.Assignment.StatusKey != store.LogicGateWorkStatusDone || !putResult.Assignment.IsIssue {
+	if putResult.Node.Status == nil || *putResult.Node.Status != "Done" || !putResult.Assignment.IsIssue {
 		t.Fatalf("PUT assignment = %+v, want done issue assignment", putResult.Assignment)
-	}
-	if putResult.Card.ColumnID != store.LogicGateWorkStatusDone || !putResult.Card.IsIssue {
-		t.Fatalf("PUT card = %+v, want done issue card", putResult.Card)
 	}
 
 	deleteAsEditor := httptest.NewRequest(http.MethodDelete, "/v2/logic-gates/"+logicGate.LogicGateID+"/nodes/"+mutableNode.NodeID+"?company_id="+companyID, nil)
@@ -211,12 +192,12 @@ func TestLogicGateWorkV2AccessAndMutations(t *testing.T) {
 		t.Fatalf("editor DELETE status = %d body=%s, want 200", deleteRecord.Code, deleteRecord.Body.String())
 	}
 	afterDelete := getLogicGateWorkV2ForTest(t, handler, companyID, logicGate.LogicGateID, editor, http.StatusOK)
-	for _, card := range afterDelete.Cards {
+	for _, card := range afterDelete.Nodes {
 		if card.NodeID == mutableNode.NodeID {
-			t.Fatalf("deleted node still present in v2 work response: %+v", afterDelete.Cards)
+			t.Fatalf("deleted node still present in v2 work response: %+v", afterDelete.Nodes)
 		}
 		if card.NodeID == hiddenNode.NodeID {
-			t.Fatalf("hidden node leaked in visible gate response: %+v", afterDelete.Cards)
+			t.Fatalf("hidden node leaked in visible gate response: %+v", afterDelete.Nodes)
 		}
 	}
 }
@@ -353,9 +334,9 @@ func TestLogicGateWorkV2ResponseSerializationIsMinimal(t *testing.T) {
 		t.Fatalf("decode raw work JSON: %v", err)
 	}
 	if len(top) != 5 {
-		t.Fatalf("raw /work keys=%v body=%s, want five Kanban-specific keys", top, rec.Body.String())
+		t.Fatalf("raw /work keys=%v body=%s, want five Process work keys", top, rec.Body.String())
 	}
-	for _, forbidden := range []string{"company_id", "logic_gate_id", "statuses", "assignments", "nodes", "cards_limit"} {
+	for _, forbidden := range []string{"company_id", "logic_gate_id", "statuses", "assignments", "cards", "board", "columns", "cards_limit"} {
 		if _, ok := top[forbidden]; ok {
 			t.Fatalf("raw /work retained %q: %s", forbidden, rec.Body.String())
 		}
@@ -370,12 +351,12 @@ func TestLogicGateWorkV2ResponseSerializationIsMinimal(t *testing.T) {
 		}
 	}
 	var cards []map[string]json.RawMessage
-	if err := json.Unmarshal(top["cards"], &cards); err != nil || len(cards) != 1 {
-		t.Fatalf("decode raw cards=%s err=%v, want one", top["cards"], err)
+	if err := json.Unmarshal(top["nodes"], &cards); err != nil || len(cards) != 1 {
+		t.Fatalf("decode raw cards=%s err=%v, want one", top["nodes"], err)
 	}
-	for _, forbidden := range []string{"company_id", "board_id", "logic_gate_id", "description_snapshot", "updated_timestamp"} {
+	for _, forbidden := range []string{"company_id", "board_id", "card_id", "column_id", "logic_gate_id", "description_snapshot", "updated_timestamp"} {
 		if _, ok := cards[0][forbidden]; ok {
-			t.Fatalf("raw /work card retained %q: %s", forbidden, top["cards"])
+			t.Fatalf("raw /work card retained %q: %s", forbidden, top["nodes"])
 		}
 	}
 }
@@ -661,9 +642,9 @@ type countingLogicGateWorkRepo struct {
 	domainSequenceCalls int
 }
 
-func (r *countingLogicGateWorkRepo) GetLogicGateWork(companyID, logicGateID string) (domain.LogicGateWorkView, error) {
+func (r *countingLogicGateWorkRepo) GetLogicGateWork(companyID, logicGateID, userID string) (domain.LogicGateWorkView, error) {
 	r.getWorkCalls++
-	return r.Repository.GetLogicGateWork(companyID, logicGateID)
+	return r.Repository.GetLogicGateWork(companyID, logicGateID, userID)
 }
 
 func (r *countingLogicGateWorkRepo) CurrentLogicGateWorkVersion(companyID, logicGateID string) (int64, error) {
@@ -679,7 +660,6 @@ func (r *countingLogicGateWorkRepo) CurrentDomainEventSequence(query store.Domai
 type logicGateWorkMutationPayloadForTest struct {
 	Assignment               domain.NodeLogicGateAssignment  `json:"assignment"`
 	Node                     domain.Node                     `json:"node"`
-	Card                     domain.KanbanCard               `json:"card"`
 	RACIMatrixProjectionRows []store.RACIMatrixProjectionRow `json:"gvic_projection_rows"`
 }
 
@@ -690,24 +670,4 @@ func decodeLogicGateWorkMutationPayloadForTest(t *testing.T, rr *httptest.Respon
 		t.Fatalf("decode mutation response: %v body=%s", err, rr.Body.String())
 	}
 	return payload
-}
-
-type logicGateWorkForbiddenKanbanReadsRepo struct {
-	store.Repository
-	kanbanReadCount int
-}
-
-func (r *logicGateWorkForbiddenKanbanReadsRepo) ListKanbanBoards(companyID string, query store.KanbanBoardQuery) ([]domain.KanbanBoard, error) {
-	r.kanbanReadCount++
-	return nil, store.ErrInvalid
-}
-
-func (r *logicGateWorkForbiddenKanbanReadsRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
-	r.kanbanReadCount++
-	return nil, store.ErrInvalid
-}
-
-func (r *logicGateWorkForbiddenKanbanReadsRepo) ListKanbanCards(companyID, boardID string, query store.KanbanCardQuery) ([]domain.KanbanCard, error) {
-	r.kanbanReadCount++
-	return nil, store.ErrInvalid
 }

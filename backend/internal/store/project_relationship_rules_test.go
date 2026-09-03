@@ -193,9 +193,9 @@ func TestMemoryLogicGateWorkCardMarksProjectNode(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	before, err := repo.GetLogicGateWork(companyID, logicGate.LogicGateID)
-	if err != nil || len(before.Cards) != 1 || before.Cards[0].HasProject {
-		t.Fatalf("Logic Gate work before project = %+v err=%v, want one unmarked card", before, err)
+	before, err := repo.GetLogicGateWork(companyID, logicGate.LogicGateID, "")
+	if err != nil || len(before.Nodes) != 1 || before.Nodes[0].HasProject {
+		t.Fatalf("Logic Gate work before project = %+v err=%v, want one unmarked Node", before, err)
 	}
 	if _, err := repo.UpsertProjectRelationship(ProjectRelationshipInput{
 		CompanyID: companyID, ProjectID: projectResult.Project.ProjectID,
@@ -203,8 +203,8 @@ func TestMemoryLogicGateWorkCardMarksProjectNode(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertProjectRelationship: %v", err)
 	}
-	after, err := repo.GetLogicGateWork(companyID, logicGate.LogicGateID)
-	if err != nil || len(after.Cards) != 1 || !after.Cards[0].HasProject {
-		t.Fatalf("Logic Gate work after project = %+v err=%v, want one project-marked card", after, err)
+	after, err := repo.GetLogicGateWork(companyID, logicGate.LogicGateID, "")
+	if err != nil || len(after.Nodes) != 1 || !after.Nodes[0].HasProject {
+		t.Fatalf("Logic Gate work after project = %+v err=%v, want one project-marked Node", after, err)
 	}
 }

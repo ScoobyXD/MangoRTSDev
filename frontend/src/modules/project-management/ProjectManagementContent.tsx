@@ -377,7 +377,6 @@ function buildProjectExplorerRows(input: {
     nodes: input.nodes,
     logicGates: input.logicGates.map(toLogicGateViewRecord),
     projects: [],
-    kanbanBoards: [],
     folders: [],
     folderItems: [],
     rootRowOrder: {},

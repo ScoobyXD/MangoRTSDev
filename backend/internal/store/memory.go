@@ -30,6 +30,7 @@ type MemoryRepo struct {
 	logicGateText                    map[string]map[string]domain.LogicGateProjection
 	processMapPlacements             map[string]domain.ProcessMapPlacement
 	resourceOperationalRelationships map[string]domain.ResourceOperationalRelationship
+ processSteps map[string]domain.ProcessStep
 	processMapTraces                 map[string]domain.ProcessMapTrace
 	logicGateRACI                    map[string][]domain.LogicGateRACIAssignment
 	gvicAssignments                  map[string]domain.ResourceRACIAssignment
@@ -63,9 +64,6 @@ type MemoryRepo struct {
 	companyExplorerV2Subscriptions   map[string]memoryCompanyExplorerV2Subscription
 	folderShares                     map[string]domain.CompanyExplorerFolderShare
 	defaultFolderSeed                map[string]bool
-	kanbanBoards                     map[string]domain.KanbanBoard
-	kanbanColumns                    map[string][]domain.KanbanColumn
-	kanbanCards                      map[string][]domain.KanbanCard
 	nodeLogicGateAssignments         map[string]domain.NodeLogicGateAssignment
 	RACIMatrixProjectionRows         map[string]memoryRACIMatrixProjectionRow
 	projectTimelineItems             map[string]memoryProjectManagementTimelineItem
@@ -149,6 +147,7 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateText:                    map[string]map[string]domain.LogicGateProjection{},
 		processMapPlacements:             map[string]domain.ProcessMapPlacement{},
 		resourceOperationalRelationships: map[string]domain.ResourceOperationalRelationship{},
+ processSteps: map[string]domain.ProcessStep{},
 		processMapTraces:                 map[string]domain.ProcessMapTrace{},
 		logicGateRACI:                    map[string][]domain.LogicGateRACIAssignment{},
 		gvicAssignments:                  map[string]domain.ResourceRACIAssignment{},
@@ -180,9 +179,6 @@ func NewMemoryRepo() *MemoryRepo {
 		companyExplorerV2Subscriptions:   map[string]memoryCompanyExplorerV2Subscription{},
 		folderShares:                     map[string]domain.CompanyExplorerFolderShare{},
 		defaultFolderSeed:                map[string]bool{},
-		kanbanBoards:                     map[string]domain.KanbanBoard{},
-		kanbanColumns:                    map[string][]domain.KanbanColumn{},
-		kanbanCards:                      map[string][]domain.KanbanCard{},
 		nodeLogicGateAssignments:         map[string]domain.NodeLogicGateAssignment{},
 		RACIMatrixProjectionRows:         map[string]memoryRACIMatrixProjectionRow{},
 		projectTimelineItems:             map[string]memoryProjectManagementTimelineItem{},
@@ -282,9 +278,6 @@ func triageItemKey(userID, messageID string) string {
 	return userID + ":" + messageID
 }
 
-func emailNodeLinkKey(companyID, boardID, cardID string) string {
-	return companyID + ":" + boardID + ":" + cardID
-}
 
 func emailNodeAttachmentLinkKey(companyID, userID, messageID, nodeID string) string {
 	return companyID + ":" + userID + ":" + messageID + ":" + nodeID

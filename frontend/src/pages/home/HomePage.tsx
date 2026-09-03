@@ -79,8 +79,7 @@ import type { LogicGateRACIRole, LogicGateRecord } from "../../modules/logic-gat
 import { invalidateNodeRecordStoreCaches } from "../../modules/nodes/nodeRecordStore";
 import { getLogicGateRecordSingleFlight } from "../../modules/logic-gates/logicGateRecordStore";
 import { removeNodeRelationshipGraphNode, upsertNodeRelationshipGraphNode } from "../../modules/nodes/nodeRelationshipGraph";
-import { invalidateKanbanBoardContentsCache } from "../../modules/kanban/KanbanBoardContentStore";
-import { invalidateKanbanBoardListCache, invalidateLogicGateArenaViewCache, type RACIMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
+import { invalidateLogicGateArenaViewCache, type RACIMatrixProjectionRow } from "../../modules/kanban/kanbanApi";
 
 import { listMyLogicGates, listRACIMatrixProjectionRows } from "../../modules/work-items/workItemReadApi";
 import { useNotificationSummary } from "../../modules/notifications/useNotificationSummary";
@@ -2497,8 +2496,6 @@ export function HomePage({
       const conversionSucceeded = Boolean(
         detail.logicGateID?.trim()
         || (detail.nodeIDs ?? []).some((id) => id.trim())
-        || (detail.boardIDs ?? []).some((id) => id.trim())
-        || (detail.cardIDs ?? []).some((id) => id.trim())
       );
       if (!conversionSucceeded) return;
       const unstarredMessageIDs = cleanIDList(detail.unstarredMessageIDs ?? []);
@@ -3887,7 +3884,6 @@ export function HomePage({
     nodes,
     logicGates: [],
     projects: [],
-    kanbanBoards: [],
     folders: [],
     folderItems: [],
     rootRowOrder: {},
@@ -4000,7 +3996,6 @@ export function HomePage({
     nodes: [],
     logicGates: logicGateCanvasRecords,
     projects: [],
-    kanbanBoards: [],
     folders: [],
     folderItems: [],
     rootRowOrder: {},
@@ -4450,9 +4445,7 @@ export function HomePage({
         accountEmail: sharedInboxID ? undefined : activeMailAccountEmail,
         messageIDs: ids,
         priority,
-        invalidateKanbanBoardList: invalidateKanbanBoardListCache,
-        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
-        invalidateLogicGateArenaView: invalidateLogicGateArenaViewCache,
+        invalidateProcessWork: invalidateLogicGateArenaViewCache,
         invalidateNodeRecord: invalidateNodeRecordStoreCaches,
         upsertNodeRelationshipGraphNode,
       });
@@ -4833,7 +4826,7 @@ export function HomePage({
           priority: assignment.priority,
           status: assignment.status,
           nodeByID: nextNodeByID,
-          invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+          invalidateProcessWork: invalidateLogicGateArenaViewCache,
         });
         applyRACIMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
         for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
@@ -4946,7 +4939,7 @@ export function HomePage({
         priority: input.priority,
         status: input.status,
         nodeByID,
-        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+        invalidateProcessWork: invalidateLogicGateArenaViewCache,
       });
       applyRACIMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
       for (const node of dropResult.nodes) {
@@ -4983,7 +4976,7 @@ export function HomePage({
         priority: input.priority,
         status: input.status,
         nodeByID,
-        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+        invalidateProcessWork: invalidateLogicGateArenaViewCache,
       });
       applyRACIMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
       for (const node of dropResult.nodes) mergeUpdatedNode(node, titleVersionAtStart);
@@ -5044,7 +5037,7 @@ export function HomePage({
           priority: input.priority,
           status: input.status,
           nodeByID,
-          invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+          invalidateProcessWork: invalidateLogicGateArenaViewCache,
         });
         applyRACIMatrixProjectionRows(dropResult.gvic_projection_rows, { titleVersionAtStart });
         movedNodeCount += dropResult.nodes.length;
@@ -5074,7 +5067,7 @@ export function HomePage({
         logicGateID: cleanLogicGateID,
         nodeIDs: ids,
         nodeByID,
-        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+        invalidateProcessWork: invalidateLogicGateArenaViewCache,
       });
       for (const node of updatedNodes) mergeUpdatedNode(node, titleVersionAtStart);
       invalidateLogicGateArenaViewCache(apiBase, companyID, cleanLogicGateID);
@@ -5218,7 +5211,7 @@ export function HomePage({
         nodeIDs: ids,
         patch,
         nodeByID,
-        invalidateKanbanBoardContents: invalidateKanbanBoardContentsCache,
+        invalidateProcessWork: invalidateLogicGateArenaViewCache,
       });
       for (const node of updatedNodes) {
         mergeUpdatedNode(node, titleVersionAtStart);

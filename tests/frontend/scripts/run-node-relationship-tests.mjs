@@ -81,9 +81,8 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/selectionCoordinator.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/shared.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanApi.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanBoardContentStore.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanCommands.test.js"),
-  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanRealtimeRefresh.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processWorkStore.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processWork.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/nodeEditorOverlayViewMode.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/overlayClamp.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
@@ -240,7 +239,6 @@ for (const testFile of testFiles) {
   contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/selectionSync"', '"../../../../frontend/src/modules/company-explorer/selectionSync.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/company-explorer/treePresentation"', '"../../../../frontend/src/modules/company-explorer/treePresentation.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/shared"', '"../../../../frontend/src/modules/kanban/shared.js"');
-  contents = contents.replaceAll('"../../../../frontend/src/modules/kanban/KanbanBoardContentStore"', '"../../../../frontend/src/modules/kanban/KanbanBoardContentStore.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/plainTextEditing"', '"../../../../frontend/src/modules/editor/plainTextEditing.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/unifiedRichEditorContract"', '"../../../../frontend/src/modules/editor/unifiedRichEditorContract.js"');
   contents = contents.replaceAll('"../../../../frontend/src/modules/editor/richTextEditing"', '"../../../../frontend/src/modules/editor/richTextEditing.js"');

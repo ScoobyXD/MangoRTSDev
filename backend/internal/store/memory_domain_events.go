@@ -62,7 +62,7 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 	if input.IdempotencyKey != "" {
 		for _, existing := range r.domainEvents {
 			if existing.CompanyID == input.CompanyID && existing.IdempotencyKey == input.IdempotencyKey {
-				if err := r.enqueueKanbanRealtimeForDomainEventLocked(existing); err != nil {
+				if err := r.enqueueProcessWorkRealtimeForDomainEventLocked(existing); err != nil {
 					restore()
 					return domain.DomainEvent{}, err
 				}
@@ -99,7 +99,7 @@ func (r *MemoryRepo) appendDomainEventLocked(input DomainEventInput) (domain.Dom
 	r.applyNodeCompletionTransitionUpdatesLocked([]domain.DomainEvent{item})
 	r.updateWorkspaceReadVersionsLocked(item)
 	r.updateLogicGateWorkReadVersionsLocked(item)
-	if err := r.enqueueKanbanRealtimeForDomainEventLocked(item); err != nil {
+	if err := r.enqueueProcessWorkRealtimeForDomainEventLocked(item); err != nil {
 		restore()
 		return domain.DomainEvent{}, err
 	}
@@ -134,10 +134,10 @@ func (r *MemoryRepo) appendDomainEventsLocked(inputs []DomainEventInput) ([]doma
 	}
 	// Individual appends must be atomic when called alone, but a multi-event
 	// product mutation is one delivery unit. Replace its provisional rows with
-	// one coalesced event per exact board scope before the logical commit.
+	// one coalesced event per exact Process scope before the logical commit.
 	r.realtimeOutbox = maps.Clone(beforeOutbox)
 	r.realtimeOutboxSequence = beforeOutboxSequence
-	if err := r.enqueueKanbanRealtimeForDomainEventsLocked(events); err != nil {
+	if err := r.enqueueProcessWorkRealtimeForDomainEventsLocked(events); err != nil {
 		restore()
 		return nil, err
 	}
@@ -260,7 +260,7 @@ func (r *MemoryRepo) updateLogicGateWorkReadVersionsLocked(event domain.DomainEv
 		}
 	}
 	addLogicGateID(workspaceEventPayloadString(event.Payload, "logic_gate_id"))
-	addLogicGateID(LogicGateIDFromKanbanBoardID(workspaceEventPayloadString(event.Payload, "board_id")))
+	addLogicGateID(workspaceEventPayloadString(event.Payload, "source_logic_gate_id"))
 
 	nodeID := workspaceEventPayloadString(event.Payload, "node_id")
 	if nodeID != "" {
@@ -272,7 +272,21 @@ func (r *MemoryRepo) updateLogicGateWorkReadVersionsLocked(event domain.DomainEv
 	}
 
 	eventType := strings.TrimSpace(event.Type)
-	bumpAll := stringInList(eventType, CompanyExplorerFolderWorkspaceEventTypes)
+	changedFolderID := ""
+	if stringInList(eventType, CompanyExplorerFolderWorkspaceEventTypes) {
+		changedFolderID = workspaceEventPayloadString(event.Payload, "folder_id")
+		if changedFolderID == "" && workspaceEventPayloadString(event.Payload, "resource_type") == EntityTypeCompanyExplorerFolder {
+			changedFolderID = workspaceEventPayloadString(event.Payload, "resource_id")
+		}
+		folderKind := workspaceEventPayloadString(event.Payload, "folder_kind")
+		if folder, ok := r.folders[key(event.CompanyID, changedFolderID)]; ok {
+			folderKind = folder.FolderKind
+		}
+		if folderKind == "communications" {
+			changedFolderID = ""
+		}
+	}
+	bumpAll := false
 	if stringInList(eventType, CompanyExplorerFolderItemWorkspaceEventTypes) {
 		targetType := workspaceEventPayloadString(event.Payload, "target_type")
 		if targetType == "" || targetType == EntityTypeLogicGate {
@@ -282,10 +296,20 @@ func (r *MemoryRepo) updateLogicGateWorkReadVersionsLocked(event domain.DomainEv
 	if (stringInList(eventType, LogicGateListWorkspaceEventTypes) || stringInList(eventType, NodeListWorkspaceEventTypes)) && len(logicGateIDs) == 0 {
 		bumpAll = true
 	}
-	if bumpAll {
+	if bumpAll || changedFolderID != "" {
 		for _, logicGate := range r.logicGates {
-			if logicGate.CompanyID == event.CompanyID {
+			if logicGate.CompanyID != event.CompanyID {
+				continue
+			}
+			if bumpAll {
 				addLogicGateID(logicGate.LogicGateID)
+				continue
+			}
+			for _, ancestor := range r.resourcePermissionAncestorsLocked(event.CompanyID, EntityTypeLogicGate, logicGate.LogicGateID) {
+				if ancestor.ResourceType == EntityTypeCompanyExplorerFolder && ancestor.ResourceID == changedFolderID {
+					addLogicGateID(logicGate.LogicGateID)
+					break
+				}
 			}
 		}
 	}

@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { EXPLORER_DRAG_MIME } from "../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 import { EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload } from "../../../frontend/src/modules/kanban/shared.js";
+import { PROCESS_NODE_DRAG } from "../../../frontend/src/modules/kanban/processWork.js";
 import { TRIAGE_MESSAGE_DRAG_MIME } from "../../../frontend/src/modules/triage/triageDragDrop.js";
 import {
   APP_SIDEBAR_PIN_DRAG_MIME,
   hasSidebarPinDrag,
+  hasMangoDragPayload,
   readSidebarPinnedResourceDropAction,
   sidebarPinAcceptsPinnedResourceDrag,
   sidebarPinAcceptsPinnedResourceDrop,
@@ -46,6 +48,30 @@ function pin(kind: SidebarPin["kind"], id: string): SidebarPin {
 }
 
 describe("sidebar pin drops", () => {
+  it("pins Process Nodes and drops exact Node IDs onto a pinned Process", () => {
+    const transfer = dataTransfer();
+    transfer.setData(PROCESS_NODE_DRAG, JSON.stringify({ companyID: "company-1", logicGateID: "process-source", nodeIDs: ["node-1", "node-1", "node-2"] }));
+    assert.equal(hasMangoDragPayload(transfer), true);
+    assert.deepEqual(sidebarPinsFromDrop(transfer).map(({ id, kind }) => ({ id, kind })), [
+      { id: "node-1", kind: "node" }, { id: "node-2", kind: "node" },
+    ]);
+    const target = pin("logic_gate", "process-target");
+    assert.equal(sidebarPinAcceptsPinnedResourceDrag(target, transfer), true);
+    assert.deepEqual(readSidebarPinnedResourceDropAction(target, transfer), {
+      kind: "nodes_to_logic_gate", pin: target, logicGateID: "process-target", nodeIDs: ["node-1", "node-2"],
+    });
+    assert.equal(readSidebarPinnedResourceDropAction(pin("node", "node-target"), transfer), null);
+  });
+
+  it("ignores malformed Process Node drag payloads", () => {
+    const transfer = dataTransfer();
+    for (const payload of ["not JSON", "null", JSON.stringify({ nodeIDs: ["node-1"] }), JSON.stringify({ companyID: "company-1", logicGateID: "process-1", nodeIDs: "node-1" })]) {
+      transfer.setData(PROCESS_NODE_DRAG, payload);
+      assert.deepEqual(sidebarPinsFromDrop(transfer), []);
+      assert.equal(readSidebarPinnedResourceDropAction(pin("logic_gate", "process-target"), transfer), null);
+    }
+  });
+
   it("routes triage message drops only to node and Logic Gate pins", () => {
     const transfer = dataTransfer();
     transfer.setData(TRIAGE_MESSAGE_DRAG_MIME, JSON.stringify({ kind: "triage_messages", message_ids: ["message-1", "message-1", "message-2"], account_email: " OWNER@Example.TEST " }));

@@ -28,16 +28,12 @@ export function getExplorerDragPayload(row: ExplorerTreeNode): ExplorerDragPaylo
   if (row.kind === "project" && row.projectID) {
     return { kind: "project", label: row.label, itemID: row.projectID, itemType: "project", sourceTreeID: row.id };
   }
-  if (row.kind === "kanban" && row.kanbanBoardID) {
-    return { kind: "kanban", label: row.label, itemID: row.kanbanBoardID, itemType: "kanban", sourceTreeID: row.id };
-  }
   return null;
 }
 
 export function getExplorerItemPayload(row: ExplorerTreeNode): { itemID: string; itemType: CompanyExplorerItemType } | null {
   if (row.kind === "logic_gate" && row.logicGateID) return { itemID: row.logicGateID, itemType: "logic_gate" };
   if (row.kind === "project" && row.projectID) return { itemID: row.projectID, itemType: "project" };
-  if (row.kind === "kanban" && row.kanbanBoardID) return { itemID: row.kanbanBoardID, itemType: "kanban" };
   return null;
 }
 
@@ -45,7 +41,6 @@ export function getExplorerDragPayloadForSelection(row: ExplorerTreeNode, select
   const basePayload = getExplorerDragPayload(row);
   const baseItem = getExplorerItemPayload(row);
   if (!basePayload || !baseItem) return basePayload;
-  if (baseItem.itemType === "kanban") return basePayload;
 
   const dragIDs = selectedIDs.has(row.id) ? selectedIDs : new Set([row.id]);
   const items: { itemID: string; itemType: CompanyExplorerItemType; treeID?: string }[] = [];
@@ -54,7 +49,7 @@ export function getExplorerDragPayloadForSelection(row: ExplorerTreeNode, select
     if (!dragIDs.has(candidate.id)) continue;
     const item = getExplorerItemPayload(candidate);
     const key = item ? `${item.itemType}:${item.itemID}` : "";
-    if (!item || item.itemType === "kanban" || seen.has(key)) continue;
+    if (!item || seen.has(key)) continue;
     seen.add(key);
     items.push({ ...item, treeID: candidate.id });
   }
@@ -72,7 +67,7 @@ export function readExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDra
       ...parsed,
       label: typeof parsed.label === "string" ? parsed.label.trim() : undefined,
     };
-    if ((parsed.kind === "logic_gate" || parsed.kind === "project" || parsed.kind === "kanban") && parsed.itemID && parsed.itemType) return {
+    if ((parsed.kind === "logic_gate" || parsed.kind === "project") && parsed.itemID && parsed.itemType) return {
       ...parsed,
       label: typeof parsed.label === "string" ? parsed.label.trim() : undefined,
       sourceTreeID: typeof parsed.sourceTreeID === "string" ? parsed.sourceTreeID : undefined,
@@ -121,7 +116,7 @@ export function getExplorerRowContainerID(row: ExplorerTreeNode): string | null 
 
 export function getExplorerRowOrderKind(row: ExplorerTreeNode): CompanyExplorerItemType | CompanyExplorerFolderKind | null {
   if (row.kind === "folder") return row.folderKind ?? (row.entityID ? "logic_gate" : null);
-  return row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : row.kind === "kanban" ? "kanban" : null;
+  return row.kind === "logic_gate" ? "logic_gate" : row.kind === "project" ? "project" : null;
 }
 
 export function getExplorerSelectionDomain(row?: ExplorerTreeNode | null): ExplorerSelectionDomain {
@@ -129,7 +124,6 @@ export function getExplorerSelectionDomain(row?: ExplorerTreeNode | null): Explo
   if (row.kind === "node") return "node";
   if (row.kind === "logic_gate") return "logic_gate";
   if (row.kind === "project") return "project";
-  if (row.kind === "kanban") return "kanban";
   return row.folderKind ?? "root";
 }
 

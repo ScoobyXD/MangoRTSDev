@@ -78,7 +78,7 @@ func TestAttachmentOwnerDeletionPathsUseSharedRetirement(t *testing.T) {
 			"retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, \"company_explorer_folder\"",
 			"retireNodeChatAttachmentRelationshipsTx", "EntityTypeLogicGate", "delete from email_relationships",
 		},
-		"postgres_communications_triage.go":    {"retireNodeChatAttachmentRelationshipsTx", "EntityTypeNode"},
+		"postgres_communications_triage.go":    {"postgresDeleteNodeWithDependentProjectionsTx", "EntityTypeNode"},
 		"postgres_projects.go":                 {"retireProjectChatAttachmentRelationshipsTx", "EntityTypeProject", "delete from email_relationships"},
 		"postgres_logic_gate_final_storage.go": {"resource_type='logic_gate'", "attachment_relationships"},
 		"postgres_node_textbox_chats.go":       {"retireNodeTextboxChatTreeRelationshipsTx", "retireAttachmentRelationshipsTx"},

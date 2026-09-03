@@ -1,7 +1,6 @@
 import { type NodeRecord } from "../nodes/types.js";
 import { getLogicGateTitle, type LogicGateViewRecord as LogicGateRecord } from "../logic-gates/types.js";
 import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind } from "../folders/companyExplorerFolders.js";
-import type { KanbanBoard } from "../kanban/shared.js";
 import type { ProjectRecord } from "../project-management/projectManagementApi.js";
 import type { CompanyExplorerSearchResult, CompanyExplorerV2EntityType, CompanyExplorerV2Row } from "./companyExplorerLazyApi.js";
 import {
@@ -16,7 +15,6 @@ type BuildCompanyExplorerTreeRowsInput = {
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
   projects: ProjectRecord[];
-  kanbanBoards: KanbanBoard[];
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   rootRowOrder: Record<string, number>;
@@ -75,14 +73,12 @@ export function buildCompanyExplorerTreeRows({
   nodes,
   logicGates,
   projects,
-  kanbanBoards,
   folders,
   folderItems,
   rootRowOrder,
   todayISODate,
 }: BuildCompanyExplorerTreeRowsInput): ExplorerTreeNode[] {
   void nodes;
-  void kanbanBoards;
   const rows: ExplorerTreeNode[] = [];
   void todayISODate;
   const logicGateByID = new Map(logicGates.map((logicGate) => [logicGate.logic_gate_id, logicGate]));
@@ -222,7 +218,6 @@ export function buildCompanyExplorerTreeRows({
     const childFolders = (foldersByParent.get(parentFolderID) ?? [])
       .filter((folder) => parentFolderID !== "" || folder.folder_kind === folderKind);
     for (const folder of childFolders) {
-      if (folder.system_key === "kanban_boards") continue;
       const childFolderKind = folder.folder_kind as CompanyExplorerFolderKind;
       const rowID = `workspace-folder-${folder.folder_id}`;
       branchRows.push({

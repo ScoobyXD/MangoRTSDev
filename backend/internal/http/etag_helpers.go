@@ -13,9 +13,6 @@ var (
 	logicGateListWorkspaceEventTypes             = store.LogicGateListWorkspaceEventTypes
 	companyExplorerFolderWorkspaceEventTypes     = store.CompanyExplorerFolderWorkspaceEventTypes
 	companyExplorerFolderItemWorkspaceEventTypes = store.CompanyExplorerFolderItemWorkspaceEventTypes
-	kanbanBoardWorkspaceEventTypes               = store.KanbanBoardWorkspaceEventTypes
-	kanbanColumnWorkspaceEventTypes              = store.KanbanColumnWorkspaceEventTypes
-	kanbanCardWorkspaceEventTypes                = store.KanbanCardWorkspaceEventTypes
 )
 
 func workspaceEventQuery(eventTypes ...string) store.DomainEventStreamQuery {
@@ -88,7 +85,7 @@ func (s *Server) workspaceEventVersionWithReadVersion(companyID string, readVers
 
 func workspaceReadVersionQueryForResource(companyID, resource string, queries []store.DomainEventStreamQuery) store.WorkspaceReadVersionQuery {
 	switch resource {
-	case "nodes", "node-relationships", "logic-gates", "kanban-boards", "process-map":
+	case "nodes", "node-relationships", "logic-gates", "process-map":
 		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource}
 	case "company-explorer-folder-items":
 		itemType := workspaceEventQueryPayloadValue(queries, "item_type")
@@ -96,12 +93,6 @@ func workspaceReadVersionQueryForResource(companyID, resource string, queries []
 			return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource}
 		}
 		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource, ResourceKey: store.WorkspaceReadVersionResourceKey("item_type", itemType)}
-	case "kanban-columns", "kanban-cards":
-		boardID := workspaceEventQueryPayloadValue(queries, "board_id")
-		if boardID == "" {
-			return store.WorkspaceReadVersionQuery{}
-		}
-		return store.WorkspaceReadVersionQuery{CompanyID: companyID, Scope: resource, ResourceKey: store.WorkspaceReadVersionResourceKey("board_id", boardID)}
 	default:
 		return store.WorkspaceReadVersionQuery{}
 	}
@@ -135,12 +126,6 @@ func workspaceSnapshotReadVersionQuery(r *http.Request, companyID, scope string)
 			query.ResourceKey = store.WorkspaceReadVersionResourceKey("folder_kind", folderKind)
 		}
 		return query
-	case "kanban":
-		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
-		if boardID == "" {
-			return store.WorkspaceReadVersionQuery{}
-		}
-		return store.WorkspaceReadVersionQuery{CompanyID: companyID, UserID: userID, Scope: "workspace-snapshot:kanban", ResourceKey: store.WorkspaceReadVersionResourceKey("board_id", boardID)}
 	default:
 		return store.WorkspaceReadVersionQuery{}
 	}
@@ -168,8 +153,4 @@ func folderKindPayload(kind string) map[string]string {
 
 func itemTypePayload(itemType string) map[string]string {
 	return map[string]string{"item_type": strings.TrimSpace(itemType)}
-}
-
-func boardIDPayload(boardID string) map[string]string {
-	return map[string]string{"board_id": strings.TrimSpace(boardID)}
 }

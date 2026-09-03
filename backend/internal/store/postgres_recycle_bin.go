@@ -12,12 +12,11 @@ import (
 )
 
 type companyExplorerRecycleScope struct {
-	FolderIDs      map[string]bool
-	FolderKinds    map[string]string
-	NodeIDs        map[string]bool
-	LogicGateIDs   map[string]bool
-	ProjectIDs     map[string]bool
-	KanbanBoardIDs map[string]bool
+	FolderIDs    map[string]bool
+	FolderKinds  map[string]string
+	NodeIDs      map[string]bool
+	LogicGateIDs map[string]bool
+	ProjectIDs   map[string]bool
 }
 
 type companyExplorerRecycleRootScope struct {
@@ -27,12 +26,11 @@ type companyExplorerRecycleRootScope struct {
 
 func newCompanyExplorerRecycleScope() companyExplorerRecycleScope {
 	return companyExplorerRecycleScope{
-		FolderIDs:      map[string]bool{},
-		FolderKinds:    map[string]string{},
-		NodeIDs:        map[string]bool{},
-		LogicGateIDs:   map[string]bool{},
-		ProjectIDs:     map[string]bool{},
-		KanbanBoardIDs: map[string]bool{},
+		FolderIDs:    map[string]bool{},
+		FolderKinds:  map[string]string{},
+		NodeIDs:      map[string]bool{},
+		LogicGateIDs: map[string]bool{},
+		ProjectIDs:   map[string]bool{},
 	}
 }
 
@@ -52,19 +50,10 @@ func (scope companyExplorerRecycleScope) mergeInto(target *companyExplorerRecycl
 	for id := range scope.ProjectIDs {
 		target.ProjectIDs[id] = true
 	}
-	for id := range scope.KanbanBoardIDs {
-		target.KanbanBoardIDs[id] = true
-	}
-}
-
-func (scope companyExplorerRecycleScope) addLogicGateBoards() {
-	for logicGateID := range scope.LogicGateIDs {
-		scope.KanbanBoardIDs[LogicGateKanbanBoardID(logicGateID)] = true
-	}
 }
 
 func (scope companyExplorerRecycleScope) hasAnyRows() bool {
-	return len(scope.FolderIDs)+len(scope.NodeIDs)+len(scope.LogicGateIDs)+len(scope.ProjectIDs)+len(scope.KanbanBoardIDs) > 0
+	return len(scope.FolderIDs)+len(scope.NodeIDs)+len(scope.LogicGateIDs)+len(scope.ProjectIDs) > 0
 }
 
 func (r *PostgresRepo) ListRecycleBinItems(companyID, deletedByUserID string) ([]domain.RecycleBinItem, error) {
@@ -477,7 +466,7 @@ var recycleSnapshotTables = map[string]bool{
 	"project_relationships":                  true,
 	"project_relationship_projection":        true,
 	"node_logic_gate_assignments":            true,
-	"kanban_board_projection":                true,
+	"process_steps":                          true,
 	"project_management_timeline_items":      true,
 	"project_management_timeline_projection": true,
 	"resource_gvic_settings":                 true,
@@ -497,6 +486,7 @@ var recycleRestoreTableOrder = []string{
 	"company_explorer_folders",
 	"nodes",
 	"logic_gates",
+	"process_steps",
 	"scorecards",
 	"resource_operational_relationships",
 	"process_map_placements",
@@ -535,7 +525,6 @@ var recycleRestoreTableOrder = []string{
 	"project_relationship_projection",
 	"project_management_timeline_items",
 	"project_management_timeline_projection",
-	"kanban_board_projection",
 	"company_explorer_items",
 	"huddle_explorer_items",
 }
@@ -778,6 +767,11 @@ where (
       select 1 from logic_gates process
       where process.company_id=restored_row.company_id and process.logic_gate_id=restored_row.source_resource_id
     ))
+    or
+    (restored_row.source_resource_type='process_step' and exists (
+      select 1 from process_steps step
+      where step.company_id=restored_row.company_id and step.process_step_id=restored_row.source_resource_id
+    ))
   )
   and (
     (restored_row.target_resource_type='company_explorer_folder' and exists (
@@ -788,6 +782,11 @@ where (
     (restored_row.target_resource_type='logic_gate' and exists (
       select 1 from logic_gates process
       where process.company_id=restored_row.company_id and process.logic_gate_id=restored_row.target_resource_id
+    ))
+    or
+    (restored_row.target_resource_type='process_step' and exists (
+      select 1 from process_steps step
+      where step.company_id=restored_row.company_id and step.process_step_id=restored_row.target_resource_id
     ))
   )
 on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
@@ -813,6 +812,22 @@ on conflict do nothing`, columnList, strings.Join(qualifiedColumns, ", "))
 		return err
 	}
 	selectColumns := columnList
+	if tableName == "node_logic_gate_assignments" {
+		selected := make([]string, len(columns))
+		for index, column := range columns {
+			if column == `"process_step_id"` {
+				selected[index] = `case when exists (
+  select 1 from process_steps step
+  where step.company_id=restored_row.company_id
+    and step.logic_gate_id=restored_row.logic_gate_id
+    and step.process_step_id=restored_row.process_step_id
+) then restored_row.process_step_id else null end`
+			} else {
+				selected[index] = "restored_row." + column
+			}
+		}
+		selectColumns = strings.Join(selected, ", ")
+	}
 	if tableName == "scorecards" {
 		selected := make([]string, len(columns))
 		for index, column := range columns {
@@ -1010,7 +1025,6 @@ func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *s
 	nodeIDs := sortedMapKeys(scope.NodeIDs)
 	logicGateIDs := sortedMapKeys(scope.LogicGateIDs)
 	projectIDs := sortedMapKeys(scope.ProjectIDs)
-	boardIDs := sortedMapKeys(scope.KanbanBoardIDs)
 	folderIDCSV := strings.Join(folderIDs, ",")
 	nodeIDCSV := strings.Join(nodeIDs, ",")
 	logicGateIDCSV := strings.Join(logicGateIDs, ",")
@@ -1033,7 +1047,7 @@ func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *s
 		}
 	}
 	if len(logicGateIDs) > 0 {
-		for _, tableName := range []string{"logic_gates", "scorecards", "logic_gate_textboxes", "logic_gate_textboxes_history"} {
+		for _, tableName := range []string{"logic_gates", "process_steps", "scorecards", "logic_gate_textboxes", "logic_gate_textboxes_history"} {
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 				return nil, err
 			}
@@ -1066,7 +1080,9 @@ func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *s
 			`(source_resource_type='company_explorer_folder' and source_resource_id = any(` + folderIDArray + `)) or ` +
 			`(target_resource_type='company_explorer_folder' and target_resource_id = any(` + folderIDArray + `)) or ` +
 			`(source_resource_type='logic_gate' and source_resource_id = any(` + logicGateIDArray + `)) or ` +
-			`(target_resource_type='logic_gate' and target_resource_id = any(` + logicGateIDArray + `)))`
+			`(target_resource_type='logic_gate' and target_resource_id = any(` + logicGateIDArray + `)) or ` +
+			`(source_resource_type='process_step' and source_resource_id in (select process_step_id from process_steps where company_id=$1::uuid and logic_gate_id = any(` + logicGateIDArray + `))) or ` +
+			`(target_resource_type='process_step' and target_resource_id in (select process_step_id from process_steps where company_id=$1::uuid and logic_gate_id = any(` + logicGateIDArray + `))))`
 		if err := addTable("resource_operational_relationships", relationshipWhere, companyID, folderIDCSV, logicGateIDCSV); err != nil {
 			return nil, err
 		}
@@ -1099,9 +1115,6 @@ func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *s
 			if err := addTable("node_logic_gate_assignments", assignmentWhere, assignmentArgs...); err != nil {
 				return nil, err
 			}
-			if err := addTable("kanban_board_projection", assignmentWhere, assignmentArgs...); err != nil {
-				return nil, err
-			}
 			if err := addTable("project_management_timeline_items", assignmentWhere, assignmentArgs...); err != nil {
 				return nil, err
 			}
@@ -1111,7 +1124,7 @@ func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *s
 		}
 	}
 	if len(folderIDs) > 0 || len(nodeIDs) > 0 || len(logicGateIDs) > 0 || len(projectIDs) > 0 {
-		itemWhere, itemArgs := recycleFolderItemsWhere(companyID, folderIDs, nodeIDs, logicGateIDs, projectIDs, boardIDs)
+		itemWhere, itemArgs := recycleFolderItemsWhere(companyID, folderIDs, nodeIDs, logicGateIDs, projectIDs)
 		if itemWhere != "" {
 			if err := addTable("company_explorer_items", itemWhere, itemArgs...); err != nil {
 				return nil, err
@@ -1424,7 +1437,7 @@ func recycleRACIMatrixProjectionWhere(companyID string, nodeIDs, logicGateIDs []
 	return "company_id=$1::uuid and (" + strings.Join(clauses, " or ") + ")", args
 }
 
-func recycleFolderItemsWhere(companyID string, folderIDs, nodeIDs, logicGateIDs, projectIDs, boardIDs []string) (string, []any) {
+func recycleFolderItemsWhere(companyID string, folderIDs, nodeIDs, logicGateIDs, projectIDs []string) (string, []any) {
 	clauses := []string{}
 	args := []any{companyID}
 	if len(folderIDs) > 0 {
@@ -1533,14 +1546,14 @@ func postgresExpandCompanyExplorerRecycleScopeTx(ctx context.Context, tx *sql.Tx
 	}
 	changed := true
 	for changed {
-		before := len(scope.FolderIDs) + len(scope.NodeIDs) + len(scope.LogicGateIDs) + len(scope.ProjectIDs) + len(scope.KanbanBoardIDs)
+		before := len(scope.FolderIDs) + len(scope.NodeIDs) + len(scope.LogicGateIDs) + len(scope.ProjectIDs)
 		if err := postgresAddFolderScopeItemsTx(ctx, tx, companyID, scope); err != nil {
 			return err
 		}
 		if err := postgresAddLogicGateScopeItemsTx(ctx, tx, companyID, scope); err != nil {
 			return err
 		}
-		after := len(scope.FolderIDs) + len(scope.NodeIDs) + len(scope.LogicGateIDs) + len(scope.ProjectIDs) + len(scope.KanbanBoardIDs)
+		after := len(scope.FolderIDs) + len(scope.NodeIDs) + len(scope.LogicGateIDs) + len(scope.ProjectIDs)
 		changed = after > before
 	}
 	return nil
@@ -1572,8 +1585,6 @@ where company_id=$1::uuid
 			scope.LogicGateIDs[itemID] = true
 		case EntityTypeProject:
 			scope.ProjectIDs[itemID] = true
-		case "kanban":
-			scope.KanbanBoardIDs[itemID] = true
 		}
 	}
 	return rows.Err()
@@ -1616,9 +1627,6 @@ func postgresRecycleTargetLabelTx(ctx context.Context, tx *sql.Tx, companyID str
 		err = tx.QueryRowContext(ctx, `select header from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid`, companyID, target.ID).Scan(&label)
 	case "project":
 		err = tx.QueryRowContext(ctx, `select name from projects where company_id=$1::uuid and project_id=$2::uuid`, companyID, target.ID).Scan(&label)
-	case "kanban":
-		label = "Kanban board"
-		return label, nil
 	default:
 		return "", ErrInvalid
 	}

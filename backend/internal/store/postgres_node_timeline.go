@@ -297,13 +297,13 @@ func insertLogicGateTransferTimelineEventTx(ctx context.Context, tx *sql.Tx, com
 insert into node_timeline_events
 (event_id, company_id, node_id, event_type, actor_user_id, actor_display_name,
  from_logic_gate_id, from_logic_gate_name, to_logic_gate_id, to_logic_gate_name)
-select $1::uuid, $2::uuid, $3::uuid, 'logic_gate_transfer', $4::uuid,
+select $1::uuid, $2::uuid, $3::uuid, 'logic_gate_transfer', nullif($4, '')::uuid,
        coalesce(nullif(actor.display_name, ''), nullif(actor.email, ''), 'Unknown user'),
        $5::uuid, coalesce(nullif(source_gate.header, ''), 'Deleted process'),
        $6::uuid, coalesce(nullif(target_gate.header, ''), 'Deleted process')
 from logic_gates source_gate
 join logic_gates target_gate on target_gate.company_id=source_gate.company_id and target_gate.logic_gate_id=$6::uuid
-left join users actor on actor.user_id=$4::uuid
+left join users actor on actor.user_id=nullif($4, '')::uuid
 where source_gate.company_id=$2::uuid and source_gate.logic_gate_id=$5::uuid
 returning `+nodeTimelineEventColumns,
 		newUUIDv7String(), companyID, nodeID, actorUserID, fromLogicGateID, toLogicGateID))
