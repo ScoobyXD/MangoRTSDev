@@ -61,14 +61,14 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
   }, [open]);
 
   return (
-    <div ref={controlsRef} style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 8 }}>
+    <div ref={controlsRef} style={{ position: "relative", display: "inline-flex", alignItems: "center", flexShrink: 0, gap: 8 }}>
       <button
         type="button"
         title="Group"
         aria-expanded={open}
         onClick={onToggleOpen}
         style={{
-          height: 32,
+          height: 36,
           border: `1px solid ${open ? accent : line}`,
           borderRadius: 8,
           background: buttonSurface,
@@ -88,7 +88,7 @@ export const KanbanGroupingControls: React.FC<KanbanGroupingControlsProps> = ({
           data-kanban-group-controls="true"
           style={{
             position: "absolute",
-            left: 0,
+            right: 0,
             top: 38,
             width: 306,
             maxWidth: "min(306px, calc(100vw - 32px))",

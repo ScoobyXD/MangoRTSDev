@@ -7,22 +7,20 @@ import { ConfirmActionMenu } from "../../app/ConfirmActionMenu";
 import { requestAppDockTab } from "../../app/appDockTabs";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
-import { AccountFilterControl, useCompanyAccounts } from "../accounts/AccountFilterControl";
-import { entityMatchesAccountFilter } from "../accounts/accountsApi";
 import { requestJSON, isAbortError, APIHTTPError } from "../api/requestJSON";
-import { convertTriageMessagesToExplorerTarget, listCompanyUsers, revertEmailNodeToMyTriage, transferEmailNodeToNode } from "../communications/communicationsApi";
+import { convertTriageMessagesToExplorerTarget, listCompanyUsers, transferEmailNodeToNode } from "../communications/communicationsApi";
 import { dispatchTriageConversionApplied } from "../triage/triageEvents";
 import { hasTriageMessageDrag, readTriageMessageDrag } from "../triage/triageDragDrop";
 import { invalidateNodeRecordStoreCaches } from "../nodes/nodeRecordStore";
 import { removeNodeRelationshipGraphNode, upsertNodeRelationshipGraphNode } from "../nodes/nodeRelationshipGraph";
-import { publishCommittedEntityTitleUpdate, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
+import { subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh";
 import { subscribeRealtimeScope } from "../realtime/realtimeWebSocket";
 import { publishLiveSelection, readLiveSelectionForFrame, subscribeLiveSelection } from "../selectionCoordinator";
 import { fetchSavedViews, saveSavedView, type SavedView, type SavedViewGrouping } from "../../pages/home/savedViewsApi";
 import { buildUniversalNestedGroups, type UniversalNestedGroup, type UniversalGroupValue } from "../grouping/universalGrouping";
-import { assignNodeToLogicGateStatus, changeProcessNodeState, createProcessNode, createProcessStep, createProcessStepRelationship, deleteProcessStep, deleteProcessStepRelationship, dispatchLogicGateWorkUpdated, clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight, invalidateLogicGateArenaViewCache, PROCESS_WORK_UPDATED_EVENT, updateProcessStep, type ProcessNodeStatePatch } from "./kanbanApi";
-import { orderedProcessSteps, PROCESS_STATUSES, PROCESS_WORK_VIEWS, processNodeMovePlan, processWorkCounts, processWorkView, type ProcessStep, type ProcessWorkNode, type ProcessWorkSnapshot, type ProcessWorkView } from "./processWork";
+import { assignNodeToLogicGateStatus, changeProcessNodeState, createProcessNode, createProcessStep, deleteProcessStep, deleteProcessStepRelationship, dispatchLogicGateWorkUpdated, clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight, invalidateLogicGateArenaViewCache, PROCESS_WORK_UPDATED_EVENT, updateProcessStep, type ProcessNodeStatePatch } from "./kanbanApi";
+import { orderedProcessSteps, PROCESS_STATUSES, PROCESS_WORK_VIEWS, processNodeMovePlan, processStatusColor, processWorkCounts, processWorkView, type ProcessStep, type ProcessWorkNode, type ProcessWorkSnapshot, type ProcessWorkView } from "./processWork";
 import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { shouldResetNodeEditorOverlayViewMode } from "./nodeEditorOverlayViewMode";
 import { KanbanGroupingControls } from "./KanbanGroupingControls";
@@ -33,7 +31,7 @@ import { ProcessNodeCard } from "./ProcessNodeCard";
 import { PROCESS_NODE_DRAG } from "./processWork";
 import "./processWork.css";
 
-type WorkDialog = { kind: "step" | "node" | "start" | "rename"; name: string; stepID: string; nodeIDs: string[]; afterID?: string; status?: string };
+type WorkDialog = { kind: "step" | "node" | "start"; name: string; stepID: string; nodeIDs: string[]; afterID?: string; status?: string };
 type Group = UniversalNestedGroup<ProcessWorkNode, string>;
 const defaultGroupings: SavedViewGrouping[] = [{ field: "priority", direction: "asc" }];
 
@@ -52,11 +50,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   const [processID, setProcessID] = useState(forcedLogicGateID);
   const [snapshot, setSnapshot] = useState<ProcessWorkSnapshot | null>(null);
   const [view, setView] = useState<ProcessWorkView>("Steps");
-  const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectionAnchor = useRef("");
-  const [accountIDs, setAccountIDs] = useState<string[]>([]);
-  const { accounts } = useCompanyAccounts(companyID);
   const [users, setUsers] = useState<CompanyUser[]>([]);
   const [userID, setUserID] = useState("");
   const [loading, setLoading] = useState(false);
@@ -242,11 +237,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   const userName = (id?: string) => users.find((person) => person.user_id === id)?.display_name || users.find((person) => person.user_id === id)?.email || "";
   const canEdit = snapshot?.permissions.can_edit === true;
   const selectedIDs = [...selected];
-  const visible = useMemo(() => (snapshot?.nodes ?? []).filter((node) => {
-    if (processWorkView(node) !== view || (accountIDs.length && !entityMatchesAccountFilter(node, accountIDs))) return false;
-    const haystack = [node.node_title, node.status, node.is_issue ? "issue" : "", node.due_date, stepByID.get(node.process_step_id ?? "")?.name, ...(node.accounts ?? []).map((account) => account.name)].join(" ").toLowerCase();
-    return !search.trim() || haystack.includes(search.trim().toLowerCase());
-  }), [snapshot?.nodes, view, accountIDs, search, stepByID]);
+  const visible = useMemo(() => (snapshot?.nodes ?? []).filter((node) => processWorkView(node) === view), [snapshot?.nodes, view]);
   const sortNodes = (nodes: ProcessWorkNode[]) => [...nodes].sort((a, b) => dateSort ? (dateDirection === "asc" ? 1 : -1) * (Date.parse(a.created_timestamp) - Date.parse(b.created_timestamp)) || a.position - b.position : a.position - b.position);
   const groupingValues = (node: ProcessWorkNode, field: string): UniversalGroupValue[] => {
     if (field === "priority") return [{ key: `priority:${node.priority ?? 0}`, label: getKanbanPriorityGroupLabel(node.priority ?? 0), sortValue: node.priority ?? 6 }];
@@ -282,10 +273,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
     updateSelection(node, next);
   };
   const startWork = (nodes: ProcessWorkNode[]) => setDialog({ kind: "start", name: "", nodeIDs: nodes.map((node) => node.node_id), stepID: nodes.length === 1 ? nodes[0].process_step_id ?? steps[0]?.process_step_id ?? "" : steps[0]?.process_step_id ?? "" });
-  const setStatus = (node: ProcessWorkNode, status: string) => {
-    if (status === "In Progress" && processWorkView(node) !== "Steps") { startWork([node]); return; }
-    void changeNodes([node.node_id], { status });
-  };
   const submitDialog = () => {
     if (!dialog) return; const draft = dialog;
     void mutate(async () => {
@@ -294,8 +281,6 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
         else await createProcessStep(apiBase, companyID, processID, draft.name.trim(), draft.afterID);
       } else if (draft.kind === "start") {
         for (const id of draft.nodeIDs) { const result = await changeProcessNodeState(apiBase, companyID, processID, id, { status: "In Progress", process_step_id: draft.stepID }); invalidateNodeRecordStoreCaches(apiBase, companyID, id); upsertNodeRelationshipGraphNode(apiBase, companyID, result.node); }
-      } else if (draft.kind === "rename") {
-        await requestJSON(apiBase, `/v1/nodes/${encodeURIComponent(draft.nodeIDs[0])}`, { method: "PUT", json: { company_id: companyID, name: draft.name.trim() } }); publishCommittedEntityTitleUpdate({ companyID, entityType: "node", resourceID: draft.nodeIDs[0], title: draft.name.trim() }); invalidateNodeRecordStoreCaches(apiBase, companyID, draft.nodeIDs[0]);
       } else {
         const result = await createProcessNode(apiBase, companyID, processID, draft.name.trim(), { status: draft.status, process_step_id: draft.stepID || null });
         upsertNodeRelationshipGraphNode(apiBase, companyID, result.node); openNode(result.node.node_id, result.node.name);
@@ -343,10 +328,8 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   const allowDrop = (event: React.DragEvent) => { if (canEdit && (event.dataTransfer.types.includes(PROCESS_NODE_DRAG) || event.dataTransfer.types.includes(EXPLORER_ENTITY_DRAG_MIME) || hasTriageMessageDrag(event.dataTransfer))) event.preventDefault(); };
   const renderNode = (node: ProcessWorkNode) => <ProcessNodeCard key={node.node_id} node={node} steps={steps} selected={selected.has(node.node_id) || forcedHighlightedNodeID === node.node_id} active={view === "Steps"} canEdit={canEdit} busy={busy} personName={userName(node.placed_by_user_id)}
     canAccept={canEdit && snapshot?.permissions.can_resolve_requests === true && node.requested_by_user_id !== userID} canCancel={canEdit && node.requested_by_user_id === userID}
-    onSelect={(event) => selectNode(node, event)} onToggleSelect={() => { const next = new Set(selected); next.has(node.node_id) ? next.delete(node.node_id) : next.add(node.node_id); updateSelection(node, next); }}
-    onOpen={() => { updateSelection(node, new Set([node.node_id])); openNode(node.node_id, node.node_title); }} onChange={(patch) => void changeNodes([node.node_id], patch)} onStatus={(status) => setStatus(node, status)} onStart={() => startWork([node])}
-    onRename={() => setDialog({ kind: "rename", nodeIDs: [node.node_id], name: node.node_title, stepID: "" })} onDelete={() => setDeletion({ nodeIDs: [node.node_id] })} onRevert={() => void mutate(async () => { await revertEmailNodeToMyTriage({ companyID, nodeID: node.node_id }); removeNodeRelationshipGraphNode(apiBase, companyID, node.node_id); invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id); if (overlay?.nodeID === node.node_id) closeOverlay(); })}
-    onDueDate={(date) => void mutate(async () => { await requestJSON(apiBase, `/v1/nodes/${node.node_id}`, { method: "PUT", json: { company_id: companyID, due_date: date || null } }); invalidateNodeRecordStoreCaches(apiBase, companyID, node.node_id); })}
+    onSelect={(event) => selectNode(node, event)}
+    onOpen={() => { updateSelection(node, new Set([node.node_id])); openNode(node.node_id, node.node_title); }} onChange={(patch) => void changeNodes([node.node_id], patch)} onStart={() => startWork([node])}
     onDragStart={(event) => { const nodeIDs = selected.has(node.node_id) ? selectedIDs : [node.node_id]; event.dataTransfer.setData(PROCESS_NODE_DRAG, JSON.stringify({ companyID, logicGateID: processID, nodeIDs })); event.dataTransfer.setData("text/plain", node.node_title); event.dataTransfer.effectAllowed = "move"; }} onDragOver={allowDrop} onDrop={(event) => drop(event, node.process_step_id, node.node_id)} />;
   const renderGroups = (groups: Group[], stepID: string | null): React.ReactNode => groups.map((group) => <section className="process-work__group" key={group.id}><div className="process-work__group-label" onDragOver={group.field === "priority" && Number(group.key.split(":")[1]) >= 1 && Number(group.key.split(":")[1]) <= 5 ? allowDrop : undefined} onDrop={group.field === "priority" && Number(group.key.split(":")[1]) >= 1 && Number(group.key.split(":")[1]) <= 5 ? (event) => drop(event, stepID, undefined, Number(group.key.split(":")[1])) : undefined}>{group.label}<span>{group.rows.length}</span></div>{group.groups.length ? renderGroups(group.groups, stepID) : group.rows.map(renderNode)}</section>);
   const renderNodes = (nodes: ProcessWorkNode[], stepID: string | null) => groupings.length ? renderGroups(groupedNodes(nodes, stepID || view), stepID) : sortNodes(nodes).map(renderNode);
@@ -359,20 +342,22 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
     const id = step?.process_step_id ?? null, nodes = visible.filter((node) => node.process_step_id === id);
     const outgoing = snapshot?.relationships.filter((edge) => edge.source.resource_id === id) ?? [];
     return <section key={id ?? "unassigned"} data-process-step={id ?? "unassigned"} className={`process-work__step${step ? "" : " process-work__unassigned"}`} onDragOver={allowDrop} onDrop={(event) => drop(event, id)}>
-      <header><div><span className="process-work__step-number">{step ? index + 1 : "—"}</span><h3>{step?.name ?? "No step assigned"}</h3><span className="process-work__count">{nodes.length}</span></div>{step && canEdit && <details><summary aria-label={`Options for ${step.name}`}>···</summary><div className="process-work__step-menu">
+      <header><div><h3>{step?.name ?? "No step assigned"}</h3><span className="process-work__count">{nodes.length}</span></div>{canEdit && <div className="process-work__step-controls">
+        <button type="button" className="process-work__icon-button" aria-label={`New Node in ${step?.name ?? "No step assigned"}`} title="New Node" disabled={busy} onClick={() => newNode(id)}>+</button>
+        {step && <details><summary className="process-work__icon-button" aria-label={`Options for ${step.name}`}>⋯</summary><div className="process-work__step-menu">
         <button type="button" disabled={busy} onClick={() => setDialog({ kind: "step", name: step.name, stepID: id!, nodeIDs: [] })}>Rename</button>
         <button type="button" disabled={busy || index === 0} onClick={() => moveStep(step, -1)}>Move left</button><button type="button" disabled={busy || index === steps.length - 1} onClick={() => moveStep(step, 1)}>Move right</button>
-        <button type="button" disabled={busy} onClick={() => setDialog({ kind: "step", name: "", stepID: "", afterID: id!, nodeIDs: [] })}>Add next step</button><button type="button" disabled={busy} className="process-work__danger" onClick={() => setDeletion({ step })}>Delete step</button>
-      </div></details>}</header>
-      {step && <div className="process-work__connections">{outgoing.map((edge) => <span key={edge.resource_operational_relationship_id}>→ {stepByID.get(edge.target.resource_id)?.name}{canEdit && <button type="button" title="Remove connection" disabled={busy} onClick={() => void mutate(() => deleteProcessStepRelationship(apiBase, companyID, processID, edge.resource_operational_relationship_id))}>×</button>}</span>)}{canEdit && <select aria-label={`Connect ${step.name} to another step`} value="" disabled={busy} onChange={(event) => { const target = event.target.value; if (target) void mutate(() => createProcessStepRelationship(apiBase, companyID, processID, id!, target)); }}><option value="">+ Connect to…</option>{steps.filter((target) => target.process_step_id !== id && !outgoing.some((edge) => edge.target.resource_id === target.process_step_id)).map((target) => <option key={target.process_step_id} value={target.process_step_id}>{target.name}</option>)}</select>}</div>}
-      <div className="process-work__step-nodes">{renderNodes(nodes, id)}{nodes.length === 0 && <p className="process-work__empty-lane">{step ? "No active work" : "Active work without a step appears here."}</p>}</div>{canEdit && <button type="button" className="process-work__add-node" disabled={busy} onClick={() => newNode(id)}>+ New Node</button>}
+        <button type="button" disabled={busy} onClick={() => setDialog({ kind: "step", name: "", stepID: "", afterID: id!, nodeIDs: [] })}>Add next step</button><button type="button" disabled={busy} className="process-work__danger" onClick={() => setDeletion({ step })}>Delete column</button>
+      </div></details>}</div>}</header>
+      {outgoing.length > 0 && <div className="process-work__connections">{outgoing.map((edge) => <span key={edge.resource_operational_relationship_id}>→ {stepByID.get(edge.target.resource_id)?.name}{canEdit && <button type="button" title="Remove connection" disabled={busy} onClick={() => void mutate(() => deleteProcessStepRelationship(apiBase, companyID, processID, edge.resource_operational_relationship_id))}>×</button>}</span>)}</div>}
+      <div className="process-work__step-nodes">{renderNodes(nodes, id)}{nodes.length === 0 && <p className="process-work__empty-lane">{step ? "No active work" : "Active work without a step appears here."}</p>}</div>
     </section>;
   };
   if (!processID) return <div className="process-work process-work__empty">Open a Process to see its steps and work.</div>;
   return <div ref={rootRef} className={`process-work${isDark ? " process-work--dark" : ""}`} aria-label="Process work" style={{ "--process-accent": accent } as React.CSSProperties}>
     <div className="process-work__toolbar"><strong>{snapshot?.logic_gate.header || forcedLogicGateLabel || "Process"}</strong>{onCollapseArenaToTab && <button type="button" title="Minimize Process" onClick={onCollapseArenaToTab}>−</button>}</div>
-    <div className="process-work__views" role="tablist" aria-label="Process work views">{PROCESS_WORK_VIEWS.map((tab) => <button key={tab} id={`${frameID}-${tab}`} type="button" role="tab" aria-selected={view === tab} aria-controls={`${frameID}-work-panel`} className={view === tab ? "is-active" : ""} onClick={() => { setView(tab); setSelected(new Set()); }}><span>{tab}</span><span className="process-work__count">{counts[tab]}</span></button>)}</div>
-    <div className="process-work__tools"><input type="search" placeholder="Search work…" aria-label="Search Process work" value={search} onChange={(event) => setSearch(event.target.value)} /><div className="process-work__accounts"><AccountFilterControl accounts={accounts} selectedAccountIDs={accountIDs} onChange={setAccountIDs} /></div>
+    <div className="process-work__controls">
+      <div className="process-work__views" role="tablist" aria-label="Process work views">{PROCESS_WORK_VIEWS.map((tab) => <button key={tab} id={`${frameID}-${tab}`} type="button" role="tab" aria-selected={view === tab} aria-controls={`${frameID}-work-panel`} className={view === tab ? "is-active" : ""} style={{ "--view-color": tab === "Steps" ? accent : processStatusColor(tab === "Backlog" ? "Backlogs" : tab) } as React.CSSProperties} onClick={() => { setView(tab); setSelected(new Set()); }}><span>{tab}</span><span className="process-work__count">{counts[tab]}</span></button>)}</div>
       <KanbanGroupingControls controlsRef={groupRef} open={groupOpen} groupings={groupings} loading={!groupsLoaded} saving={groupSaving} error="" isDark={isDark} line={isDark ? "#3b4659" : "#dbe1e8"} cardBackground={isDark ? "#252e3d" : "#f8fafc"} text={isDark ? "#e4eaf3" : "#172033"} subtext={isDark ? "#a5b3c9" : "#64748b"} accent={accent} dateAddedSortEnabled={dateSort} dateAddedSortDirection={dateDirection} onToggleOpen={() => setGroupOpen(!groupOpen)} onAddGrouping={(field) => setGroupings([...groupings, { field, direction: "asc" }])} onUpdateGrouping={(index, grouping) => setGroupings(groupings.map((item, i) => i === index ? grouping : item))} onRemoveGrouping={(index) => setGroupings(groupings.filter((_, i) => i !== index))} onToggleDateAddedSortEnabled={() => setDateSort(!dateSort)} onToggleDateAddedSortDirection={() => setDateDirection(dateDirection === "asc" ? "desc" : "asc")} />
     </div>
     {selected.size > 0 && canEdit && <div className="process-work__selection"><span>{selected.size} selected</span>
@@ -384,15 +369,15 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
     {loading && <p role="status">Loading Process work…</p>}
     <div id={`${frameID}-work-panel`} role="tabpanel" aria-labelledby={`${frameID}-${view}`} className="process-work__panel">
       {view === "Steps" ? <div className="process-work__steps">{steps.map(renderStep)}{renderStep(null, steps.length)}{canEdit && <button type="button" className="process-work__add-step" disabled={busy} onClick={() => setDialog({ kind: "step", name: "", stepID: "", afterID: steps[steps.length - 1]?.process_step_id, nodeIDs: [] })}>+ Add {steps.length ? "next " : ""}step</button>}</div> :
-        <section className="process-work__list" onDragOver={allowDrop} onDrop={(event) => drop(event, null)}><header><h3>{view}</h3>{canEdit && <button type="button" disabled={busy} onClick={() => newNode(null)}>+ New Node</button>}</header>{visible.length ? renderNodes(visible, null) : <p className="process-work__empty-lane">No {view.toLowerCase()} work{search || accountIDs.length ? " matches these filters" : ""}.</p>}</section>}
+        <section className="process-work__list" onDragOver={allowDrop} onDrop={(event) => drop(event, null)}><header><h3>{view}</h3>{canEdit && <button type="button" className="process-work__icon-button" aria-label={`New Node in ${view}`} title="New Node" disabled={busy} onClick={() => newNode(null)}>+</button>}</header>{visible.length ? renderNodes(visible, null) : <p className="process-work__empty-lane">No {view.toLowerCase()} work.</p>}</section>}
     </div>
     {dialog && <AppModalPortal onRequestClose={busy ? undefined : () => setDialog(null)}><div className="process-work__modal-backdrop"><form className={`process-work__dialog${isDark ? " process-work--dark" : ""}`} role="dialog" aria-modal="true" aria-label={dialog.kind === "start" ? "Start work" : dialog.kind === "step" ? "Process step" : "Node"} onSubmit={(event) => { event.preventDefault(); submitDialog(); }}>
-      <h3>{dialog.kind === "start" ? "Start work" : dialog.kind === "step" ? dialog.stepID ? "Rename step" : "Add step" : dialog.kind === "rename" ? "Rename Node" : "New Node"}</h3>
+      <h3>{dialog.kind === "start" ? "Start work" : dialog.kind === "step" ? dialog.stepID ? "Rename step" : "Add step" : "New Node"}</h3>
       {dialog.kind === "start" ? <label>Choose a step<select autoFocus value={dialog.stepID} onChange={(event) => setDialog({ ...dialog, stepID: event.target.value })}><option value="" disabled>Choose a step</option>{steps.map((step) => <option key={step.process_step_id} value={step.process_step_id}>{step.name}</option>)}</select></label> : <label>Name<input autoFocus required maxLength={dialog.kind === "step" ? 200 : 240} value={dialog.name} onChange={(event) => setDialog({ ...dialog, name: event.target.value })} /></label>}
       {dialog.kind === "start" && <p>The selected work will become In Progress in this step.</p>}
       <div><button type="button" disabled={busy} onClick={() => setDialog(null)}>Cancel</button><button type="submit" disabled={busy || (dialog.kind === "start" ? !dialog.stepID : !dialog.name.trim())}>{busy ? "Saving…" : dialog.kind === "start" ? "Start work" : "Save"}</button></div>
     </form></div></AppModalPortal>}
-    {deletion && <ConfirmActionMenu title={deletion.step ? `Delete step “${deletion.step.name}”?` : `Delete ${deletion.nodeIDs?.length === 1 ? "this Node" : "these Nodes"}?`} detail={deletion.step ? "Its Nodes keep their Process and status. Active Nodes move to No step assigned." : "The Nodes move to the Recycle Bin."} requireDisplayNameConfirmation={!deletion.step} confirmDisabled={busy} onCancel={() => setDeletion(null)} onConfirm={(confirmationDisplayName) => {
+    {deletion && <ConfirmActionMenu title={deletion.step ? `Delete column “${deletion.step.name}”?` : `Delete ${deletion.nodeIDs?.length === 1 ? "this Node" : "these Nodes"}?`} detail={deletion.step ? "Its Nodes keep their Process and status. Active Nodes move to No step assigned." : "The Nodes move to the Recycle Bin."} requireDisplayNameConfirmation={!deletion.step} confirmDisabled={busy} onCancel={() => setDeletion(null)} onConfirm={(confirmationDisplayName) => {
       const pending = deletion;
       void mutate(async () => {
         if (pending.step) await deleteProcessStep(apiBase, companyID, processID, pending.step.process_step_id);

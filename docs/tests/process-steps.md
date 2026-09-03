@@ -32,13 +32,15 @@
 30. Work views, counts, and related readers derive from Nodes, Process assignments, and steps; `kanban_board_projection` and its synchronization paths do not exist.
 31. Process work commands enforce current Process and Node access through existing authorization rules, and hidden Nodes contribute neither rows nor counts.
 32. Committed work changes invalidate the existing Process work read through exact Process identity, and mounted views use one active refresh with at most one queued refresh.
-33. The Process editor remains beside the work area; Steps, Requested, Pending, Backlog, and Done are selected at the top of that work area.
+33. The existing left sidebar and SOP editor remain in place, with RACI assignments above the editor toolbar; the Process work board occupies only the right-hand work area.
 34. Step columns, controls, and Node cards reuse Mango's elevated surfaces and soft gradients; status is identified by both color and text.
 35. The Issue flag decorates a Node's underlying status and never moves a Pending or Done Node into the active Steps view.
 36. An assigned Node accepts only Requested, Pending, Backlogs, In Progress, Review, or Done through every status update path; Issue is never saved as its status.
 37. A folder change refreshes Process work only when it affects that Process's inherited access; unrelated folders and shared inboxes do not invalidate its work.
 38. Every effective Responsible user with Process access can accept or decline another user's request, including users reached through groups or inherited RACI.
 39. RACI assignment constraints accept the same canonical resource types as RACI settings so Process requests can inherit Responsible users from folders.
+40. Compact rectangular tabs at the top of the work area select Steps, Requested, Pending, Backlog, and Done.
+41. Requested uses yellow, Pending gray, Backlog purple, and Done green while retaining readable labels.
 
 ## Process Story
 

@@ -1,10 +1,14 @@
 # Process Work Module
 
-The Process work area replaces the status-column board inside the existing Process page. Its business rules live in `docs/tests/process-steps.md` and `docs/tests/kanbanboard.md`; Process editor, RACI, QDC, and linker rules remain in `docs/tests/logic-gates.md`.
+The Process work area replaces the status-column board only in the existing Process page's right-hand column. The left sidebar and SOP editor remain in place, with RACI assignments above the editor toolbar. Its business rules live in `docs/tests/process-steps.md` and `docs/tests/kanbanboard.md`; Process editor, RACI, QDC, and linker rules remain in `docs/tests/logic-gates.md`.
 
-The header shows **Steps · Requested · Pending · Backlog · Done**. Steps displays active Nodes under their exact Process steps, including an unassigned area. The other views display status-filtered lists. Status labels and colors remain independent of step columns, and Issue is a separate marker. All surfaces reuse the application's elevated neumorphic treatment, soft shadows, and gradients.
+The header shows **Steps Â· Requested Â· Pending Â· Backlog Â· Done**. Steps displays active Nodes under their exact Process steps, including an unassigned area. The other views display status-filtered lists. Status labels and colors remain independent of step columns, and Issue is a separate marker. All surfaces reuse the application's elevated neumorphic treatment, soft shadows, and gradients.
 
-The board keeps optional priority/date/person/account grouping, Date Added sorting, multi-selection, shared Node editing, request actions, and exact-mailbox email drops. These features read the same work snapshot and reuse the existing saved-view, Node, assignment, editor, and email commands.
+The compact rectangular view tabs share a row with **Group**. Requested is yellow, Pending gray, Backlog purple, and Done green. The board has no work-search or account-filter controls; optional priority/date/person/account grouping and Date Added sorting remain available.
+
+Step headers show the name without an ordinal badge. Their top-right plus button creates a Node, and the three-dot menu provides Rename, Move left, Move right, Add next step, and Delete column. Existing outgoing connection chips remain visible without a Connect to dropdown. There is no bottom New Node button.
+
+Node cards use larger titles while retaining status, priority, due date, and placement metadata. Cards omit selection checkboxes and the Change footer. Click, Ctrl/Cmd-click, and Shift-click selection, bulk commands, shared Node editing, request actions, Start work, and exact-mailbox email drops remain available. These features read the same work snapshot and reuse the existing saved-view, Node, assignment, editor, and email commands.
 
 ## Canonical data
 

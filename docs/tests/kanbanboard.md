@@ -1,17 +1,17 @@
 # Current Process Work Board Business Logic Laws
 
 1. The Process work board must follow the canonical step, status, ownership, and deletion rules in `docs/tests/process-steps.md`.
-2. The work area must show **Steps**, **Requested**, **Pending**, **Backlog**, and **Done** as separate views of the same assigned Nodes.
+2. The work area must show **Steps**, **Requested**, **Pending**, **Backlog**, and **Done** as compact rectangular tabs for separate views of the same assigned Nodes.
 3. Raised surfaces, soft shadows, rounded controls, and gradient accents must match the application's neumorphic appearance in both themes.
 4. A Node's status color and readable status label must come from `nodes.status` rather than its step.
 5. The Issue marker must remain independent of status and must not pull Pending or Done work into Steps.
 6. Work reads and realtime hints must require current access to the exact owning Process and must omit inaccessible Nodes.
 7. The board must preserve the same underlying assignments and order for every authorized viewer.
 8. Personal grouping and Date Added sorting must use the existing single user-owned `saved_views` row for `logic_gate_kanban` across all Processes in that company.
-9. The grouping button must open settings for optional nested priority, due date, by-person, and account groups.
+9. The Group button must share the tab row and open settings for optional nested priority, due date, by-person, and account groups.
 10. Each optional grouping field must appear at most once and support ascending or descending order.
 11. Grouping must render within each step or status list and must not change assignment, status, or step identity.
-12. Search and account filters must run before subgroup construction and subgroup counts.
+12. The work board must not display work-search or account-filter controls.
 13. Account grouping must show an assigned Node in each matching account group and use **No account** when none is assigned.
 14. Priority grouping must use values 1 through 5 and display null as **Not Assigned**.
 15. Due-date grouping must place missing values under **No due date**.
@@ -60,7 +60,17 @@
 58. Authorization must run before an ETag can produce `304 Not Modified`.
 59. Work version changes must cover every source field that changes visible work data without rebuilding a board projection.
 60. A Process deletion must capture its current authorized audience before deletion and send its committed deletion hint to that audience.
+61. The board must occupy only the right-hand work area while preserving the left sidebar and SOP editor with RACI assignments above its toolbar.
+62. Requested tabs must use yellow, Pending gray, Backlog purple, and Done green.
+63. Step headers must display their names without ordinal-number badges.
+64. Each column must create a Node through its top-right plus button instead of a bottom New Node button.
+65. A step's three-dot menu must retain Rename, Move left, Move right, Add next step, and Delete column actions.
+66. Existing outgoing connection chips must remain visible without a Connect to dropdown.
+67. Node titles must be larger than their status and metadata text.
+68. Node cards must retain readable status, priority, due date, and placement metadata.
+69. Node selection must work without a card checkbox.
+70. Node cards must omit the Change footer while existing Node editing, bulk commands, request actions, and Start work remain available.
 
 ## Process Story
 
-A user opens a Process, filters and groups its work, and moves active Nodes between its steps. Requested, waiting, deferred, and completed work remain available in their own status lists. Existing Node editing, request handling, email conversion, and recycle actions use the same exact Nodes while authorized viewers refresh the changed Process.
+A user opens a Process beside its SOP editor, groups its work, and moves active Nodes between its steps. Requested, waiting, deferred, and completed work remain available through compact status tabs. Existing Node editing, request handling, email conversion, and recycle actions use the same exact Nodes while authorized viewers refresh the changed Process.
