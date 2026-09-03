@@ -1,4 +1,5 @@
 const ACTIVE_COMPANY_KEY = "mangorts:active-company-id-v1";
+export const ACTIVE_COMPANY_CHANGED_EVENT = "mangorts:active-company-changed";
 const DEV_COMPANY_ID_PARTS = ["11111111", "1111", "1111", "1111", "111111111111"] as const;
 
 export function getStoredActiveCompanyID(): string {
@@ -16,7 +17,8 @@ export function getActiveCompanyID(): string {
 
 export function setActiveCompanyID(companyID: string): void {
   const next = companyID.trim();
-  if (!next) return;
+  if (!next || next === getStoredActiveCompanyID()) return;
   sessionStorage.setItem(ACTIVE_COMPANY_KEY, next);
+  window.dispatchEvent(new Event(ACTIVE_COMPANY_CHANGED_EVENT));
 }
 
