@@ -9,7 +9,6 @@ import (
 type memoryWorkItemAssignmentEventSnapshot struct {
 	nodes                     map[string]domain.Node
 	folderItems               map[string]domain.CompanyExplorerFolderItem
-	kanbanCards               map[string][]domain.KanbanCard
 	nodeLogicGateAssignments  map[string]domain.NodeLogicGateAssignment
 	emailNodeLinks            map[string]communicationsEmailNodeLink
 	entityPermissions         map[string]domain.EntityPermission
@@ -24,7 +23,6 @@ func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItem
 	return memoryWorkItemAssignmentEventSnapshot{
 		nodes:                     cloneMemoryMap(r.nodes),
 		folderItems:               cloneMemoryMap(r.folderItems),
-		kanbanCards:               cloneMemorySliceMap(r.kanbanCards),
 		nodeLogicGateAssignments:  cloneMemoryMap(r.nodeLogicGateAssignments),
 		emailNodeLinks:            cloneMemoryMap(r.emailNodeLinks),
 		entityPermissions:         cloneMemoryMap(r.entityPermissions),
@@ -39,7 +37,6 @@ func (r *MemoryRepo) snapshotWorkItemAssignmentEventStateLocked() memoryWorkItem
 func (r *MemoryRepo) restoreWorkItemAssignmentEventStateLocked(snapshot memoryWorkItemAssignmentEventSnapshot) {
 	r.nodes = snapshot.nodes
 	r.folderItems = snapshot.folderItems
-	r.kanbanCards = snapshot.kanbanCards
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
 	r.emailNodeLinks = snapshot.emailNodeLinks
 	r.entityPermissions = snapshot.entityPermissions

@@ -14,7 +14,6 @@ type memoryNodeGraphEventSnapshot struct {
 	folders                        map[string]domain.CompanyExplorerFolder
 	folderItems                    map[string]domain.CompanyExplorerFolderItem
 	defaultFolderSeed              map[string]bool
-	kanbanCards                    map[string][]domain.KanbanCard
 	emailNodeLinks                 map[string]communicationsEmailNodeLink
 	emailDrafts                    map[string]domain.CommunicationsEmailDraft
 	attachments                    map[string]domain.Attachment
@@ -61,7 +60,6 @@ func (r *MemoryRepo) snapshotNodeGraphEventStateLocked() memoryNodeGraphEventSna
 		folders:                        cloneMemoryMap(r.folders),
 		folderItems:                    cloneMemoryMap(r.folderItems),
 		defaultFolderSeed:              cloneMemoryMap(r.defaultFolderSeed),
-		kanbanCards:                    cloneMemorySliceMap(r.kanbanCards),
 		emailNodeLinks:                 cloneMemoryMap(r.emailNodeLinks),
 		emailDrafts:                    cloneMemoryMap(r.emailDrafts),
 		attachments:                    cloneMemoryMap(r.attachments),
@@ -84,7 +82,6 @@ func (r *MemoryRepo) restoreNodeGraphEventStateLocked(snapshot memoryNodeGraphEv
 	r.folders = snapshot.folders
 	r.folderItems = snapshot.folderItems
 	r.defaultFolderSeed = snapshot.defaultFolderSeed
-	r.kanbanCards = snapshot.kanbanCards
 	r.emailNodeLinks = snapshot.emailNodeLinks
 	r.emailDrafts = snapshot.emailDrafts
 	r.attachments = snapshot.attachments

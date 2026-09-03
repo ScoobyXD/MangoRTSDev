@@ -74,7 +74,7 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	for _, field := range []string{"board", "cards", "nodes", "assignments", "email_provenance", "deleted_message_ids", "unstarred_message_ids"} {
+	for _, field := range []string{"nodes", "assignments", "email_provenance", "deleted_message_ids", "unstarred_message_ids"} {
 		if _, ok := response[field]; !ok {
 			t.Fatalf("response missing %s: %s", field, rec.Body.String())
 		}
@@ -100,7 +100,7 @@ func TestCommunicationsTriageConvertUsesCommittedEmailConversionCommandEvents(t 
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	if len(durable) != 5 || durable[0].Type != store.WorkItemEmailConvertedEventType || durable[2].Type != store.WorkItemLogicGateAssignmentSavedEventType {
+	if len(durable) != 4 || durable[0].Type != store.WorkItemEmailConvertedEventType || durable[2].Type != store.WorkItemLogicGateAssignmentSavedEventType {
 		t.Fatalf("durable events = %+v, want committed conversion events", durable)
 	}
 }

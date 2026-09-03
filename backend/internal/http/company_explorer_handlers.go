@@ -794,8 +794,6 @@ func (s *Server) requireCompanyExplorerDeleteTargetEdit(w http.ResponseWriter, r
 		return s.requireEntityEdit(w, r, companyID, store.EntityTypeLogicGate, id, "logic_gate_not_found")
 	case store.EntityTypeProject:
 		return s.requireEntityEdit(w, r, companyID, store.EntityTypeProject, id, "project_not_found")
-	case "kanban":
-		return s.requireKanbanBoardEdit(w, r, companyID, id, "")
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_company_explorer_delete_target")
 		return false

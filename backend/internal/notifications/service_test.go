@@ -385,8 +385,8 @@ func TestProcessDomainEventLogicGateWorkReviewMoveNotifiesRACIRecipients(t *test
 	if err != nil {
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
-	if assigned.Assignment.StatusKey != store.LogicGateWorkStatusPending {
-		t.Fatalf("assigned status = %q, want pending", assigned.Assignment.StatusKey)
+	if assigned.Node.Status == nil || *assigned.Node.Status != "Pending" {
+		t.Fatalf("assigned status = %v, want pending", assigned.Node.Status)
 	}
 	if _, err := repo.SetResourceRACIAssignments(store.ResourceRACIAssignmentUpdateInput{
 		CompanyID:    companyID,
@@ -411,8 +411,8 @@ func TestProcessDomainEventLogicGateWorkReviewMoveNotifiesRACIRecipients(t *test
 	if err != nil {
 		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
 	}
-	if moved.Assignment.StatusKey != store.LogicGateWorkStatusReview || moved.Node.Status == nil || *moved.Node.Status != "Review" {
-		t.Fatalf("moved status assignment=%q node=%+v, want Review", moved.Assignment.StatusKey, moved.Node.Status)
+	if moved.Node.Status == nil || *moved.Node.Status != "Review" {
+		t.Fatalf("moved node status=%+v, want Review", moved.Node.Status)
 	}
 
 	items, err := service.ProcessDomainEvent(context.Background(), moved.Events[0])
@@ -1090,7 +1090,7 @@ func TestPhase6NotificationSourceShape(t *testing.T) {
 		"../http/notification_handlers.go",
 		"../http/logic_gate_handlers.go",
 		"../http/logic_gate_gvic_command_handlers.go",
-		"../http/kanban_handlers.go",
+		"../http/logic_gate_work_handlers.go",
 		"../store/postgres_notifications.go",
 		"../store/memory_notifications.go",
 		"../store/node_graph_workspace_events.go",

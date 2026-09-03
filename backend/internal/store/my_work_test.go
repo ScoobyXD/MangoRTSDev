@@ -1272,7 +1272,7 @@ func TestPostgresMyWorkQueriesKeepSubjectAndViewerResolutionSetBased(t *testing.
 	for _, required := range []string{
 		"process_count_node_targets(resource_type,resource_id)",
 		`myWorkPermissionAccessCTEs("process_count_node_targets", "process_count_node")`,
-		"node_access.resource_id=projection.node_id and node_access.allowed",
+		"node_access.resource_id=assignment.node_id and node_access.allowed",
 	} {
 		if !strings.Contains(processQuery, required) {
 			t.Fatalf("My Work Process counts missing viewer-visible Node contract %q", required)

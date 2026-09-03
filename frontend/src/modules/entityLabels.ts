@@ -3,9 +3,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export function isLikelyOpaqueEntityID(value: string): boolean {
   const clean = value.trim();
   if (!clean) return false;
-  if (UUID_PATTERN.test(clean)) return true;
-  const logicGatePrefix = "logic-gate:";
-  return clean.toLowerCase().startsWith(logicGatePrefix) && UUID_PATTERN.test(clean.slice(logicGatePrefix.length).trim());
+  return UUID_PATTERN.test(clean);
 }
 
 export function humanLabelOrFallback(value: string | undefined | null, fallback: string): string {

@@ -1,8 +1,7 @@
 import { markCommunicationsWorkspaceResourcesStale } from "../modules/communications/communicationsApi.js";
 import type { CommittedEntityTitleUpdate } from "../modules/realtime/committedEntityTitleUpdates.js";
 import { invalidateLogicGateRecordStoreCaches } from "../modules/logic-gates/logicGateRecordStore.js";
-import { reconcileKanbanBoardContentTitles } from "../modules/kanban/KanbanBoardContentStore.js";
-import { invalidateKanbanBoardListCache } from "../modules/kanban/kanbanApi.js";
+import { reconcileProcessWorkTitles } from "../modules/kanban/ProcessWorkStore.js";
 import { invalidateNodeRecordStoreCaches } from "../modules/nodes/nodeRecordStore.js";
 import { reconcileNodeRelationshipGraphTitle } from "../modules/nodes/nodeRelationshipGraph.js";
 import { invalidateProjectRelationshipsForResource } from "../modules/project-management/projectManagementApi.js";
@@ -20,7 +19,7 @@ export function reconcileCachesForCommittedEntityTitle(
     resourceType: update.entityType,
     resourceID,
   });
-  reconcileKanbanBoardContentTitles(apiBase, companyID, update);
+  reconcileProcessWorkTitles(apiBase, companyID, update);
   if (update.entityType === "node") {
     invalidateNodeRecordStoreCaches(apiBase, companyID, resourceID);
     markCommunicationsWorkspaceResourcesStale(companyID, { nodes: true });
@@ -30,5 +29,4 @@ export function reconcileCachesForCommittedEntityTitle(
 
   invalidateLogicGateRecordStoreCaches(apiBase, companyID, resourceID);
   markCommunicationsWorkspaceResourcesStale(companyID, { logicGates: true });
-  invalidateKanbanBoardListCache(apiBase, companyID);
 }

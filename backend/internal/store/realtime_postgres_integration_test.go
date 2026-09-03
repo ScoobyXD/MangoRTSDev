@@ -188,7 +188,7 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 	}
 
 	t.Run("Logic Gate create update and mounted board", func(t *testing.T) {
-		forceRealtimeOutboxEvent(t, db, "kanban.changed", true)
+		forceRealtimeOutboxEvent(t, db, ProcessWorkChangedEventType, true)
 		if _, _, err := repo.CreateLogicGateWithWorkspaceEvent(company.CompanyID, "rolled back", ""); err == nil {
 			t.Fatal("Logic Gate create succeeded with forced outbox failure")
 		}
@@ -199,12 +199,12 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 			t.Fatalf("rolled-back domain events = %d", got)
 		}
 
-		forceRealtimeOutboxEvent(t, db, "kanban.changed", false)
+		forceRealtimeOutboxEvent(t, db, ProcessWorkChangedEventType, false)
 		gate, event, err := repo.CreateLogicGateWithWorkspaceEvent(company.CompanyID, "committed", "")
 		if err != nil || event.Type != "logic_gate_created" {
 			t.Fatalf("committed Logic Gate = %+v event=%+v err=%v", gate, event, err)
 		}
-		forceRealtimeOutboxEvent(t, db, "kanban.changed", true)
+		forceRealtimeOutboxEvent(t, db, ProcessWorkChangedEventType, true)
 		if _, _, err := repo.UpdateLogicGateHeaderWithWorkspaceEvent(company.CompanyID, gate.LogicGateID, "not committed"); err == nil {
 			t.Fatal("Logic Gate update succeeded with forced outbox failure")
 		}
@@ -215,7 +215,7 @@ func TestPostgresRealtimeProducersAreTransactionallyAtomic(t *testing.T) {
 		if _, _, err := repo.UpdateLogicGateHeaderWithWorkspaceEvent(company.CompanyID, "00000000-0000-4000-8000-000000000099", "missing"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("missing Logic Gate update = %v", err)
 		}
-		forceRealtimeOutboxEvent(t, db, "kanban.changed", false)
+		forceRealtimeOutboxEvent(t, db, ProcessWorkChangedEventType, false)
 	})
 
 	node, err := repo.CreateNode(company.CompanyID, "Realtime node")
@@ -422,9 +422,9 @@ func TestPostgresRealtimeRecycleRestorePreservesProjectAssociationsAndResponsibl
 		t.Fatal(err)
 	}
 	if got := countPostgresRows(t, db,
-		"select count(*) from kanban_board_projection where company_id=$1::uuid and logic_gate_id=$2::uuid and node_id=$3::uuid",
+		"select count(*) from node_logic_gate_assignments where company_id=$1::uuid and logic_gate_id=$2::uuid and node_id=$3::uuid",
 		company.CompanyID, logicGate.LogicGateID, node.NodeID); got != 1 {
-		t.Fatalf("kanban projection rows before delete = %d, want 1", got)
+		t.Fatalf("Process assignment rows before delete = %d, want 1", got)
 	}
 
 	deleted, err := repo.DeleteCompanyExplorerTargets(company.CompanyID, []CompanyExplorerDeleteTargetInput{{
@@ -481,8 +481,8 @@ func TestPostgresRealtimeRecycleRestorePreservesProjectAssociationsAndResponsibl
 		t.Fatalf("GetNode after restore: %v", err)
 	}
 	if got := countPostgresRows(t, db,
-		"select count(*) from kanban_board_projection where company_id=$1::uuid and logic_gate_id=$2::uuid and node_id=$3::uuid",
+		"select count(*) from node_logic_gate_assignments where company_id=$1::uuid and logic_gate_id=$2::uuid and node_id=$3::uuid",
 		company.CompanyID, logicGate.LogicGateID, node.NodeID); got != 1 {
-		t.Fatalf("kanban projection rows after restore = %d, want 1", got)
+		t.Fatalf("Process assignment rows after restore = %d, want 1", got)
 	}
 }

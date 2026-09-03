@@ -7,191 +7,79 @@ import (
 	"miraeopus/backend/internal/domain"
 )
 
-func (r *PostgresRepo) GetLogicGateWork(companyID, logicGateID string) (domain.LogicGateWorkView, error) {
-	companyID = cleanUUIDText(companyID)
-	logicGateID = cleanUUIDText(logicGateID)
-	if companyID == "" || logicGateID == "" {
+func (r *PostgresRepo) GetLogicGateWork(companyID, logicGateID, userID string) (domain.LogicGateWorkView, error) {
+	if cleanUUIDText(companyID) == "" || cleanUUIDText(logicGateID) == "" || userID != "" && cleanUUIDText(userID) == "" {
 		return domain.LogicGateWorkView{}, ErrInvalid
 	}
-
-	rows, err := r.db.QueryContext(context.Background(), `
-with gate_metadata as (
-  select
-    gate.company_id::text as company_id,
-    gate.logic_gate_id::text as logic_gate_id,
-    gate.header,
-    source_setting.default_access,
-    coalesce((
-      select assignment.user_id::text
-      from mangorts_v2_effective_gvic_assignments(gate.company_id,'logic_gate',gate.logic_gate_id) assignment
-      where assignment.role='responsible'
-      order by assignment.user_id
-      limit 1
-    ), '') as request_owner_user_id,
-    gate.created_timestamp
-  from logic_gates gate
-  cross join lateral mangorts_v2_resolve_permission_policy(gate.company_id,'logic_gate',gate.logic_gate_id) resolved
-  join resource_permission_settings source_setting
-    on source_setting.company_id=gate.company_id
-   and source_setting.resource_type=resolved.source_resource_type
-   and source_setting.resource_id=resolved.source_resource_id
-  where gate.company_id=$1::uuid
-    and gate.logic_gate_id=$2::uuid
-)select
-  gate.company_id,
-  gate.logic_gate_id,
-  gate.header,
-  gate.default_access,
-  gate.request_owner_user_id,
-  gate.created_timestamp,
-  projection.compatibility_card_id::text,
-  `+kanbanProjectionCanonicalStatusSQL+`,
-  projection.node_id::text,
-  projection.title,
-  coalesce(projection.requested_by_user_id::text, ''),
-  coalesce(projection.placed_by_user_id::text, ''),
-  projection.is_issue,
-  projection.position,
-  projection.due_date::text,
-  projection.priority,
-  exists (
-    select 1
-    from email_relationships relationship
-    where relationship.company_id=projection.company_id
-      and relationship.resource_type='node'
-      and relationship.resource_id=projection.node_id
-  ) as created_from_email,
-  exists (
-    select 1 from project_relationships relationship
-    where relationship.company_id=projection.company_id
-      and relationship.resource_type='node'
-      and relationship.resource_id=projection.node_id
-  ) as has_project,
-  projection.projection_updated_timestamp,
-  projection.assignment_created_timestamp,
-  projection.accounts::text
-from gate_metadata gate
-left join kanban_board_projection projection
-  on projection.company_id=$1::uuid
- and projection.logic_gate_id=$2::uuid
-order by
-  projection.status_rank asc nulls last,
-  projection.position asc nulls last,
-  projection.assignment_created_timestamp asc nulls last,
-  projection.assignment_id asc nulls last`,
-		companyID,
-		logicGateID,
-	)
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
 	if err != nil {
 		return domain.LogicGateWorkView{}, err
 	}
-	defer rows.Close()
-
-	var work domain.LogicGateWorkView
-	var found bool
+	defer tx.Rollback()
+	work := domain.LogicGateWorkView{Steps: []domain.ProcessStep{}, Relationships: []domain.ResourceOperationalRelationship{}, Nodes: []domain.LogicGateWorkNode{}}
+	err = tx.QueryRowContext(ctx, `select gate.logic_gate_id::text,gate.header,source_setting.default_access,exists(select 1 from mangorts_v2_effective_gvic_assignments(gate.company_id,'logic_gate',gate.logic_gate_id) a where a.role='responsible' and a.user_id=nullif($3,'')::uuid) from logic_gates gate cross join lateral mangorts_v2_resolve_permission_policy(gate.company_id,'logic_gate',gate.logic_gate_id) resolved join resource_permission_settings source_setting on source_setting.company_id=gate.company_id and source_setting.resource_type=resolved.source_resource_type and source_setting.resource_id=resolved.source_resource_id where gate.company_id=$1::uuid and gate.logic_gate_id=$2::uuid`, companyID, logicGateID, userID).Scan(&work.LogicGate.LogicGateID, &work.LogicGate.Header, &work.LogicGate.DefaultAccess, &work.Permissions.CanResolveRequests)
+	if errors.Is(err, sql.ErrNoRows) {
+		return work, ErrNotFound
+	}
+	if err != nil {
+		return work, err
+	}
+	rows, err := tx.QueryContext(ctx, `select `+processStepSelectColumns+` from process_steps where company_id=$1::uuid and logic_gate_id=$2::uuid order by position,process_step_id`, companyID, logicGateID)
+	if err != nil {
+		return work, err
+	}
 	for rows.Next() {
-		var (
-			gateCompanyID     string
-			gateID            string
-			gateHeader        string
-			defaultAccess     string
-			requestOwnerID    string
-			gateCreated       sql.NullTime
-			cardID            sql.NullString
-			columnID          sql.NullString
-			nodeID            sql.NullString
-			nodeTitle         sql.NullString
-			requestedByUserID sql.NullString
-			placedByUserID    sql.NullString
-			isIssue           sql.NullBool
-			position          sql.NullInt64
-			dueDate           sql.NullString
-			priority          sql.NullInt64
-			createdFromEmail  bool
-			hasProject        bool
-			projectionUpdated sql.NullTime
-			cardCreated       sql.NullTime
-			accountsJSON      sql.NullString
-		)
-		if err := rows.Scan(
-			&gateCompanyID,
-			&gateID,
-			&gateHeader,
-			&defaultAccess,
-			&requestOwnerID,
-			&gateCreated,
-			&cardID,
-			&columnID,
-			&nodeID,
-			&nodeTitle,
-			&requestedByUserID,
-			&placedByUserID,
-			&isIssue,
-			&position,
-			&dueDate,
-			&priority,
-			&createdFromEmail,
-			&hasProject,
-			&projectionUpdated,
-			&cardCreated,
-			&accountsJSON,
-		); err != nil {
-			return domain.LogicGateWorkView{}, err
+		step, err := scanProcessStep(rows)
+		if err != nil {
+			rows.Close()
+			return work, err
 		}
-		if !found {
-			logicGate := domain.LogicGate{
-				CompanyID:        gateCompanyID,
-				LogicGateID:      gateID,
-				Header:           gateHeader,
-				DefaultAccess:    defaultAccess,
-				CreatedTimestamp: gateCreated.Time,
-			}
-			board := synthesizeLogicGateWorkBoard(logicGate)
-			work = domain.LogicGateWorkView{
-				LogicGate: domain.LogicGateWorkHeader{
-					LogicGateID:        gateID,
-					Header:             gateHeader,
-					DefaultAccess:      defaultResourceAccessOrEdit(defaultAccess),
-					RequestOwnerUserID: requestOwnerID,
-				},
-				Board:   board,
-				Columns: synthesizeLogicGateWorkColumns(gateCompanyID, board.BoardID, gateCreated.Time),
-				Cards:   []domain.LogicGateWorkCard{},
-			}
-			found = true
-		}
-		if !cardID.Valid {
-			continue
-		}
-		card := domain.LogicGateWorkCard{
-			CardID:                     cardID.String,
-			ColumnID:                   columnID.String,
-			NodeID:                     nodeID.String,
-			NodeTitle:                  nodeTitle.String,
-			RequestedByUserID:          requestedByUserID.String,
-			PlacedByUserID:             placedByUserID.String,
-			IsIssue:                    isIssue.Bool,
-			Position:                   int(position.Int64),
-			CreatedFromEmail:           createdFromEmail,
-			HasProject:                 hasProject,
-			ProjectionUpdatedTimestamp: projectionUpdated.Time,
-			CreatedTimestamp:           cardCreated.Time,
-			Accounts:                   scanAccountSnapshotsJSON(accountsJSON),
-		}
-		if dueDate.Valid {
-			card.DueDate = &dueDate.String
-		}
-		if priority.Valid {
-			value := int(priority.Int64)
-			card.Priority = &value
-		}
-		work.Cards = append(work.Cards, card)
+		work.Steps = append(work.Steps, step)
 	}
-	if err := rows.Err(); err != nil {
-		return domain.LogicGateWorkView{}, err
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return work, err
 	}
-	if !found {
-		return domain.LogicGateWorkView{}, ErrNotFound
+	rows, err = tx.QueryContext(ctx, `select edge.company_id::text,edge.resource_operational_relationship_id::text,edge.source_resource_type,edge.source_resource_id::text,edge.target_resource_type,edge.target_resource_id::text,edge.created_timestamp from resource_operational_relationships edge join process_steps source on source.company_id=edge.company_id and source.process_step_id=edge.source_resource_id join process_steps target on target.company_id=edge.company_id and target.process_step_id=edge.target_resource_id where edge.company_id=$1::uuid and edge.source_resource_type='process_step' and edge.target_resource_type='process_step' and source.logic_gate_id=$2::uuid and target.logic_gate_id=$2::uuid order by edge.resource_operational_relationship_id`, companyID, logicGateID)
+	if err != nil {
+		return work, err
+	}
+	for rows.Next() {
+		edge, err := scanResourceOperationalRelationship(rows)
+		if err != nil {
+			rows.Close()
+			return work, err
+		}
+		work.Relationships = append(work.Relationships, edge)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return work, err
+	}
+	rows, err = tx.QueryContext(ctx, `select n.node_id::text,n.name,coalesce(n.status,'Pending'),a.process_step_id::text,a.is_issue,a.position,coalesce(a.requested_by_user_id::text,''),coalesce(a.placed_by_user_id::text,''),n.due_date::text,n.priority,a.created_timestamp,coalesce(account_snapshot.accounts_json,'[]')::text,exists(select 1 from email_relationships e where e.company_id=n.company_id and e.resource_type='node' and e.resource_id=n.node_id),exists(select 1 from project_relationships p where p.company_id=n.company_id and p.resource_type='node' and p.resource_id=n.node_id) from node_logic_gate_assignments a join nodes n on n.company_id=a.company_id and n.node_id=a.node_id `+postgresAccountSnapshotsForNodeLateralSQL("n")+` where a.company_id=$1::uuid and a.logic_gate_id=$2::uuid and ($3='' or mangorts_user_can_access_resource(n.company_id,'node',n.node_id,nullif($3,'')::uuid,'edit')) order by a.position,a.created_timestamp,n.node_id`, companyID, logicGateID, userID)
+	if err != nil {
+		return work, err
+	}
+	for rows.Next() {
+		var item domain.LogicGateWorkNode
+		var accounts sql.NullString
+		if err := rows.Scan(&item.NodeID, &item.NodeTitle, &item.Status, &item.ProcessStepID, &item.IsIssue, &item.Position, &item.RequestedByUserID, &item.PlacedByUserID, &item.DueDate, &item.Priority, &item.CreatedTimestamp, &accounts, &item.CreatedFromEmail, &item.HasProject); err != nil {
+			rows.Close()
+			return work, err
+		}
+		item.Accounts = scanAccountSnapshotsJSON(accounts)
+		work.Nodes = append(work.Nodes, item)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return work, err
+	}
+	if err = tx.Commit(); err != nil {
+		return work, err
 	}
 	return work, nil
 }

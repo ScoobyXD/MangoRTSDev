@@ -42,73 +42,11 @@ func scanCommunicationsEmailPlacement(row interface {
 		&placement.UserID,
 		&placement.MessageID,
 		&placement.NodeID,
-		&placement.BoardID,
-		&placement.CardID,
 		&placement.LogicGateID,
 		&placement.CreatedTimestamp,
 		&placement.UpdatedTimestamp,
 	)
 	return placement, err
-}
-
-type postgresCommunicationsEmailNodeReference struct {
-	CompanyID        string
-	UserID           string
-	MessageID        string
-	NodeID           string
-	Message          []byte
-	CreatedTimestamp time.Time
-}
-
-func takePostgresCommunicationsEmailNodeReferenceForCardTx(ctx context.Context, tx *sql.Tx, companyID, nodeID, boardID, cardID string) (postgresCommunicationsEmailNodeReference, bool, error) {
-	var reference postgresCommunicationsEmailNodeReference
-	err := tx.QueryRowContext(ctx, `
-select relationship.company_id::text,'',message.provider_message_id,
-       relationship.resource_id::text,
-       jsonb_build_object(
-        'id',message.provider_message_id,'thread_id',thread.provider_thread_id,
-        'subject',message.subject,'snippet',message.snippet,
-        'body',case when btrim(message.rich_html_body)<>'' then message.rich_html_body else message.text_fallback end,
-        'date',coalesce(floor(extract(epoch from message.message_timestamp)*1000)::bigint,0),
-        'unread',message.unread,'starred',message.starred,
-        'from',message.sender_snapshot,'to',message.to_snapshot,'cc',message.cc_snapshot,
-        'bcc',message.bcc_snapshot,'reply_to',message.reply_to_snapshot,
-        'attachments',message.attachment_metadata,'folders',message.folder_snapshot,
-        'folder_ids',message.folder_id_snapshot,'download_complete',message.download_complete),
-       relationship.created_timestamp
-from email_relationships relationship
-join email_threads thread on thread.company_id=relationship.company_id and thread.email_thread_id=relationship.email_thread_id
-join email_messages message on message.company_id=relationship.company_id
- and message.email_thread_id=relationship.email_thread_id and message.email_message_id=relationship.email_message_id
-join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
- and assignment.node_id=relationship.resource_id
-where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_id=$2::uuid and relationship.resource_textbox_id is null
- and assignment.compatibility_board_id=$3 and assignment.compatibility_card_id=$4::uuid
-order by relationship.created_timestamp limit 1`, companyID, nodeID, boardID, cardID).Scan(
-		&reference.CompanyID, &reference.UserID, &reference.MessageID, &reference.NodeID,
-		&reference.Message, &reference.CreatedTimestamp)
-	if errors.Is(err, sql.ErrNoRows) {
-		return postgresCommunicationsEmailNodeReference{}, false, nil
-	}
-	if err != nil {
-		return postgresCommunicationsEmailNodeReference{}, false, err
-	}
-	return reference, true, nil
-}
-
-func restorePostgresCommunicationsEmailNodeReferenceTx(ctx context.Context, tx *sql.Tx, reference postgresCommunicationsEmailNodeReference, boardID, cardID, logicGateID string) error {
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `
-select exists(select 1 from email_relationships
- where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid)`,
-		reference.CompanyID, reference.NodeID).Scan(&exists); err != nil {
-		return err
-	}
-	if !exists {
-		return ErrNotFound
-	}
-	return nil
 }
 
 func (r *PostgresRepo) UpsertCommunicationsTriageItem(userID string, message domain.EmailMessageSnapshot) (domain.CommunicationsTriageItem, error) {
@@ -251,26 +189,23 @@ where company_id=$1 and logic_gate_id=$2`, input.CompanyID, input.LogicGateID).S
 		}
 		return result, nil
 	}
-	board := synthesizeKanbanBoardFromLogicGate(logicGate, 1000)
-	columns := synthesizeLogicGateWorkColumns(input.CompanyID, board.BoardID, logicGate.CreatedTimestamp)
-	column, err := resolveLogicGateAssignmentColumn(columns, input.ColumnID, input.Status)
+	if input.ProcessStepID != nil {
+		var validStep bool
+		if err := tx.QueryRowContext(ctx, `select exists(select 1 from process_steps where company_id=$1::uuid and logic_gate_id=$2::uuid and process_step_id=$3::uuid)`, input.CompanyID, input.LogicGateID, *input.ProcessStepID).Scan(&validStep); err != nil {
+			return CommunicationsTriageConversionResult{}, err
+		}
+		if !validStep {
+			return CommunicationsTriageConversionResult{}, ErrInvalid
+		}
+	}
+	nextPosition, err := nextLogicGateAssignmentPositionTx(ctx, tx, input.CompanyID, input.LogicGateID)
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
-
-	var nextPosition int
-	if err := tx.QueryRowContext(ctx, `
-select coalesce(max(position), 0) + 1000
-from node_logic_gate_assignments
-where company_id=$1 and compatibility_board_id=$2 and column_id=$3`, input.CompanyID, board.BoardID, column.ColumnID).Scan(&nextPosition); err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
-
 	result := CommunicationsTriageConversionResult{
 		Target:           input.Target,
 		LogicGate:        logicGate,
 		CreatedLogicGate: createdLogicGate,
-		Board:            board,
 	}
 	for index, messageID := range input.MessageIDs {
 		var rawMessage []byte
@@ -297,39 +232,25 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 		nodeID := newUUIDv7String()
 		nodeTitle := emailNodeTitle(message)
 		if _, err := tx.ExecContext(ctx, `
-insert into nodes (company_id, node_id, name, priority, created_timestamp)
-values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, input.Priority); err != nil {
+insert into nodes (company_id, node_id, name, priority, status, created_timestamp)
+values ($1, $2, $3, $4::smallint, $5, now())`, input.CompanyID, nodeID, nodeTitle, input.Priority, input.Status); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 
-		cardID := newUUIDv7String()
-		position := nextPosition + index*1000
 		assignment, err := upsertNodeLogicGateAssignmentSQL(ctx, tx, nodeLogicGateAssignmentSQLInput{
-			CompanyID:            input.CompanyID,
-			NodeID:               nodeID,
-			LogicGateID:          input.LogicGateID,
-			StatusKey:            logicGateAssignmentStatusKey(column.Title),
-			ColumnID:             column.ColumnID,
-			IsIssue:              false,
-			Position:             position,
-			CompatibilityBoardID: board.BoardID,
-			CompatibilityCardID:  cardID,
-			RequestedByUserID:    input.ActorUserID,
+			CompanyID: input.CompanyID, NodeID: nodeID, LogicGateID: input.LogicGateID,
+			ProcessStepID:     input.ProcessStepID,
+			Position:          nextPosition + index*1000,
+			RequestedByUserID: requestedByUserIDForLogicGateStatus(input.Status, input.ActorUserID, ""),
+			PlacedByUserID:    input.ActorUserID,
 		})
-		if err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		if err := syncNodeStatusFromLogicGateAssignmentTx(ctx, tx, assignment); err != nil {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		card, err := nodeLogicGateAssignmentCardSQL(ctx, tx, assignment)
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		now := time.Now().UTC()
 		placement := domain.CommunicationsEmailPlacement{
 			CompanyID: input.CompanyID, UserID: input.UserID, MessageID: messageID, NodeID: nodeID,
-			BoardID: board.BoardID, CardID: card.CardID, LogicGateID: input.LogicGateID,
+			LogicGateID:      input.LogicGateID,
 			CreatedTimestamp: now, UpdatedTimestamp: now,
 		}
 		emailInput := input
@@ -354,12 +275,6 @@ where user_id=$1 and message_id=$2`, input.UserID, messageID); err != nil {
 		if err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
-		if projectedCard, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, nodeID, input.LogicGateID); err == nil {
-			card = projectedCard
-		} else {
-			return CommunicationsTriageConversionResult{}, err
-		}
-		card.CreatedFromEmail = true
 		if input.Target.ProjectID != "" {
 			relationships, err := upsertCommunicationsTriageProjectRelationshipTx(ctx, tx, input, nodeID)
 			if err != nil {
@@ -381,12 +296,9 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, nodeID))
 			MessageID:   placement.MessageID,
 			ThreadID:    strings.TrimSpace(message.ThreadID),
 			NodeID:      placement.NodeID,
-			BoardID:     placement.BoardID,
-			CardID:      placement.CardID,
 			LogicGateID: placement.LogicGateID,
 		}
 		result.Nodes = append(result.Nodes, node)
-		result.Cards = append(result.Cards, card)
 		result.Assignments = append(result.Assignments, assignment)
 		result.EmailPlacements = append(result.EmailPlacements, placement)
 		result.EmailProvenance = append(result.EmailProvenance, provenance)
@@ -516,8 +428,8 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 		nodeID := newUUIDv7String()
 		nodeTitle := emailNodeTitle(message)
 		if _, err := tx.ExecContext(ctx, `
-insert into nodes (company_id, node_id, name, priority, created_timestamp)
-values ($1, $2, $3, $4::smallint, now())`, input.CompanyID, nodeID, nodeTitle, input.Priority); err != nil {
+insert into nodes (company_id, node_id, name, priority, status, created_timestamp)
+values ($1, $2, $3, $4::smallint, $5, now())`, input.CompanyID, nodeID, nodeTitle, input.Priority, input.Status); err != nil {
 			return CommunicationsTriageConversionResult{}, err
 		}
 		emailInput := input
@@ -604,11 +516,6 @@ func (r *PostgresRepo) attachCommunicationsTriageItemsToExistingNodeTx(ctx conte
 	if err != nil {
 		return CommunicationsTriageConversionResult{}, err
 	}
-	card, err := nodeLogicGateAssignmentCardSQL(ctx, tx, assignment)
-	if err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
-	board := synthesizeKanbanBoardFromLogicGate(logicGate, 1000)
 	updateResult, err := tx.ExecContext(ctx, `
 update nodes
 set priority=case when $3::boolean then $4::smallint else priority end
@@ -625,7 +532,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, input.Priori
 	result := CommunicationsTriageConversionResult{
 		Target:    input.Target,
 		LogicGate: logicGate,
-		Board:     board,
 	}
 	result.Target.Header = logicGate.Header
 	err = syncNodeLogicGateAssignmentProjectionDependenciesTx(ctx, tx, NodeLogicGateAssignmentProjectionDependencyInput{
@@ -634,11 +540,6 @@ where company_id=$1 and node_id=$2`, input.CompanyID, input.NodeID, input.Priori
 		NodeID:       input.NodeID,
 	})
 	if err != nil {
-		return CommunicationsTriageConversionResult{}, err
-	}
-	if projectedCard, err := kanbanBoardProjectionCardByNodeTx(ctx, tx, input.CompanyID, input.NodeID, input.LogicGateID); err == nil {
-		card = projectedCard
-	} else {
 		return CommunicationsTriageConversionResult{}, err
 	}
 	for _, messageID := range input.MessageIDs {
@@ -666,7 +567,7 @@ for update`, input.UserID, messageID).Scan(&rawMessage); errors.Is(err, sql.ErrN
 		now := time.Now().UTC()
 		placement := domain.CommunicationsEmailPlacement{
 			CompanyID: input.CompanyID, UserID: input.UserID, MessageID: messageID, NodeID: input.NodeID,
-			BoardID: card.BoardID, CardID: card.CardID, LogicGateID: input.LogicGateID,
+			LogicGateID:      input.LogicGateID,
 			CreatedTimestamp: now, UpdatedTimestamp: now,
 		}
 		informationID, emailThreadID, emailMessageID, err := r.persistCommunicationsConversionEmailTx(ctx, tx, input, message, time.Now().UTC())
@@ -695,12 +596,9 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 			MessageID:   placement.MessageID,
 			ThreadID:    strings.TrimSpace(message.ThreadID),
 			NodeID:      placement.NodeID,
-			BoardID:     placement.BoardID,
-			CardID:      placement.CardID,
 			LogicGateID: placement.LogicGateID,
 		}
 		result.Nodes = append(result.Nodes, node)
-		result.Cards = append(result.Cards, card)
 		result.Assignments = append(result.Assignments, assignment)
 		result.EmailPlacements = append(result.EmailPlacements, placement)
 		result.EmailProvenance = append(result.EmailProvenance, provenance)
@@ -730,8 +628,6 @@ func (r *PostgresRepo) ListCommunicationsEmailPlacements(userID, companyID strin
 	rows, err := r.db.Query(`
 select relationship.company_id::text,$1::text,message.provider_message_id,
        relationship.resource_id::text,
-       coalesce(assignment.compatibility_board_id,''),
-       coalesce(assignment.compatibility_card_id::text,''),
        coalesce(assignment.logic_gate_id::text,''),
        relationship.created_timestamp,
        greatest(relationship.created_timestamp,message.updated_timestamp)
@@ -780,8 +676,6 @@ func (r *PostgresRepo) ListCommunicationsEmailPlacementsForConnection(userID, co
 	rows, err := r.db.Query(`
 select relationship.company_id::text,$1::text,message.provider_message_id,
        relationship.resource_id::text,
-       coalesce(assignment.compatibility_board_id,''),
-       coalesce(assignment.compatibility_card_id::text,''),
        coalesce(assignment.logic_gate_id::text,''),
        relationship.created_timestamp,
        greatest(relationship.created_timestamp,message.updated_timestamp)
@@ -878,57 +772,15 @@ where relationship.company_id=$1::uuid and relationship.resource_type='node'
 	return relationshipID, nil
 }
 
-func deletePostgresCommunicationsEmailSourceNodeTx(ctx context.Context, tx *sql.Tx, companyID string, link communicationsEmailNodeLink) error {
-	if err := retireResourceSharedEmailDraftAttachmentsTx(ctx, tx, companyID, EntityTypeNode, link.NodeID); err != nil {
-		return err
-	}
-	if err := retireNodeChatAttachmentRelationshipsTx(ctx, tx, companyID, link.NodeID); err != nil {
-		return err
-	}
-	if err := retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeNode, link.NodeID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `delete from email_relationships where company_id=$1::uuid and resource_type='node' and resource_id=$2::uuid`, companyID, link.NodeID); err != nil {
-		return err
-	}
-	result, err := tx.ExecContext(ctx, `delete from nodes where company_id=$1::uuid and node_id=$2::uuid`, companyID, link.NodeID)
-	if err != nil {
-		return err
-	}
-	if rows, _ := result.RowsAffected(); rows != 1 {
-		return ErrNotFound
-	}
-	return nil
-}
-
-func loadPostgresCommunicationsEmailNodeLinkForCardTx(ctx context.Context, tx *sql.Tx, companyID, userID, boardID, cardID string) (communicationsEmailNodeLink, error) {
-	var nodeID string
-	err := tx.QueryRowContext(ctx, `
-select relationship.resource_id::text
-from email_relationships relationship
-join node_logic_gate_assignments assignment on assignment.company_id=relationship.company_id
- and assignment.node_id=relationship.resource_id
-where relationship.company_id=$1::uuid and relationship.resource_type='node'
- and relationship.resource_textbox_id is null
- and assignment.compatibility_board_id=$3 and assignment.compatibility_card_id=$4::uuid
- and ($2='' or mangorts_user_can_access_resource(relationship.company_id,'node',
-     relationship.resource_id,$2::uuid,'edit'))
-order by relationship.created_timestamp limit 1`, companyID, userID, boardID, cardID).Scan(&nodeID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return communicationsEmailNodeLink{}, ErrNotFound
-	}
-	if err != nil {
-		return communicationsEmailNodeLink{}, err
-	}
+func loadPostgresCommunicationsEmailNodeLinkTx(ctx context.Context, tx *sql.Tx, companyID, userID, nodeID string) (communicationsEmailNodeLink, error) {
 	if err := lockResourceSharedEmailDraftOwnerTx(ctx, tx, companyID, EntityTypeNode, nodeID); err != nil {
 		return communicationsEmailNodeLink{}, err
 	}
 	var link communicationsEmailNodeLink
 	var raw []byte
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 select relationship.company_id::text,$2::text,message.provider_message_id,
-       relationship.resource_id::text,assignment.compatibility_board_id,
-       assignment.compatibility_card_id::text,assignment.logic_gate_id::text,
+       relationship.resource_id::text,assignment.logic_gate_id::text,
        jsonb_build_object(
         'id',message.provider_message_id,'thread_id',thread.provider_thread_id,
         'subject',message.subject,'snippet',message.snippet,
@@ -948,13 +800,12 @@ join node_logic_gate_assignments assignment on assignment.company_id=relationshi
  and assignment.node_id=relationship.resource_id
 where relationship.company_id=$1::uuid and relationship.resource_type='node'
  and relationship.resource_textbox_id is null
- and assignment.compatibility_board_id=$3 and assignment.compatibility_card_id=$4::uuid
- and relationship.resource_id=$5::uuid
+ and relationship.resource_id=$3::uuid
  and ($2='' or mangorts_user_can_access_resource(relationship.company_id,'node',
      relationship.resource_id,$2::uuid,'edit'))
 order by relationship.created_timestamp limit 1
-for update of relationship`, companyID, userID, boardID, cardID, nodeID).Scan(
-		&link.CompanyID, &link.UserID, &link.MessageID, &link.NodeID, &link.BoardID, &link.CardID,
+for update of relationship`, companyID, userID, nodeID).Scan(
+		&link.CompanyID, &link.UserID, &link.MessageID, &link.NodeID,
 		&link.LogicGateID, &raw, &link.CreatedTimestamp, &link.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return communicationsEmailNodeLink{}, ErrNotFound
@@ -980,47 +831,43 @@ func (r *PostgresRepo) TransferCommunicationsEmailNode(input CommunicationsEmail
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
 	defer tx.Rollback()
-	link, err := loadPostgresCommunicationsEmailNodeLinkForCardTx(ctx, tx, input.CompanyID, input.UserID, input.SourceBoardID, input.SourceCardID)
+	link, err := loadPostgresCommunicationsEmailNodeLinkTx(ctx, tx, input.CompanyID, input.UserID, input.SourceNodeID)
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
-	targetCard, err := scanKanbanCard(tx.QueryRowContext(ctx, `
-select `+kanbanBoardProjectionCardSelectColumns+`
-from kanban_board_projection projection
-where projection.company_id=$1::uuid and projection.compatibility_board_id=$2
- and projection.compatibility_card_id=$3::uuid
-for update`, input.CompanyID, input.TargetBoardID, input.TargetCardID))
+	var targetLogicGateID string
+	err = tx.QueryRowContext(ctx, `select assignment.logic_gate_id::text
+from node_logic_gate_assignments assignment
+join nodes node on node.company_id=assignment.company_id and node.node_id=assignment.node_id
+where assignment.company_id=$1::uuid and assignment.node_id=$2::uuid
+for update of node`, input.CompanyID, input.TargetNodeID).Scan(&targetLogicGateID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return CommunicationsEmailNodeTransferResult{}, ErrNotFound
 	}
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
-	targetLogicGateID := ""
-	if targetCard.LogicGateID != nil {
-		targetLogicGateID = strings.TrimSpace(*targetCard.LogicGateID)
-	}
-	if targetLogicGateID == "" || targetCard.NodeID == link.NodeID {
+	if input.TargetNodeID == link.NodeID {
 		return CommunicationsEmailNodeTransferResult{}, ErrInvalid
 	}
 	sharedInboxID, accountEmail, err := emailProjectionMailboxScopeSQL(ctx, tx, input.CompanyID, link.NodeID, link.MessageID)
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
-	if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, targetCard.NodeID, sharedInboxID, accountEmail, link.Message, time.Now().UTC(), false); err != nil {
+	if err := addEmailProjectionSQL(ctx, tx, input.CompanyID, input.TargetNodeID, sharedInboxID, accountEmail, link.Message, time.Now().UTC(), false); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
-	if err := deletePostgresCommunicationsEmailSourceNodeTx(ctx, tx, input.CompanyID, link); err != nil {
+	if err := postgresDeleteNodeWithDependentProjectionsTx(ctx, tx, input.CompanyID, link.NodeID); err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
 	now := time.Now().UTC()
 	placement := domain.CommunicationsEmailPlacement{CompanyID: input.CompanyID, UserID: link.UserID,
-		MessageID: link.MessageID, NodeID: targetCard.NodeID, BoardID: targetCard.BoardID,
-		CardID: targetCard.CardID, LogicGateID: targetLogicGateID, CreatedTimestamp: now, UpdatedTimestamp: now}
+		MessageID: link.MessageID, NodeID: input.TargetNodeID, LogicGateID: targetLogicGateID,
+		CreatedTimestamp: now, UpdatedTimestamp: now}
 	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
-		workspaceDomainEventInput(input.CompanyID, "kanban_card_deleted", map[string]any{"board_id": link.BoardID, "card_id": link.CardID}),
+		workspaceDomainEventInput(input.CompanyID, WorkItemLogicGateAssignmentRemovedEventType, map[string]any{"logic_gate_id": link.LogicGateID, "node_id": link.NodeID}),
 		nodeDeletedWorkspaceEventInput(input.CompanyID, link.NodeID),
-		workspaceDomainEventInput(input.CompanyID, "node_updated", map[string]any{"node_id": targetCard.NodeID}),
+		workspaceDomainEventInput(input.CompanyID, "node_updated", map[string]any{"node_id": input.TargetNodeID}),
 	})
 	if err != nil {
 		return CommunicationsEmailNodeTransferResult{}, err
@@ -1029,16 +876,14 @@ for update`, input.CompanyID, input.TargetBoardID, input.TargetCardID))
 		return CommunicationsEmailNodeTransferResult{}, err
 	}
 	return CommunicationsEmailNodeTransferResult{EmailPlacement: placement, DeletedNodeID: link.NodeID,
-		DeletedCardID: link.CardID, SourceBoardID: link.BoardID, TargetNodeID: targetCard.NodeID,
-		TargetBoardID: targetCard.BoardID, TargetCardID: targetCard.CardID, Events: events}, nil
+		TargetNodeID: input.TargetNodeID, Events: events}, nil
 }
 
 func (r *PostgresRepo) RevertCommunicationsTriageNode(input CommunicationsTriageRevertInput) (CommunicationsTriageRevertResult, error) {
 	input.UserID = cleanUUIDText(input.UserID)
 	input.CompanyID = cleanUUIDText(input.CompanyID)
-	input.BoardID = strings.TrimSpace(input.BoardID)
-	input.CardID = cleanUUIDText(input.CardID)
-	if input.UserID == "" || input.CompanyID == "" || input.BoardID == "" || input.CardID == "" {
+	input.NodeID = cleanUUIDText(input.NodeID)
+	if input.UserID == "" || input.CompanyID == "" || input.NodeID == "" {
 		return CommunicationsTriageRevertResult{}, ErrInvalid
 	}
 	ctx := context.Background()
@@ -1047,7 +892,7 @@ func (r *PostgresRepo) RevertCommunicationsTriageNode(input CommunicationsTriage
 		return CommunicationsTriageRevertResult{}, err
 	}
 	defer tx.Rollback()
-	link, err := loadPostgresCommunicationsEmailNodeLinkForCardTx(ctx, tx, input.CompanyID, input.UserID, input.BoardID, input.CardID)
+	link, err := loadPostgresCommunicationsEmailNodeLinkTx(ctx, tx, input.CompanyID, input.UserID, input.NodeID)
 	if err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
@@ -1064,11 +909,11 @@ returning user_id::text,message_id,message,created_timestamp,updated_timestamp`,
 	if err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
-	if err := deletePostgresCommunicationsEmailSourceNodeTx(ctx, tx, input.CompanyID, link); err != nil {
+	if err := postgresDeleteNodeWithDependentProjectionsTx(ctx, tx, input.CompanyID, link.NodeID); err != nil {
 		return CommunicationsTriageRevertResult{}, err
 	}
 	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
-		workspaceDomainEventInput(input.CompanyID, "kanban_card_deleted", map[string]any{"board_id": input.BoardID, "card_id": input.CardID}),
+		workspaceDomainEventInput(input.CompanyID, WorkItemLogicGateAssignmentRemovedEventType, map[string]any{"logic_gate_id": link.LogicGateID, "node_id": link.NodeID}),
 		nodeDeletedWorkspaceEventInput(input.CompanyID, link.NodeID),
 	})
 	if err != nil {
@@ -1078,5 +923,5 @@ returning user_id::text,message_id,message,created_timestamp,updated_timestamp`,
 		return CommunicationsTriageRevertResult{}, err
 	}
 	return CommunicationsTriageRevertResult{TriageItem: triageItem, DeletedNodeID: link.NodeID,
-		DeletedCardID: input.CardID, BoardID: input.BoardID, Events: events}, nil
+		Events: events}, nil
 }

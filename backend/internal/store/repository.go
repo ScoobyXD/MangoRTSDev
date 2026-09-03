@@ -82,7 +82,7 @@ type Repository interface {
 	HuddleRepository
 	RecycleBinRepository
 	WorkspaceEntityCommandRepository
-	KanbanRepository
+	ProcessWorkRepository
 	ProjectManagementRepository
 	NotificationRepository
 	NodeTimelineRepository
@@ -657,7 +657,7 @@ type EffectiveAccessRepository interface {
 
 type ConsolidatedViewRepository interface {
 	GetNodeView(input NodeViewInput) (domain.NodeView, error)
-	GetLogicGateView(companyID, logicGateID string) (domain.LogicGateView, error)
+	GetLogicGateView(companyID, logicGateID, userID string) (domain.LogicGateView, error)
 }
 
 type SavedViewRepository interface {
@@ -787,7 +787,12 @@ type UserPinGroupResult struct {
 }
 
 type LogicGateWorkRepository interface {
-	GetLogicGateWork(companyID, logicGateID string) (domain.LogicGateWorkView, error)
+	CreateProcessStep(input ProcessStepCreateInput) (ProcessStepMutationResult, error)
+	UpdateProcessStep(input ProcessStepUpdateInput) (ProcessStepMutationResult, error)
+	DeleteProcessStep(input ProcessStepDeleteInput) (ProcessStepMutationResult, error)
+	CreateProcessStepRelationship(input ProcessStepRelationshipInput) (ProcessStepMutationResult, error)
+	DeleteProcessStepRelationship(input ProcessStepRelationshipDeleteInput) (ProcessStepMutationResult, error)
+	GetLogicGateWork(companyID, logicGateID, userID string) (domain.LogicGateWorkView, error)
 	LogicGateWorkAccessFlags(companyID, userID, logicGateID string) (domain.EffectiveAccessFlags, error)
 	CurrentLogicGateWorkVersion(companyID, logicGateID string) (int64, error)
 }
@@ -804,9 +809,6 @@ type WorkItemReadRepository interface {
 	ListRACIMatrixProjectionRowsForUser(query WorkItemInboxQuery) ([]RACIMatrixProjectionRow, error)
 	ListRACIMatrixProjectionRowsForResources(companyID string, nodeIDs, logicGateIDs []string) ([]RACIMatrixProjectionRow, error)
 	ListRACIMatrixProjectionRowsForLogicGate(companyID, logicGateID string) ([]RACIMatrixProjectionRow, error)
-	ListKanbanBoardProjectionRows(companyID, logicGateID string, query KanbanCardQuery) ([]KanbanBoardProjectionRow, error)
-	ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]KanbanBoardProjectionRow, error)
-	ListKanbanBoardProjectionRowsForLogicGate(companyID, logicGateID string) ([]KanbanBoardProjectionRow, error)
 }
 
 type MyWorkRepository interface {
@@ -1070,35 +1072,12 @@ type WorkspaceEntityCommandRepository interface {
 	CreateRACIMatrixNode(input RACIMatrixNodeCreateInput) (RACIMatrixNodeCreateResult, error)
 }
 
-type KanbanRepository interface {
-	ListKanbanBoards(companyID string, query KanbanBoardQuery) ([]domain.KanbanBoard, error)
-	EnsureLogicGateKanbanBoard(companyID, logicGateID, title string) (domain.KanbanBoard, error)
-	CreateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
-	CreateKanbanBoardWithWorkspaceEvent(companyID, boardID, title string, position int) (KanbanBoardWorkspaceEventResult, error)
-	UpdateKanbanBoard(companyID, boardID, title string, position int) (domain.KanbanBoard, error)
-	UpdateKanbanBoardWithWorkspaceEvent(companyID, boardID, title string, position int) (KanbanBoardWorkspaceEventResult, error)
-	DeleteKanbanBoard(companyID, boardID string) error
-	DeleteKanbanBoardWithWorkspaceEvent(companyID, boardID string) (KanbanWorkspaceEventResult, error)
-	ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error)
-	CreateKanbanColumn(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
-	CreateKanbanColumnWithWorkspaceEvent(companyID, boardID, title string, position int, widthPx int, heightPx int, itemColor string) (KanbanColumnWorkspaceEventResult, error)
-	UpdateKanbanColumn(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (domain.KanbanColumn, error)
-	UpdateKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID, title string, position int, widthPx int, heightPx int, itemColor string) (KanbanColumnWorkspaceEventResult, error)
-	DeleteKanbanColumn(companyID, boardID, columnID string) error
-	DeleteKanbanColumnWithWorkspaceEvent(companyID, boardID, columnID string) (KanbanWorkspaceEventResult, error)
-	ListKanbanCards(companyID, boardID string, query KanbanCardQuery) ([]domain.KanbanCard, error)
-	GetKanbanCard(companyID, boardID, cardID string) (domain.KanbanCard, error)
-	UpsertKanbanCard(input KanbanCardMutationInput) (domain.KanbanCard, error)
-	UpsertKanbanCardWithWorkspaceEvent(input KanbanCardMutationInput) (KanbanCardWorkspaceEventResult, error)
-	MoveKanbanCard(input KanbanCardMoveInput) (domain.KanbanCard, error)
-	MoveKanbanCardWithWorkspaceEvent(input KanbanCardMoveInput) (KanbanCardWorkspaceEventResult, error)
+type ProcessWorkRepository interface {
 	ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error)
 	AssignNodeToLogicGateStatus(input LogicGateNodeAssignmentInput) (LogicGateNodeAssignmentResult, error)
 	MoveLogicGateNodeAssignment(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentResult, error)
 	RemoveLogicGateNodeAssignment(input LogicGateNodeAssignmentRemoveInput) (LogicGateNodeAssignmentRemoveResult, error)
 	SetLogicGateNodeAssignmentIssue(input LogicGateNodeAssignmentIssueInput) (LogicGateNodeAssignmentResult, error)
-	DeleteKanbanCard(companyID, boardID, cardID string) error
-	DeleteKanbanCardWithWorkspaceEvent(companyID, boardID, cardID string) (KanbanCardWorkspaceEventResult, error)
 }
 
 type NotificationRepository interface {
@@ -1232,9 +1211,6 @@ type ProjectionRow struct {
 	RelationshipUpdatedTimestamp time.Time        `json:"relationship_updated_timestamp,omitempty"`
 	CreatedTimestamp             time.Time        `json:"created_timestamp,omitempty"`
 	UpdatedTimestamp             time.Time        `json:"updated_timestamp,omitempty"`
-	BoardID                      string           `json:"board_id,omitempty"`
-	CardID                       string           `json:"card_id,omitempty"`
-	ColumnID                     string           `json:"column_id,omitempty"`
 	NodeID                       string           `json:"node_id,omitempty"`
 	StartDate                    string           `json:"start_date,omitempty"`
 	EndDate                      string           `json:"end_date,omitempty"`
@@ -1255,8 +1231,6 @@ type ProjectionRow struct {
 type RACIMatrixProjectionRow = ProjectionRow
 
 type RACIEffectiveAssignmentProjectionRow = ProjectionRow
-
-type KanbanBoardProjectionRow = ProjectionRow
 
 type ProjectManagementTimelineProjectionRow = ProjectionRow
 
@@ -1446,12 +1420,12 @@ type ProjectScopedNodeCreateInput struct {
 }
 
 type ProjectScopedNodeLogicGateAssignmentInput struct {
-	LogicGateID string
-	Status      string
-	ColumnID    string
-	Position    int
-	Priority    *int
-	IsIssue     *bool
+	LogicGateID   string
+	Status        string
+	Position      int
+	Priority      *int
+	IsIssue       *bool
+	ProcessStepID *string
 }
 
 type ProjectScopedNodeCreateResult struct {
@@ -1460,7 +1434,6 @@ type ProjectScopedNodeCreateResult struct {
 	ImplicitRelationships []domain.ProjectRelationshipProjection `json:"implicit_relationships,omitempty"`
 	Information           *domain.NodeInformation                `json:"information,omitempty"`
 	Assignment            *domain.NodeLogicGateAssignment        `json:"assignment,omitempty"`
-	Card                  *domain.KanbanCard                     `json:"card,omitempty"`
 	Events                []domain.DomainEvent                   `json:"-"`
 }
 type ProjectScopedLogicGateCreateInput struct {
@@ -1756,7 +1729,6 @@ type RACIMatrixNodeCreateInput struct {
 	CreatorLogicGateRACIRole string
 	MutationOrigin           string
 	Status                   string
-	ColumnID                 string
 	DescriptionSnapshot      string
 	Position                 int
 	Priority                 *int
@@ -1766,13 +1738,14 @@ type RACIMatrixNodeCreateInput struct {
 	ActorUserID              string
 	IdempotencyKey           string
 	TimingRecorder           TimingRecorder
+	ProcessStepID            *string
+	ProcessStepIDSet         bool
 }
 
 type RACIMatrixNodeCreateResult struct {
 	Node                     domain.Node                        `json:"node"`
 	LogicGate                *domain.LogicGate                  `json:"logic_gate,omitempty"`
 	Assignment               *domain.NodeLogicGateAssignment    `json:"assignment,omitempty"`
-	Card                     *domain.KanbanCard                 `json:"card,omitempty"`
 	FolderItems              []domain.CompanyExplorerFolderItem `json:"folder_items,omitempty"`
 	RACIMatrixProjectionRows []RACIMatrixProjectionRow          `json:"gvic_projection_rows,omitempty"`
 	Events                   []domain.DomainEvent               `json:"-"`
@@ -1889,8 +1862,6 @@ type CommunicationsEmailConversionProvenance struct {
 	MessageID   string `json:"message_id"`
 	ThreadID    string `json:"thread_id,omitempty"`
 	NodeID      string `json:"node_id"`
-	BoardID     string `json:"board_id"`
-	CardID      string `json:"card_id"`
 	LogicGateID string `json:"logic_gate_id"`
 }
 
@@ -1911,7 +1882,7 @@ type CommunicationsTriageConversionInput struct {
 	LinkedTextBlock    *NodeInformationInput
 	InitialChat        *NodeInformationInput
 	Status             string
-	ColumnID           string
+	ProcessStepID      *string
 	Priority           *int
 	PrioritySet        bool
 }
@@ -1920,8 +1891,6 @@ type CommunicationsTriageConversionResult struct {
 	Target                      CommunicationsTriageConversionTarget      `json:"target"`
 	LogicGate                   domain.LogicGate                          `json:"logic_gate"`
 	CreatedLogicGate            bool                                      `json:"created_logic_gate,omitempty"`
-	Board                       domain.KanbanBoard                        `json:"board"`
-	Cards                       []domain.KanbanCard                       `json:"cards"`
 	Nodes                       []domain.Node                             `json:"nodes"`
 	Assignments                 []domain.NodeLogicGateAssignment          `json:"assignments,omitempty"`
 	EmailPlacements             []domain.CommunicationsEmailPlacement     `json:"email_placements,omitempty"`
@@ -1940,27 +1909,22 @@ type CommunicationsTriageConversionResult struct {
 }
 
 type CommunicationsTriageRevertInput struct {
+	NodeID    string
 	UserID    string
 	CompanyID string
-	BoardID   string
-	CardID    string
 }
 
 type CommunicationsTriageRevertResult struct {
 	TriageItem    domain.CommunicationsTriageItem `json:"triage_item"`
 	DeletedNodeID string                          `json:"deleted_node_id"`
-	DeletedCardID string                          `json:"deleted_card_id"`
-	BoardID       string                          `json:"board_id"`
 	Events        []domain.DomainEvent            `json:"-"`
 }
 
 type CommunicationsEmailNodeTransferInput struct {
+	TargetNodeID   string
 	UserID         string
 	CompanyID      string
-	SourceBoardID  string
-	SourceCardID   string
-	TargetBoardID  string
-	TargetCardID   string
+	SourceNodeID   string
 	ActorUserID    string
 	IdempotencyKey string
 }
@@ -1968,17 +1932,9 @@ type CommunicationsEmailNodeTransferInput struct {
 type CommunicationsEmailNodeTransferResult struct {
 	EmailPlacement domain.CommunicationsEmailPlacement `json:"email_placement"`
 	DeletedNodeID  string                              `json:"deleted_node_id"`
-	DeletedCardID  string                              `json:"deleted_card_id"`
-	SourceBoardID  string                              `json:"source_board_id"`
 	TargetNodeID   string                              `json:"target_node_id"`
-	TargetBoardID  string                              `json:"target_board_id"`
-	TargetCardID   string                              `json:"target_card_id"`
 	Events         []domain.DomainEvent                `json:"-"`
 }
-
-const KanbanMaxCardsLimit = 500
-
-const KanbanMaxBoardsLimit = 200
 
 const DefaultCompanyListLimit = 100
 const CompanyListMaxLimit = 200
@@ -1993,55 +1949,11 @@ func NormalizeCompanyListLimit(limit int) int {
 	return limit
 }
 
-const KanbanDefaultRequestedColor = "#facc15"
-const KanbanDefaultBacklogColor = "#8b5cf6"
-const KanbanDefaultPendingColor = "#808080"
-const KanbanDefaultInProgressColor = "#ff9500"
-const KanbanDefaultReviewColor = "#00aaff"
-const KanbanDefaultDoneColor = "#39ff14"
-
-type KanbanBoardQuery struct {
-	AfterPosition int
-	Limit         int
-	LogicGateID   string
-}
-
-type KanbanCardQuery struct {
-	ColumnID      string
-	AfterPosition int
-	Limit         int
-}
-
-type KanbanCardMutationInput struct {
-	CompanyID           string
-	BoardID             string
-	ColumnID            string
-	NodeID              string
-	NodeTitle           string
-	DescriptionSnapshot string
-	Position            int
-	IsIssue             bool
-	IsIssueSet          bool
-	RequestedByUserID   string
-	PlacedByUserID      string
-	CardID              string
-}
-
-type KanbanCardMoveInput struct {
-	CompanyID string
-	BoardID   string
-	CardID    string
-	ColumnID  string
-	Position  int
-	IsIssue   *bool
-}
-
 type LogicGateNodeAssignmentInput struct {
 	CompanyID           string
 	LogicGateID         string
 	NodeID              string
 	Status              string
-	ColumnID            string
 	MutationOrigin      string
 	NodeTitle           string
 	CreateNodeTitle     string
@@ -2054,22 +1966,25 @@ type LogicGateNodeAssignmentInput struct {
 	ActorUserID         string
 	IdempotencyKey      string
 	TimingRecorder      TimingRecorder
+	ProcessStepID       *string
+	ProcessStepIDSet    bool
 }
 
 type LogicGateNodeAssignmentMoveInput struct {
-	CompanyID       string
-	LogicGateID     string
-	FromLogicGateID string
-	NodeID          string
-	Status          string
-	ColumnID        string
-	MutationOrigin  string
-	Position        int
-	Priority        *int
-	PrioritySet     bool
-	ActorUserID     string
-	IdempotencyKey  string
-	TimingRecorder  TimingRecorder
+	CompanyID        string
+	LogicGateID      string
+	FromLogicGateID  string
+	NodeID           string
+	Status           string
+	MutationOrigin   string
+	Position         int
+	Priority         *int
+	PrioritySet      bool
+	ActorUserID      string
+	IdempotencyKey   string
+	TimingRecorder   TimingRecorder
+	ProcessStepID    *string
+	ProcessStepIDSet bool
 }
 
 type LogicGateNodeAssignmentRemoveInput struct {
@@ -2091,17 +2006,15 @@ type LogicGateNodeAssignmentIssueInput struct {
 }
 
 type LogicGateNodeAssignmentResult struct {
-	Card                     domain.KanbanCard              `json:"card"`
 	Node                     domain.Node                    `json:"node"`
-	Assignment               domain.NodeLogicGateAssignment `json:"-"`
+	Assignment               domain.NodeLogicGateAssignment `json:"assignment"`
 	RACIMatrixProjectionRows []RACIMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
 	Events                   []domain.DomainEvent           `json:"-"`
 }
 
 type LogicGateNodeAssignmentRemoveResult struct {
-	Card                     domain.KanbanCard              `json:"card"`
 	Node                     domain.Node                    `json:"node"`
-	Assignment               domain.NodeLogicGateAssignment `json:"-"`
+	Assignment               domain.NodeLogicGateAssignment `json:"assignment"`
 	RACIMatrixProjectionRows []RACIMatrixProjectionRow      `json:"gvic_projection_rows,omitempty"`
 	Events                   []domain.DomainEvent           `json:"-"`
 }
@@ -2126,26 +2039,6 @@ type NodeTimelineMutationResult struct {
 }
 
 const NodeVerificationRequestedWorkspaceEventType = "node.verification_requested"
-
-type KanbanWorkspaceEventResult struct {
-	Events []domain.DomainEvent `json:"-"`
-}
-
-type KanbanBoardWorkspaceEventResult struct {
-	Board  domain.KanbanBoard   `json:"board"`
-	Events []domain.DomainEvent `json:"-"`
-}
-
-type KanbanColumnWorkspaceEventResult struct {
-	Column domain.KanbanColumn  `json:"column"`
-	Events []domain.DomainEvent `json:"-"`
-}
-
-type KanbanCardWorkspaceEventResult struct {
-	Card        domain.KanbanCard    `json:"card"`
-	DerivedNode *domain.Node         `json:"-"`
-	Events      []domain.DomainEvent `json:"-"`
-}
 
 const NotificationListMaxLimit = 100
 const NotificationCleanupMaxLimit = 1000
@@ -2520,17 +2413,6 @@ type CommunicationsEmailSignatureInput struct {
 	UpdatedByUserID      string
 }
 
-func NormalizeKanbanBoardQuery(query KanbanBoardQuery) KanbanBoardQuery {
-	query.LogicGateID = strings.TrimSpace(query.LogicGateID)
-	if query.AfterPosition < 0 {
-		query.AfterPosition = 0
-	}
-	if query.Limit <= 0 || query.Limit > KanbanMaxBoardsLimit {
-		query.Limit = 100
-	}
-	return query
-}
-
 func NormalizeRACIRole(role string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(role)) {
 	case domain.RACIRoleResponsible:
@@ -2666,85 +2548,6 @@ func EntityPermissionSatisfies(grant, required string) bool {
 	return EntityPermissionRank(grant) >= EntityPermissionRank(required) && EntityPermissionRank(required) > 0
 }
 
-func LogicGateKanbanBoardID(logicGateID string) string {
-	return "logic-gate:" + strings.TrimSpace(logicGateID)
-}
-
-func IsLogicGateKanbanBoardID(boardID string) bool {
-	return strings.HasPrefix(strings.TrimSpace(boardID), "logic-gate:")
-}
-
-func LogicGateIDFromKanbanBoardID(boardID string) string {
-	boardID = strings.TrimSpace(boardID)
-	if !IsLogicGateKanbanBoardID(boardID) {
-		return ""
-	}
-	return strings.TrimSpace(strings.TrimPrefix(boardID, "logic-gate:"))
-}
-
-func NormalizeKanbanCardQuery(query KanbanCardQuery) KanbanCardQuery {
-	query.ColumnID = strings.TrimSpace(query.ColumnID)
-	if query.AfterPosition < 0 {
-		query.AfterPosition = 0
-	}
-	if query.Limit <= 0 || query.Limit > KanbanMaxCardsLimit {
-		query.Limit = 200
-	}
-	return query
-}
-
 func isEditorTextBoxType(infoType string) bool {
 	return infoType == "Text box"
-}
-
-func normalizeKanbanBoardTitle(boardID, title string) string {
-	title = strings.TrimSpace(title)
-	if title != "" {
-		return title
-	}
-	boardID = strings.TrimSpace(boardID)
-	if boardID != "" {
-		return boardID
-	}
-	return "Kanban board"
-}
-
-func normalizeKanbanColumnWidth(widthPx int) int {
-	if widthPx <= 0 {
-		return 260
-	}
-	if widthPx < 180 {
-		return 180
-	}
-	if widthPx > 2000 {
-		return 2000
-	}
-	return widthPx
-}
-
-func normalizeKanbanColumnHeight(heightPx int) int {
-	if heightPx <= 0 {
-		return 240
-	}
-	if heightPx < 160 {
-		return 160
-	}
-	if heightPx > 10000 {
-		return 10000
-	}
-	return heightPx
-}
-
-func normalizeKanbanColumnItemColor(itemColor string) string {
-	itemColor = strings.TrimSpace(itemColor)
-	if len(itemColor) != 7 || itemColor[0] != '#' {
-		return "#fbb152"
-	}
-	for _, char := range itemColor[1:] {
-		if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F') {
-			continue
-		}
-		return "#fbb152"
-	}
-	return itemColor
 }

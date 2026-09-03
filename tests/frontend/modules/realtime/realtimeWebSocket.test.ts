@@ -22,7 +22,7 @@ import {
   type RealtimeChatMessageCreatedMessage,
   type RealtimeChatMessageUpdatedMessage,
   type RealtimeChatMessageDeletedMessage,
-  type RealtimeKanbanChangedMessage,
+  type RealtimeProcessWorkChangedMessage,
   type RealtimeHuddleActionItemsChangedMessage,
   type RealtimeLogicGateQDRatingUpdatedMessage,
   type RealtimeMailboxFolderChangedMessage,
@@ -92,14 +92,14 @@ test("parses retained product and scoped mailbox message families", () => {
   assert.equal(deleted.node_id, "node-1");
 
   const board = parseRealtimeMessage(JSON.stringify({
-    type: "kanban.changed",
+    type: "process.work.changed",
     company_id: "company-1",
-    scope: "board:logic-gate:gate-1",
-    board_id: "logic-gate:gate-1",
-    change_type: "card.moved",
-  })) as RealtimeKanbanChangedMessage;
-  assert.equal(board.board_id, "logic-gate:gate-1");
-  assert.equal(board.change_type, "card.moved");
+    scope: "process:gate-1",
+    logic_gate_id: "gate-1",
+    change_type: "node.moved",
+  })) as RealtimeProcessWorkChangedMessage;
+  assert.equal(board.logic_gate_id, "gate-1");
+  assert.equal(board.change_type, "node.moved");
 
   const processMap = parseRealtimeMessage(JSON.stringify({
     type: "process_map.changed",
@@ -250,7 +250,7 @@ test("rejects deleted broad protocol messages", () => {
 test("allows only exact notification, mailbox, node-chat, board, and editor scope families", () => {
   assert.equal(isSupportedRealtimeScope("notifications:user:user-1"), true);
   assert.equal(isSupportedRealtimeScope("chat:node:node-1"), true);
-  assert.equal(isSupportedRealtimeScope("board:logic-gate:gate-1"), true);
+  assert.equal(isSupportedRealtimeScope("process:gate-1"), true);
   assert.equal(realtimeHuddleActionItemsScope(" node-1 "), "huddle-action-items:node-1");
   assert.equal(realtimeHuddleBoardActionItemsScope(" board-1 "), "huddle-board-action-items:board-1");
   assert.equal(isSupportedRealtimeScope("huddle-action-items:node-1"), true);
@@ -354,7 +354,7 @@ test("one client shares a socket and dispatches compact messages to exact scopes
       onChatMessageCreated: () => { chat += 1; },
       onChatMessageUpdated: () => { chat += 1; },
     });
-    const unsubBoard = client.subscribe("board:logic-gate:gate-1", { onAccepted: () => { boardAcceptances += 1; }, onKanbanChanged: () => { board += 1; } });
+    const unsubBoard = client.subscribe("process:gate-1", { onAccepted: () => { boardAcceptances += 1; }, onProcessWorkChanged: () => { board += 1; } });
     const unsubMailbox = client.subscribe("mailbox:personal:account:user-1:owner@example.com", { onMailboxMessageChanged: () => { mailbox += 1; } });
     const unsubHuddleNodeActionItems = client.subscribe("huddle-action-items:huddle-node-1", {
       onHuddleActionItemsChanged: () => { huddleNodeActionItems += 1; },
@@ -368,11 +368,11 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     assert.equal(client.currentConnectionID(), "connection-1");
     assert.equal(client.currentConnectionCorrelation(), "correlation-1");
     const subscriptions = sockets[0].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe");
-    assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "huddle-action-items:huddle-node-1", "huddle-board-action-items:huddle-board-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
+    assert.deepEqual(subscriptions.map((message) => message.scope).sort(), ["chat:node:node-1", "huddle-action-items:huddle-node-1", "huddle-board-action-items:huddle-board-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1", "process:gate-1"]);
 
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });
-    sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "board:logic-gate:gate-1" }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "process:gate-1" }) });
     assert.equal(notificationAcceptances, 1);
     assert.equal(chatAcceptances, 1);
     assert.equal(boardAcceptances, 1);
@@ -382,11 +382,11 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     const unsubLateChat = client.subscribe("chat:node:node-1", {
       onAccepted: () => { lateChatAcceptances += 1; },
     });
-    const unsubLateBoard = client.subscribe("board:logic-gate:gate-1", {
+    const unsubLateBoard = client.subscribe("process:gate-1", {
       onAccepted: () => { lateBoardAcceptances += 1; },
     });
     assert.equal(lateChatAcceptances, 1, "a second mounted editor immediately reconciles an already accepted node scope");
-    assert.equal(lateBoardAcceptances, 1, "a second mounted Kanban immediately reconciles an already accepted board scope");
+    assert.equal(lateBoardAcceptances, 1, "a second mounted work surface immediately reconciles an already accepted Process scope");
     assert.equal(sockets[0].sent.filter((raw) => JSON.parse(raw).type === "subscribe").length, wireSubscribeCount, "late local handlers do not duplicate the wire subscription");
 
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "subscription.rejected", scope: "chat:node:node-1", error: "forbidden" }) });
@@ -400,7 +400,7 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     assert.equal(lateChatAcceptances, 2);
     assert.equal(acceptanceAfterRejection, 1);
 
-    const transientScope = "board:logic-gate:transient";
+    const transientScope = "process:transient";
     let transientAcceptances = 0;
     const transientSubscribeCount = sockets[0].sent.filter((raw) => JSON.parse(raw).type === "subscribe").length;
     const unsubTransient = client.subscribe(transientScope, {
@@ -431,7 +431,7 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.created", company_id: "company-1", scope: "chat:node:node-1", node_id: "node-1", block_id: "block-1", message_id: "m-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "chat.message.updated", company_id: "company-1", scope: "chat:node:node-1", node_id: "node-1", block_id: "block-1", message_id: "m-1" }) });
-    sockets[0].onmessage?.({ data: JSON.stringify({ type: "kanban.changed", company_id: "company-1", scope: "board:logic-gate:gate-1", board_id: "logic-gate:gate-1" }) });
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "process.work.changed", company_id: "company-1", scope: "process:gate-1", logic_gate_id: "gate-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "mailbox.message.changed", company_id: "company-1", scope: "mailbox:personal:account:user-1:owner@example.com", trigger: "message.created", message_id: "mail-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "huddle_action_items.changed", company_id: "company-1", scope: "huddle-action-items:huddle-node-1", huddle_node_id: "huddle-node-1" }) });
     sockets[0].onmessage?.({ data: JSON.stringify({ type: "huddle_action_items.changed", company_id: "company-1", scope: "huddle-board-action-items:huddle-board-1", huddle_logic_gate_id: "huddle-board-1" }) });
@@ -452,7 +452,7 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     const unsubDowntimeChat = client.subscribe("chat:node:node-1", {
       onAccepted: () => { downtimeChatAcceptances += 1; },
     });
-    const unsubDowntimeBoard = client.subscribe("board:logic-gate:gate-1", {
+    const unsubDowntimeBoard = client.subscribe("process:gate-1", {
       onAccepted: () => { downtimeBoardAcceptances += 1; },
     });
     assert.equal(downtimeChatAcceptances, 0, "a closed socket must not leak stale node-scope acceptance");
@@ -462,10 +462,10 @@ test("one client shares a socket and dispatches compact messages to exact scopes
     assert.equal(sockets.length, 2);
     assert.equal(client.currentConnectionID(), "connection-2");
     assert.equal(client.currentConnectionCorrelation(), "correlation-2");
-    assert.deepEqual(sockets[1].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe").map((message) => message.scope).sort(), ["board:logic-gate:gate-1", "chat:node:node-1", "huddle-action-items:huddle-node-1", "huddle-board-action-items:huddle-board-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1"]);
+    assert.deepEqual(sockets[1].sent.map((raw) => JSON.parse(raw) as { type: string; scope?: string }).filter((message) => message.type === "subscribe").map((message) => message.scope).sort(), ["chat:node:node-1", "huddle-action-items:huddle-node-1", "huddle-board-action-items:huddle-board-1", "mailbox:personal:account:user-1:owner@example.com", "notifications:user:user-1", "process:gate-1"]);
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "notifications:user:user-1" }) });
     sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "chat:node:node-1" }) });
-    sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "board:logic-gate:gate-1" }) });
+    sockets[1].onmessage?.({ data: JSON.stringify({ type: "subscription.accepted", scope: "process:gate-1" }) });
     assert.equal(notificationAcceptances, 2);
     assert.equal(chatAcceptances, 3);
     assert.equal(boardAcceptances, 2);
@@ -698,7 +698,7 @@ test("terminal authentication failure does not reconnect", async () => {
     },
     reconnectDelayMs: 1,
   });
-  const unsubscribe = client.subscribe("board:logic-gate:gate-1");
+  const unsubscribe = client.subscribe("process:gate-1");
   await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
   assert.equal(ticketRequests, 1);
   unsubscribe();

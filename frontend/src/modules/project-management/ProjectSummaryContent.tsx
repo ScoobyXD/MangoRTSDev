@@ -2220,20 +2220,13 @@ export const ProjectSummaryContent: React.FC<ProjectSummaryContentProps> = ({
         await loadProject({ showLoading: false });
       }
       const convertedMessageIDs = normalizeTriageMessageIDs(result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs);
-      const savedCards = result.cards ?? [];
-      const boardIDs = Array.from(new Set([
-        result.board?.board_id ?? "",
-        ...savedCards.map((card) => card.board_id),
-      ].map((id) => id.trim()).filter(Boolean)));
       dispatchTriageConversionApplied({
         companyID,
         messageIDs: convertedMessageIDs,
         sharedInboxID,
         accountEmail,
-        logicGateID: result.board?.logic_gate_id?.trim() || cleanLogicGateID || undefined,
+        logicGateID: cleanLogicGateID || result.assignments?.[0]?.logic_gate_id,
         nodeIDs: (result.nodes ?? []).map((node) => node.node_id),
-        boardIDs,
-        cardIDs: savedCards.map((card) => card.card_id),
         unstarredMessageIDs: normalizeTriageMessageIDs(result.unstarred_message_ids ?? []),
       });
       const createdNodeID = result.nodes?.[0]?.node_id?.trim() ?? "";

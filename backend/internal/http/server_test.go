@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -771,291 +770,6 @@ func TestUpdateNodeRACIResponsibleRequiresCompanyMembership(t *testing.T) {
 	}
 }
 
-func TestLogicGateArenaAPIsExposeAttachedBoardIssueToggleAndNodeMetadata(t *testing.T) {
-	t.Parallel()
-
-	repo := store.NewMemoryRepo()
-	server := NewServerWithOptions(repo, ServerOptions{})
-	companyID := "11111111-1111-4111-8111-333333333333"
-	handler := handlerWithCompanyAdminForTest(server.Routes(), companyID)
-
-	logicGate, err := repo.CreateLogicGate(companyID, "Fulfillment Gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate() error = %v", err)
-	}
-	node, err := repo.CreateNode(companyID, "Invoice node")
-	if err != nil {
-		t.Fatalf("CreateNode() error = %v", err)
-	}
-	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
-
-	listBoardsReq := httptest.NewRequest(http.MethodGet, "/v1/kanban/boards?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
-	listBoardsRec := httptest.NewRecorder()
-	handler.ServeHTTP(listBoardsRec, listBoardsReq)
-	if listBoardsRec.Code != http.StatusOK {
-		t.Fatalf("GET logic-gate boards status = %d body=%s", listBoardsRec.Code, listBoardsRec.Body.String())
-	}
-	var boardsPayload struct {
-		Boards []struct {
-			BoardID     string  `json:"board_id"`
-			LogicGateID *string `json:"logic_gate_id"`
-		} `json:"boards"`
-	}
-	if err := json.NewDecoder(listBoardsRec.Body).Decode(&boardsPayload); err != nil {
-		t.Fatalf("decode boards: %v", err)
-	}
-	if len(boardsPayload.Boards) != 1 || boardsPayload.Boards[0].BoardID != boardID || boardsPayload.Boards[0].LogicGateID == nil || *boardsPayload.Boards[0].LogicGateID != logicGate.LogicGateID {
-		t.Fatalf("logic-gate boards = %+v, want attached board", boardsPayload.Boards)
-	}
-
-	columns, err := repo.ListKanbanColumns(companyID, boardID)
-	if err != nil {
-		t.Fatalf("ListKanbanColumns() error = %v", err)
-	}
-	columnID := ""
-	for _, column := range columns {
-		if column.Title == "In Progress" {
-			columnID = column.ColumnID
-			break
-		}
-	}
-	if columnID == "" {
-		t.Fatalf("attached board columns = %+v, want In Progress", columns)
-	}
-	if _, err := repo.UpdateNode(store.UpdateNodeInput{CompanyID: companyID, NodeID: node.NodeID, Priority: testPriority(3), PrioritySet: true}); err != nil {
-		t.Fatalf("UpdateNode priority: %v", err)
-	}
-
-	addCardBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"board_id":   boardID,
-		"column_id":  columnID,
-		"node_id":    node.NodeID,
-		"node_title": node.Title,
-	})
-	addCardReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(addCardBody))
-	addCardReq.Header.Set("Content-Type", "application/json")
-	addCardRec := httptest.NewRecorder()
-	handler.ServeHTTP(addCardRec, addCardReq)
-	if addCardRec.Code != http.StatusCreated {
-		t.Fatalf("POST logic-gate card status = %d body=%s", addCardRec.Code, addCardRec.Body.String())
-	}
-	var createdCard struct {
-		CardID      string  `json:"card_id"`
-		LogicGateID *string `json:"logic_gate_id"`
-		IsIssue     bool    `json:"is_issue"`
-	}
-	if err := json.NewDecoder(addCardRec.Body).Decode(&createdCard); err != nil {
-		t.Fatalf("decode card: %v", err)
-	}
-	if createdCard.LogicGateID == nil || *createdCard.LogicGateID != logicGate.LogicGateID || createdCard.IsIssue {
-		t.Fatalf("created logic-gate card = %+v", createdCard)
-	}
-
-	issueBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"board_id":   boardID,
-		"is_issue":   true,
-	})
-	issueReq := httptest.NewRequest(http.MethodPut, "/v1/kanban/cards/"+createdCard.CardID, bytes.NewReader(issueBody))
-	issueReq.Header.Set("Content-Type", "application/json")
-	issueRec := httptest.NewRecorder()
-	handler.ServeHTTP(issueRec, issueReq)
-	if issueRec.Code != http.StatusOK {
-		t.Fatalf("PUT issue card status = %d body=%s", issueRec.Code, issueRec.Body.String())
-	}
-	var issueCard struct {
-		ColumnID string `json:"column_id"`
-		IsIssue  bool   `json:"is_issue"`
-	}
-	if err := json.NewDecoder(issueRec.Body).Decode(&issueCard); err != nil {
-		t.Fatalf("decode issue card: %v", err)
-	}
-	if !issueCard.IsIssue || issueCard.ColumnID != store.LogicGateWorkStatusInProgress {
-		t.Fatalf("issue card = %+v, want issue without move", issueCard)
-	}
-	updateNodeBody, _ := json.Marshal(map[string]any{
-		"company_id": companyID,
-		"due_date":   "05/06/2026",
-		"priority":   4,
-	})
-	updateNodeReq := httptest.NewRequest(http.MethodPut, "/v1/nodes/"+node.NodeID, bytes.NewReader(updateNodeBody))
-	updateNodeReq.Header.Set("Content-Type", "application/json")
-	updateNodeRec := httptest.NewRecorder()
-	handler.ServeHTTP(updateNodeRec, updateNodeReq)
-	if updateNodeRec.Code != http.StatusOK {
-		t.Fatalf("PUT node metadata status = %d body=%s", updateNodeRec.Code, updateNodeRec.Body.String())
-	}
-	var updatedNode struct {
-		Status   *string `json:"status"`
-		DueDate  *string `json:"due_date"`
-		Priority *int    `json:"priority"`
-	}
-	if err := json.NewDecoder(updateNodeRec.Body).Decode(&updatedNode); err != nil {
-		t.Fatalf("decode node: %v", err)
-	}
-	if updatedNode.Status == nil || *updatedNode.Status != "Issue" || updatedNode.DueDate == nil || *updatedNode.DueDate != "2026-05-06" || updatedNode.Priority == nil || *updatedNode.Priority != 4 {
-		t.Fatalf("updated node = %+v, want derived status and metadata", updatedNode)
-	}
-
-	arenaReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
-	arenaRec := httptest.NewRecorder()
-	handler.ServeHTTP(arenaRec, arenaReq)
-	if arenaRec.Code != http.StatusOK {
-		t.Fatalf("GET logic gate arena status = %d body=%s", arenaRec.Code, arenaRec.Body.String())
-	}
-	var arenaPayload struct {
-		LogicGate struct {
-			LogicGateID string `json:"logic_gate_id"`
-		} `json:"logic_gate"`
-		Board struct {
-			BoardID     string  `json:"board_id"`
-			LogicGateID *string `json:"logic_gate_id"`
-		} `json:"board"`
-		Columns []struct{ ColumnID string } `json:"columns"`
-		Cards   []struct {
-			CardID  string `json:"card_id"`
-			IsIssue bool   `json:"is_issue"`
-		} `json:"cards"`
-	}
-	if err := json.NewDecoder(arenaRec.Body).Decode(&arenaPayload); err != nil {
-		t.Fatalf("decode logic gate arena: %v", err)
-	}
-	if arenaPayload.LogicGate.LogicGateID != logicGate.LogicGateID || arenaPayload.Board.BoardID != boardID || arenaPayload.Board.LogicGateID == nil || *arenaPayload.Board.LogicGateID != logicGate.LogicGateID {
-		t.Fatalf("arena identity = %+v, want selected logic gate and attached board", arenaPayload)
-	}
-	if len(arenaPayload.Columns) != len(columns) || len(arenaPayload.Cards) != 1 || arenaPayload.Cards[0].CardID != createdCard.CardID || !arenaPayload.Cards[0].IsIssue {
-		t.Fatalf("arena contents = %+v, want bounded composed board view", arenaPayload)
-	}
-
-	deleteBoardReq := httptest.NewRequest(http.MethodDelete, "/v1/kanban/boards/"+boardID+"?company_id="+companyID, nil)
-	deleteBoardRec := httptest.NewRecorder()
-	handler.ServeHTTP(deleteBoardRec, deleteBoardReq)
-	if deleteBoardRec.Code != http.StatusNotFound {
-		t.Fatalf("DELETE attached board status = %d, want %d body=%s", deleteBoardRec.Code, http.StatusNotFound, deleteBoardRec.Body.String())
-	}
-}
-
-type noRepairLogicGateArenaRepo struct {
-	store.Repository
-	hideArenaBoards  bool
-	dropArenaColumns bool
-	ensureCalls      int
-	boardListCalls   int
-	columnListCalls  int
-}
-
-func (r *noRepairLogicGateArenaRepo) EnsureLogicGateKanbanBoard(companyID, logicGateID, title string) (domain.KanbanBoard, error) {
-	r.ensureCalls++
-	return domain.KanbanBoard{}, fmt.Errorf("unexpected Logic Gate Arena repair for %s/%s", companyID, logicGateID)
-}
-
-func (r *noRepairLogicGateArenaRepo) ListKanbanBoards(companyID string, query store.KanbanBoardQuery) ([]domain.KanbanBoard, error) {
-	r.boardListCalls++
-	if r.hideArenaBoards && query.LogicGateID != "" {
-		return []domain.KanbanBoard{}, nil
-	}
-	return r.Repository.ListKanbanBoards(companyID, query)
-}
-
-func (r *noRepairLogicGateArenaRepo) ListKanbanColumns(companyID, boardID string) ([]domain.KanbanColumn, error) {
-	r.columnListCalls++
-	if r.dropArenaColumns {
-		return []domain.KanbanColumn{}, nil
-	}
-	return r.Repository.ListKanbanColumns(companyID, boardID)
-}
-
-func TestLogicGateArenaGETLoadsExistingBoardWithoutRepair(t *testing.T) {
-	t.Parallel()
-
-	backing := store.NewMemoryRepo()
-	companyID := "company-arena-existing-read-only-test"
-	logicGate, err := backing.CreateLogicGate(companyID, "Existing Arena Gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate failed: %v", err)
-	}
-	repo := &noRepairLogicGateArenaRepo{Repository: backing}
-	server := NewServer(repo)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
-	rec := httptest.NewRecorder()
-	server.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET arena status = %d, want %d body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if repo.ensureCalls != 0 {
-		t.Fatalf("GET arena called EnsureLogicGateKanbanBoard %d times, want 0", repo.ensureCalls)
-	}
-	if repo.boardListCalls != 0 || repo.columnListCalls != 0 {
-		t.Fatalf("GET arena used legacy Kanban reads boards=%d columns=%d, want projection only", repo.boardListCalls, repo.columnListCalls)
-	}
-	var payload struct {
-		Board struct {
-			BoardID string `json:"board_id"`
-		} `json:"board"`
-		Columns []domain.KanbanColumn `json:"columns"`
-	}
-	if err := json.NewDecoder(rec.Body).Decode(&payload); err != nil {
-		t.Fatalf("decode arena payload: %v", err)
-	}
-	if payload.Board.BoardID != store.LogicGateKanbanBoardID(logicGate.LogicGateID) || len(payload.Columns) != 6 || payload.Columns[0].ColumnID != store.LogicGateWorkStatusRequested {
-		t.Fatalf("arena payload board=%q columns=%d, want existing provisioned board and columns", payload.Board.BoardID, len(payload.Columns))
-	}
-}
-
-func TestLogicGateArenaGETDoesNotProvisionMissingBoard(t *testing.T) {
-	t.Parallel()
-
-	backing := store.NewMemoryRepo()
-	companyID := "company-arena-missing-board-read-only-test"
-	logicGate, err := backing.CreateLogicGate(companyID, "Missing Board Gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate failed: %v", err)
-	}
-	repo := &noRepairLogicGateArenaRepo{Repository: backing, hideArenaBoards: true}
-	server := NewServer(repo)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
-	rec := httptest.NewRecorder()
-	server.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET missing-board arena status = %d body=%s, want projected arena", rec.Code, rec.Body.String())
-	}
-	if repo.ensureCalls != 0 {
-		t.Fatalf("GET missing-board arena called EnsureLogicGateKanbanBoard %d times, want 0", repo.ensureCalls)
-	}
-	if repo.boardListCalls != 0 || repo.columnListCalls != 0 {
-		t.Fatalf("GET missing-board arena used legacy Kanban reads boards=%d columns=%d, want projection only", repo.boardListCalls, repo.columnListCalls)
-	}
-}
-
-func TestLogicGateArenaGETDoesNotRepairMissingDefaultColumns(t *testing.T) {
-	t.Parallel()
-
-	backing := store.NewMemoryRepo()
-	companyID := "company-arena-missing-columns-read-only-test"
-	logicGate, err := backing.CreateLogicGate(companyID, "Missing Columns Gate")
-	if err != nil {
-		t.Fatalf("CreateLogicGate failed: %v", err)
-	}
-	repo := &noRepairLogicGateArenaRepo{Repository: backing, dropArenaColumns: true}
-	server := NewServer(repo)
-
-	req := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+logicGate.LogicGateID, nil)
-	rec := httptest.NewRecorder()
-	server.Routes().ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("GET missing-column arena status = %d body=%s, want projected arena", rec.Code, rec.Body.String())
-	}
-	if repo.ensureCalls != 0 {
-		t.Fatalf("GET missing-column arena called EnsureLogicGateKanbanBoard %d times, want 0", repo.ensureCalls)
-	}
-	if repo.boardListCalls != 0 || repo.columnListCalls != 0 {
-		t.Fatalf("GET missing-column arena used legacy Kanban reads boards=%d columns=%d, want projection only", repo.boardListCalls, repo.columnListCalls)
-	}
-}
-
 func TestWorkspaceSnapshotReturnsNotModifiedWhenDataUnchanged(t *testing.T) {
 	t.Parallel()
 
@@ -1583,37 +1297,12 @@ func TestWorkspaceEntityBatchCreatesLogicGateWithFolder(t *testing.T) {
 		t.Fatalf("folder item position = %d, want 4242", payload.FolderItems[0].Position)
 	}
 
-	boardsBeforeArena, err := repo.ListKanbanBoards(companyID, store.KanbanBoardQuery{LogicGateID: createdID, Limit: 2})
+	work, err := repo.GetLogicGateWork(companyID, createdID, "")
 	if err != nil {
-		t.Fatalf("ListKanbanBoards before arena load failed: %v", err)
+		t.Fatalf("GetLogicGateWork: %v", err)
 	}
-	if len(boardsBeforeArena) != 1 || boardsBeforeArena[0].BoardID != store.LogicGateKanbanBoardID(createdID) {
-		t.Fatalf("batch create arena boards = %+v, want one attached board before arena load", boardsBeforeArena)
-	}
-
-	arenaReq := httptest.NewRequest(http.MethodGet, "/v1/logic-gate-arena?company_id="+companyID+"&logic_gate_id="+createdID, nil)
-	arenaRec := httptest.NewRecorder()
-	server.Routes().ServeHTTP(arenaRec, arenaReq)
-	if arenaRec.Code != http.StatusOK {
-		t.Fatalf("GET logic gate arena status = %d, want %d body=%s", arenaRec.Code, http.StatusOK, arenaRec.Body.String())
-	}
-	var arenaPayload struct {
-		Board struct {
-			BoardID     string  `json:"board_id"`
-			LogicGateID *string `json:"logic_gate_id"`
-		} `json:"board"`
-		Columns []struct {
-			ColumnID string `json:"column_id"`
-		} `json:"columns"`
-	}
-	if err := json.Unmarshal(arenaRec.Body.Bytes(), &arenaPayload); err != nil {
-		t.Fatalf("decode logic gate arena response: %v", err)
-	}
-	if arenaPayload.Board.BoardID != store.LogicGateKanbanBoardID(createdID) || arenaPayload.Board.LogicGateID == nil || *arenaPayload.Board.LogicGateID != createdID {
-		t.Fatalf("arena board = %+v, want attached board for created gate %s", arenaPayload.Board, createdID)
-	}
-	if len(arenaPayload.Columns) != 6 || arenaPayload.Columns[0].ColumnID != store.LogicGateWorkStatusRequested {
-		t.Fatalf("arena columns = %d, want default columns", len(arenaPayload.Columns))
+	if work.LogicGate.LogicGateID != createdID || len(work.Steps) != 0 || len(work.Nodes) != 0 {
+		t.Fatalf("new Process work = %+v, want empty steps and nodes", work)
 	}
 }
 
@@ -1676,17 +1365,6 @@ func TestWorkspaceEntityBatchAssignsCreatedLogicGateRACIToCreator(t *testing.T) 
 	}
 	if len(stored.RACIAssignments) != 1 || stored.RACIAssignments[0].Role != domain.RACIRoleResponsible || stored.RACIAssignments[0].UserID != creator.UserID {
 		t.Fatalf("stored RACI assignments = %+v, want responsible creator only", stored.RACIAssignments)
-	}
-}
-
-func TestSelectLogicGateArenaBoardFallsBackToAttachedBoard(t *testing.T) {
-	t.Parallel()
-
-	board, ok := selectLogicGateArenaBoard([]domain.KanbanBoard{
-		{BoardID: "legacy-attached-board"},
-	}, "logic-gate:22222222-2222-4222-8222-222222222222")
-	if !ok || board.BoardID != "legacy-attached-board" {
-		t.Fatalf("selected board = %+v ok=%v, want legacy attached board fallback", board, ok)
 	}
 }
 
@@ -1772,8 +1450,7 @@ func TestWorkspaceSnapshotScopesIgnoreUnrelatedCompanyExplorerFolderChanges(t *t
 	if err != nil {
 		t.Fatalf("CreateLogicGate() error = %v", err)
 	}
-	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
-	url := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=kanban&board_id=" + boardID
+	url := "/v2/logic-gates/" + logicGate.LogicGateID + "/work?company_id=" + companyID
 	firstReq := httptest.NewRequest(http.MethodGet, url, nil)
 	firstRec := httptest.NewRecorder()
 	handler.ServeHTTP(firstRec, firstReq)
@@ -1798,7 +1475,7 @@ func TestWorkspaceSnapshotScopesIgnoreUnrelatedCompanyExplorerFolderChanges(t *t
 	}
 }
 
-func TestKanbanWorkspaceSnapshotScopeInvalidatesForRelevantEvents(t *testing.T) {
+func TestProcessWorkInvalidatesForRelevantEvents(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
 	companyID := "company-scoped-etag-relevant-test"
@@ -1816,12 +1493,11 @@ func TestKanbanWorkspaceSnapshotScopeInvalidatesForRelevantEvents(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CreateLogicGate() error = %v", err)
 	}
-	boardID := store.LogicGateKanbanBoardID(logicGate.LogicGateID)
 	kanbanNode, err := repo.CreateNode(companyID, "Relevant kanban node")
 	if err != nil {
 		t.Fatalf("CreateNode kanban error = %v", err)
 	}
-	url := "/v1/workspace/snapshot?company_id=" + companyID + "&scope=kanban&board_id=" + boardID
+	url := "/v2/logic-gates/" + logicGate.LogicGateID + "/work?company_id=" + companyID
 	firstReq := httptest.NewRequest(http.MethodGet, url, nil)
 	firstRec := httptest.NewRecorder()
 	handler.ServeHTTP(firstRec, firstReq)
@@ -1829,8 +1505,8 @@ func TestKanbanWorkspaceSnapshotScopeInvalidatesForRelevantEvents(t *testing.T) 
 		t.Fatalf("initial kanban snapshot status = %d body=%s", firstRec.Code, firstRec.Body.String())
 	}
 	etag := firstRec.Header().Get("ETag")
-	cardBody, _ := json.Marshal(map[string]any{"company_id": companyID, "board_id": boardID, "column_id": store.LogicGateWorkStatusPending, "node_id": kanbanNode.NodeID, "node_title": kanbanNode.Title, "priority": 3})
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/kanban/cards", bytes.NewReader(cardBody))
+	cardBody, _ := json.Marshal(map[string]any{"company_id": companyID, "status": store.LogicGateWorkStatusPending, "node_id": kanbanNode.NodeID, "node_title": kanbanNode.Title, "priority": 3})
+	createReq := httptest.NewRequest(http.MethodPost, "/v2/logic-gates/"+logicGate.LogicGateID+"/nodes", bytes.NewReader(cardBody))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)

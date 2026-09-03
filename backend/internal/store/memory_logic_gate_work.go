@@ -5,26 +5,42 @@ import (
 	"strings"
 )
 
-func (r *MemoryRepo) GetLogicGateWork(companyID, logicGateID string) (domain.LogicGateWorkView, error) {
+func (r *MemoryRepo) GetLogicGateWork(companyID, logicGateID, userID string) (domain.LogicGateWorkView, error) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
 	if companyID == "" || logicGateID == "" {
 		return domain.LogicGateWorkView{}, ErrInvalid
 	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	logicGate, ok := r.logicGates[key(companyID, logicGateID)]
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	gate, ok := r.logicGates[key(companyID, logicGateID)]
 	if !ok {
 		return domain.LogicGateWorkView{}, ErrNotFound
 	}
-	logicGate = r.withLogicGateRACILocked(logicGate)
 	if policy, found := r.resolvedResourcePermissionPolicyLocked(companyID, EntityTypeLogicGate, logicGateID); found {
-		logicGate.DefaultAccess = policy.DefaultAccess
+		gate.DefaultAccess = policy.DefaultAccess
 	}
-
-	assignments := make([]logicGateWorkAssignment, 0)
+	work := domain.LogicGateWorkView{LogicGate: domain.LogicGateWorkHeader{LogicGateID: logicGateID, Header: gate.Header, DefaultAccess: defaultResourceAccessOrEdit(gate.DefaultAccess)}, Steps: r.processStepsLocked(companyID, logicGateID), Relationships: r.processStepRelationshipsLocked(companyID, logicGateID), Nodes: []domain.LogicGateWorkNode{}}
+	if userID != "" {
+		for _, assignment := range r.gvicEffectiveAssignmentsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID) {
+			if assignment.UserID == userID && assignment.Role == domain.RACIRoleResponsible {
+				work.Permissions.CanResolveRequests = true
+				break
+			}
+		}
+	}
+	emailNodes := map[string]bool{}
+	for _, link := range r.emailNodeLinks {
+		if link.CompanyID == companyID {
+			emailNodes[link.NodeID] = true
+		}
+	}
+	projectNodes := map[string]bool{}
+	for _, relationship := range r.projectRelationships {
+		if relationship.CompanyID == companyID && relationship.ResourceType == EntityTypeNode {
+			projectNodes[relationship.ResourceID] = true
+		}
+	}
 	for _, assignment := range r.nodeLogicGateAssignments {
 		if assignment.CompanyID != companyID || assignment.LogicGateID != logicGateID {
 			continue
@@ -33,64 +49,34 @@ func (r *MemoryRepo) GetLogicGateWork(companyID, logicGateID string) (domain.Log
 		if !ok {
 			continue
 		}
-		assignments = append(assignments, logicGateWorkAssignment{
-			Assignment: assignment,
-			Node:       r.logicGateWorkNodeSummaryLocked(node, assignment),
-		})
-	}
-	work := buildLogicGateWorkView(logicGate, assignments)
-	for index := range work.Cards {
-		for _, relationship := range r.projectRelationships {
-			if relationship.CompanyID == companyID && relationship.ResourceType == EntityTypeNode && relationship.ResourceID == work.Cards[index].NodeID {
-				work.Cards[index].HasProject = true
-				break
-			}
-		}
-	}
-	emailOriginKeys := make(map[string]bool)
-	for linkKey, link := range r.emailNodeLinks {
-		if linkKey != emailNodeLinkKey(link.CompanyID, link.BoardID, link.CardID) {
+		if userID != "" && !r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeNode, node.NodeID, EntityPermissionEdit) {
 			continue
 		}
-		if link.CompanyID != companyID || link.LogicGateID != logicGateID {
-			continue
-		}
-		emailOriginKeys[logicGateWorkCardEmailOriginKey(link.BoardID, link.CardID, link.NodeID)] = true
+		item := logicGateWorkNode(assignment, r.withNodeReadModelLocked(node))
+		item.HasProject = projectNodes[node.NodeID]
+		item.CreatedFromEmail = emailNodes[node.NodeID]
+		work.Nodes = append(work.Nodes, item)
 	}
-	markLogicGateWorkEmailOriginCards(&work, emailOriginKeys)
+	sortLogicGateWorkNodes(work.Nodes)
 	return work, nil
 }
-
-func (r *MemoryRepo) logicGateWorkNodeSummaryLocked(node domain.Node, assignment domain.NodeLogicGateAssignment) domain.Node {
-	node = r.withNodeReadModelLocked(node)
-	node.LogicGateIDs = []string{assignment.LogicGateID}
-	return node
-}
-
 func (r *MemoryRepo) LogicGateWorkAccessFlags(companyID, userID, logicGateID string) (domain.EffectiveAccessFlags, error) {
-	companyID = strings.TrimSpace(companyID)
-	userID = strings.TrimSpace(userID)
-	logicGateID = strings.TrimSpace(logicGateID)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if companyID == "" || userID == "" || logicGateID == "" {
 		return domain.EffectiveAccessFlags{}, ErrInvalid
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	if !r.entityExistsLocked(companyID, EntityTypeLogicGate, logicGateID) {
 		return domain.EffectiveAccessFlags{}, ErrNotFound
 	}
-	canEdit := r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, logicGateID, EntityPermissionEdit)
-	return domain.EffectiveAccessFlags{CanEdit: canEdit}, nil
+	return domain.EffectiveAccessFlags{CanEdit: r.userHasEffectiveAccessLocked(companyID, userID, EntityTypeLogicGate, logicGateID, EntityPermissionEdit)}, nil
 }
-
 func (r *MemoryRepo) CurrentLogicGateWorkVersion(companyID, logicGateID string) (int64, error) {
-	companyID = strings.TrimSpace(companyID)
-	logicGateID = strings.TrimSpace(logicGateID)
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if companyID == "" || logicGateID == "" {
 		return 0, ErrInvalid
 	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	if _, ok := r.logicGates[key(companyID, logicGateID)]; !ok {
 		return 0, ErrNotFound
 	}

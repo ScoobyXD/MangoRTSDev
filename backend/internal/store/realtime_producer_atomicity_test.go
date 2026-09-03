@@ -71,24 +71,23 @@ func TestMemoryNodeChatMutationAndOutboxAreAtomic(t *testing.T) {
 func TestMemoryWorkspaceMutationAndOutboxAreAtomic(t *testing.T) {
 	forced := errors.New("forced outbox failure")
 
-	t.Run("mounted Kanban mutation", func(t *testing.T) {
+	t.Run("Process step mutation", func(t *testing.T) {
 		repo := NewMemoryRepo()
 		companyID := "19191919-1919-4191-8191-191919191902"
-		logicGate, err := repo.CreateLogicGate(companyID, "Mounted board gate")
+		logicGate, err := repo.CreateLogicGate(companyID, "Atomic Process")
 		if err != nil {
-			t.Fatalf("CreateLogicGate: %v", err)
+			t.Fatal(err)
 		}
-		boardID := LogicGateKanbanBoardID(logicGate.LogicGateID)
 		repo.realtimeOutboxErr = forced
-		if _, err := repo.UpdateKanbanBoardWithWorkspaceEvent(companyID, boardID, "Changed title", 100); !errors.Is(err, forced) {
-			t.Fatalf("UpdateKanbanBoardWithWorkspaceEvent error = %v, want forced outbox failure", err)
+		if _, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Name: "Review"}); !errors.Is(err, forced) {
+			t.Fatalf("CreateProcessStep error = %v, want forced outbox failure", err)
 		}
-		boards, err := repo.ListKanbanBoards(companyID, KanbanBoardQuery{Limit: 10})
-		if err != nil || len(boards) != 1 || boards[0].Title != "Mounted board gate" {
-			t.Fatalf("boards after failed outbox insert = %+v err=%v, want original mounted board", boards, err)
+		work, err := repo.GetLogicGateWork(companyID, logicGate.LogicGateID, "")
+		if err != nil || len(work.Steps) != 0 {
+			t.Fatalf("steps after failed outbox insert = %+v err=%v, want none", work.Steps, err)
 		}
 		if len(repo.domainEvents) != 0 || len(repo.realtimeOutbox) != 0 {
-			t.Fatalf("split Kanban state domain_events=%d outbox=%d", len(repo.domainEvents), len(repo.realtimeOutbox))
+			t.Fatalf("split Process state domain_events=%d outbox=%d", len(repo.domainEvents), len(repo.realtimeOutbox))
 		}
 	})
 
@@ -134,10 +133,9 @@ func TestMemoryBatchedWorkspaceEventsAndOutboxAreAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateLogicGate: %v", err)
 	}
-	boardID := LogicGateKanbanBoardID(logicGate.LogicGateID)
 	inputs := []DomainEventInput{
-		workspaceDomainEventInput(companyID, "kanban_board_updated", map[string]any{"board_id": boardID}),
-		workspaceDomainEventInput(companyID, "kanban_column_updated", map[string]any{"board_id": boardID}),
+		workspaceDomainEventInput(companyID, ProcessWorkChangedEventType, map[string]any{"logic_gate_id": logicGate.LogicGateID}),
+		workspaceDomainEventInput(companyID, ProcessWorkChangedEventType, map[string]any{"logic_gate_id": logicGate.LogicGateID}),
 	}
 	repo.realtimeOutboxErr = errors.New("forced batched outbox failure")
 	if _, err := repo.AppendDomainEvents(inputs); err == nil {
