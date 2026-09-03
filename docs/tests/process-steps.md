@@ -32,7 +32,7 @@
 30. Work views, counts, and related readers derive from Nodes, Process assignments, and steps; `kanban_board_projection` and its synchronization paths do not exist.
 31. Process work commands enforce current Process and Node access through existing authorization rules, and hidden Nodes contribute neither rows nor counts.
 32. Committed work changes invalidate the existing Process work read through exact Process identity, and mounted views use one active refresh with at most one queued refresh.
-33. The existing left sidebar and SOP editor remain in place, with RACI assignments above the editor toolbar; the Process work board occupies only the right-hand work area.
+33. The existing left sidebar and SOP editor remain in place, including the RACI assignments and editor toolbar; the Process work board occupies only the right-hand work area.
 34. Step columns, controls, and Node cards reuse Mango's elevated surfaces and soft gradients; status is identified by both color and text.
 35. The Issue flag decorates a Node's underlying status and never moves a Pending or Done Node into the active Steps view.
 36. An assigned Node accepts only Requested, Pending, Backlogs, In Progress, Review, or Done through every status update path; Issue is never saved as its status.

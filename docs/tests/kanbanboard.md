@@ -60,7 +60,7 @@
 58. Authorization must run before an ETag can produce `304 Not Modified`.
 59. Work version changes must cover every source field that changes visible work data without rebuilding a board projection.
 60. A Process deletion must capture its current authorized audience before deletion and send its committed deletion hint to that audience.
-61. The board must occupy only the right-hand work area while preserving the left sidebar and SOP editor with RACI assignments above its toolbar.
+61. The board must occupy only the right-hand work area while preserving the left sidebar, SOP editor, RACI assignments, and editor toolbar.
 62. Requested tabs must use yellow, Pending gray, Backlog purple, and Done green.
 63. Step headers must display their names without ordinal-number badges.
 64. Each column must create a Node through its top-right plus button instead of a bottom New Node button.
@@ -70,6 +70,7 @@
 68. Node cards must retain readable status, priority, due date, and placement metadata.
 69. Node selection must work without a card checkbox.
 70. Node cards must omit the Change footer while existing Node editing, bulk commands, request actions, and Start work remain available.
+71. Readers whose shared Process response is invalidated must join at most one fresh read, and must never retry caller cancellation, cache clearing, or network failures.
 
 ## Process Story
 

@@ -8,7 +8,7 @@
 .process-work__toolbar>strong { flex:1; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:14px; }
 .process-work__controls { flex-shrink:0; min-width:0; gap:8px; }
 .process-work__views { display:flex; gap:6px; padding:4px; overflow-x:auto; min-width:0; }
-.process-work__views>button { display:flex; gap:6px; align-items:center; justify-content:center; flex:0 0 auto; min-width:80px; min-height:36px; font-weight:750; white-space:nowrap; background:linear-gradient(135deg,color-mix(in srgb,var(--view-color),white 88%),color-mix(in srgb,var(--view-color),white 70%)); border-color:color-mix(in srgb,var(--view-color),white 60%); }
+.process-work__views>button { display:flex; gap:5px; align-items:center; justify-content:center; flex:0 0 auto; min-width:68px; min-height:36px; padding:7px 8px; font-weight:750; white-space:nowrap; background:linear-gradient(135deg,color-mix(in srgb,var(--view-color),white 88%),color-mix(in srgb,var(--view-color),white 70%)); border-color:color-mix(in srgb,var(--view-color),white 60%); }
 .process-work__views>button:hover:not(:disabled) { background:linear-gradient(135deg,color-mix(in srgb,var(--view-color),white 80%),color-mix(in srgb,var(--view-color),white 60%)); }
 .process-work__views>button.is-active { box-shadow:inset 2px 2px 5px #8992a43d,inset -2px -2px 5px #fff; border-color:var(--view-color); }
 .process-work__count { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; font-size:10px; padding:0 3px; border-radius:6px; background:#ffffffaa; box-shadow:inset 1px 1px 3px #b7c1d52e; }

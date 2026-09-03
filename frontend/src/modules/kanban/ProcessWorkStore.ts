@@ -8,6 +8,7 @@ type Flight = { promise: Promise<ProcessWorkSnapshot>; controller: AbortControll
 const cache = new Map<string, Snapshot>();
 const flights = new Map<string, Flight>();
 const revisions = new Map<string, number>();
+const invalidatedRead = new DOMException("Process work changed during this read.", "AbortError");
 const key = (apiBase: string, companyID: string, processID: string) => `${getAuthSessionCacheGeneration()}\0${apiBase}\0${companyID}\0${processID}`;
 const clone = (value: ProcessWorkSnapshot): ProcessWorkSnapshot => structuredClone(value);
 
@@ -49,6 +50,17 @@ function applyTitle(value: ProcessWorkSnapshot, update: CommittedEntityTitleUpda
 }
 
 export async function getProcessWorkSingleFlight(apiBase: string, companyID: string, logicGateID: string, signal?: AbortSignal): Promise<ProcessWorkSnapshot> {
+  try {
+    return await readProcessWork(apiBase, companyID, logicGateID, signal);
+  } catch (cause) {
+    if (cause !== invalidatedRead) throw cause;
+    // Sidebar and board invalidations may supersede the same shared read.
+    // All active callers join one fresh read; cancellation never retries.
+    return readProcessWork(apiBase, companyID, logicGateID, signal);
+  }
+}
+
+async function readProcessWork(apiBase: string, companyID: string, logicGateID: string, signal?: AbortSignal): Promise<ProcessWorkSnapshot> {
   if (signal?.aborted) throw signal.reason ?? new DOMException("Request aborted", "AbortError");
   const item = key(apiBase, companyID, logicGateID);
   const cached = cache.get(item);
@@ -61,7 +73,8 @@ export async function getProcessWorkSingleFlight(apiBase: string, companyID: str
     const params = new URLSearchParams({ company_id: companyID });
     const next: Flight = { controller, callers: new Set(), settled: false, promise: Promise.resolve(null as unknown as ProcessWorkSnapshot) };
     next.promise = requestJSON<ProcessWorkSnapshot>(apiBase, `/v2/logic-gates/${encodeURIComponent(logicGateID)}/work?${params}`, { signal: controller.signal }).then((contents) => {
-      if ((revisions.get(item) ?? 0) !== revision || controller.signal.aborted) throw new DOMException("Process work changed during this read.", "AbortError");
+      if (controller.signal.aborted) throw controller.signal.reason ?? new DOMException("Request aborted", "AbortError");
+      if ((revisions.get(item) ?? 0) !== revision) throw invalidatedRead;
       foldCommittedEntityTitlesSince(contents, companyID, titleVersion, applyTitle);
       cache.set(item, { contents: clone(contents), stale: false });
       return contents;

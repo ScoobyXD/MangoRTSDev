@@ -17,6 +17,8 @@
 15. Changing account or company clears the visible session and aborts its request; chat has no saved history table or background job.
 16. OpenAI credentials remain on the server, provider errors remain private, and missing key or model configuration produces an unavailable state.
 17. Only completed nonempty replies enter later conversation history; interrupted or failed turns must not be silently resubmitted.
+18. Moving a Node to a Process uses the canonical Process work command and checks current access to the Node, its stored source Process, and the destination Process.
+19. A move with null status preserves the Node's current status and Issue flag; moving to another Process clears the previous step assignment.
 
 ## Process story
 

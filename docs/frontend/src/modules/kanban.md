@@ -1,6 +1,6 @@
 # Process Work Module
 
-The Process work area replaces the status-column board only in the existing Process page's right-hand column. The left sidebar and SOP editor remain in place, with RACI assignments above the editor toolbar. Its business rules live in `docs/tests/process-steps.md` and `docs/tests/kanbanboard.md`; Process editor, RACI, QDC, and linker rules remain in `docs/tests/logic-gates.md`.
+The Process work area replaces the status-column board only in the existing Process page's right-hand column. The left sidebar and SOP editor remain in place, including the RACI assignments and editor toolbar. Its business rules live in `docs/tests/process-steps.md` and `docs/tests/kanbanboard.md`; Process editor, RACI, QDC, and linker rules remain in `docs/tests/logic-gates.md`.
 
 The header shows **Steps · Requested · Pending · Backlog · Done**. Steps displays active Nodes under their exact Process steps, including an unassigned area. The other views display status-filtered lists. Status labels and colors remain independent of step columns, and Issue is a separate marker. All surfaces reuse the application's elevated neumorphic treatment, soft shadows, and gradients.
 
@@ -46,7 +46,7 @@ Every request carries the current company and follows the existing authenticated
 
 ## Loading and updates
 
-`ProcessWorkStore.ts` owns the exact company/Process cache and shared in-flight read. It retains a stale complete snapshot during revalidation and rejects obsolete selection responses. The UI reconciles mutations through the same loader; it does not create another polling loop or rebuild copied work data.
+`ProcessWorkStore.ts` owns the exact company/Process cache and shared in-flight read. It retains a stale complete snapshot during revalidation and rejects obsolete selection responses. When invalidation supersedes a shared response, active readers share at most one fresh read; cancellation, cache clearing, and network failures are never retried. The UI reconciles mutations through the same loader; it does not create another polling loop or rebuild copied work data.
 
 Realtime uses `process.work.changed` on `process:{logic_gate_id}`. The hint names the exact Process and contains no Node payload or replay sequence. Subscription acceptance, reconnection, local command completion, and server hints coalesce canonical reads. The backend rechecks current access and uses an actor-safe work ETag before returning either data or 304.
 
