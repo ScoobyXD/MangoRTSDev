@@ -387,6 +387,18 @@ variable "bootstrap_dev_company_name" {
   default     = "MangoRTS Bootstrap"
 }
 
+variable "assistant_model" {
+  description = "OpenAI Responses API model for Mango chat. Set together with openai_api_key_secret_arn."
+  type        = string
+  default     = ""
+}
+
+variable "openai_api_key_secret_arn" {
+  description = "AWS Secrets Manager ARN containing the plaintext OpenAI API key for Mango chat. Set together with assistant_model."
+  type        = string
+  default     = ""
+}
+
 variable "nylas_client_id" {
   description = "Nylas application client/application ID for Hosted OAuth. Leave empty to disable Communications email integration."
   type        = string

@@ -62,6 +62,6 @@ run(
   repoRoot,
 );
 runBackendGoTests();
-run("Infrastructure contract tests", "node --test infra/tests/attachment_direct_upload.test.mjs infra/tests/ci_workflow.test.mjs infra/tests/email_sqs.test.mjs infra/tests/qa_environment.test.mjs infra/tests/valkey_realtime.test.mjs", repoRoot);
+run("Infrastructure contract tests", "node --test infra/tests/assistant_config.test.mjs infra/tests/attachment_direct_upload.test.mjs infra/tests/ci_workflow.test.mjs infra/tests/email_sqs.test.mjs infra/tests/qa_environment.test.mjs infra/tests/valkey_realtime.test.mjs", repoRoot);
 
 console.log("\nAll test suites passed.");
