@@ -36,15 +36,21 @@
   pointer-events: none;
 }
 
-.mango-assistant-panel {
+.mango-assistant-expanded {
+  position: relative;
   width: min(760px, 100%);
   min-width: 0;
+  padding-top: 10px;
   pointer-events: auto;
+}
+
+.mango-assistant-panel {
+  min-width: 0;
   color: #111827;
   border: 1px solid rgba(148, 163, 184, 0.28);
   border-radius: 12px;
   background: linear-gradient(145deg, #fff, #f6f7fb);
-  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.14), inset 1px 1px 0 #fff;
+  box-shadow: 0 14px 38px rgba(15, 23, 42, 0.18), inset 1px 1px 0 #fff;
 }
 
 .mango-assistant button {
@@ -74,7 +80,24 @@
   font-size: 13px;
 }
 
-.mango-assistant .mango-assistant-toggle { width: 28px; padding: 5px; border-color: transparent; background: transparent; font-size: 18px; }
+.mango-assistant .mango-assistant-collapse,
+.mango-assistant .mango-assistant-expand {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border-color: rgba(148, 163, 184, 0.42);
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 5px 14px rgba(15, 23, 42, 0.2);
+}
+.mango-assistant .mango-assistant-expand[hidden],
+.mango-assistant .mango-assistant-expanded[hidden] { display: none; }
+.mango-assistant .mango-assistant-collapse { position: absolute; top: 0; left: 50%; z-index: 1; transform: translate(-50%, -50%); }
+.mango-assistant .mango-assistant-expand { width: 34px; height: 34px; pointer-events: auto; }
+.mango-assistant .mango-assistant-collapse svg,
+.mango-assistant .mango-assistant-expand svg { width: 16px; height: 16px; }
 .mango-assistant .mango-assistant-send { min-height: 32px; background: #475569; color: #fff; }
 .mango-assistant-transcript { border-bottom: 1px solid rgba(148, 163, 184, 0.25); }
 .mango-assistant-transcript header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 9px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); font-size: 12px; }

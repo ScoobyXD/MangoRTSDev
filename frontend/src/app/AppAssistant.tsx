@@ -9,6 +9,13 @@ import {
 type Props = { apiBase: string; userID: string; leftInset: number; bottomInset: number };
 type Turn = { question: string; reply: string; status: "running" | "complete" | "stopped" | "failed"; notice: string };
 
+function AssistantToggleIcon({ direction }: { direction: "up" | "down" }) {
+  const path = direction === "up" ? "M5 15l7-7 7 7" : "M5 9l7 7 7-7";
+  return <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <path d={path} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>;
+}
+
 function subscribeCompany(listener: () => void): () => void {
   window.addEventListener(ACTIVE_COMPANY_CHANGED_EVENT, listener);
   return () => window.removeEventListener(ACTIVE_COMPANY_CHANGED_EVENT, listener);
@@ -25,11 +32,15 @@ function AssistantSession({ apiBase, companyID, leftInset, bottomInset }: Props 
   const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [draft, setDraft] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [expanded, setExpanded] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [running, setRunning] = useState(false);
   const activeRequest = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const followReply = useRef(true);
+  const focusToggleAfterChange = useRef(false);
+  const expandButtonRef = useRef<HTMLButtonElement>(null);
+  const collapseButtonRef = useRef<HTMLButtonElement>(null);
+  const panelID = React.useId();
   const transcriptID = React.useId();
 
   useLayoutEffect(() => () => { activeRequest.current?.abort(); }, []);
@@ -53,10 +64,16 @@ function AssistantSession({ apiBase, companyID, leftInset, bottomInset }: Props 
   }, [apiBase, companyID]);
 
   useLayoutEffect(() => {
-    if (expanded && followReply.current && transcriptRef.current) {
+    if (!focusToggleAfterChange.current) return;
+    focusToggleAfterChange.current = false;
+    (panelOpen ? collapseButtonRef : expandButtonRef).current?.focus();
+  }, [panelOpen]);
+
+  useLayoutEffect(() => {
+    if (panelOpen && followReply.current && transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
-  }, [expanded, turns]);
+  }, [panelOpen, turns]);
 
   const history: AssistantMessage[] = turns.filter((turn) => turn.status === "complete" && turn.reply.trim()).flatMap((turn) => [
     { role: "user" as const, content: turn.question }, { role: "assistant" as const, content: turn.reply },
@@ -72,7 +89,6 @@ function AssistantSession({ apiBase, companyID, leftInset, bottomInset }: Props 
     const index = turns.length;
     setTurns((current) => [...current, { question, reply: "", status: "running", notice: "Thinking…" }]);
     setDraft("");
-    setExpanded(true);
     setRunning(true);
     followReply.current = true;
     const update = (changes: Partial<Turn>) => setTurns((current) => current.map((turn, turnIndex) => turnIndex === index ? { ...turn, ...changes } : turn));
@@ -106,19 +122,42 @@ function AssistantSession({ apiBase, companyID, leftInset, bottomInset }: Props 
     setTurns((current) => current.map((turn) => turn.status === "running" ? { ...turn, status: "stopped", notice: ASSISTANT_STOP_MESSAGE } : turn));
   };
 
+  const setPanelVisibility = (open: boolean) => {
+    focusToggleAfterChange.current = true;
+    setPanelOpen(open);
+  };
+
   return <aside className="mango-assistant" aria-label="Mango chat" style={{ left: leftInset, bottom: bottomInset }}>
-    <div className="mango-assistant-panel">
-      {expanded && <section className="mango-assistant-transcript" id={transcriptID} aria-label="Chat transcript">
+    <button
+      ref={expandButtonRef}
+      type="button"
+      className="mango-assistant-expand"
+      aria-label="Expand Mango chat"
+      aria-expanded={false}
+      aria-controls={panelID}
+      hidden={panelOpen}
+      onClick={() => setPanelVisibility(true)}
+    ><AssistantToggleIcon direction="up" /></button>
+    <div className="mango-assistant-expanded" hidden={!panelOpen}>
+      <button
+        ref={collapseButtonRef}
+        type="button"
+        className="mango-assistant-collapse"
+        aria-label="Collapse Mango chat"
+        aria-expanded={true}
+        aria-controls={panelID}
+        onClick={() => setPanelVisibility(false)}
+      ><AssistantToggleIcon direction="down" /></button>
+      <div className="mango-assistant-panel" id={panelID}>
+        {turns.length > 0 && <section className="mango-assistant-transcript" id={transcriptID} aria-label="Chat transcript">
         <header>
           <strong>Mango chat</strong>
           <button type="button" disabled={running || turns.length === 0} onClick={() => { setTurns([]); setDraft(""); }}>Clear chat</button>
-          <button type="button" aria-label="Collapse chat transcript" onClick={() => setExpanded(false)}>Collapse</button>
         </header>
         <div className="mango-assistant-messages mango-home-scroll" ref={transcriptRef} onScroll={(event) => {
           const element = event.currentTarget;
           followReply.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
         }}>
-          {turns.length === 0 && <p className="mango-assistant-hint">Ask about your Mango work or request a change.</p>}
           {turns.map((turn, index) => <React.Fragment key={index}>
             <div className="mango-assistant-message mango-assistant-question"><strong>You</strong><p>{turn.question}</p></div>
             <div className="mango-assistant-message" data-assistant-turn-status={turn.status}>
@@ -128,15 +167,15 @@ function AssistantSession({ apiBase, companyID, leftInset, bottomInset }: Props 
             </div>
           </React.Fragment>)}
         </div>
-      </section>}
-      <form className="mango-assistant-composer" onSubmit={(event) => { void send(event); }}>
-        <button type="button" className="mango-assistant-toggle" aria-label={expanded ? "Collapse chat transcript" : "Expand chat transcript"} aria-expanded={expanded} aria-controls={transcriptID} onClick={() => setExpanded((current) => !current)}>{expanded ? "⌄" : "⌃"}</button>
-        <input aria-label="Message Mango" placeholder={available === null ? "Checking Mango chat…" : "Ask Mango…"} value={draft} maxLength={ASSISTANT_MAX_MESSAGE_CHARS} disabled={!available || running} onChange={(event) => setDraft(event.currentTarget.value)} />
-        {running
-          ? <button type="button" className="mango-assistant-send" onClick={stop}>Stop</button>
-          : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError)}>Send</button>}
-      </form>
-      {(availabilityMessage || historyError) && <p className="mango-assistant-availability" role="status">{availabilityMessage || historyError}</p>}
+        </section>}
+        <form className="mango-assistant-composer" onSubmit={(event) => { void send(event); }}>
+          <input aria-label="Message Mango" placeholder={available === null ? "Checking Mango chat…" : "Ask Mango…"} value={draft} maxLength={ASSISTANT_MAX_MESSAGE_CHARS} disabled={!available || running} onChange={(event) => setDraft(event.currentTarget.value)} />
+          {running
+            ? <button type="button" className="mango-assistant-send" onClick={stop}>Stop</button>
+            : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError)}>Send</button>}
+        </form>
+        {(availabilityMessage || historyError) && <p className="mango-assistant-availability" role="status">{availabilityMessage || historyError}</p>}
+      </div>
     </div>
   </aside>;
 }

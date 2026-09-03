@@ -48,6 +48,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
   </>);
   const input = () => container.querySelector<HTMLInputElement>('input[aria-label="Message Mango"]')!;
   const form = () => container.querySelector("form")!;
+  const assistantButton = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
   const send = async (content: string, duplicate = false) => {
     await act(async () => { input().value = content; Simulate.change(input()); });
     await act(async () => {
@@ -64,12 +65,37 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     setActiveCompanyID("company-a");
     await act(async () => { render(); });
     assert.equal(input().disabled, false);
+    const collapseButton = assistantButton("Collapse Mango chat");
+    const panelID = collapseButton.getAttribute("aria-controls")!;
+    const panel = dom.window.document.getElementById(panelID)!;
+    const expandedRegion = panel.closest<HTMLDivElement>(".mango-assistant-expanded")!;
+    const expandButton = assistantButton("Expand Mango chat");
+    assert.equal(collapseButton.getAttribute("aria-expanded"), "true");
+    assert.equal(expandedRegion.hidden, false);
+    assert.equal(expandButton.hidden, true);
+    await act(async () => { input().value = "Keep this draft"; Simulate.change(input()); });
+    await act(async () => { collapseButton.click(); });
+    assert.ok(dom.window.document.getElementById(panelID), "the controlled panel must remain mounted while hidden");
+    assert.equal(expandedRegion.hidden, true);
+    assert.equal(expandButton.hidden, false);
+    assert.equal(dom.window.document.activeElement, expandButton, "collapse must focus the replacement control");
+    assert.equal(expandButton.getAttribute("aria-expanded"), "false");
+    await act(async () => { expandButton.click(); });
+    assert.equal(expandedRegion.hidden, false);
+    assert.equal(dom.window.document.activeElement, collapseButton, "expand must focus the replacement control");
+    assert.equal(input().value, "Keep this draft", "collapsing chat must preserve its in-memory session");
     await send("List my processes", true);
     assert.equal(requests.length, 1);
+    await act(async () => { assistantButton("Collapse Mango chat").click(); });
+    assert.equal(requests[0].signal.aborted, false, "collapsing must not stop the active request");
+    await emit(0, { type: "text", text: "<script>safe text</script>" });
+    await act(async () => { assistantButton("Expand Mango chat").click(); });
+    assert.match(container.textContent!, /<script>safe text<\/script>/, "the live turn must remain visible after expansion");
+    assert.ok(Array.from(container.querySelectorAll("button")).some((button) => button.textContent === "Stop"));
     await act(async () => { render("user-a", true); });
     const modalInput = dom.window.document.querySelector<HTMLInputElement>('input[aria-label="Permission input"]')!;
     await act(async () => { modalInput.focus(); });
-    await emit(0, { type: "text", text: "<script>safe text</script>" });
+    await emit(0, { type: "tool", name: "list_processes", status: "running" });
     assert.equal(dom.window.document.activeElement, modalInput, "stream updates must not take focus from a dialog");
     assert.equal(container.querySelector("script"), null);
     await emit(0, { type: "done" });

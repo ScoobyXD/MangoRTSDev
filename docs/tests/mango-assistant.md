@@ -17,6 +17,8 @@
 15. Changing account or company clears the visible session and aborts its request; chat has no saved history table or background job.
 16. OpenAI credentials remain on the server, provider errors remain private, and missing key or model configuration produces an unavailable state.
 17. Only completed nonempty replies enter later conversation history; interrupted or failed turns must not be silently resubmitted.
+18. Mango chat floats above the app canvas and must not reduce the canvas dimensions.
+19. Expanded chat has one centered circular down-arrow control that collapses the entire chat surface to one centered circular up-arrow control; focus follows the replacement control, and expanding restores the same in-memory session.
 
 ## Process story
 
