@@ -169,7 +169,7 @@ func TestRealtimeWebSocketUnauthorizedSubscriptionRejectedAndNotStored(t *testin
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
 	client.readJSON(t)
-	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
+	scope := realtimeProcessWorkScope(logicGate.LogicGateID)
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 
 	rejected := client.readJSON(t)
@@ -273,7 +273,7 @@ func TestRealtimeWebSocketAuthorizedSubscriptionAcceptedAndStored(t *testing.T) 
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
 	client.readJSON(t)
-	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
+	scope := realtimeProcessWorkScope(logicGate.LogicGateID)
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 
 	accepted := client.readJSON(t)
@@ -299,7 +299,7 @@ func TestRealtimeWebSocketCloseRemovesSubscriptions(t *testing.T) {
 
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	client.readJSON(t)
-	scope := realtimeBoardScope(store.LogicGateKanbanBoardID(logicGate.LogicGateID))
+	scope := realtimeProcessWorkScope(logicGate.LogicGateID)
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 	client.readJSON(t)
 	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
@@ -406,7 +406,7 @@ func TestRealtimeWebSocketOnlyAllowsAuthorizedNarrowScopes(t *testing.T) {
 		realtimePersonalMailboxScope(user.UserID, user.Email),
 		realtimeSharedMailboxScope(sharedInbox.FolderID),
 		realtimeChatScope(node.NodeID),
-		realtimeBoardScope(store.LogicGateKanbanBoardID(gate.LogicGateID)),
+		realtimeProcessWorkScope(gate.LogicGateID),
 		realtimeProcessMapScope,
 	}
 	for _, scope := range allowed {
@@ -534,7 +534,7 @@ func TestRealtimeResourceSubscriptionsRequireExistingSameCompanyResourceEvenForA
 
 	for _, scope := range []string{
 		realtimeChatScope("26262626-2626-4262-8262-262626262626"),
-		realtimeBoardScope(store.LogicGateKanbanBoardID("27272727-2727-4272-8272-272727272727")),
+		realtimeProcessWorkScope("27272727-2727-4272-8272-272727272727"),
 		realtimeSharedMailboxScope("28282828-2828-4282-8282-282828282828"),
 		realtimeChatScope(foreignNode.NodeID),
 		realtimeSharedMailboxScope(heading.FolderID),
@@ -564,8 +564,8 @@ func TestRealtimeSubscriptionScopeShapeAndLengthValidation(t *testing.T) {
 		"notifications:user:not-a-uuid",
 		"chat:node:not-a-uuid",
 		"chat:node:30303030-3030-4030-8030-303030303030:extra",
-		"board:30303030-3030-4030-8030-303030303030",
-		"board:logic-gate:not-a-uuid",
+		"process:not-a-uuid",
+		"process:30303030-3030-4030-8030-303030303030:extra",
 		"mailbox:shared:not-a-uuid",
 		"mailbox:personal:account:" + user.UserID + ":not-an-email",
 		"process-map:folder",
@@ -765,11 +765,11 @@ func TestRealtimeNodeChatPublicationReauthorizesAfterSubscription(t *testing.T) 
 	}
 }
 
-func TestRealtimeKanbanPublicationReauthorizesAfterSubscription(t *testing.T) {
+func TestRealtimeProcessWorkPublicationReauthorizesAfterSubscription(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "33323232-3232-4232-8232-323232323232"
-	token := "kanban-revocation-token"
-	user := mustRealtimeAuthUser(t, repo, companyID, "kanban-revocation-user", domain.RoleCompanyUser)
+	token := "process-work-revocation-token"
+	user := mustRealtimeAuthUser(t, repo, companyID, "process-work-revocation-user", domain.RoleCompanyUser)
 	gate, err := repo.CreateLogicGate(companyID, "Revocable board")
 	if err != nil {
 		t.Fatal(err)
@@ -787,8 +787,8 @@ func TestRealtimeKanbanPublicationReauthorizesAfterSubscription(t *testing.T) {
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
 	client.readJSON(t)
-	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
-	scope := realtimeBoardScope(boardID)
+	logicGateID := gate.LogicGateID
+	scope := realtimeProcessWorkScope(logicGateID)
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 	client.readJSON(t)
 
@@ -798,17 +798,17 @@ func TestRealtimeKanbanPublicationReauthorizesAfterSubscription(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	publishKanbanChangedForTest(t, server, companyID, boardID, "revoked-change")
+	publishProcessWorkChangedForTest(t, server, companyID, logicGateID, "revoked-change")
 	client.assertNoMessage(t)
 	if server.realtimeRegistry.scopeSubscriptionCount(companyID, scope) != 1 {
-		t.Fatal("revocation test lost its existing board subscription")
+		t.Fatal("revocation test lost its existing Process subscription")
 	}
 	if _, err := repo.SetEntityPermissions(grant); err != nil {
 		t.Fatal(err)
 	}
-	publishKanbanChangedForTest(t, server, companyID, boardID, "restored-change")
-	if message := client.readJSON(t); message["type"] != realtimeMessageKanbanChanged || message["change_type"] != "restored-change" {
-		t.Fatalf("restored board publication = %+v", message)
+	publishProcessWorkChangedForTest(t, server, companyID, logicGateID, "restored-change")
+	if message := client.readJSON(t); message["type"] != realtimeMessageProcessWorkChanged || message["change_type"] != "restored-change" {
+		t.Fatalf("restored Process publication = %+v", message)
 	}
 }
 
@@ -886,7 +886,7 @@ func TestRealtimeNodeChatCreateDeletePublishesOnlyNodeScope(t *testing.T) {
 	}
 }
 
-func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T) {
+func TestRealtimeProcessWorkCommittedEventsPublishOnlyMountedProcessScope(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "66666666-6666-4666-8666-666666666666"
 	token := "realtime-board-token"
@@ -907,8 +907,8 @@ func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T)
 	client := openRealtimeWebSocketForTest(t, server.Routes(), "/v1/realtime/ws?company_id="+companyID, token)
 	defer client.close()
 	client.readJSON(t)
-	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
-	scope := realtimeBoardScope(boardID)
+	logicGateID := gate.LogicGateID
+	scope := realtimeProcessWorkScope(logicGateID)
 	client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": scope})
 	client.readJSON(t)
 	priority := 1
@@ -918,8 +918,8 @@ func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T)
 	}
 	server.publishCommittedWorkspaceEvents(result.Events)
 	message := client.readJSON(t)
-	if message["type"] != realtimeMessageKanbanChanged || message["scope"] != scope || message["board_id"] != boardID {
-		t.Fatalf("kanban message = %+v", message)
+	if message["type"] != realtimeMessageProcessWorkChanged || message["scope"] != scope || message["logic_gate_id"] != logicGateID {
+		t.Fatalf("Process work message = %+v", message)
 	}
 	_, event, err := repo.UpdateNodeAndWorkspaceEvent(store.UpdateNodeInput{CompanyID: companyID, NodeID: node.NodeID, Title: "Renamed board node", TitleSet: true})
 	if err != nil {
@@ -927,14 +927,14 @@ func TestRealtimeKanbanCommittedEventsPublishOnlyMountedBoardScope(t *testing.T)
 	}
 	server.publishCommittedWorkspaceEvent(event)
 	renamed := client.readJSON(t)
-	if renamed["type"] != realtimeMessageKanbanChanged || renamed["board_id"] != boardID || renamed["change_type"] != "node_updated" {
-		t.Fatalf("node rename kanban message = %+v", renamed)
+	if renamed["type"] != realtimeMessageProcessWorkChanged || renamed["logic_gate_id"] != logicGateID || renamed["change_type"] != "node_updated" {
+		t.Fatalf("node rename Process work message = %+v", renamed)
 	}
-	publishKanbanChangedForTest(t, server, companyID, "99999999-9999-4999-8999-999999999999", "unmounted_change")
+	publishProcessWorkChangedForTest(t, server, companyID, "99999999-9999-4999-8999-999999999999", "unmounted_change")
 	client.assertNoMessage(t)
 }
 
-func TestRealtimeCrossLogicGateMovePublishesSourceAndDestinationBoardsOnce(t *testing.T) {
+func TestRealtimeCrossLogicGateMovePublishesSourceAndDestinationProcessesOnce(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "67676767-6767-4767-8767-676767676767"
 	token := "realtime-cross-board-token"
@@ -971,10 +971,10 @@ func TestRealtimeCrossLogicGateMovePublishesSourceAndDestinationBoardsOnce(t *te
 	defer client.close()
 	client.readJSON(t)
 
-	sourceBoardID := store.LogicGateKanbanBoardID(sourceGate.LogicGateID)
-	targetBoardID := store.LogicGateKanbanBoardID(targetGate.LogicGateID)
-	for _, boardID := range []string{sourceBoardID, targetBoardID} {
-		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": realtimeBoardScope(boardID)})
+	sourceLogicGateID := sourceGate.LogicGateID
+	targetLogicGateID := targetGate.LogicGateID
+	for _, logicGateID := range []string{sourceLogicGateID, targetLogicGateID} {
+		client.writeJSON(t, map[string]any{"type": realtimeMessageSubscribe, "scope": realtimeProcessWorkScope(logicGateID)})
 		client.readJSON(t)
 	}
 	priority := 2
@@ -997,17 +997,17 @@ func TestRealtimeCrossLogicGateMovePublishesSourceAndDestinationBoardsOnce(t *te
 	}
 	server.publishCommittedWorkspaceEvents(moved.Events)
 
-	seenBoards := map[string]int{}
+	seenProcesses := map[string]int{}
 	for range 2 {
 		message := client.readJSON(t)
-		if message["type"] != realtimeMessageKanbanChanged || message["change_type"] != "kanban_card_moved" {
+		if message["type"] != realtimeMessageProcessWorkChanged || message["change_type"] != store.WorkItemLogicGateAssignmentMovedEventType {
 			t.Fatalf("cross-gate move message = %+v", message)
 		}
-		boardID, _ := message["board_id"].(string)
-		seenBoards[boardID]++
+		logicGateID, _ := message["logic_gate_id"].(string)
+		seenProcesses[logicGateID]++
 	}
-	if seenBoards[sourceBoardID] != 1 || seenBoards[targetBoardID] != 1 || len(seenBoards) != 2 {
-		t.Fatalf("cross-gate move board publications = %+v, want one source and one destination", seenBoards)
+	if seenProcesses[sourceLogicGateID] != 1 || seenProcesses[targetLogicGateID] != 1 || len(seenProcesses) != 2 {
+		t.Fatalf("cross-gate move Process publications = %+v, want one source and one destination", seenProcesses)
 	}
 	client.assertNoMessage(t)
 }

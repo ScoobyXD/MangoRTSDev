@@ -8,10 +8,8 @@ import (
 var (
 	NodeListWorkspaceEventTypes = []string{
 		"node_created", "node_updated", "node_deleted", "node_permissions_updated",
-		"kanban_card_upserted", "kanban_card_moved", "kanban_card_deleted",
 		WorkItemLogicGateAssignmentSavedEventType, WorkItemLogicGateAssignmentMovedEventType,
 		WorkItemLogicGateAssignmentRemovedEventType, WorkItemLogicGateIssueToggledEventType,
-		"kanban_column_deleted", "kanban_board_deleted",
 	}
 	NodeRelationshipWorkspaceEventTypes = []string{"relationship_created", "relationship_deleted", "node_deleted"}
 	LogicGateListWorkspaceEventTypes    = []string{
@@ -38,14 +36,6 @@ var (
 		"company_explorer_folder_permissions_updated", "communications_shared_inbox_gvic_updated", "shared_triage_access_updated",
 	}
 	CompanyExplorerFolderItemWorkspaceEventTypes = []string{"company_explorer_item_placed", "company_explorer_item_removed"}
-	KanbanBoardWorkspaceEventTypes               = []string{"kanban_board_saved", "kanban_board_updated", "kanban_board_deleted", "logic_gate_deleted"}
-	KanbanColumnWorkspaceEventTypes              = []string{"kanban_column_created", "kanban_column_updated", "kanban_column_deleted", "kanban_board_deleted", "logic_gate_deleted"}
-	KanbanCardWorkspaceEventTypes                = []string{
-		"kanban_card_upserted", "kanban_card_moved", "kanban_card_deleted",
-		WorkItemLogicGateAssignmentSavedEventType, WorkItemLogicGateAssignmentMovedEventType,
-		WorkItemLogicGateAssignmentRemovedEventType, WorkItemLogicGateIssueToggledEventType,
-		"kanban_column_deleted", "kanban_board_deleted", "node_deleted", "logic_gate_deleted",
-	}
 )
 
 type WorkspaceReadVersionQuery struct {
@@ -98,7 +88,6 @@ func WorkspaceReadVersionStaticRows(companyID string) []WorkspaceReadVersionQuer
 		{CompanyID: companyID, Scope: "node-relationships"},
 		{CompanyID: companyID, Scope: "logic-gates"},
 		{CompanyID: companyID, Scope: "process-map"},
-		{CompanyID: companyID, Scope: "kanban-boards"},
 	}
 }
 
@@ -114,13 +103,7 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 		}
 	}
 	addCompanyExplorer := func(resourceKey string) { add("workspace-snapshot:company_explorer", resourceKey) }
-	addKanbanBoardResource := func(scope, boardID string) {
-		if boardID != "" {
-			add(scope, WorkspaceReadVersionResourceKey("board_id", boardID))
-		}
-	}
 	eventType := strings.TrimSpace(event.Type)
-	boardID := workspaceEventPayloadString(event.Payload, "board_id")
 	add("workspace-snapshot:full", "")
 	if stringInList(eventType, NodeListWorkspaceEventTypes) {
 		add("nodes", "")
@@ -151,17 +134,6 @@ func workspaceReadVersionRowsForDomainEvent(event domain.DomainEvent) []Workspac
 	}
 	if stringInList(eventType, CompanyExplorerFolderWorkspaceEventTypes) || stringInList(eventType, CompanyExplorerFolderItemWorkspaceEventTypes) {
 		addCompanyExplorer("")
-	}
-	if stringInList(eventType, KanbanBoardWorkspaceEventTypes) {
-		add("kanban-boards", "")
-	}
-	if stringInList(eventType, KanbanColumnWorkspaceEventTypes) {
-		addKanbanBoardResource("kanban-columns", boardID)
-		addKanbanBoardResource("workspace-snapshot:kanban", boardID)
-	}
-	if stringInList(eventType, KanbanCardWorkspaceEventTypes) {
-		addKanbanBoardResource("kanban-cards", boardID)
-		addKanbanBoardResource("workspace-snapshot:kanban", boardID)
 	}
 	out := make([]WorkspaceReadVersionQuery, 0, len(rows))
 	for _, row := range rows {

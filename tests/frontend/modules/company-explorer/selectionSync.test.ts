@@ -13,7 +13,6 @@ test("empty Explorer selection has no entity, folder, or multi-selection state",
   assert.deepEqual(emptyExplorerSelectionState(), {
     selectedNodeID: "",
     selectedLogicGateID: "",
-    selectedKanbanBoardID: "",
     selectedFolderID: "",
     selectedFolderKind: undefined,
     selectedTreeID: "",

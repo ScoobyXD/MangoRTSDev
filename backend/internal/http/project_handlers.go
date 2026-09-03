@@ -69,12 +69,12 @@ type projectScopedLogicGateCreateRequest struct {
 }
 
 type projectInitialAssignmentRequest struct {
-	LogicGateID string `json:"logic_gate_id"`
-	Status      string `json:"status"`
-	ColumnID    string `json:"column_id"`
-	Position    int    `json:"position"`
-	Priority    *int   `json:"priority"`
-	IsIssue     *bool  `json:"is_issue"`
+	LogicGateID   string  `json:"logic_gate_id"`
+	Status        string  `json:"status"`
+	ProcessStepID *string `json:"process_step_id"`
+	Position      int     `json:"position"`
+	Priority      *int    `json:"priority"`
+	IsIssue       *bool   `json:"is_issue"`
 }
 
 func (s *Server) handleProjects(w http.ResponseWriter, r *http.Request) {
@@ -685,12 +685,12 @@ func (s *Server) handleProjectScopedNodeCreate(w http.ResponseWriter, r *http.Re
 	}
 	if req.InitialAssignment != nil {
 		input.InitialAssignment = &store.ProjectScopedNodeLogicGateAssignmentInput{
-			LogicGateID: strings.TrimSpace(req.InitialAssignment.LogicGateID),
-			Status:      req.InitialAssignment.Status,
-			ColumnID:    req.InitialAssignment.ColumnID,
-			Position:    req.InitialAssignment.Position,
-			Priority:    req.InitialAssignment.Priority,
-			IsIssue:     req.InitialAssignment.IsIssue,
+			LogicGateID:   strings.TrimSpace(req.InitialAssignment.LogicGateID),
+			Status:        req.InitialAssignment.Status,
+			ProcessStepID: req.InitialAssignment.ProcessStepID,
+			Position:      req.InitialAssignment.Position,
+			Priority:      req.InitialAssignment.Priority,
+			IsIssue:       req.InitialAssignment.IsIssue,
 		}
 	}
 	result, err := s.repo.CreateNodeAssociatedWithProject(input)

@@ -150,12 +150,12 @@ func TestSharedMailboxPublicationAcknowledgesDurableEnqueueBeforeAudienceRetry(t
 	}
 }
 
-func TestCapturedKanbanDeletePublishesAfterResourceIsGone(t *testing.T) {
+func TestCapturedProcessWorkDeletePublishesAfterResourceIsGone(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "ffffffff-ffff-4fff-8fff-ffffffffffff"
 	repo.EnsureCompany(companyID, "Delete tombstone company")
-	allowed := mustRealtimeAuthUser(t, repo, companyID, "delete-board-allowed", domain.RoleCompanyUser)
-	denied := mustRealtimeAuthUser(t, repo, companyID, "delete-board-denied", domain.RoleCompanyUser)
+	allowed := mustRealtimeAuthUser(t, repo, companyID, "delete-process-work-allowed", domain.RoleCompanyUser)
+	denied := mustRealtimeAuthUser(t, repo, companyID, "delete-process-work-denied", domain.RoleCompanyUser)
 	gate, err := repo.CreateLogicGate(companyID, "Delete me")
 	if err != nil {
 		t.Fatal(err)
@@ -177,10 +177,10 @@ func TestCapturedKanbanDeletePublishesAfterResourceIsGone(t *testing.T) {
 	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
 	defer server.Close()
 
-	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
-	scope := realtimeBoardScope(boardID)
-	allowedNetwork := subscribeRecordingRealtimeConnection(t, server, "delete-board-allowed", companyID, allowed.UserID, scope)
-	deniedNetwork := subscribeRecordingRealtimeConnection(t, server, "delete-board-denied", companyID, denied.UserID, scope)
+	logicGateID := gate.LogicGateID
+	scope := realtimeProcessWorkScope(logicGateID)
+	allowedNetwork := subscribeRecordingRealtimeConnection(t, server, "delete-process-work-allowed", companyID, allowed.UserID, scope)
+	deniedNetwork := subscribeRecordingRealtimeConnection(t, server, "delete-process-work-denied", companyID, denied.UserID, scope)
 
 	result, err := repo.DeleteCompanyExplorerTargets(companyID, []store.CompanyExplorerDeleteTargetInput{{
 		Kind: "logic_gate",
@@ -192,19 +192,19 @@ func TestCapturedKanbanDeletePublishesAfterResourceIsGone(t *testing.T) {
 	server.publishCommittedWorkspaceEvents(result.Events)
 
 	messages := waitForRecordingRealtimeMessages(t, allowedNetwork, 1)
-	if len(messages) != 1 || messages[0]["type"] != realtimeMessageKanbanChanged || messages[0]["change_type"] != "resource_deleted" {
+	if len(messages) != 1 || messages[0]["type"] != realtimeMessageProcessWorkChanged || messages[0]["change_type"] != "resource_deleted" {
 		t.Fatalf("authorized deletion messages = %+v, want one resource_deleted tombstone", messages)
 	}
 	if messages := deniedNetwork.messages(t); len(messages) != 0 {
 		t.Fatalf("unauthorized subscriber received deletion tombstone: %+v", messages)
 	}
-	publishKanbanChangedForTest(t, server, companyID, boardID, "ordinary_post_delete_change")
+	publishProcessWorkChangedForTest(t, server, companyID, logicGateID, "ordinary_post_delete_change")
 	if messages := allowedNetwork.messages(t); len(messages) != 1 {
 		t.Fatalf("ordinary post-delete publication bypassed existence reauthorization: %+v", messages)
 	}
 
 }
-func TestNodeDeleteBoardRefreshReauthorizesTheSurvivingLogicGate(t *testing.T) {
+func TestNodeDeleteProcessWorkRefreshReauthorizesTheSurvivingLogicGate(t *testing.T) {
 	base := store.NewMemoryRepo()
 	companyID := "abababab-abab-4bab-8bab-abababababab"
 	base.EnsureCompany(companyID, "Node delete audience company")
@@ -249,8 +249,8 @@ func TestNodeDeleteBoardRefreshReauthorizesTheSurvivingLogicGate(t *testing.T) {
 		return publishedSequence > 0 && cursor >= publishedSequence
 	}, "initial assignment batch accepted before subscription")
 
-	boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
-	scope := realtimeBoardScope(boardID)
+	logicGateID := gate.LogicGateID
+	scope := realtimeProcessWorkScope(logicGateID)
 	beforeNetwork := subscribeRecordingRealtimeConnection(t, server, "node-delete-before", companyID, beforeCapture.UserID, scope)
 	afterNetwork := subscribeRecordingRealtimeConnection(t, server, "node-delete-after", companyID, afterCapture.UserID, scope)
 
@@ -268,11 +268,11 @@ func TestNodeDeleteBoardRefreshReauthorizesTheSurvivingLogicGate(t *testing.T) {
 	server.publishCommittedWorkspaceEvents(result.Events)
 
 	if messages := beforeNetwork.messages(t); len(messages) != 0 {
-		t.Fatalf("viewer removed after capture received surviving-board refresh: %+v", messages)
+		t.Fatalf("viewer removed after capture received surviving-Process refresh: %+v", messages)
 	}
 	messages := waitForRecordingRealtimeMessages(t, afterNetwork, 1)
 	if len(messages) != 1 || messages[0]["change_type"] != "resource_deleted" {
-		t.Fatalf("current viewer messages = %+v, want one reauthorized board refresh", messages)
+		t.Fatalf("current viewer messages = %+v, want one reauthorized Process refresh", messages)
 	}
 	if calls := repo.snapshotCalls(); len(calls) != 1 {
 		t.Fatalf("node delete publication audience calls = %+v, want one post-delete lookup", calls)

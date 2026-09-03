@@ -6,7 +6,7 @@ import { isAbortError } from "../api/requestJSON";
 import { openEditorEntityLink, type EditorEntityLink } from "./editorEntityLinks.js";
 import { humanLabelOrFallback } from "../entityLabels.js";
 import type { LogicGateRecord } from "../logic-gates/types";
-import { listKanbanBoards } from "../kanban/kanbanApi.js";
+import { getLogicGateRecordSingleFlight } from "../logic-gates/logicGateRecordStore.js";
 import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
 import { ExplorerEntityIcon, ExplorerRowIcon } from "../../icons/index.js";
 import { foldCommittedEntityTitlesSince, readCommittedEntityTitleVersion, subscribeCommittedEntityTitleUpdates } from "../realtime/committedEntityTitleUpdates";
@@ -1072,17 +1072,7 @@ export const NodeWorkspaceSurface: React.FC<NodeWorkspaceSurfaceProps> = ({
     }
     let cancelled = false;
     const titleVersionAtStart = readCommittedEntityTitleVersion();
-    void listKanbanBoards(apiBase, companyID, 200).then((boards) => {
-      const boardByLogicGateID = new Map(boards.map((board) => [board.logic_gate_id?.trim() ?? "", board]));
-      const records = ids.map((logicGateID): LogicGateRecord | null => {
-        const board = boardByLogicGateID.get(logicGateID);
-        return board ? {
-          company_id: board.company_id,
-          logic_gate_id: logicGateID,
-          header: board.title,
-          created_timestamp: board.created_timestamp,
-        } : null;
-      });
+    void Promise.all(ids.map(async (id) => (await getLogicGateRecordSingleFlight(apiBase, companyID, id)).logic_gate)).then((records) => {
       if (!cancelled) setAssignedLogicGateRecords(foldCommittedEntityTitlesSince(
         records.filter((record): record is LogicGateRecord => Boolean(record)),
         companyID,

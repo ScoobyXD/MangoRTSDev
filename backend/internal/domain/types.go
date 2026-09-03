@@ -800,8 +800,6 @@ type CommunicationsEmailPlacement struct {
 	UserID           string    `json:"user_id"`
 	MessageID        string    `json:"message_id"`
 	NodeID           string    `json:"node_id"`
-	BoardID          string    `json:"board_id"`
-	CardID           string    `json:"card_id"`
 	LogicGateID      string    `json:"logic_gate_id"`
 	CreatedTimestamp time.Time `json:"created_timestamp"`
 	UpdatedTimestamp time.Time `json:"updated_timestamp"`
@@ -1331,43 +1329,50 @@ type ProjectView struct {
 	EffectiveAccessFlags
 }
 
-// LogicGateWorkHeader is the Kanban-specific Logic Gate metadata needed by the
-// Arena. RequestOwnerUserID is derived from the Responsible user assignment; the
-// full RACI collection belongs to the Logic Gate details APIs.
 type LogicGateWorkHeader struct {
-	LogicGateID        string `json:"logic_gate_id"`
-	Header             string `json:"header"`
-	DefaultAccess      string `json:"default_access"`
-	RequestOwnerUserID string `json:"request_owner_user_id,omitempty"`
+	LogicGateID   string `json:"logic_gate_id"`
+	Header        string `json:"header"`
+	DefaultAccess string `json:"default_access"`
 }
 
-// LogicGateWorkCard is the non-redundant card row returned by the Logic Gate
-// Arena. Company, board, and Logic Gate IDs are supplied once instead of being
-// repeated on every card.
-type LogicGateWorkCard struct {
-	CardID                     string    `json:"card_id"`
-	ColumnID                   string    `json:"column_id"`
-	NodeID                     string    `json:"node_id"`
-	NodeTitle                  string    `json:"node_title"`
-	RequestedByUserID          string    `json:"requested_by_user_id,omitempty"`
-	PlacedByUserID             string    `json:"placed_by_user_id,omitempty"`
-	IsIssue                    bool      `json:"is_issue"`
-	Position                   int       `json:"position"`
-	DueDate                    *string   `json:"due_date,omitempty"`
-	Priority                   *int      `json:"priority,omitempty"`
-	CreatedFromEmail           bool      `json:"created_from_email,omitempty"`
-	HasProject                 bool      `json:"has_project,omitempty"`
-	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
-	CreatedTimestamp           time.Time `json:"created_timestamp"`
-	Accounts                   []Account `json:"accounts,omitempty"`
+type LogicGateWorkPermissions struct {
+	CanEdit            bool `json:"can_edit"`
+	CanResolveRequests bool `json:"can_resolve_requests"`
+}
+
+type ProcessStep struct {
+	CompanyID        string    `json:"company_id"`
+	ProcessStepID    string    `json:"process_step_id"`
+	LogicGateID      string    `json:"logic_gate_id"`
+	Name             string    `json:"name"`
+	Position         int       `json:"position"`
+	CreatedTimestamp time.Time `json:"created_timestamp"`
+	UpdatedTimestamp time.Time `json:"updated_timestamp"`
+}
+
+type LogicGateWorkNode struct {
+	NodeID            string    `json:"node_id"`
+	NodeTitle         string    `json:"node_title"`
+	Status            string    `json:"status"`
+	ProcessStepID     *string   `json:"process_step_id"`
+	RequestedByUserID string    `json:"requested_by_user_id,omitempty"`
+	PlacedByUserID    string    `json:"placed_by_user_id,omitempty"`
+	IsIssue           bool      `json:"is_issue"`
+	Position          int       `json:"position"`
+	DueDate           *string   `json:"due_date,omitempty"`
+	Priority          *int      `json:"priority,omitempty"`
+	CreatedFromEmail  bool      `json:"created_from_email,omitempty"`
+	HasProject        bool      `json:"has_project,omitempty"`
+	CreatedTimestamp  time.Time `json:"created_timestamp"`
+	Accounts          []Account `json:"accounts,omitempty"`
 }
 
 type LogicGateWorkView struct {
-	LogicGate   LogicGateWorkHeader  `json:"logic_gate"`
-	Permissions EffectiveAccessFlags `json:"permissions"`
-	Board       KanbanBoard          `json:"board"`
-	Columns     []KanbanColumn       `json:"columns"`
-	Cards       []LogicGateWorkCard  `json:"cards"`
+	LogicGate     LogicGateWorkHeader               `json:"logic_gate"`
+	Permissions   LogicGateWorkPermissions          `json:"permissions"`
+	Steps         []ProcessStep                     `json:"steps"`
+	Relationships []ResourceOperationalRelationship `json:"relationships"`
+	Nodes         []LogicGateWorkNode               `json:"nodes"`
 }
 
 type CompanyExplorerFolder struct {
@@ -1446,68 +1451,19 @@ type RecycleBinItem struct {
 	DeletedTimestamp time.Time                 `json:"deleted_timestamp"`
 }
 
-type KanbanBoard struct {
-	CompanyID        string    `json:"company_id"`
-	BoardID          string    `json:"board_id"`
-	LogicGateID      *string   `json:"logic_gate_id"`
-	Title            string    `json:"title"`
-	Position         int       `json:"position"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
-}
-
-type KanbanColumn struct {
-	CompanyID        string    `json:"company_id"`
-	BoardID          string    `json:"board_id"`
-	ColumnID         string    `json:"column_id"`
-	Title            string    `json:"title"`
-	Position         int       `json:"position"`
-	WidthPx          int       `json:"width_px"`
-	HeightPx         int       `json:"height_px"`
-	ItemColor        string    `json:"item_color"`
-	CreatedTimestamp time.Time `json:"created_timestamp"`
-	UpdatedTimestamp time.Time `json:"updated_timestamp"`
-}
-
-type KanbanCard struct {
-	CompanyID                  string    `json:"company_id"`
-	BoardID                    string    `json:"board_id"`
-	CardID                     string    `json:"card_id"`
-	ColumnID                   string    `json:"column_id"`
-	NodeID                     string    `json:"node_id"`
-	LogicGateID                *string   `json:"logic_gate_id"`
-	RequestedByUserID          string    `json:"requested_by_user_id,omitempty"`
-	PlacedByUserID             string    `json:"placed_by_user_id,omitempty"`
-	NodeTitle                  string    `json:"node_title"`
-	DescriptionSnapshot        string    `json:"description_snapshot"`
-	IsIssue                    bool      `json:"is_issue"`
-	Position                   int       `json:"position"`
-	DueDate                    *string   `json:"due_date,omitempty"`
-	Priority                   *int      `json:"priority,omitempty"`
-	CreatedFromEmail           bool      `json:"created_from_email,omitempty"`
-	HasProject                 bool      `json:"has_project,omitempty"`
-	ProjectionUpdatedTimestamp time.Time `json:"projection_updated_timestamp,omitempty"`
-	CreatedTimestamp           time.Time `json:"created_timestamp"`
-	UpdatedTimestamp           time.Time `json:"updated_timestamp"`
-	Accounts                   []Account `json:"accounts,omitempty"`
-}
-
 type NodeLogicGateAssignment struct {
-	AssignmentID         string    `json:"assignment_id"`
-	CompanyID            string    `json:"company_id"`
-	NodeID               string    `json:"node_id"`
-	LogicGateID          string    `json:"logic_gate_id"`
-	StatusKey            string    `json:"status_key"`
-	ColumnID             string    `json:"column_id"`
-	IsIssue              bool      `json:"is_issue"`
-	Position             int       `json:"position"`
-	CompatibilityBoardID string    `json:"compatibility_board_id"`
-	CompatibilityCardID  string    `json:"compatibility_card_id"`
-	RequestedByUserID    string    `json:"requested_by_user_id,omitempty"`
-	PlacedByUserID       string    `json:"placed_by_user_id,omitempty"`
-	Version              int64     `json:"version"`
-	CreatedTimestamp     time.Time `json:"created_timestamp"`
-	UpdatedTimestamp     time.Time `json:"updated_timestamp"`
+	AssignmentID      string    `json:"assignment_id"`
+	CompanyID         string    `json:"company_id"`
+	NodeID            string    `json:"node_id"`
+	LogicGateID       string    `json:"logic_gate_id"`
+	IsIssue           bool      `json:"is_issue"`
+	Position          int       `json:"position"`
+	RequestedByUserID string    `json:"requested_by_user_id,omitempty"`
+	PlacedByUserID    string    `json:"placed_by_user_id,omitempty"`
+	Version           int64     `json:"version"`
+	CreatedTimestamp  time.Time `json:"created_timestamp"`
+	UpdatedTimestamp  time.Time `json:"updated_timestamp"`
+	ProcessStepID     *string   `json:"process_step_id"`
 }
 
 type NodeAccountAssignment struct {

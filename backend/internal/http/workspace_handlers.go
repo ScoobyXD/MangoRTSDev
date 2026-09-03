@@ -131,9 +131,6 @@ func (s *Server) handleWorkspaceSnapshot(w http.ResponseWriter, r *http.Request)
 		"folders":       folders,
 		"folder_items":  folderItems,
 	}
-	if isTruthyQueryValue(firstNonEmptyQueryValue(r, "include_legacy_kanban", "include_kanban_payloads")) {
-		payload["kanban_boards"] = logicGateProjectionBoards(logicGates, store.KanbanBoardQuery{Limit: store.KanbanMaxBoardsLimit})
-	}
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, payload, etag)
 }
 
@@ -174,15 +171,6 @@ func workspaceSnapshotVersionQueries(r *http.Request, scope string) []store.Doma
 				workspaceEventQueryPayload(companyExplorerFolderWorkspaceEventTypes, folderKindPayload("logic_gate")),
 			}
 		}
-	case "kanban":
-		boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
-		if boardID == "" {
-			return nil
-		}
-		return []store.DomainEventStreamQuery{
-			workspaceEventQueryPayload(kanbanColumnWorkspaceEventTypes, boardIDPayload(boardID)),
-			workspaceEventQueryPayload(kanbanCardWorkspaceEventTypes, boardIDPayload(boardID)),
-		}
 	default:
 		return nil
 	}
@@ -191,8 +179,6 @@ func (s *Server) handleScopedWorkspaceSnapshot(w http.ResponseWriter, r *http.Re
 	switch scope {
 	case "company_explorer":
 		s.handleCompanyExplorerWorkspaceSnapshot(w, r, companyID, etag)
-	case "kanban":
-		s.handleKanbanWorkspaceSnapshot(w, r, companyID, etag)
 	default:
 		writeError(w, http.StatusBadRequest, "invalid_workspace_snapshot_scope")
 	}
@@ -395,45 +381,6 @@ func (s *Server) handleCompanyExplorerWorkspaceSnapshot(w http.ResponseWriter, r
 		"projects":     projects,
 	}, etag)
 }
-func (s *Server) handleKanbanWorkspaceSnapshot(w http.ResponseWriter, r *http.Request, companyID, etag string) {
-	boardID := strings.TrimSpace(r.URL.Query().Get("board_id"))
-	if boardID == "" {
-		writeError(w, http.StatusBadRequest, "board_id_required")
-		return
-	}
-	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
-	if logicGateID == "" {
-		writeLegacyKanbanDisabled(w)
-		return
-	}
-	if !s.requireEntityView(w, r, companyID, store.EntityTypeLogicGate, logicGateID, "logic_gate_not_found") {
-		return
-	}
-	columns, err := s.repo.ListKanbanColumns(companyID, boardID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_columns")
-		return
-	}
-	cardQuery, ok, errCode := parseKanbanCardQueryParams(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, errCode)
-		return
-	}
-	cards, err := s.repo.ListKanbanCards(companyID, boardID, cardQuery)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_list_kanban_cards")
-		return
-	}
-	writeJSONWithPrecomputedETag(w, r, http.StatusOK, map[string]any{
-		"scope":       "kanban",
-		"company_id":  companyID,
-		"board_id":    boardID,
-		"columns":     columns,
-		"cards":       cards,
-		"cards_limit": cardQuery.Limit,
-	}, etag)
-}
-
 func (s *Server) publishWorkspaceEvent(companyID, eventType string, data map[string]any) (domain.DomainEvent, bool) {
 	event, err := s.repo.AppendDomainEvent(store.DomainEventInput{
 		CompanyID:  companyID,

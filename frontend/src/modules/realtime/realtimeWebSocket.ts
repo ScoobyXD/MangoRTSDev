@@ -23,7 +23,7 @@ type RealtimeMessageType =
   | "chat.message.created"
   | "chat.message.updated"
   | "chat.message.deleted"
-  | "kanban.changed"
+  | "process.work.changed"
   | "process_map.changed"
   | "logic_gate_qd_rating_updated"
   | "huddle_action_items.changed"
@@ -116,11 +116,11 @@ export type RealtimeChatMessageDeletedMessage = RealtimeBaseMessage & {
   ts?: string;
 };
 
-export type RealtimeKanbanChangedMessage = RealtimeBaseMessage & {
-  type: "kanban.changed";
+export type RealtimeProcessWorkChangedMessage = RealtimeBaseMessage & {
+  type: "process.work.changed";
   company_id: string;
   scope: string;
-  board_id: string;
+  logic_gate_id: string;
   change_type?: string;
   ts?: string;
 };
@@ -226,7 +226,7 @@ type RealtimeInboundMessage =
   | RealtimeChatMessageCreatedMessage
   | RealtimeChatMessageUpdatedMessage
   | RealtimeChatMessageDeletedMessage
-  | RealtimeKanbanChangedMessage
+  | RealtimeProcessWorkChangedMessage
   | RealtimeProcessMapChangedMessage
   | RealtimeLogicGateQDRatingUpdatedMessage
   | RealtimeHuddleActionItemsChangedMessage
@@ -247,7 +247,7 @@ export type RealtimeSubscriptionHandlers = {
   onChatMessageCreated?: (message: RealtimeChatMessageCreatedMessage) => void;
   onChatMessageUpdated?: (message: RealtimeChatMessageUpdatedMessage) => void;
   onChatMessageDeleted?: (message: RealtimeChatMessageDeletedMessage) => void;
-  onKanbanChanged?: (message: RealtimeKanbanChangedMessage) => void;
+  onProcessWorkChanged?: (message: RealtimeProcessWorkChangedMessage) => void;
   onProcessMapChanged?: (message: RealtimeProcessMapChangedMessage) => void;
   onLogicGateQDRatingUpdated?: (message: RealtimeLogicGateQDRatingUpdatedMessage) => void;
   onHuddleActionItemsChanged?: (message: RealtimeHuddleActionItemsChangedMessage) => void;
@@ -384,11 +384,11 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
       if (!nodeID || !messageID) throw new Error("realtime_chat_message_required");
       return { ...scoped, type, node_id: nodeID, block_id: stringValue(payload.block_id) || undefined, message_id: messageID, ts: stringValue(payload.ts) || undefined };
     }
-    case "kanban.changed": {
+    case "process.work.changed": {
       const scoped = scopedMessageBase(payload, type);
-      const boardID = stringValue(payload.board_id);
-      if (!boardID) throw new Error("realtime_board_id_required");
-      return { ...scoped, type, board_id: boardID, change_type: stringValue(payload.change_type) || undefined, ts: stringValue(payload.ts) || undefined };
+      const logicGateID = stringValue(payload.logic_gate_id);
+      if (!logicGateID) throw new Error("realtime_logic_gate_id_required");
+      return { ...scoped, type, logic_gate_id: logicGateID, change_type: stringValue(payload.change_type) || undefined, ts: stringValue(payload.ts) || undefined };
     }
     case "process_map.changed": {
       const scoped = scopedMessageBase(payload, type);
@@ -487,7 +487,7 @@ export function parseRealtimeMessage(raw: string): RealtimeInboundMessage {
 }
 
 export function isSupportedRealtimeScope(scope: string): boolean {
-  return /^(?:notifications:user:[^:]+|process-map:company|chat:node:[^:]+|board:.+|huddle-action-items:[^:]+|huddle-board-action-items:[^:]+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|huddle_logic_gate|huddle_node|kpi|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
+  return /^(?:notifications:user:[^:]+|process-map:company|chat:node:[^:]+|process:[^:]+|huddle-action-items:[^:]+|huddle-board-action-items:[^:]+|mailbox:personal:account:[^:]+:[^:@\s]+@[^:@\s]+|mailbox:shared:[^:]+|editor:(?:node|logic_gate|project):[^:]+:[^:]+|editor-json:(?:node|logic_gate|project|huddle_logic_gate|huddle_node|kpi|email_draft|email_signature):[^:]+:[^:]+)$/.test(scope.trim());
 }
 
 export function realtimeHuddleActionItemsScope(huddleNodeID: string): string {
@@ -866,8 +866,8 @@ export class MangoRealtimeClient {
         case "chat.message.deleted":
           sub.onChatMessageDeleted?.(message);
           break;
-        case "kanban.changed":
-          sub.onKanbanChanged?.(message);
+        case "process.work.changed":
+          sub.onProcessWorkChanged?.(message);
           break;
         case "process_map.changed":
           sub.onProcessMapChanged?.(message);

@@ -673,7 +673,6 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	nodeIDs := deleteScope.NodeIDs
 	logicGateIDs := deleteScope.LogicGateIDs
 	projectIDs := deleteScope.ProjectIDs
-	kanbanBoardIDs := deleteScope.KanbanBoardIDs
 	recycleRoots := make([]companyExplorerRecycleRootScope, 0, len(targets))
 
 	for _, target := range targets {
@@ -730,31 +729,12 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 				return CompanyExplorerDeleteResult{}, ErrNotFound
 			}
 			targetScope.ProjectIDs[target.ID] = true
-		case "kanban":
-			if _, ok := r.kanbanBoards[boardKey(companyID, target.ID)]; !ok {
-				return CompanyExplorerDeleteResult{}, ErrNotFound
-			}
-			targetScope.KanbanBoardIDs[target.ID] = true
+
 		}
 		r.expandCompanyExplorerDeleteScopeLocked(companyID, targetScope.FolderIDs, targetScope.NodeIDs, targetScope.LogicGateIDs, targetScope.ProjectIDs)
-		for _, board := range r.kanbanBoards {
-			if board.CompanyID == companyID && board.LogicGateID != nil && targetScope.LogicGateIDs[*board.LogicGateID] {
-				targetScope.KanbanBoardIDs[board.BoardID] = true
-			}
-		}
-		targetScope.addLogicGateBoards()
+
 		targetScope.mergeInto(&deleteScope)
 		recycleRoots = append(recycleRoots, companyExplorerRecycleRootScope{Target: target, Scope: targetScope})
-	}
-	for boardID := range kanbanBoardIDs {
-		board, ok := r.kanbanBoards[boardKey(companyID, boardID)]
-		if !ok {
-			delete(kanbanBoardIDs, boardID)
-			continue
-		}
-		if board.LogicGateID != nil && !logicGateIDs[*board.LogicGateID] {
-			return CompanyExplorerDeleteResult{}, ErrInvalid
-		}
 	}
 
 	result := CompanyExplorerDeleteResult{Targets: make([]CompanyExplorerDeletedTarget, 0)}
@@ -777,7 +757,6 @@ func (r *MemoryRepo) DeleteCompanyExplorerTargets(companyID string, targets []Co
 	appendSorted("node", nodeIDs)
 	appendSorted("logic_gate", logicGateIDs)
 	appendSorted("project", projectIDs)
-	appendSorted("kanban", kanbanBoardIDs)
 	eventInputs := companyExplorerTargetWorkspaceEventInputs(companyID, result.Targets, false)
 	for index := range eventInputs {
 		eventInputs[index].ActorUserID = deletedByUserID

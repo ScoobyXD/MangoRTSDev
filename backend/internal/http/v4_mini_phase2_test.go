@@ -74,7 +74,7 @@ func TestV4MiniAccessDeniedSemanticsAndOmission(t *testing.T) {
 		t.Fatalf("SetEntityPermissions hidden folder: %v", err)
 	}
 
-	repo := &phase5ForbiddenLegacyAndKanbanReadsRepo{Repository: base}
+	repo := &phase5ForbiddenLegacyReadsRepo{Repository: base}
 	server := NewServer(repo)
 	defer server.Close()
 	handler := server.Routes()
@@ -195,7 +195,7 @@ func TestV4MiniOldV1SurfacePolicy(t *testing.T) {
 		}
 	}
 
-	repo := &phase5ForbiddenLegacyAndKanbanReadsRepo{Repository: base}
+	repo := &phase5ForbiddenLegacyReadsRepo{Repository: base}
 	server := NewServer(repo)
 	defer server.Close()
 	handler := server.Routes()

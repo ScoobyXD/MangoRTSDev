@@ -288,7 +288,6 @@ func (r *MemoryRepo) memoryMyWorkNodesLocked(query MyWorkQuery, cursor myWorkCur
 		if node.CompanyID != query.CompanyID {
 			continue
 		}
-		node = r.withDerivedNodeStatusLocked(node)
 		if myWorkStatusDone(myWorkOptionalString(node.Status)) != query.History {
 			continue
 		}
@@ -383,7 +382,7 @@ func (r *MemoryRepo) memoryMyWorkProcessesLocked(query MyWorkQuery, cursor myWor
 			continue
 		}
 		counts := countsByLogicGateID[assignment.LogicGateID]
-		addMyWorkProcessStatusCounts(&counts, myWorkProcessCountsForStatus(assignment.StatusKey))
+		addMyWorkProcessStatusCounts(&counts, myWorkProcessCountsForStatus(nodeWorkStatus(r.nodes[key(assignment.CompanyID, assignment.NodeID)])))
 		countsByLogicGateID[assignment.LogicGateID] = counts
 	}
 	for _, gate := range r.logicGates {

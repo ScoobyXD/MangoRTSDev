@@ -25,7 +25,7 @@ func TestRealtimeProductionScopeInventoryIsExplicitAndNarrow(t *testing.T) {
 		production.Write(payload)
 	}
 	source := production.String()
-	for _, required := range []string{"notifications:user:", "mailbox:personal:account:", "mailbox:shared:", "chat:node:", "board:", "process-map:company", "process_map.changed"} {
+	for _, required := range []string{"notifications:user:", "mailbox:personal:account:", "mailbox:shared:", "chat:node:", "process:", "process.work.changed", "process-map:company", "process_map.changed"} {
 		if !strings.Contains(source, required) {
 			t.Errorf("retained realtime scope %q missing from production transport", required)
 		}

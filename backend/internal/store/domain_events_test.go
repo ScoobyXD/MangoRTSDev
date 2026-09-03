@@ -189,26 +189,78 @@ func TestMemoryWorkspaceReadVersionsTrackScopedEventSemantics(t *testing.T) {
 	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:full", "", 2, true)
 }
 
-func TestMemoryWorkspaceReadVersionsTrackBoardResources(t *testing.T) {
+func TestMemoryWorkspaceReadVersionsTrackProcessResources(t *testing.T) {
 	repo := NewMemoryRepo()
 	companyID := "11111111-1111-4111-8111-333333333333"
-	boardA := WorkspaceReadVersionResourceKey("board_id", "board-a")
-	boardB := WorkspaceReadVersionResourceKey("board_id", "board-b")
+	processA := WorkspaceReadVersionResourceKey("logic_gate_id", "process-a")
+	processB := WorkspaceReadVersionResourceKey("logic_gate_id", "process-b")
 
-	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "kanban_column_created", Payload: map[string]any{"board_id": "board-a"}}); err != nil {
-		t.Fatalf("AppendDomainEvent kanban_column_created: %v", err)
+	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: ProcessWorkChangedEventType, Payload: map[string]any{"logic_gate_id": "process-a"}}); err != nil {
+		t.Fatalf("AppendDomainEvent Process work: %v", err)
 	}
-	assertWorkspaceReadVersion(t, repo, companyID, "kanban-columns", boardA, 1, true)
-	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:kanban", boardA, 1, true)
-	assertWorkspaceReadVersion(t, repo, companyID, "kanban-columns", boardB, 0, false)
+	assertWorkspaceReadVersion(t, repo, companyID, logicGateWorkReadVersionScope, processA, 1, true)
+	assertWorkspaceReadVersion(t, repo, companyID, logicGateWorkReadVersionScope, processB, 0, false)
 
-	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: "kanban_card_moved", Payload: map[string]any{"board_id": "board-b"}}); err != nil {
-		t.Fatalf("AppendDomainEvent kanban_card_moved: %v", err)
+	if _, err := repo.AppendDomainEvent(DomainEventInput{CompanyID: companyID, StreamType: "workspace", StreamID: companyID, Type: WorkItemLogicGateAssignmentMovedEventType, Payload: map[string]any{"source_logic_gate_id": "process-a", "logic_gate_id": "process-b"}}); err != nil {
+		t.Fatalf("AppendDomainEvent Process move: %v", err)
 	}
-	assertWorkspaceReadVersion(t, repo, companyID, "kanban-columns", boardA, 1, true)
-	assertWorkspaceReadVersion(t, repo, companyID, "kanban-cards", boardB, 2, true)
-	assertWorkspaceReadVersion(t, repo, companyID, "workspace-snapshot:kanban", boardB, 2, true)
+	assertWorkspaceReadVersion(t, repo, companyID, logicGateWorkReadVersionScope, processA, 2, true)
+	assertWorkspaceReadVersion(t, repo, companyID, logicGateWorkReadVersionScope, processB, 1, true)
 	assertWorkspaceReadVersion(t, repo, companyID, "nodes", "", 2, true)
+}
+
+func TestProcessWorkVersionsFollowFolderPermissionAncestry(t *testing.T) {
+	repo, companyID, gate, node := processStepsFixture(t)
+	other, err := repo.CreateLogicGate(companyID, "Unrelated Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := repo.CreateCompanyExplorerFolder(companyID, parent.FolderID, "logic_gate", "Child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := repo.AssignCompanyExplorerFolderItem(companyID, child.FolderID, EntityTypeLogicGate, gate.LogicGateID, 1000); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, NodeID: node.NodeID, Status: "Pending"}); err != nil {
+		t.Fatal(err)
+	}
+	workVersion := func(processID string) int64 {
+		t.Helper()
+		version, err := repo.CurrentLogicGateWorkVersion(companyID, processID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return version
+	}
+	before, otherBefore := workVersion(gate.LogicGateID), workVersion(other.LogicGateID)
+	if _, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Unrelated folder"); err != nil {
+		t.Fatal(err)
+	}
+	if workVersion(gate.LogicGateID) != before || workVersion(other.LogicGateID) != otherBefore {
+		t.Fatal("Creating an unrelated folder must not change Process work versions")
+	}
+	noAccess := EntityPermissionNoAccess
+	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
+		CompanyID: companyID, ResourceType: EntityTypeCompanyExplorerFolder, ResourceID: parent.FolderID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &noAccess, DescendantAction: PolicyDescendantActionInheritedOnly,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if workVersion(gate.LogicGateID) <= before || workVersion(other.LogicGateID) != otherBefore {
+		t.Fatal("Ancestor permission changes must refresh the affected Process work only")
+	}
+	before = workVersion(gate.LogicGateID)
+	if _, err := repo.MoveCompanyExplorerFolder(companyID, child.FolderID, nil, 1000, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if workVersion(gate.LogicGateID) <= before || workVersion(other.LogicGateID) != otherBefore {
+		t.Fatal("Reparenting a Process ancestor must refresh its work only")
+	}
 }
 
 func TestMemoryWorkspaceReadVersionsTrackProcessMapWithoutRetiredScope(t *testing.T) {

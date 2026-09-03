@@ -1428,8 +1428,8 @@ test("node window adapters mount the shared unified node shell", () => {
   assert.match(kanbanOverlays, /NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX/);
   assert.match(kanbanOverlays, /setNodeEditorFullscreenChromeActive\(fullscreen\)/);
   assert.match(kanbanOverlays, /closeButtonStyle=\{overlayHeaderButtonStyle\}/);
-  assert.match(kanbanContent, /onToggleFullscreen=\{toggleNodeEditorOverlayFullscreen\}/);
-  assert.match(kanbanContent, /fullscreen=\{nodeEditorOverlayFullscreen\}/);
+  assert.match(kanbanContent, /onToggleFullscreen=\{\(\) => setFullscreen\(!fullscreen\)\}/);
+  assert.match(kanbanContent, /fullscreen=\{fullscreen\}/);
   assert.doesNotMatch(kanbanOverlays, /overlayHeaderButtonStyle\(right/);
 
   assert.match(updatesView, /UnifiedNodeShell/);

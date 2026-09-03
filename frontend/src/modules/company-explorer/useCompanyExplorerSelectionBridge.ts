@@ -22,11 +22,9 @@ type UseCompanyExplorerSelectionBridgeInput = {
   scope: string;
   selectedNodeID: string;
   selectedLogicGateID: string;
-  selectedKanbanBoardID: string;
   selectedFolderID: string;
   selectedFolderKind: CompanyExplorerFolderKind | undefined;
   selectedFolderLabel: string;
-  selectedKanbanBoardLabel: string;
   selectedTreeID: string;
   selectedTreeIDs: Set<string>;
   selectedTree: ExplorerTreeNode | undefined;
@@ -44,7 +42,6 @@ type UseCompanyExplorerSelectionBridgeInput = {
   setSelectionAnchorTreeID: React.Dispatch<React.SetStateAction<string>>;
   setSelectedNodeID: React.Dispatch<React.SetStateAction<string>>;
   setSelectedLogicGateID: React.Dispatch<React.SetStateAction<string>>;
-  setSelectedKanbanBoardID: React.Dispatch<React.SetStateAction<string>>;
   expandTreeIDs: (treeIDs: string[]) => void;
   applyExplorerPathSelection: (folderPathIDs: string[], selectRoot: boolean) => void;
   applyExplorerFindSelection: (entities: ExplorerFindEntity[]) => void;
@@ -55,11 +52,9 @@ export function useCompanyExplorerSelectionBridge({
   scope,
   selectedNodeID,
   selectedLogicGateID,
-  selectedKanbanBoardID,
   selectedFolderID,
   selectedFolderKind,
   selectedFolderLabel,
-  selectedKanbanBoardLabel,
   selectedTreeID,
   selectedTreeIDs,
   selectedTree,
@@ -77,7 +72,6 @@ export function useCompanyExplorerSelectionBridge({
   setSelectionAnchorTreeID,
   setSelectedNodeID,
   setSelectedLogicGateID,
-  setSelectedKanbanBoardID,
   expandTreeIDs,
   applyExplorerPathSelection,
   applyExplorerFindSelection,
@@ -102,7 +96,6 @@ export function useCompanyExplorerSelectionBridge({
         const treeID = selection.selectedTreeID || (selection.folderID || selection.entityID ? `workspace-folder-${selection.folderID || selection.entityID}` : "folder-root");
         setSelectedNodeID("");
         setSelectedLogicGateID("");
-        setSelectedKanbanBoardID("");
         applyTreeSelection(treeID, selection.selectedTreeIDs);
         return;
       }
@@ -110,7 +103,6 @@ export function useCompanyExplorerSelectionBridge({
         const treeID = selection.selectedTreeID || (selection.entityID ? `node-${selection.entityID}` : "folder-root");
         setSelectedNodeID(selection.entityID);
         setSelectedLogicGateID("");
-        setSelectedKanbanBoardID("");
         const treeIDs = selection.selectedTreeIDs?.length
           ? selection.selectedTreeIDs
           : (selection.selectedEntityIDs?.length ? selection.selectedEntityIDs : selection.entityID ? [selection.entityID] : []).map((id) => `node-${id}`);
@@ -121,18 +113,8 @@ export function useCompanyExplorerSelectionBridge({
         const treeID = selection.selectedTreeID || (selection.entityID ? `logic-gate-${selection.entityID}` : "folder-root");
         setSelectedLogicGateID(selection.entityID);
         setSelectedNodeID("");
-        setSelectedKanbanBoardID("");
         applyTreeSelection(treeID, selection.selectedTreeIDs?.length ? selection.selectedTreeIDs : selection.entityID ? [treeID] : []);
         return;
-      }
-      if (selection.entityKind === "kanban") {
-        const boardID = selection.entityID.trim();
-        if (!boardID) return;
-        const treeID = selection.selectedTreeID || `kanban-${boardID}`;
-        setSelectedKanbanBoardID(boardID);
-        setSelectedNodeID("");
-        setSelectedLogicGateID("");
-        applyTreeSelection(treeID, selection.selectedTreeIDs?.length ? selection.selectedTreeIDs : [treeID]);
       }
     };
 
@@ -144,7 +126,6 @@ export function useCompanyExplorerSelectionBridge({
     expandTreeIDs,
     lastLocalExplorerSelectionRef,
     scope,
-    setSelectedKanbanBoardID,
     setSelectedLogicGateID,
     setSelectedNodeID,
     setSelectedTreeID,
@@ -177,7 +158,6 @@ export function useCompanyExplorerSelectionBridge({
     const nextSelection: ExplorerSelectionState = {
       selectedNodeID,
       selectedLogicGateID,
-      selectedKanbanBoardID,
       selectedFolderID,
       selectedFolderKind,
       selectedTreeID,
@@ -205,14 +185,12 @@ export function useCompanyExplorerSelectionBridge({
       selectedTreeID,
       selectedNodeID,
       selectedLogicGateID,
-      selectedKanbanBoardID,
       selectedFolderID,
       selectedFolderKind,
     });
     const selectedEntityIDs = Array.from(selectedTreeIDs).map((treeID) => {
       if (publishedSelection.entityKind === "node" && treeID.startsWith("node-")) return treeID.slice("node-".length);
       if (publishedSelection.entityKind === "logic_gate" && treeID.startsWith("logic-gate-")) return treeID.slice("logic-gate-".length);
-      if (publishedSelection.entityKind === "kanban" && treeID.startsWith("kanban-")) return treeID.slice("kanban-".length);
       return "";
     }).filter(Boolean);
 
@@ -220,7 +198,7 @@ export function useCompanyExplorerSelectionBridge({
       companyID,
       entityKind: publishedSelection.entityKind,
       entityID: publishedSelection.entityID,
-      label: selectedTree?.label || selectedKanbanBoardLabel || "",
+      label: selectedTree?.label || "",
       sourceFrameID: scope,
       sourceModule: "company-explorer",
       targetFrameIDs: Array.from(targetIDs),
@@ -243,8 +221,6 @@ export function useCompanyExplorerSelectionBridge({
     selectedFolderID,
     selectedFolderKind,
     selectedFolderLabel,
-    selectedKanbanBoardID,
-    selectedKanbanBoardLabel,
     selectedLogicGateID,
     selectedNodeID,
     selectionTargetFrameIDs,
@@ -262,7 +238,6 @@ export function useCompanyExplorerSelectionBridge({
     latestSelectionRef.current = {
       selectedNodeID,
       selectedLogicGateID,
-      selectedKanbanBoardID,
       selectedFolderID,
       selectedFolderKind,
       selectedTreeID,
@@ -274,7 +249,6 @@ export function useCompanyExplorerSelectionBridge({
     latestSelectionRef,
     selectedFolderID,
     selectedFolderKind,
-    selectedKanbanBoardID,
     selectedLogicGateID,
     selectedNodeID,
     selectedTreeID,

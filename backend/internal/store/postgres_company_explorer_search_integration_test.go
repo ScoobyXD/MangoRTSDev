@@ -67,7 +67,7 @@ func TestPostgresCompanyExplorerCandidateSearchReturnsAuthorizedPaths(t *testing
 		{`insert into logic_gates(company_id,logic_gate_id,header,default_access,created_timestamp) values($1::uuid,$2::uuid,'Search Gate','edit',now())`, []any{companyID, logicGateID}},
 		{`insert into company_explorer_items(company_id,item_id,parent_folder_id,target_type,target_id) values($1::uuid,$2::uuid,$3::uuid,'logic_gate',$4::uuid)`, []any{companyID, itemID, teamFolderID, logicGateID}},
 		{`insert into nodes(company_id,node_id,name,priority,default_access,created_timestamp) values($1::uuid,$2::uuid,'Search Node',3,'edit',now())`, []any{companyID, nodeID}},
-		{`insert into node_logic_gate_assignments(company_id,assignment_id,node_id,logic_gate_id,status_key,column_id,position,compatibility_board_id,compatibility_card_id) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'pending','pending',1000,'search-integration',$2::uuid)`, []any{companyID, assignmentID, nodeID, logicGateID}},
+		{`insert into node_logic_gate_assignments(company_id,assignment_id,node_id,logic_gate_id,position) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,1000)`, []any{companyID, assignmentID, nodeID, logicGateID}},
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement.query, statement.args...); err != nil {
@@ -154,7 +154,7 @@ func TestPostgresCompanyExplorerCandidateSearchReturnsDirectGrantWithoutRestrict
 		{`insert into company_explorer_items(company_id,item_id,parent_folder_id,target_type,target_id) values($1::uuid,$2::uuid,$3::uuid,'project',$4::uuid)`, []any{companyID, visibleProjectItemID, restrictedTeamID, visibleProjectID}},
 		{`insert into company_explorer_items(company_id,item_id,parent_folder_id,target_type,target_id) values($1::uuid,$2::uuid,$3::uuid,'logic_gate',$4::uuid)`, []any{companyID, hiddenGateItemID, restrictedTeamID, hiddenParentGateID}},
 		{`insert into nodes(company_id,node_id,name,priority,default_access,created_timestamp) values($1::uuid,$2::uuid,'Restricted Visible Node',3,'edit',now())`, []any{companyID, visibleNodeID}},
-		{`insert into node_logic_gate_assignments(company_id,assignment_id,node_id,logic_gate_id,status_key,column_id,position,compatibility_board_id,compatibility_card_id) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'pending','pending',1000,'restricted-search-integration',$2::uuid)`, []any{companyID, assignmentID, visibleNodeID, hiddenParentGateID}},
+		{`insert into node_logic_gate_assignments(company_id,assignment_id,node_id,logic_gate_id,position) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,1000)`, []any{companyID, assignmentID, visibleNodeID, hiddenParentGateID}},
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement.query, statement.args...); err != nil {

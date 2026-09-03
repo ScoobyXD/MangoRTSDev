@@ -18,7 +18,7 @@ type nodeViewLoader interface {
 type logicGateViewLoader interface {
 	GetLogicGateDetails(companyID, logicGateID string) (domain.LogicGateDetails, error)
 	ListLogicGateProjections(companyID, logicGateID string) ([]domain.LogicGateProjection, error)
-	GetLogicGateWork(companyID, logicGateID string) (domain.LogicGateWorkView, error)
+	GetLogicGateWork(companyID, logicGateID, userID string) (domain.LogicGateWorkView, error)
 }
 
 func (r *MemoryRepo) GetNodeView(input NodeViewInput) (domain.NodeView, error) {
@@ -126,15 +126,15 @@ func nodeProjectionSummaryInformation(information string) string {
 	return editorTextBlockProjectionPrefix + string(encoded)
 }
 
-func (r *MemoryRepo) GetLogicGateView(companyID, logicGateID string) (domain.LogicGateView, error) {
-	return loadLogicGateView(r, companyID, logicGateID)
+func (r *MemoryRepo) GetLogicGateView(companyID, logicGateID, userID string) (domain.LogicGateView, error) {
+	return loadLogicGateView(r, companyID, logicGateID, userID)
 }
 
-func (r *PostgresRepo) GetLogicGateView(companyID, logicGateID string) (domain.LogicGateView, error) {
-	return loadLogicGateView(r, companyID, logicGateID)
+func (r *PostgresRepo) GetLogicGateView(companyID, logicGateID, userID string) (domain.LogicGateView, error) {
+	return loadLogicGateView(r, companyID, logicGateID, userID)
 }
 
-func loadLogicGateView(loader logicGateViewLoader, companyID, logicGateID string) (domain.LogicGateView, error) {
+func loadLogicGateView(loader logicGateViewLoader, companyID, logicGateID, userID string) (domain.LogicGateView, error) {
 	companyID = strings.TrimSpace(companyID)
 	logicGateID = strings.TrimSpace(logicGateID)
 	if companyID == "" || logicGateID == "" {
@@ -149,7 +149,7 @@ func loadLogicGateView(loader logicGateViewLoader, companyID, logicGateID string
 	if err != nil {
 		return domain.LogicGateView{}, err
 	}
-	work, err := loader.GetLogicGateWork(companyID, logicGateID)
+	work, err := loader.GetLogicGateWork(companyID, logicGateID, userID)
 	if err != nil {
 		return domain.LogicGateView{}, err
 	}
@@ -175,7 +175,7 @@ func loadLogicGateView(loader logicGateViewLoader, companyID, logicGateID string
 		InformationCount:    len(details.Information),
 		ProjectionCount:     len(projections),
 		RACIAssignmentCount: len(details.LogicGate.RACIAssignments),
-		AssignmentCount:     len(work.Cards),
-		NodeCount:           len(work.Cards),
+		AssignmentCount:     len(work.Nodes),
+		NodeCount:           len(work.Nodes),
 	}, nil
 }

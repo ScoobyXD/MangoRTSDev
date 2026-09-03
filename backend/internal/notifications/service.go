@@ -203,11 +203,6 @@ func (s *Service) notificationCandidates(event notificationProjectionEvent, reco
 			nodeTitle = "This node"
 		}
 		status := payloadString(payload, "status")
-		if status == "" {
-			if statusKey := payloadString(payload, "status_key"); statusKey != "" {
-				status = store.LogicGateWorkStatusTitle(statusKey)
-			}
-		}
 		switch event.Type {
 		case store.WorkItemLogicGateAssignmentSavedEventType:
 			title = "Brand new node"

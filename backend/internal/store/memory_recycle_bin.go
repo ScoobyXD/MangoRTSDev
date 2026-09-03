@@ -62,12 +62,10 @@ type memoryRecycleBinSnapshot struct {
 	folderItems                      map[string]domain.CompanyExplorerFolderItem
 	folderShares                     map[string]domain.CompanyExplorerFolderShare
 	resourceOperationalRelationships map[string]domain.ResourceOperationalRelationship
+	processSteps                     map[string]domain.ProcessStep
 	processMapPlacements             map[string]domain.ProcessMapPlacement
 	processMapTraces                 map[string]domain.ProcessMapTrace
 	processMapCleanupChildren        map[string]memoryProcessMapCleanupChild
-	kanbanBoards                     map[string]domain.KanbanBoard
-	kanbanColumns                    map[string][]domain.KanbanColumn
-	kanbanCards                      map[string][]domain.KanbanCard
 	nodeLogicGateAssignments         map[string]domain.NodeLogicGateAssignment
 	RACIMatrixProjectionRows         map[string]memoryRACIMatrixProjectionRow
 	projectTimelineItems             map[string]memoryProjectManagementTimelineItem
@@ -375,14 +373,7 @@ func (r *MemoryRepo) deleteCompanyExplorerRecycleScopeLocked(companyID string, s
 			return err
 		}
 	}
-	for boardID := range scope.KanbanBoardIDs {
-		if _, exists := r.kanbanBoards[boardKey(companyID, boardID)]; !exists {
-			continue
-		}
-		if err := r.deleteKanbanBoardLocked(companyID, boardID); err != nil {
-			return err
-		}
-	}
+
 	for projectID := range scope.ProjectIDs {
 		if err := r.deleteProjectLocked(companyID, projectID, true); err != nil {
 			return err
@@ -477,12 +468,10 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		folderItems:                      cloneMap(r.folderItems),
 		folderShares:                     cloneMap(r.folderShares),
 		resourceOperationalRelationships: cloneMap(r.resourceOperationalRelationships),
+		processSteps:                     cloneMap(r.processSteps),
 		processMapPlacements:             cloneMap(r.processMapPlacements),
 		processMapTraces:                 cloneMap(r.processMapTraces),
 		processMapCleanupChildren:        map[string]memoryProcessMapCleanupChild{},
-		kanbanBoards:                     cloneMap(r.kanbanBoards),
-		kanbanColumns:                    cloneSliceMap(r.kanbanColumns),
-		kanbanCards:                      cloneSliceMap(r.kanbanCards),
 		nodeLogicGateAssignments:         cloneMap(r.nodeLogicGateAssignments),
 		RACIMatrixProjectionRows:         cloneMap(r.RACIMatrixProjectionRows),
 		projectTimelineItems:             cloneMap(r.projectTimelineItems),
@@ -548,11 +537,9 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.folderItems = cloneMap(snapshot.folderItems)
 	r.folderShares = cloneMap(snapshot.folderShares)
 	r.resourceOperationalRelationships = cloneMap(snapshot.resourceOperationalRelationships)
+	r.processSteps = cloneMap(snapshot.processSteps)
 	r.processMapPlacements = cloneMap(snapshot.processMapPlacements)
 	r.processMapTraces = cloneMap(snapshot.processMapTraces)
-	r.kanbanBoards = cloneMap(snapshot.kanbanBoards)
-	r.kanbanColumns = cloneSliceMap(snapshot.kanbanColumns)
-	r.kanbanCards = cloneSliceMap(snapshot.kanbanCards)
 	r.nodeLogicGateAssignments = cloneMap(snapshot.nodeLogicGateAssignments)
 	r.RACIMatrixProjectionRows = cloneMap(snapshot.RACIMatrixProjectionRows)
 	r.projectTimelineItems = cloneMap(snapshot.projectTimelineItems)
@@ -609,12 +596,10 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		folderItems:                      recycleMapDelta(before.folderItems, after.folderItems),
 		folderShares:                     recycleMapDelta(before.folderShares, after.folderShares),
 		resourceOperationalRelationships: recycleMapDelta(before.resourceOperationalRelationships, after.resourceOperationalRelationships),
+		processSteps:                     recycleMapDelta(before.processSteps, after.processSteps),
 		processMapPlacements:             recycleMapDelta(before.processMapPlacements, after.processMapPlacements),
 		processMapTraces:                 recycleMapDelta(before.processMapTraces, after.processMapTraces),
 		processMapCleanupChildren:        recycleMapDelta(before.processMapCleanupChildren, after.processMapCleanupChildren),
-		kanbanBoards:                     recycleMapDelta(before.kanbanBoards, after.kanbanBoards),
-		kanbanColumns:                    recycleMapDelta(before.kanbanColumns, after.kanbanColumns),
-		kanbanCards:                      recycleMapDelta(before.kanbanCards, after.kanbanCards),
 		nodeLogicGateAssignments:         recycleMapDelta(before.nodeLogicGateAssignments, after.nodeLogicGateAssignments),
 		RACIMatrixProjectionRows:         recycleMapDelta(before.RACIMatrixProjectionRows, after.RACIMatrixProjectionRows),
 		projectTimelineItems:             recycleMapDelta(before.projectTimelineItems, after.projectTimelineItems),
@@ -674,6 +659,7 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.folders, delta.folders)
 	mergeRecycleMap(destination.folderItems, delta.folderItems)
 	mergeRecycleMap(destination.folderShares, delta.folderShares)
+	mergeRecycleMap(destination.processSteps, delta.processSteps)
 	for relationshipKey, relationship := range delta.resourceOperationalRelationships {
 		if _, exists := destination.resourceOperationalRelationships[relationshipKey]; exists {
 			continue
@@ -748,10 +734,21 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 		placement.UpdatedTimestamp = time.Now().UTC()
 		destination.processMapPlacements[placementKey] = placement
 	}
-	mergeRecycleMap(destination.kanbanBoards, delta.kanbanBoards)
-	mergeRecycleMap(destination.kanbanColumns, delta.kanbanColumns)
-	mergeRecycleMap(destination.kanbanCards, delta.kanbanCards)
-	mergeRecycleMap(destination.nodeLogicGateAssignments, delta.nodeLogicGateAssignments)
+	for assignmentKey, assignment := range delta.nodeLogicGateAssignments {
+		if _, exists := destination.nodeLogicGateAssignments[assignmentKey]; exists {
+			continue
+		}
+		if _, exists := destination.logicGates[key(assignment.CompanyID, assignment.LogicGateID)]; !exists {
+			continue
+		}
+		if assignment.ProcessStepID != nil {
+			step, exists := destination.processSteps[key(assignment.CompanyID, *assignment.ProcessStepID)]
+			if !exists || step.LogicGateID != assignment.LogicGateID {
+				assignment.ProcessStepID = nil
+			}
+		}
+		destination.nodeLogicGateAssignments[assignmentKey] = assignment
+	}
 	mergeRecycleMap(destination.RACIMatrixProjectionRows, delta.RACIMatrixProjectionRows)
 	mergeRecycleMap(destination.projectTimelineItems, delta.projectTimelineItems)
 	mergeRecycleMap(destination.projectTimelineProjection, delta.projectTimelineProjection)
@@ -787,6 +784,10 @@ func processMapParentIDsEqual(left, right *string) bool {
 }
 
 func memoryRecycleProcessMapResourceExists(snapshot memoryRecycleBinSnapshot, companyID string, resource domain.ProcessMapResourceRef) bool {
+	if resource.ResourceType == "process_step" {
+		_, exists := snapshot.processSteps[key(companyID, resource.ResourceID)]
+		return exists
+	}
 	switch resource.ResourceType {
 	case domain.ProcessMapResourceTypeFolder:
 		_, ok := snapshot.folders[key(companyID, resource.ResourceID)]
