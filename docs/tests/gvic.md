@@ -97,7 +97,7 @@ RACI28 - Fingerprints include effective source identity and sequence, eligible r
 RACI29 - Point reads, My Work R/A/C/I reads, notification decisions, and cache validation derive current policy state at read time; canonical policy rows stay constant-size with descendant count and no sidebar projection copies effective users.
 RACI30 - Resource deletion deletes its settings row and cascades its RACI edges. No missing resource, user, or group identity can remain.
 RACI31 - Shared inbox folder and shared inbox RACI use their exact canonical resource identities and remain separate from permissions and mailbox credentials.
-RACI32 - Process work exposes `permissions.can_resolve_requests` for every reader with effective Responsible RACI, including group and inherited assignments; that flag never grants resource access.
+RACI32 - Logic Gate work may expose its effective Responsible user as request-owner metadata, but that field never implies permission.
 RACI33 - Email-derived and workspace-created resources apply creator rules only after their final parent placement so copied policy comes from the correct source.
 RACI34 - Stale in-flight reads cannot overwrite a newer committed policy response; ETags and policy fingerprints track the resolved V2 state.
 RACI35 - Canonical RACI policy readers and writers use only `resource_gvic_settings` and `resource_gvic_assignments`. Temporarily retained legacy tables are frozen rollback evidence, and no sidebar-only RACI copy is read or written.
@@ -326,15 +326,15 @@ Business logic covered:
 - RACI34
 
 Given:
-- A Process has multiple direct, group, or inherited Responsible users and a work snapshot is cached.
+- A Logic Gate has one Responsible user and an Arena work snapshot is cached.
 - The Responsible assignment changes while an older work request is still in flight.
 
 Expected:
-- Each effective Responsible reader receives `permissions.can_resolve_requests: true`; other readers receive false.
+- The work header contains the current Responsible user's ID as `request_owner_user_id`.
 - The payload contains no full RACI assignment collection.
 - The assignment/policy change invalidates the gate work version and reconciles the shared cached snapshot.
-- The stale response cannot overwrite the reader's newer request controls.
-- Request controls still require current resource access.
+- The stale response cannot overwrite the newer request owner.
+- Request-owner metadata does not grant any resource permission flag.
 
 ### Scenario RACI-S9: Email Node Creator Ownership And Normal RACI
 

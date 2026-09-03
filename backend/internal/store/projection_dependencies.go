@@ -50,10 +50,16 @@ func syncNodeProjectionDependenciesTx(ctx context.Context, tx *sql.Tx, input Nod
 	}
 
 	if input.Delete {
+		if err := deleteKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return err
+		}
 		if err := deleteProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
 	} else {
+		if err := syncKanbanBoardProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
+			return err
+		}
 		if err := syncProjectManagementTimelineProjectionForNodeTx(ctx, tx, companyID, nodeID); err != nil {
 			return err
 		}
@@ -91,6 +97,9 @@ func syncLogicGateProjectionDependenciesTx(ctx context.Context, tx *sql.Tx, inpu
 	}
 
 	if input.Delete {
+		if err := deleteKanbanBoardProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
+			return err
+		}
 		if err := deleteProjectManagementTimelineProjectionForLogicGateTx(ctx, tx, companyID, logicGateID); err != nil {
 			return err
 		}

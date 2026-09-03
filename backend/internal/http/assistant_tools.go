@@ -44,7 +44,7 @@ func assistantTools() []responses.ToolUnionParam {
 		assistantFunction("create_node", "Create an unassigned Node. Use move_node_to_process separately to assign it.", map[string]any{"name": text}),
 		assistantFunction("update_node", "Update a Node. Null fields are unchanged; an empty due_date clears it. Priority 0 clears priority, 1-5 sets it.", map[string]any{"node_id": id, "name": optionalText, "status": optionalText, "due_date": optionalText, "priority": map[string]any{"type": []string{"integer", "null"}, "minimum": 0, "maximum": 5}}),
 		assistantFunction("delete_node", "Delete a Node through Mango's recycle/deletion rules. The user must explicitly supply their display name as confirmation; never infer it from get_me.", map[string]any{"node_id": id, "confirmation_display_name": text}),
-		assistantFunction("move_node_to_process", "Assign or move a Node to a Process using its canonical stored assignment. Status null preserves the Node's current status. Moving to another Process clears its previous step.", map[string]any{"node_id": id, "process_id": id, "status": optionalText}),
+		assistantFunction("move_node_to_process", "Assign or move a Node to a Process using its canonical stored assignment. Status null preserves an existing assignment's status, or uses Mango's default for a new assignment.", map[string]any{"node_id": id, "process_id": id, "status": optionalText}),
 		assistantFunction("get_textbox", "Read the complete canonical textbox document and its revision before changing it.", map[string]any{"resource_type": resourceType, "resource_id": id, "textbox_id": textboxID}),
 		assistantFunction("save_textbox", "Save complete plain text in one canonical textbox operation. Replacement removes rich formatting, inline content and annotations; explain this and obtain the user's agreement before replacing existing rich content. New textbox: textbox_id null, base_revision 0. Existing: exact ID and last-read revision. Mango applies its existing concurrency rules, which may merge concurrent blocks; read get_textbox afterward before claiming exact final content. Never retry a failed save.", map[string]any{"resource_type": resourceType, "resource_id": id, "textbox_id": optionalTextboxID, "base_revision": revision, "plain_text": map[string]any{"type": "string", "maxLength": 16000}}),
 		assistantFunction("delete_textbox", "Delete exactly one textbox at its current revision, with normal chat/relationship cleanup. Never retry a failed delete.", map[string]any{"resource_type": resourceType, "resource_id": id, "textbox_id": textboxID, "base_revision": revision}),
@@ -216,8 +216,17 @@ func (s *Server) dispatchAssistantTool(r *http.Request, name, arguments string) 
 	case "create_node":
 		method, path, handler = http.MethodPost, "/v1/nodes", s.handleNodes
 	case "move_node_to_process":
-		method, path, handler = http.MethodPost, "/v2/logic-gates/"+str("process_id")+"/nodes", s.handleLogicGateWorkV2Subresource
+		method, path, handler = http.MethodPost, "/v1/work-items/logic-gate-assignments/move", s.handleWorkItemLogicGateAssignmentMove
 		delete(body, "process_id")
+		body["logic_gate_id"] = str("process_id")
+		assignments, err := s.repo.ListNodeLogicGateAssignments(companyID, str("node_id"))
+		if err != nil {
+			return "", errors.New("The Node's current assignment could not be read. The move was stopped.")
+		}
+		if len(assignments) == 0 {
+			path, handler = "/v2/logic-gates/"+str("process_id")+"/nodes", s.handleLogicGateWorkV2Subresource
+			delete(body, "logic_gate_id")
+		}
 	case "get_textbox", "save_textbox", "delete_textbox":
 		textboxID = str("textbox_id")
 		if name == "save_textbox" && textboxID == "" {

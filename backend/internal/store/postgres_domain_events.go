@@ -185,7 +185,7 @@ func (r *PostgresRepo) appendDomainEventTx(ctx context.Context, tx *sql.Tx, inpu
 			return domain.DomainEvent{}, err
 		}
 	}
-	if err := r.enqueueProcessWorkRealtimeForDomainEventTx(ctx, tx, item); err != nil {
+	if err := r.enqueueKanbanRealtimeForDomainEventTx(ctx, tx, item); err != nil {
 		return domain.DomainEvent{}, err
 	}
 	if err := r.enqueueProcessMapRealtimeForDomainEventsTx(ctx, tx, []domain.DomainEvent{item}); err != nil {
@@ -221,7 +221,7 @@ func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inp
 		if err := syncPostgresNodeCompletionTransitionsTx(ctx, tx, insertedEvents); err != nil {
 			return nil, err
 		}
-		if err := r.enqueueProcessWorkRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
+		if err := r.enqueueKanbanRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
 			return nil, err
 		}
 		if err := r.enqueueProcessMapRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
@@ -258,7 +258,7 @@ func (r *PostgresRepo) appendDomainEventsTx(ctx context.Context, tx *sql.Tx, inp
 		events = append(events, batch...)
 		start = end
 	}
-	if err := r.enqueueProcessWorkRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
+	if err := r.enqueueKanbanRealtimeForDomainEventsTx(ctx, tx, events); err != nil {
 		return nil, err
 	}
 	if err := r.enqueueProcessMapRealtimeForDomainEventsTx(ctx, tx, events); err != nil {

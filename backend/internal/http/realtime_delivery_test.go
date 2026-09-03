@@ -285,7 +285,7 @@ func TestRealtimeStalledScopeDoesNotBlockUnrelatedScopePublish(t *testing.T) {
 }
 
 func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testing.T) {
-	for _, surface := range []string{"chat", "process", "shared_mailbox"} {
+	for _, surface := range []string{"chat", "kanban", "shared_mailbox"} {
 		t.Run(surface, func(t *testing.T) {
 			base := store.NewMemoryRepo()
 			companyID := "71717171-7171-4171-8171-717171717171"
@@ -318,17 +318,17 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 					}
 					server.wakeRealtimeSpine()
 				}
-			case "process":
+			case "kanban":
 				gate, err := base.CreateLogicGate(companyID, "Queued board")
 				if err != nil {
 					t.Fatal(err)
 				}
 				resourceType = store.EntityTypeLogicGate
 				resourceID = gate.LogicGateID
-				logicGateID := gate.LogicGateID
-				scope = realtimeProcessWorkScope(logicGateID)
+				boardID := store.LogicGateKanbanBoardID(gate.LogicGateID)
+				scope = realtimeBoardScope(boardID)
 				publish = func(server *Server) {
-					publishProcessWorkChangedForTest(t, server, companyID, logicGateID, "queued-change")
+					publishKanbanChangedForTest(t, server, companyID, boardID, "queued-change")
 				}
 			case "shared_mailbox":
 				if _, err := base.UpsertCompanyEmailConnection(store.CompanyEmailConnectionInput{
@@ -438,6 +438,40 @@ func TestRealtimeQueuedPublicationsReauthorizeInsideExactScopeOrdering(t *testin
 	}
 }
 
+func TestRealtimeNodeUpdatedSkipsKanbanProjectionLookupWithoutLocalBoardSubscribers(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &recordingKanbanProjectionLookupRepo{Repository: base}
+	server := NewServerWithOptions(repo, explicitLocalRealtimeTestOptions(ServerOptions{DisableNotificationCleanup: true}))
+	defer server.Close()
+
+	companyID := "92929292-9292-4292-8292-929292929292"
+	event := domain.DomainEvent{
+		CompanyID: companyID,
+		Type:      "node_updated",
+		Payload:   map[string]any{"node_id": "93939393-9393-4393-8393-939393939393"},
+	}
+	otherCompanyConn := &realtimeConnection{
+		id:        "other-company-board-connection",
+		companyID: "94949494-9494-4494-8494-949494949494",
+		conn:      &recordingRealtimeNetConn{},
+	}
+	server.realtimeRegistry.subscribe(otherCompanyConn, realtimeBoardScope(store.LogicGateKanbanBoardID("95959595-9595-4595-8595-959595959595")))
+	defer otherCompanyConn.close()
+
+	publishKanbanChangesForEventsForTest(t, server, []domain.DomainEvent{event})
+	if repo.nodeLookups != 0 {
+		t.Fatalf("Kanban projection node lookups = %d, want 0 without a same-company board subscriber", repo.nodeLookups)
+	}
+
+	localConn := &realtimeConnection{id: "local-board-connection", companyID: companyID, conn: &recordingRealtimeNetConn{}}
+	server.realtimeRegistry.subscribe(localConn, realtimeBoardScope(store.LogicGateKanbanBoardID("96969696-9696-4696-8696-969696969696")))
+	defer localConn.close()
+	publishKanbanChangesForEventsForTest(t, server, []domain.DomainEvent{event})
+	if repo.nodeLookups != 1 {
+		t.Fatalf("Kanban projection node lookups = %d, want 1 with a same-company board subscriber", repo.nodeLookups)
+	}
+}
+
 func TestRealtimePublicationRejectsMissingResourceWithPermissiveResolvedAudience(t *testing.T) {
 	base := store.NewMemoryRepo()
 	repo := &missingRealtimeEntityPermissiveAudienceRepo{Repository: base}
@@ -469,6 +503,11 @@ func TestRealtimePublicationRejectsMissingResourceWithPermissiveResolvedAudience
 	}
 }
 
+type recordingKanbanProjectionLookupRepo struct {
+	store.Repository
+	nodeLookups int
+}
+
 type missingRealtimeEntityPermissiveAudienceRepo struct {
 	store.Repository
 	audienceLookups int
@@ -494,6 +533,11 @@ func (r *missingRealtimeEntityPermissiveAudienceRepo) ResolveEffectiveUsersForRe
 
 func (r *missingRealtimeEntityPermissiveAudienceRepo) GetNode(string, string) (domain.Node, error) {
 	return domain.Node{}, store.ErrNotFound
+}
+
+func (r *recordingKanbanProjectionLookupRepo) ListKanbanBoardProjectionRowsForNode(companyID, nodeID string) ([]store.KanbanBoardProjectionRow, error) {
+	r.nodeLookups++
+	return r.Repository.ListKanbanBoardProjectionRowsForNode(companyID, nodeID)
 }
 
 type deadlineBlockingRealtimeNetConn struct {

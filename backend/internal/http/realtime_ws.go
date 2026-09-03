@@ -40,7 +40,7 @@ const (
 	realtimePersonalMailboxScopePrefix        = "mailbox:personal:account:"
 	realtimeSharedMailboxScopePrefix          = "mailbox:shared:"
 	realtimeChatScopePrefix                   = "chat:node:"
-	realtimeProcessWorkScopePrefix                  = "process:"
+	realtimeBoardScopePrefix                  = "board:"
 	realtimeEditorScopePrefix                 = "editor:"
 	realtimeEditorJSONScopePrefix             = "editor-json:"
 	realtimeHuddleActionItemsScopePrefix      = store.HuddleActionItemsRealtimeScopePrefix
@@ -61,7 +61,7 @@ const (
 	realtimeMessageChatCreated              = "chat.message.created"
 	realtimeMessageChatUpdated              = "chat.message.updated"
 	realtimeMessageChatDeleted              = "chat.message.deleted"
-	realtimeMessageProcessWorkChanged            = "process.work.changed"
+	realtimeMessageKanbanChanged            = "kanban.changed"
 	realtimeMessageMailboxMessageChanged    = "mailbox.message.changed"
 	realtimeMessageMailboxFolderChanged     = "mailbox.folder.changed"
 	realtimeMessageEditorDeltaCommitted     = "editor.delta.committed"
@@ -123,11 +123,11 @@ type realtimeChatMessage struct {
 	MessageID string `json:"message_id"`
 }
 
-type realtimeProcessWorkChangedMessage struct {
+type realtimeKanbanChangedMessage struct {
 	Type       string `json:"type"`
 	CompanyID  string `json:"company_id"`
 	Scope      string `json:"scope"`
-	LogicGateID string `json:"logic_gate_id"`
+	BoardID    string `json:"board_id"`
 	ChangeType string `json:"change_type,omitempty"`
 }
 
@@ -452,7 +452,11 @@ func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, sc
 	if nodeID := realtimeChatNodeIDFromScope(scope); nodeID != "" {
 		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeNode, nodeID, store.EntityPermissionEdit)
 	}
-	if logicGateID := realtimeProcessWorkIDFromScope(scope); logicGateID != "" {
+	if boardID := realtimeBoardIDFromScope(scope); boardID != "" {
+		logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
+		if logicGateID == "" {
+			return false, "unsupported_scope", nil
+		}
 		return s.authorizeRealtimeEntityScope(actor, companyID, store.EntityTypeLogicGate, logicGateID, store.EntityPermissionEdit)
 	}
 	if huddleNodeID := realtimeHuddleActionItemsNodeIDFromScope(scope); huddleNodeID != "" {
@@ -577,12 +581,25 @@ func realtimeEditorJSONDocumentFromScope(companyID, scope string) (store.EditorJ
 	}
 	return ref, true
 }
-func realtimeProcessWorkScope(logicGateID string) string {
-	return realtimeResourceScope(realtimeProcessWorkScopePrefix, logicGateID)
+func realtimeBoardScope(boardID string) string {
+	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
+	if !isCanonicalUUID(logicGateID) {
+		return ""
+	}
+	return realtimeBoardScopePrefix + store.LogicGateKanbanBoardID(logicGateID)
 }
 
-func realtimeProcessWorkIDFromScope(scope string) string {
-	return realtimeResourceIDFromScope(scope, realtimeProcessWorkScopePrefix)
+func realtimeBoardIDFromScope(scope string) string {
+	scope = strings.TrimSpace(scope)
+	if len(scope) > maxRealtimeScopeBytes || !strings.HasPrefix(scope, realtimeBoardScopePrefix) {
+		return ""
+	}
+	boardID := strings.TrimSpace(strings.TrimPrefix(scope, realtimeBoardScopePrefix))
+	logicGateID := store.LogicGateIDFromKanbanBoardID(boardID)
+	if !isCanonicalUUID(logicGateID) || scope != realtimeBoardScope(boardID) {
+		return ""
+	}
+	return boardID
 }
 
 func realtimeChatScope(nodeID string) string {
@@ -682,7 +699,7 @@ func realtimeKnownScopePrefix(scope string) bool {
 		realtimePersonalMailboxScopePrefix,
 		realtimeSharedMailboxScopePrefix,
 		realtimeChatScopePrefix,
-		realtimeProcessWorkScopePrefix,
+		realtimeBoardScopePrefix,
 		realtimeEditorScopePrefix,
 		realtimeEditorJSONScopePrefix,
 		realtimeHuddleActionItemsScopePrefix,
@@ -710,8 +727,8 @@ func realtimeScopeType(scope string) string {
 	if realtimeChatNodeIDFromScope(scope) != "" {
 		return "chat"
 	}
-	if realtimeProcessWorkIDFromScope(scope) != "" {
-		return "process"
+	if realtimeBoardIDFromScope(scope) != "" {
+		return "board"
 	}
 	if realtimeHuddleActionItemsNodeIDFromScope(scope) != "" || realtimeHuddleBoardActionItemsIDFromScope(scope) != "" {
 		return "huddle-action-items"

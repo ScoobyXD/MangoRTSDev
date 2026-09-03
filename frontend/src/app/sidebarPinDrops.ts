@@ -1,7 +1,6 @@
 import { EXPLORER_DRAG_MIME, readExplorerDragPayload } from "../modules/company-explorer/companyExplorerDragDrop.js";
 import { getExplorerDropPayloadItems, type ExplorerDropPayload } from "../modules/company-explorer/treePresentation.js";
-import { EXPLORER_ENTITY_DRAG_MIME, parseExplorerEntityDragItems } from "../modules/kanban/shared.js";
-import { PROCESS_NODE_DRAG } from "../modules/kanban/processWork.js";
+import { EXPLORER_ENTITY_DRAG_MIME, KANBAN_CARD_DRAG_MIME, KANBAN_COLUMN_DRAG_MIME, parseExplorerEntityDragItems } from "../modules/kanban/shared.js";
 import { TRIAGE_MESSAGE_DRAG_MIME, readTriageMessageDrag } from "../modules/triage/triageDragDrop.js";
 import { sidebarPinFallbackName, type SidebarPin, type SidebarPinDraft, type SidebarPinKind } from "./sidebarPins.js";
 
@@ -87,7 +86,7 @@ export function sidebarPinAcceptsPinnedResourceDrag(pin: SidebarPin, dataTransfe
 
   const types = Array.from(dataTransfer.types);
   if (types.includes(TRIAGE_MESSAGE_DRAG_MIME)) return pin.kind === "logic_gate" || pin.kind === "node";
-  return pin.kind === "logic_gate" && (types.includes(EXPLORER_ENTITY_DRAG_MIME) || types.includes(PROCESS_NODE_DRAG));
+  return pin.kind === "logic_gate" && types.includes(EXPLORER_ENTITY_DRAG_MIME);
 }
 
 export function hasSidebarPinSectionDrop(dataTransfer: DataTransfer): boolean {
@@ -102,7 +101,8 @@ export function hasMangoDragPayload(dataTransfer: DataTransfer): boolean {
   const types = Array.from(dataTransfer.types);
   return types.includes(EXPLORER_DRAG_MIME)
     || types.includes(EXPLORER_ENTITY_DRAG_MIME)
-    || types.includes(PROCESS_NODE_DRAG);
+    || types.includes(KANBAN_CARD_DRAG_MIME)
+    || types.includes(KANBAN_COLUMN_DRAG_MIME);
 }
 
 function readSidebarNodeIDs(dataTransfer: DataTransfer): string[] {
@@ -119,19 +119,9 @@ function readSidebarNodeIDs(dataTransfer: DataTransfer): string[] {
 }
 
 function readNodeDragItems(dataTransfer: DataTransfer): Array<{ nodeID: string; label: string }> {
-  const explorerItems = parseExplorerEntityDragItems(dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME));
-  if (explorerItems.length > 0) return explorerItems;
-  try {
-    const payload = JSON.parse(dataTransfer.getData(PROCESS_NODE_DRAG)) as { companyID?: unknown; logicGateID?: unknown; nodeIDs?: unknown };
-    if (typeof payload.companyID !== "string" || !payload.companyID.trim()
-      || typeof payload.logicGateID !== "string" || !payload.logicGateID.trim()
-      || !Array.isArray(payload.nodeIDs)) return [];
-    const nodeIDs = cleanIDs(payload.nodeIDs.filter((id): id is string => typeof id === "string"));
-    const label = nodeIDs.length === 1 ? dataTransfer.getData("text/plain").trim() : "";
-    return nodeIDs.map((nodeID) => ({ nodeID, label }));
-  } catch {
-    return [];
-  }
+  return parseExplorerEntityDragItems(dataTransfer.getData(EXPLORER_ENTITY_DRAG_MIME))
+    .map((item) => ({ nodeID: item.nodeID.trim(), label: item.label.trim() }))
+    .filter((item) => item.nodeID);
 }
 
 function readSidebarExplorerDragPayload(dataTransfer: DataTransfer): ExplorerDropPayload | null {

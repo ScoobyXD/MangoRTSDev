@@ -13,7 +13,13 @@ const nodeSelectColumns = `
 n.company_id,
 n.node_id,
 n.name,
-n.status,
+coalesce(
+  case
+    when assignment.is_issue then 'Issue'
+    when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusTitleSQL + `
+  end,
+  nullif(n.status, '')
+) as status,
 n.due_date::text,
 n.priority,
 n.created_timestamp,
@@ -21,6 +27,14 @@ coalesce(node_logic_gates.logic_gate_ids_json, '[]') as logic_gate_ids_json,
 coalesce(account_snapshot.accounts_json, '[]')::text as accounts_json`
 
 const nodeStatusJoinBase = `
+left join lateral (
+  select assignment.*
+  from node_logic_gate_assignments assignment
+  where assignment.company_id = n.company_id
+    and assignment.node_id = n.node_id
+  order by assignment.updated_timestamp desc, assignment.created_timestamp desc, assignment.assignment_id desc
+  limit 1
+) assignment on true
 left join lateral (
   select coalesce(jsonb_agg(gate.logic_gate_id order by gate.logic_gate_id), '[]'::jsonb)::text as logic_gate_ids_json
   from (
@@ -287,22 +301,6 @@ where n.company_id=$1 and n.node_id=$2`, input.CompanyID, input.NodeID))
 }
 
 func (r *PostgresRepo) updateNodeTx(ctx context.Context, tx *sql.Tx, input UpdateNodeInput) (domain.Node, error) {
-	if input.StatusSet {
-		var assigned bool
-		if err := tx.QueryRowContext(ctx, `select exists(select 1 from node_logic_gate_assignments where company_id=$1::uuid and node_id=$2::uuid)`, input.CompanyID, input.NodeID).Scan(&assigned); err != nil {
-			return domain.Node{}, err
-		}
-		status, err := normalizeNodeStatusForAssignment(input.Status, assigned)
-		if err != nil {
-			return domain.Node{}, err
-		}
-		input.Status = status
-		if assigned {
-			if _, err := tx.ExecContext(ctx, `update node_logic_gate_assignments set requested_by_user_id=case when $3='Requested' then coalesce(requested_by_user_id,nullif($4,'')::uuid) else null end where company_id=$1::uuid and node_id=$2::uuid`, input.CompanyID, input.NodeID, status, input.ActorUserID); err != nil {
-				return domain.Node{}, err
-			}
-		}
-	}
 
 	dueDate := (*string)(nil)
 	if input.DueDate != nil {

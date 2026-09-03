@@ -15,7 +15,7 @@ import (
 var processMapResetSourceTables = []string{
 	"companies", "company_explorer_folders", "company_explorer_items", "logic_gates",
 	"resource_permission_settings", "resource_permissions", "resource_gvic_settings", "resource_gvic_assignments",
-	"process_steps", "nodes", "node_logic_gate_assignments",
+	"kanban_board_projection",
 }
 
 func snapshotPostgresProcessMapReset(t *testing.T, db *sql.DB, companyID string, includeMap bool) map[string]string {
@@ -178,20 +178,6 @@ func TestPostgresProcessMapResetPreviewAndApplyPreserveCompanyState(t *testing.T
 		t.Fatal(err)
 	}
 	other, otherAdmin := newPostgresProcessMapResetCompany(t, repo, "Other company")
-	firstStep, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: company.CompanyID, LogicGateID: children[1].ResourceID, Name: "Prepare"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	secondStep, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: company.CompanyID, LogicGateID: children[1].ResourceID, Name: "Review", AfterProcessStepID: &firstStep.Step.ProcessStepID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
-		CompanyID: company.CompanyID, LogicGateID: children[1].ResourceID, NodeID: newUUIDv7String(),
-		CreateNodeTitle: "Keep this work", Status: "Done", ProcessStepID: &secondStep.Step.ProcessStepID, ProcessStepIDSet: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	otherA, err := repo.CreateLogicGate(other.CompanyID, "Other A")
 	if err != nil {
 		t.Fatal(err)
@@ -245,22 +231,9 @@ func TestPostgresProcessMapResetPreviewAndApplyPreserveCompanyState(t *testing.T
 	requirePostgresProcessMapResetSnapshot(t, otherBefore, snapshotPostgresProcessMapReset(t, db, other.CompanyID, true))
 	for _, table := range []string{"resource_operational_relationships", "process_map_traces"} {
 		var count int
-		filter := ""
-		if table == "resource_operational_relationships" {
-			filter = " and source_resource_type <> 'process_step'"
-		}
-		if err := db.QueryRow("select count(*) from "+table+" where company_id=$1::uuid"+filter, company.CompanyID).Scan(&count); err != nil || count != 0 {
+		if err := db.QueryRow("select count(*) from "+table+" where company_id=$1::uuid", company.CompanyID).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s remaining=%d err=%v", table, count, err)
 		}
-	}
-	var stepConnectionSurvived bool
-	if err := db.QueryRow(`select exists(select 1 from resource_operational_relationships
- where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid
- and source_resource_type='process_step' and source_resource_id=$3::uuid
- and target_resource_type='process_step' and target_resource_id=$4::uuid)`,
-		company.CompanyID, secondStep.Relationship.ResourceOperationalRelationshipID,
-		firstStep.Step.ProcessStepID, secondStep.Step.ProcessStepID).Scan(&stepConnectionSurvived); err != nil || !stepConnectionSurvived {
-		t.Fatalf("company map reset changed the Process step connection: survived=%t err=%v", stepConnectionSurvived, err)
 	}
 	placementsAfter := postgresProcessMapResetPlacements(t, db, company.CompanyID)
 	expectedSaved := make(map[string]bool, len(placementsAfter))

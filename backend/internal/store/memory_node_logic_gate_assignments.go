@@ -10,35 +10,71 @@ import (
 func (r *MemoryRepo) ListNodeLogicGateAssignments(companyID, nodeID string) ([]domain.NodeLogicGateAssignment, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	items := []domain.NodeLogicGateAssignment{}
+
+	companyID = strings.TrimSpace(companyID)
+	nodeID = strings.TrimSpace(nodeID)
+	items := make([]domain.NodeLogicGateAssignment, 0)
 	for _, assignment := range r.nodeLogicGateAssignments {
-		if assignment.CompanyID == companyID && (nodeID == "" || assignment.NodeID == nodeID) {
-			items = append(items, assignment)
+		if assignment.CompanyID != companyID {
+			continue
 		}
+		if nodeID != "" && assignment.NodeID != nodeID {
+			continue
+		}
+		items = append(items, assignment)
 	}
 	sortNodeLogicGateAssignments(items)
 	return items, nil
 }
+
 func sortNodeLogicGateAssignments(items []domain.NodeLogicGateAssignment) {
 	sort.Slice(items, func(i, j int) bool {
 		if !items[i].UpdatedTimestamp.Equal(items[j].UpdatedTimestamp) {
 			return items[i].UpdatedTimestamp.After(items[j].UpdatedTimestamp)
 		}
+		if !items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].CreatedTimestamp.After(items[j].CreatedTimestamp)
+		}
 		return items[i].AssignmentID > items[j].AssignmentID
 	})
 }
 
+func (r *MemoryRepo) upsertNodeLogicGateAssignmentFromCardLocked(card domain.KanbanCard) domain.NodeLogicGateAssignment {
+	if card.LogicGateID == nil || strings.TrimSpace(*card.LogicGateID) == "" {
+		return domain.NodeLogicGateAssignment{}
+	}
+	column, _ := r.kanbanColumnLocked(card.CompanyID, card.BoardID, card.ColumnID)
+	return r.upsertNodeLogicGateAssignmentLocked(nodeLogicGateAssignmentMutation{
+		CompanyID:            card.CompanyID,
+		NodeID:               card.NodeID,
+		LogicGateID:          *card.LogicGateID,
+		ColumnID:             card.ColumnID,
+		StatusKey:            logicGateAssignmentStatusKey(column.Title),
+		IsIssue:              card.IsIssue,
+		Position:             card.Position,
+		CompatibilityBoardID: card.BoardID,
+		CompatibilityCardID:  card.CardID,
+		RequestedByUserID:    card.RequestedByUserID,
+		PlacedByUserID:       card.PlacedByUserID,
+		CreatedTimestamp:     card.CreatedTimestamp,
+		UpdatedTimestamp:     card.UpdatedTimestamp,
+	})
+}
+
 type nodeLogicGateAssignmentMutation struct {
-	CompanyID         string
-	NodeID            string
-	LogicGateID       string
-	ProcessStepID     *string
-	IsIssue           bool
-	Position          int
-	RequestedByUserID string
-	PlacedByUserID    string
-	CreatedTimestamp  time.Time
-	UpdatedTimestamp  time.Time
+	CompanyID            string
+	NodeID               string
+	LogicGateID          string
+	ColumnID             string
+	StatusKey            string
+	IsIssue              bool
+	Position             int
+	CompatibilityBoardID string
+	CompatibilityCardID  string
+	RequestedByUserID    string
+	PlacedByUserID       string
+	CreatedTimestamp     time.Time
+	UpdatedTimestamp     time.Time
 }
 
 func (r *MemoryRepo) upsertNodeLogicGateAssignmentLocked(input nodeLogicGateAssignmentMutation) domain.NodeLogicGateAssignment {
@@ -49,59 +85,99 @@ func (r *MemoryRepo) upsertNodeLogicGateAssignmentLocked(input nodeLogicGateAssi
 	if input.UpdatedTimestamp.IsZero() {
 		input.UpdatedTimestamp = now
 	}
-	assignmentKey := nodeLogicGateAssignmentKey(input.CompanyID, input.NodeID)
-	assignment, exists := r.nodeLogicGateAssignments[assignmentKey]
+	if strings.TrimSpace(input.StatusKey) == "" {
+		input.StatusKey = logicGateAssignmentStatusKey(input.ColumnID)
+	}
+	assignmentKeyValue := nodeLogicGateAssignmentKey(input.CompanyID, input.NodeID)
+	assignment, exists := r.nodeLogicGateAssignments[assignmentKeyValue]
 	if !exists {
-		assignment = domain.NodeLogicGateAssignment{AssignmentID: newUUIDv7String(), CompanyID: input.CompanyID, NodeID: input.NodeID, CreatedTimestamp: input.CreatedTimestamp}
+		assignment = domain.NodeLogicGateAssignment{
+			AssignmentID:     newUUIDv7String(),
+			CompanyID:        input.CompanyID,
+			NodeID:           input.NodeID,
+			CreatedTimestamp: input.CreatedTimestamp,
+			Version:          1,
+		}
+	} else {
+		assignment.Version++
 	}
 	assignment.LogicGateID = input.LogicGateID
-	assignment.ProcessStepID = cloneStringPointer(input.ProcessStepID)
-	assignment.Position = input.Position
+	assignment.StatusKey = input.StatusKey
+	assignment.ColumnID = input.ColumnID
 	assignment.IsIssue = input.IsIssue
-	assignment.RequestedByUserID = input.RequestedByUserID
-	assignment.PlacedByUserID = input.PlacedByUserID
+	assignment.Position = input.Position
+	assignment.CompatibilityBoardID = input.CompatibilityBoardID
+	assignment.CompatibilityCardID = input.CompatibilityCardID
+	if placedBy := strings.TrimSpace(input.PlacedByUserID); placedBy != "" {
+		assignment.PlacedByUserID = placedBy
+	}
+	if logicGateWorkStatusKeyOrDefault(input.StatusKey, input.ColumnID) == LogicGateWorkStatusRequested {
+		if requestedBy := strings.TrimSpace(input.RequestedByUserID); requestedBy != "" {
+			assignment.RequestedByUserID = requestedBy
+		}
+	} else {
+		assignment.RequestedByUserID = ""
+	}
 	assignment.UpdatedTimestamp = input.UpdatedTimestamp
-	assignment.Version++
-	r.nodeLogicGateAssignments[assignmentKey] = assignment
+	r.nodeLogicGateAssignments[assignmentKeyValue] = assignment
 	r.bumpNodeViewVersionLocked(input.CompanyID, input.NodeID)
 	return assignment
 }
+
 func (r *MemoryRepo) nodeLogicGateAssignmentLocked(companyID, nodeID, logicGateID string) (domain.NodeLogicGateAssignment, bool) {
 	assignment, ok := r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(companyID, nodeID)]
-	if !ok || logicGateID != "" && assignment.LogicGateID != logicGateID {
+	if !ok {
+		return domain.NodeLogicGateAssignment{}, false
+	}
+	logicGateID = strings.TrimSpace(logicGateID)
+	if logicGateID != "" && assignment.LogicGateID != logicGateID {
 		return domain.NodeLogicGateAssignment{}, false
 	}
 	return assignment, true
 }
+
 func (r *MemoryRepo) clearLogicGateAssignmentMemberReferencesLocked(companyID, userID string) {
+	companyID = strings.TrimSpace(companyID)
 	userID = strings.TrimSpace(userID)
 	if userID == "" {
 		return
 	}
-	for assignmentKey, assignment := range r.nodeLogicGateAssignments {
+	for assignmentKeyValue, assignment := range r.nodeLogicGateAssignments {
 		if companyID != "" && assignment.CompanyID != companyID {
 			continue
 		}
 		changed := false
-		if assignment.RequestedByUserID == userID {
+		if strings.TrimSpace(assignment.RequestedByUserID) == userID {
 			assignment.RequestedByUserID = ""
 			changed = true
 		}
-		if assignment.PlacedByUserID == userID {
+		if strings.TrimSpace(assignment.PlacedByUserID) == userID {
 			assignment.PlacedByUserID = ""
 			changed = true
 		}
 		if changed {
-			r.nodeLogicGateAssignments[assignmentKey] = assignment
+			r.nodeLogicGateAssignments[assignmentKeyValue] = assignment
 			r.bumpNodeViewVersionLocked(assignment.CompanyID, assignment.NodeID)
 		}
 	}
 }
+
+func (r *MemoryRepo) deleteNodeLogicGateAssignmentForCardLocked(card domain.KanbanCard) {
+	assignment, ok := r.nodeLogicGateAssignmentLocked(card.CompanyID, card.NodeID, "")
+	if !ok {
+		return
+	}
+	if assignment.CompatibilityBoardID == card.BoardID && assignment.CompatibilityCardID == card.CardID {
+		delete(r.nodeLogicGateAssignments, nodeLogicGateAssignmentKey(card.CompanyID, card.NodeID))
+		r.bumpNodeViewVersionLocked(card.CompanyID, card.NodeID)
+	}
+}
+
 func (r *MemoryRepo) deleteNodeLogicGateAssignmentsForLogicGateLocked(companyID, logicGateID string) {
-	for assignmentKey, assignment := range r.nodeLogicGateAssignments {
+	for assignmentKeyValue, assignment := range r.nodeLogicGateAssignments {
 		if assignment.CompanyID == companyID && assignment.LogicGateID == logicGateID {
-			delete(r.nodeLogicGateAssignments, assignmentKey)
-			r.bumpNodeViewVersionLocked(companyID, assignment.NodeID)
+			delete(r.nodeLogicGateAssignments, assignmentKeyValue)
+			r.bumpNodeViewVersionLocked(assignment.CompanyID, assignment.NodeID)
 		}
 	}
 }

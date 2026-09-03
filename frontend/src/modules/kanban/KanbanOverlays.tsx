@@ -1,16 +1,34 @@
 import React from "react";
-
-import { confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
-
+import { ConfirmActionMenu, confirmMenuPositionFromElement, type ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
+import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { AppModalPortal, useAppViewportAnchorRect } from "../../app/AppModalPortal";
-
 import { requestAppSidebarPin } from "../../app/sidebarPins";
-
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../editor/UnifiedNodeShell";
-
-import { NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX, NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX, setNodeEditorFullscreenChromeActive } from "../editor/nodeEditorFullscreenChrome";
-
-import { KANBAN_NODE_EDITOR_OVERLAY_EDGE_GUTTER_PX, getNodeEditorOverlayMinLeftPx, KANBAN_EDGE_FRAME, KANBAN_PANEL_BACKGROUND, KANBAN_PANEL_SHADOW, KANBAN_SHADOW, KANBAN_SOFT_BORDER, KANBAN_SURFACE, nodeEditorOverlayResizeHandles, type NodeEditorOverlayRatio, type NodeEditorOverlayState, type OverlayResizeState } from "./KanbanContentModel";
+import {
+  NODE_EDITOR_FULLSCREEN_HORIZONTAL_INSET_PX,
+  NODE_EDITOR_FULLSCREEN_VERTICAL_INSET_PX,
+  setNodeEditorFullscreenChromeActive,
+} from "../editor/nodeEditorFullscreenChrome";
+import { AccountFilterControl } from "../accounts/AccountFilterControl";
+import type { Account } from "../accounts/accountsApi";
+import { type KanbanCard, type KanbanColumn } from "./shared";
+import {
+  contextMenuButtonStyle,
+  contextMenuDividerStyle,
+  KANBAN_NODE_EDITOR_OVERLAY_EDGE_GUTTER_PX,
+  contextMenuHoverHandlers,
+  getNodeEditorOverlayMinLeftPx,
+  KANBAN_EDGE_FRAME,
+  KANBAN_PANEL_BACKGROUND,
+  KANBAN_PANEL_SHADOW,
+  KANBAN_SHADOW,
+  KANBAN_SOFT_BORDER,
+  KANBAN_SURFACE,
+  nodeEditorOverlayResizeHandles,
+  type NodeEditorOverlayRatio,
+  type NodeEditorOverlayState,
+  type OverlayResizeState,
+} from "./KanbanContentModel";
 
 const LazyKanbanNodeEditorContent = React.lazy(() => import("../editor/EditorContent").then((module) => ({
   default: module.EditorContent as React.FC<{
@@ -23,6 +41,136 @@ const LazyKanbanNodeEditorContent = React.lazy(() => import("../editor/EditorCon
     onBeforeHierarchyNavigate?: () => void;
   }>,
 })));
+
+export function KanbanContextMenus({
+  contextColumn,
+  columnContextMenu,
+  contextCard,
+  cardContextMenu,
+  contextCardSelectionIDs,
+  onCloseColumnMenu,
+  onCloseCardMenu,
+  onCreateNodeInColumn,
+  onRenameNode,
+  onOpenNodeInNewTab,
+  onRequestNodeDeleteFromCards,
+  onRequestCardDelete,
+}: {
+  contextColumn: KanbanColumn | null;
+  columnContextMenu: { x: number; y: number; columnID: string } | null;
+  contextCard: KanbanCard | null;
+  cardContextMenu: { x: number; y: number; cardID: string } | null;
+  contextCardSelectionIDs: string[];
+  onCloseColumnMenu: () => void;
+  onCloseCardMenu: () => void;
+  onCreateNodeInColumn: (columnID: string, anchor: { x: number; y: number }) => void;
+  onRenameNode: (card: KanbanCard) => void;
+  onOpenNodeInNewTab: (card: KanbanCard) => void;
+  onRequestNodeDeleteFromCards: (cardIDs: string[], position?: ConfirmActionMenuPosition) => void;
+  onRequestCardDelete: (cardIDs: string[], position?: ConfirmActionMenuPosition) => void;
+}) {
+  return (
+    <>
+      {contextColumn && columnContextMenu && (
+        <FrameRightClickMenu x={columnContextMenu.x} y={columnContextMenu.y} onClose={onCloseColumnMenu}>
+          <button type="button" style={contextMenuButtonStyle} onClick={() => onCreateNodeInColumn(contextColumn.column_id, { x: columnContextMenu.x, y: columnContextMenu.y })} {...contextMenuHoverHandlers}>
+            Create new node
+          </button>
+        </FrameRightClickMenu>
+      )}
+      {contextCard && cardContextMenu && (
+        <FrameRightClickMenu x={cardContextMenu.x} y={cardContextMenu.y} onClose={onCloseCardMenu}>
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              onOpenNodeInNewTab(contextCard);
+              onCloseCardMenu();
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Open in new browser tab
+          </button>
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              requestAppSidebarPin({ kind: "node", id: contextCard.node_id, name: contextCard.node_title });
+              onCloseCardMenu();
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Pin
+          </button>
+          <div aria-hidden="true" style={contextMenuDividerStyle} />
+          <button
+            type="button"
+            style={contextMenuButtonStyle}
+            onClick={() => {
+              onCreateNodeInColumn(contextCard.column_id, { x: cardContextMenu.x, y: cardContextMenu.y });
+              onCloseCardMenu();
+            }}
+            {...contextMenuHoverHandlers}
+          >
+            Create new node
+          </button>
+          <div aria-hidden="true" style={contextMenuDividerStyle} />
+          <button type="button" style={contextMenuButtonStyle} onClick={() => onRenameNode(contextCard)} {...contextMenuHoverHandlers}>
+            Rename node
+          </button>
+          <button type="button" style={contextMenuButtonStyle} onClick={(event) => onRequestCardDelete(contextCardSelectionIDs, confirmMenuPositionFromElement(event.currentTarget))} {...contextMenuHoverHandlers}>
+            {contextCardSelectionIDs.length > 1 ? "Remove nodes from Kanban Board" : "Remove node from Kanban Board"}
+          </button>
+          <button type="button" style={{ ...contextMenuButtonStyle, color: "#dc2626" }} onClick={(event) => onRequestNodeDeleteFromCards(contextCardSelectionIDs, confirmMenuPositionFromElement(event.currentTarget))} {...contextMenuHoverHandlers}>
+            {contextCardSelectionIDs.length > 1 ? "Delete nodes" : "Delete node"}
+          </button>
+        </FrameRightClickMenu>
+      )}
+    </>
+  );
+}
+
+export function KanbanAccountAssignmentModal({
+  title,
+  accounts,
+  selectedAccountIDs,
+  busy,
+  onChange,
+  onSave,
+  onCancel,
+}: {
+  title: string;
+  accounts: Account[];
+  selectedAccountIDs: string[];
+  busy: boolean;
+  onChange: (accountIDs: string[]) => void;
+  onSave: () => void;
+  onCancel: () => void;
+}) {
+
+  return (
+    <AppModalPortal onRequestClose={busy ? undefined : onCancel}>
+    <div style={modalBackdropStyle} onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) onCancel(); }}>
+      <div role="dialog" aria-modal="true" aria-label={`Accounts for ${title}`} style={modalPanelStyle}>
+        <div style={{ fontSize: 12, fontWeight: 760, color: "#111111", overflowWrap: "anywhere" }}>
+          Accounts for {title}
+        </div>
+        <AccountFilterControl
+          accounts={accounts}
+          selectedAccountIDs={selectedAccountIDs}
+          onChange={onChange}
+          label="Accounts"
+          placeholder="Search accounts"
+        />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <button className="mango-elevated-action" type="button" disabled={busy} onClick={onSave} style={yesButtonStyle}>{busy ? "Saving" : "Save"}</button>
+          <button className="mango-elevated-action" type="button" disabled={busy} onClick={onCancel} style={noButtonStyle}>Cancel</button>
+        </div>
+      </div>
+    </div>
+    </AppModalPortal>
+  );
+}
 
 export function KanbanNodeEditorOverlay({
   overlay,
@@ -207,3 +355,102 @@ const overlayHeaderButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   boxShadow: KANBAN_SHADOW,
 };
+
+const modalBackdropStyle: React.CSSProperties = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(241, 245, 249, 0.66)",
+  backdropFilter: "blur(14px) saturate(1.18)",
+  WebkitBackdropFilter: "blur(14px) saturate(1.18)",
+  zIndex: 1,
+  display: "grid",
+  placeItems: "center",
+};
+
+const modalPanelStyle: React.CSSProperties = {
+  width: "min(420px, 90%)",
+  borderRadius: 16,
+  border: `1px solid ${KANBAN_SOFT_BORDER}`,
+  background: KANBAN_PANEL_BACKGROUND,
+  padding: 12,
+  display: "grid",
+  gap: 10,
+  boxShadow: KANBAN_PANEL_SHADOW,
+};
+
+const yesButtonStyle: React.CSSProperties = {
+  border: `1px solid ${KANBAN_SOFT_BORDER}`,
+  borderRadius: 10,
+  background: KANBAN_SURFACE,
+  cursor: "pointer",
+  fontWeight: 700,
+  boxShadow: KANBAN_SHADOW,
+};
+
+const noButtonStyle: React.CSSProperties = {
+  border: "1px solid transparent",
+  borderRadius: 10,
+  boxShadow: `${KANBAN_SHADOW}, 0 0 14px rgba(183, 124, 255, 0.18)`,
+  color: "#334155",
+  background: `${KANBAN_SURFACE} padding-box, ${KANBAN_EDGE_FRAME} border-box`,
+  cursor: "pointer",
+  fontWeight: 700,
+};
+
+function ModalShell({ title, detail, position, onConfirm, onCancel }: {
+  title: React.ReactNode;
+  detail: React.ReactNode;
+  position?: ConfirmActionMenuPosition | null;
+  onConfirm: (confirmationDisplayName: string) => void;
+  onCancel: () => void;
+}) {
+  return (
+    <ConfirmActionMenu
+      title={title}
+      detail={detail}
+      position={position}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
+  );
+}
+
+export function KanbanDeleteConfirmations({
+  deleteNodeConfirmation,
+  deleteCardConfirmation,
+  onRemoveNodes,
+  onRemoveCards,
+  onCancelNodeDelete,
+  onCancelCardDelete,
+}: {
+  deleteNodeConfirmation: { nodeIDs: string[]; position?: ConfirmActionMenuPosition | null } | null;
+  deleteCardConfirmation: { cardIDs: string[]; position?: ConfirmActionMenuPosition | null } | null;
+  onRemoveNodes: (nodeIDs: string[], confirmationDisplayName: string) => void;
+  onRemoveCards: (cardIDs: string[]) => void;
+  onCancelNodeDelete: () => void;
+  onCancelCardDelete: () => void;
+}) {
+  if (deleteNodeConfirmation) {
+    return (
+      <ModalShell
+        title={`Are you sure you want to delete ${deleteNodeConfirmation.nodeIDs.length} node${deleteNodeConfirmation.nodeIDs.length === 1 ? "" : "s"}?`}
+        detail="This moves the underlying node data to the Recycle Bin and removes its Kanban placements."
+        position={deleteNodeConfirmation.position}
+        onConfirm={(confirmationDisplayName) => onRemoveNodes(deleteNodeConfirmation.nodeIDs, confirmationDisplayName)}
+        onCancel={onCancelNodeDelete}
+      />
+    );
+  }
+  if (deleteCardConfirmation) {
+    return (
+      <ModalShell
+        title={`Are you sure you want to remove ${deleteCardConfirmation.cardIDs.length} node${deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} from this Kanban Board?`}
+        detail={`The underlying node${deleteCardConfirmation.cardIDs.length === 1 ? "" : "s"} will continue to exist outside this board.`}
+        position={deleteCardConfirmation.position}
+        onConfirm={() => onRemoveCards(deleteCardConfirmation.cardIDs)}
+        onCancel={onCancelCardDelete}
+      />
+    );
+  }
+  return null;
+}

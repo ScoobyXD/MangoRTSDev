@@ -53,8 +53,7 @@ func (r *PostgresRepo) CreateRACIMatrixNode(input RACIMatrixNodeCreateInput) (RA
 			LogicGateID:         logicGateID,
 			NodeID:              input.NodeID,
 			Status:              input.Status,
-			ProcessStepID:input.ProcessStepID,
- ProcessStepIDSet:input.ProcessStepIDSet,
+			ColumnID:            input.ColumnID,
 			NodeTitle:           input.Title,
 			CreateNodeTitle:     input.Title,
 			DescriptionSnapshot: input.DescriptionSnapshot,
@@ -72,8 +71,10 @@ func (r *PostgresRepo) CreateRACIMatrixNode(input RACIMatrixNodeCreateInput) (RA
 			return RACIMatrixNodeCreateResult{}, err
 		}
 		assignment := assignmentResult.Assignment
+		card := assignmentResult.Card
 		result.Node = assignmentResult.Node
 		result.Assignment = &assignment
+		result.Card = &card
 		result.Events = append(result.Events, assignmentResult.Events...)
 		stop = observeTiming(ctx, "repo.CreateRACIMatrixNode.commit")
 		if err := tx.Commit(); err != nil {

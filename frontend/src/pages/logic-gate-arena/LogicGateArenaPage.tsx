@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { FrameDataModel } from "../../types";
 import { KanbanContent } from "../../modules/kanban/KanbanContent";
 import type { ArenaBoardLeftResizeRequest, ArenaBoardLeftResizeResult } from "../../modules/kanban/KanbanContentModel";
+import { logicGateIDFromKanbanBoardID } from "../../modules/kanban/shared";
 import { readLiveSelectionForFrame, subscribeLiveSelection, type LiveSelectionChange } from "../../modules/selectionCoordinator";
 import { getActiveCompanyID } from "../../auth/currentCompany";
 import { humanLabelOrFallback, preferResolvedEntityLabel } from "../../modules/entityLabels.js";
@@ -250,6 +251,16 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
         id: selection.entityID.trim(),
         label: humanLabelOrFallback(selection.label, ""),
         emptyMessage: "",
+      }));
+      return;
+    }
+    if (selection.entityKind === "kanban") {
+      const logicGateID = logicGateIDFromKanbanBoardID(selection.entityID);
+      lastArenaSelectionChangedAtRef.current = selection.changedAt || Date.now();
+      setSelectedLogicGate((current) => reconcileArenaLogicGateSelection(current, {
+        id: logicGateID,
+        label: logicGateID ? humanLabelOrFallback(selection.label, "") : "",
+        emptyMessage: logicGateID ? "" : "Sorry, this editor can only display Processes.",
       }));
       return;
     }

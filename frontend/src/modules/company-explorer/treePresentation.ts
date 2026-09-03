@@ -1,7 +1,7 @@
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem, CompanyExplorerFolderKind, CompanyExplorerFolderScopeType, CompanyExplorerItemType, CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders.js";
 import type { CompanyExplorerV2EntityType } from "./companyExplorerLazyApi.js";
 
-export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "project";
+export type ExplorerTreeEntityKind = "folder" | "node" | "logic_gate" | "project" | "kanban";
 
 export type ExplorerCreationContextRow = {
   id?: string;
@@ -9,6 +9,7 @@ export type ExplorerCreationContextRow = {
   nodeID?: string;
   logicGateID?: string;
   projectID?: string;
+  kanbanBoardID?: string;
   folderID?: string;
   folderKind?: CompanyExplorerFolderKind;
   entityID?: string;
@@ -71,15 +72,16 @@ export type ExplorerKeyboardNavigationResult = {
   expandedIDs?: Set<string>;
 };
 
-export type ExplorerSelectionDomain = "node" | "logic_gate" | "project" | "folder" | "root";
+export type ExplorerSelectionDomain = "node" | "logic_gate" | "project" | "kanban" | "folder" | "root";
 
-export type ExplorerPublishedSelectionKind = "node" | "logic_gate" | "project" | "folder";
+export type ExplorerPublishedSelectionKind = "node" | "logic_gate" | "project" | "kanban" | "folder";
 
 export type ExplorerPublishedSelection = {
   entityKind: ExplorerPublishedSelectionKind;
   entityID: string;
   selectedNodeID: string;
   selectedLogicGateID: string;
+  selectedKanbanBoardID: string;
   isLogicGateContext: boolean;
 };
 
@@ -115,6 +117,7 @@ export type ExplorerCreationTargets = {
 };
 
 export const EXPLORER_INTERNAL_ROOT_ROW_ID = "folder-root";
+export const EXPLORER_SYSTEM_KANBAN_FOLDER_ID = "system-folder-kanban-boards";
 export const EXPLORER_SYSTEM_ACTIVE_NODES_FOLDER_ID = "system-folder-active-nodes";
 export const EXPLORER_SYSTEM_ACTIVE_LOGIC_GATES_FOLDER_ID = "system-folder-active-logic-gates";
 export const EXPLORER_SYSTEM_ACTIVE_PROJECTS_FOLDER_ID = "system-folder-active-projects";
@@ -184,7 +187,7 @@ export function resolveExplorerDropTarget(row?: ExplorerCreationContextRow | nul
   }
 
   const items = getExplorerDropPayloadItems(payload).filter((item): item is ExplorerDropPayloadItem & { itemType: CompanyExplorerFolderKind } => (
-    Boolean(item.itemID.trim()) && item.itemType !== "node"
+    Boolean(item.itemID.trim()) && item.itemType !== "kanban" && item.itemType !== "node"
   ));
   if (items.length === 0) return null;
   if (!genericV2Container && items.some((item) => item.itemType !== row.folderKind)) return null;
@@ -324,6 +327,7 @@ function explorerSearchRowMatches(row: ExplorerSearchRow, query: string): boolea
   return [
     row.nodeID ?? "",
     row.logicGateID ?? "",
+    row.kanbanBoardID ?? "",
     row.folderID ?? "",
   ].some((field) => normalizeExplorerSearchValue(field).includes(query));
 }
@@ -391,7 +395,8 @@ export type ExplorerDeleteTarget =
   | ({ kind: "folder"; id: string; folderKind: CompanyExplorerFolderKind } & ExplorerDeleteTargetV2Metadata)
   | ({ kind: "node"; id: string } & ExplorerDeleteTargetV2Metadata)
   | ({ kind: "logic_gate"; id: string } & ExplorerDeleteTargetV2Metadata)
-  | ({ kind: "project"; id: string } & ExplorerDeleteTargetV2Metadata);
+  | ({ kind: "project"; id: string } & ExplorerDeleteTargetV2Metadata)
+  | ({ kind: "kanban"; id: string } & ExplorerDeleteTargetV2Metadata);
 
 export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | null): ExplorerDeleteTarget | null {
   if (!row) return null;
@@ -412,6 +417,7 @@ export function resolveExplorerDeleteTarget(row?: ExplorerCreationContextRow | n
     const id = entityType === "project" ? row.resourceID : row.projectID;
     return id ? { kind: "project", id, ...v2Metadata } : null;
   }
+  if (row.kind === "kanban" && row.kanbanBoardID) return { kind: "kanban", id: row.kanbanBoardID };
   return null;
 }
 
@@ -441,6 +447,7 @@ export function resolveExplorerPublishedSelection(input: {
   selectedTreeID: string;
   selectedNodeID: string;
   selectedLogicGateID: string;
+  selectedKanbanBoardID: string;
   selectedFolderID: string;
   selectedFolderKind?: CompanyExplorerFolderKind;
 }): ExplorerPublishedSelection {
@@ -457,6 +464,12 @@ export function resolveExplorerPublishedSelection(input: {
   } else if (treeID.startsWith("project-")) {
     entityKind = "project";
     entityID = treeID.slice("project-".length);
+  } else if (treeID.startsWith("kanban-")) {
+    entityKind = "kanban";
+    entityID = treeID.slice("kanban-".length) || input.selectedKanbanBoardID;
+  } else if (input.selectedKanbanBoardID) {
+    entityKind = "kanban";
+    entityID = input.selectedKanbanBoardID;
   } else if (input.selectedLogicGateID) {
     entityKind = "logic_gate";
     entityID = input.selectedLogicGateID;
@@ -467,6 +480,7 @@ export function resolveExplorerPublishedSelection(input: {
 
   const selectedNodeID = entityKind === "node" ? entityID : "";
   const selectedLogicGateID = entityKind === "logic_gate" ? entityID : "";
+  const selectedKanbanBoardID = entityKind === "kanban" ? entityID : "";
   const isLogicGateContext = entityKind === "logic_gate"
     || (entityKind === "folder" && input.selectedFolderKind === "logic_gate");
 
@@ -475,6 +489,7 @@ export function resolveExplorerPublishedSelection(input: {
     entityID,
     selectedNodeID,
     selectedLogicGateID,
+    selectedKanbanBoardID,
     isLogicGateContext,
   };
 }

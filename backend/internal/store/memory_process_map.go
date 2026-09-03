@@ -554,6 +554,8 @@ type memoryProcessMapMutationSnapshot struct {
 	folders               map[string]domain.CompanyExplorerFolder
 	folderItems           map[string]domain.CompanyExplorerFolderItem
 	logicGates            map[string]domain.LogicGate
+	kanbanBoards          map[string]domain.KanbanBoard
+	kanbanColumns         map[string][]domain.KanbanColumn
 	explorerEntities      map[string]memoryCompanyExplorerV2Entity
 	explorerEdges         map[string]memoryCompanyExplorerV2Edge
 	explorerSubscriptions map[string]memoryCompanyExplorerV2Subscription
@@ -581,7 +583,7 @@ func (r *MemoryRepo) snapshotProcessMapMutationLocked() memoryProcessMapMutation
 	return memoryProcessMapMutationSnapshot{
 		companies: maps.Clone(r.companies), placements: placements, relationships: maps.Clone(r.resourceOperationalRelationships),
 		traces: traces, folders: maps.Clone(r.folders), folderItems: maps.Clone(r.folderItems),
-		logicGates:       maps.Clone(r.logicGates),
+		logicGates: maps.Clone(r.logicGates), kanbanBoards: maps.Clone(r.kanbanBoards), kanbanColumns: cloneSliceMap(r.kanbanColumns),
 		explorerEntities: maps.Clone(r.companyExplorerV2Entities), explorerEdges: maps.Clone(r.companyExplorerV2Edges),
 		explorerSubscriptions: maps.Clone(r.companyExplorerV2Subscriptions),
 		gvicAssignments:       maps.Clone(r.gvicAssignments), entityPermissions: maps.Clone(r.entityPermissions),
@@ -600,6 +602,8 @@ func (r *MemoryRepo) restoreProcessMapMutationLocked(snapshot memoryProcessMapMu
 	r.folders = snapshot.folders
 	r.folderItems = snapshot.folderItems
 	r.logicGates = snapshot.logicGates
+	r.kanbanBoards = snapshot.kanbanBoards
+	r.kanbanColumns = snapshot.kanbanColumns
 	r.companyExplorerV2Entities = snapshot.explorerEntities
 	r.companyExplorerV2Edges = snapshot.explorerEdges
 	r.companyExplorerV2Subscriptions = snapshot.explorerSubscriptions

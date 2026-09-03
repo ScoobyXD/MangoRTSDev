@@ -1,9 +1,25 @@
 import React from "react";
+import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph.js";
+import { publishLiveSelection, readLiveSelectionForFrame } from "../selectionCoordinator.js";
+import type { KanbanCardDropPlacement } from "./shared.js";
+export type HighlightedEntity = { nodeID: string } | null;
 
 export type CompanyUser = {
   user_id: string;
   email?: string;
   display_name?: string;
+};
+
+export type ColumnResizeState = {
+  axis: "width" | "height";
+  columnID: string;
+  startX: number;
+  startY: number;
+  startWidth: number;
+  startHeight: number;
+  currentWidth: number;
+  currentHeight: number;
+  minHeight?: number;
 };
 
 export type NodeEditorOverlayState = {
@@ -82,9 +98,7 @@ export const nodeEditorOverlayResizeHandles: Array<{
 ];
 
 export const DEFAULT_NODE_EDITOR_OVERLAY_RATIO: NodeEditorOverlayRatio = { left: 0.01, top: 0.01, width: 0.98, height: 0.98 };
-
 export const KANBAN_NODE_EDITOR_OVERLAY_EDGE_GUTTER_PX = 8;
-
 const NODE_EDITOR_OVERLAY_SIDEBAR_BUFFER_PX = 14;
 
 type NodeEditorOverlayClampOptions = {
@@ -172,14 +186,150 @@ export function storeNodeEditorOverlayRatio(companyID: string, frameID: string, 
   localStorage.setItem(nodeEditorOverlayRatioStorageKey(companyID, frameID), JSON.stringify(clampNodeEditorOverlayRatio(ratio, options)));
 }
 
+export const contextMenuButtonStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  width: "calc(100% - 10px)",
+  margin: "2px 5px",
+  padding: "9px 11px",
+  fontSize: 12,
+  fontWeight: 600,
+  letterSpacing: 0,
+  fontFamily: "var(--mango-font-family)",
+  background: "none",
+  border: "1px solid transparent",
+  borderRadius: 10,
+  color: "#333",
+  cursor: "pointer",
+  textAlign: "left",
+  transition: "background 150ms ease, border-color 150ms ease, box-shadow 170ms ease, transform 170ms ease",
+  boxSizing: "border-box",
+};
+
+export const contextMenuDividerStyle: React.CSSProperties = {
+  height: 1,
+  margin: "4px 8px",
+  background: "rgba(148, 163, 184, 0.28)",
+};
+
+export const contextMenuHoverHandlers = {
+  onMouseEnter: (event: React.MouseEvent) => {
+    const target = event.currentTarget as HTMLElement;
+    target.style.background = "linear-gradient(135deg, rgba(255,255,255,0.88), rgba(230,252,255,0.58) 46%, rgba(247,239,255,0.66)) padding-box, linear-gradient(135deg, rgba(92,238,255,0.92), rgba(128,216,255,0.82) 34%, rgba(183,124,255,0.88) 72%, rgba(255,255,255,0.86)) border-box";
+    target.style.borderColor = "transparent";
+    target.style.boxShadow = "0 9px 24px rgba(15, 23, 42, 0.14), 0 0 16px rgba(183, 124, 255, 0.22), inset 1px 1px 0 rgba(255,255,255,0.86)";
+    target.style.backdropFilter = "blur(14px) saturate(1.28)";
+    target.style.transform = "translateY(-1px)";
+  },
+  onMouseLeave: (event: React.MouseEvent) => {
+    const target = event.currentTarget as HTMLElement;
+    target.style.background = "none";
+    target.style.borderColor = "transparent";
+    target.style.boxShadow = "none";
+    target.style.backdropFilter = "none";
+    target.style.transform = "translateY(0)";
+  },
+};
+
 export const KANBAN_PANEL_BACKGROUND = "linear-gradient(180deg, #fbfbfd 0%, #eef4f8 54%, #f5f0fb 100%)";
-
 export const KANBAN_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f6f7fb 100%)";
-
+export const KANBAN_ACTIVE_SURFACE = "linear-gradient(145deg, #ffffff 0%, #f5f6fa 100%)";
 export const KANBAN_EDGE_FRAME = "linear-gradient(135deg, rgba(92, 238, 255, 0.92) 0%, rgba(128, 216, 255, 0.82) 34%, rgba(183, 124, 255, 0.88) 72%, rgba(255, 255, 255, 0.86) 100%)";
-
 export const KANBAN_SOFT_BORDER = "rgba(255, 255, 255, 0.76)";
-
 export const KANBAN_SHADOW = "7px 7px 16px rgba(174, 174, 192, 0.26), -7px -7px 16px rgba(255, 255, 255, 0.92), inset 1px 1px 0 rgba(255, 255, 255, 0.86)";
-
 export const KANBAN_PANEL_SHADOW = "inset 0 0 0 1px rgba(255, 255, 255, 0.72), inset 5px 5px 16px rgba(174, 174, 192, 0.16), inset -5px -5px 16px rgba(255, 255, 255, 0.86), 0 12px 28px rgba(15, 23, 42, 0.14)";
+
+export const ARENA_GROUP_COLUMN_WIDTH_PX = 300;
+export const ARENA_GROUP_ROW_LABEL_WIDTH_PX = 104;
+export const ARENA_GROUP_MIN_CELL_HEIGHT_PX = 86;
+export const ARENA_GROUP_FRAME_BACKGROUND = KANBAN_SURFACE;
+export const ARENA_GROUP_GLASS_BORDER_LIGHT = "rgba(255, 255, 255, 0.76)";
+export const ARENA_GROUP_GLASS_BORDER_DARK = "rgba(255,255,255,0.18)";
+export const ARENA_GROUP_FRAME_SHADOW = "4px 4px 12px rgba(174, 174, 192, 0.18), -4px -4px 12px rgba(255, 255, 255, 0.78), inset 1px 1px 0 rgba(255,255,255,0.82)";
+
+export const KanbanDisclosureIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" style={{ display: "block" }}>
+    <path d="M3.25 4.55 6 7.3l2.75-2.75" fill="none" stroke={color} strokeWidth="1.55" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const KanbanCheckIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg aria-hidden="true" width="13" height="13" viewBox="0 0 13 13" style={{ display: "block" }}>
+    <path d="m3.1 6.55 2.05 2.05 4.75-4.75" fill="none" stroke={color} strokeWidth="1.65" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export function readLinkedExplorerSelection(companyID: string, frameID: string): HighlightedEntity {
+  const selection = readLiveSelectionForFrame(companyID, frameID);
+  return selection?.entityKind === "node" && selection.entityID ? { nodeID: selection.entityID } : null;
+}
+
+export function publishKanbanSelectionToLinkedFrames(companyID: string, sourceFrameID: string, nodeID: string, nodeTitle: string, selectedNodeIDs: string[] = [nodeID]): void {
+  if (!nodeID) return;
+  try {
+    const edges = readFrameLinksFromStorage();
+    const registry = readFrameRegistryFromStorage();
+    const targetFrameIDs = resolveConnectedFrameTargets({ sourceFrameID, edges, registry });
+    publishLiveSelection({
+      companyID,
+      entityKind: "node",
+      entityID: nodeID,
+      label: nodeTitle,
+      sourceFrameID,
+      sourceModule: "kanban",
+      targetFrameIDs,
+      selectedTreeID: `node-${nodeID}`,
+      selectedTreeIDs: selectedNodeIDs.map((id) => `node-${id}`),
+      selectedEntityIDs: selectedNodeIDs,
+    });
+  } catch {
+    // Selection handoff is a UI convenience; card selection must still work if the link graph is unavailable.
+  }
+}
+
+export function publishKanbanBoardSelectionToLinkedFrames(companyID: string, sourceFrameID: string, boardID: string, boardTitle: string): void {
+  if (!boardID) return;
+  try {
+    const edges = readFrameLinksFromStorage();
+    const registry = readFrameRegistryFromStorage();
+    const targetFrameIDs = resolveConnectedFrameTargets({ sourceFrameID, edges, registry });
+    publishLiveSelection({
+      companyID,
+      entityKind: "kanban",
+      entityID: boardID,
+      label: boardTitle,
+      sourceFrameID,
+      sourceModule: "kanban",
+      targetFrameIDs,
+      selectedTreeID: `kanban-${boardID}`,
+      selectedTreeIDs: [`kanban-${boardID}`],
+      selectedEntityIDs: [boardID],
+    });
+  } catch {
+    // Board selection should not depend on link graph storage.
+  }
+}
+
+export function dataTransferIncludes(event: React.DragEvent, mime: string): boolean {
+  return Array.from(event.dataTransfer.types).includes(mime);
+}
+
+export function cardDropPlacement(event: React.DragEvent<HTMLElement>): KanbanCardDropPlacement {
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return event.clientY > bounds.top + bounds.height / 2 ? "after" : "before";
+}
+
+export function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  const tag = target.tagName.toLowerCase();
+  return target.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
+}
+
+export function formatKanbanLoadError(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    const message = error.message.trim();
+    if (message) return message;
+  }
+  return fallback;
+}

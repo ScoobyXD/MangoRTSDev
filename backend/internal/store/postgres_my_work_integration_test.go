@@ -279,11 +279,11 @@ func TestPostgresMyWorkAndStaleRACIQueriesExecuteAgainstCanonicalSchema(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: company.CompanyID, LogicGateID: gate.LogicGateID, NodeID: doneNode.NodeID, Status: "in progress"}); err != nil {
+	if _, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{CompanyID: company.CompanyID, LogicGateID: gate.LogicGateID, NodeID: doneNode.NodeID, Status: "done"}); err != nil {
 		t.Fatal(err)
 	}
 	mustSetPostgresMyWorkRACIInherited(t, repo, company.CompanyID, EntityTypeNode, doneNode.NodeID)
-	if _, err := db.Exec(`update nodes set status='Done' where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, doneNode.NodeID); err != nil {
+	if _, err := db.Exec(`update nodes set status='In Progress' where company_id=$1::uuid and node_id=$2::uuid`, company.CompanyID, doneNode.NodeID); err != nil {
 		t.Fatal(err)
 	}
 

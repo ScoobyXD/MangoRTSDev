@@ -44,6 +44,7 @@ func TestPostgresCrossLogicGateMoveSucceedsWithoutEmailRelationship(t *testing.T
 	sourceLogicGateID := newUUIDv7String()
 	targetLogicGateID := newUUIDv7String()
 	assignmentID := newUUIDv7String()
+	cardID := newUUIDv7String()
 
 	setup := []struct {
 		query string
@@ -54,7 +55,7 @@ func TestPostgresCrossLogicGateMoveSucceedsWithoutEmailRelationship(t *testing.T
 		{"insert into company_memberships(company_id,user_id,role) values($1::uuid,$2::uuid,'company_admin')", []any{companyID, actorUserID}},
 		{"insert into logic_gates(company_id,logic_gate_id,header,created_timestamp) values($1::uuid,$2::uuid,'Source',now()),($1::uuid,$3::uuid,'Target',now())", []any{companyID, sourceLogicGateID, targetLogicGateID}},
 		{"insert into nodes(company_id,node_id,name,priority,created_timestamp) values($1::uuid,$2::uuid,'Move me',1,now())", []any{companyID, nodeID}},
-		{"insert into node_logic_gate_assignments(assignment_id,company_id,node_id,logic_gate_id,is_issue,position,placed_by_user_id) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,false,1000,$5::uuid)", []any{assignmentID, companyID, nodeID, sourceLogicGateID, actorUserID}},
+		{"insert into node_logic_gate_assignments(assignment_id,company_id,node_id,logic_gate_id,status_key,column_id,is_issue,position,compatibility_board_id,compatibility_card_id,placed_by_user_id) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'pending','pending',false,1000,$5,$6::uuid,$7::uuid)", []any{assignmentID, companyID, nodeID, sourceLogicGateID, LogicGateKanbanBoardID(sourceLogicGateID), cardID, actorUserID}},
 	}
 	for _, statement := range setup {
 		if _, err := db.Exec(statement.query, statement.args...); err != nil {
@@ -75,15 +76,18 @@ func TestPostgresCrossLogicGateMoveSucceedsWithoutEmailRelationship(t *testing.T
 	if err != nil {
 		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
 	}
-	if moved.Assignment.LogicGateID != targetLogicGateID || nodeWorkStatus(moved.Node) != "Requested" {
-		t.Fatalf("moved: %+v", moved)
+	if moved.Assignment.LogicGateID != targetLogicGateID || moved.Card.LogicGateID == nil || *moved.Card.LogicGateID != targetLogicGateID {
+		t.Fatalf("moved result = %+v card=%+v, want target logic gate %q", moved.Assignment, moved.Card, targetLogicGateID)
+	}
+	if moved.Assignment.StatusKey != LogicGateWorkStatusRequested || moved.Card.ColumnID != LogicGateWorkStatusRequested {
+		t.Fatalf("moved status assignment=%q card=%q, want requested", moved.Assignment.StatusKey, moved.Card.ColumnID)
 	}
 
 	var persistedLogicGateID, persistedStatus string
-	if err := db.QueryRow("select a.logic_gate_id::text,n.status from node_logic_gate_assignments a join nodes n on n.company_id=a.company_id and n.node_id=a.node_id where a.company_id=$1::uuid and a.node_id=$2::uuid", companyID, nodeID).Scan(&persistedLogicGateID, &persistedStatus); err != nil {
+	if err := db.QueryRow("select logic_gate_id::text,status_key from node_logic_gate_assignments where company_id=$1::uuid and node_id=$2::uuid", companyID, nodeID).Scan(&persistedLogicGateID, &persistedStatus); err != nil {
 		t.Fatal(err)
 	}
-	if persistedLogicGateID != targetLogicGateID || persistedStatus != "Requested" {
+	if persistedLogicGateID != targetLogicGateID || persistedStatus != LogicGateWorkStatusRequested {
 		t.Fatalf("persisted assignment logic_gate=%q status=%q", persistedLogicGateID, persistedStatus)
 	}
 }

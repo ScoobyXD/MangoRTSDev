@@ -415,9 +415,23 @@ func (r *PostgresRepo) postgresMyWorkNodes(ctx context.Context, query MyWorkQuer
          coalesce(node.completion_transition_timestamp,node.created_timestamp) as completed_timestamp
   from node_raci_winners winner
   join nodes node on node.company_id=$1::uuid and node.node_id=winner.resource_id
+  left join lateral (
+    select candidate_assignment.*
+    from node_logic_gate_assignments candidate_assignment
+    where candidate_assignment.company_id=node.company_id and candidate_assignment.node_id=node.node_id
+    order by candidate_assignment.updated_timestamp desc,candidate_assignment.created_timestamp desc,candidate_assignment.assignment_id desc
+    limit 1
+  ) assignment on true
   where winner.role=$3::text
     and $13::timestamptz is not null
-    and $12::boolean = (lower(btrim(coalesce(node.status,''))) in ('done','complete','completed'))
+    and $12::boolean = (lower(btrim(coalesce(
+      case
+        when assignment.is_issue then 'Issue'
+        when assignment.assignment_id is not null then ` + postgresLogicGateAssignmentStatusTitleSQL + `
+      end,
+      nullif(node.status,''),
+      ''
+    ))) in ('done','complete','completed'))
 ), node_access_targets(resource_type,resource_id) as (
   select 'node'::text,node_id
   from node_candidates
@@ -555,25 +569,24 @@ func (r *PostgresRepo) postgresMyWorkProcesses(ctx context.Context, query MyWork
   order by lower(header) collate "C",logic_gate_id
   limit $8
 ), process_count_node_targets(resource_type,resource_id) as (
-  select distinct 'node'::text,assignment.node_id
+  select distinct 'node'::text,projection.node_id
   from visible_process_page page
-  join node_logic_gate_assignments assignment
-    on assignment.company_id=$1::uuid and assignment.logic_gate_id=page.logic_gate_id
+  join kanban_board_projection projection
+    on projection.company_id=$1::uuid and projection.logic_gate_id=page.logic_gate_id
 )
 ` + myWorkPermissionAccessCTEs("process_count_node_targets", "process_count_node") + `
 , process_counts as (
   select
     page.logic_gate_id,
-    count(*) filter (where node.status='Requested')::integer as request_count,
-    count(*) filter (where node.status='Pending')::integer as pending_count,
-    count(*) filter (where node.status='In Progress')::integer as in_progress_count,
-    count(*) filter (where node.status='Review')::integer as review_count
+    count(*) filter (where projection.status_rank=0)::integer as request_count,
+    count(*) filter (where projection.status_rank=2)::integer as pending_count,
+    count(*) filter (where projection.status_rank=3)::integer as in_progress_count,
+    count(*) filter (where projection.status_rank=4)::integer as review_count
   from visible_process_page page
-  join node_logic_gate_assignments assignment
-    on assignment.company_id=$1::uuid and assignment.logic_gate_id=page.logic_gate_id
-  join nodes node on node.company_id=assignment.company_id and node.node_id=assignment.node_id
+  join kanban_board_projection projection
+    on projection.company_id=$1::uuid and projection.logic_gate_id=page.logic_gate_id
   join process_count_node_access node_access
-    on node_access.resource_type='node' and node_access.resource_id=assignment.node_id and node_access.allowed
+    on node_access.resource_type='node' and node_access.resource_id=projection.node_id and node_access.allowed
   group by page.logic_gate_id
 )
 select page.logic_gate_id::text,page.header,lower(page.header),

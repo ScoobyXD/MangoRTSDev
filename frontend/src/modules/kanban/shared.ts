@@ -1,18 +1,33 @@
+import type React from "react";
+import { humanLabelOrFallback, isLikelyOpaqueEntityID } from "../entityLabels.js";
+import type { Account } from "../accounts/accountsApi.js";
+
 export const EXPLORER_ENTITY_DRAG_MIME = "application/x-mango-explorer-entity";
-
+export const KANBAN_CARD_DRAG_MIME = "application/x-mango-kanban-card";
+export const KANBAN_COLUMN_DRAG_MIME = "application/x-mango-kanban-column";
+export const EVENT_KANBAN_BOARDS_UPDATED = "mangorts:kanban-boards-updated";
+export const EVENT_KANBAN_BOARD_CONTENTS_UPDATED = "mangorts:kanban-board-contents-updated";
+export const KANBAN_COLUMN_TITLE_TEXT_TRANSFORM = "none";
+export const KANBAN_MODULE_TOP_CLEARANCE_PX = 38;
+export const KANBAN_DEFAULT_COLUMN_WIDTH_PX = 260;
+export const KANBAN_MIN_COLUMN_WIDTH_PX = 180;
+export const KANBAN_MAX_COLUMN_WIDTH_PX = 2000;
+export const KANBAN_DEFAULT_COLUMN_HEIGHT_PX = 240;
+export const KANBAN_ARENA_DEFAULT_COLUMN_HEIGHT_PX = KANBAN_DEFAULT_COLUMN_HEIGHT_PX * 3;
+export const KANBAN_MIN_COLUMN_HEIGHT_PX = 160;
+export const KANBAN_MAX_COLUMN_HEIGHT_PX = 10000;
 export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#475569";
-
+export const KANBAN_DEFAULT_BOARD_TITLE = "Kanban board";
+export const KANBAN_DEFAULT_GROUPINGS = [{ field: "priority", direction: "asc" }] as const;
+export const KANBAN_DEFAULT_DATE_ADDED_SORT_ENABLED = true;
+export const KANBAN_DEFAULT_DATE_ADDED_SORT_DIRECTION = "desc" as const;
 export const KANBAN_LOGIC_GATE_REQUESTED_COLOR = "#facc15";
-
 export const KANBAN_LOGIC_GATE_BACKLOG_COLOR = "#8b5cf6";
-
 export const KANBAN_LOGIC_GATE_PENDING_COLOR = "#6f7b8a";
-
 export const KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR = "#f08a24";
-
 export const KANBAN_LOGIC_GATE_REVIEW_COLOR = "#19a8ff";
-
 export const KANBAN_LOGIC_GATE_DONE_COLOR = "#19c879";
+export const KANBAN_ISSUE_CARD_COLOR = "#7c6ee6";
 
 export const KANBAN_NODE_PRIORITY_STYLE_OPTIONS = [
   {
@@ -65,6 +80,21 @@ export const KANBAN_NODE_PRIORITY_STYLE_OPTIONS = [
   },
 ] as const;
 
+const KANBAN_COLUMN_ITEM_COLOR_SET = new Set([
+  "#334155",
+  "#475569",
+  "#64748b",
+  "#808080",
+  KANBAN_DEFAULT_COLUMN_ITEM_COLOR,
+  KANBAN_LOGIC_GATE_REQUESTED_COLOR,
+  KANBAN_LOGIC_GATE_BACKLOG_COLOR,
+  KANBAN_LOGIC_GATE_PENDING_COLOR,
+  KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR,
+  KANBAN_LOGIC_GATE_REVIEW_COLOR,
+  KANBAN_LOGIC_GATE_DONE_COLOR,
+  KANBAN_ISSUE_CARD_COLOR,
+].map((color) => color.toLowerCase()));
+
 export type KanbanDragPreviewItem = {
   label: string;
   color?: string;
@@ -84,7 +114,177 @@ export type ExplorerEntityDragPayload = {
   nodes: ExplorerEntityDragItem[];
 };
 
+export type KanbanBoard = {
+  company_id: string;
+  board_id: string;
+  logic_gate_id?: string | null;
+  title: string;
+  position: number;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type KanbanBoardsUpdatedDetail = {
+  companyID?: string;
+  board?: KanbanBoard;
+  deletedBoardID?: string;
+};
+
+export type KanbanBoardContentsUpdatedDetail = {
+  companyID?: string;
+  boardID: string;
+  logicGateID?: string;
+};
+
+export type KanbanColumn = {
+  company_id: string;
+  board_id: string;
+  column_id: string;
+  title: string;
+  position: number;
+  width_px: number;
+  height_px: number;
+  item_color: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type KanbanCard = {
+  company_id: string;
+  board_id: string;
+  card_id: string;
+  column_id: string;
+  node_id: string;
+  logic_gate_id?: string | null;
+  requested_by_user_id?: string;
+  placed_by_user_id?: string;
+  node_title: string;
+  description_snapshot: string;
+  is_issue?: boolean;
+  position: number;
+  due_date?: string | null;
+  priority?: number | null;
+  created_from_email?: boolean;
+  has_project?: boolean;
+  accounts?: Account[];
+  projection_updated_timestamp?: string;
+  created_timestamp: string;
+  updated_timestamp: string;
+};
+
+export type KanbanCardNodeMetadata = {
+  node_id: string;
+  due_date?: string | null;
+  priority?: number | null;
+  accounts?: Account[];
+};
+
+export type LogicGateArenaLogicGate = {
+  logic_gate_id: string;
+  header: string;
+  default_access: string;
+  request_owner_user_id?: string | null;
+};
+
+export type LogicGateArenaPermissions = {
+  can_edit: boolean;
+};
+
+export type LogicGateArenaCard = {
+  card_id: string;
+  column_id: string;
+  node_id: string;
+  requested_by_user_id?: string;
+  placed_by_user_id?: string;
+  node_title: string;
+  is_issue?: boolean;
+  position: number;
+  due_date?: string | null;
+  priority?: number | null;
+  created_from_email?: boolean;
+  has_project?: boolean;
+  accounts?: Account[];
+  projection_updated_timestamp?: string;
+  created_timestamp: string;
+};
+
+export type LogicGateArenaView = {
+  logic_gate: LogicGateArenaLogicGate;
+  permissions: LogicGateArenaPermissions;
+  board: KanbanBoard;
+  columns: KanbanColumn[];
+  cards: LogicGateArenaCard[];
+};
+
+export function hydrateKanbanCardsFromNodes(cards: KanbanCard[], nodes: KanbanCardNodeMetadata[] = []): KanbanCard[] {
+  if (nodes.length === 0 || cards.length === 0) return cards;
+  const nodeByID = new Map(nodes.map((node) => [node.node_id, node]));
+  return cards.map((card) => {
+    const node = nodeByID.get(card.node_id);
+    if (!node) return card;
+    return {
+      ...card,
+      due_date: card.due_date ?? node.due_date ?? null,
+      priority: card.priority ?? node.priority ?? null,
+      accounts: card.accounts ?? node.accounts ?? [],
+    };
+  });
+}
+
+export type KanbanCardDragPayload = {
+  cardID: string;
+  cardIDs: string[];
+  sourceColumnID: string;
+};
+
+export type KanbanColumnDragPayload = {
+  columnID: string;
+};
+
+export type KanbanColumnPositionUpdate = {
+  columnID: string;
+  position: number;
+};
+
+export type KanbanCardPositionUpdate = {
+  cardID: string;
+  columnID: string;
+  position: number;
+};
+
+export type KanbanCardSelectionUpdate = {
+  selectedCardIDs: Set<string>;
+  anchorCardID: string;
+};
+
+export type KanbanColumnDropPlacement = "before" | "after" | "swap";
+export type KanbanCardDropPlacement = "before" | "after";
 export type KanbanGroupField = "person" | "priority" | "due_date" | "account";
+
+export type KanbanGroupNode = {
+  node_id: string;
+  due_date?: string | null;
+  priority?: number | null;
+  accounts?: Account[];
+};
+
+export type KanbanGroupUser = {
+  user_id: string;
+  email?: string;
+  display_name?: string;
+};
+
+export type KanbanStatusNode = {
+  node_id: string;
+  status?: string | null;
+};
+
+export type KanbanGroupedBoardRow = {
+  key: string;
+  label: string;
+  sortValue: string | number;
+  sortLast?: boolean;
+};
 
 export const KANBAN_GROUP_FIELDS: Array<{ value: KanbanGroupField; label: string }> = [
   { value: "person", label: "By person" },
@@ -93,8 +293,102 @@ export const KANBAN_GROUP_FIELDS: Array<{ value: KanbanGroupField; label: string
   { value: "account", label: "Account" },
 ];
 
-export function isNodeDropItemType(value: unknown): value is "node" {
+export function isKanbanBoardDropItemType(value: unknown): value is "node" {
   return value === "node";
+}
+
+export function isKanbanColumnItemColor(value: unknown): value is string {
+  return typeof value === "string" && KANBAN_COLUMN_ITEM_COLOR_SET.has(value.trim().toLowerCase());
+}
+
+export function normalizeKanbanColumnItemColor(value: unknown): string {
+  return isKanbanColumnItemColor(value) ? value.trim().toLowerCase() : KANBAN_DEFAULT_COLUMN_ITEM_COLOR;
+}
+
+export function getKanbanStatusColumnColor(title: string): string | null {
+  const normalized = title.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  if (normalized === "requested" || normalized === "request" || normalized === "requests") return KANBAN_LOGIC_GATE_REQUESTED_COLOR;
+  if (normalized === "backlog" || normalized === "backlogs") return KANBAN_LOGIC_GATE_BACKLOG_COLOR;
+  if (normalized === "pending") return KANBAN_LOGIC_GATE_PENDING_COLOR;
+  if (normalized === "in progress") return KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR;
+  if (normalized === "review") return KANBAN_LOGIC_GATE_REVIEW_COLOR;
+  if (normalized === "done" || normalized === "complete" || normalized === "completed") return KANBAN_LOGIC_GATE_DONE_COLOR;
+  return null;
+}
+
+export function getKanbanColumnDisplayColor(column: Pick<KanbanColumn, "title" | "item_color">): string {
+  return getKanbanStatusColumnColor(column.title) ?? normalizeKanbanColumnItemColor(column.item_color);
+}
+
+export function isKanbanRequestedColumn(column: Pick<KanbanColumn, "column_id" | "title">): boolean {
+  const normalizedColumnID = column.column_id.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  const normalizedTitle = column.title.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  return normalizedColumnID === "requested" || normalizedTitle === "requested";
+}
+
+export function isKanbanBacklogColumn(column: Pick<KanbanColumn, "column_id" | "title">): boolean {
+  const normalizedColumnID = column.column_id.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  const normalizedTitle = column.title.trim().toLowerCase().replace(/[\s_-]+/g, " ");
+  return normalizedColumnID === "backlog" || normalizedColumnID === "backlogs" || normalizedTitle === "backlog" || normalizedTitle === "backlogs";
+}
+
+export function isKanbanBottomLaneColumn(column: Pick<KanbanColumn, "column_id" | "title">): boolean {
+  return isKanbanRequestedColumn(column) || isKanbanBacklogColumn(column);
+}
+
+export function getKanbanBoardDisplayTitle(board: Pick<KanbanBoard, "board_id" | "title" | "logic_gate_id">): string {
+  const logicGateID = board.logic_gate_id?.trim() || logicGateIDFromKanbanBoardID(board.board_id);
+  const title = board.title.trim();
+  if (title && (!logicGateID || (title !== logicGateID && title !== logicGateKanbanBoardID(logicGateID) && !isLikelyOpaqueEntityID(title)))) return title;
+  if (logicGateID) return "Process";
+  return humanLabelOrFallback(board.board_id, KANBAN_DEFAULT_BOARD_TITLE);
+}
+
+export function logicGateKanbanBoardID(logicGateID: string): string {
+  return `logic-gate:${logicGateID.trim()}`;
+}
+
+export function logicGateIDFromKanbanBoardID(boardID: string): string {
+  const prefix = "logic-gate:";
+  const trimmed = boardID.trim();
+  return trimmed.startsWith(prefix) ? trimmed.slice(prefix.length).trim() : "";
+}
+
+export function createClientUUIDv7(now: () => number = () => Date.now(), randomValues?: (bytes: Uint8Array) => Uint8Array): string {
+  const bytes = new Uint8Array(16);
+  const fillRandom = randomValues ?? globalThis.crypto?.getRandomValues?.bind(globalThis.crypto);
+  if (fillRandom) {
+    fillRandom(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  }
+
+  const timestamp = BigInt(Math.max(0, Math.floor(now()))) & 0xffffffffffffn;
+  bytes[0] = Number((timestamp >> 40n) & 0xffn);
+  bytes[1] = Number((timestamp >> 32n) & 0xffn);
+  bytes[2] = Number((timestamp >> 24n) & 0xffn);
+  bytes[3] = Number((timestamp >> 16n) & 0xffn);
+  bytes[4] = Number((timestamp >> 8n) & 0xffn);
+  bytes[5] = Number(timestamp & 0xffn);
+  bytes[6] = (bytes[6] & 0x0f) | 0x70;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
+  return `${hex[0]}${hex[1]}${hex[2]}${hex[3]}-${hex[4]}${hex[5]}-${hex[6]}${hex[7]}-${hex[8]}${hex[9]}-${hex[10]}${hex[11]}${hex[12]}${hex[13]}${hex[14]}${hex[15]}`;
+}
+
+export function sortKanbanBoards(boards: KanbanBoard[]): KanbanBoard[] {
+  return [...boards].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp) || a.board_id.localeCompare(b.board_id));
+}
+
+export function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.trim().replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(clean)) return `rgba(100,116,139,${alpha})`;
+  const value = Number.parseInt(clean, 16);
+  const red = (value >> 16) & 255;
+  const green = (value >> 8) & 255;
+  const blue = value & 255;
+  return `rgba(${red},${green},${blue},${alpha})`;
 }
 
 export function attachStackedDragPreview(dataTransfer: DataTransfer, items: KanbanDragPreviewItem[], _accentColor: string, title: string): void {
@@ -153,7 +447,7 @@ function logicGateDragPreviewIcon(): string {
 
 export function sanitizeExplorerEntityDragPayload(value: unknown): ExplorerEntityDragPayload | null {
   if (!value || typeof value !== "object") return null;
-  const candidate = value as { itemType?: unknown; nodeID?: unknown; label?: unknown; nodes?: unknown };
+  const candidate = value as { itemType?: unknown; nodeID?: unknown; itemID?: unknown; label?: unknown; nodes?: unknown };
   // Batch payloads come from Explorer multi-select. Sanitize each item so a
   // malformed row cannot poison the whole drop operation.
   if (candidate.itemType === "node_batch" && Array.isArray(candidate.nodes)) {
@@ -161,8 +455,8 @@ export function sanitizeExplorerEntityDragPayload(value: unknown): ExplorerEntit
     const seen = new Set<string>();
     for (const item of candidate.nodes) {
       if (!item || typeof item !== "object") continue;
-      const row = item as { nodeID?: unknown; label?: unknown };
-      const rawNodeID = row.nodeID;
+      const row = item as { nodeID?: unknown; itemID?: unknown; label?: unknown };
+      const rawNodeID = typeof row.nodeID === "string" ? row.nodeID : row.itemID;
       if (typeof rawNodeID !== "string" || rawNodeID.trim() === "") continue;
       const nodeID = rawNodeID.trim();
       if (seen.has(nodeID)) continue;
@@ -172,8 +466,8 @@ export function sanitizeExplorerEntityDragPayload(value: unknown): ExplorerEntit
     }
     return nodes.length > 0 ? { itemType: "node_batch", nodes } : null;
   }
-  if (!isNodeDropItemType(candidate.itemType)) return null;
-  const rawNodeID = candidate.nodeID;
+  if (!isKanbanBoardDropItemType(candidate.itemType)) return null;
+  const rawNodeID = typeof candidate.nodeID === "string" ? candidate.nodeID : candidate.itemID;
   if (typeof rawNodeID !== "string" || rawNodeID.trim() === "") return null;
   const nodeID = rawNodeID.trim();
   const label = typeof candidate.label === "string" && candidate.label.trim() ? candidate.label.trim() : nodeID;
@@ -202,11 +496,426 @@ export function serializeExplorerEntityDragPayload(payload: ExplorerEntityDragPa
   return JSON.stringify(payload);
 }
 
-export function getKanbanPriorityGroupLabel(priority: number): string {
+export function parseKanbanCardDragPayload(raw: string): KanbanCardDragPayload | null {
+  try {
+    const parsed = JSON.parse(raw) as { cardID?: unknown; cardIDs?: unknown; sourceColumnID?: unknown };
+    const cardIDs = Array.isArray(parsed.cardIDs)
+      ? parsed.cardIDs.filter((value): value is string => typeof value === "string").map((value) => value.trim()).filter(Boolean)
+      : [];
+    if (cardIDs.length === 0 && typeof parsed.cardID === "string" && parsed.cardID.trim()) cardIDs.push(parsed.cardID.trim());
+    const uniqueCardIDs = Array.from(new Set(cardIDs));
+    if (uniqueCardIDs.length === 0) return null;
+    if (typeof parsed.sourceColumnID !== "string" || parsed.sourceColumnID.trim() === "") return null;
+    return { cardID: uniqueCardIDs[0], cardIDs: uniqueCardIDs, sourceColumnID: parsed.sourceColumnID.trim() };
+  } catch {
+    return null;
+  }
+}
+
+export function parseKanbanColumnDragPayload(raw: string): KanbanColumnDragPayload | null {
+  try {
+    const parsed = JSON.parse(raw) as { columnID?: unknown };
+    if (typeof parsed.columnID !== "string" || parsed.columnID.trim() === "") return null;
+    return { columnID: parsed.columnID.trim() };
+  } catch {
+    return null;
+  }
+}
+
+export function clampColumnWidth(widthPx: number): number {
+  if (!Number.isFinite(widthPx)) return KANBAN_DEFAULT_COLUMN_WIDTH_PX;
+  return Math.max(KANBAN_MIN_COLUMN_WIDTH_PX, Math.min(KANBAN_MAX_COLUMN_WIDTH_PX, Math.round(widthPx)));
+}
+
+export function clampColumnHeight(heightPx: number): number {
+  if (!Number.isFinite(heightPx)) return KANBAN_DEFAULT_COLUMN_HEIGHT_PX;
+  return Math.max(KANBAN_MIN_COLUMN_HEIGHT_PX, Math.min(KANBAN_MAX_COLUMN_HEIGHT_PX, Math.round(heightPx)));
+}
+
+export function getColumnWidth(column: Pick<KanbanColumn, "width_px">): number {
+  return clampColumnWidth(column.width_px || KANBAN_DEFAULT_COLUMN_WIDTH_PX);
+}
+
+export function getColumnHeight(column: Pick<KanbanColumn, "height_px">): number {
+  return clampColumnHeight(column.height_px || KANBAN_DEFAULT_COLUMN_HEIGHT_PX);
+}
+
+export function sortColumns(columns: KanbanColumn[]): KanbanColumn[] {
+  return [...columns].sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp));
+}
+
+export function nextColumnPosition(columns: Pick<KanbanColumn, "position">[]): number {
+  let next = 1000;
+  for (const column of columns) {
+    if (column.position >= next) next = column.position + 1000;
+  }
+  return next;
+}
+
+function buildCompactedColumnUpdates(columns: KanbanColumn[]): KanbanColumnPositionUpdate[] {
+  return columns.map((column, index) => ({ columnID: column.column_id, position: (index + 1) * 1000 }));
+}
+
+function resolveColumnDropTarget(columns: KanbanColumn[], draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement): string | null {
+  if (targetColumnID === draggedColumnID) return draggedColumnID;
+  if (!targetColumnID || placement === "before") return targetColumnID;
+  const withoutDragged = sortColumns(columns).filter((column) => column.column_id !== draggedColumnID);
+  const targetIndex = withoutDragged.findIndex((column) => column.column_id === targetColumnID);
+  if (targetIndex < 0 || targetIndex === withoutDragged.length - 1) return null;
+  return withoutDragged[targetIndex + 1].column_id;
+}
+
+export function buildColumnReorderPlan(columns: KanbanColumn[], draggedColumnID: string, targetColumnID: string | null, placement: KanbanColumnDropPlacement = "before"): { columns: KanbanColumn[]; updates: KanbanColumnPositionUpdate[] } {
+  const sorted = sortColumns(columns);
+  const dragged = sorted.find((column) => column.column_id === draggedColumnID);
+  const target = targetColumnID ? sorted.find((column) => column.column_id === targetColumnID) : null;
+  if (placement === "swap") {
+    if (!dragged || !target || dragged.column_id === target.column_id) return { columns: sorted, updates: [] };
+    const swapped = sorted.map((column) => {
+      if (column.column_id === dragged.column_id) return { ...column, position: target.position };
+      if (column.column_id === target.column_id) return { ...column, position: dragged.position };
+      return column;
+    });
+    return {
+      columns: sortColumns(swapped),
+      updates: [
+        { columnID: dragged.column_id, position: target.position },
+        { columnID: target.column_id, position: dragged.position },
+      ],
+    };
+  }
+  const resolvedTargetID = resolveColumnDropTarget(sorted, draggedColumnID, targetColumnID, placement);
+  if (!dragged || dragged.column_id === resolvedTargetID) return { columns: sorted, updates: [] };
+
+  const withoutDragged = sorted.filter((column) => column.column_id !== draggedColumnID);
+  const targetIndex = resolvedTargetID ? withoutDragged.findIndex((column) => column.column_id === resolvedTargetID) : withoutDragged.length;
+  if (targetIndex < 0) return { columns: sorted, updates: [] };
+
+  const reordered = [
+    ...withoutDragged.slice(0, targetIndex),
+    dragged,
+    ...withoutDragged.slice(targetIndex),
+  ];
+  const prev = reordered[targetIndex - 1];
+  const next = reordered[targetIndex + 1];
+  const hasRoomBeforeNext = !next || (prev ? next.position - prev.position > 1 : next.position > 1);
+
+  if (!hasRoomBeforeNext) {
+    const updates = buildCompactedColumnUpdates(reordered);
+    const byID = new Map(updates.map((update) => [update.columnID, update.position]));
+    return { columns: sortColumns(reordered.map((column) => ({ ...column, position: byID.get(column.column_id) ?? column.position }))), updates };
+  }
+
+  const position = prev && next
+    ? Math.floor((prev.position + next.position) / 2)
+    : prev
+      ? prev.position + 1000
+      : Math.max(1, (next?.position ?? 1001) - 1000);
+  return {
+    columns: sortColumns(reordered.map((column) => (column.column_id === draggedColumnID ? { ...column, position } : column))),
+    updates: [{ columnID: draggedColumnID, position }],
+  };
+}
+
+export function nextCardPosition(cards: Pick<KanbanCard, "column_id" | "position">[], columnID: string): number {
+  let next = 1000;
+  for (const card of cards) {
+    if (card.column_id !== columnID) continue;
+    if (card.position >= next) next = card.position + 1000;
+  }
+  return next;
+}
+
+function buildCompactedCardUpdates(cards: KanbanCard[], columnID: string): KanbanCardPositionUpdate[] {
+  return cards
+    .filter((card) => card.column_id === columnID)
+    .map((card, index) => ({ cardID: card.card_id, columnID, position: (index + 1) * 1000 }));
+}
+
+export function buildCardReorderPlan(cards: KanbanCard[], draggedCardID: string, targetColumnID: string, targetCardID: string | null = null, placement: KanbanCardDropPlacement = "before"): { cards: KanbanCard[]; updates: KanbanCardPositionUpdate[] } {
+  const dragged = cards.find((card) => card.card_id === draggedCardID);
+  if (!dragged) return { cards, updates: [] };
+
+  const targetColumnCards = groupCardsByColumn(cards).get(targetColumnID) ?? [];
+  const withoutDragged = targetColumnCards.filter((card) => card.card_id !== draggedCardID);
+  const targetIndex = targetCardID ? withoutDragged.findIndex((card) => card.card_id === targetCardID) : withoutDragged.length;
+  if (targetIndex < 0) return { cards, updates: [] };
+
+  const insertIndex = targetCardID && placement === "after" ? targetIndex + 1 : targetIndex;
+  if (dragged.column_id === targetColumnID) {
+    const currentIndex = targetColumnCards.findIndex((card) => card.card_id === draggedCardID);
+    if (!targetCardID && currentIndex === targetColumnCards.length - 1) return { cards, updates: [] };
+  }
+
+  const moved = { ...dragged, column_id: targetColumnID };
+  const reorderedTargetCards = [
+    ...withoutDragged.slice(0, insertIndex),
+    moved,
+    ...withoutDragged.slice(insertIndex),
+  ];
+  const prev = reorderedTargetCards[insertIndex - 1];
+  const next = reorderedTargetCards[insertIndex + 1];
+  const hasRoomBeforeNext = !next || (prev ? next.position - prev.position > 1 : next.position > 1);
+
+  if (!hasRoomBeforeNext) {
+    const compacted = reorderedTargetCards.map((card, index) => ({ ...card, position: (index + 1) * 1000 }));
+    const byID = new Map(compacted.map((card) => [card.card_id, card]));
+    const updates = buildCompactedCardUpdates(compacted, targetColumnID);
+    return {
+      cards: cards.map((card) => byID.get(card.card_id) ?? (card.card_id === dragged.card_id ? moved : card)),
+      updates,
+    };
+  }
+
+  const position = prev && next
+    ? Math.floor((prev.position + next.position) / 2)
+    : prev
+      ? prev.position + 1000
+      : Math.max(1, (next?.position ?? 1001) - 1000);
+  const updated = { ...moved, position };
+  return {
+    cards: cards.map((card) => (card.card_id === dragged.card_id ? updated : card)),
+    updates: [{ cardID: dragged.card_id, columnID: targetColumnID, position }],
+  };
+}
+
+export function buildCardBatchReorderPlan(cards: KanbanCard[], draggedCardIDs: string[], targetColumnID: string, targetCardID: string | null = null, placement: KanbanCardDropPlacement = "before"): { cards: KanbanCard[]; updates: KanbanCardPositionUpdate[] } {
+  const orderedDraggedIDs = Array.from(new Set(draggedCardIDs.map((cardID) => cardID.trim()).filter(Boolean)));
+  if (orderedDraggedIDs.length === 0) return { cards, updates: [] };
+  if (targetCardID && orderedDraggedIDs.includes(targetCardID)) return { cards, updates: [] };
+
+  if (orderedDraggedIDs.length === 1) {
+    return buildCardReorderPlan(cards, orderedDraggedIDs[0], targetColumnID, targetCardID, placement);
+  }
+
+  const byCardID = new Map(cards.map((card) => [card.card_id, card]));
+  const draggedCards = orderedDraggedIDs.map((cardID) => byCardID.get(cardID)).filter((card): card is KanbanCard => Boolean(card));
+  if (draggedCards.length === 0) return { cards, updates: [] };
+
+  const draggedIDSet = new Set(draggedCards.map((card) => card.card_id));
+  const remainingCards = cards.filter((card) => !draggedIDSet.has(card.card_id));
+  const targetColumnCards = groupCardsByColumn(remainingCards).get(targetColumnID) ?? [];
+  const targetIndex = targetCardID ? targetColumnCards.findIndex((card) => card.card_id === targetCardID) : targetColumnCards.length;
+  if (targetIndex < 0) return { cards, updates: [] };
+
+  const insertIndex = targetCardID && placement === "after" ? targetIndex + 1 : targetIndex;
+  const movedCards = draggedCards.map((card) => ({ ...card, column_id: targetColumnID }));
+  const reorderedTargetCards = [
+    ...targetColumnCards.slice(0, insertIndex),
+    ...movedCards,
+    ...targetColumnCards.slice(insertIndex),
+  ];
+  const movedCount = movedCards.length;
+  const prev = reorderedTargetCards[insertIndex - 1];
+  const next = reorderedTargetCards[insertIndex + movedCount];
+  const updatedByID = new Map<string, KanbanCard>();
+
+  const applySparsePositions = (positions: number[]): KanbanCardPositionUpdate[] => {
+    return movedCards.map((card, index) => {
+      const updated = { ...card, position: positions[index] };
+      updatedByID.set(card.card_id, updated);
+      return { cardID: card.card_id, columnID: targetColumnID, position: updated.position };
+    });
+  };
+
+  let updates: KanbanCardPositionUpdate[];
+  if (prev && next && next.position - prev.position > movedCount) {
+    const step = Math.floor((next.position - prev.position) / (movedCount + 1));
+    updates = applySparsePositions(movedCards.map((_, index) => prev.position + step * (index + 1)));
+  } else if (prev && !next) {
+    updates = applySparsePositions(movedCards.map((_, index) => prev.position + 1000 * (index + 1)));
+  } else if (!prev && next && next.position > movedCount) {
+    const step = Math.floor(next.position / (movedCount + 1));
+    updates = applySparsePositions(movedCards.map((_, index) => step * (index + 1)));
+  } else {
+    updates = reorderedTargetCards.map((card, index) => {
+      const updated = { ...card, column_id: targetColumnID, position: (index + 1) * 1000 };
+      updatedByID.set(card.card_id, updated);
+      return { cardID: card.card_id, columnID: targetColumnID, position: updated.position };
+    });
+  }
+
+  return {
+    cards: cards.map((card) => updatedByID.get(card.card_id) ?? card),
+    updates,
+  };
+}
+
+export function groupCardsByColumn(cards: KanbanCard[]): Map<string, KanbanCard[]> {
+  const grouped = new Map<string, KanbanCard[]>();
+  for (const card of cards) {
+    const list = grouped.get(card.column_id) ?? [];
+    list.push(card);
+    grouped.set(card.column_id, list);
+  }
+  for (const list of grouped.values()) {
+    list.sort((a, b) => a.position - b.position || a.created_timestamp.localeCompare(b.created_timestamp));
+  }
+  return grouped;
+}
+
+function normalizeKanbanStatusLabel(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+export function shouldRefreshKanbanBoardForNodeStatusChange(args: {
+  node: KanbanStatusNode;
+  columns: Pick<KanbanColumn, "column_id" | "title">[];
+  cards: Pick<KanbanCard, "node_id" | "column_id" | "is_issue">[];
+}): boolean {
+  const nodeID = args.node.node_id.trim();
+  if (!nodeID) return false;
+  const visibleCards = args.cards.filter((card) => card.node_id === nodeID);
+  if (visibleCards.length === 0) return false;
+
+  const status = normalizeKanbanStatusLabel(args.node.status);
+  if (!status) return false;
+  if (status === "issue") return visibleCards.some((card) => !card.is_issue);
+
+  const targetColumn = args.columns.find((column) => normalizeKanbanStatusLabel(column.title) === status);
+  if (!targetColumn) return false;
+  return visibleCards.some((card) => card.column_id !== targetColumn.column_id || card.is_issue);
+}
+
+function getKanbanPriorityGroupLabel(priority: number): string {
   if (priority === 1) return "1\u00A0\u00A0URGENT(<1hr)";
   if (priority === 2) return "2\u00A0\u00A0By end of day";
   if (priority === 3) return "3\u00A0\u00A0Tomorrow";
   if (priority === 4) return "4\u00A0\u00A0Sprint (1 week)";
   if (priority === 5) return "5\u00A0\u00A0Later (low priority)";
   return "Not Assigned";
+}
+
+export function getKanbanPriorityFromGroupKey(key: string): number | null {
+  const match = /^priority:([1-5])$/.exec(key.trim());
+  if (!match) return null;
+  return Number.parseInt(match[1], 10);
+}
+
+function kanbanAccountGroups(accounts: Account[] | undefined): KanbanGroupedBoardRow[] {
+  const cleanAccounts = (accounts ?? [])
+    .filter((account) => account.account_id.trim())
+    .slice()
+    .sort((left, right) => (
+      (left.name || left.account_id).localeCompare(right.name || right.account_id, undefined, { numeric: true, sensitivity: "base" }) ||
+      left.account_id.localeCompare(right.account_id)
+    ));
+  if (cleanAccounts.length === 0) {
+    return [{ key: "account:none", label: "No account", sortValue: "", sortLast: true }];
+  }
+  return cleanAccounts.map((account) => ({
+    key: `account:${account.account_id}`,
+    label: account.name.trim() || account.account_id,
+    sortValue: (account.name.trim() || account.account_id).toLowerCase(),
+  }));
+}
+
+export function getKanbanGroupValue(
+  card: KanbanCard,
+  field: KanbanGroupField,
+  columnByID: ReadonlyMap<string, Pick<KanbanColumn, "title" | "position">>,
+  nodeByID: ReadonlyMap<string, KanbanGroupNode>,
+  userByID: ReadonlyMap<string, KanbanGroupUser>,
+): KanbanGroupedBoardRow {
+  return getKanbanGroupValues(card, field, columnByID, nodeByID, userByID)[0];
+}
+
+export function getKanbanGroupValues(
+  card: KanbanCard,
+  field: KanbanGroupField,
+  _columnByID: ReadonlyMap<string, Pick<KanbanColumn, "title" | "position">>,
+  nodeByID: ReadonlyMap<string, KanbanGroupNode>,
+  userByID: ReadonlyMap<string, KanbanGroupUser>,
+): KanbanGroupedBoardRow[] {
+  const node = nodeByID.get(card.node_id);
+  if (field === "person") {
+    const placedByUserID = (card.placed_by_user_id ?? "").trim();
+    if (!placedByUserID) return [{ key: "person:none", label: "No person", sortValue: "", sortLast: true }];
+    const user = userByID.get(placedByUserID);
+    const label = user?.display_name?.trim() || user?.email?.trim() || placedByUserID;
+    return [{ key: `person:${placedByUserID}`, label, sortValue: label.toLowerCase() }];
+  }
+  if (field === "priority") {
+    const priority = card.priority ?? node?.priority ?? 0;
+    const normalized = priority > 0 ? Math.max(1, Math.min(5, Math.round(priority))) : 0;
+    return [{ key: `priority:${normalized}`, label: getKanbanPriorityGroupLabel(normalized), sortValue: normalized, sortLast: normalized === 0 }];
+  }
+  if (field === "account") return kanbanAccountGroups(card.accounts ?? node?.accounts);
+  const dueDate = (card.due_date ?? node?.due_date ?? "").trim();
+  return [dueDate ? { key: `due:${dueDate}`, label: dueDate, sortValue: dueDate } : { key: "due:none", label: "No due date", sortValue: "", sortLast: true }];
+}
+
+export function getOrderedKanbanCardIDs(columns: KanbanColumn[], cards: KanbanCard[]): string[] {
+  const grouped = groupCardsByColumn(cards);
+  const ordered: string[] = [];
+  for (const column of sortColumns(columns)) {
+    for (const card of grouped.get(column.column_id) ?? []) {
+      ordered.push(card.card_id);
+    }
+  }
+  return ordered;
+}
+
+// Match the visual board order instead of DOM order so Shift selection works the
+// same way for UI users and headless callers that reuse this helper in tests.
+export function buildKanbanCardSelectionUpdate(args: {
+  columns: KanbanColumn[];
+  cards: KanbanCard[];
+  selectedCardIDs: Set<string>;
+  anchorCardID: string;
+  clickedCardID: string;
+  shiftKey?: boolean;
+  additiveKey?: boolean;
+}): KanbanCardSelectionUpdate {
+  const orderedIDs = getOrderedKanbanCardIDs(args.columns, args.cards);
+  if (!orderedIDs.includes(args.clickedCardID)) {
+    return { selectedCardIDs: new Set(args.selectedCardIDs), anchorCardID: args.anchorCardID };
+  }
+
+  if (args.shiftKey && args.anchorCardID && orderedIDs.includes(args.anchorCardID)) {
+    const anchorIndex = orderedIDs.indexOf(args.anchorCardID);
+    const clickedIndex = orderedIDs.indexOf(args.clickedCardID);
+    const [start, end] = anchorIndex <= clickedIndex ? [anchorIndex, clickedIndex] : [clickedIndex, anchorIndex];
+    const range = orderedIDs.slice(start, end + 1);
+    const selected = new Set(args.selectedCardIDs);
+    for (const cardID of range) selected.add(cardID);
+    return { selectedCardIDs: new Set(orderedIDs.filter((cardID) => selected.has(cardID))), anchorCardID: args.anchorCardID };
+  }
+
+  if (args.additiveKey) {
+    const selected = new Set(args.selectedCardIDs);
+    if (selected.has(args.clickedCardID)) selected.delete(args.clickedCardID);
+    else selected.add(args.clickedCardID);
+    return { selectedCardIDs: new Set(orderedIDs.filter((cardID) => selected.has(cardID))), anchorCardID: args.clickedCardID };
+  }
+
+  return { selectedCardIDs: new Set([args.clickedCardID]), anchorCardID: args.clickedCardID };
+}
+
+export function getKanbanConditionalColor(card: KanbanCard, columnColorByID: Map<string, string> = new Map()): string {
+  if (card.is_issue) return KANBAN_ISSUE_CARD_COLOR;
+  const columnColor = columnColorByID.get(card.column_id);
+  if (isKanbanColumnItemColor(columnColor)) return columnColor;
+
+  const palette = [KANBAN_LOGIC_GATE_REQUESTED_COLOR, KANBAN_LOGIC_GATE_BACKLOG_COLOR, KANBAN_LOGIC_GATE_PENDING_COLOR, KANBAN_LOGIC_GATE_IN_PROGRESS_COLOR, KANBAN_LOGIC_GATE_REVIEW_COLOR, KANBAN_LOGIC_GATE_DONE_COLOR];
+  const value = card.node_id || card.column_id || "empty";
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return palette[hash % palette.length];
+}
+
+export function getKanbanCardColorRailStyle(color: string): React.CSSProperties {
+  const cleanColor = isKanbanColumnItemColor(color) ? color : KANBAN_DEFAULT_COLUMN_ITEM_COLOR;
+  return {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+    left: 0,
+    width: 6,
+    background: `linear-gradient(180deg, ${hexToRgba(cleanColor, 0.96)}, ${hexToRgba(cleanColor, 0.58)})`,
+    boxShadow: `0 0 12px ${hexToRgba(cleanColor, 0.22)}`,
+    pointerEvents: "none",
+  };
 }

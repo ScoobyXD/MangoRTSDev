@@ -1,7 +1,7 @@
 import { apiFetchJSON, getApiAccessToken, getAuthSessionCacheGeneration, readAuthConfig } from "../../auth/cognitoAuth.js";
 import type { CompanyExplorerFolderItem } from "../folders/companyExplorerFolders.js";
 import type { CompanyExplorerV2Row } from "../company-explorer/companyExplorerLazyApi.js";
-import type { ProcessNodeAssignment } from "../kanban/processWork.js";
+import type { KanbanBoard, KanbanCard } from "../kanban/shared.js";
 import type { NodeRecord } from "../nodes/types.js";
 import type { LogicGateRACIAssignment, LogicGateRACIRole, LogicGateRACIPrincipalType, LogicGateRecord } from "../logic-gates/types.js";
 import type { ProjectRelationshipProjection } from "../project-management/projectManagementApi.js";
@@ -1764,7 +1764,8 @@ export type CommunicationsTriageConversionTarget =
   | { mode: "project"; projectID: string; position?: number };
 
 export type CommunicationsTriageConversionResult = {
-  assignments?: ProcessNodeAssignment[];
+  board?: KanbanBoard;
+  cards?: KanbanCard[];
   nodes: NodeRecord[];
   folder_items?: CompanyExplorerFolderItem[];
   explorer_v2_rows?: CompanyExplorerV2Row[];
@@ -1806,13 +1807,14 @@ export async function convertTriageMessagesToExplorerTarget(input: {
   target: CommunicationsTriageConversionTarget;
   messageIDs: string[];
   priority?: number;
-  processStepID?: string | null;
+  columnID?: string;
   status?: string;
   linkedTextBlock?: { type: string; information: string; informationID: string };
   initialChat?: { type: string; information: string; informationID: string };
 }): Promise<CommunicationsTriageConversionResult> {
   const cleanSharedInboxID = input.sharedInboxID?.trim() ?? "";
   const cleanAccountEmail = cleanSharedInboxID ? "" : input.accountEmail?.trim().toLowerCase() ?? "";
+  const cleanColumnID = input.columnID?.trim() ?? "";
   const cleanStatus = input.status?.trim() ?? "";
   const query = new URLSearchParams();
   if (cleanAccountEmail) query.set("account_email", cleanAccountEmail);
@@ -1825,7 +1827,7 @@ export async function convertTriageMessagesToExplorerTarget(input: {
       target: communicationsTriageConversionTargetPayload(input.target),
       message_ids: cleanIDs(input.messageIDs),
       priority: input.priority,
-      process_step_id: input.processStepID === null ? null : input.processStepID?.trim() || undefined,
+      column_id: cleanColumnID || undefined,
       status: cleanStatus || undefined,
       linked_text_block: input.linkedTextBlock ? {
         type: input.linkedTextBlock.type,
@@ -1851,7 +1853,7 @@ export async function convertTriageMessagesToLogicGate(input: {
   nodeID?: string;
   messageIDs: string[];
   priority?: number;
-  processStepID?: string | null;
+  columnID?: string;
   status?: string;
 }): Promise<CommunicationsTriageConversionResult> {
   const cleanNodeID = input.nodeID?.trim() ?? "";
@@ -1864,26 +1866,91 @@ export async function convertTriageMessagesToLogicGate(input: {
       : { mode: "existing_logic_gate", logicGateID: input.logicGateID },
     messageIDs: input.messageIDs,
     priority: input.priority,
-    processStepID: input.processStepID,
+    columnID: input.columnID,
     status: input.status,
   });
 }
 
-export async function revertEmailNodeToMyTriage(input: { companyID: string; nodeID: string }): Promise<{ triage_item: CommunicationsTriageItem; deleted_node_id: string }> {
-  const result = await apiFetchJSON<{ triage_item: CommunicationsTriageItem; deleted_node_id: string }>("/v1/communications/triage/revert-node", {
-    method: "POST", body: JSON.stringify({ company_id: input.companyID, node_id: input.nodeID }),
+export async function revertKanbanCardToMyTriage(input: {
+  companyID: string;
+  boardID: string;
+  cardID: string;
+}): Promise<{
+  triage_item: CommunicationsTriageItem;
+  deleted_node_id: string;
+  deleted_card_id: string;
+  board_id: string;
+}> {
+  const result = await apiFetchJSON<{
+    triage_item: CommunicationsTriageItem;
+    deleted_node_id: string;
+    deleted_card_id: string;
+    board_id: string;
+  }>("/v1/communications/triage/revert-card", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      board_id: input.boardID,
+      card_id: input.cardID,
+    }),
   });
   invalidateWorkspaceResourceCache(input.companyID);
   return result;
 }
 
-export async function transferEmailNodeToNode(input: { companyID: string; sourceNodeID: string; targetNodeID: string }): Promise<{ deleted_node_id: string; target_node_id: string; email_placement: { company_id: string; user_id: string; message_id: string; node_id: string; logic_gate_id: string } }> {
-  const result = await apiFetchJSON<{ deleted_node_id: string; target_node_id: string; email_placement: { company_id: string; user_id: string; message_id: string; node_id: string; logic_gate_id: string } }>("/v1/communications/email-nodes/transfer", {
-    method: "POST", body: JSON.stringify({ company_id: input.companyID, source_node_id: input.sourceNodeID, target_node_id: input.targetNodeID }),
+export async function transferEmailNodeCardToNode(input: {
+  companyID: string;
+  sourceBoardID: string;
+  sourceCardID: string;
+  targetBoardID: string;
+  targetCardID: string;
+}): Promise<{
+  email_placement: {
+    company_id: string;
+    user_id: string;
+    message_id: string;
+    node_id: string;
+    board_id: string;
+    card_id: string;
+    logic_gate_id: string;
+  };
+  deleted_node_id: string;
+  deleted_card_id: string;
+  source_board_id: string;
+  target_node_id: string;
+  target_board_id: string;
+  target_card_id: string;
+}> {
+  const result = await apiFetchJSON<{
+    email_placement: {
+      company_id: string;
+      user_id: string;
+      message_id: string;
+      node_id: string;
+      board_id: string;
+      card_id: string;
+      logic_gate_id: string;
+    };
+    deleted_node_id: string;
+    deleted_card_id: string;
+    source_board_id: string;
+    target_node_id: string;
+    target_board_id: string;
+    target_card_id: string;
+  }>("/v1/communications/email-nodes/transfer", {
+    method: "POST",
+    body: JSON.stringify({
+      company_id: input.companyID,
+      source_board_id: input.sourceBoardID,
+      source_card_id: input.sourceCardID,
+      target_board_id: input.targetBoardID,
+      target_card_id: input.targetCardID,
+    }),
   });
   invalidateWorkspaceResourceCache(input.companyID);
   return result;
 }
+
 export function invalidateCommunicationsCache(scope?: { status?: boolean; folders?: boolean; messagePages?: boolean; messages?: boolean }): void {
   const full = !scope;
   if (full || scope?.status) {

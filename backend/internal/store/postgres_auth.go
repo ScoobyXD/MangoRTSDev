@@ -768,7 +768,18 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		); err != nil {
 			return err
 		}
-		return nil
+		return optionalCleanup(
+			"clear company kanban projection member references",
+			"kanban_board_projection",
+			`update kanban_board_projection
+			 set requested_by_user_id = case when requested_by_user_id = $2::uuid then null else requested_by_user_id end,
+			     placed_by_user_id = case when placed_by_user_id = $2::uuid then null else placed_by_user_id end,
+			     projection_updated_timestamp = now()
+			 where company_id = $1::uuid
+			   and (requested_by_user_id = $2::uuid or placed_by_user_id = $2::uuid)`,
+			companyID,
+			userID,
+		)
 	}
 	clearAllLogicGateAssignmentMemberRefs := func(userID string) error {
 		if err := optionalCleanup(
@@ -783,7 +794,17 @@ func (r *PostgresRepo) DeleteCompanyUser(companyID, userID string, deleteIdentit
 		); err != nil {
 			return err
 		}
-		return nil
+		return optionalCleanup(
+			"clear all kanban projection member references",
+			"kanban_board_projection",
+			`update kanban_board_projection
+			 set requested_by_user_id = case when requested_by_user_id = $1::uuid then null else requested_by_user_id end,
+			     placed_by_user_id = case when placed_by_user_id = $1::uuid then null else placed_by_user_id end,
+			     projection_updated_timestamp = now()
+			 where requested_by_user_id = $1::uuid
+			    or placed_by_user_id = $1::uuid`,
+			userID,
+		)
 	}
 
 	var lockedUserID string

@@ -419,6 +419,7 @@ function formatObjectKind(kind: RecycleBinObjectKind, folderKind?: string): stri
   if (kind === "huddle_explorer_item") return "Huddle Boards placement";
   if (kind === "kpi") return "KPI";
   if (kind === "folder") return folderKind ? `${formatObjectKind(folderKind as RecycleBinObjectKind)} folder` : "Folder";
+  if (kind === "kanban") return "Kanban";
   return kind.slice(0, 1).toUpperCase() + kind.slice(1);
 }
 

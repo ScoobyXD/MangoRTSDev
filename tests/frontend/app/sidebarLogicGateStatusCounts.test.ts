@@ -12,15 +12,23 @@ const timestamp = "2026-08-06T00:00:00Z";
 describe("pinned Logic Gate status counts", () => {
   it("counts the four requested statuses with the aligned Pinned palette", () => {
     const counts = countSidebarLogicGateStatuses({
-      nodes: [
-        { status: "Requested" },
-        { status: "Requested" },
-        { status: "In Progress" },
-        { status: "Review" },
-        { status: "Review" },
-        { status: "Review" },
-        { status: "Backlogs" },
-        { status: "Done" },
+      columns: [
+        { column_id: "requested", title: "Requested" },
+        { column_id: "pending", title: "Pending" },
+        { column_id: "in_progress", title: "In Progress" },
+        { column_id: "review", title: "Review" },
+        { column_id: "backlog", title: "Backlogs" },
+        { column_id: "done", title: "Done" },
+      ],
+      cards: [
+        { column_id: "requested" },
+        { column_id: "requested" },
+        { column_id: "in_progress" },
+        { column_id: "review" },
+        { column_id: "review" },
+        { column_id: "review" },
+        { column_id: "backlog" },
+        { column_id: "done" },
       ],
     });
 

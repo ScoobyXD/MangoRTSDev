@@ -86,25 +86,14 @@ func TestAssistantToolsBrowserFreeProcessNodeTextboxFolderCRUD(t *testing.T) {
 	if _, err := repo.SetLogicGateNodeAssignmentIssue(store.LogicGateNodeAssignmentIssueInput{CompanyID: companyID, LogicGateID: processID, NodeID: nodeID, IsIssue: true}); err != nil {
 		t.Fatal(err)
 	}
-	step, err := repo.CreateProcessStep(store.ProcessStepCreateInput{CompanyID: companyID, LogicGateID: processID, Name: "Prepare", ActorUserID: user.UserID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := repo.AssignNodeToLogicGateStatus(store.LogicGateNodeAssignmentInput{CompanyID: companyID, LogicGateID: processID, NodeID: nodeID, ProcessStepID: &step.Step.ProcessStepID, ProcessStepIDSet: true, ActorUserID: user.UserID}); err != nil {
-		t.Fatal(err)
-	}
-	beforeMove, err := repo.GetNode(companyID, nodeID)
-	if err != nil || beforeMove.Status == nil {
-		t.Fatalf("initial Node: %+v, %v", beforeMove, err)
+	beforeMove, err := repo.ListNodeLogicGateAssignments(companyID, nodeID)
+	if err != nil || len(beforeMove) != 1 {
+		t.Fatalf("initial assignment: %+v, %v", beforeMove, err)
 	}
 	call("move_node_to_process", map[string]any{"node_id": nodeID, "process_id": secondID})
 	assignments, err := repo.ListNodeLogicGateAssignments(companyID, nodeID)
-	if err != nil || len(assignments) != 1 || assignments[0].LogicGateID != secondID || !assignments[0].IsIssue || assignments[0].ProcessStepID != nil {
+	if err != nil || len(assignments) != 1 || assignments[0].LogicGateID != secondID || !assignments[0].IsIssue || assignments[0].StatusKey != beforeMove[0].StatusKey {
 		t.Fatalf("move lost the canonical assignment's state: %+v, %v", assignments, err)
-	}
-	afterMove, err := repo.GetNode(companyID, nodeID)
-	if err != nil || afterMove.Status == nil || *afterMove.Status != *beforeMove.Status {
-		t.Fatalf("move changed the Node's status: %+v, %v", afterMove, err)
 	}
 	if _, err := server.dispatchAssistantTool(request, "move_node_to_process", assistantTestArguments(t, "move_node_to_process", map[string]any{"node_id": nodeID, "process_id": processID, "from_process_id": secondID})); err == nil {
 		t.Fatal("obsolete model-selected source hint was accepted")

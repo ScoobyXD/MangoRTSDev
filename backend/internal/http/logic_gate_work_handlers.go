@@ -20,14 +20,6 @@ func (s *Server) handleLogicGateWorkV2Subresource(w http.ResponseWriter, r *http
 	}
 	logicGateID := strings.TrimSpace(parts[0])
 	switch {
-	case len(parts) == 2 && parts[1] == "steps":
-		s.handleProcessSteps(w, r, logicGateID, "")
-	case len(parts) == 3 && parts[1] == "steps":
-		s.handleProcessSteps(w, r, logicGateID, parts[2])
-	case len(parts) == 2 && parts[1] == "step-relationships":
-		s.handleProcessStepRelationships(w, r, logicGateID, "")
-	case len(parts) == 3 && parts[1] == "step-relationships":
-		s.handleProcessStepRelationships(w, r, logicGateID, parts[2])
 	case len(parts) == 2 && parts[1] == "view":
 		s.handleLogicGateViewV2(w, r, logicGateID)
 	case len(parts) == 2 && parts[1] == "work":
@@ -69,7 +61,7 @@ func (s *Server) handleLogicGateWorkV2(w http.ResponseWriter, r *http.Request, l
 	if writeNotModifiedWithETag(w, r, etag) {
 		return
 	}
-	work, err := s.repo.GetLogicGateWork(companyID, logicGateID, actorUserID)
+	work, err := s.repo.GetLogicGateWork(companyID, logicGateID)
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_work_request")
 		return
@@ -83,7 +75,7 @@ func (s *Server) handleLogicGateWorkV2(w http.ResponseWriter, r *http.Request, l
 		writeError(w, http.StatusInternalServerError, "failed_to_load_logic_gate_work")
 		return
 	}
-	work.Permissions.CanEdit = flags.CanEdit
+	work.Permissions = flags
 	writeJSONWithPrecomputedETag(w, r, http.StatusOK, work, etag)
 }
 
@@ -98,7 +90,7 @@ func (s *Server) logicGateWorkETag(_ *http.Request, companyID, logicGateID, acto
 		return "", err
 	}
 	return strongETagFromString(
-		"process-work:v1:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(logicGateID) + ":" +
+		"logic-gate-work:v3:" + strings.TrimSpace(companyID) + ":" + strings.TrimSpace(logicGateID) + ":" +
 			strings.TrimSpace(actorUserID) + ":" + permissionKey + ":" +
 			fingerprints.RACI + ":" + fingerprints.Permission + ":" + strconv.FormatInt(version, 10),
 	), nil
@@ -175,13 +167,9 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 		return
 	}
 	if !present {
-		title, titleSet, valid := parseOptionalStringField(fields, "create_node_title")
-		if !valid || !titleSet || title == nil || strings.TrimSpace(*title) == "" {
-			stop()
-			writeError(w, http.StatusBadRequest, "create_node_title_required")
-			return
-		}
-		nodeID = store.NewUUIDv7String()
+		stop()
+		writeError(w, http.StatusBadRequest, "node_id_required")
+		return
 	}
 	if !isCanonicalUUID(nodeID) {
 		stop()
@@ -199,16 +187,6 @@ func (s *Server) handleLogicGateWorkNodeCreateV2(w http.ResponseWriter, r *http.
 	}
 	if !s.requireLogicGateWorkExistingSourceEditAccess(w, r, companyID, logicGateID, nodeID) {
 		stop()
-		return
-	}
-	if _, err := s.repo.GetNode(companyID, nodeID); err == nil {
-		if !s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
-			stop()
-			return
-		}
-	} else if !errors.Is(err, store.ErrNotFound) {
-		stop()
-		writeError(w, http.StatusInternalServerError, "failed_to_read_node")
 		return
 	}
 	stop()
@@ -279,9 +257,6 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 	stop()
 
 	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID, MutationOrigin: store.MutationOriginKanban}
-	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") || !s.requireLogicGateWorkExistingSourceEditAccess(w, r, companyID, logicGateID, nodeID) {
-		return
-	}
 	mutateAssignment := false
 	stop = timings.observeAccounted("request.validate")
 	if !parseLogicGateWorkAssignmentMoveFields(w, fields, &input, &mutateAssignment) {
@@ -355,9 +330,6 @@ func (s *Server) handleLogicGateWorkNodeDeleteV2(w http.ResponseWriter, r *http.
 	if !s.requireLogicGateWorkEffectiveAccess(w, r, companyID, logicGateID, store.EntityPermissionEdit) {
 		return
 	}
-	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") {
-		return
-	}
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
 	fallbackStatus := r.URL.Query().Get("fallback_status")
 	if _, present := r.URL.Query()["fallback_status_color"]; present {
@@ -382,14 +354,6 @@ func (s *Server) handleLogicGateWorkNodeDeleteV2(w http.ResponseWriter, r *http.
 }
 
 func parseLogicGateWorkAssignmentCreateFields(w http.ResponseWriter, fields map[string]json.RawMessage, input *store.LogicGateNodeAssignmentInput) bool {
-	if stepID, set, ok := parseOptionalStringField(fields, "process_step_id"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_process_step_id")
-		return false
-	} else if set {
-		input.ProcessStepID = stepID
-		input.ProcessStepIDSet = true
-	}
-
 	if origin, set, ok := parseOptionalStringField(fields, "mutation_origin"); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_mutation_origin")
 		return false
@@ -475,15 +439,13 @@ func parseLogicGateWorkAssignmentMoveFields(w http.ResponseWriter, fields map[st
 			*changed = true
 		}
 	}
-	if stepID, set, ok := parseOptionalStringField(fields, "process_step_id"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_process_step_id")
+	if columnID, set, ok := parseOptionalStringField(fields, "column_id"); !ok {
+		writeError(w, http.StatusBadRequest, "invalid_column_id")
 		return false
-	} else if set {
-		input.ProcessStepID = stepID
-		input.ProcessStepIDSet = true
+	} else if set && columnID != nil && strings.TrimSpace(*columnID) != "" {
+		input.ColumnID = *columnID
 		*changed = true
 	}
-
 	if _, present := fields["assignee_policy"]; present {
 		writeError(w, http.StatusBadRequest, "unsupported_assignee_policy")
 		return false
@@ -592,8 +554,32 @@ func writeLogicGateWorkRemoveError(w http.ResponseWriter, err error) bool {
 }
 
 func logicGateWorkAssignmentResultPayload(result store.LogicGateNodeAssignmentResult) map[string]any {
-	return map[string]any{"assignment": result.Assignment, "node": result.Node, "gvic_projection_rows": result.RACIMatrixProjectionRows}
+	assignment := canonicalLogicGateWorkAssignment(result.Assignment)
+	card := store.LogicGateWorkCompatibilityCard(result.Card.BoardID, assignment, result.Node)
+	card.CreatedFromEmail = result.Card.CreatedFromEmail
+	return map[string]any{
+		"assignment":           assignment,
+		"node":                 result.Node,
+		"card":                 card,
+		"gvic_projection_rows": result.RACIMatrixProjectionRows,
+	}
 }
+
 func logicGateWorkAssignmentRemoveResultPayload(result store.LogicGateNodeAssignmentRemoveResult) map[string]any {
-	return map[string]any{"assignment": result.Assignment, "node": result.Node, "gvic_projection_rows": result.RACIMatrixProjectionRows}
+	assignment := canonicalLogicGateWorkAssignment(result.Assignment)
+	card := store.LogicGateWorkCompatibilityCard(result.Card.BoardID, assignment, result.Node)
+	card.CreatedFromEmail = result.Card.CreatedFromEmail
+	return map[string]any{
+		"assignment":           assignment,
+		"node":                 result.Node,
+		"card":                 card,
+		"gvic_projection_rows": result.RACIMatrixProjectionRows,
+	}
+}
+
+func canonicalLogicGateWorkAssignment(assignment domain.NodeLogicGateAssignment) domain.NodeLogicGateAssignment {
+	if statusKey, ok := store.NormalizeLogicGateWorkStatusKey(assignment.StatusKey); ok && statusKey != "" {
+		assignment.StatusKey = statusKey
+	}
+	return assignment
 }

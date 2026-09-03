@@ -170,23 +170,39 @@ func nodeChatUpdatedOutboxInput(item domain.NodeProjection) (RealtimeOutboxInput
 	input.EventID = stableRealtimeEventID("chat.message.updated", item.CompanyID, item.NodeID, item.InformationID, item.Information)
 	return input, nil
 }
-func directProcessWorkIDsForDomainEvent(event domain.DomainEvent) map[string]string {
-	ids := map[string]string{}
+func isKanbanRealtimeDomainEvent(eventType string) bool {
+	switch strings.TrimSpace(eventType) {
+	case "kanban_board_saved", "kanban_board_updated", "kanban_board_deleted",
+		"kanban_column_created", "kanban_column_updated", "kanban_column_deleted",
+		"kanban_card_upserted", "kanban_card_moved", "kanban_card_deleted":
+		return true
+	default:
+		return false
+	}
+}
+
+func directKanbanBoardIDsForDomainEvent(event domain.DomainEvent) map[string]string {
+	boardIDs := map[string]string{}
 	changeType := strings.TrimSpace(event.Type)
 	if override := workspaceEventPayloadString(event.Payload, "realtime_change_type"); override != "" {
 		changeType = override
 	}
-	switch strings.TrimSpace(event.Type) {
-	case "logic_gate_deleted", "logic_gate_created", "logic_gate_updated",
-		WorkItemLogicGateAssignmentSavedEventType, WorkItemLogicGateAssignmentMovedEventType,
-		WorkItemLogicGateAssignmentRemovedEventType, WorkItemLogicGateIssueToggledEventType, ProcessWorkChangedEventType:
-		for _, key := range []string{"logic_gate_id", "source_logic_gate_id"} {
-			if id := workspaceEventPayloadString(event.Payload, key); id != "" {
-				ids[id] = changeType
+	if isKanbanRealtimeDomainEvent(event.Type) {
+		for _, key := range []string{"board_id", "source_board_id"} {
+			boardID := workspaceEventPayloadString(event.Payload, key)
+			if LogicGateIDFromKanbanBoardID(boardID) != "" {
+				boardIDs[boardID] = changeType
 			}
 		}
 	}
-	return ids
+	switch strings.TrimSpace(event.Type) {
+	case "logic_gate_deleted", "logic_gate_created", "logic_gate_updated":
+		logicGateID := workspaceEventPayloadString(event.Payload, "logic_gate_id")
+		if boardID := LogicGateKanbanBoardID(logicGateID); logicGateID != "" {
+			boardIDs[boardID] = changeType
+		}
+	}
+	return boardIDs
 }
 
 func companyExplorerTargetWorkspaceEventInputs(companyID string, targets []CompanyExplorerDeletedTarget, restored bool) []DomainEventInput {
@@ -209,6 +225,10 @@ func companyExplorerTargetWorkspaceEventInputs(companyID string, targets []Compa
 		case "project":
 			eventType = "project_deleted"
 			payload["project_id"] = target.ID
+		case "kanban":
+			eventType = "kanban_board_deleted"
+			payload["board_id"] = target.ID
+			payload["realtime_audience_snapshot"] = true
 		}
 		if restored {
 			payload["realtime_change_type"] = "resource_restored"
@@ -222,6 +242,8 @@ func companyExplorerTargetWorkspaceEventInputs(companyID string, targets []Compa
 				eventType = "logic_gate_created"
 			case "project":
 				eventType = "project_created"
+			case "kanban":
+				eventType = "kanban_board_saved"
 			}
 		}
 		if eventType != "" {
@@ -231,23 +253,28 @@ func companyExplorerTargetWorkspaceEventInputs(companyID string, targets []Compa
 	return inputs
 }
 
-func processWorkChangedOutboxInputForEvents(companyID, logicGateID, changeType string, eventIDs, allowedUserIDs []string, audienceRestricted bool) (RealtimeOutboxInput, error) {
+func kanbanChangedOutboxInput(event domain.DomainEvent, boardID, changeType string) (RealtimeOutboxInput, error) {
+	return kanbanChangedOutboxInputForEvents(event.CompanyID, boardID, changeType, []string{event.EventID}, nil, false)
+}
+
+func kanbanChangedOutboxInputForEvents(companyID, boardID, changeType string, eventIDs, allowedUserIDs []string, audienceRestricted bool) (RealtimeOutboxInput, error) {
 	companyID = strings.TrimSpace(companyID)
-	logicGateID = strings.TrimSpace(logicGateID)
-	scope := "process:" + logicGateID
+	boardID = strings.TrimSpace(boardID)
+	logicGateID := LogicGateIDFromKanbanBoardID(boardID)
+	scope := "board:" + boardID
 	if companyID == "" || logicGateID == "" || len(eventIDs) == 0 {
 		return RealtimeOutboxInput{}, ErrInvalid
 	}
 	payload, err := json.Marshal(map[string]any{
-		"type": "process.work.changed", "company_id": companyID, "scope": scope,
-		"logic_gate_id": logicGateID, "change_type": strings.TrimSpace(changeType),
+		"type": "kanban.changed", "company_id": companyID, "scope": scope,
+		"board_id": boardID, "change_type": strings.TrimSpace(changeType),
 	})
 	if err != nil {
 		return RealtimeOutboxInput{}, err
 	}
 	input := RealtimeOutboxInput{
-		EventID:   stableRealtimeEventID("process.work.changed", strings.Join(eventIDs, ","), logicGateID),
-		CompanyID: companyID, Scope: scope, EventType: "process.work.changed", Payload: payload,
+		EventID:   stableRealtimeEventID("kanban.changed", strings.Join(eventIDs, ","), boardID),
+		CompanyID: companyID, Scope: scope, EventType: "kanban.changed", Payload: payload,
 		AllowedUserIDs: allowedUserIDs, AudienceRestricted: audienceRestricted,
 	}
 	if !audienceRestricted {
@@ -258,15 +285,15 @@ func processWorkChangedOutboxInputForEvents(companyID, logicGateID, changeType s
 	return normalizeRealtimeOutboxInput(input)
 }
 
-type processWorkRealtimeChange struct {
+type kanbanRealtimeChange struct {
 	companyID          string
-	logicGateID        string
+	boardID            string
 	changeType         string
 	eventIDs           []string
 	audienceRestricted bool
 }
 
-func appendProcessWorkRealtimeEventID(change processWorkRealtimeChange, eventID string) processWorkRealtimeChange {
+func appendKanbanRealtimeEventID(change kanbanRealtimeChange, eventID string) kanbanRealtimeChange {
 	eventID = strings.TrimSpace(eventID)
 	if eventID == "" || slices.Contains(change.eventIDs, eventID) {
 		return change
@@ -275,8 +302,8 @@ func appendProcessWorkRealtimeEventID(change processWorkRealtimeChange, eventID 
 	return change
 }
 
-func processWorkRealtimeChangeKey(companyID, logicGateID string) string {
-	return strings.TrimSpace(companyID) + "\x00" + strings.TrimSpace(logicGateID)
+func kanbanRealtimeChangeKey(companyID, boardID string) string {
+	return strings.TrimSpace(companyID) + "\x00" + strings.TrimSpace(boardID)
 }
 
 func domainEventSnapshotsRealtimeAudience(event domain.DomainEvent) bool {
@@ -284,7 +311,7 @@ func domainEventSnapshotsRealtimeAudience(event domain.DomainEvent) bool {
 	return value
 }
 
-func nodeDomainEventProcessWorkChangeType(eventType string) (string, bool) {
+func nodeDomainEventKanbanChangeType(eventType string) (string, bool) {
 	switch strings.TrimSpace(eventType) {
 	case "node_updated":
 		return "node_updated", true
@@ -768,46 +795,46 @@ order by user_id::text`, companyID)
 	return nil
 }
 
-func (r *MemoryRepo) enqueueProcessWorkRealtimeForDomainEventLocked(event domain.DomainEvent) error {
-	return r.enqueueProcessWorkRealtimeForDomainEventsLocked([]domain.DomainEvent{event})
+func (r *MemoryRepo) enqueueKanbanRealtimeForDomainEventLocked(event domain.DomainEvent) error {
+	return r.enqueueKanbanRealtimeForDomainEventsLocked([]domain.DomainEvent{event})
 }
 
-func (r *MemoryRepo) enqueueProcessWorkRealtimeForDomainEventsLocked(events []domain.DomainEvent) error {
-	changes := map[string]processWorkRealtimeChange{}
+func (r *MemoryRepo) enqueueKanbanRealtimeForDomainEventsLocked(events []domain.DomainEvent) error {
+	changes := map[string]kanbanRealtimeChange{}
 	for _, event := range events {
-		for logicGateID, changeType := range directProcessWorkIDsForDomainEvent(event) {
-			key := processWorkRealtimeChangeKey(event.CompanyID, logicGateID)
+		for boardID, changeType := range directKanbanBoardIDsForDomainEvent(event) {
+			key := kanbanRealtimeChangeKey(event.CompanyID, boardID)
 			change := changes[key]
-			change.companyID, change.logicGateID, change.changeType = event.CompanyID, logicGateID, changeType
+			change.companyID, change.boardID, change.changeType = event.CompanyID, boardID, changeType
 			change.audienceRestricted = change.audienceRestricted || domainEventSnapshotsRealtimeAudience(event)
-			changes[key] = appendProcessWorkRealtimeEventID(change, event.EventID)
+			changes[key] = appendKanbanRealtimeEventID(change, event.EventID)
 		}
-		changeType, resolveNode := nodeDomainEventProcessWorkChangeType(event.Type)
+		changeType, resolveNode := nodeDomainEventKanbanChangeType(event.Type)
 		if !resolveNode {
 			continue
 		}
 		nodeID := workspaceEventPayloadString(event.Payload, "node_id")
-		for _, assignment := range r.nodeLogicGateAssignments {
-			logicGateID := strings.TrimSpace(assignment.LogicGateID)
-			if assignment.CompanyID != event.CompanyID || assignment.NodeID != nodeID || logicGateID == "" {
+		for _, row := range r.kanbanProjectionRowsForNodeLocked(event.CompanyID, nodeID) {
+			boardID := strings.TrimSpace(row.BoardID)
+			if LogicGateIDFromKanbanBoardID(boardID) == "" {
 				continue
 			}
-			key := processWorkRealtimeChangeKey(event.CompanyID, logicGateID)
+			key := kanbanRealtimeChangeKey(event.CompanyID, boardID)
 			change := changes[key]
-			change.companyID, change.logicGateID = event.CompanyID, logicGateID
+			change.companyID, change.boardID = event.CompanyID, boardID
 			if change.changeType == "" {
 				change.changeType = changeType
 			}
-			changes[key] = appendProcessWorkRealtimeEventID(change, event.EventID)
+			changes[key] = appendKanbanRealtimeEventID(change, event.EventID)
 		}
 	}
 	for _, change := range changes {
 		var allowedUserIDs []string
 		if change.audienceRestricted {
-			allowedUserIDs = mapKeys(r.effectiveUserIDsForResourceLocked(change.companyID, EntityTypeLogicGate, change.logicGateID, EntityPermissionEdit))
+			allowedUserIDs = mapKeys(r.effectiveUserIDsForResourceLocked(change.companyID, EntityTypeLogicGate, LogicGateIDFromKanbanBoardID(change.boardID), EntityPermissionEdit))
 			slices.Sort(allowedUserIDs)
 		}
-		input, err := processWorkChangedOutboxInputForEvents(change.companyID, change.logicGateID, change.changeType, change.eventIDs, allowedUserIDs, change.audienceRestricted)
+		input, err := kanbanChangedOutboxInputForEvents(change.companyID, change.boardID, change.changeType, change.eventIDs, allowedUserIDs, change.audienceRestricted)
 		if err != nil {
 			return err
 		}
@@ -840,21 +867,21 @@ order by membership.user_id::text`, companyID, resourceType, resourceID, accessL
 	return userIDs, rows.Err()
 }
 
-func (r *PostgresRepo) enqueueProcessWorkRealtimeForDomainEventTx(ctx context.Context, tx *sql.Tx, event domain.DomainEvent) error {
-	return r.enqueueProcessWorkRealtimeForDomainEventsTx(ctx, tx, []domain.DomainEvent{event})
+func (r *PostgresRepo) enqueueKanbanRealtimeForDomainEventTx(ctx context.Context, tx *sql.Tx, event domain.DomainEvent) error {
+	return r.enqueueKanbanRealtimeForDomainEventsTx(ctx, tx, []domain.DomainEvent{event})
 }
 
-func (r *PostgresRepo) enqueueProcessWorkRealtimeForDomainEventsTx(ctx context.Context, tx *sql.Tx, events []domain.DomainEvent) error {
-	changes := map[string]processWorkRealtimeChange{}
+func (r *PostgresRepo) enqueueKanbanRealtimeForDomainEventsTx(ctx context.Context, tx *sql.Tx, events []domain.DomainEvent) error {
+	changes := map[string]kanbanRealtimeChange{}
 	for _, event := range events {
-		for logicGateID, changeType := range directProcessWorkIDsForDomainEvent(event) {
-			key := processWorkRealtimeChangeKey(event.CompanyID, logicGateID)
+		for boardID, changeType := range directKanbanBoardIDsForDomainEvent(event) {
+			key := kanbanRealtimeChangeKey(event.CompanyID, boardID)
 			change := changes[key]
-			change.companyID, change.logicGateID, change.changeType = event.CompanyID, logicGateID, changeType
+			change.companyID, change.boardID, change.changeType = event.CompanyID, boardID, changeType
 			change.audienceRestricted = change.audienceRestricted || domainEventSnapshotsRealtimeAudience(event)
-			changes[key] = appendProcessWorkRealtimeEventID(change, event.EventID)
+			changes[key] = appendKanbanRealtimeEventID(change, event.EventID)
 		}
-		changeType, resolveNode := nodeDomainEventProcessWorkChangeType(event.Type)
+		changeType, resolveNode := nodeDomainEventKanbanChangeType(event.Type)
 		if !resolveNode {
 			continue
 		}
@@ -862,40 +889,34 @@ func (r *PostgresRepo) enqueueProcessWorkRealtimeForDomainEventsTx(ctx context.C
 		if nodeID == "" {
 			continue
 		}
-		rows, err := tx.QueryContext(ctx, `select logic_gate_id::text from node_logic_gate_assignments where company_id=$1::uuid and node_id=$2::uuid`, event.CompanyID, nodeID)
+		rows, err := postgresKanbanProjectionRowsForNodeTx(ctx, tx, event.CompanyID, nodeID)
 		if err != nil {
 			return err
 		}
-		for rows.Next() {
-			var logicGateID string
-			if err := rows.Scan(&logicGateID); err != nil {
-				rows.Close()
-				return err
+		for _, row := range rows {
+			boardID := strings.TrimSpace(row.BoardID)
+			if LogicGateIDFromKanbanBoardID(boardID) == "" {
+				continue
 			}
-			key := processWorkRealtimeChangeKey(event.CompanyID, logicGateID)
+			key := kanbanRealtimeChangeKey(event.CompanyID, boardID)
 			change := changes[key]
-			change.companyID, change.logicGateID = event.CompanyID, logicGateID
+			change.companyID, change.boardID = event.CompanyID, boardID
 			if change.changeType == "" {
 				change.changeType = changeType
 			}
-			changes[key] = appendProcessWorkRealtimeEventID(change, event.EventID)
-		}
-		err = rows.Err()
-		rows.Close()
-		if err != nil {
-			return err
+			changes[key] = appendKanbanRealtimeEventID(change, event.EventID)
 		}
 	}
 	for _, change := range changes {
 		var allowedUserIDs []string
 		if change.audienceRestricted {
 			var err error
-			allowedUserIDs, err = postgresEffectiveUsersForResourceTx(ctx, tx, change.companyID, EntityTypeLogicGate, change.logicGateID, EntityPermissionEdit)
+			allowedUserIDs, err = postgresEffectiveUsersForResourceTx(ctx, tx, change.companyID, EntityTypeLogicGate, LogicGateIDFromKanbanBoardID(change.boardID), EntityPermissionEdit)
 			if err != nil {
 				return err
 			}
 		}
-		input, err := processWorkChangedOutboxInputForEvents(change.companyID, change.logicGateID, change.changeType, change.eventIDs, allowedUserIDs, change.audienceRestricted)
+		input, err := kanbanChangedOutboxInputForEvents(change.companyID, change.boardID, change.changeType, change.eventIDs, allowedUserIDs, change.audienceRestricted)
 		if err != nil {
 			return err
 		}

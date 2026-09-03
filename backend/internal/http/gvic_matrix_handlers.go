@@ -267,11 +267,11 @@ func parseRACIMatrixNodeCreateMutationFields(w http.ResponseWriter, fields map[s
 			input.Status = store.LogicGateWorkStatusTitle(statusKey)
 		}
 	}
-	if stepID, set, ok := parseOptionalStringField(fields, "process_step_id"); !ok {
-		writeError(w, http.StatusBadRequest, "invalid_process_step_id")
+	if columnID, set, ok := parseOptionalStringField(fields, "column_id"); !ok {
+		writeError(w, http.StatusBadRequest, "invalid_column_id")
 		return false
-	} else if set {
-		input.ProcessStepID, input.ProcessStepIDSet = stepID, true
+	} else if set && columnID != nil {
+		input.ColumnID = *columnID
 	}
 	if description, set, ok := parseOptionalStringField(fields, "description_snapshot"); !ok {
 		writeError(w, http.StatusBadRequest, "invalid_description_snapshot")

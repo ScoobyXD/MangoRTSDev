@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { NodeRecord } from "../nodes/types";
 import type { LogicGateViewRecord as LogicGateRecord } from "../logic-gates/types";
 import type { CompanyExplorerFolder, CompanyExplorerFolderItem } from "../folders/companyExplorerFolders";
+import type { KanbanBoard } from "../kanban/shared";
 import type { ProjectRecord } from "../project-management/projectManagementApi";
 import type { CompanyExplorerV2Row } from "./companyExplorerLazyApi";
 import { buildCompanyExplorerTreeRows, buildCompanyExplorerV2TreeRows } from "./companyExplorerTreeRows";
@@ -13,6 +14,7 @@ type UseCompanyExplorerTreeModelInput = {
   nodes: NodeRecord[];
   logicGates: LogicGateRecord[];
   projects: ProjectRecord[];
+  kanbanBoards: KanbanBoard[];
   folders: CompanyExplorerFolder[];
   folderItems: CompanyExplorerFolderItem[];
   rows?: CompanyExplorerV2Row[];
@@ -28,6 +30,7 @@ export function useCompanyExplorerTreeModel({
   nodes,
   logicGates,
   projects,
+  kanbanBoards,
   folders,
   folderItems,
   rows = [],
@@ -40,8 +43,8 @@ export function useCompanyExplorerTreeModel({
   const treeRows = useMemo<ExplorerTreeNode[]>(
     () => (useV2Rows
       ? buildCompanyExplorerV2TreeRows({ expanded, rows })
-      : buildCompanyExplorerTreeRows({ expanded, nodes, logicGates, projects, folders, folderItems, rootRowOrder })),
-    [expanded, nodes, logicGates, projects, folders, folderItems, rootRowOrder, rows, useV2Rows],
+      : buildCompanyExplorerTreeRows({ expanded, nodes, logicGates, projects, kanbanBoards, folders, folderItems, rootRowOrder })),
+    [expanded, nodes, logicGates, projects, kanbanBoards, folders, folderItems, rootRowOrder, rows, useV2Rows],
   );
 
   const selectedTree = useMemo(() => treeRows.find((row) => row.id === selectedTreeID), [selectedTreeID, treeRows]);
@@ -55,6 +58,7 @@ export function useCompanyExplorerTreeModel({
     selectedFolderKind: selectedTree?.folderKind,
     selectedFolderID: selectedTree?.folderID ?? "",
     selectedFolderLabel: selectedTree?.folderLabel ?? (selectedTree?.folderKind ? selectedTree.label : ""),
+    selectedKanbanBoardLabel: selectedTree?.kind === "kanban" ? selectedTree.label : "",
     virtualizedTree,
   };
 }

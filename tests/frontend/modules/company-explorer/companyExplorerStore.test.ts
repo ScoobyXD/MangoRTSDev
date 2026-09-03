@@ -7,6 +7,7 @@ import {
   createCompanyExplorerStoreState,
   reduceCompanyExplorerStore,
   shouldLoadCompanyExplorerBranchChildren,
+  shouldRefreshKanbanBoardsAfterUpdate,
 } from "../../../../frontend/src/modules/company-explorer/companyExplorerStore.js";
 import {
   type CommittedEntityTitleUpdate,
@@ -57,6 +58,15 @@ const logicGate = (id: string, header = id) => ({
   created_timestamp: id,
 });
 
+const board = (id: string, position: number, created = id) => ({
+  company_id: "c",
+  board_id: id,
+  title: id,
+  position,
+  created_timestamp: created,
+  updated_timestamp: created,
+});
+
 const folder = (id: string, parent = "") => ({
   company_id: "c",
   folder_id: id,
@@ -68,7 +78,7 @@ const folder = (id: string, parent = "") => ({
   updated_timestamp: id,
 });
 
-const folderItem = (folderID: string, itemType: "node" | "logic_gate" | "project", itemID: string) => ({
+const folderItem = (folderID: string, itemType: "node" | "logic_gate" | "project" | "kanban", itemID: string) => ({
   company_id: "c",
   folder_id: folderID,
   item_type: itemType,
@@ -98,8 +108,9 @@ const v2Row = (input: {
   updated_timestamp: input.entityID,
 });
 
-run("snapshot reducer replaces explorer snapshot", () => {
+run("snapshot reducer replaces explorer snapshot and preserves board list", () => {
   let state = createCompanyExplorerStoreState();
+  state = reduceCompanyExplorerStore(state, { type: "setKanbanBoards", boards: [board("board-a", 1000)] });
   state = reduceCompanyExplorerStore(state, {
     type: "applySnapshot",
     snapshot: {
@@ -117,6 +128,34 @@ run("snapshot reducer replaces explorer snapshot", () => {
   assert.deepEqual(state.folders.map((item) => item.folder_id), ["folder-a"]);
   assert.deepEqual(state.folderItems.map((item) => `${item.item_type}:${item.item_id}`), ["logic_gate:gate-a"]);
   assert.deepEqual(state.rows.map((row) => `${row.entity_type}:${row.resource_id}:${row.edge_id ?? ""}`), []);
+  assert.deepEqual(state.kanbanBoards.map((item) => item.board_id), ["board-a"]);
+});
+
+run("kanban board reducer keeps sorted boards and removes explorer placement", () => {
+  let state = reduceCompanyExplorerStore(createCompanyExplorerStoreState(), {
+    type: "setKanbanBoards",
+    boards: [board("board-b", 2000), board("board-a", 1000)],
+  });
+  state = reduceCompanyExplorerStore(state, {
+    type: "upsertFolderItems",
+    folderItems: [folderItem("folder-a", "kanban", "board-b")],
+  });
+  state = reduceCompanyExplorerStore(state, {
+    type: "applyKanbanBoardsUpdated",
+    companyID: "c",
+    detail: { companyID: "c", board: board("board-c", 1500) },
+  });
+  assert.deepEqual(state.kanbanBoards.map((item) => item.board_id), ["board-a", "board-c", "board-b"]);
+
+  state = reduceCompanyExplorerStore(state, {
+    type: "applyKanbanBoardsUpdated",
+    companyID: "c",
+    detail: { companyID: "c", deletedBoardID: "board-b" },
+  });
+  assert.deepEqual(state.kanbanBoards.map((item) => item.board_id), ["board-a", "board-c"]);
+  assert.deepEqual(state.folderItems, []);
+  assert.equal(shouldRefreshKanbanBoardsAfterUpdate({ companyID: "c", board: board("board-a", 1000) }, "c"), false);
+  assert.equal(shouldRefreshKanbanBoardsAfterUpdate(undefined, "c"), true);
 });
 
 run("v2 row reducer preserves manual and native parent contexts", () => {

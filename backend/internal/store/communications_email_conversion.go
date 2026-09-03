@@ -18,11 +18,8 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.NewLogicGateHeader = strings.TrimSpace(input.NewLogicGateHeader)
-	if _, valid := NormalizeLogicGateWorkStatusKey(input.Status); !valid {
-		return CommunicationsTriageConversionInput{}, ErrInvalid
-	}
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
-	input.ProcessStepID = normalizeOptionalStringPointer(input.ProcessStepID)
+	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.MessageIDs = normalizeUniqueStrings(input.MessageIDs, CommunicationsTriageBatchMaxItems)
 	input.Target.Mode = normalizeCommunicationsEmailConversionTargetMode(input.Target.Mode)
 	input.Target.LogicGateID = strings.TrimSpace(input.Target.LogicGateID)
@@ -56,7 +53,7 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 		}
 	}
 
-	if input.Status == "" {
+	if input.Status == "" && input.ColumnID == "" {
 		input.Status = "Pending"
 	}
 	if input.Priority != nil {
@@ -116,14 +113,16 @@ func NormalizeCommunicationsTriageConversionInput(input CommunicationsTriageConv
 func NormalizeCommunicationsEmailNodeTransferInput(input CommunicationsEmailNodeTransferInput) (CommunicationsEmailNodeTransferInput, error) {
 	input.UserID = strings.TrimSpace(input.UserID)
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
-	input.SourceNodeID = strings.TrimSpace(input.SourceNodeID)
-	input.TargetNodeID = strings.TrimSpace(input.TargetNodeID)
+	input.SourceBoardID = strings.TrimSpace(input.SourceBoardID)
+	input.SourceCardID = strings.TrimSpace(input.SourceCardID)
+	input.TargetBoardID = strings.TrimSpace(input.TargetBoardID)
+	input.TargetCardID = strings.TrimSpace(input.TargetCardID)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
-	if input.CompanyID == "" || input.SourceNodeID == "" || input.TargetNodeID == "" {
+	if input.CompanyID == "" || input.SourceBoardID == "" || input.SourceCardID == "" || input.TargetBoardID == "" || input.TargetCardID == "" {
 		return CommunicationsEmailNodeTransferInput{}, ErrInvalid
 	}
-	if input.SourceNodeID == input.TargetNodeID {
+	if input.SourceBoardID == input.TargetBoardID && input.SourceCardID == input.TargetCardID {
 		return CommunicationsEmailNodeTransferInput{}, ErrInvalid
 	}
 	return input, nil
@@ -160,6 +159,10 @@ func communicationsEmailConversionWorkspaceEventInputs(result CommunicationsTria
 		if index < len(result.FolderItems) {
 			folderItem = result.FolderItems[index]
 		}
+		var card domain.KanbanCard
+		if index < len(result.Cards) {
+			card = result.Cards[index]
+		}
 		var assignment domain.NodeLogicGateAssignment
 		if index < len(result.Assignments) {
 			assignment = result.Assignments[index]
@@ -178,6 +181,9 @@ func communicationsEmailConversionWorkspaceEventInputs(result CommunicationsTria
 		if createsNodes && assignment.CompanyID != "" {
 			inputs = append(inputs, workItemAssignmentWorkspaceEventInput(WorkItemLogicGateAssignmentSavedEventType, assignment, node, meta))
 		}
+		if createsNodes && card.CompanyID != "" {
+			inputs = append(inputs, kanbanCardWorkspaceEventInput(card.CompanyID, "kanban_card_upserted", card, true, meta))
+		}
 		inputs = append(inputs, nodeUpdatedWorkspaceEventInputWithMetadata(node, meta))
 	}
 	for _, relationship := range result.ProjectRelationships {
@@ -188,17 +194,22 @@ func communicationsEmailConversionWorkspaceEventInputs(result CommunicationsTria
 
 func emailConvertedWorkspaceEventInput(provenance CommunicationsEmailConversionProvenance, assignment domain.NodeLogicGateAssignment, node domain.Node, meta workItemAssignmentEventMetadata) DomainEventInput {
 	payload := map[string]any{
-		"company_id":      provenance.CompanyID,
-		"user_id":         provenance.UserID,
-		"message_id":      provenance.MessageID,
-		"thread_id":       provenance.ThreadID,
-		"node_id":         provenance.NodeID,
-		"logic_gate_id":   provenance.LogicGateID,
-		"assignment_id":   assignment.AssignmentID,
-		"process_step_id": assignment.ProcessStepID,
-		"status":          optionalStringValue(node.Status),
-		"position":        assignment.Position,
-		"is_issue":        assignment.IsIssue,
+		"company_id":             provenance.CompanyID,
+		"user_id":                provenance.UserID,
+		"message_id":             provenance.MessageID,
+		"thread_id":              provenance.ThreadID,
+		"node_id":                provenance.NodeID,
+		"logic_gate_id":          provenance.LogicGateID,
+		"assignment_id":          assignment.AssignmentID,
+		"status":                 optionalStringValue(node.Status),
+		"status_key":             assignment.StatusKey,
+		"column_id":              assignment.ColumnID,
+		"position":               assignment.Position,
+		"is_issue":               assignment.IsIssue,
+		"compatibility_board_id": provenance.BoardID,
+		"compatibility_card_id":  provenance.CardID,
+		"board_id":               provenance.BoardID,
+		"card_id":                provenance.CardID,
 	}
 	if meta.ActorUserID != "" {
 		payload["actor_user_id"] = meta.ActorUserID

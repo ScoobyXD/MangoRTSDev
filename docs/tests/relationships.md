@@ -1,19 +1,3 @@
-# Current Process Step Relationship Business Logic Laws
-
-1. `process_steps.logic_gate_id` is the exact same-company owning Process identity, and every step has one immutable Process owner.
-2. `node_logic_gate_assignments.process_step_id` is nullable and names one exact step in that assignment's existing same-company Process.
-3. Node-to-Process membership and Node-to-step placement are separate facts; clearing a step never detaches or deletes a Node.
-4. `resource_operational_relationships` stores every step-to-step flow edge using canonical `process_step` types and exact source step IDs.
-5. Both step endpoints must belong to the same Process; mixed step/Folder/Process edges and self-edges are rejected.
-6. Repeated creation of an exact directed step pair reuses one edge; branching uses several pairwise edges.
-7. Add next step creates its step and explicitly requested incoming edge atomically.
-8. Deleting a step clears its Node step assignments and deletes its exact incident edges while preserving Node statuses, Process assignments, and unrelated resources.
-9. Step deletion does not infer replacement connections, delete Nodes, or modify permission ancestry.
-10. Steps have no Company Explorer placement, company Process Map placement, company-map trace, resource registry, or translated identity.
-11. Step commands check access through their exact owning Process and existing Node access rules; flow edges grant no access.
-12. Process and Node recycle/restore preserve their promised exact step identities and assignments in dependency order; restoring a Node whose step was permanently deleted clears that step reference.
-13. Node status lives only in `nodes.status`; status-list membership and the removed Kanban projection never become relationship authority.
-
 # Current Huddle Relationship Business Logic Laws
 
 1. `huddle_logic_gate_relationships` is the only live authority for a Huddle Logic Gate's related normal Logic Gates.
@@ -272,15 +256,13 @@ Mango synchronizes exactly one Process Map placement under the same exact Folder
 ↓
 Moving within that Explorer parent changes only map geometry; moving a Folder translates its subtree and internal trace points, resizing it proportionally scales that subtree and those internal trace points, neither action changes an operational relationship, crossing a Folder boundary uses the canonical Explorer move, and removing a Process from the map removes only its Explorer edge
 ↓
-Automatic placement creates, infers, changes, and deletes no operational edge; the manual company-map trace command creates or reuses an exact directed Folder/Process `resource_operational_relationships` edge and stores its route in `process_map_traces`
+Automatic placement creates, infers, changes, and deletes no operational edge; the existing manual trace command alone creates or reuses an exact directed `resource_operational_relationships` edge and stores its route in `process_map_traces`
 ↓
 Deleting a selected trace still removes its exact operational edge and dependent geometry without deleting either endpoint, while endpoint deletion and recycle continue to follow their exact typed lifecycle contracts
 
-An explicitly invoked company-map operator reset validates a fresh layout from Explorer, checks Edit access across the affected resources, and commits that layout together with removal of the company's Folder/Process operational edges and dependent traces; it preserves source resources, Explorer organization, policies, and other relationship meanings.
+An explicitly invoked company-map operator reset validates a fresh layout from Explorer, checks Edit access across the affected resources, and commits that layout together with removal of the company's operational edges and dependent traces; it preserves source resources, Explorer organization, policies, and other relationship meanings.
 
-Within a Process, each Node keeps its Process assignment and optionally names one exact step. Step moves preserve status. Same-Process step connections use the operational relationship table without map geometry. Deleting a step clears only its Node step references and incident connections; Nodes keep their Process membership and status. The company-map reset preserves these step connections.
-
-Last updated: 2026-09-03
+Last updated: 2026-09-02
 
 # Relationship Business Logic Laws
 
@@ -319,7 +301,7 @@ Mango MUST NOT put every edge into one universal graph table. Different relation
 Examples include:
 
 - `node_relationships` for Node-to-Node parent, child, and peer structure.
-- `resource_operational_relationships` for directed Folder/Process operational flow and same-Process step-to-step flow.
+- `resource_operational_relationships` for directed Folder and Process operational flow.
 - `project_relationships` for a Project's Node and Logic Gate membership.
 - `email_relationships` for normalized email messages attached to supported Mango owners.
 - `attachment_relationships` for stored files owned or used by supported Mango resources.
@@ -565,17 +547,17 @@ Explorer structural create, move, removal, deletion, recycle, and restore comman
 
 ### Law 35 — Resource operational relationships are exact directed pairwise edges
 
-`resource_operational_relationships` MUST be the sole canonical authority for directed Folder-to-Folder, Folder-to-Process, Process-to-Folder, Process-to-Process, and same-Process step-to-step operational flow. Step edges MUST use canonical `process_step` endpoints whose literal IDs exist in `process_steps` under the same Process. A step MUST NOT connect directly to a Folder, Process, or step in another Process. Every row stores the exact same-company typed source and target IDs, rejects a self-edge, and has one semantic edge for one exact directed endpoint pair; repeating the same creation command returns or reuses that edge instead of inserting a duplicate. Every create transport MUST carry `source` and `target` as objects containing exactly `{resource_type, resource_id}` and MUST NOT carry a placement, label, geometry, permission, or alternate endpoint identity.
+`resource_operational_relationships` MUST be the sole canonical authority for directed Folder-to-Folder, Folder-to-Process, Process-to-Folder, and Process-to-Process operational flow. Every row stores the exact same-company typed source and target IDs, rejects a self-edge, and has one semantic edge for one exact directed endpoint pair; repeating the same creation command returns or reuses that edge instead of inserting a duplicate. Every create transport MUST carry `source` and `target` as objects containing exactly `{resource_type, resource_id}` and MUST NOT carry a placement, label, geometry, permission, or alternate endpoint identity.
 
 The source and target of an operational relationship are immutable. Changing either endpoint or reversing direction deletes the old edge and its trace before creating a new edge and trace. The Process-to-Process meaning formerly owned by `logic_gate_relationships` MUST move through one forward-only cutover before `resource_operational_relationships` becomes live authority, with no dual writer, compatibility reader, fallback, or second live Process-flow authority afterward. Removing one operational edge deletes neither endpoint, placement, permission, RACI assignment, nor organizational parent.
 
-An explicitly invoked operator reset MAY delete all Folder/Process operational edges for one exact company, including unrouted edges and edges with unmapped endpoints, in the same transaction as replacing that company's map geometry. It MUST validate a current read-only preview and Edit access to every mapped resource and deleted edge endpoint, preserve every source resource, Explorer parent, permission, assignment, and other relationship meaning, and publish the existing typed deletion events. Process Step edges MUST be preserved by this company-map reset. Ordinary automatic placement, deployment, and restart MUST NOT invoke this operation.
+An explicitly invoked operator reset MAY delete all operational edges for one exact company, including unrouted edges and edges with unmapped endpoints, in the same transaction as replacing that company's map geometry. It MUST validate a current read-only preview and Edit access to every mapped resource and deleted edge endpoint, preserve every source resource, Explorer parent, permission, assignment, and other relationship meaning, and publish the existing typed deletion events. Ordinary automatic placement, deployment, and restart MUST NOT invoke this operation.
 
 ### Law 36 — Process Map traces are dependent geometry, not relationship authority
 
 `process_map_traces` MUST identify one exact `resource_operational_relationships` row and store only one ordered JSONB array of at most 256 snapped global company-world integer route points, revision, and timestamps. Every route point MUST contain exactly `x` and `y`; repeating an identical ordered array MUST not advance the trace revision or timestamps. Every Folder and Process has exactly one input anchor and one output anchor derived by presentation rules from its current saved bounds; the trace source always uses the source output and the trace target always uses the target input, so trace storage MUST NOT contain anchor columns, endpoint coordinates, endpoint identities, or endpoint payloads. Trace geometry MUST NOT invent a junction resource or become another operational relationship authority.
 
-One Folder/Process operational relationship has at most one company-map trace, and a relationship may exist without a trace. A step-to-step operational relationship MUST have no company-map trace or placement; its connections belong only to its owning Process work view. Deleting a selected Process Map trace MUST delete its operational relationship and dependent geometry in one transaction while preserving both endpoint resources; Process Map exposes no user command that deletes only trace geometry. Fan-out and fan-in use several pairwise relationships whose routes may share points, traces MAY cross map parents and derived spatial tile boundaries, and hidden endpoints suppress every incident relationship and trace. Permanent deletion and recycle/restore MUST preserve or clean the exact dependent geometry through every required path.
+One operational relationship has at most one company-map trace, and a relationship may exist without a trace. Deleting a selected Process Map trace MUST delete its operational relationship and dependent geometry in one transaction while preserving both endpoint resources; Process Map exposes no user command that deletes only trace geometry. Fan-out and fan-in use several pairwise relationships whose routes may share points, traces MAY cross map parents and derived spatial tile boundaries, and hidden endpoints suppress every incident relationship and trace. Permanent deletion and recycle/restore MUST preserve or clean the exact dependent geometry through every required path.
 
 ### Law 37 — Entity relationships use exact Entity-to-resource edges
 

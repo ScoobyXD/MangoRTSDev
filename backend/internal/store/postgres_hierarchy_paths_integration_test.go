@@ -60,7 +60,7 @@ func TestPostgresExplorerHierarchyPathsUseCanonicalPlacementAndOwnership(t *test
 		{`insert into nodes(company_id,node_id,name,priority,default_access,created_timestamp) values($1::uuid,$2::uuid,'Postgres Node',1,'edit',now())`, []any{companyID, nodeID}},
 		{`insert into company_explorer_items(company_id,item_id,parent_folder_id,target_type,target_id) values($1::uuid,$2::uuid,$3::uuid,'logic_gate',$4::uuid)`, []any{companyID, gateItemID, gateFolderID, gateID}},
 		{`insert into company_explorer_items(company_id,item_id,parent_folder_id,target_type,target_id) values($1::uuid,$2::uuid,$3::uuid,'project',$4::uuid)`, []any{companyID, projectItemID, projectFolderID, projectID}},
-		{`insert into node_logic_gate_assignments(company_id,assignment_id,node_id,logic_gate_id,position) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,1000)`, []any{companyID, assignmentID, nodeID, gateID}},
+		{`insert into node_logic_gate_assignments(company_id,assignment_id,node_id,logic_gate_id,status_key,column_id,position,compatibility_board_id,compatibility_card_id) values($1::uuid,$2::uuid,$3::uuid,$4::uuid,'pending','pending',1000,'hierarchy-path-integration',$2::uuid)`, []any{companyID, assignmentID, nodeID, gateID}},
 		{`insert into project_relationships(company_id,relationship_id,project_id,resource_type,resource_id) values($1::uuid,$2::uuid,$3::uuid,'node',$4::uuid)`, []any{companyID, projectRelationshipID, projectID, nodeID}},
 		{`insert into huddle_explorer_folders(company_id,folder_id,name) values($1::uuid,$2::uuid,'Huddles')`, []any{companyID, huddleRootFolderID}},
 		{`insert into huddle_explorer_folders(company_id,folder_id,parent_folder_id,name) values($1::uuid,$2::uuid,$3::uuid,'Standups')`, []any{companyID, huddleChildFolderID, huddleRootFolderID}},

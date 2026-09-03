@@ -36,7 +36,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		NewLogicGateHeader string                                            `json:"new_logic_gate_header"`
 		Target             store.CommunicationsTriageConversionTarget        `json:"target"`
 		Status             string                                            `json:"status"`
-		ProcessStepID      *string                                           `json:"process_step_id"`
+		ColumnID           string                                            `json:"column_id"`
 		Priority           *int                                              `json:"priority"`
 		MessageIDs         []string                                          `json:"message_ids"`
 		LinkedTextBlock    *communicationsTriageAtomicNodeInformationRequest `json:"linked_text_block"`
@@ -82,7 +82,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 		NewLogicGateHeader: req.NewLogicGateHeader,
 		Target:             req.Target,
 		Status:             req.Status,
-		ProcessStepID:      req.ProcessStepID,
+		ColumnID:           req.ColumnID,
 		Priority:           req.Priority,
 		PrioritySet:        req.Priority != nil,
 		MessageIDs:         req.MessageIDs,
@@ -102,7 +102,7 @@ func (s *Server) handleCommunicationsTriageConvert(w http.ResponseWriter, r *htt
 	}
 	if conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingLogicGate ||
 		(conversionInput.Target.Mode == store.CommunicationsEmailConversionTargetExistingNode && conversionInput.LogicGateID != "") {
-		if !s.requireEntityEdit(w, r, conversionInput.CompanyID, store.EntityTypeLogicGate, conversionInput.LogicGateID, "logic_gate_not_found") {
+		if !s.requireKanbanLogicGateEffectiveAccess(w, conversionInput.CompanyID, permissionUserID, conversionInput.LogicGateID, store.EntityPermissionEdit) {
 			return
 		}
 	}
@@ -222,39 +222,39 @@ func (s *Server) handleCommunicationsTriageRevert(w http.ResponseWriter, r *http
 	}
 	var req struct {
 		CompanyID string `json:"company_id"`
-		NodeID    string `json:"node_id"`
+		BoardID   string `json:"board_id"`
+		CardID    string `json:"card_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
 	req.CompanyID = strings.TrimSpace(req.CompanyID)
-	req.NodeID = strings.TrimSpace(req.NodeID)
-	if req.CompanyID == "" || req.NodeID == "" {
-		writeError(w, http.StatusBadRequest, "company_and_node_required")
+	req.BoardID = strings.TrimSpace(req.BoardID)
+	req.CardID = strings.TrimSpace(req.CardID)
+	if req.CompanyID == "" || req.BoardID == "" || req.CardID == "" {
+		writeError(w, http.StatusBadRequest, "company_board_and_card_required")
 		return
 	}
 	if !requireCompanyAccess(w, r, req.CompanyID) {
 		return
 	}
-	if !s.requireEntityEdit(w, r, req.CompanyID, store.EntityTypeNode, req.NodeID, "node_not_found") {
-		return
-	}
 	result, err := s.repo.RevertCommunicationsTriageNode(store.CommunicationsTriageRevertInput{
 		UserID:    connection.UserID,
 		CompanyID: req.CompanyID,
-		NodeID:    req.NodeID,
+		BoardID:   req.BoardID,
+		CardID:    req.CardID,
 	})
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_triage_revert")
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "triage_node_not_found")
+		writeError(w, http.StatusNotFound, "triage_card_not_found")
 		return
 	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_revert_triage_node")
+		writeError(w, http.StatusInternalServerError, "failed_to_revert_triage_card")
 		return
 	}
 	s.publishCommittedWorkspaceEvents(result.Events)
@@ -271,9 +271,11 @@ func (s *Server) handleCommunicationsEmailNodeTransfer(w http.ResponseWriter, r 
 		return
 	}
 	var req struct {
-		CompanyID    string `json:"company_id"`
-		SourceNodeID string `json:"source_node_id"`
-		TargetNodeID string `json:"target_node_id"`
+		CompanyID     string `json:"company_id"`
+		SourceBoardID string `json:"source_board_id"`
+		SourceCardID  string `json:"source_card_id"`
+		TargetBoardID string `json:"target_board_id"`
+		TargetCardID  string `json:"target_card_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_json")
@@ -282,13 +284,15 @@ func (s *Server) handleCommunicationsEmailNodeTransfer(w http.ResponseWriter, r 
 	actorUserID, idempotencyKey := workItemAssignmentRequestEventMetadata(r)
 	input, err := store.NormalizeCommunicationsEmailNodeTransferInput(store.CommunicationsEmailNodeTransferInput{
 		CompanyID:      req.CompanyID,
-		SourceNodeID:   req.SourceNodeID,
-		TargetNodeID:   req.TargetNodeID,
+		SourceBoardID:  req.SourceBoardID,
+		SourceCardID:   req.SourceCardID,
+		TargetBoardID:  req.TargetBoardID,
+		TargetCardID:   req.TargetCardID,
 		ActorUserID:    actorUserID,
 		IdempotencyKey: idempotencyKey,
 	})
 	if errors.Is(err, store.ErrInvalid) {
-		writeError(w, http.StatusBadRequest, "company_source_and_target_nodes_required")
+		writeError(w, http.StatusBadRequest, "company_source_and_target_cards_required")
 		return
 	}
 	if err != nil {
@@ -298,10 +302,49 @@ func (s *Server) handleCommunicationsEmailNodeTransfer(w http.ResponseWriter, r 
 	if !requireCompanyAccess(w, r, input.CompanyID) {
 		return
 	}
-	if !s.requireEntityEdit(w, r, input.CompanyID, store.EntityTypeNode, input.SourceNodeID, "source_node_not_found") {
+	sourceCard, err := s.repo.GetKanbanCard(input.CompanyID, input.SourceBoardID, input.SourceCardID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_source_card")
 		return
 	}
-	if !s.requireEntityEdit(w, r, input.CompanyID, store.EntityTypeNode, input.TargetNodeID, "target_node_not_found") {
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "source_email_card_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_source_card")
+		return
+	}
+	targetCard, err := s.repo.GetKanbanCard(input.CompanyID, input.TargetBoardID, input.TargetCardID)
+	if errors.Is(err, store.ErrInvalid) {
+		writeError(w, http.StatusBadRequest, "invalid_target_card")
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "target_card_not_found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed_to_load_target_card")
+		return
+	}
+	if sourceCard.NodeID == targetCard.NodeID {
+		writeError(w, http.StatusBadRequest, "source_and_target_must_differ")
+		return
+	}
+	permissionUserID := s.entityPermissionActorUserID(r, input.CompanyID)
+	if sourceCard.LogicGateID != nil && strings.TrimSpace(*sourceCard.LogicGateID) != "" &&
+		!s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, permissionUserID, strings.TrimSpace(*sourceCard.LogicGateID), store.EntityPermissionEdit) {
+		return
+	}
+	if targetCard.LogicGateID != nil && strings.TrimSpace(*targetCard.LogicGateID) != "" &&
+		!s.requireKanbanLogicGateEffectiveAccess(w, input.CompanyID, permissionUserID, strings.TrimSpace(*targetCard.LogicGateID), store.EntityPermissionEdit) {
+		return
+	}
+	if !s.requireEntityEdit(w, r, input.CompanyID, store.EntityTypeNode, sourceCard.NodeID, "source_node_not_found") {
+		return
+	}
+	if !s.requireEntityEdit(w, r, input.CompanyID, store.EntityTypeNode, targetCard.NodeID, "target_node_not_found") {
 		return
 	}
 
@@ -311,7 +354,7 @@ func (s *Server) handleCommunicationsEmailNodeTransfer(w http.ResponseWriter, r 
 		return
 	}
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "source_email_node_or_target_not_found")
+		writeError(w, http.StatusNotFound, "source_email_card_or_target_not_found")
 		return
 	}
 	if err != nil {

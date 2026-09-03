@@ -60,6 +60,31 @@ func (r *MemoryRepo) createNodeWithIDLocked(companyID, nodeID, title string) (do
 	return r.withNodeReadModelLocked(n), nil
 }
 
+func (r *MemoryRepo) deriveNodeStatusLocked(companyID, nodeID string) *string {
+	assignment, ok := r.nodeLogicGateAssignmentLocked(companyID, nodeID, "")
+	if !ok {
+		return nil
+	}
+	status := ""
+	if assignment.IsIssue {
+		status = "Issue"
+	} else if title, ok := r.kanbanColumnTitleLocked(companyID, assignment.CompatibilityBoardID, assignment.ColumnID); ok {
+		status = title
+	}
+	if status == "" {
+		status = "Unknown"
+	}
+	return &status
+}
+
+func (r *MemoryRepo) withDerivedNodeStatusLocked(node domain.Node) domain.Node {
+	derivedStatus := r.deriveNodeStatusLocked(node.CompanyID, node.NodeID)
+	if derivedStatus != nil {
+		node.Status = derivedStatus
+	}
+	return node
+}
+
 func (r *MemoryRepo) nodeLogicGateIDsLocked(companyID, nodeID string) []string {
 	seen := map[string]bool{}
 	assignment, ok := r.nodeLogicGateAssignmentLocked(companyID, nodeID, "")
@@ -79,6 +104,7 @@ func (r *MemoryRepo) nodeLogicGateIDsLocked(companyID, nodeID string) []string {
 
 func (r *MemoryRepo) withNodeReadModelLocked(node domain.Node) domain.Node {
 	node.DefaultAccess = defaultResourceAccessOrEdit(node.DefaultAccess)
+	node = r.withDerivedNodeStatusLocked(node)
 	node.LogicGateIDs = r.nodeLogicGateIDsLocked(node.CompanyID, node.NodeID)
 	node.Accounts = r.accountSnapshotsForNodeLocked(node.CompanyID, node.NodeID)
 	return node
@@ -125,22 +151,18 @@ func (r *MemoryRepo) updateNodeLocked(input UpdateNodeInput) (domain.Node, error
 		return domain.Node{}, ErrNotFound
 	}
 
-	if input.StatusSet {
-		assignment, assigned := r.nodeLogicGateAssignmentLocked(input.CompanyID, input.NodeID, "")
-		status, err := normalizeNodeStatusForAssignment(input.Status, assigned)
-		if err != nil {
-			return domain.Node{}, err
-		}
-		input.Status = status
-		if assigned {
-			assignment.RequestedByUserID = requestedByUserIDForLogicGateStatus(*status, assignment.RequestedByUserID, input.ActorUserID)
-			r.nodeLogicGateAssignments[nodeLogicGateAssignmentKey(input.CompanyID, input.NodeID)] = assignment
-		}
-	}
-
 	if input.TitleSet {
 		node.Title = input.Title
-
+		for boardKey, cards := range r.kanbanCards {
+			for index, card := range cards {
+				if card.CompanyID != input.CompanyID || card.NodeID != input.NodeID {
+					continue
+				}
+				card.NodeTitle = input.Title
+				card.UpdatedTimestamp = time.Now().UTC()
+				r.kanbanCards[boardKey][index] = card
+			}
+		}
 	}
 	if input.DueDateSet {
 		node.DueDate = input.DueDate
@@ -334,6 +356,16 @@ func (r *MemoryRepo) deleteNodeLocked(companyID, nodeID string, preserveResource
 		if participant.CompanyID == companyID && collaborationIDs[participant.CollaborationID] {
 			delete(r.emailCollaborationParticipants, participantKey)
 		}
+	}
+	for board, cards := range r.kanbanCards {
+		next := make([]domain.KanbanCard, 0, len(cards))
+		for _, card := range cards {
+			if card.CompanyID == companyID && card.NodeID == nodeID {
+				continue
+			}
+			next = append(next, card)
+		}
+		r.kanbanCards[board] = next
 	}
 
 	filtered := make([]domain.NodeRelationship, 0, len(r.nodeRels[companyID]))

@@ -1,6 +1,9 @@
 package store
 
 import (
+	"errors"
+	"miraeopus/backend/internal/domain"
+	"sort"
 	"strings"
 )
 
@@ -9,7 +12,7 @@ func NormalizeLogicGateNodeAssignmentInput(input LogicGateNodeAssignmentInput) (
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
-	input.ProcessStepID = normalizeOptionalStringPointer(input.ProcessStepID)
+	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
 	input.NodeTitle = strings.TrimSpace(input.NodeTitle)
 	input.CreateNodeTitle = strings.TrimSpace(input.CreateNodeTitle)
@@ -26,13 +29,27 @@ func NormalizeLogicGateNodeAssignmentInput(input LogicGateNodeAssignmentInput) (
 	return input, nil
 }
 
+func logicGateAssignmentInputPriority(input LogicGateNodeAssignmentInput) (*int, bool) {
+	if !input.PrioritySet {
+		return nil, false
+	}
+	if input.Priority == nil {
+		return nil, true
+	}
+	priority := *input.Priority
+	if priority < 1 || priority > 5 {
+		return nil, false
+	}
+	return &priority, true
+}
+
 func NormalizeLogicGateNodeAssignmentMoveInput(input LogicGateNodeAssignmentMoveInput) (LogicGateNodeAssignmentMoveInput, error) {
 	input.CompanyID = strings.TrimSpace(input.CompanyID)
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.FromLogicGateID = strings.TrimSpace(input.FromLogicGateID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
-	input.ProcessStepID = normalizeOptionalStringPointer(input.ProcessStepID)
+	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
@@ -51,13 +68,6 @@ func NormalizeLogicGateNodeAssignmentRemoveInput(input LogicGateNodeAssignmentRe
 	input.LogicGateID = strings.TrimSpace(input.LogicGateID)
 	input.NodeID = strings.TrimSpace(input.NodeID)
 	input.FallbackStatus = normalizeOptionalStringPointer(input.FallbackStatus)
-	if input.FallbackStatus != nil {
-		status, err := normalizeNodeStatusForAssignment(input.FallbackStatus, false)
-		if err != nil {
-			return LogicGateNodeAssignmentRemoveInput{}, err
-		}
-		input.FallbackStatus = status
-	}
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
 	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	if input.CompanyID == "" || input.NodeID == "" {
@@ -86,7 +96,7 @@ func NormalizeRACIMatrixNodeCreateInput(input RACIMatrixNodeCreateInput) (RACIMa
 	input.CreateLogicGateHeader = strings.TrimSpace(input.CreateLogicGateHeader)
 	input.MutationOrigin = NormalizeMutationOrigin(input.MutationOrigin)
 	input.Status = NormalizeLogicGateAssignmentStatusTitle(input.Status)
-	input.ProcessStepID = normalizeOptionalStringPointer(input.ProcessStepID)
+	input.ColumnID = strings.TrimSpace(input.ColumnID)
 	input.DescriptionSnapshot = strings.TrimSpace(input.DescriptionSnapshot)
 	input.CreatorLogicGateRACIRole = strings.TrimSpace(input.CreatorLogicGateRACIRole)
 	input.ActorUserID = strings.TrimSpace(input.ActorUserID)
@@ -143,6 +153,60 @@ func NormalizeLogicGateAssignmentStatusTitle(status string) string {
 	default:
 		return strings.TrimSpace(status)
 	}
+}
+
+func resolveLogicGateAssignmentColumn(columns []domain.KanbanColumn, columnID, status string) (domain.KanbanColumn, error) {
+	columnID = strings.TrimSpace(columnID)
+	if columnID != "" {
+		for _, column := range columns {
+			if column.ColumnID == columnID {
+				return column, nil
+			}
+		}
+		return domain.KanbanColumn{}, ErrNotFound
+	}
+
+	ordered := append([]domain.KanbanColumn{}, columns...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Position != ordered[j].Position {
+			return ordered[i].Position < ordered[j].Position
+		}
+		if !ordered[i].CreatedTimestamp.Equal(ordered[j].CreatedTimestamp) {
+			return ordered[i].CreatedTimestamp.Before(ordered[j].CreatedTimestamp)
+		}
+		return ordered[i].ColumnID < ordered[j].ColumnID
+	})
+	if len(ordered) == 0 {
+		return domain.KanbanColumn{}, ErrNotFound
+	}
+
+	target := logicGateAssignmentStatusKey(status)
+	if target == "" {
+		return ordered[0], nil
+	}
+	for _, column := range ordered {
+		if logicGateAssignmentStatusKey(column.Title) == target {
+			return column, nil
+		}
+	}
+	return domain.KanbanColumn{}, ErrNotFound
+}
+
+func resolveLogicGateAssignmentMoveColumn(columns []domain.KanbanColumn, input LogicGateNodeAssignmentMoveInput, currentColumnID, currentStatusKey string, crossLogicGateMove bool) (domain.KanbanColumn, error) {
+	if !crossLogicGateMove && input.ColumnID == "" && input.Status == "" {
+		return domain.KanbanColumn{ColumnID: currentColumnID}, nil
+	}
+	if input.ColumnID != "" || input.Status != "" {
+		return resolveLogicGateAssignmentColumn(columns, input.ColumnID, input.Status)
+	}
+	column, err := resolveLogicGateAssignmentColumn(columns, "", currentStatusKey)
+	if err == nil {
+		return column, nil
+	}
+	if errors.Is(err, ErrNotFound) {
+		return resolveLogicGateAssignmentColumn(columns, "", "")
+	}
+	return domain.KanbanColumn{}, err
 }
 
 func logicGateAssignmentStatusKey(status string) string {

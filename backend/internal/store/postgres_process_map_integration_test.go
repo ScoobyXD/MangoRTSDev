@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -85,9 +84,7 @@ func openPostgresProcessMapIntegration(t *testing.T) (*sql.DB, *PostgresRepo) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	if _, err := db.ExecContext(ctx, string(schema)); err != nil {
+	if _, err := db.Exec(string(schema)); err != nil {
 		t.Fatalf("apply canonical schema: %v", err)
 	}
 	return db, NewPostgresRepo(db)

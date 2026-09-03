@@ -28,11 +28,18 @@ import type {
 import {
   assignNodeToLogicGateStatus as defaultAssignNodeToLogicGateStatus,
   createRACIMatrixNode as defaultCreateRACIMatrixNode,
+  invalidateKanbanBoardListCache as defaultInvalidateKanbanBoardListCache,
   invalidateLogicGateArenaViewCache as defaultInvalidateLogicGateArenaViewCache,
   moveLogicGateAssignment as defaultMoveLogicGateAssignment,
-  dispatchLogicGateWorkUpdated,
 } from "../../modules/kanban/kanbanApi.js";
 import type { LogicGateAssignmentCommandResult, RACIMatrixProjectionRow } from "../../modules/kanban/kanbanApi.js";
+import {
+  EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
+  EVENT_KANBAN_BOARDS_UPDATED,
+  logicGateKanbanBoardID,
+  type KanbanBoardContentsUpdatedDetail,
+  type KanbanBoardsUpdatedDetail,
+} from "../../modules/kanban/shared.js";
 import { editorBodyHasEmailContent, serializeEditorBodyForEmailHTML } from "../../modules/editor/richTextEditing.js";
 import { buildForwardedComposeBody } from "./emailForwarding.js";
 import type { NodeRecord } from "../../modules/nodes/types.js";
@@ -70,12 +77,13 @@ export type HomeUpdateSharedInboxRACIAssignments = typeof defaultUpdateCommunica
 export type HomeBulkNodePatch = Partial<Pick<NodeRecord, "priority" | "status" | "due_date">>;
 export type HomeMailMessageUpdate = { unread?: boolean; starred?: boolean; folders?: string[] };
 
-export type HomeProcessWorkInvalidator = (apiBase: string, companyID: string, logicGateID: string) => void;
+export type HomeKanbanBoardContentsInvalidator = (apiBase: string, companyID: string, boardID: string) => void;
 export type HomeNodeRecordInvalidator = (apiBase: string, companyID: string, nodeID: string) => void;
 export type HomeNodeGraphNodeUpsert = (apiBase: string, companyID: string, node: NodeRecord) => void;
 
 export type HomeTriageConversionCommandResult = {
   result: Awaited<ReturnType<HomeConvertTriageMessagesToLogicGate>>;
+  boardID: string;
   logicGateID: string;
   convertedMessageIDs: string[];
   unstarredMessageIDs: string[];
@@ -83,6 +91,7 @@ export type HomeTriageConversionCommandResult = {
 
 export type HomeExplorerTriageConversionCommandResult = {
   result: Awaited<ReturnType<HomeConvertTriageMessagesToExplorerTarget>>;
+  boardID: string;
   logicGateID: string;
   convertedMessageIDs: string[];
   unstarredMessageIDs: string[];
@@ -153,6 +162,7 @@ type HomeDeleteEntitiesResponse = {
   targets?: HomeDeleteEntityTarget[];
 };
 
+function noopKanbanBoardContentsInvalidator(): void {}
 function noopNodeRecordInvalidator(): void {}
 function noopNodeGraphNodeUpsert(): void {}
 
@@ -162,6 +172,15 @@ function bindHomeEntityCreateRequest(apiBase: string, requestJSON: HomeEntityCre
   return <T>(path: string, init?: RequestInit): Promise<T> => requestJSON<T>(apiBase, path, init as RequestJSONInit);
 }
 
+function dispatchKanbanBoardsUpdated(detail: KanbanBoardsUpdatedDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<KanbanBoardsUpdatedDetail>(EVENT_KANBAN_BOARDS_UPDATED, { detail }));
+}
+
+function dispatchKanbanBoardContentsUpdated(detail: KanbanBoardContentsUpdatedDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<KanbanBoardContentsUpdatedDetail>(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, { detail }));
+}
 export async function archiveHomeMailMessagesCommand(args: {
   companyID: string;
   sharedInboxID?: string;
@@ -301,7 +320,7 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
   nodeByID: Map<string, NodeRecord>;
   assignNodeToLogicGateStatus?: HomeDropAssignNodeToLogicGateStatus;
   moveLogicGateAssignment?: HomeBulkMoveLogicGateAssignment;
-  invalidateProcessWork?: HomeProcessWorkInvalidator;
+  invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
 }): Promise<HomeLogicGateDropCommandResult> {
   const logicGateID = args.logicGateID.trim();
   const rawFromLogicGateID = args.fromLogicGateID?.trim() ?? "";
@@ -327,9 +346,9 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
         priority,
         position: 0,
       });
-      args.invalidateProcessWork?.(args.apiBase, args.companyID, result.assignment.logic_gate_id);
+      args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, result.card.board_id);
       if (fromLogicGateID !== logicGateID) {
-        args.invalidateProcessWork?.(args.apiBase, args.companyID, fromLogicGateID);
+        args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, logicGateKanbanBoardID(fromLogicGateID));
       }
       return result;
     }
@@ -343,7 +362,7 @@ export async function dropNodesIntoInboxLogicGateCommand(args: {
       nodeTitle: nodeTitle(node),
       position: 0,
     });
-    args.invalidateProcessWork?.(args.apiBase, args.companyID, result.assignment.logic_gate_id);
+    args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, result.card.board_id);
     return result;
   }));
   const assignmentResults = results.filter((result): result is LogicGateAssignmentCommandResult => result !== null);
@@ -360,7 +379,7 @@ export async function addNodesToLogicGateCommand(args: {
   nodeIDs: string[];
   nodeByID: Map<string, NodeRecord>;
   assignNodeToLogicGateStatus?: HomeDropAssignNodeToLogicGateStatus;
-  invalidateProcessWork?: HomeProcessWorkInvalidator;
+  invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
 }): Promise<NodeRecord[]> {
   const logicGateID = args.logicGateID.trim();
   const nodeIDs = cleanIDList(args.nodeIDs).filter((nodeID) => args.nodeByID.has(nodeID));
@@ -382,7 +401,7 @@ export async function addNodesToLogicGateCommand(args: {
       nodeTitle: nodeTitle(node),
       position: 0,
     });
-    args.invalidateProcessWork?.(args.apiBase, args.companyID, result.assignment.logic_gate_id);
+    args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, result.card.board_id);
     return result.node;
   })).then((nodes) => nodes.filter((node): node is NodeRecord => node !== null));
 }
@@ -496,8 +515,7 @@ export async function deleteHomeEntitiesCommand(args: {
 
   for (const target of targets) {
     if (target.kind === "logic_gate") {
-      defaultInvalidateLogicGateArenaViewCache(args.apiBase, args.companyID, target.id);
-      dispatchLogicGateWorkUpdated(args.companyID, target.id);
+      dispatchKanbanBoardsUpdated({ companyID: args.companyID, deletedBoardID: logicGateKanbanBoardID(target.id) });
     }
   }
   if (targets.some((target) => target.kind === "logic_gate")) {
@@ -513,7 +531,7 @@ export async function applyBulkNodePatchCommand(args: {
   nodeByID: Map<string, NodeRecord>;
   moveLogicGateAssignment?: HomeBulkMoveLogicGateAssignment;
   updateNode?: HomeBulkUpdateNode;
-  invalidateProcessWork?: HomeProcessWorkInvalidator;
+  invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
 }): Promise<NodeRecord[]> {
   const nodeIDs = cleanIDList(args.nodeIDs).filter((nodeID) => args.nodeByID.has(nodeID));
   if (nodeIDs.length === 0) return [];
@@ -543,7 +561,7 @@ export async function applyBulkNodePatchCommand(args: {
       commandNode = result.node;
       if (status) delete directPatch.status;
       if (priorityWasSet) delete directPatch.priority;
-      args.invalidateProcessWork?.(args.apiBase, args.companyID, result.assignment.logic_gate_id);
+      args.invalidateKanbanBoardContents?.(args.apiBase, args.companyID, result.card.board_id);
     }
 
     if (Object.keys(directPatch).length === 0) return commandNode;
@@ -696,7 +714,11 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   messageIDs: string[];
   priority?: number;
   convertTriageMessagesToExplorerTarget?: HomeConvertTriageMessagesToExplorerTarget;
-  invalidateProcessWork?: HomeProcessWorkInvalidator;
+  invalidateKanbanBoardList?: typeof defaultInvalidateKanbanBoardListCache;
+  invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
+  invalidateLogicGateArenaView?: typeof defaultInvalidateLogicGateArenaViewCache;
+  dispatchKanbanBoardsUpdated?: (detail: KanbanBoardsUpdatedDetail) => void;
+  dispatchKanbanBoardContentsUpdated?: (detail: KanbanBoardContentsUpdatedDetail) => void;
   invalidateNodeRecord?: HomeNodeRecordInvalidator;
   upsertNodeRelationshipGraphNode?: HomeNodeGraphNodeUpsert;
 }): Promise<HomeExplorerTriageConversionCommandResult | null> {
@@ -720,14 +742,23 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   if (accountEmail) conversionInput.accountEmail = accountEmail;
   const result = await convertTriageMessagesToExplorerTarget(conversionInput);
 
-  const targetLogicGateID = result.assignments?.[0]?.logic_gate_id ?? explorerTargetLogicGateID(args.target);
-  const invalidateProcessWork = args.invalidateProcessWork ?? defaultInvalidateLogicGateArenaViewCache;
+  const targetLogicGateID = explorerTargetLogicGateID(args.target);
+  const boardID = result.board?.board_id?.trim() || (targetLogicGateID ? logicGateKanbanBoardID(targetLogicGateID) : "");
+  const boardLogicGateID = result.board?.logic_gate_id?.trim() || targetLogicGateID;
+  const invalidateKanbanBoardList = args.invalidateKanbanBoardList ?? defaultInvalidateKanbanBoardListCache;
+  const invalidateKanbanBoardContents = args.invalidateKanbanBoardContents ?? noopKanbanBoardContentsInvalidator;
+  const invalidateLogicGateArenaView = args.invalidateLogicGateArenaView ?? defaultInvalidateLogicGateArenaViewCache;
+  const emitKanbanBoardsUpdated = args.dispatchKanbanBoardsUpdated ?? dispatchKanbanBoardsUpdated;
+  const emitKanbanBoardContentsUpdated = args.dispatchKanbanBoardContentsUpdated ?? dispatchKanbanBoardContentsUpdated;
   const invalidateNodeRecord = args.invalidateNodeRecord ?? noopNodeRecordInvalidator;
   const upsertNodeRelationshipGraphNode = args.upsertNodeRelationshipGraphNode ?? noopNodeGraphNodeUpsert;
 
-  if (targetLogicGateID) {
-    invalidateProcessWork(args.apiBase, companyID, targetLogicGateID);
-    dispatchLogicGateWorkUpdated(companyID, targetLogicGateID);
+  if (boardID && boardLogicGateID) {
+    invalidateKanbanBoardList(args.apiBase, companyID);
+    invalidateKanbanBoardContents(args.apiBase, companyID, boardID);
+    invalidateLogicGateArenaView(args.apiBase, companyID, boardLogicGateID);
+    emitKanbanBoardsUpdated({ companyID, board: result.board });
+    emitKanbanBoardContentsUpdated({ companyID, boardID, logicGateID: boardLogicGateID });
   }
   for (const node of result.nodes ?? []) {
     invalidateNodeRecord(args.apiBase, companyID, node.node_id);
@@ -735,7 +766,7 @@ export async function convertMessagesToExplorerTargetCommand(args: {
   }
   const convertedMessageIDs = result.deleted_message_ids?.length ? result.deleted_message_ids : messageIDs;
   const unstarredMessageIDs = cleanIDList(result.unstarred_message_ids ?? []);
-  return { result, logicGateID: targetLogicGateID, convertedMessageIDs, unstarredMessageIDs };
+  return { result, boardID, logicGateID: boardLogicGateID, convertedMessageIDs, unstarredMessageIDs };
 }
 export async function convertMessagesToLogicGateCommand(args: {
   apiBase: string;
@@ -747,7 +778,11 @@ export async function convertMessagesToLogicGateCommand(args: {
   messageIDs: string[];
   priority?: number;
   convertTriageMessagesToLogicGate?: HomeConvertTriageMessagesToLogicGate;
-  invalidateProcessWork?: HomeProcessWorkInvalidator;
+  invalidateKanbanBoardList?: typeof defaultInvalidateKanbanBoardListCache;
+  invalidateKanbanBoardContents?: HomeKanbanBoardContentsInvalidator;
+  invalidateLogicGateArenaView?: typeof defaultInvalidateLogicGateArenaViewCache;
+  dispatchKanbanBoardsUpdated?: (detail: KanbanBoardsUpdatedDetail) => void;
+  dispatchKanbanBoardContentsUpdated?: (detail: KanbanBoardContentsUpdatedDetail) => void;
   invalidateNodeRecord?: HomeNodeRecordInvalidator;
   upsertNodeRelationshipGraphNode?: HomeNodeGraphNodeUpsert;
 }): Promise<HomeTriageConversionCommandResult | null> {
@@ -772,13 +807,22 @@ export async function convertMessagesToLogicGateCommand(args: {
   if (accountEmail) conversionInput.accountEmail = accountEmail;
   if (nodeID) conversionInput.nodeID = nodeID;
   const result = await convertTriageMessagesToLogicGate(conversionInput);
+  const boardID = result.board?.board_id?.trim() || logicGateKanbanBoardID(logicGateID);
+  const boardLogicGateID = result.board?.logic_gate_id?.trim() || logicGateID;
 
-  const invalidateProcessWork = args.invalidateProcessWork ?? defaultInvalidateLogicGateArenaViewCache;
+  const invalidateKanbanBoardList = args.invalidateKanbanBoardList ?? defaultInvalidateKanbanBoardListCache;
+  const invalidateKanbanBoardContents = args.invalidateKanbanBoardContents ?? noopKanbanBoardContentsInvalidator;
+  const invalidateLogicGateArenaView = args.invalidateLogicGateArenaView ?? defaultInvalidateLogicGateArenaViewCache;
+  const emitKanbanBoardsUpdated = args.dispatchKanbanBoardsUpdated ?? dispatchKanbanBoardsUpdated;
+  const emitKanbanBoardContentsUpdated = args.dispatchKanbanBoardContentsUpdated ?? dispatchKanbanBoardContentsUpdated;
   const invalidateNodeRecord = args.invalidateNodeRecord ?? noopNodeRecordInvalidator;
   const upsertNodeRelationshipGraphNode = args.upsertNodeRelationshipGraphNode ?? noopNodeGraphNodeUpsert;
 
-  invalidateProcessWork(args.apiBase, args.companyID, logicGateID);
-  dispatchLogicGateWorkUpdated(args.companyID, logicGateID);
+  invalidateKanbanBoardList(args.apiBase, args.companyID);
+  invalidateKanbanBoardContents(args.apiBase, args.companyID, boardID);
+  invalidateLogicGateArenaView(args.apiBase, args.companyID, boardLogicGateID);
+  emitKanbanBoardsUpdated({ companyID: args.companyID, board: result.board });
+  emitKanbanBoardContentsUpdated({ companyID: args.companyID, boardID, logicGateID: boardLogicGateID });
   for (const node of result.nodes ?? []) {
     invalidateNodeRecord(args.apiBase, args.companyID, node.node_id);
     upsertNodeRelationshipGraphNode(args.apiBase, args.companyID, node);
@@ -787,7 +831,8 @@ export async function convertMessagesToLogicGateCommand(args: {
   const unstarredMessageIDs = cleanIDList(result.unstarred_message_ids ?? []);
   return {
     result,
-    logicGateID,
+    boardID,
+    logicGateID: boardLogicGateID,
     convertedMessageIDs,
     unstarredMessageIDs,
   };

@@ -45,10 +45,11 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if result.Target.Mode != CommunicationsEmailConversionTargetExistingLogicGate || result.Target.LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("target = %+v, want existing Logic Gate %s", result.Target, logicGate.LogicGateID)
 	}
-	if len(result.Nodes) != 1 || len(result.Assignments) != 1 || len(result.EmailPlacements) != 1 || len(result.EmailProvenance) != 1 {
-		t.Fatalf("conversion result = nodes %d assignments %d placements %d provenance %d", len(result.Nodes), len(result.Assignments), len(result.EmailPlacements), len(result.EmailProvenance))
+	if len(result.Nodes) != 1 || len(result.Cards) != 1 || len(result.Assignments) != 1 || len(result.EmailPlacements) != 1 || len(result.EmailProvenance) != 1 {
+		t.Fatalf("conversion result = nodes %d cards %d assignments %d placements %d provenance %d", len(result.Nodes), len(result.Cards), len(result.Assignments), len(result.EmailPlacements), len(result.EmailProvenance))
 	}
 	node := result.Nodes[0]
+	card := result.Cards[0]
 	assignment := result.Assignments[0]
 	if node.Title != message.Subject || node.Status == nil || *node.Status != "In Progress" {
 		t.Fatalf("node = %+v, want email title and In Progress status", node)
@@ -59,8 +60,15 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if !stringSliceContains(node.LogicGateIDs, logicGate.LogicGateID) {
 		t.Fatalf("node logic_gate_ids = %+v, want %s", node.LogicGateIDs, logicGate.LogicGateID)
 	}
-	if assignment.NodeID != node.NodeID || assignment.LogicGateID != logicGate.LogicGateID || assignment.ProcessStepID != nil {
-		t.Fatalf("assignment = %+v, want exact Node/Process without a step", assignment)
+	if assignment.NodeID != node.NodeID || assignment.LogicGateID != logicGate.LogicGateID || assignment.StatusKey != "in progress" || assignment.ColumnID != card.ColumnID {
+		t.Fatalf("assignment = %+v, card = %+v", assignment, card)
+	}
+	if assignment.CompatibilityBoardID != card.BoardID || assignment.CompatibilityCardID != card.CardID {
+		t.Fatalf("assignment compatibility = %+v, card = %+v", assignment, card)
+	}
+	cards, err := repo.ListKanbanCards(companyID, card.BoardID, KanbanCardQuery{Limit: 10})
+	if err != nil || len(cards) != 1 || cards[0].CardID != card.CardID || cards[0].NodeID != node.NodeID {
+		t.Fatalf("compatibility cards = %+v err=%v, want converted card", cards, err)
 	}
 	assignments, err := repo.ListNodeLogicGateAssignments(companyID, node.NodeID)
 	if err != nil || len(assignments) != 1 || assignments[0].AssignmentID != assignment.AssignmentID {
@@ -71,7 +79,7 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 		t.Fatalf("email placements = %+v err=%v", placements, err)
 	}
 	provenance := result.EmailProvenance[0]
-	if provenance.MessageID != message.ID || provenance.ThreadID != message.ThreadID || provenance.NodeID != node.NodeID {
+	if provenance.MessageID != message.ID || provenance.ThreadID != message.ThreadID || provenance.NodeID != node.NodeID || provenance.CardID != card.CardID {
 		t.Fatalf("provenance = %+v, want original email/message/thread and created work item IDs", provenance)
 	}
 	projections, err := repo.ListNodeProjections(companyID, node.NodeID)
@@ -93,7 +101,7 @@ func TestMemoryEmailConversionCommandCreatesAssignedWorkItemWithProvenanceAndEve
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{LogicGateRACIUpdatedEventType, WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "node_updated"}
+	wantTypes := []string{LogicGateRACIUpdatedEventType, WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated"}
 	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
 	}
@@ -208,8 +216,8 @@ func TestMemoryEmailConversionCommandAttachesEmailToExistingNode(t *testing.T) {
 	if len(result.FolderItems) != 0 {
 		t.Fatalf("folder items = %+v, want none for existing node attachment", result.FolderItems)
 	}
-	if len(result.Assignments) != 1 || result.Assignments[0].AssignmentID != assignmentResult.Assignment.AssignmentID {
-		t.Fatalf("assignments = %+v, want unchanged existing assignment", result.Assignments)
+	if len(result.Cards) != 1 || result.Cards[0].CardID != assignmentResult.Card.CardID {
+		t.Fatalf("cards = %+v, want existing assignment card %s", result.Cards, assignmentResult.Card.CardID)
 	}
 	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{message.ID})
 	if err != nil || len(placements) != 1 || placements[0].NodeID != node.NodeID || placements[0].LogicGateID != logicGate.LogicGateID {
@@ -253,7 +261,7 @@ func TestMemoryEmailNodeTransferAttachesEmailAndDeletesSourceNode(t *testing.T) 
 		t.Fatalf("CreateNode target: %v", err)
 	}
 	targetPriority := 2
-	_, err = repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
+	targetAssignment, err := repo.AssignNodeToLogicGateStatus(LogicGateNodeAssignmentInput{
 		CompanyID:   companyID,
 		LogicGateID: logicGate.LogicGateID,
 		NodeID:      targetNode.NodeID,
@@ -278,29 +286,50 @@ func TestMemoryEmailNodeTransferAttachesEmailAndDeletesSourceNode(t *testing.T) 
 	if err != nil {
 		t.Fatalf("ConvertCommunicationsTriageItems source: %v", err)
 	}
+	if len(sourceConversion.Cards) != 1 || !sourceConversion.Cards[0].CreatedFromEmail {
+		t.Fatalf("source conversion card = %+v, want created_from_email card", sourceConversion.Cards)
+	}
+	sourceCard := sourceConversion.Cards[0]
 	sourceNodeID := sourceConversion.Nodes[0].NodeID
+	listedSourceCard, err := repo.GetKanbanCard(companyID, sourceCard.BoardID, sourceCard.CardID)
+	if err != nil || !listedSourceCard.CreatedFromEmail {
+		t.Fatalf("GetKanbanCard source = %+v err=%v, want created_from_email", listedSourceCard, err)
+	}
+
 	transfer, err := repo.TransferCommunicationsEmailNode(CommunicationsEmailNodeTransferInput{
-		CompanyID:    companyID,
-		SourceNodeID: sourceNodeID,
-		TargetNodeID: targetNode.NodeID,
+		CompanyID:     companyID,
+		SourceBoardID: sourceCard.BoardID,
+		SourceCardID:  sourceCard.CardID,
+		TargetBoardID: targetAssignment.Card.BoardID,
+		TargetCardID:  targetAssignment.Card.CardID,
 	})
 	if err != nil {
 		t.Fatalf("TransferCommunicationsEmailNode: %v", err)
 	}
-	if transfer.DeletedNodeID != sourceNodeID {
-		t.Fatalf("transfer deleted source = %+v, want node %s", transfer, sourceNodeID)
+	if transfer.DeletedNodeID != sourceNodeID || transfer.DeletedCardID != sourceCard.CardID || transfer.SourceBoardID != sourceCard.BoardID {
+		t.Fatalf("transfer deleted source = %+v, want node %s card %s board %s", transfer, sourceNodeID, sourceCard.CardID, sourceCard.BoardID)
 	}
-	if transfer.EmailPlacement.NodeID != targetNode.NodeID || transfer.EmailPlacement.LogicGateID != logicGate.LogicGateID {
+	if transfer.EmailPlacement.NodeID != targetNode.NodeID || transfer.EmailPlacement.CardID != targetAssignment.Card.CardID || transfer.EmailPlacement.LogicGateID != logicGate.LogicGateID {
 		t.Fatalf("transfer placement = %+v, want target node/card/gate", transfer.EmailPlacement)
 	}
 	if transfer.EmailPlacement.UserID != user.UserID {
 		t.Fatalf("transfer placement user_id = %q, want original email owner %q", transfer.EmailPlacement.UserID, user.UserID)
 	}
+	if _, err := repo.GetKanbanCard(companyID, sourceCard.BoardID, sourceCard.CardID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("source card after transfer err=%v, want ErrNotFound", err)
+	}
 	if _, err := repo.GetNode(companyID, sourceNodeID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("source node after transfer err=%v, want ErrNotFound", err)
 	}
+	targetCard, err := repo.GetKanbanCard(companyID, targetAssignment.Card.BoardID, targetAssignment.Card.CardID)
+	if err != nil {
+		t.Fatalf("GetKanbanCard target: %v", err)
+	}
+	if targetCard.CreatedFromEmail {
+		t.Fatalf("target card created_from_email = true, want false for normal node with attached email")
+	}
 	placements, err := repo.ListCommunicationsEmailPlacements(user.UserID, companyID, []string{message.ID})
-	if err != nil || len(placements) != 1 || placements[0].NodeID != targetNode.NodeID {
+	if err != nil || len(placements) != 1 || placements[0].NodeID != targetNode.NodeID || placements[0].CardID != targetAssignment.Card.CardID {
 		t.Fatalf("email placements after transfer = %+v err=%v, want target placement", placements, err)
 	}
 	projections, err := repo.ListNodeProjections(companyID, targetNode.NodeID)
@@ -458,8 +487,8 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectLogicGateTarget(t *test
 	if err != nil {
 		t.Fatalf("ConvertCommunicationsTriageItems project logic gate target: %v", err)
 	}
-	if len(result.Nodes) != 1 || len(result.Assignments) != 1 || len(result.ProjectRelationships) != 2 {
-		t.Fatalf("result nodes/assignments/project relationships = %d/%d/%d, want one node/assignment and two project relationships", len(result.Nodes), len(result.Assignments), len(result.ProjectRelationships))
+	if len(result.Nodes) != 1 || len(result.Cards) != 1 || len(result.Assignments) != 1 || len(result.ProjectRelationships) != 2 {
+		t.Fatalf("result nodes/cards/assignments/project relationships = %d/%d/%d/%d, want one node/card/assignment and two project relationships", len(result.Nodes), len(result.Cards), len(result.Assignments), len(result.ProjectRelationships))
 	}
 	node := result.Nodes[0]
 	var relationship domain.ProjectRelationshipProjection
@@ -478,8 +507,8 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectLogicGateTarget(t *test
 	if relationship.AssignmentID == nil || *relationship.AssignmentID != result.Assignments[0].AssignmentID {
 		t.Fatalf("project relationship assignment = %+v, want %s", relationship.AssignmentID, result.Assignments[0].AssignmentID)
 	}
-	if !relationship.CreatedFromEmail {
-		t.Fatal("project relationship must show its email origin")
+	if !relationship.CreatedFromEmail || !result.Cards[0].CreatedFromEmail {
+		t.Fatalf("email origin flags relationship/card = %v/%v, want true/true", relationship.CreatedFromEmail, result.Cards[0].CreatedFromEmail)
 	}
 	relationships, err := repo.ListProjectRelationshipProjections(companyID, project.ProjectID)
 	if err != nil {
@@ -502,7 +531,7 @@ func TestMemoryEmailConversionCommandCreatesNodeInProjectLogicGateTarget(t *test
 	if err != nil {
 		t.Fatalf("ListDomainEventsAfter: %v", err)
 	}
-	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "node_updated", "project_relationship_upserted", "project_relationship_upserted"}
+	wantTypes := []string{WorkItemEmailConvertedEventType, "node_created", WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated", "project_relationship_upserted", "project_relationship_upserted"}
 	if gotTypes := domainEventTypes(durable); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
 	}
@@ -549,8 +578,8 @@ func TestMemoryEmailConversionCommandAttachesEmailToStandaloneExistingNode(t *te
 	if len(result.Nodes) != 1 || result.Nodes[0].NodeID != node.NodeID {
 		t.Fatalf("result nodes = %+v, want existing node", result.Nodes)
 	}
-	if len(result.Assignments) != 0 || len(result.EmailPlacements) != 0 || len(result.FolderItems) != 0 {
-		t.Fatalf("assignments/placements/folder items = %d/%d/%d, want none", len(result.Assignments), len(result.EmailPlacements), len(result.FolderItems))
+	if len(result.Cards) != 0 || len(result.Assignments) != 0 || len(result.EmailPlacements) != 0 || len(result.FolderItems) != 0 {
+		t.Fatalf("cards/assignments/placements/folder items = %d/%d/%d/%d, want none", len(result.Cards), len(result.Assignments), len(result.EmailPlacements), len(result.FolderItems))
 	}
 	if result.Nodes[0].Priority == nil || *result.Nodes[0].Priority != priority {
 		t.Fatalf("node priority = %+v, want %d", result.Nodes[0].Priority, priority)

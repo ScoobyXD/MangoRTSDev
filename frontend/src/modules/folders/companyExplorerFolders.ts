@@ -1,6 +1,6 @@
 export type CompanyExplorerFolderKind = "node" | "logic_gate" | "project";
-export type CompanyExplorerItemType = CompanyExplorerFolderKind;
-export type CompanyExplorerSystemFolderKey = "active_nodes" | "active_logic_gates" | "active_projects" | "history";
+export type CompanyExplorerItemType = CompanyExplorerFolderKind | "kanban";
+export type CompanyExplorerSystemFolderKey = "kanban_boards" | "active_nodes" | "active_logic_gates" | "active_projects" | "history";
 export type CompanyExplorerFolderScopeType = "company" | "user" | "team";
 
 export type CompanyExplorerFolder = {
@@ -41,7 +41,7 @@ export function isCompanyExplorerFolderKind(value: unknown): value is CompanyExp
 }
 
 export function isCompanyExplorerItemType(value: unknown): value is CompanyExplorerItemType {
-  return isCompanyExplorerFolderKind(value);
+  return isCompanyExplorerFolderKind(value) || value === "kanban";
 }
 
 export function isCompanyExplorerSystemFolderKey(value: unknown): value is CompanyExplorerSystemFolderKey {

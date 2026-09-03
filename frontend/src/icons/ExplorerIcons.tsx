@@ -1,4 +1,5 @@
 import React from "react";
+import { KanbanBoardIcon } from "./KanbanBoardIcon.js";
 import { ExplorerEntityIcon } from "./EntityIcons.js";
 import type { ExplorerTreeNode } from "../modules/company-explorer/companyExplorerTypes.js";
 
@@ -125,6 +126,9 @@ export const ExplorerRowIcon: React.FC<{
   }
   if (kind === "entity") {
     return <ExplorerEntityIcon kind="entity" tone={tone} />;
+  }
+  if (kind === "kanban") {
+    return <KanbanBoardIcon />;
   }
   return <ExplorerEntityIcon kind="logic_gate" tone={tone} />;
 };

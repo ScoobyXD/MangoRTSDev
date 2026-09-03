@@ -91,12 +91,6 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 		return
 	}
 	etag, err := s.consolidatedViewETag(r, companyID, "logic-gate-view:"+logicGateID, store.EntityTypeLogicGate, logicGateID, actorUserID)
-	includeWork := strings.TrimSpace(r.URL.Query().Get("include_work")) == "1"
-	if err == nil && includeWork {
-		var workETag string
-		workETag, err = s.logicGateWorkETag(r, companyID, logicGateID, actorUserID, flags)
-		etag = strongETagFromString(etag + ":" + workETag)
-	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed_to_read_logic_gate_view_version")
 		return
@@ -104,8 +98,9 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 	if writeNotModifiedWithETag(w, r, etag) {
 		return
 	}
+	includeWork := strings.TrimSpace(r.URL.Query().Get("include_work")) == "1"
 	if includeWork {
-		view, err := s.repo.GetLogicGateView(companyID, logicGateID, actorUserID)
+		view, err := s.repo.GetLogicGateView(companyID, logicGateID)
 		if errors.Is(err, store.ErrInvalid) {
 			writeError(w, http.StatusBadRequest, "invalid_logic_gate_view_request")
 			return
@@ -120,7 +115,7 @@ func (s *Server) handleLogicGateViewV2(w http.ResponseWriter, r *http.Request, l
 			return
 		}
 		view.EffectiveAccessFlags = flags
-		view.Work.Permissions.CanEdit = flags.CanEdit
+		view.Work.Permissions = flags
 		response := logicGateViewResponseWithWork(view)
 		writeJSONWithPrecomputedETag(w, r, http.StatusOK, response, etag)
 		return

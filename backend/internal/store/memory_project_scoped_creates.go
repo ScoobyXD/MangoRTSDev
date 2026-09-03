@@ -19,6 +19,9 @@ type memoryProjectScopedCreateSnapshot struct {
 	folders                       map[string]domain.CompanyExplorerFolder
 	folderItems                   map[string]domain.CompanyExplorerFolderItem
 	defaultFolderSeed             map[string]bool
+	kanbanBoards                  map[string]domain.KanbanBoard
+	kanbanColumns                 map[string][]domain.KanbanColumn
+	kanbanCards                   map[string][]domain.KanbanCard
 	nodeLogicGateAssignments      map[string]domain.NodeLogicGateAssignment
 	RACIMatrixProjectionRows      map[string]memoryRACIMatrixProjectionRow
 	effectiveAccess               map[string]domain.EffectiveResourceAccess
@@ -40,6 +43,9 @@ func (r *MemoryRepo) snapshotProjectScopedCreateLocked() memoryProjectScopedCrea
 		folders:                       cloneMemoryMap(r.folders),
 		folderItems:                   cloneMemoryMap(r.folderItems),
 		defaultFolderSeed:             cloneMemoryMap(r.defaultFolderSeed),
+		kanbanBoards:                  cloneMemoryMap(r.kanbanBoards),
+		kanbanColumns:                 cloneMemorySliceMap(r.kanbanColumns),
+		kanbanCards:                   cloneMemorySliceMap(r.kanbanCards),
 		nodeLogicGateAssignments:      cloneMemoryMap(r.nodeLogicGateAssignments),
 		RACIMatrixProjectionRows:      cloneMemoryMap(r.RACIMatrixProjectionRows),
 		effectiveAccess:               cloneMemoryMap(r.effectiveAccess),
@@ -61,6 +67,9 @@ func (r *MemoryRepo) restoreProjectScopedCreateLocked(snapshot memoryProjectScop
 	r.folders = snapshot.folders
 	r.folderItems = snapshot.folderItems
 	r.defaultFolderSeed = snapshot.defaultFolderSeed
+	r.kanbanBoards = snapshot.kanbanBoards
+	r.kanbanColumns = snapshot.kanbanColumns
+	r.kanbanCards = snapshot.kanbanCards
 	r.nodeLogicGateAssignments = snapshot.nodeLogicGateAssignments
 	r.RACIMatrixProjectionRows = snapshot.RACIMatrixProjectionRows
 	r.effectiveAccess = snapshot.effectiveAccess
@@ -113,6 +122,7 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		information = &item
 	}
 	var assignment *domain.NodeLogicGateAssignment
+	var card *domain.KanbanCard
 	assignmentEvents := make([]domain.DomainEvent, 0)
 	if input.InitialAssignment != nil {
 		assignmentResult, err := r.assignInitialProjectScopedNodeToLogicGateLocked(input, node)
@@ -122,6 +132,8 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		}
 		node = assignmentResult.Node
 		assignment = &assignmentResult.Assignment
+		cardValue := assignmentResult.Card
+		card = &cardValue
 		assignmentEvents = append(assignmentEvents, assignmentResult.Events...)
 	}
 	implicitRelationships := make([]domain.ProjectRelationshipProjection, 0, 1)
@@ -177,6 +189,7 @@ func (r *MemoryRepo) CreateNodeAssociatedWithProject(input ProjectScopedNodeCrea
 		ImplicitRelationships: implicitRelationships,
 		Information:           information,
 		Assignment:            assignment,
+		Card:                  card,
 		Events:                events,
 	}, nil
 }
@@ -186,17 +199,16 @@ func (r *MemoryRepo) CreateLogicGateAssociatedWithProject(input ProjectScopedLog
 }
 func (r *MemoryRepo) assignInitialProjectScopedNodeToLogicGateLocked(input ProjectScopedNodeCreateInput, node domain.Node) (LogicGateNodeAssignmentResult, error) {
 	assignmentInput := LogicGateNodeAssignmentInput{
-		CompanyID:        input.CompanyID,
-		LogicGateID:      input.InitialAssignment.LogicGateID,
-		NodeID:           node.NodeID,
-		Status:           input.InitialAssignment.Status,
-		ProcessStepID:    input.InitialAssignment.ProcessStepID,
-		ProcessStepIDSet: true,
-		Position:         input.InitialAssignment.Position,
-		Priority:         input.InitialAssignment.Priority,
-		PrioritySet:      input.InitialAssignment.Priority != nil,
-		ActorUserID:      input.ActorUserID,
-		IdempotencyKey:   input.IdempotencyKey,
+		CompanyID:      input.CompanyID,
+		LogicGateID:    input.InitialAssignment.LogicGateID,
+		NodeID:         node.NodeID,
+		Status:         input.InitialAssignment.Status,
+		ColumnID:       input.InitialAssignment.ColumnID,
+		Position:       input.InitialAssignment.Position,
+		Priority:       input.InitialAssignment.Priority,
+		PrioritySet:    input.InitialAssignment.Priority != nil,
+		ActorUserID:    input.ActorUserID,
+		IdempotencyKey: input.IdempotencyKey,
 	}
 	if input.InitialAssignment.IsIssue != nil {
 		assignmentInput.IsIssue = *input.InitialAssignment.IsIssue
@@ -206,7 +218,53 @@ func (r *MemoryRepo) assignInitialProjectScopedNodeToLogicGateLocked(input Proje
 	if err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
-	return r.assignNodeToLogicGateStatusLocked(assignmentInput)
+	boardID := LogicGateKanbanBoardID(assignmentInput.LogicGateID)
+	board, ok := r.kanbanBoards[boardKey(assignmentInput.CompanyID, boardID)]
+	if !ok || board.LogicGateID == nil || *board.LogicGateID != assignmentInput.LogicGateID {
+		return LogicGateNodeAssignmentResult{}, ErrNotFound
+	}
+	column, err := resolveLogicGateAssignmentColumn(r.kanbanColumns[boardKey(assignmentInput.CompanyID, boardID)], assignmentInput.ColumnID, assignmentInput.Status)
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	if assignmentInput.PrioritySet {
+		priority, ok := logicGateAssignmentInputPriority(assignmentInput)
+		if !ok {
+			return LogicGateNodeAssignmentResult{}, ErrInvalid
+		}
+		nodeValue := r.nodes[key(assignmentInput.CompanyID, assignmentInput.NodeID)]
+		nodeValue.Priority = cloneIntPointer(priority)
+		r.nodes[key(assignmentInput.CompanyID, assignmentInput.NodeID)] = nodeValue
+	}
+	card, err := r.upsertKanbanCardLocked(KanbanCardMutationInput{
+		CompanyID:  assignmentInput.CompanyID,
+		BoardID:    boardID,
+		ColumnID:   column.ColumnID,
+		NodeID:     assignmentInput.NodeID,
+		NodeTitle:  node.Title,
+		Position:   assignmentInput.Position,
+		IsIssue:    assignmentInput.IsIssue,
+		IsIssueSet: assignmentInput.IsIssueSet,
+	})
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	r.syncRACIResourceKeysLocked(assignmentInput.CompanyID, []resourceRACIKey{{companyID: assignmentInput.CompanyID, resourceType: EntityTypeNode, resourceID: assignmentInput.NodeID}})
+	assignment, ok := r.nodeLogicGateAssignmentLocked(assignmentInput.CompanyID, assignmentInput.NodeID, assignmentInput.LogicGateID)
+	if !ok {
+		return LogicGateNodeAssignmentResult{}, ErrNotFound
+	}
+	result := LogicGateNodeAssignmentResult{
+		Card:       r.withKanbanCardProjectionFieldsLocked(card),
+		Node:       r.withNodeReadModelLocked(r.nodes[key(assignmentInput.CompanyID, assignmentInput.NodeID)]),
+		Assignment: assignment,
+	}
+	events, err := r.appendDomainEventsLocked(logicGateAssignmentSavedWorkspaceEventInputs(result, workItemAssignmentEventMetadataFromValues(input.ActorUserID, input.IdempotencyKey)))
+	if err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
+	result.Events = events
+	return result, nil
 }
 
 func (r *MemoryRepo) addInitialNodeInformationLocked(input NodeInformationInput) (domain.NodeInformation, error) {

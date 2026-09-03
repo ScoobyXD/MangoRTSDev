@@ -28,8 +28,9 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 		t.Fatalf("AssignNodeToLogicGateStatus: %v", err)
 	}
 	assertWorkItemAssignmentSemanticEvent(t, assigned.Events, WorkItemLogicGateAssignmentSavedEventType, companyID, logicGate.LogicGateID, node.NodeID, assigned.Assignment.AssignmentID)
+	assertKanbanEventCardColumn(t, assigned.Events[1], LogicGateWorkStatusInProgress)
 	payload := assigned.Events[0].Payload
-	if _, hasAssignee := payload["assignee_user_id"]; payload["status"] != "In Progress" || payload["priority"] != priority || hasAssignee {
+	if _, hasAssignee := payload["assignee_user_id"]; payload["status"] != "In Progress" || payload["status_key"] != "in progress" || payload["priority"] != priority || hasAssignee {
 		t.Fatalf("saved payload = %+v, want status/priority source state and no assignee", payload)
 	}
 	if assigned.Events[0].ActorUserID == nil || *assigned.Events[0].ActorUserID != actorUserID || payload["actor_user_id"] != actorUserID || payload["idempotency_key"] != "assign-key" {
@@ -42,7 +43,8 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
 	}
 	assertWorkItemAssignmentSemanticEvent(t, moved.Events, WorkItemLogicGateAssignmentMovedEventType, companyID, logicGate.LogicGateID, node.NodeID, moved.Assignment.AssignmentID)
-	if moved.Events[0].Payload["status"] != "Done" {
+	assertKanbanEventCardColumn(t, moved.Events[1], LogicGateWorkStatusDone)
+	if moved.Events[0].Payload["status"] != "Done" || moved.Events[0].Payload["column_id"] != moved.Card.ColumnID {
 		t.Fatalf("moved payload = %+v, want done placement", moved.Events[0].Payload)
 	}
 
@@ -51,7 +53,8 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 		t.Fatalf("SetLogicGateNodeAssignmentIssue: %v", err)
 	}
 	assertWorkItemAssignmentSemanticEvent(t, issue.Events, WorkItemLogicGateIssueToggledEventType, companyID, logicGate.LogicGateID, node.NodeID, issue.Assignment.AssignmentID)
-	if issue.Events[0].Payload["is_issue"] != true || issue.Events[0].Payload["status"] != "Done" {
+	assertKanbanEventCardColumn(t, issue.Events[1], LogicGateWorkStatusDone)
+	if issue.Events[0].Payload["is_issue"] != true || issue.Events[0].Payload["status"] != "Issue" {
 		t.Fatalf("issue payload = %+v, want issue state", issue.Events[0].Payload)
 	}
 
@@ -67,10 +70,10 @@ func TestMemoryWorkItemAssignmentWorkspaceEventsAreAtomicAndSemantic(t *testing.
 	}
 	wantTypes := []string{
 		LogicGateRACIUpdatedEventType,
-		WorkItemLogicGateAssignmentSavedEventType, "node_updated",
-		WorkItemLogicGateAssignmentMovedEventType, "node_updated",
-		WorkItemLogicGateIssueToggledEventType, "node_updated",
-		WorkItemLogicGateAssignmentRemovedEventType, "node_updated",
+		WorkItemLogicGateAssignmentSavedEventType, "kanban_card_upserted", "node_updated",
+		WorkItemLogicGateAssignmentMovedEventType, "kanban_card_moved", "node_updated",
+		WorkItemLogicGateIssueToggledEventType, "kanban_card_moved", "node_updated",
+		WorkItemLogicGateAssignmentRemovedEventType, "kanban_card_deleted", "node_updated",
 	}
 	if gotTypes := domainEventTypes(replay); !reflect.DeepEqual(gotTypes, wantTypes) {
 		t.Fatalf("durable event types = %+v, want %+v", gotTypes, wantTypes)
@@ -109,12 +112,30 @@ func TestMemoryCrossLogicGateMoveEventsIdentifySourceAndDestinationBoards(t *tes
 		t.Fatalf("MoveLogicGateNodeAssignment: %v", err)
 	}
 
-	if assigned.Assignment.LogicGateID == moved.Assignment.LogicGateID {
-		t.Fatal("Expected distinct Processes")
+	sourceBoardID := assigned.Card.BoardID
+	targetBoardID := moved.Card.BoardID
+	if sourceBoardID == targetBoardID {
+		t.Fatalf("cross-gate move board ids are equal: %q", sourceBoardID)
 	}
-	payload := moved.Events[0].Payload
-	if payload["logic_gate_id"] != targetGate.LogicGateID || payload["source_logic_gate_id"] != sourceGate.LogicGateID {
-		t.Fatalf("move routing = %+v", payload)
+	for _, eventIndex := range []int{0, 1} {
+		payload := moved.Events[eventIndex].Payload
+		if payload["board_id"] != targetBoardID || payload["source_board_id"] != sourceBoardID {
+			t.Fatalf("move event[%d] board routing = %+v, want source %q and destination %q", eventIndex, payload, sourceBoardID, targetBoardID)
+		}
+		if payload["source_logic_gate_id"] != sourceGate.LogicGateID {
+			t.Fatalf("move event[%d] source Logic Gate = %+v, want %q", eventIndex, payload, sourceGate.LogicGateID)
+		}
+	}
+}
+
+func assertKanbanEventCardColumn(t *testing.T, event domain.DomainEvent, wantColumnID string) {
+	t.Helper()
+	card, ok := event.Payload["card"].(domain.KanbanCard)
+	if !ok {
+		t.Fatalf("%s card payload = %T, want domain.KanbanCard", event.Type, event.Payload["card"])
+	}
+	if card.ColumnID != wantColumnID {
+		t.Fatalf("%s card column = %q, want %q: %+v", event.Type, card.ColumnID, wantColumnID, card)
 	}
 }
 
@@ -132,7 +153,10 @@ func TestMemoryWorkItemAssignmentEventAppendFailureRollsBackState(t *testing.T) 
 		}
 		assertMemoryDomainEventsUnchanged(t, repo.domainEvents, beforeEvents)
 		assertNoLogicGateAssignmentForStoreTest(t, repo, companyID, node.NodeID)
-
+		cards, err := repo.ListKanbanCards(companyID, LogicGateKanbanBoardID(logicGate.LogicGateID), KanbanCardQuery{Limit: 10})
+		if err != nil || len(cards) != 0 {
+			t.Fatalf("cards after failed assign = %+v err=%v, want none", cards, err)
+		}
 	})
 
 	t.Run("move", func(t *testing.T) {
@@ -149,7 +173,7 @@ func TestMemoryWorkItemAssignmentEventAppendFailureRollsBackState(t *testing.T) 
 		}
 		assertMemoryDomainEventsUnchanged(t, repo.domainEvents, beforeEvents)
 		assignment := assertOneLogicGateAssignmentForStoreTest(t, repo, companyID, node.NodeID)
-		if assignment.Version != assigned.Assignment.Version || nodeWorkStatus(repo.nodes[key(companyID, node.NodeID)]) != nodeWorkStatus(assigned.Node) {
+		if assignment.ColumnID != assigned.Card.ColumnID || assignment.StatusKey != assigned.Assignment.StatusKey {
 			t.Fatalf("assignment after failed move = %+v, want original %+v", assignment, assigned.Assignment)
 		}
 	})
@@ -232,7 +256,7 @@ func setupWorkItemAssignmentEventTest(t *testing.T, suffix string) (*MemoryRepo,
 
 func assertWorkItemAssignmentSemanticEvent(t *testing.T, events []domain.DomainEvent, eventType, companyID, logicGateID, nodeID, assignmentID string) {
 	t.Helper()
-	if len(events) != 2 {
+	if len(events) != 3 {
 		t.Fatalf("events len = %d, want semantic plus compatibility events: %+v", len(events), events)
 	}
 	event := events[0]
@@ -243,12 +267,9 @@ func assertWorkItemAssignmentSemanticEvent(t *testing.T, events []domain.DomainE
 	if payload["company_id"] != companyID || payload["logic_gate_id"] != logicGateID || payload["node_id"] != nodeID || payload["assignment_id"] != assignmentID {
 		t.Fatalf("semantic payload identifiers = %+v", payload)
 	}
-	for _, field := range []string{"compatibility_board_id", "compatibility_card_id", "board_id", "card_id", "column_id", "status_key"} {
-		if _, exists := payload[field]; exists {
-			t.Fatalf("Obsolete event field %s", field)
-		}
+	if payload["compatibility_board_id"] == "" || payload["compatibility_card_id"] == "" || payload["board_id"] == "" || payload["card_id"] == "" {
+		t.Fatalf("semantic payload compatibility ids = %+v", payload)
 	}
-
 }
 
 func assertAssignmentResponseContractHiddenFields(t *testing.T, result LogicGateNodeAssignmentResult) {
@@ -261,13 +282,13 @@ func assertAssignmentResponseContractHiddenFields(t *testing.T, result LogicGate
 	if err := json.Unmarshal(body, &fields); err != nil {
 		t.Fatalf("unmarshal assignment result: %v", err)
 	}
-	if _, ok := fields["assignment"]; !ok {
-		t.Fatalf("assignment response fields = %+v, want assignment", fields)
+	if _, ok := fields["card"]; !ok {
+		t.Fatalf("assignment response fields = %+v, want card", fields)
 	}
 	if _, ok := fields["node"]; !ok {
 		t.Fatalf("assignment response fields = %+v, want node", fields)
 	}
-	if _, ok := fields["card"]; ok {
+	if _, ok := fields["assignment"]; ok {
 		t.Fatalf("assignment response leaked hidden assignment field: %s", string(body))
 	}
 	if _, ok := fields["events"]; ok {

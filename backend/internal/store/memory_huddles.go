@@ -77,9 +77,9 @@ func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID st
 	}
 	r.deleteMemoryHuddleRelationshipsForLogicGateLocked(companyID, logicGateID)
 	r.deleteMemoryHuddlePoliciesLocked(companyID, EntityTypeLogicGate, logicGateID)
-	for _, step := range r.processSteps {
-		if step.CompanyID == companyID && step.LogicGateID == logicGateID {
-			r.deleteProcessStepLocked(companyID, step.ProcessStepID)
+	for k, board := range r.kanbanBoards {
+		if board.CompanyID == companyID && board.LogicGateID != nil && *board.LogicGateID == logicGateID {
+			delete(r.kanbanBoards, k)
 		}
 	}
 	return huddle, nil

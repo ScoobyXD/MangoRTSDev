@@ -1681,7 +1681,7 @@ func TestCompanyExplorerBatchDeleteTargetsRemovesMoreThanFolderItemBatchLimit(t 
 	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("Unmarshal response: %v", err)
 	}
-	expectedDeletedTargets := count // each Process is one exact resource.
+	expectedDeletedTargets := count * 2 // each Logic Gate delete also deletes its responsible kanban board.
 	if len(response.Targets) != expectedDeletedTargets {
 		t.Fatalf("deleted targets = %d, want %d", len(response.Targets), expectedDeletedTargets)
 	}

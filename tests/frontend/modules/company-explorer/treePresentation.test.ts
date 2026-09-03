@@ -105,6 +105,7 @@ run("tree rows render a blank root when the workspace is empty", () => {
     nodes: [],
     logicGates: [],
     projects: [],
+    kanbanBoards: [],
     folders: systemFolders,
     folderItems: [],
     rootRowOrder: {},
@@ -118,6 +119,7 @@ run("tree rows ignore source nodes in the main Company Explorer", () => {
     nodes: [{ company_id: "c", node_id: "node-a", name: "Alpha", created_timestamp: "1" }],
     logicGates: [],
     projects: [],
+    kanbanBoards: [],
     folders: systemFolders,
     folderItems: [],
     rootRowOrder: {},
@@ -522,6 +524,7 @@ run("tree rows ignore stale node folder items", () => {
     ],
     logicGates: [],
     projects: [],
+    kanbanBoards: [],
     folders: systemFolders,
     folderItems: [{ company_id: "c", folder_id: "logic-root", item_type: "node", item_id: "future", position: 1000, created_timestamp: "5", updated_timestamp: "5" }],
     rootRowOrder: {},
@@ -538,6 +541,7 @@ run("root folders from different domains can be locally ordered together", () =>
     nodes: [],
     logicGates: [],
     projects: [],
+    kanbanBoards: [],
     folders: [
       ...systemFolders,
       { company_id: "c", folder_id: "node-root", folder_kind: "node", name: "Node Root", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
@@ -592,6 +596,7 @@ run("scoped explorer rows render children under a named logic-gate root", () => 
       { company_id: "c", logic_gate_id: "gate-b", node_id: "gate-b", header: "Exec review", title: "Exec review", created_timestamp: "5" },
     ],
     projects: [],
+    kanbanBoards: [],
     folders,
     folderItems: [
       { company_id: "c", folder_id: "function-child", item_type: "logic_gate", item_id: "gate-a", position: 1000, created_timestamp: "6", updated_timestamp: "6" },
@@ -620,6 +625,7 @@ run("raw scoped tree rows keep custom folders under default-named parents", () =
       { company_id: "c", logic_gate_id: "gate-b", node_id: "gate-b", header: "Gate B", title: "Gate B", created_timestamp: "5" },
     ],
     projects: [],
+    kanbanBoards: [],
     folders,
     folderItems: [
       { company_id: "c", folder_id: "custom-a", item_type: "logic_gate", item_id: "gate-a", position: 1000, created_timestamp: "6", updated_timestamp: "6" },
@@ -645,6 +651,7 @@ run("custom logic gate rows stay leaves when expanded", () => {
       { company_id: "c", logic_gate_id: "gate-a", node_id: "gate-a", header: "Gate A", title: "Gate A", created_timestamp: "4" },
     ],
     projects: [],
+    kanbanBoards: [],
     folders: [
       ...systemFolders,
       { company_id: "c", folder_id: "custom", folder_kind: "logic_gate" as const, name: "MangoRTS", position: 1000, created_timestamp: "1", updated_timestamp: "1" },
@@ -709,6 +716,7 @@ run("rename targets only resolve for concrete folders and entities", () => {
   assert.equal(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node", folderID: "folder-1" }), null);
   assert.equal(resolveExplorerRenameTarget({ kind: "node", nodeID: "node-1" }), null);
   assert.deepEqual(resolveExplorerRenameTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
+  assert.equal(resolveExplorerRenameTarget({ kind: "kanban", kanbanBoardID: "board-1" }), null);
   assert.equal(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node" }), null);
   assert.equal(resolveExplorerRenameTarget({ kind: "folder", folderKind: "node", folderID: "system", systemKey: "history" }), null);
 });
@@ -717,6 +725,7 @@ run("delete targets only resolve for concrete folders and entities", () => {
   assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node", folderID: "folder-1" }), null);
   assert.equal(resolveExplorerDeleteTarget({ kind: "node", nodeID: "node-1" }), null);
   assert.deepEqual(resolveExplorerDeleteTarget({ kind: "logic_gate", logicGateID: "gate-1" }), { kind: "logic_gate", id: "gate-1" });
+  assert.deepEqual(resolveExplorerDeleteTarget({ kind: "kanban", kanbanBoardID: "board-1" }), { kind: "kanban", id: "board-1" });
   assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node" }), null);
   assert.equal(resolveExplorerDeleteTarget({ kind: "folder", folderKind: "node", folderID: "system", systemKey: "active_nodes" }), null);
 });
@@ -760,6 +769,22 @@ run("drop targets resolve item rows to their containing folder", () => {
       },
     ),
     { folderID: "gate-folder", folderKind: "logic_gate", treeID: "workspace-folder-gate-folder" },
+  );
+
+  assert.equal(
+    resolveExplorerDropTarget(
+      { kind: "node", folderKind: "node", folderID: "node-folder", nodeID: "node-1" },
+      { kind: "kanban", itemType: "kanban", itemID: "board-1" },
+    ),
+    null,
+  );
+
+  assert.equal(
+    resolveExplorerDropTarget(
+      { kind: "logic_gate", folderKind: "logic_gate", folderID: "gate-folder", logicGateID: "gate-1" },
+      { kind: "kanban", itemType: "kanban", itemID: "board-1" },
+    ),
+    null,
   );
 });
 
@@ -885,6 +910,7 @@ run("published selection follows the active tree row during domain switches", ()
     selectedTreeID: "node-node-a",
     selectedNodeID: "node-a",
     selectedLogicGateID: "stale-gate",
+    selectedKanbanBoardID: "",
     selectedFolderID: "",
     selectedFolderKind: "node",
   });
@@ -901,6 +927,7 @@ run("published folder selection keeps the matching entity domain", () => {
     selectedTreeID: "workspace-folder-logic",
     selectedNodeID: "",
     selectedLogicGateID: "",
+    selectedKanbanBoardID: "",
     selectedFolderID: "logic",
     selectedFolderKind: "logic_gate",
   });

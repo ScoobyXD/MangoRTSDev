@@ -15,7 +15,7 @@ export type ExplorerTreeNode = {
   id: string;
   label: string;
   depth: number;
-  kind: "folder" | "node" | "logic_gate" | "project";
+  kind: "folder" | "node" | "logic_gate" | "project" | "kanban";
   entityID?: string;
   entityType?: CompanyExplorerV2EntityType;
   edgeID?: string;
@@ -24,6 +24,7 @@ export type ExplorerTreeNode = {
   nodeID?: string;
   logicGateID?: string;
   projectID?: string;
+  kanbanBoardID?: string;
   folderID?: string;
   parentFolderID?: string;
   folderKind?: CompanyExplorerFolderKind;

@@ -57,20 +57,20 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 		information = &item
 	}
 	var assignment *domain.NodeLogicGateAssignment
+	var card *domain.KanbanCard
 	assignmentEvents := make([]domain.DomainEvent, 0)
 	if input.InitialAssignment != nil {
 		assignmentInput := LogicGateNodeAssignmentInput{
-			CompanyID:        input.CompanyID,
-			LogicGateID:      input.InitialAssignment.LogicGateID,
-			NodeID:           node.NodeID,
-			Status:           input.InitialAssignment.Status,
-			ProcessStepID:    input.InitialAssignment.ProcessStepID,
-			ProcessStepIDSet: true,
-			Position:         input.InitialAssignment.Position,
-			Priority:         input.InitialAssignment.Priority,
-			PrioritySet:      input.InitialAssignment.Priority != nil,
-			ActorUserID:      input.ActorUserID,
-			IdempotencyKey:   input.IdempotencyKey,
+			CompanyID:      input.CompanyID,
+			LogicGateID:    input.InitialAssignment.LogicGateID,
+			NodeID:         node.NodeID,
+			Status:         input.InitialAssignment.Status,
+			ColumnID:       input.InitialAssignment.ColumnID,
+			Position:       input.InitialAssignment.Position,
+			Priority:       input.InitialAssignment.Priority,
+			PrioritySet:    input.InitialAssignment.Priority != nil,
+			ActorUserID:    input.ActorUserID,
+			IdempotencyKey: input.IdempotencyKey,
 		}
 		if input.InitialAssignment.IsIssue != nil {
 			assignmentInput.IsIssue = *input.InitialAssignment.IsIssue
@@ -86,6 +86,8 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 		}
 		node = assignmentResult.Node
 		assignment = &assignmentResult.Assignment
+		cardValue := assignmentResult.Card
+		card = &cardValue
 		assignmentEvents = append(assignmentEvents, assignmentResult.Events...)
 	}
 	implicitRelationships := make([]domain.ProjectRelationshipProjection, 0, 1)
@@ -151,6 +153,7 @@ func (r *PostgresRepo) createNodeAssociatedWithProjectTx(ctx context.Context, tx
 		ImplicitRelationships: implicitRelationships,
 		Information:           information,
 		Assignment:            assignment,
+		Card:                  card,
 		Events:                events,
 	}, nil
 }

@@ -51,12 +51,17 @@ import {
 import { NOTIFICATION_TYPE_MENTION, NOTIFICATION_TYPE_URGENT_MENTION, type NotificationSummary, type UpdateFeedFilter } from "../modules/notifications/notificationsApi";
 import { useNotificationSummary } from "../modules/notifications/useNotificationSummary";
 import { requestUpdatesFilter } from "../modules/notifications/updatesFilterRequests";
+import { assignNodeToLogicGateStatus } from "../modules/kanban/kanbanApi";
 import {
-  assignNodeToLogicGateStatus,
-  getProcessWorkSingleFlight,
-  invalidateLogicGateArenaViewCache,
-  PROCESS_WORK_UPDATED_EVENT,
-} from "../modules/kanban/kanbanApi";
+  getKanbanBoardContentsSingleFlight,
+  invalidateKanbanBoardContentsCache,
+} from "../modules/kanban/KanbanBoardContentStore";
+import {
+  EVENT_KANBAN_BOARD_CONTENTS_UPDATED,
+  logicGateIDFromKanbanBoardID,
+  logicGateKanbanBoardID,
+  type KanbanBoardContentsUpdatedDetail,
+} from "../modules/kanban/shared";
 import { subscribeRealtimeScope } from "../modules/realtime/realtimeWebSocket";
 import { UnifiedNodeShell, type UnifiedNodeShellAction } from "../modules/editor/UnifiedNodeShell";
 import { INBOX_PRIORITIES } from "../pages/home/homeConstants";
@@ -335,17 +340,17 @@ export function AppSidebar({
   const sharedCreateNameInputRef = useRef<HTMLInputElement | null>(null);
   const sharedEmailInputRef = useRef<HTMLInputElement | null>(null);
   const skipRenameBlurRef = useRef(false);
-  const pinnedProcessSubscriptionByLogicGateIDRef = useRef(new Map<string, () => void>());
+  const pinnedBoardSubscriptionByLogicGateIDRef = useRef(new Map<string, () => void>());
   const trackedPinnedLogicGateIDsRef = useRef(new Set<string>());
   const pinnedCountRequestVersionByLogicGateIDRef = useRef(new Map<string, number>());
-  const refreshPinnedLogicGateCountsRef = useRef<(logicGateID: string) => void>(() => undefined);
+  const refreshPinnedLogicGateCountsRef = useRef<(logicGateID: string, boardID?: string) => void>(() => undefined);
 
-  refreshPinnedLogicGateCountsRef.current = (logicGateID: string) => {
+  refreshPinnedLogicGateCountsRef.current = (logicGateID: string, boardID = logicGateKanbanBoardID(logicGateID)) => {
     if (!trackedPinnedLogicGateIDsRef.current.has(logicGateID)) return;
     const version = (pinnedCountRequestVersionByLogicGateIDRef.current.get(logicGateID) ?? 0) + 1;
     pinnedCountRequestVersionByLogicGateIDRef.current.set(logicGateID, version);
-    invalidateLogicGateArenaViewCache(apiBase, companyID, logicGateID);
-    void getProcessWorkSingleFlight(apiBase, companyID, logicGateID).then(
+    invalidateKanbanBoardContentsCache(apiBase, companyID, boardID);
+    void getKanbanBoardContentsSingleFlight(apiBase, companyID, boardID, Number.MAX_SAFE_INTEGER).then(
       (contents) => {
         if (!trackedPinnedLogicGateIDsRef.current.has(logicGateID)
           || pinnedCountRequestVersionByLogicGateIDRef.current.get(logicGateID) !== version) return;
@@ -366,17 +371,18 @@ export function AppSidebar({
   };
 
   useEffect(() => {
-    const onLocalProcessChange = (event: Event) => {
-      const detail = (event as CustomEvent<{ companyID: string; logicGateID: string }>).detail;
+    const onLocalBoardChange = (event: Event) => {
+      const detail = (event as CustomEvent<KanbanBoardContentsUpdatedDetail>).detail;
       if (detail?.companyID && detail.companyID !== companyID) return;
-      const logicGateID = detail?.logicGateID?.trim();
-      if (logicGateID) refreshPinnedLogicGateCountsRef.current(logicGateID);
+      const boardID = detail?.boardID?.trim() ?? "";
+      const logicGateID = detail?.logicGateID?.trim() || logicGateIDFromKanbanBoardID(boardID);
+      if (logicGateID) refreshPinnedLogicGateCountsRef.current(logicGateID, boardID || logicGateKanbanBoardID(logicGateID));
     };
-    window.addEventListener(PROCESS_WORK_UPDATED_EVENT, onLocalProcessChange);
+    window.addEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalBoardChange);
     return () => {
-      window.removeEventListener(PROCESS_WORK_UPDATED_EVENT, onLocalProcessChange);
-      for (const unsubscribe of pinnedProcessSubscriptionByLogicGateIDRef.current.values()) unsubscribe();
-      pinnedProcessSubscriptionByLogicGateIDRef.current.clear();
+      window.removeEventListener(EVENT_KANBAN_BOARD_CONTENTS_UPDATED, onLocalBoardChange);
+      for (const unsubscribe of pinnedBoardSubscriptionByLogicGateIDRef.current.values()) unsubscribe();
+      pinnedBoardSubscriptionByLogicGateIDRef.current.clear();
       trackedPinnedLogicGateIDsRef.current.clear();
       pinnedCountRequestVersionByLogicGateIDRef.current.clear();
     };
@@ -385,10 +391,10 @@ export function AppSidebar({
   useEffect(() => {
     const nextLogicGateIDs = new Set(pinnedLogicGateIDs);
     trackedPinnedLogicGateIDsRef.current = nextLogicGateIDs;
-    for (const [logicGateID, unsubscribe] of pinnedProcessSubscriptionByLogicGateIDRef.current) {
+    for (const [logicGateID, unsubscribe] of pinnedBoardSubscriptionByLogicGateIDRef.current) {
       if (nextLogicGateIDs.has(logicGateID)) continue;
       unsubscribe();
-      pinnedProcessSubscriptionByLogicGateIDRef.current.delete(logicGateID);
+      pinnedBoardSubscriptionByLogicGateIDRef.current.delete(logicGateID);
       pinnedCountRequestVersionByLogicGateIDRef.current.delete(logicGateID);
     }
     setLogicGateStatusCountsByID((current) => Object.fromEntries(
@@ -396,20 +402,21 @@ export function AppSidebar({
     ));
     if (!companyID.trim()) return;
     for (const logicGateID of pinnedLogicGateIDs) {
-      if (pinnedProcessSubscriptionByLogicGateIDRef.current.has(logicGateID)) continue;
+      if (pinnedBoardSubscriptionByLogicGateIDRef.current.has(logicGateID)) continue;
+      const boardID = logicGateKanbanBoardID(logicGateID);
       let acceptedOnce = false;
-      const unsubscribe = subscribeRealtimeScope(apiBase, companyID, `process:${logicGateID}`, {
+      const unsubscribe = subscribeRealtimeScope(apiBase, companyID, `board:${boardID}`, {
         onAccepted() {
-          if (acceptedOnce) refreshPinnedLogicGateCountsRef.current(logicGateID);
+          if (acceptedOnce) refreshPinnedLogicGateCountsRef.current(logicGateID, boardID);
           acceptedOnce = true;
         },
-        onProcessWorkChanged(message) {
-          if (message.company_id !== companyID || message.logic_gate_id !== logicGateID) return;
-          refreshPinnedLogicGateCountsRef.current(logicGateID);
+        onKanbanChanged(message) {
+          if (message.company_id !== companyID || message.board_id !== boardID) return;
+          refreshPinnedLogicGateCountsRef.current(logicGateID, boardID);
         },
       });
-      pinnedProcessSubscriptionByLogicGateIDRef.current.set(logicGateID, unsubscribe);
-      refreshPinnedLogicGateCountsRef.current(logicGateID);
+      pinnedBoardSubscriptionByLogicGateIDRef.current.set(logicGateID, unsubscribe);
+      refreshPinnedLogicGateCountsRef.current(logicGateID, boardID);
     }
   }, [apiBase, companyID, pinnedLogicGateIDKey]);
   useEffect(() => subscribeCommittedEntityTitleUpdates((update) => {
@@ -549,6 +556,11 @@ export function AppSidebar({
         accountEmail: menu.accountEmail,
         logicGateID: conversion?.logicGateID || (target.mode === "existing_logic_gate" ? target.logicGateID : undefined),
         nodeIDs: conversion?.result.nodes?.map((node) => node.node_id) ?? [],
+        boardIDs: [
+          conversion?.boardID ?? "",
+          ...(conversion?.result.cards ?? []).map((card) => card.board_id),
+        ],
+        cardIDs: (conversion?.result.cards ?? []).map((card) => card.card_id),
         unstarredMessageIDs: conversion?.unstarredMessageIDs ?? [],
       });
       setExplorerDropSuccess(convertedMessageIDs.length === 1 ? "Email added to Process." : `${convertedMessageIDs.length} emails added to Process.`);
@@ -626,6 +638,11 @@ export function AppSidebar({
         accountEmail: menu.action.accountEmail,
         logicGateID: conversion?.logicGateID || (menu.action.kind === "triage_to_logic_gate" ? menu.action.logicGateID : undefined),
         nodeIDs: conversion?.result.nodes?.map((node) => node.node_id) ?? [],
+        boardIDs: [
+          conversion?.boardID ?? "",
+          ...(conversion?.result.cards ?? []).map((card) => card.board_id),
+        ],
+        cardIDs: (conversion?.result.cards ?? []).map((card) => card.card_id),
         unstarredMessageIDs: conversion?.unstarredMessageIDs ?? [],
       });
       setPinDropSuccess(convertedMessageIDs.length === 1 ? `Email added to ${menu.action.pin.name}.` : `${convertedMessageIDs.length} emails added to ${menu.action.pin.name}.`);

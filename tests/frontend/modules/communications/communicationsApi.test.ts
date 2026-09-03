@@ -9,8 +9,6 @@ import {
   createCommunicationsSharedInbox,
   createMessageQuery,
   convertTriageMessagesToExplorerTarget,
-  revertEmailNodeToMyTriage,
-  transferEmailNodeToNode,
   deleteCommunicationsSharedInbox,
   downloadEmailAttachment,
   deleteEmailDraft,
@@ -436,7 +434,7 @@ test("email draft and signature writes downgrade only Entity reference chips", a
   }
 });
 
-test("triage conversion payload can target a specific Process step with independent status", async () => {
+test("triage conversion payload can target a specific Kanban column", async () => {
   invalidateCommunicationsCache();
   const calls: Array<{ path: string; method: string; body: unknown }> = [];
   const originalFetch = globalThis.fetch;
@@ -448,7 +446,8 @@ test("triage conversion payload can target a specific Process step with independ
     });
     return jsonResponse({
       target: { mode: "existing_logic_gate", logic_gate_id: "gate-1" },
-      assignments: [],
+      board: { company_id: "company-1", board_id: "logic-gate:gate-1", logic_gate_id: "gate-1", title: "Gate", position: 1000, created_timestamp: "2026-05-20T00:00:00.000Z", updated_timestamp: "2026-05-20T00:00:00.000Z" },
+      cards: [],
       nodes: [],
       deleted_message_ids: ["msg-1"],
     }, 201);
@@ -460,7 +459,7 @@ test("triage conversion payload can target a specific Process step with independ
       accountEmail: "ignored@example.test",
       target: { mode: "existing_logic_gate", logicGateID: "gate-1" },
       messageIDs: [" msg-1 "],
-      processStepID: " step-1 ", status: "Review",
+      columnID: " review ",
     });
     assert.deepEqual(calls, [{
       path: "/v1/communications/triage/convert",
@@ -470,7 +469,7 @@ test("triage conversion payload can target a specific Process step with independ
         shared_inbox_id: "shared-1",
         target: { mode: "existing_logic_gate", logic_gate_id: "gate-1" },
         message_ids: ["msg-1"],
-        process_step_id: "step-1", status: "Review",
+        column_id: "review",
       },
     }]);
   } finally {
@@ -1894,7 +1893,8 @@ test("personal triage conversion selects the exact normalized account", async ()
     });
     return jsonResponse({
       target: { mode: "existing_logic_gate", logic_gate_id: "gate-1" },
-      assignments: [],
+      board: { company_id: "company-1", board_id: "logic-gate:gate-1", logic_gate_id: "gate-1", title: "Gate", position: 1000, created_timestamp: "2026-05-20T00:00:00.000Z", updated_timestamp: "2026-05-20T00:00:00.000Z" },
+      cards: [],
       nodes: [],
       deleted_message_ids: ["msg-1"],
     }, 201);
@@ -2297,17 +2297,3 @@ function installSessionStorageStub(): () => void {
     else delete (globalThis as { sessionStorage?: Storage }).sessionStorage;
   };
 }
-
-test("email work transfer and revert use exact Node IDs", async () => {
-  const original = globalThis.fetch;
-  const requests: Array<{path:string;body:unknown}> = [];
-  globalThis.fetch = async (input, init) => { requests.push({path:String(input),body:JSON.parse(String(init?.body))}); return jsonResponse({deleted_node_id:"source-node",target_node_id:"target-node",triage_item:{}}); };
-  try {
-    await transferEmailNodeToNode({companyID:"company-1",sourceNodeID:"source-node",targetNodeID:"target-node"});
-    await revertEmailNodeToMyTriage({companyID:"company-1",nodeID:"source-node"});
-    assert.deepEqual(requests, [
-      {path:"/v1/communications/email-nodes/transfer",body:{company_id:"company-1",source_node_id:"source-node",target_node_id:"target-node"}},
-      {path:"/v1/communications/triage/revert-node",body:{company_id:"company-1",node_id:"source-node"}},
-    ]);
-  } finally {globalThis.fetch = original;invalidateCommunicationsCache();}
-});
