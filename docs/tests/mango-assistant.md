@@ -19,6 +19,8 @@
 17. Only completed nonempty replies enter later conversation history; interrupted or failed turns must not be silently resubmitted.
 18. Moving a Node to a Process uses the canonical Process work command and checks current access to the Node, its stored source Process, and the destination Process.
 19. A move with null status preserves the Node's current status and Issue flag; moving to another Process clears the previous step assignment.
+20. Mango chat floats above the app canvas and must not reduce the canvas dimensions.
+21. Expanded chat has one centered circular down-arrow control that collapses the entire chat surface to one centered circular up-arrow control; focus follows the replacement control, and expanding restores the same in-memory session.
 
 ## Process story
 

@@ -755,7 +755,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
 
   const canvasW = Math.max(1, viewSize.w - appSidebarWidth - APP_RESIZE_HANDLE_W - PAGE_EDGE_GAP * 2);
   const assistantBottomInset = dockTabs.length > 0 ? 62 : PAGE_EDGE_GAP;
-  const canvasH = Math.max(1, viewSize.h - PAGE_EDGE_GAP - assistantBottomInset - 84);
+  const canvasH = Math.max(1, viewSize.h - PAGE_EDGE_GAP * 2);
   const taskbarLeftInset = PAGE_EDGE_GAP + appSidebarWidth + APP_RESIZE_HANDLE_W;
   const gridCols = Math.max(1, Math.round(canvasW / CELL_SIZE));
   const gridRows = Math.max(1, Math.round(canvasH / CELL_SIZE));
