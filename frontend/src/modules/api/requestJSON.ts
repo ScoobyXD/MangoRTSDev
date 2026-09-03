@@ -23,6 +23,7 @@ export type RequestJSONInit = RequestInit & {
   throwOnHTTPError?: boolean;
   allowDuringRealtimeDegraded?: boolean;
   editorTraceContext?: EditorTraceContext | null;
+  consumeResponse?: (response: Response) => Promise<unknown>;
 };
 
 export type BoundRequestJSON = <T>(path: string, init?: RequestJSONInit) => Promise<T>;
@@ -73,6 +74,7 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
   const {
     allowDuringRealtimeDegraded = false,
     editorTraceContext = null,
+    consumeResponse,
     auth = true,
     fetchImpl = globalThis.fetch.bind(globalThis),
     getAccessToken = getApiAccessToken,
@@ -165,7 +167,7 @@ export async function requestJSONWithMeta<T>(apiBase: string, path: string, init
     }
     const emptyBody = notModified || response.status === 204;
     return {
-      body: emptyBody ? undefined : await traceEditorAsyncFunction(editorTraceContext, "request.response_json", "network.parse", () => response.json()) as T,
+      body: emptyBody ? undefined : await traceEditorAsyncFunction(editorTraceContext, consumeResponse ? "request.response_body" : "request.response_json", "network.parse", () => consumeResponse ? consumeResponse(response) : response.json()) as T,
       status: response.status,
       statusText: response.statusText,
       ok: true,

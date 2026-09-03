@@ -77,6 +77,10 @@ func main() {
 		log.Fatal(err)
 	}
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
+		Assistant: httpapi.AssistantConfig{
+			APIKey: strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
+			Model:  strings.TrimSpace(os.Getenv("MANGORTS_ASSISTANT_MODEL")),
+		},
 		AuthValidator:         authValidator,
 		TestAuthHeaderEnabled: testAuthHeaderEnabled,
 		CognitoAdmin:          cognitoAdmin,
