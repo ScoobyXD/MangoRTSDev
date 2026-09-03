@@ -39,6 +39,7 @@ locals {
   effective_origin_verify_secret = var.origin_verify_secret
   origin_verify_header_name      = "x-mangorts-origin-verify"
   origin_verify_header_value     = sha256("${local.name_prefix}:${local.effective_origin_verify_secret}")
+  assistant_enabled              = var.environment == "dev" && trimspace(var.assistant_model) != "" && trimspace(var.openai_api_key_secret_arn) != ""
   nylas_enabled                  = trimspace(var.nylas_client_id) != "" && trimspace(var.nylas_api_key_secret_arn) != "" && trimspace(var.nylas_state_secret_arn) != ""
   nylas_worker_enabled           = trimspace(var.nylas_client_id) != "" && trimspace(var.nylas_api_key_secret_arn) != ""
   nylas_redirect_uri             = "https://${local.api_domain}/nylas/oauth/callback"
