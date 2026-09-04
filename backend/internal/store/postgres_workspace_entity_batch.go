@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"miraeopus/backend/internal/domain"
 	"strings"
 )
@@ -54,19 +53,11 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	if syncFolderItems {
 		stopFolderSetup := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.folder_setup")
 		if input.FolderID != "" {
-			if err := tx.QueryRowContext(ctx,
-				`select 'folder'::text
-				 from company_explorer_folders
-				 where company_id=$1::uuid and folder_id=$2::uuid`,
-				input.CompanyID, input.FolderID,
-			).Scan(&targetFolderKind); err != nil {
-				if errors.Is(err, sql.ErrNoRows) {
-					stopFolderSetup()
-					return WorkspaceEntityBatchResult{}, ErrNotFound
-				}
+			if err := lockPostgresCompanyExplorerResourceEditTx(ctx, tx, input.CompanyID, input.CreatorUserID, EntityTypeCompanyExplorerFolder, input.FolderID); err != nil {
 				stopFolderSetup()
 				return WorkspaceEntityBatchResult{}, err
 			}
+			targetFolderKind = "folder"
 		}
 		stopFolderSetup()
 	}

@@ -1254,6 +1254,14 @@ func TestWorkspaceEntityBatchCreatesLogicGateWithFolder(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	server := NewServer(repo)
 	companyID := "company-batch-logic-test"
+	repo.EnsureCompany(companyID, "Batch Logic Company")
+	creator, err := repo.UpsertAuthUser("batch-folder-creator", "folder-creator@example.com", "Folder Creator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(creator.CognitoSubject, companyID, "company_user"); err != nil {
+		t.Fatal(err)
+	}
 	folder, err := repo.CreateCompanyExplorerFolder(companyID, "", "logic_gate", "Logic folder")
 	if err != nil {
 		t.Fatalf("CreateCompanyExplorerFolder failed: %v", err)
@@ -1265,6 +1273,7 @@ func TestWorkspaceEntityBatchCreatesLogicGateWithFolder(t *testing.T) {
 		"items":[{"client_id":"new-gate","title":"New gate","position":4242}]
 	}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/workspace/entity-batches", bytes.NewReader(body))
+	req = requestWithActorForTest(req, creator, companyID)
 	rec := httptest.NewRecorder()
 	server.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusCreated {

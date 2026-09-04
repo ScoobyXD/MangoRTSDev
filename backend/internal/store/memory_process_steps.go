@@ -127,6 +127,7 @@ func (r *MemoryRepo) deleteProcessStepLocked(companyID, stepID string) {
 			delete(r.resourceOperationalRelationships, edgeKey)
 		}
 	}
+	r.pruneProcessStepMapsLocked(companyID)
 }
 
 func (r *MemoryRepo) DeleteProcessStep(input ProcessStepDeleteInput) (ProcessStepMutationResult, error) {
@@ -177,5 +178,6 @@ func (r *MemoryRepo) DeleteProcessStepRelationship(input ProcessStepRelationship
 		return ProcessStepMutationResult{}, err
 	}
 	delete(r.resourceOperationalRelationships, key(input.CompanyID, input.RelationshipID))
+	r.pruneProcessStepMapsLocked(input.CompanyID)
 	return ProcessStepMutationResult{Events: events}, nil
 }

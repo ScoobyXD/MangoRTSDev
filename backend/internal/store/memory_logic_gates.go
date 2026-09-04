@@ -588,6 +588,7 @@ func (r *MemoryRepo) deleteLogicGateLocked(companyID, logicGateID string, preser
 	}
 	r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeProcess, logicGateID)
 	delete(r.logicGates, k)
+	delete(r.processStepMaps, k)
 	delete(r.logicGateInfo, k)
 	delete(r.logicGateText, k)
 	delete(r.logicGateRACI, k)

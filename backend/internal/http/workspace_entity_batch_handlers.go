@@ -73,6 +73,10 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 	}
 	stop()
 	stop = timings.observeAccounted("request.access_check")
+	if input.EntityKind == store.EntityTypeLogicGate && input.FolderID != "" && !s.requireEntityEdit(w, r, input.CompanyID, store.EntityTypeCompanyExplorerFolder, input.FolderID, "folder_not_found") {
+		stop()
+		return
+	}
 	for _, relationship := range input.Relationships {
 		entityType := store.EntityTypeNode
 		notFoundCode := "node_not_found"

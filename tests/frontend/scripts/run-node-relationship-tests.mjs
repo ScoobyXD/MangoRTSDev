@@ -83,6 +83,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processWorkStore.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processWork.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processStepMap.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/nodeEditorOverlayViewMode.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/overlayClamp.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/editor/editorTabs.test.js"),
@@ -120,6 +121,19 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/logic-gates/qdRatingsApi.test.js"),
 ];
 const componentTests = [
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/kanban/processWorkMapIntegration.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processWorkMapIntegration.test.js"),
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/kanban/processStepMapInteractions.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processStepMapInteractions.test.cjs"),
+    bundleDependencies: true,
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/company-explorer/companyExplorerCreateProcessDialog.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerCreateProcessDialog.test.js"),
+  },
   {
     source: resolve(repoRoot, "tests/frontend/app/appAssistant.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/app/appAssistant.test.js"),

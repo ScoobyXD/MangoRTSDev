@@ -67,6 +67,7 @@ func (r *MemoryRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID st
 	r.deleteProcessMapResourceLocked(companyID, domain.ProcessMapResourceTypeProcess, logicGateID)
 	r.clearEntityResourceFieldsForResourceLocked(companyID, EntityTypeLogicGate, logicGateID)
 	delete(r.logicGates, key(companyID, logicGateID))
+	delete(r.processStepMaps, key(companyID, logicGateID))
 	delete(r.logicGateInfo, key(companyID, logicGateID))
 	delete(r.logicGateText, key(companyID, logicGateID))
 	delete(r.logicGateRACI, key(companyID, logicGateID))

@@ -20,6 +20,8 @@ func (s *Server) handleLogicGateWorkV2Subresource(w http.ResponseWriter, r *http
 	}
 	logicGateID := strings.TrimSpace(parts[0])
 	switch {
+	case len(parts) == 2 && parts[1] == "step-map":
+		s.handleProcessStepMap(w, r, logicGateID)
 	case len(parts) == 2 && parts[1] == "steps":
 		s.handleProcessSteps(w, r, logicGateID, "")
 	case len(parts) == 3 && parts[1] == "steps":

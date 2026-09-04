@@ -467,6 +467,7 @@ var recycleSnapshotTables = map[string]bool{
 	"project_relationship_projection":        true,
 	"node_logic_gate_assignments":            true,
 	"process_steps":                          true,
+	"process_step_map_layouts":               true,
 	"project_management_timeline_items":      true,
 	"project_management_timeline_projection": true,
 	"resource_gvic_settings":                 true,
@@ -489,6 +490,7 @@ var recycleRestoreTableOrder = []string{
 	"process_steps",
 	"scorecards",
 	"resource_operational_relationships",
+	"process_step_map_layouts",
 	"process_map_placements",
 	"process_map_traces",
 	"projects",
@@ -512,6 +514,7 @@ var recycleRestoreTableOrder = []string{
 	"project_textbox_chats",
 	"huddle_explorer_folders",
 	"node_account_assignments",
+	"company_explorer_items",
 	"resource_gvic_settings",
 	"resource_permission_settings",
 	"resource_gvic_assignments",
@@ -525,7 +528,6 @@ var recycleRestoreTableOrder = []string{
 	"project_relationship_projection",
 	"project_management_timeline_items",
 	"project_management_timeline_projection",
-	"company_explorer_items",
 	"huddle_explorer_items",
 }
 
@@ -1047,7 +1049,7 @@ func postgresSnapshotRecyclePayloadWithCleanupScopeTx(ctx context.Context, tx *s
 		}
 	}
 	if len(logicGateIDs) > 0 {
-		for _, tableName := range []string{"logic_gates", "process_steps", "scorecards", "logic_gate_textboxes", "logic_gate_textboxes_history"} {
+		for _, tableName := range []string{"logic_gates", "process_steps", "process_step_map_layouts", "scorecards", "logic_gate_textboxes", "logic_gate_textboxes_history"} {
 			if err := addTable(tableName, `company_id=$1::uuid and logic_gate_id = any(string_to_array($2, ',')::uuid[])`, companyID, logicGateIDCSV); err != nil {
 				return nil, err
 			}
