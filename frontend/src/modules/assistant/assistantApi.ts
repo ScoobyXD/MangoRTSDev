@@ -8,6 +8,7 @@ export const ASSISTANT_DEFAULT_REASONING_EFFORT: AssistantReasoningEffort = "med
 export type AssistantEvent =
   | { type: "text"; text: string }
   | { type: "tool"; name: string; status: "running" | "completed" }
+  | { type: "node"; node_id: string; process_id: string }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -37,12 +38,13 @@ export async function streamAssistantChat(
   reasoningEffort: AssistantReasoningEffort,
   signal: AbortSignal,
   onEvent: (event: AssistantEvent) => void,
+  processID?: string,
 ): Promise<void> {
   const historyError = assistantHistoryError(messages);
   if (historyError) throw new Error(historyError);
   await requestJSON(apiBase, `/v1/assistant/chat?company_id=${encodeURIComponent(companyID)}`, {
     method: "POST",
-    json: { request_id: crypto.randomUUID(), reasoning_effort: reasoningEffort, messages },
+    json: { request_id: crypto.randomUUID(), reasoning_effort: reasoningEffort, messages, ...(processID ? { process_id: processID } : {}) },
     headers: { Accept: "text/event-stream" },
     signal,
     timeoutMs: 95_000,
@@ -87,6 +89,7 @@ function isAssistantEvent(event: unknown): event is AssistantEvent {
   return value.type === "done"
     || value.type === "text" && typeof value.text === "string"
     || value.type === "error" && typeof value.message === "string"
+    || value.type === "node" && typeof value.node_id === "string" && Boolean(value.node_id.trim()) && typeof value.process_id === "string" && Boolean(value.process_id.trim())
     || value.type === "tool" && typeof value.name === "string" && (value.status === "running" || value.status === "completed");
 }
 

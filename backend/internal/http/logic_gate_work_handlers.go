@@ -280,7 +280,7 @@ func (s *Server) handleLogicGateWorkNodeStateV2(w http.ResponseWriter, r *http.R
 	}
 	stop()
 
-	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID, MutationOrigin: store.MutationOriginKanban}
+	input := store.LogicGateNodeAssignmentMoveInput{CompanyID: companyID, LogicGateID: logicGateID, NodeID: nodeID, MutationOrigin: store.MutationOriginKanban, ExpectedNodeWork: assistantExpectedNodeWork(r)}
 	if !s.requireEntityEdit(w, r, companyID, store.EntityTypeNode, nodeID, "node_not_found") || !s.requireLogicGateWorkExistingSourceEditAccess(w, r, companyID, logicGateID, nodeID) {
 		return
 	}
@@ -561,6 +561,10 @@ func (s *Server) requireLogicGateWorkExistingSourceEditAccess(w http.ResponseWri
 }
 
 func writeLogicGateWorkMutationError(w http.ResponseWriter, err error, fallback string) bool {
+	if errors.Is(err, store.ErrVersionConflict) {
+		writeError(w, http.StatusConflict, "logic_gate_work_assignment_changed")
+		return false
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_logic_gate_work_assignment")
 		return false

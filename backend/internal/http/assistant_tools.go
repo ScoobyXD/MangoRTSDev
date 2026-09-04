@@ -76,11 +76,15 @@ func assistantFunction(name, description string, properties map[string]any) resp
 // Validate the flat scalar inputs against the exact schema sent to the model.
 // The ordinary handler remains responsible for all business validation.
 func assistantToolArguments(name, arguments string) (map[string]any, error) {
+	return assistantArgumentsForTools(assistantTools(), name, arguments)
+}
+
+func assistantArgumentsForTools(tools []responses.ToolUnionParam, name, arguments string) (map[string]any, error) {
 	if len(arguments) > 32<<10 {
 		return nil, errors.New("Mango tool arguments are too large.")
 	}
 	var properties map[string]any
-	for _, tool := range assistantTools() {
+	for _, tool := range tools {
 		if tool.OfFunction.Name == name {
 			properties = tool.OfFunction.Parameters["properties"].(map[string]any)
 			break
@@ -151,6 +155,12 @@ func (s *Server) dispatchAssistantTool(r *http.Request, name, arguments string) 
 	if err != nil {
 		return "", err
 	}
+	return s.dispatchAssistantOperation(r, name, args)
+}
+
+// Call only after validating the selected tool's arguments. Process execution
+// supplies its own tracked resource IDs, never IDs chosen by the model.
+func (s *Server) dispatchAssistantOperation(r *http.Request, name string, args map[string]any) (string, error) {
 	if err := r.Context().Err(); err != nil {
 		return "", errors.New("Mango request stopped before the action began.")
 	}
@@ -218,6 +228,12 @@ func (s *Server) dispatchAssistantTool(r *http.Request, name, arguments string) 
 	case "move_node_to_process":
 		method, path, handler = http.MethodPost, "/v2/logic-gates/"+str("process_id")+"/nodes", s.handleLogicGateWorkV2Subresource
 		delete(body, "process_id")
+	case "create_process_node":
+		method, path, handler = http.MethodPost, "/v2/logic-gates/"+str("process_id")+"/nodes", s.handleLogicGateWorkV2Subresource
+		body = map[string]any{"company_id": companyID, "create_node_title": str("name"), "process_step_id": str("process_step_id"), "status": "In Progress"}
+	case "move_process_node_to_step":
+		method, path, handler = http.MethodPut, "/v2/logic-gates/"+str("process_id")+"/nodes/"+str("node_id")+"/state", s.handleLogicGateWorkV2Subresource
+		body = map[string]any{"company_id": companyID, "process_step_id": str("process_step_id")}
 	case "get_textbox", "save_textbox", "delete_textbox":
 		textboxID = str("textbox_id")
 		if name == "save_textbox" && textboxID == "" {

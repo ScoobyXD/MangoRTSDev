@@ -29,6 +29,34 @@ test("an unfinished or malformed stream cannot become a successful reply", async
   }
 });
 
+test("assistant accepts the created Node event and rejects missing resource identities", async () => {
+  const encoder = new TextEncoder();
+  const node = { type: "node", node_id: "node-a", process_id: "process-a" };
+  const events: AssistantEvent[] = [];
+  await consumeAssistantStream(streamResponse([encoder.encode(`data: ${JSON.stringify(node)}\n\ndata: {"type":"done"}\n\n`)]), (event) => events.push(event));
+  assert.deepEqual(events, [node, { type: "done" }]);
+  for (const invalid of [{ type: "node", node_id: "node-a" }, { ...node, node_id: " " }, { ...node, process_id: null }]) {
+    await assert.rejects(consumeAssistantStream(streamResponse([encoder.encode(`data: ${JSON.stringify(invalid)}\n\n`)]), () => undefined));
+  }
+});
+
+test("Process chat sends the exact selected identity without injecting client-side instructions or credentials", async () => {
+  const originalFetch = globalThis.fetch;
+  const messages = [{ role: "user" as const, content: "Please perform #Order review" }];
+  globalThis.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.process_id, "11111111-1111-4111-8111-111111111111");
+    assert.deepEqual(body.messages, messages);
+    assert.deepEqual(Object.keys(body).sort(), ["messages", "process_id", "reasoning_effort", "request_id"]);
+    return streamResponse([new TextEncoder().encode('data: {"type":"done"}\n\n')]);
+  };
+  try {
+    await streamAssistantChat("https://api.example.test", "company-a", messages, "medium", new AbortController().signal, () => undefined, "11111111-1111-4111-8111-111111111111");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("assistant sends a company-scoped request once and never repeats an uncertain write", async () => {
   const originalFetch = globalThis.fetch;
   let requests = 0;

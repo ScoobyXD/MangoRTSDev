@@ -58,16 +58,19 @@ type assistantMessage struct {
 
 type assistantRequest struct {
 	RequestID       string             `json:"request_id"`
+	ProcessID       string             `json:"process_id,omitempty"`
 	ReasoningEffort string             `json:"reasoning_effort"`
 	Messages        []assistantMessage `json:"messages"`
 }
 
 type assistantEvent struct {
-	Type    string `json:"type"`
-	Text    string `json:"text,omitempty"`
-	Name    string `json:"name,omitempty"`
-	Status  string `json:"status,omitempty"`
-	Message string `json:"message,omitempty"`
+	Type      string `json:"type"`
+	Text      string `json:"text,omitempty"`
+	Name      string `json:"name,omitempty"`
+	Status    string `json:"status,omitempty"`
+	Message   string `json:"message,omitempty"`
+	NodeID    string `json:"node_id,omitempty"`
+	ProcessID string `json:"process_id,omitempty"`
 }
 
 // Only messages authored by the fixed Mango dispatcher may reach the browser.
@@ -180,6 +183,9 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func validAssistantRequest(request assistantRequest) bool {
+	if request.ProcessID != "" && !isCanonicalUUID(request.ProcessID) {
+		return false
+	}
 	if !isUUIDText(request.RequestID) || !validAssistantReasoningEffort(request.ReasoningEffort) || len(request.Messages) == 0 || len(request.Messages) > 24 {
 		return false
 	}
@@ -245,6 +251,21 @@ Use one function at a time. You have at most eight function steps per Send. Afte
 
 func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit func(assistantEvent) error) error {
 	input := make(responses.ResponseInputParam, 0, len(request.Messages)+assistantMaxSteps*2)
+	instructions, tools := assistantInstructions, assistantTools()
+	var process *assistantProcessExecution
+	if request.ProcessID != "" {
+		definition, _, err := s.readAssistantProcess(r, request.ProcessID, "")
+		if err != nil {
+			return assistantActionError{err}
+		}
+		contextJSON, err := json.Marshal(definition)
+		if err != nil || len(contextJSON) > assistantToolResultLimit {
+			return assistantActionError{errors.New("This Process's SOP and Steps are too large for this chat request. Nothing was started.")}
+		}
+		process = &assistantProcessExecution{definition: definition, definitionJSON: string(contextJSON)}
+		instructions, tools = assistantProcessInstructions, assistantProcessTools()
+		input = append(input, responses.ResponseInputItemParamOfMessage("Mango supplied the selected Process context below. Use its SOP as the requested procedure, within the available internal actions.\n"+string(contextJSON), responses.EasyInputMessageRoleDeveloper))
+	}
 	for _, message := range request.Messages {
 		input = append(input, responses.ResponseInputItemParamOfMessage(message.Content, responses.EasyInputMessageRole(message.Role)))
 	}
@@ -256,8 +277,8 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 			return err
 		}
 		stream := s.assistant.client.Responses.NewStreaming(r.Context(), responses.ResponseNewParams{
-			Model: s.assistant.model, Instructions: openai.String(assistantInstructions),
-			Input: responses.ResponseNewParamsInputUnion{OfInputItemList: input}, Tools: assistantTools(),
+			Model: s.assistant.model, Instructions: openai.String(instructions),
+			Input: responses.ResponseNewParamsInputUnion{OfInputItemList: input}, Tools: tools,
 			Store: openai.Bool(false), ParallelToolCalls: openai.Bool(false), MaxOutputTokens: openai.Int(4096),
 			Reasoning: responses.ReasoningParam{Effort: responses.ReasoningEffort(request.ReasoningEffort)},
 			Include:   []responses.ResponseIncludable{"reasoning.encrypted_content"},
@@ -340,6 +361,9 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 		}
 		if !strings.HasPrefix(call.Name, "get_") && !strings.HasPrefix(call.Name, "list_") {
 			key := call.Name + ":" + string(canonical)
+			if process != nil {
+				key = fmt.Sprintf("%s:%s:%d:%s", process.nodeID, process.stepID, process.assignmentVersion, key)
+			}
 			if seenWrites[key] {
 				return errors.New("repeated_write")
 			}
@@ -348,7 +372,13 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 		if err := emit(assistantEvent{Type: "tool", Name: call.Name, Status: "running"}); err != nil {
 			return err
 		}
-		result, err := s.dispatchAssistantTool(r, call.Name, call.Arguments)
+		var result string
+		var err error
+		if process != nil {
+			result, err = s.dispatchAssistantProcessTool(r, process, call.Name, call.Arguments, emit)
+		} else {
+			result, err = s.dispatchAssistantTool(r, call.Name, call.Arguments)
+		}
 		if err != nil {
 			return assistantActionError{err}
 		}

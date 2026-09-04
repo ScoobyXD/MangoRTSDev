@@ -54,6 +54,7 @@ export type UniversalEntityPickerProps = {
   sourceType?: EditorEntityType;
   sourceLabel?: string;
   linkTargetTypes: readonly UniversalEntityPickerEntityType[];
+  referenceTargetTypes?: readonly EditorEntityType[];
   initialMode?: UniversalEntityPickerMode;
   initialCategory?: UniversalEntityPickerCategory;
   lockMode?: boolean;
@@ -86,10 +87,11 @@ export function universalPickerAllowedTypes(
   mode: UniversalEntityPickerMode,
   linkTargetTypes: readonly UniversalEntityPickerEntityType[],
   category: UniversalEntityPickerCategory,
+  referenceTargetTypes: readonly EditorEntityType[] = ALL_ENTITY_TYPES,
 ): UniversalEntityPickerEntityType[] {
   const permitted = mode === "link"
     ? new Set(linkTargetTypes.filter((type) => type !== "entity"))
-    : new Set<UniversalEntityPickerEntityType>(ALL_ENTITY_TYPES);
+    : new Set<UniversalEntityPickerEntityType>(referenceTargetTypes);
   const ordered = PICKER_ENTITY_TYPES.filter((type) => permitted.has(type));
   return category === "all" ? ordered : ordered.includes(category) ? [category] : [];
 }
@@ -174,8 +176,8 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
   const dragOnly = Boolean(props.onEntityDragStart && !props.onChoose);
 
   const allowedTypes = useMemo(
-    () => universalPickerAllowedTypes(mode, props.linkTargetTypes, category),
-    [category, mode, props.linkTargetTypes],
+    () => universalPickerAllowedTypes(mode, props.linkTargetTypes, category, props.referenceTargetTypes),
+    [category, mode, props.linkTargetTypes, props.referenceTargetTypes],
   );
   const visibleCategoryOptions = useMemo(
     () => props.linkTargetTypes.includes("huddle_logic_gate") ? categoryOptions : categoryOptions.filter((option) => option.type !== "huddle_logic_gate"),
@@ -421,6 +423,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     setEmailSearchResults([]);
   };
   const onInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return;
     if (event.key === "Escape") { event.preventDefault(); props.onCancel(); return; }
     if (!props.lockMode && event.key === "#" && !query && mode === "reference" && props.linkTargetTypes.length > 0) {
       event.preventDefault();
@@ -434,7 +437,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
     }
     if (event.key === "Tab" && !event.shiftKey) {
       const shortcutCategory = universalPickerShortcutCategory(query);
-      if (shortcutCategory && universalPickerAllowedTypes(mode, props.linkTargetTypes, shortcutCategory).length > 0) {
+      if (shortcutCategory && universalPickerAllowedTypes(mode, props.linkTargetTypes, shortcutCategory, props.referenceTargetTypes).length > 0) {
         event.preventDefault(); setCategory(shortcutCategory); setQuery(""); return;
       }
       if (props.onChoose && category === "email_message" && emailPaneRef.current?.chooseSelection()) {
@@ -491,7 +494,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
       </div>
       <div data-mango-universal-picker-categories="true" style={{ width: "calc(100% - 28px)", maxWidth: 430, display: "grid", gridTemplateColumns: `repeat(${visibleCategoryOptions.length},minmax(0,1fr))`, gap: 6, margin: "0 auto 10px" }}>
         {visibleCategoryOptions.map((option) => {
-          const enabled = mode === "reference" || (option.type !== "entity" && props.linkTargetTypes.includes(option.type));
+          const enabled = universalPickerAllowedTypes(mode, props.linkTargetTypes, option.type, props.referenceTargetTypes).length > 0;
           const active = category === option.type;
           return <button key={option.type} type="button" disabled={!enabled || busy} aria-pressed={active} onClick={() => { setCategory(props.lockMode ? option.type : active ? "all" : option.type); setQuery(""); }} style={{ width: "100%", minWidth: 0, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, padding: "7px 6px", border: active ? "1px solid rgba(8,145,178,.30)" : "1px solid rgba(255,255,255,.72)", borderRadius: 11, background: active ? "linear-gradient(145deg,#e8fbff,#f5efff)" : EDITOR_NEU_ACTIVE_SURFACE, boxShadow: active ? "inset 2px 2px 5px rgba(174,174,192,.18)" : EDITOR_NEU_SHADOW, color: enabled ? "#263247" : "#94a3b8", cursor: enabled ? "pointer" : "not-allowed", fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>{option.type === "email_message" ? <HeaderTriageIcon color={enabled ? "#0ea5e9" : "#94a3b8"} /> : option.type === "huddle_logic_gate" ? <HuddleResourceIcon type="huddle_logic_gate" /> : <ExplorerRowIcon kind={option.type} />}{option.label}</button>;
         })}
@@ -512,7 +515,7 @@ export const UniversalEntityPicker: React.FC<UniversalEntityPickerProps> = (prop
       </div>}
       <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 42, padding: "8px 14px", borderTop: "1px solid rgba(255,255,255,.72)", color: "#64748b", fontSize: 10 }}>
         {props.linkTargetTypes.length > 0 && !props.lockMode ? <button type="button" disabled={busy} onClick={() => setPickerMode(mode === "reference" ? "link" : "reference")} style={{ padding: "5px 8px", border: 0, borderRadius: 8, background: mode === "link" ? "rgba(124,58,237,.12)" : "rgba(8,145,178,.10)", color: mode === "link" ? "#6d28d9" : "#0e7490", cursor: "pointer", fontSize: 10, fontWeight: 900 }}>{mode === "link" ? "## Link" : "# Reference"}</button> : <span>{mode === "link" ? "## Link" : "# Reference"}</span>}
-        <span>{dragOnly ? `${props.linkTargetTypes.map(pickerEntityTypeLabel).join(", ")} only · Drag a result onto the map · Esc close` : `${props.lockMode ? `${props.linkTargetTypes.map(pickerEntityTypeLabel).join(", ")} only` : mode === "link" ? "Backspace for # reference" : "# for ## link"} · ↑↓ choose · Enter/Tab select · Esc close`}</span>
+        <span>{dragOnly ? `${props.linkTargetTypes.map(pickerEntityTypeLabel).join(", ")} only · Drag a result onto the map · Esc close` : `${props.lockMode ? `${(mode === "link" ? props.linkTargetTypes : props.referenceTargetTypes ?? ALL_ENTITY_TYPES).map(pickerEntityTypeLabel).join(", ")} only` : mode === "link" ? "Backspace for # reference" : "# for ## link"} · ↑↓ choose · Enter/Tab select · Esc close`}</span>
         {error && <span role="alert" style={{ marginLeft: "auto", color: "#b91c1c", fontWeight: 800 }}>{error}</span>}
       </div>
       </div>

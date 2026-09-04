@@ -26,15 +26,29 @@
 24. Each Send selects exactly one reasoning effort from low, medium, high, xhigh, or max; the backend rejects every other value and applies the selected effort to every provider step in that Send.
 25. A new browser chat session starts collapsed; expanding it preserves the selected reasoning effort, which defaults to medium and remembers the last valid browser choice.
 26. API startup must prefer a nonempty `OPENAI_API_KEY`; otherwise, when the model and `OPENAI_API_KEY_SECRET_ARN` exist, it must read one nonempty key from that secret into memory, and an explicit retrieval failure must stop startup.
+27. Selecting a Process with the existing universal `#` reference picker binds that Send to its exact `logic_gate` identity; removing or changing the reference clears its binding.
+28. A Process Send automatically loads the authenticated user and company, current Process, real Step identities/names/order/connections, and authoritative SOP before its first model call.
+29. Process context uses the existing canonical SOP document and never adds a separate Step instruction field or interprets map coordinates as execution order.
+30. A Process Send exposes only creating its one Node, adding text to that Node, and moving that Node between the selected Process's existing Steps.
+31. Process tools never accept a model-selected company, actor, Process, Node, or textbox identity; Step arguments must identify actual Steps of the selected Process.
+32. Creating the request's Node uses the existing atomic Process assignment command with its starting Step and In Progress status.
+33. Each Process text write creates a fresh canonical Node textbox and reads its saved document back; it never replaces existing content.
+34. Process Step movement uses the existing Node state command and preserves Node status.
+35. Before every Process action, Mango rechecks current access and the loaded logical definition, and stops if the SOP, Steps, connections, or tracked Node placement/status changed.
+36. A Process Send with no Steps, no saved SOP, unavailable context, or excessive context stops before making a model request or creating a Node.
+37. The created Node is linked in the chat turn even if later work stops or fails, and ordinary committed events update the existing Process Board.
+38. Selecting a Process grants no external tool access, broad CRUD access, background execution, formal output verification, staging, rollback, or permission to change its authored definition.
+39. Each Process write or move checks the expected Process, Step, Node status, and assignment version inside its existing storage transaction; a mismatch saves nothing and stops the request.
+40. Repeating the same text at different Step placements is allowed; repeating an identical action at the same assignment version stops the request.
 
 ## Process story
 
-A user sends a message from the bottom composer. Mango authenticates the request and streams a Responses API reply. If the model requests one of the 25 functions, Mango validates it and calls the same handler used by the app with fresh company permissions. The function result and model output return to the model for its next response. The request ends on completion, failure, Stop, or a fixed limit. Ordinary Mango realtime events update the working UI.
+A user sends a message from the bottom composer. A selected `#` Process automatically supplies its SOP and real Steps and limits that request to three actions on one new Node; ordinary chat retains its existing 25 functions. Mango validates calls and uses the normal app handlers with fresh permissions. Saved results return to the model, the Node remains accessible from chat, and ordinary realtime events update the working UI. The foreground request ends on completion, failure, Stop, or a fixed limit, preserving already saved work.
 
 ## Scenarios
 
-1. **Create and explain:** the model calls `create_process`; Mango creates the Process through its normal handler; the returned exact identity goes back to the model before it reports success.
+1. **Perform a Process:** the user selects a summary Process with `#`; Mango supplies its SOP and Steps; the model creates an assigned Node, saves summary text, and moves it to the next Step through the existing commands. If a Step changes during the request, later actions stop and the Node remains available.
 2. **Lost acknowledgement:** a write commits but its response fails; the request ends with a message to check Mango, and neither the SDK nor the function loop repeats the action.
 3. **Change company:** a user with access to two companies switches from A to B; the prior transcript disappears, its request is aborted, and attachment lookup cannot use A's membership during a B request.
 
-Verification: `TestAssistant*` in the existing Go HTTP suite and the assistant cases in the existing frontend relationship test runner. Provider tests use a local HTTP stub and repository/storage fixtures; they make no paid OpenAI calls or live-database writes.
+Verification: `TestAssistant*` in the Go HTTP suite, `TestNodeWorkPrecondition*` in the memory store suite, `TestPostgresProcessMapNodeWorkPrecondition` in the disposable PostgreSQL harness, and the assistant/picker cases in the frontend relationship runner. Provider tests use a local HTTP stub; database tests use disposable local fixtures. They make no paid OpenAI calls or live-database writes.
