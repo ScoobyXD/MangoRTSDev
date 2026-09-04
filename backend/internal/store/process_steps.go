@@ -1,11 +1,16 @@
 package store
 
 import (
-	"miraeopus/backend/internal/domain"
+	"sort"
 	"strings"
+
+	"miraeopus/backend/internal/domain"
 )
 
 const ProcessWorkChangedEventType = "process.work.changed"
+
+const processStepPositionStride = 1000
+const maxPostgresInteger = 2147483647
 
 type ProcessStepCreateInput struct {
 	CompanyID          string
@@ -42,9 +47,10 @@ type ProcessStepRelationshipDeleteInput struct {
 	ActorUserID    string
 }
 type ProcessStepMutationResult struct {
-	Step         *domain.ProcessStep                     `json:"step,omitempty"`
-	Relationship *domain.ResourceOperationalRelationship `json:"relationship,omitempty"`
-	Events       []domain.DomainEvent                    `json:"-"`
+	Step            *domain.ProcessStep                     `json:"step,omitempty"`
+	Relationship    *domain.ResourceOperationalRelationship `json:"relationship,omitempty"`
+	PositionUpdates map[string]int                          `json:"position_updates,omitempty"`
+	Events          []domain.DomainEvent                    `json:"-"`
 }
 
 func processWorkChangedEvent(companyID, logicGateID, actorUserID string) DomainEventInput {
@@ -52,6 +58,58 @@ func processWorkChangedEvent(companyID, logicGateID, actorUserID string) DomainE
 }
 
 func validProcessStepName(name string) bool { return strings.TrimSpace(name) != "" && len(name) <= 200 }
+
+func planProcessStepInsertion(steps []domain.ProcessStep, afterProcessStepID *string) (int, map[string]int, bool) {
+	ordered := append([]domain.ProcessStep(nil), steps...)
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].Position != ordered[j].Position {
+			return ordered[i].Position < ordered[j].Position
+		}
+		return ordered[i].ProcessStepID < ordered[j].ProcessStepID
+	})
+	insertionIndex := len(ordered)
+	if afterProcessStepID != nil {
+		insertionIndex = -1
+		for index, step := range ordered {
+			if step.ProcessStepID == *afterProcessStepID {
+				insertionIndex = index + 1
+				break
+			}
+		}
+		if insertionIndex < 0 {
+			return 0, nil, false
+		}
+	}
+	if len(ordered)+1 > maxPostgresInteger/processStepPositionStride {
+		return 0, nil, false
+	}
+	if insertionIndex == len(ordered) {
+		if len(ordered) == 0 {
+			return processStepPositionStride, nil, true
+		}
+		lastPosition := ordered[len(ordered)-1].Position
+		if lastPosition <= maxPostgresInteger-processStepPositionStride {
+			return lastPosition + processStepPositionStride, nil, true
+		}
+	} else {
+		leftPosition, rightPosition := ordered[insertionIndex-1].Position, ordered[insertionIndex].Position
+		if rightPosition-leftPosition > 1 {
+			return leftPosition + (rightPosition-leftPosition)/2, nil, true
+		}
+	}
+	positionUpdates := map[string]int{}
+	for index, step := range ordered {
+		slot := index
+		if index >= insertionIndex {
+			slot++
+		}
+		position := (slot + 1) * processStepPositionStride
+		if step.Position != position {
+			positionUpdates[step.ProcessStepID] = position
+		}
+	}
+	return (insertionIndex + 1) * processStepPositionStride, positionUpdates, true
+}
 
 func validProcessStepRelationship(input ProcessStepRelationshipInput) bool {
 	return input.CompanyID != "" && input.LogicGateID != "" && input.Source.ResourceType == "process_step" && input.Target.ResourceType == "process_step" && input.Source.ResourceID != "" && input.Target.ResourceID != "" && input.Source.ResourceID != input.Target.ResourceID

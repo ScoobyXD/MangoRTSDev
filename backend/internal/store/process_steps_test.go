@@ -27,6 +27,90 @@ func TestProcessStepsRequestResolversIncludeEveryEffectiveResponsible(t *testing
 	assertProcessStepsRequestResolvers(t, repo, companyID)
 }
 
+func TestProcessStepCreationInsertsImmediatelyAfterSource(t *testing.T) {
+	repo, companyID, _, _ := processStepsFixture(t)
+	assertProcessStepCreationOrder(t, repo, companyID)
+}
+
+func assertProcessStepCreationOrder(t *testing.T, repo Repository, companyID string) {
+	t.Helper()
+	gate, err := repo.CreateLogicGate(companyID, "Ordered steps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, Name: "First"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, Name: "Second", AfterProcessStepID: &first.Step.ProcessStepID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, Name: "Third", AfterProcessStepID: &second.Step.ProcessStepID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	denseSecond, denseThird := processStepPositionStride+1, processStepPositionStride+2
+	if _, err = repo.UpdateProcessStep(ProcessStepUpdateInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, ProcessStepID: second.Step.ProcessStepID, Position: &denseSecond}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = repo.UpdateProcessStep(ProcessStepUpdateInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, ProcessStepID: third.Step.ProcessStepID, Position: &denseThird}); err != nil {
+		t.Fatal(err)
+	}
+	inserted, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, Name: "Inserted", AfterProcessStepID: &first.Step.ProcessStepID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inserted.PositionUpdates[second.Step.ProcessStepID] != 3*processStepPositionStride || inserted.PositionUpdates[third.Step.ProcessStepID] != 4*processStepPositionStride {
+		t.Fatalf("rebalanced positions = %+v", inserted.PositionUpdates)
+	}
+	newest, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, Name: "Newest", AfterProcessStepID: &first.Step.ProcessStepID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newest.Relationship == nil || newest.Relationship.Source.ResourceID != first.Step.ProcessStepID || newest.Relationship.Target.ResourceID != newest.Step.ProcessStepID {
+		t.Fatal("Add next must connect the source step to the new step")
+	}
+	if inserted.Relationship == nil || inserted.Relationship.Source.ResourceID != first.Step.ProcessStepID || inserted.Relationship.Target.ResourceID != inserted.Step.ProcessStepID {
+		t.Fatal("Inserted step must keep its exact incoming connection")
+	}
+	appended, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: gate.LogicGateID, Name: "Appended"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := repo.GetLogicGateWork(companyID, gate.LogicGateID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantNames := []string{"First", "Newest", "Inserted", "Second", "Third", "Appended"}
+	if len(work.Steps) != len(wantNames) {
+		t.Fatalf("steps = %+v, want %v", work.Steps, wantNames)
+	}
+	for index, wantName := range wantNames {
+		if work.Steps[index].Name != wantName || index > 0 && work.Steps[index-1].Position >= work.Steps[index].Position {
+			t.Fatalf("step %d = %+v, want %q in strictly increasing order", index, work.Steps[index], wantName)
+		}
+	}
+	if appended.Step.Position != work.Steps[len(work.Steps)-1].Position {
+		t.Fatal("Add step must append at the right edge")
+	}
+}
+
+func TestPlanProcessStepInsertionRebalancesOnlyWhenRequired(t *testing.T) {
+	firstID, secondID := "00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000002"
+	steps := []domain.ProcessStep{{ProcessStepID: firstID, Position: 1000}, {ProcessStepID: secondID, Position: 1001}}
+	position, updates, ok := planProcessStepInsertion(steps, &firstID)
+	_, firstChanged := updates[firstID]
+	if !ok || position != 2000 || firstChanged || updates[secondID] != 3000 {
+		t.Fatalf("dense insertion plan = position %d updates %+v ok %t", position, updates, ok)
+	}
+	steps[1].Position = 3000
+	position, updates, ok = planProcessStepInsertion(steps, &firstID)
+	if !ok || position != 2000 || len(updates) != 0 {
+		t.Fatalf("sparse insertion plan = position %d updates %+v ok %t", position, updates, ok)
+	}
+}
+
 func assertProcessStepsRequestResolvers(t *testing.T, repo Repository, companyID string) {
 	t.Helper()
 	users := []domain.User{}

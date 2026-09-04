@@ -6,7 +6,7 @@
 4. `resource_operational_relationships` stores every step-to-step flow edge using canonical `process_step` types and exact source step IDs.
 5. Both step endpoints must belong to the same Process; mixed step/Folder/Process edges and self-edges are rejected.
 6. Repeated creation of an exact directed step pair reuses one edge; branching uses several pairwise edges.
-7. Add next step creates its step and explicitly requested incoming edge atomically.
+7. Add next step inserts the new step immediately to the right of its exact source and creates that incoming edge atomically.
 8. Deleting a step clears its Node step assignments and deletes its exact incident edges while preserving Node statuses, Process assignments, and unrelated resources.
 9. Step deletion does not infer replacement connections, delete Nodes, or modify permission ancestry.
 10. Steps have no Company Explorer placement, company Process Map placement, company-map trace, resource registry, or translated identity.
@@ -278,7 +278,7 @@ Deleting a selected trace still removes its exact operational edge and dependent
 
 An explicitly invoked company-map operator reset validates a fresh layout from Explorer, checks Edit access across the affected resources, and commits that layout together with removal of the company's Folder/Process operational edges and dependent traces; it preserves source resources, Explorer organization, policies, and other relationship meanings.
 
-Within a Process, each Node keeps its Process assignment and optionally names one exact step. Step moves preserve status. Same-Process step connections use the operational relationship table without map geometry. Deleting a step clears only its Node step references and incident connections; Nodes keep their Process membership and status. The company-map reset preserves these step connections.
+Within a Process, each Node keeps its Process assignment and optionally names one exact step. Step moves preserve status. Add next step stores its new step immediately after the selected source and creates the exact incoming connection in the same mutation. Same-Process step connections use the operational relationship table without map geometry. Deleting a step clears only its Node step references and incident connections; Nodes keep their Process membership and status. The company-map reset preserves these step connections.
 
 Last updated: 2026-09-03
 

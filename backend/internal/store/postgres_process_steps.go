@@ -18,6 +18,22 @@ func scanProcessStep(row interface{ Scan(...any) error }) (domain.ProcessStep, e
 	}
 	return step, err
 }
+func listProcessStepsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) ([]domain.ProcessStep, error) {
+	rows, err := tx.QueryContext(ctx, `select `+processStepSelectColumns+` from process_steps where company_id=$1::uuid and logic_gate_id=$2::uuid order by position,process_step_id`, companyID, logicGateID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	steps := []domain.ProcessStep{}
+	for rows.Next() {
+		step, scanErr := scanProcessStep(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		steps = append(steps, step)
+	}
+	return steps, rows.Err()
+}
 func lockProcessStepsTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string) error {
 	if cleanUUIDText(companyID) == "" || cleanUUIDText(logicGateID) == "" {
 		return ErrInvalid
@@ -86,11 +102,24 @@ func (r *PostgresRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessS
 	if err = validateProcessStepTx(ctx, tx, input.CompanyID, input.LogicGateID, input.AfterProcessStepID); err != nil {
 		return ProcessStepMutationResult{}, err
 	}
-	step, err := scanProcessStep(tx.QueryRowContext(ctx, `insert into process_steps(company_id,process_step_id,logic_gate_id,name,position) values($1::uuid,$2::uuid,$3::uuid,$4,(select coalesce(max(position),0)+1000 from process_steps where company_id=$1::uuid and logic_gate_id=$3::uuid)) returning `+processStepSelectColumns, input.CompanyID, newUUIDv7String(), input.LogicGateID, input.Name))
+	steps, err := listProcessStepsTx(ctx, tx, input.CompanyID, input.LogicGateID)
 	if err != nil {
 		return ProcessStepMutationResult{}, err
 	}
-	result := ProcessStepMutationResult{Step: &step}
+	position, positionUpdates, ok := planProcessStepInsertion(steps, input.AfterProcessStepID)
+	if !ok {
+		return ProcessStepMutationResult{}, ErrInvalid
+	}
+	for stepID, updatedPosition := range positionUpdates {
+		if _, err = tx.ExecContext(ctx, `update process_steps set position=$4,updated_timestamp=now() where company_id=$1::uuid and logic_gate_id=$2::uuid and process_step_id=$3::uuid`, input.CompanyID, input.LogicGateID, stepID, updatedPosition); err != nil {
+			return ProcessStepMutationResult{}, err
+		}
+	}
+	step, err := scanProcessStep(tx.QueryRowContext(ctx, `insert into process_steps(company_id,process_step_id,logic_gate_id,name,position) values($1::uuid,$2::uuid,$3::uuid,$4,$5) returning `+processStepSelectColumns, input.CompanyID, newUUIDv7String(), input.LogicGateID, input.Name, position))
+	if err != nil {
+		return ProcessStepMutationResult{}, err
+	}
+	result := ProcessStepMutationResult{Step: &step, PositionUpdates: positionUpdates}
 	if input.AfterProcessStepID != nil {
 		edge, err := createProcessStepRelationshipTx(ctx, tx, ProcessStepRelationshipInput{CompanyID: input.CompanyID, LogicGateID: input.LogicGateID, Source: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: *input.AfterProcessStepID}, Target: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: step.ProcessStepID}})
 		if err != nil {
