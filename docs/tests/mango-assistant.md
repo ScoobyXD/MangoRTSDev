@@ -21,6 +21,8 @@
 19. A move with null status preserves the Node's current status and Issue flag; moving to another Process clears the previous step assignment.
 20. Mango chat floats above the app canvas and must not reduce the canvas dimensions.
 21. Expanded chat has one centered circular down-arrow control that collapses the entire chat surface to one centered circular up-arrow control; focus follows the replacement control, and expanding restores the same in-memory session.
+22. Mango chat is centered on the browser viewport regardless of app sidebar or canvas dimensions.
+23. The cloud-integrated local backend launcher loads the assistant model and OpenAI key from local environment, ignored dev tfvars, or the deployed DEV task without logging the key, and restores the caller's prior assistant environment after the backend exits; chat stays unavailable when either value is absent.
 
 ## Process story
 

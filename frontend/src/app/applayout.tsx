@@ -2313,7 +2313,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
       )}
       </div>
 
-      <AppAssistant apiBase={apiBase} userID={me?.user.user_id ?? "local"} leftInset={taskbarLeftInset} bottomInset={assistantBottomInset} />
+      <AppAssistant apiBase={apiBase} userID={me?.user.user_id ?? "local"} bottomInset={assistantBottomInset} />
       <AppTaskbar
         tabs={dockTabs}
         activeTabID={activeDockTabID}

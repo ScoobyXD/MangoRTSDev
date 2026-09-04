@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
 import React, { act } from "react";
 import { Simulate } from "react-dom/test-utils";
@@ -43,7 +45,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
   const container = dom.window.document.getElementById("root")!;
   const root = createRoot(container);
   const render = (userID = "user-a", modal = false) => root.render(<>
-    <AppAssistant apiBase="http://localhost:8080" userID={userID} leftInset={340} bottomInset={10} />
+    <AppAssistant apiBase="http://localhost:8080" userID={userID} bottomInset={10} />
     {modal && <AppModalPortal onRequestClose={() => undefined}><section role="dialog" aria-label="Permissions"><input aria-label="Permission input" /></section></AppModalPortal>}
   </>);
   const input = () => container.querySelector<HTMLInputElement>('input[aria-label="Message Mango"]')!;
@@ -65,6 +67,10 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     setActiveCompanyID("company-a");
     await act(async () => { render(); });
     assert.equal(input().disabled, false);
+    const assistant = container.querySelector<HTMLElement>(".mango-assistant")!;
+    assert.equal(assistant.style.left, "", "chat centering must not inherit the app sidebar inset");
+    const stylesheet = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
+    assert.match(stylesheet, /\.mango-assistant\s*\{[^}]*left:\s*10px;[^}]*right:\s*10px;/s, "chat must use equal viewport gutters");
     const collapseButton = assistantButton("Collapse Mango chat");
     const panelID = collapseButton.getAttribute("aria-controls")!;
     const panel = dom.window.document.getElementById(panelID)!;
