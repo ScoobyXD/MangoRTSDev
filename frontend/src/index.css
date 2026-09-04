@@ -29,6 +29,7 @@
 
 .mango-assistant {
   position: fixed;
+  left: 10px;
   right: 10px;
   z-index: 115;
   display: flex;

@@ -6,7 +6,7 @@ import {
   getAssistantStatus, streamAssistantChat, type AssistantMessage,
 } from "../modules/assistant/assistantApi.js";
 
-type Props = { apiBase: string; userID: string; leftInset: number; bottomInset: number };
+type Props = { apiBase: string; userID: string; bottomInset: number };
 type Turn = { question: string; reply: string; status: "running" | "complete" | "stopped" | "failed"; notice: string };
 
 function AssistantToggleIcon({ direction }: { direction: "up" | "down" }) {
@@ -27,7 +27,7 @@ export function AppAssistant(props: Props) {
   return <AssistantSession key={`${props.userID}:${companyID}:${authGeneration}`} {...props} companyID={companyID} />;
 }
 
-function AssistantSession({ apiBase, companyID, leftInset, bottomInset }: Props & { companyID: string }) {
+function AssistantSession({ apiBase, companyID, bottomInset }: Props & { companyID: string }) {
   const [available, setAvailable] = useState<boolean | null>(null);
   const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [draft, setDraft] = useState("");
@@ -127,7 +127,7 @@ function AssistantSession({ apiBase, companyID, leftInset, bottomInset }: Props 
     setPanelOpen(open);
   };
 
-  return <aside className="mango-assistant" aria-label="Mango chat" style={{ left: leftInset, bottom: bottomInset }}>
+  return <aside className="mango-assistant" aria-label="Mango chat" style={{ bottom: bottomInset }}>
     <button
       ref={expandButtonRef}
       type="button"
