@@ -22,9 +22,10 @@
 20. Mango chat floats above the app canvas and must not reduce the canvas dimensions.
 21. Expanded chat has one centered circular down-arrow control that collapses the entire chat surface to one centered circular up-arrow control; focus follows the replacement control, and expanding restores the same in-memory session.
 22. Mango chat is centered on the browser viewport regardless of app sidebar or canvas dimensions.
-23. The cloud-integrated local backend launcher loads the assistant model and OpenAI key from local environment, ignored dev tfvars, or the deployed DEV task without logging the key, and restores the caller's prior assistant environment after the backend exits; chat stays unavailable when either value is absent.
+23. When Secrets Manager configures local chat, the cloud-integrated launcher itself must write only the resolved assistant model and secret ARN into the caller's shell; it must never fetch, log, write, or leave the referenced OpenAI key there.
 24. Each Send selects exactly one reasoning effort from low, medium, high, xhigh, or max; the backend rejects every other value and applies the selected effort to every provider step in that Send.
 25. A new browser chat session starts collapsed; expanding it preserves the selected reasoning effort, which defaults to medium and remembers the last valid browser choice.
+26. API startup must prefer a nonempty `OPENAI_API_KEY`; otherwise, when the model and `OPENAI_API_KEY_SECRET_ARN` exist, it must read one nonempty key from that secret into memory, and an explicit retrieval failure must stop startup.
 
 ## Process story
 

@@ -40,6 +40,13 @@ func main() {
 		log.Fatal(err)
 	}
 	defer cleanup()
+	var assistantConfig httpapi.AssistantConfig
+	if runtimeRole == "api" {
+		assistantConfig, err = buildAssistantConfig(context.Background())
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
 	nylasConfig := buildNylasConfig()
 	var authValidator httpapi.AuthTokenValidator
 	if validator := buildAuthValidator(); validator != nil {
@@ -77,10 +84,7 @@ func main() {
 		log.Fatal(err)
 	}
 	server := httpapi.NewServerWithOptions(repo, httpapi.ServerOptions{
-		Assistant: httpapi.AssistantConfig{
-			APIKey: strings.TrimSpace(os.Getenv("OPENAI_API_KEY")),
-			Model:  strings.TrimSpace(os.Getenv("MANGORTS_ASSISTANT_MODEL")),
-		},
+		Assistant:             assistantConfig,
 		AuthValidator:         authValidator,
 		TestAuthHeaderEnabled: testAuthHeaderEnabled,
 		CognitoAdmin:          cognitoAdmin,

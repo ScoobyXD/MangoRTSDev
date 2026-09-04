@@ -358,29 +358,12 @@ $localEmailFromCandidate = First-NonBlank @(
 )
 $backendContainer = Get-LatestBackendContainerDefinition -ProjectName $projectName -EnvironmentName $environmentName
 
-$assistantEnvironmentNames = @("OPENAI_API_KEY", "MANGORTS_ASSISTANT_MODEL")
-$previousAssistantEnvironment = @{}
-foreach ($name in $assistantEnvironmentNames) {
-  $previousAssistantEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
-}
-$assistantModel = First-NonBlank @(
-  $env:MANGORTS_ASSISTANT_MODEL,
-  (Get-OptionalTfvarString -Name "assistant_model" -Path $tfvarsPath),
-  (Get-ContainerEnvironmentValue -Container $backendContainer -Name "MANGORTS_ASSISTANT_MODEL")
-)
-$openAIApiKeySecretArn = First-NonBlank @(
-  $env:OPENAI_API_KEY_SECRET_ARN,
-  (Get-OptionalTfvarString -Name "openai_api_key_secret_arn" -Path $tfvarsPath),
-  (Get-ContainerSecretReference -Container $backendContainer -Name "OPENAI_API_KEY")
-)
+$assistantModel = Get-OptionalTfvarString -Name "assistant_model" -Path $tfvarsPath
+$openAIApiKeySecretArn = Get-OptionalTfvarString -Name "openai_api_key_secret_arn" -Path $tfvarsPath
 $openAIApiKey = First-NonBlank @($env:OPENAI_API_KEY)
-if ([string]::IsNullOrWhiteSpace($openAIApiKey) `
-    -and -not [string]::IsNullOrWhiteSpace($assistantModel) `
-    -and -not [string]::IsNullOrWhiteSpace($openAIApiKeySecretArn)) {
-  $openAIApiKey = Get-SecretStringValue -SecretID $openAIApiKeySecretArn -PropertyNames @("api_key", "OPENAI_API_KEY", "openai_api_key")
-}
 $assistantConfigured = -not [string]::IsNullOrWhiteSpace($assistantModel) `
-  -and -not [string]::IsNullOrWhiteSpace($openAIApiKey)
+  -and (-not [string]::IsNullOrWhiteSpace($openAIApiKey) `
+    -or -not [string]::IsNullOrWhiteSpace($openAIApiKeySecretArn))
 
 $appURL = First-NonBlank @(
   $AppURL,
@@ -549,7 +532,7 @@ if ([string]::IsNullOrWhiteSpace($emailFromAddress)) {
   Write-Host "SES invite email: enabled from $emailFromAddress"
 }
 if ($assistantConfigured) {
-  Write-Host "Mango chat: configured from local environment, tfvars, or the deployed DEV task."
+  Write-Host "Mango chat: configured from ignored dev tfvars and the server-side key source."
 } else {
   Write-Host "Mango chat: not configured. Set assistant_model and openai_api_key_secret_arn in infra/aws-dev/terraform.tfvars."
 }
@@ -574,16 +557,15 @@ Write-Host "Email SQS: using the deployed DEV work queue."
 
 Push-Location (Join-Path $repoRoot "backend")
 try {
-  Remove-Item Env:\OPENAI_API_KEY -ErrorAction SilentlyContinue
   Remove-Item Env:\MANGORTS_ASSISTANT_MODEL -ErrorAction SilentlyContinue
+  Remove-Item Env:\OPENAI_API_KEY_SECRET_ARN -ErrorAction SilentlyContinue
   if ($assistantConfigured) {
-    $env:OPENAI_API_KEY = $openAIApiKey
     $env:MANGORTS_ASSISTANT_MODEL = $assistantModel
+    if (-not [string]::IsNullOrWhiteSpace($openAIApiKeySecretArn)) {
+      $env:OPENAI_API_KEY_SECRET_ARN = $openAIApiKeySecretArn
+    }
   }
   go run ./cmd/miraeopus-api
 } finally {
-  foreach ($name in $assistantEnvironmentNames) {
-    [Environment]::SetEnvironmentVariable($name, $previousAssistantEnvironment[$name], "Process")
-  }
   Pop-Location
 }
