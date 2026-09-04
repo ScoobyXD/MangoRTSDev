@@ -66,7 +66,7 @@
 64. Each column must create a Node through its top-right plus button instead of a bottom New Node button.
 65. Add step and Add next step must immediately create a default-named column without a naming modal; Add next must keep its atomic incoming connection, and the three-dot menu must retain Rename, Move left, Move right, Add next step, and Delete column actions.
 66. Existing outgoing connection chips must remain visible without a Connect to dropdown.
-67. Each Node title must use the canonical Node icon inside an editor-style inline label colored from the Node's status, stay compact, and remain slightly larger than its status and metadata text.
+67. Each Node title must stay colorless and compact, use the canonical Node icon at its leading edge aligned with the first line of multiline text, and remain slightly larger than its status and metadata text.
 68. Status must be larger than metadata and use a readable status-colored label; priority must use a label colored by the existing Node urgency style while due date and placement metadata remain readable.
 69. Node selection must work without a card checkbox.
 70. Node cards must omit the Change footer while existing Node editing, bulk commands, request actions, and Start work remain available.

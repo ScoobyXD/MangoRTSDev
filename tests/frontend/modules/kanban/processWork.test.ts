@@ -49,11 +49,15 @@ test("Process cards reuse the canonical Node icon and status and urgency labels"
   const card = readFileSync(resolve(process.cwd(), "frontend/src/modules/kanban/ProcessNodeCard.tsx"), "utf8");
   const styles = readFileSync(resolve(process.cwd(), "frontend/src/modules/kanban/processWork.css"), "utf8");
   assert.match(card, /ExplorerEntityIcon kind="node" className="mango-editor-entity-icon"/);
+  assert.match(card, /<ExplorerEntityIcon kind="node" className="mango-editor-entity-icon" \/>\s*<span className="mango-editor-entity-label">/);
   assert.match(card, /process-work__node-title mango-editor-entity-link mango-editor-entity-link--node/);
   assert.match(card, /process-work__status-label/);
   assert.match(card, /KANBAN_NODE_PRIORITY_STYLE_OPTIONS\.find/);
   assert.match(card, /background: priorityStyle\.surface/);
-  assert.match(styles, /\.process-work \.process-work__node-title[^\n]*font-size:14px/);
+  assert.match(styles, /\.process-work \.process-work__node-title[^\n]*align-items:flex-start[^\n]*border:0[^\n]*background:none[^\n]*font-size:14px/);
+  const titleRules = styles.match(/\.process-work[^\n{]*\.process-work__node-title[^\n]*\{[^\n]*\}/g) ?? [];
+  assert.ok(titleRules.length >= 3);
+  for (const rule of titleRules) assert.doesNotMatch(rule, /var\(--status-color\)/);
   assert.match(styles, /\.process-work__status-label[^\n]*color:#334155[^\n]*font-size:11\.5px/);
   assert.match(styles, /\.process-work--dark \.process-work__status-label[^\n]*color:#f8fafc/);
 });
