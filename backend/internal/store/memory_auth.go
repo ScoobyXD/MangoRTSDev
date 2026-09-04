@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"miraeopus/backend/internal/domain"
 	"slices"
@@ -10,6 +11,10 @@ import (
 )
 
 func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
+	return r.upsertAuthUser(cognitoSubject, email, displayName, time.Time{})
+}
+
+func (r *MemoryRepo) upsertAuthUser(cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
 	if cognitoSubject == "" {
@@ -24,18 +29,26 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 	now := time.Now().UTC()
 	user, ok := r.users[cognitoSubject]
 	if !ok {
+		authClaimsIssuedAt := claimsIssuedAt.UTC()
+		if authClaimsIssuedAt.IsZero() {
+			authClaimsIssuedAt = now
+		}
 		user = domain.User{
-			UserID:           newUUIDv7String(),
-			CognitoSubject:   cognitoSubject,
-			Email:            email,
-			DisplayName:      insertDisplayName,
-			CreatedTimestamp: now,
-			UpdatedTimestamp: now,
+			UserID:             newUUIDv7String(),
+			CognitoSubject:     cognitoSubject,
+			Email:              email,
+			DisplayName:        insertDisplayName,
+			AuthClaimsIssuedAt: authClaimsIssuedAt,
+			CreatedTimestamp:   now,
+			UpdatedTimestamp:   now,
 		}
 		r.users[cognitoSubject] = user
 		return user, nil
 	}
 
+	if !claimsIssuedAt.IsZero() && !claimsIssuedAt.After(user.AuthClaimsIssuedAt) {
+		return user, nil
+	}
 	updated := user
 	if email != "" {
 		updated.Email = email
@@ -43,8 +56,20 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 	if updateDisplayName != "" {
 		updated.DisplayName = updateDisplayName
 	}
-	if updated.Email == user.Email && updated.DisplayName == user.DisplayName {
-		return user, nil
+	profileChanged := updated.Email != user.Email || updated.DisplayName != user.DisplayName
+	if claimsIssuedAt.IsZero() {
+		if !profileChanged {
+			return user, nil
+		}
+		if now.After(updated.AuthClaimsIssuedAt) {
+			updated.AuthClaimsIssuedAt = now
+		}
+	} else {
+		updated.AuthClaimsIssuedAt = claimsIssuedAt.UTC()
+	}
+	if !profileChanged {
+		r.users[cognitoSubject] = updated
+		return updated, nil
 	}
 	updated.UpdatedTimestamp = now
 	r.users[cognitoSubject] = updated
@@ -59,6 +84,29 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 		return domain.User{}, err
 	}
 	return updated, nil
+}
+
+func (r *MemoryRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	user, err := r.GetAuthUser(cognitoSubject)
+	if err == nil {
+		if claimsIssuedAt.IsZero() {
+			if !authUserNeedsClaimRefresh(user, email, displayName) {
+				return user, nil
+			}
+		} else if !claimsIssuedAt.After(user.AuthClaimsIssuedAt) {
+			return user, nil
+		}
+	}
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return domain.User{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	return r.upsertAuthUser(cognitoSubject, email, displayName, claimsIssuedAt)
 }
 
 func (r *MemoryRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
@@ -155,6 +203,13 @@ func (r *MemoryRepo) UserHasCompanyAccess(cognitoSubject, companyID string) (boo
 }
 
 func (r *MemoryRepo) CreateCompany(name string) (domain.Company, error) {
+	return r.CreateCompanyContext(context.Background(), name)
+}
+
+func (r *MemoryRepo) CreateCompanyContext(ctx context.Context, name string) (domain.Company, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Company{}, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return domain.Company{}, ErrInvalid
@@ -325,6 +380,83 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 		return domain.CompanyMembership{}, err
 	}
 	return membership, nil
+}
+
+func (r *MemoryRepo) BootstrapDevAdminContext(ctx context.Context, cognitoSubject, companyName string) (domain.CompanyMembership, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	cognitoSubject = strings.TrimSpace(cognitoSubject)
+	companyName = strings.TrimSpace(companyName)
+	if cognitoSubject == "" || companyName == "" {
+		return domain.CompanyMembership{}, false, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	user, ok := r.users[cognitoSubject]
+	if !ok {
+		return domain.CompanyMembership{}, false, ErrNotFound
+	}
+	for _, membership := range r.memberships {
+		if membership.UserID == user.UserID {
+			return domain.CompanyMembership{}, false, nil
+		}
+	}
+
+	processSnapshot := r.snapshotProcessMapMutationLocked()
+	entityTypesSnapshot := maps.Clone(r.entityTypes)
+	entityFieldTypesSnapshot := maps.Clone(r.entityFieldTypes)
+	membershipsSnapshot := maps.Clone(r.memberships)
+	rollback := func() {
+		r.restoreProcessMapMutationLocked(processSnapshot)
+		r.entityTypes = entityTypesSnapshot
+		r.entityFieldTypes = entityFieldTypesSnapshot
+		r.memberships = membershipsSnapshot
+	}
+
+	now := time.Now().UTC()
+	company := domain.Company{
+		CompanyID:        newUUIDv7String(),
+		Name:             companyName,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.companies[company.CompanyID] = company
+	r.ensureCompanyExplorerV2CompanyGraphLocked(company.CompanyID)
+	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(company.CompanyID)
+	if err := r.syncMemoryDefaultFolderProcessMapPlacementsLocked(company.CompanyID, defaultFolders); err != nil {
+		rollback()
+		return domain.CompanyMembership{}, false, err
+	}
+	if err := r.ensureActionItemDefaultsLocked(company.CompanyID); err != nil {
+		rollback()
+		return domain.CompanyMembership{}, false, err
+	}
+
+	membership := domain.CompanyMembership{
+		CompanyID:        company.CompanyID,
+		CompanyName:      company.Name,
+		UserID:           user.UserID,
+		Role:             domain.RoleDevAdmin,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.memberships[membershipKey(company.CompanyID, user.UserID)] = membership
+	affectedCompanyIDs := memoryMembershipAffectedCompanyIDsLocked(r.companies, company.CompanyID, true)
+	r.advancePolicyGroupMembershipVersionsLocked(affectedCompanyIDs)
+	if _, err := r.appendDomainEventsLocked(companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, user.UserID)); err != nil {
+		rollback()
+		return domain.CompanyMembership{}, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		rollback()
+		return domain.CompanyMembership{}, false, err
+	}
+	return membership, true, nil
 }
 
 func (r *MemoryRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser, error) {
@@ -1022,25 +1154,28 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 		r.realtimeOutboxSequence = beforeRealtimeOutboxSequence
 	}
 	user, ok := r.users[cognitoSubject]
+	now := time.Now().UTC()
 	if !ok {
-		now := time.Now().UTC()
 		user = domain.User{
-			UserID:           newUUIDv7String(),
-			CognitoSubject:   cognitoSubject,
-			Email:            email,
-			DisplayName:      displayName,
-			CreatedTimestamp: now,
-			UpdatedTimestamp: now,
+			UserID:             newUUIDv7String(),
+			CognitoSubject:     cognitoSubject,
+			Email:              email,
+			DisplayName:        displayName,
+			AuthClaimsIssuedAt: now,
+			CreatedTimestamp:   now,
+			UpdatedTimestamp:   now,
 		}
 		r.users[cognitoSubject] = user
 	} else {
 		user.Email = email
 		user.DisplayName = displayName
-		user.UpdatedTimestamp = time.Now().UTC()
+		if now.After(user.AuthClaimsIssuedAt) {
+			user.AuthClaimsIssuedAt = now
+		}
+		user.UpdatedTimestamp = now
 		r.users[cognitoSubject] = user
 	}
 	hadGlobalAccess := memoryUserHasDevAdminMembershipLocked(r.memberships, user.UserID)
-	now := time.Now().UTC()
 	r.memberships[membershipKey(invitation.CompanyID, user.UserID)] = domain.CompanyMembership{
 		CompanyID:        invitation.CompanyID,
 		UserID:           user.UserID,

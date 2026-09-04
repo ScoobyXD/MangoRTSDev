@@ -14,9 +14,10 @@ const (
 )
 
 type authMembershipCacheKey struct {
-	subject string
-	email   string
-	name    string
+	subject  string
+	email    string
+	name     string
+	issuedAt int64
 }
 
 type authMembershipCacheEntry struct {
@@ -30,6 +31,7 @@ type authMembershipCache struct {
 	maxEntries int
 	now        func() time.Time
 	entries    map[authMembershipCacheKey]authMembershipCacheEntry
+	generation uint64
 }
 
 func newAuthMembershipCache(ttl time.Duration, maxEntries int) *authMembershipCache {
@@ -73,29 +75,57 @@ func (c *authMembershipCache) get(claims auth.Claims) (ActorContext, bool) {
 	return actor, true
 }
 
-func (c *authMembershipCache) set(claims auth.Claims, actor ActorContext) {
+func (c *authMembershipCache) snapshotGeneration() uint64 {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.generation
+}
+
+func (c *authMembershipCache) setIfGeneration(claims auth.Claims, actor ActorContext, generation uint64) bool {
 	if c == nil || c.ttl <= 0 || c.maxEntries <= 0 {
-		return
+		return true
 	}
 	key := cacheKeyForClaims(claims)
 	if key.subject == "" {
-		return
+		return true
 	}
 	actor = cloneActorContext(actor)
 	actor.Claims = claims
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.generation != generation {
+		return false
+	}
 
 	now := c.now().UTC()
-	c.pruneExpiredLocked(now)
-	for len(c.entries) >= c.maxEntries {
-		c.evictEarliestLocked()
+	expiresAt := now.Add(c.ttl)
+	for existingKey, entry := range c.entries {
+		if !entry.expiresAt.After(now) {
+			delete(c.entries, existingKey)
+		}
+	}
+	if _, exists := c.entries[key]; !exists {
+		if len(c.entries) >= c.maxEntries {
+			c.evictEarliestLocked()
+		}
+	}
+	for existingKey, entry := range c.entries {
+		if existingKey.subject != key.subject {
+			continue
+		}
+		entry.actor = actor
+		entry.expiresAt = expiresAt
+		c.entries[existingKey] = entry
 	}
 	c.entries[key] = authMembershipCacheEntry{
 		actor:     actor,
-		expiresAt: now.Add(c.ttl),
+		expiresAt: expiresAt,
 	}
+	return true
 }
 
 func (c *authMembershipCache) invalidateSubject(subject string) {
@@ -108,6 +138,7 @@ func (c *authMembershipCache) invalidateSubject(subject string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 	for key := range c.entries {
 		if key.subject == subject {
 			delete(c.entries, key)
@@ -125,6 +156,7 @@ func (c *authMembershipCache) invalidateUser(userID string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 	for key, entry := range c.entries {
 		if entry.actor.User.UserID == userID {
 			delete(c.entries, key)
@@ -142,6 +174,7 @@ func (c *authMembershipCache) invalidateCompany(companyID string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 	for key, entry := range c.entries {
 		if entry.actor.CompanyID == companyID {
 			delete(c.entries, key)
@@ -162,15 +195,8 @@ func (c *authMembershipCache) clear() {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 	c.entries = map[authMembershipCacheKey]authMembershipCacheEntry{}
-}
-
-func (c *authMembershipCache) pruneExpiredLocked(now time.Time) {
-	for key, entry := range c.entries {
-		if !entry.expiresAt.After(now) {
-			delete(c.entries, key)
-		}
-	}
 }
 
 func (c *authMembershipCache) evictEarliestLocked() {
@@ -188,10 +214,15 @@ func (c *authMembershipCache) evictEarliestLocked() {
 }
 
 func cacheKeyForClaims(claims auth.Claims) authMembershipCacheKey {
+	issuedAt := int64(0)
+	if !claims.IssuedAt.IsZero() {
+		issuedAt = claims.IssuedAt.Unix()
+	}
 	return authMembershipCacheKey{
-		subject: strings.TrimSpace(claims.Subject),
-		email:   strings.ToLower(strings.TrimSpace(claims.Email)),
-		name:    strings.TrimSpace(claims.Name),
+		subject:  strings.TrimSpace(claims.Subject),
+		email:    strings.ToLower(strings.TrimSpace(claims.Email)),
+		name:     strings.TrimSpace(claims.Name),
+		issuedAt: issuedAt,
 	}
 }
 

@@ -68,7 +68,7 @@ func (s *Server) handleCompanies(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	company, err := s.repo.CreateCompany(strings.TrimSpace(req.Name))
+	company, err := s.repo.CreateCompanyContext(r.Context(), strings.TrimSpace(req.Name))
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "company_name_required")
 		return

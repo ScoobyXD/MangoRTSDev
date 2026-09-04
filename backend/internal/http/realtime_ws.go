@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"crypto/sha1"
 	"encoding/base64"
@@ -40,7 +41,7 @@ const (
 	realtimePersonalMailboxScopePrefix        = "mailbox:personal:account:"
 	realtimeSharedMailboxScopePrefix          = "mailbox:shared:"
 	realtimeChatScopePrefix                   = "chat:node:"
-	realtimeProcessWorkScopePrefix                  = "process:"
+	realtimeProcessWorkScopePrefix            = "process:"
 	realtimeEditorScopePrefix                 = "editor:"
 	realtimeEditorJSONScopePrefix             = "editor-json:"
 	realtimeHuddleActionItemsScopePrefix      = store.HuddleActionItemsRealtimeScopePrefix
@@ -61,7 +62,7 @@ const (
 	realtimeMessageChatCreated              = "chat.message.created"
 	realtimeMessageChatUpdated              = "chat.message.updated"
 	realtimeMessageChatDeleted              = "chat.message.deleted"
-	realtimeMessageProcessWorkChanged            = "process.work.changed"
+	realtimeMessageProcessWorkChanged       = "process.work.changed"
 	realtimeMessageMailboxMessageChanged    = "mailbox.message.changed"
 	realtimeMessageMailboxFolderChanged     = "mailbox.folder.changed"
 	realtimeMessageEditorDeltaCommitted     = "editor.delta.committed"
@@ -82,6 +83,7 @@ type realtimeOutboundFrame struct {
 }
 
 type realtimeConnection struct {
+	ctx              context.Context
 	id               string
 	companyID        string
 	userID           string
@@ -124,11 +126,11 @@ type realtimeChatMessage struct {
 }
 
 type realtimeProcessWorkChangedMessage struct {
-	Type       string `json:"type"`
-	CompanyID  string `json:"company_id"`
-	Scope      string `json:"scope"`
+	Type        string `json:"type"`
+	CompanyID   string `json:"company_id"`
+	Scope       string `json:"scope"`
 	LogicGateID string `json:"logic_gate_id"`
-	ChangeType string `json:"change_type,omitempty"`
+	ChangeType  string `json:"change_type,omitempty"`
 }
 
 type realtimeMailboxChangedMessage struct {
@@ -160,9 +162,9 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	currentRole, err := s.currentActorRoleForCompany(actor, companyID)
+	currentRole, err := s.currentActorRoleForCompanyContext(r.Context(), actor, companyID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_check_company_access")
+		s.writeAuthResolutionError(w, r, actor.Claims, err)
 		return
 	}
 	if currentRole == "" {
@@ -180,6 +182,7 @@ func (s *Server) handleRealtimeWebSocket(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	realtimeConn := &realtimeConnection{
+		ctx:       r.Context(),
 		id:        newRealtimeConnectionID(),
 		companyID: companyID,
 		userID:    strings.TrimSpace(actor.User.UserID),
@@ -283,6 +286,10 @@ func acceptWebSocket(w http.ResponseWriter, r *http.Request) (net.Conn, *bufio.R
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		_ = conn.Close()
+		return nil, nil, err
+	}
 	accept := webSocketAcceptKey(key)
 	response := "HTTP/1.1 101 Switching Protocols\r\n" +
 		"Upgrade: websocket\r\n" +
@@ -377,7 +384,11 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Error: "scope_too_long"})
 		return
 	}
-	authorized, rejectCode, err := s.authorizeRealtimeSubscription(conn.actor, conn.companyID, scope)
+	subscriptionContext := conn.ctx
+	if subscriptionContext == nil {
+		subscriptionContext = s.realtimeSpineContext
+	}
+	authorized, rejectCode, err := s.authorizeRealtimeSubscription(subscriptionContext, conn.actor, conn.companyID, scope)
 	if err != nil {
 		log.Printf("failed to authorize realtime subscription company_id=%s user_id=%s scope=%s: %v", conn.companyID, conn.userID, scope, err)
 		_ = conn.sendJSON(realtimeServerMessage{Type: realtimeMessageSubscriptionRejected, Scope: scope, Error: "failed_to_check_subscription"})
@@ -408,9 +419,9 @@ func (s *Server) handleRealtimeSubscribe(conn *realtimeConnection, message realt
 	log.Printf("realtime_subscription_accepted company_id=%s user_id=%s connection_id=%s scope_type=%s scope=%s", conn.companyID, conn.userID, conn.id, realtimeScopeType(scope), scope)
 }
 
-func (s *Server) authorizeRealtimeSubscription(actor ActorContext, companyID, scope string) (bool, string, error) {
+func (s *Server) authorizeRealtimeSubscription(ctx context.Context, actor ActorContext, companyID, scope string) (bool, string, error) {
 	if strings.TrimSpace(scope) == realtimeProcessMapScope {
-		role, err := s.currentActorRoleForCompany(actor, companyID)
+		role, err := s.currentActorRoleForCompanyContext(ctx, actor, companyID)
 		if err != nil {
 			return false, "", err
 		}

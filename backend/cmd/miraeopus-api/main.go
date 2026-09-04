@@ -123,18 +123,23 @@ func main() {
 		addr = ":8080"
 	}
 
-	httpServer := &http.Server{
-		Addr:              addr,
-		Handler:           withSecurityHeaders(withLogging(withCORS(server.Routes()))),
-		ReadHeaderTimeout: envDurationDefault("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
-		ReadTimeout:       envDurationDefault("HTTP_READ_TIMEOUT", 15*time.Second),
-		IdleTimeout:       envDurationDefault("HTTP_IDLE_TIMEOUT", 60*time.Second),
-		MaxHeaderBytes:    envIntDefault("HTTP_MAX_HEADER_BYTES", 1<<20),
-	}
+	httpServer := configuredHTTPServer(addr, withSecurityHeaders(withLogging(withCORS(server.Routes()))))
 
 	log.Printf("miraeopus-api listening on %s", addr)
 	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
+	}
+}
+
+func configuredHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: envDurationDefault("HTTP_READ_HEADER_TIMEOUT", 5*time.Second),
+		ReadTimeout:       envDurationDefault("HTTP_READ_TIMEOUT", 15*time.Second),
+		WriteTimeout:      envDurationDefault("HTTP_WRITE_TIMEOUT", 30*time.Second),
+		IdleTimeout:       envDurationDefault("HTTP_IDLE_TIMEOUT", 60*time.Second),
+		MaxHeaderBytes:    envIntDefault("HTTP_MAX_HEADER_BYTES", 1<<20),
 	}
 }
 

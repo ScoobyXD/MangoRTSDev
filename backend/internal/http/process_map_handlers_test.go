@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 	"net/http"
@@ -72,7 +71,7 @@ type processMapRealtimeConnectionCaptureRepo struct {
 
 type processMapMembershipContextRepo struct {
 	store.Repository
-	sawContextError error
+	called bool
 }
 
 type processMapAccessContextRepo struct {
@@ -83,7 +82,7 @@ type processMapAccessContextRepo struct {
 type processMapAccessContextKey struct{}
 
 func (r *processMapMembershipContextRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
-	r.sawContextError = ctx.Err()
+	r.called = true
 	return nil, ctx.Err()
 }
 
@@ -284,7 +283,7 @@ func TestProcessMapHTTPSceneTilePrivacyETagAndCutover(t *testing.T) {
 	}
 }
 
-func TestProcessMapHTTPAuthorizationPropagatesRequestCancellation(t *testing.T) {
+func TestProcessMapHTTPAuthorizationStopsBeforeMembershipLookupWhenRequestIsCanceled(t *testing.T) {
 	fixture := newProcessMapHTTPFixture(t)
 	repo := &processMapMembershipContextRepo{Repository: fixture.repo}
 	server := NewServerWithOptions(repo, ServerOptions{EmailWorkerOnly: true, DisableRealtimeSpine: true})
@@ -295,8 +294,8 @@ func TestProcessMapHTTPAuthorizationPropagatesRequestCancellation(t *testing.T) 
 	request := httptest.NewRequest(http.MethodGet, "/v1/process-map/scene?company_id="+url.QueryEscape(fixture.companyID), nil).WithContext(ctx)
 	request = requestWithActorForTest(request, fixture.admin, fixture.companyID)
 	server.Routes().ServeHTTP(httptest.NewRecorder(), request)
-	if !errors.Is(repo.sawContextError, context.Canceled) {
-		t.Fatalf("membership lookup context error = %v, want context.Canceled", repo.sawContextError)
+	if repo.called {
+		t.Fatal("membership lookup started after the request was already canceled")
 	}
 }
 

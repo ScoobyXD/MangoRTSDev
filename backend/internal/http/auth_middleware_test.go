@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
@@ -423,6 +424,11 @@ func testValidator(t *testing.T, kid string, key *rsa.PrivateKey) *auth.Validato
 
 func testJWT(t *testing.T, key *rsa.PrivateKey, kid, subject, email string) string {
 	t.Helper()
+	return testJWTWithIssuedAt(t, key, kid, subject, email, time.Now().Add(-time.Minute))
+}
+
+func testJWTWithIssuedAt(t *testing.T, key *rsa.PrivateKey, kid, subject, email string, issuedAt time.Time) string {
+	t.Helper()
 	header := map[string]string{"alg": "RS256", "kid": kid, "typ": "JWT"}
 	claims := map[string]any{
 		"iss":       "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_test",
@@ -431,7 +437,7 @@ func testJWT(t *testing.T, key *rsa.PrivateKey, kid, subject, email string) stri
 		"client_id": "test-client",
 		"token_use": "access",
 		"exp":       time.Now().Add(time.Hour).Unix(),
-		"iat":       time.Now().Add(-time.Minute).Unix(),
+		"iat":       issuedAt.Unix(),
 	}
 	unsigned := encodeJSONSegment(t, header) + "." + encodeJSONSegment(t, claims)
 	sum := sha256.Sum256([]byte(unsigned))
@@ -440,6 +446,41 @@ func testJWT(t *testing.T, key *rsa.PrivateKey, kid, subject, email string) stri
 		t.Fatal(err)
 	}
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func TestAuthValidatorReturnsVerifiedTokenIssueTime(t *testing.T) {
+	t.Parallel()
+	key := mustRSAKey(t)
+	claims, err := testValidator(t, "kid", key).Validate(context.Background(), testJWT(t, key, "kid", "issued-at-subject", "issued-at@example.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.IssuedAt.IsZero() || claims.IssuedAt.After(time.Now()) {
+		t.Fatalf("issued at = %s, want verified past token issue time", claims.IssuedAt)
+	}
+}
+
+func TestAuthValidatorAllowsSmallIssuerClockSkewInTokenIssueTime(t *testing.T) {
+	t.Parallel()
+	key := mustRSAKey(t)
+	issuedAt := time.Now().Add(time.Second).Truncate(time.Second)
+	claims, err := testValidator(t, "kid", key).Validate(context.Background(), testJWTWithIssuedAt(t, key, "kid", "clock-skew-subject", "clock-skew@example.com", issuedAt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claims.IssuedAt.Equal(issuedAt) {
+		t.Fatalf("issued at = %s, want %s", claims.IssuedAt, issuedAt)
+	}
+}
+
+func TestAuthValidatorRejectsFarFutureTokenIssueTime(t *testing.T) {
+	t.Parallel()
+	key := mustRSAKey(t)
+	issuedAt := time.Now().Add(10 * time.Minute).Truncate(time.Second)
+	_, err := testValidator(t, "kid", key).Validate(context.Background(), testJWTWithIssuedAt(t, key, "kid", "future-subject", "future@example.com", issuedAt))
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("far-future issued-at error = %v, want %v", err, auth.ErrInvalidToken)
+	}
 }
 
 func encodeJSONSegment(t *testing.T, value any) string {
@@ -454,28 +495,28 @@ func encodeJSONSegment(t *testing.T, value any) string {
 type countingAuthRepo struct {
 	store.Repository
 	mu              sync.Mutex
-	upsertCalls     int
+	resolutionCalls int
 	membershipCalls int
 }
 
-func (r *countingAuthRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
+func (r *countingAuthRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	r.mu.Lock()
-	r.upsertCalls++
+	r.resolutionCalls++
 	r.mu.Unlock()
-	return r.Repository.UpsertAuthUser(cognitoSubject, email, displayName)
+	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName, claimsIssuedAt)
 }
 
-func (r *countingAuthRepo) ListUserMemberships(userID string) ([]domain.CompanyMembership, error) {
+func (r *countingAuthRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
 	r.mu.Lock()
 	r.membershipCalls++
 	r.mu.Unlock()
-	return r.Repository.ListUserMemberships(userID)
+	return r.Repository.ListUserMembershipsContext(ctx, userID)
 }
 
 func (r *countingAuthRepo) counts() (int, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.upsertCalls, r.membershipCalls
+	return r.resolutionCalls, r.membershipCalls
 }
 
 type tokenClaimsValidator struct {
@@ -536,9 +577,9 @@ func TestAuthMembershipCacheReusesContextAfterTokenValidation(t *testing.T) {
 	if got := validator.count(); got != 2 {
 		t.Fatalf("validator calls = %d, want 2", got)
 	}
-	upserts, memberships := repo.counts()
-	if upserts != 1 || memberships != 1 {
-		t.Fatalf("repo auth calls = upserts %d memberships %d, want 1/1", upserts, memberships)
+	resolutions, memberships := repo.counts()
+	if resolutions != 1 || memberships != 1 {
+		t.Fatalf("repo auth calls = resolutions %d memberships %d, want 1/1", resolutions, memberships)
 	}
 }
 
@@ -588,9 +629,32 @@ func TestAuthMembershipCacheExpires(t *testing.T) {
 	if got := validator.count(); got != 3 {
 		t.Fatalf("validator calls = %d, want 3", got)
 	}
-	upserts, memberships := repo.counts()
-	if upserts != 2 || memberships != 2 {
-		t.Fatalf("repo auth calls = upserts %d memberships %d, want 2/2", upserts, memberships)
+	resolutions, memberships := repo.counts()
+	if resolutions != 2 || memberships != 2 {
+		t.Fatalf("repo auth calls = resolutions %d memberships %d, want 2/2", resolutions, memberships)
+	}
+}
+
+func TestAuthMembershipCachePrunesExpiredTokenVariants(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	cache := newAuthMembershipCache(time.Second, 10)
+	cache.now = func() time.Time { return now }
+	oldClaims := auth.Claims{Subject: "pruned-subject", Email: "old@example.com", IssuedAt: now}
+	if !cache.setIfGeneration(oldClaims, ActorContext{User: domain.User{UserID: "pruned-user"}}, cache.snapshotGeneration()) {
+		t.Fatal("initial cache set was rejected")
+	}
+
+	now = now.Add(2 * time.Second)
+	newClaims := auth.Claims{Subject: oldClaims.Subject, Email: "new@example.com", IssuedAt: now}
+	if !cache.setIfGeneration(newClaims, ActorContext{User: domain.User{UserID: "pruned-user"}}, cache.snapshotGeneration()) {
+		t.Fatal("replacement cache set was rejected")
+	}
+	if len(cache.entries) != 1 {
+		t.Fatalf("cache entries = %d, want only the current token variant", len(cache.entries))
+	}
+	if _, ok := cache.entries[cacheKeyForClaims(newClaims)]; !ok {
+		t.Fatal("current token variant is missing from cache")
 	}
 }
 
@@ -601,46 +665,99 @@ func TestAuthMembershipCacheMissesOnChangedIdentityClaims(t *testing.T) {
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const subject = "claim-change-subject"
 	baseRepo.EnsureCompany(companyID, "Claims Company")
-	if _, err := baseRepo.UpsertAuthUser(subject, "old@example.com", "Old Name"); err != nil {
+	seededUser, err := baseRepo.UpsertAuthUser(subject, "old@example.com", "Old Name")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := baseRepo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	repo := &countingAuthRepo{Repository: baseRepo}
+	oldIssuedAt := time.Unix(seededUser.AuthClaimsIssuedAt.Unix()+10, 0).UTC()
+	newIssuedAt := oldIssuedAt.Add(10 * time.Second)
 	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
-		"old-token": {Subject: subject, Email: "old@example.com", Name: "Old Name"},
-		"new-token": {Subject: subject, Email: "new@example.com", Name: "New Name"},
+		"old-token": {Subject: subject, Email: "old@example.com", Name: "Old Name", IssuedAt: oldIssuedAt},
+		"new-token": {Subject: subject, Email: "new@example.com", Name: "New Name", IssuedAt: newIssuedAt},
 	}}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: validator}).Routes()
-
-	oldReq := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
-	oldReq.Header.Set("Authorization", "Bearer old-token")
-	oldRes := httptest.NewRecorder()
-	handler.ServeHTTP(oldRes, oldReq)
-	if oldRes.Code != http.StatusOK {
-		t.Fatalf("old claims status = %d, want %d, body=%s", oldRes.Code, http.StatusOK, strings.TrimSpace(oldRes.Body.String()))
+	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator:          validator,
+		AuthMembershipCacheTTL: time.Second,
+	})
+	server.authCache.now = func() time.Time { return now }
+	handler := server.Routes()
+	requestMe := func(token string) domain.User {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d, body=%s", token, res.Code, http.StatusOK, strings.TrimSpace(res.Body.String()))
+		}
+		var payload struct {
+			User domain.User `json:"user"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.User
+	}
+	assertNewProfile := func(label string, user domain.User) {
+		t.Helper()
+		if user.Email != "new@example.com" || user.DisplayName != "New Name" {
+			t.Fatalf("%s user = %+v, want current new profile", label, user)
+		}
 	}
 
-	newReq := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
-	newReq.Header.Set("Authorization", "Bearer new-token")
-	newRes := httptest.NewRecorder()
-	handler.ServeHTTP(newRes, newReq)
-	if newRes.Code != http.StatusOK {
-		t.Fatalf("new claims status = %d, want %d, body=%s", newRes.Code, http.StatusOK, strings.TrimSpace(newRes.Body.String()))
+	oldUser := requestMe("old-token")
+	if oldUser.Email != "old@example.com" || oldUser.DisplayName != "Old Name" {
+		t.Fatalf("initial old user = %+v, want old profile", oldUser)
 	}
-	var payload struct {
-		User domain.User `json:"user"`
-	}
-	if err := json.NewDecoder(newRes.Body).Decode(&payload); err != nil {
+	assertNewProfile("new token", requestMe("new-token"))
+	assertNewProfile("repeated old token", requestMe("old-token"))
+	assertNewProfile("repeated new token", requestMe("new-token"))
+	storedNew, err := baseRepo.GetAuthUser(subject)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if payload.User.Email != "new@example.com" || payload.User.DisplayName != "New Name" {
-		t.Fatalf("user = %+v, want updated email/display name from claims", payload.User)
+	now = now.Add(2 * time.Second)
+	assertNewProfile("expired old token", requestMe("old-token"))
+	assertNewProfile("post-refresh new token", requestMe("new-token"))
+	stored, err := baseRepo.GetAuthUser(subject)
+	if err != nil {
+		t.Fatal(err)
 	}
-	upserts, memberships := repo.counts()
-	if upserts != 2 || memberships != 2 {
-		t.Fatalf("repo auth calls = upserts %d memberships %d, want 2/2 after changed claims", upserts, memberships)
+	if stored.Email != "new@example.com" || stored.DisplayName != "New Name" || !stored.UpdatedTimestamp.Equal(storedNew.UpdatedTimestamp) || !stored.AuthClaimsIssuedAt.Equal(newIssuedAt) {
+		t.Fatalf("stored user = %+v, want older token to leave new profile unchanged", stored)
+	}
+
+	latestAIssuedAt := newIssuedAt.Add(10 * time.Second)
+	validator.mu.Lock()
+	validator.claims["latest-a-token"] = auth.Claims{Subject: subject, Email: "old@example.com", Name: "Old Name", IssuedAt: latestAIssuedAt}
+	validator.mu.Unlock()
+	latestA := requestMe("latest-a-token")
+	if latestA.Email != "old@example.com" || latestA.DisplayName != "Old Name" {
+		t.Fatalf("latest A user = %+v, want a genuinely later A profile change", latestA)
+	}
+	if staleB := requestMe("new-token"); staleB.Email != "old@example.com" || staleB.DisplayName != "Old Name" {
+		t.Fatalf("stale B user = %+v, want latest A profile", staleB)
+	}
+	now = now.Add(2 * time.Second)
+	if expiredStaleB := requestMe("new-token"); expiredStaleB.Email != "old@example.com" || expiredStaleB.DisplayName != "Old Name" {
+		t.Fatalf("expired stale B user = %+v, want latest A profile", expiredStaleB)
+	}
+	storedLatestA, err := baseRepo.GetAuthUser(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedLatestA.Email != "old@example.com" || storedLatestA.DisplayName != "Old Name" || !storedLatestA.UpdatedTimestamp.Equal(latestA.UpdatedTimestamp) {
+		t.Fatalf("stored latest A user = %+v, want stale B token to leave it unchanged", storedLatestA)
+	}
+
+	resolutions, memberships := repo.counts()
+	if resolutions != 6 || memberships != 6 {
+		t.Fatalf("repo auth calls = resolutions %d memberships %d, want 6/6 across three token versions and two expiries", resolutions, memberships)
 	}
 }
 
@@ -852,5 +969,799 @@ func TestTestAuthHeaderIsExplicitAndMembershipScoped(t *testing.T) {
 	enabled.Routes().ServeHTTP(deniedResponse, deniedRequest)
 	if deniedResponse.Code != http.StatusForbidden {
 		t.Fatalf("unscoped test subject status = %d, want %d, body=%s", deniedResponse.Code, http.StatusForbidden, deniedResponse.Body.String())
+	}
+}
+
+type blockingAuthPoolRepo struct {
+	store.Repository
+	pool            chan struct{}
+	resolveStarted  chan struct{}
+	resolveRelease  chan struct{}
+	startOnce       sync.Once
+	mu              sync.Mutex
+	resolveCalls    int
+	membershipCalls int
+	companyCalls    int
+	addMemberCalls  int
+	active          int
+	maxActive       int
+	membershipDelay time.Duration
+}
+
+func newBlockingAuthPoolRepo(base store.Repository, poolSize int) *blockingAuthPoolRepo {
+	return &blockingAuthPoolRepo{
+		Repository:      base,
+		pool:            make(chan struct{}, poolSize),
+		resolveStarted:  make(chan struct{}),
+		resolveRelease:  make(chan struct{}),
+		membershipDelay: 75 * time.Millisecond,
+	}
+}
+
+func (r *blockingAuthPoolRepo) beginDatabaseUse(ctx context.Context) (func(), error) {
+	select {
+	case r.pool <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	r.mu.Lock()
+	r.active++
+	if r.active > r.maxActive {
+		r.maxActive = r.active
+	}
+	r.mu.Unlock()
+	return func() {
+		r.mu.Lock()
+		r.active--
+		r.mu.Unlock()
+		<-r.pool
+	}, nil
+}
+
+func (r *blockingAuthPoolRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
+	done, err := r.beginDatabaseUse(ctx)
+	if err != nil {
+		return domain.User{}, err
+	}
+	defer done()
+	r.mu.Lock()
+	r.resolveCalls++
+	r.mu.Unlock()
+	r.startOnce.Do(func() { close(r.resolveStarted) })
+	select {
+	case <-r.resolveRelease:
+	case <-ctx.Done():
+		return domain.User{}, ctx.Err()
+	}
+	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName, claimsIssuedAt)
+}
+
+func (r *blockingAuthPoolRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
+	done, err := r.beginDatabaseUse(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+	r.mu.Lock()
+	r.membershipCalls++
+	r.mu.Unlock()
+	timer := time.NewTimer(r.membershipDelay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	return r.Repository.ListUserMembershipsContext(ctx, userID)
+}
+
+func (r *blockingAuthPoolRepo) BootstrapDevAdminContext(ctx context.Context, cognitoSubject, companyName string) (domain.CompanyMembership, bool, error) {
+	done, err := r.beginDatabaseUse(ctx)
+	if err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	defer done()
+	r.mu.Lock()
+	r.companyCalls++
+	r.addMemberCalls++
+	r.mu.Unlock()
+	return r.Repository.BootstrapDevAdminContext(ctx, cognitoSubject, companyName)
+}
+
+func (r *blockingAuthPoolRepo) stats() (resolveCalls, membershipCalls, active, maxActive int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.resolveCalls, r.membershipCalls, r.active, r.maxActive
+}
+
+func (r *blockingAuthPoolRepo) bootstrapStats() (companyCalls, addMemberCalls int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.companyCalls, r.addMemberCalls
+}
+
+func TestAuthBurstAcrossMeProtectedAndRealtimeStaysBelowTwentyConnectionPool(t *testing.T) {
+	base := store.NewMemoryRepo()
+	const companyID = "11111111-1111-1111-1111-111111111111"
+	const subject = "auth-burst-subject"
+	base.EnsureCompany(companyID, "Auth Burst")
+	if _, err := base.UpsertAuthUser(subject, "burst@example.com", "Burst User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	repo := newBlockingAuthPoolRepo(base, 20)
+	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
+		"burst-token": {Subject: subject, Email: "burst@example.com", Name: "Burst User"},
+	}}
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator:                  validator,
+		DisableRealtimeSpine:           true,
+		DisableAttachmentUploadCleanup: true,
+		DisableNotificationCleanup:     true,
+	})
+	server.realtimeSpineReady.Store(true)
+	t.Cleanup(server.Close)
+	handler := server.Routes()
+
+	type burstRequest struct {
+		method string
+		path   string
+		body   string
+		want   int
+	}
+	requests := []burstRequest{
+		{method: http.MethodGet, path: "/v1/me", want: http.StatusOK},
+		{method: http.MethodGet, path: "/v1/nodes?company_id=" + companyID, want: http.StatusOK},
+		{method: http.MethodPost, path: "/v1/realtime/ticket", body: `{"company_id":"` + companyID + `"}`, want: http.StatusOK},
+		{method: http.MethodGet, path: "/v1/realtime/ws?company_id=" + companyID, want: http.StatusBadRequest},
+	}
+	const requestCount = 60
+	start := make(chan struct{})
+	errorsFound := make(chan error, requestCount)
+	var wg sync.WaitGroup
+	for i := 0; i < requestCount; i++ {
+		request := requests[i%len(requests)]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			req := httptest.NewRequest(request.method, request.path, strings.NewReader(request.body))
+			req.Header.Set("Authorization", "Bearer burst-token")
+			res := httptest.NewRecorder()
+			handler.ServeHTTP(res, req)
+			if res.Code != request.want {
+				errorsFound <- errors.New("unexpected status for " + request.path + ": " + res.Body.String())
+			}
+		}()
+	}
+	close(start)
+	select {
+	case <-repo.resolveStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("auth burst did not enter the shared user resolution")
+	}
+	time.Sleep(50 * time.Millisecond)
+	_, _, activeBeforeRelease, maxBeforeRelease := repo.stats()
+	if activeBeforeRelease != 1 || maxBeforeRelease != 1 {
+		t.Fatalf("database use before release = active %d max %d, want 1/1", activeBeforeRelease, maxBeforeRelease)
+	}
+	close(repo.resolveRelease)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("auth burst did not complete")
+	}
+	close(errorsFound)
+	for err := range errorsFound {
+		t.Error(err)
+	}
+	resolveCalls, membershipCalls, active, maxActive := repo.stats()
+	if resolveCalls != 1 {
+		t.Fatalf("user resolutions = %d, want 1", resolveCalls)
+	}
+	if membershipCalls < 1 {
+		t.Fatal("membership resolution did not run")
+	}
+	if active != 0 || maxActive != 1 {
+		t.Fatalf("database use after burst = active %d max %d, want 0/1 below pool capacity 20", active, maxActive)
+	}
+}
+
+func TestAuthJoinedWaiterReturnsOnOwnCancellation(t *testing.T) {
+	base := store.NewMemoryRepo()
+	const subject = "auth-cancel-waiter"
+	if _, err := base.UpsertAuthUser(subject, "cancel@example.com", "Cancel User"); err != nil {
+		t.Fatal(err)
+	}
+	repo := newBlockingAuthPoolRepo(base, 20)
+	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true})
+	t.Cleanup(server.Close)
+	claims := auth.Claims{Subject: subject, Email: "cancel@example.com", Name: "Cancel User"}
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, err := server.authenticatedActorForClaims(context.Background(), claims)
+		leaderDone <- err
+	}()
+	select {
+	case <-repo.resolveStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader auth resolution did not start")
+	}
+	waiterContext, cancelWaiter := context.WithCancel(context.Background())
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := server.authenticatedActorForClaims(waiterContext, claims)
+		waiterDone <- err
+	}()
+	cancelWaiter()
+	select {
+	case err := <-waiterDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("waiter error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled auth waiter did not return")
+	}
+	close(repo.resolveRelease)
+	select {
+	case err := <-leaderDone:
+		if err != nil {
+			t.Fatalf("leader resolution failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader auth resolution did not finish")
+	}
+	resolveCalls, _, active, maxActive := repo.stats()
+	if resolveCalls != 1 || active != 0 || maxActive != 1 {
+		t.Fatalf("database use = resolutions %d active %d max %d, want 1/0/1", resolveCalls, active, maxActive)
+	}
+}
+
+func TestAuthLiveWaiterRetriesAfterShortDeadlineLeader(t *testing.T) {
+	base := store.NewMemoryRepo()
+	const subject = "auth-short-deadline-leader"
+	if _, err := base.UpsertAuthUser(subject, "leader@example.com", "Leader User"); err != nil {
+		t.Fatal(err)
+	}
+	repo := newBlockingAuthPoolRepo(base, 20)
+	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true})
+	t.Cleanup(server.Close)
+	claims := auth.Claims{Subject: subject, Email: "leader@example.com", Name: "Leader User"}
+	leaderContext, cancelLeader := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancelLeader()
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, err := server.authenticatedActorForClaims(leaderContext, claims)
+		leaderDone <- err
+	}()
+	select {
+	case <-repo.resolveStarted:
+	case <-time.After(time.Second):
+		t.Fatal("short-deadline leader did not start")
+	}
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := server.authenticatedActorForClaims(context.Background(), claims)
+		waiterDone <- err
+	}()
+	select {
+	case err := <-leaderDone:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("leader error = %v, want context.DeadlineExceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("short-deadline leader did not return")
+	}
+	close(repo.resolveRelease)
+	select {
+	case err := <-waiterDone:
+		if err != nil {
+			t.Fatalf("live waiter failed after leader deadline: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("live waiter did not retry after leader deadline")
+	}
+	resolveCalls, _, active, maxActive := repo.stats()
+	if resolveCalls != 2 || active != 0 || maxActive != 1 {
+		t.Fatalf("database use = resolutions %d active %d max %d, want 2/0/1", resolveCalls, active, maxActive)
+	}
+}
+
+type recoverableSlowAuthRepo struct {
+	store.Repository
+	mu     sync.Mutex
+	slow   bool
+	active int
+}
+
+func (r *recoverableSlowAuthRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
+	r.mu.Lock()
+	r.active++
+	slow := r.slow
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.active--
+		r.mu.Unlock()
+	}()
+	if slow {
+		<-ctx.Done()
+		return domain.User{}, ctx.Err()
+	}
+	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName, claimsIssuedAt)
+}
+
+func TestAuthTimeoutReturnsControlledErrorAndRecoversPool(t *testing.T) {
+	base := store.NewMemoryRepo()
+	const subject = "auth-timeout-recovery"
+	if _, err := base.UpsertAuthUser(subject, "timeout@example.com", "Timeout User"); err != nil {
+		t.Fatal(err)
+	}
+	repo := &recoverableSlowAuthRepo{Repository: base, slow: true}
+	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
+		"timeout-token": {Subject: subject, Email: "timeout@example.com", Name: "Timeout User"},
+	}}
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator:              validator,
+		AuthResolutionTimeout:      25 * time.Millisecond,
+		DisableRealtimeSpine:       true,
+		DisableNotificationCleanup: true,
+	})
+	t.Cleanup(server.Close)
+	handler := server.Routes()
+
+	timedOut := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	timedOut.Header.Set("Authorization", "Bearer timeout-token")
+	timedOutResponse := httptest.NewRecorder()
+	handler.ServeHTTP(timedOutResponse, timedOut)
+	if timedOutResponse.Code != http.StatusGatewayTimeout || !strings.Contains(timedOutResponse.Body.String(), "authentication_timeout") {
+		t.Fatalf("timeout response = %d %s, want 504 authentication_timeout", timedOutResponse.Code, timedOutResponse.Body.String())
+	}
+	repo.mu.Lock()
+	if repo.active != 0 {
+		t.Fatalf("active database operations after timeout = %d, want 0", repo.active)
+	}
+	repo.slow = false
+	repo.mu.Unlock()
+
+	recovered := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	recovered.Header.Set("Authorization", "Bearer timeout-token")
+	recoveredResponse := httptest.NewRecorder()
+	handler.ServeHTTP(recoveredResponse, recovered)
+	if recoveredResponse.Code != http.StatusOK {
+		t.Fatalf("recovered response = %d %s, want 200", recoveredResponse.Code, recoveredResponse.Body.String())
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if repo.active != 0 {
+		t.Fatalf("active database operations after recovery = %d, want 0", repo.active)
+	}
+}
+
+type authPostgresTimeoutError string
+
+func (e authPostgresTimeoutError) Error() string    { return "postgres auth timeout" }
+func (e authPostgresTimeoutError) SQLState() string { return string(e) }
+
+type authResolutionErrorRepo struct {
+	store.Repository
+	err error
+}
+
+func (r *authResolutionErrorRepo) ResolveAuthUserContext(context.Context, string, string, string, time.Time) (domain.User, error) {
+	return domain.User{}, r.err
+}
+
+func TestAuthPostgresTimeoutsReturnControlledGatewayTimeout(t *testing.T) {
+	for _, sqlState := range []string{"55P03", "57014"} {
+		t.Run(sqlState, func(t *testing.T) {
+			base := store.NewMemoryRepo()
+			repo := &authResolutionErrorRepo{Repository: base, err: authPostgresTimeoutError(sqlState)}
+			server := NewServerWithOptions(repo, ServerOptions{
+				AuthValidator:              &tokenClaimsValidator{claims: map[string]auth.Claims{"timeout-token": {Subject: "postgres-timeout", Email: "timeout@example.com"}}},
+				DisableRealtimeSpine:       true,
+				DisableNotificationCleanup: true,
+			})
+			t.Cleanup(server.Close)
+			request := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+			request.Header.Set("Authorization", "Bearer timeout-token")
+			response := httptest.NewRecorder()
+			server.Routes().ServeHTTP(response, request)
+			if response.Code != http.StatusGatewayTimeout || !strings.Contains(response.Body.String(), "authentication_timeout") {
+				t.Fatalf("PostgreSQL timeout response = %d %s, want 504 authentication_timeout", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+type blockingChangedClaimsRepo struct {
+	store.Repository
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	calls   int
+	active  int
+	max     int
+}
+
+func (r *blockingChangedClaimsRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
+	r.mu.Lock()
+	r.calls++
+	call := r.calls
+	r.active++
+	if r.active > r.max {
+		r.max = r.active
+	}
+	r.mu.Unlock()
+	defer func() {
+		r.mu.Lock()
+		r.active--
+		r.mu.Unlock()
+	}()
+	if call == 1 {
+		r.once.Do(func() { close(r.started) })
+		select {
+		case <-r.release:
+		case <-ctx.Done():
+			return domain.User{}, ctx.Err()
+		}
+	}
+	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName, claimsIssuedAt)
+}
+
+func TestConcurrentChangedClaimsSerializeBySubject(t *testing.T) {
+	base := store.NewMemoryRepo()
+	const subject = "serialized-claim-change"
+	if _, err := base.UpsertAuthUser(subject, "old@example.com", "Old Name"); err != nil {
+		t.Fatal(err)
+	}
+	repo := &blockingChangedClaimsRepo{Repository: base, started: make(chan struct{}), release: make(chan struct{})}
+	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true})
+	t.Cleanup(server.Close)
+	oldClaims := auth.Claims{Subject: subject, Email: "old@example.com", Name: "Old Name"}
+	newClaims := auth.Claims{Subject: subject, Email: "new@example.com", Name: "New Name"}
+	oldDone := make(chan error, 1)
+	go func() {
+		_, err := server.authenticatedActorForClaims(context.Background(), oldClaims)
+		oldDone <- err
+	}()
+	select {
+	case <-repo.started:
+	case <-time.After(time.Second):
+		t.Fatal("old-claims resolution did not start")
+	}
+	newDone := make(chan error, 1)
+	go func() {
+		_, err := server.authenticatedActorForClaims(context.Background(), newClaims)
+		newDone <- err
+	}()
+	close(repo.release)
+	for name, done := range map[string]<-chan error{"old": oldDone, "new": newDone} {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("%s claims resolution failed: %v", name, err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s claims resolution did not finish", name)
+		}
+	}
+	stored, err := base.GetAuthUser(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Email != "new@example.com" || stored.DisplayName != "New Name" {
+		t.Fatalf("stored user = %+v, want new claims", stored)
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if repo.calls != 2 || repo.active != 0 || repo.max != 1 {
+		t.Fatalf("claim resolutions = calls %d active %d max %d, want 2/0/1", repo.calls, repo.active, repo.max)
+	}
+}
+
+func TestAuthFirstBootstrapBurstCreatesOneCompanyAndMembership(t *testing.T) {
+	base := store.NewMemoryRepo()
+	const subject = "first-bootstrap-burst"
+	repo := newBlockingAuthPoolRepo(base, 20)
+	server := NewServerWithOptions(repo, ServerOptions{
+		BootstrapDevAdmin:              BootstrapDevAdminConfig{Emails: []string{"bootstrap@example.com"}, CompanyName: "Bootstrap Company"},
+		DisableRealtimeSpine:           true,
+		DisableAttachmentUploadCleanup: true,
+		DisableNotificationCleanup:     true,
+	})
+	t.Cleanup(server.Close)
+	claims := auth.Claims{Subject: subject, Email: "bootstrap@example.com", Name: "Bootstrap User"}
+
+	const requestCount = 40
+	start := make(chan struct{})
+	errorsFound := make(chan error, requestCount)
+	var waiters sync.WaitGroup
+	for index := 0; index < requestCount; index++ {
+		waiters.Add(1)
+		go func() {
+			defer waiters.Done()
+			<-start
+			actor, err := server.authenticatedActorForClaims(context.Background(), claims)
+			if err != nil {
+				errorsFound <- err
+				return
+			}
+			if !actor.IsDevAdmin || len(actor.Memberships) != 1 {
+				errorsFound <- errors.New("bootstrap actor did not receive one dev-admin membership")
+			}
+		}()
+	}
+	close(start)
+	select {
+	case <-repo.resolveStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("bootstrap auth resolution did not start")
+	}
+	time.Sleep(25 * time.Millisecond)
+	close(repo.resolveRelease)
+	waiters.Wait()
+	close(errorsFound)
+	for err := range errorsFound {
+		t.Error(err)
+	}
+	resolveCalls, membershipCalls, active, maxActive := repo.stats()
+	companyCalls, addMemberCalls := repo.bootstrapStats()
+	if resolveCalls != 1 || membershipCalls != 2 || companyCalls != 1 || addMemberCalls != 1 {
+		t.Fatalf("bootstrap calls = resolve %d memberships %d companies %d adds %d, want 1/2/1/1", resolveCalls, membershipCalls, companyCalls, addMemberCalls)
+	}
+	if active != 0 || maxActive != 1 {
+		t.Fatalf("bootstrap database use = active %d max %d, want 0/1", active, maxActive)
+	}
+}
+
+type coordinatedBootstrapRepo struct {
+	store.Repository
+	started chan struct{}
+	release chan struct{}
+	mu      sync.Mutex
+	calls   int
+	created int
+}
+
+func (r *coordinatedBootstrapRepo) BootstrapDevAdminContext(ctx context.Context, cognitoSubject, companyName string) (domain.CompanyMembership, bool, error) {
+	r.mu.Lock()
+	r.calls++
+	if r.calls == 2 {
+		close(r.started)
+	}
+	r.mu.Unlock()
+	select {
+	case <-r.release:
+	case <-ctx.Done():
+		return domain.CompanyMembership{}, false, ctx.Err()
+	}
+	membership, created, err := r.Repository.BootstrapDevAdminContext(ctx, cognitoSubject, companyName)
+	if created {
+		r.mu.Lock()
+		r.created++
+		r.mu.Unlock()
+	}
+	return membership, created, err
+}
+
+func TestAuthBootstrapIsAtomicAcrossServerInstances(t *testing.T) {
+	base := store.NewMemoryRepo()
+	repo := &coordinatedBootstrapRepo{Repository: base, started: make(chan struct{}), release: make(chan struct{})}
+	options := ServerOptions{
+		BootstrapDevAdmin:              BootstrapDevAdminConfig{Emails: []string{"cross-server@example.com"}, CompanyName: "Cross Server Bootstrap"},
+		DisableRealtimeSpine:           true,
+		DisableAttachmentUploadCleanup: true,
+		DisableNotificationCleanup:     true,
+	}
+	servers := []*Server{NewServerWithOptions(repo, options), NewServerWithOptions(repo, options)}
+	for _, server := range servers {
+		t.Cleanup(server.Close)
+	}
+	claims := auth.Claims{Subject: "cross-server-bootstrap", Email: "cross-server@example.com", Name: "Cross Server User"}
+	actors := make(chan ActorContext, len(servers))
+	errorsFound := make(chan error, len(servers))
+	for _, server := range servers {
+		go func(server *Server) {
+			actor, err := server.authenticatedActorForClaims(context.Background(), claims)
+			if err != nil {
+				errorsFound <- err
+				return
+			}
+			actors <- actor
+		}(server)
+	}
+	select {
+	case <-repo.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("both server instances did not reach atomic bootstrap")
+	}
+	close(repo.release)
+	for range servers {
+		select {
+		case err := <-errorsFound:
+			t.Fatal(err)
+		case actor := <-actors:
+			if !actor.IsDevAdmin || len(actor.Memberships) != 1 {
+				t.Fatalf("cross-server bootstrap actor = %+v, want one dev-admin membership", actor)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("cross-server bootstrap did not finish")
+		}
+	}
+	companies, err := base.ListCompanies("", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(companies) != 1 {
+		t.Fatalf("bootstrap companies = %d, want exactly one", len(companies))
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if repo.calls != 2 || repo.created != 1 {
+		t.Fatalf("atomic bootstrap calls = %d created = %d, want 2/1", repo.calls, repo.created)
+	}
+}
+
+type invalidationRaceAuthRepo struct {
+	store.Repository
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+	mu      sync.Mutex
+	calls   int
+}
+
+func (r *invalidationRaceAuthRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
+	r.mu.Lock()
+	r.calls++
+	call := r.calls
+	r.mu.Unlock()
+	if call == 1 {
+		r.once.Do(func() { close(r.started) })
+		select {
+		case <-r.release:
+			return []domain.CompanyMembership{}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return r.Repository.ListUserMembershipsContext(ctx, userID)
+}
+
+func TestAuthInvalidationRacingLoadCannotRestoreStaleMemberships(t *testing.T) {
+	base := store.NewMemoryRepo()
+	const companyID = "25252525-2525-4252-8252-252525252525"
+	const subject = "auth-invalidation-race"
+	base.EnsureCompany(companyID, "Invalidation Race")
+	if _, err := base.UpsertAuthUser(subject, "race@example.com", "Race User"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	repo := &invalidationRaceAuthRepo{Repository: base, started: make(chan struct{}), release: make(chan struct{})}
+	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true})
+	t.Cleanup(server.Close)
+	claims := auth.Claims{Subject: subject, Email: "race@example.com", Name: "Race User"}
+	actorResult := make(chan ActorContext, 1)
+	errorResult := make(chan error, 1)
+	go func() {
+		actor, err := server.authenticatedActorForClaims(context.Background(), claims)
+		if err != nil {
+			errorResult <- err
+			return
+		}
+		actorResult <- actor
+	}()
+	select {
+	case <-repo.started:
+	case <-time.After(time.Second):
+		t.Fatal("stale membership load did not start")
+	}
+	server.authCache.invalidateSubject(subject)
+	close(repo.release)
+	select {
+	case err := <-errorResult:
+		t.Fatal(err)
+	case actor := <-actorResult:
+		if len(actor.Memberships) != 1 || actor.Memberships[0].CompanyID != companyID {
+			t.Fatalf("actor memberships = %+v, want current company membership", actor.Memberships)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("auth resolution did not retry after invalidation")
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if repo.calls != 3 {
+		t.Fatalf("membership loads = %d, want stale load, fenced membership retry, and fenced actor retry", repo.calls)
+	}
+}
+
+type revocationRaceMembershipRepo struct {
+	store.Repository
+	started chan struct{}
+	release chan struct{}
+	stale   []domain.CompanyMembership
+	mu      sync.Mutex
+	calls   int
+}
+
+func (r *revocationRaceMembershipRepo) ListUserMembershipsContext(ctx context.Context, _ string) ([]domain.CompanyMembership, error) {
+	r.mu.Lock()
+	r.calls++
+	call := r.calls
+	r.mu.Unlock()
+	if call == 1 {
+		close(r.started)
+		select {
+		case <-r.release:
+			return append([]domain.CompanyMembership(nil), r.stale...), nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return []domain.CompanyMembership{}, nil
+}
+
+func TestRealtimeMembershipCheckRetriesReadThatRacedRevocation(t *testing.T) {
+	base := store.NewMemoryRepo()
+	const companyID = "35353535-3535-4353-8353-353535353535"
+	const subject = "realtime-revocation-race"
+	base.EnsureCompany(companyID, "Realtime Revocation Race")
+	user, err := base.UpsertAuthUser(subject, "revoked@example.com", "Revoked User")
+	if err != nil {
+		t.Fatal(err)
+	}
+	membership, err := base.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &revocationRaceMembershipRepo{
+		Repository: base,
+		started:    make(chan struct{}),
+		release:    make(chan struct{}),
+		stale:      []domain.CompanyMembership{membership},
+	}
+	server := NewServerWithOptions(repo, ServerOptions{DisableRealtimeSpine: true, DisableNotificationCleanup: true})
+	t.Cleanup(server.Close)
+	actor := ActorContext{User: user, Memberships: []domain.CompanyMembership{membership}}
+	type authorizationResult struct {
+		authorized bool
+		rejectCode string
+		err        error
+	}
+	done := make(chan authorizationResult, 1)
+	go func() {
+		authorized, rejectCode, err := server.authorizeRealtimeSubscription(context.Background(), actor, companyID, realtimeProcessMapScope)
+		done <- authorizationResult{authorized: authorized, rejectCode: rejectCode, err: err}
+	}()
+	select {
+	case <-repo.started:
+	case <-time.After(time.Second):
+		t.Fatal("stale realtime membership read did not start")
+	}
+	server.authCache.invalidateUser(user.UserID)
+	close(repo.release)
+	select {
+	case result := <-done:
+		if result.err != nil || result.authorized || result.rejectCode != "company_access_denied" {
+			t.Fatalf("authorization after revocation race = authorized %v reject %q err %v", result.authorized, result.rejectCode, result.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("realtime membership check did not retry after revocation")
+	}
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	if repo.calls != 2 {
+		t.Fatalf("realtime membership loads = %d, want stale load plus current retry", repo.calls)
 	}
 }

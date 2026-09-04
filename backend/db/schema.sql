@@ -5331,6 +5331,7 @@ CREATE TABLE public.users (
     created_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     updated_timestamp timestamp with time zone DEFAULT now() NOT NULL,
     display_name text NOT NULL,
+    auth_claims_issued_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT users_cognito_subject_nonblank_chk CHECK ((btrim(cognito_subject) <> ''::text)),
     CONSTRAINT users_display_name_nonblank_chk CHECK ((btrim(display_name) <> ''::text)),
     CONSTRAINT users_email_lowercase_chk CHECK ((email = lower(btrim(email))))
