@@ -1,11 +1,13 @@
 -- Emergency rollback for backend/db/migrations/20260903_process_steps.sql.
 -- Run only with the application stopped and only after taking a database backup.
 -- Paste this entire file into DBeaver and execute it as one script.
+-- If any statement fails, run ROLLBACK; in the same connection before retrying.
 --
 -- This restores the pre-Process-Steps database shape. The forward migration
 -- permanently removed the original compatibility card IDs, so this rollback
 -- deterministically uses assignment_id as compatibility_card_id. It archives
--- all Process Step rows, placements, edges, and affected recycle payloads in
+-- all Process Step rows, placements, edges, the exact migration ledger row,
+-- and affected recycle payloads in
 -- the mangorts_process_steps_rollback_20260903 schema before removing them from
 -- the live public schema.
 
@@ -19,7 +21,12 @@ DO $$
 DECLARE
   assignment_column_count integer;
   process_step_column_count integer;
+  later_migration_count integer := 0;
 BEGIN
+  IF NOT pg_try_advisory_xact_lock(4855156563379734401) THEN
+    RAISE EXCEPTION 'STOP: another database migration is running';
+  END IF;
+
   IF current_setting('server_version_num')::integer < 170000
      OR current_setting('server_version_num')::integer >= 190000 THEN
     RAISE EXCEPTION 'STOP: this rollback supports PostgreSQL 17 and 18 only';
@@ -134,6 +141,16 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'STOP: a recycled assignment lacks a matching Node with a convertible status';
   END IF;
+
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE 'LOCK TABLE public.schema_migrations IN SHARE ROW EXCLUSIVE MODE';
+    EXECUTE 'SELECT count(*) FROM public.schema_migrations WHERE version > $1'
+      INTO later_migration_count
+      USING '20260903_process_steps.sql';
+    IF later_migration_count <> 0 THEN
+      RAISE EXCEPTION 'STOP: a later database migration is recorded; this rollback only supports 20260903_process_steps.sql as the newest migration';
+    END IF;
+  END IF;
 END $$;
 
 LOCK TABLE nodes, node_logic_gate_assignments, process_steps,
@@ -163,6 +180,23 @@ WHERE restore_payload ?| ARRAY[
   'process_steps','node_logic_gate_assignments','kanban_board_projection',
   'resource_operational_relationships'
 ];
+
+CREATE TABLE mangorts_process_steps_rollback_20260903.schema_migration_ledger (
+  version text NOT NULL,
+  applied_at timestamp with time zone
+);
+
+DO $$
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE $archive$
+      INSERT INTO mangorts_process_steps_rollback_20260903.schema_migration_ledger(version,applied_at)
+      SELECT version,applied_at
+      FROM public.schema_migrations
+      WHERE version='20260903_process_steps.sql'
+    $archive$;
+  END IF;
+END $$;
 
 -- Rebuild the old assignment fields from the current canonical Node status.
 ALTER TABLE public.node_logic_gate_assignments
@@ -540,9 +574,18 @@ AFTER INSERT OR UPDATE OR DELETE ON public.kanban_board_projection
 FOR EACH ROW EXECUTE FUNCTION public.mangorts_trg_bump_logic_gate_work_from_gate_row();
 
 DO $$
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE 'DELETE FROM public.schema_migrations WHERE version=$1'
+      USING '20260903_process_steps.sql';
+  END IF;
+END $$;
+
+DO $$
 DECLARE
   assignment_count bigint;
   projection_count bigint;
+  process_steps_ledger_count bigint := 0;
 BEGIN
   IF to_regclass('public.process_steps') IS NOT NULL
      OR to_regclass('public.kanban_board_projection') IS NULL THEN
@@ -571,6 +614,14 @@ BEGIN
     RAISE EXCEPTION 'ROLLBACK FAILED: projection count % does not match assignment count %',
       projection_count,assignment_count;
   END IF;
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    EXECUTE 'SELECT count(*) FROM public.schema_migrations WHERE version=$1'
+      INTO process_steps_ledger_count
+      USING '20260903_process_steps.sql';
+    IF process_steps_ledger_count <> 0 THEN
+      RAISE EXCEPTION 'ROLLBACK FAILED: Process Steps migration ledger row remains';
+    END IF;
+  END IF;
 END $$;
 
 COMMIT;
@@ -579,4 +630,5 @@ SELECT
   (SELECT count(*) FROM public.node_logic_gate_assignments) AS restored_assignments,
   (SELECT count(*) FROM public.kanban_board_projection) AS rebuilt_projection_rows,
   (SELECT count(*) FROM mangorts_process_steps_rollback_20260903.process_steps) AS archived_process_steps,
-  (SELECT count(*) FROM mangorts_process_steps_rollback_20260903.step_relationships) AS archived_step_edges;
+  (SELECT count(*) FROM mangorts_process_steps_rollback_20260903.step_relationships) AS archived_step_edges,
+  (SELECT count(*) FROM mangorts_process_steps_rollback_20260903.schema_migration_ledger) AS archived_migration_ledger_rows;

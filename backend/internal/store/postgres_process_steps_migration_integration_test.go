@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,6 +14,7 @@ const processStepsLegacyFixture = `
 create table logic_gates(company_id uuid not null,logic_gate_id uuid not null,primary key(company_id,logic_gate_id));
 create table nodes(company_id uuid not null,node_id uuid not null,name text not null,status text,
  due_date date,priority smallint,completion_transition_timestamp timestamptz,
+ created_timestamp timestamptz not null default now(),updated_timestamp timestamptz not null default now(),
  primary key(company_id,node_id));
 create table node_logic_gate_assignments(
  company_id uuid not null,assignment_id uuid not null,node_id uuid not null,logic_gate_id uuid not null,
@@ -50,11 +52,15 @@ create table resource_gvic_settings(company_id uuid,resource_type text,resource_
 create table resource_gvic_assignments(resource_type text not null,
  constraint resource_gvic_assignments_resource_type_chk check(resource_type in
  ('node','logic_gate','project','shared_triage_folder','shared_inbox','huddle_logic_gate','huddle_node')));
+create table accounts(company_id uuid not null,account_id uuid not null,name text not null,folder_id uuid,position integer not null default 0,
+ created_timestamp timestamptz not null default now(),updated_timestamp timestamptz not null default now(),primary key(company_id,account_id));
+create table node_account_assignments(company_id uuid not null,node_id uuid not null,account_id uuid not null,
+ primary key(company_id,node_id,account_id));
 insert into logic_gates values
  ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001'),
  ('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000002'),
  ('10000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000003');
-insert into nodes values
+insert into nodes(company_id,node_id,name,status,due_date,priority,completion_transition_timestamp) values
  ('10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Live issue','Issue','2026-09-10',2,null),
  ('10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000002','Finished work','Done',null,null,'2026-08-30T12:00:00Z');
 insert into node_logic_gate_assignments(company_id,assignment_id,node_id,logic_gate_id,status_key,column_id,is_issue,position,compatibility_board_id,compatibility_card_id)
@@ -178,6 +184,124 @@ func TestPostgresProcessStepsMigrationPreservesExistingWork(t *testing.T) {
 	}
 	if nodeCount != 2 || assignmentCount != 2 || edgeCount != 0 || assignedStepCount != 0 {
 		t.Fatalf("step cleanup deleted work or retained edges: Nodes=%d assignments=%d edges=%d assigned=%d", nodeCount, assignmentCount, edgeCount, assignedStepCount)
+	}
+}
+
+func TestPostgresProcessStepsEmergencyRollbackRestoresLegacySchema(t *testing.T) {
+	db := openPostgresProcessMapTestDatabase(t)
+	if _, err := db.Exec(`drop schema if exists mangorts_process_steps_rollback_20260903 cascade;` + processStepsLegacyFixture); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260903_process_steps.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("Process Steps migration: %v", err)
+	}
+	if _, err := db.Exec(`
+create table schema_migrations(version text primary key,applied_at timestamptz not null default now());
+insert into schema_migrations(version) values('20260902_previous.sql'),('20260903_process_steps.sql');
+insert into process_steps(company_id,process_step_id,logic_gate_id,name,position) values
+ ('10000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','Prepare',1000),
+ ('10000000-0000-4000-8000-000000000001','70000000-0000-4000-8000-000000000002','20000000-0000-4000-8000-000000000001','Review',2000);
+update node_logic_gate_assignments set process_step_id='70000000-0000-4000-8000-000000000001'
+ where assignment_id='40000000-0000-4000-8000-000000000001';
+insert into resource_operational_relationships(
+ company_id,resource_operational_relationship_id,source_resource_type,source_resource_id,target_resource_type,target_resource_id
+) values(
+ '10000000-0000-4000-8000-000000000001','80000000-0000-4000-8000-000000000001',
+ 'process_step','70000000-0000-4000-8000-000000000001','process_step','70000000-0000-4000-8000-000000000002'
+);`); err != nil {
+		t.Fatal(err)
+	}
+	rollback, err := os.ReadFile(filepath.Join("..", "..", "..", "scripts", "process_steps_emergency_rollback.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(rollback)); err != nil {
+		t.Fatalf("Process Steps emergency rollback: %v", err)
+	}
+
+	var restored bool
+	if err := db.QueryRow(`select
+ to_regclass('public.process_steps') is null
+ and to_regclass('public.kanban_board_projection') is not null
+ and exists(select 1 from information_schema.columns where table_schema='public' and table_name='node_logic_gate_assignments' and column_name='status_key')
+ and not exists(select 1 from information_schema.columns where table_schema='public' and table_name='node_logic_gate_assignments' and column_name='process_step_id')`).Scan(&restored); err != nil || !restored {
+		t.Fatalf("legacy table shape was not restored: restored=%t err=%v", restored, err)
+	}
+	var statusKey, columnID, boardID, cardID string
+	if err := db.QueryRow(`select status_key,column_id,compatibility_board_id,compatibility_card_id::text
+ from node_logic_gate_assignments where assignment_id='40000000-0000-4000-8000-000000000001'`).Scan(
+		&statusKey, &columnID, &boardID, &cardID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if statusKey != "review" || columnID != "review" || boardID != "logic-gate:20000000-0000-4000-8000-000000000001" || cardID != "40000000-0000-4000-8000-000000000001" {
+		t.Fatalf("assignment was not reconstructed safely: status=%s column=%s board=%s card=%s", statusKey, columnID, boardID, cardID)
+	}
+	var projectionCount, liveEdgeCount, olderLedgerCount, exactLedgerCount int
+	if err := db.QueryRow(`select
+ (select count(*) from kanban_board_projection),
+ (select count(*) from resource_operational_relationships where source_resource_type='process_step' or target_resource_type='process_step'),
+ (select count(*) from schema_migrations where version='20260902_previous.sql'),
+ (select count(*) from schema_migrations where version='20260903_process_steps.sql')`).Scan(
+		&projectionCount, &liveEdgeCount, &olderLedgerCount, &exactLedgerCount,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if projectionCount != 2 || liveEdgeCount != 0 || olderLedgerCount != 1 || exactLedgerCount != 0 {
+		t.Fatalf("rollback live state mismatch: projection=%d edges=%d older-ledger=%d process-steps-ledger=%d", projectionCount, liveEdgeCount, olderLedgerCount, exactLedgerCount)
+	}
+	var archivedSteps, archivedPlacements, archivedEdges, archivedPayloads, archivedLedger int
+	if err := db.QueryRow(`select
+ (select count(*) from mangorts_process_steps_rollback_20260903.process_steps),
+ (select count(*) from mangorts_process_steps_rollback_20260903.node_step_placements),
+ (select count(*) from mangorts_process_steps_rollback_20260903.step_relationships),
+ (select count(*) from mangorts_process_steps_rollback_20260903.recycle_payloads),
+ (select count(*) from mangorts_process_steps_rollback_20260903.schema_migration_ledger)`).Scan(
+		&archivedSteps, &archivedPlacements, &archivedEdges, &archivedPayloads, &archivedLedger,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if archivedSteps != 2 || archivedPlacements != 1 || archivedEdges != 1 || archivedPayloads != 1 || archivedLedger != 1 {
+		t.Fatalf("rollback archive mismatch: steps=%d placements=%d edges=%d payloads=%d ledger=%d", archivedSteps, archivedPlacements, archivedEdges, archivedPayloads, archivedLedger)
+	}
+}
+
+func TestPostgresProcessStepsEmergencyRollbackRejectsLaterMigration(t *testing.T) {
+	db := openPostgresProcessMapTestDatabase(t)
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`drop schema if exists mangorts_process_steps_rollback_20260903 cascade;` + processStepsLegacyFixture); err != nil {
+		t.Fatal(err)
+	}
+	migration, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260903_process_steps.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(migration)); err != nil {
+		t.Fatalf("Process Steps migration: %v", err)
+	}
+	if _, err := db.Exec(`create table schema_migrations(version text primary key,applied_at timestamptz not null default now());
+ insert into schema_migrations(version) values('20260903_process_steps.sql'),('20260904_future.sql')`); err != nil {
+		t.Fatal(err)
+	}
+	rollback, err := os.ReadFile(filepath.Join("..", "..", "..", "scripts", "process_steps_emergency_rollback.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(string(rollback)); err == nil || !strings.Contains(err.Error(), "a later database migration is recorded") {
+		t.Fatalf("rollback did not reject a later migration: %v", err)
+	}
+	if _, err := db.Exec("rollback"); err != nil {
+		t.Fatal(err)
+	}
+	var unchanged bool
+	if err := db.QueryRow(`select to_regclass('public.process_steps') is not null
+ and to_regnamespace('mangorts_process_steps_rollback_20260903') is null
+ and exists(select 1 from schema_migrations where version='20260903_process_steps.sql')`).Scan(&unchanged); err != nil || !unchanged {
+		t.Fatalf("rejected rollback changed the cutover schema: unchanged=%t err=%v", unchanged, err)
 	}
 }
 
