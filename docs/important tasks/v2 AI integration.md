@@ -10,7 +10,7 @@ Build the smallest working Process-level AI experience first. A user asks the AI
 
 The full original proposal is retained below as future scope and as a verbatim reference. Its instructions to implement everything, its original first-version requirements, tests, and acceptance checklist do not apply to the small first version. The current decision and first-version scope in this document take precedence.
 
-Jonat authorized implementation of this small first version. The backlog, live database changes, integration into main, deployments, and publishing remain outside that authorization. Current behavior is documented in [Mango assistant laws](../tests/mango-assistant.md) and [relationship laws](../tests/relationships.md).
+Jonat authorized implementation of this small first version. The backlog, live database changes, integration into main, deployments, and publishing remain outside that authorization. Current behavior is documented in [AI & MCP laws and tool inventory](../tests/AI%26MCP.md) and [relationship laws](../tests/relationships.md).
 
 ## First version: ask the AI to perform a Process
 

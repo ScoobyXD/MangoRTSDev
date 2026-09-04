@@ -1,6 +1,6 @@
 # Mango chat setup
 
-The bottom composer, authenticated status/chat endpoints, streamed OpenAI Responses API calls, function-result continuation, and 25 internal Mango functions are implemented. The official Go SDK is pinned to `v3.30.0`, which supports Mango's existing Go version. No schema change is required.
+The bottom composer, authenticated status/chat endpoints, streamed OpenAI Responses API calls, and internal Mango functions are implemented. Ordinary chat has 25 tools; selecting a Process replaces them with 3 Process tools. The exact current catalog and behavior live in [AI & MCP](tests/AI%26MCP.md). The official Go SDK is pinned to `v3.30.0`, which supports Mango's existing Go version. The assistant adds no schema migration.
 
 An operator must supply the model and one server-side key source:
 
@@ -32,27 +32,8 @@ A new PowerShell session still needs the launcher once to load the dev database,
 
 For a restricted OpenAI key, grant `Responses (/v1/responses)` write access. Mango chat does not need List models, Assistants, Threads, Files, or the other unrelated capabilities.
 
-Chat uses Mango's existing signed-in user and `company_id` query scope. `GET /v1/assistant/status` returns `{ "available": false }` until both settings exist; availability means configured, not a provider billing/connectivity check. `POST /v1/assistant/chat` accepts `{ "request_id": "UUID", "reasoning_effort": "medium", "messages": [{ "role": "user", "content": "Hello" }] }` and streams `text`, `tool`, `done`, or sanitized `error` events. The required effort is one of `low`, `medium`, `high`, `xhigh`, or `max` and applies to every provider step in that Send. Unauthenticated local mode cannot run assistant actions; use the existing authenticated app setup. There is no public tool-dispatch endpoint.
+Use Mango's existing authenticated app setup and selected `company_id` query scope. `GET /v1/assistant/status` reports whether chat is configured. `POST /v1/assistant/chat` accepts `{ "request_id": "UUID", "reasoning_effort": "medium", "messages": [{ "role": "user", "content": "Hello" }] }`; selecting a Process also supplies its exact `process_id`. The stream carries `text`, `tool`, `node`, `done`, or sanitized `error` events.
 
-The provider receives conversation text and the Mango data returned by requested functions. Responses use `store: false`; conversation state stays in the current browser session. The server keeps the model fixed while the browser reasoning picker defaults to medium and remembers the last valid local choice. Chat starts collapsed. Higher efforts still use Mango's fixed 4,096-token and 90-second safety limits. These choices do not change the provider account's separate retention policies.
+[AI & MCP](tests/AI%26MCP.md) is the single current record for business rules, CRUD/HTTP tool mappings, permissions, request limits, confirmation behavior, Process execution, attachment constraints, and verification coverage. Keep setup and credential instructions here; update tool behavior and the inventory there.
 
-| Area | Internal functions |
-| --- | --- |
-| Current user | `get_me` |
-| Processes | `list_processes`, `get_process`, `get_process_nodes`, `create_process`, `update_process`, `delete_process` |
-| Nodes | `get_node`, `create_node`, `update_node`, `delete_node`, `move_node_to_process` |
-| Textboxes | `get_textbox`, `save_textbox`, `delete_textbox` |
-| Company Explorer | `list_explorer`, `create_folder`, `rename_folder`, `move_folder`, `delete_folder` |
-| Attachments | `list_attachments`, `create_attachment_upload`, `get_attachment_upload`, `complete_attachment_upload`, `link_attachment` |
-
-Process updates rename a Process. Node updates expose its name, status, due date, and priority; assignment uses the existing move command. Textbox tools support Nodes and Processes. Attachment tools support Nodes, Processes, and Company Explorer Folders. Reads are bounded; narrow a search when a result is too large.
-
-Textbox save replaces the whole submitted document with plain text, removing rich formatting, inline references, and annotations. It uses existing editor revisions; PostgreSQL can merge concurrent blocks, so read the saved document before claiming exact final content. Deletion retains Mango's existing confirmation and recycle behavior.
-
-There is no file picker or file-byte function in this chat. Upload preparation returns the existing upload descriptor; a client must perform Mango's normal byte upload and any multipart signing steps before calling completion. Completion verifies the stored object. Preparation alone never creates a completed attachment.
-
-Each Send is limited to 90 seconds, eight function steps, nine model responses with at most 4,096 output tokens each, and 32,000 streamed text bytes. User messages are limited to 8,000 characters; history to 24 messages and 48,000 characters. Clear chat when history is full. Tool results are bounded to 64 KiB. No automatic retries or polling occur.
-
-Duplicate-send protection is process-local and retains request IDs for fifteen minutes (at most 2,048 receipts). It is not a durable exactly-once guarantee across backend replicas or restarts. Do not retry a write after an interrupted/uncertain result without first checking Mango. Stop prevents subsequent work; ordinary synchronous repository operations already entered may still commit.
-
-Protocol references: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling) and [streaming Responses](https://developers.openai.com/api/docs/guides/streaming-responses). Behavior and local test coverage are specified in [Mango Assistant laws](tests/mango-assistant.md).
+Protocol references: [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling) and [streaming Responses](https://developers.openai.com/api/docs/guides/streaming-responses).
