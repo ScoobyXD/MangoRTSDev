@@ -57,15 +57,13 @@ func (r *MemoryRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessSte
 	if !r.processStepBelongsLocked(input.CompanyID, input.LogicGateID, input.AfterProcessStepID) {
 		return ProcessStepMutationResult{}, ErrInvalid
 	}
-	position := 1000
-	for _, step := range r.processSteps {
-		if step.CompanyID == input.CompanyID && step.LogicGateID == input.LogicGateID && step.Position >= position {
-			position = step.Position + 1000
-		}
-	}
 	now := time.Now().UTC()
+	position, positionUpdates, ok := planProcessStepInsertion(r.processStepsLocked(input.CompanyID, input.LogicGateID), input.AfterProcessStepID)
+	if !ok {
+		return ProcessStepMutationResult{}, ErrInvalid
+	}
 	step := domain.ProcessStep{CompanyID: input.CompanyID, LogicGateID: input.LogicGateID, ProcessStepID: newUUIDv7String(), Name: input.Name, Position: position, CreatedTimestamp: now, UpdatedTimestamp: now}
-	result := ProcessStepMutationResult{Step: &step}
+	result := ProcessStepMutationResult{Step: &step, PositionUpdates: positionUpdates}
 	if input.AfterProcessStepID != nil {
 		edge := domain.ResourceOperationalRelationship{CompanyID: input.CompanyID, ResourceOperationalRelationshipID: newUUIDv7String(), Source: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: *input.AfterProcessStepID}, Target: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: step.ProcessStepID}, CreatedTimestamp: now}
 		result.Relationship = &edge
@@ -73,6 +71,12 @@ func (r *MemoryRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessSte
 	events, err := r.appendDomainEventsLocked([]DomainEventInput{processWorkChangedEvent(input.CompanyID, input.LogicGateID, input.ActorUserID)})
 	if err != nil {
 		return ProcessStepMutationResult{}, err
+	}
+	for stepID, updatedPosition := range positionUpdates {
+		existing := r.processSteps[key(input.CompanyID, stepID)]
+		existing.Position = updatedPosition
+		existing.UpdatedTimestamp = now
+		r.processSteps[key(input.CompanyID, stepID)] = existing
 	}
 	r.processSteps[key(input.CompanyID, step.ProcessStepID)] = step
 	if result.Relationship != nil {

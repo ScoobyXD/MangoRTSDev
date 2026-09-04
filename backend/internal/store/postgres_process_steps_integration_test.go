@@ -13,6 +13,7 @@ func TestPostgresProcessStepsRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertProcessStepsRequestResolvers(t, repo, company.CompanyID)
+	assertProcessStepCreationOrder(t, repo, company.CompanyID)
 	gate, err := repo.CreateLogicGate(company.CompanyID, "Review invoices")
 	if err != nil {
 		t.Fatal(err)

@@ -6,7 +6,7 @@
 4. Step display order is stored on the step and does not create or change an operational connection.
 5. Step connections use only `resource_operational_relationships` with exact `process_step` endpoints belonging to the same Process.
 6. A connection is directed, rejects a self-edge, and has one row per exact company and directed endpoint pair.
-7. Add next step creates the new step and its explicitly requested incoming connection atomically.
+7. Add next step stores and renders the new step immediately to the right of its exact source and creates that incoming connection atomically.
 8. One step may connect to several other steps, and several steps may connect to the same step.
 9. A connection controls neither Node permissions nor Process membership and creates no Company Explorer or company-map placement.
 10. A Node keeps its one existing Process assignment and may have one step assignment within that same Process.
@@ -44,7 +44,7 @@
 
 ## Process Story
 
-A Node is requested into a Process. An authorized Responsible user accepts it into Pending. Starting work selects a step and sets In Progress; later step moves keep its status. Marking it Done removes it from active columns while keeping it openable in Done with the same Process and surviving step. Deleting a step clears only its step assignments and connections, so all affected Nodes remain available in the view determined by their unchanged status.
+A Node is requested into a Process. An authorized Responsible user accepts it into Pending. Starting work selects a step and sets In Progress; later step moves keep its status. Add next step places the new column immediately after the selected source and creates their directed connection in the same mutation. Marking a Node Done removes it from active columns while keeping it openable in Done with the same Process and surviving step. Deleting a step clears only its step assignments and connections, so all affected Nodes remain available in the view determined by their unchanged status.
 
 ## Main Scenarios
 

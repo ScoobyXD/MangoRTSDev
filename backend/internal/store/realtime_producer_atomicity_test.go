@@ -78,16 +78,30 @@ func TestMemoryWorkspaceMutationAndOutboxAreAtomic(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		first, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Name: "First"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Name: "Second", AfterProcessStepID: &first.Step.ProcessStepID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		denseSecond := repo.processSteps[key(companyID, second.Step.ProcessStepID)]
+		denseSecond.Position = processStepPositionStride + 1
+		repo.processSteps[key(companyID, second.Step.ProcessStepID)] = denseSecond
 		repo.realtimeOutboxErr = forced
-		if _, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Name: "Review"}); !errors.Is(err, forced) {
+		if _, err := repo.CreateProcessStep(ProcessStepCreateInput{CompanyID: companyID, LogicGateID: logicGate.LogicGateID, Name: "Review", AfterProcessStepID: &first.Step.ProcessStepID}); !errors.Is(err, forced) {
 			t.Fatalf("CreateProcessStep error = %v, want forced outbox failure", err)
 		}
 		work, err := repo.GetLogicGateWork(companyID, logicGate.LogicGateID, "")
-		if err != nil || len(work.Steps) != 0 {
-			t.Fatalf("steps after failed outbox insert = %+v err=%v, want none", work.Steps, err)
+		if err != nil || len(work.Steps) != 2 || work.Steps[0].ProcessStepID != first.Step.ProcessStepID || work.Steps[0].Position != processStepPositionStride || work.Steps[1].ProcessStepID != second.Step.ProcessStepID || work.Steps[1].Position != processStepPositionStride+1 || !work.Steps[1].UpdatedTimestamp.Equal(denseSecond.UpdatedTimestamp) {
+			t.Fatalf("steps after failed outbox insert = %+v err=%v, want original order and positions", work.Steps, err)
 		}
-		if len(repo.domainEvents) != 0 || len(repo.realtimeOutbox) != 0 {
-			t.Fatalf("split Process state domain_events=%d outbox=%d", len(repo.domainEvents), len(repo.realtimeOutbox))
+		if len(work.Relationships) != 1 || work.Relationships[0].ResourceOperationalRelationshipID != second.Relationship.ResourceOperationalRelationshipID {
+			t.Fatalf("relationships after failed outbox insert = %+v, want original edge only", work.Relationships)
+		}
+		if len(repo.domainEvents) != 2 || len(repo.realtimeOutbox) != 2 {
+			t.Fatalf("split Process state domain_events=%d outbox=%d, want two committed creates", len(repo.domainEvents), len(repo.realtimeOutbox))
 		}
 	})
 

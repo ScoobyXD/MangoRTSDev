@@ -94,6 +94,13 @@ export function orderedProcessSteps(steps: readonly ProcessStep[]): ProcessStep[
   return [...steps].sort((a, b) => a.position - b.position || a.process_step_id.localeCompare(b.process_step_id));
 }
 
+export function mergeCreatedProcessStep(steps: readonly ProcessStep[], step: ProcessStep, positionUpdates: Readonly<Record<string, number>> = {}): ProcessStep[] {
+  const existing = steps
+    .filter((item) => item.process_step_id !== step.process_step_id)
+    .map((item) => positionUpdates[item.process_step_id] === undefined ? item : { ...item, position: positionUpdates[item.process_step_id] });
+  return orderedProcessSteps([...existing, step]);
+}
+
 /** Reordering changes only the selected nodes' location/order, never their status. */
 export function processNodeMovePlan(nodes: readonly ProcessWorkNode[], nodeIDs: readonly string[], stepID: string | null, beforeNodeID?: string, options: { dateAddedSort?: boolean; priority?: number } = {}): Array<{ node_id: string; process_step_id: string | null; position?: number; priority?: number }> {
   const ids = new Set(nodeIDs);

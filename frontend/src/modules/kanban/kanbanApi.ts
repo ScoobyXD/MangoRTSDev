@@ -48,7 +48,7 @@ async function mutateProcess<T>(apiBase: string, companyID: string, logicGateID:
   return result;
 }
 
-export type ProcessStepMutationResult = { step?: ProcessStep; relationship?: ProcessStepRelationship };
+export type ProcessStepMutationResult = { step?: ProcessStep; relationship?: ProcessStepRelationship; position_updates?: Record<string, number> };
 export function createProcessStep(apiBase: string, companyID: string, logicGateID: string, name: string, afterProcessStepID?: string): Promise<ProcessStepMutationResult> {
   return mutateProcess(apiBase, companyID, logicGateID, "steps", "POST", { name, after_process_step_id: afterProcessStepID });
 }

@@ -21,7 +21,7 @@ import { fetchSavedViews, saveSavedView, type SavedView, type SavedViewGrouping 
 import { NODE_ICON_GRADIENT_END, NODE_ICON_GRADIENT_START } from "../../icons/index.js";
 import { buildUniversalNestedGroups, type UniversalNestedGroup, type UniversalGroupValue } from "../grouping/universalGrouping";
 import { assignNodeToLogicGateStatus, changeProcessNodeState, createProcessNode, createProcessStep, deleteProcessStep, deleteProcessStepRelationship, dispatchLogicGateWorkUpdated, clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight, invalidateLogicGateArenaViewCache, PROCESS_WORK_UPDATED_EVENT, updateProcessStep, type ProcessNodeStatePatch } from "./kanbanApi";
-import { orderedProcessSteps, PROCESS_STATUSES, PROCESS_WORK_VIEWS, processNodeMovePlan, processStatusColor, processWorkCounts, processWorkView, type ProcessStep, type ProcessWorkNode, type ProcessWorkSnapshot, type ProcessWorkView } from "./processWork";
+import { mergeCreatedProcessStep, orderedProcessSteps, PROCESS_STATUSES, PROCESS_WORK_VIEWS, processNodeMovePlan, processStatusColor, processWorkCounts, processWorkView, type ProcessStep, type ProcessWorkNode, type ProcessWorkSnapshot, type ProcessWorkView } from "./processWork";
 import { readFrameLinksFromStorage, readFrameRegistryFromStorage, resolveConnectedFrameTargets } from "../linkingGraph";
 import { shouldResetNodeEditorOverlayViewMode } from "./nodeEditorOverlayViewMode";
 import { KanbanGroupingControls } from "./KanbanGroupingControls";
@@ -338,7 +338,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
     if (!step) return;
     setSnapshot((current) => processRef.current !== processID || !current ? current : {
       ...current,
-      steps: [...current.steps, step],
+      steps: mergeCreatedProcessStep(current.steps, step, result.position_updates),
       relationships: result.relationship ? [...current.relationships, result.relationship] : current.relationships,
     });
   }); };
