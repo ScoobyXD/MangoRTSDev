@@ -1194,6 +1194,7 @@ func (r *MemoryRepo) DeleteResourceOperationalRelationship(ctx context.Context, 
 	if err != nil {
 		return restore(err)
 	}
+	r.pruneProcessStepMapsLocked(input.CompanyID)
 	readVersion, _ := r.processMapVersionsLocked(input.CompanyID)
 	return ProcessMapMutationEnvelope{Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: []string{}, ProcessMapReadVersion: readVersion, Relationship: &relationship, Changed: true, Events: events}, nil
 }
@@ -1233,4 +1234,5 @@ func (r *MemoryRepo) deleteProcessMapResourceLocked(companyID, resourceType, res
 			delete(r.resourceOperationalRelationships, relationshipKey)
 		}
 	}
+	r.pruneProcessStepMapsLocked(companyID)
 }

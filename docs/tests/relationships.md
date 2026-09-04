@@ -13,6 +13,14 @@
 11. Step commands check access through their exact owning Process and existing Node access rules; flow edges grant no access.
 12. Process and Node recycle/restore preserve their promised exact step identities and assignments in dependency order; restoring a Node whose step was permanently deleted clears that step reference.
 13. Node status lives only in `nodes.status`; status-list membership and the removed Kanban projection never become relationship authority.
+14. `process_step_map_layouts` stores presentation for one exact same-company Process, with Step boxes keyed by `process_step_id` and routes keyed by existing `resource_operational_relationship_id`.
+15. Layout never creates, replaces, or changes a Step owner, operational endpoint, Explorer parent, Node assignment, policy, or Board order.
+16. Step and edge deletion prune their dependent layout entries in the same transaction; Process deletion cascades its layout, and recycle/restore preserves exact surviving references in dependency order.
+17. Creating a Process in a chosen Folder checks current destination Edit access inside the same transaction that creates its one Explorer placement.
+
+## Process Step Relationship Story
+
+A user creates a Process in a permitted Folder and creates its Steps from Board or Map. Both surfaces use exact Step and operational edge records. The map saves their geometry separately under that Process. A deleted Step loses its incident edges and layout entries while Nodes keep their Process and status; restoring a recycled Process restores its exact Steps and edges before its layout.
 
 # Current Huddle Relationship Business Logic Laws
 

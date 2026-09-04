@@ -29,6 +29,7 @@ import { KanbanNodeEditorOverlay } from "./KanbanOverlays";
 import { getNodeEditorOverlayMinLeftPx, type NodeEditorOverlayRatio, clampNodeEditorOverlayRatio, DEFAULT_NODE_EDITOR_OVERLAY_RATIO, readNodeEditorOverlayRatio, storeNodeEditorOverlayRatio, type KanbanContentProps, type NodeEditorOverlayState, type OverlayResizeState, type CompanyUser } from "./KanbanContentModel";
 import { EXPLORER_ENTITY_DRAG_MIME, parseExplorerEntityDragItems, getKanbanPriorityGroupLabel } from "./shared";
 import { ProcessNodeCard } from "./ProcessNodeCard";
+import { ProcessStepMap } from "./ProcessStepMap";
 import { PROCESS_NODE_DRAG } from "./processWork";
 import "./processWork.css";
 
@@ -51,6 +52,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   const [processID, setProcessID] = useState(forcedLogicGateID);
   const [snapshot, setSnapshot] = useState<ProcessWorkSnapshot | null>(null);
   const [view, setView] = useState<ProcessWorkView>("Steps");
+  const [surface, setSurface] = useState<"board" | "map">("board");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectionAnchor = useRef("");
   const [users, setUsers] = useState<CompanyUser[]>([]);
@@ -111,7 +113,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
     if (!processID || !companyID) { setSnapshot(null); return; }
     let live = true;
     const controller = new AbortController();
-    setSelected(new Set()); setView("Steps"); setError(""); setBusy(false); setDialog(null); setStepRename(null); setDeletion(null); setOverlay(null); setFullscreen(false); if (overlay) onNodeEditorOverlayClose?.();
+    setSelected(new Set()); setView("Steps"); setSurface("board"); setError(""); setBusy(false); setDialog(null); setStepRename(null); setDeletion(null); setOverlay(null); setFullscreen(false); if (overlay) onNodeEditorOverlayClose?.();
     const cached = getCachedProcessWork(apiBase, companyID, processID);
     setSnapshot(cached?.contents ?? null); setLoading(!cached);
     const refresh = createCoalescedCanonicalRefresh(async () => {
@@ -377,21 +379,25 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   if (!processID) return <div className="process-work process-work__empty">Open a Process to see its steps and work.</div>;
   return <div ref={rootRef} className={`process-work${isDark ? " process-work--dark" : ""}`} aria-label="Process work" style={{ "--process-accent": accent } as React.CSSProperties}>
     <div className="process-work__controls">
-      <div className="process-work__views" role="tablist" aria-label="Process work views">{PROCESS_WORK_VIEWS.map((tab) => {
+      {surface === "board" ? <div className="process-work__views" role="tablist" aria-label="Process work views">{PROCESS_WORK_VIEWS.map((tab) => {
         const color = tab === "Steps" ? NODE_ICON_GRADIENT_END : processStatusColor(tab === "Backlog" ? "Backlogs" : tab);
         return <button key={tab} id={`${frameID}-${tab}`} type="button" role="tab" aria-selected={view === tab} aria-controls={`${frameID}-work-panel`} className={view === tab ? "is-active" : ""} style={{ "--view-color": color, "--view-start-color": tab === "Steps" ? NODE_ICON_GRADIENT_START : color, "--view-end-color": color } as React.CSSProperties} onClick={() => { setView(tab); setSelected(new Set()); }}><span>{tab}</span><span className="process-work__count">{counts[tab]}</span></button>;
-      })}</div>
-      <KanbanGroupingControls controlsRef={groupRef} open={groupOpen} groupings={groupings} loading={!groupsLoaded} saving={groupSaving} error="" isDark={isDark} line={isDark ? "#3b4659" : "#dbe1e8"} cardBackground={isDark ? "#252e3d" : "#f8fafc"} text={isDark ? "#e4eaf3" : "#172033"} subtext={isDark ? "#a5b3c9" : "#64748b"} accent={accent} dateAddedSortEnabled={dateSort} dateAddedSortDirection={dateDirection} onToggleOpen={() => setGroupOpen(!groupOpen)} onAddGrouping={(field) => setGroupings([...groupings, { field, direction: "asc" }])} onUpdateGrouping={(index, grouping) => setGroupings(groupings.map((item, i) => i === index ? grouping : item))} onRemoveGrouping={(index) => setGroupings(groupings.filter((_, i) => i !== index))} onToggleDateAddedSortEnabled={() => setDateSort(!dateSort)} onToggleDateAddedSortDirection={() => setDateDirection(dateDirection === "asc" ? "desc" : "asc")} />
+      })}</div> : <strong className="process-work__map-title">Step map</strong>}
+      {surface === "board" && <KanbanGroupingControls controlsRef={groupRef} open={groupOpen} groupings={groupings} loading={!groupsLoaded} saving={groupSaving} error="" isDark={isDark} line={isDark ? "#3b4659" : "#dbe1e8"} cardBackground={isDark ? "#252e3d" : "#f8fafc"} text={isDark ? "#e4eaf3" : "#172033"} subtext={isDark ? "#a5b3c9" : "#64748b"} accent={accent} dateAddedSortEnabled={dateSort} dateAddedSortDirection={dateDirection} onToggleOpen={() => setGroupOpen(!groupOpen)} onAddGrouping={(field) => setGroupings([...groupings, { field, direction: "asc" }])} onUpdateGrouping={(index, grouping) => setGroupings(groupings.map((item, i) => i === index ? grouping : item))} onRemoveGrouping={(index) => setGroupings(groupings.filter((_, i) => i !== index))} onToggleDateAddedSortEnabled={() => setDateSort(!dateSort)} onToggleDateAddedSortDirection={() => setDateDirection(dateDirection === "asc" ? "desc" : "asc")} />}
+      <div className="process-work__surface-toggle" role="group" aria-label="Process display">
+        <button type="button" aria-pressed={surface === "board"} onClick={() => setSurface("board")}>Board</button>
+        <button type="button" aria-pressed={surface === "map"} onClick={() => { setSurface("map"); setGroupOpen(false); }} disabled={busy || loading || !snapshot}>Map</button>
+      </div>
     </div>
-    {selected.size > 0 && canEdit && <div className="process-work__selection"><span>{selected.size} selected</span>
+    {surface === "board" && selected.size > 0 && canEdit && <div className="process-work__selection"><span>{selected.size} selected</span>
       <select aria-label="Set selected Nodes status" value="" disabled={busy} onChange={(event) => { const status = event.target.value; if (!status) return; if (status === "In Progress") startWork((snapshot?.nodes ?? []).filter((node) => selected.has(node.node_id))); else void changeNodes(selectedIDs, { status }); }}><option value="">Set status…</option>{PROCESS_STATUSES.map((status) => <option key={status} value={status}>{status === "Backlogs" ? "Backlog" : status}</option>)}</select>
       <select aria-label="Assign selected Nodes to step" value="" disabled={busy} onChange={(event) => { if (event.target.value) void changeNodes(selectedIDs, { process_step_id: event.target.value === "none" ? null : event.target.value }); }}><option value="">Assign step…</option><option value="none">No step assigned</option>{steps.map((step) => <option key={step.process_step_id} value={step.process_step_id}>{step.name}</option>)}</select>
       <button type="button" disabled={busy} onClick={() => setDeletion({ nodeIDs: selectedIDs })}>Delete Nodes</button><button type="button" onClick={() => setSelected(new Set())}>Clear</button>
     </div>}
     {error && <div role="alert" className="process-work__error">{error}<button type="button" onClick={() => { setError(""); refreshRef.current(); }}>Retry</button></div>}
     {loading && <p role="status">Loading Process work…</p>}
-    <div id={`${frameID}-work-panel`} role="tabpanel" aria-labelledby={`${frameID}-${view}`} className="process-work__panel">
-      {view === "Steps" ? <div className="process-work__steps">{steps.map(renderStep)}{renderStep(null, steps.length)}{canEdit && <button type="button" className="process-work__add-step" disabled={busy} onClick={() => addStep(steps[steps.length - 1]?.process_step_id)}>+ Add {steps.length ? "next " : ""}step</button>}</div> :
+    <div id={`${frameID}-work-panel`} role={surface === "board" ? "tabpanel" : "region"} aria-labelledby={surface === "board" ? `${frameID}-${view}` : undefined} aria-label={surface === "map" ? "Process Step map" : undefined} className={`process-work__panel${surface === "map" ? " process-work__panel--map" : ""}`}>
+      {surface === "map" ? snapshot && <ProcessStepMap key={`${companyID}:${processID}`} apiBase={apiBase} companyID={companyID} processID={processID} steps={steps} relationships={snapshot.relationships} canEdit={canEdit} isDark={isDark} onChanged={() => refreshRef.current()} /> : view === "Steps" ? <div className="process-work__steps">{steps.map(renderStep)}{renderStep(null, steps.length)}{canEdit && <button type="button" className="process-work__add-step" disabled={busy} onClick={() => addStep(steps[steps.length - 1]?.process_step_id)}>+ Add {steps.length ? "next " : ""}step</button>}</div> :
         <section className="process-work__list" onDragOver={allowDrop} onDrop={(event) => drop(event, null)}><header><h3>{view}</h3>{canEdit && <button type="button" className="process-work__icon-button" aria-label={`New Node in ${view}`} title="New Node" disabled={busy} onClick={() => newNode(null)}>+</button>}</header>{visible.length ? renderNodes(visible, null) : <p className="process-work__empty-lane">No {view.toLowerCase()} work.</p>}</section>}
     </div>
     {dialog && <AppModalPortal onRequestClose={busy ? undefined : () => setDialog(null)}><div className="process-work__modal-backdrop"><form className={`process-work__dialog${isDark ? " process-work--dark" : ""}`} role="dialog" aria-modal="true" aria-label={dialog.kind === "start" ? "Start work" : "Node"} onSubmit={(event) => { event.preventDefault(); submitDialog(); }}>

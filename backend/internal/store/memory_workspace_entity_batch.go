@@ -39,6 +39,9 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		if !ok {
 			return WorkspaceEntityBatchResult{}, ErrNotFound
 		}
+		if input.CreatorUserID != "" && !r.userHasEffectiveAccessLocked(input.CompanyID, input.CreatorUserID, EntityTypeCompanyExplorerFolder, targetFolderID, EntityPermissionEdit) {
+			return WorkspaceEntityBatchResult{}, ErrNotFound
+		}
 		targetFolderKind = folder.FolderKind
 	}
 

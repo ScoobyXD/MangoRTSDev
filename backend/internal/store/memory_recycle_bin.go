@@ -63,6 +63,7 @@ type memoryRecycleBinSnapshot struct {
 	folderShares                     map[string]domain.CompanyExplorerFolderShare
 	resourceOperationalRelationships map[string]domain.ResourceOperationalRelationship
 	processSteps                     map[string]domain.ProcessStep
+	processStepMaps                  map[string]domain.ProcessStepMapLayout
 	processMapPlacements             map[string]domain.ProcessMapPlacement
 	processMapTraces                 map[string]domain.ProcessMapTrace
 	processMapCleanupChildren        map[string]memoryProcessMapCleanupChild
@@ -213,6 +214,12 @@ func (r *MemoryRepo) RestoreRecycleBinItems(companyID, deletedByUserID string, i
 		return RecycleBinRestoreResult{}, ErrNotFound
 	}
 	r.restoreRecycleSnapshotLocked(restoredState)
+	for ownerKey, layout := range r.processStepMaps {
+		if _, existed := beforeState.processStepMaps[ownerKey]; !existed {
+			layout.Revision = memoryProcessStepMapRevision.Add(1)
+			r.processStepMaps[ownerKey] = layout
+		}
+	}
 	for relationshipKey, relationship := range r.entityRelationships {
 		if _, exists := r.entities[key(relationship.CompanyID, relationship.EntityID)]; !exists {
 			delete(r.entityRelationships, relationshipKey)
@@ -469,6 +476,7 @@ func (r *MemoryRepo) snapshotRecycleStateLocked() memoryRecycleBinSnapshot {
 		folderShares:                     cloneMap(r.folderShares),
 		resourceOperationalRelationships: cloneMap(r.resourceOperationalRelationships),
 		processSteps:                     cloneMap(r.processSteps),
+		processStepMaps:                  cloneMap(r.processStepMaps),
 		processMapPlacements:             cloneMap(r.processMapPlacements),
 		processMapTraces:                 cloneMap(r.processMapTraces),
 		processMapCleanupChildren:        map[string]memoryProcessMapCleanupChild{},
@@ -538,6 +546,7 @@ func (r *MemoryRepo) restoreRecycleSnapshotLocked(snapshot memoryRecycleBinSnaps
 	r.folderShares = cloneMap(snapshot.folderShares)
 	r.resourceOperationalRelationships = cloneMap(snapshot.resourceOperationalRelationships)
 	r.processSteps = cloneMap(snapshot.processSteps)
+	r.processStepMaps = cloneMap(snapshot.processStepMaps)
 	r.processMapPlacements = cloneMap(snapshot.processMapPlacements)
 	r.processMapTraces = cloneMap(snapshot.processMapTraces)
 	r.nodeLogicGateAssignments = cloneMap(snapshot.nodeLogicGateAssignments)
@@ -597,6 +606,7 @@ func memoryRecycleSnapshotDelta(before, after memoryRecycleBinSnapshot) memoryRe
 		folderShares:                     recycleMapDelta(before.folderShares, after.folderShares),
 		resourceOperationalRelationships: recycleMapDelta(before.resourceOperationalRelationships, after.resourceOperationalRelationships),
 		processSteps:                     recycleMapDelta(before.processSteps, after.processSteps),
+		processStepMaps:                  recycleMapDelta(before.processStepMaps, after.processStepMaps),
 		processMapPlacements:             recycleMapDelta(before.processMapPlacements, after.processMapPlacements),
 		processMapTraces:                 recycleMapDelta(before.processMapTraces, after.processMapTraces),
 		processMapCleanupChildren:        recycleMapDelta(before.processMapCleanupChildren, after.processMapCleanupChildren),
@@ -660,6 +670,7 @@ func mergeMemoryRecycleSnapshot(destination *memoryRecycleBinSnapshot, delta mem
 	mergeRecycleMap(destination.folderItems, delta.folderItems)
 	mergeRecycleMap(destination.folderShares, delta.folderShares)
 	mergeRecycleMap(destination.processSteps, delta.processSteps)
+	mergeRecycleMap(destination.processStepMaps, delta.processStepMaps)
 	for relationshipKey, relationship := range delta.resourceOperationalRelationships {
 		if _, exists := destination.resourceOperationalRelationships[relationshipKey]; exists {
 			continue

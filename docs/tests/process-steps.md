@@ -41,10 +41,21 @@
 39. RACI assignment constraints accept the same canonical resource types as RACI settings so Process requests can inherit Responsible users from folders.
 40. Compact rectangular tabs at the top of the work area select Steps, Requested, Pending, Backlog, and Done.
 41. Requested uses yellow, Pending gray, Backlog purple, and Done green while retaining readable labels.
+42. The top-right Board / Map toggle displays the same exact Process and Steps, and a newly opened Process starts in Board mode.
+43. Map creation, renaming, and connection commands use the existing Step records and same-Process operational relationships.
+44. Step-map layout stores only positions, dimensions, and routes keyed by exact Step and relationship IDs within one Process.
+45. Moving or resizing a Step or routing a connection never changes Board order, Node assignments, statuses, SOP content, or operational endpoints.
+46. Completed layout gestures save on the server and report saving, success, or failure; reload and view switching restore the saved arrangement.
+47. A stale layout revision is rejected rather than overwriting a newer layout, and the client reloads the current arrangement before retrying.
+48. Deleting a Step or connection removes its dependent layout entries and advances the layout revision; surviving resources and geometry remain unchanged.
+49. Process recycle and restore preserve exact surviving Step geometry and routes, and permanent Process deletion removes its layout.
+50. Layout reads and writes require current access to the exact owning Process and reject references to another Process.
+51. SOP text provides written Step explanations; the map introduces no separate instruction fields or inferred Step identities.
+52. Zoom, scrolling, and the selected view are local presentation state and never replace shared Step layout.
 
 ## Process Story
 
-A Node is requested into a Process. An authorized Responsible user accepts it into Pending. Starting work selects a step and sets In Progress; later step moves keep its status. Add next step places the new column immediately after the selected source and creates their directed connection in the same mutation. Marking a Node Done removes it from active columns while keeping it openable in Done with the same Process and surviving step. Deleting a step clears only its step assignments and connections, so all affected Nodes remain available in the view determined by their unchanged status.
+A user creates a Process in an existing Folder, writes its instructions in the SOP, and switches from Board to Map to create and arrange its Steps. Positions, sizes, and connection routes save on the server. Board uses those same Steps as columns while Node status determines the active or separate status view. Deleting a Step clears its assignments, connections, and geometry while preserving every Node and status; a stale layout save cannot resurrect deleted geometry.
 
 ## Main Scenarios
 
@@ -55,3 +66,5 @@ A Node is requested into a Process. An authorized Responsible user accepts it in
 ## Database Rollout
 
 The repository migration is `backend/db/migrations/20260903_process_steps.sql`. A human operator must stop application writers, run this forward-only migration against PostgreSQL 17 or 18, and deploy the matching application before reopening writes. It also corrects the outdated RACI assignment constraint that blocked folder inheritance. It reports the connected version and stops on an unsupported version, incompatible starting schema, or unsupported existing status/resource type. Agents must not apply it to a live database. Disposable integration tests exercise the conversion and lifecycle without using live credentials.
+
+The Step-map addition is `backend/db/migrations/20260904_process_step_map_layouts.sql`, applied after the Step migration by a human operator before deploying this feature. It adds Process-owned layout storage and dependent cleanup; existing Steps need no geometry backfill. No live database is modified by this task.

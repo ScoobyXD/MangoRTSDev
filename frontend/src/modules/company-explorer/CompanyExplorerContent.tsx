@@ -12,10 +12,11 @@ import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, ty
 import { dispatchLogicGateWorkUpdated, type RACIMatrixProjectionRow } from "../kanban/kanbanApi";
 import { type ExplorerEntityDragItem } from "../kanban/shared";
 import { type SelectionIntent } from "../selectionCoordinator";
-import { createWorkspaceEntityBatchClientID, createWorkspaceEntityBatchCommand, type WorkspaceEntityBatchCreatorLogicGateRACIRole } from "../workspace/workspaceEntityCommands";
+import { type WorkspaceEntityBatchCreatorLogicGateRACIRole } from "../workspace/workspaceEntityCommands";
 import { buildExplorerFindSelection, buildExplorerRowBatchReorderPlan, buildExplorerRowReorderPlan, buildExplorerSearchViewRows, getExplorerDropPayloadItemType, getExplorerDropPayloadItemTypes, getExplorerDropPayloadItems, getExplorerScrollTopForRow, isExplorerSystemFolderKey, resolveExplorerClickSelection, resolveExplorerCreationTargets, resolveExplorerDeleteTarget, resolveExplorerRenameTarget, type ExplorerFindEntity } from "./treePresentation";
 import { CompanyExplorerContextMenu } from "./CompanyExplorerContextMenu";
 import { CompanyExplorerDeleteBlockedDialog, CompanyExplorerDeleteConfirmationDialog } from "./CompanyExplorerDialogs";
+import { CompanyExplorerCreateProcessDialog } from "./CompanyExplorerCreateProcessDialog";
 import { CompanyExplorerTree } from "./CompanyExplorerTree";
 import {
   collectFolderSubtreeIDs,
@@ -1310,6 +1311,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
   const [dragPayload, setDragPayload] = useState<ExplorerDragPayload | null>(null);
   const [triageDropTreeID, setTriageDropTreeID] = useState("");
   const [explorerContextMenu, setExplorerContextMenu] = useState<CompanyExplorerContextMenuState | null>(null);
+  const [createProcessTarget, setCreateProcessTarget] = useState<{ folderID: string; position?: number; RACIRole?: WorkspaceEntityBatchCreatorLogicGateRACIRole } | null>(null);
   const [folderPermissionsTarget, setFolderPermissionsTarget] = useState<CompanyExplorerFolderPermissionsTarget | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ targets: ExplorerDeleteTargetWithLabel[]; position?: ConfirmActionMenuPosition | null } | null>(null);
   const [deleteBlockedMessage, setDeleteBlockedMessage] = useState("");
@@ -2435,63 +2437,35 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
   }, [companyExplorerV2Active, companyExplorerV2RootEntityID, companyExplorerV2TreeIDForEntityID]);
 
-  const createLogicGateAtFolder = useCallback(async (parentFolderID: string, position?: number, RACIRole?: string) => {
+  const handleProcessCreated = useCallback((response: CompanyExplorerWorkspaceEntityBatchResponse, folderPath: string[]) => {
     setError("");
-    const creatorLogicGateRACIRole: WorkspaceEntityBatchCreatorLogicGateRACIRole | undefined = isLogicGateRACIRole(RACIRole) ? RACIRole : undefined;
-    try {
-      const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
-        companyID,
-        entityKind: "logic_gate",
-        folderID: companyExplorerV2Active ? "" : parentFolderID,
-        mutationOrigin: "company_explorer",
-        creatorLogicGateRACIRole,
-        items: [{
-          client_id: createWorkspaceEntityBatchClientID("explorer-logic-gate"),
-          title: "new process",
-          position,
-        }],
-        requestJSON,
-      });
-      const created = response.logic_gates?.[0];
-      if (!created) throw new Error("logic_gate_batch_create_missing_gate");
-      const logicGate = toLogicGateViewRecord(created) as ExplorerLogicGateRecord;
-      logicGate.gvic_assignments = created.gvic_assignments ?? [];
-      for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
-      let createdFolderID = response.folder_items?.find((item) => item.item_type === "logic_gate" && item.item_id === logicGate.logic_gate_id)?.folder_id ?? parentFolderID;
-      if (companyExplorerV2Active) {
-        const parentEntityID = parentFolderID || companyExplorerV2RootEntityID;
-        if (parentEntityID) {
-          const row = await requestJSON<CompanyExplorerV2Row>("/v1/company-explorer/items", {
-            method: "POST",
-            body: JSON.stringify({
-              company_id: companyID,
-              parent_entity_id: parentEntityID,
-              target_type: "logic_gate",
-              target_id: logicGate.logic_gate_id,
-              position,
-            }),
-          });
-          dispatchExplorerStore({ type: "upsertV2Rows", rows: [row] });
-          createdFolderID = parentEntityID;
-        }
-      }
-      dispatchExplorerStore({ type: "upsertLogicGate", logicGate });
-      if (!createdFolderID && position && position > 0) {
-        setRootRowOrder((previous) => ({ ...previous, [`logic-gate-${logicGate.logic_gate_id}`]: position }));
-      }
-      expandCreatedItemTarget(createdFolderID);
-      lastLocalExplorerSelectionRef.current = { domain: "logic_gate", changedAt: Date.now() };
-      pendingExplorerSelectionIntentRef.current = "activate";
-      setSelectedTreeID(`logic-gate-${logicGate.logic_gate_id}`);
-      setSelectedTreeIDs(new Set([`logic-gate-${logicGate.logic_gate_id}`]));
-      setSelectionAnchorTreeID(`logic-gate-${logicGate.logic_gate_id}`);
-      setSelectedLogicGateID(logicGate.logic_gate_id);
-      setSelectedNodeID("");
-      if (creatorLogicGateRACIRole) requestRACIExplorerProjectionRefreshRef.current();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "failed_to_create_logic_gate");
-    }
-  }, [apiBase, companyExplorerV2Active, companyExplorerV2RootEntityID, companyID, expandCreatedItemTarget, requestJSON, upsertOptimisticFolderItem]);
+    const created = response.logic_gates![0];
+    const logicGate = toLogicGateViewRecord(created) as ExplorerLogicGateRecord;
+    logicGate.gvic_assignments = created.gvic_assignments ?? [];
+    for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
+    dispatchExplorerStore({ type: "upsertLogicGate", logicGate });
+    setExpanded((previous) => new Set([...previous, "folder-root", ...folderPath.map((id) => `workspace-folder-${id}`)]));
+    // Refresh canonical rows, including an unopened destination path. Creation has
+    // already committed; a failed read must not turn the form into a second create.
+    void Promise.all([companyID, ...folderPath].map((id) => requestJSON<{ rows?: CompanyExplorerV2Row[] }>(`/v1/company-explorer/children?company_id=${encodeURIComponent(companyID)}&parent_id=${encodeURIComponent(id)}`)))
+      .then((snapshots) => {
+        for (const snapshot of snapshots) dispatchExplorerStore({ type: "mergeSnapshot", snapshot });
+      })
+      .catch(() => setError("Process created. Could not refresh Company Explorer; reopen it to reload."));
+    const treeID = `logic-gate-${logicGate.logic_gate_id}`;
+    lastLocalExplorerSelectionRef.current = { domain: "logic_gate", changedAt: Date.now() };
+    pendingExplorerSelectionIntentRef.current = "activate";
+    setSelectedTreeID(treeID);
+    setSelectedTreeIDs(new Set([treeID]));
+    setSelectionAnchorTreeID(treeID);
+    setSelectedLogicGateID(logicGate.logic_gate_id);
+    setSelectedNodeID("");
+    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+      companyID, sourceFrameID: scope, kind: "logic_gate", id: logicGate.logic_gate_id,
+      label: getLogicGateRecordTitle(logicGate), selectedTreeID: treeID, suppressNavigation: false, changedAt: Date.now(),
+    });
+    if (createProcessTarget?.RACIRole) requestRACIExplorerProjectionRefreshRef.current();
+  }, [companyID, createProcessTarget?.RACIRole, requestJSON, scope, upsertOptimisticFolderItem]);
 
   const createProjectAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
     setError("");
@@ -3609,7 +3583,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           setExplorerContextMenu(null);
         }}
         onCreateLogicGate={(parentFolderID, position, RACIRole) => {
-          void createLogicGateAtFolder(parentFolderID, position, RACIRole);
+          setCreateProcessTarget({ folderID: parentFolderID === companyID ? "" : parentFolderID, position, RACIRole: isLogicGateRACIRole(RACIRole) ? RACIRole : undefined });
           setExplorerContextMenu(null);
         }}
         onCreateProject={(parentFolderID, position) => {
@@ -3638,6 +3612,19 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         }}
         onDeleteTargets={requestDeleteTargets}
       />
+
+      {createProcessTarget && (
+        <CompanyExplorerCreateProcessDialog
+          companyID={companyID}
+          requestJSON={requestJSON}
+          initialFolderID={createProcessTarget.folderID}
+          position={createProcessTarget.position}
+          creatorRACIRole={createProcessTarget.RACIRole}
+          isDarkTheme={isDarkTheme}
+          onCreated={handleProcessCreated}
+          onClose={() => setCreateProcessTarget(null)}
+        />
+      )}
 
       {folderPermissionsTarget && (
         <EntityPermissionsDialog

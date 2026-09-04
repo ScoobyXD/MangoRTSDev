@@ -92,3 +92,11 @@
 .process-work--dark .process-work__error { color:#ffc1ca; background:#542f3c; }
 .process-work--dark .process-work__list .process-work__group { background:#35425833; }
 .process-work__dialog.process-work--dark { border-color:var(--work-line); box-shadow:12px 12px 32px #04070d66,inset 0 1px 0 #ffffff09; }
+
+.process-work__surface-toggle { margin-left:auto; display:flex; flex-shrink:0; gap:3px; padding:3px; border:1px solid #dce2e9; border-radius:11px; }
+.process-work__surface-toggle button { min-height:32px; padding:5px 10px; box-shadow:none; border-color:transparent; background:transparent; font-weight:700; }
+.process-work__surface-toggle button[aria-pressed=true] { color:#65489d; border-color:#d8c9ef; background:linear-gradient(135deg,#faf7ff,#e9dff8); box-shadow:0 1px 4px #64479922; }
+.process-work__map-title { padding:8px 3px; font-size:13px; }
+.process-work__panel--map { display:flex; flex-direction:column; overflow:hidden; min-height:0; }
+.process-work--dark .process-work__surface-toggle { border-color:var(--work-line); }
+.process-work--dark .process-work__surface-toggle button[aria-pressed=true] { color:#eadcff; border-color:#796393; background:linear-gradient(135deg,#50415f,#352e4a); }

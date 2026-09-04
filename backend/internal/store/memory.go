@@ -30,7 +30,8 @@ type MemoryRepo struct {
 	logicGateText                    map[string]map[string]domain.LogicGateProjection
 	processMapPlacements             map[string]domain.ProcessMapPlacement
 	resourceOperationalRelationships map[string]domain.ResourceOperationalRelationship
- processSteps map[string]domain.ProcessStep
+	processSteps                     map[string]domain.ProcessStep
+	processStepMaps                  map[string]domain.ProcessStepMapLayout
 	processMapTraces                 map[string]domain.ProcessMapTrace
 	logicGateRACI                    map[string][]domain.LogicGateRACIAssignment
 	gvicAssignments                  map[string]domain.ResourceRACIAssignment
@@ -147,7 +148,8 @@ func NewMemoryRepo() *MemoryRepo {
 		logicGateText:                    map[string]map[string]domain.LogicGateProjection{},
 		processMapPlacements:             map[string]domain.ProcessMapPlacement{},
 		resourceOperationalRelationships: map[string]domain.ResourceOperationalRelationship{},
- processSteps: map[string]domain.ProcessStep{},
+		processSteps:                     map[string]domain.ProcessStep{},
+		processStepMaps:                  map[string]domain.ProcessStepMapLayout{},
 		processMapTraces:                 map[string]domain.ProcessMapTrace{},
 		logicGateRACI:                    map[string][]domain.LogicGateRACIAssignment{},
 		gvicAssignments:                  map[string]domain.ResourceRACIAssignment{},
@@ -277,7 +279,6 @@ func effectiveAccessKey(companyID, userID, resourceType, resourceID, sourceType,
 func triageItemKey(userID, messageID string) string {
 	return userID + ":" + messageID
 }
-
 
 func emailNodeAttachmentLinkKey(companyID, userID, messageID, nodeID string) string {
 	return companyID + ":" + userID + ":" + messageID + ":" + nodeID

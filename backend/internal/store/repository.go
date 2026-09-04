@@ -790,6 +790,8 @@ type UserPinGroupResult struct {
 }
 
 type LogicGateWorkRepository interface {
+	GetProcessStepMap(companyID, logicGateID string) (domain.ProcessStepMapLayout, error)
+	PutProcessStepMap(input ProcessStepMapPutInput) (ProcessStepMapMutationResult, error)
 	CreateProcessStep(input ProcessStepCreateInput) (ProcessStepMutationResult, error)
 	UpdateProcessStep(input ProcessStepUpdateInput) (ProcessStepMutationResult, error)
 	DeleteProcessStep(input ProcessStepDeleteInput) (ProcessStepMutationResult, error)
