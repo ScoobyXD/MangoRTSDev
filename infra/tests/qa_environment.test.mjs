@@ -233,31 +233,22 @@ test("the shared edge uses the exact AWS-managed CloudFront policy IDs", () => {
   assert.match(moduleSecurity, /prefix_list_ids\s*=\s*\[one\(data\.aws_ec2_managed_prefix_lists\.cloudfront_origin_facing\.ids\)\]/);
 });
 
-test("QA registers immutable migration images before schema bootstrap without starting the app", () => {
-  assert.match(
-    qaWorkflow,
-    /workflow_dispatch:[\s\S]*?stage:[\s\S]*?type: choice[\s\S]*?- bootstrap-images[\s\S]*?- deploy/,
-  );
+test("QA workflow only succeeds after deploying and smoke-testing the approved revision", () => {
+  assert.doesNotMatch(qaWorkflow, /bootstrap-images|inputs\.stage|QA_STAGE|EFFECTIVE_/);
   assert.match(qaWorkflow, /expected_git_commit:[\s\S]*?required:\s*true[\s\S]*?type:\s*string/);
   assert.match(qaWorkflow, /GITHUB_SHA" != "\$EXPECTED_GIT_COMMIT/);
   assert.match(
     qaWorkflow,
-    /bootstrap-images\)[\s\S]*?TF_EMAIL_SCHEMA_MIGRATED" != "false"[\s\S]*?EFFECTIVE_BACKEND_DESIRED_COUNT=0[\s\S]*?EFFECTIVE_EMAIL_SCHEMA_MIGRATED=false[\s\S]*?EFFECTIVE_EMAIL_WORKER_ENABLED=false/,
+    /TF_EMAIL_SCHEMA_MIGRATED" != "true"[\s\S]*?QA application deployment requires TF_EMAIL_SCHEMA_MIGRATED=true/,
   );
-  assert.match(
-    qaWorkflow,
-    /deploy\)[\s\S]*?TF_EMAIL_SCHEMA_MIGRATED" != "true"[\s\S]*?EFFECTIVE_BACKEND_DESIRED_COUNT=1[\s\S]*?EFFECTIVE_EMAIL_SCHEMA_MIGRATED=true/,
-  );
-  assert.match(qaWorkflow, /backend_desired_count = \$EFFECTIVE_BACKEND_DESIRED_COUNT/);
-  assert.match(qaWorkflow, /email_sqs_database_migration_complete = \$EFFECTIVE_EMAIL_SCHEMA_MIGRATED/);
-  assert.match(qaWorkflow, /email_worker_enabled = \$EFFECTIVE_EMAIL_WORKER_ENABLED/);
-  assert.match(qaWorkflow, /The reviewed QA foundation must exist before either image workflow stage runs/);
-  assert.match(qaWorkflow, /- name: Build frontend\s+if: inputs\.stage == 'deploy'/);
-  assert.match(qaWorkflow, /- name: Publish frontend\s+if: inputs\.stage == 'deploy'/);
-  assert.match(qaWorkflow, /- name: Post-deploy smoke tests\s+if: inputs\.stage == 'deploy'/);
-  assert.match(qaWorkflow, /- name: Bootstrap image summary\s+if: inputs\.stage == 'bootstrap-images'/);
-  assert.match(qaWorkflow, /API desired count: 0/);
-  assert.match(qaWorkflow, /Email worker: disabled/);
+  assert.match(qaWorkflow, /backend_desired_count = 1/);
+  assert.match(qaWorkflow, /email_sqs_database_migration_complete = true/);
+  assert.match(qaWorkflow, /email_worker_enabled = \$TF_EMAIL_WORKER_ENABLED/);
+  assert.match(qaWorkflow, /The reviewed QA foundation must exist before the QA deployment runs/);
+  assert.match(qaWorkflow, /- name: Build frontend\s+working-directory: frontend/);
+  assert.match(qaWorkflow, /- name: Publish frontend\s+run: \|/);
+  assert.match(qaWorkflow, /- name: Post-deploy smoke tests\s+run: \|/);
+  assert.match(qaWorkflow, /- name: Deployment summary\s+run: \|/);
   assert.match(qaWorkflow, /Revision: \$\{GITHUB_SHA\}/);
   assert.match(qaWorkflow, /API image: \$\{IMAGE_URI\}/);
   assert.match(qaWorkflow, /Migration image: \$\{MIGRATION_IMAGE_URI\}/);
