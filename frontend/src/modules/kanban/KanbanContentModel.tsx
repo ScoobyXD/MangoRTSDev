@@ -18,11 +18,9 @@ export type KanbanContentProps = {
   theme?: "mango" | "teal" | "light" | "dark";
   arenaMode?: boolean;
   forcedLogicGateID?: string;
-  forcedLogicGateLabel?: string;
   forcedHighlightedNodeID?: string;
   forcedOpenNodeID?: string;
   controlForcedOpenNode?: boolean;
-  onCollapseArenaToTab?: () => void;
   onNodeEditorOverlayOpen?: (nodeID: string) => void;
   onNodeEditorOverlayClose?: () => void;
   arenaBoardLeftResizeRequest?: ArenaBoardLeftResizeRequest | null;

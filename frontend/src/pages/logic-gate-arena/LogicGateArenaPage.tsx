@@ -18,7 +18,6 @@ type LogicGateArenaPageProps = {
     mentionUserID?: string;
     requestID?: number;
   } | null;
-  onCollapseToTab?: (selection: { logicGateID: string; label: string; nodeID?: string }) => void;
   onNodeOpen?: (selection: { logicGateID: string; label: string; nodeID: string }) => void;
   onNodeClose?: (selection: { logicGateID: string; label: string }) => void;
   onLogicGateTitleChange?: (update: { logicGateID: string; label: string }) => void;
@@ -139,7 +138,7 @@ function getArenaFrames(frames: FrameDataModel[]) {
   };
 }
 
-export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames, targetLogicGate, onCollapseToTab, onNodeOpen, onNodeClose, onLogicGateTitleChange }) => {
+export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, updateFrames, targetLogicGate, onNodeOpen, onNodeClose, onLogicGateTitleChange }) => {
   const companyID = getActiveCompanyID();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizeRef = useRef<ArenaResizeState | null>(null);
@@ -324,14 +323,6 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
     linkedNodeEditorResizeRef.current = null;
   }, []);
 
-  const collapseArenaToTab = useCallback(() => {
-    onCollapseToTab?.({
-      logicGateID: selectedLogicGate.id,
-      label: selectedLogicGate.label || "Process Arena",
-      nodeID: selectedLogicGate.nodeID,
-    });
-  }, [onCollapseToTab, selectedLogicGate.id, selectedLogicGate.label, selectedLogicGate.nodeID]);
-
   const openKanbanNode = useCallback((nodeID: string) => {
     if (!selectedLogicGate.id) return;
     onNodeOpen?.({ logicGateID: selectedLogicGate.id, label: selectedLogicGate.label || "Process", nodeID });
@@ -394,11 +385,9 @@ export const LogicGateArenaPage: React.FC<LogicGateArenaPageProps> = ({ frames, 
           theme={kanbanFrame.theme}
           arenaMode
           forcedLogicGateID={selectedLogicGate.id}
-          forcedLogicGateLabel={selectedLogicGate.label}
           forcedHighlightedNodeID={selectedLogicGate.nodeID}
           forcedOpenNodeID={selectedLogicGate.nodeID}
           controlForcedOpenNode={!!targetLogicGate}
-          onCollapseArenaToTab={onCollapseToTab ? collapseArenaToTab : undefined}
           onNodeEditorOverlayOpen={openKanbanNode}
           onNodeEditorOverlayClose={closeKanbanNode}
           arenaBoardLeftResizeRequest={kanbanBoardLeftResizeRequest}
