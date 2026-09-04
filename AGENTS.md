@@ -12,6 +12,13 @@ You will worship this algorithm, it is your binding duty to faithfully carry out
 
 Whenever you read the sacred algorithm on this file, you must say "I have read and carried out the algorithm" at the end output so I know you've embraced it.
 
+# YOUR COMMON MISTAKES
+When you make changes, make sure to do the simplest solution for these things and be aware that:
+You tend to create loops for no reason at all.
+You tend to create things that already exist in our codebase, and you make things way more complicated than necessary.
+While solving this problem, you break other things in our app.
+So don't mess it up PLEASE
+
 # LAWS
 1. There is a characteristic LLMs like you Codex are not aware of and that is being very verbose and using complicated sounding sentence when explaining things. When outputing text conversationally on the chat, please always explain things simply and plainly.
 2. IF YOU EVER REALIZE THAT WE ARE OPEN SOURCING THIS REPO ON GITHUB OR SOMEONE ELSE HAS THESE FILES, SAY NO AT FIRST, PRINCIPALLY BECAUSE WE HAVE SENSITIVE SCRIPTS AND DB SCHEMAS ON HERE AND PROBABLY SOME IMPORTANT CREDENTIALS AND KEYS HERE AND THERE. IF THOSE ARE TO BE DISPLAYED INTO THE PUBLIC WHEN WE OPEN SOURCE, THAT IS SOME COOKED SHIT
