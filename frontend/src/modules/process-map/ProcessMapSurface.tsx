@@ -5,10 +5,9 @@ import {
   type Layer,
   type OrthographicViewState,
   type PickingInfo,
-  type UpdateParameters,
   type ViewStateChangeParameters,
 } from "@deck.gl/core";
-import { TileLayer, type TileLayerProps } from "@deck.gl/geo-layers";
+import { type TileLayerProps } from "@deck.gl/geo-layers";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import DeckGL, { type DeckGLRef } from "@deck.gl/react";
 import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
@@ -17,16 +16,21 @@ import { getQDBusinessDate, millisecondsUntilNextQDBusinessDay } from "../logic-
 import { createCoalescedCanonicalRefresh } from "../realtime/coalescedCanonicalRefresh.js";
 import { getCurrentRealtimeConnectionID, subscribeRealtimeScope } from "../realtime/realtimeWebSocket.js";
 import { ProcessMapQDCard } from "./ProcessMapQDCard.js";
+import { ProcessMapProtectedTileLayer, type ProcessMapValidatedTile } from "./processMapTileLayer.js";
 import {
+  applyProcessMapCacheValidation,
   deleteProcessMapPlacement,
   deleteProcessMapRelationship,
   fetchProcessMapScene,
+  fetchProcessMapChanges,
   fetchProcessMapTile,
   invalidateProcessMapReadCaches,
   postProcessMapRelationship,
+  processMapTileVersionKey,
   putProcessMapPlacement,
   putProcessMapTrace,
   type ProcessMapMutationEnvelope,
+  type ProcessMapChangesResponse,
   type ProcessMapPlacement,
   type ProcessMapResourceRef,
   type ProcessMapSceneResponse,
@@ -48,7 +52,8 @@ import {
   insertProcessMapRoutePoint,
   normalizeProcessMapRoutePoints,
   processMapDeckTileSize,
-  processMapDeepestContainingFolder,
+  processMapBoundsContain,
+  processMapOrderFoldersForContainment,
   processMapInputAnchor,
   processMapOrthogonalPathPoints,
   processMapOutputAnchor,
@@ -95,29 +100,6 @@ const COLOR_SCORE_RED: [number, number, number, number] = [223, 83, 83, 255];
 const COLOR_SCORE_NEUTRAL: [number, number, number, number] = [100, 116, 139, 255];
 const COLOR_RESPONSIBLE: [number, number, number, number] = [240, 138, 36, 255];
 const COLOR_ACCOUNTABLE: [number, number, number, number] = [25, 200, 121, 255];
-
-export class ProcessMapProtectedTileLayer extends TileLayer<ProcessMapTileResponse, { protectedGeneration: number }> {
-  static override layerName = "ProcessMapProtectedTileLayer";
-
-  override updateState(params: UpdateParameters<this>): void {
-    const regenerateMaskedLayers = Boolean(
-      params.changeFlags.dataChanged
-      && params.changeFlags.updateTriggersChanged
-      && params.changeFlags.updateTriggersChanged.renderSubLayers,
-    );
-    if (
-      this.state.tileset
-      && params.oldProps.protectedGeneration !== params.props.protectedGeneration
-    ) {
-      this.state.tileset.finalize();
-      this.setState({ tileset: null, isLoaded: false });
-    }
-    super.updateState(params);
-    if (regenerateMaskedLayers) {
-      this.state.tileset?.tiles.forEach((tile) => { tile.layers = null; });
-    }
-  }
-}
 
 type ProcessMapSingularSelection = { kind: "placement" | "trace"; id: string };
 type ProcessMapSelection = ProcessMapSingularSelection | { kind: "placements"; ids: ReadonlySet<string> } | null;
@@ -192,9 +174,11 @@ export type ProcessMapLayerBuildOptions = {
   scene: ProcessMapSceneResponse;
   protectedGeneration: number;
   scoreCardBusinessDate: string;
+  validatedTiles: ReadonlyMap<string, ProcessMapValidatedTile> | null;
   settled: boolean;
   settledPixelsPerGridUnit: number;
   presentation: ProcessMapPresentationState;
+  folderChildTops: ReadonlyMap<string, readonly ProcessMapVisiblePlacement[]>;
   editedPlacementKeys: ReadonlySet<string>;
   editedTraceIDs: ReadonlySet<string>;
   editOverlay: ProcessMapEditOverlayModel;
@@ -205,7 +189,7 @@ export type ProcessMapLayerBuildOptions = {
   onTileError?: (cause: unknown) => void;
 };
 
-type ProcessMapSpatialLayerBuildOptions = Omit<ProcessMapLayerBuildOptions, "presentation" | "editOverlay" | "settled"> & {
+type ProcessMapSpatialLayerBuildOptions = Omit<ProcessMapLayerBuildOptions, "presentation" | "folderChildTops" | "editOverlay" | "settled"> & {
   selectedPlacementKey: string | null;
   selectedTraceID: string | null;
 };
@@ -541,6 +525,21 @@ export function mergeProcessMapPresentation(
   return { placements, traces, removedPlacementKeys: new Set(committed.removedPlacementKeys) };
 }
 
+export function validateProcessMapLoadedTiles(
+  tiles: ReadonlyMap<string, ProcessMapTileResponse>,
+  changes: ProcessMapChangesResponse,
+): Map<string, ProcessMapValidatedTile> {
+  const result = new Map<string, ProcessMapValidatedTile>();
+  if (changes.protected_geometry_changed) return result;
+  const validated = new Set(changes.validated_tiles.map(processMapTileVersionKey));
+  for (const [id, previous] of tiles) {
+    if (validated.has(processMapTileVersionKey(previous))) {
+      result.set(id, { previous, current: { ...previous, process_map_read_version: changes.process_map_read_version } });
+    }
+  }
+  return result;
+}
+
 function tileBounds(bounds: [number[], number[]]): TileBounds {
   return {
     minX: Math.min(bounds[0][0], bounds[1][0]),
@@ -673,6 +672,33 @@ function processMapChildTopByFolder(
     childTopByFolder.set(parentID, Math.min(childTopByFolder.get(parentID) ?? Number.POSITIVE_INFINITY, geometry.grid_y));
   }
   return childTopByFolder;
+}
+
+// Only the two lowest direct children are needed: a gesture transforms either
+// every child of a moved Folder, or just its root among unchanged siblings.
+export function processMapFolderChildTops(placements: Iterable<ProcessMapVisiblePlacement>): Map<string, ProcessMapVisiblePlacement[]> {
+  const result = new Map<string, ProcessMapVisiblePlacement[]>();
+  for (const placement of placements) {
+    if (!placement.map_parent_folder_id) continue;
+    const children = result.get(placement.map_parent_folder_id) ?? [];
+    if (!children[0] || placement.grid_y < children[0].grid_y) children.unshift(placement);
+    else if (!children[1] || placement.grid_y < children[1].grid_y) children.splice(1, 0, placement);
+    if (children.length > 2) children.length = 2;
+    result.set(placement.map_parent_folder_id, children);
+  }
+  return result;
+}
+
+function processMapOverlayChildTop(folderID: string, options: ProcessMapLayerBuildOptions): number | undefined {
+  const children = options.folderChildTops.get(folderID);
+  if (!children?.length) return undefined;
+  const transform = options.editOverlay.placementTransform;
+  const root = transform?.basePlacements.get(transform.key);
+  if (root?.map_parent_folder_id === folderID) {
+    const unchanged = children.find((child) => placementKey(child) !== transform!.key);
+    return Math.min(unchanged?.grid_y ?? Infinity, processMapPlacementGeometryForTransform(root, transform).grid_y);
+  }
+  return processMapPlacementGeometryForTransform(children[0], transform).grid_y;
 }
 
 function scoreCardTextColor(rating: "green" | "yellow" | "red" | null | undefined): [number, number, number, number] {
@@ -918,7 +944,6 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
 }
 
 function editPlacementLayers(options: ProcessMapLayerBuildOptions): { backdrops: Layer[]; foreground: Layer[] } {
-  const childTopByFolder = processMapChildTopByFolder(options.presentation.placements.values(), options.editOverlay.placementTransform);
   const folderShadows: PolygonDatum[] = [];
   const folderSurfaces: PolygonDatum[] = [];
   const processShadows: PolygonDatum[] = [];
@@ -967,7 +992,7 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): { backdrops:
     if (lod !== "whole") {
       const labelSize = lod === "editing" ? 13 : 11;
       const folderLabelY = placement.resource_type === "company_explorer_folder"
-        ? processMapFolderLabelY(bounds, options.settledPixelsPerGridUnit, lod === "editing", labelSize, childTopByFolder.get(placement.resource_id))
+        ? processMapFolderLabelY(bounds, options.settledPixelsPerGridUnit, lod === "editing", labelSize, processMapOverlayChildTop(placement.resource_id, options))
         : null;
       if (placement.resource_type !== "company_explorer_folder" || folderLabelY !== null) {
         const labelPosition: [number, number] = [
@@ -1010,7 +1035,14 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): { backdrops:
     }
   }
   if (options.settled) {
-    for (const placement of options.presentation.placements.values()) {
+    const anchorPlacements = options.editOverlay.connectionSourceKey
+      ? options.presentation.placements.values()
+      : [...new Set([options.editOverlay.selectedPlacementKey, options.editOverlay.hoveredPlacementKey])]
+        .flatMap((key) => {
+          const placement = key ? options.presentation.placements.get(key) : undefined;
+          return placement ? [placement] : [];
+        });
+    for (const placement of anchorPlacements) {
       const key = placementKey(placement);
       const geometry = processMapPlacementGeometryForTransform(placement, options.editOverlay.placementTransform);
       if (processMapPlacementDisplayLOD({
@@ -1028,10 +1060,6 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): { backdrops:
         }
         continue;
       }
-      if (
-        options.editOverlay.selectedPlacementKey !== key
-        && options.editOverlay.hoveredPlacementKey !== key
-      ) continue;
       anchors.push({ position: [input.x, input.y], radius: 6, fill: [255, 255, 255, 255], line: [14, 165, 233, 255], pick: { kind: "anchor", anchor: "input", key, placement } });
       anchors.push({ position: [output.x, output.y], radius: 6, fill: [14, 165, 233, 255], line: [255, 255, 255, 255], pick: { kind: "anchor", anchor: "output", key, placement } });
     }
@@ -1076,6 +1104,15 @@ function buildProcessMapSpatialLayers(options: ProcessMapSpatialLayerBuildOption
   const tile = sceneBounds ? new ProcessMapProtectedTileLayer({
     id: "process-map-spatial-tiles",
     protectedGeneration: options.protectedGeneration,
+    readVersion: options.scene.process_map_read_version,
+    validatedTiles: options.validatedTiles,
+    renderState: {
+      settledPixelsPerGridUnit: options.settledPixelsPerGridUnit,
+      editedPlacementKeys: options.editedPlacementKeys,
+      editedTraceIDs: options.editedTraceIDs,
+      selectedPlacementKey: options.selectedPlacementKey,
+      selectedTraceID: options.selectedTraceID,
+    },
     data: `${options.scene.process_map_read_version}:${options.protectedGeneration}:${options.scoreCardBusinessDate}`,
     extent: [sceneBounds.min_x, sceneBounds.min_y, sceneBounds.max_x, sceneBounds.max_y],
     tileSize: processMapDeckTileSize(options.scene.tile_size, options.scene.max_tile_zoom),
@@ -1260,6 +1297,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const [protectedScope, setProtectedScope] = useState(protectedScopeKey);
   const [settledViewState, setSettledViewState] = useState(viewState);
   const [loadedTiles, setLoadedTiles] = useState<Map<string, ProcessMapTileResponse>>(new Map());
+  const [validatedTiles, setValidatedTiles] = useState<ReadonlyMap<string, ProcessMapValidatedTile> | null>(null);
   const [committedOverlay, setCommittedOverlay] = useState<ProcessMapPresentationState>(emptyPresentation);
   const [previewPlacements, setPreviewPlacements] = useState<Map<string, ProcessMapVisiblePlacement>>(new Map());
   const [previewTraces, setPreviewTraces] = useState<Map<string, ProcessMapTrace>>(new Map());
@@ -1280,6 +1318,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const viewRef = useRef(viewState);
   const sceneRef = useRef(activeScene);
+  const minimumReadVersionRef = useRef(0);
   const loadedTilesRef = useRef(loadedTiles);
   const presentationRef = useRef<ProcessMapPresentationState>(emptyPresentation());
   const committedOverlayRef = useRef(committedOverlay);
@@ -1321,6 +1360,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     tilePresentation,
   ]);
   presentationRef.current = presentation;
+  const folderChildTops = useMemo(() => processMapFolderChildTops(presentation.placements.values()), [presentation.placements]);
 
   const advanceProtectedGeneration = useCallback(() => {
     const next = canonicalGenerationRef.current + 1;
@@ -1349,6 +1389,9 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const purgeProtectedScene = useCallback(() => {
     sceneAbortRef.current?.abort();
     setScene(null);
+    sceneRef.current = null;
+    minimumReadVersionRef.current = 0;
+    setValidatedTiles(null);
     setProtectedScope(protectedScopeKey);
     advanceProtectedGeneration();
     invalidateProcessMapReadCaches(apiBase, companyID);
@@ -1378,8 +1421,28 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     sceneAbortRef.current = controller;
     setError("");
     try {
-      const nextScene = await fetchProcessMapScene(apiBase, companyID, controller.signal);
+      const previousScene = sceneRef.current;
+      const changes = previousScene && !purgeProtectedGeometry
+        ? await fetchProcessMapChanges(apiBase, companyID, previousScene.process_map_read_version, [...loadedTilesRef.current.values()], controller.signal)
+        : null;
+      const nextScene = changes ?? await fetchProcessMapScene(apiBase, companyID, controller.signal);
       if (controller.signal.aborted) return;
+      if (nextScene.process_map_read_version < minimumReadVersionRef.current) return;
+      if (changes?.protected_geometry_changed) {
+        purgeProtectedScene();
+      } else if (changes) {
+        const certified = validateProcessMapLoadedTiles(loadedTilesRef.current, changes);
+        const nextTiles = new Map(loadedTilesRef.current);
+        for (const [id, { current }] of certified) nextTiles.set(id, current);
+        applyProcessMapCacheValidation(apiBase, companyID, changes);
+        loadedTilesRef.current = nextTiles;
+        setLoadedTiles(nextTiles);
+        setValidatedTiles(certified);
+      } else {
+        setValidatedTiles(null);
+      }
+      minimumReadVersionRef.current = nextScene.process_map_read_version;
+      sceneRef.current = nextScene;
       setScene(nextScene);
       setLoading(false);
       markUnsettled();
@@ -1388,7 +1451,21 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setLoading(false);
       setError(errorMessage(cause, "Process Map could not be loaded."));
     }
-  }, [companyID, markUnsettled, purgeProtectedScene]);
+  }, [apiBase, companyID, markUnsettled, purgeProtectedScene]);
+
+  const canonicalRefreshRef = useRef<ReturnType<typeof createCoalescedCanonicalRefresh> | null>(null);
+  useEffect(() => {
+    const refresh = createCoalescedCanonicalRefresh(
+      () => loadScene(false),
+      (cause) => setError(errorMessage(cause, "Process Map could not refresh.")),
+    );
+    canonicalRefreshRef.current = refresh;
+    return () => {
+      refresh.dispose();
+      canonicalRefreshRef.current = null;
+    };
+  }, [loadScene]);
+  const requestCanonicalRefresh = useCallback(() => canonicalRefreshRef.current?.request(), []);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1426,13 +1503,9 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [activeScene, markUnsettled, viewportSize]);
 
   useEffect(() => {
-    const coalesced = createCoalescedCanonicalRefresh(
-      () => loadScene(false),
-      (cause) => setError(errorMessage(cause, "Process Map could not refresh.")),
-    );
     const requestRefresh = (purge: boolean) => {
       if (purge) purgeProtectedScene();
-      coalesced.request();
+      requestCanonicalRefresh();
     };
     const unsubscribe = subscribeRealtimeScope(apiBase, companyID, PROCESS_MAP_REALTIME_SCOPE, {
       onProcessMapChanged: (message) => {
@@ -1447,22 +1520,31 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       },
     });
     return () => {
-      coalesced.dispose();
       unsubscribe();
     };
-  }, [apiBase, companyID, loadScene, purgeProtectedScene]);
+  }, [apiBase, companyID, purgeProtectedScene, requestCanonicalRefresh]);
 
   const guardedGetTileData = useCallback(async (request: ProcessMapTileLoadRequest): Promise<ProcessMapTileResponse | null> => {
     const currentScene = sceneRef.current;
     if (!currentScene || request.z < currentScene.min_tile_zoom || request.z > currentScene.max_tile_zoom) return null;
+    const canonicalGeneration = canonicalGenerationRef.current;
+    let tile: ProcessMapTileResponse | null = null;
     try {
-      const tile = await fetchProcessMapTile(apiBase, companyID, currentScene.process_map_read_version, request.z, request.x, request.y, request.signal, scoreCardBusinessDate);
-      if (request.signal?.aborted || tile.process_map_read_version !== sceneRef.current?.process_map_read_version) return null;
-      return tile;
+      tile = await fetchProcessMapTile(apiBase, companyID, currentScene.process_map_read_version, request.z, request.x, request.y, request.signal, scoreCardBusinessDate);
     } catch (cause) {
-      if (isAbortError(cause)) return null;
-      throw cause;
+      if (!isAbortError(cause)) throw cause;
     }
+    if (
+      canonicalGeneration !== canonicalGenerationRef.current || !sceneRef.current
+      || scoreCardBusinessDate !== getQDBusinessDate().dateKey
+    ) return null;
+    if (tile && !request.signal?.aborted && tile.process_map_read_version === sceneRef.current.process_map_read_version) return tile;
+    // deck.gl clears a header's content on null before its replacement loader
+    // may start. Keep only this exact tile's already authorized coverage.
+    const retained = loadedTilesRef.current.get(request.tileID);
+    return retained && retained.z === request.z && retained.x === request.x && retained.y === request.y
+      ? retained
+      : null;
   }, [apiBase, companyID, scoreCardBusinessDate]);
 
   const handleTileLoad = useCallback((tileID: string, data: ProcessMapTileResponse, generation: number) => {
@@ -1494,6 +1576,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const handleViewportLoad = useCallback((generation: number) => {
     if (generation !== canonicalGenerationRef.current) return;
     const readVersion = sceneRef.current?.process_map_read_version;
+    if (readVersion === undefined || readVersion < minimumReadVersionRef.current) return;
     if (readVersion !== undefined) {
       setLoadedTiles((current) => {
         if ([...current.values()].every((tile) => tile.process_map_read_version === readVersion)) return current;
@@ -1509,10 +1592,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, []);
 
   const refreshAfterMutation = useCallback((readVersion: number) => {
-    setScene((current) => current && readVersion >= current.process_map_read_version ? { ...current, process_map_read_version: readVersion } : current);
+    minimumReadVersionRef.current = Math.max(minimumReadVersionRef.current, readVersion);
     markUnsettled();
-    void loadScene(false);
-  }, [loadScene, markUnsettled]);
+    requestCanonicalRefresh();
+  }, [markUnsettled, requestCanonicalRefresh]);
 
   const applyEnvelope = useCallback((
     envelope: ProcessMapMutationEnvelope,
@@ -1588,7 +1671,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setNotice("Saving placement…");
     try {
       const envelope = await putProcessMapPlacement(apiBase, companyID, placement, placement);
-      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) {
+        if (canonicalGeneration === canonicalGenerationRef.current) refreshAfterMutation(envelope.process_map_read_version);
+        return;
+      }
       applyEnvelope(envelope, pending, pendingTraceIDs, expectedOperationGenerations);
       setNotice("Placement saved.");
     } catch (cause) {
@@ -1608,7 +1694,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setPreviewTraces((current) => replaceProcessMapPreviewEntries(current, currentTraceIDs, new Map()));
       setNotice(errorMessage(cause, "Placement was restored because it could not be saved."));
     }
-  }, [apiBase, applyEnvelope, companyID, nextOperation]);
+  }, [apiBase, applyEnvelope, companyID, nextOperation, refreshAfterMutation]);
 
   const saveTrace = useCallback(async (trace: ProcessMapTrace, routePoints: readonly ProcessMapGridPoint[]) => {
     const id = trace.resource_operational_relationship_id;
@@ -1619,7 +1705,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setPreviewTraces((current) => new Map(current).set(id, preview));
     try {
       const envelope = await putProcessMapTrace(apiBase, companyID, id, preview.route_points);
-      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) {
+        if (canonicalGeneration === canonicalGenerationRef.current) refreshAfterMutation(envelope.process_map_read_version);
+        return;
+      }
       applyEnvelope(envelope, new Map());
       setNotice(envelope.changed === false ? "Trace route was already current." : "Trace route saved.");
     } catch (cause) {
@@ -1631,7 +1720,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       });
       setNotice(errorMessage(cause, "Trace route was restored because it could not be saved."));
     }
-  }, [apiBase, applyEnvelope, companyID, nextOperation]);
+  }, [apiBase, applyEnvelope, companyID, nextOperation, refreshAfterMutation]);
 
   const placementGesture = gesture && (gesture.kind === "move" || gesture.kind === "resize") ? gesture : null;
   const placementTransform = useMemo<ProcessMapPlacementTransform | null>(() => placementGesture ? {
@@ -1646,16 +1735,17 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     vertical: placementGesture.vertical,
   } : null, [placementGesture]);
   const folders = useMemo(() => [...presentation.placements.values()].filter((placement) => placement.resource_type === "company_explorer_folder"), [presentation.placements]);
+  const gestureRoot = placementGesture?.basePlacements.get(placementGesture.key);
+  const excludedFolderID = gestureRoot?.resource_type === "company_explorer_folder" ? gestureRoot.resource_id : undefined;
+  const destinationFolders = useMemo(() => processMapOrderFoldersForContainment(folders, excludedFolderID), [folders, excludedFolderID]);
   const highlightedFolder = useMemo(() => {
     let bounds: ProcessMapBounds | null = null;
-    let excludedFolderID: string | undefined;
     const activePlacement = placementGesture?.basePlacements.get(placementGesture.key) ?? null;
     if (activePlacement) {
       bounds = processMapPlacementBounds(processMapPlacementGeometryForTransform(activePlacement, placementTransform));
-      if (activePlacement.resource_type === "company_explorer_folder") excludedFolderID = activePlacement.resource_id;
     }
-    return bounds ? processMapDeepestContainingFolder(bounds, folders, excludedFolderID) : null;
-  }, [folders, placementGesture, placementTransform]);
+    return bounds ? destinationFolders.find((folder) => processMapBoundsContain(processMapPlacementBounds(folder), bounds!)) ?? null : null;
+  }, [destinationFolders, placementGesture, placementTransform]);
 
   const singularSelection = selection?.kind === "placements" ? null : selection;
   const selectionIdentity = singularSelection ? processMapSelectionIdentity(singularSelection) : null;
@@ -1762,6 +1852,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const spatialLayers = useMemo(() => activeScene ? buildProcessMapSpatialLayers({
     scene: activeScene,
+    validatedTiles,
     protectedGeneration,
     scoreCardBusinessDate,
     settledPixelsPerGridUnit: 2 ** settledViewState.zoom,
@@ -1774,15 +1865,17 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     onTileUnload: handleTileUnload,
     onViewportLoad: handleViewportLoad,
     onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
-  }) : null, [activeScene, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, protectedGeneration, scoreCardBusinessDate, selectedPlacementKey, selectedTraceID, settledViewState.zoom, spatialEditedPlacementKeys, spatialEditedTraceIDs]);
+  }) : null, [activeScene, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, protectedGeneration, scoreCardBusinessDate, selectedPlacementKey, selectedTraceID, settledViewState.zoom, spatialEditedPlacementKeys, spatialEditedTraceIDs, validatedTiles]);
 
   const layers = useMemo(() => activeScene && spatialLayers ? composeProcessMapLayers({
     scene: activeScene,
+    validatedTiles,
     protectedGeneration,
     scoreCardBusinessDate,
     settled,
     settledPixelsPerGridUnit: 2 ** settledViewState.zoom,
     presentation,
+    folderChildTops,
     editedPlacementKeys,
     editedTraceIDs,
     editOverlay,
@@ -1791,7 +1884,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     onTileUnload: handleTileUnload,
     onViewportLoad: handleViewportLoad,
     onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
-  }, spatialLayers) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, scoreCardBusinessDate, settled, settledViewState.zoom, spatialLayers]);
+  }, spatialLayers) : [], [activeScene, editOverlay, editedPlacementKeys, editedTraceIDs, folderChildTops, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, presentation, protectedGeneration, scoreCardBusinessDate, settled, settledViewState.zoom, spatialLayers, validatedTiles]);
 
   const handleViewStateChange = useCallback(<ViewStateT extends OrthographicViewState,>(params: ViewStateChangeParameters<ViewStateT>): ViewStateT => {
     if (gestureRef.current?.kind === "connection") {
@@ -1917,8 +2010,12 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       return;
     }
     if (current.kind === "waypoint") {
+      const snapped = { x: snapProcessMapGridCoordinate(point.x), y: snapProcessMapGridCoordinate(point.y) };
+      const previous = previewTracesRef.current.get(current.trace.resource_operational_relationship_id)?.route_points[current.index]
+        ?? current.startingRoute[current.index];
+      if (previous?.x === snapped.x && previous.y === snapped.y) return;
       const route = current.startingRoute.map((routePoint) => ({ ...routePoint }));
-      route[current.index] = { x: snapProcessMapGridCoordinate(point.x), y: snapProcessMapGridCoordinate(point.y) };
+      route[current.index] = snapped;
       const id = current.trace.resource_operational_relationship_id;
       const nextPreviews = replaceProcessMapPreviewEntries(previewTracesRef.current, [id], new Map([[id, { ...cloneTrace(current.trace), route_points: route }]]));
       const next = { ...current, moved: true };
@@ -1930,6 +2027,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     }
     const dx = snapProcessMapGridCoordinate(point.x - current.start.x);
     const dy = snapProcessMapGridCoordinate(point.y - current.start.y);
+    if (dx === current.deltaX && dy === current.deltaY) return;
     const next = {
       ...current,
       deltaX: dx,
@@ -1975,7 +2073,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     );
     try {
       const envelope = await postProcessMapRelationship(apiBase, companyID, current.source, target, routePoints);
-      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) return;
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) {
+        if (canonicalGeneration === canonicalGenerationRef.current) refreshAfterMutation(envelope.process_map_read_version);
+        return;
+      }
       applyEnvelope(envelope, new Map());
       if (envelope.relationship) setSelection({ kind: "trace", id: envelope.relationship.resource_operational_relationship_id });
       setNotice(envelope.created === false ? "Existing operational trace selected." : "Operational trace created.");
@@ -1983,7 +2084,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) return;
       setNotice(errorMessage(cause, "Operational trace was not created."));
     }
-  }, [apiBase, applyEnvelope, companyID, nextOperation, settledViewState.zoom]);
+  }, [apiBase, applyEnvelope, companyID, nextOperation, refreshAfterMutation, settledViewState.zoom]);
 
   const handleDragEnd = useCallback((info: PickingInfo) => {
     const current = gestureRef.current;
@@ -2032,7 +2133,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     }
     const placement = pending.get(current.key);
     if (!placement) return;
-    const parent = processMapDeepestContainingFolder(processMapPlacementBounds(placement), folders, placement.resource_type === "company_explorer_folder" ? placement.resource_id : undefined);
+    const parent = destinationFolders.find((folder) => processMapBoundsContain(processMapPlacementBounds(folder), processMapPlacementBounds(placement))) ?? null;
     const saved = { ...placement, map_parent_folder_id: parent?.resource_id ?? null };
     pending.set(current.key, saved);
     const nextPlacementPreviews = replaceProcessMapPreviewEntries(previewPlacementsRef.current, current.basePlacementKeys, pending);
@@ -2045,7 +2146,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setPreviewTraces(nextTracePreviews);
     }
     void savePlacement(saved, pending, current.baseTraceIDs);
-  }, [finishConnection, folders, savePlacement, saveTrace]);
+  }, [destinationFolders, finishConnection, savePlacement, saveTrace]);
 
   const fitFolder = useCallback((placement: ProcessMapVisiblePlacement) => {
     const next = fitProcessMapViewState(processMapPlacementBounds(placement), viewportSize, { padding: 80 });
@@ -2142,7 +2243,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setSelection(null);
       try {
         const envelope = await deleteProcessMapRelationship(apiBase, companyID, id);
-        if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) return;
+        if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(operationKey) ?? 0)) {
+          if (canonicalGeneration === canonicalGenerationRef.current) refreshAfterMutation(envelope.process_map_read_version);
+          return;
+        }
         refreshAfterMutation(envelope.process_map_read_version);
         setNotice("Operational relationship removed.");
       } catch (cause) {
@@ -2203,7 +2307,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     if (placement.resource_type === "logic_gate") setPinnedProcessID((current) => current === placement.resource_id ? null : current);
     try {
       const envelope = await deleteProcessMapPlacement(apiBase, companyID, placement);
-      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) return;
+      if (!shouldApplyProcessMapMutationAck(canonicalGeneration, canonicalGenerationRef.current, operationGeneration, operationGenerationRef.current.get(key) ?? 0)) {
+        if (canonicalGeneration === canonicalGenerationRef.current) refreshAfterMutation(envelope.process_map_read_version);
+        return;
+      }
       applyEnvelope(envelope, new Map(), affectedTraceIDs, expectedOperationGenerations);
       setNotice(placement.resource_type === "logic_gate"
         ? "Company Explorer placement removed. The Process and its data remain."

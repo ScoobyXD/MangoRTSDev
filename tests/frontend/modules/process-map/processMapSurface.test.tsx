@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { OrthographicViewport, type Layer } from "../../../../frontend/node_modules/@deck.gl/core/dist/index.js";
+import { _Tile2DHeader as TileHeader } from "../../../../frontend/node_modules/@deck.gl/geo-layers/dist/index.js";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { JSDOM } from "jsdom";
@@ -10,8 +11,8 @@ import {
   buildProcessMapLayers,
   materializeProcessMapPlacementTransform,
   mergeProcessMapPresentation,
-  ProcessMapProtectedTileLayer,
   ProcessMapSurface,
+  processMapFolderChildTops,
   processMapCurrentOperationKeys,
   processMapInternalTracesForTransform,
   processMapPerimeterSegments,
@@ -23,7 +24,10 @@ import {
   type ProcessMapPlacementTransform,
   type ProcessMapPresentationState,
 } from "../../../../frontend/src/modules/process-map/ProcessMapSurface.js";
+import { ProcessMapProtectedTileLayer } from "../../../../frontend/src/modules/process-map/processMapTileLayer.js";
+import "./processMapTileLayer.test.js";
 import type {
+  ProcessMapChangesResponse,
   ProcessMapMutationEnvelope,
   ProcessMapSceneResponse,
   ProcessMapTileResponse,
@@ -127,6 +131,7 @@ function buildOptions(overrides: Partial<ProcessMapLayerBuildOptions> = {}): Pro
   return {
     scene,
     protectedGeneration: 0,
+    validatedTiles: null,
     scoreCardBusinessDate: "2026-08-26",
     settled: true,
     settledPixelsPerGridUnit: 0.25,
@@ -141,6 +146,7 @@ function buildOptions(overrides: Partial<ProcessMapLayerBuildOptions> = {}): Pro
     onTileLoad: () => undefined,
     onTileUnload: () => undefined,
     ...overrides,
+    folderChildTops: overrides.folderChildTops ?? processMapFolderChildTops((overrides.presentation ?? emptyPresentation()).placements.values()),
   };
 }
 
@@ -218,6 +224,7 @@ function currentDeckLayer(id: string): DeckTestLayer {
 function behaviorSceneResponse(
   readVersion: number,
   bounds: ProcessMapSceneResponse["bounds"],
+  validatedTiles: ProcessMapChangesResponse["validated_tiles"] = [],
 ): Response {
   return new Response(JSON.stringify({
     bounds,
@@ -225,6 +232,8 @@ function behaviorSceneResponse(
     tile_size: 256,
     min_tile_zoom: 0,
     max_tile_zoom: 22,
+    validated_tiles: validatedTiles,
+    protected_geometry_changed: false,
   }), { status: 200, headers: { "Content-Type": "application/json", ETag: `"scene-${readVersion}"` } });
 }
 
@@ -251,6 +260,7 @@ type MountedProcessMap = {
 };
 
 type ProcessMapBehaviorMountOptions = {
+  strictMode?: boolean;
   process?: ProcessMapVisiblePlacement;
   initialPlacements?: ProcessMapTileResponse["placements"];
   sceneBounds?: ProcessMapSceneResponse["bounds"];
@@ -277,12 +287,19 @@ async function mountProcessMapForBehavior(
   const initialTile = behaviorTile(1, options.initialPlacements ?? [process]);
   const heldSceneReads: Array<Deferred<Response>> = [];
   let sceneReads = 0;
-  globalThis.fetch = (async (input: string | URL | Request) => {
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
-    if (url.includes("/v1/process-map/scene?")) {
+    if (url.includes("/v1/process-map/scene?") || url.endsWith("/v1/process-map/changes")) {
       sceneReads += 1;
       const held = heldSceneReads.shift();
-      return held ? held.promise : behaviorSceneResponse(sceneReads, sceneBounds);
+      if (!held) return behaviorSceneResponse(sceneReads, sceneBounds);
+      const signal = init?.signal;
+      return new Promise<Response>((resolve, reject) => {
+        const onAbort = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+        if (signal?.aborted) { onAbort(); return; }
+        signal?.addEventListener("abort", onAbort, { once: true });
+        void held.promise.then(resolve, reject).finally(() => signal?.removeEventListener("abort", onAbort));
+      });
     }
     if (url.includes("/qd-ratings?")) {
       return new Response(JSON.stringify({ qd_ratings: [] }), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -303,7 +320,8 @@ async function mountProcessMapForBehavior(
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => {
-    root.render(<ProcessMapSurface apiBase={apiBase} companyID={companyID} onOpenLogicGate={onOpenLogicGate} />);
+    const surface = <ProcessMapSurface apiBase={apiBase} companyID={companyID} onOpenLogicGate={onOpenLogicGate} />;
+    root.render(options.strictMode ? <React.StrictMode>{surface}</React.StrictMode> : surface);
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
   });
   for (let attempt = 0; attempt < 10 && !readProcessMapDeckGLTestProps().layers.some((layer) => layer.id === "process-map-spatial-tiles"); attempt += 1) {
@@ -320,6 +338,7 @@ async function mountProcessMapForBehavior(
   const currentTileLayer = deck.layers.find((layer) => layer.id === "process-map-spatial-tiles");
   assert.ok(currentTileLayer);
   const onTileLoad = currentTileLayer.props.onTileLoad as (tile: { id: string; content: ProcessMapTileResponse }) => void;
+  initialTile.process_map_read_version = sceneReads;
   await act(async () => {
     onTileLoad({
       id: "22-0-0",
@@ -403,9 +422,10 @@ async function resolveMountedScene(
   held: Deferred<Response>,
   readVersion: number,
   bounds: ProcessMapSceneResponse["bounds"],
+  validatedTiles: ProcessMapChangesResponse["validated_tiles"] = [],
 ): Promise<void> {
   await act(async () => {
-    held.resolve(behaviorSceneResponse(readVersion, bounds));
+    held.resolve(behaviorSceneResponse(readVersion, bounds, validatedTiles));
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
   });
 }
@@ -456,6 +476,85 @@ test("name-visible normal LOD keeps Process scorecards, controls, and drag movem
     assert.equal(propagationStopped, true);
     assert.deepEqual(movedBody.polygon, [[3, 2], [17, 2], [17, 10], [3, 10]], "dragging moves the selected Process through the existing snapped transform");
     assert.ok(mounted.container.querySelector(".process-map-qd-card"), "dragging keeps the pinned scorecard attached");
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("pointer movement inside the same snapped grid cell preserves overlay data", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  try {
+    const key = `logic_gate:${mounted.process.resource_id}`;
+    await act(async () => {
+      readProcessMapDeckGLTestProps().onDragStart(
+        { object: { kind: "placement", key, placement: mounted.process }, coordinate: [1, 1] },
+        { stopPropagation: () => undefined },
+      );
+      readProcessMapDeckGLTestProps().onDrag({ coordinate: [4, 3] });
+    });
+    const moved = currentDeckLayer("process-map-edit-placement-bodies").props.data;
+    await act(async () => { readProcessMapDeckGLTestProps().onDrag({ coordinate: [4.1, 3.1] }); });
+    assert.equal(currentDeckLayer("process-map-edit-placement-bodies").props.data, moved);
+    await act(async () => { readProcessMapDeckGLTestProps().onDrag({ coordinate: [5, 3] }); });
+    assert.notEqual(currentDeckLayer("process-map-edit-placement-bodies").props.data, moved);
+    assert.deepEqual((mountedPlacementBodies(key)[0] as MountedPlacementDatum & { polygon: number[][] }).polygon,
+      [[4, 2], [18, 2], [18, 10], [4, 10]]);
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("overlapping saves still validate an older committed result when the newer save fails", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  try {
+    const initialFetch = globalThis.fetch;
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    const saves = [first, second];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("/v1/process-map/placements/") && init?.method === "PUT") {
+        const save = saves.shift();
+        assert.ok(save);
+        return save.promise;
+      }
+      return initialFetch(input, init);
+    }) as typeof fetch;
+    setCurrentRealtimeConnectionIDForTest("local-save");
+    await mounted.clickPlacement(mounted.process);
+    const key = `logic_gate:${mounted.process.resource_id}`;
+    const move = async (candidate: ProcessMapVisiblePlacement, dx: number) => {
+      await act(async () => {
+        readProcessMapDeckGLTestProps().onDragStart(
+          { object: { kind: "placement", key, placement: candidate }, coordinate: [candidate.grid_x + 1, 1] },
+          { stopPropagation: () => undefined },
+        );
+        readProcessMapDeckGLTestProps().onDrag({ coordinate: [candidate.grid_x + 1 + dx, 1] });
+      });
+      await act(async () => { readProcessMapDeckGLTestProps().onDragEnd({}); });
+    };
+    await move(mounted.process, 2);
+    const firstPreview = mountedPlacementBodies(key)[0].pick!.placement;
+    await move(firstPreview, 3);
+    assert.equal(saves.length, 0);
+    const held = mounted.holdNextSceneRead();
+    const committed = { ...mounted.process, grid_x: 2, revision: 6, updated_timestamp: "first-save" };
+    await act(async () => {
+      first.resolve(new Response(JSON.stringify({
+        placements: [{ ...committed, company_id: mounted.companyID }], traces: [], deleted_trace_ids: [], process_map_read_version: 2,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+    assert.equal(mounted.readSceneCount(), 2, "the committed older acknowledgement must request canonical validation");
+    assert.equal(mountedPlacementBodies(key)[0].pick?.placement.grid_x, 5, "the older acknowledgement must preserve the newer preview");
+    await emitMountedProcessMapChange(mounted, false, "local-save");
+    assert.equal(mounted.readSceneCount(), 2, "the initiating connection echo is suppressed");
+    await act(async () => {
+      second.resolve(new Response(JSON.stringify({ error: "save_failed" }), { status: 400, headers: { "Content-Type": "application/json" } }));
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+    await resolveMountedScene(held, 2, { min_x: 2, min_y: 0, max_x: 16, max_y: 8 });
+    await mounted.loadTile(behaviorTile(2, [committed]));
+    assert.equal(mountedPlacementBodies(key)[0].pick?.placement.grid_x, 2, "the successful first save must become canonical after the later failure");
   } finally {
     await mounted.cleanup();
   }
@@ -847,6 +946,49 @@ test("a remote-client ordinary mutation retains mounted state and settles its ca
   }
 });
 
+test("ordinary refresh certifies unrelated loaded tiles while preserving selection, pin, and camera", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  try {
+    const distant = placement("distant-process", 300, 0, 14, 8);
+    const distantTile = { ...behaviorTile(1, [distant]), x: 1 };
+    await mounted.loadTile(distantTile, false, "22-1-0");
+    await mounted.clickPlacement(mounted.process);
+    const pinned = mounted.container.querySelector(".process-map-qd-card");
+    const camera = structuredClone(readProcessMapDeckGLTestProps().viewState);
+    const held = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false, "remote");
+    await resolveMountedScene(held, 2, { min_x: 0, min_y: 0, max_x: 314, max_y: 8 }, [
+      { z: 22, x: 1, y: 0, process_map_read_version: 1 },
+    ]);
+    const certified = mounted.readTileLayer().props.validatedTiles as ReadonlyMap<string, { previous: ProcessMapTileResponse; current: ProcessMapTileResponse }>;
+    assert.equal(certified.size, 1);
+    assert.equal(certified.get("22-1-0")?.previous, distantTile);
+    assert.equal(certified.get("22-1-0")?.current.placements, distantTile.placements, "certification must retain the exact unrelated geometry arrays");
+    assert.equal(certified.get("22-1-0")?.current.process_map_read_version, 2);
+    assert.equal(certified.has("22-0-0"), false, "the changed tile must fetch new canonical data");
+    const moved = { ...mounted.process, grid_x: 2, revision: 6 };
+    await mounted.loadTile(behaviorTile(2, [moved]));
+    assert.equal(mountedPlacementBodies(`logic_gate:${mounted.process.resource_id}`)[0].pick?.placement.grid_x, 2);
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), pinned);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, camera);
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("canonical refresh remains active after React StrictMode effect replay", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined, { strictMode: true });
+  try {
+    const initialReads = mounted.readSceneCount();
+    const held = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false, "remote");
+    assert.equal(mounted.readSceneCount(), initialReads + 1);
+    await resolveMountedScene(held, initialReads + 1, { min_x: 0, min_y: 0, max_x: 14, max_y: 8 });
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
 test("protected geometry invalidation interrupts an ordinary refresh and cannot be origin-suppressed", async () => {
   const mounted = await mountProcessMapForBehavior(() => undefined);
   try {
@@ -942,13 +1084,20 @@ test("protected generations keep one logical TileLayer while replacing and dispo
 test("mutation masks regenerate cached tile sublayers during a same-permission version reload", () => {
   const parent = Object.getPrototypeOf(ProcessMapProtectedTileLayer.prototype) as { updateState: (params: unknown) => void };
   const originalParentUpdate = parent.updateState;
-  const cachedTile = { layers: [{}] as unknown[] | null };
+  const cachedTile = {
+    layers: [{}] as unknown[] | null,
+    content: { placements: [placement("masked", 0, 0)], traces: [] },
+  };
   const fake = { state: { tileset: { tiles: [cachedTile] } } };
   parent.updateState = () => undefined;
   try {
     ProcessMapProtectedTileLayer.prototype.updateState.call(fake as never, {
-      oldProps: { protectedGeneration: 4 },
-      props: { protectedGeneration: 4 },
+      oldProps: { protectedGeneration: 4, renderState: {
+        settledPixelsPerGridUnit: 1, editedPlacementKeys: new Set(), editedTraceIDs: new Set(), selectedPlacementKey: null, selectedTraceID: null,
+      } },
+      props: { protectedGeneration: 4, validatedTiles: null, renderState: {
+        settledPixelsPerGridUnit: 1, editedPlacementKeys: new Set(["logic_gate:masked"]), editedTraceIDs: new Set(), selectedPlacementKey: null, selectedTraceID: null,
+      } },
       changeFlags: { dataChanged: true, updateTriggersChanged: { renderSubLayers: true } },
     } as never);
     assert.equal(cachedTile.layers, null, "mutation masks must immediately regenerate cached drawing sublayers");
@@ -995,6 +1144,60 @@ test("settled LOD changes regenerate sublayers without reloading cached tile dat
     },
   });
   assert.equal(reloads, 1, "a real tile data identity change still reloads stale payloads");
+});
+
+test("ordinary shared-read cancellation retains tile coverage before deck transitions, while protected cancellation clears it", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  const originalFetch = globalThis.fetch;
+  const observedSignals: AbortSignal[] = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (!url.includes("/v1/process-map/tiles/")) return originalFetch(input, init);
+    const signal = init?.signal;
+    assert.ok(signal);
+    observedSignals.push(signal);
+    return new Promise<Response>((_resolve, reject) => {
+      signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    });
+  }) as typeof fetch;
+  const header = new TileHeader<ProcessMapTileResponse>({ z: 22, x: 0, y: 0 });
+  header.id = "22-0-0";
+  header.content = mounted.initialTile;
+  const loadFromSurface = () => {
+    const read = mounted.readTileLayer().props.getTileData as (request: {
+      id: string; index: { z: number; x: number; y: number }; signal: AbortSignal;
+    }) => Promise<ProcessMapTileResponse | null>;
+    return header.loadData({
+      requestScheduler: { scheduleRequest: async () => ({ done: () => undefined }) } as never,
+      getData: read as never,
+      onLoad: () => undefined,
+      onError: (error) => { throw error; },
+    });
+  };
+  try {
+    const ordinaryLoad = loadFromSurface();
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(observedSignals.length, 1);
+    await act(async () => {
+      emitProcessMapChangedForTest({ type: "process_map.changed", company_id: mounted.companyID, scope: "process-map:company", protected_geometry_changed: false });
+      await ordinaryLoad;
+    });
+    assert.equal(observedSignals[0].aborted, true, "obsolete shared transport still cancels immediately");
+    assert.equal(header.content, mounted.initialTile, "a stale/aborted null must not erase last valid coverage before the next deck update");
+
+    const protectedLoad = loadFromSurface();
+    await act(async () => { await Promise.resolve(); });
+    assert.equal(observedSignals.length, 2);
+    await act(async () => {
+      emitProcessMapChangedForTest({ type: "process_map.changed", company_id: mounted.companyID, scope: "process-map:company", protected_geometry_changed: true });
+      await protectedLoad;
+    });
+    assert.equal(observedSignals[1].aborted, true);
+    assert.equal(header.content, null, "a protected generation change must never retain earlier tile content");
+  } finally {
+    globalThis.fetch = originalFetch;
+    await mounted.cleanup();
+  }
 });
 
 test("preview replacement preserves unrelated operations", () => {

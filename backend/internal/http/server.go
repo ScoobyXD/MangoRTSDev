@@ -382,6 +382,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/v1/logic-gates", s.handleLogicGates)
 	mux.HandleFunc("/v1/logic-gates/", s.handleLogicGateSubresource)
 	mux.HandleFunc("/v1/process-map/scene", s.handleProcessMapScene)
+	mux.HandleFunc("/v1/process-map/changes", s.handleProcessMapChanges)
 	mux.HandleFunc("/v1/process-map/tiles/", s.handleProcessMapTile)
 	mux.HandleFunc("/v1/process-map/placements/", s.handleProcessMapPlacement)
 	mux.HandleFunc("/v1/process-map/operational-relationships", s.handleProcessMapOperationalRelationships)

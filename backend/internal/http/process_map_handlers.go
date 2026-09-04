@@ -130,6 +130,35 @@ func processMapTilePath(path string) (int, int, int, bool) {
 	return values[0], values[1], values[2], true
 }
 
+func (s *Server) handleProcessMapChanges(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		return
+	}
+	var request struct {
+		CompanyID    string                           `json:"company_id"`
+		SinceVersion *int64                           `json:"since_version"`
+		Tiles        []store.ProcessMapTileValidation `json:"tiles"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 128*1024)
+	if err := decodeProcessMapJSON(r, &request); err != nil || strings.TrimSpace(request.CompanyID) == "" || request.SinceVersion == nil || request.Tiles == nil || len(request.Tiles) > store.ProcessMapMaxValidationTiles {
+		writeError(w, http.StatusBadRequest, "invalid_process_map_changes_request")
+		return
+	}
+	companyID := strings.TrimSpace(request.CompanyID)
+	actorUserID, _, ok := s.authorizeProcessMapRead(w, r, companyID, "", "")
+	if !ok {
+		return
+	}
+	result, err := s.repo.GetProcessMapChanges(r.Context(), store.ProcessMapChangesQuery{CompanyID: companyID, PermissionUserID: actorUserID, SinceVersion: *request.SinceVersion, Tiles: request.Tiles})
+	if err != nil {
+		writeProcessMapError(w, err, "failed_to_read_process_map_changes")
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (s *Server) handleProcessMapTile(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")

@@ -781,6 +781,7 @@ func processMapRelationshipEventPayload(relationship domain.ResourceOperationalR
 type ProcessMapRepository interface {
 	CurrentProcessMapVersions(ctx context.Context, companyID string) (int64, int64, error)
 	GetProcessMapScene(ctx context.Context, input ProcessMapSceneQuery) (domain.ProcessMapScene, error)
+	GetProcessMapChanges(ctx context.Context, input ProcessMapChangesQuery) (ProcessMapChanges, error)
 	GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (domain.ProcessMapTile, error)
 	ListResourceOperationalRelationshipsForResource(ctx context.Context, input ResourceOperationalRelationshipQuery) ([]domain.ResourceOperationalRelationship, error)
 	PutProcessMapPlacement(ctx context.Context, input ProcessMapPlacementPutInput) (ProcessMapMutationEnvelope, error)

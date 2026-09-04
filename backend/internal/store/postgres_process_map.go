@@ -185,8 +185,19 @@ func (r *PostgresRepo) GetProcessMapScene(ctx context.Context, input ProcessMapS
 	if err := postgresRequireProcessMapMembershipTx(ctx, tx, companyID, permissionUserID); err != nil {
 		return domain.ProcessMapScene{}, err
 	}
+	result, err := postgresProcessMapSceneTx(ctx, tx, companyID, permissionUserID)
+	if err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.ProcessMapScene{}, err
+	}
+	return result, nil
+}
+
+func postgresProcessMapSceneTx(ctx context.Context, tx *sql.Tx, companyID, permissionUserID string) (domain.ProcessMapScene, error) {
 	var minX, minY, maxX, maxY sql.NullInt64
-	err = tx.QueryRowContext(ctx, `
+	err := tx.QueryRowContext(ctx, `
 select min(placement.grid_x),min(placement.grid_y),
        max(placement.grid_x + case when allowed then placement.grid_width else $3 end),
        max(placement.grid_y + case when allowed then placement.grid_height else $4 end)
@@ -217,9 +228,6 @@ from (
 	}
 	if minX.Valid && minY.Valid && maxX.Valid && maxY.Valid {
 		result.Bounds = &domain.ProcessMapBounds{MinX: int(minX.Int64), MinY: int(minY.Int64), MaxX: int(maxX.Int64), MaxY: int(maxY.Int64)}
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.ProcessMapScene{}, err
 	}
 	return result, nil
 }
@@ -1330,6 +1338,16 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 			return ProcessMapMutationEnvelope{}, err
 		}
 	}
+	transformedRefs := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
+	if transformsFolderGroup {
+		for _, descendant := range descendants {
+			transformedRefs = append(transformedRefs, domain.ProcessMapResourceRef{ResourceType: descendant.ResourceType, ResourceID: descendant.ResourceID})
+		}
+	}
+	beforeDamage, err := postgresProcessMapDamageTx(ctx, tx, companyID, transformedRefs, "")
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
 	explorerEvent, err := r.syncCompanyExplorerParentFromProcessMapTx(ctx, tx, companyID, resourceType, resourceID, parentID, actorUserID)
 	if err != nil {
 		return ProcessMapMutationEnvelope{}, err
@@ -1363,7 +1381,6 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 	}
 
 	changedPlacements := []domain.ProcessMapPlacement{}
-	transformedRefs := []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}
 	if resourceType == domain.ProcessMapResourceTypeFolder {
 		folderBounds := processMapPlacementBounds(target)
 		for index, descendant := range descendants {
@@ -1379,9 +1396,6 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 			}
 			if !processMapBoundsContain(folderBounds, processMapPlacementBounds(transformed)) {
 				return ProcessMapMutationEnvelope{}, ErrProcessMapContainment
-			}
-			if transformsFolderGroup {
-				transformedRefs = append(transformedRefs, domain.ProcessMapResourceRef{ResourceType: descendant.ResourceType, ResourceID: descendant.ResourceID})
 			}
 			descendants[index] = transformed
 		}
@@ -1452,6 +1466,11 @@ func (r *PostgresRepo) PutProcessMapPlacement(ctx context.Context, input Process
 	if explorerEvent != nil {
 		eventInputs = append(eventInputs, *explorerEvent)
 	}
+	afterDamage, err := postgresProcessMapDamageTx(ctx, tx, companyID, transformedRefs, "")
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
+	attachProcessMapDamage(eventInputs, beforeDamage, afterDamage)
 	result.Events, err = r.appendDomainEventsTx(ctx, tx, eventInputs)
 	if err != nil {
 		return ProcessMapMutationEnvelope{}, err
@@ -1502,6 +1521,10 @@ func (r *PostgresRepo) DeleteProcessMapPlacement(ctx context.Context, input Proc
 	if _, err := processMapPlacementByResourceTx(ctx, tx, companyID, resourceType, resourceID, true); err != nil {
 		return ProcessMapMutationEnvelope{}, err
 	}
+	beforeDamage, err := postgresProcessMapDamageTx(ctx, tx, companyID, []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: resourceID}}, "")
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
 
 	deletedTraceIDs := []string{}
 	explorerEvent := DomainEventInput{}
@@ -1533,10 +1556,12 @@ where company_id=$1::uuid and item_id=$2::uuid`, companyID, itemID); err != nil 
 	}
 	explorerEvent.ActorUserID = actorUserID
 	result := ProcessMapMutationEnvelope{Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: deletedTraceIDs, Changed: true}
-	result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{
+	eventInputs := []DomainEventInput{
 		processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID, ProcessMapPlacementDeletedEvent, processMapResourceEventPayload(resourceType, resourceID)),
 		explorerEvent,
-	})
+	}
+	attachProcessMapDamage(eventInputs, beforeDamage, newProcessMapDamage())
+	result.Events, err = r.appendDomainEventsTx(ctx, tx, eventInputs)
 	if err != nil {
 		return ProcessMapMutationEnvelope{}, err
 	}
@@ -1603,6 +1628,10 @@ for update`, companyID, input.Source.ResourceType, input.Source.ResourceID, inpu
 		Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: []string{},
 		Relationship: &relationship, Created: created, Changed: created,
 	}
+	beforeDamage, err := postgresProcessMapDamageTx(ctx, tx, companyID, nil, relationship.ResourceOperationalRelationshipID)
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
 	eventInputs := []DomainEventInput{}
 	if created {
 		eventInputs = append(eventInputs, processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID,
@@ -1624,6 +1653,11 @@ for update`, companyID, input.Source.ResourceType, input.Source.ResourceID, inpu
 		}
 	}
 	if len(eventInputs) > 0 {
+		afterDamage, err := postgresProcessMapDamageTx(ctx, tx, companyID, nil, relationship.ResourceOperationalRelationshipID)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+		attachProcessMapDamage(eventInputs, beforeDamage, afterDamage)
 		result.Events, err = r.appendDomainEventsTx(ctx, tx, eventInputs)
 		if err != nil {
 			return ProcessMapMutationEnvelope{}, err
@@ -1671,6 +1705,10 @@ func (r *PostgresRepo) PutProcessMapTrace(ctx context.Context, input ProcessMapT
 	if err := postgresValidateTraceEndpointsMappedTx(ctx, tx, companyID, relationship); err != nil {
 		return ProcessMapMutationEnvelope{}, err
 	}
+	beforeDamage, err := postgresProcessMapDamageTx(ctx, tx, companyID, nil, relationshipID)
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
 	trace, changed, err := upsertPostgresProcessMapTraceTx(ctx, tx, companyID, relationshipID, input.RoutePoints)
 	if err != nil {
 		return ProcessMapMutationEnvelope{}, err
@@ -1680,8 +1718,14 @@ func (r *PostgresRepo) PutProcessMapTrace(ctx context.Context, input ProcessMapT
 		Relationship: &relationship, Changed: changed, Events: []domain.DomainEvent{},
 	}
 	if changed {
-		result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID,
-			ProcessMapTraceSavedEvent, processMapRelationshipEventPayload(relationship))})
+		afterDamage, err := postgresProcessMapDamageTx(ctx, tx, companyID, nil, relationshipID)
+		if err != nil {
+			return ProcessMapMutationEnvelope{}, err
+		}
+		eventInputs := []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID,
+			ProcessMapTraceSavedEvent, processMapRelationshipEventPayload(relationship))}
+		attachProcessMapDamage(eventInputs, beforeDamage, afterDamage)
+		result.Events, err = r.appendDomainEventsTx(ctx, tx, eventInputs)
 		if err != nil {
 			return ProcessMapMutationEnvelope{}, err
 		}
@@ -1722,6 +1766,10 @@ func (r *PostgresRepo) DeleteResourceOperationalRelationship(ctx context.Context
 	if _, err := processMapRelationshipByIDTx(ctx, tx, companyID, relationshipID, true); err != nil {
 		return ProcessMapMutationEnvelope{}, err
 	}
+	beforeDamage, err := postgresProcessMapDamageTx(ctx, tx, companyID, nil, relationshipID)
+	if err != nil {
+		return ProcessMapMutationEnvelope{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `
 delete from resource_operational_relationships
 where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`, companyID, relationshipID); err != nil {
@@ -1731,8 +1779,10 @@ where company_id=$1::uuid and resource_operational_relationship_id=$2::uuid`, co
 		Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: []string{},
 		Relationship: &relationship, Changed: true,
 	}
-	result.Events, err = r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID,
-		ResourceOperationalRelationshipDeletedEvent, processMapRelationshipEventPayload(relationship))})
+	eventInputs := []DomainEventInput{processMapMutationEventInput(companyID, actorUserID, input.RealtimeConnectionID,
+		ResourceOperationalRelationshipDeletedEvent, processMapRelationshipEventPayload(relationship))}
+	attachProcessMapDamage(eventInputs, beforeDamage, newProcessMapDamage())
+	result.Events, err = r.appendDomainEventsTx(ctx, tx, eventInputs)
 	if err != nil {
 		return ProcessMapMutationEnvelope{}, err
 	}
