@@ -21,10 +21,12 @@ state object and its `.tflock` file.
 The QA identity is fixed in this root: project `mangorts`, environment `qa`, and
 the three hostnames `qa.mangorts.com`, `api.qa.mangorts.com`, and
 `origin.qa.mangorts.com`. GitHub variables cannot replace those values. The QA
-deploy role accepts only OIDC jobs running inside the GitHub `qa` Environment,
-and the workflow itself accepts only `main`. Required reviewers and deployment
-branch restrictions are separate GitHub Environment settings; do not describe
-them as enabled until they are verified in GitHub.
+deploy role accepts only OIDC jobs running inside the GitHub `qa` or
+`qa-bootstrap` Environment, and the workflow itself accepts only `main`.
+Verified application deployments use `qa`; image-only bootstrap runs use
+`qa-bootstrap` so they cannot report a successful `qa` deployment. Required
+reviewers and deployment branch restrictions are separate GitHub Environment
+settings; do not describe them as enabled until they are verified in GitHub.
 
 Before certificate validation, an explicitly authorized production DNS operator
 must apply one checked-in Terraform `NS` record for `qa.mangorts.com` to the
