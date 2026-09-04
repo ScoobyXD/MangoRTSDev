@@ -1518,16 +1518,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
     }
   }, [apiBase, appRequestJSON, dockTabs, onNavigate]);
 
-  const collapseLogicGateArenaToTab = useCallback((selection: { logicGateID: string; label: string }) => {
-    upsertDockTab({
-      kind: "logic_gate_arena",
-      entityID: selection.logicGateID,
-      label: selection.label,
-    });
-    setActiveDockTabID(null);
-    selectPrimaryPage("home");
-  }, [selectPrimaryPage, upsertDockTab]);
-
   const handleLogicGateArenaTitleChange = useCallback((update: { logicGateID: string; label: string }) => {
     const logicGateID = update.logicGateID.trim();
     const label = update.label.trim();
@@ -2111,7 +2101,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               frames={frames}
               updateFrames={updateActiveFrames}
               targetLogicGate={logicGateArenaTarget}
-              onCollapseToTab={collapseLogicGateArenaToTab}
               onNodeOpen={openLogicGateArenaNodeRoute}
               onNodeClose={closeLogicGateArenaNodeRoute}
               onLogicGateTitleChange={handleLogicGateArenaTitleChange}

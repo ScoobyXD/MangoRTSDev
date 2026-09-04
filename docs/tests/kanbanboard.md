@@ -60,14 +60,14 @@
 58. Authorization must run before an ETag can produce `304 Not Modified`.
 59. Work version changes must cover every source field that changes visible work data without rebuilding a board projection.
 60. A Process deletion must capture its current authorized audience before deletion and send its committed deletion hint to that audience.
-61. The board must occupy only the right-hand work area while preserving the left sidebar, SOP editor, RACI assignments, and editor toolbar.
-62. Requested tabs must use yellow, Pending gray, Backlog purple, and Done green.
-63. Step headers must display their names without ordinal-number badges.
+61. The board must occupy only the right-hand work area, start at its view tabs without a repeated Process title or board-minimize control, and preserve the left sidebar, SOP editor, RACI assignments, and editor toolbar.
+62. Steps must use the canonical Node cyan-to-blue gradient, while Requested uses a strong yellow gradient, Pending gray, Backlog purple, and Done green.
+63. Step headers must display their names without ordinal-number badges, and clicking an editable step title must rename it in place.
 64. Each column must create a Node through its top-right plus button instead of a bottom New Node button.
-65. A step's three-dot menu must retain Rename, Move left, Move right, Add next step, and Delete column actions.
+65. Add step and Add next step must immediately create a default-named column without a naming modal; Add next must keep its atomic incoming connection, and the three-dot menu must retain Rename, Move left, Move right, Add next step, and Delete column actions.
 66. Existing outgoing connection chips must remain visible without a Connect to dropdown.
-67. Node titles must be larger than their status and metadata text.
-68. Node cards must retain readable status, priority, due date, and placement metadata.
+67. Each Node title must use the canonical Node icon inside an editor-style inline label colored from the Node's status, stay compact, and remain slightly larger than its status and metadata text.
+68. Status must be larger than metadata and use a readable status-colored label; priority must use a label colored by the existing Node urgency style while due date and placement metadata remain readable.
 69. Node selection must work without a card checkbox.
 70. Node cards must omit the Change footer while existing Node editing, bulk commands, request actions, and Start work remain available.
 71. Readers whose shared Process response is invalidated must join at most one fresh read, and must never retry caller cancellation, cache clearing, or network failures.
