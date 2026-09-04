@@ -1,6 +1,10 @@
 package store
 
-import "strings"
+import (
+	"strings"
+
+	"miraeopus/backend/internal/domain"
+)
 
 func authoritativeAuthDisplayName(displayName, email string) string {
 	displayName = strings.TrimSpace(displayName)
@@ -24,4 +28,12 @@ func authInsertDisplayName(cognitoSubject, email, displayName string) string {
 		return email
 	}
 	return strings.TrimSpace(cognitoSubject)
+}
+
+func authUserNeedsClaimRefresh(user domain.User, email, displayName string) bool {
+	if normalizedEmail := normalizeEmail(email); normalizedEmail != "" && normalizedEmail != normalizeEmail(user.Email) {
+		return true
+	}
+	authoritativeDisplayName := authoritativeAuthDisplayName(displayName, email)
+	return authoritativeDisplayName != "" && authoritativeDisplayName != user.DisplayName
 }

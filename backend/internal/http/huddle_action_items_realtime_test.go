@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"testing"
 
 	"miraeopus/backend/internal/domain"
@@ -57,11 +58,11 @@ func TestHuddleActionItemsRealtimeAdmissionUsesExactNodeAndBoardEditAccess(t *te
 	boardScope := store.HuddleBoardActionItemsRealtimeScopePrefix + board.HuddleLogicGateID
 
 	for _, scope := range []string{nodeScope, boardScope} {
-		authorized, rejectCode, err := server.authorizeRealtimeSubscription(editorActor, companyID, scope)
+		authorized, rejectCode, err := server.authorizeRealtimeSubscription(context.Background(), editorActor, companyID, scope)
 		if err != nil || !authorized || rejectCode != "" {
 			t.Fatalf("editor admission for %q = authorized %v reject %q err %v", scope, authorized, rejectCode, err)
 		}
-		authorized, rejectCode, err = server.authorizeRealtimeSubscription(viewerActor, companyID, scope)
+		authorized, rejectCode, err = server.authorizeRealtimeSubscription(context.Background(), viewerActor, companyID, scope)
 		if err != nil || authorized || rejectCode != "access_denied" {
 			t.Fatalf("member without exact edit admission for %q = authorized %v reject %q err %v", scope, authorized, rejectCode, err)
 		}
@@ -76,7 +77,7 @@ func TestHuddleActionItemsRealtimeAdmissionUsesExactNodeAndBoardEditAccess(t *te
 	}
 	editorWithBothCompanies := actorFor(editor, otherCompany.CompanyID)
 	for _, scope := range []string{nodeScope, boardScope} {
-		authorized, rejectCode, err := server.authorizeRealtimeSubscription(editorWithBothCompanies, otherCompany.CompanyID, scope)
+		authorized, rejectCode, err := server.authorizeRealtimeSubscription(context.Background(), editorWithBothCompanies, otherCompany.CompanyID, scope)
 		if err != nil || authorized || rejectCode != "resource_not_found" {
 			t.Fatalf("wrong-company admission for %q = authorized %v reject %q err %v", scope, authorized, rejectCode, err)
 		}
@@ -88,7 +89,7 @@ func TestHuddleActionItemsRealtimeAdmissionUsesExactNodeAndBoardEditAccess(t *te
 		store.HuddleBoardActionItemsRealtimeScopePrefix + "not-a-uuid",
 		store.HuddleBoardActionItemsRealtimeScopePrefix + board.HuddleLogicGateID + ":extra",
 	} {
-		authorized, rejectCode, err := server.authorizeRealtimeSubscription(editorActor, companyID, scope)
+		authorized, rejectCode, err := server.authorizeRealtimeSubscription(context.Background(), editorActor, companyID, scope)
 		if err != nil || authorized || rejectCode != "invalid_scope" {
 			t.Fatalf("invalid admission for %q = authorized %v reject %q err %v", scope, authorized, rejectCode, err)
 		}

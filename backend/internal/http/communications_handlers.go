@@ -1376,7 +1376,7 @@ func (s *Server) userCanManageSharedInboxStructure(ctx context.Context, companyI
 	if companyID == "" || userID == "" {
 		return false, nil
 	}
-	memberships, err := s.repo.ListUserMembershipsContext(ctx, userID)
+	memberships, err := s.freshUserMemberships(ctx, userID)
 	if err != nil {
 		return false, err
 	}

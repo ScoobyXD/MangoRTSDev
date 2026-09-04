@@ -22,6 +22,65 @@ import (
 	"time"
 )
 
+type deadlineRecordingWebSocketConn struct {
+	bytes.Buffer
+	deadline time.Time
+	calls    int
+}
+
+func (c *deadlineRecordingWebSocketConn) Read([]byte) (int, error) { return 0, io.EOF }
+func (c *deadlineRecordingWebSocketConn) Close() error             { return nil }
+func (c *deadlineRecordingWebSocketConn) LocalAddr() net.Addr      { return &net.TCPAddr{} }
+func (c *deadlineRecordingWebSocketConn) RemoteAddr() net.Addr     { return &net.TCPAddr{} }
+func (c *deadlineRecordingWebSocketConn) SetDeadline(deadline time.Time) error {
+	c.deadline = deadline
+	c.calls++
+	return nil
+}
+func (c *deadlineRecordingWebSocketConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *deadlineRecordingWebSocketConn) SetWriteDeadline(time.Time) error { return nil }
+
+type webSocketHijackResponse struct {
+	header http.Header
+	conn   *deadlineRecordingWebSocketConn
+	rw     *bufio.ReadWriter
+}
+
+func (w *webSocketHijackResponse) Header() http.Header { return w.header }
+func (w *webSocketHijackResponse) Write(payload []byte) (int, error) {
+	return w.conn.Write(payload)
+}
+func (w *webSocketHijackResponse) WriteHeader(int) {}
+func (w *webSocketHijackResponse) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return w.conn, w.rw, nil
+}
+
+func TestAcceptWebSocketClearsInheritedHTTPWriteDeadline(t *testing.T) {
+	conn := &deadlineRecordingWebSocketConn{deadline: time.Now().Add(time.Second)}
+	response := &webSocketHijackResponse{
+		header: make(http.Header),
+		conn:   conn,
+	}
+	response.rw = bufio.NewReadWriter(bufio.NewReader(conn), bufio.NewWriter(conn))
+	request := httptest.NewRequest(http.MethodGet, "/v1/realtime/ws", nil)
+	request.Header.Set("Sec-WebSocket-Version", "13")
+	request.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+
+	accepted, _, err := acceptWebSocket(response, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted != conn {
+		t.Fatal("accepted connection does not match hijacked connection")
+	}
+	if conn.calls != 1 || !conn.deadline.IsZero() {
+		t.Fatalf("connection deadline after hijack = %s with %d calls, want one zero deadline", conn.deadline, conn.calls)
+	}
+	if !strings.HasPrefix(conn.String(), "HTTP/1.1 101 Switching Protocols") {
+		t.Fatalf("handshake response = %q, want switching-protocols response", conn.String())
+	}
+}
+
 func TestRealtimeWebSocketUnauthenticatedHandshakeRejected(t *testing.T) {
 	repo := store.NewMemoryRepo()
 	companyID := "88888888-8888-4888-8888-888888888001"
@@ -649,7 +708,7 @@ func TestRealtimeProcessMapSubscriptionUsesCurrentMembershipForStaleActorSnapsho
 	server := newRealtimeAuthServerForTest(repo, "process-map-membership-grant-token", user)
 	defer server.Close()
 
-	authorized, rejectCode, err := server.authorizeRealtimeSubscription(ActorContext{User: user}, companyID, realtimeProcessMapScope)
+	authorized, rejectCode, err := server.authorizeRealtimeSubscription(context.Background(), ActorContext{User: user}, companyID, realtimeProcessMapScope)
 	if err != nil || !authorized || rejectCode != "" {
 		t.Fatalf("freshly granted member with stale actor snapshot authorization = authorized %v reject %q err %v", authorized, rejectCode, err)
 	}

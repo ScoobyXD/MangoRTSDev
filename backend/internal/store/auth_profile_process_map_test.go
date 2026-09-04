@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"miraeopus/backend/internal/domain"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func companyUserProfileEventCompaniesForTest(repo *MemoryRepo) []string {
@@ -77,6 +79,48 @@ func TestMemoryAuthProfileUpdatesAtomicallyInvalidateMembershipCompanyProcessMap
 	}
 	if stored.Email != updated.Email || stored.DisplayName != updated.DisplayName || !stored.UpdatedTimestamp.Equal(updated.UpdatedTimestamp) {
 		t.Fatalf("failed profile event did not restore user: %+v, want %+v", stored, updated)
+	}
+}
+
+func TestMemoryDevAdminBootstrapStopsAfterCanceledLockWait(t *testing.T) {
+	repo := NewMemoryRepo()
+	const subject = "canceled-memory-bootstrap"
+	user, err := repo.UpsertAuthUser(subject, "canceled-memory@example.com", "Canceled Memory")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	repo.mu.Lock()
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, _, bootstrapErr := repo.BootstrapDevAdminContext(ctx, subject, "Canceled Memory Bootstrap")
+		result <- bootstrapErr
+	}()
+	cancel()
+	repo.mu.Unlock()
+
+	select {
+	case bootstrapErr := <-result:
+		if !errors.Is(bootstrapErr, context.Canceled) {
+			t.Fatalf("canceled bootstrap error = %v, want context.Canceled", bootstrapErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled bootstrap did not return")
+	}
+	companies, err := repo.ListCompanies("", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(companies) != 0 {
+		t.Fatalf("companies after canceled bootstrap = %+v, want none", companies)
+	}
+	memberships, err := repo.ListUserMemberships(user.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(memberships) != 0 {
+		t.Fatalf("memberships after canceled bootstrap = %+v, want none", memberships)
 	}
 }
 

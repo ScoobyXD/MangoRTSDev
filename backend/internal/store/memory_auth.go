@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"miraeopus/backend/internal/domain"
 	"slices"
@@ -59,6 +60,23 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 		return domain.User{}, err
 	}
 	return updated, nil
+}
+
+func (r *MemoryRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	user, err := r.GetAuthUser(cognitoSubject)
+	if err == nil && !authUserNeedsClaimRefresh(user, email, displayName) {
+		return user, nil
+	}
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return domain.User{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return domain.User{}, err
+	}
+	return r.UpsertAuthUser(cognitoSubject, email, displayName)
 }
 
 func (r *MemoryRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
@@ -155,6 +173,13 @@ func (r *MemoryRepo) UserHasCompanyAccess(cognitoSubject, companyID string) (boo
 }
 
 func (r *MemoryRepo) CreateCompany(name string) (domain.Company, error) {
+	return r.CreateCompanyContext(context.Background(), name)
+}
+
+func (r *MemoryRepo) CreateCompanyContext(ctx context.Context, name string) (domain.Company, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.Company{}, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return domain.Company{}, ErrInvalid
@@ -272,6 +297,13 @@ func (r *MemoryRepo) EnsureCompany(companyID, name string) domain.Company {
 }
 
 func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
+	return r.AddCompanyMembershipContext(context.Background(), cognitoSubject, companyID, role)
+}
+
+func (r *MemoryRepo) AddCompanyMembershipContext(ctx context.Context, cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.CompanyMembership{}, err
+	}
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	companyID = strings.TrimSpace(companyID)
 	var ok bool
@@ -325,6 +357,83 @@ func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string
 		return domain.CompanyMembership{}, err
 	}
 	return membership, nil
+}
+
+func (r *MemoryRepo) BootstrapDevAdminContext(ctx context.Context, cognitoSubject, companyName string) (domain.CompanyMembership, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	cognitoSubject = strings.TrimSpace(cognitoSubject)
+	companyName = strings.TrimSpace(companyName)
+	if cognitoSubject == "" || companyName == "" {
+		return domain.CompanyMembership{}, false, ErrInvalid
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	user, ok := r.users[cognitoSubject]
+	if !ok {
+		return domain.CompanyMembership{}, false, ErrNotFound
+	}
+	for _, membership := range r.memberships {
+		if membership.UserID == user.UserID {
+			return domain.CompanyMembership{}, false, nil
+		}
+	}
+
+	processSnapshot := r.snapshotProcessMapMutationLocked()
+	entityTypesSnapshot := maps.Clone(r.entityTypes)
+	entityFieldTypesSnapshot := maps.Clone(r.entityFieldTypes)
+	membershipsSnapshot := maps.Clone(r.memberships)
+	rollback := func() {
+		r.restoreProcessMapMutationLocked(processSnapshot)
+		r.entityTypes = entityTypesSnapshot
+		r.entityFieldTypes = entityFieldTypesSnapshot
+		r.memberships = membershipsSnapshot
+	}
+
+	now := time.Now().UTC()
+	company := domain.Company{
+		CompanyID:        newUUIDv7String(),
+		Name:             companyName,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.companies[company.CompanyID] = company
+	r.ensureCompanyExplorerV2CompanyGraphLocked(company.CompanyID)
+	defaultFolders := r.ensureCompanyExplorerDefaultFoldersLocked(company.CompanyID)
+	if err := r.syncMemoryDefaultFolderProcessMapPlacementsLocked(company.CompanyID, defaultFolders); err != nil {
+		rollback()
+		return domain.CompanyMembership{}, false, err
+	}
+	if err := r.ensureActionItemDefaultsLocked(company.CompanyID); err != nil {
+		rollback()
+		return domain.CompanyMembership{}, false, err
+	}
+
+	membership := domain.CompanyMembership{
+		CompanyID:        company.CompanyID,
+		CompanyName:      company.Name,
+		UserID:           user.UserID,
+		Role:             domain.RoleDevAdmin,
+		CreatedTimestamp: now,
+		UpdatedTimestamp: now,
+	}
+	r.memberships[membershipKey(company.CompanyID, user.UserID)] = membership
+	affectedCompanyIDs := memoryMembershipAffectedCompanyIDsLocked(r.companies, company.CompanyID, true)
+	r.advancePolicyGroupMembershipVersionsLocked(affectedCompanyIDs)
+	if _, err := r.appendDomainEventsLocked(companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, user.UserID)); err != nil {
+		rollback()
+		return domain.CompanyMembership{}, false, err
+	}
+	if err := ctx.Err(); err != nil {
+		rollback()
+		return domain.CompanyMembership{}, false, err
+	}
+	return membership, true, nil
 }
 
 func (r *MemoryRepo) ListCompanyUsers(companyID string) ([]domain.CompanyUser, error) {

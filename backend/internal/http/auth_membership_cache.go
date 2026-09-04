@@ -30,6 +30,7 @@ type authMembershipCache struct {
 	maxEntries int
 	now        func() time.Time
 	entries    map[authMembershipCacheKey]authMembershipCacheEntry
+	generation uint64
 }
 
 func newAuthMembershipCache(ttl time.Duration, maxEntries int) *authMembershipCache {
@@ -73,19 +74,36 @@ func (c *authMembershipCache) get(claims auth.Claims) (ActorContext, bool) {
 	return actor, true
 }
 
-func (c *authMembershipCache) set(claims auth.Claims, actor ActorContext) {
+func (c *authMembershipCache) snapshotGeneration() uint64 {
+	if c == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.generation
+}
+
+func (c *authMembershipCache) setIfGeneration(claims auth.Claims, actor ActorContext, generation uint64) bool {
 	if c == nil || c.ttl <= 0 || c.maxEntries <= 0 {
-		return
+		return true
 	}
 	key := cacheKeyForClaims(claims)
 	if key.subject == "" {
-		return
+		return true
 	}
 	actor = cloneActorContext(actor)
 	actor.Claims = claims
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.generation != generation {
+		return false
+	}
+	for existingKey := range c.entries {
+		if existingKey.subject == key.subject {
+			delete(c.entries, existingKey)
+		}
+	}
 
 	now := c.now().UTC()
 	c.pruneExpiredLocked(now)
@@ -96,6 +114,7 @@ func (c *authMembershipCache) set(claims auth.Claims, actor ActorContext) {
 		actor:     actor,
 		expiresAt: now.Add(c.ttl),
 	}
+	return true
 }
 
 func (c *authMembershipCache) invalidateSubject(subject string) {
@@ -108,6 +127,7 @@ func (c *authMembershipCache) invalidateSubject(subject string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 	for key := range c.entries {
 		if key.subject == subject {
 			delete(c.entries, key)
@@ -125,6 +145,7 @@ func (c *authMembershipCache) invalidateUser(userID string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 	for key, entry := range c.entries {
 		if entry.actor.User.UserID == userID {
 			delete(c.entries, key)
@@ -142,6 +163,7 @@ func (c *authMembershipCache) invalidateCompany(companyID string) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 	for key, entry := range c.entries {
 		if entry.actor.CompanyID == companyID {
 			delete(c.entries, key)
@@ -162,6 +184,7 @@ func (c *authMembershipCache) clear() {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.generation++
 	c.entries = map[authMembershipCacheKey]authMembershipCacheEntry{}
 }
 

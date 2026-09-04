@@ -90,6 +90,9 @@ type Server struct {
 	authValidator                          AuthTokenValidator
 	testAuthHeaderEnabled                  bool
 	authCache                              *authMembershipCache
+	authFlights                            singleflight.Group
+	authMembershipFlights                  singleflight.Group
+	authResolutionTimeout                  time.Duration
 	cognitoAdmin                           CognitoAdminClient
 	emailSender                            AuthEmailSender
 	emailQueue                             emailqueue.Sender
@@ -116,6 +119,7 @@ type ServerOptions struct {
 	TestAuthHeaderEnabled          bool
 	AuthMembershipCacheTTL         time.Duration
 	AuthMembershipCacheMaxEntries  int
+	AuthResolutionTimeout          time.Duration
 	CognitoAdmin                   CognitoAdminClient
 	EmailSender                    AuthEmailSender
 	EmailQueue                     emailqueue.Sender
@@ -181,6 +185,10 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	if metrics == nil {
 		metrics = NewInMemoryMetricsRecorder()
 	}
+	authResolutionTimeout := options.AuthResolutionTimeout
+	if authResolutionTimeout <= 0 {
+		authResolutionTimeout = defaultAuthResolutionTimeout
+	}
 	realtimeTicketSecret := strings.TrimSpace(options.RealtimeTicketSecret)
 	if realtimeTicketSecret == "" {
 		realtimeTicketSecret = strings.TrimSpace(options.NylasConfig.StateSecret)
@@ -215,6 +223,7 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 		authValidator:                      options.AuthValidator,
 		testAuthHeaderEnabled:              options.TestAuthHeaderEnabled,
 		authCache:                          newAuthMembershipCache(options.AuthMembershipCacheTTL, options.AuthMembershipCacheMaxEntries),
+		authResolutionTimeout:              authResolutionTimeout,
 		cognitoAdmin:                       options.CognitoAdmin,
 		emailSender:                        options.EmailSender,
 		emailQueue:                         options.EmailQueue,

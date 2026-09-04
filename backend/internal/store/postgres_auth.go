@@ -10,6 +10,35 @@ import (
 	"time"
 )
 
+const (
+	postgresAuthLockTimeoutSQL      = `set local lock_timeout = '1s'`
+	postgresAuthStatementTimeoutSQL = `set local statement_timeout = '4s'`
+	postgresAuthTransactionTimeout  = 5 * time.Second
+)
+
+func configurePostgresAuthTimeouts(ctx context.Context, tx *sql.Tx) error {
+	for _, statement := range []string{
+		postgresAuthLockTimeoutSQL,
+		postgresAuthStatementTimeoutSQL,
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func commitPostgresAuthTx(ctx context.Context, tx *sql.Tx) error {
+	err := tx.Commit()
+	if err == nil {
+		return nil
+	}
+	if contextErr := ctx.Err(); contextErr != nil {
+		return contextErr
+	}
+	return err
+}
+
 func lockPostgresCompanyMembershipCompanySetTx(ctx context.Context, tx *sql.Tx) error {
 	_, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended('company-membership-company-set',0))`)
 	return err
@@ -56,6 +85,21 @@ func postgresUserMembershipCompanyIDsTx(ctx context.Context, tx *sql.Tx, userID 
 }
 
 func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
+	return r.UpsertAuthUserContext(context.Background(), cognitoSubject, email, displayName)
+}
+
+func (r *PostgresRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
+	user, err := r.GetAuthUserContext(ctx, cognitoSubject)
+	if err == nil && !authUserNeedsClaimRefresh(user, email, displayName) {
+		return user, nil
+	}
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return domain.User{}, err
+	}
+	return r.UpsertAuthUserContext(ctx, cognitoSubject, email, displayName)
+}
+
+func (r *PostgresRepo) UpsertAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
 	if cognitoSubject == "" {
@@ -64,18 +108,22 @@ func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string)
 	insertDisplayName := authInsertDisplayName(cognitoSubject, email, displayName)
 	updateDisplayName := authoritativeAuthDisplayName(displayName, email)
 
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
+	txContext, cancel := context.WithTimeout(ctx, postgresAuthTransactionTimeout)
+	defer cancel()
+	tx, err := r.db.BeginTx(txContext, nil)
 	if err != nil {
 		return domain.User{}, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `select pg_advisory_xact_lock(hashtextextended('auth-user:' || $1, 0))`, cognitoSubject); err != nil {
+	if err := configurePostgresAuthTimeouts(txContext, tx); err != nil {
+		return domain.User{}, err
+	}
+	if _, err := tx.ExecContext(txContext, `select pg_advisory_xact_lock(hashtextextended('auth-user:' || $1, 0))`, cognitoSubject); err != nil {
 		return domain.User{}, err
 	}
 
 	var user domain.User
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(txContext, `
 select user_id::text, cognito_subject, email, display_name, created_timestamp, updated_timestamp
 from users
 where cognito_subject=$1
@@ -84,7 +132,7 @@ for update`, cognitoSubject).Scan(
 		&user.CreatedTimestamp, &user.UpdatedTimestamp,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		err = tx.QueryRowContext(ctx, `
+		err = tx.QueryRowContext(txContext, `
 insert into users (user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp)
 values ($1::uuid, $2, $3, $4, now(), now())
 returning user_id::text, cognito_subject, email, display_name, created_timestamp, updated_timestamp`,
@@ -96,7 +144,7 @@ returning user_id::text, cognito_subject, email, display_name, created_timestamp
 		if err != nil {
 			return domain.User{}, err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := commitPostgresAuthTx(txContext, tx); err != nil {
 			return domain.User{}, err
 		}
 		return user, nil
@@ -114,12 +162,12 @@ returning user_id::text, cognito_subject, email, display_name, created_timestamp
 		updatedDisplayName = updateDisplayName
 	}
 	if updatedEmail == user.Email && updatedDisplayName == user.DisplayName {
-		if err := tx.Commit(); err != nil {
+		if err := commitPostgresAuthTx(txContext, tx); err != nil {
 			return domain.User{}, err
 		}
 		return user, nil
 	}
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(txContext, `
 update users
 set email=$2, display_name=$3, updated_timestamp=now()
 where user_id=$1::uuid
@@ -132,27 +180,31 @@ returning user_id::text, cognito_subject, email, display_name, created_timestamp
 	if err != nil {
 		return domain.User{}, err
 	}
-	companyIDs, err := postgresUserMembershipCompanyIDsTx(ctx, tx, user.UserID)
+	companyIDs, err := postgresUserMembershipCompanyIDsTx(txContext, tx, user.UserID)
 	if err != nil {
 		return domain.User{}, err
 	}
-	if _, err := r.appendDomainEventsTx(ctx, tx, companyMembershipEventInputs(companyIDs, CompanyUserProfileUpdatedEventType, user.UserID)); err != nil {
+	if _, err := r.appendDomainEventsTx(txContext, tx, companyMembershipEventInputs(companyIDs, CompanyUserProfileUpdatedEventType, user.UserID)); err != nil {
 		return domain.User{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresAuthTx(txContext, tx); err != nil {
 		return domain.User{}, err
 	}
 	return user, nil
 }
 
 func (r *PostgresRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
+	return r.GetAuthUserContext(context.Background(), cognitoSubject)
+}
+
+func (r *PostgresRepo) GetAuthUserContext(ctx context.Context, cognitoSubject string) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	if cognitoSubject == "" {
 		return domain.User{}, ErrInvalid
 	}
 
 	var user domain.User
-	err := r.db.QueryRow(
+	err := r.db.QueryRowContext(ctx,
 		`select user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
 		 from users
 		 where cognito_subject = $1`,
@@ -243,6 +295,10 @@ func (r *PostgresRepo) UserHasCompanyAccess(cognitoSubject, companyID string) (b
 }
 
 func (r *PostgresRepo) AddCompanyMembership(cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
+	return r.AddCompanyMembershipContext(context.Background(), cognitoSubject, companyID, role)
+}
+
+func (r *PostgresRepo) AddCompanyMembershipContext(ctx context.Context, cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	companyID = strings.TrimSpace(companyID)
 	normalizedRole, ok := normalizeRole(role)
@@ -250,15 +306,19 @@ func (r *PostgresRepo) AddCompanyMembership(cognitoSubject, companyID, role stri
 		return domain.CompanyMembership{}, ErrInvalid
 	}
 
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
+	txContext, cancel := context.WithTimeout(ctx, postgresAuthTransactionTimeout)
+	defer cancel()
+	tx, err := r.db.BeginTx(txContext, nil)
 	if err != nil {
 		return domain.CompanyMembership{}, err
 	}
 	defer tx.Rollback()
+	if err := configurePostgresAuthTimeouts(txContext, tx); err != nil {
+		return domain.CompanyMembership{}, err
+	}
 
 	var userID string
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(txContext, `
 select user_id::text
 from users
 where cognito_subject=$1
@@ -271,7 +331,7 @@ for update`, cognitoSubject).Scan(&userID)
 	}
 	var existingRole string
 	var hadGlobalAccess, hasOtherGlobalAccess bool
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(txContext, `
 select coalesce((
          select target_membership.role
          from company_memberships target_membership
@@ -296,7 +356,7 @@ select coalesce((
 	}
 	if existingRole == normalizedRole {
 		var membership domain.CompanyMembership
-		err = tx.QueryRowContext(ctx, `
+		err = tx.QueryRowContext(txContext, `
 select membership.company_id::text, company.name, membership.user_id::text, membership.role,
        membership.created_timestamp, membership.updated_timestamp
 from company_memberships membership
@@ -309,22 +369,22 @@ where membership.company_id=$1::uuid
 		if err != nil {
 			return domain.CompanyMembership{}, err
 		}
-		if err := tx.Commit(); err != nil {
+		if err := commitPostgresAuthTx(txContext, tx); err != nil {
 			return domain.CompanyMembership{}, err
 		}
 		return membership, nil
 	}
 	hasGlobalAccess := normalizedRole == domain.RoleDevAdmin || hasOtherGlobalAccess
-	affectedCompanyIDs, err := postgresMembershipAffectedCompanyIDsTx(ctx, tx, []string{companyID}, hadGlobalAccess != hasGlobalAccess)
+	affectedCompanyIDs, err := postgresMembershipAffectedCompanyIDsTx(txContext, tx, []string{companyID}, hadGlobalAccess != hasGlobalAccess)
 	if err != nil {
 		return domain.CompanyMembership{}, err
 	}
-	if err := advancePostgresPolicyGroupMembershipVersionsTx(ctx, tx, affectedCompanyIDs); err != nil {
+	if err := advancePostgresPolicyGroupMembershipVersionsTx(txContext, tx, affectedCompanyIDs); err != nil {
 		return domain.CompanyMembership{}, err
 	}
 
 	var membership domain.CompanyMembership
-	err = tx.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(txContext, `
 with upserted as (
 	insert into company_memberships (company_id, user_id, role, created_timestamp, updated_timestamp)
 	values ($1::uuid, $2::uuid, $3, now(), now())
@@ -344,33 +404,130 @@ join companies on companies.company_id=upserted.company_id`,
 	if err != nil {
 		return domain.CompanyMembership{}, err
 	}
-	if _, err := r.appendDomainEventsTx(ctx, tx, companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, userID)); err != nil {
+	if _, err := r.appendDomainEventsTx(txContext, tx, companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, userID)); err != nil {
 		return domain.CompanyMembership{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresAuthTx(txContext, tx); err != nil {
 		return domain.CompanyMembership{}, err
 	}
 	return membership, nil
 }
 
+func (r *PostgresRepo) BootstrapDevAdminContext(ctx context.Context, cognitoSubject, companyName string) (domain.CompanyMembership, bool, error) {
+	cognitoSubject = strings.TrimSpace(cognitoSubject)
+	companyName = strings.TrimSpace(companyName)
+	if cognitoSubject == "" || companyName == "" {
+		return domain.CompanyMembership{}, false, ErrInvalid
+	}
+
+	txContext, cancel := context.WithTimeout(ctx, postgresAuthTransactionTimeout)
+	defer cancel()
+	tx, err := r.db.BeginTx(txContext, nil)
+	if err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	defer tx.Rollback()
+	if err := configurePostgresAuthTimeouts(txContext, tx); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	if _, err := tx.ExecContext(txContext, `select pg_advisory_xact_lock(hashtextextended('auth-user:' || $1, 0))`, cognitoSubject); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+
+	var userID string
+	err = tx.QueryRowContext(txContext, `
+select user_id::text
+from users
+where cognito_subject=$1
+for update`, cognitoSubject).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.CompanyMembership{}, false, ErrNotFound
+	}
+	if err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	var hasMembership bool
+	if err := tx.QueryRowContext(txContext, `select exists(select 1 from company_memberships where user_id=$1::uuid)`, userID).Scan(&hasMembership); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	if hasMembership {
+		if err := commitPostgresAuthTx(txContext, tx); err != nil {
+			return domain.CompanyMembership{}, false, err
+		}
+		return domain.CompanyMembership{}, false, nil
+	}
+	if err := lockPostgresCompanyMembershipCompanySetTx(txContext, tx); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+
+	companyID := newUUIDv7String()
+	if _, err := tx.ExecContext(txContext, `
+insert into companies (company_id, name, created_timestamp, updated_timestamp)
+values ($1::uuid, $2, now(), now())`, companyID, companyName); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	if _, err := r.ensureCompanyExplorerDefaultFoldersTx(txContext, tx, companyID, ""); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	if err := r.ensureActionItemDefaultsTx(txContext, tx, companyID); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	affectedCompanyIDs, err := postgresMembershipAffectedCompanyIDsTx(txContext, tx, []string{companyID}, true)
+	if err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	if err := advancePostgresPolicyGroupMembershipVersionsTx(txContext, tx, affectedCompanyIDs); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+
+	var membership domain.CompanyMembership
+	err = tx.QueryRowContext(txContext, `
+insert into company_memberships (company_id, user_id, role, created_timestamp, updated_timestamp)
+values ($1::uuid, $2::uuid, 'dev_admin', now(), now())
+returning company_id::text, $3::text, user_id::text, role, created_timestamp, updated_timestamp`,
+		companyID, userID, companyName,
+	).Scan(
+		&membership.CompanyID, &membership.CompanyName, &membership.UserID, &membership.Role,
+		&membership.CreatedTimestamp, &membership.UpdatedTimestamp,
+	)
+	if err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	if _, err := r.appendDomainEventsTx(txContext, tx, companyMembershipEventInputs(affectedCompanyIDs, CompanyMembershipSavedEventType, userID)); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	if err := commitPostgresAuthTx(txContext, tx); err != nil {
+		return domain.CompanyMembership{}, false, err
+	}
+	return membership, true, nil
+}
+
 func (r *PostgresRepo) CreateCompany(name string) (domain.Company, error) {
+	return r.CreateCompanyContext(context.Background(), name)
+}
+
+func (r *PostgresRepo) CreateCompanyContext(ctx context.Context, name string) (domain.Company, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return domain.Company{}, ErrInvalid
 	}
 
-	ctx := context.Background()
-	tx, err := r.db.BeginTx(ctx, nil)
+	txContext, cancel := context.WithTimeout(ctx, postgresAuthTransactionTimeout)
+	defer cancel()
+	tx, err := r.db.BeginTx(txContext, nil)
 	if err != nil {
 		return domain.Company{}, err
 	}
 	defer tx.Rollback()
-	if err := lockPostgresCompanyMembershipCompanySetTx(ctx, tx); err != nil {
+	if err := configurePostgresAuthTimeouts(txContext, tx); err != nil {
+		return domain.Company{}, err
+	}
+	if err := lockPostgresCompanyMembershipCompanySetTx(txContext, tx); err != nil {
 		return domain.Company{}, err
 	}
 
 	var company domain.Company
-	err = tx.QueryRowContext(ctx,
+	err = tx.QueryRowContext(txContext,
 		`insert into companies (company_id, name, created_timestamp, updated_timestamp)
 		 values ($1, $2, now(), now())
 		 returning company_id, name, created_timestamp, updated_timestamp`,
@@ -380,13 +537,13 @@ func (r *PostgresRepo) CreateCompany(name string) (domain.Company, error) {
 	if err != nil {
 		return domain.Company{}, err
 	}
-	if _, err := r.ensureCompanyExplorerDefaultFoldersTx(ctx, tx, company.CompanyID, ""); err != nil {
+	if _, err := r.ensureCompanyExplorerDefaultFoldersTx(txContext, tx, company.CompanyID, ""); err != nil {
 		return domain.Company{}, err
 	}
-	if err := r.ensureActionItemDefaultsTx(ctx, tx, company.CompanyID); err != nil {
+	if err := r.ensureActionItemDefaultsTx(txContext, tx, company.CompanyID); err != nil {
 		return domain.Company{}, err
 	}
-	if err := tx.Commit(); err != nil {
+	if err := commitPostgresAuthTx(txContext, tx); err != nil {
 		return domain.Company{}, err
 	}
 	return company, nil

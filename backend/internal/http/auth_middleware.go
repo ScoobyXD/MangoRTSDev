@@ -9,14 +9,19 @@ import (
 	"log"
 	"miraeopus/backend/internal/auth"
 	"miraeopus/backend/internal/domain"
+	"miraeopus/backend/internal/store"
 	"net/http"
 	"strings"
+	"time"
 )
 
 type authClaimsContextKey struct{}
 type actorContextKey struct{}
 
-const maxCompanyIDPayloadScanBytes int64 = 1 << 20
+const (
+	maxCompanyIDPayloadScanBytes int64 = 1 << 20
+	defaultAuthResolutionTimeout       = 6 * time.Second
+)
 
 var errCompanyIDScanLimit = errors.New("company_id_scan_limit_exceeded")
 
@@ -34,25 +39,11 @@ func (s *Server) testAuthActor(r *http.Request) (ActorContext, error) {
 	if subject == "" || len(subject) > 160 {
 		return ActorContext{}, errors.New("test_auth_subject_required")
 	}
-	user, err := s.repo.UpsertAuthUser(subject, subject+"@mangorts.test", subject)
-	if err != nil {
-		return ActorContext{}, err
-	}
-	memberships, err := s.repo.ListUserMemberships(user.UserID)
-	if err != nil {
-		return ActorContext{}, err
-	}
-	actor := ActorContext{
-		Claims: auth.Claims{Subject: subject, Email: user.Email, Name: user.DisplayName},
-		User:   user, Memberships: normalizeMembershipRoles(memberships),
-	}
-	for _, membership := range actor.Memberships {
-		if membership.Role == domain.RoleDevAdmin {
-			actor.IsDevAdmin = true
-			break
-		}
-	}
-	return actor, nil
+	return s.authenticatedActorForClaims(r.Context(), auth.Claims{
+		Subject: subject,
+		Email:   subject + "@mangorts.test",
+		Name:    subject,
+	})
 }
 
 func (s *Server) withAuth(next http.Handler) http.Handler {
@@ -123,45 +114,10 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
-		actor, ok := s.authCache.get(claims)
-		if !ok {
-			user, err := s.repo.UpsertAuthUser(claims.Subject, claims.Email, claims.Name)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_record_authenticated_user")
-				return
-			}
-			memberships, err := s.repo.ListUserMemberships(user.UserID)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed_to_load_memberships")
-				return
-			}
-			if len(memberships) == 0 {
-				bootstrapped, err := s.maybeBootstrapDevAdmin(claims)
-				if err != nil {
-					log.Printf("failed to bootstrap dev admin email=%s subject=%s: %v", claims.Email, claims.Subject, err)
-					writeError(w, http.StatusInternalServerError, "failed_to_bootstrap_dev_admin")
-					return
-				}
-				if bootstrapped {
-					memberships, err = s.repo.ListUserMemberships(user.UserID)
-					if err != nil {
-						writeError(w, http.StatusInternalServerError, "failed_to_load_memberships")
-						return
-					}
-				}
-			}
-			actor = ActorContext{
-				Claims:      claims,
-				User:        user,
-				Memberships: normalizeMembershipRoles(memberships),
-			}
-			for _, membership := range actor.Memberships {
-				if membership.Role == domain.RoleDevAdmin {
-					actor.IsDevAdmin = true
-					break
-				}
-			}
-			s.authCache.set(claims, actor)
+		actor, err := s.authenticatedActorForClaims(r.Context(), claims)
+		if err != nil {
+			s.writeAuthResolutionError(w, r, claims, err)
+			return
 		}
 
 		companyID, err := requestCompanyID(r)
@@ -188,7 +144,195 @@ func (s *Server) withAuth(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Server) maybeBootstrapDevAdmin(claims auth.Claims) (bool, error) {
+type authActorResolution struct {
+	claimsKey authMembershipCacheKey
+	actor     ActorContext
+	retry     bool
+}
+
+type authMembershipResolution struct {
+	generation  uint64
+	memberships []domain.CompanyMembership
+}
+
+func (s *Server) authenticatedActorForClaims(ctx context.Context, claims auth.Claims) (ActorContext, error) {
+	if ctx == nil {
+		return ActorContext{}, errors.New("authentication_context_required")
+	}
+	if err := ctx.Err(); err != nil {
+		return ActorContext{}, err
+	}
+	resolutionTimeout := s.authResolutionTimeout
+	if resolutionTimeout <= 0 {
+		resolutionTimeout = defaultAuthResolutionTimeout
+	}
+	resolutionContext, cancelResolution := context.WithTimeout(ctx, resolutionTimeout)
+	defer cancelResolution()
+	key := cacheKeyForClaims(claims)
+	if key.subject == "" {
+		return ActorContext{}, store.ErrInvalid
+	}
+	for {
+		if actor, ok := s.authCache.get(claims); ok {
+			return actor, nil
+		}
+		result := s.authFlights.DoChan(key.subject, func() (any, error) {
+			if actor, ok := s.authCache.get(claims); ok {
+				return authActorResolution{claimsKey: key, actor: actor}, nil
+			}
+			generation := s.authCache.snapshotGeneration()
+			actor, err := s.loadAuthenticatedActor(resolutionContext, claims)
+			if err != nil {
+				return authActorResolution{}, err
+			}
+			if !s.authCache.setIfGeneration(claims, actor, generation) {
+				return authActorResolution{retry: true}, nil
+			}
+			return authActorResolution{claimsKey: key, actor: actor}, nil
+		})
+
+		select {
+		case <-resolutionContext.Done():
+			return ActorContext{}, resolutionContext.Err()
+		case completed := <-result:
+			if completed.Err != nil {
+				if resolutionErr := resolutionContext.Err(); resolutionErr != nil {
+					return ActorContext{}, resolutionErr
+				}
+				if (errors.Is(completed.Err, context.Canceled) || errors.Is(completed.Err, context.DeadlineExceeded)) && resolutionContext.Err() == nil {
+					continue
+				}
+				return ActorContext{}, completed.Err
+			}
+			resolution, ok := completed.Val.(authActorResolution)
+			if !ok {
+				return ActorContext{}, errors.New("invalid_auth_actor_resolution")
+			}
+			if resolution.retry || resolution.claimsKey != key {
+				continue
+			}
+			actor := cloneActorContext(resolution.actor)
+			actor.Claims = claims
+			return actor, nil
+		}
+	}
+}
+
+func (s *Server) loadAuthenticatedActor(ctx context.Context, claims auth.Claims) (ActorContext, error) {
+	user, err := s.repo.ResolveAuthUserContext(ctx, claims.Subject, claims.Email, claims.Name)
+	if err != nil {
+		return ActorContext{}, err
+	}
+	memberships, err := s.freshUserMemberships(ctx, user.UserID)
+	if err != nil {
+		return ActorContext{}, err
+	}
+	if len(memberships) == 0 {
+		bootstrapped, err := s.maybeBootstrapDevAdmin(ctx, claims)
+		if err != nil {
+			return ActorContext{}, err
+		}
+		if bootstrapped {
+			memberships, err = s.freshUserMemberships(ctx, user.UserID)
+			if err != nil {
+				return ActorContext{}, err
+			}
+		}
+	}
+	actor := ActorContext{
+		Claims:      claims,
+		User:        user,
+		Memberships: normalizeMembershipRoles(memberships),
+	}
+	for _, membership := range actor.Memberships {
+		if membership.Role == domain.RoleDevAdmin {
+			actor.IsDevAdmin = true
+			break
+		}
+	}
+	return actor, nil
+}
+
+func (s *Server) freshUserMemberships(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
+	if ctx == nil {
+		return nil, errors.New("authentication_context_required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	resolutionTimeout := s.authResolutionTimeout
+	if resolutionTimeout <= 0 {
+		resolutionTimeout = defaultAuthResolutionTimeout
+	}
+	loadContext, cancelLoad := context.WithTimeout(ctx, resolutionTimeout)
+	defer cancelLoad()
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return nil, store.ErrInvalid
+	}
+	for {
+		result := s.authMembershipFlights.DoChan(userID, func() (any, error) {
+			generation := s.authCache.snapshotGeneration()
+			memberships, err := s.repo.ListUserMembershipsContext(loadContext, userID)
+			if err != nil {
+				return authMembershipResolution{}, err
+			}
+			return authMembershipResolution{generation: generation, memberships: memberships}, nil
+		})
+		select {
+		case <-loadContext.Done():
+			return nil, loadContext.Err()
+		case completed := <-result:
+			if completed.Err != nil {
+				if loadErr := loadContext.Err(); loadErr != nil {
+					return nil, loadErr
+				}
+				if (errors.Is(completed.Err, context.Canceled) || errors.Is(completed.Err, context.DeadlineExceeded)) && loadContext.Err() == nil {
+					continue
+				}
+				return nil, completed.Err
+			}
+			resolution, ok := completed.Val.(authMembershipResolution)
+			if !ok {
+				return nil, errors.New("invalid_auth_membership_resolution")
+			}
+			if resolution.generation != s.authCache.snapshotGeneration() {
+				continue
+			}
+			return append([]domain.CompanyMembership(nil), resolution.memberships...), nil
+		}
+	}
+}
+
+func (s *Server) writeAuthResolutionError(w http.ResponseWriter, r *http.Request, claims auth.Claims, err error) {
+	if errors.Is(err, context.Canceled) && r.Context().Err() != nil {
+		return
+	}
+	log.Printf("authentication resolution failed path=%s subject=%s: %v", r.URL.Path, claims.Subject, err)
+	if isAuthResolutionTimeout(err) {
+		writeError(w, http.StatusGatewayTimeout, "authentication_timeout")
+		return
+	}
+	writeError(w, http.StatusServiceUnavailable, "authentication_unavailable")
+}
+
+func isAuthResolutionTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var postgresError interface{ SQLState() string }
+	if !errors.As(err, &postgresError) {
+		return false
+	}
+	switch postgresError.SQLState() {
+	case "55P03", "57014":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) maybeBootstrapDevAdmin(ctx context.Context, claims auth.Claims) (bool, error) {
 	config := s.bootstrapDevAdmin
 	email := normalizeEmailForCompare(claims.Email)
 	if email == "" || len(config.Emails) == 0 {
@@ -204,15 +348,14 @@ func (s *Server) maybeBootstrapDevAdmin(claims auth.Claims) (bool, error) {
 	if !allowed {
 		return false, nil
 	}
-	company, err := s.repo.CreateCompany(config.CompanyName)
+	membership, bootstrapped, err := s.repo.BootstrapDevAdminContext(ctx, claims.Subject, config.CompanyName)
 	if err != nil {
 		return false, err
 	}
-	if _, err := s.repo.AddCompanyMembership(claims.Subject, company.CompanyID, domain.RoleDevAdmin); err != nil {
-		return false, err
+	if bootstrapped {
+		s.wakeRealtimeSpine()
+		log.Printf("bootstrapped dev admin email=%s subject=%s company_id=%s", email, claims.Subject, membership.CompanyID)
 	}
-	s.wakeRealtimeSpine()
-	log.Printf("bootstrapped dev admin email=%s subject=%s company_id=%s", email, claims.Subject, company.CompanyID)
 	return true, nil
 }
 
@@ -409,17 +552,13 @@ func actorRoleForCompany(actor ActorContext, companyID string) string {
 	return ""
 }
 
-func (s *Server) currentActorRoleForCompany(actor ActorContext, companyID string) (string, error) {
-	return s.currentActorRoleForCompanyContext(context.Background(), actor, companyID)
-}
-
 func (s *Server) currentActorRoleForCompanyContext(ctx context.Context, actor ActorContext, companyID string) (string, error) {
 	userID := strings.TrimSpace(actor.User.UserID)
 	companyID = strings.TrimSpace(companyID)
 	if userID == "" || companyID == "" {
 		return "", nil
 	}
-	memberships, err := s.repo.ListUserMembershipsContext(ctx, userID)
+	memberships, err := s.freshUserMemberships(ctx, userID)
 	if err != nil {
 		return "", err
 	}
