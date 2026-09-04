@@ -219,7 +219,7 @@ func (s *Server) authenticatedActorForClaims(ctx context.Context, claims auth.Cl
 }
 
 func (s *Server) loadAuthenticatedActor(ctx context.Context, claims auth.Claims) (ActorContext, error) {
-	user, err := s.repo.ResolveAuthUserContext(ctx, claims.Subject, claims.Email, claims.Name)
+	user, err := s.repo.ResolveAuthUserContext(ctx, claims.Subject, claims.Email, claims.Name, claims.IssuedAt)
 	if err != nil {
 		return ActorContext{}, err
 	}

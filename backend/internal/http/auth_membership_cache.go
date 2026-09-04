@@ -14,9 +14,10 @@ const (
 )
 
 type authMembershipCacheKey struct {
-	subject string
-	email   string
-	name    string
+	subject  string
+	email    string
+	name     string
+	issuedAt int64
 }
 
 type authMembershipCacheEntry struct {
@@ -99,20 +100,30 @@ func (c *authMembershipCache) setIfGeneration(claims auth.Claims, actor ActorCon
 	if c.generation != generation {
 		return false
 	}
-	for existingKey := range c.entries {
-		if existingKey.subject == key.subject {
+
+	now := c.now().UTC()
+	expiresAt := now.Add(c.ttl)
+	for existingKey, entry := range c.entries {
+		if !entry.expiresAt.After(now) {
 			delete(c.entries, existingKey)
 		}
 	}
-
-	now := c.now().UTC()
-	c.pruneExpiredLocked(now)
-	for len(c.entries) >= c.maxEntries {
-		c.evictEarliestLocked()
+	if _, exists := c.entries[key]; !exists {
+		if len(c.entries) >= c.maxEntries {
+			c.evictEarliestLocked()
+		}
+	}
+	for existingKey, entry := range c.entries {
+		if existingKey.subject != key.subject {
+			continue
+		}
+		entry.actor = actor
+		entry.expiresAt = expiresAt
+		c.entries[existingKey] = entry
 	}
 	c.entries[key] = authMembershipCacheEntry{
 		actor:     actor,
-		expiresAt: now.Add(c.ttl),
+		expiresAt: expiresAt,
 	}
 	return true
 }
@@ -188,14 +199,6 @@ func (c *authMembershipCache) clear() {
 	c.entries = map[authMembershipCacheKey]authMembershipCacheEntry{}
 }
 
-func (c *authMembershipCache) pruneExpiredLocked(now time.Time) {
-	for key, entry := range c.entries {
-		if !entry.expiresAt.After(now) {
-			delete(c.entries, key)
-		}
-	}
-}
-
 func (c *authMembershipCache) evictEarliestLocked() {
 	var oldestKey authMembershipCacheKey
 	var oldestExpiresAt time.Time
@@ -211,10 +214,15 @@ func (c *authMembershipCache) evictEarliestLocked() {
 }
 
 func cacheKeyForClaims(claims auth.Claims) authMembershipCacheKey {
+	issuedAt := int64(0)
+	if !claims.IssuedAt.IsZero() {
+		issuedAt = claims.IssuedAt.Unix()
+	}
 	return authMembershipCacheKey{
-		subject: strings.TrimSpace(claims.Subject),
-		email:   strings.ToLower(strings.TrimSpace(claims.Email)),
-		name:    strings.TrimSpace(claims.Name),
+		subject:  strings.TrimSpace(claims.Subject),
+		email:    strings.ToLower(strings.TrimSpace(claims.Email)),
+		name:     strings.TrimSpace(claims.Name),
+		issuedAt: issuedAt,
 	}
 }
 

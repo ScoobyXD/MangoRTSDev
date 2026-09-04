@@ -135,14 +135,13 @@ type AccountRepository interface {
 
 type IdentityRepository interface {
 	UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error)
-	ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error)
+	ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error)
 	GetAuthUser(cognitoSubject string) (domain.User, error)
 	GetAuthUserByEmail(email string) (domain.User, error)
 	ListUserMemberships(userID string) ([]domain.CompanyMembership, error)
 	ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error)
 	UserHasCompanyAccess(cognitoSubject, companyID string) (bool, error)
 	AddCompanyMembership(cognitoSubject, companyID, role string) (domain.CompanyMembership, error)
-	AddCompanyMembershipContext(ctx context.Context, cognitoSubject, companyID, role string) (domain.CompanyMembership, error)
 	BootstrapDevAdminContext(ctx context.Context, cognitoSubject, companyName string) (domain.CompanyMembership, bool, error)
 	CreateCompany(name string) (domain.Company, error)
 	CreateCompanyContext(ctx context.Context, name string) (domain.Company, error)

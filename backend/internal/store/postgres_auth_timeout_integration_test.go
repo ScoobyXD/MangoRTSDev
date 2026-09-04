@@ -11,6 +11,68 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+func TestPostgresProcessMapAuthOrdersClaimVariantsByTokenIssueTime(t *testing.T) {
+	_, repo := openPostgresProcessMapIntegration(t)
+	const subject = "auth-claim-order"
+	oldAIssuedAt := time.Unix(time.Now().Unix()+60, 0).UTC()
+	createdA, err := repo.ResolveAuthUserContext(context.Background(), subject, "a@example.com", "Profile A", oldAIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createdA.Email != "a@example.com" || createdA.DisplayName != "Profile A" || !createdA.AuthClaimsIssuedAt.Equal(oldAIssuedAt) {
+		t.Fatalf("created profile A = %+v", createdA)
+	}
+
+	newBIssuedAt := oldAIssuedAt.Add(10 * time.Second)
+	profileB, err := repo.ResolveAuthUserContext(context.Background(), subject, "b@example.com", "Profile B", newBIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profileB.Email != "b@example.com" || profileB.DisplayName != "Profile B" || !profileB.AuthClaimsIssuedAt.Equal(newBIssuedAt) {
+		t.Fatalf("profile B = %+v", profileB)
+	}
+	equalA, err := repo.ResolveAuthUserContext(context.Background(), subject, "a@example.com", "Profile A", newBIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if equalA.Email != profileB.Email || equalA.DisplayName != profileB.DisplayName || !equalA.UpdatedTimestamp.Equal(profileB.UpdatedTimestamp) {
+		t.Fatalf("equal-time A changed profile B: before=%+v after=%+v", profileB, equalA)
+	}
+
+	newerUnchangedBIssuedAt := newBIssuedAt.Add(20 * time.Second)
+	newerUnchangedB, err := repo.ResolveAuthUserContext(context.Background(), subject, profileB.Email, profileB.DisplayName, newerUnchangedBIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !newerUnchangedB.AuthClaimsIssuedAt.Equal(newerUnchangedBIssuedAt) || !newerUnchangedB.UpdatedTimestamp.Equal(profileB.UpdatedTimestamp) {
+		t.Fatalf("newer unchanged B = %+v, want watermark-only update", newerUnchangedB)
+	}
+	staleAIssuedAt := newBIssuedAt.Add(10 * time.Second)
+	staleA, err := repo.ResolveAuthUserContext(context.Background(), subject, "a@example.com", "Profile A", staleAIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staleA.Email != profileB.Email || staleA.DisplayName != profileB.DisplayName || !staleA.UpdatedTimestamp.Equal(profileB.UpdatedTimestamp) {
+		t.Fatalf("stale A changed profile B after a newer unchanged token: before=%+v after=%+v", profileB, staleA)
+	}
+
+	latestAIssuedAt := newerUnchangedBIssuedAt.Add(10 * time.Second)
+	latestA, err := repo.ResolveAuthUserContext(context.Background(), subject, "a@example.com", "Profile A", latestAIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latestA.Email != "a@example.com" || latestA.DisplayName != "Profile A" || !latestA.AuthClaimsIssuedAt.Equal(latestAIssuedAt) {
+		t.Fatalf("latest A = %+v, want a later A profile", latestA)
+	}
+	staleB, err := repo.ResolveAuthUserContext(context.Background(), subject, "b@example.com", "Profile B", newerUnchangedBIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staleB.Email != latestA.Email || staleB.DisplayName != latestA.DisplayName || !staleB.UpdatedTimestamp.Equal(latestA.UpdatedTimestamp) {
+		t.Fatalf("stale B changed latest A: before=%+v after=%+v", latestA, staleB)
+	}
+}
+
 func TestPostgresProcessMapAuthRequestCancellationRollsBackAndRecoversPool(t *testing.T) {
 	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Auth cancellation test")
@@ -52,6 +114,7 @@ func TestPostgresProcessMapAuthRequestCancellationRollsBackAndRecoversPool(t *te
 			subject,
 			"auth-cancel-updated@example.com",
 			"Auth Cancel Updated",
+			time.Time{},
 		)
 		requestDone <- resolveErr
 	}()
@@ -91,6 +154,7 @@ func TestPostgresProcessMapAuthRequestCancellationRollsBackAndRecoversPool(t *te
 		subject,
 		"auth-cancel-recovered@example.com",
 		"Auth Cancel Recovered",
+		time.Time{},
 	)
 	if err != nil {
 		t.Fatalf("auth resolution after cancellation: %v", err)
@@ -131,7 +195,7 @@ func TestPostgresProcessMapAuthAdvisoryLockTimeoutRollsBackAndRecoversPool(t *te
 	}
 
 	unchangedCtx, cancelUnchanged := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	unchanged, err := repo.ResolveAuthUserContext(unchangedCtx, subject, originalEmail, originalName)
+	unchanged, err := repo.ResolveAuthUserContext(unchangedCtx, subject, originalEmail, originalName, time.Time{})
 	cancelUnchanged()
 	if err != nil {
 		t.Fatalf("unchanged auth resolution waited on the advisory lock: %v", err)
@@ -147,6 +211,7 @@ func TestPostgresProcessMapAuthAdvisoryLockTimeoutRollsBackAndRecoversPool(t *te
 		subject,
 		"auth-lock-updated@example.com",
 		"Auth Lock Updated",
+		time.Time{},
 	)
 	elapsed := time.Since(started)
 	var postgresErr *pgconn.PgError
@@ -181,6 +246,7 @@ func TestPostgresProcessMapAuthAdvisoryLockTimeoutRollsBackAndRecoversPool(t *te
 		subject,
 		"auth-lock-recovered@example.com",
 		"Auth Lock Recovered",
+		time.Time{},
 	)
 	if err != nil {
 		t.Fatalf("auth resolution after lock timeout: %v", err)

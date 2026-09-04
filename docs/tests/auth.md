@@ -1,4 +1,4 @@
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 # Auth
 
@@ -15,7 +15,7 @@ AUTH4 - First-time auth user creation may use a fallback display name only to sa
 AUTH5 - Existing Mango users must not have `users.display_name` overwritten by page refresh, `/v1/me`, auth cache misses, blank token names, or email-looking fallback token names.
 AUTH6 - Auth refresh may update the stored email from authenticated identity claims, but it must preserve the existing Mango display name unless an incoming name is clearly real user-name data.
 AUTH7 - Explicit Mango flows such as invite acceptance and future profile editing are authoritative places to set `users.display_name`.
-AUTH8 - An auth membership cache miss must preserve Mango-owned profile fields and must not restore data invalidated while that cache load was running.
+AUTH8 - An auth membership cache miss must preserve Mango-owned profile fields and must not restore data invalidated while that cache load was running. Once a claim variant is accepted, a token with an older or equal issue time must return the stored profile and must not rewrite it; a token with a strictly later issue time may change the profile back. Cache expiry must still refresh current memberships.
 AUTH9 - Browser app sessions may stay alive while the app is open by silently refreshing short-lived access tokens; access tokens themselves must not be made long-lived merely to avoid re-login.
 AUTH10 - Auth refresh means the app silently obtains a fresh access token from the auth provider; it must not require a visible user login while the refresh path is still valid.
 AUTH11 - A terminal auth failure or failed silent refresh must force the normal Mango logout/login flow and show the existing Mango login page.
@@ -25,7 +25,7 @@ AUTH14 - Third-party provider credential failures, such as Nylas mailbox reautho
 AUTH15 - A third-party provider reauthorization requirement must never be returned to an already-authenticated Mango browser as a Mango auth `401`, `unauthorized`, terminal-auth, logout, or login-redirect response. The backend must return a recoverable provider-specific response, such as `409 nylas_reauth_required`, so the frontend can show reconnect/repair UI while keeping the Mango session active.
 AUTH16 - A Mango session `401` or terminal logout stops authenticated work but must not purge an unsynchronized local email draft. The fallback remains isolated by company, Mango user, and exact personal-account/shared-inbox scope so another user or mailbox cannot see it; a later valid same-scope session may reconcile it.
 AUTH17 - Concurrent auth requests for one subject must share one in-flight identity and bootstrap operation; waiting requests must not reserve database connections and each waiter may cancel independently.
-AUTH18 - Resolving an existing user with unchanged claims must perform only a read; only a missing user or a real email or name change may enter the user write transaction.
+AUTH18 - Repeated resolution of the same or an older token must only read the user. The first resolution of a later token may advance only the hidden auth-claims watermark; only a missing user or a real email or name change may update visible profile fields or emit a profile event.
 AUTH19 - Concurrent current-membership checks for one user must share one in-flight database read while realtime admission and Process Map subscription still use current membership.
 AUTH20 - Request cancellation must reach auth reads, transactions, membership reads, and lock acquisition; one auth resolution and its reads must have a six-second deadline, write transactions a five-second deadline, statements inside those transactions a four-second limit, and lock waits a one-second limit.
 AUTH21 - An authentication-resolution or realtime-admission timeout must roll back its transaction, release its database connection, and return `504 authentication_timeout`; a non-timeout storage failure on those paths must return `503 authentication_unavailable`.
@@ -54,7 +54,7 @@ Given:
 
 Expected:
 - A missing user is created with a nonblank real-name, email, or subject fallback.
-- An existing user with unchanged claims is read without a user write transaction.
+- A repeated token with unchanged claims is read without a user write transaction; the first later-issued token may advance only the hidden auth-claims watermark.
 - A real changed email or name is stored through the serialized write path.
 - A blank or email-looking name does not replace `display_name = "Jonathan Kim"`.
 - The auth middleware does not turn a blank token name into an authoritative profile update.

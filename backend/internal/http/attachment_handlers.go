@@ -163,11 +163,16 @@ func (s *Server) handleAttachmentContent(w http.ResponseWriter, r *http.Request,
 	if content.OriginalFilename != "" {
 		w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": content.OriginalFilename}))
 	}
+	clearAttachmentDownloadWriteDeadline(w)
 	w.WriteHeader(http.StatusOK)
 	if _, err := io.Copy(w, output.Body); err != nil {
 		log.Printf("attachment_content_stream status=failed attachment_id=%s variant=%s", content.AttachmentID, content.ServedVariant)
 		return
 	}
+}
+
+func clearAttachmentDownloadWriteDeadline(w http.ResponseWriter) {
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 }
 
 func (s *Server) canReadAttachmentThroughLinks(w http.ResponseWriter, r *http.Request, companyID string, links []domain.ResourceAttachment) bool {

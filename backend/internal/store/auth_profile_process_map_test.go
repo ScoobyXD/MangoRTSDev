@@ -82,6 +82,97 @@ func TestMemoryAuthProfileUpdatesAtomicallyInvalidateMembershipCompanyProcessMap
 	}
 }
 
+func TestMemoryAuthClaimsWatermarkBlocksOlderClaimVariants(t *testing.T) {
+	repo := NewMemoryRepo()
+	company := repo.EnsureCompany("72727272-7272-4272-8272-727272727272", "Auth Claims Company")
+	user, err := repo.UpsertAuthUser("auth-claims-watermark", "a@example.com", "Profile A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(user.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	resetMemoryMembershipEventState(repo)
+
+	newerUnchangedIssuedAt := time.Unix(user.AuthClaimsIssuedAt.Unix()+20, 0).UTC()
+	newerUnchanged, err := repo.ResolveAuthUserContext(context.Background(), user.CognitoSubject, user.Email, user.DisplayName, newerUnchangedIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !newerUnchanged.AuthClaimsIssuedAt.Equal(newerUnchangedIssuedAt) {
+		t.Fatalf("watermark = %s, want %s", newerUnchanged.AuthClaimsIssuedAt, newerUnchangedIssuedAt)
+	}
+	if !newerUnchanged.UpdatedTimestamp.Equal(user.UpdatedTimestamp) || len(repo.domainEvents) != 0 || len(repo.realtimeOutbox) != 0 {
+		t.Fatalf("watermark-only resolution changed profile state or emitted events: user=%+v events=%d outbox=%d", newerUnchanged, len(repo.domainEvents), len(repo.realtimeOutbox))
+	}
+
+	assertRejected := func(label string, issuedAt time.Time) {
+		t.Helper()
+		resolved, err := repo.ResolveAuthUserContext(context.Background(), user.CognitoSubject, "b@example.com", "Profile B", issuedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolved.Email != user.Email || resolved.DisplayName != user.DisplayName || !resolved.AuthClaimsIssuedAt.Equal(newerUnchangedIssuedAt) {
+			t.Fatalf("%s claim variant changed the profile: %+v", label, resolved)
+		}
+	}
+	assertRejected("older", time.Unix(user.AuthClaimsIssuedAt.Unix()+10, 0).UTC())
+	assertRejected("equal", newerUnchangedIssuedAt)
+
+	newerChangedIssuedAt := newerUnchangedIssuedAt.Add(10 * time.Second)
+	newerChanged, err := repo.ResolveAuthUserContext(context.Background(), user.CognitoSubject, "b@example.com", "Profile B", newerChangedIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newerChanged.Email != "b@example.com" || newerChanged.DisplayName != "Profile B" || !newerChanged.AuthClaimsIssuedAt.Equal(newerChangedIssuedAt) {
+		t.Fatalf("newer claim variant = %+v", newerChanged)
+	}
+	if got := companyUserProfileEventCompaniesForTest(repo); !slices.Equal(got, []string{company.CompanyID}) {
+		t.Fatalf("profile event companies = %v, want %s", got, company.CompanyID)
+	}
+}
+
+func TestMemoryInvitationProfileWriteFencesOlderTokenClaims(t *testing.T) {
+	repo := NewMemoryRepo()
+	company := repo.EnsureCompany("73737373-7373-4373-8373-737373737373", "Invitation Profile Company")
+	inviter, err := repo.UpsertAuthUser("invitation-profile-inviter", "inviter@example.com", "Inviter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(inviter.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	invitation, err := repo.CreateInvitation(CreateInvitationInput{
+		CompanyID: company.CompanyID, Email: "invitee@example.com",
+		Role: domain.RoleCompanyUser, InvitedByUserID: inviter.UserID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldIssuedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+	invitee, err := repo.ResolveAuthUserContext(context.Background(), "invitation-profile-invitee", "invitee@example.com", "Old Token Name", oldIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AcceptInvitation(invitation.Token, invitee.CognitoSubject, invitee.Email, "Invitation Name"); err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := repo.GetAuthUser(invitee.CognitoSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.DisplayName != "Invitation Name" || !accepted.AuthClaimsIssuedAt.After(oldIssuedAt) {
+		t.Fatalf("accepted user = %+v", accepted)
+	}
+	resolved, err := repo.ResolveAuthUserContext(context.Background(), invitee.CognitoSubject, invitee.Email, "Old Token Name", oldIssuedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.DisplayName != accepted.DisplayName || !resolved.AuthClaimsIssuedAt.Equal(accepted.AuthClaimsIssuedAt) {
+		t.Fatalf("older token changed invitation profile: before=%+v after=%+v", accepted, resolved)
+	}
+}
+
 func TestMemoryDevAdminBootstrapStopsAfterCanceledLockWait(t *testing.T) {
 	repo := NewMemoryRepo()
 	const subject = "canceled-memory-bootstrap"

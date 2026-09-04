@@ -11,6 +11,10 @@ import (
 )
 
 func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (domain.User, error) {
+	return r.upsertAuthUser(cognitoSubject, email, displayName, time.Time{})
+}
+
+func (r *MemoryRepo) upsertAuthUser(cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
 	if cognitoSubject == "" {
@@ -25,18 +29,26 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 	now := time.Now().UTC()
 	user, ok := r.users[cognitoSubject]
 	if !ok {
+		authClaimsIssuedAt := claimsIssuedAt.UTC()
+		if authClaimsIssuedAt.IsZero() {
+			authClaimsIssuedAt = now
+		}
 		user = domain.User{
-			UserID:           newUUIDv7String(),
-			CognitoSubject:   cognitoSubject,
-			Email:            email,
-			DisplayName:      insertDisplayName,
-			CreatedTimestamp: now,
-			UpdatedTimestamp: now,
+			UserID:             newUUIDv7String(),
+			CognitoSubject:     cognitoSubject,
+			Email:              email,
+			DisplayName:        insertDisplayName,
+			AuthClaimsIssuedAt: authClaimsIssuedAt,
+			CreatedTimestamp:   now,
+			UpdatedTimestamp:   now,
 		}
 		r.users[cognitoSubject] = user
 		return user, nil
 	}
 
+	if !claimsIssuedAt.IsZero() && !claimsIssuedAt.After(user.AuthClaimsIssuedAt) {
+		return user, nil
+	}
 	updated := user
 	if email != "" {
 		updated.Email = email
@@ -44,8 +56,20 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 	if updateDisplayName != "" {
 		updated.DisplayName = updateDisplayName
 	}
-	if updated.Email == user.Email && updated.DisplayName == user.DisplayName {
-		return user, nil
+	profileChanged := updated.Email != user.Email || updated.DisplayName != user.DisplayName
+	if claimsIssuedAt.IsZero() {
+		if !profileChanged {
+			return user, nil
+		}
+		if now.After(updated.AuthClaimsIssuedAt) {
+			updated.AuthClaimsIssuedAt = now
+		}
+	} else {
+		updated.AuthClaimsIssuedAt = claimsIssuedAt.UTC()
+	}
+	if !profileChanged {
+		r.users[cognitoSubject] = updated
+		return updated, nil
 	}
 	updated.UpdatedTimestamp = now
 	r.users[cognitoSubject] = updated
@@ -62,13 +86,19 @@ func (r *MemoryRepo) UpsertAuthUser(cognitoSubject, email, displayName string) (
 	return updated, nil
 }
 
-func (r *MemoryRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
+func (r *MemoryRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.User{}, err
 	}
 	user, err := r.GetAuthUser(cognitoSubject)
-	if err == nil && !authUserNeedsClaimRefresh(user, email, displayName) {
-		return user, nil
+	if err == nil {
+		if claimsIssuedAt.IsZero() {
+			if !authUserNeedsClaimRefresh(user, email, displayName) {
+				return user, nil
+			}
+		} else if !claimsIssuedAt.After(user.AuthClaimsIssuedAt) {
+			return user, nil
+		}
 	}
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return domain.User{}, err
@@ -76,7 +106,7 @@ func (r *MemoryRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject,
 	if err := ctx.Err(); err != nil {
 		return domain.User{}, err
 	}
-	return r.UpsertAuthUser(cognitoSubject, email, displayName)
+	return r.upsertAuthUser(cognitoSubject, email, displayName, claimsIssuedAt)
 }
 
 func (r *MemoryRepo) GetAuthUser(cognitoSubject string) (domain.User, error) {
@@ -297,13 +327,6 @@ func (r *MemoryRepo) EnsureCompany(companyID, name string) domain.Company {
 }
 
 func (r *MemoryRepo) AddCompanyMembership(cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
-	return r.AddCompanyMembershipContext(context.Background(), cognitoSubject, companyID, role)
-}
-
-func (r *MemoryRepo) AddCompanyMembershipContext(ctx context.Context, cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
-	if err := ctx.Err(); err != nil {
-		return domain.CompanyMembership{}, err
-	}
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	companyID = strings.TrimSpace(companyID)
 	var ok bool
@@ -1131,25 +1154,28 @@ func (r *MemoryRepo) AcceptInvitation(token, cognitoSubject, email, displayName 
 		r.realtimeOutboxSequence = beforeRealtimeOutboxSequence
 	}
 	user, ok := r.users[cognitoSubject]
+	now := time.Now().UTC()
 	if !ok {
-		now := time.Now().UTC()
 		user = domain.User{
-			UserID:           newUUIDv7String(),
-			CognitoSubject:   cognitoSubject,
-			Email:            email,
-			DisplayName:      displayName,
-			CreatedTimestamp: now,
-			UpdatedTimestamp: now,
+			UserID:             newUUIDv7String(),
+			CognitoSubject:     cognitoSubject,
+			Email:              email,
+			DisplayName:        displayName,
+			AuthClaimsIssuedAt: now,
+			CreatedTimestamp:   now,
+			UpdatedTimestamp:   now,
 		}
 		r.users[cognitoSubject] = user
 	} else {
 		user.Email = email
 		user.DisplayName = displayName
-		user.UpdatedTimestamp = time.Now().UTC()
+		if now.After(user.AuthClaimsIssuedAt) {
+			user.AuthClaimsIssuedAt = now
+		}
+		user.UpdatedTimestamp = now
 		r.users[cognitoSubject] = user
 	}
 	hadGlobalAccess := memoryUserHasDevAdminMembershipLocked(r.memberships, user.UserID)
-	now := time.Now().UTC()
 	r.memberships[membershipKey(invitation.CompanyID, user.UserID)] = domain.CompanyMembership{
 		CompanyID:        invitation.CompanyID,
 		UserID:           user.UserID,

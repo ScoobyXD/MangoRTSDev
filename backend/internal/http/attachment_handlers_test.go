@@ -12,15 +12,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
 
 type fakeAttachmentObjectStorage struct {
-	bucket  string
-	objects map[string]fakeAttachmentObject
-	getKeys []string
+	bucket   string
+	objects  map[string]fakeAttachmentObject
+	getKeys  []string
+	getDelay time.Duration
 }
 
 func TestHuddleLogicGateAttachmentPermissionUsesExactTypedOwner(t *testing.T) {
@@ -85,6 +87,9 @@ func (s *fakeAttachmentObjectStorage) PutObject(ctx context.Context, input Attac
 }
 
 func (s *fakeAttachmentObjectStorage) GetObject(ctx context.Context, input AttachmentGetObjectInput) (AttachmentGetObjectOutput, error) {
+	if s.getDelay > 0 {
+		time.Sleep(s.getDelay)
+	}
 	s.getKeys = append(s.getKeys, input.Key)
 	object, ok := s.objects[input.Key]
 	if !ok {
@@ -104,6 +109,37 @@ func (s *fakeAttachmentObjectStorage) GetObject(ctx context.Context, input Attac
 func (s *fakeAttachmentObjectStorage) DeleteObject(_ context.Context, key string) error {
 	delete(s.objects, key)
 	return nil
+}
+
+func TestAttachmentContentClearsGeneralServerWriteDeadline(t *testing.T) {
+	repo, server, storage, companyID, allowed, _, node := newAttachmentRouteTestFixture(t)
+	attachmentID := seedAttachmentForTest(t, repo, storage, companyID, node.NodeID, allowed)
+	storage.getDelay = 100 * time.Millisecond
+
+	routes := server.Routes()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		routes.ServeHTTP(w, attachmentRequestWithActor(r, allowed, companyID, domain.RoleCompanyUser))
+	})
+	httpServer := httptest.NewUnstartedServer(handler)
+	httpServer.Config.WriteTimeout = 20 * time.Millisecond
+	httpServer.Start()
+	t.Cleanup(httpServer.Close)
+
+	response, err := httpServer.Client().Get(httpServer.URL + "/v1/attachments/" + attachmentID + "/content?company_id=" + companyID + "&variant=original")
+	if err != nil {
+		t.Fatalf("download attachment: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read attachment: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", response.StatusCode, http.StatusOK, body)
+	}
+	if string(body) != "hello attachment" {
+		t.Fatalf("body = %q, want complete attachment", body)
+	}
 }
 
 func TestAttachmentContentRejectsStorageLengthMismatchBeforeStreaming(t *testing.T) {

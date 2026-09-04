@@ -46,6 +46,7 @@ type fakeNylasClient struct {
 	updateCalls                 []fakeNylasUpdateCall
 	updateErrByID               map[string]error
 	downloadContent             []byte
+	downloadDelay               time.Duration
 	downloadErr                 error
 	rawMIME                     string
 	rawMIMEErr                  error
@@ -397,6 +398,9 @@ func (f *fakeNylasClient) GetMessageRawMIME(_ context.Context, grantID, messageI
 func (f *fakeNylasClient) DownloadAttachment(_ context.Context, grantID, messageID, attachmentID string) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.downloadDelay > 0 {
+		time.Sleep(f.downloadDelay)
+	}
 	f.lastDownloadGrantID = grantID
 	f.lastDownloadMessageID = messageID
 	f.lastDownloadAttachmentID = attachmentID
@@ -765,6 +769,46 @@ func (f *communicationsSendTestFixture) send(t *testing.T, payload any) *httptes
 	rec := httptest.NewRecorder()
 	f.handler.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestCommunicationsAttachmentClearsGeneralServerWriteDeadline(t *testing.T) {
+	fixture := newCommunicationsSendTestFixture(t)
+	t.Cleanup(fixture.server.Close)
+	fixture.nylas.message = NylasMessage{
+		ID: "message-1",
+		Attachments: []NylasAttachment{{
+			ID:          "attachment-1",
+			Filename:    "hello.txt",
+			ContentType: "text/plain",
+		}},
+	}
+	fixture.nylas.downloadContent = []byte("hello provider attachment")
+	fixture.nylas.downloadDelay = 100 * time.Millisecond
+
+	httpServer := httptest.NewUnstartedServer(fixture.handler)
+	httpServer.Config.WriteTimeout = 20 * time.Millisecond
+	httpServer.Start()
+	t.Cleanup(httpServer.Close)
+	req, err := http.NewRequest(http.MethodGet, httpServer.URL+"/v1/communications/messages/message-1/attachments/attachment-1?company_id="+url.QueryEscape(fixture.companyID)+"&account_email="+url.QueryEscape(fixture.accountEmail), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", fixture.token)
+	response, err := httpServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("download provider attachment: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read provider attachment: %v", err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d, body=%s", response.StatusCode, http.StatusOK, body)
+	}
+	if string(body) != "hello provider attachment" {
+		t.Fatalf("body = %q, want complete provider attachment", body)
+	}
 }
 
 func TestCommunicationsSharedDraftSendUsesPersistedRevisionAndRechecksSender(t *testing.T) {

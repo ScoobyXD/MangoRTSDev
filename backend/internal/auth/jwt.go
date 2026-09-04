@@ -21,12 +21,15 @@ var (
 	ErrInvalidToken = errors.New("invalid token")
 )
 
+const maxTokenIssuedAtClockSkew = 5 * time.Minute
+
 type Claims struct {
-	Subject string
-	Email   string
-	Name    string
-	Issuer  string
-	Client  string
+	Subject  string
+	Email    string
+	Name     string
+	Issuer   string
+	Client   string
+	IssuedAt time.Time
 }
 
 type ValidatorConfig struct {
@@ -108,6 +111,11 @@ func (v *Validator) Validate(ctx context.Context, token string) (Claims, error) 
 	if nbf, ok := getNumber(raw, "nbf"); ok && now < int64(nbf) {
 		return Claims{}, ErrInvalidToken
 	}
+	issuedAtValue, ok := getNumber(raw, "iat")
+	issuedAtUnix := int64(issuedAtValue)
+	if !ok || issuedAtUnix <= 0 || issuedAtUnix > now+int64(maxTokenIssuedAtClockSkew/time.Second) {
+		return Claims{}, ErrInvalidToken
+	}
 
 	key, err := v.keys.Key(ctx, header.KeyID)
 	if err != nil {
@@ -124,11 +132,12 @@ func (v *Validator) Validate(ctx context.Context, token string) (Claims, error) 
 	}
 
 	return Claims{
-		Subject: subject,
-		Email:   getString(raw, "email"),
-		Name:    displayNameFromClaims(raw),
-		Issuer:  getString(raw, "iss"),
-		Client:  client,
+		Subject:  subject,
+		Email:    getString(raw, "email"),
+		Name:     displayNameFromClaims(raw),
+		Issuer:   getString(raw, "iss"),
+		Client:   client,
+		IssuedAt: time.Unix(issuedAtUnix, 0).UTC(),
 	}, nil
 }
 

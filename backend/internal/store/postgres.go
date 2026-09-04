@@ -54,6 +54,7 @@ func (r *PostgresRepo) CheckApplicationSchemaReadiness() error {
 		}
 	}
 	requiredColumns := [][2]string{
+		{"users", "auth_claims_issued_at"},
 		{"email_connections", "email_connection_id"},
 		{"email_connections", "company_id"},
 		{"email_connections", "connection_type"},

@@ -880,6 +880,7 @@ func (s *Server) downloadCommunicationsAttachment(w http.ResponseWriter, r *http
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("inline", map[string]string{"filename": filename}))
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	clearAttachmentDownloadWriteDeadline(w)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)
 }

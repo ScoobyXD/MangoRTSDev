@@ -17,13 +17,11 @@ const (
 )
 
 func configurePostgresAuthTimeouts(ctx context.Context, tx *sql.Tx) error {
-	for _, statement := range []string{
-		postgresAuthLockTimeoutSQL,
-		postgresAuthStatementTimeoutSQL,
-	} {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			return err
-		}
+	if _, err := tx.ExecContext(ctx, postgresAuthLockTimeoutSQL); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, postgresAuthStatementTimeoutSQL); err != nil {
+		return err
 	}
 	return nil
 }
@@ -88,20 +86,31 @@ func (r *PostgresRepo) UpsertAuthUser(cognitoSubject, email, displayName string)
 	return r.UpsertAuthUserContext(context.Background(), cognitoSubject, email, displayName)
 }
 
-func (r *PostgresRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
+func (r *PostgresRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	user, err := r.GetAuthUserContext(ctx, cognitoSubject)
-	if err == nil && !authUserNeedsClaimRefresh(user, email, displayName) {
-		return user, nil
+	if err == nil {
+		if claimsIssuedAt.IsZero() {
+			if !authUserNeedsClaimRefresh(user, email, displayName) {
+				return user, nil
+			}
+		} else if !claimsIssuedAt.After(user.AuthClaimsIssuedAt) {
+			return user, nil
+		}
 	}
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return domain.User{}, err
 	}
-	return r.UpsertAuthUserContext(ctx, cognitoSubject, email, displayName)
+	return r.upsertAuthUserContext(ctx, cognitoSubject, email, displayName, claimsIssuedAt)
 }
 
 func (r *PostgresRepo) UpsertAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
+	return r.upsertAuthUserContext(ctx, cognitoSubject, email, displayName, time.Time{})
+}
+
+func (r *PostgresRepo) upsertAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	email = normalizeEmail(email)
+	claimsIssuedAt = claimsIssuedAt.UTC()
 	if cognitoSubject == "" {
 		return domain.User{}, ErrInvalid
 	}
@@ -124,22 +133,26 @@ func (r *PostgresRepo) UpsertAuthUserContext(ctx context.Context, cognitoSubject
 
 	var user domain.User
 	err = tx.QueryRowContext(txContext, `
-select user_id::text, cognito_subject, email, display_name, created_timestamp, updated_timestamp
+select user_id::text, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp
 from users
 where cognito_subject=$1
 for update`, cognitoSubject).Scan(
 		&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName,
-		&user.CreatedTimestamp, &user.UpdatedTimestamp,
+		&user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
+		var claimsIssuedAtValue any
+		if !claimsIssuedAt.IsZero() {
+			claimsIssuedAtValue = claimsIssuedAt
+		}
 		err = tx.QueryRowContext(txContext, `
-insert into users (user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp)
-values ($1::uuid, $2, $3, $4, now(), now())
-returning user_id::text, cognito_subject, email, display_name, created_timestamp, updated_timestamp`,
-			newUUIDv7String(), cognitoSubject, email, insertDisplayName,
+insert into users (user_id, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp)
+values ($1::uuid, $2, $3, $4, coalesce($5::timestamptz, now()), now(), now())
+returning user_id::text, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp`,
+			newUUIDv7String(), cognitoSubject, email, insertDisplayName, claimsIssuedAtValue,
 		).Scan(
 			&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName,
-			&user.CreatedTimestamp, &user.UpdatedTimestamp,
+			&user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp,
 		)
 		if err != nil {
 			return domain.User{}, err
@@ -153,6 +166,12 @@ returning user_id::text, cognito_subject, email, display_name, created_timestamp
 		return domain.User{}, err
 	}
 
+	if !claimsIssuedAt.IsZero() && !claimsIssuedAt.After(user.AuthClaimsIssuedAt) {
+		if err := commitPostgresAuthTx(txContext, tx); err != nil {
+			return domain.User{}, err
+		}
+		return user, nil
+	}
 	updatedEmail := user.Email
 	if email != "" {
 		updatedEmail = email
@@ -161,31 +180,41 @@ returning user_id::text, cognito_subject, email, display_name, created_timestamp
 	if updateDisplayName != "" {
 		updatedDisplayName = updateDisplayName
 	}
-	if updatedEmail == user.Email && updatedDisplayName == user.DisplayName {
+	profileChanged := updatedEmail != user.Email || updatedDisplayName != user.DisplayName
+	if claimsIssuedAt.IsZero() && !profileChanged {
 		if err := commitPostgresAuthTx(txContext, tx); err != nil {
 			return domain.User{}, err
 		}
 		return user, nil
 	}
+	var claimsIssuedAtValue any
+	if !claimsIssuedAt.IsZero() {
+		claimsIssuedAtValue = claimsIssuedAt
+	}
 	err = tx.QueryRowContext(txContext, `
 update users
-set email=$2, display_name=$3, updated_timestamp=now()
+set email=$2,
+    display_name=$3,
+    auth_claims_issued_at=coalesce($4::timestamptz, greatest(auth_claims_issued_at, now())),
+    updated_timestamp=case when $5 then now() else updated_timestamp end
 where user_id=$1::uuid
-returning user_id::text, cognito_subject, email, display_name, created_timestamp, updated_timestamp`,
-		user.UserID, updatedEmail, updatedDisplayName,
+returning user_id::text, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp`,
+		user.UserID, updatedEmail, updatedDisplayName, claimsIssuedAtValue, profileChanged,
 	).Scan(
 		&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName,
-		&user.CreatedTimestamp, &user.UpdatedTimestamp,
+		&user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp,
 	)
 	if err != nil {
 		return domain.User{}, err
 	}
-	companyIDs, err := postgresUserMembershipCompanyIDsTx(txContext, tx, user.UserID)
-	if err != nil {
-		return domain.User{}, err
-	}
-	if _, err := r.appendDomainEventsTx(txContext, tx, companyMembershipEventInputs(companyIDs, CompanyUserProfileUpdatedEventType, user.UserID)); err != nil {
-		return domain.User{}, err
+	if profileChanged {
+		companyIDs, err := postgresUserMembershipCompanyIDsTx(txContext, tx, user.UserID)
+		if err != nil {
+			return domain.User{}, err
+		}
+		if _, err := r.appendDomainEventsTx(txContext, tx, companyMembershipEventInputs(companyIDs, CompanyUserProfileUpdatedEventType, user.UserID)); err != nil {
+			return domain.User{}, err
+		}
 	}
 	if err := commitPostgresAuthTx(txContext, tx); err != nil {
 		return domain.User{}, err
@@ -205,11 +234,11 @@ func (r *PostgresRepo) GetAuthUserContext(ctx context.Context, cognitoSubject st
 
 	var user domain.User
 	err := r.db.QueryRowContext(ctx,
-		`select user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
+		`select user_id, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp
 		 from users
 		 where cognito_subject = $1`,
 		cognitoSubject,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}
@@ -224,11 +253,11 @@ func (r *PostgresRepo) GetAuthUserByEmail(email string) (domain.User, error) {
 
 	var user domain.User
 	err := r.db.QueryRow(
-		`select user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp
+		`select user_id, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp
 		 from users
 		 where email = $1`,
 		email,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.User{}, ErrNotFound
 	}
@@ -295,10 +324,6 @@ func (r *PostgresRepo) UserHasCompanyAccess(cognitoSubject, companyID string) (b
 }
 
 func (r *PostgresRepo) AddCompanyMembership(cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
-	return r.AddCompanyMembershipContext(context.Background(), cognitoSubject, companyID, role)
-}
-
-func (r *PostgresRepo) AddCompanyMembershipContext(ctx context.Context, cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
 	cognitoSubject = strings.TrimSpace(cognitoSubject)
 	companyID = strings.TrimSpace(companyID)
 	normalizedRole, ok := normalizeRole(role)
@@ -306,7 +331,7 @@ func (r *PostgresRepo) AddCompanyMembershipContext(ctx context.Context, cognitoS
 		return domain.CompanyMembership{}, ErrInvalid
 	}
 
-	txContext, cancel := context.WithTimeout(ctx, postgresAuthTransactionTimeout)
+	txContext, cancel := context.WithTimeout(context.Background(), postgresAuthTransactionTimeout)
 	defer cancel()
 	tx, err := r.db.BeginTx(txContext, nil)
 	if err != nil {
@@ -1518,13 +1543,14 @@ func (r *PostgresRepo) AcceptInvitation(token, cognitoSubject, email, displayNam
 		 on conflict (cognito_subject) do update set
 		   email = case when excluded.email <> '' then excluded.email else users.email end,
 		   display_name = case when excluded.display_name <> '' then excluded.display_name else users.display_name end,
+		   auth_claims_issued_at = greatest(users.auth_claims_issued_at, now()),
 		   updated_timestamp = now()
-		 returning user_id, cognito_subject, email, display_name, created_timestamp, updated_timestamp`,
+		 returning user_id, cognito_subject, email, display_name, auth_claims_issued_at, created_timestamp, updated_timestamp`,
 		newUUIDv7String(),
 		cognitoSubject,
 		email,
 		displayName,
-	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.CreatedTimestamp, &user.UpdatedTimestamp)
+	).Scan(&user.UserID, &user.CognitoSubject, &user.Email, &user.DisplayName, &user.AuthClaimsIssuedAt, &user.CreatedTimestamp, &user.UpdatedTimestamp)
 	if err != nil {
 		return domain.Invitation{}, err
 	}

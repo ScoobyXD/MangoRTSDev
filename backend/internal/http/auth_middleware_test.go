@@ -424,6 +424,11 @@ func testValidator(t *testing.T, kid string, key *rsa.PrivateKey) *auth.Validato
 
 func testJWT(t *testing.T, key *rsa.PrivateKey, kid, subject, email string) string {
 	t.Helper()
+	return testJWTWithIssuedAt(t, key, kid, subject, email, time.Now().Add(-time.Minute))
+}
+
+func testJWTWithIssuedAt(t *testing.T, key *rsa.PrivateKey, kid, subject, email string, issuedAt time.Time) string {
+	t.Helper()
 	header := map[string]string{"alg": "RS256", "kid": kid, "typ": "JWT"}
 	claims := map[string]any{
 		"iss":       "https://cognito-idp.us-west-1.amazonaws.com/us-west-1_test",
@@ -432,7 +437,7 @@ func testJWT(t *testing.T, key *rsa.PrivateKey, kid, subject, email string) stri
 		"client_id": "test-client",
 		"token_use": "access",
 		"exp":       time.Now().Add(time.Hour).Unix(),
-		"iat":       time.Now().Add(-time.Minute).Unix(),
+		"iat":       issuedAt.Unix(),
 	}
 	unsigned := encodeJSONSegment(t, header) + "." + encodeJSONSegment(t, claims)
 	sum := sha256.Sum256([]byte(unsigned))
@@ -441,6 +446,41 @@ func testJWT(t *testing.T, key *rsa.PrivateKey, kid, subject, email string) stri
 		t.Fatal(err)
 	}
 	return unsigned + "." + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+func TestAuthValidatorReturnsVerifiedTokenIssueTime(t *testing.T) {
+	t.Parallel()
+	key := mustRSAKey(t)
+	claims, err := testValidator(t, "kid", key).Validate(context.Background(), testJWT(t, key, "kid", "issued-at-subject", "issued-at@example.com"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claims.IssuedAt.IsZero() || claims.IssuedAt.After(time.Now()) {
+		t.Fatalf("issued at = %s, want verified past token issue time", claims.IssuedAt)
+	}
+}
+
+func TestAuthValidatorAllowsSmallIssuerClockSkewInTokenIssueTime(t *testing.T) {
+	t.Parallel()
+	key := mustRSAKey(t)
+	issuedAt := time.Now().Add(time.Second).Truncate(time.Second)
+	claims, err := testValidator(t, "kid", key).Validate(context.Background(), testJWTWithIssuedAt(t, key, "kid", "clock-skew-subject", "clock-skew@example.com", issuedAt))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claims.IssuedAt.Equal(issuedAt) {
+		t.Fatalf("issued at = %s, want %s", claims.IssuedAt, issuedAt)
+	}
+}
+
+func TestAuthValidatorRejectsFarFutureTokenIssueTime(t *testing.T) {
+	t.Parallel()
+	key := mustRSAKey(t)
+	issuedAt := time.Now().Add(10 * time.Minute).Truncate(time.Second)
+	_, err := testValidator(t, "kid", key).Validate(context.Background(), testJWTWithIssuedAt(t, key, "kid", "future-subject", "future@example.com", issuedAt))
+	if !errors.Is(err, auth.ErrInvalidToken) {
+		t.Fatalf("far-future issued-at error = %v, want %v", err, auth.ErrInvalidToken)
+	}
 }
 
 func encodeJSONSegment(t *testing.T, value any) string {
@@ -459,11 +499,11 @@ type countingAuthRepo struct {
 	membershipCalls int
 }
 
-func (r *countingAuthRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
+func (r *countingAuthRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	r.mu.Lock()
 	r.resolutionCalls++
 	r.mu.Unlock()
-	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName)
+	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName, claimsIssuedAt)
 }
 
 func (r *countingAuthRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
@@ -595,6 +635,29 @@ func TestAuthMembershipCacheExpires(t *testing.T) {
 	}
 }
 
+func TestAuthMembershipCachePrunesExpiredTokenVariants(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	cache := newAuthMembershipCache(time.Second, 10)
+	cache.now = func() time.Time { return now }
+	oldClaims := auth.Claims{Subject: "pruned-subject", Email: "old@example.com", IssuedAt: now}
+	if !cache.setIfGeneration(oldClaims, ActorContext{User: domain.User{UserID: "pruned-user"}}, cache.snapshotGeneration()) {
+		t.Fatal("initial cache set was rejected")
+	}
+
+	now = now.Add(2 * time.Second)
+	newClaims := auth.Claims{Subject: oldClaims.Subject, Email: "new@example.com", IssuedAt: now}
+	if !cache.setIfGeneration(newClaims, ActorContext{User: domain.User{UserID: "pruned-user"}}, cache.snapshotGeneration()) {
+		t.Fatal("replacement cache set was rejected")
+	}
+	if len(cache.entries) != 1 {
+		t.Fatalf("cache entries = %d, want only the current token variant", len(cache.entries))
+	}
+	if _, ok := cache.entries[cacheKeyForClaims(newClaims)]; !ok {
+		t.Fatal("current token variant is missing from cache")
+	}
+}
+
 func TestAuthMembershipCacheMissesOnChangedIdentityClaims(t *testing.T) {
 	t.Parallel()
 
@@ -602,46 +665,99 @@ func TestAuthMembershipCacheMissesOnChangedIdentityClaims(t *testing.T) {
 	const companyID = "11111111-1111-1111-1111-111111111111"
 	const subject = "claim-change-subject"
 	baseRepo.EnsureCompany(companyID, "Claims Company")
-	if _, err := baseRepo.UpsertAuthUser(subject, "old@example.com", "Old Name"); err != nil {
+	seededUser, err := baseRepo.UpsertAuthUser(subject, "old@example.com", "Old Name")
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := baseRepo.AddCompanyMembership(subject, companyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 	repo := &countingAuthRepo{Repository: baseRepo}
+	oldIssuedAt := time.Unix(seededUser.AuthClaimsIssuedAt.Unix()+10, 0).UTC()
+	newIssuedAt := oldIssuedAt.Add(10 * time.Second)
 	validator := &tokenClaimsValidator{claims: map[string]auth.Claims{
-		"old-token": {Subject: subject, Email: "old@example.com", Name: "Old Name"},
-		"new-token": {Subject: subject, Email: "new@example.com", Name: "New Name"},
+		"old-token": {Subject: subject, Email: "old@example.com", Name: "Old Name", IssuedAt: oldIssuedAt},
+		"new-token": {Subject: subject, Email: "new@example.com", Name: "New Name", IssuedAt: newIssuedAt},
 	}}
-	handler := NewServerWithOptions(repo, ServerOptions{AuthValidator: validator}).Routes()
-
-	oldReq := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
-	oldReq.Header.Set("Authorization", "Bearer old-token")
-	oldRes := httptest.NewRecorder()
-	handler.ServeHTTP(oldRes, oldReq)
-	if oldRes.Code != http.StatusOK {
-		t.Fatalf("old claims status = %d, want %d, body=%s", oldRes.Code, http.StatusOK, strings.TrimSpace(oldRes.Body.String()))
+	now := time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC)
+	server := NewServerWithOptions(repo, ServerOptions{
+		AuthValidator:          validator,
+		AuthMembershipCacheTTL: time.Second,
+	})
+	server.authCache.now = func() time.Time { return now }
+	handler := server.Routes()
+	requestMe := func(token string) domain.User {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d, body=%s", token, res.Code, http.StatusOK, strings.TrimSpace(res.Body.String()))
+		}
+		var payload struct {
+			User domain.User `json:"user"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.User
+	}
+	assertNewProfile := func(label string, user domain.User) {
+		t.Helper()
+		if user.Email != "new@example.com" || user.DisplayName != "New Name" {
+			t.Fatalf("%s user = %+v, want current new profile", label, user)
+		}
 	}
 
-	newReq := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
-	newReq.Header.Set("Authorization", "Bearer new-token")
-	newRes := httptest.NewRecorder()
-	handler.ServeHTTP(newRes, newReq)
-	if newRes.Code != http.StatusOK {
-		t.Fatalf("new claims status = %d, want %d, body=%s", newRes.Code, http.StatusOK, strings.TrimSpace(newRes.Body.String()))
+	oldUser := requestMe("old-token")
+	if oldUser.Email != "old@example.com" || oldUser.DisplayName != "Old Name" {
+		t.Fatalf("initial old user = %+v, want old profile", oldUser)
 	}
-	var payload struct {
-		User domain.User `json:"user"`
-	}
-	if err := json.NewDecoder(newRes.Body).Decode(&payload); err != nil {
+	assertNewProfile("new token", requestMe("new-token"))
+	assertNewProfile("repeated old token", requestMe("old-token"))
+	assertNewProfile("repeated new token", requestMe("new-token"))
+	storedNew, err := baseRepo.GetAuthUser(subject)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if payload.User.Email != "new@example.com" || payload.User.DisplayName != "New Name" {
-		t.Fatalf("user = %+v, want updated email/display name from claims", payload.User)
+	now = now.Add(2 * time.Second)
+	assertNewProfile("expired old token", requestMe("old-token"))
+	assertNewProfile("post-refresh new token", requestMe("new-token"))
+	stored, err := baseRepo.GetAuthUser(subject)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if stored.Email != "new@example.com" || stored.DisplayName != "New Name" || !stored.UpdatedTimestamp.Equal(storedNew.UpdatedTimestamp) || !stored.AuthClaimsIssuedAt.Equal(newIssuedAt) {
+		t.Fatalf("stored user = %+v, want older token to leave new profile unchanged", stored)
+	}
+
+	latestAIssuedAt := newIssuedAt.Add(10 * time.Second)
+	validator.mu.Lock()
+	validator.claims["latest-a-token"] = auth.Claims{Subject: subject, Email: "old@example.com", Name: "Old Name", IssuedAt: latestAIssuedAt}
+	validator.mu.Unlock()
+	latestA := requestMe("latest-a-token")
+	if latestA.Email != "old@example.com" || latestA.DisplayName != "Old Name" {
+		t.Fatalf("latest A user = %+v, want a genuinely later A profile change", latestA)
+	}
+	if staleB := requestMe("new-token"); staleB.Email != "old@example.com" || staleB.DisplayName != "Old Name" {
+		t.Fatalf("stale B user = %+v, want latest A profile", staleB)
+	}
+	now = now.Add(2 * time.Second)
+	if expiredStaleB := requestMe("new-token"); expiredStaleB.Email != "old@example.com" || expiredStaleB.DisplayName != "Old Name" {
+		t.Fatalf("expired stale B user = %+v, want latest A profile", expiredStaleB)
+	}
+	storedLatestA, err := baseRepo.GetAuthUser(subject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedLatestA.Email != "old@example.com" || storedLatestA.DisplayName != "Old Name" || !storedLatestA.UpdatedTimestamp.Equal(latestA.UpdatedTimestamp) {
+		t.Fatalf("stored latest A user = %+v, want stale B token to leave it unchanged", storedLatestA)
+	}
+
 	resolutions, memberships := repo.counts()
-	if resolutions != 2 || memberships != 2 {
-		t.Fatalf("repo auth calls = resolutions %d memberships %d, want 2/2 after changed claims", resolutions, memberships)
+	if resolutions != 6 || memberships != 6 {
+		t.Fatalf("repo auth calls = resolutions %d memberships %d, want 6/6 across three token versions and two expiries", resolutions, memberships)
 	}
 }
 
@@ -902,7 +1018,7 @@ func (r *blockingAuthPoolRepo) beginDatabaseUse(ctx context.Context) (func(), er
 	}, nil
 }
 
-func (r *blockingAuthPoolRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
+func (r *blockingAuthPoolRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	done, err := r.beginDatabaseUse(ctx)
 	if err != nil {
 		return domain.User{}, err
@@ -917,7 +1033,7 @@ func (r *blockingAuthPoolRepo) ResolveAuthUserContext(ctx context.Context, cogni
 	case <-ctx.Done():
 		return domain.User{}, ctx.Err()
 	}
-	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName)
+	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName, claimsIssuedAt)
 }
 
 func (r *blockingAuthPoolRepo) ListUserMembershipsContext(ctx context.Context, userID string) ([]domain.CompanyMembership, error) {
@@ -937,30 +1053,6 @@ func (r *blockingAuthPoolRepo) ListUserMembershipsContext(ctx context.Context, u
 		return nil, ctx.Err()
 	}
 	return r.Repository.ListUserMembershipsContext(ctx, userID)
-}
-
-func (r *blockingAuthPoolRepo) CreateCompanyContext(ctx context.Context, name string) (domain.Company, error) {
-	done, err := r.beginDatabaseUse(ctx)
-	if err != nil {
-		return domain.Company{}, err
-	}
-	defer done()
-	r.mu.Lock()
-	r.companyCalls++
-	r.mu.Unlock()
-	return r.Repository.CreateCompanyContext(ctx, name)
-}
-
-func (r *blockingAuthPoolRepo) AddCompanyMembershipContext(ctx context.Context, cognitoSubject, companyID, role string) (domain.CompanyMembership, error) {
-	done, err := r.beginDatabaseUse(ctx)
-	if err != nil {
-		return domain.CompanyMembership{}, err
-	}
-	defer done()
-	r.mu.Lock()
-	r.addMemberCalls++
-	r.mu.Unlock()
-	return r.Repository.AddCompanyMembershipContext(ctx, cognitoSubject, companyID, role)
 }
 
 func (r *blockingAuthPoolRepo) BootstrapDevAdminContext(ctx context.Context, cognitoSubject, companyName string) (domain.CompanyMembership, bool, error) {
@@ -1189,7 +1281,7 @@ type recoverableSlowAuthRepo struct {
 	active int
 }
 
-func (r *recoverableSlowAuthRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
+func (r *recoverableSlowAuthRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	r.mu.Lock()
 	r.active++
 	slow := r.slow
@@ -1203,7 +1295,7 @@ func (r *recoverableSlowAuthRepo) ResolveAuthUserContext(ctx context.Context, co
 		<-ctx.Done()
 		return domain.User{}, ctx.Err()
 	}
-	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName)
+	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName, claimsIssuedAt)
 }
 
 func TestAuthTimeoutReturnsControlledErrorAndRecoversPool(t *testing.T) {
@@ -1263,7 +1355,7 @@ type authResolutionErrorRepo struct {
 	err error
 }
 
-func (r *authResolutionErrorRepo) ResolveAuthUserContext(context.Context, string, string, string) (domain.User, error) {
+func (r *authResolutionErrorRepo) ResolveAuthUserContext(context.Context, string, string, string, time.Time) (domain.User, error) {
 	return domain.User{}, r.err
 }
 
@@ -1300,7 +1392,7 @@ type blockingChangedClaimsRepo struct {
 	max     int
 }
 
-func (r *blockingChangedClaimsRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string) (domain.User, error) {
+func (r *blockingChangedClaimsRepo) ResolveAuthUserContext(ctx context.Context, cognitoSubject, email, displayName string, claimsIssuedAt time.Time) (domain.User, error) {
 	r.mu.Lock()
 	r.calls++
 	call := r.calls
@@ -1322,7 +1414,7 @@ func (r *blockingChangedClaimsRepo) ResolveAuthUserContext(ctx context.Context, 
 			return domain.User{}, ctx.Err()
 		}
 	}
-	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName)
+	return r.Repository.ResolveAuthUserContext(ctx, cognitoSubject, email, displayName, claimsIssuedAt)
 }
 
 func TestConcurrentChangedClaimsSerializeBySubject(t *testing.T) {
