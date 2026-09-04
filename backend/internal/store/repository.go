@@ -1973,6 +1973,13 @@ type LogicGateNodeAssignmentInput struct {
 	ProcessStepIDSet    bool
 }
 
+type NodeWorkPrecondition struct {
+	LogicGateID       string
+	ProcessStepID     string
+	Status            string
+	AssignmentVersion int64
+}
+
 type LogicGateNodeAssignmentMoveInput struct {
 	CompanyID        string
 	LogicGateID      string
@@ -1988,6 +1995,7 @@ type LogicGateNodeAssignmentMoveInput struct {
 	TimingRecorder   TimingRecorder
 	ProcessStepID    *string
 	ProcessStepIDSet bool
+	ExpectedNodeWork *NodeWorkPrecondition
 }
 
 type LogicGateNodeAssignmentRemoveInput struct {

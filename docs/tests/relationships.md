@@ -13,6 +13,7 @@
 11. Step commands check access through their exact owning Process and existing Node access rules; flow edges grant no access.
 12. Process and Node recycle/restore preserve their promised exact step identities and assignments in dependency order; restoring a Node whose step was permanently deleted clears that step reference.
 13. Node status lives only in `nodes.status`; status-list membership and the removed Kanban projection never become relationship authority.
+14. A Process AI write or move requires the exact expected Process, Step, Node status, and assignment version inside the mutation transaction; a mismatch changes neither text nor placement.
 
 # Current Huddle Relationship Business Logic Laws
 
@@ -279,6 +280,8 @@ Deleting a selected trace still removes its exact operational edge and dependent
 An explicitly invoked company-map operator reset validates a fresh layout from Explorer, checks Edit access across the affected resources, and commits that layout together with removal of the company's Folder/Process operational edges and dependent traces; it preserves source resources, Explorer organization, policies, and other relationship meanings.
 
 Within a Process, each Node keeps its Process assignment and optionally names one exact step. Step moves preserve status. Add next step stores its new step immediately after the selected source and creates the exact incoming connection in the same mutation. Same-Process step connections use the operational relationship table without map geometry. Deleting a step clears only its Node step references and incident connections; Nodes keep their Process membership and status. The company-map reset preserves these step connections.
+
+When AI works on its newly created Node, ordinary assignment and editor commands check that Node's expected Process, Step, status, and assignment version in the same transaction as the write. A concurrent human move stops the AI action without restoring the old placement or adding text after the move.
 
 Last updated: 2026-09-03
 

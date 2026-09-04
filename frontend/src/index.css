@@ -123,6 +123,10 @@
 .mango-assistant-question { background: #eaf0f6; border-radius: 8px; margin-left: 10%; }
 .mango-assistant-hint { color: #64748b; font-size: 12px; }
 .mango-assistant-availability { padding: 0 12px 8px; max-height: 40px; overflow-y: auto; font-size: 11px; line-height: 16px; color: #64748b; }
+.mango-assistant-process { display: flex; align-items: center; gap: 6px; padding: 7px 11px 0; font-size: 12px; color: #334155; }
+.mango-assistant-process span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mango-assistant-process button { padding: 0 5px; font-size: 15px; }
+.mango-assistant .mango-assistant-resource { margin-top: 5px; max-width: 100%; overflow-wrap: anywhere; color: #0e7490; text-align: left; }
 
 /* Lock app viewport to full-screen and prevent browser scrollbars. */
 html, body, #root {

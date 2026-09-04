@@ -865,7 +865,16 @@ test("shared toolbar preserves collapsed typing formats, atomic entities, and na
     const actionPickerRow = [...(actionPicker?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])]
       .find((button) => button.textContent?.includes("Call the delayed carrier"));
     assert.ok(actionPickerRow, "the Action Item search result is selectable");
-    await act(async () => actionPickerRow.click());
+    const actionPickerInput = actionPicker?.querySelector<HTMLInputElement>("input");
+    assert.ok(actionPickerInput);
+    const composingEnter = new dom.window.KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true, cancelable: true });
+    await act(async () => actionPickerInput.dispatchEvent(composingEnter));
+    await flushAsyncWork();
+    assert.equal(chosenActionItem, null, "Enter confirming IME text must not select the highlighted resource");
+    assert.equal(composingEnter.defaultPrevented, false, "the IME keeps its native text-confirmation behavior");
+    assert.equal(actionPickerInput.disabled, false, "composition must leave the picker available for continued search");
+    assert.equal(actionPickerRequests.some((path) => path.startsWith("/v1/entities/action-item-picker-1?")), false, "IME confirmation must not fetch a resource for selection");
+    await act(async () => actionPickerInput.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
     await flushAsyncWork();
     assert.ok(chosenActionItem);
     assert.equal(chosenActionItem.actionItemColor, "red", "selection hydrates the authoritative Action Item Color field");

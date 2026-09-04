@@ -147,6 +147,9 @@ func (r *PostgresRepo) MoveLogicGateNodeAssignment(input LogicGateNodeAssignment
 	if err := lockProcessStepsTx(ctx, tx, input.CompanyID, input.LogicGateID); err != nil {
 		return LogicGateNodeAssignmentResult{}, err
 	}
+	if err := requireNodeWorkPreconditionTx(ctx, tx, input.CompanyID, input.NodeID, input.ExpectedNodeWork); err != nil {
+		return LogicGateNodeAssignmentResult{}, err
+	}
 	var nodeID string
 	if err = tx.QueryRowContext(ctx, `select node_id::text from nodes where company_id=$1::uuid and node_id=$2::uuid for update`, input.CompanyID, input.NodeID).Scan(&nodeID); errors.Is(err, sql.ErrNoRows) {
 		return LogicGateNodeAssignmentResult{}, ErrNotFound

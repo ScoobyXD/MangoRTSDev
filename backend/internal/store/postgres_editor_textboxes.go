@@ -437,6 +437,14 @@ func commitPostgresEditorTextboxDocument(r *PostgresRepo, input EditorJSONCommit
 		return EditorJSONCommit{}, err
 	}
 	defer tx.Rollback()
+	if input.ExpectedNodeWork != nil {
+		if input.Document.ResourceType != EntityTypeNode {
+			return EditorJSONCommit{}, ErrVersionConflict
+		}
+		if err := requireNodeWorkPreconditionTx(ctx, tx, input.Document.CompanyID, input.Document.ResourceID, input.ExpectedNodeWork); err != nil {
+			return EditorJSONCommit{}, err
+		}
+	}
 	if err := requirePostgresEditorJSONFormatTx(ctx, tx, input.Document.CompanyID); err != nil {
 		return EditorJSONCommit{}, err
 	}
