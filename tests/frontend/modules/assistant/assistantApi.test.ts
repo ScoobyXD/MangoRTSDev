@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { APIHTTPError, requestJSON } from "../../../../frontend/src/modules/api/requestJSON.js";
-import { assistantErrorMessage, assistantHistoryError, consumeAssistantStream, streamAssistantChat, type AssistantEvent } from "../../../../frontend/src/modules/assistant/assistantApi.js";
+import {
+  ASSISTANT_DEFAULT_REASONING_EFFORT, assistantErrorMessage, assistantHistoryError, consumeAssistantStream,
+  isAssistantReasoningEffort, streamAssistantChat, type AssistantEvent,
+} from "../../../../frontend/src/modules/assistant/assistantApi.js";
 
 function streamResponse(chunks: Uint8Array[]): Response {
   return new Response(new ReadableStream({ start(controller) { chunks.forEach((chunk) => controller.enqueue(chunk)); controller.close(); } }), {
@@ -36,16 +39,23 @@ test("assistant sends a company-scoped request once and never repeats an uncerta
     assert.equal(new Headers(init?.headers).get("Accept"), "text/event-stream");
     const body = JSON.parse(String(init?.body));
     assert.match(body.request_id, /^[0-9a-f-]{36}$/);
+    assert.equal(body.reasoning_effort, "xhigh");
     assert.deepEqual(body.messages, [{ role: "user", content: "Create a process" }]);
-    assert.deepEqual(Object.keys(body).sort(), ["messages", "request_id"]);
+    assert.deepEqual(Object.keys(body).sort(), ["messages", "reasoning_effort", "request_id"]);
     throw new Error("connection lost after server accepted request");
   };
   try {
-    await assert.rejects(streamAssistantChat("https://api.example.test", "company-a", [{ role: "user", content: "Create a process" }], new AbortController().signal, () => undefined));
+    await assert.rejects(streamAssistantChat("https://api.example.test", "company-a", [{ role: "user", content: "Create a process" }], "xhigh", new AbortController().signal, () => undefined));
     assert.equal(requests, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("assistant exposes only the product reasoning choices and defaults to medium", () => {
+  assert.equal(ASSISTANT_DEFAULT_REASONING_EFFORT, "medium");
+  for (const effort of ["low", "medium", "high", "xhigh", "max"]) assert.equal(isAssistantReasoningEffort(effort), true);
+  for (const effort of ["", "none", "minimal", "MEDIUM", "ultra"]) assert.equal(isAssistantReasoningEffort(effort), false);
 });
 
 test("the shared request timeout stays active while its stream body is consumed", async () => {

@@ -57,8 +57,9 @@ type assistantMessage struct {
 }
 
 type assistantRequest struct {
-	RequestID string             `json:"request_id"`
-	Messages  []assistantMessage `json:"messages"`
+	RequestID       string             `json:"request_id"`
+	ReasoningEffort string             `json:"reasoning_effort"`
+	Messages        []assistantMessage `json:"messages"`
 }
 
 type assistantEvent struct {
@@ -179,7 +180,7 @@ func (s *Server) handleAssistantChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func validAssistantRequest(request assistantRequest) bool {
-	if !isUUIDText(request.RequestID) || len(request.Messages) == 0 || len(request.Messages) > 24 {
+	if !isUUIDText(request.RequestID) || !validAssistantReasoningEffort(request.ReasoningEffort) || len(request.Messages) == 0 || len(request.Messages) > 24 {
 		return false
 	}
 	total := 0
@@ -195,6 +196,15 @@ func validAssistantRequest(request assistantRequest) bool {
 		total += size
 	}
 	return total <= 48000 && request.Messages[len(request.Messages)-1].Role == "user"
+}
+
+func validAssistantReasoningEffort(effort string) bool {
+	switch effort {
+	case "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
 }
 
 // These short-lived receipts prevent in-process double sends, including after a lost
@@ -249,7 +259,8 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 			Model: s.assistant.model, Instructions: openai.String(assistantInstructions),
 			Input: responses.ResponseNewParamsInputUnion{OfInputItemList: input}, Tools: assistantTools(),
 			Store: openai.Bool(false), ParallelToolCalls: openai.Bool(false), MaxOutputTokens: openai.Int(4096),
-			Include: []responses.ResponseIncludable{"reasoning.encrypted_content"},
+			Reasoning: responses.ReasoningParam{Effort: responses.ReasoningEffort(request.ReasoningEffort)},
+			Include:   []responses.ResponseIncludable{"reasoning.encrypted_content"},
 		})
 		var completed *responses.Response
 		var streamErr error

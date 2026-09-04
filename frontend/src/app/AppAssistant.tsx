@@ -2,12 +2,35 @@ import React, { useEffect, useLayoutEffect, useRef, useState, useSyncExternalSto
 import { addAuthTerminalFailureListener, getAuthSessionCacheGeneration, isTerminalAuthFailureActive } from "../auth/cognitoAuth.js";
 import { ACTIVE_COMPANY_CHANGED_EVENT, getActiveCompanyID } from "../auth/currentCompany.js";
 import {
-  ASSISTANT_MAX_MESSAGE_CHARS, ASSISTANT_STOP_MESSAGE, assistantErrorMessage, assistantHistoryError,
-  getAssistantStatus, streamAssistantChat, type AssistantMessage,
+  ASSISTANT_DEFAULT_REASONING_EFFORT, ASSISTANT_MAX_MESSAGE_CHARS, ASSISTANT_REASONING_EFFORTS,
+  ASSISTANT_STOP_MESSAGE, assistantErrorMessage, assistantHistoryError, getAssistantStatus,
+  isAssistantReasoningEffort, streamAssistantChat, type AssistantMessage, type AssistantReasoningEffort,
 } from "../modules/assistant/assistantApi.js";
 
 type Props = { apiBase: string; userID: string; bottomInset: number };
 type Turn = { question: string; reply: string; status: "running" | "complete" | "stopped" | "failed"; notice: string };
+const ASSISTANT_REASONING_STORAGE_KEY = "mangorts.assistant.reasoningEffort.v1";
+const ASSISTANT_REASONING_LABELS: Record<AssistantReasoningEffort, string> = {
+  low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum",
+};
+
+function loadReasoningEffort(): AssistantReasoningEffort {
+  try {
+    const saved = window.localStorage.getItem(ASSISTANT_REASONING_STORAGE_KEY);
+    if (saved && isAssistantReasoningEffort(saved)) return saved;
+  } catch {
+    // A blocked localStorage must not block chat.
+  }
+  return ASSISTANT_DEFAULT_REASONING_EFFORT;
+}
+
+function saveReasoningEffort(effort: AssistantReasoningEffort): void {
+  try {
+    window.localStorage.setItem(ASSISTANT_REASONING_STORAGE_KEY, effort);
+  } catch {
+    // The current session still uses the selected value.
+  }
+}
 
 function AssistantToggleIcon({ direction }: { direction: "up" | "down" }) {
   const path = direction === "up" ? "M5 15l7-7 7 7" : "M5 9l7 7 7-7";
@@ -32,7 +55,8 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [draft, setDraft] = useState("");
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [reasoningEffort, setReasoningEffort] = useState(loadReasoningEffort);
   const [running, setRunning] = useState(false);
   const activeRequest = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -94,7 +118,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
     const update = (changes: Partial<Turn>) => setTurns((current) => current.map((turn, turnIndex) => turnIndex === index ? { ...turn, ...changes } : turn));
     let reply = "";
     try {
-      await streamAssistantChat(apiBase, companyID, [...history, { role: "user", content: question }], controller.signal, (message) => {
+      await streamAssistantChat(apiBase, companyID, [...history, { role: "user", content: question }], reasoningEffort, controller.signal, (message) => {
         if (controller.signal.aborted) return;
         if (message.type === "text") {
           reply += message.text;
@@ -170,6 +194,17 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
         </section>}
         <form className="mango-assistant-composer" onSubmit={(event) => { void send(event); }}>
           <input aria-label="Message Mango" placeholder={available === null ? "Checking Mango chat…" : "Ask Mango…"} value={draft} maxLength={ASSISTANT_MAX_MESSAGE_CHARS} disabled={!available || running} onChange={(event) => setDraft(event.currentTarget.value)} />
+          <label className="mango-assistant-reasoning">
+            <span>Reasoning</span>
+            <select aria-label="Reasoning effort" value={reasoningEffort} disabled={running} onChange={(event) => {
+              const effort = event.currentTarget.value;
+              if (!isAssistantReasoningEffort(effort)) return;
+              setReasoningEffort(effort);
+              saveReasoningEffort(effort);
+            }}>
+              {ASSISTANT_REASONING_EFFORTS.map((effort) => <option key={effort} value={effort}>{ASSISTANT_REASONING_LABELS[effort]}</option>)}
+            </select>
+          </label>
           {running
             ? <button type="button" className="mango-assistant-send" onClick={stop}>Stop</button>
             : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError)}>Send</button>}

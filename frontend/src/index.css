@@ -80,6 +80,18 @@
   color: inherit;
   font-size: 13px;
 }
+.mango-assistant-reasoning { display: flex; align-items: center; gap: 5px; color: #64748b; font-size: 11px; font-weight: 650; white-space: nowrap; }
+.mango-assistant-reasoning select {
+  height: 32px;
+  padding: 0 7px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 7px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  cursor: pointer;
+}
+.mango-assistant-reasoning select:disabled { opacity: 0.5; cursor: default; }
 
 .mango-assistant .mango-assistant-collapse,
 .mango-assistant .mango-assistant-expand {

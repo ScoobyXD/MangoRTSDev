@@ -20,7 +20,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     restores.push(() => { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete (globalThis as Record<string, unknown>)[name]; });
   }
   Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {}, getClientRects: () => [{ width: 100, height: 30 }] });
-  const requests: Array<{ url: string; body: { messages: Array<{ role: string; content: string }> }; signal: AbortSignal; stream: ReadableStreamDefaultController<Uint8Array> }> = [];
+  const requests: Array<{ url: string; body: { reasoning_effort: string; messages: Array<{ role: string; content: string }> }; signal: AbortSignal; stream: ReadableStreamDefaultController<Uint8Array> }> = [];
   const statusURLs: string[] = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
@@ -49,6 +49,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     {modal && <AppModalPortal onRequestClose={() => undefined}><section role="dialog" aria-label="Permissions"><input aria-label="Permission input" /></section></AppModalPortal>}
   </>);
   const input = () => container.querySelector<HTMLInputElement>('input[aria-label="Message Mango"]')!;
+  const reasoningSelect = () => container.querySelector<HTMLSelectElement>('select[aria-label="Reasoning effort"]')!;
   const form = () => container.querySelector("form")!;
   const assistantButton = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
   const send = async (content: string, duplicate = false) => {
@@ -65,6 +66,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
   try {
     resetTerminalAuthFailure();
     setActiveCompanyID("company-a");
+    dom.window.localStorage.setItem("mangorts.assistant.reasoningEffort.v1", "ultra");
     await act(async () => { render(); });
     assert.equal(input().disabled, false);
     const assistant = container.querySelector<HTMLElement>(".mango-assistant")!;
@@ -76,12 +78,20 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     const panel = dom.window.document.getElementById(panelID)!;
     const expandedRegion = panel.closest<HTMLDivElement>(".mango-assistant-expanded")!;
     const expandButton = assistantButton("Expand Mango chat");
-    assert.equal(collapseButton.getAttribute("aria-expanded"), "true");
+    assert.ok(dom.window.document.getElementById(panelID), "the controlled panel must remain mounted while hidden");
+    assert.equal(expandedRegion.hidden, true, "chat must start collapsed");
+    assert.equal(expandButton.hidden, false);
+    assert.equal(expandButton.getAttribute("aria-expanded"), "false");
+    await act(async () => { expandButton.click(); });
     assert.equal(expandedRegion.hidden, false);
     assert.equal(expandButton.hidden, true);
+    assert.equal(dom.window.document.activeElement, collapseButton, "expanding must focus the replacement control");
+    assert.equal(reasoningSelect().value, "medium", "invalid saved effort must fall back to medium");
+    assert.deepEqual(Array.from(reasoningSelect().options, (option) => option.value), ["low", "medium", "high", "xhigh", "max"]);
+    await act(async () => { reasoningSelect().value = "max"; Simulate.change(reasoningSelect()); });
+    assert.equal(dom.window.localStorage.getItem("mangorts.assistant.reasoningEffort.v1"), "max");
     await act(async () => { input().value = "Keep this draft"; Simulate.change(input()); });
     await act(async () => { collapseButton.click(); });
-    assert.ok(dom.window.document.getElementById(panelID), "the controlled panel must remain mounted while hidden");
     assert.equal(expandedRegion.hidden, true);
     assert.equal(expandButton.hidden, false);
     assert.equal(dom.window.document.activeElement, expandButton, "collapse must focus the replacement control");
@@ -92,6 +102,8 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     assert.equal(input().value, "Keep this draft", "collapsing chat must preserve its in-memory session");
     await send("List my processes", true);
     assert.equal(requests.length, 1);
+    assert.equal(requests[0].body.reasoning_effort, "max");
+    assert.equal(reasoningSelect().disabled, true, "the effort for a running Send must stay fixed");
     await act(async () => { assistantButton("Collapse Mango chat").click(); });
     assert.equal(requests[0].signal.aborted, false, "collapsing must not stop the active request");
     await emit(0, { type: "text", text: "<script>safe text</script>" });
@@ -122,6 +134,9 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     assert.doesNotMatch(container.textContent!, /List my processes|Partial write reply|Another read/);
     assert.equal(input().value, "");
     assert.match(statusURLs.at(-1)!, /company_id=company-b$/);
+    assert.equal(assistantButton("Expand Mango chat").hidden, false, "a new company session must start collapsed");
+    assert.equal(reasoningSelect().value, "max", "the valid browser choice must survive a session remount");
+    await act(async () => { assistantButton("Expand Mango chat").click(); });
     await send("Company B question");
     assert.match(requests[4].url, /company_id=company-b$/);
     assert.deepEqual(requests[4].body.messages, [{ role: "user", content: "Company B question" }]);
@@ -131,6 +146,9 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     await act(async () => { render("user-b"); });
     assert.equal(requests[5].signal.aborted, true);
     assert.doesNotMatch(container.textContent!, /Company B question/);
+    assert.equal(assistantButton("Expand Mango chat").hidden, false, "a new account session must start collapsed");
+    assert.equal(reasoningSelect().value, "max");
+    await act(async () => { assistantButton("Expand Mango chat").click(); });
     await send("User B question");
     await act(async () => { markTerminalAuthFailure("logout"); });
     assert.equal(requests[6].signal.aborted, true);

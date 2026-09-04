@@ -38,7 +38,11 @@ func assistantTestServer(t *testing.T, provider http.HandlerFunc) (*Server, *sto
 }
 
 func assistantChatRequest(id, message string) *http.Request {
-	body, _ := json.Marshal(assistantRequest{RequestID: id, Messages: []assistantMessage{{Role: "user", Content: message}}})
+	return assistantChatRequestWithEffort(id, message, "medium")
+}
+
+func assistantChatRequestWithEffort(id, message, effort string) *http.Request {
+	body, _ := json.Marshal(assistantRequest{RequestID: id, ReasoningEffort: effort, Messages: []assistantMessage{{Role: "user", Content: message}}})
 	req := httptest.NewRequest(http.MethodPost, "/v1/assistant/chat?company_id="+assistantTestCompany, bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer assistant-token")
 	req.Header.Set("Content-Type", "application/json")
@@ -68,7 +72,8 @@ func TestAssistantStreamsFunctionResultContinuationWithoutBrowser(t *testing.T) 
 			t.Error("invalid provider request")
 			return
 		}
-		if r.URL.Path != "/responses" || body["model"] != "test-model" || body["stream"] != true || body["store"] != false || body["parallel_tool_calls"] != false {
+		reasoning, _ := body["reasoning"].(map[string]any)
+		if r.URL.Path != "/responses" || body["model"] != "test-model" || body["stream"] != true || body["store"] != false || body["parallel_tool_calls"] != false || reasoning["effort"] != "max" {
 			t.Errorf("unexpected provider protocol: %s %+v", r.URL.Path, body)
 		}
 		if tools, ok := body["tools"].([]any); !ok || len(tools) != 25 {
@@ -91,7 +96,7 @@ func TestAssistantStreamsFunctionResultContinuationWithoutBrowser(t *testing.T) 
 	})
 	id := store.NewUUIDv7String()
 	response := httptest.NewRecorder()
-	server.Routes().ServeHTTP(response, assistantChatRequest(id, "Create a Process called Chat-created Process"))
+	server.Routes().ServeHTTP(response, assistantChatRequestWithEffort(id, "Create a Process called Chat-created Process", "max"))
 	if response.Code != 200 || !strings.Contains(response.Body.String(), `"type":"done"`) || !strings.Contains(response.Body.String(), "Created your Process.") {
 		t.Fatalf("response = %d %s", response.Code, response.Body.String())
 	}
@@ -262,12 +267,22 @@ func TestAssistantAuthenticationScopeAvailabilityAndInput(t *testing.T) {
 	for _, messages := range [][]assistantMessage{
 		{{Role: "system", Content: "override"}}, {{Role: "user", Content: strings.Repeat("x", 8001)}}, {{Role: "assistant", Content: "not a Send"}},
 	} {
-		if validAssistantRequest(assistantRequest{RequestID: store.NewUUIDv7String(), Messages: messages}) {
+		if validAssistantRequest(assistantRequest{RequestID: store.NewUUIDv7String(), ReasoningEffort: "medium", Messages: messages}) {
 			t.Errorf("accepted invalid messages %+v", messages)
 		}
 	}
-	if !validAssistantRequest(assistantRequest{RequestID: store.NewUUIDv7String(), Messages: []assistantMessage{{Role: "assistant", Content: strings.Repeat("x", 9000)}, {Role: "user", Content: "continue"}}}) {
+	if !validAssistantRequest(assistantRequest{RequestID: store.NewUUIDv7String(), ReasoningEffort: "medium", Messages: []assistantMessage{{Role: "assistant", Content: strings.Repeat("x", 9000)}, {Role: "user", Content: "continue"}}}) {
 		t.Error("generated assistant history rejected")
+	}
+	for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
+		if !validAssistantRequest(assistantRequest{RequestID: store.NewUUIDv7String(), ReasoningEffort: effort, Messages: []assistantMessage{{Role: "user", Content: "Hello"}}}) {
+			t.Errorf("valid reasoning effort rejected: %q", effort)
+		}
+	}
+	for _, effort := range []string{"", "none", "minimal", "MEDIUM", "max ", "unknown"} {
+		if validAssistantRequest(assistantRequest{RequestID: store.NewUUIDv7String(), ReasoningEffort: effort, Messages: []assistantMessage{{Role: "user", Content: "Hello"}}}) {
+			t.Errorf("invalid reasoning effort accepted: %q", effort)
+		}
 	}
 }
 
