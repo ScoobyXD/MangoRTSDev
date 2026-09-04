@@ -4,7 +4,7 @@
 
 Make the existing Process Map feel fast when loading, panning, zooming, hovering, selecting, dragging, and receiving updates. Priorities below are impact buckets, not a numbered ranking of individual tasks. P1 means potentially large impact, P2 medium impact, and P3 narrower impact. Actual improvement must be measured; these are not promises of a particular percentage or frame rate.
 
-The user authorized documenting every candidate here and implementing all three P1 items in the current worktree. P2, P3, and the unclassified backend investigation remain follow-up work. Do not merge, push, or open a PR without a separate user request.
+The user authorized documenting every candidate here and implementing all three performance P1 items in the current worktree. The user subsequently authorized adding the code-organization concerns below and merging the completed work into local main. Performance P2/P3, code-organization follow-ups, and the unclassified backend investigation remain unimplemented follow-up work. A push or pull request requires a separate user request.
 
 Investigation baseline: commit `c80d670b247d1220a626c89a5576082c601918a6`, branch `codex/investigate-process-map-performance0000844`. This document was written before implementation. Update the completion section after verification; keep the remaining candidates actionable for another agent.
 
@@ -96,6 +96,58 @@ Acceptance: camera-only updates move the pinned card without rerendering unchang
 `backend/internal/store/postgres_process_map.go` computes permission-safe whole-company scene bounds before tile loading can start. Its trace query joins endpoints and expands `jsonb_array_elements(trace.route_points)` to calculate route bounds for each tile; clipping then happens in Go. This can be expensive with many connectors, but no live query timings were collected.
 
 Measure the actual production-shaped scene and tile queries with a designated read-only credential and representative authorized data. A bare spatial predicate test that disables sequential scans does not prove the full permission/enrichment query is fast. Use full-query `EXPLAIN (ANALYZE, BUFFERS)` only in the permitted read-only workflow. Preserve source identities and geometry authority if indexes/query changes become justified; PostgreSQL development compatibility is 17.x. Do not apply migrations as an agent.
+
+## Code organization priorities (follow-up)
+
+These buckets describe the severity of maintenance concerns, independently of the performance-impact buckets above: P1 means a really bad problem, P2 a medium concern, and P3 a lower concern. This review found a coherent working update flow and a large concentration of responsibilities in `ProcessMapSurface.tsx`; it did not establish a broken architecture or justify replacing the current update system. At review time, the Surface module had 2,451 lines, 24 React state hooks, and 22 refs. Those counts describe its size, not proof that its behavior is wrong.
+
+### P1 — No confirmed items
+
+No confirmed concern from this organization review warrants the "really bad" bucket. Do not confuse this with the three implemented performance P1 items above.
+
+### P2 — Extract the map-data hook
+
+Move the existing scene loading, refresh queue, successful/failed save handling, reconciliation, temporary saved results, and protected-scope resets into a dedicated hook in the Process Map module, for example `useProcessMapData.ts`. Preserve the existing implementation and data contract while giving these related decisions one clear home. Keep `ProcessMapSurface.tsx` focused on connecting the canvas, interactions, and controls.
+
+Relevant starting points are `loadScene`, `requestCanonicalRefresh`, the realtime subscription, `refreshAfterMutation`, `applyEnvelope`, placement/trace/relationship save completion, `handleViewportLoad`, and `purgeProtectedScene`. The API module should continue to own requests and its bounded cache; the existing TileLayer adapter should continue to own renderer-specific tile scheduling, content, and sublayers. The hook coordinates accepted versions and results across those existing boundaries. Do not introduce a second refresh controller, generic state framework, copied business authority, or a wrapper that leaves the same coordination duplicated in Surface.
+
+Acceptance: Surface no longer owns the map-data lifecycle; local saves and remote changes still share one refresh queue; stale responses, overlapping saves, rollback, current tile coverage, permission resets, selection, camera, and pinned cards retain their existing behavior. The extraction must preserve the P1 operation-count and tile-reuse improvements.
+
+### P2 — Extract drawing builders
+
+Move ordinary tile drawing and selected/edit overlay construction into a separate module, for example `processMapLayers.ts`. Move their drawing-only types, constants, and helpers with them when that produces a clear boundary. Keep the existing `processMapGeometry.ts`, `processMapInteraction.ts`, `processMapTileLayer.ts`, and `ProcessMapQDCard.tsx` responsibilities intact. Avoid circular dependencies back into Surface.
+
+Relevant starting points are `renderTileSubLayers`, `editPlacementLayers`, `editTraceLayers`, `buildProcessMapSpatialLayers`, `composeProcessMapLayers`, and `buildProcessMapLayers`. Ordinary and selected objects intentionally have different controls, highlighting, masking, and drawing order; preserve those differences.
+
+Acceptance: Surface connects the existing canvas and controls while the drawing module builds layers from explicit inputs. Picking, LOD, Folder label clearance, cross-tile fragments, selected-object overlays, layer/data reference reuse, and ordinary/protected replacement behavior remain unchanged.
+
+### P3 — Small cleanup alongside extraction
+
+- Remove helpers confirmed to have no remaining production purpose after checking all callers. Review candidates include `snapProcessMapDimensions`, the now test-only `processMapDeepestContainingFolder`, and `postgresRequireMappedProcessMapParentTx`; recheck usage before deleting anything. Backend cleanup is a separate follow-up from the frontend extraction.
+- Share identical body/label/shape helpers where that reduces real duplication, while preserving intentional differences between ordinary and selected drawing. Do not force both paths into a configurable rendering framework.
+- Adjust tests that unnecessarily depend on a helper's exact filename, local name, or source position. Preserve business, security, and performance coverage; use the existing behavior tests to verify the extracted modules.
+
+### Existing update rules to preserve
+
+These are explanations of the current behavior, not proposed business-rule changes. The numbered laws in `docs/tests/process-map.md` remain authoritative.
+
+1. The backend owns confirmed saved geometry and relationships.
+2. An active drag displays a temporary preview immediately; a save response provides confirmed geometry.
+3. An older response must not overwrite a newer edit, and a failed operation must not clear another operation's preview.
+4. Successful saves and ordinary remote changes enter the same coalesced refresh path; an older successful save still requests validation when its overlay is superseded.
+5. Only server-certified unchanged tiles may advance to a newer read version without refetching; authorized previous coverage may remain visible while changed tiles load.
+6. Confirmed temporary results and deletion masks remain until current-version viewport coverage can replace them; later pans must not resurrect stale moved/deleted objects.
+7. Permission, actor, company, or protected-scope changes clear old protected data, cancel obsolete requests, and reject stale completions before replacement content is accepted.
+
+For example, dragging a Process from A to B shows B while the old downloaded tile still contains A. After the server confirms B, the temporary confirmed result keeps B visible and suppresses A until fresh tiles arrive. If the user starts a second move to C, the first save's late response must preserve that newer preview. These are temporary representations of one saved object, not separate business records. The current merge order already expresses downloaded content, then confirmed results awaiting fresh tiles, then active previews, with deletion masks suppressing stale content.
+
+### Clarifications and scope
+
+Automatic placement and manual placement intentionally differ. Frontend drag previews and backend saved geometry are both necessary and must agree on shared geometry rules. Selected and ordinary objects intentionally expose different controls. None of those differences alone is a cleanup defect.
+
+The Explorer observation was specific to the in-memory backend: `syncMemoryProcessMapParentToExplorerLocked` updates Folder/item records and `companyExplorerV2Edges`. That shows two representations being synchronized, but this review did not establish that either is obsolete or that production PostgreSQL has the same duplicate graph. Do not expand the module extraction into an Explorer relationship/schema redesign or a Memory/PostgreSQL rewrite without a separate investigation and task.
+
+Status: documented follow-up only. The current documentation-and-merge request does not implement these extractions. Implement them in working, behavior-preserving steps when requested, run the affected Process Map behavior/performance tests and frontend build, and keep the existing API/geometry/security contracts intact.
 
 ## Verification and future measurement
 
