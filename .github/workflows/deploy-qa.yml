@@ -3,6 +3,14 @@ name: Deploy MangoRTS QA
 on:
   workflow_dispatch:
     inputs:
+      stage:
+        description: Register bootstrap images or deploy the verified application
+        required: true
+        default: deploy
+        type: choice
+        options:
+          - bootstrap-images
+          - deploy
       expected_git_commit:
         description: Exact 40-character main commit approved for this run
         required: true
@@ -24,7 +32,8 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: qa
+    environment:
+      name: ${{ inputs.stage == 'deploy' && 'qa' || 'qa-bootstrap' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -78,6 +87,7 @@ jobs:
       - name: Write Terraform input vars
         working-directory: ${{ env.TF_DIR }}
         env:
+          QA_STAGE: ${{ inputs.stage }}
           TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
           TF_VPC_ID: ${{ vars.TF_VPC_ID }}
           TF_PUBLIC_SUBNET_IDS: ${{ vars.TF_PUBLIC_SUBNET_IDS }}
@@ -124,10 +134,32 @@ jobs:
           : "${TF_ORIGIN_VERIFY_SECRET:?Set QA GitHub secret ORIGIN_VERIFY_SECRET}"
           : "${TF_GITHUB_OIDC_PROVIDER_ARN:?Set QA GitHub variable TF_GITHUB_OIDC_PROVIDER_ARN to the existing account provider}"
 
-          if [[ "$TF_EMAIL_SCHEMA_MIGRATED" != "true" ]]; then
-            echo "QA application deployment requires TF_EMAIL_SCHEMA_MIGRATED=true after human schema initialization and verification." >&2
-            exit 1
-          fi
+          case "$QA_STAGE" in
+            bootstrap-images)
+              if [[ "$TF_EMAIL_SCHEMA_MIGRATED" != "false" ]]; then
+                echo "Set TF_EMAIL_SCHEMA_MIGRATED=false before registering bootstrap images." >&2
+                exit 1
+              fi
+              EFFECTIVE_BACKEND_DESIRED_COUNT=0
+              EFFECTIVE_EMAIL_SCHEMA_MIGRATED=false
+              EFFECTIVE_EMAIL_WORKER_ENABLED=false
+              EFFECTIVE_EMAIL_SCHEDULE_ENABLED=false
+              ;;
+            deploy)
+              if [[ "$TF_EMAIL_SCHEMA_MIGRATED" != "true" ]]; then
+                echo "QA application deployment requires TF_EMAIL_SCHEMA_MIGRATED=true after human schema initialization and verification." >&2
+                exit 1
+              fi
+              EFFECTIVE_BACKEND_DESIRED_COUNT=1
+              EFFECTIVE_EMAIL_SCHEMA_MIGRATED=true
+              EFFECTIVE_EMAIL_WORKER_ENABLED="$TF_EMAIL_WORKER_ENABLED"
+              EFFECTIVE_EMAIL_SCHEDULE_ENABLED="$TF_EMAIL_SCHEDULE_ENABLED"
+              ;;
+            *)
+              echo "Unknown QA workflow stage: $QA_STAGE" >&2
+              exit 1
+              ;;
+          esac
 
           if [[ ! "$TF_DATABASE_ENGINE_VERSION" =~ ^17([.][0-9]+)?$ ]]; then
             echo "TF_DATABASE_ENGINE_VERSION must remain on PostgreSQL 17.x." >&2
@@ -161,11 +193,11 @@ jobs:
             echo "TF_NYLAS_WEBHOOK_SECRET_ARN requires the complete QA Nylas configuration." >&2
             exit 1
           fi
-          if [[ "$TF_EMAIL_WORKER_ENABLED" == "true" && "$NYLAS_CONFIGURED_COUNT" != "3" ]]; then
+          if [[ "$EFFECTIVE_EMAIL_WORKER_ENABLED" == "true" && "$NYLAS_CONFIGURED_COUNT" != "3" ]]; then
             echo "The QA email worker requires the complete QA Nylas configuration." >&2
             exit 1
           fi
-          if [[ "$TF_EMAIL_WORKER_ENABLED" == "true" && "$TF_REALTIME_VALKEY_ENABLED" != "true" ]]; then
+          if [[ "$EFFECTIVE_EMAIL_WORKER_ENABLED" == "true" && "$TF_REALTIME_VALKEY_ENABLED" != "true" ]]; then
             echo "The QA email worker requires TF_REALTIME_VALKEY_ENABLED=true." >&2
             exit 1
           fi
@@ -206,10 +238,10 @@ jobs:
           backend_image_uri = ""
           migration_image_uri = ""
           deploy_revision = $(json_string "$GITHUB_SHA")
-          backend_desired_count = 1
-          email_sqs_database_migration_complete = true
-          email_worker_enabled = $TF_EMAIL_WORKER_ENABLED
-          email_reconciliation_schedule_enabled = $TF_EMAIL_SCHEDULE_ENABLED
+          backend_desired_count = $EFFECTIVE_BACKEND_DESIRED_COUNT
+          email_sqs_database_migration_complete = $EFFECTIVE_EMAIL_SCHEMA_MIGRATED
+          email_worker_enabled = $EFFECTIVE_EMAIL_WORKER_ENABLED
+          email_reconciliation_schedule_enabled = $EFFECTIVE_EMAIL_SCHEDULE_ENABLED
           realtime_valkey_enabled = $TF_REALTIME_VALKEY_ENABLED
           default_company_id = $(json_string "$TF_QA_COMPANY_ID")
           email_from_address = $(json_string "$TF_EMAIL_FROM_ADDRESS")
@@ -262,7 +294,7 @@ jobs:
           set -euo pipefail
           ECR_REPOSITORY_URL="$(terraform output -raw backend_ecr_repository_url 2>/dev/null || true)"
           if [[ -z "$ECR_REPOSITORY_URL" ]]; then
-            echo "The reviewed QA foundation must exist before the QA deployment runs." >&2
+            echo "The reviewed QA foundation must exist before either image workflow stage runs." >&2
             exit 1
           fi
           echo "ECR_REPOSITORY_URL=$ECR_REPOSITORY_URL" >> "$GITHUB_ENV"
@@ -333,6 +365,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Build frontend
+        if: inputs.stage == 'deploy'
         working-directory: frontend
         env:
           VITE_API_BASE_URL: ${{ env.APP_URL }}
@@ -359,12 +392,14 @@ jobs:
           fi
 
       - name: Publish frontend
+        if: inputs.stage == 'deploy'
         run: |
           aws s3 sync frontend/dist "s3://${FRONTEND_BUCKET}" --delete
           INVALIDATION_ID="$(aws cloudfront create-invalidation --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --paths "/*" --query 'Invalidation.Id' --output text)"
           aws cloudfront wait invalidation-completed --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" --id "$INVALIDATION_ID"
 
       - name: Post-deploy smoke tests
+        if: inputs.stage == 'deploy'
         run: |
           set -euo pipefail
           tmp_body="$(mktemp)"
@@ -406,6 +441,7 @@ jobs:
           [[ "$(cat "$tmp_body")" == "qa-deploy-smoke" ]]
 
       - name: Deployment summary
+        if: inputs.stage == 'deploy'
         run: |
           {
             echo "## MangoRTS QA deploy"
@@ -419,6 +455,23 @@ jobs:
             echo "- Nylas callback: ${NYLAS_CALLBACK_URL}"
             echo "- Nylas webhook: ${NYLAS_WEBHOOK_URL}"
             echo "- One-off migration task (never auto-run): ${MIGRATION_TASK_DEFINITION_ARN}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bootstrap image summary
+        if: inputs.stage == 'bootstrap-images'
+        run: |
+          {
+            echo "## MangoRTS QA bootstrap images registered"
+            echo ""
+            echo "- Revision: ${GITHUB_SHA}"
+            echo "- API image: ${IMAGE_URI}"
+            echo "- Migration image: ${MIGRATION_IMAGE_URI}"
+            echo "- Human-triggered one-time copy image: ${QA_COPY_IMAGE_URI}"
+            echo "- API desired count: 0"
+            echo "- Email worker: disabled"
+            echo "- Database schema confirmation: false"
+            echo "- One-off migration task (never auto-run): ${MIGRATION_TASK_DEFINITION_ARN}"
+            echo "- Next step: a human runs the guarded database audit/bootstrap/audit sequence"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove runner-local Terraform secret material

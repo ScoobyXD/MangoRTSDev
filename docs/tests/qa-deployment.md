@@ -1,5 +1,5 @@
 # QA Deployment Laws
 
-1. Every successful QA deployment workflow run must deploy the exact approved commit under the `qa` GitHub Environment.
-2. The QA deployment workflow must publish the frontend and pass post-deployment smoke tests before it may report success.
-3. Database bootstrap remains a separate human-controlled operation and must not be exposed as a successful QA deployment workflow mode.
+1. A successful verified application deployment must use the `qa` GitHub Environment.
+2. A bootstrap-image run must use the `qa-bootstrap` GitHub Environment and must never report a deployment to `qa`.
+3. The `qa` and `qa-bootstrap` GitHub Environments must each provide the variables and secrets required by their selected workflow stage.

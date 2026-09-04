@@ -79,12 +79,13 @@ the explicit override `-mode schema -baseline-migrations`. The guarded helper ma
 target only the stable QA database or a timestamped `mangorts_qa_next_*` database
 on this same RDS instance. The task uses the same private subnets, ECS security
 group, and fixed customer-managed password secret as the API.
-The initial QA bootstrap is complete. `deploy-qa.yml` is now deployment-only: it
-requires `TF_EMAIL_SCHEMA_MIGRATED=true`, starts the API, publishes the frontend,
-and runs application smoke tests. It does not expose an image-registration-only
-mode. Rebuilding a brand-new QA database remains a separately reviewed human
-infrastructure and database operation using the guarded migration task described
-above; it must not be reported as a successful QA application deployment.
+After the infrastructure-only apply creates ECR, set
+`TF_EMAIL_SCHEMA_MIGRATED=false` and run `deploy-qa.yml` with stage
+`bootstrap-images`. That explicit stage builds and pushes immutable backend and
+migration images, registers both task definitions, and forces API desired count
+zero, worker disabled, and schema confirmation false. It stops without publishing
+the frontend or running application smoke tests. A human can then run the guarded
+database audit/bootstrap/audit sequence with the reported migration task ARN.
 The current one-time copy foundation restores the full Dev schema objects and
 data into one fresh timestamped, inactive database on the QA RDS instance,
 omitting only ownership and grants through the required restore flags. It does not
@@ -94,8 +95,8 @@ or replace the stable `mangorts_qa` database; see
 
 Only after a later approved phase adds verification and cutover may an operator set
 `TF_EMAIL_SCHEMA_MIGRATED=true`, explicitly keep
-`TF_EMAIL_WORKER_ENABLED=false`, and run `deploy-qa.yml` for the base site.
-Configure the separate QA Nylas app and secret ARNs later. The
+`TF_EMAIL_WORKER_ENABLED=false`, and run `deploy-qa.yml` with stage `deploy` for
+the base site. Configure the separate QA Nylas app and secret ARNs later. The
 workflow rejects a worker deploy unless the schema, image, Nylas core
 configuration, and Valkey dependencies are complete. QA uses Mango's normal
 outbound behavior once the worker is deliberately enabled, so authorized users
