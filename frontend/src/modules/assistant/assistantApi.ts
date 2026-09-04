@@ -2,6 +2,9 @@ import { APIHTTPError, isTerminalAuthFailureError, requestJSON } from "../api/re
 import { RealtimeMutationBlockedError } from "../realtime/realtimeHealth.js";
 
 export type AssistantMessage = { role: "user" | "assistant"; content: string };
+export const ASSISTANT_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
+export type AssistantReasoningEffort = typeof ASSISTANT_REASONING_EFFORTS[number];
+export const ASSISTANT_DEFAULT_REASONING_EFFORT: AssistantReasoningEffort = "medium";
 export type AssistantEvent =
   | { type: "text"; text: string }
   | { type: "tool"; name: string; status: "running" | "completed" }
@@ -11,6 +14,10 @@ export type AssistantEvent =
 export const ASSISTANT_MAX_MESSAGE_CHARS = 8_000;
 export const ASSISTANT_STOP_MESSAGE = "Stopped. Changes already completed in Mango may remain.";
 const STREAM_ERROR = "The reply was interrupted. Check Mango before repeating a request that changes data.";
+
+export function isAssistantReasoningEffort(value: string): value is AssistantReasoningEffort {
+  return (ASSISTANT_REASONING_EFFORTS as readonly string[]).includes(value);
+}
 
 export function assistantHistoryError(messages: AssistantMessage[]): string {
   if (messages.length > 24 || messages.reduce((total, message) => total + message.content.length, 0) > 48_000) {
@@ -27,6 +34,7 @@ export async function streamAssistantChat(
   apiBase: string,
   companyID: string,
   messages: AssistantMessage[],
+  reasoningEffort: AssistantReasoningEffort,
   signal: AbortSignal,
   onEvent: (event: AssistantEvent) => void,
 ): Promise<void> {
@@ -34,7 +42,7 @@ export async function streamAssistantChat(
   if (historyError) throw new Error(historyError);
   await requestJSON(apiBase, `/v1/assistant/chat?company_id=${encodeURIComponent(companyID)}`, {
     method: "POST",
-    json: { request_id: crypto.randomUUID(), messages },
+    json: { request_id: crypto.randomUUID(), reasoning_effort: reasoningEffort, messages },
     headers: { Accept: "text/event-stream" },
     signal,
     timeoutMs: 95_000,

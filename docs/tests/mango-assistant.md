@@ -23,6 +23,8 @@
 21. Expanded chat has one centered circular down-arrow control that collapses the entire chat surface to one centered circular up-arrow control; focus follows the replacement control, and expanding restores the same in-memory session.
 22. Mango chat is centered on the browser viewport regardless of app sidebar or canvas dimensions.
 23. The cloud-integrated local backend launcher loads the assistant model and OpenAI key from local environment, ignored dev tfvars, or the deployed DEV task without logging the key, and restores the caller's prior assistant environment after the backend exits; chat stays unavailable when either value is absent.
+24. Each Send selects exactly one reasoning effort from low, medium, high, xhigh, or max; the backend rejects every other value and applies the selected effort to every provider step in that Send.
+25. A new browser chat session starts collapsed; expanding it preserves the selected reasoning effort, which defaults to medium and remembers the last valid browser choice.
 
 ## Process story
 
