@@ -114,6 +114,17 @@ export type ProcessMapTileResponse = {
   byteLength: number;
 };
 
+export type ProcessMapTileVersion = Pick<ProcessMapTileResponse, "z" | "x" | "y" | "process_map_read_version">;
+export type ProcessMapChangesResponse = ProcessMapSceneResponse & {
+  validated_tiles: ProcessMapTileVersion[];
+  protected_geometry_changed: boolean;
+};
+export const PROCESS_MAP_MAX_VALIDATION_TILES = 512;
+
+export function processMapTileVersionKey(tile: ProcessMapTileVersion): string {
+  return `${tile.z}:${tile.x}:${tile.y}:${tile.process_map_read_version}`;
+}
+
 export type ProcessMapMutationEnvelope = {
   placements: ProcessMapCommittedPlacement[];
   traces: ProcessMapCommittedTrace[];
@@ -591,6 +602,78 @@ export function fetchProcessMapTile(
   return subscribeInflight(entry, signal, cloneTile);
 }
 
+export async function fetchProcessMapChanges(
+  apiBase: string,
+  companyID: string,
+  sinceVersion: number,
+  tiles: readonly ProcessMapTileVersion[],
+  signal?: AbortSignal,
+): Promise<ProcessMapChangesResponse> {
+  const submitted = tiles.slice(0, PROCESS_MAP_MAX_VALIDATION_TILES).map(({ z, x, y, process_map_read_version }) => ({ z, x, y, process_map_read_version }));
+  const value = await requestJSON<unknown>(apiBase, "/v1/process-map/changes", {
+    method: "POST",
+    json: { company_id: companyID.trim(), since_version: sinceVersion, tiles: submitted },
+    signal,
+    // This POST is a read, including when realtime recovery blocks mutations.
+    allowDuringRealtimeDegraded: true,
+  });
+  if (!isRecord(value) || !Array.isArray(value.validated_tiles) || typeof value.protected_geometry_changed !== "boolean") {
+    throw new Error("invalid_process_map_changes");
+  }
+  const scene = normalizeScene(value);
+  if (scene.process_map_read_version < sinceVersion) throw new Error("stale_process_map_changes");
+  const candidates = new Set(submitted.map(processMapTileVersionKey));
+  const validated = value.validated_tiles.map((tile): ProcessMapTileVersion => {
+    if (!isRecord(tile)) throw new Error("invalid_process_map_validated_tile");
+    const result = {
+      z: requiredInteger(tile.z, "invalid_process_map_tile_zoom"),
+      x: requiredInteger(tile.x, "invalid_process_map_tile_x"),
+      y: requiredInteger(tile.y, "invalid_process_map_tile_y"),
+      process_map_read_version: requiredInteger(tile.process_map_read_version, "invalid_process_map_read_version"),
+    };
+    if (!candidates.delete(processMapTileVersionKey(result)) || result.process_map_read_version > scene.process_map_read_version) {
+      throw new Error("invalid_process_map_validated_tile");
+    }
+    return result;
+  });
+  if (value.protected_geometry_changed && validated.length) throw new Error("invalid_process_map_protected_validation");
+  return { ...scene, validated_tiles: validated, protected_geometry_changed: value.protected_geometry_changed };
+}
+
+// Promote old tile versions only when certified by the canonical read.
+// Already-current or newer cached responses do not need another certificate.
+export function applyProcessMapCacheValidation(apiBase: string, companyID: string, changes: ProcessMapChangesResponse): void {
+  if (changes.protected_geometry_changed) {
+    invalidateProcessMapReadCaches(apiBase, companyID);
+    return;
+  }
+  const prefix = cachePrefix(apiBase, companyID);
+  const version = changes.process_map_read_version;
+  const validated = new Set(changes.validated_tiles.map(processMapTileVersionKey));
+  const retained: Array<[string, CacheEntry<ProcessMapTileResponse>]> = [];
+  for (const [key, entry] of tileCache) {
+    if (!key.startsWith(prefix) || entry.response.process_map_read_version >= version) continue;
+    tileCache.delete(key);
+    tileCacheBytes -= entry.response.byteLength;
+    if (validated.has(processMapTileVersionKey(entry.response))) {
+      const parts = key.slice(prefix.length).split("\u0000");
+      const response = { ...entry.response, process_map_read_version: version };
+      retained.push([tileKey(apiBase, companyID, version, parts[1], response.z, response.x, response.y), { response }]);
+    }
+  }
+  for (const [key, entry] of retained) storeTileCache(key, entry);
+  for (const [key, entry] of tileInflight) {
+    if (!key.startsWith(prefix) || Number(key.slice(prefix.length).split("\u0000", 1)[0]) >= version) continue;
+    entry.cacheable = false;
+    tileInflight.delete(key);
+    entry.controller.abort();
+  }
+  const key = sceneKey(apiBase, companyID);
+  if ((sceneCache.get(key)?.response.process_map_read_version ?? -1) <= version) {
+    sceneCache.set(key, { response: normalizeScene(changes) });
+  }
+}
+
 export function invalidateProcessMapReadCaches(apiBase: string, companyID: string): void {
   const belongsToCompany = (key: string) => {
     const parts = key.split("\u0000");
@@ -649,7 +732,6 @@ async function committedMutation(
     headers: processMapMutationHeaders(apiBase, companyID),
   });
   const envelope = normalizeMutationEnvelope(payload);
-  invalidateProcessMapReadCaches(apiBase, companyID);
   return cloneEnvelope(envelope);
 }
 

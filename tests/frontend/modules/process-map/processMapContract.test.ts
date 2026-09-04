@@ -82,7 +82,6 @@ test("retired map and full-company relationship graph files remain absent", () =
 test("V3 Surface retains placement containment, Folder resize safety, owned traces, rollback, and permission-state disposal", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
 
-  assert.match(surface, /processMapDeepestContainingFolder\(processMapPlacementBounds\(placement\)/);
   assert.match(surface, /pending\.values\(\)\]\.some\(\(item\) => item\.grid_width < 1 \|\| item\.grid_height < 1\)/);
   assert.match(surface, /Folder resize was restored because its contents cannot be shrunk any further/);
   assert.match(surface, /const routePoints = defaultProcessMapRoutePoints\([\s\S]{0,220}postProcessMapRelationship\(apiBase, companyID, current\.source, target, routePoints\)/);
@@ -180,11 +179,8 @@ test("same-permission mutation reconciliation keeps loaded coverage and refreshe
   const refreshEnd = surface.indexOf("\n\n  const applyEnvelope", refreshStart);
   assert.ok(refreshStart >= 0 && refreshEnd > refreshStart);
   const refresh = surface.slice(refreshStart, refreshEnd);
-  assert.match(refresh, /setScene\(/);
-  assert.match(refresh, /loadScene\(false\)/);
   assert.doesNotMatch(refresh, /setLoadedTiles\(new Map\(\)\)/);
   assert.match(surface, /committedOverlay\.removedPlacementKeys/);
-  assert.match(surface, /tile\.layers = null/);
   assert.match(surface, /tile\.process_map_read_version === readVersion/);
   assert.match(surface, /for \(const affectedKey of removalPlacementKeys\) \{/);
   assert.match(surface, /removedPlacementKeys\.add\(affectedKey\)/);

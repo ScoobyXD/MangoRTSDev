@@ -148,20 +148,6 @@ export function scaleProcessMapPlacement(
   };
 }
 
-function folderDepth(folder: ProcessMapFolderGeometry, byID: ReadonlyMap<string, ProcessMapFolderGeometry>): number {
-  let depth = 0;
-  let current: ProcessMapFolderGeometry | undefined = folder;
-  const visited = new Set<string>();
-  while (current?.map_parent_folder_id) {
-    if (visited.has(current.resource_id)) return -1;
-    visited.add(current.resource_id);
-    current = byID.get(current.map_parent_folder_id);
-    if (!current) return depth;
-    depth += 1;
-  }
-  return depth;
-}
-
 function folderDescendsFrom(folder: ProcessMapFolderGeometry, ancestorID: string, byID: ReadonlyMap<string, ProcessMapFolderGeometry>): boolean {
   let parentID = folder.map_parent_folder_id;
   const visited = new Set<string>();
@@ -179,18 +165,45 @@ export function processMapDeepestContainingFolder<T extends ProcessMapFolderGeom
   folders: readonly T[],
   excludedFolderID?: string,
 ): T | null {
+  return processMapOrderFoldersForContainment(folders, excludedFolderID)
+    .find((folder) => processMapBoundsContain(processMapPlacementBounds(folder), finalBounds)) ?? null;
+}
+
+export function processMapOrderFoldersForContainment<T extends ProcessMapFolderGeometry>(
+  folders: readonly T[],
+  excludedFolderID?: string,
+): T[] {
   const byID = new Map(folders.map((folder) => [folder.resource_id, folder]));
+  const depths = new Map<string, number>();
+  for (const folder of folders) {
+    if (depths.has(folder.resource_id)) continue;
+    const path: string[] = [];
+    const visited = new Set<string>();
+    let current: T | undefined = folder;
+    let depth = -1;
+    let cyclic = false;
+    while (current) {
+      const known = depths.get(current.resource_id);
+      if (known !== undefined) { depth = known; cyclic = known < 0; break; }
+      if (visited.has(current.resource_id)) { cyclic = true; break; }
+      visited.add(current.resource_id);
+      path.push(current.resource_id);
+      current = current.map_parent_folder_id ? byID.get(current.map_parent_folder_id) : undefined;
+    }
+    for (let index = path.length - 1; index >= 0; index -= 1) {
+      depths.set(path[index], cyclic ? -1 : ++depth);
+    }
+  }
   return folders
     .filter((folder) => folder.resource_id !== excludedFolderID)
     .filter((folder) => !excludedFolderID || !folderDescendsFrom(folder, excludedFolderID, byID))
-    .filter((folder) => processMapBoundsContain(processMapPlacementBounds(folder), finalBounds))
     .sort((left, right) => {
-      const depthDelta = folderDepth(right, byID) - folderDepth(left, byID);
+      const depthDelta = depths.get(right.resource_id)! - depths.get(left.resource_id)!;
       if (depthDelta) return depthDelta;
       const leftArea = left.grid_width * left.grid_height;
       const rightArea = right.grid_width * right.grid_height;
       return leftArea - rightArea || left.resource_id.localeCompare(right.resource_id);
-    })[0] ?? null;
+    });
 }
 
 export function processMapPlacementLOD(

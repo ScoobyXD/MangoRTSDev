@@ -364,6 +364,10 @@ func (r *MemoryRepo) GetProcessMapScene(ctx context.Context, input ProcessMapSce
 	if !r.userHasCompanyMembershipLocked(companyID, permissionUserID) {
 		return domain.ProcessMapScene{}, ErrNotFound
 	}
+	return r.processMapSceneLocked(companyID, permissionUserID), nil
+}
+
+func (r *MemoryRepo) processMapSceneLocked(companyID, permissionUserID string) domain.ProcessMapScene {
 	var bounds *domain.ProcessMapBounds
 	for _, placement := range r.processMapPlacements {
 		if placement.CompanyID != companyID || !r.processMapResourceExistsLocked(companyID, placement.ResourceType, placement.ResourceID) {
@@ -388,7 +392,7 @@ func (r *MemoryRepo) GetProcessMapScene(ctx context.Context, input ProcessMapSce
 	return domain.ProcessMapScene{
 		Bounds: bounds, ProcessMapReadVersion: processVersion,
 		TileSize: ProcessMapTileSize, MinTileZoom: ProcessMapMinTileZoom, MaxTileZoom: ProcessMapMaxTileZoom,
-	}, nil
+	}
 }
 
 func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTileQuery) (domain.ProcessMapTile, error) {
@@ -902,6 +906,11 @@ func (r *MemoryRepo) PutProcessMapPlacement(ctx context.Context, input ProcessMa
 		eventInput.ActorUserID = input.ActorUserID
 		eventInputs = append(eventInputs, eventInput)
 	}
+	damageResources := make([]domain.ProcessMapResourceRef, 0, len(changedPlacements))
+	for _, placement := range changedPlacements {
+		damageResources = append(damageResources, domain.ProcessMapResourceRef{ResourceType: placement.ResourceType, ResourceID: placement.ResourceID})
+	}
+	r.attachProcessMapMutationDamageLocked(eventInputs, snapshot, input.CompanyID, damageResources, "")
 	events, err := r.appendDomainEventsLocked(eventInputs)
 	if err != nil {
 		return restore(err)
@@ -1009,6 +1018,7 @@ func (r *MemoryRepo) DeleteProcessMapPlacement(ctx context.Context, input Proces
 	explorerEvent := workspaceDomainEventInput(input.CompanyID, eventType, payload)
 	explorerEvent.ActorUserID = input.ActorUserID
 	eventInputs = append(eventInputs, explorerEvent)
+	r.attachProcessMapMutationDamageLocked(eventInputs, snapshot, input.CompanyID, []domain.ProcessMapResourceRef{{ResourceType: resourceType, ResourceID: input.ResourceID}}, "")
 	events, err := r.appendDomainEventsLocked(eventInputs)
 	if err != nil {
 		return restore(err)
@@ -1108,6 +1118,7 @@ func (r *MemoryRepo) CreateResourceOperationalRelationship(ctx context.Context, 
 	events := []domain.DomainEvent{}
 	var err error
 	if len(eventInputs) > 0 {
+		r.attachProcessMapMutationDamageLocked(eventInputs, snapshot, input.CompanyID, nil, relationship.ResourceOperationalRelationshipID)
 		events, err = r.appendDomainEventsLocked(eventInputs)
 		if err != nil {
 			return restore(err)
@@ -1151,7 +1162,9 @@ func (r *MemoryRepo) PutProcessMapTrace(ctx context.Context, input ProcessMapTra
 	events := []domain.DomainEvent{}
 	var err error
 	if changed {
-		events, err = r.appendDomainEventsLocked([]DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, processMapRelationshipEventPayload(relationship))})
+		eventInputs := []DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ProcessMapTraceSavedEvent, processMapRelationshipEventPayload(relationship))}
+		r.attachProcessMapMutationDamageLocked(eventInputs, snapshot, input.CompanyID, nil, relationship.ResourceOperationalRelationshipID)
+		events, err = r.appendDomainEventsLocked(eventInputs)
 		if err != nil {
 			return restore(err)
 		}
@@ -1190,7 +1203,9 @@ func (r *MemoryRepo) DeleteResourceOperationalRelationship(ctx context.Context, 
 	}
 	delete(r.processMapTraces, relationshipKey)
 	delete(r.resourceOperationalRelationships, relationshipKey)
-	events, err := r.appendDomainEventsLocked([]DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipDeletedEvent, processMapRelationshipEventPayload(relationship))})
+	eventInputs := []DomainEventInput{processMapMutationEventInput(input.CompanyID, input.ActorUserID, input.RealtimeConnectionID, ResourceOperationalRelationshipDeletedEvent, processMapRelationshipEventPayload(relationship))}
+	r.attachProcessMapMutationDamageLocked(eventInputs, snapshot, input.CompanyID, nil, relationship.ResourceOperationalRelationshipID)
+	events, err := r.appendDomainEventsLocked(eventInputs)
 	if err != nil {
 		return restore(err)
 	}

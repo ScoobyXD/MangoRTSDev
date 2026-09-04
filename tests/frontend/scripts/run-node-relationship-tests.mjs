@@ -153,6 +153,18 @@ const componentTests = [
     processMapComponentHarness: true,
   },
   {
+    source: resolve(repoRoot, "tests/frontend/modules/process-map/processMapPerformance.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/process-map/processMapPerformance.test.cjs"),
+    bundleDependencies: true,
+    processMapComponentHarness: true,
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/process-map/processMapChanges.test.ts"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/process-map/processMapChanges.test.cjs"),
+    bundleDependencies: true,
+    processMapComponentHarness: true,
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/communications/EmailQuotedHistory.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/communications/EmailQuotedHistory.test.js"),
   },
