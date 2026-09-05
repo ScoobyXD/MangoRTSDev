@@ -54,7 +54,7 @@ So don't mess it up PLEASE
 
 - Backend: `backend/` — Go module `miraeopus/backend`, Go 1.23.x.
 - Frontend: `frontend/` — Vite/React app. There is no root `package.json`; do not run `npm install` from repo root.
-- Full test runner: `scripts/run_all_tests.mjs`.
+- Full test runner: `scripts/run_all_tests.mjs`. Disabled for local merges by default; its existence is not an instruction to run it.
 - Cloud-integrated local backend helper: `scripts/start_local_cognito_backend.ps1`.
 
 ## Windows execution and sandbox defaults
@@ -92,17 +92,21 @@ This launcher/worker behavior should be driven from Jonat's natural-language req
 
 ### Explicit integration only
 
+By default, disable all merge-time tests, builds, and verification helpers. Local integration is limited to Git merge operations, checking for merge conflicts, resolving them, and reporting the result. Ignore previous full-verification requirements and generated helper commands for now. Only an explicit request from Jonat to run specific checks overrides this default.
+
+Do not invoke `scripts/merge_worker_branch.ps1`, `scripts/integrate_worker_branch.ps1`, `scripts/batch_integrate_worker_branches.ps1`, `scripts/fast_verify.ps1`, or `scripts/run_all_tests.mjs` as part of a local merge. Do not run frontend tests, production builds, backend tests, disposable PostgreSQL fixtures, schema validation, infrastructure tests, dependency installation, or any other suite or task as part of merging. This also applies after conflict resolution or a merge-time fix. Keep existing test files and helpers available for separately requested work; do not substitute another verification command or launch a verification task.
+
 Only when Jonat explicitly asks to merge or integrate a completed worker into local `main`:
 
 1. Review the worker diff, exclude unrelated changes, and ensure every intended worker change is committed.
-2. From `C:\Users\Jonat\MangoRTSDev`, run `scripts\merge_worker_branch.ps1` for that worker with `-CommitWorkerChanges` and `-Verification Full`; let the helper resolve the worker branch from `-WorkerPath`. BUT THIS CAN BE IGNORED IF I GIVE SPECIFIC INSTRUCTIONS TO IGNORE.
+2. From `C:\Users\Jonat\MangoRTSDev`, use Git directly to merge the worker branch into local `main`. Do not use a merge helper or run tests or builds.
 3. Resolve any merge conflicts or integration failures while preserving both current `main` behavior and the worker's intended product behavior.
-4. After every merge-time fix, rerun `node scripts\run_all_tests.mjs` on merged `main` and do not finish until the complete verification gate passes.
-5. Report the worker path and branch, worker commit SHA, merge commit SHA, verification result, final `git status --short --branch`, and any conflict-resolution or post-merge fixes separately.
+4. After conflict resolution or a merge-time fix, finish the Git merge and check for unresolved conflicts. Do not run any verification suite.
+5. Report the worker path and branch, worker commit SHA, merge commit SHA, `Tests/builds: not run (disabled for local merges)`, final `git status --short --branch`, and any conflict-resolution or post-merge fixes separately.
 6. Every merge completion report must prominently and unambiguously include all of the following, based on inspection of the merged diff:
    - `Backend changes: yes` or `Backend changes: no`. When yes, identify the backend files or subsystems changed and summarize the behavioral effect.
    - `Database/schema changes: yes` or `Database/schema changes: no`. When yes, identify every migration, canonical schema, seed, or database-contract change and state any required human-run migration or rollout action.
-   - `Merge conflicts: none` when there were no conflicts. When conflicts occurred, identify every conflicted file, explain the competing changes or exact problem, describe precisely how each conflict was resolved and why that resolution preserves both current `main` behavior and the worker's intent, and report the verification run after resolution.
+   - `Merge conflicts: none` when there were no conflicts. When conflicts occurred, identify every conflicted file, explain the competing changes or exact problem, and describe precisely how each conflict was resolved and why that resolution preserves both current `main` behavior and the worker's intent. Do not run tests or builds after resolution unless Jonat explicitly requests them.
 7. Do not push the worker branch or `main` unless Jonat explicitly asks for a push.
 
 ## Local development commands
