@@ -244,6 +244,8 @@
 242. Child and unrelated animation events MUST NOT finish a Process exit.
 243. Saving a Process draft MUST keep the saved Process focused.
 244. Enabling reduced motion or hiding the Page MUST immediately finish any pending Process exit.
+245. Step traces and connection previews MUST use the Node icon's light cyan-to-blue gradient without arrowheads.
+246. Hovering or selecting a Step trace MUST preserve its gradient while making the trace more visible.
 Last updated: 2026-09-04
 
 # Process Story: One company canvas moves from overview to Process work
