@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { test } from 'node:test';
-import { AI_ROOT, inspectable, LIMITS, runInteraction } from './runtime.mjs';
+import { inspectable, LIMITS, runInteraction } from './runtime.mjs';
 import { PROVIDER_RESPONSE_MAX_BYTES, validateResponse } from './response-validation.mjs';
 
 const functionTool = name => ({ type: 'function', name, description: `Fixture ${name}`, parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false } });
@@ -71,7 +71,7 @@ test('real Pi captures exact initial and continuation HTTP bodies, complete nati
   assert.match(JSON.stringify(f.requests[0]), /Cloud Bakery/);
   assert.match(JSON.stringify(f.requests[0]), /available_skills/);
   assert.match(f.captured.find(e => e.kind === 'runtime').data.effective_system_prompt, /<location>skills\/mango-process\/SKILL\.md<\/location>/);
-  assert.deepEqual(f.requests[0].tools.find(tool => tool.name === 'read').parameters.properties.path.enum, ['AGENTS.md', 'skills/mango-process/SKILL.md']);
+  assert.deepEqual(f.requests[0].tools.find(tool => tool.name === 'read').parameters.properties.path.enum, ['AGENTS.md', 'skills/mango-process/SKILL.md', 'skills/mango-node-chat/SKILL.md']);
   assert.equal(f.captured.filter(e => e.kind === 'skill_load').length, 1);
   assert.match(JSON.stringify(f.requests[1]), /Work with a saved Mango Process/);
   assert.match(JSON.stringify(f.requests[2]), /A saved written simulation/);
@@ -79,6 +79,22 @@ test('real Pi captures exact initial and continuation HTTP bodies, complete nati
   assert.deepEqual(f.requests[0].tools.map(tool => tool.name).sort(), ['fixture_write', 'read']);
   assert.doesNotMatch(JSON.stringify(f.captured), /fixture-credential-never-in-trace|SACRED COMMANDMENTS|prod Route53/);
   assert.equal(f.emitted.map(e => e.text).join(''), 'Saved a written simulation.');
+});
+
+test('Pi loads the advertised Node chat skill before dispatching a message action', async t => {
+  const f = await fixture(t, (response, call) => reply(response, call === 1
+    ? [toolItem('read', { path: f.captured.find(e => e.kind === 'runtime').data.skills.find(skill => skill.name === 'mango-node-chat').filePath })]
+    : call === 2 ? [toolItem('fixture_write', { text: 'The requested Node chat.' }, 'call_2')]
+    : [textItem('Posted the requested Node chat.')]));
+  await runInteraction(f.start, f.transport);
+  const runtime = f.captured.find(e => e.kind === 'runtime').data;
+  assert.match(runtime.effective_system_prompt, /<location>skills\/mango-node-chat\/SKILL\.md<\/location>/);
+  assert.deepEqual(runtime.skills.map(skill => skill.name).sort(), ['mango-node-chat', 'mango-process']);
+  const load = f.captured.find(e => e.kind === 'skill_load');
+  assert.match(load.data.content, /send_process_node_chat/);
+  assert.match(JSON.stringify(f.requests[1]), /urgent_user_ids/);
+  assert.equal(f.dispatches.length, 1);
+  assert.equal(f.captured.at(-1).status, 'completed');
 });
 
 test('discussion has no mutations and differently named/changed Process content reaches the provider', async t => {
@@ -185,8 +201,7 @@ test('slash skill syntax remains user text; unknown files are not discovered', a
   assert.match(JSON.stringify(f.requests[0]), /\/skill:mango-process literal customer text/);
   assert.equal(f.captured.filter(e => e.kind === 'skill_load').length, 0);
   const runtime = f.captured.find(e => e.kind === 'runtime');
-  assert.equal(runtime.data.skills.length, 1);
-  assert.ok(runtime.data.skills[0].filePath.startsWith(AI_ROOT));
+  assert.deepEqual(runtime.data.skills.map(skill => skill.filePath).sort(), ['skills/mango-node-chat/SKILL.md', 'skills/mango-process/SKILL.md']);
 });
 
 test('security omissions identify opaque reasoning; known credential cannot enter context or trace', () => {

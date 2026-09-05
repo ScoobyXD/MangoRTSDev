@@ -714,6 +714,9 @@ func (r *PostgresRepo) addNodeInformation(input NodeInformationInput) (domain.No
 		return domain.NodeInformation{}, err
 	}
 	defer tx.Rollback()
+	if err := requireNodeWorkPreconditionTx(ctx, tx, input.CompanyID, input.NodeID, input.ExpectedNodeWork); err != nil {
+		return domain.NodeInformation{}, err
+	}
 
 	companyID := strings.TrimSpace(input.CompanyID)
 	nodeID := strings.TrimSpace(input.NodeID)

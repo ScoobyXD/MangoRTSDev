@@ -18,6 +18,7 @@
 !backend/internal/store/*.go
 !ai/AGENTS.md
 !ai/skills/mango-process/SKILL.md
+!ai/skills/mango-node-chat/SKILL.md
 !ai/runtime/package.json
 !ai/runtime/package-lock.json
 !ai/runtime/main.mjs

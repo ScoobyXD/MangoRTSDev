@@ -131,6 +131,28 @@ func (s *Server) handleCompanyUsersSubresource(w http.ResponseWriter, r *http.Re
 		if !requireCompanyAccess(w, r, companyID) {
 			return
 		}
+		if parseBoolQuery(r.URL.Query().Get("mentionable")) {
+			users, err := s.repo.ListMentionableCompanyUsers(companyID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed_to_list_mentionable_users")
+				return
+			}
+			query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+			matches := make([]map[string]string, 0)
+			hasMore := false
+			for _, user := range users {
+				if query != "" && !strings.Contains(strings.ToLower(user.DisplayName+" "+user.Email), query) {
+					continue
+				}
+				if len(matches) == 50 {
+					hasMore = true
+					break
+				}
+				matches = append(matches, map[string]string{"user_id": user.UserID, "display_name": user.DisplayName, "email": user.Email})
+			}
+			writeJSONMaybeNotModified(w, r, http.StatusOK, map[string]any{"users": matches, "has_more": hasMore})
+			return
+		}
 		users, err := s.repo.ListCompanyUsers(companyID)
 		if err != nil {
 			log.Printf("failed to list company users company_id=%s: %v", companyID, err)

@@ -40,6 +40,8 @@ func assistantTools() []assistantFunctionTool {
 	optionalTextboxID := map[string]any{"type": []string{"string", "null"}, "minLength": 1, "maxLength": 128}
 	return []assistantFunctionTool{
 		assistantFunction("get_me", "Read the signed-in user and selected company membership.", map[string]any{}),
+		assistantChatUsersTool(),
+		assistantNodeChatTool(false),
 		assistantFunction("list_my_processes", "Read the signed-in user's assigned Processes in the selected company. Use this for 'my processes' or 'what processes am I assigned to'. Mango filters by current RACI assignments, including inherited and group assignments, and current Process access. Includes any R, A, C, or I role; does not scan only the first 50 company Processes.", map[string]any{}),
 		assistantFunction("list_processes", "Find visible Processes (canonical logic_gate resources); returns at most 50. Use query to narrow results.", map[string]any{"query": optionalText}),
 		assistantFunction("get_process", "Read one Process and its textbox IDs.", map[string]any{"process_id": id}),
@@ -80,7 +82,7 @@ func assistantFunction(name, description string, properties map[string]any) assi
 	}
 }
 
-// Validate the flat scalar inputs against the exact schema sent to the model.
+// Validate inputs against the exact schema sent to the model.
 // The ordinary handler remains responsible for all business validation.
 func assistantToolArguments(name, arguments string) (map[string]any, error) {
 	return assistantArgumentsForTools(assistantTools(), name, arguments)
@@ -120,6 +122,18 @@ func assistantArgumentsForTools(tools []assistantFunctionTool, name, arguments s
 		}
 		valid := false
 		switch kind {
+		case "array":
+			if values, ok := value.([]any); ok {
+				valid = len(values) <= property["maxItems"].(int)
+				seen := make(map[string]bool, len(values))
+				for _, value := range values {
+					id, ok := value.(string)
+					if !ok || !isCanonicalUUID(id) || seen[id] {
+						valid = false
+					}
+					seen[id] = true
+				}
+			}
 		case "string":
 			if str, ok := value.(string); ok {
 				valid = true
@@ -202,6 +216,17 @@ func (s *Server) dispatchAssistantOperation(r *http.Request, name string, args m
 	switch name {
 	case "get_me":
 		path, handler = "/v1/me", s.handleMe
+	case "list_chat_users":
+		path, handler = "/v1/companies/"+companyID+"/users", s.handleCompanySubresource
+		query.Set("mentionable", "true")
+		query.Set("q", str("query"))
+	case "send_node_chat":
+		information, err := s.assistantNodeChatInformation(call, args)
+		if err != nil {
+			return "", err
+		}
+		method, path, handler = http.MethodPost, "/v1/nodes/"+str("node_id")+"/information", s.handleNodeSubresource
+		body = map[string]any{"company_id": companyID, "information_id": operationID, "type": "Text block chat", "information": information}
 	case "list_my_processes":
 		path, handler = "/v1/logic-gates", s.handleLogicGates
 		query.Set("assigned_to_me", "true")

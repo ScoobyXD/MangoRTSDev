@@ -23,7 +23,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     restores.push(() => { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete (globalThis as Record<string, unknown>)[name]; });
   }
   Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {}, getClientRects: () => [{ width: 100, height: 30 }] });
-  const requests: Array<{ url: string; body: { request_id: string; reasoning_effort: string; messages: Array<{ role: string; content: string }> }; signal: AbortSignal; stream: ReadableStreamDefaultController<Uint8Array> }> = [];
+  const requests: Array<{ url: string; body: { request_id: string; reasoning_effort: string; inspect_context?: boolean; messages: Array<{ role: string; content: string }> }; signal: AbortSignal; stream: ReadableStreamDefaultController<Uint8Array> }> = [];
   const statusURLs: string[] = [];
   const resultURLs: string[] = [];
   let stoppedResultReads = 0;
@@ -86,6 +86,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     await act(async () => { render(); });
     assert.equal(input().getAttribute("aria-disabled"), "false");
     assert.equal(container.querySelector('input[type="checkbox"]'), null, "normal users have no context-inspection control");
+    assert.equal(Array.from(container.querySelectorAll("button")).some((button) => button.textContent === "Inspect"), false, "normal users have no header Inspect button");
     const assistant = container.querySelector<HTMLElement>(".mango-assistant")!;
     assert.equal(assistant.style.left, "", "chat centering must not inherit the app sidebar inset");
     const stylesheet = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
@@ -120,6 +121,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     await send("List my processes", true);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].body.reasoning_effort, "max");
+    assert.equal(requests[0].body.inspect_context, undefined, "normal users must not request privileged traces");
     assert.equal(reasoningSelect().disabled, true, "the effort for a running Send must stay fixed");
     await act(async () => { assistantButton("Collapse Mango chat").click(); });
     assert.equal(requests[0].signal.aborted, false, "collapsing must not stop the active request");
@@ -271,7 +273,7 @@ test("Process pills persist across follow-ups and inspection retains full server
   const input = () => container.querySelector<HTMLElement & { editor: Editor }>('[role="textbox"][aria-label="Message Mango"]')!;
   const picker = () => dom.window.document.querySelector<HTMLElement>('[aria-label="Universal picker"]');
   const chip = () => input().querySelector<HTMLElement>('[data-mango-entity-link="true"]');
-  const checkbox = () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  const header = () => container.querySelector<HTMLElement>(".mango-assistant-header")!;
   const append = async (text: string) => { await act(async () => { input().editor.commands.insertContentAt(input().editor.state.doc.content.size - 1, { type: "text", text }); }); };
   const key = async (value: string, init: KeyboardEventInit = {}) => { await act(async () => { input().dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true, ...init })); }); };
   const emit = async (index: number, event: object & { type?: string; trace?: object }) => {
@@ -302,22 +304,36 @@ test("Process pills persist across follow-ups and inspection retains full server
     resetTerminalAuthFailure(); setActiveCompanyID("process-company-a");
     await act(async () => { render(); });
     await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand Mango chat"]')!.click(); });
-    assert.equal(checkbox().checked, false);
+    assert.equal(container.querySelector('input[type="checkbox"]'), null, "inspection no longer requires opting in before each Send");
+    assert.equal(header().querySelector("strong")!.textContent, "Mango chat", "the header exists before the first Send");
+    assert.equal(header().querySelector("strong")!.nextElementSibling!.textContent, "Inspect", "Inspect sits immediately beside the title");
+    let modal = await inspect(header());
+    assert.match(modal.textContent!, /No runs yet/, "header inspection has an empty state before the first Send");
+    await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
     await append("Please perform "); await choose(); await append("for today's order");
     assert.equal(requests.length, 0);
     await key("Enter", { isComposing: true });
     assert.equal(requests.length, 0, "composition Enter cannot send");
-    await act(async () => { checkbox().click(); });
     await key("Enter");
     assert.equal(requests[0].process_id, processIDs[1]);
     assert.equal(requests[0].inspect_context, true);
-    assert.equal(checkbox().checked, false, "inspection applies to one Send");
     assert.equal(chip()!.dataset.mangoEntityId, processIDs[1], "the selected pill stays visible after sending");
-    let modal = await inspect(container.querySelector('[data-assistant-turn-status="running"]')!);
+    modal = await inspect(header());
     assert.match(modal.textContent!, /No server events received yet/, "Inspect is available before the first provider request");
     await emit(0, { type: "trace", trace: { sequence: 1, kind: "provider_request", status: "prepared", time: "2026-09-05T00:00:00Z", data: { invocation: 1, body: { input: [{ role: "developer", content: "Server-compiled SOP and Steps" }], model: "test-model", instructions: "Server instructions plus Pi", tools: [{ name: "write_process_node" }], max_output_tokens: 4096, store: false, parallel_tool_calls: false } } } });
+    assert.match(modal.textContent!, /Server-compiled SOP and Steps/, "a header inspector opened during a run updates as SSE events arrive");
+    assert.equal(recoveries.length, 0, "watching live events does not fetch or poll a recovery endpoint");
+    await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
+    modal = await inspect(header());
+    assert.match(modal.textContent!, /Server-compiled SOP and Steps/, "reopening the live inspector retains already received events");
+    const liveEvents = modal.querySelector<HTMLDivElement>(".mango-assistant-context-calls")!;
+    Object.defineProperties(liveEvents, { scrollHeight: { configurable: true, value: 1000 }, clientHeight: { configurable: true, value: 100 } });
+    await act(async () => { liveEvents.scrollTop = 100; Simulate.scroll(liveEvents); });
     await emit(0, { type: "trace", trace: { sequence: 2, kind: "provider_request", status: "dispatched", time: "2026-09-05T00:00:01Z", data: { invocation: 17, body: { input: [{ role: "developer", content: "Server-compiled SOP and Steps" }, { type: "function_call_output", output: "Saved tool result" }], omissions: ["Encrypted reasoning is unavailable"] } } } });
+    assert.equal(liveEvents.scrollTop, 100, "arriving events do not move someone reading earlier events");
+    await act(async () => { liveEvents.scrollTop = 900; Simulate.scroll(liveEvents); });
     await emit(0, { type: "trace", trace: { sequence: 3, kind: "skill", status: "completed", time: "2026-09-05T00:00:02Z", data: { content: "Full native skill content, including the final line." } } });
+    assert.equal(liveEvents.scrollTop, 1000, "the event list follows new events when the reader returns to the bottom");
     await emit(0, { type: "node", node_id: nodeID, process_id: processIDs[1] });
     await emit(0, { type: "trace", trace: { sequence: 4, kind: "tool", status: "failed", time: "2026-09-05T00:00:03Z", data: { arguments: { plain_text: "Work attempted" }, error: "The SOP changed" } } });
     await emit(0, { type: "error", message: "Stopped at the current Step." });
@@ -328,9 +344,12 @@ test("Process pills persist across follow-ups and inspection retains full server
     await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
     await append("Do you see it now?"); await key("Enter");
     assert.equal(requests[1].process_id, processIDs[1], "a plain follow-up keeps the same exact Process context");
-    assert.equal(requests[1].inspect_context, undefined);
+    assert.equal(requests[1].inspect_context, true, "every authorized Send streams traces without another opt-in");
     assert.deepEqual(requests[1].messages, [{ role: "user", content: "#Order review Do you see it now?" }]);
     await emit(1, { type: "done" });
+    modal = await inspect(header());
+    assert.doesNotMatch(modal.textContent!, /Server-compiled SOP and Steps/, "header Inspect selects the latest Send instead of reopening an older turn");
+    await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
     await choose(0); await append("Use this one"); await key("Enter");
     assert.equal(requests[2].process_id, processIDs[0], "same-label replacement changes the exact Process ID");
     await emit(2, { type: "done" });
@@ -338,7 +357,7 @@ test("Process pills persist across follow-ups and inspection retains full server
     assert.equal(chip(), null, "normal Mango Backspace leaves the label and removes reference identity");
     await append(" is only text now"); await key("Enter");
     assert.equal(requests[3].process_id, undefined); await emit(3, { type: "done" });
-    await act(async () => { input().editor.commands.clearContent(); checkbox().click(); });
+    await act(async () => { input().editor.commands.clearContent(); });
     await append("Find the saved lunch Process and perform its written walkthrough"); await key("Enter");
     assert.equal(requests[4].process_id, undefined, "discovery starts without a browser-selected identity");
     await emit(4, { type: "process", process_id: processIDs[0], name: "Lunch walkthrough revised" });
@@ -366,7 +385,6 @@ test("Process pills persist across follow-ups and inspection retains full server
     assert.equal(recoveries.length, recoveryCount, "opening a complete captured turn does not depend on expired server recovery");
     assert.equal(statusChecks, previousStatusChecks + 1, "opening an old browser capture still rechecks current developer access");
     await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
-    await act(async () => { checkbox().click(); });
     await append("Perform a walkthrough that finishes after Stop"); await key("Enter");
     unfinishedTraceRequestID = requests[6].request_id;
     await emit(6, { type: "trace", trace: { sequence: 1, kind: "tool", status: "dispatched", time: "2026-09-05T00:00:00Z", data: { name: "create_process_node", message: "Received before late save" } } });
@@ -383,7 +401,6 @@ test("Process pills persist across follow-ups and inspection retains full server
     assert.match(modal.textContent!, /Final server capture is unavailable/);
     assert.match(modal.textContent!, /Saved action results recovered/);
     await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
-    await act(async () => { checkbox().click(); });
     await append("Perform another written walkthrough"); await key("Enter");
     assert.equal(requests[8].inspect_context, true);
     await emit(8, { type: "trace", trace: { sequence: 1, kind: "tool", status: "dispatched", time: "2026-09-05T00:00:00Z", data: { name: "create_process_node" } } });
@@ -393,7 +410,6 @@ test("Process pills persist across follow-ups and inspection retains full server
     assert.equal(new URL(publicRecoveries[1]).searchParams.get("request_id"), requests[8].request_id);
     assert.match(Array.from(container.querySelectorAll('[data-assistant-turn-status="stopped"]')).at(-1)!.textContent!, /Open Node/, "losing Inspect does not hide an accessible confirmed saved Node");
     assert.equal(dom.window.document.querySelector('[aria-label="AI inspection"]'), null, "revocation closes privileged inspection");
-    assert.equal(checkbox(), null);
     assert.equal(Array.from(container.querySelectorAll("button")).some((button) => button.textContent === "Inspect"), false);
     await choose();
     await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Clear chat")!.click(); });
@@ -406,14 +422,14 @@ test("Process pills persist across follow-ups and inspection retains full server
     assert.equal(chip(), null); assert.equal(input().editor.getText(), ""); assert.equal(picker(), null);
     canInspect = true;
     await act(async () => { render("inspection-race-user"); });
-    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand Mango chat"]')!.click(); checkbox().click(); });
+    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand Mango chat"]')!.click(); });
     await append("Inspect this completed turn"); await key("Enter"); await emit(9, { type: "done" });
     deferStatus = true;
     await inspect(container.querySelector('[data-assistant-turn-status="complete"]')!);
     assert.ok(pendingStatus, "inspection access remains pending");
     await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Clear chat")!.click(); });
     assert.equal(pendingStatus.signal.aborted, true, "Clear chat cancels pending inspection requests");
-    await append("This new turn was not inspected"); await key("Enter"); await emit(10, { type: "done" });
+    await append("This new turn was sent after Clear chat"); await key("Enter"); await emit(10, { type: "done" });
     await act(async () => { pendingStatus!.resolve(new Response(JSON.stringify({ available: true, can_inspect_context: true }), { headers: { "Content-Type": "application/json" } })); });
     assert.equal(dom.window.document.querySelector('[aria-label="AI inspection"]'), null, "a delayed Inspect response cannot open a new turn after Clear chat");
   } finally {

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createAgentSession, createExtensionRuntime, createReadToolDefinition,
@@ -11,8 +11,8 @@ import { validateResponse } from './response-validation.mjs';
 
 export const AI_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const LIMITS = Object.freeze({ tools: 16, responses: 17, output_bytes: 32000, context_bytes: 512000, trace_bytes: 8388608 });
-const PROCESS_SKILL_PATH = 'skills/mango-process/SKILL.md';
-const ASSETS = ['AGENTS.md', PROCESS_SKILL_PATH];
+const SKILL_PATHS = ['skills/mango-process/SKILL.md', 'skills/mango-node-chat/SKILL.md'];
+const ASSETS = ['AGENTS.md', ...SKILL_PATHS];
 const SAFE_ERROR = 'Chat stopped. Check Mango before repeating an action; completed changes may remain.';
 const bytes = value => Buffer.byteLength(typeof value === 'string' ? value : JSON.stringify(value), 'utf8');
 const sha256 = value => createHash('sha256').update(value).digest('hex');
@@ -41,10 +41,14 @@ async function resources() {
     if (bytes(content) > 32000 || content.split('\n').length > 1000) throw new Error(SAFE_ERROR);
     assets.set(path, { path, content, sha256: sha256(content) });
   }
-  const skills = loadSkills({ cwd: AI_ROOT, agentDir: AI_ROOT, skillPaths: [resolve(AI_ROOT, PROCESS_SKILL_PATH)], includeDefaults: false });
-  if (skills.diagnostics.length || skills.skills.length !== 1 || skills.skills[0].name !== 'mango-process') throw new Error(SAFE_ERROR);
-  // Pi's model-facing catalog uses the same portable path as the read tool.
-  skills.skills[0].filePath = PROCESS_SKILL_PATH;
+  const skills = loadSkills({ cwd: AI_ROOT, agentDir: AI_ROOT, skillPaths: SKILL_PATHS.map(path => resolve(AI_ROOT, path)), includeDefaults: false });
+  if (skills.diagnostics.length || skills.skills.length !== SKILL_PATHS.length) throw new Error(SAFE_ERROR);
+  for (const skill of skills.skills) {
+    const path = relative(AI_ROOT, skill.filePath).split(sep).join('/');
+    if (!SKILL_PATHS.includes(path) || skill.name !== path.split('/')[1]) throw new Error(SAFE_ERROR);
+    // Pi's model-facing catalog uses the same portable paths as the read tool.
+    skill.filePath = path;
+  }
   const extensions = { extensions: [], errors: [], runtime: createExtensionRuntime() };
   return {
     assets,

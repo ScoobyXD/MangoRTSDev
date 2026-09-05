@@ -111,12 +111,12 @@ func TestAssistantPiDiscoversBindsAndExecutesThreeAuthoredSteps(t *testing.T) {
 			assistantProviderComplete(w, assistantProviderCall("bind", "bind_process", fmt.Sprintf(`{"process_id":%q}`, fixture.process.LogicGateID)))
 		case 3:
 			tools, _ := body["tools"].([]any)
-			if len(tools) != 4 {
+			if len(tools) != 6 {
 				t.Errorf("discovery did not switch to Process tools plus native read: %+v", tools)
 			}
 			for _, tool := range tools {
 				name := tool.(map[string]any)["name"]
-				if name != "read" && name != "create_process_node" && name != "write_process_node" && name != "move_process_node_to_step" {
+				if name != "read" && name != "create_process_node" && name != "write_process_node" && name != "move_process_node_to_step" && name != "list_chat_users" && name != "send_process_node_chat" {
 					t.Errorf("bound interaction retained a broad tool: %v", name)
 				}
 			}

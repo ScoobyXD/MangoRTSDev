@@ -2202,6 +2202,7 @@ type NodeInformationInput struct {
 	SaveKind            string
 	SourceInformationID string
 	ExpectedRevision    *int64
+	ExpectedNodeWork    *NodeWorkPrecondition
 }
 
 type LogicGateProjectionInput struct {
