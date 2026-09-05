@@ -49,6 +49,7 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		CreatorLogicGateRACIRole string                                    `json:"creator_logic_gate_gvic_role"`
 		Items                    []workspaceEntityBatchItemRequest         `json:"items"`
 		Relationships            []workspaceEntityBatchRelationshipRequest `json:"relationships"`
+		ProcessDefinition        *store.WorkspaceProcessDefinitionInput    `json:"process_definition"`
 	}
 	stop := timings.observeAccounted("request.decode")
 	decoder := json.NewDecoder(r.Body)
@@ -66,6 +67,7 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
 		return
 	}
+	input.ProcessDefinition = req.ProcessDefinition
 	stop()
 	stop = timings.observeAccounted("request.auth")
 	if actor, ok := authenticatedActor(r); ok {
@@ -99,6 +101,10 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 	stop = timings.observeAccounted("source.transaction")
 	result, err := s.repo.CreateWorkspaceEntityBatch(input)
 	stop()
+	if errors.Is(err, store.ErrConflict) {
+		writeError(w, http.StatusConflict, "workspace_entity_batch_conflict")
+		return
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
 		return
@@ -235,36 +241,11 @@ func buildWorkspaceEntityBatchInput(
 }
 
 func publishWorkspaceEntityBatchEvents(s *Server, result store.WorkspaceEntityBatchResult, timings *requestTimingRecorder) {
-	inputs := make([]store.DomainEventInput, 0,
-		len(result.FolderItems)+len(result.Nodes)+len(result.LogicGates)+len(result.Relationships),
-	)
-	appendEvent := func(eventType string, payload map[string]any) {
-		inputs = append(inputs, store.DomainEventInput{
-			CompanyID:      result.CompanyID,
-			StreamType:     workspaceDomainStreamType,
-			StreamID:       result.CompanyID,
-			Type:           eventType,
-			Payload:        payload,
-			TimingRecorder: timings,
-		})
+	if len(result.Events) > 0 {
+		s.publishCommittedWorkspaceEventsWithTiming(result.Events, timings)
+		return
 	}
-	for _, item := range result.FolderItems {
-		appendEvent("company_explorer_item_placed", map[string]any{"parent_entity_id": item.FolderID, "target_type": item.ItemType, "target_id": item.ItemID, "folder_item": item})
-	}
-	for _, item := range result.Nodes {
-		appendEvent("node_created", map[string]any{"node_id": item.NodeID, "node": item})
-	}
-	for _, item := range result.LogicGates {
-		appendEvent("logic_gate_created", map[string]any{"logic_gate_id": item.LogicGateID, "logic_gate": item})
-	}
-	for _, item := range result.Relationships {
-		appendEvent("relationship_created", map[string]any{
-			"node_relationship_id": item.NodeRelationshipID,
-			"node_id_a":            item.NodeIDA,
-			"node_id_b":            item.NodeIDB,
-			"relationship":         item,
-		})
-	}
+	inputs := store.WorkspaceEntityBatchEventInputs(result, timings)
 	if len(inputs) == 0 {
 		return
 	}

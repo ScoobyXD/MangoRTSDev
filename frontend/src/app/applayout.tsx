@@ -484,6 +484,12 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(() => logicGateTargetFromRoute(deepLink));
   const [processMapLogicGateOverlay, setProcessMapLogicGateOverlay] = useState<LogicGateArenaTarget | null>(null);
   const [processMapLogicGateOverlayFrames, setProcessMapLogicGateOverlayFrames] = useState<FrameDataModel[]>(createLogicGateArenaFrames);
+  const [processMapDraftCompanyID, setProcessMapDraftCompanyID] = useState<string | null>(null);
+  const processMapHasDraft = processMapDraftCompanyID === activeCompanyID;
+  const setProcessMapHasDraft = useCallback((active: boolean) => {
+    setProcessMapDraftCompanyID((current) => active ? activeCompanyID : current === activeCompanyID ? null : current);
+  }, [activeCompanyID]);
+  useEffect(() => setProcessMapDraftCompanyID(null), [activeCompanyID]);
   const [projectManagementTarget, setProjectManagementTarget] = useState<ProjectManagementTarget | null>(() => projectTargetFromRoute(deepLink));
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
@@ -531,6 +537,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const isTeamsView = activePrimaryPage === "teams";
   const huddleLogicGateID = deepLink?.kind === "huddle_logic_gate" ? deepLink.huddleLogicGateID : "";
   const isHuddleLogicGateView = Boolean(huddleLogicGateID);
+  const processMapVisible = isProcessMapView && !isHuddleLogicGateView && !overrideContent;
   const isFullPageView = isHuddleLogicGateView || isLogicGateArenaView || isHomeView || isMyWorkView || isProjectManagementView || isProcessMapView || isEntitiesView || isAccountManagerView || isTeamsView;
   const homePageOwnsEmailReferencePreview = !overrideContent && !isHuddleLogicGateView && !isLogicGateArenaView && isHomeView;
   const rootFrames = useMemo(() => frames.filter((frame) => !frame.parentId), [frames]);
@@ -2041,6 +2048,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
           }}
         />
 
+      <div style={{ position: "relative", width: canvasW, height: canvasH, minWidth: 0, minHeight: 0 }}>
       {overrideContent ? (
         <main
           style={{
@@ -2141,15 +2149,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
               targetProjectRequestID={projectManagementTarget?.requestID}
             />
           </React.Suspense>
-        ) : isProcessMapView ? (
-          <React.Suspense fallback={fullPageFallback}>
-            <LazyProcessMapPage
-              apiBase={apiBase}
-              companyID={activeCompanyID}
-              onOpenLogicGate={openProcessMapLogicGateOverlay}
-            />
-          </React.Suspense>
-        ) : isAccountManagerView ? (
+        ) : isProcessMapView ? null : isAccountManagerView ? (
           <React.Suspense fallback={fullPageFallback}>
             <LazyAccountManagerPage />
           </React.Suspense>
@@ -2300,6 +2300,25 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         )}
       </FrameCanvas>
       )}
+      {(processMapVisible || processMapHasDraft) && <div
+        data-process-map-retained="true"
+        aria-hidden={!processMapVisible}
+        ref={(element) => element?.toggleAttribute("inert", !processMapVisible)}
+        style={{ ...frameCanvasStyle, position: "absolute", inset: 0, visibility: processMapVisible ? "visible" : "hidden", pointerEvents: processMapVisible ? "auto" : "none" }}
+        onContextMenu={(event) => { if (!shouldDeferToNativeTextEditing(event.target)) event.preventDefault(); }}
+      >
+        <React.Suspense fallback={fullPageFallback}>
+          <LazyProcessMapPage
+            key={activeCompanyID}
+            apiBase={apiBase}
+            companyID={activeCompanyID}
+            onOpenLogicGate={openProcessMapLogicGateOverlay}
+            onDraftStateChange={setProcessMapHasDraft}
+            active={Boolean(processMapVisible)}
+          />
+        </React.Suspense>
+      </div>}
+      </div>
       </div>
 
       <AppAssistant apiBase={apiBase} userID={me?.user.user_id ?? "local"} bottomInset={assistantBottomInset} />

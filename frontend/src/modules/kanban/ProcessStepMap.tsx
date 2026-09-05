@@ -1,20 +1,39 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import FrameRightClickMenu from "../../app/framerightclickmenu";
 import { APIHTTPError, isAbortError } from "../api/requestJSON.js";
-import { createProcessStep, createProcessStepRelationship, deleteProcessStep, deleteProcessStepRelationship, updateProcessStep } from "./kanbanApi.js";
+import { createProcessStep, createProcessStepRelationship, deleteProcessStep, deleteProcessStepRelationship, updateProcessStep, type ProcessStepMutationResult } from "./kanbanApi.js";
 import type { ProcessStep, ProcessStepRelationship } from "./processWork.js";
 import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, snapStepMapCoordinate, stepMapBounds, stepMapPath, STEP_MAP_GRID, type ProcessStepMapLayout, type StepMapBox, type StepMapPoint } from "./processStepMapGeometry.js";
 import { getProcessStepMap, saveProcessStepMap } from "./processStepMapApi.js";
 import "./processStepMap.css";
 
-export type ProcessStepMapProps = {
-  apiBase: string;
-  companyID: string;
-  processID: string;
+export type ProcessStepMapCommands = {
+  readLayout: (signal: AbortSignal) => Promise<ProcessStepMapLayout>;
+  saveLayout: (layout: ProcessStepMapLayout) => Promise<ProcessStepMapLayout>;
+  createStep: (name: string) => Promise<ProcessStepMutationResult>;
+  renameStep: (stepID: string, name: string) => Promise<ProcessStepMutationResult>;
+  deleteStep: (stepID: string) => Promise<void>;
+  connectSteps: (sourceID: string, targetID: string) => Promise<ProcessStepMutationResult>;
+  disconnectSteps: (relationshipID: string) => Promise<void>;
+};
+
+export type ProcessStepMapEditorProps = {
   steps: ProcessStep[];
   relationships: ProcessStepRelationship[];
   canEdit: boolean;
-  onChanged: () => void;
+  commands: ProcessStepMapCommands;
+  onChanged?: () => void;
+  onBusyChange?: (busy: boolean) => void;
+  onCreateFolder?: () => void;
+  onCreateProcess?: () => void;
   isDark?: boolean;
+  saveMode?: "saved" | "draft";
+};
+
+export type ProcessStepMapProps = Omit<ProcessStepMapEditorProps, "commands" | "saveMode"> & {
+  apiBase: string;
+  companyID: string;
+  processID: string;
 };
 
 type Selection = { kind: "step" | "route"; id: string } | null;
@@ -34,10 +53,20 @@ const emptyLayout: ProcessStepMapLayout = { revision: 0, steps: [], routes: [] }
 const message = (error: unknown) => error instanceof Error ? error.message : "The change could not be saved. Please try again.";
 
 export function ProcessStepMap(props: ProcessStepMapProps) {
-  return <ProcessStepMapContent key={`${props.companyID}:${props.processID}`} {...props} />;
+  const { apiBase, companyID, processID, ...editorProps } = props;
+  const commands = useMemo<ProcessStepMapCommands>(() => ({
+    readLayout: (signal) => getProcessStepMap(apiBase, companyID, processID, signal),
+    saveLayout: (layout) => saveProcessStepMap(apiBase, companyID, processID, layout),
+    createStep: (name) => createProcessStep(apiBase, companyID, processID, name),
+    renameStep: (stepID, name) => updateProcessStep(apiBase, companyID, processID, stepID, { name }),
+    deleteStep: (stepID) => deleteProcessStep(apiBase, companyID, processID, stepID),
+    connectSteps: (sourceID, targetID) => createProcessStepRelationship(apiBase, companyID, processID, sourceID, targetID),
+    disconnectSteps: (relationshipID) => deleteProcessStepRelationship(apiBase, companyID, processID, relationshipID),
+  }), [apiBase, companyID, processID]);
+  return <ProcessStepMapEditor key={`${apiBase}:${companyID}:${processID}`} {...editorProps} commands={commands} />;
 }
 
-function ProcessStepMapContent({ apiBase, companyID, processID, steps, relationships, canEdit, onChanged, isDark = false }: ProcessStepMapProps) {
+export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, onChanged, onBusyChange, onCreateFolder, onCreateProcess, isDark = false, saveMode = "saved" }: ProcessStepMapEditorProps) {
   const [layout, setLayout] = useState<ProcessStepMapLayout | null>(null);
   const [preview, setPreview] = useState<ProcessStepMapLayout | null>(null);
   const [selection, setSelection] = useState<Selection>(null);
@@ -46,6 +75,8 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
   const [zoom, setZoom] = useState(1);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [gestureActive, setGestureActive] = useState(false);
+  const [contextMenu, setContextMenu] = useState<StepMapPoint | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [deleteRequested, setDeleteRequested] = useState(false);
@@ -57,8 +88,8 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
   const readController = useRef<AbortController | null>(null);
   const refreshPending = useRef(false);
   const layoutRef = useRef(layout);
-  const current = useRef({ steps, relationships, canEdit, onChanged });
-  current.current = { steps, relationships, canEdit, onChanged };
+  const current = useRef({ steps, relationships, canEdit, onChanged, commands, onBusyChange });
+  current.current = { steps, relationships, canEdit, onChanged, commands, onBusyChange };
   layoutRef.current = layout;
   const arrowID = `step-map-arrow-${useId().replace(/:/g, "")}`;
 
@@ -71,7 +102,7 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
     readController.current = controller;
     setLoading(true);
     try {
-      const next = await getProcessStepMap(apiBase, companyID, processID, controller.signal);
+      const next = await current.current.commands.readLayout(controller.signal);
       if (!mounted.current || generation !== readGeneration.current || busyRef.current || gesture.current) return;
       if (next.revision >= (layoutRef.current?.revision ?? 0)) { layoutRef.current = next; setLayout(next); }
       setError("");
@@ -82,19 +113,22 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
     } finally {
       if (mounted.current && generation === readGeneration.current) setLoading(false);
     }
-  }, [apiBase, companyID, processID]);
+  }, []);
 
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; readGeneration.current += 1; readController.current?.abort(); gesture.current = null; };
+    return () => { mounted.current = false; readGeneration.current += 1; readController.current?.abort(); gesture.current = null; current.current.onBusyChange?.(false); };
   }, []);
+  useEffect(() => { onBusyChange?.(loading || busy || gestureActive); }, [onBusyChange, loading, busy, gestureActive]);
   // The board refreshes these canonical arrays on Process realtime events, including layout changes.
   useEffect(() => { void load(); }, [load, steps, relationships]);
   useEffect(() => {
     if (canEdit) return;
     gesture.current = null;
+    setGestureActive(false);
     setPreview(null);
     setDeleteRequested(false);
+    setContextMenu(null);
   }, [canEdit]);
 
   const display = useMemo(() => completeStepMapLayout(preview ?? layout ?? emptyLayout, steps, relationships), [preview, layout, steps, relationships]);
@@ -110,24 +144,24 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
   const bounds = gesture.current?.bounds ?? currentBounds;
   const selectedStep = selection?.kind === "step" ? stepByID.get(selection.id) : undefined;
   const selectedRoute = selection?.kind === "route" ? routes.find(({ edge }) => edge.resource_operational_relationship_id === selection.id) : undefined;
-  const disabled = !canEdit || busy || loading || !layout;
+  const disabled = !canEdit || busy || loading || !layout || gestureActive;
   useEffect(() => { setName(selectedStep?.name ?? ""); setTargetID(""); setDeleteRequested(false); }, [selectedStep?.process_step_id, selectedStep?.name, selection?.kind, selection?.id]);
   useEffect(() => {
     const active = gesture.current;
     if (!active) return;
     const exists = active.kind === "route" ? relationships.some((edge) => edge.resource_operational_relationship_id === active.id) : steps.some((step) => step.process_step_id === active.id);
-    if (!exists) { gesture.current = null; setPreview(null); if (refreshPending.current) void load(); }
+    if (!exists) { gesture.current = null; setGestureActive(false); setPreview(null); if (refreshPending.current) void load(); }
   }, [steps, relationships, load]);
 
   const beginMutation = () => {
-    if (busyRef.current || !current.current.canEdit) return false;
+    if (busyRef.current || gesture.current || !current.current.canEdit || !layoutRef.current) return false;
     busyRef.current = true;
     readGeneration.current += 1;
     readController.current?.abort();
     setLoading(false);
     setBusy(true);
     setError("");
-    setNotice("Saving…");
+    setNotice(saveMode === "draft" ? "Updating draft…" : "Saving…");
     return true;
   };
   const finishMutation = () => {
@@ -140,12 +174,12 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
   const saveLayout = async (next: ProcessStepMapLayout) => {
     if (!beginMutation()) { setPreview(null); return; }
     try {
-      const saved = await saveProcessStepMap(apiBase, companyID, processID, completeStepMapLayout(next, current.current.steps, current.current.relationships));
+      const saved = await current.current.commands.saveLayout(completeStepMapLayout(next, current.current.steps, current.current.relationships));
       if (!mounted.current) return;
       layoutRef.current = saved;
       setLayout(saved);
-      setNotice("Map saved.");
-      current.current.onChanged();
+      setNotice(saveMode === "draft" ? "Unsaved changes kept until you save the Process." : "Map saved.");
+      current.current.onChanged?.();
     } catch (cause) {
       if (!mounted.current) return;
       if (cause instanceof APIHTTPError && cause.status === 409) {
@@ -153,7 +187,7 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
         refreshPending.current = true;
       } else {
         setError(message(cause));
-        setNotice("Your move was not saved. The last saved layout is shown.");
+        setNotice(saveMode === "draft" ? "Your move was not kept. The previous draft layout is shown." : "Your move was not saved. The last saved layout is shown.");
       }
     } finally {
       if (mounted.current) setPreview(null);
@@ -166,9 +200,9 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
     try {
       await command();
       if (!mounted.current) return;
-      setNotice(success);
+      setNotice(saveMode === "draft" ? "Unsaved changes kept until you save the Process." : success);
       setDeleteRequested(false);
-      current.current.onChanged();
+      current.current.onChanged?.();
     } catch (cause) { if (mounted.current) { setError(message(cause)); setNotice(""); } }
     finally { finishMutation(); }
   };
@@ -181,6 +215,8 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
     event.currentTarget.focus();
     const base = kind === "route" ? withRoutePoints(display, id, routes.find(({ edge }) => edge.resource_operational_relationship_id === id)!.points) : display;
     gesture.current = { kind, id, pointIndex, pointerID: event.pointerId, start: { x: event.clientX, y: event.clientY }, layout: base, next: base, moved: false, bounds };
+    setGestureActive(true);
+    setContextMenu(null);
     setSelection({ kind: kind === "route" ? "route" : "step", id });
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
@@ -201,11 +237,13 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
     if (!active || active.pointerID !== event.pointerId) return;
     moveGesture(event);
     gesture.current = null;
+    setGestureActive(false);
     if (active.moved) void saveLayout(active.next);
     else if (refreshPending.current) void load();
   };
   const cancelGesture = () => {
     gesture.current = null;
+    setGestureActive(false);
     setPreview(null);
     if (refreshPending.current) void load();
   };
@@ -225,19 +263,25 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
     setZoom(Math.max(.25, Math.min(1, (element.clientWidth - 24) / bounds.width, (element.clientHeight - 24) / bounds.height)));
     element.scrollTo?.({ top: 0, left: 0 });
   };
+  const createStep = () => changeDefinition(async () => {
+    const result = await current.current.commands.createStep("New step");
+    if (mounted.current && result.step) setSelection({ kind: "step", id: result.step.process_step_id });
+  }, "Step created. Give it a name below.");
 
   return <section className={`process-step-map${isDark ? " process-step-map--dark" : ""}`} aria-label="Process Step map">
     <div className="process-step-map__toolbar">
-      <button type="button" disabled={disabled} onClick={() => void changeDefinition(async () => {
-        const result = await createProcessStep(apiBase, companyID, processID, "New step");
-        if (mounted.current && result.step) setSelection({ kind: "step", id: result.step.process_step_id });
-      }, "Step created. Give it a name below.")}>+ Create Step</button>
+      <button type="button" disabled={disabled} onClick={() => void createStep()}>+ Create Step</button>
       <span className="process-step-map__hint">Drag Steps to arrange. Select a Step to name or connect it.</span>
       <div className="process-step-map__zoom"><button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(.25, value - .25))}>−</button><span>{Math.round(zoom * 100)}%</span><button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2, value + .25))}>+</button><button type="button" onClick={fit}>Fit</button></div>
     </div>
-    {error && <div className="process-step-map__error" role="alert">{error} <button type="button" disabled={busy} onClick={() => void load()}>Reload map</button></div>}
-    <div className="process-step-map__status" role="status" aria-live="polite">{loading ? "Loading map…" : notice || (canEdit ? "Changes save when you finish moving or resizing." : "You can view this map.")}</div>
-    <div ref={viewport} className="process-step-map__viewport" onPointerMove={moveGesture} onPointerUp={endGesture} onPointerCancel={cancelGesture} onKeyDown={(event) => { if (event.key === "Escape") cancelGesture(); }}>
+    {error && <div className="process-step-map__error" role="alert">{error} <button type="button" disabled={busy} onClick={() => void load()}>{saveMode === "draft" ? "Reload draft" : "Reload map"}</button></div>}
+    <div className="process-step-map__status" role="status" aria-live="polite">{loading ? "Loading map…" : notice || (saveMode === "draft" ? "Unsaved changes stay here until you save the Process." : canEdit ? "Changes save when you finish moving or resizing." : "You can view this map.")}</div>
+    <div ref={viewport} className="process-step-map__viewport" onPointerMove={moveGesture} onPointerUp={endGesture} onPointerCancel={cancelGesture} onKeyDown={(event) => { if (event.key === "Escape") cancelGesture(); }} onContextMenu={(event) => {
+      if ((event.target as Element).closest(".process-step-map__step, button, [role='button']")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu({ x: event.clientX, y: event.clientY });
+    }}>
       {layout && <div style={{ width: bounds.width * zoom, height: bounds.height * zoom }}>
         <div className="process-step-map__canvas" style={{ width: bounds.width, height: bounds.height, transform: `scale(${zoom})` }}>
           <svg className="process-step-map__edges" width={bounds.width} height={bounds.height} viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`} aria-label="Step connections">
@@ -255,7 +299,7 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
             return <article key={step.process_step_id} data-step-map-id={step.process_step_id} className={`process-step-map__step${selectedStep?.process_step_id === step.process_step_id ? " is-selected" : ""}`} style={{ left: box.x - bounds.x, top: box.y - bounds.y, width: box.width, height: box.height }}>
               <span className="process-step-map__port is-input" aria-hidden="true" /><span className="process-step-map__port is-output" aria-hidden="true" />
               <button className="process-step-map__step-title" type="button" title="Drag to move. Arrow keys move one grid square; Shift moves four." aria-label={`Move ${step.name}`} aria-disabled={disabled} onClick={() => { if (!disabled) setSelection({ kind: "step", id: step.process_step_id }); }} onPointerDown={(event) => startGesture(event, "move", step.process_step_id)} onKeyDown={(event) => keyMove(event, box)}>{step.name}</button>
-              <span className="process-step-map__step-label">Step</span>
+              <span className="process-step-map__step-label">{saveMode === "draft" ? "Unsaved Step" : "Step"}</span>
               <button type="button" className="process-step-map__resize" aria-label={`Resize ${step.name}`} title="Drag to resize, or use arrow keys." aria-disabled={disabled} onPointerDown={(event) => startGesture(event, "resize", step.process_step_id)} onKeyDown={(event) => keyMove(event, box, true)}>↘</button>
             </article>;
           })}
@@ -272,20 +316,25 @@ function ProcessStepMapContent({ apiBase, companyID, processID, steps, relations
       </div>}
     </div>
     {selectedStep && <div className="process-step-map__inspector" aria-label="Selected Step">
-      <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && name.trim() !== selectedStep.name) void changeDefinition(() => updateProcessStep(apiBase, companyID, processID, selectedStep.process_step_id, { name: name.trim() }), "Step renamed."); }}>
-        <label>Step name<input aria-label="Step name" value={name} maxLength={200} disabled={disabled} onChange={(event) => setName(event.target.value)} /></label><button type="submit" disabled={disabled || !name.trim() || name.trim() === selectedStep.name}>Save name</button>
+      <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && name.trim() !== selectedStep.name) void changeDefinition(() => current.current.commands.renameStep(selectedStep.process_step_id, name.trim()), "Step renamed."); }}>
+        <label>Step name<input aria-label="Step name" value={name} maxLength={200} disabled={disabled} onChange={(event) => setName(event.target.value)} /></label><button type="submit" disabled={disabled || !name.trim() || name.trim() === selectedStep.name}>{saveMode === "draft" ? "Apply name" : "Save name"}</button>
       </form>
       <div className="process-step-map__connect"><label>Connect to<select aria-label="Connect to Step" value={targetID} disabled={disabled} onChange={(event) => setTargetID(event.target.value)}><option value="">Choose Step…</option>{steps.filter((step) => step.process_step_id !== selectedStep.process_step_id).map((step) => <option key={step.process_step_id} value={step.process_step_id}>{step.name}</option>)}</select></label><button type="button" disabled={disabled || !targetID} onClick={() => void changeDefinition(async () => {
-        const result = await createProcessStepRelationship(apiBase, companyID, processID, selectedStep.process_step_id, targetID);
+        const result = await current.current.commands.connectSteps(selectedStep.process_step_id, targetID);
         if (mounted.current && result.relationship) setSelection({ kind: "route", id: result.relationship.resource_operational_relationship_id });
       }, "Connection saved. Select its route to arrange it.")}>Connect</button></div>
       <button type="button" className="process-step-map__danger" disabled={disabled} onClick={() => setDeleteRequested(true)}>Delete Step</button>
-      {deleteRequested && <div role="alert" className="process-step-map__confirm">Delete “{selectedStep.name}”? Its Nodes keep their Process and status.<button type="button" disabled={disabled} onClick={() => void changeDefinition(() => deleteProcessStep(apiBase, companyID, processID, selectedStep.process_step_id), "Step deleted. Its Nodes are preserved.")}>Confirm delete Step</button><button type="button" onClick={() => setDeleteRequested(false)}>Cancel</button></div>}
+      {deleteRequested && <div role="alert" className="process-step-map__confirm">Delete “{selectedStep.name}”? {saveMode === "draft" ? "It will be removed from this draft." : "Its Nodes keep their Process and status."}<button type="button" disabled={disabled} onClick={() => void changeDefinition(() => current.current.commands.deleteStep(selectedStep.process_step_id), "Step deleted. Its Nodes are preserved.")}>Confirm delete Step</button><button type="button" onClick={() => setDeleteRequested(false)}>Cancel</button></div>}
     </div>}
     {selectedRoute && <div className="process-step-map__inspector" aria-label="Selected connection"><span>{stepByID.get(selectedRoute.source.process_step_id)?.name} → {stepByID.get(selectedRoute.target.process_step_id)?.name}</span><button type="button" disabled={disabled || selectedRoute.points.length >= 256} onClick={() => {
       const last = selectedRoute.points[selectedRoute.points.length - 1] ?? defaultStepMapRoute(selectedRoute.source, selectedRoute.target)[0];
       void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, [...selectedRoute.points, { x: snapStepMapCoordinate(last.x + 32), y: snapStepMapCoordinate(last.y + 32) }]));
-    }}>Add route point</button><button type="button" disabled={disabled} onClick={() => void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, defaultStepMapRoute(selectedRoute.source, selectedRoute.target)))}>Reset route</button><button type="button" className="process-step-map__danger" disabled={disabled} onClick={() => void changeDefinition(() => deleteProcessStepRelationship(apiBase, companyID, processID, selectedRoute.edge.resource_operational_relationship_id), "Connection deleted. Both Steps are preserved.")}>Delete connection</button></div>}
+    }}>Add route point</button><button type="button" disabled={disabled} onClick={() => void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, defaultStepMapRoute(selectedRoute.source, selectedRoute.target)))}>Reset route</button><button type="button" className="process-step-map__danger" disabled={disabled} onClick={() => void changeDefinition(() => current.current.commands.disconnectSteps(selectedRoute.edge.resource_operational_relationship_id), "Connection deleted. Both Steps are preserved.")}>Delete connection</button></div>}
+    {contextMenu && <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} ariaLabel="Process map creation" onClose={() => setContextMenu(null)}>
+      <button className="process-step-map__context-action" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); void createStep(); }}>Create Step</button>
+      {onCreateFolder && <button className="process-step-map__context-action" type="button" role="menuitem" disabled={busy || loading || gestureActive} onClick={() => { setContextMenu(null); onCreateFolder(); }}>Create Folder</button>}
+      {onCreateProcess && <button className="process-step-map__context-action" type="button" role="menuitem" disabled={busy || loading || gestureActive} onClick={() => { setContextMenu(null); onCreateProcess(); }}>Create Process</button>}
+    </FrameRightClickMenu>}
   </section>;
 }
 

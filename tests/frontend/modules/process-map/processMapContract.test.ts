@@ -444,7 +444,7 @@ test("light mode is scoped to the Process Map canvas and map content", () => {
   assert.match(hoverModeRule, /right:\s*22px/);
   assert.match(hoverModeRule, /color:\s*#475569/);
   assert.match(hoverModeRule, /background:\s*rgba\(255, 255, 255, 0\.94\)/);
-  assert.doesNotMatch(page, /<header|<h1>/);
+  assert.doesNotMatch(surface, /<header|<h1>/);
   assert.match(page, /<div className="process-map-page__canvas">[\s\S]*<ProcessMapSurface[\s\S]*<label className="process-map-page__hover-mode">/);
   assert.doesNotMatch(css, /\.process-map-page__header|\.process-map-toolbar/);
   assert.match(surface, /const COLOR_MAP_BACKGROUND:[^=]*= \[255, 255, 255, 255\]/);

@@ -89,11 +89,7 @@ select exists (
 	if invalid {
 		return ProcessStepMapMutationResult{}, ErrInvalid
 	}
-	err = tx.QueryRowContext(ctx, `
-insert into process_step_map_layouts(company_id,logic_gate_id,steps,routes)
-values($1::uuid,$2::uuid,$3::jsonb,$4::jsonb)
-on conflict(company_id,logic_gate_id) do update set steps=excluded.steps,routes=excluded.routes
-returning revision`, input.CompanyID, input.LogicGateID, string(steps), string(routes)).Scan(&layout.Revision)
+	layout.Revision, err = writeProcessStepMapLayoutTx(ctx, tx, input.CompanyID, input.LogicGateID, steps, routes)
 	if err != nil {
 		return ProcessStepMapMutationResult{}, err
 	}
@@ -105,4 +101,14 @@ returning revision`, input.CompanyID, input.LogicGateID, string(steps), string(r
 		return ProcessStepMapMutationResult{}, err
 	}
 	return ProcessStepMapMutationResult{ProcessStepMapLayout: layout, Events: events}, nil
+}
+
+func writeProcessStepMapLayoutTx(ctx context.Context, tx *sql.Tx, companyID, logicGateID string, steps, routes []byte) (int64, error) {
+	var revision int64
+	err := tx.QueryRowContext(ctx, `
+insert into process_step_map_layouts(company_id,logic_gate_id,steps,routes)
+values($1::uuid,$2::uuid,$3::jsonb,$4::jsonb)
+on conflict(company_id,logic_gate_id) do update set steps=excluded.steps,routes=excluded.routes
+returning revision`, companyID, logicGateID, string(steps), string(routes)).Scan(&revision)
+	return revision, err
 }

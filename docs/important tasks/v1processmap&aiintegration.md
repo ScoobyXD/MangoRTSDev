@@ -2,7 +2,7 @@
 
 Updated: September 4, 2026
 
-Status: Step mapping MVP implemented and verified on September 4, 2026 in worktree 0000841. The AI MVP is also locally committed in 0000842. Both are ready for review; integration and live rollout remain separate. Deliver the small Step mapping MVP first, then review it with Jonat before choosing another increment.
+Status: The initial Step and AI increments were integrated into main. The current correction makes the company Process Map the starting point for Process and Step authoring, as Jonat clarified on September 4. Review this small flow before choosing another increment; live rollout remains separate.
 
 ## Purpose and precedence
 
@@ -16,21 +16,23 @@ This document describes desired behavior, not shipped behavior. Current behavior
 
 ### Required behavior
 
-1. Let the user create a Process, enter its name, and select its destination Folder.
+1. Start on the company Process Map with its existing root Folders, top-right Create Folder / Create Process / Create Step buttons, and the same actions in the map's right-click menu.
 2. Save the Process into the existing Company Explorer at that location, without an unexplained duplicate root entry. Expand, reveal, and select its location using the existing creation behavior.
-3. Provide a Map view for authoring that Process's Steps, with an obvious Create Step button.
+3. Create Process opens its own full-canvas authoring workspace with an obvious Create Step button; the starting flow does not open the Board/SOP split.
 4. Let the user create/name Steps, position and resize them, connect them, and arrange connection routes.
 5. Persist Step positions, sizes, and routing on the server. The arrangement must survive save, reload, navigation away and back, and switching views.
 6. Put a Board / Map toggle near the top-right of the existing Process board. Both modes use the same Process and exact Step records.
 7. Board mode continues to show actual Nodes in the existing Step columns. Map mode edits the authored Step structure. Creating or arranging Steps never creates or duplicates runtime work.
 8. Keep the existing sidebar, SOP editor, authorization, and working Process board. Add only what this small end-to-end feature needs.
 9. The SOP describes the Process's Steps and briefly explains what happens in each one. The Step map makes those same Steps visible and editable as a structure; it does not need a separate per-Step instruction editor for the MVP. Step records still supply exact identities and board columns, while the SOP supplies the written operating instructions.
+10. Above the draft canvas, show a selectable file-style destination path and Process name. Browse that path to choose an existing Folder, then explicitly save the complete Process and Steps there.
+11. Keep the current Step-card styling for this correction; visual redesign is a separate increment.
 
 ### Working interpretation and small decisions
 
-For this MVP, **Step map** means the internal map of one Process, reached through its Board / Map toggle. **Company Process Map** means the existing whole-company Folder/Process canvas. These are different views and must not use the same placement records. This is the implementation scope used after Jonat authorized both tasks to start.
+For this MVP, **Step map** means the internal map of one Process, authored directly from the company map and also accessible through its Board / Map toggle. **Company Process Map** means the existing whole-company Folder/Process canvas. The focused authoring workspace keeps the map shell and does not introduce a Workflow, another map record, or company-map placements for Steps.
 
-Creation order: name the Process and select an existing permitted Folder, save them together, then author its Steps from its Map view. Every persisted Step must still have one exact Process owner. The original standalone Process creation paragraph's “empty Workflow Canvas” means its Step authoring view under this interpretation, not an MVP Workflow.
+Creation order: choose Create Process from the company canvas, name the draft and choose its destination path, author its Steps and arrangement, then Save the complete result atomically. Create Step on the company canvas starts a new Process draft containing its first Step. Every persisted Step still has one exact Process owner.
 
 An empty Process is valid while being authored; one Step is valid. This resolves the original “one or more Steps” description against the requested empty creation flow and current zero-or-more-Step model.
 
@@ -38,12 +40,12 @@ Keep Board column order separate from Step x/y geometry unless Jonat explicitly 
 
 Implementation decisions:
 
-- Choose an existing permitted Folder in the Create Process dialog; Folder creation keeps its existing Explorer flow.
-- Create and place the Process in one transaction before authoring Steps.
-- Save positions, sizes, and route points after each completed gesture; show saving, saved, and failure states.
+- Choose an existing permitted Folder through a breadcrumb path with a small direct-child browser. Create Folder uses the existing Explorer command.
+- Keep Process, Steps, connections, and geometry local until explicit Save commits them together with the Explorer placement and events.
+- After initial Save, persist positions, sizes, and route points after each completed gesture and show saving, saved, and failure states.
 - Reject stale layout revisions and reload the current layout so concurrent edits are not silently lost.
 - Use snapped Step drag/resize and editable orthogonal route points, with keyboard controls.
-- Start each opened Process in Board mode. Zoom, scrolling, and view selection are local UI state.
+- Start map creation in its focused canvas; the existing Board entry continues to start in Board mode. Zoom, scrolling, and view selection are local UI state.
 
 ### Explicitly deferred
 
@@ -58,9 +60,9 @@ Implementation decisions:
 
 ### MVP acceptance checks
 
-1. Create a Process in a selected Folder; it appears once in the correct Explorer location and can be reopened.
-2. Switch that Process between Board and Map through the top-right toggle.
-3. Create Receive purchase order, Validate purchase order, Enter order, and Confirm order from Map mode.
+1. Open company Process Map, see its root Folders and creation controls, then choose Create Process without entering the Board.
+2. Select its destination breadcrumb and name; create Receive purchase order, Validate purchase order, Enter order, and Confirm order in the focused canvas before Save.
+3. Save the Process once into the chosen Explorer Folder, then open its Board and switch between Board and Map through the top-right toggle.
 4. Move/resize the Steps, connect them, and arrange their connection routes.
 5. Save, reload, leave/reopen, and switch modes; layout and exact Step identities remain intact.
 6. The board uses these same Steps, including Steps created on the map. Existing Nodes, statuses, assignments, and SOP content survive.

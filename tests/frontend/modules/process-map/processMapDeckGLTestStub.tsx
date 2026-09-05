@@ -1,4 +1,4 @@
-import React, { forwardRef } from "react";
+import React, { forwardRef, useImperativeHandle } from "react";
 
 export type ProcessMapDeckGLTestProps = {
   layers: Array<{ id: string; props: Record<string, unknown> }>;
@@ -16,6 +16,11 @@ export type ProcessMapDeckGLTestProps = {
 };
 
 let latestProps: ProcessMapDeckGLTestProps | null = null;
+let pickedObject: unknown = null;
+
+export function setProcessMapDeckGLPickedObjectForTest(object: unknown): void {
+  pickedObject = object;
+}
 
 export function readProcessMapDeckGLTestProps(): ProcessMapDeckGLTestProps {
   if (!latestProps) throw new Error("process_map_deck_not_rendered");
@@ -24,9 +29,11 @@ export function readProcessMapDeckGLTestProps(): ProcessMapDeckGLTestProps {
 
 export function resetProcessMapDeckGLTestStub(): void {
   latestProps = null;
+  pickedObject = null;
 }
 
-const ProcessMapDeckGLTestStub = forwardRef<unknown, ProcessMapDeckGLTestProps>((props, _ref) => {
+const ProcessMapDeckGLTestStub = forwardRef<unknown, ProcessMapDeckGLTestProps>((props, ref) => {
+  useImperativeHandle(ref, () => ({ pickObject: () => ({ object: pickedObject }) }));
   latestProps = props;
   return <div data-process-map-deck-test-stub="true" />;
 });

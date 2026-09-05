@@ -38,6 +38,20 @@ describe("deepLinkRoutes", () => {
     assert.doesNotMatch(page, /pushState|replaceState|popstate|buildProcessMapRoute\([^)]/);
   });
 
+  it("keeps one lazy company-scoped Process Map draft mounted outside primary page switching", () => {
+    const appLayout = readFileSync(resolve(process.cwd(), "frontend/src/app/applayout.tsx"), "utf8");
+    assert.equal((appLayout.match(/<LazyProcessMapPage\b/g) ?? []).length, 1);
+    assert.match(appLayout, /processMapDraftCompanyID === activeCompanyID/);
+    assert.match(appLayout, /useEffect\(\(\) => setProcessMapDraftCompanyID\(null\), \[activeCompanyID\]\)/);
+    assert.match(appLayout, /isProcessMapView \? null : isAccountManagerView/);
+    const retainedSurface = appLayout.slice(appLayout.indexOf("{(processMapVisible || processMapHasDraft)"));
+    assert.match(retainedSurface, /data-process-map-retained="true"/);
+    assert.match(retainedSurface, /aria-hidden=\{!processMapVisible\}/);
+    assert.match(retainedSurface, /toggleAttribute\("inert", !processMapVisible\)/);
+    assert.match(retainedSurface, /<LazyProcessMapPage\s+key=\{activeCompanyID\}/);
+    assert.match(retainedSurface, /onDraftStateChange=\{setProcessMapHasDraft\}/);
+  });
+
   it("round-trips canonical Logic Gate routes", () => {
     const path = buildLogicGateRoute("logic gate/1");
     assert.equal(path, "/logic-gates/logic%20gate%2F1");

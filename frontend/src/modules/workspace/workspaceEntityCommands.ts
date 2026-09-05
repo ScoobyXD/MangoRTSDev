@@ -1,4 +1,14 @@
+import type { ProcessStepMapLayout } from "../kanban/processStepMapGeometry.js";
+import type { ProcessStepRelationship } from "../kanban/processWork.js";
+
 export type WorkspaceEntityCommandRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+
+export type WorkspaceProcessDefinition = {
+  logic_gate_id: string;
+  steps: Array<{ process_step_id: string; name: string }>;
+  relationships: ProcessStepRelationship[];
+  layout: Omit<ProcessStepMapLayout, "revision">;
+};
 
 export type WorkspaceEntityBatchKind = "node" | "logic_gate";
 export type WorkspaceEntityBatchCreatorLogicGateRACIRole = "responsible" | "accountable" | "consulted" | "informed";
@@ -33,6 +43,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
   creatorLogicGateRACIRole?: WorkspaceEntityBatchCreatorLogicGateRACIRole;
   items: WorkspaceEntityBatchItem[];
   relationships?: WorkspaceEntityBatchRelationship[];
+  processDefinition?: WorkspaceProcessDefinition;
   requestJSON: WorkspaceEntityCommandRequest;
 }): Promise<TResponse> {
   const body: {
@@ -43,6 +54,7 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
     creator_logic_gate_gvic_role?: WorkspaceEntityBatchCreatorLogicGateRACIRole;
     items: WorkspaceEntityBatchItem[];
     relationships: WorkspaceEntityBatchRelationship[];
+    process_definition?: WorkspaceProcessDefinition;
   } = {
     company_id: args.companyID,
     entity_kind: args.entityKind,
@@ -52,5 +64,6 @@ export async function createWorkspaceEntityBatchCommand<TResponse>(args: {
   };
   if (args.entityKind === "logic_gate" && args.creatorLogicGateRACIRole) body.creator_logic_gate_gvic_role = args.creatorLogicGateRACIRole;
   if (args.mutationOrigin) body.mutation_origin = args.mutationOrigin;
+  if (args.processDefinition) body.process_definition = args.processDefinition;
   return args.requestJSON<TResponse>("/v1/workspace/entity-batches", { method: "POST", body: JSON.stringify(body) });
 }

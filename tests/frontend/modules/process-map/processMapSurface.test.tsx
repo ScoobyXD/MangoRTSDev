@@ -23,6 +23,7 @@ import {
   type ProcessMapLayerBuildOptions,
   type ProcessMapPlacementTransform,
   type ProcessMapPresentationState,
+  type ProcessMapSurfaceProps,
 } from "../../../../frontend/src/modules/process-map/ProcessMapSurface.js";
 import { ProcessMapProtectedTileLayer } from "../../../../frontend/src/modules/process-map/processMapTileLayer.js";
 import "./processMapTileLayer.test.js";
@@ -59,6 +60,7 @@ import { createProcessMapSettlementGate } from "../../../../frontend/src/modules
 import {
   readProcessMapDeckGLTestProps,
   resetProcessMapDeckGLTestStub,
+  setProcessMapDeckGLPickedObjectForTest,
 } from "./processMapDeckGLTestStub.js";
 import {
   emitProcessMapChangedForTest,
@@ -184,7 +186,7 @@ function assertPlacementLabelHorizontalContentBox(placement: ProcessMapVisiblePl
 }
 
 function installProcessMapTestDOM(): () => void {
-  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://process-map.test" });
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", { url: "https://process-map.test", pretendToBeVisual: true });
   const values: Record<string, unknown> = {
     window: dom.window,
     document: dom.window.document,
@@ -259,7 +261,7 @@ type MountedProcessMap = {
   cleanup: () => Promise<void>;
 };
 
-type ProcessMapBehaviorMountOptions = {
+type ProcessMapBehaviorMountOptions = Pick<ProcessMapSurfaceProps, "onCreateFolder" | "onCreateProcess" | "onCreateStep"> & {
   strictMode?: boolean;
   process?: ProcessMapVisiblePlacement;
   initialPlacements?: ProcessMapTileResponse["placements"];
@@ -279,7 +281,7 @@ async function mountProcessMapForBehavior(
   processMapBehaviorTestSequence += 1;
   const apiBase = `https://process-map-behavior-${processMapBehaviorTestSequence}.test`;
   const companyID = `company-${processMapBehaviorTestSequence}`;
-  const sceneBounds = options.sceneBounds ?? { min_x: 0, min_y: 0, max_x: 14, max_y: 8 };
+  const sceneBounds = options.sceneBounds === undefined ? { min_x: 0, min_y: 0, max_x: 14, max_y: 8 } : options.sceneBounds;
   const process: ProcessMapVisiblePlacement = options.process ?? {
     ...placement("behavior-process", 0, 0, 14, 8),
     name: "Behavior Process",
@@ -320,31 +322,30 @@ async function mountProcessMapForBehavior(
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => {
-    const surface = <ProcessMapSurface apiBase={apiBase} companyID={companyID} onOpenLogicGate={onOpenLogicGate} />;
+    const surface = <ProcessMapSurface apiBase={apiBase} companyID={companyID} onOpenLogicGate={onOpenLogicGate}
+      onCreateFolder={options.onCreateFolder} onCreateProcess={options.onCreateProcess} onCreateStep={options.onCreateStep} />;
     root.render(options.strictMode ? <React.StrictMode>{surface}</React.StrictMode> : surface);
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
   });
-  for (let attempt = 0; attempt < 10 && !readProcessMapDeckGLTestProps().layers.some((layer) => layer.id === "process-map-spatial-tiles"); attempt += 1) {
+  for (let attempt = 0; attempt < 10 && container.querySelector(".process-map-loading"); attempt += 1) {
     await act(async () => { await new Promise((resolvePromise) => setTimeout(resolvePromise, 0)); });
   }
   let deck = readProcessMapDeckGLTestProps();
   const tileLayer = deck.layers.find((layer) => layer.id === "process-map-spatial-tiles");
-  assert.ok(tileLayer, "scene load must create the spatial TileLayer");
+  assert.equal(Boolean(tileLayer), Boolean(sceneBounds), "only nonempty scenes create the spatial TileLayer");
   await act(async () => { deck.onResize({ width: 1_000, height: 700 }); });
   await act(async () => {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, PROCESS_MAP_SETTLE_DELAY_MS + 20));
   });
   deck = readProcessMapDeckGLTestProps();
   const currentTileLayer = deck.layers.find((layer) => layer.id === "process-map-spatial-tiles");
-  assert.ok(currentTileLayer);
-  const onTileLoad = currentTileLayer.props.onTileLoad as (tile: { id: string; content: ProcessMapTileResponse }) => void;
   initialTile.process_map_read_version = sceneReads;
-  await act(async () => {
-    onTileLoad({
-      id: "22-0-0",
-      content: initialTile,
+  if (currentTileLayer) {
+    const onTileLoad = currentTileLayer.props.onTileLoad as (tile: { id: string; content: ProcessMapTileResponse }) => void;
+    await act(async () => {
+      onTileLoad({ id: "22-0-0", content: initialTile });
     });
-  });
+  }
 
   return {
     companyID,
@@ -429,6 +430,86 @@ async function resolveMountedScene(
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
   });
 }
+
+test("the first nonempty scene frames its geometry after an initially empty company map", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined, { sceneBounds: null, initialPlacements: [] });
+  try {
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState.target, [0, 0, 0]);
+    assert.match(mounted.container.textContent ?? "", /No saved Folders or Processes are available on this map/);
+    const held = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false, "remote");
+    const bounds = { min_x: 10_000, min_y: 20_000, max_x: 10_200, max_y: 20_200 };
+    await resolveMountedScene(held, 2, bounds);
+    const fitted = fitProcessMapViewState(bounds, { width: 1_000, height: 700 });
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, fitted);
+    assert.doesNotMatch(mounted.container.textContent ?? "", /No saved Folders or Processes are available on this map/);
+    assert.ok(mounted.readTileLayer(), "the first geometry creates a spatial layer");
+
+    const refresh = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false, "remote");
+    await resolveMountedScene(refresh, 3, { ...bounds, max_x: 30_000 });
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, fitted, "later refreshes preserve the existing camera");
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("blank map creation menu exposes optional actions and invokes only the chosen action", async () => {
+  const calls: Array<[string, string | undefined]> = [];
+  const mounted = await mountProcessMapForBehavior(() => undefined, {
+    onCreateFolder: (id) => calls.push(["Folder", id]),
+    onCreateProcess: (id) => calls.push(["Process", id]),
+    onCreateStep: (id) => calls.push(["Step", id]),
+  });
+  try {
+    const surface = mounted.container.querySelector<HTMLElement>("[role='application']")!;
+    for (const action of ["Folder", "Process", "Step"]) {
+      const event = new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 400, clientY: 250 });
+      await act(async () => { surface.dispatchEvent(event); });
+      assert.equal(event.defaultPrevented, true);
+      const menu = document.querySelector("[role='menu'][aria-label='Process Map creation']");
+      assert.ok(menu);
+      const buttons = [...menu.querySelectorAll<HTMLButtonElement>("[role='menuitem']")];
+      assert.deepEqual(buttons.map((button) => button.textContent), ["Create Folder", "Create Process", "Create Step"]);
+      assert.equal(document.activeElement, buttons[0], "the first action receives keyboard focus");
+      await act(async () => { buttons.find((button) => button.textContent === `Create ${action}`)!.click(); });
+      assert.equal(document.querySelector("[aria-label='Process Map creation']"), null);
+    }
+    assert.deepEqual(calls, [["Folder", undefined], ["Process", undefined], ["Step", undefined]]);
+  } finally {
+    await mounted.cleanup();
+  }
+});
+
+test("creation menu uses the picked Folder destination and preserves other map context behavior", async () => {
+  const calls: Array<string | undefined> = [];
+  const folder = placement("destination-folder", 0, 0, 80, 60, "company_explorer_folder");
+  const mounted = await mountProcessMapForBehavior(() => undefined, { onCreateProcess: (id) => calls.push(id), initialPlacements: [folder] });
+  try {
+    const surface = mounted.container.querySelector<HTMLElement>("[role='application']")!;
+    setProcessMapDeckGLPickedObjectForTest({ pick: { kind: "placement", key: "company_explorer_folder:destination-folder", placement: folder } });
+    await act(async () => { surface.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    const button = document.querySelector<HTMLButtonElement>("[role='menuitem']");
+    assert.equal(button?.textContent, "Create Process");
+    assert.equal(document.querySelectorAll("[role='menuitem']").length, 1);
+    await act(async () => { button!.click(); });
+    assert.deepEqual(calls, ["destination-folder"]);
+
+    setProcessMapDeckGLPickedObjectForTest({ kind: "placement", key: `logic_gate:${mounted.process.resource_id}`, placement: mounted.process });
+    const processEvent = new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    await act(async () => { surface.dispatchEvent(processEvent); });
+    assert.equal(processEvent.defaultPrevented, false);
+    assert.equal(document.querySelector("[role='menu']"), null);
+
+    setProcessMapDeckGLPickedObjectForTest(null);
+    await act(async () => { surface.dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true })); });
+    await act(async () => { document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    assert.equal(document.querySelector("[role='menu']"), null);
+    assert.deepEqual(calls, ["destination-folder"], "dismissal must not create anything");
+  } finally {
+    await mounted.cleanup();
+  }
+});
 
 test("a real Deck double-click opens the Process instead of pinning its scorecard", async () => {
   const opened: Array<[string, string]> = [];

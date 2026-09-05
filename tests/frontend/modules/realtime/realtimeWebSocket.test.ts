@@ -781,7 +781,6 @@ test("frontend source inventory contains only retained narrow scope families", (
     .filter((file) => !file.endsWith("realtimeWebSocket.ts"))
     .map((file) => ({ file, source: readFileSync(file, "utf8") }))
     .filter(({ source }) => source.includes("subscribeRealtimeScope("));
-  assert.equal(subscriptionSources.length, 12);
   assert.deepEqual(subscriptionSources.map(({ file }) => file.split("\\").join("/").split("/frontend/src/")[1]).sort(), [
     "app/AppSidebarChrome.tsx",
     "app/NotificationRealtimeBridge.tsx",
@@ -795,6 +794,7 @@ test("frontend source inventory contains only retained narrow scope families", (
     "pages/home/EmailCollaborationChatSurface.tsx",
     "pages/home/EmailReferencePreviewHost.tsx",
     "pages/home/HomePage.tsx",
+    "pages/process-map/ProcessMapSavedProcess.tsx",
   ]);
 });
 

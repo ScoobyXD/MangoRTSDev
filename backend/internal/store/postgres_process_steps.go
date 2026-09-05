@@ -62,7 +62,7 @@ func validateProcessStepTx(ctx context.Context, tx *sql.Tx, companyID, logicGate
 	}
 	return nil
 }
-func createProcessStepRelationshipTx(ctx context.Context, tx *sql.Tx, input ProcessStepRelationshipInput) (domain.ResourceOperationalRelationship, error) {
+func createProcessStepRelationshipTx(ctx context.Context, tx *sql.Tx, input ProcessStepRelationshipInput, relationshipID string) (domain.ResourceOperationalRelationship, error) {
 	if !validProcessStepRelationship(input) {
 		return domain.ResourceOperationalRelationship{}, ErrInvalid
 	}
@@ -72,7 +72,7 @@ func createProcessStepRelationshipTx(ctx context.Context, tx *sql.Tx, input Proc
 	if err := validateProcessStepTx(ctx, tx, input.CompanyID, input.LogicGateID, &input.Target.ResourceID); err != nil {
 		return domain.ResourceOperationalRelationship{}, err
 	}
-	return scanResourceOperationalRelationship(tx.QueryRowContext(ctx, `insert into resource_operational_relationships(company_id,resource_operational_relationship_id,source_resource_type,source_resource_id,target_resource_type,target_resource_id) values($1::uuid,$2::uuid,'process_step',$3::uuid,'process_step',$4::uuid) on conflict(company_id,source_resource_type,source_resource_id,target_resource_type,target_resource_id) do update set source_resource_id=excluded.source_resource_id returning company_id::text,resource_operational_relationship_id::text,source_resource_type,source_resource_id::text,target_resource_type,target_resource_id::text,created_timestamp`, input.CompanyID, newUUIDv7String(), input.Source.ResourceID, input.Target.ResourceID))
+	return scanResourceOperationalRelationship(tx.QueryRowContext(ctx, `insert into resource_operational_relationships(company_id,resource_operational_relationship_id,source_resource_type,source_resource_id,target_resource_type,target_resource_id) values($1::uuid,$2::uuid,'process_step',$3::uuid,'process_step',$4::uuid) on conflict(company_id,source_resource_type,source_resource_id,target_resource_type,target_resource_id) do update set source_resource_id=excluded.source_resource_id returning company_id::text,resource_operational_relationship_id::text,source_resource_type,source_resource_id::text,target_resource_type,target_resource_id::text,created_timestamp`, input.CompanyID, relationshipID, input.Source.ResourceID, input.Target.ResourceID))
 }
 func (r *PostgresRepo) commitProcessStepMutation(ctx context.Context, tx *sql.Tx, companyID, logicGateID, actorID string, result ProcessStepMutationResult) (ProcessStepMutationResult, error) {
 	events, err := r.appendDomainEventsTx(ctx, tx, []DomainEventInput{processWorkChangedEvent(companyID, logicGateID, actorID)})
@@ -121,7 +121,7 @@ func (r *PostgresRepo) CreateProcessStep(input ProcessStepCreateInput) (ProcessS
 	}
 	result := ProcessStepMutationResult{Step: &step, PositionUpdates: positionUpdates}
 	if input.AfterProcessStepID != nil {
-		edge, err := createProcessStepRelationshipTx(ctx, tx, ProcessStepRelationshipInput{CompanyID: input.CompanyID, LogicGateID: input.LogicGateID, Source: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: *input.AfterProcessStepID}, Target: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: step.ProcessStepID}})
+		edge, err := createProcessStepRelationshipTx(ctx, tx, ProcessStepRelationshipInput{CompanyID: input.CompanyID, LogicGateID: input.LogicGateID, Source: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: *input.AfterProcessStepID}, Target: domain.ProcessMapResourceRef{ResourceType: "process_step", ResourceID: step.ProcessStepID}}, newUUIDv7String())
 		if err != nil {
 			return ProcessStepMutationResult{}, err
 		}
@@ -191,7 +191,7 @@ func (r *PostgresRepo) CreateProcessStepRelationship(input ProcessStepRelationsh
 	if err = lockProcessStepsTx(ctx, tx, input.CompanyID, input.LogicGateID); err != nil {
 		return ProcessStepMutationResult{}, err
 	}
-	edge, err := createProcessStepRelationshipTx(ctx, tx, input)
+	edge, err := createProcessStepRelationshipTx(ctx, tx, input, newUUIDv7String())
 	if err != nil {
 		return ProcessStepMutationResult{}, err
 	}

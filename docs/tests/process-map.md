@@ -2,7 +2,7 @@
 
 1. Process Map MUST reference the exact canonical Company Explorer Folder and Process identities and MUST NOT create copied Folder or Process entities.
 2. Process is the product name for the existing Logic Gate resource and MUST reuse the exact existing Logic Gate identity and records.
-3. Process Map MUST support only Company Explorer Folders and Processes and MUST NOT support Nodes, Projects, textboxes, annotations, or other resource types.
+3. The company canvas MUST contain only Company Explorer Folders and Processes; a focused Process authoring canvas MUST use that Process's Step layout rather than company placements.
 4. Folder names and facts MUST come from `company_explorer_folders`, and Process names and facts MUST come from the canonical Logic Gate records.
 5. Current source names and permissions MUST be joined when Process Map is read and MUST NOT be copied into Process Map storage.
 6. Company Explorer MUST be the sole authority for Process Map inclusion and structural parentage; `process_map_placements` MUST own only the exact typed source reference, its Explorer-mirrored parent, snapped global geometry, positive dimensions, revision, and timestamps.
@@ -120,7 +120,7 @@
 118. Automatic insertion MUST follow existing sibling order by saved Y, saved X, resource type, and resource ID, preserving saved positions and dimensions unless fitting the changed contents into their parent requires a proportional group transform.
 119. Process Map MUST omit the former left placement tray and its collapsed preference, branch reads, candidate state, cards, and controls.
 120. Every visible saved or pending trace MUST remain static; saved traces and connection previews MUST use the same orthogonal cyan-to-blue direction treatment, and Process Map MUST NOT create a moving flow marker, animation timer, phase state, or second trace presentation.
-121. Process Map MUST fill its route area with the map canvas and MUST omit a dedicated header row, repeated Process Map title, former drag-only placement Universal Picker, fixed selection-status or delete toolbar, and every other manual placement control.
+121. The company overview MUST fill its route area with the canvas and omit a dedicated title row, manual placement picker, and fixed selection or delete toolbar; a focused Process workspace MUST show its name and destination path above its Step canvas.
 122. Accessible placement anchors and resize grips MUST be invisible and noninteractive by default; at every display detail where an accessible Folder or Process name is shown, hovering or selecting it MUST reveal its left input, right output, and four corner resize grips, and each corner MUST use its correct diagonal resize cursor instead of a hand cursor. Starting from the output MUST retain that source output and reveal only distinct name-visible eligible target inputs; leaving the placement, anchors, and grips MUST hide hover-only controls, and completion, invalid drop, cancellation, camera change, or permission change MUST clear temporary controls and connection state.
 123. One **Hover mode** checkbox MUST remain pinned at the map canvas's top-right as its only persistent corner control; it controls only transient Process data cards, MUST NOT control placement-anchor discovery, and changing it MUST NOT change selection, a pinned card, placement, operational relationships, traces, or saved Process Map state.
 124. When Hover mode is checked, hovering an accessible Process MUST show its transient data card immediately to the Process's right and leaving both the Process and card MUST remove it; unchecked hover MUST show no data card.
@@ -196,11 +196,20 @@
 194. Every successful mutation acknowledgement in the current protected generation MUST request canonical validation even when a newer object operation prevents applying its overlay.
 195. Canonical coverage MUST NOT retire mutation masks until it reaches every acknowledged read version; after replacement coverage completes, later pans MUST NOT render older cached moved or deleted objects.
 196. Ordinary local and remote refresh requests MUST coalesce while preserving a queued refresh for changes arriving during an active read.
+197. The company map MUST offer Create Folder, Create Process, and Create Step in its top-right controls and blank-canvas context menu.
+198. A context creation action on an accessible Folder MUST carry that exact Folder as its proposed destination.
+199. Create Process MUST open a full-canvas local draft with a selectable destination breadcrumb above it and MUST NOT open the Board or SOP split.
+200. Create Step without an open Process MUST start a new Process draft containing one Step; Steps MUST remain owned by a Process.
+201. Save Process MUST create the Process, Steps, connections, geometry, and chosen Explorer placement atomically through the existing workspace batch command.
+202. Create Folder MUST use the canonical Explorer Folder command with the chosen parent and MUST create no separate map resource.
+203. Returning from the focused Process canvas MUST preserve the mounted company canvas and its camera.
+204. An initially empty scene MUST remain eligible to fit the first nonempty company bounds; ordinary later refreshes MUST preserve the camera.
+205. An empty company scene MUST show an explanatory status with read-only Retry and MUST NOT silently reset or backfill saved map geometry.
 Last updated: 2026-09-04
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` and sees one continuous company canvas with the saved layout intact. New Folders and Processes form rows inside their exact Explorer parent. Moving or resizing a Folder keeps its subtree and internal connectors together; crossing a boundary uses the canonical Explorer move. Ordinary saves and remote changes replace affected tiles while certified unchanged tiles, selection, camera, and pinned cards remain available. Permission changes remove old protected coverage before replacement reads. Opening and closing a Process editor returns to the same map. An explicitly confirmed operator reset can replace an old dev layout once; ordinary reads and restarts preserve saved geometry.
+An authorized user opens `/process-map` at the company overview with its existing root Folders and saved geometry. Create Process opens a focused Step canvas: the user chooses its destination path, names the Process, and arranges Steps before Save commits it to Explorer. Returning restores the same company camera. Folder moves and resizes preserve their contained structure; ordinary changes refresh affected tiles, while permission changes remove protected coverage before replacement. Reads never reset saved layouts.
 
 The default root size is `14 × 8^8` by `8 × 8^8`. At Folder level `L`, the preferred size is `14 × 8^(9-L)` by `8 × 8^(9-L)`. Each step reduces both dimensions eightfold, giving a 64-fold area reduction:
 

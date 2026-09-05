@@ -41,21 +41,31 @@
 39. RACI assignment constraints accept the same canonical resource types as RACI settings so Process requests can inherit Responsible users from folders.
 40. Compact rectangular tabs at the top of the work area select Steps, Requested, Pending, Backlog, and Done.
 41. Requested uses yellow, Pending gray, Backlog purple, and Done green while retaining readable labels.
-42. The top-right Board / Map toggle displays the same exact Process and Steps, and a newly opened Process starts in Board mode.
+42. The top-right Board / Map toggle displays the same exact Process and Steps; opening its Board starts in Board mode, while company-map creation starts in its focused Step canvas.
 43. Map creation, renaming, and connection commands use the existing Step records and same-Process operational relationships.
 44. Step-map layout stores only positions, dimensions, and routes keyed by exact Step and relationship IDs within one Process.
 45. Moving or resizing a Step or routing a connection never changes Board order, Node assignments, statuses, SOP content, or operational endpoints.
-46. Completed layout gestures save on the server and report saving, success, or failure; reload and view switching restore the saved arrangement.
+46. Completed layout gestures in a saved Process save on the server and report saving, success, or failure; gestures in an unsaved Process update only its local draft until Save Process.
 47. A stale layout revision is rejected rather than overwriting a newer layout, and the client reloads the current arrangement before retrying.
 48. Deleting a Step or connection removes its dependent layout entries and advances the layout revision; surviving resources and geometry remain unchanged.
 49. Process recycle and restore preserve exact surviving Step geometry and routes, and permanent Process deletion removes its layout.
 50. Layout reads and writes require current access to the exact owning Process and reject references to another Process.
 51. SOP text provides written Step explanations; the map introduces no separate instruction fields or inferred Step identities.
 52. Zoom, scrolling, and the selected view are local presentation state and never replace shared Step layout.
+53. Create Process on the company map opens an empty local draft, and Create Step without an open Process opens a new Process draft containing its first Step.
+54. Save Process requires a nonblank name and an existing destination Folder selected through its breadcrumb path.
+55. Initial Save stores the Process, Folder placement, zero to 200 Steps, up to 500 same-Process connections, layout, and committed events in one transaction.
+56. Initial Step array order sets Board order independently of authored geometry.
+57. A rejected save retains the local draft and commits no partial Process, relationship, placement, or event.
+58. Repeated save attempts retain the same allocated UUIDs and cannot create duplicate Processes or overwrite an existing identity.
+59. Save and navigation controls stay disabled during a layout gesture or pending mutation.
+60. Leaving an unsaved draft through its Company map or Create Process action requires explicit discard; successful Save stays in the full Process canvas.
+61. Sidebar navigation retains the current company's draft in memory; returning to Process Map restores that draft without a server write.
+62. An uncertain Save offers an explicit saved-version recovery that freshly authorizes the exact Process and its Explorer location before leaving the draft.
 
 ## Process Story
 
-A user creates a Process in an existing Folder, writes its instructions in the SOP, and switches from Board to Map to create and arrange its Steps. Positions, sizes, and connection routes save on the server. Board uses those same Steps as columns while Node status determines the active or separate status view. Deleting a Step clears its assignments, connections, and geometry while preserving every Node and status; a stale layout save cannot resurrect deleted geometry.
+A user chooses Create Process from the company Process Map, chooses its destination path, and creates and arranges Steps in the full canvas. Save commits the complete draft to Company Explorer. Further Step edits save normally, and the Board uses those exact Steps as columns. Written explanations remain in the SOP. Deleting a Step preserves every Node and status; a stale layout save cannot resurrect deleted geometry.
 
 ## Main Scenarios
 
