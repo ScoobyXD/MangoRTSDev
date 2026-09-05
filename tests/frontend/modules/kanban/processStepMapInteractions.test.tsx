@@ -144,6 +144,202 @@ async function harness(draft = false, canvas = false) {
   return { dom, container, state, requests, localCalls, busyStates, mount, render, button, click, input, doubleClick, pointer, key, writes, dispose };
 }
 
+function cameraFixture(h: Awaited<ReturnType<typeof harness>>) {
+  const viewport = h.container.querySelector<HTMLElement>(".process-step-map__viewport")!;
+  const extent = h.container.querySelector<HTMLElement>(".process-step-map__extent")!;
+  const canvas = h.container.querySelector<HTMLElement>(".process-step-map__canvas")!;
+  viewport.style.padding = "80px 24px 24px";
+  Object.defineProperties(viewport, { clientWidth: { configurable: true, value: 800 }, clientHeight: { configurable: true, value: 600 } });
+  Object.defineProperties(extent, { offsetWidth: { configurable: true, value: 800 }, offsetHeight: { configurable: true, value: 500 } });
+  viewport.getBoundingClientRect = () => ({ x: 20, y: 30, left: 20, top: 30, right: 820, bottom: 630, width: 800, height: 600, toJSON() {} });
+  const read = () => {
+    const transform = canvas.style.transform.match(/^translate\(([-\d.e+]+)px, ([-\d.e+]+)px\) scale\(([-\d.e+]+)\)$/);
+    assert.ok(transform, `missing canvas camera transform: ${canvas.style.transform}`);
+    return { x: Number(transform[1]), y: Number(transform[2]), zoom: Number(transform[3]) };
+  };
+  const wheel = async (deltaY: number, deltaMode = 0, target: Element = viewport) => {
+    const event = new h.dom.window.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 244, clientY: 260, deltaY, deltaMode });
+    await act(async () => target.dispatchEvent(event));
+    await flush();
+    return event;
+  };
+  const screenPosition = (stepID: string) => {
+    const step = h.container.querySelector<HTMLElement>(`[data-step-map-id="${stepID}"]`)!;
+    const transform = read();
+    return { x: transform.x + Number.parseFloat(step.style.left) * transform.zoom, y: transform.y + Number.parseFloat(step.style.top) * transform.zoom };
+  };
+  return { viewport, extent, canvas, read, wheel, screenPosition };
+}
+
+const near = (actual: number, expected: number, message?: string) => assert.ok(Math.abs(actual - expected) < 1e-7, message ?? `expected ${actual} to equal ${expected}`);
+
+test("readonly canvas pans on blank space and restores the starting view on pointercancel or Escape without saving", async () => {
+  const h = await harness(false, true);
+  try {
+    h.state.canEdit = false;
+    await h.mount();
+    const c = cameraFixture(h);
+    const busyBefore = [...h.busyStates];
+    await h.pointer(c.viewport, "pointerdown", 300, 300);
+    await h.pointer(c.viewport, "pointermove", 390, 345);
+    await h.pointer(c.viewport, "pointerup", 390, 345);
+    assert.deepEqual(c.read(), { x: 90, y: 45, zoom: 1 });
+    await h.pointer(c.canvas, "pointerdown", 300, 300);
+    await h.pointer(c.canvas, "pointermove", 320, 330);
+    assert.deepEqual(c.read(), { x: 110, y: 75, zoom: 1 });
+    await h.pointer(c.canvas, "pointercancel", 320, 330);
+    assert.deepEqual(c.read(), { x: 90, y: 45, zoom: 1 });
+    await h.pointer(c.viewport, "pointerdown", 300, 300);
+    await h.pointer(c.viewport, "pointermove", 340, 280);
+    await h.key(c.viewport, "Escape");
+    assert.deepEqual(c.read(), { x: 90, y: 45, zoom: 1 });
+    await h.pointer(h.button("Move Receive"), "pointerdown", 100, 100);
+    await h.pointer(c.viewport, "pointermove", 200, 180);
+    await h.pointer(c.viewport, "pointerup", 200, 180);
+    assert.deepEqual(c.read(), { x: 90, y: 45, zoom: 1 }, "readonly Steps must not become pan handles");
+    assert.deepEqual(h.busyStates, busyBefore, "camera movement must not make the editor busy");
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
+    assert.deepEqual(h.state.layout, initialLayout);
+  } finally { await h.dispose(); }
+});
+
+test("canvas wheel zoom keeps the pointer's world point fixed, normalizes wheel units and clamps the range", async () => {
+  const h = await harness(false, true);
+  try {
+    await h.mount();
+    const c = cameraFixture(h);
+    const busyBefore = [...h.busyStates];
+    assert.equal((await c.wheel(-Math.log(2) / .002)).defaultPrevented, true, "the native wheel handler must suppress page scrolling");
+    near(c.read().zoom, 2);
+    near(c.read().x, -200);
+    near(c.read().y, -150);
+    near((200 - c.read().x) / c.read().zoom, 200);
+    near((150 - c.read().y) / c.read().zoom, 150);
+    await c.wheel(-1, 1);
+    near(c.read().zoom, 2 * Math.exp(16 * .002));
+    const beforePage = c.read().zoom;
+    await c.wheel(-.1, 2);
+    near(c.read().zoom, beforePage * Math.exp(49.6 * .002));
+    await c.wheel(-10000);
+    near(c.read().zoom, 8);
+    await c.wheel(10000);
+    near(c.read().zoom, .5);
+    assert.deepEqual(h.busyStates, busyBefore);
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
+    assert.deepEqual(h.state.layout, initialLayout);
+  } finally { await h.dispose(); }
+});
+
+test("canvas zoom buttons use the viewport center and Fit measures the unscaled extent", async () => {
+  const h = await harness(false, true);
+  try {
+    await h.mount();
+    const c = cameraFixture(h);
+    await h.click("Zoom in");
+    near(c.read().zoom, 1.25);
+    near(c.read().x, -94);
+    near(c.read().y, -62);
+    await h.click("Zoom out");
+    assert.deepEqual(c.read(), { x: 0, y: 0, zoom: 1 });
+    await c.wheel(-10000);
+    await h.click("Fit");
+    near(c.read().zoom, .94);
+    near(c.read().x, 0);
+    near(c.read().y, 13);
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
+  } finally { await h.dispose(); }
+});
+
+test("Step and route gestures block camera changes until cancelled", async () => {
+  const h = await harness(false, true);
+  try {
+    await h.mount();
+    const c = cameraFixture(h);
+    const initial = c.read();
+    const step = h.button("Move Receive");
+    await h.pointer(step, "pointerdown", 100, 100);
+    assert.equal(h.button("Zoom in").disabled, true);
+    assert.equal(h.button("Zoom out").disabled, true);
+    assert.equal(h.button("Fit").disabled, true);
+    await c.wheel(-200);
+    await h.click("Zoom in");
+    await h.click("Fit");
+    assert.deepEqual(c.read(), initial);
+    await h.pointer(step, "pointercancel", 100, 100);
+    assert.equal(h.button("Zoom in").disabled, false);
+    const edge = h.container.querySelector('[aria-label="Connection from Receive to Check"]')!;
+    await h.key(edge, "Enter");
+    const waypoint = h.button("Move route point 1");
+    await h.pointer(waypoint, "pointerdown", 368, 176);
+    await c.wheel(-200);
+    assert.equal(h.button("Zoom in").disabled, true);
+    assert.deepEqual(c.read(), initial);
+    await h.pointer(waypoint, "pointercancel", 368, 176);
+    await h.click("Zoom in");
+    near(c.read().zoom, 1.25);
+    assert.equal(h.writes().length, 0);
+  } finally { await h.dispose(); }
+});
+
+test("inline text and connection controls cannot start canvas panning", async () => {
+  const h = await harness(false, true);
+  try {
+    await h.mount();
+    const c = cameraFixture(h);
+    await h.doubleClick(h.button("Move Receive"));
+    const input = h.container.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
+    const initial = c.read();
+    const busyBefore = [...h.busyStates];
+    await h.pointer(input, "pointerdown", 100, 100);
+    await h.pointer(c.viewport, "pointermove", 200, 180);
+    await h.pointer(c.viewport, "pointerup", 200, 180);
+    assert.equal((await c.wheel(-200, 0, input)).defaultPrevented, false, "wheel input over a text field must remain native");
+    assert.deepEqual(c.read(), initial);
+    assert.deepEqual(h.busyStates, busyBefore);
+    await h.key(input, "Escape");
+    const edge = h.container.querySelector('[aria-label="Connection from Receive to Check"]')!;
+    await h.pointer(edge, "pointerdown", 100, 100);
+    await h.pointer(c.viewport, "pointermove", 200, 180);
+    await h.pointer(c.viewport, "pointerup", 200, 180);
+    assert.deepEqual(c.read(), initial, "a connection hit target must not be treated as blank space");
+    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
+  } finally { await h.dispose(); }
+});
+
+test("Board map keeps its existing scroll surface without canvas wheel zoom or blank-space pan", async () => {
+  const h = await harness();
+  try {
+    await h.mount();
+    const viewport = h.container.querySelector<HTMLElement>(".process-step-map__viewport")!;
+    const canvas = h.container.querySelector<HTMLElement>(".process-step-map__canvas")!;
+    const original = canvas.style.transform;
+    const wheel = new h.dom.window.WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -200 });
+    await act(async () => viewport.dispatchEvent(wheel));
+    await h.pointer(viewport, "pointerdown", 100, 100);
+    await h.pointer(viewport, "pointermove", 200, 180);
+    await h.pointer(viewport, "pointerup", 200, 180);
+    assert.equal(wheel.defaultPrevented, false);
+    assert.equal(canvas.style.transform, original);
+    assert.equal(viewport.classList.contains("is-panning"), false);
+    assert.equal(h.writes().length, 0);
+  } finally { await h.dispose(); }
+});
+
+test("negative Step bounds cannot shift unrelated Steps on screen when zoomed and moved", async () => {
+  const h = await harness(false, true);
+  try {
+    h.state.layout.steps[0] = { ...h.state.layout.steps[0], x: -144, y: -80 };
+    await h.mount();
+    const c = cameraFixture(h);
+    await c.wheel(-Math.log(2) / .002);
+    const fixed = c.screenPosition("b");
+    await h.key(h.button("Move Receive"), "ArrowLeft");
+    assert.deepEqual(c.screenPosition("b"), fixed, "normalizing a new negative bound must not move an untouched Step on screen");
+    assert.equal(h.state.layout.steps[0].x, -160);
+    assert.equal(h.writes().length, 1, "only the authored Step movement may save geometry");
+  } finally { await h.dispose(); }
+});
+
 test("canvas action callback creates through the existing command and keeps actions available beside Step details", async () => {
   const h = await harness(false, true);
   try {

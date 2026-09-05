@@ -130,7 +130,14 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
       <ProcessMapDestinationPath folders={folders} folderID={folderID} onChange={setFolderID} disabled={saving || foldersLoading} />
       <span aria-hidden="true">/</span>
       {editingName ? <input className="process-map-workspace__filename" aria-label="Process name" autoFocus placeholder="Untitled Process" value={name} maxLength={240} disabled={saving} onChange={(event) => setName(event.currentTarget.value)} onBlur={() => setEditingName(false)} onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); setEditingName(false); window.requestAnimationFrame(() => filenameRef.current?.focus()); }
+        if (event.key === "Enter" || event.key === "Escape") {
+          event.preventDefault();
+          const previousFocus = document.activeElement;
+          setEditingName(false);
+          window.requestAnimationFrame(() => {
+            if (document.activeElement === previousFocus || document.activeElement === document.body) filenameRef.current?.focus();
+          });
+        }
       }} /> : <button ref={filenameRef} type="button" className="process-map-workspace__filename" aria-label="Name Process" title="Rename Process" disabled={saving} onClick={() => setEditingName(true)}>{name.trim() || "Untitled Process"}<span aria-hidden="true"> ✎</span></button>}
     </div>
     {error && <div role="alert" className="process-map-authoring-error">{error} Your draft has been kept. If Save already completed, you can open that saved version; later draft edits will be left behind. <button type="button" disabled={saving || editorBusy} onClick={() => { void openSavedVersion(); }}>Open saved version</button></div>}

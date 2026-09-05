@@ -5,6 +5,7 @@ import { createProcessStep, createProcessStepRelationship, deleteProcessStep, de
 import type { ProcessStep, ProcessStepRelationship } from "./processWork.js";
 import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, snapStepMapCoordinate, stepMapBounds, stepMapPath, STEP_MAP_GRID, type ProcessStepMapLayout, type StepMapBox, type StepMapPoint, type StepMapResizeHandle } from "./processStepMapGeometry.js";
 import { getProcessStepMap, saveProcessStepMap } from "./processStepMapApi.js";
+import { useProcessStepMapCamera } from "./useProcessStepMapCamera.js";
 import "./processStepMap.css";
 
 export type ProcessStepMapCommands = {
@@ -89,7 +90,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const [hoveredStepID, setHoveredStepID] = useState<string | null>(null);
   const [name, setName] = useState(() => steps.find((step) => step.process_step_id === initialEditingStepID)?.name ?? "");
   const [targetID, setTargetID] = useState("");
-  const [zoom, setZoom] = useState(1);
+  const [boardZoom, setBoardZoom] = useState(1);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [gestureActive, setGestureActive] = useState(false);
@@ -110,6 +111,8 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   layoutRef.current = layout;
   const arrowID = `step-map-arrow-${useId().replace(/:/g, "")}`;
   const isCanvas = presentation === "canvas";
+  const camera = useProcessStepMapCamera(viewport, isCanvas, () => gesture.current !== null);
+  const zoom = isCanvas ? camera.zoom : boardZoom;
 
   const load = useCallback(async () => {
     if (busyRef.current || gesture.current) { refreshPending.current = true; return; }
@@ -237,7 +240,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const withRoutePoints = (base: ProcessStepMapLayout, id: string, points: StepMapPoint[]): ProcessStepMapLayout => ({ ...base, routes: [...base.routes.filter((route) => route.resource_operational_relationship_id !== id), { resource_operational_relationship_id: id, points }] });
   const startGesture = (event: React.PointerEvent<HTMLElement>, kind: Gesture["kind"], id: string, pointIndex = 0, resizeHandle: StepMapResizeHandle = "se") => {
     event.stopPropagation();
-    if (disabled || busyRef.current || gesture.current || event.button !== 0) return;
+    if (disabled || busyRef.current || gesture.current || camera.isPanning() || event.button !== 0) return;
     if (editingRef.current) {
       finishRename();
       if (busyRef.current) return;
@@ -289,12 +292,10 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     void saveLayout(next);
   };
   const fit = () => {
+    if (isCanvas) { camera.fit(bounds); return; }
     const element = viewport.current;
     if (!element) return;
-    const style = window.getComputedStyle(element);
-    const width = element.clientWidth - (isCanvas ? parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) : 24);
-    const height = element.clientHeight - (isCanvas ? parseFloat(style.paddingTop) + parseFloat(style.paddingBottom) : 24);
-    setZoom(Math.max(.25, Math.min(1, width / bounds.width, height / bounds.height)));
+    setBoardZoom(Math.max(.25, Math.min(1, (element.clientWidth - 24) / bounds.width, (element.clientHeight - 24) / bounds.height)));
     element.scrollTo?.({ top: 0, left: 0 });
   };
   const createStep = () => changeDefinition(async () => {
@@ -333,7 +334,8 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     setSelection(null);
   };
 
-  const zoomControls = <div className="process-step-map__zoom"><button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(.25, value - .25))}>−</button><span>{Math.round(zoom * 100)}%</span><button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2, value + .25))}>+</button><button type="button" onClick={fit}>Fit</button></div>;
+  const cameraDisabled = gestureActive || camera.panning;
+  const zoomControls = <div className="process-step-map__zoom"><button type="button" aria-label="Zoom out" disabled={cameraDisabled || zoom <= (isCanvas ? .5 : .25)} onClick={() => isCanvas ? camera.zoomTo(zoom - .25) : setBoardZoom((value) => Math.max(.25, value - .25))}>−</button><span>{Math.round(zoom * 100)}%</span><button type="button" aria-label="Zoom in" disabled={cameraDisabled || zoom >= (isCanvas ? 8 : 2)} onClick={() => isCanvas ? camera.zoomTo(zoom + .25) : setBoardZoom((value) => Math.min(2, value + .25))}>+</button><button type="button" disabled={cameraDisabled} onClick={fit}>Fit</button></div>;
 
   return <section className={`process-step-map${isDark && !isCanvas ? " process-step-map--dark" : ""}${isCanvas ? " process-step-map--canvas" : ""}`} aria-label="Process Step map">
     {!isCanvas && <div className="process-step-map__toolbar">
@@ -345,14 +347,14 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     {renderActions?.({ createStep: () => void createStep(), disabled, busy: busy || loading || gestureActive })}
     {error && <div className="process-step-map__error" role="alert">{error} <button type="button" disabled={busy} onClick={() => void load()}>{saveMode === "draft" ? "Reload draft" : "Reload map"}</button></div>}
     <div className="process-step-map__status" role="status" aria-live="polite">{loading ? "Loading map…" : notice || (saveMode === "draft" ? "Unsaved changes stay here until you save the Process." : canEdit ? "Changes save when you finish moving or resizing." : "You can view this map.")}</div>
-    <div ref={viewport} className="process-step-map__viewport" onPointerMove={moveGesture} onPointerUp={endGesture} onPointerCancel={cancelGesture} onKeyDown={(event) => { if (event.key === "Escape") cancelGesture(); }} onContextMenu={(event) => {
+    <div ref={viewport} tabIndex={isCanvas ? 0 : undefined} aria-label={isCanvas ? "Process canvas. Drag blank space to pan; scroll to zoom." : undefined} className={`process-step-map__viewport${camera.panning ? " is-panning" : ""}`} onPointerDown={camera.startPan} onPointerMove={(event) => { camera.movePan(event); moveGesture(event); }} onPointerUp={(event) => { camera.endPan(event); endGesture(event); }} onPointerCancel={() => { camera.cancelPan(); cancelGesture(); }} onLostPointerCapture={camera.cancelPan} onKeyDown={(event) => { if (event.key === "Escape") { camera.cancelPan(); cancelGesture(); } }} onContextMenu={(event) => {
       if ((event.target as Element).closest(".process-step-map__step, button, [role='button']")) return;
       event.preventDefault();
       event.stopPropagation();
       setContextMenu({ x: event.clientX, y: event.clientY });
     }}>
-      {(layout || isCanvas) && <div className="process-step-map__extent" style={{ width: bounds.width * zoom, height: bounds.height * zoom }}>
-        <div className="process-step-map__canvas" style={{ width: isCanvas ? `calc(100% / ${zoom})` : bounds.width, height: isCanvas ? `calc(100% / ${zoom})` : bounds.height, transform: `scale(${zoom})` }}>
+      {(layout || isCanvas) && <div className="process-step-map__extent" style={{ width: bounds.width * (isCanvas ? 1 : zoom), height: bounds.height * (isCanvas ? 1 : zoom), minWidth: isCanvas ? `calc(100% - ${bounds.x}px)` : undefined, minHeight: isCanvas ? `calc(100% - ${bounds.y}px)` : undefined }}>
+        <div className="process-step-map__canvas" style={{ width: isCanvas ? "100%" : bounds.width, height: isCanvas ? "100%" : bounds.height, transform: isCanvas ? `translate(${camera.x + bounds.x * zoom}px, ${camera.y + bounds.y * zoom}px) scale(${zoom})` : `scale(${zoom})` }}>
           {isCanvas && <div className="process-step-map__process-outline" role="img" aria-label={`Process outline: ${processName.trim() || "Untitled Process"}`}><span aria-hidden="true">Process · {processName.trim() || "Untitled Process"}</span></div>}
           {layout && <>
           <svg className="process-step-map__edges" width={bounds.width} height={bounds.height} viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`} aria-label="Step connections">

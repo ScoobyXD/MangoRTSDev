@@ -45,8 +45,11 @@ export function ProcessMapDestinationPath({ folders, folderID, onChange, allowRo
   }, [open, browsingFolderID]);
 
   const closeBrowser = () => {
+    const previousFocus = document.activeElement;
     setOpen(false);
-    window.requestAnimationFrame(() => containerRef.current?.querySelector<HTMLButtonElement>("nav button")?.focus());
+    window.requestAnimationFrame(() => {
+      if (document.activeElement === previousFocus || document.activeElement === document.body) containerRef.current?.querySelector<HTMLButtonElement>("nav button")?.focus();
+    });
   };
 
   const browse = (nextFolderID: string) => {
