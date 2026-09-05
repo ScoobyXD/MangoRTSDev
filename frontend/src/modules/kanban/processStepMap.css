@@ -42,3 +42,6 @@
 .process-step-map--dark .process-step-map__inspector { border-color:#3b4a60; background:linear-gradient(145deg,#2b384a,#223044); }
 .process-step-map--dark .process-step-map__error { background:#4c2733; color:#ffc4cf; }
 .process-work .process-step-map--dark .process-step-map__danger, .process-step-map--dark .process-step-map__confirm { color:#ffc4cf; }
+.process-step-map__context-action { display:block; width:100%; padding:9px 14px; border:0; background:transparent; color:#273449; text-align:left; font-size:12px; cursor:pointer; }
+.process-step-map__context-action:hover:not(:disabled), .process-step-map__context-action:focus-visible { background:#dfeaf7; }
+.process-step-map__context-action:disabled { opacity:.5; cursor:default; }

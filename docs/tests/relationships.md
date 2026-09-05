@@ -18,10 +18,13 @@
 16. Step and edge deletion prune their dependent layout entries in the same transaction; Process deletion cascades its layout, and recycle/restore preserves exact surviving references in dependency order.
 17. Creating a Process in a chosen Folder checks current destination Edit access inside the same transaction that creates its one Explorer placement.
 18. A Process AI write or move requires the exact expected Process, Step, Node status, and assignment version inside the mutation transaction; a mismatch changes neither text nor placement.
+19. Saving a new Process map draft atomically creates its exact Process, chosen Explorer Folder placement, Steps, directed Step edges, layout, and committed events through the existing workspace batch command.
+20. A draft save accepts only one new Process in an existing editable Folder and only Step endpoints listed in that draft.
+21. A draft allocates each Process, Step, and edge UUID once; an existing identity rejects the entire save without updating records or creating another Process.
 
 ## Process Step Relationship Story
 
-A user creates a Process in a permitted Folder and creates its Steps from Board or Map. Both surfaces use exact Step and operational edge records. The map saves their geometry separately under that Process. A deleted Step loses its incident edges and layout entries while Nodes keep their Process and status; restoring a recycled Process restores its exact Steps and edges before its layout.
+A user starts a Process draft from the company map, chooses its Folder through the destination path, and arranges its Steps before Save. One transaction stores the exact Process, Steps, connections, layout, and Explorer placement. Board and Map then edit those same records. Deleting a Step removes its incident edges and geometry while Nodes retain their Process and status; restore puts exact Steps and edges back before their layout.
 
 # Current Huddle Relationship Business Logic Laws
 

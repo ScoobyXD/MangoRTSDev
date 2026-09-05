@@ -6,7 +6,11 @@ import (
 	"time"
 )
 
-func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error) {
+func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (result WorkspaceEntityBatchResult, err error) {
+	input, err = normalizeWorkspaceProcessDefinition(input)
+	if err != nil {
+		return WorkspaceEntityBatchResult{}, err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -18,7 +22,7 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		return WorkspaceEntityBatchResult{}, ErrInvalid
 	}
 	now := time.Now().UTC()
-	result := WorkspaceEntityBatchResult{
+	result = WorkspaceEntityBatchResult{
 		CompanyID:      input.CompanyID,
 		EntityKind:     input.EntityKind,
 		EntityMappings: make([]WorkspaceEntityBatchEntityMapping, 0, len(input.Items)),
@@ -81,7 +85,33 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		}
 	}
 
+	if definition := input.ProcessDefinition; definition != nil {
+		if _, exists := r.logicGates[key(input.CompanyID, definition.LogicGateID)]; exists {
+			return WorkspaceEntityBatchResult{}, ErrConflict
+		}
+		for _, step := range definition.Steps {
+			if _, exists := r.processSteps[key(input.CompanyID, step.ProcessStepID)]; exists {
+				return WorkspaceEntityBatchResult{}, ErrConflict
+			}
+		}
+		for _, edge := range definition.Relationships {
+			if _, exists := r.resourceOperationalRelationships[key(input.CompanyID, edge.ResourceOperationalRelationshipID)]; exists {
+				return WorkspaceEntityBatchResult{}, ErrConflict
+			}
+		}
+	}
 	beforeMutation := r.snapshotProcessMapMutationLocked()
+	if definition := input.ProcessDefinition; definition != nil {
+		defer func() {
+			if err != nil {
+				r.restoreProcessMapMutationLocked(beforeMutation)
+				for _, step := range definition.Steps {
+					delete(r.processSteps, key(input.CompanyID, step.ProcessStepID))
+				}
+				delete(r.processStepMaps, key(input.CompanyID, definition.LogicGateID))
+			}
+		}()
+	}
 	clientToEntityID := make(map[string]string, len(input.Items))
 	for _, item := range input.Items {
 		if input.EntityKind == "node" {
@@ -105,6 +135,9 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 			Header:           item.Title,
 			DefaultAccess:    ResourceDefaultAccessEdit,
 			CreatedTimestamp: now,
+		}
+		if input.ProcessDefinition != nil {
+			created.LogicGateID = input.ProcessDefinition.LogicGateID
 		}
 		r.logicGates[key(input.CompanyID, created.LogicGateID)] = created
 		result.LogicGates = append(result.LogicGates, created)
@@ -235,5 +268,27 @@ func (r *MemoryRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput)
 		result.Relationships = append(result.Relationships, item)
 	}
 
+	if definition := input.ProcessDefinition; definition != nil {
+		result.ProcessSteps = make([]domain.ProcessStep, 0, len(definition.Steps))
+		result.StepRelationships = make([]domain.ResourceOperationalRelationship, 0, len(definition.Relationships))
+		for index, source := range definition.Steps {
+			step := domain.ProcessStep{CompanyID: input.CompanyID, ProcessStepID: source.ProcessStepID, LogicGateID: definition.LogicGateID, Name: source.Name, Position: (index + 1) * processStepPositionStride, CreatedTimestamp: now, UpdatedTimestamp: now}
+			r.processSteps[key(input.CompanyID, step.ProcessStepID)] = step
+			result.ProcessSteps = append(result.ProcessSteps, step)
+		}
+		for _, source := range definition.Relationships {
+			edge := domain.ResourceOperationalRelationship{CompanyID: input.CompanyID, ResourceOperationalRelationshipID: source.ResourceOperationalRelationshipID, Source: source.Source, Target: source.Target, CreatedTimestamp: now}
+			r.resourceOperationalRelationships[key(input.CompanyID, edge.ResourceOperationalRelationshipID)] = edge
+			result.StepRelationships = append(result.StepRelationships, edge)
+		}
+		layout := domain.ProcessStepMapLayout{CompanyID: input.CompanyID, LogicGateID: definition.LogicGateID, Revision: memoryProcessStepMapRevision.Add(1), Steps: definition.Layout.Steps, Routes: definition.Layout.Routes}
+		r.processStepMaps[key(input.CompanyID, definition.LogicGateID)] = cloneProcessStepMap(layout)
+		result.StepMap = &layout
+		inputs := append(WorkspaceEntityBatchEventInputs(result, input.TimingRecorder), processWorkChangedEvent(input.CompanyID, definition.LogicGateID, input.CreatorUserID))
+		result.Events, err = r.appendDomainEventsLocked(inputs)
+		if err != nil {
+			return WorkspaceEntityBatchResult{}, err
+		}
+	}
 	return result, nil
 }

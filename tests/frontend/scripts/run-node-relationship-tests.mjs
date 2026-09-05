@@ -122,6 +122,24 @@ const testFiles = [
 ];
 const componentTests = [
   {
+    source: resolve(repoRoot, "tests/frontend/pages/process-map/ProcessMapPage.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/pages/process-map/ProcessMapPage.test.cjs"),
+    bundleDependencies: true,
+    processMapComponentHarness: true,
+    jsx: "automatic",
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/pages/process-map/ProcessMapSavedProcess.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/pages/process-map/ProcessMapSavedProcess.test.cjs"),
+    bundleDependencies: true,
+    jsx: "automatic",
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/pages/process-map/processMapAuthoringDialogs.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/pages/process-map/processMapAuthoringDialogs.test.cjs"),
+    bundleDependencies: true,
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/modules/kanban/processWorkMapIntegration.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processWorkMapIntegration.test.js"),
   },
@@ -296,6 +314,7 @@ for (const componentTest of componentTests) {
     bundle: true,
     platform: "node",
     format: componentTest.bundleDependencies ? "cjs" : "esm",
+    ...(componentTest.jsx ? { jsx: componentTest.jsx } : {}),
     ...(componentTest.bundleDependencies
       ? { external: ["react", "react-dom", "react-dom/*", "jsdom"] }
       : { packages: "external" }),

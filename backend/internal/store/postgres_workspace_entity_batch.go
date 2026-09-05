@@ -7,7 +7,14 @@ import (
 	"strings"
 )
 
-func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (WorkspaceEntityBatchResult, error) {
+func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInput) (result WorkspaceEntityBatchResult, err error) {
+	input, err = normalizeWorkspaceProcessDefinition(input)
+	if err != nil {
+		return WorkspaceEntityBatchResult{}, err
+	}
+	if input.ProcessDefinition != nil {
+		defer func() { err = workspaceProcessDefinitionWriteError(err) }()
+	}
 	if input.EntityKind == EntityTypeLogicGate && len(input.Relationships) > 0 {
 		return WorkspaceEntityBatchResult{}, ErrInvalid
 	}
@@ -23,7 +30,7 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 	}
 	defer tx.Rollback()
 
-	result := WorkspaceEntityBatchResult{
+	result = WorkspaceEntityBatchResult{
 		CompanyID:      input.CompanyID,
 		EntityKind:     input.EntityKind,
 		EntityMappings: make([]WorkspaceEntityBatchEntityMapping, 0, len(input.Items)),
@@ -94,6 +101,9 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 			LogicGateID:   newUUIDv7String(),
 			Header:        item.Title,
 			DefaultAccess: ResourceDefaultAccessEdit,
+		}
+		if input.ProcessDefinition != nil {
+			created.LogicGateID = input.ProcessDefinition.LogicGateID
 		}
 		stop := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.logic_gate_writes")
 		if err := tx.QueryRowContext(ctx,
@@ -241,6 +251,11 @@ func (r *PostgresRepo) CreateWorkspaceEntityBatch(input WorkspaceEntityBatchInpu
 		result.Relationships = append(result.Relationships, item)
 	}
 
+	if input.ProcessDefinition != nil {
+		if err := r.createWorkspaceProcessDefinitionTx(ctx, tx, input, &result); err != nil {
+			return WorkspaceEntityBatchResult{}, err
+		}
+	}
 	stopCommit := observeTiming(ctx, "repo.CreateWorkspaceEntityBatch.commit")
 	if err := tx.Commit(); err != nil {
 		stopCommit()

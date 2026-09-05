@@ -1707,6 +1707,7 @@ type WorkspaceEntityBatchInput struct {
 	CreatorLogicGateRACIRole string
 	Items                    []WorkspaceEntityBatchItemInput
 	Relationships            []WorkspaceEntityBatchRelationshipInput
+	ProcessDefinition        *WorkspaceProcessDefinitionInput
 	TimingRecorder           TimingRecorder
 }
 
@@ -1716,13 +1717,17 @@ type WorkspaceEntityBatchEntityMapping struct {
 }
 
 type WorkspaceEntityBatchResult struct {
-	CompanyID      string                              `json:"company_id"`
-	EntityKind     string                              `json:"entity_kind"`
-	EntityMappings []WorkspaceEntityBatchEntityMapping `json:"entity_mappings"`
-	Nodes          []domain.Node                       `json:"nodes,omitempty"`
-	LogicGates     []domain.LogicGate                  `json:"logic_gates,omitempty"`
-	Relationships  []domain.NodeRelationship           `json:"relationships,omitempty"`
-	FolderItems    []domain.CompanyExplorerFolderItem  `json:"folder_items,omitempty"`
+	CompanyID         string                                   `json:"company_id"`
+	EntityKind        string                                   `json:"entity_kind"`
+	EntityMappings    []WorkspaceEntityBatchEntityMapping      `json:"entity_mappings"`
+	Nodes             []domain.Node                            `json:"nodes,omitempty"`
+	LogicGates        []domain.LogicGate                       `json:"logic_gates,omitempty"`
+	Relationships     []domain.NodeRelationship                `json:"relationships,omitempty"`
+	FolderItems       []domain.CompanyExplorerFolderItem       `json:"folder_items,omitempty"`
+	ProcessSteps      []domain.ProcessStep                     `json:"process_steps,omitempty"`
+	StepRelationships []domain.ResourceOperationalRelationship `json:"step_relationships,omitempty"`
+	StepMap           *domain.ProcessStepMapLayout             `json:"step_map,omitempty"`
+	Events            []domain.DomainEvent                     `json:"-"`
 }
 
 type RACIMatrixNodeCreateInput struct {

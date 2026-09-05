@@ -10,6 +10,8 @@ import {
 import { type TileLayerProps } from "@deck.gl/geo-layers";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
 import DeckGL, { type DeckGLRef } from "@deck.gl/react";
+import FrameRightClickMenu from "../../app/framerightclickmenu.js";
+import { hoverHandlers, menuBtnBase } from "../../app/frameLayoutTypes.js";
 import { getAuthSessionCacheGeneration } from "../../auth/cognitoAuth.js";
 import { createRequestJSON, isAbortError } from "../api/requestJSON.js";
 import { getQDBusinessDate, millisecondsUntilNextQDBusinessDay } from "../logic-gates/qdRatingsApi.js";
@@ -204,6 +206,9 @@ export type ProcessMapSurfaceProps = {
   companyID: string;
   hoverModeEnabled?: boolean;
   onOpenLogicGate: (logicGateID: string, label: string) => void;
+  onCreateFolder?: (initialParentFolderID?: string) => void;
+  onCreateProcess?: (initialParentFolderID?: string) => void;
+  onCreateStep?: (initialParentFolderID?: string) => void;
 };
 
 type PlacementGesture = {
@@ -1283,7 +1288,7 @@ export function materializeProcessMapPlacementTransform(
   return result;
 }
 
-export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false, onOpenLogicGate }: ProcessMapSurfaceProps) {
+export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false, onOpenLogicGate, onCreateFolder, onCreateProcess, onCreateStep }: ProcessMapSurfaceProps) {
   const authGeneration = getAuthSessionCacheGeneration();
   const protectedScopeKey = `${apiBase.trim()}\u0000${companyID.trim()}\u0000${authGeneration}`;
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -1312,6 +1317,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [creationMenu, setCreationMenu] = useState<{ x: number; y: number; initialParentFolderID?: string } | null>(null);
   const protectedScopeCurrent = protectedScope === protectedScopeKey;
   const activeScene = protectedScopeCurrent ? scene : null;
 
@@ -1410,6 +1416,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setHoveredResizePick(null);
     setHoveredProcessID(null);
     setPinnedProcessID(null);
+    setCreationMenu(null);
     setLoading(true);
   }, [advanceProtectedGeneration, apiBase, companyID, protectedScopeKey]);
 
@@ -1489,7 +1496,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   }, [apiBase, companyID, loadScene]);
 
   useEffect(() => {
-    if (!activeScene || fittedSceneRef.current || viewportSize.width <= 1 || viewportSize.height <= 1) return;
+    if (!activeScene?.bounds || fittedSceneRef.current || viewportSize.width <= 1 || viewportSize.height <= 1) return;
     fittedSceneRef.current = true;
     const fitted = fitProcessMapViewState(activeScene.bounds, viewportSize);
     viewRef.current = fitted;
@@ -2407,6 +2414,16 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
           ? `Process Map. Selected ${selectedPlacement.name}.`
           : "Process Map company canvas"}
       onKeyDown={handleKeyDown}
+      onContextMenu={(event) => {
+        if ((!onCreateFolder && !onCreateProcess && !onCreateStep) || !activeScene || gestureRef.current) return;
+        if (event.target instanceof Element && event.target.closest("button, input, select, textarea, a, [contenteditable='true'], [data-process-map-fixed-overlay]")) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const pick = pickFromObject(deckRef.current?.pickObject({ x: event.clientX - bounds.left, y: event.clientY - bounds.top })?.object);
+        if (pick && (pick.kind !== "placement" || pick.placement.resource_type !== "company_explorer_folder")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setCreationMenu({ x: event.clientX, y: event.clientY, initialParentFolderID: pick?.placement.resource_id });
+      }}
     >
       <DeckGL
         ref={deckRef}
@@ -2427,6 +2444,26 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         getCursor={({ isDragging, isHovering }) => dragSelectionActive ? "crosshair" : resizeCursor ?? (isDragging ? "grabbing" : isHovering ? "pointer" : "grab")}
       />
 
+      {protectedScopeCurrent && creationMenu && <FrameRightClickMenu
+        x={creationMenu.x}
+        y={creationMenu.y}
+        ariaLabel="Process Map creation"
+        onClose={() => setCreationMenu(null)}
+      >
+        {onCreateFolder && <button type="button" role="menuitem" autoFocus style={menuBtnBase} {...hoverHandlers} onClick={() => {
+          setCreationMenu(null);
+          onCreateFolder(creationMenu.initialParentFolderID);
+        }}>Create Folder</button>}
+        {onCreateProcess && <button type="button" role="menuitem" autoFocus={!onCreateFolder} style={menuBtnBase} {...hoverHandlers} onClick={() => {
+          setCreationMenu(null);
+          onCreateProcess(creationMenu.initialParentFolderID);
+        }}>Create Process</button>}
+        {onCreateStep && <button type="button" role="menuitem" autoFocus={!onCreateFolder && !onCreateProcess} style={menuBtnBase} {...hoverHandlers} onClick={() => {
+          setCreationMenu(null);
+          onCreateStep(creationMenu.initialParentFolderID);
+        }}>Create Step</button>}
+      </FrameRightClickMenu>}
+
       {qdPosition && qdPlacement && <div data-process-map-fixed-overlay="true" className="process-map-qd-overlay" style={qdPosition}>
         <ProcessMapQDCard
           apiBase={apiBase}
@@ -2445,6 +2482,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       </div>}
       {loading && <div data-process-map-fixed-overlay="true" className="process-map-loading" role="status">Loading Process Map…</div>}
       {error && <div data-process-map-fixed-overlay="true" className="process-map-message is-error" role="alert"><span>{error}</span><button type="button" onClick={() => void loadScene(true)}>Retry</button></div>}
+      {!loading && !error && !notice && activeScene && !activeScene.bounds && <div data-process-map-fixed-overlay="true" className="process-map-message" role="status">
+        <span>No saved Folders or Processes are available on this map. </span>
+        <button type="button" onClick={() => void loadScene(true)}>Retry</button>
+      </div>}
       {!error && notice && <div data-process-map-fixed-overlay="true" className="process-map-message" role="status">{notice}</div>}
     </div>
   );
