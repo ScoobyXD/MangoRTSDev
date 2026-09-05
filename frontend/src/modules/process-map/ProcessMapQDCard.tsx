@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { LogicGateQDTracker } from "../logic-gates/LogicGateQDTracker.js";
 import {
   logicGateDisplayRACIAssignments,
@@ -36,7 +36,7 @@ function assignmentLabel(assignment: LogicGateRACIAssignment): string {
     ?? (principalType === "group" ? "Unknown group" : "Unknown user");
 }
 
-export function ProcessMapQDCard({
+export const ProcessMapQDCard = memo(function ProcessMapQDCard({
   apiBase,
   companyID,
   logicGateID,
@@ -117,4 +117,4 @@ export function ProcessMapQDCard({
       </footer>
     </article>
   );
-}
+});

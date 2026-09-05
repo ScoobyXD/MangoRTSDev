@@ -84,8 +84,6 @@ type ProcessMapVisiblePlacement struct {
 	GridWidth         int                         `json:"grid_width"`
 	GridHeight        int                         `json:"grid_height"`
 	Revision          int64                       `json:"revision"`
-	CreatedTimestamp  time.Time                   `json:"created_timestamp"`
-	UpdatedTimestamp  time.Time                   `json:"updated_timestamp"`
 	CanEdit           bool                        `json:"can_edit"`
 	ScoreCard         *ProcessMapScoreCardSummary `json:"score_card,omitempty"`
 	ResponsibleNames  []string                    `json:"responsible_names,omitempty"`
@@ -127,8 +125,6 @@ type ProcessMapTileTrace struct {
 	RoutePoints                       []ProcessMapRoutePoint  `json:"route_points"`
 	PathFragments                     [][]ProcessMapPathPoint `json:"path_fragments"`
 	Revision                          int64                   `json:"revision"`
-	CreatedTimestamp                  time.Time               `json:"created_timestamp"`
-	UpdatedTimestamp                  time.Time               `json:"updated_timestamp"`
 }
 
 type ProcessMapTile struct {

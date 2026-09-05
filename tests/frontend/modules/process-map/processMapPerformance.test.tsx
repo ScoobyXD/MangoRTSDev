@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { Layer } from "../../../../frontend/node_modules/@deck.gl/core/dist/index.js";
+import { OrthographicViewport, type Layer } from "../../../../frontend/node_modules/@deck.gl/core/dist/index.js";
 import {
   buildProcessMapLayers,
+  mergeTilePresentation,
+  mergeProcessMapPresentation,
+  prioritizeProcessMapValidationTiles,
   processMapFolderChildTops,
   type ProcessMapLayerBuildOptions,
   type ProcessMapPlacementTransform,
 } from "../../../../frontend/src/modules/process-map/ProcessMapSurface.js";
-import type { ProcessMapVisiblePlacement } from "../../../../frontend/src/modules/process-map/processMapApi.js";
+import {
+  fetchProcessMapTile,
+  invalidateProcessMapReadCaches,
+  type ProcessMapVisiblePlacement,
+  type ProcessMapTileResponse,
+  type ProcessMapTileVersion,
+  PROCESS_MAP_MAX_VALIDATION_TILES,
+} from "../../../../frontend/src/modules/process-map/processMapApi.js";
 
 function key(placement: ProcessMapVisiblePlacement): string {
   return `${placement.resource_type}:${placement.resource_id}`;
@@ -28,8 +38,6 @@ function placement(id: string, x = 0, y = 0): ProcessMapVisiblePlacement {
     grid_height: 8,
     can_edit: true,
     revision: 1,
-    created_timestamp: "created",
-    updated_timestamp: "updated",
   };
 }
 
@@ -218,4 +226,82 @@ test("moving or resizing a complete Folder subtree keeps its title above transfo
     assert.ok(label);
     assert.equal(label.position[1], expectedY);
   }
+});
+
+test("presentation merging shares frozen reads and reuses fragment keys without changing deduplication", async () => {
+  const apiBase = "https://process-map-merge-ownership.test";
+  const originalFetch = globalThis.fetch;
+  const process = placement("shared-process");
+  let fragmentSerializations = 0;
+  globalThis.fetch = (async (input) => {
+    const x = Number(new URL(String(input)).pathname.split("/").at(-2));
+    return new Response(JSON.stringify({
+      z: 22, x, y: 0, process_map_read_version: 1,
+      placements: [{ ...process, presentation: x === 0 ? "normal" : "editing" }],
+      traces: [{
+        presentation: "editing", resource_operational_relationship_id: "shared-trace",
+        source: { resource_type: "logic_gate", resource_id: "shared-process" },
+        target: { resource_type: "logic_gate", resource_id: "target" },
+        route_points: [{ x: 14, y: 4 }],
+        path_fragments: x === 0
+          ? [[{ x: 0, y: 4 }, { x: 14, y: 4 }]]
+          : [[{ x: 0, y: 4 }, { x: 14, y: 4 }], [{ x: 14, y: 4 }, { x: 28, y: 4 }]],
+        revision: 1, created_timestamp: "created", updated_timestamp: "updated",
+      }],
+    }));
+  }) as typeof fetch;
+  try {
+    const tiles = await Promise.all([0, 1].map((x) => fetchProcessMapTile(apiBase, "company", 1, 22, x, 0)));
+    const countedTiles = tiles.map((tile): ProcessMapTileResponse => {
+      const fragments = tile.traces[0].path_fragments.map((fragment) => new Proxy(fragment, {
+        get(target, property, receiver) {
+          if (property === "map") fragmentSerializations += 1;
+          return Reflect.get(target, property, receiver);
+        },
+      }));
+      Object.freeze(fragments);
+      return Object.freeze({ ...tile, traces: Object.freeze([Object.freeze({ ...tile.traces[0], path_fragments: fragments })]) });
+    });
+    const inputs = new Map(countedTiles.map((tile) => [String(tile.x), tile]));
+    const merged = mergeTilePresentation(inputs);
+    assert.equal(merged.placements.get(key(process)), tiles[1].placements[0], "the higher presentation wins without copying its immutable object");
+    const trace = merged.traces.get("shared-trace");
+    assert.ok(trace);
+    assert.equal(trace.route_points, tiles[0].traces[0].route_points);
+    assert.deepEqual(trace.path_fragments, [[{ x: 0, y: 4 }, { x: 14, y: 4 }], [{ x: 14, y: 4 }, { x: 28, y: 4 }]]);
+    assert.equal(trace.path_fragments[0], countedTiles[0].traces[0].path_fragments[0]);
+    assert.equal(trace.path_fragments[1], countedTiles[1].traces[0].path_fragments[1]);
+    assert.equal(Reflect.set(trace.path_fragments[0][0], "x", 99), false);
+    assert.equal(fragmentSerializations, 3, "each distinct immutable fragment computes its key once");
+    assert.deepEqual(mergeTilePresentation(inputs), merged);
+    assert.equal(fragmentSerializations, 3, "another arrival/merge reuses the existing fragments' keys");
+    assert.equal(mergeProcessMapPresentation(merged, { placements: new Map(), traces: new Map(), removedPlacementKeys: new Set() }, new Map(), new Map(), new Set()), merged,
+      "an idle presentation does not copy the full resident maps");
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateProcessMapReadCaches(apiBase, "company");
+  }
+});
+
+test("validation overflow prioritizes visible fractional-zoom negative tiles before retained history", () => {
+  const scene = options([]).scene;
+  const viewport = new OrthographicViewport({ width: 400, height: 300, target: [-330, -170, 0], zoom: -0.4 });
+  const history: ProcessMapTileVersion[] = Array.from({ length: PROCESS_MAP_MAX_VALIDATION_TILES }, (_, index) => ({
+    z: 22, x: 2_000 - index, y: 2_000, process_map_read_version: 1,
+  }));
+  const visible: ProcessMapTileVersion = { z: 22, x: -2, y: -1, process_map_read_version: 1 };
+  const ancestor: ProcessMapTileVersion = { z: 21, x: -1, y: -1, process_map_read_version: 1 };
+  const candidates = [...history, ancestor, visible];
+  const prioritized = prioritizeProcessMapValidationTiles(candidates, scene, viewport);
+  assert.equal(prioritized.length, PROCESS_MAP_MAX_VALIDATION_TILES);
+  assert.equal(prioritized[0], visible, "ceil(camera zoom + max tile zoom) gives current z22 coverage at negative fractional zoom");
+  assert.equal(prioritized[1], ancestor, "visible coarser coverage precedes every offscreen tile");
+  assert.equal(prioritized[2], history.at(-1), "the nearest offscreen coverage fills remaining capacity first");
+  assert.equal(candidates[0], history[0], "prioritization leaves cache insertion order untouched");
+  assert.equal(candidates.at(-1), visible);
+  const bounded = candidates.slice(0, PROCESS_MAP_MAX_VALIDATION_TILES);
+  Object.freeze(bounded);
+  assert.equal(prioritizeProcessMapValidationTiles(bounded, scene, {
+    zoom: -0.4, getBounds: () => { throw new Error("bounded validation must not inspect or sort the camera coverage"); },
+  }), bounded);
 });

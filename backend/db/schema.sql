@@ -1506,7 +1506,7 @@ $$;
 --
 
 CREATE FUNCTION public.mangorts_v2_policy_parent(p_company_id uuid, p_resource_type text, p_resource_id uuid) RETURNS TABLE(parent_resource_type text, parent_resource_id uuid)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE ROWS 1
     SET search_path TO 'public', 'pg_temp'
     AS $$
   select 'logic_gate'::text, assignment.logic_gate_id
@@ -1707,7 +1707,7 @@ $$;
 --
 
 CREATE FUNCTION public.mangorts_v2_resolve_permission_policy(p_company_id uuid, p_resource_type text, p_resource_id uuid) RETURNS TABLE(source_resource_type text, source_resource_id uuid, source_customized_sequence bigint, reset_resource_type text, reset_resource_id uuid, reset_sequence bigint, overwritten_resource_type text, overwritten_resource_id uuid, overwritten_sequence bigint, parent_link_fingerprint text)
-    LANGUAGE sql STABLE
+    LANGUAGE sql STABLE ROWS 1
     SET search_path TO 'public', 'pg_temp'
     AS $$
   with recursive path as (
@@ -1734,10 +1734,13 @@ CREATE FUNCTION public.mangorts_v2_resolve_permission_policy(p_company_id uuid, 
            child.visited || (parent_setting.resource_type || ':' || parent_setting.resource_id::text)
     from path child
     cross join lateral mangorts_v2_policy_parent(p_company_id,child.resource_type,child.resource_id) parent
-    join resource_permission_settings parent_setting
-      on parent_setting.company_id=p_company_id
-     and parent_setting.resource_type=parent.parent_resource_type
-     and parent_setting.resource_id=parent.parent_resource_id
+    cross join lateral (
+      select parent_setting.* from resource_permission_settings parent_setting
+      where parent_setting.company_id=p_company_id
+        and parent_setting.resource_type=parent.parent_resource_type
+        and parent_setting.resource_id=parent.parent_resource_id
+      limit 1
+    ) parent_setting
     where not (parent_setting.resource_type || ':' || parent_setting.resource_id::text)=any(child.visited)
   ),
   eligible_resets as (

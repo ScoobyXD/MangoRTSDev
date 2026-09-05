@@ -20,6 +20,7 @@ export type ProcessMapRefinementTile = {
   isVisible: boolean;
   isLoaded: boolean;
   content?: unknown | null;
+  parent: ProcessMapRefinementTile | null;
 };
 
 export function processMapResourceNodeID(resource: ProcessMapResourceRef): string {
@@ -143,32 +144,26 @@ export function createProcessMapSettlementGate(options: {
   };
 }
 
-function tileCovers(ancestor: ProcessMapRefinementTile, descendant: ProcessMapRefinementTile): boolean {
-  const zoomDelta = descendant.index.z - ancestor.index.z;
-  if (zoomDelta <= 0) return false;
-  const scale = 2 ** zoomDelta;
-  return Math.floor(descendant.index.x / scale) === ancestor.index.x
-    && Math.floor(descendant.index.y / scale) === ancestor.index.y;
-}
-
 export function transparentVectorRefinementStrategy(tiles: ProcessMapRefinementTile[]): void {
-  for (const tile of tiles) tile.isVisible = false;
-  const selected = tiles.filter((tile) => tile.isSelected);
-  const loadedAncestors = tiles
-    .filter((tile) => tile.content != null && !tile.isSelected)
-    .sort((left, right) => right.index.z - left.index.z);
-  const blockedAncestors = new Set<ProcessMapRefinementTile>();
-
-  for (const tile of selected) {
-    if (tile.content != null) continue;
-    const ancestor = loadedAncestors.find((candidate) => tileCovers(candidate, tile));
-    if (ancestor) blockedAncestors.add(ancestor);
+  // Tileset2D already marks only selected tiles visible and maintains each
+  // header's nearest cached parent. Complete coverage needs no refinement.
+  let missingCoverage = false;
+  for (const tile of tiles) {
+    if (!tile.isSelected || tile.content != null) continue;
+    missingCoverage = true;
+    tile.isVisible = false;
+    let ancestor = tile.parent;
+    while (ancestor && ancestor.content == null) ancestor = ancestor.parent;
+    if (ancestor) ancestor.isVisible = true;
   }
+  if (!missingCoverage) return;
 
-  for (const ancestor of blockedAncestors) ancestor.isVisible = true;
-  for (const tile of selected) {
-    if (tile.content == null) continue;
-    const coveredByVisibleAncestor = [...blockedAncestors].some((ancestor) => tileCovers(ancestor, tile));
-    if (!coveredByVisibleAncestor) tile.isVisible = true;
+  // One covering level must draw each region: translucent ancestors must not
+  // overlap either another substitute ancestor or a ready selected child.
+  for (const tile of tiles) {
+    if (!tile.isVisible) continue;
+    let ancestor = tile.parent;
+    while (ancestor && !ancestor.isVisible) ancestor = ancestor.parent;
+    if (ancestor) tile.isVisible = false;
   }
 }

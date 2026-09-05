@@ -501,7 +501,7 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 			Restricted: false, Presentation: presentation, ResourceType: placement.ResourceType, ResourceID: placement.ResourceID, Name: name,
 			MapParentFolderID: parentID, GridX: placement.GridX, GridY: placement.GridY,
 			GridWidth: placement.GridWidth, GridHeight: placement.GridHeight, Revision: placement.Revision,
-			CreatedTimestamp: placement.CreatedTimestamp, UpdatedTimestamp: placement.UpdatedTimestamp, CanEdit: true,
+			CanEdit:   true,
 			ScoreCard: scoreCard, ResponsibleNames: responsibleNames, AccountableNames: accountableNames,
 		})
 	}
@@ -543,7 +543,6 @@ func (r *MemoryRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTile
 			Presentation:                      presentation,
 			Source:                            relationship.Source, Target: relationship.Target, RoutePoints: routePoints,
 			PathFragments: fragments, Revision: trace.Revision,
-			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
 		})
 	}
 	return result, ctx.Err()

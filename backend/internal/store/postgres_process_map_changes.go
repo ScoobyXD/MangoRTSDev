@@ -19,18 +19,12 @@ func (r *PostgresRepo) GetProcessMapChanges(ctx context.Context, input ProcessMa
 		return ProcessMapChanges{}, err
 	}
 	defer tx.Rollback()
-	if err := postgresRequireProcessMapMembershipTx(ctx, tx, companyID, userID); err != nil {
-		return ProcessMapChanges{}, err
-	}
-	version, _, err := processMapVersionsTx(ctx, tx, companyID)
+	scene, err := postgresProcessMapScene(ctx, tx, companyID, userID)
 	if err != nil {
 		return ProcessMapChanges{}, err
 	}
+	version := scene.ProcessMapReadVersion
 	minimumVersion, err := validateProcessMapChangesQuery(input, version)
-	if err != nil {
-		return ProcessMapChanges{}, err
-	}
-	scene, err := postgresProcessMapSceneTx(ctx, tx, companyID, userID)
 	if err != nil {
 		return ProcessMapChanges{}, err
 	}
