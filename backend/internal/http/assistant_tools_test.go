@@ -321,7 +321,7 @@ func TestAssistantToolsAttachmentLifecycleVerifiesBytesAndPinsCompany(t *testing
 
 func TestAssistantToolsCatalogAndResponseBound(t *testing.T) {
 	tools := assistantTools()
-	if len(tools) != 25 {
+	if len(tools) != 26 {
 		t.Fatalf("tool count=%d", len(tools))
 	}
 	seen := map[string]bool{}

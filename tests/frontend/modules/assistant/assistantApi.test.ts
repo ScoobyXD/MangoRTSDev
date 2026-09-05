@@ -12,6 +12,33 @@ function streamResponse(chunks: Uint8Array[]): Response {
   });
 }
 
+test("context inspection requires opt-in and accepts bounded initial and continuation input", async () => {
+  const context = { type: "context", context: { step: 1, model: "test-model", instructions: "Mango rules", tools: [], input: [{ role: "developer", content: "a".repeat(520_000) }], omitted_reasoning_items: 0 } };
+  const continuation = { type: "context", context: { step: 2, input: [{ type: "function_call_output", output: "Saved" }], omitted_reasoning_items: 1 } };
+  const bytes = new TextEncoder().encode(`data: ${JSON.stringify(context)}\n\ndata: ${JSON.stringify(continuation)}\n\ndata: {"type":"done"}\n\n`);
+  await assert.rejects(consumeAssistantStream(streamResponse([bytes]), () => undefined));
+  const events: AssistantEvent[] = [];
+  await consumeAssistantStream(streamResponse([bytes]), (event) => events.push(event), true);
+  assert.deepEqual(events, [context, continuation, { type: "done" }]);
+  for (const invalid of [{ ...context.context, step: 0 }, { ...context.context, input: null }, { ...context.context, omitted_reasoning_items: -1 }]) {
+    const malformed = new TextEncoder().encode(`data: ${JSON.stringify({ type: "context", context: invalid })}\n\n`);
+    await assert.rejects(consumeAssistantStream(streamResponse([malformed]), () => undefined, true));
+  }
+});
+
+test("context inspection request sends only its opt-in, never a client-authored context", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    const body = JSON.parse(String(init?.body));
+    assert.equal(body.inspect_context, true);
+    assert.deepEqual(Object.keys(body).sort(), ["inspect_context", "messages", "reasoning_effort", "request_id"]);
+    return streamResponse([new TextEncoder().encode('data: {"type":"done"}\n\n')]);
+  };
+  try {
+    await streamAssistantChat("https://api.example.test", "company-a", [{ role: "user", content: "Hello" }], "medium", new AbortController().signal, () => undefined, undefined, true);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("assistant consumes fragmented UTF-8 SSE, comments, tool progress and explicit completion", async () => {
   const encoder = new TextEncoder();
   const body = encoder.encode(': connected\r\n\r\ndata: {"type":"text","text":"Mango 🥭"}\r\n\r\ndata: {"type":"tool","name":"get_me","status":"running"}\n\ndata: {"type":"done"}\n\ndata: {"type":"text","text":"ignored"}\n\n');

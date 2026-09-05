@@ -93,6 +93,171 @@ func assistantProcessInputText(value any) string {
 	}
 }
 
+func TestAssistantProcessCanDiscussMissingSOPOrSteps(t *testing.T) {
+	for _, scenario := range []struct {
+		name     string
+		hasSOP   bool
+		hasSteps bool
+	}{{"no_sop", false, true}, {"no_steps", true, false}, {"neither", false, false}} {
+		t.Run(scenario.name, func(t *testing.T) {
+			captured := make(chan map[string]any, 1)
+			server, repo := assistantTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Error(err)
+					http.Error(w, "invalid request", 500)
+					return
+				}
+				captured <- body
+				assistantProviderEvent(w, map[string]any{"type": "response.output_text.delta", "delta": "Yes, I can see this Process."})
+				assistantProviderComplete(w)
+			})
+			inspect := scenario.name == "neither"
+			if inspect {
+				if _, err := repo.AddCompanyMembership("assistant-user", assistantTestCompany, domain.RoleDevAdmin); err != nil {
+					t.Fatal(err)
+				}
+			}
+			process, err := repo.CreateLogicGate(assistantTestCompany, "A Process to discuss")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario.hasSteps {
+				if _, err := repo.CreateProcessStep(store.ProcessStepCreateInput{CompanyID: assistantTestCompany, LogicGateID: process.LogicGateID, Name: "Prepare"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if scenario.hasSOP {
+				// Canonical content must be readable without a separate metadata write.
+				if _, err := repo.CommitEditorJSONDocument(store.EditorJSONCommitInput{
+					Document:    store.EditorJSONDocumentRef{CompanyID: assistantTestCompany, ResourceType: store.EntityTypeLogicGate, ResourceID: process.LogicGateID, DocumentID: store.NewUUIDv7String()},
+					OperationID: store.NewUUIDv7String(), ClientID: "process-discussion-test", SchemaVersion: store.MangoTiptapSchemaVersion, JSONDocument: assistantProcessTestSOP("Discuss the supplied meeting notes."),
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			response := httptest.NewRecorder()
+			server.Routes().ServeHTTP(response, assistantContextChatRequest(assistantRequest{ProcessID: process.LogicGateID, InspectContext: inspect, Messages: []assistantMessage{{Role: "user", Content: "Do you see this Process?"}}}))
+			if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type":"done"`) || strings.Contains(response.Body.String(), `"type":"error"`) {
+				t.Fatalf("discussion was rejected: %d %s", response.Code, response.Body.String())
+			}
+			if inspect {
+				contexts := assistantContextEvents(t, response.Body.String())
+				if len(contexts) != 1 {
+					t.Fatalf("incomplete Process inspection events=%d, want 1", len(contexts))
+				}
+				if tools, ok := contexts[0]["tools"].([]any); !ok || len(tools) != 0 {
+					t.Fatalf("first inspection must explicitly show tools:[], got %#v", contexts[0]["tools"])
+				}
+			}
+			select {
+			case body := <-captured:
+				tools, _ := body["tools"].([]any)
+				if len(tools) != 0 {
+					t.Fatalf("incomplete Process exposed %d execution tools", len(tools))
+				}
+				definition := assistantDeveloperContext(t, body["input"])
+				selected, _ := definition["process"].(map[string]any)
+				if selected["logic_gate_id"] != process.LogicGateID || selected["header"] != process.Header {
+					t.Fatalf("provider cannot see the selected Process: %+v", selected)
+				}
+				if reason, _ := definition["execution_blocked_reason"].(string); reason == "" {
+					t.Fatal("incomplete Process lacks an execution-only explanation")
+				}
+				steps, _ := definition["steps"].([]any)
+				sop, _ := definition["sop"].([]any)
+				if (len(steps) > 0) != scenario.hasSteps || (len(sop) > 0) != scenario.hasSOP {
+					t.Fatalf("available Process data was lost: Steps=%d SOPs=%d", len(steps), len(sop))
+				}
+			default:
+				t.Fatal("discussion never reached the provider")
+			}
+			nodes, err := repo.ListNodes(assistantTestCompany)
+			if err != nil || len(nodes) != 0 {
+				t.Fatalf("discussion created work: Nodes=%+v err=%v", nodes, err)
+			}
+		})
+	}
+}
+
+func TestAssistantProcessFollowupReloadsCanonicalSOPWithoutCreatingWork(t *testing.T) {
+	captured := make(chan map[string]any, 1)
+	server, repo := assistantTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+			http.Error(w, "invalid request", 500)
+			return
+		}
+		captured <- body
+		assistantProviderComplete(w)
+	})
+	process, err := repo.CreateLogicGate(assistantTestCompany, "Follow-up Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateProcessStep(store.ProcessStepCreateInput{CompanyID: assistantTestCompany, LogicGateID: process.LogicGateID, Name: "Discuss notes"}); err != nil {
+		t.Fatal(err)
+	}
+	ref := store.EditorJSONDocumentRef{CompanyID: assistantTestCompany, ResourceType: store.EntityTypeLogicGate, ResourceID: process.LogicGateID, DocumentID: store.NewUUIDv7String()}
+	messages := []assistantMessage{{Role: "user", Content: "Do you see this Process?"}}
+	for turn, sopText := range []string{"", "The first saved SOP discusses Monday's notes.", "The updated SOP discusses Friday's notes."} {
+		if turn > 0 {
+			// No UpdateEditorJSONMetadata call: the saved document is authoritative.
+			if _, err := repo.CommitEditorJSONDocument(store.EditorJSONCommitInput{
+				Document: ref, OperationID: store.NewUUIDv7String(), ClientID: "human-editor", BaseRevision: int64(turn - 1), SchemaVersion: store.MangoTiptapSchemaVersion, JSONDocument: assistantProcessTestSOP(sopText),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			messages = append(messages, assistantMessage{Role: "assistant", Content: "Yes, I can see the Process."}, assistantMessage{Role: "user", Content: "I changed the SOP. Can you see my change?"})
+		}
+		response := httptest.NewRecorder()
+		server.Routes().ServeHTTP(response, assistantContextChatRequest(assistantRequest{ProcessID: process.LogicGateID, Messages: messages}))
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"type":"done"`) || strings.Contains(response.Body.String(), `"type":"error"`) {
+			t.Fatalf("discussion turn %d failed: %d %s", turn, response.Code, response.Body.String())
+		}
+		var body map[string]any
+		select {
+		case body = <-captured:
+		default:
+			t.Fatalf("turn %d did not reach the provider", turn)
+		}
+		definition := assistantDeveloperContext(t, body["input"])
+		selected, _ := definition["process"].(map[string]any)
+		if selected["logic_gate_id"] != process.LogicGateID || selected["header"] != process.Header {
+			t.Fatalf("follow-up lost the selected Process: %+v", selected)
+		}
+		instructions, _ := body["instructions"].(string)
+		if !strings.Contains(instructions, "not a request to execute") {
+			t.Error("the model is not told that selecting a Process alone does not authorize execution")
+		}
+		sop, _ := definition["sop"].([]any)
+		if turn == 0 {
+			if len(sop) != 0 {
+				t.Fatal("unsaved SOP content was invented")
+			}
+			continue
+		}
+		if len(sop) != 1 {
+			t.Fatalf("turn %d omitted the canonical SOP saved without metadata", turn)
+		}
+		saved := sop[0].(map[string]any)
+		if saved["textbox_id"] != ref.DocumentID || saved["revision"] != float64(turn) || !strings.Contains(assistantProcessInputText(saved["document"]), sopText) {
+			t.Fatalf("turn %d read stale or wrong SOP: %+v", turn, saved)
+		}
+		if turn == 2 && strings.Contains(assistantProcessInputText(saved["document"]), "Monday's notes") {
+			t.Fatal("follow-up kept the previous SOP content")
+		}
+		if reason, _ := definition["execution_blocked_reason"].(string); reason != "" {
+			t.Fatalf("saved SOP did not clear readiness: %s", reason)
+		}
+	}
+	nodes, err := repo.ListNodes(assistantTestCompany)
+	if err != nil || len(nodes) != 0 {
+		t.Fatalf("discussion or follow-up created work: Nodes=%+v err=%v", nodes, err)
+	}
+}
+
 func TestAssistantProcessExecutesSavedNodeWithAutomaticContext(t *testing.T) {
 	var calls atomic.Int32
 	var fixture assistantProcessFixture
