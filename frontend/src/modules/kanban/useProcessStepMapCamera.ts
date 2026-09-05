@@ -22,10 +22,9 @@ export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, ena
     const left = parseFloat(style.paddingLeft) || 0, top = parseFloat(style.paddingTop) || 0;
     return { left, top, width: element.clientWidth - left - (parseFloat(style.paddingRight) || 0), height: element.clientHeight - top - (parseFloat(style.paddingBottom) || 0) };
   };
-  const zoomTo = (value: number, point?: StepMapPoint) => {
+  const zoomTo = (value: number, anchor: StepMapPoint) => {
     if (!enabled || blocked.current() || pan.current || !viewport.current) return;
     const previous = cameraRef.current, zoom = clampZoom(value);
-    const area = viewArea(), anchor = point ?? { x: area.width / 2, y: area.height / 2 };
     const ratio = zoom / previous.zoom;
     update({ zoom, x: anchor.x - (anchor.x - previous.x) * ratio, y: anchor.y - (anchor.y - previous.y) * ratio });
   };
@@ -71,13 +70,5 @@ export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, ena
     setPanning(false);
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  const fit = (origin: StepMapPoint) => {
-    const extent = viewport.current?.querySelector<HTMLElement>(".process-step-map__extent");
-    if (!enabled || blocked.current() || pan.current || !extent) return;
-    const area = viewArea();
-    const zoom = clampZoom(Math.min(1, area.width / extent.offsetWidth, area.height / extent.offsetHeight));
-    update({ zoom, x: (area.width - extent.offsetWidth * zoom) / 2 - origin.x * zoom, y: (area.height - extent.offsetHeight * zoom) / 2 - origin.y * zoom });
-  };
-
-  return { ...camera, panning, isPanning: () => pan.current !== null, zoomTo, fit, startPan, movePan, endPan, cancelPan };
+  return { ...camera, panning, isPanning: () => pan.current !== null, startPan, movePan, endPan, cancelPan };
 }

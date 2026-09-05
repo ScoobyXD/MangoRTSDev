@@ -31,8 +31,6 @@ export type ProcessStepMapEditorProps = {
   commands: ProcessStepMapCommands;
   onChanged?: () => void;
   onBusyChange?: (busy: boolean) => void;
-  onCreateFolder?: () => void;
-  onCreateProcess?: () => void;
   isDark?: boolean;
   saveMode?: "saved" | "draft";
   presentation?: "board" | "canvas";
@@ -80,7 +78,7 @@ export function ProcessStepMap(props: ProcessStepMapProps) {
   return <ProcessStepMapEditor key={`${apiBase}:${companyID}:${processID}`} {...editorProps} commands={commands} />;
 }
 
-export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, onChanged, onBusyChange, onCreateFolder, onCreateProcess, isDark = false, saveMode = "saved", presentation = "board", processName = "", initialEditingStepID, hoverModeEnabled = false, renderActions }: ProcessStepMapEditorProps) {
+export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, onChanged, onBusyChange, isDark = false, saveMode = "saved", presentation = "board", processName = "", initialEditingStepID, hoverModeEnabled = false, renderActions }: ProcessStepMapEditorProps) {
   const [layout, setLayout] = useState<ProcessStepMapLayout | null>(null);
   const [preview, setPreview] = useState<ProcessStepMapLayout | null>(null);
   const [selection, setSelection] = useState<Selection>(() => initialEditingStepID ? { kind: "step", id: initialEditingStepID } : null);
@@ -173,7 +171,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   useEffect(() => {
     if (editingStepID && selectedStep?.process_step_id === editingStepID && !disabled) {
       titleInput.current?.focus();
-      titleInput.current?.select();
+      titleInput.current?.setSelectionRange(0, titleInput.current.value.length, "forward");
     }
   }, [editingStepID, selectedStep?.process_step_id, disabled]);
   useEffect(() => {
@@ -292,7 +290,6 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     void saveLayout(next);
   };
   const fit = () => {
-    if (isCanvas) { camera.fit(bounds); return; }
     const element = viewport.current;
     if (!element) return;
     setBoardZoom(Math.max(.25, Math.min(1, (element.clientWidth - 24) / bounds.width, (element.clientHeight - 24) / bounds.height)));
@@ -326,24 +323,13 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     if (cancel || !nextName || !step || nextName === step.name) { setName(step?.name ?? ""); return; }
     void changeDefinition(() => current.current.commands.renameStep(id, nextName), "Step renamed.");
   };
-  const closeInspector = () => {
-    finishRename();
-    const target = viewport.current?.querySelector<HTMLElement>(".process-step-map__step.is-selected .process-step-map__step-title, .process-step-map__edges .is-selected .process-step-map__edge-hit")
-      ?? viewport.current?.querySelector<HTMLElement>(".process-step-map__step.is-selected");
-    target?.focus();
-    setSelection(null);
-  };
-
-  const cameraDisabled = gestureActive || camera.panning;
-  const zoomControls = <div className="process-step-map__zoom"><button type="button" aria-label="Zoom out" disabled={cameraDisabled || zoom <= (isCanvas ? .5 : .25)} onClick={() => isCanvas ? camera.zoomTo(zoom - .25) : setBoardZoom((value) => Math.max(.25, value - .25))}>−</button><span>{Math.round(zoom * 100)}%</span><button type="button" aria-label="Zoom in" disabled={cameraDisabled || zoom >= (isCanvas ? 8 : 2)} onClick={() => isCanvas ? camera.zoomTo(zoom + .25) : setBoardZoom((value) => Math.min(2, value + .25))}>+</button><button type="button" disabled={cameraDisabled} onClick={fit}>Fit</button></div>;
 
   return <section className={`process-step-map${isDark && !isCanvas ? " process-step-map--dark" : ""}${isCanvas ? " process-step-map--canvas" : ""}`} aria-label="Process Step map">
     {!isCanvas && <div className="process-step-map__toolbar">
       <button type="button" disabled={disabled} onClick={() => void createStep()}>+ Create Step</button>
       <span className="process-step-map__hint">Drag Steps to arrange. Select a Step to name or connect it.</span>
-      {zoomControls}
+      <div className="process-step-map__zoom"><button type="button" aria-label="Zoom out" disabled={gestureActive || boardZoom <= .25} onClick={() => setBoardZoom((value) => Math.max(.25, value - .25))}>−</button><span>{Math.round(boardZoom * 100)}%</span><button type="button" aria-label="Zoom in" disabled={gestureActive || boardZoom >= 2} onClick={() => setBoardZoom((value) => Math.min(2, value + .25))}>+</button><button type="button" disabled={gestureActive} onClick={fit}>Fit</button></div>
     </div>}
-    {isCanvas && zoomControls}
     {renderActions?.({ createStep: () => void createStep(), disabled, busy: busy || loading || gestureActive })}
     {error && <div className="process-step-map__error" role="alert">{error} <button type="button" disabled={busy} onClick={() => void load()}>{saveMode === "draft" ? "Reload draft" : "Reload map"}</button></div>}
     <div className="process-step-map__status" role="status" aria-live="polite">{loading ? "Loading map…" : notice || (saveMode === "draft" ? "Unsaved changes stay here until you save the Process." : canEdit ? "Changes save when you finish moving or resizing." : "You can view this map.")}</div>
@@ -380,7 +366,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
               }} /> : <button className="process-step-map__step-title" type="button" title={isCanvas ? "Drag to move. Double-click or press F2 to name. Arrow keys move one grid square; Shift moves four." : "Drag to move. Arrow keys move one grid square; Shift moves four."} aria-label={`Move ${step.name}`} aria-disabled={disabled} onClick={() => { if (!disabled) setSelection({ kind: "step", id: step.process_step_id }); }} onPointerDown={(event) => { if (!isCanvas) startGesture(event, "move", step.process_step_id); }} onKeyDown={(event) => { if (isCanvas && event.key === "F2") { event.preventDefault(); startRename(step); } else keyMove(event, box); }}>{step.name}</button>}
               <span className="process-step-map__step-label">{saveMode === "draft" ? "Unsaved Step" : "Step"}</span>
               {(isCanvas ? resizeHandles : ["se" as const]).map((handle) => <button key={handle} type="button" className="process-step-map__resize" data-resize-handle={handle} aria-label={`Resize ${step.name}${handle === "se" ? "" : ` ${handle}`}`} title="Drag to resize, or use arrow keys." aria-disabled={disabled} onPointerDown={(event) => startGesture(event, "resize", step.process_step_id, 0, handle)} onKeyDown={(event) => keyMove(event, box, handle)}>{isCanvas ? null : "↘"}</button>)}
-              {hovered && <div className="process-step-map__hover-preview" role="tooltip">{step.name}<span>{canEdit ? "Select to name or connect this Step." : "Step connections are highlighted."}</span></div>}
+              {hovered && <div className="process-step-map__hover-preview" role="tooltip">{step.name}<span>{canEdit ? isCanvas ? "Double-click to name this Step." : "Select to name or connect this Step." : "Step connections are highlighted."}</span></div>}
             </article>;
           })}
           {selectedRoute && selectedRoute.points.map((point, index) => <button key={index} type="button" className="process-step-map__waypoint" style={{ left: point.x - bounds.x, top: point.y - bounds.y }} aria-label={`Move route point ${index + 1}`} title="Drag route point or use arrow keys. Delete removes it." aria-disabled={disabled} onPointerDown={(event) => startGesture(event, "route", selectedRoute.edge.resource_operational_relationship_id, index)} onKeyDown={(event) => {
@@ -391,16 +377,15 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
             const points = delta ? selectedRoute.points.map((item, i) => i === index ? { x: snapStepMapCoordinate(item.x + delta.x), y: snapStepMapCoordinate(item.y + delta.y) } : item) : selectedRoute.points.filter((_, i) => i !== index);
             void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, points));
           }} />)}
-          {steps.length === 0 && <p className="process-step-map__empty">Create your first Step, then connect the stages of this Process.</p>}
+          {steps.length === 0 && <p className="process-step-map__empty">Create your first Step to start this Process.</p>}
           </>}
         </div>
       </div>}
     </div>
-    {selectedStep && <div className="process-step-map__inspector" aria-label="Selected Step">
-      {isCanvas && <div className="process-step-map__inspector-heading"><strong>Step</strong><button type="button" aria-label="Close Step details" onClick={closeInspector}>×</button></div>}
-      {isCanvas ? <button type="button" disabled={disabled} onClick={() => startRename(selectedStep)}>Rename Step</button> : <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && name.trim() !== selectedStep.name) void changeDefinition(() => current.current.commands.renameStep(selectedStep.process_step_id, name.trim()), "Step renamed."); }}>
+    {!isCanvas && selectedStep && <div className="process-step-map__inspector" aria-label="Selected Step">
+      <form onSubmit={(event) => { event.preventDefault(); if (name.trim() && name.trim() !== selectedStep.name) void changeDefinition(() => current.current.commands.renameStep(selectedStep.process_step_id, name.trim()), "Step renamed."); }}>
         <label>Step name<input aria-label="Step name" value={name} maxLength={200} disabled={disabled} onChange={(event) => setName(event.target.value)} /></label><button type="submit" disabled={disabled || !name.trim() || name.trim() === selectedStep.name}>{saveMode === "draft" ? "Apply name" : "Save name"}</button>
-      </form>}
+      </form>
       <div className="process-step-map__connect"><label>Connect to<select aria-label="Connect to Step" value={targetID} disabled={disabled} onChange={(event) => setTargetID(event.target.value)}><option value="">Choose Step…</option>{steps.filter((step) => step.process_step_id !== selectedStep.process_step_id).map((step) => <option key={step.process_step_id} value={step.process_step_id}>{step.name}</option>)}</select></label><button type="button" disabled={disabled || !targetID} onClick={() => void changeDefinition(async () => {
         const result = await current.current.commands.connectSteps(selectedStep.process_step_id, targetID);
         if (mounted.current && result.relationship) setSelection({ kind: "route", id: result.relationship.resource_operational_relationship_id });
@@ -408,14 +393,12 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
       <button type="button" className="process-step-map__danger" disabled={disabled} onClick={() => setDeleteRequested(true)}>Delete Step</button>
       {deleteRequested && <div role="alert" className="process-step-map__confirm">Delete “{selectedStep.name}”? {saveMode === "draft" ? "It will be removed from this draft." : "Its Nodes keep their Process and status."}<button type="button" disabled={disabled} onClick={() => void changeDefinition(() => current.current.commands.deleteStep(selectedStep.process_step_id), "Step deleted. Its Nodes are preserved.")}>Confirm delete Step</button><button type="button" onClick={() => setDeleteRequested(false)}>Cancel</button></div>}
     </div>}
-    {selectedRoute && <div className="process-step-map__inspector" aria-label="Selected connection">{isCanvas && <div className="process-step-map__inspector-heading"><strong>Connection</strong><button type="button" aria-label="Close connection details" onClick={closeInspector}>×</button></div>}<span>{stepByID.get(selectedRoute.source.process_step_id)?.name} → {stepByID.get(selectedRoute.target.process_step_id)?.name}</span><button type="button" disabled={disabled || selectedRoute.points.length >= 256} onClick={() => {
+    {!isCanvas && selectedRoute && <div className="process-step-map__inspector" aria-label="Selected connection"><span>{stepByID.get(selectedRoute.source.process_step_id)?.name} → {stepByID.get(selectedRoute.target.process_step_id)?.name}</span><button type="button" disabled={disabled || selectedRoute.points.length >= 256} onClick={() => {
       const last = selectedRoute.points[selectedRoute.points.length - 1] ?? defaultStepMapRoute(selectedRoute.source, selectedRoute.target)[0];
       void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, [...selectedRoute.points, { x: snapStepMapCoordinate(last.x + 32), y: snapStepMapCoordinate(last.y + 32) }]));
     }}>Add route point</button><button type="button" disabled={disabled} onClick={() => void saveLayout(withRoutePoints(display, selectedRoute.edge.resource_operational_relationship_id, defaultStepMapRoute(selectedRoute.source, selectedRoute.target)))}>Reset route</button><button type="button" className="process-step-map__danger" disabled={disabled} onClick={() => void changeDefinition(() => current.current.commands.disconnectSteps(selectedRoute.edge.resource_operational_relationship_id), "Connection deleted. Both Steps are preserved.")}>Delete connection</button></div>}
     {contextMenu && <FrameRightClickMenu x={contextMenu.x} y={contextMenu.y} ariaLabel="Process map creation" onClose={() => setContextMenu(null)}>
       <button className="process-step-map__context-action" type="button" role="menuitem" disabled={disabled} onClick={() => { setContextMenu(null); void createStep(); }}>Create Step</button>
-      {onCreateFolder && <button className="process-step-map__context-action" type="button" role="menuitem" disabled={busy || loading || gestureActive} onClick={() => { setContextMenu(null); onCreateFolder(); }}>Create Folder</button>}
-      {onCreateProcess && <button className="process-step-map__context-action" type="button" role="menuitem" disabled={busy || loading || gestureActive} onClick={() => { setContextMenu(null); onCreateProcess(); }}>Create Process</button>}
     </FrameRightClickMenu>}
   </section>;
 }

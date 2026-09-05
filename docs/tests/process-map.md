@@ -220,17 +220,21 @@
 218. Panning or zooming a focused Process MUST move or scale its outline, Steps, and routes together without changing the outline's world dimensions.
 219. Dragging blank space in a focused Process MUST pan its camera.
 220. Wheel zoom in a focused Process MUST preserve the world point beneath the pointer within a 50% to 800% zoom range.
-221. The focused Process zoom buttons MUST zoom around the center of the current view.
-222. Fit in a focused Process MUST center its outline using the best fitting zoom within the 50% to 800% range.
-223. Focused Process controls and the breadcrumb MUST stay fixed while its camera moves.
-224. A read-only focused Process MUST allow camera navigation.
-225. The focused Process camera MUST remain fixed during a Step or route editing gesture.
-226. Deferred breadcrumb focus restoration MUST preserve any newer focus choice made by the user.
+221. Focused Process drafts and saved maps MUST omit zoom buttons and Fit.
+222. Focused Process controls and the breadcrumb MUST stay fixed while its camera moves.
+223. A read-only focused Process MUST allow camera navigation.
+224. The focused Process camera MUST remain fixed during a Step or route editing gesture.
+225. Deferred breadcrumb focus restoration MUST preserve any newer focus choice made by the user.
+226. Focused Process drafts and saved maps MUST omit Step and connection inspectors.
+227. Create Folder and Create Process MUST remain visible and disabled inside focused Process drafts and saved maps.
+228. Focused Step title editing MUST show borderless text with the entire name selected when editing begins.
+229. Folder breadcrumb controls and Folder picker choices MUST use an orange gradient.
+230. The creation card MUST sit 56 pixels below the map's top edge, or 52 pixels on viewports at most 700 pixels wide.
 Last updated: 2026-09-04
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` on one white map pane. Create Process briefly enters a labeled outline that fills the initial work area. The user creates and names compact Steps, drags blank space to pan, and uses the wheel to zoom around the pointer. The outline and its contents move together while the creation card and breadcrumb stay fixed. Save commits the complete draft to Explorer; returning to the company overview restores its mounted camera.
+An authorized user opens `/process-map` on one white map pane. Create Process enters a labeled outline; the card keeps Create Folder and Create Process visible but disabled while Create Step adds to the focused Process. The user chooses its orange Folder path, names Steps directly on their cards, drags blank space to pan, and uses the wheel to zoom. The outline and Steps move together while the card and breadcrumb stay fixed. Save commits the draft to Explorer; returning to the company overview restores its mounted camera.
 
 ## Scenario: Fit nested Folders within the existing world
 

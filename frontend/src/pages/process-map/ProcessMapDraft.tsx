@@ -13,11 +13,11 @@ import { ProcessMapActions } from "./ProcessMapActions.js";
 type DraftContents = { steps: ProcessStep[]; relationships: ProcessStepRelationship[]; layout: ProcessStepMapLayout };
 export type SavedMapProcess = { processID: string; name: string; folderID: string };
 
-export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, initialFolderID, folders, foldersLoading, active, onSaved, onBack, onCreateFolder, onCreateProcess, onBusyChange, hoverModeEnabled, onHoverModeChange }: {
+export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, initialFolderID, folders, foldersLoading, active, onSaved, onBack, onBusyChange, hoverModeEnabled, onHoverModeChange }: {
   apiBase: string; companyID: string; processID: string; firstStep: boolean; initialFolderID: string;
   folders: CompanyExplorerFolder[]; foldersLoading: boolean; active: boolean;
   onSaved: (process: SavedMapProcess) => void; onBack: () => void;
-  onCreateFolder: (parentFolderID?: string) => void; onCreateProcess: (folderID?: string) => void; onBusyChange: (busy: boolean) => void;
+  onBusyChange: (busy: boolean) => void;
   hoverModeEnabled: boolean; onHoverModeChange: (enabled: boolean) => void;
 }) {
   const [name, setName] = useState("");
@@ -142,8 +142,7 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
     </div>
     {error && <div role="alert" className="process-map-authoring-error">{error} Your draft has been kept. If Save already completed, you can open that saved version; later draft edits will be left behind. <button type="button" disabled={saving || editorBusy} onClick={() => { void openSavedVersion(); }}>Open saved version</button></div>}
     <ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="draft" presentation="canvas" processName={name} initialEditingStepID={firstStep ? contents.steps[0]?.process_step_id : undefined} hoverModeEnabled={hoverModeEnabled}
-      onCreateFolder={() => onCreateFolder(folderID || undefined)} onCreateProcess={() => onCreateProcess(folderID || undefined)}
-      renderActions={({ createStep, disabled, busy }) => <ProcessMapActions onCreateFolder={() => onCreateFolder(folderID || undefined)} onCreateProcess={() => onCreateProcess(folderID || undefined)} onCreateStep={createStep} disabled={saving || busy || !active} stepDisabled={disabled} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={onHoverModeChange}>
+      renderActions={({ createStep, disabled, busy }) => <ProcessMapActions onCreateStep={createStep} disabled={saving || busy || !active} stepDisabled={disabled} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={onHoverModeChange}>
         <span className="process-map-workspace__status">Unsaved draft</span>
         <button type="button" className="process-map-primary" disabled={saving || editorBusy || foldersLoading || !name.trim() || !selectedFolder} onClick={() => { void save(); }}>{saving ? "Saving…" : "Save Process"}</button>
         {(!name.trim() || !selectedFolder) && <span className="process-map-workspace__status">{!name.trim() ? "Name this Process in the path above." : "Choose a Folder in the path above."}</span>}
