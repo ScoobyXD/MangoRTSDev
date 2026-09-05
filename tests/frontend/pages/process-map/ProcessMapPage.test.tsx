@@ -152,7 +152,7 @@ async function harness() {
   return { dom, container, state, requests, workReads, opened, draftStates, render, findButton, button, click, input, key, renameStep, pointer, cards, preventsUnload, mutations, batches, chooseFolder, start, dispose };
 }
 
-test("Process Map authors Steps locally and saves their exact identities and geometry in one batch", async () => {
+test("Process Map authors Steps and connections locally and saves their exact identities and geometry in one batch", async () => {
   const h = await harness();
   try {
     await h.start();
@@ -180,7 +180,22 @@ test("Process Map authors Steps locally and saves their exact identities and geo
     await h.pointer(move, "pointerup", 132, 116);
     await flush();
     await h.key(h.button("Resize Receive order"), "ArrowRight");
-    assert.equal(h.mutations().length, 0, "names, Steps and gestures must all remain local before Save");
+    const output = h.button("Connect from Receive order"), input = h.button("Connect into Ship order");
+    const viewport = h.container.querySelector(".process-step-map__viewport")!;
+    Object.defineProperty(h.dom.window.document, "elementFromPoint", { configurable: true, value: () => input });
+    await h.pointer(output, "pointerdown", 224, 108);
+    await h.pointer(viewport, "pointermove", 384, 92);
+    assert.ok(h.container.querySelector(".process-step-map__connection-preview"));
+    assert.ok(input.classList.contains("is-connection-target"));
+    assert.equal(h.button("Save Process").disabled, true, "outer Save must wait for the connection gesture");
+    await h.click("Save Process");
+    assert.equal(h.batches().length, 0, "a connection in progress cannot be omitted by saving early");
+    await h.pointer(viewport, "pointerup", 384, 92);
+    await flush();
+    assert.equal(h.container.querySelector(".process-step-map__connection-preview"), null);
+    assert.ok(h.container.querySelector('[aria-label="Connection from Receive order to Ship order"]'));
+    assert.equal(h.button("Save Process").disabled, false);
+    assert.equal(h.mutations().length, 0, "names, Steps, connections and gestures must all remain local before Save");
     await h.click("Save Process");
     await settle(() => Boolean(h.container.querySelector('[aria-label="Saved Process map"]')) && h.findButton("Open Board / SOP")?.disabled === false, "saved full canvas did not load");
     assert.equal(h.batches().length, 1);
@@ -195,12 +210,16 @@ test("Process Map authors Steps locally and saves their exact identities and geo
     assert.match(definition.logic_gate_id, /^[0-9a-f-]{36}$/);
     assert.deepEqual(batch.relationships, []);
     assert.deepEqual(definition.steps, [{ process_step_id: sourceID, name: "Receive order" }, { process_step_id: targetID, name: "Ship order" }]);
-    assert.deepEqual(definition.relationships, []);
+    assert.equal(definition.relationships.length, 1);
+    const relationship = definition.relationships[0];
+    assert.match(relationship.resource_operational_relationship_id, /^[0-9a-f-]{36}$/);
+    assert.deepEqual(relationship, { resource_operational_relationship_id: relationship.resource_operational_relationship_id, source: { resource_type: "process_step", resource_id: sourceID }, target: { resource_type: "process_step", resource_id: targetID } });
     assert.deepEqual(definition.layout.steps.find((box) => box.process_step_id === sourceID), { process_step_id: sourceID, x: 96, y: 80, width: 128, height: 56 });
     assert.deepEqual(definition.layout.routes, []);
     assert.deepEqual(h.cards().map((card) => card.dataset.stepMapId), [sourceID, targetID]);
     assert.equal(h.cards()[0].style.left, "96px");
     assert.equal(h.cards()[0].style.width, "128px");
+    assert.ok(h.container.querySelector('[aria-label="Connection from Receive order to Ship order"]'), "the same directed connection must survive the saved-map reload");
     assert.equal(h.container.querySelector('[aria-label="New Process map"]'), null);
     assert.deepEqual(h.opened, [], "saving must keep the full canvas open");
     assert.ok(h.container.querySelector('[aria-label="Process outline: Order fulfilment"]'), "saving must retain the named Process boundary");

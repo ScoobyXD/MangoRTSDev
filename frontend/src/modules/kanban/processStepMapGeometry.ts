@@ -35,6 +35,34 @@ export function completeStepMapLayout(layout: ProcessStepMapLayout, steps: reado
   return { revision: layout.revision, steps: boxes, routes: layout.routes.filter((route) => edgeIDs.has(route.resource_operational_relationship_id)).map((route) => ({ ...route, points: route.points.map((point) => ({ ...point })) })) };
 }
 
+/** Visual sequence follows directed flow from the leftmost Step without changing Board order. */
+export function stepMapSequence(boxes: readonly StepMapBox[], relationships: readonly ProcessStepRelationship[]): Map<string, number> {
+  const sequence = new Map<string, number>();
+  if (!boxes.length) return sequence;
+  let first = boxes[0];
+  const nextByID = new Map<string, string[]>();
+  for (const box of boxes) {
+    nextByID.set(box.process_step_id, []);
+    if (box.x < first.x || (box.x === first.x && (box.y < first.y || (box.y === first.y && box.process_step_id < first.process_step_id)))) first = box;
+  }
+  for (const relationship of relationships) {
+    const next = nextByID.get(relationship.source.resource_id);
+    if (next && nextByID.has(relationship.target.resource_id)) next.push(relationship.target.resource_id);
+  }
+  sequence.set(first.process_step_id, 1);
+  const queue = [first.process_step_id];
+  for (let index = 0; index < queue.length; index += 1) {
+    const id = queue[index];
+    const number = sequence.get(id)! + 1;
+    for (const nextID of nextByID.get(id)!) {
+      if (sequence.has(nextID)) continue;
+      sequence.set(nextID, number);
+      queue.push(nextID);
+    }
+  }
+  return sequence;
+}
+
 export function moveStepMapBox(box: StepMapBox, delta: StepMapPoint, resize: StepMapResizeHandle | false = false): StepMapBox {
   if (!resize) return { ...box, x: snapStepMapCoordinate(box.x + delta.x), y: snapStepMapCoordinate(box.y + delta.y) };
   const west = resize.includes("w"), north = resize.includes("n");

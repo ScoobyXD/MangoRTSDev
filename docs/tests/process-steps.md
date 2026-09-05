@@ -74,8 +74,8 @@
 72. The Process outline expands to contain authored Step and route geometry without changing that geometry or Board layout.
 73. New Step-map boxes use dimensions of 112 by 56 canvas units.
 74. Existing saved Step boxes retain their dimensions until explicitly resized.
-75. In the focused map, dragging any Step card surface other than a resize handle or active title input moves that Step.
-76. Hovering or selecting a Step in the focused map reveals eight resize handles, one at each side midpoint and corner.
+75. In the focused map, dragging a Step card outside its connection ports, resize handles, and active title input moves that Step.
+76. Hovering or selecting a Step in the focused map reveals six resize handles at its four corners and top and bottom midpoints.
 77. Each resize handle moves only its corresponding edges.
 78. Create Step in the focused map focuses its inline title with all text selected.
 79. Double-clicking a Step card or its title in the focused map opens inline title editing with all text selected.
@@ -86,14 +86,27 @@
 84. Wheel zoom in the focused map keeps the world point beneath the pointer fixed within a 50% to 800% range.
 85. Focused maps omit zoom buttons and Fit.
 86. Read-only access allows focused-map camera navigation.
-87. A Step or route editing gesture holds the focused-map camera fixed until that gesture ends.
+87. A Step, route, or connection editing gesture holds the focused-map camera fixed until that gesture ends.
 88. Create Folder and Create Process remain visible and disabled inside focused Process drafts and saved maps.
 89. Inline Step titles have no visible input border.
 90. The separate Board presentation retains its top toolbar, Step and connection inspectors, and zoom controls.
+91. Each focused Step has one input port at its left midpoint and one output port at its right midpoint.
+92. Dragging between one Step's output and another Step's input always connects output to input, regardless of which port starts the drag.
+93. A completed connection uses the existing connectSteps command with the exact two Step IDs in their existing owning Process.
+94. An active connection drag shows a temporary preview without writing a relationship or layout.
+95. Cancelling a connection or dropping on blank space, the same Step, a matching port type, or an existing directed pair writes nothing.
+96. Starting or completing a connection requires current Edit access to its owning Process.
+97. Losing permission or either endpoint during a connection drag clears its preview without a write.
+98. The focused map labels its leftmost Step as Step 1.
+99. Each reachable Step's displayed number equals one plus the fewest directed connections from Step 1.
+100. Steps unreachable from Step 1 remain unnumbered.
+101. Step numbers derive only from current map positions and canonical directed connections without changing saved Step order, names, geometry, or relationships.
+102. Equal leftmost positions choose Step 1 by the smallest Y coordinate, then exact Step ID.
+103. Selecting opposite ports with Enter or Space follows the same direction and validation rules as dragging.
 
 ## Process Story
 
-A user chooses Create Process, chooses a Folder, and edits the filename in the inline path. Create Step adds a compact card with its borderless title selected for typing; the other creation actions stay visible and disabled. The user arranges Steps inside the outline, pans blank space, and zooms with the wheel while the controls stay fixed. Save commits the draft to Company Explorer. The separate Board presentation retains its editing controls and uses those exact Steps as columns. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
+A user chooses Create Process, chooses a Folder, and names compact Steps directly on the map. Dragging between an output and another Step's input creates their directed connection; the leftmost Step starts the displayed numbering, which follows the connected flow. The user arranges Steps, pans blank space, and zooms with the wheel while the controls stay fixed. Save commits the draft to Company Explorer. The separate Board presentation uses those exact Steps and retains its editing controls. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
 
 ## Main Scenarios
 

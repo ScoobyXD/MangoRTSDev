@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, stepMapPath, type ProcessStepMapLayout, type StepMapResizeHandle } from "../../../../frontend/src/modules/kanban/processStepMapGeometry.js";
+import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, stepMapPath, stepMapSequence, type ProcessStepMapLayout, type StepMapBox, type StepMapResizeHandle } from "../../../../frontend/src/modules/kanban/processStepMapGeometry.js";
 import type { ProcessStep, ProcessStepRelationship } from "../../../../frontend/src/modules/kanban/processWork.js";
 
 const steps: ProcessStep[] = [
@@ -8,6 +8,48 @@ const steps: ProcessStep[] = [
   { process_step_id: "b", logic_gate_id: "process", name: "Check", position: 2000 },
 ];
 const edge: ProcessStepRelationship = { resource_operational_relationship_id: "edge", source: { resource_type: "process_step", resource_id: "a" }, target: { resource_type: "process_step", resource_id: "b" } };
+const sequenceBox = (id: string, x: number, y = 0): StepMapBox => ({ process_step_id: id, x, y, width: 112, height: 56 });
+const sequenceEdge = (source: string, target: string): ProcessStepRelationship => ({ resource_operational_relationship_id: `${source}-${target}`, source: { resource_type: "process_step", resource_id: source }, target: { resource_type: "process_step", resource_id: target } });
+
+test("Step sequence handles empty and single-Step maps", () => {
+  assert.deepEqual(stepMapSequence([], []), new Map());
+  assert.deepEqual(stepMapSequence([sequenceBox("only", 200)], []), new Map([["only", 1]]));
+});
+
+test("Step sequence starts at the leftmost box and follows connections without rewriting inputs", () => {
+  const boxes = [sequenceBox("last", 160), sequenceBox("middle", 320), sequenceBox("first", 0)];
+  const relationships = [sequenceEdge("middle", "last"), sequenceEdge("first", "middle")];
+  const original = structuredClone({ boxes, relationships });
+  assert.deepEqual(stepMapSequence(boxes, relationships), new Map([["first", 1], ["middle", 2], ["last", 3]]));
+  assert.deepEqual({ boxes, relationships }, original, "numbering must not reorder, move, rename, or replace canonical inputs");
+});
+
+test("Step sequence gives branch siblings equal numbers and merged Steps their shortest directed distance", () => {
+  const boxes = [sequenceBox("start", 0), sequenceBox("upper", 160), sequenceBox("lower", 160, 160), sequenceBox("extra", 320), sequenceBox("merge", 480), sequenceBox("finish", 640)];
+  const relationships = [sequenceEdge("start", "upper"), sequenceEdge("upper", "extra"), sequenceEdge("extra", "merge"), sequenceEdge("start", "lower"), sequenceEdge("lower", "merge"), sequenceEdge("merge", "finish")];
+  const expected = new Map([["start", 1], ["upper", 2], ["lower", 2], ["extra", 3], ["merge", 3], ["finish", 4]]);
+  assert.deepEqual(stepMapSequence(boxes, relationships), expected);
+  assert.deepEqual(stepMapSequence(boxes, [...relationships].reverse()), expected, "relationship order cannot choose a longer route");
+});
+
+test("Step sequence terminates on loops and never increases numbers through repeated edges", () => {
+  const boxes = [sequenceBox("a", 0), sequenceBox("b", 160), sequenceBox("c", 320)];
+  const relationships = [sequenceEdge("a", "b"), sequenceEdge("b", "c"), sequenceEdge("c", "a"), sequenceEdge("b", "b"), sequenceEdge("a", "b")];
+  assert.deepEqual(stepMapSequence(boxes, relationships), new Map([["a", 1], ["b", 2], ["c", 3]]));
+});
+
+test("Step sequence leaves unreachable boxes unnumbered and ignores missing endpoints", () => {
+  const boxes = [sequenceBox("start", 0), sequenceBox("isolated", 160), sequenceBox("cycle-a", 320), sequenceBox("cycle-b", 480)];
+  const relationships = [sequenceEdge("isolated", "start"), sequenceEdge("start", "missing"), sequenceEdge("missing", "isolated"), sequenceEdge("cycle-a", "cycle-b"), sequenceEdge("cycle-b", "cycle-a")];
+  assert.deepEqual(stepMapSequence(boxes, relationships), new Map([["start", 1]]));
+});
+
+test("Step sequence breaks equal x positions by y, then exact ID, independently of array order", () => {
+  const boxes = [sequenceBox("z", 0, 32), sequenceBox("b", 0, 16), sequenceBox("a", 0, 16), sequenceBox("higher", 16, -100)];
+  assert.deepEqual(stepMapSequence(boxes, []), new Map([["a", 1]]));
+  assert.deepEqual(stepMapSequence([...boxes].reverse(), []), new Map([["a", 1]]));
+  assert.deepEqual(stepMapSequence([...boxes, sequenceBox("left", -16, 1000)], []), new Map([["left", 1]]), "x takes precedence over y");
+});
 
 test("Step geometry follows IDs through Board reordering, removes deleted endpoints, and never invents edges", () => {
   const layout: ProcessStepMapLayout = { revision: 8, steps: [{ process_step_id: "a", x: 320, y: 160, width: 224, height: 112 }], routes: [{ resource_operational_relationship_id: "edge", points: [{ x: 640, y: 256 }] }] };

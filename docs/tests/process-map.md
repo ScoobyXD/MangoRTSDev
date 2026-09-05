@@ -223,18 +223,26 @@
 221. Focused Process drafts and saved maps MUST omit zoom buttons and Fit.
 222. Focused Process controls and the breadcrumb MUST stay fixed while its camera moves.
 223. A read-only focused Process MUST allow camera navigation.
-224. The focused Process camera MUST remain fixed during a Step or route editing gesture.
+224. The focused Process camera MUST remain fixed during a Step, route, or connection editing gesture.
 225. Deferred breadcrumb focus restoration MUST preserve any newer focus choice made by the user.
 226. Focused Process drafts and saved maps MUST omit Step and connection inspectors.
 227. Create Folder and Create Process MUST remain visible and disabled inside focused Process drafts and saved maps.
 228. Focused Step title editing MUST show borderless text with the entire name selected when editing begins.
 229. Folder breadcrumb controls and Folder picker choices MUST use an orange gradient.
 230. The creation card MUST sit 56 pixels below the map's top edge, or 52 pixels on viewports at most 700 pixels wide.
+231. Each focused Step MUST have a left input port and right output port separate from its six corner and top or bottom resize handles.
+232. Dragging between distinct Steps' opposite ports MUST connect the output Step to the input Step regardless of the drag's starting end.
+233. A valid completed connection MUST use the existing same-Process Step connection command with exact canonical Step IDs.
+234. Connection previews, cancellations, invalid drops, and existing directed pairs MUST produce no relationship or layout write.
+235. Connection gestures MUST cancel without a write when current Edit access or either endpoint is lost.
+236. Focused Step numbering MUST start at 1 on the leftmost Step and follow the fewest directed connections to each reachable Step.
+237. Unreachable Steps MUST remain unnumbered.
+238. Displayed Step numbers MUST NOT change saved Step order, names, geometry, or relationships.
 Last updated: 2026-09-04
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` on one white map pane. Create Process enters a labeled outline; the card keeps Create Folder and Create Process visible but disabled while Create Step adds to the focused Process. The user chooses its orange Folder path, names Steps directly on their cards, drags blank space to pan, and uses the wheel to zoom. The outline and Steps move together while the card and breadcrumb stay fixed. Save commits the draft to Explorer; returning to the company overview restores its mounted camera.
+An authorized user opens `/process-map` on one white map pane. Create Process enters a labeled outline; its card enables Step creation while Folder and Process creation stay disabled. The user chooses the orange Folder path, names Steps, and drags between their output and input ports to connect the flow. Displayed numbering starts at the leftmost Step and follows its connections. Blank-space dragging pans and the wheel zooms while the card and breadcrumb stay fixed. Save commits the draft to Explorer; returning restores the mounted company camera.
 
 ## Scenario: Fit nested Folders within the existing world
 
