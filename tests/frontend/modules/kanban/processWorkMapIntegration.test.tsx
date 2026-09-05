@@ -21,7 +21,7 @@ async function settle(condition: () => boolean, description: string) {
   }
 }
 
-test("Board and Map share created Steps, restore saved geometry, and clear the old Process on navigation or denial", async () => {
+test("Board and the named Process canvas share inline Step edits, block switching during writes, and preserve canonical geometry", async () => {
   const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", { pretendToBeVisual: true, url: apiBase });
   const restores: Array<() => void> = [];
   const install = (name: string, value: unknown) => {
@@ -48,7 +48,8 @@ test("Board and Map share created Steps, restore saved geometry, and clear the o
   ]);
   let denied = false;
   let releaseCreate: (() => void) | undefined;
-  const creates: unknown[] = [], saves: Array<{ processID: string; layout: ProcessStepMapLayout }> = [];
+  let releaseSave: (() => void) | undefined;
+  const creates: unknown[] = [], renames: unknown[] = [], saves: Array<{ processID: string; layout: ProcessStepMapLayout }> = [];
   install("fetch", async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, apiBase);
     const method = init?.method ?? "GET";
@@ -58,7 +59,7 @@ test("Board and Map share created Steps, restore saved geometry, and clear the o
     if (url.pathname.endsWith("/users")) return reply({ users: [] });
     if (url.pathname === "/v1/saved-views") return reply({ saved_views: [] });
     if (url.pathname === "/v1/realtime/ticket") return reply({ ticket: "local-test" });
-    const match = url.pathname.match(/^\/v2\/logic-gates\/([^/]+)\/(work|step-map|steps)$/);
+    const match = url.pathname.match(/^\/v2\/logic-gates\/([^/]+)\/(work|step-map|steps)(?:\/([^/]+))?$/);
     assert.ok(match, `Unexpected request ${method} ${url.pathname}`);
     const id = match[1];
     if (denied && id === processB) return reply({ error: "not_found" }, 404);
@@ -66,9 +67,17 @@ test("Board and Map share created Steps, restore saved geometry, and clear the o
     if (match[2] === "step-map" && method === "GET") return reply(layouts.get(id));
     if (match[2] === "step-map" && method === "PUT") {
       const layout = { revision: body.base_revision + 1, steps: body.steps, routes: body.routes };
-      layouts.set(id, layout);
       saves.push({ processID: id, layout });
+      await new Promise<void>((resolve) => { releaseSave = resolve; });
+      layouts.set(id, layout);
       return reply(layout);
+    }
+    if (match[2] === "steps" && method === "PATCH") {
+      renames.push({ processID: id, stepID: match[3], body });
+      const step = snapshots.get(id)!.steps.find((item) => item.process_step_id === match[3]);
+      assert.ok(step);
+      step.name = body.name;
+      return reply({ step });
     }
     assert.equal(method, "POST");
     creates.push(body);
@@ -85,8 +94,9 @@ test("Board and Map share created Steps, restore saved geometry, and clear the o
   clearProcessWorkCache(apiBase, companyID, processB);
   const root = createRoot(dom.window.document.getElementById("root")!);
   const document = dom.window.document;
-  const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === label)!;
-  const click = async (label: string) => { assert.ok(button(label), `Missing ${label} button`); await act(async () => Simulate.click(button(label))); };
+  const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.textContent === label || item.getAttribute("aria-label") === label)!;
+  const click = async (label: string) => { assert.ok(button(label), `Missing ${label} button`); await act(async () => button(label).click()); };
+  const pointer = async (element: Element, type: string, x: number, y: number) => { await act(async () => element.dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }))); };
   try {
     await act(async () => root.render(<KanbanContent accent="#17a8aa" widgetId="integration" forcedLogicGateID={processA} />));
     await settle(() => Boolean(document.querySelector(".process-work__step-title")), "Board did not load the original Step");
@@ -94,31 +104,83 @@ test("Board and Map share created Steps, restore saved geometry, and clear the o
     await click("Map");
     await settle(() => Boolean(document.querySelector(`[data-step-map-id="${stepA}"]`)), "Map did not load the same Step");
     await settle(() => !button("+ Create Step").disabled, "Map never became editable");
+    assert.ok(document.querySelector('[aria-label="Process outline: Order Process"]'));
+    const controls = document.querySelector('[aria-label="Process map controls"]')!;
+    assert.ok(controls.contains(button("Board")) && controls.contains(button("Map")) && controls.contains(button("+ Create Step")));
+    assert.equal(document.querySelector('[aria-label="Process work views"]'), null, "the Map pane must not retain Board filters");
+    assert.equal(document.querySelector(".process-step-map__toolbar, .process-step-map__inspector, .process-step-map__zoom"), null);
     await click("+ Create Step");
     await settle(() => Boolean(releaseCreate), "Create request did not start");
+    assert.equal(button("Board").disabled, true);
+    assert.equal(button("Map").disabled, true);
     await click("Board");
+    assert.ok(document.querySelector(".process-step-map__canvas"), "a pending Step creation must keep its Map mounted");
+    assert.equal(document.querySelector(".process-work__step-title"), null);
     await act(async () => releaseCreate!());
-    await settle(() => [...document.querySelectorAll(".process-work__step-title")].some((item) => item.textContent === "New step"), "Board did not receive the Step created in Map after switching views");
+    await settle(() => Boolean(document.querySelector('[aria-label="Step name"]')) && !button("Board").disabled, "the created Step did not open inline naming");
+    const input = document.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
+    assert.equal(document.activeElement, input);
+    assert.equal(input.selectionStart, 0);
+    assert.equal(input.selectionEnd, input.value.length);
+    await act(async () => { input.value = "Confirm purchase order"; Simulate.change(input); });
+    await act(async () => Simulate.keyDown(input, { key: "Enter" }));
+    await settle(() => Boolean(button("Move Confirm purchase order")) && !button("Board").disabled, "the inline name was not saved");
+    assert.deepEqual(renames, [{ processID: processA, stepID: "66666666-6666-6666-6666-666666666666", body: { company_id: companyID, name: "Confirm purchase order" } }]);
+    await click("Board");
+    await settle(() => [...document.querySelectorAll(".process-work__step-title")].some((item) => item.textContent === "Confirm purchase order"), "Board did not receive the Step named in Map");
     assert.equal(creates.length, 1);
     await click("Map");
     await settle(() => Boolean(document.querySelector(`[data-step-map-id="${stepA}"]`)), "Map did not reopen");
-    await settle(() => !document.querySelector<HTMLButtonElement>(`[aria-label="Move Receive purchase order"]`)!.disabled, "Map controls are not ready");
-    await act(async () => Simulate.keyDown(document.querySelector('[aria-label="Move Receive purchase order"]')!, { key: "ArrowRight" }));
-    await settle(() => saves.length === 1, "Step position was not persisted");
-    assert.equal(saves[0].layout.steps.find((step) => step.process_step_id === stepA)!.x, 112);
+    await settle(() => !button("+ Create Step").disabled, "Map controls are not ready");
+    const viewport = document.querySelector<HTMLElement>(".process-step-map__viewport")!;
+    const canvas = document.querySelector<HTMLElement>(".process-step-map__canvas")!;
+    viewport.style.padding = "80px 24px 24px";
+    Object.defineProperties(viewport, { clientWidth: { value: 800 }, clientHeight: { value: 600 } });
+    viewport.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 600, width: 800, height: 600, toJSON() {} });
+    const dataBefore = structuredClone(snapshots.get(processA)), layoutBefore = structuredClone(layouts.get(processA));
+    await act(async () => viewport.dispatchEvent(new dom.window.WheelEvent("wheel", { bubbles: true, cancelable: true, clientX: 224, clientY: 230, deltaY: -Math.log(1.5) / .002 })));
+    await pointer(viewport, "pointerdown", 400, 300);
+    await pointer(viewport, "pointermove", 448, 332);
+    await pointer(viewport, "pointerup", 448, 332);
+    const camera = canvas.style.transform;
+    assert.match(camera, /scale\(1\.5\)/);
+    assert.deepEqual(snapshots.get(processA), dataBefore);
+    assert.deepEqual(layouts.get(processA), layoutBefore);
+    assert.equal(saves.length, 0, "camera navigation must not save Process geometry");
+    assert.equal(button("Board").disabled, false, "camera navigation must not make authoring busy");
+    const move = button("Move Receive purchase order");
+    await pointer(move, "pointerdown", 100, 100);
+    await pointer(viewport, "pointermove", 148, 100);
+    assert.equal(button("Board").disabled, true, "a Step gesture must block view changes before its save starts");
+    assert.equal(button("Map").disabled, true);
+    await click("Board");
+    assert.equal(document.querySelector(".process-step-map__canvas"), canvas);
+    await pointer(viewport, "pointerup", 148, 100);
+    await settle(() => Boolean(releaseSave), "Step position save did not start");
+    assert.equal(button("Board").disabled, true, "finishing a gesture must remain blocked until its mutation completes");
+    await click("Board");
+    assert.equal(document.querySelector(".process-step-map__canvas"), canvas);
+    assert.equal(saves[0].layout.steps.find((step) => step.process_step_id === stepA)!.x, 128, "screen movement must use the current zoom");
+    await act(async () => releaseSave!());
+    await settle(() => !button("Board").disabled, "view switching did not resume after the save");
+    assert.equal(document.querySelector(".process-step-map__canvas"), canvas);
+    assert.equal(canvas.style.transform, camera, "saving a Step move must preserve the active Map camera");
+    assert.deepEqual(snapshots.get(processA), dataBefore, "layout saves must preserve the canonical Steps, names, and relationships");
     await click("Board");
     await click("Map");
-    await settle(() => document.querySelector<HTMLElement>(`[data-step-map-id="${stepA}"]`)?.style.left === "112px", "Reopened Map lost persisted geometry");
+    await settle(() => document.querySelector<HTMLElement>(`[data-step-map-id="${stepA}"]`)?.style.left === "128px", "Reopened Map lost persisted geometry");
     assert.equal(saves.length, 1, "view changes must not write layout");
     await act(async () => root.render(<KanbanContent accent="#17a8aa" widgetId="integration" forcedLogicGateID={processB} />));
     await settle(() => document.querySelector(".process-work__step-title")?.textContent === "Review invoice", "Navigation did not open the next Process Board");
     assert.equal(document.querySelector(`[data-step-map-id="${stepA}"]`), null);
     await click("Map");
     await settle(() => document.querySelector<HTMLElement>(`[data-step-map-id="${stepB}"]`)?.style.left === "512px", "Second Process Map did not use its own geometry");
+    assert.ok(document.querySelector('[aria-label="Process outline: Finance Process"]'));
     denied = true;
     await act(async () => dispatchLogicGateWorkUpdated(companyID, processB));
     await settle(() => document.querySelector(".process-step-map__canvas") === null, "Revoked Process access left map geometry visible");
     assert.equal(button("Map").disabled, true);
+    assert.equal(button("Board").disabled, false, "denied Map access must still allow returning to Board");
     assert.deepEqual(saves.map((save) => save.processID), [processA]);
   } finally {
     await act(async () => root.unmount());

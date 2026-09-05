@@ -20,7 +20,7 @@ type Request = { path: string; method: string; body: Record<string, any> };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 async function flush() { await act(async () => { for (let index = 0; index < 16; index += 1) await Promise.resolve(); }); }
 
-async function harness(draft = false, canvas = false) {
+async function harness(draft = false) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "http://localhost/", pretendToBeVisual: true });
   const restores: Array<() => void> = [];
   const install = (name: string, value: unknown) => {
@@ -28,7 +28,7 @@ async function harness(draft = false, canvas = false) {
     Object.defineProperty(globalThis, name, { configurable: true, writable: true, value });
     restores.push(() => { if (original) Object.defineProperty(globalThis, name, original); else delete (globalThis as Record<string, unknown>)[name]; });
   };
-  for (const name of ["window", "document", "navigator", "HTMLElement", "HTMLInputElement", "Node", "Event", "MouseEvent", "CustomEvent", "localStorage"]) install(name, name === "window" ? dom.window : name === "document" ? dom.window.document : (dom.window as any)[name]);
+  for (const name of ["window", "document", "navigator", "Element", "HTMLElement", "HTMLInputElement", "Node", "Event", "MouseEvent", "CustomEvent", "localStorage"]) install(name, name === "window" ? dom.window : name === "document" ? dom.window.document : (dom.window as any)[name]);
   install("IS_REACT_ACT_ENVIRONMENT", true);
   const state = { steps: structuredClone(initialSteps), relationships: [structuredClone(initialEdge)], layout: structuredClone(initialLayout), processID: "process", canEdit: true, hoverModeEnabled: false, saveMode: "success" as "success" | "failure" | "conflict", customFetch: null as ((request: Request) => Promise<Response> | null) | null, customLocalSave: null as ((layout: ProcessStepMapLayout) => Promise<ProcessStepMapLayout>) | null };
   const requests: Request[] = [];
@@ -111,7 +111,7 @@ async function harness(draft = false, canvas = false) {
   const onBusyChange = (busy: boolean) => busyStates.push(busy);
   const renderActions = ({ createStep, disabled }: ProcessStepMapActions) => <div aria-label="Canvas actions"><button type="button" disabled={disabled} onClick={createStep}>Create Step</button></div>;
   const render = () => {
-    const props = { steps: [...state.steps], relationships: [...state.relationships], canEdit: state.canEdit, onChanged: render, onBusyChange, ...(canvas ? { presentation: "canvas" as const, hoverModeEnabled: state.hoverModeEnabled, renderActions } : {}) };
+    const props = { steps: [...state.steps], relationships: [...state.relationships], canEdit: state.canEdit, onChanged: render, onBusyChange, processName: "Order Process", hoverModeEnabled: state.hoverModeEnabled, renderActions };
     root.render(draft
       ? <ProcessStepMapEditor key={state.processID} {...props} commands={commands} saveMode="draft" />
       : <ProcessStepMap apiBase="http://localhost" companyID="company" processID={state.processID} {...props} />);
@@ -182,7 +182,7 @@ function connectionFixture(h: Awaited<ReturnType<typeof harness>>) {
 }
 
 test("canvas ports create one directed connection at the current zoom and reuse an existing pair", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     h.state.relationships = [];
     h.state.layout.routes = [];
@@ -233,7 +233,7 @@ test("canvas ports create one directed connection at the current zoom and reuse 
 });
 
 test("dragging backward from an input to an output connects the output Step to the input Step locally", async () => {
-  const h = await harness(true, true);
+  const h = await harness(true);
   try {
     h.state.relationships = [];
     h.state.layout.routes = [];
@@ -251,7 +251,7 @@ test("dragging backward from an input to an output connects the output Step to t
 });
 
 test("keyboard users can connect opposite ports with Enter or Space and cancel with Escape", async () => {
-  const h = await harness(true, true);
+  const h = await harness(true);
   try {
     h.state.relationships = [];
     h.state.layout.routes = [];
@@ -283,7 +283,7 @@ test("keyboard users can connect opposite ports with Enter or Space and cancel w
 });
 
 test("blank, same-Step, same-side and outside-canvas connection drops do not issue commands", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     await h.mount();
     const p = connectionFixture(h);
@@ -306,7 +306,7 @@ test("blank, same-Step, same-side and outside-canvas connection drops do not iss
 });
 
 test("connection cancellation and permission loss discard the preview and prevent later release from saving", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     h.state.relationships = [];
     h.state.layout.routes = [];
@@ -341,7 +341,7 @@ test("connection cancellation and permission loss discard the preview and preven
 });
 
 test("a pending connection blocks overlapping edits and a failed save leaves no edge before retry", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   let releaseConnection!: (value: Response) => void;
   try {
     h.state.relationships = [];
@@ -379,7 +379,7 @@ test("a pending connection blocks overlapping edits and a failed save leaves no 
 });
 
 test("readonly canvas pans on blank space and restores the starting view on pointercancel or Escape without saving", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     h.state.canEdit = false;
     await h.mount();
@@ -409,7 +409,7 @@ test("readonly canvas pans on blank space and restores the starting view on poin
 });
 
 test("canvas wheel zoom keeps the pointer's world point fixed, normalizes wheel units and clamps the range", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     await h.mount();
     const c = cameraFixture(h);
@@ -436,7 +436,7 @@ test("canvas wheel zoom keeps the pointer's world point fixed, normalizes wheel 
 });
 
 test("Step and route gestures block camera changes until cancelled", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     await h.mount();
     const c = cameraFixture(h);
@@ -460,7 +460,7 @@ test("Step and route gestures block camera changes until cancelled", async () =>
 });
 
 test("inline text and connection controls cannot start canvas panning", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     await h.mount();
     const c = cameraFixture(h);
@@ -484,30 +484,8 @@ test("inline text and connection controls cannot start canvas panning", async ()
   } finally { await h.dispose(); }
 });
 
-test("Board map keeps its existing scroll surface without canvas wheel zoom or blank-space pan", async () => {
-  const h = await harness();
-  try {
-    await h.mount();
-    const viewport = h.container.querySelector<HTMLElement>(".process-step-map__viewport")!;
-    const canvas = h.container.querySelector<HTMLElement>(".process-step-map__canvas")!;
-    const original = canvas.style.transform;
-    const wheel = new h.dom.window.WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: -200 });
-    await act(async () => viewport.dispatchEvent(wheel));
-    await h.pointer(viewport, "pointerdown", 100, 100);
-    await h.pointer(viewport, "pointermove", 200, 180);
-    await h.pointer(viewport, "pointerup", 200, 180);
-    assert.equal(wheel.defaultPrevented, false);
-    assert.equal(canvas.style.transform, original);
-    assert.equal(viewport.classList.contains("is-panning"), false);
-    assert.ok(h.container.querySelector(".process-step-map__toolbar"));
-    assert.equal(h.button("Zoom in").disabled, false);
-    assert.ok(h.button("Fit"));
-    assert.equal(h.writes().length, 0);
-  } finally { await h.dispose(); }
-});
-
 test("negative Step bounds cannot shift unrelated Steps on screen when zoomed and moved", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     h.state.layout.steps[0] = { ...h.state.layout.steps[0], x: -144, y: -80 };
     await h.mount();
@@ -522,7 +500,7 @@ test("negative Step bounds cannot shift unrelated Steps on screen when zoomed an
 });
 
 test("canvas creates and names Steps inline without inspectors or separate zoom controls", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     await h.mount();
     assert.ok(h.container.querySelector(".process-step-map--canvas"));
@@ -554,7 +532,7 @@ test("canvas creates and names Steps inline without inspectors or separate zoom 
 });
 
 test("focused canvas context menus create Steps without offering Folder or Process creation", async () => {
-  const h = await harness(true, true);
+  const h = await harness(true);
   try {
     await h.mount();
     const viewport = h.container.querySelector(".process-step-map__viewport")!;
@@ -572,7 +550,7 @@ test("focused canvas context menus create Steps without offering Folder or Proce
 });
 
 test("canvas hover previews leave an unfinished Step name and selection intact", async () => {
-  const h = await harness(true, true);
+  const h = await harness(true);
   try {
     h.state.hoverModeEnabled = true;
     await h.mount();
@@ -600,7 +578,7 @@ test("canvas hover previews leave an unfinished Step name and selection intact",
 });
 
 test("canvas body, title and keyboard naming share one inline editor and only commit nonblank changes", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   const renames = () => h.requests.filter((request) => request.method === "PATCH");
   try {
     await h.mount();
@@ -645,7 +623,7 @@ test("canvas body, title and keyboard naming share one inline editor and only co
 });
 
 test("canvas body dragging uses the current zoom and directional handles keep opposite edges fixed", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     await h.mount();
     await cameraFixture(h).wheel(-Math.log(1.5) / .002);
@@ -684,7 +662,7 @@ test("canvas body dragging uses the current zoom and directional handles keep op
 });
 
 test("resizing an edited Step waits for its pending rename without starting a body drag", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   let releaseRename!: (value: Response) => void;
   try {
     await h.mount();
@@ -723,7 +701,7 @@ test("resizing an edited Step waits for its pending rename without starting a bo
 });
 
 test("losing edit permission cancels an inline Step name without committing it later", async () => {
-  const h = await harness(false, true);
+  const h = await harness();
   try {
     await h.mount();
     await h.doubleClick(h.button("Move Receive"));
@@ -796,7 +774,7 @@ test("failed layout save rolls back, conflict loads current saved geometry, and 
     h.state.canEdit = false;
     await h.mount();
     const count = h.requests.length;
-    await h.click("+ Create Step");
+    await h.click("Create Step");
     await h.key(h.button("Move Receive"), "ArrowRight");
     assert.equal(h.requests.length, count);
   } finally { await h.dispose(); }
@@ -806,24 +784,24 @@ test("Step creation, naming, directed connection and deletion use existing defin
   const h = await harness();
   try {
     await h.mount();
-    await h.click("+ Create Step");
+    await h.click("Create Step");
     assert.ok(h.container.querySelector('[data-step-map-id="new"]'));
     const input = h.container.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, "value")!.set!.call(input, "Confirm order");
       input.dispatchEvent(new h.dom.window.Event("input", { bubbles: true }));
     });
-    await h.click("Save name");
+    await h.key(input, "Enter");
     assert.equal(h.state.steps.find((step) => step.process_step_id === "new")?.name, "Confirm order");
-    const select = h.container.querySelector<HTMLSelectElement>('[aria-label="Connect to Step"]')!;
-    await act(async () => { select.value = "a"; select.dispatchEvent(new h.dom.window.Event("change", { bubbles: true })); });
-    await h.click("Connect");
+    await h.key(h.button("Connect from Confirm order"), "Enter");
+    await h.key(h.button("Connect into Receive"), "Enter");
     const createEdge = h.requests.find((request) => request.path.endsWith("/step-relationships") && request.method === "POST")!;
     assert.deepEqual(createEdge.body.source, { resource_type: "process_step", resource_id: "new" });
     assert.deepEqual(createEdge.body.target, { resource_type: "process_step", resource_id: "a" });
+    await h.pointer(h.container.querySelector('[aria-label="Connection from Confirm order to Receive"]')!, "contextmenu", 300, 200);
     await h.click("Delete connection");
     assert.equal(h.state.steps.length, 3);
-    await h.click("Move Confirm order");
+    await h.pointer(h.button("Move Confirm order"), "contextmenu", 300, 200);
     await h.click("Delete Step");
     assert.equal(h.state.steps.length, 3, "deleting a Step asks before changing the definition");
     await h.click("Confirm delete Step");
@@ -902,7 +880,7 @@ test("keyboard movement keeps focus through save and failure without stealing a 
   try {
     await h.mount();
     const move = h.button("Move Receive");
-    move.focus();
+    await act(async () => move.focus());
     const pending = new Promise<Response>((resolve) => { resolveSave = resolve; });
     h.state.customFetch = (request) => request.method === "PUT" ? pending : null;
     await h.key(move, "ArrowRight");
@@ -925,15 +903,15 @@ test("keyboard movement keeps focus through save and failure without stealing a 
     assert.equal(h.state.layout.steps[0].x, 96);
     h.state.customFetch = (request) => request.method === "PUT" ? new Promise<Response>((resolve) => { resolveSave = resolve; }) : null;
     await h.key(move, "ArrowRight");
-    const zoom = h.button("Zoom in");
-    zoom.focus();
+    const laterFocus = h.container.querySelector<HTMLElement>(".process-step-map__viewport")!;
+    await act(async () => laterFocus.focus());
     await act(async () => resolveSave(response({ error: "Save failed" }, 500)));
     await flush();
-    assert.equal(h.dom.window.document.activeElement, zoom, "saving must never restore focus over the user's later choice");
+    assert.equal(h.dom.window.document.activeElement, laterFocus, "saving must never restore focus over the user's later choice");
   } finally { await h.dispose(); }
 });
 
-test("waypoint clicks do not save and repeated keyboard route edits retain their focus", async () => {
+test("waypoint editing keeps focus and route menus change geometry without changing the connection", async () => {
   const h = await harness();
   try {
     await h.mount();
@@ -943,12 +921,81 @@ test("waypoint clicks do not save and repeated keyboard route edits retain their
     await h.pointer(point, "pointerup", 368, 176);
     await h.click("Move route point 1");
     assert.equal(h.writes().length, 0, "selecting an unchanged route point must not issue a layout PUT");
-    point.focus();
+    await act(async () => point.focus());
     await h.key(h.dom.window.document.activeElement!, "ArrowDown");
     assert.equal(h.dom.window.document.activeElement, point);
     await h.key(h.dom.window.document.activeElement!, "ArrowDown");
     assert.equal(h.dom.window.document.activeElement, point);
     assert.equal(h.state.layout.routes[0].points[0].y, 208);
+    const edge = h.container.querySelector('[aria-label="Connection from Receive to Check"]')!;
+    await h.pointer(edge, "contextmenu", 368, 208);
+    assert.ok(h.dom.window.document.querySelector('[aria-label="Connection actions"]'));
+    await h.click("Add route point");
+    assert.deepEqual(h.state.layout.routes[0].points, [{ x: 368, y: 208 }, { x: 400, y: 240 }]);
+    await h.key(h.button("Move route point 2"), "Delete");
+    assert.deepEqual(h.state.layout.routes[0].points, [{ x: 368, y: 208 }]);
+    assert.deepEqual(h.state.relationships, [initialEdge], "deleting a waypoint must not bubble into deleting its connection");
+    await h.pointer(edge, "contextmenu", 368, 208);
+    await h.click("Reset route");
+    assert.deepEqual(h.state.layout.routes[0].points, [{ x: 384, y: 216 }]);
+    assert.deepEqual(h.state.relationships, [initialEdge]);
+    assert.deepEqual(h.state.layout.steps, initialLayout.steps);
+    assert.equal(h.writes().length, 5, "each completed point edit or route action must save once");
+  } finally { await h.dispose(); }
+});
+
+test("Delete on a focused Step port or resize handle cannot delete the previously selected connection", async () => {
+  const h = await harness();
+  try {
+    await h.mount();
+    const edge = h.container.querySelector<SVGElement>('[aria-label="Connection from Receive to Check"]')!;
+    for (const label of ["Connect into Check", "Resize Check n"]) {
+      await act(async () => edge.focus());
+      assert.ok(h.container.querySelector('.process-step-map__edges .is-selected [aria-label="Connection from Receive to Check"]'));
+      const control = h.button(label);
+      await act(async () => control.focus());
+      await h.key(control, "Delete");
+      const confirmation = h.container.querySelector('[aria-label="Delete Step confirmation"]');
+      assert.ok(confirmation, `${label} must select its Step before handling Delete`);
+      assert.match(confirmation.textContent ?? "", /Delete “Check”/);
+      assert.deepEqual(h.state.steps, initialSteps);
+      assert.deepEqual(h.state.relationships, [initialEdge]);
+      assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), [], "focus and Delete must not mutate either record before confirmation");
+      await h.click("Cancel");
+    }
+  } finally { await h.dispose(); }
+});
+
+test("keyboard deletion preserves inline text and permissions and asks before deleting a Step", async () => {
+  const h = await harness(true);
+  try {
+    await h.mount();
+    await h.doubleClick(h.button("Move Receive"));
+    const input = await h.input("Receive delivery");
+    await h.key(input, "Backspace");
+    await h.key(input, "Delete");
+    assert.equal(h.container.querySelector('[aria-label="Delete Step confirmation"]'), null);
+    assert.deepEqual(h.localCalls, [], "native text deletion must not become a Step command");
+    await h.key(input, "Escape");
+    await act(async () => h.button("Move Receive").focus());
+    await h.key(h.button("Move Receive"), "Delete");
+    assert.ok(h.container.querySelector('[aria-label="Delete Step confirmation"]'));
+    assert.equal(h.state.steps.length, 2);
+    await h.key(h.button("Cancel"), "Escape");
+    assert.equal(h.container.querySelector('[aria-label="Delete Step confirmation"]'), null);
+    assert.deepEqual(h.localCalls, []);
+    const edge = h.container.querySelector('[aria-label="Connection from Receive to Check"]')!;
+    await act(async () => (edge as SVGElement).focus());
+    await h.key(edge, "Backspace");
+    assert.deepEqual(h.localCalls, ["disconnect"]);
+    assert.equal(h.state.steps.length, 2, "deleting a selected connection must preserve both Steps");
+    h.state.canEdit = false;
+    await h.mount();
+    await act(async () => h.button("Move Receive").focus());
+    await h.key(h.button("Move Receive"), "Delete");
+    assert.equal(h.container.querySelector('[aria-label="Delete Step confirmation"]'), null);
+    assert.deepEqual(h.localCalls, ["disconnect"]);
+    assert.deepEqual(h.requests, []);
   } finally { await h.dispose(); }
 });
 
@@ -960,19 +1007,19 @@ test("draft map uses only supplied local commands for geometry, Steps, and conne
     await h.key(h.button("Move Receive"), "ArrowRight");
     assert.equal(h.state.layout.steps[0].x, 80);
     assert.match(h.container.textContent ?? "", /Unsaved changes kept until you save the Process/);
-    await h.click("+ Create Step");
+    await h.click("Create Step");
     const input = h.container.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
     await act(async () => {
       Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, "value")!.set!.call(input, "Draft review");
       input.dispatchEvent(new h.dom.window.Event("input", { bubbles: true }));
     });
-    await h.click("Apply name");
+    await h.key(input, "Enter");
     assert.equal(h.state.steps.find((step) => step.process_step_id === "new")?.name, "Draft review");
-    const select = h.container.querySelector<HTMLSelectElement>('[aria-label="Connect to Step"]')!;
-    await act(async () => { select.value = "a"; select.dispatchEvent(new h.dom.window.Event("change", { bubbles: true })); });
-    await h.click("Connect");
+    await h.key(h.button("Connect from Draft review"), "Enter");
+    await h.key(h.button("Connect into Receive"), "Enter");
+    await h.pointer(h.container.querySelector('[aria-label="Connection from Draft review to Receive"]')!, "contextmenu", 300, 200);
     await h.click("Delete connection");
-    await h.click("Move Draft review");
+    await h.pointer(h.button("Move Draft review"), "contextmenu", 300, 200);
     await h.click("Delete Step");
     await h.click("Confirm delete Step");
     assert.deepEqual(h.localCalls, ["layout", "create", "rename", "connect", "disconnect", "delete"]);
@@ -998,7 +1045,7 @@ test("draft busy state covers gestures and pending mutations, and failure restor
     await h.pointer(move, "pointermove", 132, 100);
     await h.pointer(move, "pointerup", 132, 100);
     assert.equal(h.busyStates.at(-1), true, "finishing a drag remains busy until the local command finishes");
-    assert.equal(h.button("+ Create Step").disabled, true);
+    assert.equal(h.button("Create Step").disabled, true);
     const saved = { ...h.state.layout, revision: 4, steps: h.state.layout.steps.map((box) => box.process_step_id === "a" ? { ...box, x: 96 } : box) };
     h.state.layout = saved;
     h.state.customLocalSave = null;
@@ -1015,7 +1062,7 @@ test("draft busy state covers gestures and pending mutations, and failure restor
   assert.equal(h.busyStates.at(-1), false, "unmount releases the outer Save control");
 });
 
-test("saved and draft Board map menus create Steps without intercepting cards", async () => {
+test("saved and draft map menus distinguish Step actions from blank-canvas creation", async () => {
   for (const draft of [false, true]) {
     const h = await harness(draft);
     try {
@@ -1026,16 +1073,20 @@ test("saved and draft Board map menus create Steps without intercepting cards", 
       };
       await open(h.button("Move Receive"));
       assert.equal(h.dom.window.document.querySelector('[aria-label="Process map creation"]'), null);
+      assert.ok(h.dom.window.document.querySelector('[aria-label="Step actions"]'));
       await open(h.container.querySelector(".process-step-map__viewport")!);
       assert.deepEqual([...h.dom.window.document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent), ["Create Step"]);
-      await h.click("Create Step");
+      const create = h.dom.window.document.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
+      await act(async () => create.click());
+      await flush();
       assert.ok(h.container.querySelector('[data-step-map-id="new"]'));
       if (draft) assert.deepEqual(h.requests, []);
       h.state.canEdit = false;
       await h.mount();
       await open(h.container.querySelector(".process-step-map__canvas")!);
-      assert.equal(h.button("Create Step").disabled, true);
-      await h.key(h.button("Create Step"), "Escape");
+      const disabledCreate = h.dom.window.document.querySelector<HTMLButtonElement>('[role="menuitem"]')!;
+      assert.equal(disabledCreate.disabled, true);
+      await h.key(disabledCreate, "Escape");
       assert.equal(h.dom.window.document.querySelector('[aria-label="Process map creation"]'), null);
     } finally { await h.dispose(); }
   }
