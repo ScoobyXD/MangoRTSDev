@@ -2,7 +2,7 @@
 
 Date: September 4, 2026
 
-Status: Jonat authorized both MVP tasks to begin. The Process AI skeleton is implemented and verified in worktree 0000842; the full proposal remains future scope. Integration and publishing require a separate request.
+Status: Jonat authorized both MVP tasks to begin. The Process AI skeleton is implemented in worktree 0000842, with verified discussion, follow-up context, inline reference labels, and developer context inspection; the full proposal remains future scope. Integration and publishing require a separate request.
 
 ## Current decision
 
@@ -76,7 +76,7 @@ These are normal saved Node changes. There is no separate sandbox, staged compan
 - New Step Expected Outputs fields, Process Success Criteria fields, formal verification, and verified-success metrics.
 - Staging, change sets, commit/discard, inverse actions, and rollback systems.
 - Workflow orchestration, child Runs, multiple-order batches, and cross-Process execution.
-- Exact context inspection tabs, durable invocation archives, full event-log infrastructure, cost dashboards, and notifications.
+- Durable invocation archives, full event-log infrastructure, cost dashboards, and notifications. The developer context inspector described below is included in the small version.
 - Retry/resume/restart management, schedule overlap policies, configurable budgets, and a new conflict-resolution system.
 - New navigation, a separate AI board, or changes to Process Map, Workflow copying, or Company Explorer.
 
@@ -98,7 +98,7 @@ Use a simple internal example, such as drafting a meeting summary and action lis
 ### First-version implementation decisions
 
 - Reuse the floating Mango chat, the universal reference picker, and the existing OpenAI Responses connection. Ordinary chat remains available.
-- One selected Process applies to one Send and creates one Node. A later Send requires a new selection and starts another work item.
+- The selected Process remains as the existing inline reference label across Sends until removed or replaced. Referencing it supplies context for discussion; only an execution request creates one new Node.
 - Read the actual Steps and canonical SOP textboxes before calling the model. The SOP lists and briefly explains the Steps; map positions and sizes do not determine execution.
 - Let the model select a clear starting Step and follow the SOP and logical connections. An ambiguous path or unavailable external action stops with an explanation.
 - Create the Node with In Progress status and its starting Step in one existing command. Later moves preserve its status.
@@ -110,13 +110,25 @@ Use a simple internal example, such as drafting a meeting summary and action lis
 
 ### Implementation verification — September 4, 2026
 
-- Complete backend `go test ./...` passed through WSL2 Ubuntu, including the assistant and memory-store regressions.
+- Complete backend `go test ./...` passed through WSL2 Ubuntu, including ordinary identity injection, current-user assignments beyond 50 Processes, developer context inspection, incomplete-Process discussion, refreshed canonical SOP reads, and the existing execution/store regressions.
 - The existing disposable PostgreSQL gate passed on local PostgreSQL 18.4, including the new guarded Node write/move test; the new queries use PostgreSQL 17-compatible features.
-- The complete frontend relationship suite passed 1,062 tests with zero failures. The final picker IME regression and production build also passed.
+- The complete frontend relationship suite passed 1,064 tests with zero failures; the production build passed. Browser verification confirmed the actual editor reference label, persistent Process identity on follow-up, and context inspection dialog.
 - Tests cover selected-Process context and three-tool restriction, actual saved Node text/Step changes, current access, changed SOP/Steps/connections, concurrent human movement, identical text in different Steps, picker binding/reset, and retained Node links.
 - The original 72,523-byte proposal in the appendix was verified against its recorded SHA-256.
 - Model responses were supplied by a local test server. A live model demonstration has not been performed; this uses Mango's existing server-side OpenAI configuration.
 - No packages, schema migrations, live database writes, main integration, push, or pull request were added by this task.
+
+### What Mango sends to the model
+
+1. **Instructions:** Mango's fixed behavior and tool-use rules; Process discussion/execution rules replace general chat rules when a Process is selected.
+2. **Current identity, every Send:** authenticated user ID, display name, email, selected company ID, and current company role. These come from server-side authentication, not client-supplied profile fields.
+3. **Selected Process, when present:** its exact ID and name, current Step IDs/names/order, logical connections, and canonical SOP JSON with textbox identity and revision. Missing SOP/Steps are reported as execution blockers while discussion remains available. Map geometry is excluded.
+4. **Conversation:** completed user/assistant exchanges and the latest user message. The current Process selection is refreshed independently of old transcript text.
+5. **Tools:** the permitted function names, descriptions, and argument schemas. Process execution uses only its three narrow actions; general chat includes the existing current-user assignment query.
+6. **Within one Send:** each subsequent model call retains earlier input and adds the model's completed tool call and Mango's actual result. The provider's encrypted reasoning continuation is forwarded by the existing SDK loop and is not displayed as readable context.
+7. **Settings:** the configured server model, selected reasoning effort, and existing foreground/output limits. Provider credentials stay in server memory and are not prompt content.
+
+For a dev_admin, enable **Inspect context** before Send, then open **View context** on that chat turn. The view shows the initial human-readable input and additions for each model call, using data captured from the actual backend request parameters. Earlier input is reused by later calls; it is not duplicated in the inspector. Encrypted reasoning items are counted as omitted. Nothing is saved as a new run log or transcript table.
 
 ## Full future product requirements
 

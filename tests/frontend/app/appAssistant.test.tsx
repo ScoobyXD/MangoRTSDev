@@ -5,6 +5,7 @@ import test from "node:test";
 import React, { act } from "react";
 import { Simulate } from "react-dom/test-utils";
 import { JSDOM } from "jsdom";
+import type { Editor } from "@tiptap/core";
 
 test("chat submits once, preserves only finished history, aborts on Stop and isolates company/account state", async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "http://localhost/", pretendToBeVisual: true });
@@ -13,6 +14,8 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
     Node: dom.window.Node, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement,
     Event: dom.window.Event, CustomEvent: dom.window.CustomEvent, sessionStorage: dom.window.sessionStorage, localStorage: dom.window.localStorage,
+    MutationObserver: dom.window.MutationObserver, DOMParser: dom.window.DOMParser, getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window), cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
     IS_REACT_ACT_ENVIRONMENT: true,
   })) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -48,12 +51,13 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     <AppAssistant apiBase="http://localhost:8080" userID={userID} bottomInset={10} />
     {modal && <AppModalPortal onRequestClose={() => undefined}><section role="dialog" aria-label="Permissions"><input aria-label="Permission input" /></section></AppModalPortal>}
   </>);
-  const input = () => container.querySelector<HTMLInputElement>('input[aria-label="Message Mango"]')!;
+  const input = () => container.querySelector<HTMLElement & { editor: Editor }>('[role="textbox"][aria-label="Message Mango"]')!;
+  const setMessage = (content: string) => input().editor.commands.setContent({ type: "doc", content: [{ type: "paragraph", content: content ? [{ type: "text", text: content }] : [] }] });
   const reasoningSelect = () => container.querySelector<HTMLSelectElement>('select[aria-label="Reasoning effort"]')!;
   const form = () => container.querySelector("form")!;
   const assistantButton = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
   const send = async (content: string, duplicate = false) => {
-    await act(async () => { input().value = content; Simulate.change(input()); });
+    await act(async () => { setMessage(content); });
     await act(async () => {
       Simulate.submit(form());
       if (duplicate) Simulate.submit(form());
@@ -68,7 +72,8 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     setActiveCompanyID("company-a");
     dom.window.localStorage.setItem("mangorts.assistant.reasoningEffort.v1", "ultra");
     await act(async () => { render(); });
-    assert.equal(input().disabled, false);
+    assert.equal(input().getAttribute("aria-disabled"), "false");
+    assert.equal(container.querySelector('input[type="checkbox"]'), null, "normal users have no context-inspection control");
     const assistant = container.querySelector<HTMLElement>(".mango-assistant")!;
     assert.equal(assistant.style.left, "", "chat centering must not inherit the app sidebar inset");
     const stylesheet = readFileSync(resolve(process.cwd(), "frontend/src/index.css"), "utf8");
@@ -90,7 +95,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     assert.deepEqual(Array.from(reasoningSelect().options, (option) => option.value), ["low", "medium", "high", "xhigh", "max"]);
     await act(async () => { reasoningSelect().value = "max"; Simulate.change(reasoningSelect()); });
     assert.equal(dom.window.localStorage.getItem("mangorts.assistant.reasoningEffort.v1"), "max");
-    await act(async () => { input().value = "Keep this draft"; Simulate.change(input()); });
+    await act(async () => { setMessage("Keep this draft"); });
     await act(async () => { collapseButton.click(); });
     assert.equal(expandedRegion.hidden, true);
     assert.equal(expandButton.hidden, false);
@@ -99,7 +104,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     await act(async () => { expandButton.click(); });
     assert.equal(expandedRegion.hidden, false);
     assert.equal(dom.window.document.activeElement, collapseButton, "expand must focus the replacement control");
-    assert.equal(input().value, "Keep this draft", "collapsing chat must preserve its in-memory session");
+    assert.equal(input().editor.getText(), "Keep this draft", "collapsing chat must preserve its in-memory session");
     await send("List my processes", true);
     assert.equal(requests.length, 1);
     assert.equal(requests[0].body.reasoning_effort, "max");
@@ -132,7 +137,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     await act(async () => { setActiveCompanyID("company-b"); });
     assert.equal(requests[3].signal.aborted, true);
     assert.doesNotMatch(container.textContent!, /List my processes|Partial write reply|Another read/);
-    assert.equal(input().value, "");
+    assert.equal(input().editor.getText(), "");
     assert.match(statusURLs.at(-1)!, /company_id=company-b$/);
     assert.equal(assistantButton("Expand Mango chat").hidden, false, "a new company session must start collapsed");
     assert.equal(reasoningSelect().value, "max", "the valid browser choice must survive a session remount");
@@ -153,7 +158,7 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
     await act(async () => { markTerminalAuthFailure("logout"); });
     assert.equal(requests[6].signal.aborted, true);
     assert.doesNotMatch(container.textContent!, /User B question/);
-    assert.equal(input().disabled, true);
+    assert.equal(input().getAttribute("aria-disabled"), "true");
   } finally {
     await act(async () => { root.unmount(); });
     resetTerminalAuthFailure();
@@ -163,13 +168,15 @@ test("chat submits once, preserves only finished history, aborts on Stop and iso
   }
 });
 
-test("Process selection uses the universal picker, exact per-turn identities, editable mentions, and existing Node navigation", async () => {
+test("Process pills persist across follow-ups and developer inspection shows only the server's context", async () => {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "http://localhost/", pretendToBeVisual: true });
   const restores: Array<() => void> = [];
   for (const [name, value] of Object.entries({
     window: dom.window, document: dom.window.document, navigator: dom.window.navigator,
     Node: dom.window.Node, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement,
     Event: dom.window.Event, CustomEvent: dom.window.CustomEvent, sessionStorage: dom.window.sessionStorage, localStorage: dom.window.localStorage,
+    MutationObserver: dom.window.MutationObserver, DOMParser: dom.window.DOMParser, getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window), cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
     IS_REACT_ACT_ENVIRONMENT: true,
   })) {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, name);
@@ -177,21 +184,20 @@ test("Process selection uses the universal picker, exact per-turn identities, ed
     restores.push(() => { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete (globalThis as Record<string, unknown>)[name]; });
   }
   Object.assign(dom.window.HTMLElement.prototype, { attachEvent() {}, detachEvent() {}, getClientRects: () => [{ width: 100, height: 30 }] });
+  Object.assign(dom.window.Range.prototype, { getClientRects: () => [], getBoundingClientRect: () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 }) });
   const processIDs = ["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"];
   const nodeID = "33333333-3333-4333-8333-333333333333";
-  const requests: Array<{ process_id?: string; messages: Array<{ content: string }> }> = [];
-  const calls: Array<{ url: string; method: string }> = [];
+  const requests: Array<{ process_id?: string; inspect_context?: boolean; messages: Array<{ content: string }> }> = [];
   const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = String(input);
-    calls.push({ url, method: init?.method ?? "GET" });
-    if (url.includes("/status?")) return new Response(JSON.stringify({ available: true }), { headers: { "Content-Type": "application/json" } });
-    if (url.includes("/user-pins?")) return new Response(JSON.stringify({ user_pins: [
-      ...processIDs.map((id, index) => ({ pin_id: `pin-${index}`, resource_type: "logic_gate", resource_id: id, name: "Order review", position: index })),
-      { pin_id: "pin-node", resource_type: "node", resource_id: nodeID, name: "Unrelated Node", position: 2 },
-    ] }), { headers: { "Content-Type": "application/json" } });
-    assert.match(url, /\/assistant\/chat\?/);
+    if (url.includes("/status?")) return new Response(JSON.stringify({ available: true, can_inspect_context: true }), { headers: { "Content-Type": "application/json" } });
+    if (url.includes("/user-pins?")) {
+      assert.equal(init?.method ?? "GET", "GET");
+      return new Response(JSON.stringify({ user_pins: processIDs.map((id, index) => ({ pin_id: `pin-${index}`, resource_type: "logic_gate", resource_id: id, name: "Order review", position: index })) }), { headers: { "Content-Type": "application/json" } });
+    }
+    assert.match(url, /\/assistant\/chat\?/, "inserting a reference never calls a relationship command");
     requests.push(JSON.parse(String(init?.body)));
     return new Response(new ReadableStream<Uint8Array>({ start(controller) {
       streams.push(controller);
@@ -204,97 +210,77 @@ test("Process selection uses the universal picker, exact per-turn identities, ed
   const container = dom.window.document.getElementById("root")!;
   const root = createRoot(container);
   const render = (userID = "process-user-a") => root.render(<AppAssistant apiBase="http://localhost:8080" userID={userID} bottomInset={10} />);
-  const input = () => container.querySelector<HTMLInputElement>('input[aria-label="Message Mango"]')!;
+  const input = () => container.querySelector<HTMLElement & { editor: Editor }>('[role="textbox"][aria-label="Message Mango"]')!;
   const picker = () => dom.window.document.querySelector<HTMLElement>('[aria-label="Universal picker"]');
-  const selected = () => container.querySelector('[aria-label="Selected Process"]');
-  const change = async (value: string, cursor = value.length) => { await act(async () => { input().value = value; input().setSelectionRange(cursor, cursor); Simulate.change(input()); }); };
-  const submit = async () => { await act(async () => { Simulate.submit(container.querySelector("form")!); }); };
+  const chip = () => input().querySelector<HTMLElement>('[data-mango-entity-link="true"]');
+  const checkbox = () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  const append = async (text: string) => { await act(async () => { input().editor.commands.insertContentAt(input().editor.state.doc.content.size - 1, { type: "text", text }); }); };
+  const key = async (value: string, init: KeyboardEventInit = {}) => { await act(async () => { input().dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true, ...init })); }); };
   const emit = async (index: number, event: object) => { await act(async () => { streams[index].enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`)); }); };
-  const choose = async () => {
-    await change("Please perform #");
-    assert.ok(picker(), "# must open the existing universal picker");
+  const choose = async (index = 1) => {
+    await act(async () => { input().editor.commands.setTextSelection(input().editor.state.doc.content.size - 1); });
+    await key("#");
+    assert.ok(picker());
     assert.equal(picker()!.dataset.mangoUniversalPickerMode, "reference");
-    assert.match(picker()!.textContent!, /# Reference/);
-    assert.doesNotMatch(picker()!.textContent!, /## Link/);
     const options = picker()!.querySelectorAll<HTMLButtonElement>('[role="option"]');
-    assert.equal(options.length, 2, "only Processes can be selected");
-    assert.doesNotMatch(picker()!.textContent!, /Unrelated Node/);
-    const search = picker()!.querySelector<HTMLInputElement>("input")!;
-    await act(async () => { Simulate.keyDown(search, { key: "ArrowDown" }); });
-    await act(async () => { Simulate.keyDown(search, { key: "Enter" }); });
+    assert.equal(options.length, 2);
+    await act(async () => { options[index].click(); await new Promise((resolve) => setTimeout(resolve, 25)); });
     assert.equal(picker(), null);
-    assert.equal(dom.window.document.activeElement, input(), "selection returns focus to the message");
-    assert.equal(input().value, "Please perform #Order review ");
-    assert.match(selected()!.textContent!, /Order review/);
+    assert.equal(chip()!.dataset.mangoEntityId, processIDs[index]);
+    assert.match(chip()!.className, /mango-editor-entity-link--logic_gate/);
+    assert.ok(chip()!.querySelector("svg"), "the chip renders the existing Process icon");
+    assert.equal(input().querySelectorAll('[data-mango-entity-link="true"]').length, 1);
   };
   try {
-    assert.deepEqual(universalPickerAllowedTypes("reference", [], "all"), ["node", "logic_gate", "project", "entity", "email_message"], "existing reference callers keep their full resource choices");
+    assert.deepEqual(universalPickerAllowedTypes("reference", [], "all"), ["node", "logic_gate", "project", "entity", "email_message"]);
     assert.deepEqual(universalPickerAllowedTypes("reference", [], "all", ["logic_gate"]), ["logic_gate"]);
-    assert.deepEqual(universalPickerAllowedTypes("reference", [], "node", ["logic_gate"]), []);
-    assert.deepEqual(universalPickerAllowedTypes("link", ["project"], "all", ["logic_gate"]), ["project"], "reference filtering does not change relationship linking");
-    resetTerminalAuthFailure();
-    setActiveCompanyID("process-company-a");
+    resetTerminalAuthFailure(); setActiveCompanyID("process-company-a");
     await act(async () => { render(); });
     await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand Mango chat"]')!.click(); });
-    await choose();
-    assert.equal(requests.length, 0, "choosing a Process must not execute it or create any relationship");
-    assert.ok(calls.every((call) => call.method === "GET"));
-    await change(`Now: ${input().value}`);
-    await change(`${input().value}for today's order`);
-    assert.ok(selected(), "editing around the exact mention preserves selection");
-    await submit();
-    assert.equal(requests[0].process_id, processIDs[1], "duplicate names retain the exact selected Process ID");
-    assert.equal(input().value, "");
-    assert.equal(selected(), null, "Process selection belongs only to the submitted turn");
-    await emit(0, { type: "node", node_id: nodeID, process_id: processIDs[0] });
-    assert.ok(!container.textContent!.includes("Open Node"), "a different Process event cannot link a Node to this turn");
+    assert.equal(checkbox().checked, false);
+    await append("Please perform "); await choose(); await append("for today's order");
+    assert.equal(requests.length, 0);
+    await key("Enter", { isComposing: true });
+    assert.equal(requests.length, 0, "composition Enter cannot send");
+    await act(async () => { checkbox().click(); });
+    await key("Enter");
+    assert.equal(requests[0].process_id, processIDs[1]);
+    assert.equal(requests[0].inspect_context, true);
+    assert.equal(checkbox().checked, false, "inspection applies to one Send");
+    assert.equal(chip()!.dataset.mangoEntityId, processIDs[1], "the selected pill stays visible after sending");
+    await emit(0, { type: "context", context: { step: 1, input: [{ role: "developer", content: "Server-compiled SOP and Steps" }], omitted_reasoning_items: 0, model: "test-model", reasoning_effort: "medium", instructions: "Server instructions", tools: [{ name: "write_process_node" }] } });
+    await emit(0, { type: "context", context: { step: 2, input: [{ type: "function_call_output", output: "Saved tool result" }], omitted_reasoning_items: 1 } });
     await emit(0, { type: "node", node_id: nodeID, process_id: processIDs[1] });
     await emit(0, { type: "error", message: "Stopped at the current Step." });
     const failed = container.querySelector('[data-assistant-turn-status="failed"]')!;
-    assert.match(failed.textContent!, /Open Node/, "failed work keeps its existing Node accessible");
-    await act(async () => { failed.querySelector<HTMLButtonElement>("button")!.click(); });
-    assert.match(dom.window.location.pathname, new RegExp(`${nodeID}$`));
-    await change("What happened?");
-    await submit();
-    assert.equal(requests[1].process_id, undefined, "a follow-up cannot silently execute the prior Process again");
-    assert.deepEqual(requests[1].messages, [{ role: "user", content: "What happened?" }], "failed work is not replayed");
+    assert.match(failed.textContent!, /Open Node/);
+    await act(async () => { Array.from(failed.querySelectorAll("button")).find((button) => button.textContent === "View context")!.click(); });
+    const modal = dom.window.document.querySelector<HTMLElement>('[role="dialog"][aria-label="AI context"]')!;
+    for (const content of ["Server-compiled SOP and Steps", "Server instructions", "initial context", "additional input", "Saved tool result", "private model reasoning"]) assert.ok(modal.textContent!.includes(content));
+    await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
+    await append("Do you see it now?"); await key("Enter");
+    assert.equal(requests[1].process_id, processIDs[1], "a plain follow-up keeps the same exact Process context");
+    assert.equal(requests[1].inspect_context, undefined);
+    assert.deepEqual(requests[1].messages, [{ role: "user", content: "#Order review Do you see it now?" }]);
     await emit(1, { type: "done" });
-    await choose();
-    await change(input().value.replace("Order", "Other"));
-    assert.equal(selected(), null, "editing the mention invalidates its selected identity");
-    await submit();
-    assert.equal(requests[2].process_id, undefined);
+    await choose(0); await append("Use this one"); await key("Enter");
+    assert.equal(requests[2].process_id, processIDs[0], "same-label replacement changes the exact Process ID");
     await emit(2, { type: "done" });
+    await act(async () => { input().editor.commands.setNodeSelection(1); }); await key("Backspace");
+    assert.equal(chip(), null, "normal Mango Backspace leaves the label and removes reference identity");
+    await append(" is only text now"); await key("Enter");
+    assert.equal(requests[3].process_id, undefined); await emit(3, { type: "done" });
     await choose();
-    await change(`Prefix ${input().value}`);
-    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Remove selected Process"]')!.click(); });
-    assert.equal(input().value, "Prefix Please perform  ");
-    assert.equal(selected(), null);
-    await change("Cancel #");
-    await act(async () => { Simulate.keyDown(picker()!.querySelector("input")!, { key: "Escape" }); });
-    assert.equal(picker(), null);
-    assert.equal(dom.window.document.activeElement, input());
-    await choose();
-    await change(`${input().value}#Order review `);
-    assert.ok(selected());
-    await change("Please perform #Order review ", "Please perform ".length);
-    assert.equal(selected(), null, "removing the selected occurrence cannot transfer its ID to identical unselected text");
-    await choose();
-    await act(async () => { setActiveCompanyID("process-company-b"); });
-    assert.equal(selected(), null);
-    assert.equal(input().value, "");
-    assert.doesNotMatch(container.textContent!, /Order review|Open Node/);
+    await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Clear chat")!.click(); });
+    assert.equal(chip(), null); assert.equal(input().editor.getText(), "");
+    assert.doesNotMatch(container.textContent!, /View context|Open Node/);
+    await choose(); await act(async () => { setActiveCompanyID("process-company-b"); });
+    assert.equal(chip(), null); assert.equal(input().editor.getText(), "");
     await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand Mango chat"]')!.click(); });
-    await choose();
-    await act(async () => { render("process-user-b"); });
-    assert.equal(selected(), null);
-    assert.equal(input().value, "");
-    assert.equal(picker(), null);
+    await choose(); await act(async () => { render("process-user-b"); });
+    assert.equal(chip(), null); assert.equal(input().editor.getText(), ""); assert.equal(picker(), null);
   } finally {
-    await act(async () => { root.unmount(); });
-    resetTerminalAuthFailure();
-    globalThis.fetch = originalFetch;
-    restores.reverse().forEach((restore) => restore());
-    dom.window.close();
+    await act(async () => { root.unmount(); }); resetTerminalAuthFailure(); globalThis.fetch = originalFetch;
+    restores.reverse().forEach((restore) => restore()); dom.window.close();
   }
 });

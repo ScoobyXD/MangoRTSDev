@@ -76,7 +76,7 @@ func TestAssistantStreamsFunctionResultContinuationWithoutBrowser(t *testing.T) 
 		if r.URL.Path != "/responses" || body["model"] != "test-model" || body["stream"] != true || body["store"] != false || body["parallel_tool_calls"] != false || reasoning["effort"] != "max" {
 			t.Errorf("unexpected provider protocol: %s %+v", r.URL.Path, body)
 		}
-		if tools, ok := body["tools"].([]any); !ok || len(tools) != 25 {
+		if tools, ok := body["tools"].([]any); !ok || len(tools) != 26 {
 			t.Error("missing fixed tools")
 		}
 		if requests.Add(1) == 1 {

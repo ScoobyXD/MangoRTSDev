@@ -34,6 +34,7 @@ func assistantTools() []responses.ToolUnionParam {
 	optionalTextboxID := map[string]any{"type": []string{"string", "null"}, "minLength": 1, "maxLength": 128}
 	return []responses.ToolUnionParam{
 		assistantFunction("get_me", "Read the signed-in user and selected company membership.", map[string]any{}),
+		assistantFunction("list_my_processes", "Read the signed-in user's assigned Processes in the selected company. Use this for 'my processes' or 'what processes am I assigned to'. Mango filters by current RACI assignments, including inherited and group assignments, and current Process access. Includes any R, A, C, or I role; does not scan only the first 50 company Processes.", map[string]any{}),
 		assistantFunction("list_processes", "Find visible Processes (canonical logic_gate resources); returns at most 50. Use query to narrow results.", map[string]any{"query": optionalText}),
 		assistantFunction("get_process", "Read one Process and its textbox IDs.", map[string]any{"process_id": id}),
 		assistantFunction("get_process_nodes", "Read one Process's current work and Nodes using its normal work permissions.", map[string]any{"process_id": id}),
@@ -195,6 +196,9 @@ func (s *Server) dispatchAssistantOperation(r *http.Request, name string, args m
 	switch name {
 	case "get_me":
 		path, handler = "/v1/me", s.handleMe
+	case "list_my_processes":
+		path, handler = "/v1/logic-gates", s.handleLogicGates
+		query.Set("assigned_to_me", "true")
 	case "list_processes":
 		path, handler = "/v1/logic-gates", s.handleLogicGates
 		query.Set("limit", "50")

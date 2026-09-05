@@ -4,16 +4,16 @@ import { ACTIVE_COMPANY_CHANGED_EVENT, getActiveCompanyID } from "../auth/curren
 import {
   ASSISTANT_DEFAULT_REASONING_EFFORT, ASSISTANT_MAX_MESSAGE_CHARS, ASSISTANT_REASONING_EFFORTS,
   ASSISTANT_STOP_MESSAGE, assistantErrorMessage, assistantHistoryError, getAssistantStatus,
-  isAssistantReasoningEffort, streamAssistantChat, type AssistantMessage, type AssistantReasoningEffort,
+  isAssistantReasoningEffort, streamAssistantChat, type AssistantMessage, type AssistantReasoningEffort, type AssistantEvent,
 } from "../modules/assistant/assistantApi.js";
 import { createRequestJSON } from "../modules/api/requestJSON.js";
 import { openEditorEntityLink } from "../modules/editor/editorEntityLinks.js";
-import { UniversalEntityPicker, type UniversalEntityPickerAnchor } from "../modules/editor/UniversalEntityPicker.js";
+import { AssistantComposer, type AssistantComposerHandle, type AssistantProcess } from "../modules/assistant/AssistantComposer.js";
+import { AppModalPortal } from "./AppModalPortal.js";
 
 type Props = { apiBase: string; userID: string; bottomInset: number };
-type SelectedProcess = { id: string; label: string; start: number; end: number };
-type Turn = { question: string; reply: string; status: "running" | "complete" | "stopped" | "failed"; notice: string; process?: SelectedProcess; nodeID?: string };
-const PROCESS_PICKER_TYPES = ["logic_gate"] as const;
+type ContextSnapshot = Extract<AssistantEvent, { type: "context" }>["context"];
+type Turn = { question: string; reply: string; status: "running" | "complete" | "stopped" | "failed"; notice: string; process?: AssistantProcess; nodeID?: string; contexts: ContextSnapshot[] };
 const ASSISTANT_REASONING_STORAGE_KEY = "mangorts.assistant.reasoningEffort.v1";
 const ASSISTANT_REASONING_LABELS: Record<AssistantReasoningEffort, string> = {
   low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum",
@@ -59,15 +59,17 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const [available, setAvailable] = useState<boolean | null>(null);
   const [availabilityMessage, setAvailabilityMessage] = useState("");
   const [draft, setDraft] = useState("");
-  const [selectedProcess, setSelectedProcess] = useState<SelectedProcess | null>(null);
-  const [picker, setPicker] = useState<{ anchor: UniversalEntityPickerAnchor; start: number } | null>(null);
+  const [selectedProcess, setSelectedProcess] = useState<AssistantProcess | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [canInspectContext, setCanInspectContext] = useState(false);
+  const [inspectContext, setInspectContext] = useState(false);
+  const [inspectedTurn, setInspectedTurn] = useState<number | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState(loadReasoningEffort);
   const [running, setRunning] = useState(false);
   const activeRequest = useRef<AbortController | null>(null);
-  const composerRef = useRef<HTMLInputElement>(null);
-  const focusComposerAt = useRef<number | null>(null);
+  const composerRef = useRef<AssistantComposerHandle>(null);
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const followReply = useRef(true);
@@ -88,6 +90,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
     void getAssistantStatus(apiBase, companyID, controller.signal).then((status) => {
       if (controller.signal.aborted) return;
       setAvailable(status.available);
+      setCanInspectContext(status.can_inspect_context === true);
       if (!status.available) setAvailabilityMessage("Mango chat is unavailable. Ask your administrator to configure it.");
     }).catch((error: unknown) => {
       if (controller.signal.aborted) return;
@@ -104,13 +107,6 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   }, [panelOpen]);
 
   useLayoutEffect(() => {
-    if (picker || focusComposerAt.current === null) return;
-    composerRef.current?.focus();
-    composerRef.current?.setSelectionRange(focusComposerAt.current, focusComposerAt.current);
-    focusComposerAt.current = null;
-  }, [picker, selectedProcess]);
-
-  useLayoutEffect(() => {
     if (panelOpen && followReply.current && transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
     }
@@ -119,19 +115,19 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const history: AssistantMessage[] = turns.filter((turn) => turn.status === "complete" && turn.reply.trim()).flatMap((turn) => [
     { role: "user" as const, content: turn.question }, { role: "assistant" as const, content: turn.reply },
   ]);
-  const historyError = assistantHistoryError([...history, { role: "user", content: draft.trim() }]);
+  const historyError = draft.length > ASSISTANT_MAX_MESSAGE_CHARS ? "Keep your message under 8,000 characters." : assistantHistoryError([...history, { role: "user", content: draft.trim() }]);
 
-  const send = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const send = async () => {
     const question = draft.trim();
-    if (activeRequest.current || picker || !available || !question || question.length > ASSISTANT_MAX_MESSAGE_CHARS || historyError) return;
+    if (activeRequest.current || pickerOpen || !available || !question || question.length > ASSISTANT_MAX_MESSAGE_CHARS || historyError) return;
     const controller = new AbortController();
     activeRequest.current = controller;
     const index = turns.length;
     const process = selectedProcess ?? undefined;
-    setTurns((current) => [...current, { question, reply: "", status: "running", notice: "Thinking…", process }]);
-    setDraft("");
-    setSelectedProcess(null);
+    const inspecting = canInspectContext && inspectContext;
+    setTurns((current) => [...current, { question, reply: "", status: "running", notice: "Thinking…", process, contexts: [] }]);
+    composerRef.current?.clearMessage();
+    setInspectContext(false);
     setRunning(true);
     followReply.current = true;
     const update = (changes: Partial<Turn>) => setTurns((current) => current.map((turn, turnIndex) => turnIndex === index ? { ...turn, ...changes } : turn));
@@ -146,12 +142,14 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
           update({ notice: message.status === "running" ? "Working in Mango…" : "Preparing reply…" });
         } else if (message.type === "node") {
           if (process?.id === message.process_id) update({ nodeID: message.node_id });
+        } else if (message.type === "context") {
+          if (inspecting) setTurns((current) => current.map((turn, turnIndex) => turnIndex === index ? { ...turn, contexts: [...turn.contexts, message.context] } : turn));
         } else if (message.type === "done") {
           update({ status: "complete", notice: reply ? "" : "Finished without a text reply." });
         } else {
           update({ status: "failed", notice: message.message });
         }
-      }, process?.id);
+      }, process?.id, inspecting);
     } catch (error) {
       if (!controller.signal.aborted) update({ status: "failed", notice: assistantErrorMessage(error) });
     } finally {
@@ -168,39 +166,8 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   };
 
   const setPanelVisibility = (open: boolean) => {
-    if (!open) setPicker(null);
     focusToggleAfterChange.current = true;
     setPanelOpen(open);
-  };
-
-  const changeDraft = (input: HTMLInputElement) => {
-    const next = input.value;
-    const cursor = input.selectionStart ?? next.length;
-    let selection = selectedProcess;
-    if (selection && next !== draft) {
-      let start = 0;
-      while (start < draft.length && start < cursor && draft[start] === next[start]) start += 1;
-      let end = draft.length;
-      let nextEnd = next.length;
-      while (end > start && nextEnd > start && draft[end - 1] === next[nextEnd - 1]) { end -= 1; nextEnd -= 1; }
-      if (end <= selection.start) {
-        const offset = next.length - draft.length;
-        selection = { ...selection, start: selection.start + offset, end: selection.end + offset };
-      } else if (start < selection.end) selection = null;
-      setSelectedProcess(selection);
-    }
-    setDraft(next);
-    if (!selection && next !== draft && next[cursor - 1] === "#" && (cursor === 1 || /\s/.test(next[cursor - 2]))) {
-      const rect = input.getBoundingClientRect();
-      setPicker({ anchor: { left: rect.left, top: rect.top }, start: cursor - 1 });
-    }
-  };
-
-  const removeProcess = () => {
-    if (!selectedProcess) return;
-    setDraft(draft.slice(0, selectedProcess.start) + draft.slice(selectedProcess.end));
-    focusComposerAt.current = selectedProcess.start;
-    setSelectedProcess(null);
   };
 
   return <aside className="mango-assistant" aria-label="Mango chat" style={{ bottom: bottomInset }}>
@@ -228,7 +195,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
         {turns.length > 0 && <section className="mango-assistant-transcript" id={transcriptID} aria-label="Chat transcript">
         <header>
           <strong>Mango chat</strong>
-          <button type="button" disabled={running || turns.length === 0} onClick={() => { setTurns([]); setDraft(""); setSelectedProcess(null); setPicker(null); }}>Clear chat</button>
+          <button type="button" disabled={running || turns.length === 0} onClick={() => { setTurns([]); composerRef.current?.clear(); setInspectContext(false); setInspectedTurn(null); }}>Clear chat</button>
         </header>
         <div className="mango-assistant-messages mango-home-scroll" ref={transcriptRef} onScroll={(event) => {
           const element = event.currentTarget;
@@ -243,16 +210,15 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
               {turn.reply && <p>{turn.reply}</p>}
               {turn.notice && <p className="mango-assistant-hint" role="status">{turn.notice}</p>}
               {turn.nodeID && <button type="button" className="mango-assistant-resource" onClick={() => openEditorEntityLink({ entityType: "node", entityID: turn.nodeID!, label: "AI Process Node" })}>Open Node</button>}
+              {turn.contexts.length > 0 && <button type="button" className="mango-assistant-resource" onClick={() => setInspectedTurn(index)}>View context</button>}
             </div>
           </React.Fragment>)}
         </div>
         </section>}
-        {selectedProcess && <div className="mango-assistant-process" aria-label="Selected Process">
-          <span>Process: <strong>{selectedProcess.label}</strong></span>
-          <button type="button" aria-label="Remove selected Process" onClick={removeProcess}>×</button>
-        </div>}
-        <form className="mango-assistant-composer" onSubmit={(event) => { void send(event); }}>
-          <input ref={composerRef} aria-label="Message Mango" placeholder={available === null ? "Checking Mango chat…" : "Ask Mango… Type # to select a Process"} value={draft} maxLength={ASSISTANT_MAX_MESSAGE_CHARS} disabled={!available || running} onChange={(event) => changeDraft(event.currentTarget)} onKeyDown={(event) => { if (event.nativeEvent.isComposing && event.key === "Enter") event.preventDefault(); }} />
+        <form className="mango-assistant-composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+          <AssistantComposer ref={composerRef} companyID={companyID} requestJSON={requestJSON} disabled={!available || running} visible={panelOpen}
+            placeholder={available === null ? "Checking Mango chat…" : "Ask Mango… Type # to select a Process"}
+            onChange={(next) => { setDraft(next.text); setSelectedProcess(next.process); }} onSubmit={() => { void send(); }} onPickerChange={setPickerOpen} />
           <label className="mango-assistant-reasoning">
             <span>Reasoning</span>
             <select aria-label="Reasoning effort" value={reasoningEffort} disabled={running} onChange={(event) => {
@@ -266,32 +232,25 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
           </label>
           {running
             ? <button type="button" className="mango-assistant-send" onClick={stop}>Stop</button>
-            : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError) || Boolean(picker)}>Send</button>}
+            : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError) || pickerOpen}>Send</button>}
         </form>
+        {canInspectContext && <label className="mango-assistant-inspect"><input type="checkbox" checked={inspectContext} disabled={running} onChange={(event) => setInspectContext(event.currentTarget.checked)} />Inspect context for next message</label>}
         {(availabilityMessage || historyError) && <p className="mango-assistant-availability" role="status">{availabilityMessage || historyError}</p>}
       </div>
     </div>
-    {picker && <UniversalEntityPicker
-      companyID={companyID}
-      requestJSON={requestJSON}
-      sourceLabel="Select a Process for Mango"
-      linkTargetTypes={[]}
-      referenceTargetTypes={PROCESS_PICKER_TYPES}
-      initialMode="reference"
-      initialCategory="logic_gate"
-      lockMode
-      anchor={picker.anchor}
-      onCancel={() => { focusComposerAt.current = picker.start + 1; setPicker(null); }}
-      onChoose={async (entity) => {
-        if (entity.entityType !== "logic_gate") throw new Error("Select a Process.");
-        const mention = `#${entity.label}`;
-        const next = draft.slice(0, picker.start) + mention + " " + draft.slice(picker.start + 1);
-        if (next.length > ASSISTANT_MAX_MESSAGE_CHARS) throw new Error("Shorten your message before selecting a Process.");
-        setDraft(next);
-        setSelectedProcess({ id: entity.entityID, label: entity.label, start: picker.start, end: picker.start + mention.length });
-        focusComposerAt.current = picker.start + mention.length + 1;
-        setPicker(null);
-      }}
-    />}
+    {inspectedTurn !== null && turns[inspectedTurn] && <AppModalPortal onRequestClose={() => setInspectedTurn(null)}>
+      <section role="dialog" aria-modal="true" aria-label="AI context" className="mango-assistant-context">
+        <header><strong>AI context</strong><button type="button" onClick={() => setInspectedTurn(null)}>Close context</button></header>
+        <p>Initial model input and the additions supplied to each later call. Earlier input is included again in later calls.</p>
+        <div className="mango-assistant-context-calls">{turns[inspectedTurn].contexts.map((context, index) => <details key={index} open={index === 0}>
+          <summary>Model call {context.step} — {index === 0 ? "initial context" : "additional input"}</summary>
+          {context.model && <p>Model: {context.model} · Reasoning: {context.reasoning_effort}</p>}
+          {context.instructions && <><strong>Instructions</strong><pre>{context.instructions}</pre></>}
+          <strong>Input</strong><pre>{JSON.stringify(context.input, null, 2)}</pre>
+          {context.tools && <><strong>Available tools</strong><pre>{JSON.stringify(context.tools, null, 2)}</pre></>}
+          {context.omitted_reasoning_items > 0 && <p>{context.omitted_reasoning_items} private model reasoning item(s) omitted.</p>}
+        </details>)}</div>
+      </section>
+    </AppModalPortal>}
   </aside>;
 }

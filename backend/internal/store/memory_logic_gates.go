@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"maps"
 	"miraeopus/backend/internal/domain"
 	"sort"
@@ -218,10 +219,10 @@ func newestLogicGateTextProjectionKey(items map[string]domain.LogicGateProjectio
 	keyValue := ""
 	var newest domain.LogicGateProjection
 	for key, item := range items {
-		if !isEditorTextBoxType(item.Type) {
+		if !isEditorTextBoxType(item.Type) || item.IsDeleted {
 			continue
 		}
-		if keyValue == "" || item.UpdatedTimestamp.After(newest.UpdatedTimestamp) || (item.UpdatedTimestamp.Equal(newest.UpdatedTimestamp) && item.InformationID > newest.InformationID) {
+		if keyValue == "" || item.UpdatedTimestamp.After(newest.UpdatedTimestamp) || (item.UpdatedTimestamp.Equal(newest.UpdatedTimestamp) && (item.CreatedTimestamp.After(newest.CreatedTimestamp) || (item.CreatedTimestamp.Equal(newest.CreatedTimestamp) && item.InformationID > newest.InformationID))) {
 			keyValue = key
 			newest = item
 		}
@@ -696,8 +697,50 @@ func (r *MemoryRepo) ListLogicGateProjections(companyID, logicGateID string) ([]
 		return nil, ErrNotFound
 	}
 	items := make([]domain.LogicGateProjection, 0)
-	latestTextKey := newestLogicGateTextProjectionKey(r.logicGateText[key(companyID, logicGateID)])
-	for projectionID, item := range r.logicGateText[key(companyID, logicGateID)] {
+	projections := maps.Clone(r.logicGateText[key(companyID, logicGateID)])
+	if projections == nil {
+		projections = make(map[string]domain.LogicGateProjection)
+	}
+	// Canonical bodies and metadata are stored separately in memory, but both
+	// represent the same textbox row in PostgreSQL.
+	for documentKey, document := range r.editorJSONDocuments {
+		ref := document.Ref
+		if ref.CompanyID != companyID || ref.ResourceType != EntityTypeLogicGate || ref.ResourceID != logicGateID {
+			continue
+		}
+		if document.Deleted {
+			delete(projections, ref.DocumentID)
+			continue
+		}
+		item := projections[ref.DocumentID]
+		payload := map[string]any{"title": "", "attachments": []EditorJSONAttachmentReference{}, "email_message_id": "", "email_accent": ""}
+		if strings.HasPrefix(item.Information, editorTextBlockProjectionPrefix) {
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(item.Information, editorTextBlockProjectionPrefix)), &payload); err != nil {
+				return nil, err
+			}
+		}
+		payload["document"] = string(document.JSONDocument)
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		item.CompanyID, item.LogicGateID, item.InformationID, item.Type = companyID, logicGateID, ref.DocumentID, "Text box"
+		item.Information = editorTextBlockProjectionPrefix + string(encoded)
+		item.Revision = max(item.Revision, document.Revision)
+		created := document.UpdatedTimestamp
+		if versions := r.editorJSONVersions[documentKey]; len(versions) > 0 {
+			created = versions[0].CreatedAt
+		}
+		if item.CreatedTimestamp.IsZero() || created.Before(item.CreatedTimestamp) {
+			item.CreatedTimestamp = created
+		}
+		if document.UpdatedTimestamp.After(item.UpdatedTimestamp) {
+			item.UpdatedTimestamp = document.UpdatedTimestamp
+		}
+		projections[ref.DocumentID] = item
+	}
+	latestTextKey := newestLogicGateTextProjectionKey(projections)
+	for projectionID, item := range projections {
 		if isEditorTextBoxType(item.Type) && projectionID != latestTextKey {
 			continue
 		}
@@ -707,7 +750,10 @@ func (r *MemoryRepo) ListLogicGateProjections(companyID, logicGateID string) ([]
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].UpdatedTimestamp.Before(items[j].UpdatedTimestamp)
+		if items[i].CreatedTimestamp.Equal(items[j].CreatedTimestamp) {
+			return items[i].InformationID < items[j].InformationID
+		}
+		return items[i].CreatedTimestamp.Before(items[j].CreatedTimestamp)
 	})
 	return items, nil
 }

@@ -5,10 +5,20 @@ export type AssistantMessage = { role: "user" | "assistant"; content: string };
 export const ASSISTANT_REASONING_EFFORTS = ["low", "medium", "high", "xhigh", "max"] as const;
 export type AssistantReasoningEffort = typeof ASSISTANT_REASONING_EFFORTS[number];
 export const ASSISTANT_DEFAULT_REASONING_EFFORT: AssistantReasoningEffort = "medium";
+export type AssistantContext = {
+  step: number;
+  input: unknown[];
+  omitted_reasoning_items: number;
+  model?: string;
+  reasoning_effort?: string;
+  instructions?: string;
+  tools?: unknown[];
+};
 export type AssistantEvent =
   | { type: "text"; text: string }
   | { type: "tool"; name: string; status: "running" | "completed" }
   | { type: "node"; node_id: string; process_id: string }
+  | { type: "context"; context: AssistantContext }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -27,7 +37,7 @@ export function assistantHistoryError(messages: AssistantMessage[]): string {
   return "";
 }
 
-export function getAssistantStatus(apiBase: string, companyID: string, signal: AbortSignal): Promise<{ available: boolean }> {
+export function getAssistantStatus(apiBase: string, companyID: string, signal: AbortSignal): Promise<{ available: boolean; can_inspect_context: boolean }> {
   return requestJSON(apiBase, `/v1/assistant/status?company_id=${encodeURIComponent(companyID)}`, { signal });
 }
 
@@ -39,20 +49,21 @@ export async function streamAssistantChat(
   signal: AbortSignal,
   onEvent: (event: AssistantEvent) => void,
   processID?: string,
+  inspectContext = false,
 ): Promise<void> {
   const historyError = assistantHistoryError(messages);
   if (historyError) throw new Error(historyError);
   await requestJSON(apiBase, `/v1/assistant/chat?company_id=${encodeURIComponent(companyID)}`, {
     method: "POST",
-    json: { request_id: crypto.randomUUID(), reasoning_effort: reasoningEffort, messages, ...(processID ? { process_id: processID } : {}) },
+    json: { request_id: crypto.randomUUID(), reasoning_effort: reasoningEffort, messages, ...(processID ? { process_id: processID } : {}), ...(inspectContext ? { inspect_context: true } : {}) },
     headers: { Accept: "text/event-stream" },
     signal,
     timeoutMs: 95_000,
-    consumeResponse: (response) => consumeAssistantStream(response, onEvent),
+    consumeResponse: (response) => consumeAssistantStream(response, onEvent, inspectContext),
   });
 }
 
-export async function consumeAssistantStream(response: Response, onEvent: (event: AssistantEvent) => void): Promise<void> {
+export async function consumeAssistantStream(response: Response, onEvent: (event: AssistantEvent) => void, inspectContext = false): Promise<void> {
   if (!response.body || !response.headers.get("Content-Type")?.includes("text/event-stream")) throw new Error(STREAM_ERROR);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -63,7 +74,7 @@ export async function consumeAssistantStream(response: Response, onEvent: (event
       const { value, done } = await reader.read();
       if (done) throw new Error(STREAM_ERROR);
       bytes += value.byteLength;
-      if (bytes > 512_000) throw new Error(STREAM_ERROR);
+      if (bytes > 512_000 + (inspectContext ? 2 * 1024 * 1024 : 0)) throw new Error(STREAM_ERROR);
       buffer += decoder.decode(value, { stream: true });
       let boundary: RegExpExecArray | null;
       while ((boundary = /\r?\n\r?\n/.exec(buffer))) {
@@ -73,6 +84,7 @@ export async function consumeAssistantStream(response: Response, onEvent: (event
         if (!data) continue;
         const event: unknown = JSON.parse(data);
         if (!isAssistantEvent(event)) throw new Error(STREAM_ERROR);
+        if (event.type === "context" && !inspectContext) throw new Error(STREAM_ERROR);
         onEvent(event);
         if (event.type === "error" || event.type === "done") return;
       }
@@ -90,7 +102,18 @@ function isAssistantEvent(event: unknown): event is AssistantEvent {
     || value.type === "text" && typeof value.text === "string"
     || value.type === "error" && typeof value.message === "string"
     || value.type === "node" && typeof value.node_id === "string" && Boolean(value.node_id.trim()) && typeof value.process_id === "string" && Boolean(value.process_id.trim())
+    || value.type === "context" && isAssistantContext(value.context)
     || value.type === "tool" && typeof value.name === "string" && (value.status === "running" || value.status === "completed");
+}
+
+function isAssistantContext(value: unknown): value is AssistantContext {
+  if (!value || typeof value !== "object") return false;
+  const context = value as Record<string, unknown>;
+  return Number.isInteger(context.step) && Number(context.step) >= 1 && Number(context.step) <= 9
+    && Array.isArray(context.input)
+    && Number.isInteger(context.omitted_reasoning_items) && Number(context.omitted_reasoning_items) >= 0
+    && ["model", "reasoning_effort", "instructions"].every((key) => context[key] === undefined || typeof context[key] === "string")
+    && (context.tools === undefined || Array.isArray(context.tools));
 }
 
 export function assistantErrorMessage(error: unknown): string {
