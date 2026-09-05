@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import FrameRightClickMenu from "../../app/framerightclickmenu";
+import { NODE_ICON_GRADIENT_END, NODE_ICON_GRADIENT_START } from "../../icons/EntityIcons.js";
 import { APIHTTPError, isAbortError } from "../api/requestJSON.js";
 import { createProcessStep, createProcessStepRelationship, deleteProcessStep, deleteProcessStepRelationship, updateProcessStep, type ProcessStepMutationResult } from "./kanbanApi.js";
 import type { ProcessStep, ProcessStepRelationship } from "./processWork.js";
-import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, snapStepMapCoordinate, stepMapBounds, stepMapPath, stepMapSequence, STEP_MAP_GRID, type ProcessStepMapLayout, type StepMapBox, type StepMapPoint, type StepMapResizeHandle } from "./processStepMapGeometry.js";
+import { completeStepMapLayout, defaultStepMapRoute, moveStepMapBox, snapStepMapCoordinate, stepMapAnchors, stepMapBounds, stepMapPath, stepMapSequence, STEP_MAP_GRID, type ProcessStepMapLayout, type StepMapBox, type StepMapPoint, type StepMapResizeHandle } from "./processStepMapGeometry.js";
 import { getProcessStepMap, saveProcessStepMap } from "./processStepMapApi.js";
 import { useProcessStepMapCamera } from "./useProcessStepMapCamera.js";
 import "./processStepMap.css";
@@ -76,6 +77,14 @@ const resizeHandles: StepMapResizeHandle[] = ["nw", "n", "ne", "se", "s", "sw"];
 const connectionPorts: ConnectionPort[] = ["input", "output"];
 const message = (error: unknown) => error instanceof Error ? error.message : "The change could not be saved. Please try again.";
 
+function traceGradient(id: string, source: StepMapBox, target: StepMapBox) {
+  const { start, end } = stepMapAnchors(source, target);
+  // User-space coordinates also paint traces whose width or height is zero.
+  return <defs><linearGradient id={id} gradientUnits="userSpaceOnUse" x1={start.x} y1={start.y} x2={end.x} y2={end.y}>
+    <stop stopColor={NODE_ICON_GRADIENT_START} /><stop offset="1" stopColor={NODE_ICON_GRADIENT_END} />
+  </linearGradient></defs>;
+}
+
 export function ProcessStepMap(props: ProcessStepMapProps) {
   const { apiBase, companyID, processID, ...editorProps } = props;
   const commands = useMemo<ProcessStepMapCommands>(() => ({
@@ -120,7 +129,7 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
   const current = useRef({ steps, relationships, canEdit, onChanged, commands, onBusyChange });
   current.current = { steps, relationships, canEdit, onChanged, commands, onBusyChange };
   layoutRef.current = layout;
-  const arrowID = `step-map-arrow-${useId().replace(/:/g, "")}`;
+  const traceGradientID = `step-map-trace-${useId().replace(/:/g, "")}`;
   const isCanvas = presentation === "canvas";
   const camera = useProcessStepMapCamera(viewport, isCanvas, () => gesture.current !== null);
   const zoom = isCanvas ? camera.zoom : boardZoom;
@@ -411,13 +420,13 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
     setGestureActive(false);
     connectPortPair(active, id);
   };
-  const connectionPath = (() => {
+  const connectionTrace = (() => {
     if (!connectionPreview) return null;
     const start = boxes.get(connectionPreview.id);
     if (!start) return null;
     const end = (connectionPreview.targetID && boxes.get(connectionPreview.targetID)) || { ...connectionPreview.point, process_step_id: "", width: 0, height: 0 };
     const [source, target] = connectionPreview.port === "output" ? [start, end] : [end, start];
-    return stepMapPath(source, target, defaultStepMapRoute(source, target));
+    return { source, target, path: stepMapPath(source, target, defaultStepMapRoute(source, target)) };
   })();
 
   return <section className={`process-step-map${isDark && !isCanvas ? " process-step-map--dark" : ""}${isCanvas ? " process-step-map--canvas" : ""}`} aria-label="Process Step map">
@@ -440,14 +449,15 @@ export function ProcessStepMapEditor({ commands, steps, relationships, canEdit, 
           {isCanvas && <div className="process-step-map__process-outline" role="img" aria-label={`Process outline: ${processName.trim() || "Untitled Process"}`}><span aria-hidden="true">Process · {processName.trim() || "Untitled Process"}</span></div>}
           {layout && <>
           <svg className="process-step-map__edges" width={bounds.width} height={bounds.height} viewBox={`${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`} aria-label="Step connections">
-            <defs><marker id={arrowID} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" /></marker></defs>
-            {connectionPath && <path className="process-step-map__connection-preview" d={connectionPath} markerEnd={`url(#${arrowID})`} />}
+            {connectionTrace && <>{traceGradient(`${traceGradientID}-preview`, connectionTrace.source, connectionTrace.target)}<path className="process-step-map__connection-preview" d={connectionTrace.path} stroke={`url(#${traceGradientID}-preview)`} /></>}
             {routes.map(({ edge, source, target, points }) => {
               const selected = selectedRoute?.edge.resource_operational_relationship_id === edge.resource_operational_relationship_id;
               const hovered = hoverModeEnabled && (source.process_step_id === hoveredStepID || target.process_step_id === hoveredStepID);
+              const gradientID = `${traceGradientID}-${edge.resource_operational_relationship_id}`;
               return <g key={edge.resource_operational_relationship_id} className={selected ? "is-selected" : hovered ? "is-hovered" : undefined}>
+                {traceGradient(gradientID, source, target)}
                 <path className="process-step-map__edge-hit" d={stepMapPath(source, target, points)} tabIndex={0} role="button" aria-label={`Connection from ${stepByID.get(source.process_step_id)?.name} to ${stepByID.get(target.process_step_id)?.name}`} onClick={() => setSelection({ kind: "route", id: edge.resource_operational_relationship_id })} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setSelection({ kind: "route", id: edge.resource_operational_relationship_id }); } }} />
-                <path className="process-step-map__edge" d={stepMapPath(source, target, points)} markerEnd={`url(#${arrowID})`} />
+                <path className="process-step-map__edge" d={stepMapPath(source, target, points)} stroke={`url(#${gradientID})`} />
               </g>;
             })}
           </svg>
