@@ -245,9 +245,9 @@ func NewServerWithOptions(repo store.Repository, options ServerOptions) *Server 
 	}
 	if !options.EmailWorkerOnly {
 		server.startAttachmentUploadCleanup()
-		server.startAttachmentDeletionCleanup()
 		server.startNotificationCleanup()
 	}
+	server.startAttachmentDeletionCleanup()
 	server.startRealtimeSpine()
 	return server
 }

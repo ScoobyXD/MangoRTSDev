@@ -121,6 +121,7 @@ func (s *Server) handleRecycleBinPermanentDelete(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_recycle_bin_items")
 		return
 	}
+	s.wakeAttachmentDeletionCleanup()
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 

@@ -200,6 +200,15 @@ func (s *Server) processCommunicationsEmailIngestionProviderWork(ctx context.Con
 		if thread, err = s.repo.UpsertCommunicationsEmailThreadContext(ctx, communicationsEmailThreadInputFromStoredThread(thread, snapshot, false)); err != nil {
 			return err
 		}
+		// Retire redundant imported links after this message commits, even if
+		// fetching a later message fails before the thread finishes.
+		attachmentsChanged, err := s.repo.ConvergeCommunicationsEmailThreadAttachmentLinksContext(ctx, thread.CompanyID, thread.EmailThreadID)
+		if err != nil {
+			return err
+		}
+		if attachmentsChanged {
+			s.wakeAttachmentDeletionCleanup()
+		}
 	}
 
 	if len(thread.Messages) == 0 {
@@ -385,9 +394,6 @@ func (s *Server) storeImportedEmailMessageAttachments(ctx context.Context, conne
 		digest := sha256.Sum256(body)
 		digestHex := fmt.Sprintf("%x", digest[:])
 		storageKey := attachmentOriginalObjectKey(thread.CompanyID, mangoAttachmentID)
-		if err := s.attachmentStorage.PutObject(ctx, AttachmentPutObjectInput{Key: storageKey, ContentType: mimeType, ContentLength: int64(len(body)), SHA256: digestHex, Body: bytes.NewReader(body)}); err != nil {
-			return NylasMessage{}, errCommunicationsEmailAttachmentUnavailable
-		}
 		relationship := store.AttachmentRelationshipEmailAttachment
 		if attachment.IsInline || strings.TrimSpace(attachment.ContentID) != "" {
 			relationship = store.AttachmentRelationshipEmailInline
@@ -400,6 +406,14 @@ func (s *Server) storeImportedEmailMessageAttachments(ctx context.Context, conne
 			StorageBucket: s.attachmentStorage.Bucket(), StorageKey: storageKey, SourceKind: store.AttachmentSourceEmailIncoming,
 			SourceProvider: strings.TrimSpace(connection.Provider), CreatedTimestamp: now,
 			ResourceLink: store.ResourceAttachmentInput{CompanyID: thread.CompanyID, ResourceType: "email_message", ResourceID: emailMessageID, RelationshipKind: relationship, CreatedByUserID: actorUserID, CreatedTimestamp: now},
+			// Imported IDs reuse their original key. Store bytes only while the
+			// repository holds the same attachment lock used by deletion cleanup.
+			StoreObject: func(storageCtx context.Context) error {
+				if err := s.attachmentStorage.PutObject(storageCtx, AttachmentPutObjectInput{Key: storageKey, ContentType: mimeType, ContentLength: int64(len(body)), SHA256: digestHex, Body: bytes.NewReader(body)}); err != nil {
+					return errCommunicationsEmailAttachmentUnavailable
+				}
+				return nil
+			},
 		})
 		if createErr != nil && !errors.Is(createErr, store.ErrAlreadyExists) {
 			return NylasMessage{}, createErr

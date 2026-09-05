@@ -28,16 +28,33 @@ import (
 )
 
 func main() {
-	runtimeRole := strings.ToLower(strings.TrimSpace(getenvDefault("MANGORTS_RUNTIME_ROLE", "api")))
-	if runtimeRole != "api" && runtimeRole != "email-worker" {
-		log.Fatal("MANGORTS_RUNTIME_ROLE must be api or email-worker")
+	runtimeRole, err := normalizeRuntimeRole(getenvDefault("MANGORTS_RUNTIME_ROLE", "api"))
+	if err != nil {
+		log.Fatal(err)
 	}
-	if runtimeRole == "email-worker" && strings.TrimSpace(os.Getenv("DB_HOST")) == "" {
-		log.Fatal("DB_HOST is required for the email worker")
+	if runtimeRole != "api" && strings.TrimSpace(os.Getenv("DB_HOST")) == "" {
+		log.Fatalf("DB_HOST is required for the %s role", runtimeRole)
+	}
+	if runtimeRole == "attachment-maintenance" {
+		// Bound startup too: shared repository initialization predates context-aware queries.
+		deadline := time.AfterFunc(16*time.Minute, func() {
+			log.Fatal("attachment maintenance exceeded its process deadline")
+		})
+		defer deadline.Stop()
 	}
 	repo, cleanup, err := buildRepository()
 	if err != nil {
 		log.Fatal(err)
+	}
+	if runtimeRole == "attachment-maintenance" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		err := runAttachmentMaintenance(ctx, repo, httpapi.NewS3AttachmentStorageFromEnv())
+		stop()
+		cleanup()
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
 	}
 	defer cleanup()
 	var assistantConfig httpapi.AssistantConfig

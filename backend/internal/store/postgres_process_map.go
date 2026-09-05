@@ -1498,13 +1498,10 @@ func (r *PostgresRepo) DeleteProcessMapPlacement(ctx context.Context, input Proc
 			return ProcessMapMutationEnvelope{}, err
 		}
 		processVersion, _, err := r.CurrentProcessMapVersions(ctx, companyID)
-		if err != nil {
-			return ProcessMapMutationEnvelope{}, err
-		}
 		return ProcessMapMutationEnvelope{
 			Placements: []domain.ProcessMapPlacement{}, Traces: []domain.ProcessMapTrace{}, DeletedTraceIDs: []string{},
 			ProcessMapReadVersion: processVersion, Changed: true, Events: deleted.Events,
-		}, nil
+		}, err
 	}
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

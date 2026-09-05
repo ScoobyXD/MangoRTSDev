@@ -257,6 +257,7 @@ func (s *Server) handleCommunicationsTriageRevert(w http.ResponseWriter, r *http
 		writeError(w, http.StatusInternalServerError, "failed_to_revert_triage_node")
 		return
 	}
+	s.wakeAttachmentDeletionCleanup()
 	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }
@@ -318,6 +319,7 @@ func (s *Server) handleCommunicationsEmailNodeTransfer(w http.ResponseWriter, r 
 		writeError(w, http.StatusInternalServerError, "failed_to_transfer_email_node")
 		return
 	}
+	s.wakeAttachmentDeletionCleanup()
 	s.publishCommittedWorkspaceEvents(result.Events)
 	writeJSON(w, http.StatusOK, result)
 }

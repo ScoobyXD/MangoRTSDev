@@ -262,6 +262,7 @@ func (s *Server) deleteCommunicationsSharedInbox(w http.ResponseWriter, r *http.
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_shared_inbox")
 		return
 	}
+	s.wakeAttachmentDeletionCleanup()
 	resourceType := store.CommunicationsSharedInboxResourceType(item)
 	s.publishWorkspaceEvent(companyID, "company_explorer_folder_deleted", map[string]any{"folder_id": folderID, "shared_inbox_id": item.SharedInboxID, "folder_kind": "communications", "resource_type": resourceType})
 	status := "deleted"

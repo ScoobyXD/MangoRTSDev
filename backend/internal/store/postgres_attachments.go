@@ -74,11 +74,37 @@ func (r *PostgresRepo) CreateAttachmentWithResourceLinkContext(ctx context.Conte
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
 	defer tx.Rollback()
+	if err := attachmentcleanup.LockAttachmentStorageTx(ctx, tx, attachment.CompanyID, attachment.AttachmentID); err != nil {
+		return domain.Attachment{}, domain.ResourceAttachment{}, err
+	}
 	if link.ResourceType == "email_draft" {
 		link.ResourceRevision, err = advanceSharedEmailDraftAttachmentRevisionTx(
 			ctx, tx, link.CompanyID, link.ResourceID, link.CreatedByUserID, input.ResourceLink.ExpectedRevision,
 		)
 		if err != nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, err
+		}
+	}
+	if input.StoreObject != nil {
+		existing, err := scanAttachment(tx.QueryRowContext(ctx, `select `+attachmentSelectColumns+`
+from attachments a where a.company_id=$1::uuid and a.attachment_id=$2::uuid for update`, attachment.CompanyID, attachment.AttachmentID))
+		if err == nil {
+			if existing.DeletedTimestamp != nil {
+				return domain.Attachment{}, domain.ResourceAttachment{}, ErrNotFound
+			}
+			storedLink, err := insertOrReviveResourceAttachmentTx(ctx, tx, link)
+			if err != nil {
+				return domain.Attachment{}, domain.ResourceAttachment{}, err
+			}
+			if err := tx.Commit(); err != nil {
+				return domain.Attachment{}, domain.ResourceAttachment{}, err
+			}
+			return existing, storedLink, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return domain.Attachment{}, domain.ResourceAttachment{}, err
+		}
+		if err := input.StoreObject(ctx); err != nil {
 			return domain.Attachment{}, domain.ResourceAttachment{}, err
 		}
 	}

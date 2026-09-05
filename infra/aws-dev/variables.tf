@@ -511,3 +511,8 @@ variable "extra_tags" {
   type        = map(string)
   default     = {}
 }
+variable "attachment_maintenance_alarm_action_arns" {
+  description = "Existing notification targets for daily attachment recovery failures; empty means visible CloudWatch alarms only."
+  type        = list(string)
+  default     = []
+}

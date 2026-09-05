@@ -14,6 +14,8 @@ func (r *MemoryRepo) CreateAttachmentWithResourceLink(input AttachmentCreateInpu
 }
 
 func (r *MemoryRepo) CreateAttachmentWithResourceLinkContext(ctx context.Context, input AttachmentCreateInput) (domain.Attachment, domain.ResourceAttachment, error) {
+	r.attachmentStorageMu.Lock()
+	defer r.attachmentStorageMu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
@@ -27,12 +29,32 @@ func (r *MemoryRepo) CreateAttachmentWithResourceLinkContext(ctx context.Context
 	if _, ok := r.companies[attachment.CompanyID]; !ok {
 		return domain.Attachment{}, domain.ResourceAttachment{}, ErrNotFound
 	}
-	if _, ok := r.attachments[attachmentKey(attachment.CompanyID, attachment.AttachmentID)]; ok {
-		return domain.Attachment{}, domain.ResourceAttachment{}, ErrAlreadyExists
+	if existing, ok := r.attachments[attachmentKey(attachment.CompanyID, attachment.AttachmentID)]; ok {
+		if input.StoreObject == nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, ErrAlreadyExists
+		}
+		if existing.DeletedTimestamp != nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, ErrNotFound
+		}
+		storedLink, err := r.upsertResourceAttachmentLocked(link)
+		return cloneAttachment(existing), cloneResourceAttachment(storedLink), err
 	}
 	for _, existing := range r.attachments {
 		if existing.StorageBucket == attachment.StorageBucket && existing.StorageKey == attachment.StorageKey {
 			return domain.Attachment{}, domain.ResourceAttachment{}, ErrAlreadyExists
+		}
+	}
+	if input.StoreObject != nil {
+		// Storage callbacks do not run under the general repository mutex.
+		// The storage mutex still excludes same-ID creation and cleanup.
+		r.mu.Unlock()
+		err := input.StoreObject(ctx)
+		r.mu.Lock()
+		if err != nil {
+			return domain.Attachment{}, domain.ResourceAttachment{}, err
+		}
+		if _, ok := r.companies[attachment.CompanyID]; !ok {
+			return domain.Attachment{}, domain.ResourceAttachment{}, ErrNotFound
 		}
 	}
 	if link.ResourceType == "email_draft" {
@@ -52,6 +74,15 @@ func (r *MemoryRepo) CreateAttachmentWithResourceLinkContext(ctx context.Context
 		return domain.Attachment{}, domain.ResourceAttachment{}, err
 	}
 	return cloneAttachment(attachment), cloneResourceAttachment(storedLink), nil
+}
+
+func (r *MemoryRepo) WithItemLock(ctx context.Context, item attachmentcleanup.WorkItem, run func(attachmentcleanup.Repository) attachmentcleanup.ItemResult) attachmentcleanup.ItemResult {
+	r.attachmentStorageMu.Lock()
+	defer r.attachmentStorageMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return attachmentcleanup.ItemResult{Kind: item.Kind, CompanyID: item.CompanyID, AttachmentID: item.AttachmentID, FailureStage: "lock_attachment_storage", Err: err}
+	}
+	return run(r)
 }
 
 func (r *MemoryRepo) GetAttachment(companyID, attachmentID string) (domain.Attachment, error) {
@@ -743,7 +774,7 @@ func cloneAttachmentIntPointer(value *int) *int {
 	return &copied
 }
 
-func (r *MemoryRepo) ListWork(ctx context.Context, companyID string, limit int) ([]attachmentcleanup.WorkItem, error) {
+func (r *MemoryRepo) ListWork(ctx context.Context, companyID, afterAttachmentID string, limit int) ([]attachmentcleanup.WorkItem, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -751,10 +782,10 @@ func (r *MemoryRepo) ListWork(ctx context.Context, companyID string, limit int) 
 	defer r.mu.RUnlock()
 	items := make([]attachmentcleanup.WorkItem, 0)
 	for _, attachment := range r.attachments {
-		if attachment.CompanyID != strings.TrimSpace(companyID) || attachment.DeletedTimestamp == nil {
+		if attachment.CompanyID != strings.TrimSpace(companyID) || attachment.DeletedTimestamp == nil || attachment.AttachmentID <= afterAttachmentID {
 			continue
 		}
-		if r.attachmentRestorableFromSharedDraftRecycleLocked(attachment.CompanyID, attachment.AttachmentID) {
+		if r.attachmentRestorableFromRecycleLocked(attachment.CompanyID, attachment.AttachmentID) {
 			continue
 		}
 		item := attachmentcleanup.WorkItem{
@@ -773,6 +804,25 @@ func (r *MemoryRepo) ListWork(ctx context.Context, companyID string, limit int) 
 		items = items[:limit]
 	}
 	return items, nil
+}
+
+func (r *MemoryRepo) LoadObjects(ctx context.Context, item attachmentcleanup.WorkItem) ([]attachmentcleanup.ObjectRef, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	attachment, ok := r.attachments[attachmentKey(item.CompanyID, item.AttachmentID)]
+	if !ok {
+		return nil, nil
+	}
+	objects := []attachmentcleanup.ObjectRef{{Bucket: attachment.StorageBucket, Key: attachment.StorageKey}}
+	for _, preview := range r.attachmentVariants {
+		if preview.AttachmentID == attachment.AttachmentID {
+			objects = append(objects, attachmentcleanup.ObjectRef{Bucket: preview.StorageBucket, Key: preview.StorageKey})
+		}
+	}
+	return objects, nil
 }
 
 func WorkKindOrphanAttachment() attachmentcleanup.WorkKind {
@@ -794,7 +844,7 @@ func (r *MemoryRepo) Eligible(ctx context.Context, item attachmentcleanup.WorkIt
 			return false, nil
 		}
 	}
-	if r.attachmentRestorableFromSharedDraftRecycleLocked(item.CompanyID, item.AttachmentID) {
+	if r.attachmentRestorableFromRecycleLocked(item.CompanyID, item.AttachmentID) {
 		return false, nil
 	}
 	return true, nil
@@ -807,14 +857,16 @@ func (r *MemoryRepo) SharedWithRetained(ctx context.Context, _ attachmentcleanup
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, attachment := range r.attachments {
-		if attachment.DeletedTimestamp == nil && attachment.StorageBucket == object.Bucket && attachment.StorageKey == object.Key {
+		if attachment.StorageBucket == object.Bucket && attachment.StorageKey == object.Key &&
+			(attachment.DeletedTimestamp == nil || r.attachmentRestorableFromRecycleLocked(attachment.CompanyID, attachment.AttachmentID)) {
 			return true, nil
 		}
 	}
 	for _, preview := range r.attachmentVariants {
 		attachmentFound := false
 		for _, attachment := range r.attachments {
-			if attachment.AttachmentID == preview.AttachmentID && attachment.DeletedTimestamp == nil {
+			if attachment.AttachmentID == preview.AttachmentID &&
+				(attachment.DeletedTimestamp == nil || r.attachmentRestorableFromRecycleLocked(attachment.CompanyID, attachment.AttachmentID)) {
 				attachmentFound = true
 				break
 			}
@@ -852,7 +904,7 @@ func (r *MemoryRepo) Finalize(ctx context.Context, item attachmentcleanup.WorkIt
 			return attachmentcleanup.ErrStillOwned
 		}
 	}
-	if r.attachmentRestorableFromSharedDraftRecycleLocked(item.CompanyID, item.AttachmentID) {
+	if r.attachmentRestorableFromRecycleLocked(item.CompanyID, item.AttachmentID) {
 		return attachmentcleanup.ErrStillOwned
 	}
 	delete(r.attachments, key)
@@ -869,25 +921,21 @@ func (r *MemoryRepo) Finalize(ctx context.Context, item attachmentcleanup.WorkIt
 	return nil
 }
 
-func (r *MemoryRepo) attachmentRestorableFromSharedDraftRecycleLocked(companyID, attachmentID string) bool {
+func (r *MemoryRepo) attachmentRestorableFromRecycleLocked(companyID, attachmentID string) bool {
 	for _, record := range r.recycleBin {
 		if record.Item.CompanyID != companyID {
 			continue
 		}
-		owners := map[string]bool{}
-		for _, target := range record.Targets {
-			if target.Kind == EntityTypeNode || target.Kind == EntityTypeProject {
-				owners[target.Kind+":"+target.ID] = true
+		snapshot := record.Snapshot
+		if record.UseDelta {
+			snapshot = record.Delta
+			if _, ok := snapshot.attachments[attachmentKey(companyID, attachmentID)]; ok {
+				return true
 			}
 		}
-		draftIDs := map[string]bool{}
-		for _, draft := range record.Snapshot.emailDrafts {
-			if draft.CompanyID == companyID && draft.DeletedTimestamp == nil && owners[draft.SharedResourceType+":"+draft.SharedResourceID] {
-				draftIDs[draft.DraftID] = true
-			}
-		}
-		for _, link := range record.Snapshot.resourceAttachments {
-			if link.CompanyID == companyID && link.DeletedTimestamp == nil && link.ResourceType == "email_draft" && draftIDs[link.ResourceID] && link.AttachmentID == attachmentID {
+		for _, link := range snapshot.resourceAttachments {
+			if link.CompanyID == companyID && link.DeletedTimestamp == nil && link.AttachmentID == attachmentID &&
+				(record.UseDelta || (link.ResourceType == record.Item.ObjectKind && link.ResourceID == record.Item.ObjectID)) {
 				return true
 			}
 		}

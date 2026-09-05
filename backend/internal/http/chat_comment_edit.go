@@ -201,6 +201,7 @@ func (s *Server) handleNodeChatCommentEdit(w http.ResponseWriter, r *http.Reques
 		writeChatCommentEditError(w, err, "failed_to_edit_chat_comment")
 		return
 	}
+	s.wakeAttachmentDeletionCleanup()
 
 	s.recordMentionNotifications(r, req.CompanyID, "node", nodeID, informationID, existing.Type, updatedInformation)
 	s.publishWorkspaceEvent(req.CompanyID, "node_chat_comment_updated", map[string]any{"node_id": nodeID, "information_id": informationID})
@@ -249,6 +250,7 @@ func (s *Server) handleProjectChatCommentEdit(w http.ResponseWriter, r *http.Req
 		writeChatCommentEditError(w, err, "failed_to_edit_chat_comment")
 		return
 	}
+	s.wakeAttachmentDeletionCleanup()
 	s.publishWorkspaceEvent(req.CompanyID, "project_chat_comment_updated", map[string]any{"project_id": projectID, "information_id": informationID})
 	writeJSON(w, http.StatusOK, item)
 }

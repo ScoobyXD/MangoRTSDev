@@ -471,6 +471,7 @@ func (s *Server) handleCommunicationsEmailDraftDelete(w http.ResponseWriter, r *
 		writeError(w, http.StatusInternalServerError, "failed_to_delete_email_draft")
 		return
 	}
+	s.wakeAttachmentDeletionCleanup()
 	writeJSON(w, http.StatusOK, map[string]any{"status": "deleted"})
 }
 

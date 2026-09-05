@@ -328,6 +328,9 @@ type AttachmentCreateInput struct {
 	SourceProvider           string
 	ResourceLink             ResourceAttachmentInput
 	CreatedTimestamp         time.Time
+	// StoreObject writes imported bytes only while their exact attachment
+	// identity is locked against cleanup. A live existing row skips this write.
+	StoreObject func(context.Context) error
 }
 
 type AttachmentUploadIntentCreateInput struct {
@@ -2226,6 +2229,9 @@ type EditorSaveVersionRestoreInput struct {
 	SaveID           string
 	ActorUserID      string
 	ActorDisplayName string
+	// AfterDeleteCommit runs after each independently committed textbox removal,
+	// even when a later step of restoring the saved version fails.
+	AfterDeleteCommit func()
 }
 
 type NodeProjectionDeleteInput struct {

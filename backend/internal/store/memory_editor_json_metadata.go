@@ -201,6 +201,9 @@ func (r *MemoryRepo) deleteEditorProjectionLocked(ref EditorDocumentRef) {
 				}
 			}
 			if remove {
+				if isTextboxChatType(projection.Type) {
+					r.retireMemoryAttachmentOwnerLocked(ref.CompanyID, "node_chat_message", projectionID, time.Now().UTC())
+				}
 				delete(r.nodeText[bucketKey], projectionID)
 				removedProjectionIDs[projectionID] = true
 			}

@@ -46,9 +46,9 @@ func TestPostgresAttachmentReadsUseOneContentQueryAndBatchedMetadataVariants(t *
 }
 
 func TestPendingAttachmentDeletionCompanyQueryOrdersBySelectedExpression(t *testing.T) {
-	source, err := os.ReadFile("postgres_attachment_cleanup.go")
+	source, err := os.ReadFile("../attachmentcleanup/postgres.go")
 	if err != nil {
-		t.Fatalf("read postgres_attachment_cleanup.go: %v", err)
+		t.Fatalf("read shared postgres cleanup implementation: %v", err)
 	}
 	text := string(source)
 	if !strings.Contains(text, "select distinct attachment.company_id::text") {

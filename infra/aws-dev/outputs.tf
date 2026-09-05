@@ -127,3 +127,6 @@ output "github_deploy_role_arn" {
   description = "IAM role ARN for GitHub Actions OIDC dev deploys."
   value       = module.platform.github_deploy_role_arn
 }
+output "attachment_maintenance" {
+  value = module.platform.attachment_maintenance
+}

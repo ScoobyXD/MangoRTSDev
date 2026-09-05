@@ -305,6 +305,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusInternalServerError, "failed_to_delete_node")
 				return
 			}
+			s.wakeAttachmentDeletionCleanup()
 			stop = timings.observeAccounted("events.publish.enqueue")
 			s.publishCommittedWorkspaceEvents(result.Events)
 			stop()
@@ -592,11 +593,12 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 		}
 		actorUserID, actorLabel := nodeChangeActorPayload(r)
 		version, err := s.repo.RestoreNodeEditorSaveVersion(store.EditorSaveVersionRestoreInput{
-			CompanyID:        req.CompanyID,
-			ResourceID:       nodeID,
-			SaveID:           saveID,
-			ActorUserID:      actorUserID,
-			ActorDisplayName: actorLabel,
+			CompanyID:         req.CompanyID,
+			ResourceID:        nodeID,
+			SaveID:            saveID,
+			ActorUserID:       actorUserID,
+			ActorDisplayName:  actorLabel,
+			AfterDeleteCommit: s.wakeAttachmentDeletionCleanup,
 		})
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "save_version_not_found")
@@ -692,6 +694,7 @@ func (s *Server) handleNodeSubresource(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed_to_delete_node_projection")
 			return
 		}
+		s.wakeAttachmentDeletionCleanup()
 		s.publishWorkspaceEvent(companyID, "node_projection_deleted", map[string]any{"node_id": nodeID, "information_id": informationID})
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 		return

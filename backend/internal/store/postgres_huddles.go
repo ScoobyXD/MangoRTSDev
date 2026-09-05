@@ -94,11 +94,13 @@ func (r *PostgresRepo) ConvertLogicGateToHuddle(companyID, logicGateID, actorID 
 	if err = postgresDeleteProcessMapResourceTx(ctx, tx, companyID, domain.ProcessMapResourceTypeProcess, logicGateID); err != nil {
 		return domain.HuddleLogicGate{}, err
 	}
+	if err = retireAttachmentOwnerRelationshipsTx(ctx, tx, companyID, EntityTypeLogicGate, logicGateID); err != nil {
+		return domain.HuddleLogicGate{}, err
+	}
 	for _, query := range []string{
 		`delete from project_relationship_projection where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from project_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from email_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
-		`delete from attachment_relationships where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2`,
 		`delete from pins where company_id=$1::uuid and resource_type='logic_gate' and resource_id=$2::uuid`,
 		`delete from logic_gates where company_id=$1::uuid and logic_gate_id=$2::uuid`,
 	} {

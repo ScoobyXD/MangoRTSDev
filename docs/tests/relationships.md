@@ -285,6 +285,8 @@ Reads, events, projections, recycle/restore, and permanent deletion use the same
 ↓
 Removing one relationship removes only that edge unless the owning subsystem has a separate, explicit deletion rule; deleting a resource removes its policies without treating cascading assignment removal as a surviving-resource detach
 ↓
+Attachment owner retirement and permanent recycle purge wake the committing process's cleanup consumer; startup and finite daily recovery drain the same durable pending markers without idle polling, while live owners and recycle snapshots retain their files
+↓
 Deleting a personal pin folder removes only its descendant folder and pin records, never the pinned resources
 
 Last updated: 2026-08-14
@@ -463,6 +465,8 @@ Cleanup MUST include `resource_type`; deleting rows by UUID alone is forbidden. 
 ### Law 17 — Every deletion path follows the same cleanup law
 
 Single deletion, batch deletion, company deletion, retention cleanup, and any background permanent-deletion worker MUST apply the same relationship cleanup rules. Adding a new deletion entry point without its relationship cleanup and regression tests is forbidden.
+
+Attachment owner retirement and removal of recycle protection MUST wake cleanup after their successful commit in every producing process. Cleanup MUST preserve durable pending markers and keys through failures, drain known backlog without starving later attachments, and stop querying when settled. Startup and a finite daily recovery task MUST recover missed wakes; [attachment-deletion.md](attachment-deletion.md) defines this retryable storage boundary.
 
 Normal foreign-key cascades MAY perform cleanup for fixed typed columns. Generic typed references MAY use explicit transactional deletes or validated database triggers. The result, not one particular mechanism, is mandatory.
 

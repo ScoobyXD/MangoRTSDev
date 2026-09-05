@@ -59,6 +59,7 @@ module "platform" {
   realtime_valkey_max_ecpu_per_second       = var.realtime_valkey_max_ecpu_per_second
   realtime_valkey_alarm_action_arns         = var.realtime_valkey_alarm_action_arns
   attachment_s3_bucket                      = local.attachment_bucket_name
+  attachment_maintenance_alarm_action_arns  = var.attachment_maintenance_alarm_action_arns
   attachment_direct_upload_enabled          = var.attachment_direct_upload_enabled
   attachment_max_browser_upload_bytes       = var.attachment_max_browser_upload_bytes
   attachment_upload_intent_ttl_seconds      = var.attachment_upload_intent_ttl_seconds

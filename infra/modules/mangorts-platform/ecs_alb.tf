@@ -247,6 +247,11 @@ resource "aws_ecs_service" "backend" {
 
   depends_on = [
     aws_lb_listener_rule.cloudfront_to_backend,
+    aws_cloudwatch_event_target.attachment_maintenance,
+    aws_cloudwatch_event_target.attachment_maintenance_failures,
+    aws_cloudwatch_metric_alarm.attachment_maintenance_delivery_failed,
+    aws_cloudwatch_metric_alarm.attachment_maintenance_failed,
+    aws_cloudwatch_metric_alarm.attachment_maintenance_overdue,
     aws_iam_role_policy_attachment.ecs_task_email_sqs,
     aws_iam_role_policy_attachment.ecs_task_realtime_valkey,
   ]
