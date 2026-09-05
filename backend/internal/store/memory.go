@@ -72,6 +72,7 @@ type MemoryRepo struct {
 	users                            map[string]domain.User
 	companies                        map[string]domain.Company
 	memberships                      map[string]domain.CompanyMembership
+	aiRuns                           map[string]AIRun
 	userGroups                       map[string]domain.CompanyUserGroup
 	userGroupMembers                 map[string]domain.CompanyUserGroupMember
 	savedViews                       map[string]domain.SavedView
@@ -126,6 +127,7 @@ type MemoryRepo struct {
 
 func NewMemoryRepo() *MemoryRepo {
 	return &MemoryRepo{
+		aiRuns:                           map[string]AIRun{},
 		nodes:                            map[string]domain.Node{},
 		nodeInfo:                         map[string][]domain.NodeInformation{},
 		nodeText:                         map[string]map[string]domain.NodeProjection{},

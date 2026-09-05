@@ -111,6 +111,7 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 	if !ok {
 		return assistantActionError{errors.New("Sign in before using Mango chat.")}
 	}
+	defer func() { s.finishAssistantCapture(r, request, emit, runErr) }()
 	role, err := s.currentActorRoleForCompanyContext(ctx, actor, actor.CompanyID)
 	if err != nil || role == "" {
 		return assistantActionError{errors.New("Your company access could not be verified.")}
@@ -136,28 +137,6 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 		}
 		return emit(event)
 	}
-	defer func() {
-		status, message := "completed", "Foreground interaction completed."
-		if runErr != nil {
-			status, message = "failed", "Chat stopped. Check saved work before repeating an action."
-			var actionError assistantActionError
-			if errors.As(runErr, &actionError) {
-				message = actionError.Error()
-			}
-		}
-		if ctx.Err() != nil {
-			status, message = "stopped", "Cancellation or deadline stopped further work. An entered action may have committed."
-		}
-		_ = record("termination", status, map[string]any{"message": message})
-		a.finishAssistantResult(key)
-		a.mu.Lock()
-		capture.finished = true
-		close(capture.done)
-		if !capture.inspect {
-			delete(a.captures, key)
-		}
-		a.mu.Unlock()
-	}()
 	inputContext := map[string]any{"identity": assistantUserContext(actor, role)}
 	var process *assistantProcessExecution
 	if request.ProcessID != "" {
