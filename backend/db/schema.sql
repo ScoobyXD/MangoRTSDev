@@ -9460,15 +9460,15 @@ FOR EACH ROW EXECUTE FUNCTION public.trg_process_step_map_prune_route();
 CREATE TABLE public.ai_runs (
     company_id uuid NOT NULL,
     user_id uuid NOT NULL,
-    "AI_runs_id" uuid NOT NULL,
+    ai_runs_id uuid NOT NULL,
+    inspection_json jsonb NOT NULL,
     start_time timestamp with time zone NOT NULL,
     finish_time timestamp with time zone NOT NULL,
-    inspection_json jsonb NOT NULL,
-    CONSTRAINT "AI_runs_pkey" PRIMARY KEY (company_id, user_id, "AI_runs_id"),
-    CONSTRAINT "AI_runs_company_fkey" FOREIGN KEY (company_id)
+    CONSTRAINT ai_runs_pkey PRIMARY KEY (company_id, user_id, ai_runs_id),
+    CONSTRAINT ai_runs_company_fkey FOREIGN KEY (company_id)
       REFERENCES public.companies(company_id) ON DELETE CASCADE,
-    CONSTRAINT "AI_runs_user_fkey" FOREIGN KEY (user_id)
+    CONSTRAINT ai_runs_user_fkey FOREIGN KEY (user_id)
       REFERENCES public.users(user_id) ON DELETE CASCADE,
-    CONSTRAINT "AI_runs_time_chk" CHECK (finish_time >= start_time),
-    CONSTRAINT "AI_runs_inspection_chk" CHECK (jsonb_typeof(inspection_json) = 'array')
+    CONSTRAINT ai_runs_time_chk CHECK (finish_time >= start_time),
+    CONSTRAINT ai_runs_inspection_chk CHECK (jsonb_typeof(inspection_json) = 'array')
 );

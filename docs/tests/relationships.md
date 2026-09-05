@@ -1,6 +1,6 @@
 # Current AI Inspection Ownership Business Logic Laws
 
-1. `public.ai_runs` records the exact authenticated company and user accepted by the existing Send authorization rules and uses that owner's existing request UUID as `"AI_runs_id"`.
+1. `public.ai_runs` records the exact authenticated company and user accepted by the existing Send authorization rules and uses that owner's existing request UUID as `ai_runs_id`.
 2. One company, user, and request UUID has at most one immutable inspection archive; repeated saves never overwrite it.
 3. Membership changes preserve historical archives and allow an already admitted Send to save its final inspection; existing global administrator access requires no new company membership.
 4. Permanently deleting the exact company or user cascades its dependent archives and preserves unrelated owners' archives.

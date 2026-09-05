@@ -75,7 +75,7 @@
 73. Inspection records the HTTP status of every provider response, including rejected requests, without exposing private error bodies.
 74. General AI rules live in AGENTS.md; the Process skill adds only Process-specific execution guidance, and tool/skill catalogs come from their registered definitions.
 75. Every admitted Send attempts one complete inspection save when foreground work ends, including completion, failure, and Stop, whether Inspect is enabled or disabled.
-76. `ai_runs` has exactly `company_id`, `user_id`, `AI_runs_id`, `start_time`, `finish_time`, and `inspection_json`; its IDs are the authenticated company/user and existing Send request ID, and its times record actual admission and completion before the archive write.
+76. New `ai_runs` tables define exactly `company_id`, `user_id`, `ai_runs_id`, `inspection_json`, `start_time`, and `finish_time` in that order; the IDs are the authenticated company/user and existing Send request ID, and the times record actual admission and completion before the archive write.
 77. `inspection_json` stores the existing sanitized ordered event array, including the terminal outcome and each event's original sequence, time, kind, status, and captured data, without reconstruction or replacement timestamps.
 78. One company/user/request may have only one immutable archive; persistence never inserts per event, updates a growing body, retries, or restarts model or business work.
 79. Stop cannot cancel the final synchronous archive attempt, which has a five-second limit; archive failure logs no inspection body or raw error and must not change a business action's outcome.

@@ -1,4 +1,5 @@
--- Human-run forward migration; plain PostgreSQL SQL suitable for DBeaver.
+-- Single AI inspection creation migration; plain PostgreSQL SQL for DBeaver.
+-- Existing installations: run scripts/reset_ai_run_inspections.sql first.
 BEGIN;
 SELECT current_setting('server_version') AS connected_postgresql_version;
 DO $$
@@ -12,19 +13,29 @@ $$;
 SET LOCAL lock_timeout = '10s';
 SET LOCAL statement_timeout = '5min';
 
-CREATE TABLE public."AI_runs" (
+CREATE TABLE public.ai_runs (
     company_id uuid NOT NULL,
     user_id uuid NOT NULL,
-    "AI_runs_id" uuid NOT NULL,
+    ai_runs_id uuid NOT NULL,
+    inspection_json jsonb NOT NULL,
     start_time timestamp with time zone NOT NULL,
     finish_time timestamp with time zone NOT NULL,
-    inspection_json jsonb NOT NULL,
-    CONSTRAINT "AI_runs_pkey" PRIMARY KEY (company_id, user_id, "AI_runs_id"),
-    CONSTRAINT "AI_runs_company_fkey" FOREIGN KEY (company_id)
+    CONSTRAINT ai_runs_pkey PRIMARY KEY (company_id, user_id, ai_runs_id),
+    CONSTRAINT ai_runs_company_fkey FOREIGN KEY (company_id)
       REFERENCES public.companies(company_id) ON DELETE CASCADE,
-    CONSTRAINT "AI_runs_user_fkey" FOREIGN KEY (user_id)
+    CONSTRAINT ai_runs_user_fkey FOREIGN KEY (user_id)
       REFERENCES public.users(user_id) ON DELETE CASCADE,
-    CONSTRAINT "AI_runs_time_chk" CHECK (finish_time >= start_time),
-    CONSTRAINT "AI_runs_inspection_chk" CHECK (jsonb_typeof(inspection_json) = 'array')
+    CONSTRAINT ai_runs_time_chk CHECK (finish_time >= start_time),
+    CONSTRAINT ai_runs_inspection_chk CHECK (jsonb_typeof(inspection_json) = 'array')
 );
+
+-- Keep direct DBeaver execution recorded for the normal deployment runner.
+DO $$
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    INSERT INTO public.schema_migrations(version) VALUES ('20260905_ai_runs.sql')
+    ON CONFLICT (version) DO NOTHING;
+  END IF;
+END;
+$$;
 COMMIT;

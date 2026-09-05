@@ -33,15 +33,6 @@ user_id uuid references public.users on delete cascade,primary key(company_id,us
 			if _, err := db.Exec(string(sqlText)); err != nil {
 				t.Fatal(err)
 			}
-			if source == "migration" {
-				renameSQL, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260905_z_lowercase_ai_runs.sql"))
-				if err != nil {
-					t.Fatal(err)
-				}
-				if _, err := db.Exec(string(renameSQL)); err != nil {
-					t.Fatal(err)
-				}
-			}
 			companyID := "10000000-0000-4000-8000-000000000001"
 			otherCompanyID := "10000000-0000-4000-8000-000000000002"
 			userID := "20000000-0000-4000-8000-000000000001"
@@ -75,7 +66,7 @@ insert into public.company_memberships(company_id,user_id,role) values($1,$3,'co
 				t.Fatal(err)
 			}
 			rows.Close()
-			wantColumns := map[string]bool{"company_id": true, "user_id": true, "AI_runs_id": true, "start_time": true, "finish_time": true, "inspection_json": true}
+			wantColumns := map[string]bool{"company_id": true, "user_id": true, "ai_runs_id": true, "inspection_json": true, "start_time": true, "finish_time": true}
 			if !reflect.DeepEqual(columns, wantColumns) {
 				t.Fatalf("archive columns = %v", columns)
 			}
@@ -93,7 +84,7 @@ insert into public.company_memberships(company_id,user_id,role) values($1,$3,'co
 			}
 			var matches bool
 			if err := db.QueryRow(`select count(*)=1 and bool_and(start_time=$4 and finish_time=$5 and inspection_json=$6::jsonb)
-from public.ai_runs where company_id=$1 and user_id=$2 and "AI_runs_id"=$3`,
+from public.ai_runs where company_id=$1 and user_id=$2 and ai_runs_id=$3`,
 				run.CompanyID, run.UserID, run.AIRunsID, run.StartTime, run.FinishTime, string(run.InspectionJSON)).Scan(&matches); err != nil || !matches {
 				t.Fatalf("duplicate changed timestamped inspection: %t, %v", matches, err)
 			}
