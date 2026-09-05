@@ -326,7 +326,7 @@ func TestAssistantToolsAttachmentLifecycleVerifiesBytesAndPinsCompany(t *testing
 
 func TestAssistantToolsCatalogAndResponseBound(t *testing.T) {
 	tools := assistantTools()
-	if len(tools) != 26 {
+	if len(tools) != 28 {
 		t.Fatalf("tool count=%d", len(tools))
 	}
 	seen := map[string]bool{}
@@ -350,8 +350,8 @@ func TestAssistantToolsCatalogWireShape(t *testing.T) {
 		process *assistantProcessExecution
 		count   int
 	}{
-		{name: "ordinary", count: 27},
-		{name: "Process", process: &assistantProcessExecution{}, count: 3},
+		{name: "ordinary", count: 29},
+		{name: "Process", process: &assistantProcessExecution{}, count: 5},
 		{name: "blocked Process", process: &assistantProcessExecution{definition: assistantProcessDefinition{ExecutionBlockedReason: "SOP required"}}, count: 0},
 	} {
 		t.Run(scenario.name, func(t *testing.T) {

@@ -52,8 +52,11 @@
 50. Converting a chat draft preserves existing references outside the selection and retains the original text when its length exceeds the Action Item name limit.
 51. A Huddle Node's saved chat references and textbox references jointly determine its live Action Item relationships; an unsent chat reference does not enter the Huddle Board rollup.
 52. An owner or draft change during creation must not insert a reference into the changed chat; after successful creation any retry must reuse the existing Action Item.
+53. An AI Node chat creates one ordinary root chat in an exact existing Node textbox through the same canonical chat command as the Node UI.
+54. AI chat authorship comes from the authenticated user, and normal or urgent recipients use exact IDs from the company's canonical mentionable-user directory, including eligible global developer administrators, verified by the existing mention parser.
+55. A bound Process AI chat checks the tracked Node's exact Process, Step, status, and assignment version inside the chat transaction before saving.
 
-Last updated: 2026-09-02
+Last updated: 2026-09-05
 
 # General Process Story
 

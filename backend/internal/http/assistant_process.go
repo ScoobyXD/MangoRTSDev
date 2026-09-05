@@ -60,6 +60,8 @@ func assistantExpectedNodeWork(r *http.Request) *store.NodeWorkPrecondition {
 func assistantProcessTools() []assistantFunctionTool {
 	stepID := map[string]any{"type": "string", "format": "uuid"}
 	return []assistantFunctionTool{
+		assistantChatUsersTool(),
+		assistantNodeChatTool(true),
 		assistantFunction("create_process_node", "Create the one Node for this request in the selected Process and starting Step. Call once. Returns the saved Node identity and Step.", map[string]any{"name": map[string]any{"type": "string", "minLength": 1, "maxLength": 240}, "process_step_id": stepID}),
 		assistantFunction("write_process_node", "Add a new text box with the work for the current Step to this request's Node. Existing text is preserved. Returns the actual saved document.", map[string]any{"plain_text": map[string]any{"type": "string", "minLength": 1, "maxLength": 16000}}),
 		assistantFunction("move_process_node_to_step", "Move this request's Node to another supplied Step of the selected Process after doing the current work. Preserve Node status.", map[string]any{"process_step_id": stepID}),
@@ -158,6 +160,9 @@ func (s *Server) dispatchAssistantProcessTool(r *http.Request, execution *assist
 	if execution.nodeID != "" && (node == nil || node.ProcessStepID == nil || *node.ProcessStepID != execution.stepID || node.Status != execution.status) {
 		return "", errors.New("The Node was moved, changed, or is no longer accessible. Work stopped without moving it back.")
 	}
+	if name == "list_chat_users" {
+		return s.dispatchAssistantOperation(r, name, args)
+	}
 	stepID, _ := args["process_step_id"].(string)
 	if stepID != "" {
 		found := false
@@ -198,6 +203,10 @@ func (s *Server) dispatchAssistantProcessTool(r *http.Request, execution *assist
 			return "", &assistantSavedResultError{error: err, Result: json.RawMessage(result)}
 		}
 		return document, nil
+	}
+	if name == "send_process_node_chat" {
+		args["node_id"] = execution.nodeID
+		return s.dispatchAssistantOperation(r, "send_node_chat", args)
 	}
 	args["process_id"] = processID
 	if execution.nodeID != "" {

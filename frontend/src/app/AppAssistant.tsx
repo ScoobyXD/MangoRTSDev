@@ -68,8 +68,7 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const [selectedProcess, setSelectedProcess] = useState<AssistantProcess | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [canInspectContext, setCanInspectContext] = useState(false);
-  const [inspectContext, setInspectContext] = useState(false);
-  const [inspectedTurn, setInspectedTurn] = useState<number | null>(null);
+  const [inspectedTurn, setInspectedTurn] = useState<number | "latest" | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState(loadReasoningEffort);
@@ -80,11 +79,14 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const requestJSON = useMemo(() => createRequestJSON(apiBase), [apiBase]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const followReply = useRef(true);
+  const inspectionRef = useRef<HTMLDivElement>(null);
+  const followInspection = useRef(true);
   const focusToggleAfterChange = useRef(false);
   const expandButtonRef = useRef<HTMLButtonElement>(null);
   const collapseButtonRef = useRef<HTMLButtonElement>(null);
   const panelID = React.useId();
   const transcriptID = React.useId();
+  const inspection = inspectedTurn === "latest" ? turns[turns.length - 1] : inspectedTurn === null ? undefined : turns[inspectedTurn];
 
   useLayoutEffect(() => () => {
     activeRequest.current?.abort();
@@ -123,6 +125,12 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
     }
   }, [panelOpen, turns]);
 
+  useLayoutEffect(() => {
+    if (followInspection.current && inspectionRef.current) {
+      inspectionRef.current.scrollTop = inspectionRef.current.scrollHeight;
+    }
+  }, [inspection]);
+
   const history: AssistantMessage[] = turns.filter((turn) => turn.status === "complete" && turn.reply.trim()).flatMap((turn) => [
     { role: "user" as const, content: turn.question }, { role: "assistant" as const, content: turn.reply },
   ]);
@@ -131,7 +139,6 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
   const revokeInspection = () => {
     setCanInspectContext(false);
     setInspectedTurn(null);
-    setInspectContext(false);
     setTurns((current) => current.map((item) => ({ ...item, traces: [], inspecting: false })));
   };
 
@@ -176,9 +183,10 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
     }
   };
 
-  const openInspection = async (index: number) => {
+  const openInspection = async (selected: number | "latest") => {
+    const index = selected === "latest" ? turns.length - 1 : selected;
     const turn = turns[index];
-    if (!turn?.inspecting) return;
+    if (turn && !turn.inspecting) return;
     const controller = new AbortController();
     inspectionRequests.current.add(controller);
     try {
@@ -189,8 +197,9 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
         revokeInspection();
         return;
       }
-      setInspectedTurn(index);
-      if (!turn.captureFinished && (turn.status === "failed" || turn.status === "stopped")) await recoverTurn(index, turn.requestID, true);
+      followInspection.current = true;
+      setInspectedTurn(selected);
+      if (turn && !turn.captureFinished && (turn.status === "failed" || turn.status === "stopped")) await recoverTurn(index, turn.requestID, true);
     } catch {
       if (!controller.signal.aborted) setAvailabilityMessage("Inspection access could not be checked. Try Inspect again.");
     } finally {
@@ -206,10 +215,9 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
     const index = turns.length;
     const requestID = crypto.randomUUID();
     let process = selectedProcess ?? undefined;
-    const inspecting = canInspectContext && inspectContext;
+    const inspecting = canInspectContext;
     setTurns((current) => [...current, { requestID, question, reply: "", status: "running", notice: "Thinking…", process, inspecting, traces: [] }]);
     composerRef.current?.clearMessage();
-    setInspectContext(false);
     setRunning(true);
     followReply.current = true;
     const update = (changes: Partial<Turn>) => setTurns((current) => current.map((turn, turnIndex) => turnIndex === index ? { ...turn, ...changes } : turn));
@@ -282,14 +290,15 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
         onClick={() => setPanelVisibility(false)}
       ><AssistantToggleIcon direction="down" /></button>
       <div className="mango-assistant-panel" id={panelID}>
-        {turns.length > 0 && <section className="mango-assistant-transcript" id={transcriptID} aria-label="Chat transcript">
-        <header>
+        <header className="mango-assistant-header">
           <strong>Mango chat</strong>
-          <button type="button" disabled={running || turns.length === 0} onClick={() => {
+          {canInspectContext && <button type="button" aria-haspopup="dialog" onClick={() => { void openInspection("latest"); }}>Inspect</button>}
+          <button type="button" className="mango-assistant-clear" disabled={running || turns.length === 0} onClick={() => {
             for (const controller of inspectionRequests.current) controller.abort();
-            setTurns([]); composerRef.current?.clear(); setInspectContext(false); setInspectedTurn(null);
+            setTurns([]); composerRef.current?.clear(); setInspectedTurn(null);
           }}>Clear chat</button>
         </header>
+        {turns.length > 0 && <section className="mango-assistant-transcript" id={transcriptID} aria-label="Chat transcript">
         <div className="mango-assistant-messages mango-home-scroll" ref={transcriptRef} onScroll={(event) => {
           const element = event.currentTarget;
           followReply.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
@@ -328,21 +337,24 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
             ? <button type="button" className="mango-assistant-send" onClick={stop}>Stop</button>
             : <button type="submit" className="mango-assistant-send" disabled={!available || !draft.trim() || Boolean(historyError) || pickerOpen}>Send</button>}
         </form>
-        {canInspectContext && <label className="mango-assistant-inspect"><input type="checkbox" checked={inspectContext} disabled={running} onChange={(event) => setInspectContext(event.currentTarget.checked)} />Inspect next message</label>}
         {(availabilityMessage || historyError) && <p className="mango-assistant-availability" role="status">{availabilityMessage || historyError}</p>}
       </div>
     </div>
-    {canInspectContext && inspectedTurn !== null && turns[inspectedTurn] && <AppModalPortal onRequestClose={() => setInspectedTurn(null)}>
+    {canInspectContext && inspectedTurn !== null && <AppModalPortal onRequestClose={() => setInspectedTurn(null)}>
       <section role="dialog" aria-modal="true" aria-label="AI inspection" className="mango-assistant-context">
         <header><strong>AI inspection</strong><button type="button" onClick={() => setInspectedTurn(null)}>Close inspection</button></header>
-        <p>Complete captured context, skills, tool events, and final provider requests. Prepared, dispatched, saved, failed, and uncertain are separate outcomes.</p>
+        <p>Events appear live while Mango works: captured context, skills, tool events, and provider requests. Prepared, dispatched, saved, failed, and uncertain are separate outcomes.</p>
         <p>Security omissions: credentials, authentication headers, private provider internals, and hidden reasoning are excluded. Recorded omission markers identify unavailable or removed fields.</p>
         <p>Inspection stays in memory. Clear chat, reload, or an account/company change loses this browser history. Server recovery lasts up to 15 minutes, until your next Send in this company, or until backend restart. Earlier captured turns remain here until this chat is cleared.</p>
-        <div className="mango-assistant-context-calls">
-          {turns[inspectedTurn].interruption && <p role="status">Browser observation at {turns[inspectedTurn].interruption!.time}: {turns[inspectedTurn].interruption!.message}</p>}
-          {turns[inspectedTurn].inspectionNotice && <p role="status">{turns[inspectedTurn].inspectionNotice}</p>}
-          {turns[inspectedTurn].traces.length === 0 && <p>No server events received yet.</p>}
-          {turns[inspectedTurn].traces.map((trace) => <AssistantTraceDetails key={trace.sequence} trace={trace} />)}
+        <div className="mango-assistant-context-calls" ref={inspectionRef} onScroll={(event) => {
+          const element = event.currentTarget;
+          followInspection.current = element.scrollHeight - element.scrollTop - element.clientHeight < 40;
+        }}>
+          {inspection?.interruption && <p role="status">Browser observation at {inspection.interruption.time}: {inspection.interruption.message}</p>}
+          {inspection?.inspectionNotice && <p role="status">{inspection.inspectionNotice}</p>}
+          {!inspection && <p>No runs yet. Send a message, then open Inspect to watch its events live.</p>}
+          {inspection?.traces.length === 0 && <p>No server events received yet.</p>}
+          {inspection?.traces.map((trace) => <AssistantTraceDetails key={trace.sequence} trace={trace} />)}
         </div>
       </section>
     </AppModalPortal>}

@@ -362,7 +362,7 @@ func TestAssistantProcessExecutesSavedNodeWithAutomaticContext(t *testing.T) {
 					t.Errorf("automatic context omits %q", want)
 				}
 			}
-			wantTools := map[string][]string{"create_process_node": {"name", "process_step_id"}, "write_process_node": {"plain_text"}, "move_process_node_to_step": {"process_step_id"}}
+			wantTools := map[string][]string{"create_process_node": {"name", "process_step_id"}, "write_process_node": {"plain_text"}, "move_process_node_to_step": {"process_step_id"}, "list_chat_users": {"query"}, "send_process_node_chat": {"textbox_id", "message", "mentioned_user_ids", "urgent_user_ids"}}
 			tools, _ := body["tools"].([]any)
 			if len(tools) != len(wantTools)+1 {
 				t.Errorf("Process mode exposed %d tools", len(tools))

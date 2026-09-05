@@ -123,8 +123,8 @@
 .mango-assistant .mango-assistant-expand svg { width: 16px; height: 16px; }
 .mango-assistant .mango-assistant-send { min-height: 32px; background: #475569; color: #fff; }
 .mango-assistant-transcript { border-bottom: 1px solid rgba(148, 163, 184, 0.25); }
-.mango-assistant-transcript header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 9px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); font-size: 12px; }
-.mango-assistant-transcript header strong { flex: 1; }
+.mango-assistant-header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 9px 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.15); font-size: 12px; }
+.mango-assistant-header .mango-assistant-clear { margin-left: auto; }
 .mango-assistant-messages { max-height: min(42vh, 360px); overflow-y: auto; overscroll-behavior: contain; padding: 12px; }
 .mango-assistant-message { margin-bottom: 12px; padding: 10px; font-size: 13px; line-height: 1.5; }
 .mango-assistant-message:last-child { margin-bottom: 0; }
@@ -134,7 +134,6 @@
 .mango-assistant-hint { color: #64748b; font-size: 12px; }
 .mango-assistant-availability { padding: 0 12px 8px; max-height: 40px; overflow-y: auto; font-size: 11px; line-height: 16px; color: #64748b; }
 .mango-assistant .mango-assistant-resource { margin-top: 5px; max-width: 100%; overflow-wrap: anywhere; color: #0e7490; text-align: left; }
-.mango-assistant-inspect { display: flex; align-items: center; gap: 6px; padding: 0 11px 8px; font-size: 11px; color: #64748b; }
 .mango-assistant-context { position: fixed; inset: 10vh max(16px, calc((100vw - 820px) / 2)); display: flex; flex-direction: column; gap: 12px; padding: 18px; border: 1px solid #cbd5e1; border-radius: 12px; background: #fff; color: #111827; box-shadow: 0 18px 60px #0f172a40; font-size: 13px; }
 .mango-assistant-context header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .mango-assistant-context header button { padding: 5px 9px; border: 1px solid #cbd5e1; border-radius: 6px; background: #fff; cursor: pointer; }

@@ -29,8 +29,8 @@
 27. Selecting a Process with the universal `#` reference picker inserts the existing atomic inline label; its exact identity remains selected across Sends until removed, replaced, or the session is cleared.
 28. Every Send supplies the authenticated user's ID, name, email, company ID, and current company role once under identity; selected or discovered Process context contains only its definition, Steps/order/connections, and canonical SOP, without another copy of the user.
 29. Process context uses the existing canonical SOP document and never adds a separate Step instruction field or interprets map coordinates as execution order.
-30. Selecting a Process supplies discussion context and never means permission to execute; only an execution request may use its three actions to create one Node, add text, and move that Node between its Steps.
-31. Process tools never accept a model-selected company, actor, Process, Node, or textbox identity; Step arguments must identify actual Steps of the selected Process.
+30. Selecting a Process supplies discussion context and never means permission to execute; only an execution request may create one Node, add text, post required chats, and move that Node between its Steps.
+31. Process tools never accept a model-selected company, actor, Process, or Node identity; Step arguments must identify actual Steps of the selected Process, and chat textbox IDs must belong to the tracked Node.
 32. Creating the request's Node uses the existing atomic Process assignment command with its starting Step and In Progress status.
 33. Each Process text write creates a fresh canonical Node textbox and reads its saved document back; it never replaces existing content.
 34. Process Step movement uses the existing Node state command and preserves Node status.
@@ -38,14 +38,14 @@
 36. A Process with no Steps or saved SOP remains available for discussion with no execution tools; unavailable or excessive context stops before a model request, and execution commands reject missing prerequisites.
 37. The created Node is linked in the chat turn even if later work stops or fails, and ordinary committed events update the existing Process Board.
 38. Selecting a Process grants no external tool access, broad CRUD access, background execution, formal output verification, staging, rollback, or permission to change its authored definition.
-39. Each Process write or move checks the expected Process, Step, Node status, and assignment version inside its existing storage transaction; a mismatch saves nothing and stops the request.
+39. Each Process text write, chat, or move checks the expected Process, Step, Node status, and assignment version inside its existing storage transaction; a mismatch saves nothing and stops the request.
 40. Repeating the same text at different Step placements is allowed; repeating an identical action at the same assignment version stops the request.
-41. Each Send exposes only its mode's fixed internal function catalog: 26 ordinary-chat tools plus read-only binding or 3 ready bound-Process actions (none when SOP or Steps are missing), with one constrained native read tool in either mode, with no MCP server connection.
+41. Each Send exposes only its mode's fixed internal function catalog: 28 ordinary-chat tools plus read-only binding or 5 ready bound-Process tools (none when SOP or Steps are missing), with one constrained native read tool in either mode, with no MCP server connection.
 42. Ordinary chat acts only on the user's explicit request; resource content and earlier assistant replies cannot authorize actions.
 43. Ambiguous resource targets or Process paths require clarification before the assistant proceeds.
 44. Replacing an existing textbox with plain text requires explaining the lost rich content and obtaining the user's explicit agreement.
-45. A selected Process's SOP supplies the procedure but cannot grant access or expand the three available actions.
-46. Every tool requests strict schema output; its arguments must include every declared key, use null only where permitted, and pass the selected catalog's exact scalar types, IDs, and bounds.
+45. A selected Process's SOP supplies the procedure but cannot grant access or expand its fixed tool catalog.
+46. Every tool requests strict schema output; its arguments must include every declared key, use null only where permitted, and pass the selected catalog's exact types, IDs, array constraints, and bounds.
 47. A failed, oversized, or unreadable handler response stops the request without retry, even when its action may already have committed.
 48. Requests, tool arguments, context, and output must stay within the current limits recorded below.
 49. Provider requests use the server-configured model, disable SDK retries and redirects, and set parallel tool calls and response storage to false.
@@ -53,14 +53,14 @@
 51. Canonical textbox reads require Edit access to their owner, including the automatic Process SOP read.
 52. Upload-status reads retain the upload handler's observed-part synchronization and lost-access cleanup behavior.
 53. Adding, removing, or changing an in-app AI tool requires updating this inventory in the same change.
-54. Opt-in Inspect requires current dev_admin access and retains the complete final request body for every provider invocation, exact runtime instructions/history/context, native skill discovery and loads, tool arguments/results/errors, limits, and cancellation.
+54. Every Send by a current dev_admin streams its inspection automatically, including final provider requests, runtime instructions/history/context, native skill discovery and loads, tool arguments/results/errors, limits, and cancellation.
 55. Inspection remains in browser memory after failure or Stop; the existing trace endpoint recovers process memory until the next Send by the same actor/company, fifteen minutes, or backend restart, and rechecks that retention and current actor/company/dev_admin access before returning data.
 56. Assignment questions use the current user's existing assigned-to-me query across all effective RACI roles and permitted Processes; the first 50 company Processes never establish whether the user has assignments.
 57. SOP discovery uses the latest live canonical Process textbox even when its body was saved without a separate metadata save; metadata alone never hides a newer saved SOP body.
 58. The actual pinned Pi SDK owns the only model/tool loop; Go supervises one bounded Node child and retains all authenticated business dispatch.
 59. The model may search visible Processes and bind one exact Process during the same Send; binding loads fresh authorized context, changes the tool catalog, and never mutates or authorizes execution.
 60. After binding, no ordinary mutation tool can dispatch; one interaction binds at most one Process and creates at most one Process Node.
-61. Native Pi skills use only packaged AGENTS.md and the Process SKILL.md; the skill catalog and read tool use the exact ai-relative paths `AGENTS.md` and `skills/mango-process/SKILL.md`; home/project instructions, absolute read paths, arbitrary filesystem/shell tools, extensions, customer slash expansion, retries, and compaction remain disabled.
+61. Native Pi skills and the read tool use only the exact packaged ai-relative paths `AGENTS.md`, `skills/mango-process/SKILL.md`, and `skills/mango-node-chat/SKILL.md`; home/project instructions, absolute read paths, arbitrary filesystem/shell tools, extensions, customer slash expansion, retries, and compaction remain disabled.
 62. Required request capture must be retained before provider dispatch; capture failure or a size limit stops further work without silently truncating retained events.
 63. Inspection distinguishes preparation, dispatch, confirmed saved results, failures, denials, stops, and uncertain outcomes; provider-hidden instructions and private reasoning are unavailable.
 64. Credentials, authorization headers, secret URLs, opaque private continuation fields, and raw provider errors never enter inspection; security omissions are explicit and credentials/secret URLs are removed before model egress.
@@ -73,23 +73,30 @@
 71. Every actor may recover only their own saved Process/Node links through the current-company result endpoint; it rechecks current resource access and returns no prompts or traces.
 72. Stopped or failed turns can recover their saved links through the result endpoint when inspection is unavailable while retaining received traces; unfinished recovery offers a manual refresh without repeating the action or polling automatically.
 73. Inspection records the HTTP status of every provider response, including rejected requests, without exposing private error bodies.
-74. General AI rules live in AGENTS.md; the Process skill adds only Process-specific execution guidance, and tool/skill catalogs come from their registered definitions.
+74. General AI rules live in AGENTS.md; the Process and Node chat skills add only their specific execution guidance, and tool/skill catalogs come from their registered definitions.
 75. Every admitted Send attempts one complete inspection save when foreground work ends, including completion, failure, and Stop, whether Inspect is enabled or disabled.
 76. New `ai_runs` tables define exactly `company_id`, `user_id`, `ai_runs_id`, `inspection_json`, `start_time`, and `finish_time` in that order; the IDs are the authenticated company/user and existing Send request ID, and the times record actual admission and completion before the archive write.
 77. `inspection_json` stores the existing sanitized ordered event array, including the terminal outcome and each event's original sequence, time, kind, status, and captured data, without reconstruction or replacement timestamps.
 78. One company/user/request may have only one immutable archive; persistence never inserts per event, updates a growing body, retries, or restarts model or business work.
 79. Stop cannot cancel the final synchronous archive attempt, which has a five-second limit; archive failure logs no inspection body or raw error and must not change a business action's outcome.
 80. A backend crash before the final save may lose that inspection; archives have no automatic age-based deletion, background continuation, or authority over live resources and permissions.
+81. Expanded Mango chat always shows its header, with Inspect beside the title for authorized dev_admin users before, during, and after a Send.
+82. Header Inspect shows the latest turn's arriving events without polling, while prior turns retain their own Inspect action and recovery rules.
+83. AI Node chats use the existing exact Node/textbox chat command under the authenticated actor and preserve its ordinary permission, mention, notification, and event behavior.
+84. The assistant resolves requested recipients through Mango's current mentionable-user directory, including eligible global developer administrators, and asks when a name is ambiguous.
+85. Normal and urgent mentions use separate exact user-ID lists; unselected, duplicate, conflicting, or unresolved recipients stop the send before any chat is saved.
+86. A bound Process chat targets only its server-tracked Node and an existing textbox on that Node.
+87. A requested chat or mention must be sent through its chat tool and reported only after a saved result; a textbox note or written simulation does not count as sending.
 
 ## Process story
 
-A user sends a message from the existing composer. Mango supplies current identity and any picker-selected Process. Pi can also search and bind one exact saved Process in the same interaction. Discussion creates no Node; an explicit execution request uses the same guarded create, append-text, and move commands. Pi loads generic native guidance from approved ai files while the saved SOP remains the procedure. Inspect shows complete provider requests and actual harness/action outcomes. Stop prevents further work and preserves saved changes and the Node link. When foreground work ends, Mango saves the captured timestamped events and terminal outcome once in `ai_runs`; a failed archive write leaves business results unchanged, and a crash before the save can lose the inspection.
+A user sends a message from the existing composer. Mango supplies current identity and any picker-selected Process. Pi can also search and bind one exact saved Process in the same interaction. Discussion creates no Node; an explicit execution request uses the guarded create, append-text, chat, and move commands. Pi loads the Process and Node chat guidance as needed while the saved SOP remains the procedure. A requested chat resolves its exact Node, textbox, and recipients before using Mango's existing chat and mention actions. Header Inspect shows live provider requests and actual action outcomes to an authorized developer administrator. Stop preserves saved changes and the Node link. When foreground work ends, Mango saves the captured timestamped events and terminal outcome once in `ai_runs`; a failed archive write leaves business results unchanged, and a crash before the save can lose the inspection.
 
 ## Current AI and MCP inventory
 
 Checked against the Pi MVP implementation and pinned official Pi 0.85.0.
 
-Mango exposes 30 distinct internal business/context tools: 26 ordinary tools, read-only bind_process, and 3 bound-Process actions. Pi additionally exposes one constrained native read tool. Ordinary mode has 28 available tools; a ready bound Process has 4, and an incomplete Process has only native read. A successful binding replaces the catalog before the next invocation. Connected MCP servers: 0. MCP-protocol tools: 0. There is no MCP transport or public execution endpoint. Codex's own tools are separate.
+Mango exposes 33 distinct internal business/context tools: 28 ordinary tools, read-only bind_process, and 4 bound-Process actions, with list_chat_users shared between modes. Pi additionally exposes one constrained native read tool. Ordinary mode has 30 available tools; a ready bound Process has 6, and an incomplete Process has only native read. A successful binding replaces the catalog before the next invocation. Connected MCP servers: 0. MCP-protocol tools: 0. There is no MCP transport or public execution endpoint. Codex's own tools are separate.
 
 The tables group tools by what they do to saved data and show the actual HTTP method separately. `POST` also performs some updates and the Folder deletion command; `save_textbox` creates or updates through `POST`. A `GET` does not guarantee View-only access or zero incidental effects: see the textbox and upload-status rows.
 
@@ -97,11 +104,12 @@ The tables group tools by what they do to saved data and show the actual HTTP me
 
 In argument lists, `?` means the key is required but accepts null; it does not mean the key may be omitted. Resource IDs are canonical UUIDs. Textbox IDs are existing document IDs, 1–128 bytes, and cannot contain path separators, query/fragment/percent characters, or equal `.` or `..`. Ordinary names and other non-null short text are 1–500 bytes; nullable short text allows an empty string and at most 500 bytes. Revisions are nonnegative integers. The dispatcher validates types and bounds before the normal handler validates the operation.
 
-### Read — GET (10 tools)
+### Read — GET (11 tools)
 
 | Exact tool name | Mode | Model arguments | Mango handler route | Returned data / constraints |
 | --- | --- | --- | --- | --- |
 | `get_me` | Chat | None (`{}`) | `GET /v1/me` | Signed-in user and selected-company membership; does not supply deletion consent. |
+| `list_chat_users` | Both | `query?` | `GET /v1/companies/{company_id}/users?mentionable=true&q={query}` | Canonical mentionable user IDs, names, and emails, including eligible global developer administrators. Name/email filtering precedes the 50-result and response-size bounds; `has_more` requires narrowing the query. Ambiguous names require clarification. |
 | `list_processes` | Chat | `query?` | `GET /v1/logic-gates` | Visible Processes; sends `limit=50` and `q`; narrow the query for a larger set. |
 | `list_my_processes` | Chat | None (`{}`) | `GET /v1/logic-gates?assigned_to_me=true` | All permitted Processes assigned to the current user through effective R, A, C, or I roles, including direct, group, nested-group, and inherited assignments; no 50-Process scan limit. |
 | `get_process` | Chat | `process_id` | `GET /v1/logic-gates/{process_id}` | Process details and its textbox IDs. |
@@ -112,7 +120,7 @@ In argument lists, `?` means the key is required but accepts null; it does not m
 | `list_attachments` | Chat | `resource_type`, `resource_id` | `GET /v1/resources/{resource_type}/{resource_id}/attachments` | Existing stored attachments. Types: `node`, `logic_gate`, `company_explorer_folder`. |
 | `get_attachment_upload` | Chat | `upload_intent_id` | `GET /v1/attachments/upload-intents/{upload_intent_id}` | Upload status within the selected company and current owner Edit access. May persist observed multipart parts; lost-access cleanup can abort multipart upload, remove its temporary object, and mark the intent aborted. Does not upload bytes. |
 
-### Create — POST (7 tools)
+### Create — POST (9 tools)
 
 | Exact tool name | Mode | Model arguments | Mango handler route | Saved effect / constraints |
 | --- | --- | --- | --- | --- |
@@ -123,6 +131,8 @@ In argument lists, `?` means the key is required but accepts null; it does not m
 | `link_attachment` | Chat | `resource_type`, `resource_id`, `attachment_id` | `POST /v1/resources/{resource_type}/{resource_id}/attachments` | Adds the existing `file_attachment` relationship to a stored, readable attachment; does not create new file bytes. Attachment types match `list_attachments`. |
 | `create_process_node` | Process | `name`, `process_step_id` | `POST /v2/logic-gates/{selected_process_id}/nodes` | Creates this Send's one Node and its starting Step assignment atomically, with `In Progress` status. Name: 1–240 bytes. Step must belong to the selected Process; Process/Node IDs are server-owned. |
 | `write_process_node` | Process | `plain_text` | `POST /v1/editor-json/node/{tracked_node_id}/documents/{new_textbox_id}`, then GET of that document | Adds a fresh canonical textbox with 1–16,000 bytes of plain text and reads the saved document back. Uses a generated textbox ID, base revision 0, and the exact tracked Node precondition; never replaces an earlier textbox. |
+| `send_node_chat` | Chat | `node_id`, `textbox_id`, `message`, `mentioned_user_ids`, `urgent_user_ids` | `POST /v1/nodes/{node_id}/information` | Creates one root chat in the exact existing textbox after an authorized canonical read. Body is 1–16,000 bytes; each required ID array contains at most 20 distinct user UUIDs, with no overlap. Mango constructs and verifies actual mention tokens through the existing notification parser. |
+| `send_process_node_chat` | Process | `textbox_id`, `message`, `mentioned_user_ids`, `urgent_user_ids` | `POST /v1/nodes/{tracked_node_id}/information` | Same chat operation and mention rules, restricted to the server-tracked Node with its expected work state checked inside the chat transaction. |
 
 ### Create or update — POST (2 tools)
 
@@ -162,7 +172,7 @@ In argument lists, `?` means the key is required but accepts null; it does not m
 
 Every Send automatically supplies the authenticated user ID, display name, email, selected company ID, and current company role. A selected Process additionally supplies its current ID/name, Step names/IDs/order/connections, and canonical SOP JSON with textbox IDs and revisions. SOP discovery uses the latest live canonical textbox body, including saves without a separate metadata update. The SOP reads use the same canonical `get_textbox` handler with Edit access. Missing SOP or Steps supply an execution-blocked reason and no business actions while allowing discussion and native skill reads. Mango repeats definition/access checks before each action and reads new text back after writing. These are server-controlled reads, not additional model-callable Process tools. Layout coordinates and map revisions are excluded from execution context.
 
-A current dev_admin can enable inspection and open Inspect during or after the turn. Each full final provider body is captured after Pi transformations and checked against the serialized transport body. Go acknowledges retained capture before egress. Independent records contain native skill loads, tool validation/dispatch/results, errors, limits and cancellation. The same authenticated actor/company can recover the final capture and saved Node after Stop through GET /v1/assistant/trace. Credentials and private reasoning are explicitly omitted; no provider-hidden information is claimed.
+A current dev_admin has Inspect beside the Mango chat title, and every Send streams its events automatically. The header opens the latest run before, during, or after execution; earlier turns retain their Inspect buttons. Each full final provider body is captured after Pi transformations and checked against the serialized transport body. Go acknowledges retained capture before egress. Independent records contain native skill loads, tool validation/dispatch/results, errors, limits and cancellation. The same authenticated actor/company can recover the final capture and saved Node after Stop through GET /v1/assistant/trace. Credentials and private reasoning are explicitly omitted; no provider-hidden information is claimed.
 Ordinary chat has no Step creation/edit/delete, Step-edge editing, map-layout save, Process placement-in-Folder, or Step-specific Node move tool. Selected-Process mode cannot use ordinary chat's CRUD catalog. Neither catalog includes external MCP connections, web browsing, email sending, arbitrary HTTP, shell/code execution, database queries, attachment download/deletion or file-byte upload, background scheduling, Workflow execution, or general permission/RACI-management tools. An app API or a future design document alone does not make a capability available to AI.
 
 The rules for explicit intent, ambiguous paths, document trust, rich-text replacement agreement, and truthful completion are given to the model as instructions. Authentication, permissions, argument schemas, mode catalogs, budgets, delete-name checks, and Node/editor concurrency are also checked in code. Process moves enforce destination-Step ownership, not adjacency along a saved connection; interpreting the SOP and logical path remains the model's job. The instructions are not a separate approval engine or formal output verifier. `store: false` is the provider request setting; it does not establish a claim about the provider account's other retention policies.
@@ -185,7 +195,7 @@ The rules for explicit intent, ambiguous paths, document trust, rich-text replac
 | Result receipts | Saved Process/Node links only, same fifteen-minute/2,048-request bound; current actor/company/resource checks apply even with Inspect off. |
 | Duplicate actions | Duplicate function call IDs are rejected; identical writes are rejected within a Send, with Node/Step/assignment-version included in the selected-Process key. |
 | Chat state | In-memory browser conversation and Node links; only completed nonempty replies enter later history. No saved conversation/run table or automatic resume. |
-| Stream events | `text`, `tool` (`running`/`completed`), `node` (created Node/Process IDs), `process` (bound ID/name), opt-in `trace`, `done`, or sanitized `error`; serialized inspection payloads total at most 8 MiB per Send. |
+| Stream events | `text`, `tool` (`running`/`completed`), `node` (created Node/Process IDs), `process` (bound ID/name), automatic authorized `trace`, `done`, or sanitized `error`; serialized inspection payloads total at most 8 MiB per Send. |
 
 ## Scenarios
 
