@@ -109,11 +109,9 @@ async function harness(draft = false, canvas = false) {
     },
   };
   const onBusyChange = (busy: boolean) => busyStates.push(busy);
-  const onCreateFolder = () => { localCalls.push("folder"); };
-  const onCreateProcess = () => { localCalls.push("process"); };
   const renderActions = ({ createStep, disabled }: ProcessStepMapActions) => <div aria-label="Canvas actions"><button type="button" disabled={disabled} onClick={createStep}>Create Step</button></div>;
   const render = () => {
-    const props = { steps: [...state.steps], relationships: [...state.relationships], canEdit: state.canEdit, onChanged: render, onBusyChange, onCreateFolder, onCreateProcess, ...(canvas ? { presentation: "canvas" as const, hoverModeEnabled: state.hoverModeEnabled, renderActions } : {}) };
+    const props = { steps: [...state.steps], relationships: [...state.relationships], canEdit: state.canEdit, onChanged: render, onBusyChange, ...(canvas ? { presentation: "canvas" as const, hoverModeEnabled: state.hoverModeEnabled, renderActions } : {}) };
     root.render(draft
       ? <ProcessStepMapEditor key={state.processID} {...props} commands={commands} saveMode="draft" />
       : <ProcessStepMap apiBase="http://localhost" companyID="company" processID={state.processID} {...props} />);
@@ -146,11 +144,9 @@ async function harness(draft = false, canvas = false) {
 
 function cameraFixture(h: Awaited<ReturnType<typeof harness>>) {
   const viewport = h.container.querySelector<HTMLElement>(".process-step-map__viewport")!;
-  const extent = h.container.querySelector<HTMLElement>(".process-step-map__extent")!;
   const canvas = h.container.querySelector<HTMLElement>(".process-step-map__canvas")!;
   viewport.style.padding = "80px 24px 24px";
   Object.defineProperties(viewport, { clientWidth: { configurable: true, value: 800 }, clientHeight: { configurable: true, value: 600 } });
-  Object.defineProperties(extent, { offsetWidth: { configurable: true, value: 800 }, offsetHeight: { configurable: true, value: 500 } });
   viewport.getBoundingClientRect = () => ({ x: 20, y: 30, left: 20, top: 30, right: 820, bottom: 630, width: 800, height: 600, toJSON() {} });
   const read = () => {
     const transform = canvas.style.transform.match(/^translate\(([-\d.e+]+)px, ([-\d.e+]+)px\) scale\(([-\d.e+]+)\)$/);
@@ -168,7 +164,7 @@ function cameraFixture(h: Awaited<ReturnType<typeof harness>>) {
     const transform = read();
     return { x: transform.x + Number.parseFloat(step.style.left) * transform.zoom, y: transform.y + Number.parseFloat(step.style.top) * transform.zoom };
   };
-  return { viewport, extent, canvas, read, wheel, screenPosition };
+  return { viewport, canvas, read, wheel, screenPosition };
 }
 
 const near = (actual: number, expected: number, message?: string) => assert.ok(Math.abs(actual - expected) < 1e-7, message ?? `expected ${actual} to equal ${expected}`);
@@ -230,26 +226,6 @@ test("canvas wheel zoom keeps the pointer's world point fixed, normalizes wheel 
   } finally { await h.dispose(); }
 });
 
-test("canvas zoom buttons use the viewport center and Fit measures the unscaled extent", async () => {
-  const h = await harness(false, true);
-  try {
-    await h.mount();
-    const c = cameraFixture(h);
-    await h.click("Zoom in");
-    near(c.read().zoom, 1.25);
-    near(c.read().x, -94);
-    near(c.read().y, -62);
-    await h.click("Zoom out");
-    assert.deepEqual(c.read(), { x: 0, y: 0, zoom: 1 });
-    await c.wheel(-10000);
-    await h.click("Fit");
-    near(c.read().zoom, .94);
-    near(c.read().x, 0);
-    near(c.read().y, 13);
-    assert.deepEqual(h.requests.filter((request) => request.method !== "GET"), []);
-  } finally { await h.dispose(); }
-});
-
 test("Step and route gestures block camera changes until cancelled", async () => {
   const h = await harness(false, true);
   try {
@@ -258,24 +234,17 @@ test("Step and route gestures block camera changes until cancelled", async () =>
     const initial = c.read();
     const step = h.button("Move Receive");
     await h.pointer(step, "pointerdown", 100, 100);
-    assert.equal(h.button("Zoom in").disabled, true);
-    assert.equal(h.button("Zoom out").disabled, true);
-    assert.equal(h.button("Fit").disabled, true);
     await c.wheel(-200);
-    await h.click("Zoom in");
-    await h.click("Fit");
     assert.deepEqual(c.read(), initial);
     await h.pointer(step, "pointercancel", 100, 100);
-    assert.equal(h.button("Zoom in").disabled, false);
     const edge = h.container.querySelector('[aria-label="Connection from Receive to Check"]')!;
     await h.key(edge, "Enter");
     const waypoint = h.button("Move route point 1");
     await h.pointer(waypoint, "pointerdown", 368, 176);
     await c.wheel(-200);
-    assert.equal(h.button("Zoom in").disabled, true);
     assert.deepEqual(c.read(), initial);
     await h.pointer(waypoint, "pointercancel", 368, 176);
-    await h.click("Zoom in");
+    await c.wheel(-Math.log(1.25) / .002);
     near(c.read().zoom, 1.25);
     assert.equal(h.writes().length, 0);
   } finally { await h.dispose(); }
@@ -321,6 +290,9 @@ test("Board map keeps its existing scroll surface without canvas wheel zoom or b
     assert.equal(wheel.defaultPrevented, false);
     assert.equal(canvas.style.transform, original);
     assert.equal(viewport.classList.contains("is-panning"), false);
+    assert.ok(h.container.querySelector(".process-step-map__toolbar"));
+    assert.equal(h.button("Zoom in").disabled, false);
+    assert.ok(h.button("Fit"));
     assert.equal(h.writes().length, 0);
   } finally { await h.dispose(); }
 });
@@ -340,16 +312,17 @@ test("negative Step bounds cannot shift unrelated Steps on screen when zoomed an
   } finally { await h.dispose(); }
 });
 
-test("canvas action callback creates through the existing command and keeps actions available beside Step details", async () => {
+test("canvas creates and names Steps inline without inspectors or separate zoom controls", async () => {
   const h = await harness(false, true);
   try {
     await h.mount();
     assert.ok(h.container.querySelector(".process-step-map--canvas"));
     assert.equal(h.container.querySelector(".process-step-map__toolbar"), null);
+    assert.equal(h.container.querySelector(".process-step-map__zoom"), null);
     await h.click("Create Step");
     assert.equal(h.requests.filter((request) => request.method === "POST" && request.path.endsWith("/steps")).length, 1);
     assert.ok(h.container.querySelector('[data-step-map-id="new"].is-selected'));
-    assert.ok(h.container.querySelector('[aria-label="Selected Step"]'));
+    assert.equal(h.container.querySelector('[aria-label="Selected Step"]'), null);
     const step = h.container.querySelector<HTMLElement>('[data-step-map-id="new"]')!;
     assert.equal(step.style.width, "112px");
     assert.equal(step.style.height, "56px");
@@ -358,20 +331,34 @@ test("canvas action callback creates through the existing command and keeps acti
     assert.equal(h.dom.window.document.activeElement, input);
     assert.equal(input.selectionStart, 0);
     assert.equal(input.selectionEnd, input.value.length);
-    assert.equal(h.container.querySelector('[aria-label="Selected Step"] input[aria-label="Step name"]'), null);
     await h.key(input, "Escape");
     assert.equal(h.button("Create Step").disabled, false);
-    await h.click("Close Step details");
-    assert.equal(h.dom.window.document.activeElement, h.button("Move New step"));
+    await h.click("Move New step");
     assert.equal(h.container.querySelector('[aria-label="Selected Step"]'), null);
     const edge = h.container.querySelector('[aria-label="Connection from Receive to Check"]')!;
     await h.key(edge, "Enter");
-    await h.click("Close connection details");
-    assert.equal(h.dom.window.document.activeElement, edge);
     assert.equal(h.container.querySelector('[aria-label="Selected connection"]'), null);
     h.state.canEdit = false;
     await h.mount();
     assert.equal(h.button("Create Step").disabled, true);
+  } finally { await h.dispose(); }
+});
+
+test("focused canvas context menus create Steps without offering Folder or Process creation", async () => {
+  const h = await harness(true, true);
+  try {
+    await h.mount();
+    const viewport = h.container.querySelector(".process-step-map__viewport")!;
+    await h.pointer(viewport, "contextmenu", 400, 300);
+    const menu = h.dom.window.document.querySelector('[role="menu"][aria-label="Process map creation"]')!;
+    assert.ok(menu);
+    const items = [...menu.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    assert.deepEqual(items.map((item) => item.textContent), ["Create Step"]);
+    await act(async () => items[0].click());
+    await flush();
+    assert.ok(h.container.querySelector('[data-step-map-id="new"] input[aria-label="Step name"]'));
+    assert.deepEqual(h.localCalls, ["create"]);
+    assert.deepEqual(h.requests, []);
   } finally { await h.dispose(); }
 });
 
@@ -430,17 +417,16 @@ test("canvas body, title and keyboard naming share one inline editor and only co
 
     await h.doubleClick(h.button("Move Receive delivery"));
     await h.input("   ");
-    await act(async () => h.button("Zoom in").focus());
+    await act(async () => h.container.querySelector<HTMLElement>(".process-step-map__viewport")!.focus());
     await flush();
     assert.ok(h.button("Move Receive delivery"));
     assert.equal(h.container.querySelector('[aria-label="Step name"]'), null);
     assert.equal(renames().length, 1, "a blank blur must restore the previous name");
 
-    await h.click("Move Check");
-    await h.click("Rename Step");
+    await h.key(h.button("Move Check"), "F2");
     const blurred = await h.input("Inspect delivery");
     assert.ok(h.container.querySelector('[data-step-map-id="b"]')!.contains(blurred));
-    await act(async () => h.button("Zoom in").focus());
+    await act(async () => h.container.querySelector<HTMLElement>(".process-step-map__viewport")!.focus());
     await flush();
     assert.equal(renames().length, 2, "blur must issue one rename for the exact edited Step");
     assert.deepEqual(renames()[1], { path: "/v2/logic-gates/process/steps/b", method: "PATCH", body: { company_id: "company", name: "Inspect delivery" } });
@@ -453,8 +439,7 @@ test("canvas body dragging uses the current zoom and directional handles keep op
   const h = await harness(false, true);
   try {
     await h.mount();
-    await h.click("Zoom in");
-    await h.click("Zoom in");
+    await cameraFixture(h).wheel(-Math.log(1.5) / .002);
     const card = h.container.querySelector<HTMLElement>('[data-step-map-id="a"]')!;
     assert.deepEqual([...card.querySelectorAll<HTMLElement>("[data-resize-handle]")].map((handle) => handle.dataset.resizeHandle).sort(), ["e", "n", "ne", "nw", "s", "se", "sw", "w"]);
     const body = card.querySelector(".process-step-map__step-label")!;
@@ -821,7 +806,7 @@ test("draft busy state covers gestures and pending mutations, and failure restor
   assert.equal(h.busyStates.at(-1), false, "unmount releases the outer Save control");
 });
 
-test("saved and draft blank-canvas menus reuse creation actions without intercepting Steps", async () => {
+test("saved and draft Board map menus create Steps without intercepting cards", async () => {
   for (const draft of [false, true]) {
     const h = await harness(draft);
     try {
@@ -833,19 +818,15 @@ test("saved and draft blank-canvas menus reuse creation actions without intercep
       await open(h.button("Move Receive"));
       assert.equal(h.dom.window.document.querySelector('[aria-label="Process map creation"]'), null);
       await open(h.container.querySelector(".process-step-map__viewport")!);
-      await h.click("Create Folder");
-      await open(h.container.querySelector(".process-step-map__canvas")!);
-      await h.click("Create Process");
-      await open(h.container.querySelector(".process-step-map__canvas")!);
+      assert.deepEqual([...h.dom.window.document.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent), ["Create Step"]);
       await h.click("Create Step");
       assert.ok(h.container.querySelector('[data-step-map-id="new"]'));
-      assert.deepEqual(h.localCalls.filter((call) => call === "folder" || call === "process"), ["folder", "process"]);
       if (draft) assert.deepEqual(h.requests, []);
       h.state.canEdit = false;
       await h.mount();
       await open(h.container.querySelector(".process-step-map__canvas")!);
       assert.equal(h.button("Create Step").disabled, true);
-      await h.key(h.button("Create Folder"), "Escape");
+      await h.key(h.button("Create Step"), "Escape");
       assert.equal(h.dom.window.document.querySelector('[aria-label="Process map creation"]'), null);
     } finally { await h.dispose(); }
   }

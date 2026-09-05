@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useAppFloatingMenuDismissal } from "../../app/AppModalPortal.js";
+import { ExplorerRowIcon } from "../../icons/ExplorerIcons.js";
 import type { CompanyExplorerFolder } from "../../modules/folders/companyExplorerFolders.js";
 
 export function processMapFolderPath(folders: CompanyExplorerFolder[], folderID: string): CompanyExplorerFolder[] {
@@ -57,24 +58,25 @@ export function ProcessMapDestinationPath({ folders, folderID, onChange, allowRo
     setBrowsingFolderID(nextFolderID);
     setOpen(true);
   };
-  const breadcrumbButton = (label: string, nextFolderID: string) => <button
+  const breadcrumbButton = (label: string, nextFolderID: string, folder = false) => <button
     type="button"
+    className={folder ? "process-map-path__folder" : undefined}
     disabled={disabled}
     aria-haspopup="dialog"
     aria-expanded={open}
     aria-controls={open ? `${id}-browser` : undefined}
     onClick={() => browse(nextFolderID)}
-  >{label}</button>;
+  >{folder && <ExplorerRowIcon kind="folder" tone="orange" />}<span className={folder ? "process-map-path__folder-name" : undefined}>{label}</span></button>;
 
   return <div className="process-map-path" ref={containerRef}>
     <nav className="process-map-path__breadcrumb" aria-label="Destination path">
       {!selectedPath.length && (!allowRoot || folderID)
-        ? breadcrumbButton("Choose Folder", "")
+        ? breadcrumbButton("Choose Folder", "", true)
         : <>
           {breadcrumbButton("Workspace", "")}
           {selectedPath.map((folder) => <React.Fragment key={folder.folder_id}>
             <span aria-hidden="true">/</span>
-            {breadcrumbButton(folder.name, folder.folder_id)}
+            {breadcrumbButton(folder.name, folder.folder_id, true)}
           </React.Fragment>)}
         </>}
     </nav>
@@ -82,12 +84,12 @@ export function ProcessMapDestinationPath({ folders, folderID, onChange, allowRo
     {open && !disabled && <div ref={browserRef} id={`${id}-browser`} className="process-map-path__browser" role="dialog" aria-label="Choose destination Folder">
       <div className="process-map-path__browser-header">
         <button type="button" disabled={!browsingFolderID} onClick={() => setBrowsingFolderID(browsingFolder?.parent_folder_id ?? "")} aria-label="Up to parent Folder">Up</button>
-        <span>{browsingValid ? ["Workspace", ...browsingPath.map((folder) => folder.name)].join(" / ") : "Folder unavailable"}</span>
+        <span className="process-map-path__browser-location">{browsingValid ? <>Workspace{browsingPath.map((folder) => <React.Fragment key={folder.folder_id}> / <span className="process-map-path__folder-name">{folder.name}</span></React.Fragment>)}</> : "Folder unavailable"}</span>
         <button type="button" onClick={closeBrowser} aria-label="Close Folder browser">×</button>
       </div>
       <div className="process-map-path__children">
         {browsingValid && children.map((folder) => <button type="button" key={folder.folder_id} aria-label={`Open ${folder.name}`} onClick={() => setBrowsingFolderID(folder.folder_id)}>
-          <span aria-hidden="true">📁</span><span>{folder.name}</span><span aria-hidden="true">›</span>
+          <ExplorerRowIcon kind="folder" tone="orange" /><span className="process-map-path__folder-name">{folder.name}</span><span aria-hidden="true">›</span>
         </button>)}
         {browsingValid && children.length === 0 && <p>No Folders inside this location.</p>}
       </div>

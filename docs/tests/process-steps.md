@@ -59,7 +59,7 @@
 57. A rejected save retains the local draft and commits no partial Process, relationship, placement, or event.
 58. Repeated save attempts retain the same allocated UUIDs and cannot create duplicate Processes or overwrite an existing identity.
 59. Save and controls that leave the Process stay disabled during a layout gesture or pending mutation.
-60. Leaving an unsaved draft through its Company map or Create Process action requires explicit discard; successful Save stays in the full Process canvas.
+60. Leaving an unsaved draft through its Company map action requires explicit discard; successful Save stays in the full Process canvas.
 61. Sidebar navigation retains the current company's draft in memory; returning to Process Map restores that draft without a server write.
 62. An uncertain Save offers an explicit saved-version recovery that freshly authorizes the exact Process and its Explorer location before leaving the draft.
 63. Company browsing, Process drafts, and saved focused Processes use one edge-to-edge white map pane without a background grid, outer panels, or separate creation form.
@@ -69,7 +69,7 @@
 67. Folder selection and Folder creation appear on compact elevated surfaces inside the map.
 68. Save Process and its save status stay inside the common top-right card.
 69. Hover mode on the focused map previews the hovered Step's name and highlights its connections without changing selection or pending edits.
-70. Closing Step or connection details returns keyboard focus to that exact map item.
+70. Focused Process drafts and saved maps omit Step and connection inspectors.
 71. The focused Process outline uses unscaled work-area dimensions and pans and zooms with its Steps and routes.
 72. The Process outline expands to contain authored Step and route geometry without changing that geometry or Board layout.
 73. New Step-map boxes use dimensions of 112 by 56 canvas units.
@@ -84,14 +84,16 @@
 82. A blank inline title leaves the last committed Step name unchanged.
 83. Dragging blank space in the focused map pans its camera without moving authored geometry.
 84. Wheel zoom in the focused map keeps the world point beneath the pointer fixed within a 50% to 800% range.
-85. The focused map's zoom buttons zoom around the current view center.
-86. Fit centers the focused Process outline at the best fitting zoom within the 50% to 800% range.
-87. Read-only access allows focused-map camera navigation.
-88. A Step or route editing gesture holds the focused-map camera fixed until that gesture ends.
+85. Focused maps omit zoom buttons and Fit.
+86. Read-only access allows focused-map camera navigation.
+87. A Step or route editing gesture holds the focused-map camera fixed until that gesture ends.
+88. Create Folder and Create Process remain visible and disabled inside focused Process drafts and saved maps.
+89. Inline Step titles have no visible input border.
+90. The separate Board presentation retains its top toolbar, Step and connection inspectors, and zoom controls.
 
 ## Process Story
 
-A user chooses Create Process, chooses a Folder, and edits the filename in the inline path. Create Step adds a compact card with its title selected for typing. The user arranges Steps inside the outline, pans blank space, and zooms to inspect the work while the controls stay fixed. Save commits the complete draft to Company Explorer. Further Step edits save normally, and the Board uses those exact Steps as columns. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
+A user chooses Create Process, chooses a Folder, and edits the filename in the inline path. Create Step adds a compact card with its borderless title selected for typing; the other creation actions stay visible and disabled. The user arranges Steps inside the outline, pans blank space, and zooms with the wheel while the controls stay fixed. Save commits the draft to Company Explorer. The separate Board presentation retains its editing controls and uses those exact Steps as columns. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
 
 ## Main Scenarios
 

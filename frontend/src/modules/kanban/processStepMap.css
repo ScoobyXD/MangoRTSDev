@@ -55,7 +55,8 @@
 .process-step-map--canvas .process-step-map__canvas { background:none; }
 .process-step-map--canvas .process-step-map__step { cursor:grab; touch-action:none; }
 .process-step-map--canvas .process-step-map__step:active { cursor:grabbing; }
-.process-step-map__title-input { width:100%; min-width:0; box-sizing:border-box; padding:2px; border:0; border-radius:2px; background:#fff; color:inherit; text-align:center; font:inherit; font-size:13px; font-weight:750; cursor:text; touch-action:auto; }
+.process-step-map__title-input { width:100%; min-width:0; box-sizing:border-box; padding:2px; border:0; border-radius:0; background:transparent; box-shadow:none; color:inherit; caret-color:currentColor; text-align:center; font:inherit; font-size:13px; font-weight:750; cursor:text; touch-action:auto; }
+.process-step-map .process-step-map__title-input:focus { outline:none; box-shadow:none; }
 .process-step-map--canvas .process-step-map__resize { top:auto; right:auto; bottom:auto; left:auto; z-index:2; width:12px; height:12px; border:1px solid #328dbe; border-radius:2px; background:#fff; opacity:0; pointer-events:none; }
 .process-step-map--canvas .process-step-map__step:hover > .process-step-map__resize,
 .process-step-map--canvas .process-step-map__step.is-selected > .process-step-map__resize,
@@ -70,27 +71,12 @@
 .process-step-map--canvas .process-step-map__resize[data-resize-handle="w"] { top:calc(50% - 6px); left:-6px; cursor:ew-resize; }
 .process-step-map__process-outline { position:absolute; inset:0; box-sizing:border-box; border:2px solid #19f07aeb; border-radius:3px; pointer-events:none; }
 .process-step-map__process-outline > span { position:absolute; top:0; left:24px; transform:translateY(-50%); max-width:calc(100% - 48px); box-sizing:border-box; padding:0 10px; background:#fff; color:#1e293b; font-size:13px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.process-step-map--canvas .process-step-map__zoom,
-.process-step-map--canvas .process-step-map__status,
-.process-step-map--canvas .process-step-map__inspector { position:absolute; z-index:5; background:rgba(255,255,255,.86); box-shadow:0 6px 28px #26344914; backdrop-filter:blur(16px); border:1px solid rgba(223,228,236,.7); border-radius:14px; }
-.process-step-map--canvas .process-step-map__zoom { right:16px; bottom:16px; padding:5px; gap:3px; }
-.process-step-map--canvas .process-step-map__zoom button { min-width:30px; height:30px; padding:4px 8px; border:0; box-shadow:none; background:transparent; }
-.process-step-map--canvas .process-step-map__status { left:16px; bottom:16px; min-height:0; max-width:calc(100% - 225px); padding:9px 12px; box-sizing:border-box; font-size:11px; }
-.process-step-map--canvas .process-step-map__inspector { left:16px; bottom:70px; width:360px; max-width:calc(100% - 32px); max-height:calc(100% - 160px); box-sizing:border-box; overflow:auto; padding:14px; gap:12px; }
-.process-step-map--canvas .process-step-map__inspector-heading { display:flex; flex-basis:100%; align-items:center; justify-content:space-between; color:#44526a; font-size:12px; }
-.process-step-map--canvas .process-step-map__inspector .process-step-map__inspector-heading button { width:24px; height:24px; padding:0; border:0; box-shadow:none; background:none; font-size:19px; }
-.process-step-map--canvas .process-step-map__inspector form,
-.process-step-map--canvas .process-step-map__connect { width:100%; }
-.process-step-map--canvas .process-step-map__inspector label { flex:1; min-width:0; }
-.process-step-map--canvas .process-step-map__inspector input,
-.process-step-map--canvas .process-step-map__inspector select { width:100%; max-width:none; box-sizing:border-box; border:1px solid #dbe3ed; border-radius:7px; padding:7px 8px; background:#fff; color:#334155; font:inherit; }
+.process-step-map--canvas .process-step-map__status { position:absolute; z-index:5; background:rgba(255,255,255,.86); box-shadow:0 6px 28px #26344914; backdrop-filter:blur(16px); border:1px solid rgba(223,228,236,.7); border-radius:14px; left:16px; bottom:16px; min-height:0; max-width:calc(100% - 32px); padding:9px 12px; box-sizing:border-box; font-size:11px; }
 .process-step-map--canvas .process-step-map__error { position:absolute; z-index:6; top:80px; left:16px; max-width:calc(100% - 240px); box-shadow:0 6px 28px #26344914; }
 .process-step-map--canvas .process-step-map__step { background:#f7fbf9; box-shadow:0 5px 16px #26344914; }
 .process-step-map--canvas .process-step-map__empty { top:40px; }
 @media (max-width:700px) {
   .process-step-map--canvas .process-step-map__viewport { padding:100px 12px 12px; }
-  .process-step-map--canvas .process-step-map__zoom { right:12px; bottom:12px; }
-  .process-step-map--canvas .process-step-map__status { left:12px; bottom:60px; max-width:calc(100% - 24px); }
-  .process-step-map--canvas .process-step-map__inspector { left:12px; bottom:105px; max-width:calc(100% - 24px); max-height:calc(100% - 260px); }
+  .process-step-map--canvas .process-step-map__status { left:12px; bottom:12px; max-width:calc(100% - 24px); }
   .process-step-map--canvas .process-step-map__error { top:100px; left:12px; max-width:calc(100% - 190px); }
 }
