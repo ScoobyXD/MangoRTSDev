@@ -17,6 +17,7 @@ When you make changes, make sure to do the simplest solution for these things an
 You tend to create loops for no reason at all.
 You tend to create things that already exist in our codebase, and you make things way more complicated than necessary.
 While solving this problem, you break other things in our app.
+The frontend and backend apis are all splintered and not unified.
 So don't mess it up PLEASE
 
 # LAWS
