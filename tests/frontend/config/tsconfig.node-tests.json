@@ -192,6 +192,7 @@
     "../modules/kanban/shared.test.ts",
     "../modules/kanban/processWorkStore.test.ts",
     "../modules/kanban/processWork.test.ts",
+    "../modules/kanban/statusKanban.test.ts",
     "../modules/kanban/processStepMap.test.ts",
     "../modules/kanban/nodeEditorOverlayViewMode.test.ts",
     "../../../frontend/src/modules/editor/editorTabs.ts",
