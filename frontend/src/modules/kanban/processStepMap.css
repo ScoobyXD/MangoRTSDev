@@ -52,6 +52,8 @@
 .process-step-map--canvas { position:relative; min-height:0; gap:0; background:#fff; }
 .process-step-map--canvas .process-step-map__viewport { min-height:0; border:0; border-radius:0; padding:80px 24px; box-sizing:border-box; background:#fff; }
 .process-step-map--canvas .process-step-map__canvas { background:none; }
+.process-step-map__process-outline { position:absolute; inset:0; box-sizing:border-box; border:2px solid #19f07aeb; border-radius:3px; pointer-events:none; }
+.process-step-map__process-outline > span { position:absolute; top:0; left:24px; transform:translateY(-50%); max-width:calc(100% - 48px); box-sizing:border-box; padding:0 10px; background:#fff; color:#1e293b; font-size:13px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .process-step-map--canvas .process-step-map__zoom,
 .process-step-map--canvas .process-step-map__status,
 .process-step-map--canvas .process-step-map__inspector { position:absolute; z-index:5; background:rgba(255,255,255,.86); box-shadow:0 6px 28px #26344914; backdrop-filter:blur(16px); border:1px solid rgba(223,228,236,.7); border-radius:14px; }

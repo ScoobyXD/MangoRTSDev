@@ -149,12 +149,14 @@ test("Process Map authors a full draft locally and saves exact Step identities, 
     await h.start();
     assert.ok(h.container.querySelector('[aria-label="New Process map"].process-map-workspace'));
     assert.ok(h.container.querySelector('.process-map-company-canvas[aria-hidden="true"][inert]'));
+    assert.ok(h.container.querySelector('[aria-label="Process outline: Untitled Process"]'), "an empty draft must already have its Process boundary");
     assert.equal(h.cards().length, 0);
     assert.deepEqual(h.opened, []);
     assert.equal(h.mutations().length, 0);
     assert.equal(h.button("Save Process").disabled, true);
     await h.input('[placeholder="Untitled Process"]', "  Order fulfilment  ");
     assert.equal(h.button("Save Process").disabled, true, "a Process requires an existing Folder");
+    assert.ok(h.container.querySelector('[aria-label="Process outline: Order fulfilment"]'), "the outline must use the current draft name");
     await h.chooseFolder();
     assert.match(h.container.querySelector('[aria-label="Destination path"]')!.textContent!, /Workspace\/Operations\/Orders/);
     await h.click("+ Create Step");
@@ -207,6 +209,7 @@ test("Process Map authors a full draft locally and saves exact Step identities, 
     assert.equal(h.cards()[0].style.width, "240px");
     assert.equal(h.container.querySelector('[aria-label="New Process map"]'), null);
     assert.deepEqual(h.opened, [], "saving must keep the full canvas open");
+    assert.ok(h.container.querySelector('[aria-label="Process outline: Order fulfilment"]'), "saving must retain the named Process boundary");
     assert.equal(h.draftStates.at(-1), false);
     await h.click("Open Board / SOP");
     assert.deepEqual(h.opened, [{ id: definition.logic_gate_id, label: "Order fulfilment" }]);

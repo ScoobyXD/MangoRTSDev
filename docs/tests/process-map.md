@@ -211,11 +211,15 @@
 209. Save Process and its save status MUST appear in the common top-right card instead of a separate header or button row.
 210. The company map's blank-canvas context menu MUST offer Create Folder, Create Process, and Create Step.
 211. Hover mode MUST retain its checked state when entering or leaving a focused Process.
+212. Opening a new Process draft MUST animate entering its work area while the creation card and breadcrumb stay fixed.
+213. A focused Process MUST immediately show a labeled rectangular outline around its Step canvas, including when it has no Steps.
+214. The Process outline MUST follow the existing Step canvas bounds and zoom without creating or saving another resource or layout record.
+215. A reduced-motion preference MUST disable the Process entrance animation.
 Last updated: 2026-09-04
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` on one white map pane. The same top-right card stays available while browsing, creating a Process, and adding Steps. The user chooses a Folder and edits the draft filename in the inline path, arranges Steps, then saves through the card. The complete draft commits to Explorer and remains in the map pane; returning to the company overview restores its mounted camera. Existing geometry and permission rules remain unchanged.
+An authorized user opens `/process-map` on one white map pane. Create Process briefly zooms into a labeled Process outline while the top-right card stays fixed. The user chooses a Folder and edits the draft filename in the inline path, arranges Steps inside the outline, then saves through the card. The complete draft commits to Explorer and remains outlined in the map pane; returning to the company overview restores its mounted camera. Existing geometry and permission rules remain unchanged.
 
 ## Scenario: Fit nested Folders within the existing world
 
