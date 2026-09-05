@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { APIHTTPError, requestJSON } from "../../../../frontend/src/modules/api/requestJSON.js";
 import {
-  ASSISTANT_DEFAULT_REASONING_EFFORT, assistantErrorMessage, assistantHistoryError, consumeAssistantStream,
+  ASSISTANT_DEFAULT_REASONING_EFFORT, ASSISTANT_MAX_TRACE_BYTES, assistantErrorMessage, assistantHistoryError, consumeAssistantStream, getAssistantTrace, getAssistantResult,
   isAssistantReasoningEffort, streamAssistantChat, type AssistantEvent,
 } from "../../../../frontend/src/modules/assistant/assistantApi.js";
 
@@ -12,18 +12,56 @@ function streamResponse(chunks: Uint8Array[]): Response {
   });
 }
 
-test("context inspection requires opt-in and accepts bounded initial and continuation input", async () => {
-  const context = { type: "context", context: { step: 1, model: "test-model", instructions: "Mango rules", tools: [], input: [{ role: "developer", content: "a".repeat(520_000) }], omitted_reasoning_items: 0 } };
-  const continuation = { type: "context", context: { step: 2, input: [{ type: "function_call_output", output: "Saved" }], omitted_reasoning_items: 1 } };
-  const bytes = new TextEncoder().encode(`data: ${JSON.stringify(context)}\n\ndata: ${JSON.stringify(continuation)}\n\ndata: {"type":"done"}\n\n`);
+test("inspection requires opt-in and retains complete initial and final continuation requests beyond the old limit", async () => {
+  const first = { type: "trace", trace: { sequence: 1, kind: "provider_request", status: "prepared", time: "2026-09-05T00:00:00Z", data: { invocation: 1, body: { model: "test-model", instructions: "Pi-added instructions", input: [{ role: "developer", content: "a".repeat(3 * 1024 * 1024) }], tools: [], max_output_tokens: 4096, store: false, parallel_tool_calls: false } } } };
+  const continuation = { type: "trace", trace: { sequence: 2, kind: "provider_request", status: "dispatched", time: "2026-09-05T00:00:01Z", data: { invocation: 17, body: { model: "test-model", instructions: "Pi-added instructions", input: [{ role: "user", content: "Please act" }, { type: "function_call_output", output: "Saved" }] } } } };
+  const bytes = new TextEncoder().encode(`data: ${JSON.stringify(first)}\n\ndata: ${JSON.stringify(continuation)}\n\ndata: {"type":"done"}\n\n`);
   await assert.rejects(consumeAssistantStream(streamResponse([bytes]), () => undefined));
   const events: AssistantEvent[] = [];
   await consumeAssistantStream(streamResponse([bytes]), (event) => events.push(event), true);
-  assert.deepEqual(events, [context, continuation, { type: "done" }]);
-  for (const invalid of [{ ...context.context, step: 0 }, { ...context.context, input: null }, { ...context.context, omitted_reasoning_items: -1 }]) {
-    const malformed = new TextEncoder().encode(`data: ${JSON.stringify({ type: "context", context: invalid })}\n\n`);
+  assert.deepEqual(events, [first, continuation, { type: "done" }]);
+  for (const invalid of [{ ...first.trace, sequence: 0 }, { ...first.trace, sequence: 2 }, { ...first.trace, data: null }, { ...first.trace, data: [] }, { ...first.trace, status: "success" }, { ...first.trace, time: "invalid" }]) {
+    const malformed = new TextEncoder().encode(`data: ${JSON.stringify({ type: "trace", trace: invalid })}\n\n`);
     await assert.rejects(consumeAssistantStream(streamResponse([malformed]), () => undefined, true));
   }
+  await assert.rejects(consumeAssistantStream(streamResponse([new TextEncoder().encode('data: {"type":"context","context":{"step":1,"input":[],"omitted_reasoning_items":0}}\n\n')]), () => undefined, true), "obsolete delta events are not accepted");
+  await assert.rejects(consumeAssistantStream(streamResponse([new Uint8Array(ASSISTANT_MAX_TRACE_BYTES + 512_000 + 256 * 1024 + 1)]), () => undefined, true));
+});
+
+test("trace recovery uses the exact company/request and validates the complete event sequence", async () => {
+  const originalFetch = globalThis.fetch;
+  let snapshot: unknown = { events: [{ sequence: 1, kind: "tool", status: "saved", time: "2026-09-05T00:00:00Z", data: { result: "Saved before cancellation" } }], finished: true, process: { id: "process-a", name: "Saved Process" }, node_id: "node-a" };
+  globalThis.fetch = async (input) => {
+    assert.equal(String(input), "https://api.example.test/v1/assistant/trace?company_id=company-a&request_id=request-a");
+    return new Response(JSON.stringify(snapshot), { headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    assert.deepEqual(await getAssistantTrace("https://api.example.test", "company-a", "request-a", new AbortController().signal), snapshot);
+    snapshot = { events: [{ sequence: 2, kind: "termination", status: "stopped", time: "2026-09-05T00:00:00Z", data: {} }], finished: true };
+    await assert.rejects(getAssistantTrace("https://api.example.test", "company-a", "request-a", new AbortController().signal));
+    snapshot = { events: [], finished: true, node_id: "unbound-node" };
+    await assert.rejects(getAssistantTrace("https://api.example.test", "company-a", "request-a", new AbortController().signal));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("regular result recovery accepts only saved resource metadata and requires no Inspect opt-in", async () => {
+  const originalFetch = globalThis.fetch;
+  let snapshot: unknown = { finished: true, process: { id: "saved-process", name: "Actual Process name" }, node_id: "saved-node" };
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "https://api.example.test/v1/assistant/result?company_id=company-a&request_id=request-a");
+    assert.equal(init?.method ?? "GET", "GET");
+    assert.equal(init?.body, undefined);
+    return new Response(JSON.stringify(snapshot), { headers: { "Content-Type": "application/json" } });
+  };
+  try {
+    assert.deepEqual(await getAssistantResult("https://api.example.test", "company-a", "request-a", new AbortController().signal), snapshot);
+    snapshot = { finished: true, node_id: "saved-node-moved-by-human" };
+    assert.deepEqual(await getAssistantResult("https://api.example.test", "company-a", "request-a", new AbortController().signal), snapshot, "a saved accessible Node does not require access to its original Process");
+    for (const invalid of [{ finished: true, events: [] }, { finished: true, context: "private" }, { finished: "yes" }, { finished: true, node_id: " " }]) {
+      snapshot = invalid;
+      await assert.rejects(getAssistantResult("https://api.example.test", "company-a", "request-a", new AbortController().signal));
+    }
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("context inspection request sends only its opt-in, never a client-authored context", async () => {
@@ -35,7 +73,7 @@ test("context inspection request sends only its opt-in, never a client-authored 
     return streamResponse([new TextEncoder().encode('data: {"type":"done"}\n\n')]);
   };
   try {
-    await streamAssistantChat("https://api.example.test", "company-a", [{ role: "user", content: "Hello" }], "medium", new AbortController().signal, () => undefined, undefined, true);
+    await streamAssistantChat("https://api.example.test", "company-a", crypto.randomUUID(), [{ role: "user", content: "Hello" }], "medium", new AbortController().signal, () => undefined, undefined, true);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -67,6 +105,18 @@ test("assistant accepts the created Node event and rejects missing resource iden
   }
 });
 
+test("discovered Process bindings carry the saved identity and name before the Node event", async () => {
+  const process = { type: "process", process_id: "process-b", name: "Changed saved Process name" };
+  const node = { type: "node", node_id: "node-b", process_id: "process-b" };
+  const events: AssistantEvent[] = [];
+  const bytes = new TextEncoder().encode([process, node, { type: "done" }].map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+  await consumeAssistantStream(streamResponse([bytes]), (event) => events.push(event));
+  assert.deepEqual(events, [process, node, { type: "done" }]);
+  for (const invalid of [{ ...process, name: " " }, { ...process, process_id: undefined }]) {
+    await assert.rejects(consumeAssistantStream(streamResponse([new TextEncoder().encode(`data: ${JSON.stringify(invalid)}\n\n`)]), () => undefined));
+  }
+});
+
 test("Process chat sends the exact selected identity without injecting client-side instructions or credentials", async () => {
   const originalFetch = globalThis.fetch;
   const messages = [{ role: "user" as const, content: "Please perform #Order review" }];
@@ -78,7 +128,7 @@ test("Process chat sends the exact selected identity without injecting client-si
     return streamResponse([new TextEncoder().encode('data: {"type":"done"}\n\n')]);
   };
   try {
-    await streamAssistantChat("https://api.example.test", "company-a", messages, "medium", new AbortController().signal, () => undefined, "11111111-1111-4111-8111-111111111111");
+    await streamAssistantChat("https://api.example.test", "company-a", crypto.randomUUID(), messages, "medium", new AbortController().signal, () => undefined, "11111111-1111-4111-8111-111111111111");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -100,7 +150,7 @@ test("assistant sends a company-scoped request once and never repeats an uncerta
     throw new Error("connection lost after server accepted request");
   };
   try {
-    await assert.rejects(streamAssistantChat("https://api.example.test", "company-a", [{ role: "user", content: "Create a process" }], "xhigh", new AbortController().signal, () => undefined));
+    await assert.rejects(streamAssistantChat("https://api.example.test", "company-a", crypto.randomUUID(), [{ role: "user", content: "Create a process" }], "xhigh", new AbortController().signal, () => undefined));
     assert.equal(requests, 1);
   } finally {
     globalThis.fetch = originalFetch;

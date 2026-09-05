@@ -338,9 +338,8 @@ func (s *Server) dispatchAssistantOperation(r *http.Request, name string, args m
 	if result.overflow {
 		return "", errors.New("Mango returned more data than chat can read. The action may have completed; check Mango before trying again.")
 	}
-	if r.Context().Err() != nil {
-		return "", errors.New("The request stopped after an action began. Its changes may already be saved; check Mango before trying again.")
-	}
+	// Keep a confirmed response even when Stop arrived during the handler. The
+	// foreground dispatcher records it and checks cancellation before any next call.
 	output := result.body.Bytes()
 	if !json.Valid(output) {
 		return "", errors.New("Mango returned an unreadable result. The action may have completed; check Mango before trying again.")

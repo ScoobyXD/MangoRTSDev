@@ -33,6 +33,15 @@ jobs:
           terraform_version: 1.6.6
           terraform_wrapper: false
 
+      - name: Set up Node for Pi tests
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Pi runtime dependencies
+        working-directory: ai/runtime
+        run: npm ci --ignore-scripts
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -237,7 +246,7 @@ jobs:
           if aws ecr describe-images --repository-name "$REPOSITORY_NAME" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then
             echo "Backend image already exists: $IMAGE_URI"
           else
-            docker build -t "$IMAGE_URI" -f backend/Dockerfile backend
+            docker build -t "$IMAGE_URI" -f backend/Dockerfile .
             if docker push "$IMAGE_URI"; then
               echo "Pushed backend image: $IMAGE_URI"
             elif aws ecr describe-images --repository-name "$REPOSITORY_NAME" --image-ids imageTag="$IMAGE_TAG" >/dev/null 2>&1; then

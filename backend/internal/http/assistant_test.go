@@ -13,8 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/openai/openai-go/v3"
-	"github.com/openai/openai-go/v3/option"
 	"miraeopus/backend/internal/domain"
 	"miraeopus/backend/internal/store"
 )
@@ -32,7 +30,7 @@ func assistantTestServer(t *testing.T, provider http.HandlerFunc) (*Server, *sto
 		stub := httptest.NewServer(provider)
 		t.Cleanup(stub.Close)
 		server.assistant = newMangoAssistant(AssistantConfig{APIKey: "unit-test-key", Model: "test-model"})
-		server.assistant.client = openai.NewClient(option.WithAPIKey("unit-test-key"), option.WithBaseURL(stub.URL+"/"), option.WithMaxRetries(0), option.WithHTTPClient(stub.Client()))
+		server.assistant.baseURL = stub.URL + "/"
 	}
 	return server, repo
 }
@@ -61,6 +59,17 @@ func assistantProviderCall(id, name, args string) map[string]any {
 }
 
 func assistantProviderComplete(w http.ResponseWriter, output ...any) {
+	for index, raw := range output {
+		item, _ := raw.(map[string]any)
+		if item["type"] == "message" {
+			assistantProviderEvent(w, map[string]any{"type": "response.output_item.added", "output_index": index, "item": item})
+			for _, part := range item["content"].([]any) {
+				content := part.(map[string]any)
+				assistantProviderEvent(w, map[string]any{"type": "response.output_text.delta", "output_index": index, "delta": content["text"]})
+			}
+		}
+		assistantProviderEvent(w, map[string]any{"type": "response.output_item.done", "output_index": index, "item": raw})
+	}
 	assistantProviderEvent(w, map[string]any{"type": "response.completed", "response": map[string]any{"id": "resp_test", "status": "completed", "output": output}})
 }
 
@@ -76,7 +85,7 @@ func TestAssistantStreamsFunctionResultContinuationWithoutBrowser(t *testing.T) 
 		if r.URL.Path != "/responses" || body["model"] != "test-model" || body["stream"] != true || body["store"] != false || body["parallel_tool_calls"] != false || reasoning["effort"] != "max" {
 			t.Errorf("unexpected provider protocol: %s %+v", r.URL.Path, body)
 		}
-		if tools, ok := body["tools"].([]any); !ok || len(tools) != 26 {
+		if tools, ok := body["tools"].([]any); !ok || len(tools) != 28 {
 			t.Error("missing fixed tools")
 		}
 		if requests.Add(1) == 1 {
@@ -293,7 +302,8 @@ func TestAssistantFunctionAndOutputLimitsStopBeforeAnotherAction(t *testing.T) {
 			server, repo := assistantTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 				n := calls.Add(1)
 				if oversized {
-					assistantProviderEvent(w, map[string]any{"type": "response.output_text.delta", "delta": strings.Repeat("x", assistantMaxOutputBytes+1)})
+					assistantProviderEvent(w, map[string]any{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"type": "message", "id": "msg_large", "role": "assistant", "content": []any{}}})
+					assistantProviderEvent(w, map[string]any{"type": "response.output_text.delta", "output_index": 0, "delta": strings.Repeat("x", assistantMaxOutputBytes+1)})
 				}
 				if oversized || n > assistantMaxSteps {
 					assistantProviderComplete(w, assistantProviderCall("do_not_run", "create_process", `{"name":"Too late"}`))

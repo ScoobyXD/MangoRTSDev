@@ -249,9 +249,14 @@ func TestAssistantToolsNeverRepeatAnUncertainCommittedWrite(t *testing.T) {
 				request = request.WithContext(ctx)
 				repo.cancel = cancel
 			}
-			_, err := server.dispatchAssistantTool(request, "create_node", `{"name":"Only once"}`)
-			if err == nil || strings.Contains(err.Error(), "sensitive") || repo.calls != 1 {
+			result, err := server.dispatchAssistantTool(request, "create_node", `{"name":"Only once"}`)
+			if (cancelled && (err != nil || !strings.Contains(result, "Only once"))) || (!cancelled && (err == nil || strings.Contains(err.Error(), "sensitive"))) || repo.calls != 1 {
 				t.Fatalf("uncertain write calls=%d error=%v", repo.calls, err)
+			}
+			if cancelled {
+				if _, err := server.dispatchAssistantTool(request, "create_node", `{"name":"Must not run"}`); err == nil || repo.calls != 1 {
+					t.Fatal("Stop allowed another action")
+				}
 			}
 			nodes, _ := memory.ListNodes(companyID)
 			if len(nodes) != 1 || nodes[0].Title != "Only once" {
