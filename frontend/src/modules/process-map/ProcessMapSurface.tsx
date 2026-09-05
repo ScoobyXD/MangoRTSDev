@@ -205,7 +205,8 @@ export type ProcessMapSurfaceProps = {
   apiBase: string;
   companyID: string;
   hoverModeEnabled?: boolean;
-  onOpenLogicGate: (logicGateID: string, label: string) => void;
+  onOpenLogicGate: (logicGateID: string, label: string, folderID?: string) => void;
+  savedProcessID?: string | null;
   onCreateFolder?: (initialParentFolderID?: string) => void;
   onCreateProcess?: (initialParentFolderID?: string) => void;
   onCreateStep?: (initialParentFolderID?: string) => void;
@@ -1288,7 +1289,7 @@ export function materializeProcessMapPlacementTransform(
   return result;
 }
 
-export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false, onOpenLogicGate, onCreateFolder, onCreateProcess, onCreateStep }: ProcessMapSurfaceProps) {
+export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false, onOpenLogicGate, savedProcessID, onCreateFolder, onCreateProcess, onCreateStep }: ProcessMapSurfaceProps) {
   const authGeneration = getAuthSessionCacheGeneration();
   const protectedScopeKey = `${apiBase.trim()}\u0000${companyID.trim()}\u0000${authGeneration}`;
   const surfaceRef = useRef<HTMLDivElement | null>(null);
@@ -1337,6 +1338,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const settlementGateRef = useRef<ReturnType<typeof createProcessMapSettlementGate> | null>(null);
   const sceneAbortRef = useRef<AbortController | null>(null);
   const fittedSceneRef = useRef(false);
+  const pendingSavedSelection = useRef<string | null>(null);
   const canonicalGenerationRef = useRef(0);
   const operationGenerationRef = useRef(new Map<string, number>());
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1473,6 +1475,11 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     };
   }, [loadScene]);
   const requestCanonicalRefresh = useCallback(() => canonicalRefreshRef.current?.request(), []);
+  useEffect(() => {
+    if (!savedProcessID) return;
+    pendingSavedSelection.current = savedProcessID;
+    requestCanonicalRefresh();
+  }, [requestCanonicalRefresh, savedProcessID]);
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1508,6 +1515,16 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setPinnedProcessID(null);
     markUnsettled();
   }, [activeScene, markUnsettled, viewportSize]);
+
+  useEffect(() => {
+    const processID = pendingSavedSelection.current;
+    if (!processID || !activeScene || (activeScene.bounds && !fittedSceneRef.current)) return;
+    const id = placementKey({ resource_type: "logic_gate", resource_id: processID });
+    setSelection({ kind: "placement", id });
+    setConfirmedMissingSelectionIdentity(null);
+    // Keep the requested selection through the creation refresh, including a protected purge.
+    if (presentation.placements.has(id)) pendingSavedSelection.current = null;
+  }, [activeScene, presentation.placements, protectedGeneration]);
 
   useEffect(() => {
     const requestRefresh = (purge: boolean) => {
@@ -1939,6 +1956,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const startPlacementGesture = useCallback((pick: PlacementPick | ResizePick, point: ProcessMapGridPoint) => {
     if (processMapPlacementDisplayLOD(pick.placement, 2 ** settledViewState.zoom) === "whole") return;
+    pendingSavedSelection.current = null;
     const subtree = processMapPlacementSubtree(pick.placement, presentationRef.current.placements);
     const basePlacements = subtree;
     const basePlacementKeys = new Set(basePlacements.keys());
@@ -1967,6 +1985,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     const point = pointFromInfo(info);
     const pick = pickFromObject(info.object);
     if (!point) return;
+    pendingSavedSelection.current = null;
     if (!pick && (event.shiftKey || event.srcEvent?.shiftKey)) {
       event.stopPropagation();
       suppressClickRef.current = true;
@@ -2169,12 +2188,13 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setHoveredResizePick(null);
     setHoveredProcessID(null);
     setPinnedProcessID(null);
-    onOpenLogicGate(placement.resource_id, placement.name);
+    onOpenLogicGate(placement.resource_id, placement.name, placement.map_parent_folder_id ?? undefined);
   }, [clearHoverTimer, onOpenLogicGate]);
 
   const handleClick = useCallback((info: PickingInfo, event: { type: string }) => {
     surfaceRef.current?.focus();
     if (suppressClickRef.current) return;
+    pendingSavedSelection.current = null;
     const pick = pickFromObject(info.object);
     if (!pick) {
       setSelection(null);
@@ -2343,6 +2363,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget) return;
+    if (["Delete", "Backspace", "Enter", " ", "Escape"].includes(event.key)) pendingSavedSelection.current = null;
     if (event.key === "Delete" || event.key === "Backspace") {
       if (!selectionVisible) return;
       event.preventDefault();

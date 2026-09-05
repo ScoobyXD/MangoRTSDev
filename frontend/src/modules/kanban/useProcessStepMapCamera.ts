@@ -7,8 +7,9 @@ const clampZoom = (zoom: number) => Math.max(.5, Math.min(8, zoom));
 const interactiveTarget = ".process-step-map__step, button, input, select, textarea, [role='button']";
 
 /** Local camera only: the same transform carries the Process frame, Steps, and routes. */
-export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, isBlocked: () => boolean) {
-  const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
+export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, isBlocked: () => boolean, initialBounds: (StepMapPoint & { width: number; height: number }) | null) {
+  const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, zoom: .85 });
+  const initialized = useRef(false);
   const [panning, setPanning] = useState(false);
   const cameraRef = useRef(camera);
   const pan = useRef<Pan | null>(null);
@@ -22,8 +23,28 @@ export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, isB
     const left = parseFloat(style.paddingLeft) || 0, top = parseFloat(style.paddingTop) || 0;
     return { left, top, width: element.clientWidth - left - (parseFloat(style.paddingRight) || 0), height: element.clientHeight - top - (parseFloat(style.paddingBottom) || 0) };
   };
+  useEffect(() => {
+    const element = viewport.current;
+    if (!element || !initialBounds || initialized.current) return;
+    const fit = () => {
+      if (initialized.current) return;
+      const area = viewArea();
+      if (area.width <= 0 || area.height <= 0) return;
+      const width = Math.max(initialBounds.width, area.width - initialBounds.x);
+      const height = Math.max(initialBounds.height, area.height - initialBounds.y);
+      const zoom = clampZoom(Math.min(.85, (area.width - 16) / width, (area.height - 16) / height));
+      initialized.current = true;
+      update({ zoom, x: 8 - initialBounds.x * zoom, y: 8 - initialBounds.y * zoom });
+    };
+    fit();
+    if (initialized.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [initialBounds, viewport]);
   const zoomTo = (value: number, anchor: StepMapPoint) => {
     if (blocked.current() || pan.current || !viewport.current) return;
+    initialized.current = true;
     const previous = cameraRef.current, zoom = clampZoom(value);
     const ratio = zoom / previous.zoom;
     update({ zoom, x: anchor.x - (anchor.x - previous.x) * ratio, y: anchor.y - (anchor.y - previous.y) * ratio });
@@ -51,6 +72,7 @@ export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, isB
   };
   const startPan = (event: PointerEvent<HTMLDivElement>) => {
     if (blocked.current() || pan.current || event.button !== 0 || (event.target as Element).closest(interactiveTarget)) return;
+    initialized.current = true;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.focus({ preventScroll: true });

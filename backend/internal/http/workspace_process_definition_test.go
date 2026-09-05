@@ -12,7 +12,7 @@ import (
 )
 
 func TestWorkspaceEntityBatchAuthoredProcessHTTP(t *testing.T) {
-	for _, scenario := range []string{"saved and retry", "empty and retry", "malformed layout", "foreign rectangle", "hidden folder", "revoked folder"} {
+	for _, scenario := range []string{"saved and retry", "empty and retry", "details and retry", "malformed layout", "invalid SOP", "foreign rectangle", "hidden folder", "revoked folder"} {
 		t.Run(scenario, func(t *testing.T) {
 			repo := store.NewMemoryRepo()
 			companyID := "66666666-6666-4666-8666-666666666491"
@@ -37,6 +37,13 @@ func TestWorkspaceEntityBatchAuthoredProcessHTTP(t *testing.T) {
 			if scenario == "malformed layout" {
 				rectangle["width"] = -1
 			}
+			if scenario == "details and retry" {
+				definition["gvic_assignments"] = []store.ResourceRACIAssignmentInput{{Role: domain.RACIRoleResponsible, PrincipalType: store.EntityPermissionSubjectUser, PrincipalID: actor.UserID}}
+				definition["editor_document"] = json.RawMessage(`{"format":"mango-tiptap-json","schema_version":1,"document":{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Saved SOP"}]}]}}`)
+			}
+			if scenario == "invalid SOP" {
+				definition["editor_document"] = map[string]string{"text": "Invalid editor format"}
+			}
 			if scenario == "foreign rectangle" {
 				rectangle["process_step_id"] = "66666666-6666-4666-8666-666666666494"
 			}
@@ -54,7 +61,7 @@ func TestWorkspaceEntityBatchAuthoredProcessHTTP(t *testing.T) {
 			}
 			server := NewServer(repository)
 			defer server.Close()
-			body, _ := json.Marshal(map[string]any{"company_id": companyID, "entity_kind": "logic_gate", "folder_id": folder.FolderID, "mutation_origin": "company_explorer", "items": []map[string]any{{"client_id": "draft", "title": "Authored Process"}}, "process_definition": definition})
+			body, _ := json.Marshal(map[string]any{"company_id": companyID, "entity_kind": "logic_gate", "folder_id": folder.FolderID, "mutation_origin": "company_explorer", "items": []map[string]any{{"client_id": "new-process", "title": "Authored Process"}}, "process_definition": definition})
 			send := func() *httptest.ResponseRecorder {
 				req := requestWithActorForTest(httptest.NewRequest(http.MethodPost, "/v1/workspace/entity-batches", bytes.NewReader(body)), actor, companyID)
 				rec := httptest.NewRecorder()
@@ -63,7 +70,7 @@ func TestWorkspaceEntityBatchAuthoredProcessHTTP(t *testing.T) {
 			}
 			rec := send()
 			wantStatus := http.StatusCreated
-			if scenario == "malformed layout" || scenario == "foreign rectangle" {
+			if scenario == "malformed layout" || scenario == "foreign rectangle" || scenario == "invalid SOP" {
 				wantStatus = http.StatusBadRequest
 			}
 			if scenario == "hidden folder" || scenario == "revoked folder" {
@@ -83,6 +90,16 @@ func TestWorkspaceEntityBatchAuthoredProcessHTTP(t *testing.T) {
 				work, err := repo.GetLogicGateWork(companyID, gateID, actor.UserID)
 				if err != nil || len(work.Nodes) != 0 {
 					t.Fatalf("authored save created runtime work: %+v %v", work, err)
+				}
+				if scenario == "details and retry" {
+					assignments, err := repo.ListResourceRACIAssignments(companyID, store.EntityTypeLogicGate, gateID)
+					if err != nil || len(assignments) != 1 || assignments[0].PrincipalID != actor.UserID || assignments[0].Role != domain.RACIRoleResponsible {
+						t.Fatalf("saved RACI = %+v %v", assignments, err)
+					}
+					snapshot, err := repo.GetEditorJSONSnapshot(store.EditorJSONDocumentRef{CompanyID: companyID, ResourceType: store.EntityTypeLogicGate, ResourceID: gateID, DocumentID: "logic-gate-overview"})
+					if err != nil || snapshot.Revision != 1 || !bytes.Contains(snapshot.JSONDocument, []byte("Saved SOP")) {
+						t.Fatalf("saved SOP = %+v %v", snapshot, err)
+					}
 				}
 			}
 			gates, err := repo.ListLogicGates(companyID)

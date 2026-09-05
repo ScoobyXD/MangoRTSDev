@@ -253,6 +253,7 @@ type MountedProcessMap = {
   initialTile: ProcessMapTileResponse;
   process: ProcessMapVisiblePlacement;
   readSceneCount: () => number;
+  selectCreatedProcess: (processID: string) => Promise<void>;
   holdNextSceneRead: () => Deferred<Response>;
   loadTile: (tile: ProcessMapTileResponse, completeViewport?: boolean, tileID?: string) => Promise<void>;
   clickPlacement: (candidate: ProcessMapVisiblePlacement) => Promise<void>;
@@ -353,6 +354,12 @@ async function mountProcessMapForBehavior(
     initialTile,
     process,
     readSceneCount: () => sceneReads,
+    selectCreatedProcess: async (processID) => {
+      await act(async () => {
+        root.render(<ProcessMapSurface apiBase={apiBase} companyID={companyID} onOpenLogicGate={onOpenLogicGate} savedProcessID={processID} />);
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+      });
+    },
     holdNextSceneRead: () => {
       const held = deferred<Response>();
       heldSceneReads.push(held);
@@ -2646,4 +2653,29 @@ test("GPU frame timing is left to a browser/GPU benchmark instead of a synthetic
     node_scope: "assert transport, settlement, cancellation, label, picking, cache-byte, and linear-construction bounds",
     rule: "correctness is not traded for a fabricated frame-time number",
   }));
+});
+
+
+test("successful Process creation refreshes locally and selects its canonical placement without moving the camera", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  try {
+    const view = { ...readProcessMapDeckGLTestProps().viewState, target: [110, 75, 0], zoom: 2 };
+    await act(async () => { readProcessMapDeckGLTestProps().onViewStateChange({ viewState: view }); });
+    const camera = structuredClone(readProcessMapDeckGLTestProps().viewState);
+    const reads = mounted.readSceneCount();
+    const savedProcess = { ...placement("new-process", 110, 75, 14, 8), name: "New Process" };
+    await mounted.selectCreatedProcess(savedProcess.resource_id);
+    assert.ok(mounted.readSceneCount() > reads, "the Save callback refreshes without waiting for a websocket");
+    await mounted.loadTile(behaviorTile(mounted.readSceneCount(), [mounted.process, savedProcess]));
+    assert.equal(mounted.container.querySelector('[aria-label="Process Map. Selected New Process."]') !== null, true);
+    assert.deepEqual(readProcessMapDeckGLTestProps().viewState, camera);
+    await mounted.clickPlacement(mounted.process);
+    assert.equal(mounted.container.querySelector('[aria-label="Process Map. Selected Behavior Process."]') !== null, true, "normal selection replaces the created Process");
+    const offscreenProcess = { ...savedProcess, resource_id: "offscreen-process", x: 4000, y: 4000 };
+    await mounted.selectCreatedProcess(offscreenProcess.resource_id);
+    await mounted.loadTile(behaviorTile(mounted.readSceneCount(), [mounted.process]));
+    await mounted.clickPlacement(mounted.process);
+    await mounted.loadTile(behaviorTile(mounted.readSceneCount(), [mounted.process, offscreenProcess]));
+    assert.equal(mounted.container.querySelector('[aria-label="Process Map. Selected Behavior Process."]') !== null, true, "a later tile cannot replace explicit selection with an offscreen created Process");
+  } finally { await mounted.cleanup(); }
 });

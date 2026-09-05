@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"miraeopus/backend/internal/domain"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -20,6 +21,46 @@ func workspaceProcessDefinitionWriteError(err error) error {
 
 func (r *PostgresRepo) createWorkspaceProcessDefinitionTx(ctx context.Context, tx *sql.Tx, input WorkspaceEntityBatchInput, result *WorkspaceEntityBatchResult) error {
 	definition := input.ProcessDefinition
+	if err := ensureV2PolicySettingsTx(ctx, tx); err != nil {
+		return err
+	}
+	policyKey := resourceRACIKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: definition.LogicGateID}
+	policy, err := postgresV2RACIPolicy(ctx, tx, policyKey)
+	if err != nil {
+		return err
+	}
+	if definition.RACIAssignments != nil {
+		normalized, err := normalizeResourceRACIAssignmentInputs(definition.RACIAssignments)
+		if err != nil {
+			return err
+		}
+		for _, assignment := range normalized {
+			if err := validatePostgresRACIPrincipalTx(ctx, tx, input.CompanyID, assignment.principalType, assignment.principalID); err != nil {
+				return err
+			}
+		}
+		if policy.ParentPolicy == nil || !normalizedRACIAssignmentsMatch(normalized, policy.ParentPolicy.Assignments) {
+			policy, err = customizeResourceRACIPolicyTx(ctx, tx, policyKey, definition.RACIAssignments)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	result.LogicGates[0].RACIAssignments = logicGateRACIAssignmentsFromResources(policy.RACIAssignments)
+	if definition.EditorDocument != nil {
+		ref := EditorJSONDocumentRef{CompanyID: input.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: definition.LogicGateID, DocumentID: "logic-gate-overview"}
+		storage, _ := postgresEditorTextboxStorageFor(ref)
+		body, err := encodeEditorTextboxBody(definition.EditorDocument, []EditorJSONAnnotation{})
+		if err != nil {
+			return err
+		}
+		if err := insertEmptyPostgresEditorTextboxTx(ctx, tx, storage, ref); err != nil {
+			return err
+		}
+		if err := updatePostgresEditorTextboxTx(ctx, tx, storage, ref, body, 1, time.Now().UTC()); err != nil {
+			return err
+		}
+	}
 	result.ProcessSteps = make([]domain.ProcessStep, 0, len(definition.Steps))
 	result.StepRelationships = make([]domain.ResourceOperationalRelationship, 0, len(definition.Relationships))
 	for index, source := range definition.Steps {

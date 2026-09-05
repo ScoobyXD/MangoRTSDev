@@ -1,17 +1,19 @@
 package store
 
 import (
+	"encoding/json"
 	"miraeopus/backend/internal/domain"
 	"strings"
 )
 
-// These creation IDs become the literal IDs of the saved records. There is no
-// stored draft or second identity for a Step or its operational relationship.
+// Creation uses the literal IDs of the saved Process, Steps, and relationships.
 type WorkspaceProcessDefinitionInput struct {
-	LogicGateID   string                                   `json:"logic_gate_id"`
-	Steps         []WorkspaceProcessDefinitionStep         `json:"steps"`
-	Relationships []WorkspaceProcessDefinitionRelationship `json:"relationships"`
-	Layout        *WorkspaceProcessDefinitionLayout        `json:"layout"`
+	LogicGateID     string                                   `json:"logic_gate_id"`
+	Steps           []WorkspaceProcessDefinitionStep         `json:"steps"`
+	Relationships   []WorkspaceProcessDefinitionRelationship `json:"relationships"`
+	Layout          *WorkspaceProcessDefinitionLayout        `json:"layout"`
+	RACIAssignments []ResourceRACIAssignmentInput            `json:"gvic_assignments"`
+	EditorDocument  json.RawMessage                          `json:"editor_document,omitempty"`
 }
 
 type WorkspaceProcessDefinitionStep struct {
@@ -42,10 +44,36 @@ func normalizeWorkspaceProcessDefinition(input WorkspaceEntityBatchInput) (Works
 	if definition.Steps == nil || definition.Relationships == nil || definition.Layout == nil || definition.Layout.Steps == nil || definition.Layout.Routes == nil || len(definition.Steps) > WorkspaceEntityBatchMaxItems || len(definition.Relationships) > WorkspaceEntityBatchMaxRelationships {
 		return input, ErrInvalid
 	}
+	if input.CreatorLogicGateRACIRole != "" {
+		return input, ErrInvalid
+	}
 	copy := *definition
 	copy.LogicGateID = cleanUUIDText(definition.LogicGateID)
 	copy.Steps = append([]WorkspaceProcessDefinitionStep{}, definition.Steps...)
 	copy.Relationships = append([]WorkspaceProcessDefinitionRelationship{}, definition.Relationships...)
+	if definition.RACIAssignments != nil {
+		assignments, err := normalizeResourceRACIAssignmentInputs(definition.RACIAssignments)
+		if err != nil {
+			return input, err
+		}
+		if err := validateResourceRACIAssignmentInputsForOperation(resourceRACIKey{companyID: input.CompanyID, resourceType: EntityTypeLogicGate, resourceID: copy.LogicGateID}, assignments, RACIAssignmentCommandSet); err != nil {
+			return input, err
+		}
+		copy.RACIAssignments = make([]ResourceRACIAssignmentInput, 0, len(assignments))
+		for _, assignment := range assignments {
+			copy.RACIAssignments = append(copy.RACIAssignments, ResourceRACIAssignmentInput{Role: assignment.role, PrincipalType: assignment.principalType, PrincipalID: assignment.principalID})
+		}
+	}
+	if definition.EditorDocument != nil {
+		var err error
+		copy.EditorDocument, err = validateMangoTiptapJSONForCommit(definition.EditorDocument)
+		if err != nil {
+			return input, err
+		}
+		if EditorOwnerTextLimitExceeded(0, int64(len(copy.EditorDocument))) {
+			return input, ErrEditorOwnerTextLimit
+		}
+	}
 	steps, relationships, pairs := map[string]bool{}, map[string]bool{}, map[[2]string]bool{}
 	for index := range copy.Steps {
 		step := &copy.Steps[index]

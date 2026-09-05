@@ -1,3 +1,51 @@
+# Current Editor Business Logic Laws
+
+1. A Node or Project timeline textbox is the required owner of every chat on that editor surface; a Project's permanent document is not a chat destination.
+2. A Node or Project textbox may link to several exact email messages. A whole stored email thread never links to a textbox.
+3. Dropping only an exact email message's noninteractive header on a Node text box creates the exact typed message/textbox relationship, while the explicit remove control beside that message in Show email removes only that edge when no anchored chat requires it.
+4. Dropping an attached email thread on a Node text box is rejected.
+5. A textbox already linked to one email message accepts another exact message unless that second message already belongs to another textbox in the same Node or Project.
+6. A Node with priority **Not Assigned** may be assigned or moved to a Logic Gate without a priority prompt or error.
+7. Clicking the chat action for highlighted email text without a linked text box creates only a temporary interface preview and writes no text box, email relationship, or chat to the database.
+8. Clearing the temporary email quote or closing its chat rail cancels the temporary text box and draft without a database delete or cleanup write.
+9. Sending the first temporary email chat atomically creates or reuses the Node or Project textbox, exact email-message relationship, and chat before the interface becomes a normal saved textbox.
+10. One exact email message may link to at most one textbox in each Node or Project and may link to a different textbox in another owner.
+11. Every email chat remains local to its exact Node or Project, exact textbox, and exact linked internal email message.
+12. An ordinary Node or Project textbox stores no color and uses the normal thin neutral frame. Only a textbox with an exact email relationship may store an approved non-red RGB `color`; every exact linked message card uses that literal value, the outer thread container stays neutral, and rendering never hashes an email ID. Red is reserved for failed-save feedback.
+13. The consolidated Node or Project projection supplies textbox identity, order, metadata, derived exact-message links, and revision without copying the canonical editor document body or storing another relationship authority.
+14. A visible editor completes its initial canonical read before subscribing for later realtime recovery, so socket acceptance cannot duplicate the initial document read.
+15. Every Node attached-email thread starts collapsed, loads no draft body or attachment relationship, and loads an exact message body only when that message is opened. Its visible messages receive separate personal and resource-shared draft indicators through one bounded body-free grouped read. Reply/**My Draft** exact-hydrates the personal draft by default; checking **Shared Draft** or opening an exact shared summary exact-hydrates the shared draft, and unchecking returns to the personal draft without deletion.
+16. The shared chat pane scrolls to the bottom only when a newly added message is authored by the current user.
+17. When React Strict Mode replaces an editor sync during preparation, only the current replacement sync may mark that editor ready.
+18. After Backspace or Delete removes an empty nested list marker, pressing Backspace or Delete again removes only its remaining blank row; the parent row, nested rows, and following rows keep their exact structure and numbering.
+19. In Automatic Numbering, Enter at the end of a nonempty ordinary row immediately before an existing numbered list inserts one empty first item into that list; the ordinary row and list identity stay unchanged, the list restarts at its canonical first marker, every existing item keeps its content, formatting, identity, and order while its marker advances by one, and the caret moves into the new item.
+20. In Automatic Numbering, Enter at the end of a numbered row with nested rows inserts one empty peer immediately before those nested rows; Tab makes only that empty peer the first nested row, keeps every existing nested and following row at its prior depth and in its prior order, and restarts each affected ordered level at its canonical first marker.
+21. An `email_message` entity is valid durable editor JSON; activating it opens the existing Triage conversation viewer and never creates an email relationship.
+22. A new pasted image and an existing image with missing or `break` position must render as a full-row break-text image. A pasted image whose clipboard markup omits dimensions uses best-effort bitmap measurement, but measurement failure must never block its durable upload. Every available width and height pair must survive clipboard preparation and width constraints without changing its aspect ratio or adding blank space above or below it.
+23. Moving the pointer onto an image in an editable sleeping editor must wake its live editor, and wrapped text must not cover that image's selectable and draggable pixels. Pasting another image must not prevent any existing image from being selected or showing all eight resize handles.
+24. An image drag must use its ProseMirror node as the only native draggable source, select that node before drag start, and complete through ProseMirror's native drag-and-drop path; dropping it in the leftmost or rightmost 30 percent of the editor must move it to the drop anchor and wrap following text on that side, while dropping it in the middle 40 percent must move it as a centered break-text image.
+25. Wrapped image placement must use only the optional `wrap` image position plus existing alignment in schema version 1, and the active and sleeping renderers must match without coordinates or data migration.
+26. A sleeping editor table must honor every stored column width before the editor is activated.
+27. Selecting an editor table must not show the detached top-right row, column, header, and delete command strip.
+28. Matching consecutive one-row image-free HTML tables or a tab-separated clipboard grid must fill the active Tiptap table from the selected cell, or create exactly one table in ordinary editor text.
+29. When a clipboard payload contains a usable HTML or tab-separated table and an unreferenced bitmap preview, every unified Tiptap editor must paste only the complete table, discard the bitmap preview and Office metadata, and retain every source row and column even when the table is wider than the editor viewport.
+30. A Node or Logic Gate header shows its live-derived clickable hierarchy breadcrumb inside the same rounded title container, directly above the existing resource icon and independently editable title, instead of adding a separate breadcrumb surface or a fixed **Node:** or **Process:** label. The current item name remains the independently editable `nodes.name` or `logic_gates.header` value and is never copied into or saved through the breadcrumb.
+31. A Node or Project timeline textbox must size from its own visible timeline container, keep the shared safety minimum, leave the shared next-row circle, header, and editor preview visible whenever space permits, and keep its editor, linked email, chat, timeline, virtual spacing, and logical scroll position aligned after every container resize.
+32. Dragging an editor table's bottom-right resize handle must add or remove whole trailing rows and columns, never reduce the table below one row or column, stop each axis before deleting a cell with content, and commit the allowed resize in one document transaction only when the pointer is released.
+33. A Huddle Node text box uses the normal Node's visible-container row-height rule, safety minimum, next-row preview, left timeline circle and line, left plus control, row spacing, canonical `mango-tiptap-json` document, revision, conflict, recovery, formatting toolbar, Universal Linker, inline Entity, image, attachment, and selection-comment behavior.
+34. Huddle Node editor documents use resource type `huddle_node`, the exact Huddle Node ID, and an exact Huddle Node textbox ID; they never borrow or manufacture a normal Node ID.
+35. A Huddle Node editor has no attached-email column and never creates an email relationship, email draft, or pass-to-Logic-Gate command.
+36. Highlighting nonblank text in a supported non-email editor exposes one yellow/red Action Item control, and choosing a color creates one real Action Item Entity with the exact owning editor resource in its immutable typed Source system field before replacing the unchanged selection with its exact inline Entity reference.
+37. Activating an inline Entity reference opens the current Entity in the shared editable details host. An Action Item stays in the activation point's owning modal layer, reuses field-labeled company-user pickers and shared calendars, shows Created date and the permission-safe Source Entity Field read-only, keeps Created by hidden, and saves through the existing Entity and Entity Field APIs.
+38. Yellow and red Action Item references use their saved Action Item color for the complete live and static chip, keep black text and icon, and pulse at two-second and one-second intervals respectively; reduced-motion preference disables only the pulse.
+39. After a Huddle Node or Huddle Logic Gate editor save, its distinct Action Item references replace that exact resource's `entity_relationships` set. A non-final duplicate removal changes no edge, and removing the final saved reference removes only that resource edge.
+40. Process Map shows the same Process SOP in a collapsible Editor below its RACI cards, using its current text projection or the canonical `logic-gate-overview` document when no projection exists.
+41. Before Process creation, the shared editor keeps normal Tiptap JSON only in the current creation form and makes no document save, recovery-storage, history, or realtime request for the nonexistent Process.
+42. Closing and reopening the Editor preserves its current content; a saved Process editor flushes pending writes before closing.
+43. A new Process editor allows normal text, formatting, tables, mentions, and references but exposes no upload, relationship, or resource-creation action requiring a saved owner.
+
+Last updated: 2026-09-05
+
 # Process Story: Email-linked textboxes remain exact to their own owner
 
 A person links one exact stored email message from Node or Project A's email column to a timeline textbox
@@ -74,49 +122,6 @@ After success the preview becomes a normal saved text box; an exact-message drop
 
 Last updated: 2026-08-08
 
-# Current Editor Business Logic Laws
-
-1. A Node or Project timeline textbox is the required owner of every chat on that editor surface; a Project's permanent document is not a chat destination.
-2. A Node or Project textbox may link to several exact email messages. A whole stored email thread never links to a textbox.
-3. Dropping only an exact email message's noninteractive header on a Node text box creates the exact typed message/textbox relationship, while the explicit remove control beside that message in Show email removes only that edge when no anchored chat requires it.
-4. Dropping an attached email thread on a Node text box is rejected.
-5. A textbox already linked to one email message accepts another exact message unless that second message already belongs to another textbox in the same Node or Project.
-6. A Node with priority **Not Assigned** may be assigned or moved to a Logic Gate without a priority prompt or error.
-7. Clicking the chat action for highlighted email text without a linked text box creates only a temporary interface preview and writes no text box, email relationship, or chat to the database.
-8. Clearing the temporary email quote or closing its chat rail cancels the temporary text box and draft without a database delete or cleanup write.
-9. Sending the first temporary email chat atomically creates or reuses the Node or Project textbox, exact email-message relationship, and chat before the interface becomes a normal saved textbox.
-10. One exact email message may link to at most one textbox in each Node or Project and may link to a different textbox in another owner.
-11. Every email chat remains local to its exact Node or Project, exact textbox, and exact linked internal email message.
-12. An ordinary Node or Project textbox stores no color and uses the normal thin neutral frame. Only a textbox with an exact email relationship may store an approved non-red RGB `color`; every exact linked message card uses that literal value, the outer thread container stays neutral, and rendering never hashes an email ID. Red is reserved for failed-save feedback.
-13. The consolidated Node or Project projection supplies textbox identity, order, metadata, derived exact-message links, and revision without copying the canonical editor document body or storing another relationship authority.
-14. A visible editor completes its initial canonical read before subscribing for later realtime recovery, so socket acceptance cannot duplicate the initial document read.
-15. Every Node attached-email thread starts collapsed, loads no draft body or attachment relationship, and loads an exact message body only when that message is opened. Its visible messages receive separate personal and resource-shared draft indicators through one bounded body-free grouped read. Reply/**My Draft** exact-hydrates the personal draft by default; checking **Shared Draft** or opening an exact shared summary exact-hydrates the shared draft, and unchecking returns to the personal draft without deletion.
-16. The shared chat pane scrolls to the bottom only when a newly added message is authored by the current user.
-17. When React Strict Mode replaces an editor sync during preparation, only the current replacement sync may mark that editor ready.
-18. After Backspace or Delete removes an empty nested list marker, pressing Backspace or Delete again removes only its remaining blank row; the parent row, nested rows, and following rows keep their exact structure and numbering.
-19. In Automatic Numbering, Enter at the end of a nonempty ordinary row immediately before an existing numbered list inserts one empty first item into that list; the ordinary row and list identity stay unchanged, the list restarts at its canonical first marker, every existing item keeps its content, formatting, identity, and order while its marker advances by one, and the caret moves into the new item.
-20. In Automatic Numbering, Enter at the end of a numbered row with nested rows inserts one empty peer immediately before those nested rows; Tab makes only that empty peer the first nested row, keeps every existing nested and following row at its prior depth and in its prior order, and restarts each affected ordered level at its canonical first marker.
-21. An `email_message` entity is valid durable editor JSON; activating it opens the existing Triage conversation viewer and never creates an email relationship.
-22. A new pasted image and an existing image with missing or `break` position must render as a full-row break-text image. A pasted image whose clipboard markup omits dimensions uses best-effort bitmap measurement, but measurement failure must never block its durable upload. Every available width and height pair must survive clipboard preparation and width constraints without changing its aspect ratio or adding blank space above or below it.
-23. Moving the pointer onto an image in an editable sleeping editor must wake its live editor, and wrapped text must not cover that image's selectable and draggable pixels. Pasting another image must not prevent any existing image from being selected or showing all eight resize handles.
-24. An image drag must use its ProseMirror node as the only native draggable source, select that node before drag start, and complete through ProseMirror's native drag-and-drop path; dropping it in the leftmost or rightmost 30 percent of the editor must move it to the drop anchor and wrap following text on that side, while dropping it in the middle 40 percent must move it as a centered break-text image.
-25. Wrapped image placement must use only the optional `wrap` image position plus existing alignment in schema version 1, and the active and sleeping renderers must match without coordinates or data migration.
-26. A sleeping editor table must honor every stored column width before the editor is activated.
-27. Selecting an editor table must not show the detached top-right row, column, header, and delete command strip.
-28. Matching consecutive one-row image-free HTML tables or a tab-separated clipboard grid must fill the active Tiptap table from the selected cell, or create exactly one table in ordinary editor text.
-29. When a clipboard payload contains a usable HTML or tab-separated table and an unreferenced bitmap preview, every unified Tiptap editor must paste only the complete table, discard the bitmap preview and Office metadata, and retain every source row and column even when the table is wider than the editor viewport.
-30. A Node or Logic Gate header shows its live-derived clickable hierarchy breadcrumb inside the same rounded title container, directly above the existing resource icon and independently editable title, instead of adding a separate breadcrumb surface or a fixed **Node:** or **Process:** label. The current item name remains the independently editable `nodes.name` or `logic_gates.header` value and is never copied into or saved through the breadcrumb.
-31. A Node or Project timeline textbox must size from its own visible timeline container, keep the shared safety minimum, leave the shared next-row circle, header, and editor preview visible whenever space permits, and keep its editor, linked email, chat, timeline, virtual spacing, and logical scroll position aligned after every container resize.
-32. Dragging an editor table's bottom-right resize handle must add or remove whole trailing rows and columns, never reduce the table below one row or column, stop each axis before deleting a cell with content, and commit the allowed resize in one document transaction only when the pointer is released.
-33. A Huddle Node text box uses the normal Node's visible-container row-height rule, safety minimum, next-row preview, left timeline circle and line, left plus control, row spacing, canonical `mango-tiptap-json` document, revision, conflict, recovery, formatting toolbar, Universal Linker, inline Entity, image, attachment, and selection-comment behavior.
-34. Huddle Node editor documents use resource type `huddle_node`, the exact Huddle Node ID, and an exact Huddle Node textbox ID; they never borrow or manufacture a normal Node ID.
-35. A Huddle Node editor has no attached-email column and never creates an email relationship, email draft, or pass-to-Logic-Gate command.
-36. Highlighting nonblank text in a supported non-email editor exposes one yellow/red Action Item control, and choosing a color creates one real Action Item Entity with the exact owning editor resource in its immutable typed Source system field before replacing the unchanged selection with its exact inline Entity reference.
-37. Activating an inline Entity reference opens the current Entity in the shared editable details host. An Action Item stays in the activation point's owning modal layer, reuses field-labeled company-user pickers and shared calendars, shows Created date and the permission-safe Source Entity Field read-only, keeps Created by hidden, and saves through the existing Entity and Entity Field APIs.
-38. Yellow and red Action Item references use their saved Action Item color for the complete live and static chip, keep black text and icon, and pulse at two-second and one-second intervals respectively; reduced-motion preference disables only the pulse.
-39. After a Huddle Node or Huddle Logic Gate editor save, its distinct Action Item references replace that exact resource's `entity_relationships` set. A non-final duplicate removal changes no edge, and removing the final saved reference removes only that resource edge.
-
-Last updated: 2026-08-30
 
 # Process Story: Editor policy status follows the draft automatically
 

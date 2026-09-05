@@ -122,10 +122,22 @@ const testFiles = [
 ];
 const componentTests = [
   {
+    source: resolve(repoRoot, "tests/frontend/modules/company-explorer/companyExplorerCreationReveal.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/company-explorer/companyExplorerCreationReveal.test.cjs"),
+    bundleDependencies: true,
+    jsx: "automatic",
+  },
+  {
     source: resolve(repoRoot, "tests/frontend/pages/process-map/ProcessMapPage.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/pages/process-map/ProcessMapPage.test.cjs"),
     bundleDependencies: true,
     processMapComponentHarness: true,
+    jsx: "automatic",
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/pages/process-map/ProcessMapDetails.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/pages/process-map/ProcessMapDetails.test.cjs"),
+    bundleDependencies: true,
     jsx: "automatic",
   },
   {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { requestJSON } from "../../modules/api/requestJSON.js";
 import type { CompanyExplorerFolder } from "../../modules/folders/companyExplorerFolders.js";
 import { ProcessStepMapEditor, type ProcessStepMapCommands } from "../../modules/kanban/ProcessStepMap.js";
@@ -9,14 +9,17 @@ import { ProcessMapDestinationPath, processMapFolderPath } from "./ProcessMapDes
 import { fetchHierarchyPath } from "../../modules/hierarchy/hierarchyPathApi.js";
 import type { ProcessWorkSnapshot } from "../../modules/kanban/processWork.js";
 import { ProcessMapActions } from "./ProcessMapActions.js";
+import { ProcessMapDetails, type ProcessMapDetailsContents } from "./ProcessMapDetails.js";
+import { emitDashboardEvent, EVENT_COMPANY_EXPLORER_FIND_REQUESTED } from "../../modules/dashboardEvents.js";
+import type { CompanyExplorerWorkspaceEntityBatchResponse } from "../../modules/company-explorer/CompanyExplorerContentModel.js";
 
-type DraftContents = { steps: ProcessStep[]; relationships: ProcessStepRelationship[]; layout: ProcessStepMapLayout };
+type ProcessContents = { steps: ProcessStep[]; relationships: ProcessStepRelationship[]; layout: ProcessStepMapLayout };
 export type SavedMapProcess = { processID: string; name: string; folderID: string };
 
-export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, initialFolderID, folders, foldersLoading, active, onSaved, onBack, onBusyChange, hoverModeEnabled, onHoverModeChange }: {
+export function ProcessMapCreateProcess({ apiBase, companyID, processID, firstStep, initialFolderID, folders, foldersLoading, active, onSaved, onBack, onBusyChange, hoverModeEnabled, onHoverModeChange }: {
   apiBase: string; companyID: string; processID: string; firstStep: boolean; initialFolderID: string;
   folders: CompanyExplorerFolder[]; foldersLoading: boolean; active: boolean;
-  onSaved: (process: SavedMapProcess) => void; onBack: () => void;
+  onSaved: (process: SavedMapProcess, response?: CompanyExplorerWorkspaceEntityBatchResponse) => void; onBack: () => void;
   onBusyChange: (busy: boolean) => void;
   hoverModeEnabled: boolean; onHoverModeChange: (enabled: boolean) => void;
 }) {
@@ -24,28 +27,37 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
   const [editingName, setEditingName] = useState(false);
   const filenameRef = useRef<HTMLButtonElement>(null);
   const [folderID, setFolderID] = useState(initialFolderID);
-  const [contents, setContents] = useState<DraftContents>(() => {
+  const [contents, setContents] = useState<ProcessContents>(() => {
     const steps = firstStep ? [{ process_step_id: crypto.randomUUID(), logic_gate_id: processID, name: "New Step", position: 1000 }] : [];
     return { steps, relationships: [], layout: completeStepMapLayout({ revision: 0, steps: [], routes: [] }, steps, []) };
   });
   const current = useRef(contents);
+  const details = useRef<ProcessMapDetailsContents>({});
+  const updateDetails = useCallback((next: ProcessMapDetailsContents) => { details.current = next; }, []);
+  const [detailsBusy, setDetailsBusy] = useState(true);
   const [editorBusy, setEditorBusy] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const submitting = useRef(false);
   const mounted = useRef(true);
+  const created = useRef(false);
   useEffect(() => {
     mounted.current = true;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    const warn = (event: BeforeUnloadEvent) => { if (!created.current) { event.preventDefault(); event.returnValue = ""; } };
     window.addEventListener("beforeunload", warn);
     return () => { mounted.current = false; window.removeEventListener("beforeunload", warn); };
   }, []);
-  useEffect(() => { onBusyChange(saving || editorBusy); }, [onBusyChange, saving, editorBusy]);
+  useEffect(() => { onBusyChange(saving || editorBusy || detailsBusy); }, [onBusyChange, saving, editorBusy, detailsBusy]);
   // Folder creation can refresh the list without resetting the chosen destination.
   const destinationPath = processMapFolderPath(folders, folderID);
   const selectedFolder = destinationPath[destinationPath.length - 1];
+  useEffect(() => {
+    if (!folderID || !active || foldersLoading) return;
+    const folderPathIDs = processMapFolderPath(folders, folderID).map((folder) => folder.folder_id);
+    if (folderPathIDs.length) emitDashboardEvent(EVENT_COMPANY_EXPLORER_FIND_REQUESTED, { companyID, sourceFrameID: "process-map", folderPathIDs, changedAt: Date.now() });
+  }, [active, companyID, folderID, folders, foldersLoading]);
   const commands = useMemo<ProcessStepMapCommands>(() => {
-    const update = (next: DraftContents) => {
+    const update = (next: ProcessContents) => {
       next.layout = completeStepMapLayout(next.layout, next.steps, next.relationships);
       current.current = next;
       setContents(next);
@@ -64,7 +76,7 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
       },
       renameStep: async (id, stepName) => {
         const step = current.current.steps.find((item) => item.process_step_id === id);
-        if (!step) throw new Error("This Step is no longer in the draft.");
+        if (!step) throw new Error("This Step is no longer in this Process.");
         const renamed = { ...step, name: stepName };
         update({ ...current.current, steps: current.current.steps.map((item) => item === step ? renamed : item) });
         return { step: renamed };
@@ -83,21 +95,22 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
     };
   }, [processID]);
   const save = async () => {
-    if (submitting.current || editorBusy || foldersLoading || !name.trim() || !selectedFolder) return;
+    if (submitting.current || editorBusy || detailsBusy || foldersLoading || !name.trim() || !selectedFolder) return;
     submitting.current = true;
     setSaving(true);
     setError("");
     try {
-      const draft = current.current;
-      await createWorkspaceEntityBatchCommand({
+      const process = current.current;
+      const response = await createWorkspaceEntityBatchCommand<CompanyExplorerWorkspaceEntityBatchResponse>({
         companyID, entityKind: "logic_gate", folderID, mutationOrigin: "company_explorer",
         items: [{ client_id: processID, title: name.trim() }],
-        processDefinition: { logic_gate_id: processID, steps: draft.steps.map(({ process_step_id, name: stepName }) => ({ process_step_id, name: stepName })), relationships: draft.relationships, layout: { steps: draft.layout.steps, routes: draft.layout.routes } },
+        processDefinition: { logic_gate_id: processID, steps: process.steps.map(({ process_step_id, name: stepName }) => ({ process_step_id, name: stepName })), relationships: process.relationships, layout: { steps: process.layout.steps, routes: process.layout.routes }, ...details.current },
         requestJSON: (path, init) => requestJSON(apiBase, path, init),
       });
-      if (mounted.current) onSaved({ processID, name: name.trim(), folderID });
+      created.current = true;
+      if (mounted.current) onSaved({ processID, name: name.trim(), folderID }, response);
     } catch (cause) {
-      if (mounted.current) setError(cause instanceof Error ? cause.message : "Could not save this Process. Your draft is still here.");
+      if (mounted.current) setError(cause instanceof Error ? cause.message : "Could not save this Process. Your changes are still here.");
     } finally {
       submitting.current = false;
       if (mounted.current) setSaving(false);
@@ -115,6 +128,7 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
       const folderSegments = path.segments.filter((segment) => segment.entity_type === "folder");
       const parent = folderSegments[folderSegments.length - 1];
       if (path.status !== "resolved" || !parent) throw new Error("The saved Process destination is unavailable.");
+      created.current = true;
       if (mounted.current) onSaved({ processID, name: snapshot.logic_gate.header, folderID: parent.entity_id });
     } catch {
       if (mounted.current) setError("No saved version is available. Check your connection or try Save Process again.");
@@ -123,7 +137,7 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
       if (mounted.current) setSaving(false);
     }
   };
-  return <section className="process-map-workspace process-map-workspace--draft" aria-label="New Process map" aria-busy={saving}>
+  return <section className="process-map-workspace process-map-workspace--new" aria-label="New Process map" aria-busy={saving}>
     <div className="process-map-workspace__path" aria-label="Process location">
       <button type="button" disabled={saving || editorBusy} onClick={onBack}>← Company map</button>
       <span aria-hidden="true">/</span>
@@ -140,11 +154,11 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
         }
       }} /> : <button ref={filenameRef} type="button" className="process-map-workspace__filename" aria-label="Name Process" title="Rename Process" disabled={saving} onClick={() => setEditingName(true)}>{name.trim() || "Untitled Process"}<span aria-hidden="true"> ✎</span></button>}
     </div>
-    {error && <div role="alert" className="process-map-authoring-error">{error} Your draft has been kept. If Save already completed, you can open that saved version; later draft edits will be left behind. <button type="button" disabled={saving || editorBusy} onClick={() => { void openSavedVersion(); }}>Open saved version</button></div>}
-    <ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="draft" processName={name} initialEditingStepID={firstStep ? contents.steps[0]?.process_step_id : undefined} hoverModeEnabled={hoverModeEnabled}
+    <ProcessMapDetails key={processID} apiBase={apiBase} companyID={companyID} processID={processID} isNew folderID={folderID} canEdit={active && !saving} disabled={saving} onChange={updateDetails} onBusyChange={setDetailsBusy} />
+    {error && <div role="alert" className="process-map-authoring-error">{error} Your changes are still here. If Save already completed, find the saved Process; later changes will be left behind. <button type="button" disabled={saving || editorBusy || detailsBusy} onClick={() => { void openSavedVersion(); }}>Find saved Process</button></div>}
+    <ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="new" processName={name} initialEditingStepID={firstStep ? contents.steps[0]?.process_step_id : undefined} hoverModeEnabled={hoverModeEnabled}
       renderActions={({ createStep, disabled, busy }) => <ProcessMapActions onCreateStep={createStep} disabled={saving || busy || !active} stepDisabled={disabled} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={onHoverModeChange}>
-        <span className="process-map-workspace__status">Unsaved draft</span>
-        <button type="button" className="process-map-primary" disabled={saving || editorBusy || foldersLoading || !name.trim() || !selectedFolder} onClick={() => { void save(); }}>{saving ? "Saving…" : "Save Process"}</button>
+        <button type="button" className="process-map-primary" disabled={saving || editorBusy || detailsBusy || foldersLoading || !name.trim() || !selectedFolder} onClick={() => { void save(); }}>{saving ? "Saving…" : "Save Process"}</button>
         {(!name.trim() || !selectedFolder) && <span className="process-map-workspace__status">{!name.trim() ? "Name this Process in the path above." : "Choose a Folder in the path above."}</span>}
       </ProcessMapActions>} />
   </section>;

@@ -1223,7 +1223,7 @@ function RACIRoleEditor({
                   {canEdit && (
                     <button
                       type="button"
-                      aria-label={`Remove ${assignmentLabel} from ${label}`}
+                      aria-label={`Remove ${resolvedAssignmentLabel} from ${label}`}
                       onClick={() => onRemovePrincipal(role, principalType, principalID)}
                       style={{ width: 22, height: 22, display: "grid", placeItems: "center", border: "none", borderRadius: 7, background: hexWithAlpha(roleAccent, "16"), color: roleAccent || accent, cursor: "pointer", padding: 0, font: "inherit", fontSize: 11, fontWeight: 900 }}
                     >
@@ -1264,10 +1264,9 @@ function RACIRoleEditor({
             setAssignedOpen(false);
             setOpen((current) => !current);
           }}
-          style={{ width: "fit-content", minWidth: 58, minHeight: 25, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "3f")}`, borderRadius: 8, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "bb")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: canEdit ? roleAccent : "#64748b", font: "inherit", fontSize: 11, fontWeight: 850, padding: "2px 8px", outline: "none", cursor: canEdit ? "pointer" : "default", pointerEvents: canEdit ? "auto" : "none", opacity: canEdit ? 1 : 0.58, boxShadow: open ? `0 8px 18px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 8px rgba(174,174,192,0.18), -2px -2px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
+          style={{ width: "fit-content", minWidth: 28, minHeight: 28, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, border: open ? "1px solid transparent" : `1px solid ${hexWithAlpha(roleAccent, "3f")}`, borderRadius: 8, background: open ? `${EDITOR_NEU_ACTIVE_SURFACE} padding-box, linear-gradient(135deg, ${hexWithAlpha(roleAccent, "bb")}, rgba(255,255,255,0.86)) border-box` : EDITOR_NEU_SURFACE, color: canEdit ? roleAccent : "#64748b", font: "inherit", fontSize: 11, fontWeight: 850, padding: "2px 8px", outline: "none", cursor: canEdit ? "pointer" : "default", pointerEvents: canEdit ? "auto" : "none", opacity: canEdit ? 1 : 0.58, boxShadow: open ? `0 8px 18px ${hexWithAlpha(roleAccent, "1c")}, inset 1px 1px 0 rgba(255,255,255,0.86)` : "2px 2px 8px rgba(174,174,192,0.18), -2px -2px 8px rgba(255,255,255,0.78), inset 1px 1px 0 rgba(255,255,255,0.86)" }}
         >
           <span aria-hidden="true" style={{ fontSize: 13, lineHeight: 1 }}>+</span>
-          <span>{disabledReason ? "Locked" : "Add"}</span>
         </button>
         {showDisabledTooltip && disabledReason && disabledTooltipPosition && (
           <div

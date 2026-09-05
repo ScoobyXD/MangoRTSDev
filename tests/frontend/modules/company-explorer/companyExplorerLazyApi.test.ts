@@ -42,6 +42,33 @@ test("simultaneous Explorer roots and matching children share in-flight requests
   }
 });
 
+test("committed creation waits for an older branch read and then reads the saved rows once", async () => {
+  const originalFetch = globalThis.fetch;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => { release = resolve; });
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    const index = calls++;
+    if (index === 0) await pending;
+    return Response.json({ rows: index === 0 ? [] : [{ entity_id: "saved-process", entity_type: "logic_gate" }] });
+  }) as typeof fetch;
+  try {
+    const beforeSave = fetchCompanyExplorerChildren("https://explorer-save.test", "company", "all", "folder");
+    const afterSave = fetchCompanyExplorerChildren("https://explorer-save.test", "company", "all", "folder", true);
+    const sameSave = fetchCompanyExplorerChildren("https://explorer-save.test", "company", "all", "folder", true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls, 1, "no simultaneous request for the same branch");
+    release();
+    assert.deepEqual((await beforeSave).rows, []);
+    assert.equal((await afterSave).rows?.[0].entity_id, "saved-process");
+    assert.equal((await sameSave).rows?.[0].entity_id, "saved-process");
+    assert.equal(calls, 2, "the post-commit readers share one fresh request");
+  } finally {
+    release();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("explicit branch expansion collects only the requested resource type", async () => {
   const apiBase = "https://explorer-branch.test";
   const companyID = "company-branch";

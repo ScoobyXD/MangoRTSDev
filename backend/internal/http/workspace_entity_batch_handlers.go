@@ -105,6 +105,10 @@ func (s *Server) handleWorkspaceEntityBatches(w http.ResponseWriter, r *http.Req
 		writeError(w, http.StatusConflict, "workspace_entity_batch_conflict")
 		return
 	}
+	if errors.Is(err, store.ErrEditorOwnerTextLimit) {
+		writeEditorJSONStoreError(w, err)
+		return
+	}
 	if errors.Is(err, store.ErrInvalid) {
 		writeError(w, http.StatusBadRequest, "invalid_workspace_entity_batch")
 		return

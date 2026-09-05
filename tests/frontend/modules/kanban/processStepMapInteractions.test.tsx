@@ -20,7 +20,7 @@ type Request = { path: string; method: string; body: Record<string, any> };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 async function flush() { await act(async () => { for (let index = 0; index < 16; index += 1) await Promise.resolve(); }); }
 
-async function harness(draft = false) {
+async function harness(isNew = false, normalizeZoom = true) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "http://localhost/", pretendToBeVisual: true });
   const restores: Array<() => void> = [];
   const install = (name: string, value: unknown) => {
@@ -78,7 +78,7 @@ async function harness(draft = false) {
     saveLayout: async (layout) => {
       localCalls.push("layout");
       if (state.customLocalSave) return state.customLocalSave(layout);
-      if (state.saveMode === "failure") throw new Error("Could not update draft");
+      if (state.saveMode === "failure") throw new Error("Could not update new Process");
       return state.layout = { ...layout, revision: state.layout.revision + 1 };
     },
     createStep: async (name) => {
@@ -112,11 +112,15 @@ async function harness(draft = false) {
   const renderActions = ({ createStep, disabled }: ProcessStepMapActions) => <div aria-label="Canvas actions"><button type="button" disabled={disabled} onClick={createStep}>Create Step</button></div>;
   const render = () => {
     const props = { steps: [...state.steps], relationships: [...state.relationships], canEdit: state.canEdit, onChanged: render, onBusyChange, processName: "Order Process", hoverModeEnabled: state.hoverModeEnabled, renderActions };
-    root.render(draft
-      ? <ProcessStepMapEditor key={state.processID} {...props} commands={commands} saveMode="draft" />
+    root.render(isNew
+      ? <ProcessStepMapEditor key={state.processID} {...props} commands={commands} saveMode="new" />
       : <ProcessStepMap apiBase="http://localhost" companyID="company" processID={state.processID} {...props} />);
   };
-  const mount = async () => { await act(async () => render()); await flush(); };
+  const mount = async () => {
+    await act(async () => render()); await flush();
+    // Existing gesture cases run at an explicit 100% camera; initial framing is covered separately.
+    if (normalizeZoom) await act(async () => container.querySelector(".process-step-map__viewport")!.dispatchEvent(new dom.window.WheelEvent("wheel", { bubbles: true, cancelable: true, deltaY: Math.log(.85) / .002 })));
+  };
   const button = (label: string): HTMLButtonElement => {
     const result = [...dom.window.document.querySelectorAll<HTMLButtonElement>("button")].find((item) => item.getAttribute("aria-label") === label || item.textContent === label);
     assert.ok(result, `Missing button ${label}`);
@@ -245,7 +249,7 @@ test("dragging backward from an input to an output connects the output Step to t
     await p.drop(p.port("Receive", "output"), 288, 120);
     assert.deepEqual(h.localCalls, ["connect"]);
     assert.deepEqual(h.state.relationships, [{ resource_operational_relationship_id: "new-edge", source: { resource_type: "process_step", resource_id: "a" }, target: { resource_type: "process_step", resource_id: "b" } }]);
-    assert.deepEqual(h.requests, [], "draft connections must use the supplied local command only");
+    assert.deepEqual(h.requests, [], "new Process connections must use the supplied local command only");
     assert.equal(h.busyStates.at(-1), false);
   } finally { await h.dispose(); }
 });
@@ -999,36 +1003,36 @@ test("keyboard deletion preserves inline text and permissions and asks before de
   } finally { await h.dispose(); }
 });
 
-test("draft map uses only supplied local commands for geometry, Steps, and connections", async () => {
+test("new Process map uses only supplied local commands for geometry, Steps, and connections", async () => {
   const h = await harness(true);
   try {
     await h.mount();
-    assert.match(h.container.textContent ?? "", /Unsaved changes stay here/);
+    assert.doesNotMatch(h.container.textContent ?? "", /Unsaved changes/);
     await h.key(h.button("Move Receive"), "ArrowRight");
     assert.equal(h.state.layout.steps[0].x, 80);
-    assert.match(h.container.textContent ?? "", /Unsaved changes kept until you save the Process/);
+    assert.doesNotMatch(h.container.textContent ?? "", /Unsaved changes/);
     await h.click("Create Step");
     const input = h.container.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
     await act(async () => {
-      Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, "value")!.set!.call(input, "Draft review");
+      Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, "value")!.set!.call(input, "New Process review");
       input.dispatchEvent(new h.dom.window.Event("input", { bubbles: true }));
     });
     await h.key(input, "Enter");
-    assert.equal(h.state.steps.find((step) => step.process_step_id === "new")?.name, "Draft review");
-    await h.key(h.button("Connect from Draft review"), "Enter");
+    assert.equal(h.state.steps.find((step) => step.process_step_id === "new")?.name, "New Process review");
+    await h.key(h.button("Connect from New Process review"), "Enter");
     await h.key(h.button("Connect into Receive"), "Enter");
-    await h.pointer(h.container.querySelector('[aria-label="Connection from Draft review to Receive"]')!, "contextmenu", 300, 200);
+    await h.pointer(h.container.querySelector('[aria-label="Connection from New Process review to Receive"]')!, "contextmenu", 300, 200);
     await h.click("Delete connection");
-    await h.pointer(h.button("Move Draft review"), "contextmenu", 300, 200);
+    await h.pointer(h.button("Move New Process review"), "contextmenu", 300, 200);
     await h.click("Delete Step");
     await h.click("Confirm delete Step");
     assert.deepEqual(h.localCalls, ["layout", "create", "rename", "connect", "disconnect", "delete"]);
     assert.equal(h.state.steps.length, 2);
-    assert.deepEqual(h.requests, [], "a draft editor must not access an app API");
+    assert.deepEqual(h.requests, [], "a new Process editor must not access an app API");
   } finally { await h.dispose(); }
 });
 
-test("draft busy state covers gestures and pending mutations, and failure restores the draft", async () => {
+test("new Process busy state covers gestures and pending mutations, and failure restores the new Process", async () => {
   const h = await harness(true);
   let resolveSave!: (layout: ProcessStepMapLayout) => void;
   try {
@@ -1054,7 +1058,7 @@ test("draft busy state covers gestures and pending mutations, and failure restor
     assert.equal(h.busyStates.at(-1), false);
     h.state.saveMode = "failure";
     await h.key(move, "ArrowRight");
-    assert.match(h.container.textContent ?? "", /previous draft layout/);
+    assert.match(h.container.textContent ?? "", /previous layout/);
     assert.equal(h.container.querySelector<HTMLElement>('[data-step-map-id="a"]')!.style.left, "96px");
     assert.equal(h.busyStates.at(-1), false);
     assert.deepEqual(h.requests, []);
@@ -1062,9 +1066,9 @@ test("draft busy state covers gestures and pending mutations, and failure restor
   assert.equal(h.busyStates.at(-1), false, "unmount releases the outer Save control");
 });
 
-test("saved and draft map menus distinguish Step actions from blank-canvas creation", async () => {
-  for (const draft of [false, true]) {
-    const h = await harness(draft);
+test("saved and new Process map menus distinguish Step actions from blank-canvas creation", async () => {
+  for (const isNew of [false, true]) {
+    const h = await harness(isNew);
     try {
       await h.mount();
       const open = async (element: Element) => {
@@ -1080,7 +1084,7 @@ test("saved and draft map menus distinguish Step actions from blank-canvas creat
       await act(async () => create.click());
       await flush();
       assert.ok(h.container.querySelector('[data-step-map-id="new"]'));
-      if (draft) assert.deepEqual(h.requests, []);
+      if (isNew) assert.deepEqual(h.requests, []);
       h.state.canEdit = false;
       await h.mount();
       await open(h.container.querySelector(".process-step-map__canvas")!);
@@ -1090,4 +1094,29 @@ test("saved and draft map menus distinguish Step actions from blank-canvas creat
       assert.equal(h.dom.window.document.querySelector('[aria-label="Process map creation"]'), null);
     } finally { await h.dispose(); }
   }
+});
+
+
+test("initial Process framing leaves room around the outline and never rewrites geometry", async () => {
+  const h = await harness(false, false);
+  try {
+    const before = structuredClone(h.state.layout);
+    h.dom.window.document.head.innerHTML = '<style>.process-step-map__viewport { padding: 184px 224px 32px 32px; }</style>';
+    Object.defineProperties(h.dom.window.HTMLElement.prototype, {
+      clientWidth: { configurable: true, get() { return this.classList.contains("process-step-map__viewport") ? 1600 : 0; } },
+      clientHeight: { configurable: true, get() { return this.classList.contains("process-step-map__viewport") ? 900 : 0; } },
+    });
+    await h.mount();
+    const canvas = h.container.querySelector<HTMLElement>(".process-step-map__canvas")!;
+    assert.equal(canvas.style.transform, "translate(8px, 8px) scale(0.85)");
+    assert.ok(32 + 8 + (1600 - 32 - 224) * .85 < 1600 - 224, "outline fits left of the control area");
+    assert.deepEqual(h.state.layout, before);
+    assert.equal(h.writes().length, 0);
+    await h.pointer(h.container.querySelector(".process-step-map__viewport")!, "pointerdown", 200, 200);
+    await h.pointer(h.container.querySelector(".process-step-map__viewport")!, "pointerup", 240, 230);
+    const moved = canvas.style.transform;
+    await act(async () => h.render());
+    await flush();
+    assert.equal(canvas.style.transform, moved, "refresh never resets a camera the user moved");
+  } finally { await h.dispose(); }
 });

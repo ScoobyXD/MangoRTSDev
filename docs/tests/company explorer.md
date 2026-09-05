@@ -88,14 +88,20 @@
 86. Creating a Process from Company Explorer requires a nonblank name and an existing permitted destination Folder.
 87. Process creation, its single Explorer placement, and its automatic company-map placement commit in one transaction.
 88. The creation transaction rechecks destination Folder Edit access before writing any Process.
-89. A successful creation reveals, selects, and opens the exact new Process; a failed creation keeps the dialog values and permits retry without a second placement request.
+89. Successful creation from Company Explorer reveals, selects, and opens the exact new Process; a failed creation keeps the dialog values and permits retry without a second placement request.
+90. Clicking Process Map scrolls the sidebar to Explore beneath the visible sticky Search Explorer field, regardless of the tree's length.
+91. The sidebar shows one Explore heading and one wide raised surface around its tree.
+92. Hovering an Explorer row lifts it slightly without selecting it or replacing its selected and drag-target indicators; reduced motion disables the lift.
+93. Choosing a Process destination reveals and expands that exact Folder and its permitted ancestor path in Company Explorer.
+94. A committed Process Map creation expands its destination path and selects the exact new Process without opening its Board or SOP.
+95. Process Map creation patches the initiating Explorer from its committed response and reads only the exact destination path; recovery after an uncertain response uses canonical reads of that same path and creates no second Process.
 
 ## Process Story
 
-A user names a Process and chooses a permitted Folder. Mango commits the Process and its one placement together, preserves the existing creator RACI behavior, and opens the new Process. Explorer remains the hierarchy authority for folders, Processes, and Projects; Nodes stay in their typed domain relationships. Reads and search return permitted source records without repairing data or exposing hidden ancestors.
+A user names a Process and chooses a permitted Folder. Mango reveals that destination and commits the Process and its one placement together. Company Explorer creation opens the new Process; Process Map creation selects its row while the map returns to the prior company view. Explorer remains the hierarchy authority for folders, Processes, and Projects; Nodes stay in their typed domain relationships. Reads and search return permitted source records without repairing data or exposing hidden ancestors.
 
 ## Main Scenarios
 
-1. **Create or retry:** save a named Process in a selected Folder. Success reveals one placement and opens the Process. A server failure leaves the entered values available; revoked Folder access creates nothing.
+1. **Create or retry:** save a named Process in a selected Folder. Success reveals one selected placement, including in a previously empty or unopened Folder. Explorer creation opens it; map creation returns to the company map. A server failure leaves the entered values available; revoked Folder access creates nothing.
 2. **Move and remove:** moving a permitted Process changes its single Explorer parent and matching company-map placement. Removing only its placement preserves the Process; deleting a protected Folder remains rejected.
 3. **Search and work:** search returns directly accessible resources with only fully visible paths. An email dropped onto a Process creates work through the existing Node assignment flow and never creates a Node Explorer row.

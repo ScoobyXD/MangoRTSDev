@@ -12,16 +12,16 @@
 .process-map-focus { position: absolute; inset: 0; }
 .process-map-focus.is-exiting { pointer-events: none; animation: process-map-exit 440ms ease-in both; }
 .process-map-focus.is-exiting .process-step-map__extent { transform-origin: 50% 40%; animation: process-map-exit-room 440ms cubic-bezier(.4,0,.8,.3) both; }
-.process-map-workspace--draft, .process-map-workspace--draft > .process-step-map, .process-map-workspace--draft .process-step-map__viewport { background: transparent; }
-.process-map-workspace--draft::before { content: ""; position: absolute; inset: 0; background: #fff; animation: process-map-enter-background 440ms ease-out; }
-.process-map-workspace--draft .process-step-map__extent { transform-origin: 50% 40%; animation: process-map-enter-room 440ms cubic-bezier(.2,.7,.2,1); }
+.process-map-workspace--new, .process-map-workspace--new > .process-step-map, .process-map-workspace--new .process-step-map__viewport { background: transparent; }
+.process-map-workspace--new::before { content: ""; position: absolute; inset: 0; background: #fff; animation: process-map-enter-background 440ms ease-out; }
+.process-map-workspace--new .process-step-map__extent { transform-origin: 50% 40%; animation: process-map-enter-room 440ms cubic-bezier(.2,.7,.2,1); }
 @keyframes process-map-enter-background { from { opacity: 0; } to { opacity: 1; } }
 @keyframes process-map-enter-room { from { opacity: .35; transform: scale(.88); pointer-events: none; } to { opacity: 1; transform: scale(1); pointer-events: none; } }
 @keyframes process-map-exit { from { opacity: 1; } to { opacity: 0; } }
 @keyframes process-map-exit-room { from { transform: scale(1); } to { transform: scale(.88); } }
 @media (prefers-reduced-motion: reduce) {
   .process-map-company-canvas, .process-map-company-canvas.is-focused { transition: none; transform: none; }
-  .process-map-workspace--draft::before, .process-map-workspace--draft .process-step-map__extent { animation: none; }
+  .process-map-workspace--new::before, .process-map-workspace--new .process-step-map__extent { animation: none; }
   .process-map-focus.is-exiting, .process-map-focus.is-exiting .process-step-map__extent { animation: none; }
 }
 .process-map-workspace__path { position: absolute; top: 16px; left: 16px; z-index: 25; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 224px); padding: 4px 6px; color: #64748b; font-size: 13px; border-radius: 10px; background: #ffffffde; box-shadow: 0 3px 16px #2634490a; backdrop-filter: blur(16px); }
@@ -69,4 +69,9 @@ input.process-map-workspace__filename { width: 20ch; border: 0; border-bottom: 1
   .process-map-workspace__path { top: 12px; left: 12px; max-width: calc(100% - 196px); font-size: 12px; }
   .process-map-workspace__path button { font-size: 12px; }
   .process-map-authoring-notice { max-width: calc(100% - 24px); box-sizing: border-box; }
+}
+
+.process-map-workspace .process-step-map__viewport { padding: 184px 224px 32px 32px; }
+@media (max-width: 700px) {
+  .process-map-workspace .process-step-map__viewport { padding: 192px 192px 24px 20px; }
 }

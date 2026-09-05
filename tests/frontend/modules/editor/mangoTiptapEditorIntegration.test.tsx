@@ -24,6 +24,57 @@ import { mangoTiptapPendingStorageKey, readExactMangoTiptapPending } from "../..
 
 type Restore = () => void;
 
+test("a new Process SOP edits normal JSON without server, recovery, or owner mutations and survives remount", async () => {
+  const dom = new JSDOM('<!doctype html><div id="local-editor"></div>', { url: "http://localhost/", pretendToBeVisual: true });
+  const restores: Restore[] = [];
+  for (const name of ["window", "document", "navigator", "self", "Node", "NodeFilter", "Element", "HTMLElement", "DocumentFragment", "DOMParser", "Event", "EventTarget", "CustomEvent", "MouseEvent", "KeyboardEvent", "FocusEvent", "InputEvent", "MutationObserver", "Range", "Selection", "localStorage", "sessionStorage"]) {
+    installGlobal(name, name === "window" || name === "self" ? dom.window : (dom.window as unknown as Record<string, unknown>)[name], restores);
+  }
+  installGlobal("getComputedStyle", dom.window.getComputedStyle.bind(dom.window), restores);
+  installGlobal("IS_REACT_ACT_ENVIRONMENT", true, restores);
+  installGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(Date.now()), 0), restores);
+  installGlobal("cancelAnimationFrame", clearTimeout, restores);
+  dom.window.HTMLElement.prototype.scrollIntoView = () => undefined;
+  dom.window.Range.prototype.getClientRects = () => [] as unknown as DOMRectList;
+  dom.window.Range.prototype.getBoundingClientRect = () => new dom.window.DOMRect();
+  const container = dom.window.document.getElementById("local-editor")!;
+  const [{ createRoot }, { MangoTiptapEditor }, { flushMangoTiptapResource }] = await Promise.all([
+    import("react-dom/client"),
+    import("../../../../frontend/src/modules/editor/tiptap/MangoTiptapEditor.js"),
+    import("../../../../frontend/src/modules/editor/tiptap/mangoTiptapFlushRegistry.js"),
+  ]);
+  const root = createRoot(container);
+  const controllerRef: React.MutableRefObject<MangoTiptapFormattingController | null> = { current: null };
+  let snapshot: MangoTiptapDocument = { format: "mango-tiptap-json", schema_version: 1, document: { type: "doc", content: [{ type: "paragraph", attrs: { blockId: "sop" }, content: [{ type: "text", text: "Initial SOP" }] }] } };
+  const requestJSON = async <T,>(): Promise<T> => { assert.fail("a new Process editor made a persistence request"); };
+  let updates = 0;
+  const render = (key: string) => root.render(<MangoTiptapEditor key={key} value={JSON.stringify(snapshot)} saveMode="local" companyID="company-local" resourceType="logic_gate" resourceID="new-process" documentID="logic-gate-overview" ariaLabel="Local SOP" requestJSON={requestJSON} formattingControllerRef={controllerRef}
+    subscribeToCanonicalChange={() => { assert.fail("a new Process editor subscribed to server changes"); }}
+    onDocumentSnapshotChange={(next) => { snapshot = next; updates += 1; }} />);
+  try {
+    await act(async () => render("first"));
+    const activate = async () => {
+      await act(async () => Simulate.doubleClick(container.querySelector('[data-mango-editor-format="tiptap_json"]')!));
+      await waitFor(() => Boolean(controllerRef.current), "local SOP did not activate");
+    };
+    await activate();
+    await act(async () => { controllerRef.current!.insertTable(); });
+    assert.match(JSON.stringify(snapshot), /"type":"table"/, "ordinary formatting updates the creation JSON immediately");
+    assert.ok(updates > 0);
+    assert.equal(container.querySelector('[aria-label="Highlighted text actions"]'), null);
+    await flushMangoTiptapResource({ companyID: "company-local", resourceType: "logic_gate", resourceID: "new-process" });
+    assert.equal(dom.window.localStorage.length, 0);
+    await act(async () => render("reopened"));
+    assert.ok(container.querySelector("table"), "closing and reopening the SOP preserves its table and JSON");
+    await activate();
+    assert.match(JSON.stringify(snapshot), /Initial SOP/);
+  } finally {
+    await act(async () => root.unmount());
+    dom.window.close();
+    for (const restore of restores.reverse()) restore();
+  }
+});
+
 const EMAIL_THREAD_ID = "22222222-2222-4222-8222-222222222222";
 const REFERENCED_EMAIL_MESSAGE_ID = "33333333-3333-4333-8333-333333333333";
 const ABSENT_EMAIL_MESSAGE_ID = "77777777-7777-4777-8777-777777777777";

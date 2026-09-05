@@ -242,7 +242,7 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
   const openProcess = surface.slice(openStart, openEnd);
   assert.match(openProcess, /placement\.resource_type !== "logic_gate"/);
   assert.doesNotMatch(openProcess, /processMapPlacementDisplayLOD/);
-  assert.match(openProcess, /onOpenLogicGate\(placement\.resource_id, placement\.name\)/);
+  assert.match(openProcess, /onOpenLogicGate\(placement\.resource_id, placement\.name, placement\.map_parent_folder_id \?\? undefined\)/);
   assert.match(click, /processMapPlacementDisplayLOD\(pick\.placement, 2 \*\* settledViewState\.zoom\) !== "whole"[\s\S]*setPinnedProcessID/);
   assert.match(surface, /event\.key === "Enter" \|\| event\.key === " "/);
   assert.match(surface, /openProcess\(selectedPlacement\)/);

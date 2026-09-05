@@ -484,12 +484,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
   const [logicGateArenaTarget, setLogicGateArenaTarget] = useState<LogicGateArenaTarget | null>(() => logicGateTargetFromRoute(deepLink));
   const [processMapLogicGateOverlay, setProcessMapLogicGateOverlay] = useState<LogicGateArenaTarget | null>(null);
   const [processMapLogicGateOverlayFrames, setProcessMapLogicGateOverlayFrames] = useState<FrameDataModel[]>(createLogicGateArenaFrames);
-  const [processMapDraftCompanyID, setProcessMapDraftCompanyID] = useState<string | null>(null);
-  const processMapHasDraft = processMapDraftCompanyID === activeCompanyID;
-  const setProcessMapHasDraft = useCallback((active: boolean) => {
-    setProcessMapDraftCompanyID((current) => active ? activeCompanyID : current === activeCompanyID ? null : current);
-  }, [activeCompanyID]);
-  useEffect(() => setProcessMapDraftCompanyID(null), [activeCompanyID]);
   const [projectManagementTarget, setProjectManagementTarget] = useState<ProjectManagementTarget | null>(() => projectTargetFromRoute(deepLink));
   const [viewSize, setViewSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
@@ -2301,7 +2295,7 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
         )}
       </FrameCanvas>
       )}
-      {(processMapVisible || processMapHasDraft) && <div
+      {processMapVisible && <div
         data-process-map-retained="true"
         aria-hidden={!processMapVisible}
         ref={(element) => element?.toggleAttribute("inert", !processMapVisible)}
@@ -2314,7 +2308,6 @@ const App: React.FC<AppProps> = ({ accountChrome, initialPage, deepLink, me, onN
             apiBase={apiBase}
             companyID={activeCompanyID}
             onOpenLogicGate={openProcessMapLogicGateOverlay}
-            onDraftStateChange={setProcessMapHasDraft}
             active={Boolean(processMapVisible)}
           />
         </React.Suspense>

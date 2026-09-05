@@ -6,7 +6,7 @@ import { requestAppSidebarPin } from "../../app/sidebarPins";
 import type { ConfirmActionMenuPosition } from "../../app/ConfirmActionMenu";
 import { type NodeRecord } from "../nodes/types";
 import { getLogicGateTitle as getLogicGateRecordTitle, toLogicGateViewRecord, type LogicGateRACIRole, type LogicGateRecord as LogicGateApiRecord, type LogicGateViewRecord } from "../logic-gates/types";
-import { emitDashboardEvent, emitExplorerContextUpdated, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED } from "../dashboardEvents";
+import { emitDashboardEvent, emitExplorerContextUpdated, EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, EVENT_COMPANY_EXPLORER_PROCESS_CREATED } from "../dashboardEvents";
 import { emptyExplorerSelectionState, type ExplorerSelectionState } from "./selectionSync";
 import { hasCompanyExplorerFolderPermissionRules, type CompanyExplorerFolder, type CompanyExplorerFolderItem, type CompanyExplorerFolderKind, type CompanyExplorerFolderScopeType, type CompanyExplorerItemType, type CompanyExplorerSystemFolderKey } from "../folders/companyExplorerFolders";
 import { dispatchLogicGateWorkUpdated, type RACIMatrixProjectionRow } from "../kanban/kanbanApi";
@@ -65,7 +65,7 @@ import {
   type CompanyExplorerSearchResultSummary,
   type CompanyExplorerTriageMessageDropHandler,
   type CompanyExplorerTriageMessageDropTarget,
-  type CompanyExplorerWorkspaceEntityBatchResponse,
+  type CompanyExplorerProcessCreatedDetail,
 } from "./CompanyExplorerContentModel";
 import {
   applyCompanyExplorerSnapshotTitleUpdate,
@@ -2421,10 +2421,6 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     }
   }, [apiBase, companyExplorerV2Rows, companyExplorerV2TreeIDForEntityID, companyID, folderItems, requestJSON]);
 
-  const upsertOptimisticFolderItem = useCallback((item: CompanyExplorerFolderItem) => {
-    dispatchExplorerStore({ type: "upsertFolderItems", folderItems: [item] });
-  }, [apiBase, companyID]);
-
   const expandCreatedItemTarget = useCallback((parentFolderID: string) => {
     setExpanded((previous) => {
       const next = new Set(previous);
@@ -2437,35 +2433,59 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     });
   }, [companyExplorerV2Active, companyExplorerV2RootEntityID, companyExplorerV2TreeIDForEntityID]);
 
-  const handleProcessCreated = useCallback((response: CompanyExplorerWorkspaceEntityBatchResponse, folderPath: string[]) => {
+  const refreshExplorerPath = useCallback(async (folderPathIDs: string[], afterPending = false) => {
+    await Promise.all(Array.from(new Set([companyID, ...folderPathIDs])).map(async (parentID) => {
+      const branchKey = companyExplorerBranchKey(parentID);
+      inflightCompanyExplorerBranchesRef.current.add(branchKey);
+      try {
+        const titleVersion = readCommittedEntityTitleVersion();
+        const snapshot = await fetchCompanyExplorerChildren(apiBase, companyID, companyExplorerLazyScope, parentID, afterPending);
+        dispatchExplorerStore({ type: "mergeSnapshot", snapshot: foldCommittedEntityTitlesSince(snapshot, companyID, titleVersion, applyCompanyExplorerSnapshotTitleUpdate) });
+        loadedCompanyExplorerBranchesRef.current.add(branchKey);
+        staleCompanyExplorerBranchesRef.current.delete(branchKey);
+      } finally {
+        inflightCompanyExplorerBranchesRef.current.delete(branchKey);
+      }
+    }));
+  }, [apiBase, companyExplorerBranchKey, companyExplorerLazyScope, companyID]);
+
+  const handleProcessCreated = useCallback(({ response, processID, folderPathIDs }: CompanyExplorerProcessCreatedDetail, activate = false) => {
     setError("");
-    const created = response.logic_gates![0];
-    const logicGate = toLogicGateViewRecord(created) as ExplorerLogicGateRecord;
-    logicGate.gvic_assignments = created.gvic_assignments ?? [];
-    for (const item of response.folder_items ?? []) upsertOptimisticFolderItem(item);
-    dispatchExplorerStore({ type: "upsertLogicGate", logicGate });
-    setExpanded((previous) => new Set([...previous, "folder-root", ...folderPath.map((id) => `workspace-folder-${id}`)]));
+    const created = response?.logic_gates?.find((process) => process.logic_gate_id === processID);
+    if (response) dispatchExplorerStore({ type: "mergeSnapshot", snapshot: response });
+    setExpanded((previous) => new Set([...previous, "folder-root", ...folderPathIDs.map((id) => `workspace-folder-${id}`)]));
     // Refresh canonical rows, including an unopened destination path. Creation has
     // already committed; a failed read must not turn the form into a second create.
-    void Promise.all([companyID, ...folderPath].map((id) => requestJSON<{ rows?: CompanyExplorerV2Row[] }>(`/v1/company-explorer/children?company_id=${encodeURIComponent(companyID)}&parent_id=${encodeURIComponent(id)}`)))
-      .then((snapshots) => {
-        for (const snapshot of snapshots) dispatchExplorerStore({ type: "mergeSnapshot", snapshot });
-      })
+    void refreshExplorerPath(folderPathIDs, true)
       .catch(() => setError("Process created. Could not refresh Company Explorer; reopen it to reload."));
-    const treeID = `logic-gate-${logicGate.logic_gate_id}`;
+    const treeID = `logic-gate-${processID}`;
     lastLocalExplorerSelectionRef.current = { domain: "logic_gate", changedAt: Date.now() };
-    pendingExplorerSelectionIntentRef.current = "activate";
+    suppressNextExplorerBroadcastRef.current = !activate;
+    pendingExplorerSelectionIntentRef.current = activate ? "activate" : "navigate";
     setSelectedTreeID(treeID);
     setSelectedTreeIDs(new Set([treeID]));
     setSelectionAnchorTreeID(treeID);
-    setSelectedLogicGateID(logicGate.logic_gate_id);
+    setSelectedLogicGateID(processID);
     setSelectedNodeID("");
-    emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
-      companyID, sourceFrameID: scope, kind: "logic_gate", id: logicGate.logic_gate_id,
-      label: getLogicGateRecordTitle(logicGate), selectedTreeID: treeID, suppressNavigation: false, changedAt: Date.now(),
-    });
-    if (createProcessTarget?.RACIRole) requestRACIExplorerProjectionRefreshRef.current();
-  }, [companyID, createProcessTarget?.RACIRole, requestJSON, scope, upsertOptimisticFolderItem]);
+    pendingScrollTreeIDRef.current = treeID;
+    pendingScrollAlignRef.current = "nearest";
+    if (activate && created) {
+      emitDashboardEvent(EVENT_COMPANY_EXPLORER_ENTITY_ACTIVATED, {
+        companyID, sourceFrameID: scope, kind: "logic_gate", id: processID,
+        label: created.header, selectedTreeID: treeID, suppressNavigation: false, changedAt: Date.now(),
+      });
+      if (createProcessTarget?.RACIRole) requestRACIExplorerProjectionRefreshRef.current();
+    }
+  }, [companyID, createProcessTarget?.RACIRole, refreshExplorerPath, scope]);
+
+  useEffect(() => {
+    const onProcessCreated = (event: Event) => {
+      const detail = (event as CustomEvent<CompanyExplorerProcessCreatedDetail>).detail;
+      if (detail?.companyID === companyID && detail.processID) handleProcessCreated(detail);
+    };
+    window.addEventListener(EVENT_COMPANY_EXPLORER_PROCESS_CREATED, onProcessCreated);
+    return () => window.removeEventListener(EVENT_COMPANY_EXPLORER_PROCESS_CREATED, onProcessCreated);
+  }, [companyID, handleProcessCreated]);
 
   const createProjectAtFolder = useCallback(async (parentFolderID: string, position?: number) => {
     setError("");
@@ -2980,7 +3000,8 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
     setSelectedLogicGateID("");
     pendingScrollAlignRef.current = "center";
     pendingScrollTreeIDRef.current = targetTreeID;
-  }, []);
+    void refreshExplorerPath(cleanFolderPathIDs).catch(() => setError("Could not reveal this Folder. Reopen Company Explorer to reload."));
+  }, [refreshExplorerPath]);
 
   const selectExplorerSearchResult = useCallback((row: ExplorerTreeNode) => {
     treeKeyboardActiveRef.current = true;
@@ -3484,7 +3505,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
         display: "grid",
         gridTemplateColumns: "minmax(0, 1fr)",
         alignContent: useParentScroll ? "start" : undefined,
-        background: elevatedExplorerControls ? "transparent" : surfaceBackground,
+        background: useParentScroll && theme === "light" ? "transparent" : surfaceBackground,
         color: surfaceText,
         overflow: useParentScroll ? "visible" : "hidden",
         minWidth: 0,
@@ -3621,7 +3642,7 @@ export const CompanyExplorerContent: React.FC<CompanyExplorerContentProps> = ({
           position={createProcessTarget.position}
           creatorRACIRole={createProcessTarget.RACIRole}
           isDarkTheme={isDarkTheme}
-          onCreated={handleProcessCreated}
+          onCreated={(response, folderPathIDs) => handleProcessCreated({ companyID, processID: response.logic_gates![0].logic_gate_id, response, folderPathIDs }, true)}
           onClose={() => setCreateProcessTarget(null)}
         />
       )}

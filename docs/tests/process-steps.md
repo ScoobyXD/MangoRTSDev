@@ -45,27 +45,27 @@
 43. Map creation, renaming, and connection commands use the existing Step records and same-Process operational relationships.
 44. Step-map layout stores only positions, dimensions, and routes keyed by exact Step and relationship IDs within one Process.
 45. Moving or resizing a Step or routing a connection never changes Board order, Node assignments, statuses, SOP content, or operational endpoints.
-46. Completed layout gestures in a saved Process save on the server and report saving, success, or failure; gestures in an unsaved Process update only its local draft until Save Process.
+46. Completed layout gestures in a saved Process save on the server; a new Process keeps them only in memory until Save Process.
 47. A stale layout revision is rejected rather than overwriting a newer layout, and the client reloads the current arrangement before retrying.
 48. Deleting a Step or connection removes its dependent layout entries and advances the layout revision; surviving resources and geometry remain unchanged.
 49. Process recycle and restore preserve exact surviving Step geometry and routes, and permanent Process deletion removes its layout.
 50. Layout reads and writes require current access to the exact owning Process and reject references to another Process.
 51. SOP text provides written Step explanations; the map introduces no separate instruction fields or inferred Step identities.
 52. Pan, zoom, Board scrolling, and the selected view are local presentation state and never write layout or resource records.
-53. Create Process on the company map opens an empty local draft inside the shared map pane.
+53. Create Process on the company map opens an unsaved new Process inside the shared map pane.
 54. Save Process requires a nonblank name and an existing destination Folder selected through its breadcrumb path.
-55. Initial Save stores the Process, Folder placement, zero to 200 Steps, up to 500 same-Process connections, layout, and committed events in one transaction.
+55. Initial Save atomically stores the Process, Folder placement, zero to 200 Steps, up to 500 connections, layout, chosen RACI, SOP, and committed events.
 56. Initial Step array order sets Board order independently of authored geometry.
-57. A rejected save retains the local draft and commits no partial Process, relationship, placement, or event.
+57. A rejected save preserves the open new Process and commits no partial record or event.
 58. Repeated save attempts retain the same allocated UUIDs and cannot create duplicate Processes or overwrite an existing identity.
 59. Save and controls that leave the Process stay disabled during a layout gesture or pending mutation.
-60. Leaving an unsaved draft through its Company map action requires explicit discard; successful Save stays in the full Process canvas.
-61. Sidebar navigation retains the current company's draft in memory; returning to Process Map restores that draft without a server write.
-62. An uncertain Save offers an explicit saved-version recovery that freshly authorizes the exact Process and its Explorer location before leaving the draft.
-63. Company browsing, Process drafts, and saved Process map views use an edge-to-edge white canvas without a background grid, outer panels, or separate creation form.
+60. Going back before Save requires the top-left “Are you sure?” confirmation; successful Save returns through the Company map exit animation.
+61. Leaving Process Map retains no saved or resumable new Process.
+62. An uncertain Save offers explicit recovery that freshly authorizes the exact saved Process and its Explorer location before returning to the company map.
+63. Company browsing and new and saved Process maps use an edge-to-edge white canvas without a background grid, outer panels, or separate creation form.
 64. The company Process Map retains one elevated translucent top-right card containing Create Folder, Create Process, Create Step, and Hover mode in that vertical order.
-65. Create Step adds to the focused draft or saved Process, or starts a new Process draft containing its first Step when no Process is open.
-66. On the company Process Map, the Folder and file breadcrumb stays inline at the top with a compact editable draft filename.
+65. Create Step adds to the focused Process, or starts a new Process containing its first Step.
+66. On the company Process Map, the Folder and file breadcrumb stays inline at the top with a compact editable new Process filename.
 67. Folder selection and Folder creation appear on compact elevated surfaces inside the map.
 68. Save Process and its save status stay inside the common top-right card.
 69. Hover mode on the focused map previews the hovered Step's name and highlights its connections without changing selection or pending edits.
@@ -87,7 +87,7 @@
 85. Process map views omit zoom buttons and Fit.
 86. Read-only access allows focused-map camera navigation.
 87. A Step, route, or connection editing gesture holds the focused-map camera fixed until that gesture ends.
-88. On the company Process Map, Create Folder and Create Process remain visible and disabled inside focused drafts and saved Processes.
+88. On the company Process Map, Create Folder and Create Process remain visible and disabled inside focused Processes.
 89. Inline Step titles have no visible input border.
 90. The Process editor's right-hand Map view uses the same Process canvas and interactions as the company Process Map.
 91. Each focused Step has one input port at its left midpoint and one output port at its right midpoint.
@@ -112,9 +112,14 @@
 110. Delete on a focused Step port or resize handle targets that exact Step.
 111. Deleting a route waypoint preserves its operational connection.
 
+112. Focused Process maps start zoomed out within the existing camera range and reserve space for their fixed controls.
+113. The new Process uses the existing RACI cards and SOP editor without a separate saved draft.
+114. The map omits the persistent unsaved-changes notice.
+115. Save reveals the Process in its expanded Explorer Folder and selects its canonical company-map placement while preserving the previous camera.
+
 ## Process Story
 
-A user creates a Process draft, chooses a Folder, and names compact Steps on the map. Output-to-input connections define the flow and its displayed numbering. The user arranges Steps, pans blank space, and zooms with the wheel before saving to Company Explorer. In the Process editor, Map opens the same white canvas beside the SOP; its floating controls create Steps or return to the Board's Node columns and status views. Both views use the same saved Steps and connections. Deleting a Step preserves every Node and status.
+A user creates a Process, chooses a Folder, and names compact Steps on the map. Output-to-input connections define the flow and its displayed numbering. The user arranges Steps, pans blank space, and zooms with the wheel before saving its RACI, SOP, and Steps together and returning to the previous company map view. In the Process editor, Map opens the same white canvas beside the SOP; its floating controls create Steps or return to the Board's Node columns and status views. Both views use the same saved Steps and connections. Deleting a Step preserves every Node and status.
 
 ## Main Scenarios
 
