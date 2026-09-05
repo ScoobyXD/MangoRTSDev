@@ -907,6 +907,55 @@ func TestMemoryProcessMapTileUsesPerPlacementConservativeLOD(t *testing.T) {
 	}
 }
 
+func TestMemoryProcessMapTileMetadataUsesCurrentMembershipAndBusinessDate(t *testing.T) {
+	repo, companyID, admin, _, _ := newV2PolicyTestRepo(t)
+	ctx := context.Background()
+	query := ProcessMapTileQuery{CompanyID: companyID, PermissionUserID: admin.UserID, Z: ProcessMapMaxTileZoom}
+	process, err := repo.CreateLogicGate(companyID, "Daily score")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, process.LogicGateID, nil, 0, 0, 10, 8)); err != nil {
+		t.Fatal(err)
+	}
+	for _, day := range []string{"2026-09-04", "2026-09-05"} {
+		rating := day
+		repo.qdRatings[memoryQDRatingDayKey(companyID, process.LogicGateID, day)] = domain.QDRating{QualityRating: &rating}
+		summary, _, _ := repo.memoryProcessMapProcessSummaryLocked(companyID, process.LogicGateID, day)
+		if summary == nil || summary.QualityRating == nil || *summary.QualityRating != day {
+			t.Fatalf("score summary ignored snapshot date %s: %+v", day, summary)
+		}
+	}
+	otherCompanyID := "99999999-2222-4333-8444-555555555555"
+	repo.EnsureCompany(otherCompanyID, "Global admin company")
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, otherCompanyID, domain.RoleDevAdmin); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, companyID, domain.RoleCompanyUser); err != nil {
+		t.Fatal(err)
+	}
+	tile, err := repo.GetProcessMapTile(ctx, query)
+	if err != nil || tile.Metadata.ActorRole != domain.RoleCompanyUser || tile.Metadata.ProcessMapVersion != tile.ProcessMapReadVersion || tile.Metadata.BusinessDate == "" {
+		t.Fatalf("tile metadata = %+v, err=%v", tile.Metadata, err)
+	}
+	metadata, err := repo.GetProcessMapTileMetadata(ctx, query)
+	if err != nil || metadata != tile.Metadata {
+		t.Fatalf("unchanged metadata = %+v, full=%+v, err=%v", metadata, tile.Metadata, err)
+	}
+	delete(repo.memberships, membershipKey(companyID, admin.UserID))
+	metadata, err = repo.GetProcessMapTileMetadata(ctx, query)
+	if err != nil || metadata.ActorRole != domain.RoleDevAdmin {
+		t.Fatalf("global admin metadata = %+v, err=%v", metadata, err)
+	}
+	delete(repo.memberships, membershipKey(otherCompanyID, admin.UserID))
+	if _, err := repo.GetProcessMapTileMetadata(ctx, query); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked metadata error = %v", err)
+	}
+	if _, err := repo.GetProcessMapTile(ctx, query); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked tile error = %v", err)
+	}
+}
+
 func TestMemoryProcessMapRootDimensionsCancellationAndRollback(t *testing.T) {
 	ctx := context.Background()
 	repo, companyID, admin, _, _ := newV2PolicyTestRepo(t)
@@ -925,6 +974,9 @@ func TestMemoryProcessMapRootDimensionsCancellationAndRollback(t *testing.T) {
 	}
 	if _, err := repo.GetProcessMapTile(cancelled, ProcessMapTileQuery{CompanyID: companyID, PermissionUserID: admin.UserID, Z: 0, X: 0, Y: 0}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("tile cancellation = %v", err)
+	}
+	if _, err := repo.GetProcessMapTileMetadata(cancelled, ProcessMapTileQuery{CompanyID: companyID, PermissionUserID: admin.UserID}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("tile metadata cancellation = %v", err)
 	}
 	if _, err := repo.PutProcessMapPlacement(cancelled, processMapTestPlacementInput(companyID, admin.UserID, domain.ProcessMapResourceTypeProcess, rootProcess.LogicGateID, nil, 1, 1)); !errors.Is(err, context.Canceled) {
 		t.Fatalf("write cancellation = %v", err)

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 )
 
 const processMapRealtimeConnectionIDHeader = "X-Mango-Realtime-Connection-ID"
@@ -45,14 +44,11 @@ func (s *Server) processMapETag(r *http.Request, companyID, actorUserID, actorRo
 	if err != nil {
 		return "", err
 	}
-	businessDate := ""
-	if contract == processMapTileETagContract {
-		businessDate, err = store.QDRatingBusinessDate(time.Now().UTC())
-		if err != nil {
-			return "", err
-		}
-	}
-	return strongETagFromString(contract + ":" + companyID + ":" + actorUserID + ":" + actorRole + ":" + r.URL.Path + "?" + r.URL.Query().Encode() + ":" + strconv.FormatInt(processVersion, 10) + ":" + strconv.FormatInt(groupVersion, 10) + ":" + businessDate), nil
+	return processMapReadETag(r, companyID, actorUserID, actorRole, contract, processVersion, groupVersion, ""), nil
+}
+
+func processMapReadETag(r *http.Request, companyID, actorUserID, actorRole, contract string, processVersion, groupVersion int64, businessDate string) string {
+	return strongETagFromString(contract + ":" + companyID + ":" + actorUserID + ":" + actorRole + ":" + r.URL.Path + "?" + r.URL.Query().Encode() + ":" + strconv.FormatInt(processVersion, 10) + ":" + strconv.FormatInt(groupVersion, 10) + ":" + businessDate)
 }
 
 func (s *Server) authorizeProcessMapRead(w http.ResponseWriter, r *http.Request, companyID, resourceType, resourceID string) (string, string, bool) {
@@ -174,26 +170,42 @@ func (s *Server) handleProcessMapTile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "company_id_required")
 		return
 	}
-	actorUserID, actorRole, ok := s.authorizeProcessMapRead(w, r, companyID, "", "")
-	if !ok {
+	actor, ok := authenticatedActor(r)
+	actorUserID := strings.TrimSpace(actor.User.UserID)
+	if !ok || actorUserID == "" {
+		writeError(w, http.StatusForbidden, "company_access_denied")
 		return
 	}
-	etag, err := s.processMapETag(r, companyID, actorUserID, actorRole, processMapTileETagContract)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed_to_read_process_map_version")
-		return
-	}
-	if writeNotModifiedWithETag(w, r, etag) {
-		return
-	}
-	tile, err := s.repo.GetProcessMapTile(r.Context(), store.ProcessMapTileQuery{
+	query := store.ProcessMapTileQuery{
 		CompanyID: companyID, PermissionUserID: actorUserID, Z: z, X: x, Y: y,
-	})
+	}
+	if strings.TrimSpace(r.Header.Get("If-None-Match")) != "" {
+		metadata, err := s.repo.GetProcessMapTileMetadata(r.Context(), query)
+		if err != nil {
+			writeProcessMapTileReadError(w, err)
+			return
+		}
+		etag := processMapReadETag(r, companyID, actorUserID, metadata.ActorRole, processMapTileETagContract, metadata.ProcessMapVersion, metadata.PermissionGroupVersion, metadata.BusinessDate)
+		if writeNotModifiedWithETag(w, r, etag) {
+			return
+		}
+	}
+	tile, err := s.repo.GetProcessMapTile(r.Context(), query)
 	if err != nil {
-		writeProcessMapError(w, err, "failed_to_read_process_map_tile")
+		writeProcessMapTileReadError(w, err)
 		return
 	}
-	writeJSONWithPrecomputedETag(w, r, http.StatusOK, tile, etag)
+	metadata := tile.Metadata
+	etag := processMapReadETag(r, companyID, actorUserID, metadata.ActorRole, processMapTileETagContract, metadata.ProcessMapVersion, metadata.PermissionGroupVersion, metadata.BusinessDate)
+	writeJSONWithPrecomputedETag(w, r, http.StatusOK, tile.ProcessMapTile, etag)
+}
+
+func writeProcessMapTileReadError(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusForbidden, "company_access_denied")
+		return
+	}
+	writeProcessMapError(w, err, "failed_to_read_process_map_tile")
 }
 
 func processMapPlacementPath(path string) (string, string, bool) {

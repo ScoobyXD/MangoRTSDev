@@ -4,7 +4,7 @@
 
 Make the existing Process Map feel fast when loading, panning, zooming, hovering, selecting, dragging, and receiving updates. Priorities below are impact buckets, not a numbered ranking of individual tasks. P1 means potentially large impact, P2 medium impact, and P3 narrower impact. Actual improvement must be measured; these are not promises of a particular percentage or frame rate.
 
-The user authorized documenting every candidate here and implementing all three performance P1 items in the current worktree. The user subsequently authorized adding the code-organization concerns below and merging the completed work into local main. Performance P2/P3, code-organization follow-ups, and the unclassified backend investigation remain unimplemented follow-up work. A push or pull request requires a separate user request.
+The user authorized documenting every candidate here and implementing all three performance P1 items in the current worktree. The user subsequently authorized adding the code-organization concerns below and merging the completed work into local main. Performance P2/P3, code-organization follow-ups, and further backend profiling remain follow-up work. The separately approved backend tile-read consolidation is recorded below and remains in its worker branch pending review. A push or pull request requires a separate user request.
 
 Investigation baseline: commit `c80d670b247d1220a626c89a5576082c601918a6`, branch `codex/investigate-process-map-performance0000844`. This document was written before implementation. Update the completion section after verification; keep the remaining candidates actionable for another agent.
 
@@ -91,7 +91,25 @@ Approach: stabilize card callbacks and memoize its data-driven contents; update 
 
 Acceptance: camera-only updates move the pinned card without rerendering unchanged tracker contents; ratings, RACI names, editing access, business-day rollover, hover behavior, and realtime updates still refresh correctly.
 
-## Unclassified — Measure backend loading before choosing changes
+## Backend tile-read consolidation — 2026-09-05
+
+Baseline: `890649a8ed50318870bfff2431ae7ddff6606e69`. The existing tile API now obtains fresh company authorization, actor role, map and permission-group versions, the Los Angeles business date, placements, and traces in one read-only SQL statement. The 200 ETag uses metadata from that complete read. Spatial candidates include real and restricted footprints before materialized permission evaluation; the prior RACI detail gate and Go trace clipping remain. No frontend scheduling or schema changes were made.
+
+For an already resolved actor, a fresh tile changes from six SELECTs plus BEGIN/COMMIT to one SELECT. A valid conditional request uses one lightweight authorized metadata SELECT; a stale conditional request uses that check followed by the complete SELECT. HTTP repository-call tests and pgx query tracing verified these paths, including revoked access before 304. These are SQL statement counts, not protocol-packet counts: connection checks and statement preparation can add exchanges.
+
+A temporary comparison used the baseline implementation and new implementation against the same disposable PostgreSQL 18.4 company: 845 synthetic Process placements plus three automatically created Folders, an ordinary company user, and no traces. Processes formed 29 columns spaced 64 units apart with 32-by-24 dimensions. The connection used WSL-to-Windows networking, pgx simple protocol, one warmed connection, and a read-only session after fixture setup. Each operation had two warmups and 12 samples with rotated execution order. The old full path included membership and version preflight reads. Public tile JSON matched exactly in all three cases.
+
+| Tile z/x/y | Returned placements | Old median / p95 | New median / p95 |
+| --- | ---: | ---: | ---: |
+| 22/0/0 | 16 | 68.390 / 87.974 ms | 29.623 / 48.790 ms |
+| 22/7/7 | 1 | 1103.108 / 1533.695 ms | 11.287 / 16.758 ms |
+| 18/0/0 | 845 | 1818.302 / 2500.103 ms | 605.616 / 944.619 ms |
+
+In the broad-tile sample, the lightweight conditional check changed from 2.364 ms median / 4.363 ms p95 to 1.391 ms / 2.609 ms. With only 12 samples, the reported nearest-rank p95 is the largest sample. These measurements combine database execution, database exchange, and Go projection time; they do not separate those costs. They exclude HTTP, authentication resolution, browser scheduling, rendering, and time until all visible tiles load. They are synthetic results, not a running-app speedup or a promise of immediate map loading. The broad tile still took about 606 ms locally. No live database was accessed and no running backend was replaced. Temporary comparison code was removed after measurement.
+
+Verification passed for the affected memory/HTTP/source-contract tests and the PostgreSQL Process Map cases. Tile regressions covered statement counts under a read-only session, role changes and revocation, concurrent metadata/payload changes, tiny restricted footprints, inherited permissions and hidden parents, scorecards, preserved RACI gating, independent/crossing traces, and cancellation. One new fixture initially deleted its test user with its last membership; preserving another company membership fixed that fixture, and the affected tile cases passed on rerun. PostgreSQL 17 was not available locally; no PostgreSQL 18-only SQL or schema change was introduced.
+
+## Further backend profiling
 
 `backend/internal/store/postgres_process_map.go` computes permission-safe whole-company scene bounds before tile loading can start. Its trace query joins endpoints and expands `jsonb_array_elements(trace.route_points)` to calculate route bounds for each tile; clipping then happens in Go. This can be expensive with many connectors, but no live query timings were collected.
 

@@ -71,7 +71,7 @@ func TestMemoryProcessMapChangesMoveInvalidatesOldAndNewTilesOnly(t *testing.T) 
 		t.Fatal(err)
 	}
 	before.ProcessMapReadVersion = after.ProcessMapReadVersion
-	if !reflect.DeepEqual(before, after) {
+	if !reflect.DeepEqual(before.ProcessMapTile, after.ProcessMapTile) {
 		t.Fatal("server certified a changed tile as reusable")
 	}
 
