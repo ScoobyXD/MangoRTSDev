@@ -249,7 +249,8 @@
 247. The Process editor's right-hand Map pane MUST use the same white Process canvas, green outline, and pan-and-zoom interactions as the company Process Map's focused Process.
 248. Create Step and Board / Map controls in the Process editor's Map pane MUST float inside the canvas without reducing its layout area.
 249. Process Step canvases MUST omit scrollbars, dots, separate toolbars, persistent help text, zoom buttons, and Fit.
-Last updated: 2026-09-04
+250. Tile reads MUST skip inherited Responsible and Accountable assignment resolution for restricted placements, Folders, and Processes below the tile's editing-detail threshold.
+Last updated: 2026-09-05
 
 # Process Story: One company canvas moves from overview to Process work
 
