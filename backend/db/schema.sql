@@ -9464,7 +9464,7 @@ CREATE TRIGGER trg_process_step_map_prune_route AFTER DELETE ON public.resource_
 FOR EACH ROW EXECUTE FUNCTION public.trg_process_step_map_prune_route();
 
 -- Completed foreground Send inspections, using each authenticated owner's request identity.
-CREATE TABLE public."AI_runs" (
+CREATE TABLE public.ai_runs (
     company_id uuid NOT NULL,
     user_id uuid NOT NULL,
     "AI_runs_id" uuid NOT NULL,

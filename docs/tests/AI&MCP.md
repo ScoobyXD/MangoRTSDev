@@ -75,7 +75,7 @@
 73. Inspection records the HTTP status of every provider response, including rejected requests, without exposing private error bodies.
 74. General AI rules live in AGENTS.md; the Process skill adds only Process-specific execution guidance, and tool/skill catalogs come from their registered definitions.
 75. Every admitted Send attempts one complete inspection save when foreground work ends, including completion, failure, and Stop, whether Inspect is enabled or disabled.
-76. `AI_runs` has exactly `company_id`, `user_id`, `AI_runs_id`, `start_time`, `finish_time`, and `inspection_json`; its IDs are the authenticated company/user and existing Send request ID, and its times record actual admission and completion before the archive write.
+76. `ai_runs` has exactly `company_id`, `user_id`, `AI_runs_id`, `start_time`, `finish_time`, and `inspection_json`; its IDs are the authenticated company/user and existing Send request ID, and its times record actual admission and completion before the archive write.
 77. `inspection_json` stores the existing sanitized ordered event array, including the terminal outcome and each event's original sequence, time, kind, status, and captured data, without reconstruction or replacement timestamps.
 78. One company/user/request may have only one immutable archive; persistence never inserts per event, updates a growing body, retries, or restarts model or business work.
 79. Stop cannot cancel the final synchronous archive attempt, which has a five-second limit; archive failure logs no inspection body or raw error and must not change a business action's outcome.
@@ -83,7 +83,7 @@
 
 ## Process story
 
-A user sends a message from the existing composer. Mango supplies current identity and any picker-selected Process. Pi can also search and bind one exact saved Process in the same interaction. Discussion creates no Node; an explicit execution request uses the same guarded create, append-text, and move commands. Pi loads generic native guidance from approved ai files while the saved SOP remains the procedure. Inspect shows complete provider requests and actual harness/action outcomes. Stop prevents further work and preserves saved changes and the Node link. When foreground work ends, Mango saves the captured timestamped events and terminal outcome once in `AI_runs`; a failed archive write leaves business results unchanged, and a crash before the save can lose the inspection.
+A user sends a message from the existing composer. Mango supplies current identity and any picker-selected Process. Pi can also search and bind one exact saved Process in the same interaction. Discussion creates no Node; an explicit execution request uses the same guarded create, append-text, and move commands. Pi loads generic native guidance from approved ai files while the saved SOP remains the procedure. Inspect shows complete provider requests and actual harness/action outcomes. Stop prevents further work and preserves saved changes and the Node link. When foreground work ends, Mango saves the captured timestamped events and terminal outcome once in `ai_runs`; a failed archive write leaves business results unchanged, and a crash before the save can lose the inspection.
 
 ## Current AI and MCP inventory
 

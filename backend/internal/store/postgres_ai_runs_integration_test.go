@@ -33,6 +33,15 @@ user_id uuid references public.users on delete cascade,primary key(company_id,us
 			if _, err := db.Exec(string(sqlText)); err != nil {
 				t.Fatal(err)
 			}
+			if source == "migration" {
+				renameSQL, err := os.ReadFile(filepath.Join("..", "..", "db", "migrations", "20260905_z_lowercase_ai_runs.sql"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(string(renameSQL)); err != nil {
+					t.Fatal(err)
+				}
+			}
 			companyID := "10000000-0000-4000-8000-000000000001"
 			otherCompanyID := "10000000-0000-4000-8000-000000000002"
 			userID := "20000000-0000-4000-8000-000000000001"
@@ -51,7 +60,7 @@ insert into public.company_memberships(company_id,user_id,role) values($1,$3,'co
 			}
 			// Compare the exact unordered set, never physical column order.
 			columns := map[string]bool{}
-			rows, err := db.Query(`select column_name from information_schema.columns where table_schema='public' and table_name='AI_runs'`)
+			rows, err := db.Query(`select column_name from information_schema.columns where table_schema='public' and table_name='ai_runs'`)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +93,7 @@ insert into public.company_memberships(company_id,user_id,role) values($1,$3,'co
 			}
 			var matches bool
 			if err := db.QueryRow(`select count(*)=1 and bool_and(start_time=$4 and finish_time=$5 and inspection_json=$6::jsonb)
-from public."AI_runs" where company_id=$1 and user_id=$2 and "AI_runs_id"=$3`,
+from public.ai_runs where company_id=$1 and user_id=$2 and "AI_runs_id"=$3`,
 				run.CompanyID, run.UserID, run.AIRunsID, run.StartTime, run.FinishTime, string(run.InspectionJSON)).Scan(&matches); err != nil || !matches {
 				t.Fatalf("duplicate changed timestamped inspection: %t, %v", matches, err)
 			}
@@ -101,7 +110,7 @@ from public."AI_runs" where company_id=$1 and user_id=$2 and "AI_runs_id"=$3`,
 			if _, err := db.Exec(`delete from public.company_memberships where company_id=$1 and user_id=$2`, companyID, userID); err != nil {
 				t.Fatal(err)
 			}
-			if count := countPostgresRows(t, db, `select count(*) from public."AI_runs"`); count != 3 {
+			if count := countPostgresRows(t, db, `select count(*) from public.ai_runs`); count != 3 {
 				t.Fatalf("membership removal discarded historical archives: %d", count)
 			}
 			finishingRun := aiRunFixture(companyID, userID)
@@ -112,13 +121,13 @@ from public."AI_runs" where company_id=$1 and user_id=$2 and "AI_runs_id"=$3`,
 			if _, err := db.Exec(`delete from public.users where user_id=$1`, userID); err != nil {
 				t.Fatal(err)
 			}
-			if count := countPostgresRows(t, db, `select count(*) from public."AI_runs"`); count != 1 {
+			if count := countPostgresRows(t, db, `select count(*) from public.ai_runs`); count != 1 {
 				t.Fatalf("user cascade crossed scope: %d", count)
 			}
 			if _, err := db.Exec(`delete from public.companies where company_id=$1`, companyID); err != nil {
 				t.Fatal(err)
 			}
-			if count := countPostgresRows(t, db, `select count(*) from public."AI_runs"`); count != 0 {
+			if count := countPostgresRows(t, db, `select count(*) from public.ai_runs`); count != 0 {
 				t.Fatalf("company cascade retained archives: %d", count)
 			}
 		})
