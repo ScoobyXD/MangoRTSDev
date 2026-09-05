@@ -246,11 +246,14 @@
 244. Enabling reduced motion or hiding the Page MUST immediately finish any pending Process exit.
 245. Step traces and connection previews MUST use the Node icon's light cyan-to-blue gradient without arrowheads.
 246. Hovering or selecting a Step trace MUST preserve its gradient while making the trace more visible.
+247. The Process editor's right-hand Map pane MUST use the same white Process canvas, green outline, and pan-and-zoom interactions as the company Process Map's focused Process.
+248. Create Step and Board / Map controls in the Process editor's Map pane MUST float inside the canvas without reducing its layout area.
+249. Process Step canvases MUST omit scrollbars, dots, separate toolbars, persistent help text, zoom buttons, and Fit.
 Last updated: 2026-09-04
 
 # Process Story: One company canvas moves from overview to Process work
 
-An authorized user opens `/process-map` on one white map pane. Create Process enters a labeled outline; its card enables Step creation while Folder and Process creation stay disabled. The user chooses the orange Folder path, names Steps, and drags between their output and input ports to connect the flow. Displayed numbering starts at the leftmost Step and follows its connections. Blank-space dragging pans and the wheel zooms while the card and breadcrumb stay fixed. Save commits the draft to Explorer and keeps it focused. Returning reverses the entrance transition and restores interaction with the unchanged company camera.
+An authorized user opens `/process-map` on one white map pane, creates a Process, chooses its Folder, and names and connects Steps inside the green outline. Displayed numbering follows the flow from the leftmost Step. Blank-space dragging pans and the wheel zooms while controls stay fixed. Save commits the draft to Explorer and keeps it focused; returning restores the unchanged company camera. The Process editor's right-hand Map uses this same canvas beside the SOP, with floating Create Step and Board / Map controls.
 
 ## Scenario: Fit nested Folders within the existing world
 

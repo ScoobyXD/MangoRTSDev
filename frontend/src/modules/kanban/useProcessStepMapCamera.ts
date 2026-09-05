@@ -7,7 +7,7 @@ const clampZoom = (zoom: number) => Math.max(.5, Math.min(8, zoom));
 const interactiveTarget = ".process-step-map__step, button, input, select, textarea, [role='button']";
 
 /** Local camera only: the same transform carries the Process frame, Steps, and routes. */
-export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, enabled: boolean, isBlocked: () => boolean) {
+export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, isBlocked: () => boolean) {
   const [camera, setCamera] = useState<Camera>({ x: 0, y: 0, zoom: 1 });
   const [panning, setPanning] = useState(false);
   const cameraRef = useRef(camera);
@@ -23,7 +23,7 @@ export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, ena
     return { left, top, width: element.clientWidth - left - (parseFloat(style.paddingRight) || 0), height: element.clientHeight - top - (parseFloat(style.paddingBottom) || 0) };
   };
   const zoomTo = (value: number, anchor: StepMapPoint) => {
-    if (!enabled || blocked.current() || pan.current || !viewport.current) return;
+    if (blocked.current() || pan.current || !viewport.current) return;
     const previous = cameraRef.current, zoom = clampZoom(value);
     const ratio = zoom / previous.zoom;
     update({ zoom, x: anchor.x - (anchor.x - previous.x) * ratio, y: anchor.y - (anchor.y - previous.y) * ratio });
@@ -31,7 +31,7 @@ export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, ena
 
   useEffect(() => {
     const element = viewport.current;
-    if (!enabled || !element) return;
+    if (!element) return;
     const wheel = (event: WheelEvent) => {
       if ((event.target as Element).closest("input, select, textarea")) return;
       event.preventDefault();
@@ -41,7 +41,7 @@ export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, ena
     };
     element.addEventListener("wheel", wheel, { passive: false });
     return () => element.removeEventListener("wheel", wheel);
-  }, [enabled, viewport]);
+  }, [viewport]);
 
   const cancelPan = () => {
     if (!pan.current) return;
@@ -50,7 +50,7 @@ export function useProcessStepMapCamera(viewport: RefObject<HTMLDivElement>, ena
     setPanning(false);
   };
   const startPan = (event: PointerEvent<HTMLDivElement>) => {
-    if (!enabled || blocked.current() || pan.current || event.button !== 0 || (event.target as Element).closest(interactiveTarget)) return;
+    if (blocked.current() || pan.current || event.button !== 0 || (event.target as Element).closest(interactiveTarget)) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.focus({ preventScroll: true });

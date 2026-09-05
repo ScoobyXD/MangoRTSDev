@@ -11,7 +11,6 @@ export type ProcessMapSavedProcessProps = {
   companyID: string;
   processID: string;
   onBusyChange?: (busy: boolean) => void;
-  isDark?: boolean;
   hoverModeEnabled?: boolean;
   renderActions?: ProcessStepMapEditorProps["renderActions"];
 };
@@ -20,7 +19,7 @@ export function ProcessMapSavedProcess(props: ProcessMapSavedProcessProps) {
   return <SavedProcess key={`${props.apiBase}:${props.companyID}:${props.processID}`} {...props} />;
 }
 
-function SavedProcess({ apiBase, companyID, processID, onBusyChange, isDark, hoverModeEnabled, renderActions }: ProcessMapSavedProcessProps) {
+function SavedProcess({ apiBase, companyID, processID, onBusyChange, hoverModeEnabled, renderActions }: ProcessMapSavedProcessProps) {
   const [snapshot, setSnapshot] = useState<ProcessWorkSnapshot | null>(() => getCachedProcessWork(apiBase, companyID, processID)?.contents ?? null);
   const [loading, setLoading] = useState(true);
   const [mapBusy, setMapBusy] = useState(false);
@@ -93,6 +92,6 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, isDark, hov
     {!snapshot && renderActions?.({ createStep: () => {}, disabled: true, busy: loading })}
     {snapshot && <ProcessStepMap apiBase={apiBase} companyID={companyID} processID={processID}
       steps={snapshot.steps} relationships={snapshot.relationships} canEdit={!loading && !error && snapshot.permissions.can_edit} processName={snapshot.logic_gate.header}
-      onChanged={() => refreshRef.current()} onBusyChange={setMapBusy} isDark={isDark} presentation="canvas" hoverModeEnabled={hoverModeEnabled} renderActions={renderActions} />}
+      onChanged={() => refreshRef.current()} onBusyChange={setMapBusy} hoverModeEnabled={hoverModeEnabled} renderActions={renderActions} />}
   </section>;
 }

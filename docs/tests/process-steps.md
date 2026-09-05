@@ -39,7 +39,7 @@
 37. A folder change refreshes Process work only when it affects that Process's inherited access; unrelated folders and shared inboxes do not invalidate its work.
 38. Every effective Responsible user with Process access can accept or decline another user's request, including users reached through groups or inherited RACI.
 39. RACI assignment constraints accept the same canonical resource types as RACI settings so Process requests can inherit Responsible users from folders.
-40. Compact rectangular tabs at the top of the work area select Steps, Requested, Pending, Backlog, and Done.
+40. Compact rectangular tabs at the top of the Board select Steps, Requested, Pending, Backlog, and Done.
 41. Requested uses yellow, Pending gray, Backlog purple, and Done green while retaining readable labels.
 42. The top-right Board / Map toggle displays the same exact Process and Steps; opening its Board starts in Board mode, while company-map creation starts in its focused Step canvas.
 43. Map creation, renaming, and connection commands use the existing Step records and same-Process operational relationships.
@@ -62,15 +62,15 @@
 60. Leaving an unsaved draft through its Company map action requires explicit discard; successful Save stays in the full Process canvas.
 61. Sidebar navigation retains the current company's draft in memory; returning to Process Map restores that draft without a server write.
 62. An uncertain Save offers an explicit saved-version recovery that freshly authorizes the exact Process and its Explorer location before leaving the draft.
-63. Company browsing, Process drafts, and saved focused Processes use one edge-to-edge white map pane without a background grid, outer panels, or separate creation form.
-64. The map retains one elevated translucent top-right card containing Create Folder, Create Process, Create Step, and Hover mode in that vertical order.
+63. Company browsing, Process drafts, and saved Process map views use an edge-to-edge white canvas without a background grid, outer panels, or separate creation form.
+64. The company Process Map retains one elevated translucent top-right card containing Create Folder, Create Process, Create Step, and Hover mode in that vertical order.
 65. Create Step adds to the focused draft or saved Process, or starts a new Process draft containing its first Step when no Process is open.
-66. The Folder and file breadcrumb stays inline at the top of the map, with a compact editable draft filename replacing the separate Process name field.
+66. On the company Process Map, the Folder and file breadcrumb stays inline at the top with a compact editable draft filename.
 67. Folder selection and Folder creation appear on compact elevated surfaces inside the map.
 68. Save Process and its save status stay inside the common top-right card.
 69. Hover mode on the focused map previews the hovered Step's name and highlights its connections without changing selection or pending edits.
-70. Focused Process drafts and saved maps omit Step and connection inspectors.
-71. The focused Process outline uses unscaled work-area dimensions and pans and zooms with its Steps and routes.
+70. Process map views omit Step and connection inspectors.
+71. The green Process outline uses unscaled work-area dimensions and pans and zooms with its Steps and routes.
 72. The Process outline expands to contain authored Step and route geometry without changing that geometry or Board layout.
 73. New Step-map boxes use dimensions of 112 by 56 canvas units.
 74. Existing saved Step boxes retain their dimensions until explicitly resized.
@@ -84,12 +84,12 @@
 82. A blank inline title leaves the last committed Step name unchanged.
 83. Dragging blank space in the focused map pans its camera without moving authored geometry.
 84. Wheel zoom in the focused map keeps the world point beneath the pointer fixed within a 50% to 800% range.
-85. Focused maps omit zoom buttons and Fit.
+85. Process map views omit zoom buttons and Fit.
 86. Read-only access allows focused-map camera navigation.
 87. A Step, route, or connection editing gesture holds the focused-map camera fixed until that gesture ends.
-88. Create Folder and Create Process remain visible and disabled inside focused Process drafts and saved maps.
+88. On the company Process Map, Create Folder and Create Process remain visible and disabled inside focused drafts and saved Processes.
 89. Inline Step titles have no visible input border.
-90. The separate Board presentation retains its top toolbar, Step and connection inspectors, and zoom controls.
+90. The Process editor's right-hand Map view uses the same Process canvas and interactions as the company Process Map.
 91. Each focused Step has one input port at its left midpoint and one output port at its right midpoint.
 92. Dragging between one Step's output and another Step's input always connects output to input, regardless of which port starts the drag.
 93. A completed connection uses the existing connectSteps command with the exact two Step IDs in their existing owning Process.
@@ -103,10 +103,18 @@
 101. Step numbers derive only from current map positions and canonical directed connections without changing saved Step order, names, geometry, or relationships.
 102. Equal leftmost positions choose Step 1 by the smallest Y coordinate, then exact Step ID.
 103. Selecting opposite ports with Enter or Space follows the same direction and validation rules as dragging.
+104. The Process editor's Map view places Create Step and the Board / Map switch on an elevated surface inside its canvas.
+105. Process map views omit scrollbars, separate toolbars, and persistent help text.
+106. The Board retains its Node columns, status views, grouping controls, and scrolling.
+107. Switching between Board and Map stays disabled during a map gesture or pending map mutation.
+108. Step and connection context menus expose their existing editing commands without persistent inspectors.
+109. Deleting a Step from the map requires confirmation.
+110. Delete on a focused Step port or resize handle targets that exact Step.
+111. Deleting a route waypoint preserves its operational connection.
 
 ## Process Story
 
-A user chooses Create Process, chooses a Folder, and names compact Steps directly on the map. Dragging between an output and another Step's input creates their directed connection; the leftmost Step starts the displayed numbering, which follows the connected flow. The user arranges Steps, pans blank space, and zooms with the wheel while the controls stay fixed. Save commits the draft to Company Explorer. The separate Board presentation uses those exact Steps and retains its editing controls. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
+A user creates a Process draft, chooses a Folder, and names compact Steps on the map. Output-to-input connections define the flow and its displayed numbering. The user arranges Steps, pans blank space, and zooms with the wheel before saving to Company Explorer. In the Process editor, Map opens the same white canvas beside the SOP; its floating controls create Steps or return to the Board's Node columns and status views. Both views use the same saved Steps and connections. Deleting a Step preserves every Node and status.
 
 ## Main Scenarios
 
