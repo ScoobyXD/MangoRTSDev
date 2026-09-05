@@ -177,34 +177,22 @@ func (r *PostgresRepo) GetProcessMapScene(ctx context.Context, input ProcessMapS
 	if err != nil {
 		return domain.ProcessMapScene{}, err
 	}
-	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true, Isolation: sql.LevelRepeatableRead})
-	if err != nil {
-		return domain.ProcessMapScene{}, err
-	}
-	defer tx.Rollback()
-	if err := postgresRequireProcessMapMembershipTx(ctx, tx, companyID, permissionUserID); err != nil {
-		return domain.ProcessMapScene{}, err
-	}
-	result, err := postgresProcessMapSceneTx(ctx, tx, companyID, permissionUserID)
-	if err != nil {
-		return domain.ProcessMapScene{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.ProcessMapScene{}, err
-	}
-	return result, nil
+	return postgresProcessMapScene(ctx, r.db, companyID, permissionUserID)
 }
 
-func postgresProcessMapSceneTx(ctx context.Context, tx *sql.Tx, companyID, permissionUserID string) (domain.ProcessMapScene, error) {
+func postgresProcessMapScene(ctx context.Context, queryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, companyID, permissionUserID string) (domain.ProcessMapScene, error) {
 	var minX, minY, maxX, maxY sql.NullInt64
-	err := tx.QueryRowContext(ctx, `
-select min(placement.grid_x),min(placement.grid_y),
-       max(placement.grid_x + case when allowed then placement.grid_width else $3 end),
-       max(placement.grid_y + case when allowed then placement.grid_height else $4 end)
-from (
-  select placement.*,
+	result := domain.ProcessMapScene{
+		TileSize: ProcessMapTileSize, MinTileZoom: ProcessMapMinTileZoom, MaxTileZoom: ProcessMapMaxTileZoom,
+	}
+	err := queryer.QueryRowContext(ctx, `with metadata as materialized (`+postgresProcessMapTileMetadataSQL+`
+), placements as materialized (
+  select placement.grid_x,placement.grid_y,placement.grid_width,placement.grid_height,
          mangorts_user_can_access_resource(placement.company_id,placement.resource_type,placement.resource_id,$2::uuid,'edit') allowed
-  from process_map_placements placement
+  from metadata
+  cross join process_map_placements placement
   left join company_explorer_folders folder
     on placement.resource_type='company_explorer_folder'
    and folder.company_id=placement.company_id and folder.folder_id=placement.resource_id
@@ -214,17 +202,22 @@ from (
   where placement.company_id=$1::uuid
     and ((placement.resource_type='company_explorer_folder' and folder.folder_id is not null)
       or (placement.resource_type='logic_gate' and process.logic_gate_id is not null))
-) placement`, companyID, permissionUserID, ProcessMapRestrictedWidth, ProcessMapRestrictedHeight).Scan(&minX, &minY, &maxX, &maxY)
+)
+select metadata.process_map_version,bounds.*
+from metadata
+cross join (
+  select min(grid_x),min(grid_y),
+         max(grid_x::bigint + case when allowed then grid_width else $3 end),
+         max(grid_y::bigint + case when allowed then grid_height else $4 end)
+  from placements
+) bounds`, companyID, permissionUserID, ProcessMapRestrictedWidth, ProcessMapRestrictedHeight).Scan(
+		&result.ProcessMapReadVersion, &minX, &minY, &maxX, &maxY,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ProcessMapScene{}, ErrNotFound
+	}
 	if err != nil {
 		return domain.ProcessMapScene{}, err
-	}
-	processVersion, _, err := processMapVersionsTx(ctx, tx, companyID)
-	if err != nil {
-		return domain.ProcessMapScene{}, err
-	}
-	result := domain.ProcessMapScene{
-		ProcessMapReadVersion: processVersion, TileSize: ProcessMapTileSize,
-		MinTileZoom: ProcessMapMinTileZoom, MaxTileZoom: ProcessMapMaxTileZoom,
 	}
 	if minX.Valid && minY.Valid && maxX.Valid && maxY.Valid {
 		result.Bounds = &domain.ProcessMapBounds{MinX: int(minX.Int64), MinY: int(minY.Int64), MaxX: int(maxX.Int64), MaxY: int(maxY.Int64)}
@@ -295,7 +288,8 @@ func (r *PostgresRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTi
 	// snapshot. Independent aggregates keep placements and traces from multiplying.
 	err = r.db.QueryRowContext(ctx, `with tile_metadata as materialized (`+postgresProcessMapTileMetadataSQL+`
 ), spatial as materialized (
-  select placement.*,tile_metadata.business_date,
+  select placement.company_id,placement.resource_type,placement.resource_id,placement.map_parent_folder_id,
+         placement.grid_x,placement.grid_y,placement.grid_width,placement.grid_height,placement.revision,tile_metadata.business_date,
          case placement.resource_type when 'company_explorer_folder' then folder.name else process.header end resource_name
   from tile_metadata
   cross join process_map_placements placement
@@ -308,23 +302,79 @@ func (r *PostgresRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTi
   where placement.company_id=$1::uuid
     and ((placement.resource_type='company_explorer_folder' and folder.folder_id is not null)
       or (placement.resource_type='logic_gate' and process.logic_gate_id is not null))
-    -- Include either possible footprint before evaluating resource permissions.
+    -- The expanded search box also covers a denied 4x3 footprint when the
+    -- stored rectangle is smaller, while retaining the existing spatial index.
+    and box(
+      point(placement.grid_x::double precision,placement.grid_y::double precision),
+      point((placement.grid_x::bigint+placement.grid_width)::double precision,(placement.grid_y::bigint+placement.grid_height)::double precision)
+    ) && box(point($3::double precision-$7::double precision,$4::double precision-$8::double precision),point($5::double precision,$6::double precision))
     and (
-      (box(
-        point(placement.grid_x::double precision,placement.grid_y::double precision),
-        point((placement.grid_x::bigint+placement.grid_width)::double precision,(placement.grid_y::bigint+placement.grid_height)::double precision)
-      ) && box(point($3::double precision,$4::double precision),point($5::double precision,$6::double precision))
-       and placement.grid_x < $5 and placement.grid_x::bigint+placement.grid_width > $3
+      (placement.grid_x < $5 and placement.grid_x::bigint+placement.grid_width > $3
        and placement.grid_y < $6 and placement.grid_y::bigint+placement.grid_height > $4)
       or (placement.grid_x < $5 and placement.grid_x::bigint+$7 > $3
        and placement.grid_y < $6 and placement.grid_y::bigint+$8 > $4)
     )
-), base as materialized (
-  select placement.*,
-         mangorts_user_can_access_resource(placement.company_id,placement.resource_type,placement.resource_id,$2::uuid,'edit') allowed,
-         case when placement.map_parent_folder_id is null then true else
-           mangorts_user_can_access_resource(placement.company_id,'company_explorer_folder',placement.map_parent_folder_id,$2::uuid,'edit') end parent_allowed
+), trace_spatial as materialized (
+  select trace.company_id,trace.resource_operational_relationship_id,trace.route_points,trace.revision,
+         relationship.source_resource_type,relationship.source_resource_id,
+         relationship.target_resource_type,relationship.target_resource_id,
+         jsonb_build_object(
+           'resource_type',relationship.source_resource_type,'resource_id',relationship.source_resource_id,
+           'grid_x',source_placement.grid_x,'grid_y',source_placement.grid_y,
+           'grid_width',source_placement.grid_width,'grid_height',source_placement.grid_height
+         ) source,
+         jsonb_build_object(
+           'resource_type',relationship.target_resource_type,'resource_id',relationship.target_resource_id,
+           'grid_x',target_placement.grid_x,'grid_y',target_placement.grid_y,
+           'grid_width',target_placement.grid_width,'grid_height',target_placement.grid_height
+         ) target
+  from tile_metadata
+  cross join process_map_traces trace
+  join resource_operational_relationships relationship
+    on relationship.company_id=trace.company_id and relationship.resource_operational_relationship_id=trace.resource_operational_relationship_id
+  join process_map_placements source_placement
+    on source_placement.company_id=relationship.company_id and source_placement.resource_type=relationship.source_resource_type and source_placement.resource_id=relationship.source_resource_id
+  join process_map_placements target_placement
+    on target_placement.company_id=relationship.company_id and target_placement.resource_type=relationship.target_resource_type and target_placement.resource_id=relationship.target_resource_id
+  cross join lateral (
+    select (source_placement.grid_x::bigint+source_placement.grid_width)::double precision source_x,
+           source_placement.grid_y::double precision+source_placement.grid_height::double precision/2 source_y,
+           target_placement.grid_x::double precision target_x,
+           target_placement.grid_y::double precision+target_placement.grid_height::double precision/2 target_y
+  ) anchors
+  where trace.company_id=$1::uuid
+    and case when least(anchors.source_x,anchors.target_x) < $5 and greatest(anchors.source_x,anchors.target_x) >= $3
+              and least(anchors.source_y,anchors.target_y) < $6 and greatest(anchors.source_y,anchors.target_y) >= $4
+      then true
+      else (
+        select least(anchors.source_x,anchors.target_x,min(point.x)) < $5
+           and greatest(anchors.source_x,anchors.target_x,max(point.x)) >= $3
+           and least(anchors.source_y,anchors.target_y,min(point.y)) < $6
+           and greatest(anchors.source_y,anchors.target_y,max(point.y)) >= $4
+        from jsonb_to_recordset(trace.route_points) point(x double precision,y double precision)
+      ) end
+), permission_resources as (
+  select resource_type,resource_id from spatial
+  union
+  select 'company_explorer_folder',map_parent_folder_id from spatial where map_parent_folder_id is not null
+  union
+  select source_resource_type,source_resource_id from trace_spatial
+  union
+  select target_resource_type,target_resource_id from trace_spatial
+), permissions as materialized (
+  -- One canonical permission check per exact typed resource, shared by its
+  -- placement, children and incident traces within this statement only.
+  select resource_type,resource_id,
+         mangorts_user_can_access_resource($1::uuid,resource_type,resource_id,$2::uuid,'edit') allowed
+  from permission_resources
+), parent_permissions as materialized (
+  select resource_id,allowed from permissions where resource_type='company_explorer_folder'
+), base as (
+  select placement.*,permission.allowed,
+         case when placement.map_parent_folder_id is null then true else parent.allowed end parent_allowed
   from spatial placement
+  join permissions permission using (resource_type,resource_id)
+  left join parent_permissions parent on parent.resource_id=placement.map_parent_folder_id
 ), candidate as (
   select placement.*
   from base placement
@@ -392,50 +442,17 @@ func (r *PostgresRepo) GetProcessMapTile(ctx context.Context, input ProcessMapTi
 select placement.company_id::text,placement.resource_type,placement.resource_id::text,
        placement.map_parent_folder_id::text,placement.grid_x,placement.grid_y,
        placement.grid_width,placement.grid_height,placement.revision,
-       placement.created_timestamp,placement.updated_timestamp,
        placement.resource_name,placement.allowed,placement.parent_allowed,
        placement.quality_rating,placement.cost_rating,placement.delivery_rating,
        placement.responsible_names,placement.accountable_names
 from enriched placement
 ), trace_rows as (
-select trace.company_id,trace.resource_operational_relationship_id,
-       trace.route_points,trace.revision,trace.created_timestamp,trace.updated_timestamp,
-       jsonb_build_object(
-         'resource_type',relationship.source_resource_type,'resource_id',relationship.source_resource_id,
-         'grid_x',source_placement.grid_x,'grid_y',source_placement.grid_y,
-         'grid_width',source_placement.grid_width,'grid_height',source_placement.grid_height
-       ) source,
-       jsonb_build_object(
-         'resource_type',relationship.target_resource_type,'resource_id',relationship.target_resource_id,
-         'grid_x',target_placement.grid_x,'grid_y',target_placement.grid_y,
-         'grid_width',target_placement.grid_width,'grid_height',target_placement.grid_height
-       ) target
-from process_map_traces trace
-cross join tile_metadata
-join resource_operational_relationships relationship
-  on relationship.company_id=trace.company_id and relationship.resource_operational_relationship_id=trace.resource_operational_relationship_id
-join process_map_placements source_placement
-  on source_placement.company_id=relationship.company_id and source_placement.resource_type=relationship.source_resource_type and source_placement.resource_id=relationship.source_resource_id
-join process_map_placements target_placement
-  on target_placement.company_id=relationship.company_id and target_placement.resource_type=relationship.target_resource_type and target_placement.resource_id=relationship.target_resource_id
-cross join lateral (
-  select min(point_x) min_x,min(point_y) min_y,max(point_x) max_x,max(point_y) max_y
-  from (
-    select (source_placement.grid_x+source_placement.grid_width)::double precision point_x,
-           (source_placement.grid_y::double precision+source_placement.grid_height::double precision/2) point_y
-    union all
-    select target_placement.grid_x::double precision,
-           (target_placement.grid_y::double precision+target_placement.grid_height::double precision/2)
-    union all
-    select (point->>'x')::double precision,(point->>'y')::double precision
-    from jsonb_array_elements(trace.route_points) point
-  ) path_point
-) path_bounds
-where trace.company_id=$1::uuid
-  and path_bounds.min_x < $5 and path_bounds.max_x >= $3
-  and path_bounds.min_y < $6 and path_bounds.max_y >= $4
-  and mangorts_user_can_access_resource(relationship.company_id,relationship.source_resource_type,relationship.source_resource_id,$2::uuid,'edit')
-  and mangorts_user_can_access_resource(relationship.company_id,relationship.target_resource_type,relationship.target_resource_id,$2::uuid,'edit')
+  select trace.company_id,trace.resource_operational_relationship_id,
+         trace.route_points,trace.revision,
+         trace.source,trace.target
+  from trace_spatial trace
+  join permissions source on source.resource_type=trace.source_resource_type and source.resource_id=trace.source_resource_id and source.allowed
+  join permissions target on target.resource_type=trace.target_resource_type and target.resource_id=trace.target_resource_id and target.allowed
 )
 select tile_metadata.role,tile_metadata.process_map_version,tile_metadata.permission_group_version,tile_metadata.business_date,
        coalesce((select jsonb_agg(to_jsonb(placement) order by placement.grid_y,placement.grid_x,placement.resource_type,placement.resource_id)
@@ -493,7 +510,7 @@ from tile_metadata`,
 			Restricted: false, Presentation: presentation, ResourceType: placement.ResourceType, ResourceID: placement.ResourceID, Name: visibleName,
 			MapParentFolderID: placement.MapParentFolderID, GridX: placement.GridX, GridY: placement.GridY,
 			GridWidth: placement.GridWidth, GridHeight: placement.GridHeight, Revision: placement.Revision,
-			CreatedTimestamp: placement.CreatedTimestamp, UpdatedTimestamp: placement.UpdatedTimestamp, CanEdit: true,
+			CanEdit: true,
 		}
 		if placement.ResourceType == domain.ProcessMapResourceTypeProcess && presentation == domain.ProcessMapPresentationEditing {
 			if item.QualityRating != nil || item.CostRating != nil || item.DeliveryRating != nil {
@@ -540,7 +557,6 @@ from tile_metadata`,
 			Source:                            domain.ProcessMapResourceRef{ResourceType: source.ResourceType, ResourceID: source.ResourceID},
 			Target:                            domain.ProcessMapResourceRef{ResourceType: target.ResourceType, ResourceID: target.ResourceID},
 			RoutePoints:                       routePoints, PathFragments: fragments, Revision: trace.Revision,
-			CreatedTimestamp: trace.CreatedTimestamp, UpdatedTimestamp: trace.UpdatedTimestamp,
 		})
 	}
 	return result, ctx.Err()

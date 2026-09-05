@@ -150,7 +150,7 @@ test("validated old tiles are reused at the new version while dirty tiles are fe
   }) as typeof fetch;
   const read = (reference: ProcessMapTileVersion, version: number) => fetchProcessMapTile(apiBase, companyID, version, reference.z, reference.x, reference.y, undefined, "2026-09-04");
   try {
-    await read(clean, 10);
+    const original = await read(clean, 10);
     await read(dirty, 10);
     assert.equal(tileReads, 2);
     const validation = await fetchProcessMapChanges(apiBase, companyID, 10, [clean, dirty]);
@@ -158,6 +158,11 @@ test("validated old tiles are reused at the new version while dirty tiles are fe
     serverVersion = 11;
     const retained = await read(clean, 11);
     assert.equal(retained.process_map_read_version, 11);
+    assert.equal(retained.placements, original.placements, "certification reuses the immutable geometry without copying it");
+    assert.equal(retained.traces, original.traces);
+    assert.equal(retained.byteLength, original.byteLength);
+    assert.equal(Reflect.set(retained, "process_map_read_version", 99), false, "the promoted wrapper remains immutable");
+    assert.equal(Reflect.set(retained.placements[0], "grid_x", 99), false);
     assert.equal(retained.placements[0].restricted ? null : retained.placements[0].name, "tile-1-version-10");
     assert.equal(tileReads, 2, "a certified unchanged tile must not make another tile request");
     const refreshed = await read(dirty, 11);

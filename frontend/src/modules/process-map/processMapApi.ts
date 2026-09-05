@@ -5,6 +5,7 @@ import { getCurrentRealtimeConnectionCorrelation } from "../realtime/realtimeWeb
 import {
   PROCESS_MAP_MAX_ROUTE_POINTS,
   PROCESS_MAP_TILE_CACHE_BYTES,
+  PROCESS_MAP_TILE_CACHE_MAX_SIZE,
   normalizeProcessMapRoutePoints,
   type ProcessMapBounds,
   type ProcessMapGridPoint,
@@ -40,8 +41,6 @@ export type ProcessMapVisiblePlacement = {
   grid_height: number;
   can_edit: true;
   revision: number;
-  created_timestamp: string;
-  updated_timestamp: string;
   score_card?: ProcessMapScoreCardPresentation;
   responsible_names?: string[];
   accountable_names?: string[];
@@ -77,8 +76,6 @@ export type ProcessMapTrace = {
   route_points: ProcessMapGridPoint[];
   path_fragments: ProcessMapGridPoint[][];
   revision: number;
-  created_timestamp: string;
-  updated_timestamp: string;
 };
 
 export type ProcessMapCommittedTrace = {
@@ -104,15 +101,16 @@ export type ProcessMapSceneResponse = {
   max_tile_zoom: number;
 };
 
-export type ProcessMapTileResponse = {
+// Tile reads are shared immutable snapshots. Editing paths own their copies.
+export type ProcessMapTileResponse = Readonly<{
   z: number;
   x: number;
   y: number;
   process_map_read_version: number;
-  placements: ProcessMapPlacement[];
-  traces: ProcessMapTrace[];
+  placements: readonly ProcessMapPlacement[];
+  traces: readonly ProcessMapTrace[];
   byteLength: number;
-};
+}>;
 
 export type ProcessMapTileVersion = Pick<ProcessMapTileResponse, "z" | "x" | "y" | "process_map_read_version">;
 export type ProcessMapChangesResponse = ProcessMapSceneResponse & {
@@ -149,7 +147,7 @@ type InflightEntry<T> = {
 
 const PROCESS_MAP_REALTIME_CONNECTION_HEADER = "X-Mango-Realtime-Connection-ID";
 const sceneCache = new Map<string, CacheEntry<ProcessMapSceneResponse>>();
-const tileCache = new Map<string, CacheEntry<ProcessMapTileResponse>>();
+const tileCache = new Map<string, ProcessMapTileResponse>();
 const sceneInflight = new Map<string, InflightEntry<ProcessMapSceneResponse>>();
 const tileInflight = new Map<string, InflightEntry<ProcessMapTileResponse>>();
 let tileCacheBytes = 0;
@@ -211,14 +209,16 @@ function scoreCardPresentation(value: unknown): ProcessMapScoreCardPresentation 
 
 function presentationNames(value: unknown, code: string): string[] {
   if (!Array.isArray(value)) throw new Error(code);
-  return value.map((name) => requiredString(name, code));
+  const names = value.map((name) => requiredString(name, code));
+  Object.freeze(names);
+  return names;
 }
 
 function normalizePlacement(value: unknown): ProcessMapPlacement {
   if (!isRecord(value)) throw new Error("invalid_process_map_placement");
   const gridX = requiredInteger(value.grid_x, "invalid_process_map_grid_x");
   const gridY = requiredInteger(value.grid_y, "invalid_process_map_grid_y");
-  if (value.restricted === true) return { restricted: true, grid_x: gridX, grid_y: gridY };
+  if (value.restricted === true) return Object.freeze({ restricted: true, grid_x: gridX, grid_y: gridY });
   if (value.restricted !== false) throw new Error("invalid_process_map_restricted_flag");
   const maxPresentation = presentation(value.presentation);
   const gridWidth = requiredInteger(value.grid_width, "invalid_process_map_grid_width");
@@ -240,14 +240,12 @@ function normalizePlacement(value: unknown): ProcessMapPlacement {
     grid_height: gridHeight,
     can_edit: true,
     revision: requiredInteger(value.revision, "invalid_process_map_revision"),
-    created_timestamp: requiredString(value.created_timestamp, "invalid_process_map_created_timestamp"),
-    updated_timestamp: requiredString(value.updated_timestamp, "invalid_process_map_updated_timestamp"),
   };
-  if (normalized.resource_type !== "logic_gate" || maxPresentation !== "editing") return normalized;
-  if (value.score_card !== undefined) normalized.score_card = scoreCardPresentation(value.score_card);
+  if (normalized.resource_type !== "logic_gate" || maxPresentation !== "editing") return Object.freeze(normalized);
+  if (value.score_card !== undefined) normalized.score_card = Object.freeze(scoreCardPresentation(value.score_card));
   if (value.responsible_names !== undefined) normalized.responsible_names = presentationNames(value.responsible_names, "invalid_process_map_responsible_names");
   if (value.accountable_names !== undefined) normalized.accountable_names = presentationNames(value.accountable_names, "invalid_process_map_accountable_names");
-  return normalized;
+  return Object.freeze(normalized);
 }
 
 function normalizeCommittedPlacement(value: unknown): ProcessMapCommittedPlacement {
@@ -283,25 +281,27 @@ function normalizeTrace(value: unknown): ProcessMapTrace {
   const maxPresentation = presentation(value.presentation);
   if (value.route_points !== undefined && !Array.isArray(value.route_points)) throw new Error("invalid_process_map_trace");
   if (maxPresentation === "editing" && !Array.isArray(value.route_points)) throw new Error("invalid_process_map_trace");
-  const routePoints = Array.isArray(value.route_points) ? value.route_points.map((point) => normalizePoint(point, true)) : [];
+  const routePoints = Array.isArray(value.route_points) ? value.route_points.map((point) => Object.freeze(normalizePoint(point, true))) : [];
   if (routePoints.length > PROCESS_MAP_MAX_ROUTE_POINTS) throw new Error("process_map_route_too_large");
   if (!Array.isArray(value.path_fragments)) throw new Error("invalid_process_map_path_fragments");
   const rawFragments = value.path_fragments;
   const pathFragments = rawFragments.map((fragment) => {
     if (!Array.isArray(fragment)) throw new Error("invalid_process_map_path_fragment");
-    return fragment.map((point) => normalizePoint(point, false));
+    const points = fragment.map((point) => Object.freeze(normalizePoint(point, false)));
+    Object.freeze(points);
+    return points;
   }).filter((fragment) => fragment.length >= 2);
-  return {
+  Object.freeze(routePoints);
+  Object.freeze(pathFragments);
+  return Object.freeze({
     presentation: maxPresentation,
     resource_operational_relationship_id: requiredString(value.resource_operational_relationship_id, "invalid_process_map_relationship_id"),
-    source: resourceRef(value.source),
-    target: resourceRef(value.target),
+    source: Object.freeze(resourceRef(value.source)),
+    target: Object.freeze(resourceRef(value.target)),
     route_points: routePoints,
     path_fragments: pathFragments,
     revision: requiredInteger(value.revision, "invalid_process_map_trace_revision"),
-    created_timestamp: requiredString(value.created_timestamp, "invalid_process_map_created_timestamp"),
-    updated_timestamp: requiredString(value.updated_timestamp, "invalid_process_map_updated_timestamp"),
-  };
+  });
 }
 
 function normalizeCommittedTrace(value: unknown): ProcessMapCommittedTrace {
@@ -346,26 +346,21 @@ function normalizeScene(value: unknown): ProcessMapSceneResponse {
   };
 }
 
-function encodedByteLength(value: unknown): number {
-  const text = JSON.stringify(value);
-  return typeof TextEncoder === "undefined" ? text.length * 2 : new TextEncoder().encode(text).byteLength;
-}
-
-function normalizeTile(value: unknown): ProcessMapTileResponse {
+function normalizeTile(value: unknown, byteLength: number): ProcessMapTileResponse {
   if (!isRecord(value) || !Array.isArray(value.placements) || !Array.isArray(value.traces)) throw new Error("invalid_process_map_tile");
   const placements = value.placements.map(normalizePlacement);
   // A clipped trace may cross this tile while both endpoints are in other
   // tiles. The server already owns endpoint permission filtering.
   const traces = value.traces.map(normalizeTrace);
-  const normalized = {
+  return Object.freeze({
     z: requiredInteger(value.z, "invalid_process_map_tile_z"),
     x: requiredInteger(value.x, "invalid_process_map_tile_x"),
     y: requiredInteger(value.y, "invalid_process_map_tile_y"),
     process_map_read_version: requiredInteger(value.process_map_read_version, "invalid_process_map_read_version"),
-    placements,
-    traces,
-  };
-  return { ...normalized, byteLength: encodedByteLength(normalized) };
+    placements: Object.freeze(placements),
+    traces: Object.freeze(traces),
+    byteLength,
+  });
 }
 
 function normalizeMutationEnvelope(value: unknown): ProcessMapMutationEnvelope {
@@ -400,51 +395,8 @@ function normalizeOperationalRelationship(value: unknown): ProcessMapOperational
   };
 }
 
-function clonePlacement(placement: ProcessMapPlacement): ProcessMapPlacement {
-  if (placement.restricted) return { ...placement };
-  return {
-    ...placement,
-    ...(placement.score_card ? { score_card: { ...placement.score_card } } : {}),
-    ...(placement.responsible_names ? { responsible_names: [...placement.responsible_names] } : {}),
-    ...(placement.accountable_names ? { accountable_names: [...placement.accountable_names] } : {}),
-  };
-}
-
-function cloneTrace(trace: ProcessMapTrace): ProcessMapTrace {
-  return {
-    ...trace,
-    source: { ...trace.source },
-    target: { ...trace.target },
-    route_points: trace.route_points.map((point) => ({ ...point })),
-    path_fragments: trace.path_fragments.map((fragment) => fragment.map((point) => ({ ...point }))),
-  };
-}
-
 function cloneScene(scene: ProcessMapSceneResponse): ProcessMapSceneResponse {
   return { ...scene, bounds: scene.bounds ? { ...scene.bounds } : null };
-}
-
-function cloneTile(tile: ProcessMapTileResponse): ProcessMapTileResponse {
-  return { ...tile, placements: tile.placements.map(clonePlacement), traces: tile.traces.map(cloneTrace) };
-}
-
-function cloneEnvelope(envelope: ProcessMapMutationEnvelope): ProcessMapMutationEnvelope {
-  return {
-    ...envelope,
-    placements: envelope.placements.map((placement) => ({ ...placement })),
-    traces: envelope.traces.map((trace) => ({
-      ...trace,
-      route_points: trace.route_points.map((point) => ({ ...point })),
-    })),
-    deleted_trace_ids: [...envelope.deleted_trace_ids],
-    ...(envelope.relationship ? {
-      relationship: {
-        ...envelope.relationship,
-        source: { ...envelope.relationship.source },
-        target: { ...envelope.relationship.target },
-      },
-    } : {}),
-  };
 }
 
 function cachePrefix(apiBase: string, companyID: string): string {
@@ -463,7 +415,7 @@ function abortReason(signal?: AbortSignal): unknown {
   return signal?.reason ?? new DOMException("The request was aborted.", "AbortError");
 }
 
-function subscribeInflight<T>(entry: InflightEntry<T>, signal: AbortSignal | undefined, clone: (response: T) => T): Promise<T> {
+function subscribeInflight<T>(entry: InflightEntry<T>, signal: AbortSignal | undefined, clone?: (response: T) => T): Promise<T> {
   const caller = Symbol("process-map-read-caller");
   if (entry.abortTimer !== undefined) {
     clearTimeout(entry.abortTimer);
@@ -496,30 +448,30 @@ function subscribeInflight<T>(entry: InflightEntry<T>, signal: AbortSignal | und
     }
     signal?.addEventListener("abort", onAbort, { once: true });
     entry.promise.then(
-      (response) => settle(() => resolve(clone(response))),
+      (response) => settle(() => resolve(clone ? clone(response) : response)),
       (cause) => settle(() => reject(cause)),
     );
   });
 }
 
-function storeTileCache(key: string, entry: CacheEntry<ProcessMapTileResponse>): void {
+function storeTileCache(key: string, tile: ProcessMapTileResponse): void {
   const previous = tileCache.get(key);
-  if (previous) tileCacheBytes -= previous.response.byteLength;
+  if (previous) tileCacheBytes -= previous.byteLength;
   tileCache.delete(key);
-  tileCache.set(key, entry);
-  tileCacheBytes += entry.response.byteLength;
-  while (tileCacheBytes > PROCESS_MAP_TILE_CACHE_BYTES && tileCache.size > 0) {
+  tileCache.set(key, tile);
+  tileCacheBytes += tile.byteLength;
+  while (tileCacheBytes > PROCESS_MAP_TILE_CACHE_BYTES || tileCache.size > PROCESS_MAP_TILE_CACHE_MAX_SIZE) {
     const oldestKey = tileCache.keys().next().value as string | undefined;
     if (!oldestKey) break;
     const oldest = tileCache.get(oldestKey);
     tileCache.delete(oldestKey);
-    if (oldest) tileCacheBytes -= oldest.response.byteLength;
+    if (oldest) tileCacheBytes -= oldest.byteLength;
   }
 }
 
-function touchTileCache(key: string, entry: CacheEntry<ProcessMapTileResponse>): void {
+function touchTileCache(key: string, tile: ProcessMapTileResponse): void {
   tileCache.delete(key);
-  tileCache.set(key, entry);
+  tileCache.set(key, tile);
 }
 
 export function fetchProcessMapScene(
@@ -573,24 +525,31 @@ export function fetchProcessMapTile(
   const cached = tileCache.get(key);
   if (cached) {
     touchTileCache(key, cached);
-    return Promise.resolve(cloneTile(cached.response));
+    return Promise.resolve(cached);
   }
   const existing = tileInflight.get(key);
-  if (existing) return subscribeInflight(existing, signal, cloneTile);
+  if (existing) return subscribeInflight(existing, signal);
   const controller = new AbortController();
   let entry: InflightEntry<ProcessMapTileResponse>;
   const params = new URLSearchParams({ company_id: companyID.trim() });
-  const promise = requestJSONWithMeta<unknown>(
+  const promise = requestJSONWithMeta<ProcessMapTileResponse>(
     apiBase,
     `/v1/process-map/tiles/${encodeURIComponent(String(z))}/${encodeURIComponent(String(x))}/${encodeURIComponent(String(y))}?${params}`,
-    { signal: controller.signal },
+    {
+      signal: controller.signal,
+      consumeResponse: async (response) => {
+        const bytes = await response.arrayBuffer();
+        return normalizeTile(JSON.parse(new TextDecoder().decode(bytes)), bytes.byteLength);
+      },
+    },
   ).then((response) => {
     if (response.notModified) throw new Error("process_map_tile_unexpected_304");
-    const normalized = normalizeTile(response.body);
+    const normalized = response.body;
+    if (!normalized) throw new Error("invalid_process_map_tile");
     if (normalized.process_map_read_version !== readVersion || normalized.z !== z || normalized.x !== x || normalized.y !== y) {
       throw new Error("stale_process_map_tile");
     }
-    if (entry.cacheable) storeTileCache(key, { response: normalized, etag: response.etag });
+    if (entry.cacheable) storeTileCache(key, normalized);
     return normalized;
   }).finally(() => {
     entry.settled = true;
@@ -599,7 +558,7 @@ export function fetchProcessMapTile(
   });
   entry = { key, controller, promise, callers: new Set(), settled: false, cacheable: true };
   tileInflight.set(key, entry);
-  return subscribeInflight(entry, signal, cloneTile);
+  return subscribeInflight(entry, signal);
 }
 
 export async function fetchProcessMapChanges(
@@ -650,15 +609,15 @@ export function applyProcessMapCacheValidation(apiBase: string, companyID: strin
   const prefix = cachePrefix(apiBase, companyID);
   const version = changes.process_map_read_version;
   const validated = new Set(changes.validated_tiles.map(processMapTileVersionKey));
-  const retained: Array<[string, CacheEntry<ProcessMapTileResponse>]> = [];
-  for (const [key, entry] of tileCache) {
-    if (!key.startsWith(prefix) || entry.response.process_map_read_version >= version) continue;
+  const retained: Array<[string, ProcessMapTileResponse]> = [];
+  for (const [key, tile] of tileCache) {
+    if (!key.startsWith(prefix) || tile.process_map_read_version >= version) continue;
     tileCache.delete(key);
-    tileCacheBytes -= entry.response.byteLength;
-    if (validated.has(processMapTileVersionKey(entry.response))) {
+    tileCacheBytes -= tile.byteLength;
+    if (validated.has(processMapTileVersionKey(tile))) {
       const parts = key.slice(prefix.length).split("\u0000");
-      const response = { ...entry.response, process_map_read_version: version };
-      retained.push([tileKey(apiBase, companyID, version, parts[1], response.z, response.x, response.y), { response }]);
+      const response = Object.freeze({ ...tile, process_map_read_version: version });
+      retained.push([tileKey(apiBase, companyID, version, parts[1], response.z, response.x, response.y), response]);
     }
   }
   for (const [key, entry] of retained) storeTileCache(key, entry);
@@ -685,7 +644,7 @@ export function invalidateProcessMapReadCaches(apiBase: string, companyID: strin
   for (const [key, cached] of tileCache) {
     if (!belongsToCompany(key)) continue;
     tileCache.delete(key);
-    tileCacheBytes -= cached.response.byteLength;
+    tileCacheBytes -= cached.byteLength;
   }
   for (const [key, entry] of sceneInflight) {
     if (!belongsToCompany(key)) continue;
@@ -731,8 +690,7 @@ async function committedMutation(
     ...init,
     headers: processMapMutationHeaders(apiBase, companyID),
   });
-  const envelope = normalizeMutationEnvelope(payload);
-  return cloneEnvelope(envelope);
+  return normalizeMutationEnvelope(payload);
 }
 
 export function putProcessMapPlacement(

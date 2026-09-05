@@ -9,10 +9,17 @@ import {
   shouldApplyProcessMapCommit,
   shouldApplyProcessMapMutationAck,
   transparentVectorRefinementStrategy,
+  type ProcessMapRefinementTile,
 } from "../../../../frontend/src/modules/process-map/processMapInteraction.js";
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function refine(tiles: ProcessMapRefinementTile[]): void {
+  // This is the state Tileset2D supplies to a custom refinement callback.
+  for (const tile of tiles) tile.isVisible = tile.isSelected;
+  transparentVectorRefinementStrategy(tiles);
 }
 
 test("connections keep exact directed endpoint identities", () => {
@@ -84,29 +91,57 @@ test("camera settlement waits for one quiet, all-inactive generation", async () 
 
 test("transparent-vector refinement keeps one loaded covering level until the complete replacement is ready", () => {
   const tiles: Parameters<typeof transparentVectorRefinementStrategy>[0] = [
-    { index: { x: 0, y: 0, z: 0 }, isSelected: false, isVisible: false, isLoaded: true, content: { level: "coarse" } },
-    { index: { x: 0, y: 0, z: 1 }, isSelected: true, isVisible: true, isLoaded: true, content: { level: "fine" } },
-    { index: { x: 1, y: 0, z: 1 }, isSelected: true, isVisible: true, isLoaded: true, content: { level: "fine" } },
-    { index: { x: 0, y: 1, z: 1 }, isSelected: true, isVisible: true, isLoaded: true, content: { level: "fine" } },
-    { index: { x: 1, y: 1, z: 1 }, isSelected: true, isVisible: true, isLoaded: true, content: null },
+    { index: { x: 0, y: 0, z: 0 }, parent: null, isSelected: false, isVisible: false, isLoaded: true, content: { level: "coarse" } },
+    { index: { x: 0, y: 0, z: 1 }, parent: null, isSelected: true, isVisible: true, isLoaded: true, content: { level: "fine" } },
+    { index: { x: 1, y: 0, z: 1 }, parent: null, isSelected: true, isVisible: true, isLoaded: true, content: { level: "fine" } },
+    { index: { x: 0, y: 1, z: 1 }, parent: null, isSelected: true, isVisible: true, isLoaded: true, content: { level: "fine" } },
+    { index: { x: 1, y: 1, z: 1 }, parent: null, isSelected: true, isVisible: true, isLoaded: true, content: null },
   ];
+  for (const tile of tiles.slice(1)) tile.parent = tiles[0];
 
-  transparentVectorRefinementStrategy(tiles);
+  refine(tiles);
   assert.equal(tiles[0].isVisible, true);
   assert.deepEqual(tiles.slice(1).map((tile) => tile.isVisible), [false, false, false, false], "a selected null-content tile cannot replace valid coarse geometry");
 
   tiles[4].content = { level: "fine" };
-  transparentVectorRefinementStrategy(tiles);
+  refine(tiles);
   assert.equal(tiles[0].isVisible, false);
   assert.deepEqual(tiles.slice(1).map((tile) => tile.isVisible), [true, true, true, true]);
 
   tiles[2].isLoaded = false;
-  transparentVectorRefinementStrategy(tiles);
+  refine(tiles);
   assert.equal(tiles[2].isVisible, true, "cached tile content remains drawable while its replacement reloads");
   tiles[2].isLoaded = true;
 
   tiles[4].content = null;
-  transparentVectorRefinementStrategy(tiles);
+  refine(tiles);
   assert.equal(tiles[0].isVisible, true, "failed or unavailable finer coverage retains valid coarse geometry");
   assert.deepEqual(tiles.slice(1).map((tile) => tile.isVisible), [false, false, false, false]);
+});
+
+test("complete selected coverage never traverses cached ancestors", () => {
+  const tiles: ProcessMapRefinementTile[] = Array.from({ length: 256 }, (_, x) => ({
+    index: { x, y: 0, z: 2 }, isSelected: x < 4, isVisible: x < 4, isLoaded: true, content: {},
+    get parent(): never { throw new Error("complete coverage needs no ancestor lookup"); },
+  }));
+  refine(tiles);
+  assert.equal(tiles.filter((tile) => tile.isVisible).length, 4);
+});
+
+test("substitute ancestors never overlap one another across sparse cached levels", () => {
+  const tile = (z: number, x: number, selected: boolean, content: unknown, parent: ProcessMapRefinementTile | null): ProcessMapRefinementTile => ({
+    index: { z, x, y: 0 }, parent, isSelected: selected, isVisible: selected, isLoaded: content != null, content,
+  });
+  const root = tile(0, 0, false, {}, null);
+  const left = tile(1, 0, false, {}, root);
+  const emptyRight = tile(1, 1, false, null, root);
+  const missingLeft = tile(3, 0, true, null, left);
+  const readyLeft = tile(3, 1, true, {}, left);
+  const missingRight = tile(3, 4, true, null, emptyRight);
+  const tiles = [readyLeft, missingLeft, left, missingRight, root, emptyRight];
+  refine(tiles);
+  assert.deepEqual(tiles.filter((entry) => entry.isVisible), [root], "higher fallback suppresses every overlapping lower layer regardless of header order");
+  missingRight.content = {};
+  refine(tiles);
+  assert.deepEqual(tiles.filter((entry) => entry.isVisible), [left, missingRight]);
 });

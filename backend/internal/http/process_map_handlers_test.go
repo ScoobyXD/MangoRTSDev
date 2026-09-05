@@ -576,14 +576,21 @@ func TestProcessMapHTTPTileRejectsPreviousRepresentationETag(t *testing.T) {
 	fixture := newProcessMapHTTPFixture(t)
 	path := "/v1/process-map/tiles/22/0/0?company_id=" + url.QueryEscape(fixture.companyID)
 	request := httptest.NewRequest(http.MethodGet, path, nil)
-	legacyETag, err := fixture.server.processMapETag(request, fixture.companyID, fixture.viewer.UserID, domain.RoleCompanyUser, "process-map-tile-v5")
+	metadata, err := fixture.repo.GetProcessMapTileMetadata(request.Context(), store.ProcessMapTileQuery{
+		CompanyID: fixture.companyID, PermissionUserID: fixture.viewer.UserID, Z: 22, X: 0, Y: 0,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	legacyETag := processMapReadETag(request, fixture.companyID, fixture.viewer.UserID, metadata.ActorRole,
+		"process-map-tile-v7", metadata.ProcessMapVersion, metadata.PermissionGroupVersion, metadata.BusinessDate)
 
 	fresh := fixture.request(t, fixture.viewer, http.MethodGet, path, "", map[string]string{"If-None-Match": legacyETag})
 	if fresh.Code != http.StatusOK {
 		t.Fatalf("legacy tile validator status=%d body=%s", fresh.Code, fresh.Body.String())
+	}
+	if strings.Contains(fresh.Body.String(), "created_timestamp") || strings.Contains(fresh.Body.String(), "updated_timestamp") {
+		t.Fatal("tile read retained unused timestamp fields")
 	}
 	currentETag := fresh.Header().Get("ETag")
 	if currentETag == "" || currentETag == legacyETag {

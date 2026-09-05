@@ -12,7 +12,7 @@ import (
 )
 
 const processMapRealtimeConnectionIDHeader = "X-Mango-Realtime-Connection-ID"
-const processMapTileETagContract = "process-map-tile-v7"
+const processMapTileETagContract = "process-map-tile-v8"
 
 func decodeProcessMapJSON(r *http.Request, destination any) error {
 	decoder := json.NewDecoder(r.Body)

@@ -102,7 +102,7 @@ test("V3 Surface retains placement containment, Folder resize safety, owned trac
   for (const required of [
     "invalidateProcessMapReadCaches(apiBase, companyID)",
     "sceneAbortRef.current?.abort()",
-    "setLoadedTiles(new Map())",
+    "publishLoadedTiles(new Map())",
     "setCommittedOverlay(emptyPresentation())",
     "setPreviewPlacements(new Map())",
     "setPreviewTraces(new Map())",
@@ -155,7 +155,8 @@ test("company or auth scope changes synchronously suppress protected geometry be
   assert.match(surface, /const activeScene = protectedScopeCurrent \? scene : null/);
   assert.match(surface, /\(\) => protectedScopeCurrent \? mergeTilePresentation\(loadedTiles\) : emptyPresentation\(\)/);
   assert.match(surface, /const presentation = useMemo\(\(\) => protectedScopeCurrent[\s\S]{0,240}: emptyPresentation\(\)/);
-  assert.match(surface, /const spatialLayers = useMemo\(\(\) => activeScene \? buildProcessMapSpatialLayers/);
+  assert.match(surface, /const fittedScene = fittedSceneRef\.current \? activeScene : null/);
+  assert.match(surface, /const spatialLayers = useMemo\(\(\) => fittedScene \? buildProcessMapSpatialLayers/);
   assert.match(surface, /const layers = useMemo\(\(\) => activeScene && spatialLayers \? composeProcessMapLayers/);
 
   const purgeStart = surface.indexOf("const purgeProtectedScene = useCallback");
@@ -164,7 +165,7 @@ test("company or auth scope changes synchronously suppress protected geometry be
   const purge = surface.slice(purgeStart, purgeEnd);
   assert.ok(purge.indexOf("setProtectedScope(protectedScopeKey)") < purge.indexOf("advanceProtectedGeneration()"));
   assert.match(purge, /setScene\(null\)/);
-  assert.match(purge, /setLoadedTiles\(new Map\(\)\)/);
+  assert.match(purge, /publishLoadedTiles\(new Map\(\)\)/);
   assert.match(purge, /setCommittedOverlay\(emptyPresentation\(\)\)/);
   assert.match(purge, /setPreviewPlacements\(new Map\(\)\)/);
   assert.match(purge, /setPreviewTraces\(new Map\(\)\)/);
@@ -179,7 +180,7 @@ test("same-permission mutation reconciliation keeps loaded coverage and refreshe
   const refreshEnd = surface.indexOf("\n\n  const applyEnvelope", refreshStart);
   assert.ok(refreshStart >= 0 && refreshEnd > refreshStart);
   const refresh = surface.slice(refreshStart, refreshEnd);
-  assert.doesNotMatch(refresh, /setLoadedTiles\(new Map\(\)\)/);
+  assert.doesNotMatch(refresh, /publishLoadedTiles\(new Map\(\)\)/);
   assert.match(surface, /committedOverlay\.removedPlacementKeys/);
   assert.match(surface, /tile\.process_map_read_version === readVersion/);
   assert.match(surface, /for \(const affectedKey of removalPlacementKeys\) \{/);
@@ -224,7 +225,9 @@ test("V3 Surface keeps QDC hover and pin controls plus the full Process modal en
   assert.match(page, /hoverModeEnabled/);
   assert.match(surface, /hoveredProcessID/);
   assert.match(surface, /pinnedProcessID/);
-  assert.match(surface, /onClose=\{\(\) => \{[\s\S]{0,180}setPinnedProcessID\(null\)[\s\S]{0,180}setHoveredProcessID\(null\)/);
+  assert.match(surface, /const closeQDCard = useCallback\(\(\) => \{\s*setPinnedProcessID\(null\);\s*setHoveredProcessID\(null\);\s*\}, \[\]\)/);
+  assert.match(surface, /onClose=\{closeQDCard\}/);
+  assert.match(card, /export const ProcessMapQDCard = memo\(function ProcessMapQDCard/);
   assert.match(card, /\{pinned && \(/);
   assert.match(card, /onClick=\{onClose\}/);
   assert.match(card, /LogicGateQDTracker/);
@@ -291,7 +294,8 @@ test("V3 Surface keeps valid tile data through camera settlement and accepts dec
   assert.match(spatialLayers, /const editedTraceMembership = useMemo\([\s\S]*?\[editedTraceIDs\]\)/);
   assert.match(spatialLayers, /const spatialEditedPlacementKeys = useMemo[\s\S]*?\[editedPlacementMembership\]/);
   assert.match(spatialLayers, /const spatialEditedTraceIDs = useMemo[\s\S]*?\[editedTraceMembership\]/);
-  assert.match(spatialLayers, /const spatialLayers = useMemo\(\(\) => activeScene \? buildProcessMapSpatialLayers/);
+  assert.match(spatialLayers, /const fittedScene = fittedSceneRef\.current \? activeScene : null/);
+  assert.match(spatialLayers, /const spatialLayers = useMemo\(\(\) => fittedScene \? buildProcessMapSpatialLayers/);
   assert.match(spatialLayers, /editedPlacementKeys: spatialEditedPlacementKeys/);
   assert.match(spatialLayers, /editedTraceIDs: spatialEditedTraceIDs/);
   assert.doesNotMatch(spatialLayers, /\b(?:presentation|editOverlay|gesture|previewPlacements|previewTraces|viewState)\b/);
@@ -422,7 +426,7 @@ test("keyboard Company Explorer deletion stays explicit without a selection tool
 
 test("QDC visibility starts with the server-capped name-visible presentation", () => {
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
-  assert.match(surface, /const qdGeometry = qdPlacement \? processMapPlacementGeometryForTransform\(qdPlacement, placementTransform\) : null/);
+  assert.match(surface, /const qdGeometry = useMemo\(\(\) => qdPlacement\s*\? processMapPlacementGeometryForTransform\(qdPlacement, placementTransform\)\s*: null, \[qdPlacement, placementTransform\]\)/);
   assert.match(surface, /const qdVisible = qdPlacement && qdGeometry && processMapPlacementDisplayLOD\(\{[\s\S]*?presentation: qdPlacement\.presentation,[\s\S]*?\}, 2 \*\* settledViewState\.zoom\) !== "whole"/);
 });
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +188,40 @@ $function$`, processIDs["Large"], processIDs["Large Target"])
 	if err := connection.Close(); err != nil {
 		t.Fatal(err)
 	}
+	// Fail on a second authorization of the same exact typed resource in one
+	// read. Placements, visible parents, and trace endpoints share one result.
+	var permissionDefinition string
+	if err := db.QueryRow(`select pg_get_functiondef('mangorts_user_can_access_resource(uuid,text,uuid,uuid,text)'::regprocedure)`).Scan(&permissionDefinition); err != nil {
+		t.Fatal(err)
+	}
+	permissionBodyStart := strings.Index(permissionDefinition, "AS $function$")
+	if permissionBodyStart < 0 {
+		t.Fatal("permission function definition has no function body")
+	}
+	if _, err := db.Exec(`alter function mangorts_user_can_access_resource(uuid,text,uuid,uuid,text) rename to process_map_test_original_permission_check`); err != nil {
+		t.Fatal(err)
+	}
+	permissionGuard := strings.Replace(permissionDefinition[:permissionBodyStart], "LANGUAGE sql", "LANGUAGE plpgsql", 1) + `AS $function$
+declare
+  checked jsonb := coalesce(nullif(current_setting('process_map_test.permission_checks',true),''),'{}')::jsonb;
+  resource_key text := p_company_id::text || ':' || p_resource_type || ':' || p_resource_id::text;
+begin
+  if checked ? resource_key then
+    raise exception 'duplicate map permission check for %', resource_key;
+  end if;
+  perform set_config('process_map_test.permission_checks',(checked || jsonb_build_object(resource_key,true))::text,false);
+  return process_map_test_original_permission_check(p_company_id,p_resource_type,p_resource_id,p_user_id,p_access_level);
+end;
+$function$`
+	if _, err := db.Exec(permissionGuard); err != nil {
+		t.Fatal(err)
+	}
+	restorePermissionCheck := func() {
+		if _, err := db.Exec(permissionDefinition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(restorePermissionCheck)
 	queryTrace := &processMapTileQueryTrace{}
 	config.Tracer = queryTrace
 	config.RuntimeParams["default_transaction_read_only"] = "on"
@@ -203,6 +238,15 @@ $function$`, processIDs["Large"], processIDs["Large Target"])
 	if len(queryTrace.statements) != 1 {
 		t.Fatalf("complete tile executed %d statements, want one", len(queryTrace.statements))
 	}
+	if _, err := tracedDB.Exec(`set process_map_test.permission_checks='{}'`); err != nil {
+		t.Fatal(err)
+	}
+	queryTrace.statements = nil
+	scene, err := tracedRepo.GetProcessMapScene(ctx, ProcessMapSceneQuery{CompanyID: company.CompanyID, PermissionUserID: viewer.UserID})
+	if err != nil || scene.Bounds == nil || len(queryTrace.statements) != 1 || scene.ProcessMapReadVersion != tile.ProcessMapReadVersion {
+		t.Fatalf("scene must authorize once per resource in one statement: scene=%+v, err=%v, statements=%d", scene, err, len(queryTrace.statements))
+	}
+	restorePermissionCheck()
 	t.Log("complete tile: 1 SQL statement, including authorization, metadata, placements, and traces")
 	if tile.Metadata.ActorRole != domain.RoleCompanyUser || tile.Metadata.ProcessMapVersion != tile.ProcessMapReadVersion ||
 		tile.Metadata.ProcessMapVersion != postgresProcessMapVersionForTest(t, repo, company.CompanyID) ||
@@ -283,6 +327,11 @@ $function$`, processIDs["Large"], processIDs["Large Target"])
 	wire, err := json.Marshal(tile)
 	if err != nil {
 		t.Fatal(err)
+	}
+	for _, unusedField := range []string{"created_timestamp", "updated_timestamp"} {
+		if strings.Contains(string(wire), unusedField) {
+			t.Fatalf("tile wire retained unused %s", unusedField)
+		}
 	}
 	var payload struct {
 		Placements []map[string]any `json:"placements"`
@@ -639,6 +688,58 @@ where box(
 	plan := strings.Join(planLines, "\n")
 	if !strings.Contains(plan, "idx_process_map_placements_spatial") {
 		t.Fatalf("Process Map tile spatial predicate did not use GiST index:\n%s", plan)
+	}
+}
+
+func TestPostgresProcessMapTileIncludesWaypointDetourFromOffscreenEndpoints(t *testing.T) {
+	_, repo := openPostgresProcessMapIntegration(t)
+	ctx := context.Background()
+	company, err := repo.CreateCompany("Offscreen trace detour")
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin, err := repo.UpsertAuthUser("map-detour-admin", "map-detour-admin@example.test", "Detour admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	var endpoints [2]domain.ProcessMapResourceRef
+	for index, x := range []int{600, 900} {
+		gate, err := repo.CreateLogicGate(company.CompanyID, fmt.Sprintf("Offscreen %d", index))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, gate.LogicGateID, nil, x, 100, 24, 16)); err != nil {
+			t.Fatal(err)
+		}
+		endpoints[index] = processMapTestRef(domain.ProcessMapResourceTypeProcess, gate.LogicGateID)
+	}
+	detour, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
+		CompanyID: company.CompanyID, ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+		Source: endpoints[0], Target: endpoints[1],
+		Trace: &ProcessMapTraceInput{RoutePoints: []domain.ProcessMapRoutePoint{{X: 0, Y: 100}, {X: 0, Y: 150}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.CreateResourceOperationalRelationship(ctx, ResourceOperationalRelationshipCreateInput{
+		CompanyID: company.CompanyID, ActorUserID: admin.UserID, PermissionUserID: admin.UserID,
+		Source: endpoints[1], Target: endpoints[0], Trace: &ProcessMapTraceInput{RoutePoints: []domain.ProcessMapRoutePoint{}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{CompanyID: company.CompanyID, PermissionUserID: admin.UserID, Z: 22, X: 0, Y: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tile.Traces) != 1 || tile.Traces[0].ResourceOperationalRelationshipID != detour.Relationship.ResourceOperationalRelationshipID {
+		t.Fatalf("tile must retain only the waypoint detour, got %+v", tile.Traces)
+	}
+	fragments := tile.Traces[0].PathFragments
+	if len(fragments) != 1 || !slices.Contains(fragments[0], domain.ProcessMapPathPoint{X: 0, Y: 100}) || !slices.Contains(fragments[0], domain.ProcessMapPathPoint{X: 0, Y: 150}) {
+		t.Fatalf("detour lost its visible route: %+v", fragments)
 	}
 }
 

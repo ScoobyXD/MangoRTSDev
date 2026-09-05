@@ -9,7 +9,7 @@ import {
   postProcessMapRelationship,
   putProcessMapPlacement,
 } from "../../../../frontend/src/modules/process-map/processMapApi.js";
-import { PROCESS_MAP_TILE_CACHE_BYTES } from "../../../../frontend/src/modules/process-map/processMapGeometry.js";
+import { PROCESS_MAP_TILE_CACHE_BYTES, PROCESS_MAP_TILE_CACHE_MAX_SIZE } from "../../../../frontend/src/modules/process-map/processMapGeometry.js";
 
 function scenePayload(readVersion = 11) {
   return {
@@ -41,8 +41,6 @@ function tilePayload(readVersion = 11, z = 2, x = 3, y = -1) {
         grid_height: 6,
         can_edit: true,
         revision: 3,
-        created_timestamp: "created",
-        updated_timestamp: "updated",
         score_card: { quality_rating: "green", cost_rating: "yellow", delivery_rating: "red" },
         responsible_names: ["Ada", "Lin"],
         accountable_names: ["Grace"],
@@ -88,8 +86,6 @@ test("tile presentation normalizes omitted names and routes without discarding t
       grid_height: 5,
       can_edit: true,
       revision: 2,
-      created_timestamp: "created",
-      updated_timestamp: "updated",
       score_card: { quality_rating: "green", cost_rating: "yellow", delivery_rating: "red" },
       responsible_names: ["must-not-survive"],
       accountable_names: ["must-not-survive"],
@@ -101,13 +97,15 @@ test("tile presentation normalizes omitted names and routes without discarding t
       target: { resource_type: "logic_gate", resource_id: "target" },
       path_fragments: [[{ x: 16, y: 14.5 }, { x: 40, y: 14.5 }]],
       revision: 3,
-      created_timestamp: "created",
-      updated_timestamp: "updated",
     }],
   }), { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
   try {
     const tile = await fetchProcessMapTile(apiBase, "company-1", 14, 4, 2, 1);
     const visible = tile.placements[0];
+    assert.equal("created_timestamp" in visible, false, "tile read placements contain only rendering data");
+    assert.equal("updated_timestamp" in visible, false);
+    assert.equal("created_timestamp" in tile.traces[0], false);
+    assert.equal("updated_timestamp" in tile.traces[0], false);
     assert.equal(visible.restricted, false);
     assert.equal(visible.restricted ? undefined : visible.presentation, "whole");
     assert.equal(visible.restricted ? undefined : visible.name, "");
@@ -140,8 +138,6 @@ test("tile parsing preserves varied square-layout rectangles and exact Folder pa
       grid_height: 90,
       can_edit: true,
       revision: 2,
-      created_timestamp: "created",
-      updated_timestamp: "updated",
     },
     {
       restricted: false,
@@ -156,8 +152,6 @@ test("tile parsing preserves varied square-layout rectangles and exact Folder pa
       grid_height: 40,
       can_edit: true,
       revision: 3,
-      created_timestamp: "created",
-      updated_timestamp: "updated",
     },
     {
       restricted: false,
@@ -172,8 +166,6 @@ test("tile parsing preserves varied square-layout rectangles and exact Folder pa
       grid_height: 8,
       can_edit: true,
       revision: 4,
-      created_timestamp: "created",
-      updated_timestamp: "updated",
     },
     {
       restricted: false,
@@ -188,8 +180,6 @@ test("tile parsing preserves varied square-layout rectangles and exact Folder pa
       grid_height: 10,
       can_edit: true,
       revision: 5,
-      created_timestamp: "created",
-      updated_timestamp: "updated",
     },
   ];
   globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -241,8 +231,6 @@ test("tile parser rejects missing or invalid presentation ceilings", async () =>
     grid_height: 5,
     can_edit: true,
     revision: 1,
-    created_timestamp: "created",
-    updated_timestamp: "updated",
   };
   const visibleTrace = {
     presentation: "editing" as unknown,
@@ -252,8 +240,6 @@ test("tile parser rejects missing or invalid presentation ceilings", async () =>
     route_points: [],
     path_fragments: [[{ x: 8, y: 4 }, { x: 20, y: 4 }]],
     revision: 1,
-    created_timestamp: "created",
-    updated_timestamp: "updated",
   };
   const cases = [
     { label: "placement missing", target: "placement", value: undefined },
@@ -396,6 +382,7 @@ test("tile cache identity includes read version and z/x/y while restricted rows 
     release();
     const [left, right] = await Promise.all([first, joined]);
     assert.deepEqual(left, right);
+    assert.equal(left, right, "identical readers share one immutable tile graph");
     assert.match(requests[0].pathname, /\/v1\/process-map\/tiles\/2\/3\/-1$/);
     assert.equal(requests[0].searchParams.get("company_id"), "company-1");
     assert.deepEqual(left.placements[1], { restricted: true, grid_x: 14, grid_y: 8 });
@@ -408,13 +395,18 @@ test("tile cache identity includes read version and z/x/y while restricted rows 
     assert.deepEqual(leftProcess.score_card, { quality_rating: "green", cost_rating: "yellow", delivery_rating: "red" });
     assert.deepEqual(leftProcess.responsible_names, ["Ada", "Lin"]);
     assert.deepEqual(leftProcess.accountable_names, ["Grace"]);
-    assert.notEqual(leftProcess.score_card, rightProcess.score_card);
-    assert.notEqual(leftProcess.responsible_names, rightProcess.responsible_names);
-    assert.notEqual(leftProcess.accountable_names, rightProcess.accountable_names);
-    rightProcess.score_card!.quality_rating = "red";
-    rightProcess.responsible_names!.push("Changed");
+    assert.equal(leftProcess.score_card, rightProcess.score_card);
+    assert.equal(leftProcess.responsible_names, rightProcess.responsible_names);
+    assert.equal(leftProcess.accountable_names, rightProcess.accountable_names);
+    assert.equal(Reflect.set(right, "x", 99), false);
+    assert.equal(Reflect.set(right.placements, "0", { restricted: true, grid_x: 0, grid_y: 0 }), false);
+    assert.equal(Reflect.set(rightProcess, "name", "Changed"), false);
+    assert.equal(Reflect.set(rightProcess.score_card!, "quality_rating", "red"), false);
+    assert.throws(() => rightProcess.responsible_names!.push("Changed"), TypeError);
+    assert.throws(() => rightProcess.accountable_names!.push("Changed"), TypeError);
     assert.equal(leftProcess.score_card?.quality_rating, "green");
     assert.deepEqual(leftProcess.responsible_names, ["Ada", "Lin"]);
+    assert.equal(await fetchProcessMapTile(apiBase, "company-1", 11, 2, 3, -1), left, "cache hits share the protected read graph too");
 
     await fetchProcessMapTile(apiBase, "company-1", 12, 2, 3, -1);
     await fetchProcessMapTile(apiBase, "company-1", 12, 3, 3, -1);
@@ -423,6 +415,107 @@ test("tile cache identity includes read version and z/x/y while restricted rows 
     release();
     invalidateProcessMapReadCaches(apiBase, "company-1");
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("tile normalization measures received UTF-8 bytes without serializing the payload again", async () => {
+  const apiBase = "https://process-map-tile-byte-count.test";
+  const originalFetch = globalThis.fetch;
+  const originalStringify = JSON.stringify;
+  const payload = tilePayload();
+  (payload.placements[0] as { name: string }).name = "Receive — 東京 😀";
+  const body = `${JSON.stringify(payload, null, 2)}\n`;
+  const expectedBytes = new TextEncoder().encode(body).byteLength;
+  let serializations = 0;
+  globalThis.fetch = (async () => new Response(body, {
+    headers: { "Content-Type": "application/json", "Content-Length": "10", "Content-Encoding": "gzip" },
+  })) as typeof fetch;
+  JSON.stringify = ((...args: Parameters<typeof JSON.stringify>) => {
+    serializations += 1;
+    return originalStringify(...args);
+  }) as typeof JSON.stringify;
+  try {
+    const result = await fetchProcessMapTile(apiBase, "company-1", 11, 2, 3, -1);
+    assert.equal(result.byteLength, expectedBytes, "use actual decoded response bytes, not compressed Content-Length or character count");
+    assert.equal(serializations, 0);
+    assert.equal(result.placements[0].restricted ? null : result.placements[0].name, "Receive — 東京 😀");
+  } finally {
+    JSON.stringify = originalStringify;
+    globalThis.fetch = originalFetch;
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+  }
+});
+
+test("shared trace reads freeze endpoints, routes, and fragments while edit copies remain independent", async () => {
+  const apiBase = "https://process-map-tile-trace-ownership.test";
+  const originalFetch = globalThis.fetch;
+  const body = JSON.stringify({
+    ...tilePayload(),
+    traces: [{
+      presentation: "editing",
+      resource_operational_relationship_id: "trace-1",
+      source: { resource_type: "logic_gate", resource_id: "source" },
+      target: { resource_type: "logic_gate", resource_id: "target" },
+      route_points: [{ x: 3, y: 2 }],
+      path_fragments: [[{ x: 1, y: 2 }, { x: 3, y: 2 }]],
+      revision: 1,
+    }],
+  });
+  let requests = 0;
+  globalThis.fetch = (async () => {
+    requests += 1;
+    return new Response(body, { headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    const [first, joined] = await Promise.all([
+      fetchProcessMapTile(apiBase, "company-1", 11, 2, 3, -1),
+      fetchProcessMapTile(apiBase, "company-1", 11, 2, 3, -1),
+    ]);
+    const trace = first.traces[0];
+    assert.equal(first, joined);
+    assert.equal(Reflect.set(first.traces, "0", null), false);
+    assert.equal(Reflect.set(trace, "revision", 999), false);
+    assert.equal(Reflect.set(trace.source, "resource_id", "changed"), false);
+    assert.equal(Reflect.set(trace.target, "resource_id", "changed"), false);
+    assert.equal(Reflect.set(trace.route_points, "0", { x: 99, y: 99 }), false);
+    assert.equal(Reflect.set(trace.route_points[0], "x", 99), false);
+    assert.equal(Reflect.set(trace.path_fragments, "0", []), false);
+    assert.equal(Reflect.set(trace.path_fragments[0], "0", { x: 99, y: 99 }), false);
+    assert.equal(Reflect.set(trace.path_fragments[0][0], "x", 99), false);
+    const editRoute = trace.route_points.map((point) => ({ ...point }));
+    editRoute[0].x = 99;
+    assert.equal(trace.route_points[0].x, 3);
+    assert.equal(await fetchProcessMapTile(apiBase, "company-1", 11, 2, 3, -1), first);
+    assert.equal(requests, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateProcessMapReadCaches(apiBase, "company-1");
+  }
+});
+
+test("small tile caching stays count-bounded and keeps recently used coverage", async () => {
+  const apiBase = "https://process-map-small-cache.test";
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = (async (input) => {
+    requests += 1;
+    const x = Number(new URL(input.toString()).pathname.split("/").at(-2));
+    return new Response(JSON.stringify({ z: 22, x, y: 0, process_map_read_version: 11, placements: [], traces: [] }));
+  }) as typeof fetch;
+  const read = (x: number) => fetchProcessMapTile(apiBase, "company-1", 11, 22, x, 0);
+  try {
+    for (let x = 0; x < PROCESS_MAP_TILE_CACHE_MAX_SIZE; x += 1) await read(x);
+    const recentlyUsed = await read(0);
+    await read(PROCESS_MAP_TILE_CACHE_MAX_SIZE);
+    assert.equal(getProcessMapReadCacheStats().tile_entries, PROCESS_MAP_TILE_CACHE_MAX_SIZE);
+    assert.ok(getProcessMapReadCacheStats().tile_bytes < PROCESS_MAP_TILE_CACHE_BYTES);
+    assert.equal(await read(0), recentlyUsed);
+    assert.equal(requests, PROCESS_MAP_TILE_CACHE_MAX_SIZE + 1, "a cache hit refreshes recency without cloning or fetching");
+    await read(1);
+    assert.equal(requests, PROCESS_MAP_TILE_CACHE_MAX_SIZE + 2, "the oldest unused tile is evicted despite its tiny payload");
+  } finally {
+    globalThis.fetch = originalFetch;
+    invalidateProcessMapReadCaches(apiBase, "company-1");
   }
 });
 

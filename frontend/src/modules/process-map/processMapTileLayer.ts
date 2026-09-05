@@ -1,6 +1,70 @@
-import type { FilterContext, Layer, UpdateParameters } from "@deck.gl/core";
-import { TileLayer, type _Tile2DHeader as TileHeader } from "@deck.gl/geo-layers";
+import { _flatten as flatten, type FilterContext, type Layer, type LayersList, type UpdateParameters } from "@deck.gl/core";
+import { TileLayer, _Tileset2D as Tileset2D, type _Tile2DHeader as TileHeader } from "@deck.gl/geo-layers";
 import type { ProcessMapTileResponse } from "./processMapApi.js";
+
+export class ProcessMapTileset extends Tileset2D {
+  // deck.gl 9.3.10 adds replacement bytes without removing the old size. Keep
+  // this pinned-library correction here, alongside the existing tile adapter.
+  private get cacheAccounting() {
+    return this as unknown as { _cache: Map<string, TileHeader>; _cacheByteSize: number };
+  }
+
+  private reconcileCacheBytes(pendingAddition = 0): void {
+    if (this.opts.maxCacheByteSize === null) return;
+    let bytes = 0;
+    for (const tile of this.cacheAccounting._cache.values()) bytes += tile.byteLength;
+    this.cacheAccounting._cacheByteSize = bytes - pendingAddition;
+  }
+
+  override setOptions(options: Parameters<Tileset2D["setOptions"]>[0]): void {
+    const { onTileLoad, onTileError, onTileUnload } = options;
+    super.setOptions({
+      ...options,
+      onTileLoad: (tile) => {
+        // The base callback adds this tile's bytes after our callback. Recount
+        // resident content so reloads, failed/cancelled replacements and late
+        // evicted requests cannot inflate the counter or revive coverage.
+        this.reconcileCacheBytes(tile.byteLength);
+        if (this.cacheAccounting._cache.get(tile.id) === tile) onTileLoad?.(tile);
+      },
+      onTileError: (error, tile) => {
+        this.reconcileCacheBytes();
+        if (this.cacheAccounting._cache.get(tile.id) === tile) onTileError?.(error, tile);
+      },
+      onTileUnload: (tile) => {
+        tile.abort();
+        this.reconcileCacheBytes();
+        onTileUnload?.(tile);
+      },
+    });
+  }
+
+  override reloadAll(): void {
+    // Retain old coverage and its accounting until replacement or normal
+    // eviction. The base reloadAll silently deletes offscreen cache entries.
+    for (const tile of this.tiles) tile.setNeedsReload();
+  }
+
+  override finalize(): void {
+    super.finalize();
+    this.cacheAccounting._cacheByteSize = 0;
+  }
+
+  override getTileIndices(options: Parameters<Tileset2D["getTileIndices"]>[0]) {
+    this.reconcileCacheBytes();
+    const indices = super.getTileIndices(options);
+    if (indices.length < 2) return indices;
+    const center = options.viewport.unproject([options.viewport.width / 2, options.viewport.height / 2]);
+    const side = this.opts.tileSize / 2 ** indices[0].z;
+    const x = center[0] / side - 0.5;
+    const y = center[1] / side - 0.5;
+    // Keep the existing scheduler and concurrency; enqueue the nearest tiles
+    // first instead of revealing the viewport column by column.
+    return indices.sort((left, right) => (
+      (left.x - x) ** 2 + (left.y - y) ** 2 - (right.x - x) ** 2 - (right.y - y) ** 2
+    ));
+  }
+}
 
 export type ProcessMapTileRenderState = {
   settledPixelsPerGridUnit: number;
@@ -44,6 +108,7 @@ export class ProcessMapProtectedTileLayer extends TileLayer<ProcessMapTileRespon
   validatedTiles: ReadonlyMap<string, ProcessMapValidatedTile> | null;
 }> {
   static override layerName = "ProcessMapProtectedTileLayer";
+  static override defaultProps = { TilesetClass: ProcessMapTileset };
   declare state: TileLayer<ProcessMapTileResponse>["state"] & { completedReadVersion?: number };
 
   override _onViewportLoad(): void {
@@ -63,6 +128,39 @@ export class ProcessMapProtectedTileLayer extends TileLayer<ProcessMapTileRespon
     // current viewport completes, later pans must not resurrect older edits.
     if ((tile.content?.process_map_read_version ?? -1) < (this.state.completedReadVersion ?? -1)) return false;
     return super.filterSubLayer(context);
+  }
+
+  override renderLayers(): LayersList {
+    const { visibleMinZoom, visibleMaxZoom, minZoom, extent } = this.props;
+    const zoom = this.context.viewport.zoom;
+    const hidden = (visibleMinZoom != null && zoom < visibleMinZoom)
+      || (visibleMaxZoom != null && zoom > visibleMaxZoom)
+      || (minZoom != null && !extent && zoom < minZoom);
+    const layers: LayersList = [];
+    // TileLayer's normal sublayer lifecycle, limited to visible coverage.
+    // Offscreen payloads remain cached, but their GPU layers are released and
+    // their new LOD/masks are built only if that coverage becomes visible.
+    for (const tile of this.state.tileset?.tiles ?? []) {
+      if (hidden || !tile.isVisible || (tile.content?.process_map_read_version ?? -1) < (this.state.completedReadVersion ?? -1)) {
+        tile.layers = null;
+        continue;
+      }
+      if (!tile.isLoaded && !tile.content) continue;
+      const subLayerProps = this.getSubLayerPropsByTile(tile);
+      if (!tile.layers) {
+        tile.layers = (flatten(this.renderSubLayers({
+          ...this.props,
+          ...this.getSubLayerProps({ id: tile.id, updateTriggers: this.props.updateTriggers }),
+          data: tile.content,
+          _offset: 0,
+          tile,
+        }), Boolean) as Layer<{ tile?: TileHeader }>[]).map((layer) => layer.clone({ tile, ...subLayerProps }));
+      } else if (subLayerProps && tile.layers[0] && (Object.keys(subLayerProps) as (keyof typeof subLayerProps)[]).some((key) => tile.layers![0].props[key] !== subLayerProps[key])) {
+        tile.layers = tile.layers.map((layer) => layer.clone(subLayerProps));
+      }
+      layers.push(tile.layers);
+    }
+    return layers;
   }
 
   override updateState(params: UpdateParameters<this>): void {

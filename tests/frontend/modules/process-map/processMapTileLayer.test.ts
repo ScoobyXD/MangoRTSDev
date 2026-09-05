@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ScatterplotLayer } from "../../../../frontend/node_modules/@deck.gl/layers/dist/index.js";
 import { TileLayer, _Tile2DHeader as TileHeader } from "../../../../frontend/node_modules/@deck.gl/geo-layers/dist/index.js";
-import type { Layer } from "../../../../frontend/node_modules/@deck.gl/core/dist/index.js";
-import { ProcessMapProtectedTileLayer, type ProcessMapTileRenderState, type ProcessMapValidatedTile } from "../../../../frontend/src/modules/process-map/processMapTileLayer.js";
+import { OrthographicViewport, type Layer } from "../../../../frontend/node_modules/@deck.gl/core/dist/index.js";
+import { ProcessMapProtectedTileLayer, ProcessMapTileset, type ProcessMapTileRenderState, type ProcessMapValidatedTile } from "../../../../frontend/src/modules/process-map/processMapTileLayer.js";
+import { transparentVectorRefinementStrategy } from "../../../../frontend/src/modules/process-map/processMapInteraction.js";
 import type { ProcessMapTileResponse, ProcessMapVisiblePlacement } from "../../../../frontend/src/modules/process-map/processMapApi.js";
 
 function renderState(overrides: Partial<ProcessMapTileRenderState> = {}): ProcessMapTileRenderState {
@@ -21,7 +22,7 @@ function placement(id: string, resourceType: "logic_gate" | "company_explorer_fo
   return {
     resource_type: resourceType, resource_id: id, restricted: false, presentation: "editing", name: id,
     grid_x: 0, grid_y: 0, grid_width: 10, grid_height: 10, map_parent_folder_id: null,
-    can_edit: true, revision: 1, created_timestamp: "created", updated_timestamp: "updated",
+    can_edit: true, revision: 1,
   };
 }
 
@@ -32,17 +33,17 @@ function cachedTile(id: string, placements: ProcessMapTileResponse["placements"]
       resource_operational_relationship_id: traceID, presentation: "editing",
       source: { resource_type: "logic_gate", resource_id: "source" },
       target: { resource_type: "logic_gate", resource_id: "target" },
-      route_points: [], path_fragments: [], revision: 1, created_timestamp: "created", updated_timestamp: "updated",
+      route_points: [], path_fragments: [], revision: 1,
     })),
   };
   return {
-    id, content, isLoaded: true, needsReload: false,
+    id, content, isLoaded: true, isVisible: true, needsReload: false,
     layers: [new ScatterplotLayer({ id: `${id}-cached`, data: [] })] as Layer[] | null,
     setNeedsReload() { this.needsReload = true; this.isLoaded = false; },
   };
 }
 
-type TestTile = Pick<TileHeader<ProcessMapTileResponse>, "id" | "content" | "isLoaded" | "layers" | "setNeedsReload">;
+type TestTile = Pick<TileHeader<ProcessMapTileResponse>, "id" | "content" | "isLoaded" | "layers" | "setNeedsReload" | "isVisible">;
 
 function harness(tiles: TestTile[]) {
   let reloads = 0;
@@ -88,7 +89,7 @@ function harness(tiles: TestTile[]) {
         changeFlags: { propsOrDataChanged: true, dataChanged, updateTriggersChanged: renderTriggerChanged ? { renderSubLayers: true } : false },
       } as never);
     },
-    render() { TileLayer.prototype.renderLayers.call(fake as never); },
+    render() { return ProcessMapProtectedTileLayer.prototype.renderLayers.call(fake as never); },
     currentTiles: () => fake.state.tileset?.tiles,
     isLoaded: () => fake.state.isLoaded,
     setCompletedReadVersion: (version: number) => { fake.state.completedReadVersion = version; },
@@ -414,4 +415,218 @@ test("completed current coverage prevents deleted or moved objects reappearing f
 
   fake.props.readVersion = 3;
   assert.equal(visible(current), true, "the next ordinary replacement still retains the last completed coverage");
+});
+
+test("offscreen layers are released and rebuild current LOD and masks only when visible again", () => {
+  const visible = cachedTile("visible", [placement("visible")]);
+  const offscreen = cachedTile("offscreen", [placement("offscreen")]);
+  offscreen.isVisible = false;
+  const run = harness([visible, offscreen]);
+  const before = renderState();
+  const after = renderState({ settledPixelsPerGridUnit: 24, selectedPlacementKey: "logic_gate:offscreen" });
+  run.update(before, after);
+  run.render();
+  assert.equal(run.counts().renders, 1);
+  assert.equal(offscreen.layers, null, "settling zoom does not construct offscreen geometry");
+  assert.ok(offscreen.content, "payload coverage remains in the existing cache");
+  offscreen.isVisible = true;
+  run.render();
+  assert.equal(run.counts().renders, 2);
+  const currentLayers = offscreen.layers;
+  run.render();
+  assert.equal(offscreen.layers, currentLayers, "unchanged visible geometry stays reusable");
+  assert.equal(run.counts().renders, 2);
+  visible.isVisible = false;
+  run.render();
+  assert.equal(visible.layers, null, "departed layers leave deck's live layer list");
+});
+
+function viewport(x = 0, width = 128, height = 128) {
+  return new OrthographicViewport({ width, height, target: [x * 256 + 128, 128, 0], zoom: 0, flipY: true });
+}
+
+function assertCacheBytes(tileset: ProcessMapTileset, bytes: number): void {
+  assert.equal(Reflect.get(tileset, "_cacheByteSize"), bytes);
+  assert.equal(tileset.tiles.reduce((total, tile) => total + tile.byteLength, 0), bytes);
+}
+
+async function loadViewport(tileset: ProcessMapTileset, view = viewport()) {
+  tileset.update(view);
+  await Promise.all(tileset.selectedTiles!.map((tile) => tile.data));
+  tileset.update(view);
+}
+
+test("real pinned tileset accounts successful, empty and failed replacements exactly", async () => {
+  let bytes: number | null = 128;
+  let fail = false;
+  let errors = 0;
+  const tileset = new ProcessMapTileset({
+    tileSize: 256, minZoom: 0, maxZoom: 0, maxCacheSize: 4, maxCacheByteSize: 512, maxRequests: 0,
+    getTileData: async () => {
+      if (fail) throw new Error("fixture load failure");
+      return bytes === null ? null : { byteLength: bytes };
+    },
+    onTileError: () => { errors += 1; },
+  });
+  try {
+    await loadViewport(tileset);
+    assertCacheBytes(tileset, 128);
+    for (const replacement of [128, 256, 64, null, 128]) {
+      bytes = replacement;
+      tileset.selectedTiles![0].setNeedsReload();
+      await loadViewport(tileset);
+      assertCacheBytes(tileset, replacement ?? 0);
+    }
+    fail = true;
+    tileset.selectedTiles![0].setNeedsReload();
+    await loadViewport(tileset);
+    assert.equal(errors, 1);
+    assertCacheBytes(tileset, 0);
+    fail = false;
+    tileset.selectedTiles![0].setNeedsReload();
+    await loadViewport(tileset);
+    assertCacheBytes(tileset, 128);
+  } finally {
+    tileset.finalize();
+  }
+  assertCacheBytes(tileset, 0);
+});
+
+test("ordinary reload retains accounted neighboring coverage until normal bounded eviction", async () => {
+  let bytes = 128;
+  let unloaded = 0;
+  const tileset = new ProcessMapTileset({
+    tileSize: 256, minZoom: 0, maxZoom: 0, maxCacheSize: 2, maxCacheByteSize: 512, maxRequests: 0,
+    getTileData: async () => ({ byteLength: bytes }),
+    onTileUnload: () => { unloaded += 1; },
+  });
+  try {
+    await loadViewport(tileset);
+    await loadViewport(tileset, viewport(1));
+    const neighbor = tileset.tiles.find((tile) => tile.index.x === 0)!;
+    tileset.reloadAll();
+    assert.equal(tileset.tiles.length, 2);
+    assert.equal(neighbor.needsReload, true);
+    assertCacheBytes(tileset, 256);
+    bytes = 64;
+    await loadViewport(tileset, viewport(1));
+    assertCacheBytes(tileset, 192);
+    for (let x = 2; x < 12; x += 1) {
+      await loadViewport(tileset, viewport(x));
+      assert.equal(tileset.tiles.length, 2, "tiny responses cannot bypass the resident tile count");
+      assertCacheBytes(tileset, 128);
+    }
+    assert.equal(unloaded, 10);
+  } finally {
+    tileset.finalize();
+  }
+});
+
+test("evicted and finalized requests cannot revive coverage or add phantom bytes", async () => {
+  let pending: ((value: { byteLength: number }) => void) | null = null;
+  const loaded: number[] = [];
+  const tileset = new ProcessMapTileset({
+    tileSize: 256, minZoom: 0, maxZoom: 0, maxCacheSize: 1, maxCacheByteSize: 512, maxRequests: 0,
+    getTileData: async ({ index }) => index.x === 0
+      ? new Promise<{ byteLength: number }>((resolve) => { pending = resolve; })
+      : { byteLength: 64 },
+    onTileLoad: (tile) => { loaded.push(tile.index.x); },
+  });
+  tileset.update(viewport());
+  const firstLoad = tileset.selectedTiles![0].data;
+  await Promise.resolve();
+  await loadViewport(tileset, viewport(1));
+  assert.ok(pending);
+  pending!({ byteLength: 128 });
+  await firstLoad;
+  assert.deepEqual(loaded, [1]);
+  assertCacheBytes(tileset, 64);
+
+  tileset.update(viewport());
+  const lastLoad = tileset.selectedTiles![0].data;
+  await Promise.resolve();
+  tileset.finalize();
+  pending!({ byteLength: 128 });
+  await lastLoad;
+  assert.deepEqual(loaded, [1]);
+  assertCacheBytes(tileset, 0);
+});
+
+test("a silently cancelled replacement is accounted before new coverage can trigger eviction", async () => {
+  let replacing = false;
+  let unloaded = 0;
+  const tileset = new ProcessMapTileset({
+    tileSize: 256, minZoom: 0, maxZoom: 0, maxCacheSize: 2, maxCacheByteSize: 128, maxRequests: 0,
+    getTileData: async ({ index, signal }) => {
+      if (replacing && index.x === 0) {
+        return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("cancelled", "AbortError")), { once: true }));
+      }
+      return { byteLength: 128 };
+    },
+    onTileUnload: () => { unloaded += 1; },
+  });
+  try {
+    await loadViewport(tileset);
+    replacing = true;
+    const old = tileset.selectedTiles![0];
+    old.setNeedsReload();
+    tileset.update(viewport());
+    const cancelled = old.data;
+    await Promise.resolve();
+    old.abort();
+    await cancelled;
+    assert.equal(old.content, null, "deck cancellation clears content without a load/error callback");
+    await loadViewport(tileset, viewport(1));
+    assertCacheBytes(tileset, 128);
+    assert.equal(tileset.tiles.length, 2);
+    assert.equal(unloaded, 0, "cancelled bytes cannot force an otherwise unnecessary eviction");
+  } finally {
+    tileset.finalize();
+  }
+});
+
+test("new viewport requests start nearest its center using the existing scheduler", async () => {
+  const starts: { x: number; y: number }[] = [];
+  const tileset = new ProcessMapTileset({
+    tileSize: 256, minZoom: 0, maxZoom: 0, maxCacheSize: 64, maxCacheByteSize: 1024, maxRequests: 1, debounceTime: 0,
+    getTileData: async ({ index }) => { starts.push(index); return { byteLength: 1 }; },
+  });
+  try {
+    const view = new OrthographicViewport({ width: 1024, height: 1024, target: [640, 640, 0], zoom: 0, flipY: true });
+    await loadViewport(tileset, view);
+    assert.equal(starts.length, 25);
+    assert.deepEqual({ x: starts[0].x, y: starts[0].y }, { x: 2, y: 2 });
+    const distances = starts.map(({ x, y }) => (x - 2) ** 2 + (y - 2) ** 2);
+    assert.deepEqual(distances, [...distances].sort((a, b) => a - b));
+  } finally {
+    tileset.finalize();
+  }
+});
+
+test("real tileset parent links preserve transparent coverage until finer tiles arrive", async () => {
+  let finishFine!: (value: { byteLength: number }) => void;
+  const tileset = new ProcessMapTileset({
+    tileSize: 256, minZoom: 0, maxZoom: 1, maxCacheSize: 16, maxCacheByteSize: 1024, maxRequests: 0,
+    refinementStrategy: transparentVectorRefinementStrategy,
+    getTileData: async ({ index }) => index.z === 1 && index.x === 1 && index.y === 1
+      ? new Promise<{ byteLength: number }>((resolve) => { finishFine = resolve; })
+      : { byteLength: 1 },
+  });
+  try {
+    await loadViewport(tileset);
+    const coarse = tileset.selectedTiles![0];
+    const fine = new OrthographicViewport({ width: 256, height: 256, target: [128, 128, 0], zoom: 1, flipY: true });
+    tileset.update(fine);
+    await Promise.all(tileset.selectedTiles!.filter((tile) => tile.index.x !== 1 || tile.index.y !== 1).map((tile) => tile.data));
+    tileset.update(fine);
+    assert.equal(coarse.isVisible, true);
+    assert.equal(tileset.selectedTiles!.some((tile) => tile.isVisible), false);
+    assert.equal(tileset.selectedTiles!.every((tile) => tile.parent === coarse), true);
+    finishFine({ byteLength: 1 });
+    await loadViewport(tileset, fine);
+    assert.equal(coarse.isVisible, false);
+    assert.equal(tileset.selectedTiles!.every((tile) => tile.isVisible), true);
+  } finally {
+    tileset.finalize();
+  }
 });

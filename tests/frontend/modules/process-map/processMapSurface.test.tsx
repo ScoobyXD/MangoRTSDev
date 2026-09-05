@@ -25,7 +25,7 @@ import {
   type ProcessMapPresentationState,
   type ProcessMapSurfaceProps,
 } from "../../../../frontend/src/modules/process-map/ProcessMapSurface.js";
-import { ProcessMapProtectedTileLayer } from "../../../../frontend/src/modules/process-map/processMapTileLayer.js";
+import { ProcessMapProtectedTileLayer, ProcessMapTileset } from "../../../../frontend/src/modules/process-map/processMapTileLayer.js";
 import "./processMapTileLayer.test.js";
 import type {
   ProcessMapChangesResponse,
@@ -50,6 +50,7 @@ import {
   PROCESS_MAP_SAFE_WORLD_COORDINATE,
   PROCESS_MAP_SETTLE_DELAY_MS,
   PROCESS_MAP_TILE_CACHE_BYTES,
+  PROCESS_MAP_TILE_CACHE_MAX_SIZE,
   PROCESS_MAP_TILE_DEBOUNCE_MS,
   PROCESS_MAP_TILE_SIZE,
   fitProcessMapViewState,
@@ -82,8 +83,6 @@ function placement(id: string, x: number, y: number, width = 10, height = 6, res
     grid_height: height,
     can_edit: true,
     revision: 5,
-    created_timestamp: "created",
-    updated_timestamp: "updated",
   };
 }
 
@@ -112,8 +111,6 @@ function trace(source: ProcessMapVisiblePlacement, target: ProcessMapVisiblePlac
     route_points: [{ x: 15, y: 3 }],
     path_fragments: [[{ x: 10, y: 3 }, { x: 20, y: 3 }]],
     revision: 4,
-    created_timestamp: "created",
-    updated_timestamp: "updated",
   };
 }
 
@@ -160,12 +157,20 @@ function layerByID(layers: Layer[], id: string): Layer {
 
 function assertFlatXYPathLayer(layer: Layer): void {
   assert.equal(layer.props.positionFormat, "XY", `${layer.id} must declare its flat coordinates as XY`);
-  const data = layer.props.data as Array<{ path: number[][] }>;
+  const data = layer.props.data as Array<{ path: number[] }>;
   assert.ok(data.length > 0, `${layer.id} needs path data in this fixture`);
-  const getPath = layer.props.getPath as (item: { path: number[][] }) => number[];
+  const getPath = layer.props.getPath as (item: { path: number[] }) => number[];
   const flatPath = getPath(data[0]);
+  assert.equal(flatPath, data[0].path, `${layer.id} retains its flat drawing path without another conversion`);
+  assert.equal(getPath(data[0]), flatPath, `${layer.id} repeated accessor reads must not allocate another array`);
   assert.ok(flatPath.length >= 4 && flatPath.length % 2 === 0, `${layer.id} must yield complete XY pairs`);
   assert.ok(flatPath.every(Number.isFinite), `${layer.id} must yield finite coordinates`);
+}
+
+function assertOrthogonalXYPath(path: number[]): void {
+  for (let index = 2; index < path.length; index += 2) {
+    assert.ok(path[index] === path[index - 2] || path[index + 1] === path[index - 1], "each segment must be horizontal or vertical");
+  }
 }
 
 type PlacementLabelDatum = {
@@ -286,7 +291,7 @@ async function mountProcessMapForBehavior(
     ...placement("behavior-process", 0, 0, 14, 8),
     name: "Behavior Process",
   };
-  const initialTile = behaviorTile(1, options.initialPlacements ?? [process]);
+  let initialTile = behaviorTile(1, options.initialPlacements ?? [process]);
   const heldSceneReads: Array<Deferred<Response>> = [];
   let sceneReads = 0;
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -332,18 +337,37 @@ async function mountProcessMapForBehavior(
   }
   let deck = readProcessMapDeckGLTestProps();
   const tileLayer = deck.layers.find((layer) => layer.id === "process-map-spatial-tiles");
-  assert.equal(Boolean(tileLayer), Boolean(sceneBounds), "only nonempty scenes create the spatial TileLayer");
-  await act(async () => { deck.onResize({ width: 1_000, height: 700 }); });
+  assert.equal(tileLayer, undefined, "initial geometry must wait for viewport dimensions instead of requesting tiles at the default camera");
+  const surface = container.querySelector<HTMLElement>(".process-map-surface");
+  assert.ok(surface);
+  Object.defineProperties(surface, {
+    clientWidth: { configurable: true, value: 1_000 },
+    clientHeight: { configurable: true, value: 700 },
+  });
+  await act(async () => { deck.onResize({ width: 300, height: 150 }); });
+  assert.equal(readProcessMapDeckGLTestProps().layers.some((layer) => layer.id === "process-map-spatial-tiles"), false,
+    "the browser's temporary 300 by 150 canvas must not fit or load tiles for a larger actual surface");
+  assert.deepEqual(readProcessMapDeckGLTestProps().viewState.target, [0, 0, 0]);
+  await act(async () => { readProcessMapDeckGLTestProps().onResize({ width: 1_000, height: 700 }); });
+  if (sceneBounds) {
+    const fitted = fitProcessMapViewState(sceneBounds, { width: 1_000, height: 700 });
+    const firstFittedDeck = readProcessMapDeckGLTestProps();
+    const firstFittedTile = currentDeckLayer("process-map-spatial-tiles");
+    assert.deepEqual(firstFittedDeck.viewState, fitted);
+    const renderTriggers = (firstFittedTile.props.updateTriggers as { renderSubLayers: unknown[] }).renderSubLayers;
+    assert.equal(renderTriggers[0], 2 ** fitted.zoom, "the first tile already uses fitted detail before the settlement timer");
+  }
   await act(async () => {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, PROCESS_MAP_SETTLE_DELAY_MS + 20));
   });
   deck = readProcessMapDeckGLTestProps();
   const currentTileLayer = deck.layers.find((layer) => layer.id === "process-map-spatial-tiles");
-  initialTile.process_map_read_version = sceneReads;
+  initialTile = { ...initialTile, process_map_read_version: sceneReads };
   if (currentTileLayer) {
     const onTileLoad = currentTileLayer.props.onTileLoad as (tile: { id: string; content: ProcessMapTileResponse }) => void;
     await act(async () => {
       onTileLoad({ id: "22-0-0", content: initialTile });
+      await new Promise<void>((resolveFrame) => window.requestAnimationFrame(() => resolveFrame()));
     });
   }
 
@@ -360,7 +384,10 @@ async function mountProcessMapForBehavior(
     },
     loadTile: async (tile, completeViewport = true, tileID = "22-0-0") => {
       const onTileLoad = currentDeckLayer("process-map-spatial-tiles").props.onTileLoad as (header: { id: string; content: ProcessMapTileResponse }) => void;
-      await act(async () => { onTileLoad({ id: tileID, content: tile }); });
+      await act(async () => {
+        onTileLoad({ id: tileID, content: tile });
+        await new Promise<void>((resolveFrame) => window.requestAnimationFrame(() => resolveFrame()));
+      });
       if (!completeViewport) return;
       const onViewportLoad = currentDeckLayer("process-map-spatial-tiles").props.onViewportLoad as (headers: Array<{ isLoaded: boolean; content: ProcessMapTileResponse }>) => void;
       await act(async () => { onViewportLoad([{ isLoaded: true, content: tile }]); });
@@ -618,7 +645,7 @@ test("overlapping saves still validate an older committed result when the newer 
     await move(firstPreview, 3);
     assert.equal(saves.length, 0);
     const held = mounted.holdNextSceneRead();
-    const committed = { ...mounted.process, grid_x: 2, revision: 6, updated_timestamp: "first-save" };
+    const committed = { ...mounted.process, grid_x: 2, revision: 6, created_timestamp: "created", updated_timestamp: "first-save" };
     await act(async () => {
       first.resolve(new Response(JSON.stringify({
         placements: [{ ...committed, company_id: mounted.companyID }], traces: [], deleted_trace_ids: [], process_map_read_version: 2,
@@ -1046,6 +1073,7 @@ test("ordinary refresh certifies unrelated loaded tiles while preserving selecti
     assert.equal(certified.get("22-1-0")?.previous, distantTile);
     assert.equal(certified.get("22-1-0")?.current.placements, distantTile.placements, "certification must retain the exact unrelated geometry arrays");
     assert.equal(certified.get("22-1-0")?.current.process_map_read_version, 2);
+    assert.ok(Object.isFrozen(certified.get("22-1-0")?.current), "certification preserves an immutable tile wrapper");
     assert.equal(certified.has("22-0-0"), false, "the changed tile must fetch new canonical data");
     const moved = { ...mounted.process, grid_x: 2, revision: 6 };
     await mounted.loadTile(behaviorTile(2, [moved]));
@@ -1288,6 +1316,228 @@ test("preview replacement preserves unrelated operations", () => {
   assert.deepEqual([...previews], [["unrelated", "keep"], ["owned-a", "old-a"], ["owned-b", "old-b"]]);
 });
 
+test("tile arrivals publish together on one frame and protected purges cancel queued coverage", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  const originalRequestFrame = window.requestAnimationFrame;
+  const originalCancelFrame = window.cancelAnimationFrame;
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameID = 0;
+  window.requestAnimationFrame = (callback) => { frames.set(++frameID, callback); return frameID; };
+  window.cancelAnimationFrame = (id) => { frames.delete(id); };
+  try {
+    const onTileLoad = mounted.readTileLayer().props.onTileLoad as (header: { id: string; content: ProcessMapTileResponse }) => void;
+    const before = readProcessMapDeckGLTestProps();
+    const first = placement("batched-first", 20, 0);
+    const second = placement("batched-second", 40, 0);
+    await act(async () => { onTileLoad({ id: "22-1-0", content: { ...behaviorTile(1, [first]), x: 1 } }); });
+    await act(async () => { onTileLoad({ id: "22-2-0", content: { ...behaviorTile(1, [second]), x: 2 } }); });
+    assert.equal(frames.size, 1, "separate completions share a single pending publication frame");
+    assert.equal(readProcessMapDeckGLTestProps(), before, "arrivals do not remerge the map before that frame");
+    await act(async () => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((callback) => callback(0));
+    });
+    assert.notEqual(readProcessMapDeckGLTestProps(), before);
+    await mounted.clickPlacement(first);
+    assert.equal(mountedPlacementBodies("logic_gate:batched-first").length, 1);
+    await mounted.clickPlacement(second);
+    assert.equal(mountedPlacementBodies("logic_gate:batched-second").length, 1, "both arrivals survived the shared publication");
+
+    await act(async () => { onTileLoad({ id: "22-3-0", content: { ...behaviorTile(1, [placement("stale", 60, 0)]), x: 3 } }); });
+    assert.equal(frames.size, 1);
+    const staleFrame = [...frames.values()][0];
+    mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, true);
+    assert.equal(frames.size, 0, "protected invalidation cancels the old publication synchronously");
+    assert.equal(mounted.container.querySelector(".process-map-qd-card"), null);
+    assert.equal(readProcessMapDeckGLTestProps().layers.some((layer) => layer.id === "process-map-spatial-tiles"), false);
+    await act(async () => {
+      staleFrame(0);
+      onTileLoad({ id: "22-4-0", content: behaviorTile(1, [first]) });
+    });
+    assert.equal(frames.size, 0, "late old-generation tile callbacks cannot schedule another publication");
+    assert.equal(readProcessMapDeckGLTestProps().layers.some((layer) => layer.id === "process-map-spatial-tiles"), false);
+  } finally {
+    window.requestAnimationFrame = originalRequestFrame;
+    window.cancelAnimationFrame = originalCancelFrame;
+    await mounted.cleanup();
+  }
+});
+
+test("empty tiles retain no drawing layers and sparse tiles contain only nonempty layers", () => {
+  const tileLayer = layerByID(buildProcessMapLayers(buildOptions()), "process-map-spatial-tiles");
+  const render = tileLayer.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
+  const header = { boundingBox: [[0, 0], [256, 256]] as [number[], number[]] };
+  assert.deepEqual(render({ id: "empty", data: behaviorTile(11, []), tile: header }), []);
+  const sparse = render({ id: "sparse", data: behaviorTile(11, [placement("one", 0, 0)]), tile: header });
+  assert.ok(sparse.length > 0 && sparse.length < 11);
+  assert.ok(sparse.every((layer) => (layer.props.data as unknown[]).length > 0));
+  assert.equal((layerByID(sparse, "sparse-placements").props.data as unknown[]).length, 1, "the lone Process remains visible and pickable");
+});
+
+test("viewport completion publishes pending tiles before retiring the saved placement mask", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  const originalRequestFrame = window.requestAnimationFrame;
+  const originalCancelFrame = window.cancelAnimationFrame;
+  try {
+    const key = `logic_gate:${mounted.process.resource_id}`;
+    const staleOnTileLoad = mounted.readTileLayer().props.onTileLoad as (header: { id: string; content: ProcessMapTileResponse }) => void;
+    const originalFetch = globalThis.fetch;
+    const save = deferred<Response>();
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).includes("/v1/process-map/placements/") && init?.method === "PUT") return save.promise;
+      return originalFetch(input, init);
+    }) as typeof fetch;
+    await act(async () => {
+      readProcessMapDeckGLTestProps().onDragStart(
+        { object: { kind: "placement", key, placement: mounted.process }, coordinate: [1, 1] },
+        { stopPropagation: () => undefined },
+      );
+      readProcessMapDeckGLTestProps().onDrag({ coordinate: [3, 1] });
+    });
+    await act(async () => { readProcessMapDeckGLTestProps().onDragEnd({}); });
+    const heldScene = mounted.holdNextSceneRead();
+    const committed = { ...mounted.process, grid_x: 2, revision: 6, created_timestamp: "created", updated_timestamp: "committed" };
+    await act(async () => {
+      save.resolve(new Response(JSON.stringify({
+        placements: [{ ...committed, company_id: mounted.companyID }], traces: [], deleted_trace_ids: [], process_map_read_version: 2,
+      }), { status: 200, headers: { "Content-Type": "application/json" } }));
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 0));
+    });
+    await resolveMountedScene(heldScene, 2, { min_x: 0, min_y: 0, max_x: 16, max_y: 8 });
+    await act(async () => { readProcessMapDeckGLTestProps().onClick({ object: null }, { type: "click" }); });
+    const masks = () => (mounted.readTileLayer().props.renderState as { editedPlacementKeys: ReadonlySet<string> }).editedPlacementKeys;
+    assert.equal(masks().has(key), true, "the saved placement still masks downloaded old geometry after deselection");
+    assert.equal(mountedPlacementBodies(key)[0].pick?.placement.grid_x, 2);
+
+    const frames = new Map<number, FrameRequestCallback>();
+    let frameID = 0;
+    window.requestAnimationFrame = (callback) => { frames.set(++frameID, callback); return frameID; };
+    window.cancelAnimationFrame = (id) => { frames.delete(id); };
+    const currentTile = behaviorTile(2, [committed]);
+    const onTileLoad = mounted.readTileLayer().props.onTileLoad as typeof staleOnTileLoad;
+    const onViewportLoad = mounted.readTileLayer().props.onViewportLoad as (headers: Array<{ isLoaded: boolean; content: ProcessMapTileResponse }>) => void;
+    await act(async () => { onTileLoad({ id: "22-0-0", content: currentTile }); });
+    assert.equal(frames.size, 1);
+    const pendingFrame = [...frames.values()][0];
+    assert.equal(masks().has(key), true, "arrival alone cannot retire the saved mask");
+    await act(async () => { onViewportLoad([{ isLoaded: true, content: currentTile }]); });
+    assert.equal(frames.size, 0, "complete viewport coverage publishes immediately and cancels its pending frame");
+    assert.equal(masks().has(key), false);
+    assert.equal(mountedPlacementBodies(key).length, 0, "the saved overlay retires with the accepted canonical tile");
+    await mounted.clickPlacement(committed);
+    assert.equal(mountedPlacementBodies(key)[0].pick?.placement.grid_x, 2, "selection reads the newly published canonical geometry");
+    await act(async () => {
+      pendingFrame(0);
+      staleOnTileLoad({ id: "22-0-0", content: mounted.initialTile });
+    });
+    assert.equal(frames.size, 0);
+    assert.equal(mountedPlacementBodies(key)[0].pick?.placement.grid_x, 2, "late publication or old tile completion cannot restore the former position");
+  } finally {
+    window.requestAnimationFrame = originalRequestFrame;
+    window.cancelAnimationFrame = originalCancelFrame;
+    await mounted.cleanup();
+  }
+});
+
+test("a tile loaded and evicted before publication never enters the combined presentation", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  const originalRequestFrame = window.requestAnimationFrame;
+  const originalCancelFrame = window.cancelAnimationFrame;
+  const frames = new Map<number, FrameRequestCallback>();
+  let frameID = 0;
+  window.requestAnimationFrame = (callback) => { frames.set(++frameID, callback); return frameID; };
+  window.cancelAnimationFrame = (id) => { frames.delete(id); };
+  try {
+    const candidate = placement("evicted-before-frame", 300, 0);
+    const header = { id: "22-1-0", content: { ...behaviorTile(1, [candidate]), x: 1 } };
+    const onTileLoad = mounted.readTileLayer().props.onTileLoad as (tile: typeof header) => void;
+    const onTileUnload = mounted.readTileLayer().props.onTileUnload as (tile: typeof header) => void;
+    await act(async () => { onTileLoad(header); });
+    await act(async () => { onTileUnload(header); });
+    assert.equal(frames.size, 1, "arrival and eviction share the same publication frame");
+    await act(async () => {
+      const callbacks = [...frames.values()];
+      frames.clear();
+      callbacks.forEach((callback) => callback(0));
+    });
+    await mounted.clickPlacement(candidate);
+    assert.equal(mountedPlacementBodies(`logic_gate:${candidate.resource_id}`).length, 0, "evicted pending coverage is absent even when selected");
+    await mounted.clickPlacement(mounted.process);
+    assert.equal(mountedPlacementBodies(`logic_gate:${mounted.process.resource_id}`).length, 1, "unrelated retained coverage remains available");
+  } finally {
+    window.requestAnimationFrame = originalRequestFrame;
+    window.cancelAnimationFrame = originalCancelFrame;
+    await mounted.cleanup();
+  }
+});
+
+test("eviction clears a failed tile's retained presentation without deleting newer same-ID coverage", async () => {
+  const mounted = await mountProcessMapForBehavior(() => undefined);
+  const layer = mounted.readTileLayer();
+  const onTileLoad = layer.props.onTileLoad as (tile: TileHeader<ProcessMapTileResponse>) => void;
+  const onTileUnload = layer.props.onTileUnload as (tile: TileHeader<ProcessMapTileResponse>) => void;
+  let failReplacement = false;
+  let failures = 0;
+  const neighbor = placement("failed-tile-neighbor", 300, 0);
+  class MountedTileset extends ProcessMapTileset {
+    override getTileId(index: { z: number; x: number; y: number }) {
+      return `${index.z}-${index.x}-${index.y}`;
+    }
+  }
+  const tileset = new MountedTileset({
+    tileSize: processMapDeckTileSize(256, 22), minZoom: 22, maxZoom: 22, zoomOffset: 22,
+    maxCacheSize: 1, maxCacheByteSize: 1024, maxRequests: 0,
+    getTileData: async ({ index }) => {
+      if (index.x !== 0) return { ...behaviorTile(1, [neighbor]), x: index.x };
+      if (failReplacement) throw new Error("fixture replacement failure");
+      return mounted.initialTile;
+    },
+    onTileLoad,
+    onTileUnload,
+    onTileError: () => { failures += 1; },
+  });
+  const view = (x: number) => new OrthographicViewport({ width: 128, height: 128, target: [x * 256 + 128, 128, 0], zoom: 0, flipY: true });
+  const load = async (x: number) => {
+    await act(async () => {
+      tileset.update(view(x));
+      await Promise.all(tileset.selectedTiles!.map((tile) => tile.data));
+      tileset.update(view(x));
+      await new Promise<void>((resolveFrame) => window.requestAnimationFrame(() => resolveFrame()));
+    });
+  };
+  try {
+    await load(0);
+    const failedHeader = tileset.selectedTiles![0] as TileHeader<ProcessMapTileResponse>;
+    failReplacement = true;
+    failedHeader.setNeedsReload();
+    await load(0);
+    assert.equal(failures, 1);
+    assert.equal(failedHeader.content, null, "the real pinned loader clears content on replacement failure");
+    const key = `logic_gate:${mounted.process.resource_id}`;
+    await mounted.clickPlacement(mounted.process);
+    assert.equal(mountedPlacementBodies(key).length, 1, "the prior presentation exists before eviction");
+    await load(1);
+    assert.equal(tileset.tiles.includes(failedHeader), false, "the real count-bounded cache evicted the failed header");
+    assert.equal(mountedPlacementBodies(key).length, 0, "eviction also removes the retained payload whose header became empty");
+    await mounted.clickPlacement(neighbor);
+    assert.equal(mountedPlacementBodies(`logic_gate:${neighbor.resource_id}`).length, 1);
+
+    const heldScene = mounted.holdNextSceneRead();
+    await emitMountedProcessMapChange(mounted, false);
+    await resolveMountedScene(heldScene, 2, { min_x: 0, min_y: 0, max_x: 314, max_y: 8 });
+    const newer = { ...mounted.process, grid_x: 2, revision: 6 };
+    await mounted.loadTile(behaviorTile(2, [newer]));
+    await mounted.clickPlacement(newer);
+    await act(async () => { onTileUnload(failedHeader); });
+    assert.equal(mountedPlacementBodies(key)[0].pick?.placement.grid_x, 2, "a stale version-1 failed-header callback cannot remove version-2 coverage at the same ID");
+  } finally {
+    tileset.finalize();
+    await mounted.cleanup();
+  }
+});
+
 test("whole-company tile rendering keeps every placement perceptible without leaking restricted picks", () => {
   const process = placement("Process", 10, 10);
   const folder = placement("Folder", 0, 0, 80, 60, "company_explorer_folder");
@@ -1501,9 +1751,9 @@ test("every Process Map PathLayer declares and yields flat XY geometry", () => {
   const editTraceLayer = layerByID(editLayers, "process-map-edit-traces");
   assertFlatXYPathLayer(editTraceLayer);
   assertFlatXYPathLayer(layerByID(editLayers, "process-map-edit-folder-fences"));
-  const editTraceData = editTraceLayer.props.data as Array<{ path: [number, number][]; color: number[]; width: number }>;
+  const editTraceData = editTraceLayer.props.data as Array<{ path: number[]; color: number[]; width: number }>;
   assert.ok(editTraceData.every((item) => item.color.join(",") === "38,195,234,220"), "saved and pending traces retain one static cyan-blue treatment");
-  assert.ok(editTraceData.every((item) => item.path.slice(1).every((point, index) => point[0] === item.path[index][0] || point[1] === item.path[index][1])), "saved and pending traces contain only horizontal or vertical segments");
+  editTraceData.forEach((item) => assertOrthogonalXYPath(item.path));
   assert.equal(editTraceData[0].width, 4, "the selected trace keeps the established fixed edit width");
   assert.equal(editTraceData[editTraceData.length - 1]?.width, 3, "the connection preview keeps the established fixed width");
 });
@@ -1616,8 +1866,8 @@ test("nested Folder title bands scale with geometry and respect existing manuall
           connectionPreview: null, highlightedFolderKey: null, connectionSourceKey: null, hoveredPlacementKey: null, placementTransform: null,
         },
       }));
-      return [layerByID(tileLayers, "scaled-labels"), layerByID(selected, "process-map-edit-labels")]
-        .map((layer) => (layer.props.data as Array<PlacementLabelDatum & { size: number }>).find((item) => item.text === folder.name));
+      return [tileLayers.find((layer) => layer.id === "scaled-labels"), layerByID(selected, "process-map-edit-labels")]
+        .map((layer) => (layer?.props.data as Array<PlacementLabelDatum & { size: number }> | undefined)?.find((item) => item.text === folder.name));
     };
     for (const label of renderLabels(child)) {
       assert.ok(label, "each nested Folder has a readable title at the same projected size");
@@ -1646,7 +1896,7 @@ test("declared presentation ceilings suppress labels and waypoints above authori
   const tileLayer = layerByID(buildProcessMapLayers(buildOptions({ settledPixelsPerGridUnit: 3 })), "process-map-spatial-tiles");
   const render = tileLayer.props.renderSubLayers as unknown as (props: { id: string; data: ProcessMapTileResponse; tile: { boundingBox: [number[], number[]] } }) => Layer[];
   const tileLayers = render({ id: "capped", data: tileData, tile: { boundingBox: [[0, 0], [256, 256]] } });
-  assert.deepEqual(layerByID(tileLayers, "capped-labels").props.data, []);
+  assert.equal(tileLayers.some((layer) => layer.id === "capped-labels"), false, "no hidden-detail label layer is retained");
 
   const source = placement("source", 0, 0);
   const target = placement("target", 20, 0);
@@ -1860,7 +2110,7 @@ test("editing Process cards show bounded QCD and RACI summaries in tiled and sel
       data: { z: 22, x: 0, y: 0, process_map_read_version: 11, byteLength: 1, placements: [candidate], traces: [] },
       tile: { boundingBox: [[0, 0], [256, 256]] },
     });
-    return layerByID(layers, `${id}-process-card-text`).props.data as Array<{
+    return (layers.find((layer) => layer.id === `${id}-process-card-text`)?.props.data ?? []) as Array<{
       text: string;
       color: number[];
       position: [number, number];
@@ -2004,14 +2254,12 @@ test("an active connection keeps only the source output and distinct eligible ta
   assert.deepEqual(layerByID(layers, "process-map-edit-resize-handles").props.data, [], "connection mode does not mix resize grips with anchors");
   const preview = layerByID(layers, "process-map-edit-traces");
   assertFlatXYPathLayer(preview);
-  const previewData = preview.props.data as Array<{ path: [number, number][]; color: number[]; width: number }>;
+  const previewData = preview.props.data as Array<{ path: number[]; color: number[]; width: number }>;
   assert.equal(previewData.length, 1, "the pending preview remains one continuous path through every bend");
   assert.deepEqual(previewData[0].color, [38, 195, 234, 220], "the pending orthogonal preview uses the static cyan-blue trace color");
-  assert.ok(previewData[0].path.slice(1).every((point, index) => point[0] === previewData[0].path[index][0] || point[1] === previewData[0].path[index][1]), "the pending preview contains only horizontal or vertical segments");
-  const start = previewData[0].path[0];
-  const firstEnd = previewData[0].path[1];
-  assert.equal(firstEnd[1], start[1], "the preview exits horizontally before its first bend");
-  assert.ok(firstEnd[0] > start[0], "the preview first moves out from the source's right edge");
+  assertOrthogonalXYPath(previewData[0].path);
+  assert.equal(previewData[0].path[3], previewData[0].path[1], "the preview exits horizontally before its first bend");
+  assert.ok(previewData[0].path[2] > previewData[0].path[0], "the preview first moves out from the source's right edge");
   assert.ok(previewData.every((item) => item.width === 3), "preview width stays fixed in screen pixels");
   assert.equal(preview.props.widthUnits, "pixels");
   assert.equal(preview.props.widthMinPixels, 2);
@@ -2287,13 +2535,13 @@ test("Folder resize scales its complete subtree and internal trace preview toget
     [`logic_gate:${source.resource_id}`, [[14, 12], [22, 12], [22, 16], [14, 16]]],
     [`logic_gate:${target.resource_id}`, [[34, 24], [42, 24], [42, 28], [34, 28]]],
   ]);
-  const previewPaths = layerByID(layers, "process-map-edit-traces").props.data as Array<{ path: number[][] }>;
+  const previewPaths = layerByID(layers, "process-map-edit-traces").props.data as Array<{ path: number[] }>;
   assert.equal(previewPaths.length, 1);
   const previewPath = previewPaths[0].path;
-  assert.deepEqual(previewPath[0], [22, 14], "the preview leaves the scaled source output");
-  assert.deepEqual(previewPath.at(-1), [34, 26], "the preview enters the scaled target input");
-  assert.ok(previewPath.some((point) => point[0] === 40 && point[1] === 4), "the saved internal route point scales with the Folder");
-  assert.ok(previewPath.slice(1).every((point, index) => point[0] === previewPath[index][0] || point[1] === previewPath[index][1]), "the scaled preview remains orthogonal");
+  assert.deepEqual(previewPath.slice(0, 2), [22, 14], "the preview leaves the scaled source output");
+  assert.deepEqual(previewPath.slice(-2), [34, 26], "the preview enters the scaled target input");
+  assert.ok(previewPath.some((x, index) => index % 2 === 0 && x === 40 && previewPath[index + 1] === 4), "the saved internal route point scales with the Folder");
+  assertOrthogonalXYPath(previewPath);
 });
 
 test("large deep Folder move planning indexes and traverses each stable member once", () => {
@@ -2393,7 +2641,7 @@ test("representative large-company transport and presentation stay byte-, reques
   };
   const encodedBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength;
   const tilePayload = (tileX: number): Omit<ProcessMapTileResponse, "byteLength"> => {
-    const placements: ProcessMapTileResponse["placements"] = [];
+    const placements: Array<ProcessMapTileResponse["placements"][number]> = [];
     const visible: ProcessMapVisiblePlacement[] = [];
     for (let index = 0; index < placementsPerTile; index += 1) {
       const gridX = tileX * PROCESS_MAP_TILE_SIZE + (index % 40) * 6;
@@ -2415,8 +2663,6 @@ test("representative large-company transport and presentation stay byte-, reques
         grid_height: 3,
         can_edit: true,
         revision: 1,
-        created_timestamp: "2026-08-26T00:00:00Z",
-        updated_timestamp: "2026-08-26T00:00:00Z",
       };
       visible.push(item);
       placements.push(item);
@@ -2434,8 +2680,6 @@ test("representative large-company transport and presentation stay byte-, reques
           { x: target.grid_x, y: target.grid_y + target.grid_height / 2 },
         ]],
         revision: 1,
-        created_timestamp: "2026-08-26T00:00:00Z",
-        updated_timestamp: "2026-08-26T00:00:00Z",
       };
     });
     return { z: 22, x: tileX, y: 0, process_map_read_version: readVersion, placements, traces };
@@ -2445,6 +2689,7 @@ test("representative large-company transport and presentation stay byte-, reques
   assert.deepEqual({
     tile_size: PROCESS_MAP_TILE_SIZE,
     cache_bytes: PROCESS_MAP_TILE_CACHE_BYTES,
+    cache_tiles: PROCESS_MAP_TILE_CACHE_MAX_SIZE,
     max_requests: PROCESS_MAP_MAX_TILE_REQUESTS,
     debounce_ms: PROCESS_MAP_TILE_DEBOUNCE_MS,
     settlement_ms: PROCESS_MAP_SETTLE_DELAY_MS,
@@ -2456,8 +2701,9 @@ test("representative large-company transport and presentation stay byte-, reques
   }, {
     tile_size: 256,
     cache_bytes: 32 * 1024 * 1024,
+    cache_tiles: 256,
     max_requests: 6,
-    debounce_ms: 60,
+    debounce_ms: 0,
     settlement_ms: 180,
     normal_lod_px: 24,
     editing_lod_px: 96,
@@ -2535,6 +2781,7 @@ test("representative large-company transport and presentation stay byte-, reques
     assert.equal(settledLayer.props.updateTriggers?.getTileData, undefined);
     assert.equal(settledLayer.props.maxRequests, PROCESS_MAP_MAX_TILE_REQUESTS);
     assert.equal(settledLayer.props.maxCacheByteSize, PROCESS_MAP_TILE_CACHE_BYTES);
+    assert.equal(settledLayer.props.maxCacheSize, PROCESS_MAP_TILE_CACHE_MAX_SIZE);
     const readTile = settledLayer.props.getTileData as unknown as (request: {
       id: string;
       index: { z: number; x: number; y: number };
@@ -2570,7 +2817,7 @@ test("representative large-company transport and presentation stay byte-, reques
 
     let placementVisits = 0;
     let traceVisits = 0;
-    const countedArray = <T,>(values: T[], onVisit: () => void): T[] => new Proxy(values, {
+    const countedArray = <T,>(values: readonly T[], onVisit: () => void): readonly T[] => new Proxy(values, {
       get(target, property, receiver) {
         if (property !== Symbol.iterator) return Reflect.get(target, property, receiver);
         return function* countedIterator() {

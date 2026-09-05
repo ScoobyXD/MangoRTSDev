@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"miraeopus/backend/internal/domain"
 	"testing"
 )
@@ -87,5 +88,17 @@ func TestPostgresProcessMapChangesSelectiveReplay(t *testing.T) {
 	}
 	if !changes.ProtectedGeometryChanged || len(changes.ValidatedTiles) != 0 {
 		t.Fatal("protected history incorrectly certified tiles")
+	}
+	query.SinceVersion = -1
+	if _, err := repo.GetProcessMapChanges(ctx, query); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("malformed authorized changes request error=%v, want ErrInvalid", err)
+	}
+	outsider, err := repo.UpsertAuthUser("map-changes-outsider", "map-changes-outsider@example.com", "Outside viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	query.PermissionUserID = outsider.UserID
+	if _, err := repo.GetProcessMapChanges(ctx, query); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("membership must be checked before changes validation: error=%v", err)
 	}
 }

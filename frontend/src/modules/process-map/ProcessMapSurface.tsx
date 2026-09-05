@@ -6,6 +6,7 @@ import {
   type OrthographicViewState,
   type PickingInfo,
   type ViewStateChangeParameters,
+  type Viewport,
 } from "@deck.gl/core";
 import { type TileLayerProps } from "@deck.gl/geo-layers";
 import { PathLayer, PolygonLayer, ScatterplotLayer, TextLayer } from "@deck.gl/layers";
@@ -29,6 +30,7 @@ import {
   invalidateProcessMapReadCaches,
   postProcessMapRelationship,
   processMapTileVersionKey,
+  PROCESS_MAP_MAX_VALIDATION_TILES,
   putProcessMapPlacement,
   putProcessMapTrace,
   type ProcessMapMutationEnvelope,
@@ -37,6 +39,7 @@ import {
   type ProcessMapResourceRef,
   type ProcessMapSceneResponse,
   type ProcessMapTileResponse,
+  type ProcessMapTileVersion,
   type ProcessMapTrace,
   type ProcessMapVisiblePlacement,
 } from "./processMapApi.js";
@@ -48,6 +51,7 @@ import {
   PROCESS_MAP_RESTRICTED_WIDTH,
   PROCESS_MAP_SETTLE_DELAY_MS,
   PROCESS_MAP_TILE_CACHE_BYTES,
+  PROCESS_MAP_TILE_CACHE_MAX_SIZE,
   PROCESS_MAP_TILE_DEBOUNCE_MS,
   defaultProcessMapRoutePoints,
   fitProcessMapViewState,
@@ -258,7 +262,7 @@ type PolygonDatum = {
   pick?: ProcessMapPick;
 };
 type PathDatum = {
-  path: number[][];
+  path: number[];
   color: [number, number, number, number];
   width: number;
   pick?: ProcessMapPick;
@@ -293,6 +297,32 @@ function processMapTileContainsSelection(tile: ProcessMapTileResponse, selection
   return selection.kind === "placement"
     ? tile.placements.some((placement) => !placement.restricted && placementKey(placement) === selection.id)
     : tile.traces.some((trace) => trace.resource_operational_relationship_id === selection.id);
+}
+
+export function prioritizeProcessMapValidationTiles(
+  tiles: ProcessMapTileVersion[],
+  scene: ProcessMapSceneResponse,
+  viewport: Pick<Viewport, "getBounds" | "zoom"> | undefined,
+): ProcessMapTileVersion[] {
+  if (tiles.length <= PROCESS_MAP_MAX_VALIDATION_TILES || !viewport) return tiles;
+  const [minX, minY, maxX, maxY] = viewport.getBounds();
+  const centerX = (minX + maxX) / 2;
+  const centerY = (minY + maxY) / 2;
+  const zoom = Math.max(scene.min_tile_zoom, Math.min(scene.max_tile_zoom, Math.ceil(viewport.zoom + scene.max_tile_zoom)));
+  // Visible/selected tiles may exceed deck.gl's soft cache cap. Use the
+  // existing validation budget for current coverage before offscreen history.
+  return tiles.map((tile) => {
+    const size = scene.tile_size * 2 ** (scene.max_tile_zoom - tile.z);
+    const x = tile.x * size;
+    const y = tile.y * size;
+    const visible = x < maxX && x + size > minX && y < maxY && y + size > minY;
+    return {
+      tile,
+      priority: visible ? (tile.z === zoom ? 0 : 1) : 2,
+      distance: (x + size / 2 - centerX) ** 2 + (y + size / 2 - centerY) ** 2,
+    };
+  }).sort((left, right) => left.priority - right.priority || left.distance - right.distance)
+    .slice(0, PROCESS_MAP_MAX_VALIDATION_TILES).map(({ tile }) => tile);
 }
 
 function processMapSelectionTileCoverage(
@@ -371,8 +401,6 @@ export function applyProcessMapMutationEnvelope(
       grid_width: committed.grid_width,
       grid_height: committed.grid_height,
       revision: committed.revision,
-      created_timestamp: committed.created_timestamp,
-      updated_timestamp: committed.updated_timestamp,
     });
     removedPlacementKeys.delete(key);
   }
@@ -394,8 +422,6 @@ export function applyProcessMapMutationEnvelope(
       route_points: committed.route_points.map((point) => ({ ...point })),
       path_fragments: existing?.path_fragments.map((fragment) => fragment.map((point) => ({ ...point }))) ?? [],
       revision: committed.revision,
-      created_timestamp: committed.created_timestamp,
-      updated_timestamp: committed.updated_timestamp,
     };
     const fullPath = tracePath(next, new Map([...pending, ...placements]));
     if (fullPath) next.path_fragments = [fullPath];
@@ -472,7 +498,20 @@ function processMapPresentationRank(value: ProcessMapTrace["presentation"]): num
   return value === "editing" ? 2 : value === "normal" ? 1 : 0;
 }
 
-function mergeTilePresentation(tiles: ReadonlyMap<string, ProcessMapTileResponse>): ProcessMapPresentationState {
+// Tile reads are immutable. Keep the deduplication key with the fragment's
+// lifetime instead of serializing every resident path on every tile arrival.
+const tileFragmentKeys = new WeakMap<ProcessMapGridPoint[], string>();
+
+function tileFragmentKey(fragment: ProcessMapGridPoint[]): string {
+  let key = tileFragmentKeys.get(fragment);
+  if (key === undefined) {
+    key = fragment.map((point) => `${point.x},${point.y}`).join(";");
+    tileFragmentKeys.set(fragment, key);
+  }
+  return key;
+}
+
+export function mergeTilePresentation(tiles: ReadonlyMap<string, ProcessMapTileResponse>): ProcessMapPresentationState {
   const placements = new Map<string, ProcessMapVisiblePlacement>();
   const traces = new Map<string, ProcessMapTrace>();
   const fragmentKeys = new Map<string, Set<string>>();
@@ -485,7 +524,7 @@ function mergeTilePresentation(tiles: ReadonlyMap<string, ProcessMapTileResponse
         !current
         || placement.revision > current.revision
         || (placement.revision === current.revision && processMapPresentationRank(placement.presentation) > processMapPresentationRank(current.presentation))
-      ) placements.set(key, clonePlacement(placement));
+      ) placements.set(key, placement);
     }
     for (const trace of tile.traces) {
       const id = trace.resource_operational_relationship_id;
@@ -495,17 +534,17 @@ function mergeTilePresentation(tiles: ReadonlyMap<string, ProcessMapTileResponse
         || trace.revision > current.revision
         || (trace.revision === current.revision && processMapPresentationRank(trace.presentation) > processMapPresentationRank(current.presentation))
       ) {
-        traces.set(id, { ...cloneTrace(trace), path_fragments: [] });
+        traces.set(id, { ...trace, path_fragments: [] });
         fragmentKeys.set(id, new Set());
       }
       const merged = traces.get(id);
       const seen = fragmentKeys.get(id);
       if (!merged || !seen || merged.revision !== trace.revision) continue;
       for (const fragment of trace.path_fragments) {
-        const key = fragment.map((point) => `${point.x},${point.y}`).join(";");
+        const key = tileFragmentKey(fragment);
         if (seen.has(key)) continue;
         seen.add(key);
-        merged.path_fragments.push(fragment.map((point) => ({ ...point })));
+        merged.path_fragments.push(fragment);
       }
     }
   }
@@ -519,6 +558,8 @@ export function mergeProcessMapPresentation(
   previewTraces: ReadonlyMap<string, ProcessMapTrace>,
   removedTraceIDs: ReadonlySet<string>,
 ): ProcessMapPresentationState {
+  if (!committed.placements.size && !committed.traces.size && !committed.removedPlacementKeys.size
+    && !previewPlacements.size && !previewTraces.size && !removedTraceIDs.size) return base;
   const placements = new Map(base.placements);
   for (const entry of committed.placements) placements.set(...entry);
   for (const entry of previewPlacements) placements.set(...entry);
@@ -539,7 +580,7 @@ export function validateProcessMapLoadedTiles(
   const validated = new Set(changes.validated_tiles.map(processMapTileVersionKey));
   for (const [id, previous] of tiles) {
     if (validated.has(processMapTileVersionKey(previous))) {
-      result.set(id, { previous, current: { ...previous, process_map_read_version: changes.process_map_read_version } });
+      result.set(id, { previous, current: Object.freeze({ ...previous, process_map_read_version: changes.process_map_read_version }) });
     }
   }
   return result;
@@ -609,12 +650,14 @@ function staticTracePaths(
   width: number,
   pick?: ProcessMapPick,
 ): PathDatum[] {
-  return fragments.filter((fragment) => fragment.length >= 2).map((fragment) => ({
-    path: fragment.map((point) => [point.x, point.y] as [number, number]),
-    color: COLOR_TRACE,
-    width,
-    pick,
-  }));
+  return fragments.filter((fragment) => fragment.length >= 2).map((fragment) => {
+    const path = new Array<number>(fragment.length * 2);
+    for (let index = 0; index < fragment.length; index += 1) {
+      path[index * 2] = fragment[index].x;
+      path[index * 2 + 1] = fragment[index].y;
+    }
+    return { path, color: COLOR_TRACE, width, pick };
+  });
 }
 
 function tracePaths(trace: ProcessMapTrace, width = PROCESS_MAP_TRACE_WIDTH_PX): PathDatum[] {
@@ -827,7 +870,7 @@ function renderTileSubLayers(
     if (!clipped) continue;
     if (placement.restricted) {
       restricted.push({ polygon: boundsPolygon(clipped), fill: COLOR_RESTRICTED_SURFACE, line: COLOR_RESTRICTED_BORDER, lineWidth: 0 });
-      for (const path of processMapPerimeterSegments(bounds, tile)) restrictedPerimeters.push({ path, color: COLOR_RESTRICTED_BORDER, width: 1 });
+      for (const path of processMapPerimeterSegments(bounds, tile)) restrictedPerimeters.push({ path: path.flat(), color: COLOR_RESTRICTED_BORDER, width: 1 });
       const center = { x: (bounds.min_x + bounds.max_x) / 2, y: (bounds.min_y + bounds.max_y) / 2 };
       if (ownsCoordinate(center, tile)) labels.push({ position: [center.x, center.y], text: "?", size: 13 });
       continue;
@@ -840,7 +883,7 @@ function renderTileSubLayers(
       const shadow = clipRectangle(processShadowBounds(bounds, options.settledPixelsPerGridUnit), tile);
       if (shadow) folderShadows.push({ polygon: boundsPolygon(shadow), fill: COLOR_SHADOW, line: COLOR_SHADOW, lineWidth: 0 });
       folderSurfaces.push({ polygon: boundsPolygon(clipped), fill: COLOR_FOLDER_SURFACE, line: COLOR_FOLDER, lineWidth: 0 });
-      for (const path of processMapPerimeterSegments(bounds, tile)) fences.push({ path, color: COLOR_FOLDER, width: lod === "editing" ? 2.5 : 1.5, pick });
+      for (const path of processMapPerimeterSegments(bounds, tile)) fences.push({ path: path.flat(), color: COLOR_FOLDER, width: lod === "editing" ? 2.5 : 1.5, pick });
     } else {
       if (lod !== "whole") {
         const shadow = clipRectangle(processShadowBounds(bounds, options.settledPixelsPerGridUnit), tile);
@@ -853,7 +896,7 @@ function renderTileSubLayers(
         lineWidth: 0,
         pick,
       });
-      for (const path of processMapPerimeterSegments(bounds, tile)) processPerimeters.push({ path, color: COLOR_PROCESS, width: lod === "editing" ? 2.5 : 1.5, pick });
+      for (const path of processMapPerimeterSegments(bounds, tile)) processPerimeters.push({ path: path.flat(), color: COLOR_PROCESS, width: lod === "editing" ? 2.5 : 1.5, pick });
     }
     const center = { x: (bounds.min_x + bounds.max_x) / 2, y: (bounds.min_y + bounds.max_y) / 2 };
     if (lod !== "whole") {
@@ -882,19 +925,20 @@ function renderTileSubLayers(
     const id = trace.resource_operational_relationship_id;
     if (!options.editedTraceIDs.has(id) && options.selectedTraceID !== id) traces.push(...tracePaths(trace));
   }
-  return [
-    new PolygonLayer<PolygonDatum>({ id: `${props.id}-folder-shadows`, data: folderShadows, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
-    new PolygonLayer<PolygonDatum>({ id: `${props.id}-folder-surfaces`, data: folderSurfaces, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
-    new PathLayer<PathDatum>({ id: `${props.id}-traces`, data: traces, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
-    new PathLayer<PathDatum>({ id: `${props.id}-folder-fences`, data: fences, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
-    new PolygonLayer<PolygonDatum>({ id: `${props.id}-process-shadows`, data: processShadows, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
-    new PolygonLayer<PolygonDatum>({ id: `${props.id}-placements`, data: bodies, pickable: true, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
-    new PolygonLayer<PolygonDatum>({ id: `${props.id}-restricted`, data: restricted, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
-    new PathLayer<PathDatum>({ id: `${props.id}-process-perimeters`, data: processPerimeters, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
-    new PathLayer<PathDatum>({ id: `${props.id}-restricted-perimeters`, data: restrictedPerimeters, pickable: false, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
-    processMapTextLayer(`${props.id}-labels`, labels),
-    processMapTextLayer(`${props.id}-process-card-text`, processCardText),
+  const layers: (Layer | null)[] = [
+    folderShadows.length ? new PolygonLayer<PolygonDatum>({ id: `${props.id}-folder-shadows`, data: folderShadows, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }) : null,
+    folderSurfaces.length ? new PolygonLayer<PolygonDatum>({ id: `${props.id}-folder-surfaces`, data: folderSurfaces, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }) : null,
+    traces.length ? new PathLayer<PathDatum>({ id: `${props.id}-traces`, data: traces, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path, getColor: (item) => item.color, getWidth: (item) => item.width }) : null,
+    fences.length ? new PathLayer<PathDatum>({ id: `${props.id}-folder-fences`, data: fences, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path, getColor: (item) => item.color, getWidth: (item) => item.width }) : null,
+    processShadows.length ? new PolygonLayer<PolygonDatum>({ id: `${props.id}-process-shadows`, data: processShadows, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }) : null,
+    bodies.length ? new PolygonLayer<PolygonDatum>({ id: `${props.id}-placements`, data: bodies, pickable: true, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }) : null,
+    restricted.length ? new PolygonLayer<PolygonDatum>({ id: `${props.id}-restricted`, data: restricted, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }) : null,
+    processPerimeters.length ? new PathLayer<PathDatum>({ id: `${props.id}-process-perimeters`, data: processPerimeters, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path, getColor: (item) => item.color, getWidth: (item) => item.width }) : null,
+    restrictedPerimeters.length ? new PathLayer<PathDatum>({ id: `${props.id}-restricted-perimeters`, data: restrictedPerimeters, pickable: false, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 1, getPath: (item) => item.path, getColor: (item) => item.color, getWidth: (item) => item.width }) : null,
+    labels.length ? processMapTextLayer(`${props.id}-labels`, labels) : null,
+    processCardText.length ? processMapTextLayer(`${props.id}-process-card-text`, processCardText) : null,
   ];
+  return layers.filter((layer): layer is Layer => layer !== null);
 }
 
 function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; waypoints: Layer } {
@@ -943,7 +987,7 @@ function editTraceLayers(options: ProcessMapLayerBuildOptions): { path: Layer; w
     ));
   }
   return {
-    path: new PathLayer<PathDatum>({ id: "process-map-edit-traces", data: paths, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+    path: new PathLayer<PathDatum>({ id: "process-map-edit-traces", data: paths, pickable: true, positionFormat: "XY", widthUnits: "pixels", widthMinPixels: 2, getPath: (item) => item.path, getColor: (item) => item.color, getWidth: (item) => item.width }),
     waypoints: new ScatterplotLayer<PointDatum>({ id: "process-map-edit-waypoints", data: waypoints, pickable: true, radiusUnits: "pixels", lineWidthUnits: "pixels", stroked: true, getPosition: (item) => item.position, getRadius: (item) => item.radius, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: 2 }),
   };
 }
@@ -976,7 +1020,7 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): { backdrops:
         [[bounds.max_x, bounds.max_y], [bounds.min_x, bounds.max_y]],
         [[bounds.min_x, bounds.max_y], [bounds.min_x, bounds.min_y]],
       ];
-      for (const path of perimeter) fences.push({ path, color: [...color], width: options.editOverlay.highlightedFolderKey === key || selected ? 4 : 3, pick });
+      for (const path of perimeter) fences.push({ path: path.flat(), color: [...color], width: options.editOverlay.highlightedFolderKey === key || selected ? 4 : 3, pick });
     } else {
       if (processMapPlacementDisplayLOD(placement, options.settledPixelsPerGridUnit) !== "whole") {
         processShadows.push({ polygon: boundsPolygon(processShadowBounds(bounds, options.settledPixelsPerGridUnit)), fill: COLOR_SHADOW, line: COLOR_SHADOW, lineWidth: 0 });
@@ -1082,7 +1126,7 @@ function editPlacementLayers(options: ProcessMapLayerBuildOptions): { backdrops:
       new PolygonLayer<PolygonDatum>({ id: "process-map-edit-folder-surfaces", data: folderSurfaces, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
     ],
     foreground: [
-      new PathLayer<PathDatum>({ id: "process-map-edit-folder-fences", data: fences, pickable: true, positionFormat: "XY", widthUnits: "pixels", getPath: (item) => item.path.flat(), getColor: (item) => item.color, getWidth: (item) => item.width }),
+      new PathLayer<PathDatum>({ id: "process-map-edit-folder-fences", data: fences, pickable: true, positionFormat: "XY", widthUnits: "pixels", getPath: (item) => item.path, getColor: (item) => item.color, getWidth: (item) => item.width }),
       new PolygonLayer<PolygonDatum>({ id: "process-map-edit-placement-shadows", data: processShadows, pickable: false, filled: true, stroked: false, getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill }),
       new PolygonLayer<PolygonDatum>({ id: "process-map-edit-placement-bodies", data: processBodies, pickable: true, filled: true, stroked: true, lineWidthUnits: "pixels", getPolygon: (item) => item.polygon, getFillColor: (item) => item.fill, getLineColor: (item) => item.line, getLineWidth: (item) => item.lineWidth }),
       processMapTextLayer("process-map-edit-labels", labels),
@@ -1125,6 +1169,7 @@ function buildProcessMapSpatialLayers(options: ProcessMapSpatialLayerBuildOption
     maxZoom: options.scene.max_tile_zoom,
     zoomOffset: options.scene.max_tile_zoom,
     maxCacheByteSize: PROCESS_MAP_TILE_CACHE_BYTES,
+    maxCacheSize: PROCESS_MAP_TILE_CACHE_MAX_SIZE,
     maxRequests: PROCESS_MAP_MAX_TILE_REQUESTS,
     debounceTime: PROCESS_MAP_TILE_DEBOUNCE_MS,
     refinementStrategy: (headers) => transparentVectorRefinementStrategy(headers),
@@ -1134,7 +1179,9 @@ function buildProcessMapSpatialLayers(options: ProcessMapSpatialLayerBuildOption
     getTileData: ((props) => options.getTileData({ tileID: props.id, z: props.index.z, x: props.index.x, y: props.index.y, signal: props.signal })) as TileLayerProps<ProcessMapTileResponse>["getTileData"],
     onTileLoad: (tile) => { if (tile.content) options.onTileLoad(tile.id, tile.content, options.protectedGeneration); },
     onTileUnload: (tile) => {
-      if (tile.content) options.onTileUnload(tile.id, tile.content.process_map_read_version, options.protectedGeneration);
+      // Failed replacements have null content but may still own a retained
+      // presentation. Carry this callback's version to protect newer reads.
+      options.onTileUnload(tile.id, options.scene.process_map_read_version, options.protectedGeneration);
     },
     onViewportLoad: (headers) => {
       if (processMapViewportHasCompleteCoverage(headers, options.scene.process_map_read_version)) options.onViewportLoad?.(options.protectedGeneration);
@@ -1231,7 +1278,7 @@ function transformedTraces(
   const result = new Map<string, ProcessMapTrace>();
   for (const trace of traces.values()) {
     result.set(trace.resource_operational_relationship_id, {
-      ...cloneTrace(trace),
+      ...trace,
       route_points: trace.route_points.map((point) => processMapGridPointForTransform(point, transform)),
       path_fragments: trace.path_fragments.map((fragment) => fragment.map((point) => processMapGridPointForTransform(point, transform))),
     });
@@ -1326,6 +1373,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const sceneRef = useRef(activeScene);
   const minimumReadVersionRef = useRef(0);
   const loadedTilesRef = useRef(loadedTiles);
+  const tilePublicationFrameRef = useRef<number | null>(null);
   const presentationRef = useRef<ProcessMapPresentationState>(emptyPresentation());
   const committedOverlayRef = useRef(committedOverlay);
   const previewPlacementsRef = useRef(previewPlacements);
@@ -1343,13 +1391,35 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   const suppressClickRef = useRef(false);
   viewRef.current = viewState;
   sceneRef.current = activeScene;
-  loadedTilesRef.current = loadedTiles;
   gestureRef.current = gesture;
   committedOverlayRef.current = committedOverlay;
   previewPlacementsRef.current = previewPlacements;
   previewTracesRef.current = previewTraces;
   removedTraceIDsRef.current = removedTraceIDs;
   selectionRef.current = selection;
+
+  const publishLoadedTiles = useCallback((next: Map<string, ProcessMapTileResponse>, defer = false) => {
+    loadedTilesRef.current = next;
+    if (defer) {
+      if (tilePublicationFrameRef.current === null) {
+        tilePublicationFrameRef.current = window.requestAnimationFrame(() => {
+          tilePublicationFrameRef.current = null;
+          setLoadedTiles(loadedTilesRef.current);
+        });
+      }
+      return;
+    }
+    if (tilePublicationFrameRef.current !== null) {
+      window.cancelAnimationFrame(tilePublicationFrameRef.current);
+      tilePublicationFrameRef.current = null;
+    }
+    setLoadedTiles(next);
+  }, []);
+
+  useEffect(() => () => {
+    if (tilePublicationFrameRef.current !== null) window.cancelAnimationFrame(tilePublicationFrameRef.current);
+    tilePublicationFrameRef.current = null;
+  }, []);
 
   const tilePresentation = useMemo(
     () => protectedScopeCurrent ? mergeTilePresentation(loadedTiles) : emptyPresentation(),
@@ -1402,7 +1472,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     advanceProtectedGeneration();
     invalidateProcessMapReadCaches(apiBase, companyID);
     setSettled(false);
-    setLoadedTiles(new Map());
+    publishLoadedTiles(new Map());
     setCommittedOverlay(emptyPresentation());
     setPreviewPlacements(new Map());
     setPreviewTraces(new Map());
@@ -1418,7 +1488,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     setPinnedProcessID(null);
     setCreationMenu(null);
     setLoading(true);
-  }, [advanceProtectedGeneration, apiBase, companyID, protectedScopeKey]);
+  }, [advanceProtectedGeneration, apiBase, companyID, protectedScopeKey, publishLoadedTiles]);
 
   const loadScene = useCallback(async (purgeProtectedGeometry: boolean) => {
     if (!companyID.trim()) return;
@@ -1430,7 +1500,8 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     try {
       const previousScene = sceneRef.current;
       const changes = previousScene && !purgeProtectedGeometry
-        ? await fetchProcessMapChanges(apiBase, companyID, previousScene.process_map_read_version, [...loadedTilesRef.current.values()], controller.signal)
+        ? await fetchProcessMapChanges(apiBase, companyID, previousScene.process_map_read_version,
+          prioritizeProcessMapValidationTiles([...loadedTilesRef.current.values()], previousScene, deckRef.current?.deck?.getViewports()[0]), controller.signal)
         : null;
       const nextScene = changes ?? await fetchProcessMapScene(apiBase, companyID, controller.signal);
       if (controller.signal.aborted) return;
@@ -1442,8 +1513,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         const nextTiles = new Map(loadedTilesRef.current);
         for (const [id, { current }] of certified) nextTiles.set(id, current);
         applyProcessMapCacheValidation(apiBase, companyID, changes);
-        loadedTilesRef.current = nextTiles;
-        setLoadedTiles(nextTiles);
+        publishLoadedTiles(nextTiles);
         setValidatedTiles(certified);
       } else {
         setValidatedTiles(null);
@@ -1458,7 +1528,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
       setLoading(false);
       setError(errorMessage(cause, "Process Map could not be loaded."));
     }
-  }, [apiBase, companyID, markUnsettled, purgeProtectedScene]);
+  }, [apiBase, companyID, markUnsettled, purgeProtectedScene, publishLoadedTiles]);
 
   const canonicalRefreshRef = useRef<ReturnType<typeof createCoalescedCanonicalRefresh> | null>(null);
   useEffect(() => {
@@ -1497,10 +1567,16 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
 
   useEffect(() => {
     if (!activeScene?.bounds || fittedSceneRef.current || viewportSize.width <= 1 || viewportSize.height <= 1) return;
+    const surface = surfaceRef.current;
+    // Deck can report the canvas's default 300x150 size before observing CSS.
+    // Fit only when its viewport agrees with the actual map pane.
+    if (!surface || Math.abs(viewportSize.width - surface.clientWidth) > 1
+      || Math.abs(viewportSize.height - surface.clientHeight) > 1) return;
     fittedSceneRef.current = true;
     const fitted = fitProcessMapViewState(activeScene.bounds, viewportSize);
     viewRef.current = fitted;
     setViewState(fitted);
+    setSettledViewState(fitted);
     setSelection(null);
     setHoveredPlacementKey(null);
     setHoveredResizePick(null);
@@ -1566,37 +1642,36 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
         currentCoverage.tileIDs.add(tileID);
       }
     }
-    setLoadedTiles((current) => new Map(current).set(tileID, data));
+    if (loadedTilesRef.current.get(tileID) !== data) {
+      publishLoadedTiles(new Map(loadedTilesRef.current).set(tileID, data), true);
+    }
     setLoading(false);
-  }, []);
+  }, [publishLoadedTiles]);
 
   const handleTileUnload = useCallback((tileID: string, readVersion: number, generation: number) => {
     if (generation !== canonicalGenerationRef.current) return;
-    setLoadedTiles((current) => {
-      if (current.get(tileID)?.process_map_read_version !== readVersion) return current;
-      const next = new Map(current);
-      next.delete(tileID);
-      return next;
-    });
-  }, []);
+    const retained = loadedTilesRef.current.get(tileID);
+    if (!retained || retained.process_map_read_version > readVersion) return;
+    const next = new Map(loadedTilesRef.current);
+    next.delete(tileID);
+    publishLoadedTiles(next, true);
+  }, [publishLoadedTiles]);
 
   const handleViewportLoad = useCallback((generation: number) => {
     if (generation !== canonicalGenerationRef.current) return;
     const readVersion = sceneRef.current?.process_map_read_version;
     if (readVersion === undefined || readVersion < minimumReadVersionRef.current) return;
-    if (readVersion !== undefined) {
-      setLoadedTiles((current) => {
-        if ([...current.values()].every((tile) => tile.process_map_read_version === readVersion)) return current;
-        return new Map([...current].filter(([, tile]) => tile.process_map_read_version === readVersion));
-      });
-    }
+    const current = loadedTilesRef.current;
+    publishLoadedTiles([...current.values()].every((tile) => tile.process_map_read_version === readVersion)
+      ? current
+      : new Map([...current].filter(([, tile]) => tile.process_map_read_version === readVersion)));
     const retired = retireProcessMapMutationMasks({
       committedOverlay: committedOverlayRef.current,
       removedTraceIDs: removedTraceIDsRef.current,
     }, true);
     setCommittedOverlay(retired.committedOverlay);
     setRemovedTraceIDs(retired.removedTraceIDs);
-  }, []);
+  }, [publishLoadedTiles]);
 
   const refreshAfterMutation = useCallback((readVersion: number) => {
     minimumReadVersionRef.current = Math.max(minimumReadVersionRef.current, readVersion);
@@ -1856,9 +1931,10 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
   );
   const selectedPlacementKey = visibleSelection?.kind === "placement" ? visibleSelection.id : null;
   const selectedTraceID = visibleSelection?.kind === "trace" ? visibleSelection.id : null;
+  const fittedScene = fittedSceneRef.current ? activeScene : null;
 
-  const spatialLayers = useMemo(() => activeScene ? buildProcessMapSpatialLayers({
-    scene: activeScene,
+  const spatialLayers = useMemo(() => fittedScene ? buildProcessMapSpatialLayers({
+    scene: fittedScene,
     validatedTiles,
     protectedGeneration,
     scoreCardBusinessDate,
@@ -1872,7 +1948,7 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     onTileUnload: handleTileUnload,
     onViewportLoad: handleViewportLoad,
     onTileError: (cause) => setNotice(errorMessage(cause, "A map tile could not be loaded. Move or zoom to retry.")),
-  }) : null, [activeScene, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, protectedGeneration, scoreCardBusinessDate, selectedPlacementKey, selectedTraceID, settledViewState.zoom, spatialEditedPlacementKeys, spatialEditedTraceIDs, validatedTiles]);
+  }) : null, [fittedScene, guardedGetTileData, handleTileLoad, handleTileUnload, handleViewportLoad, protectedGeneration, scoreCardBusinessDate, selectedPlacementKey, selectedTraceID, settledViewState.zoom, spatialEditedPlacementKeys, spatialEditedTraceIDs, validatedTiles]);
 
   const layers = useMemo(() => activeScene && spatialLayers ? composeProcessMapLayers({
     scene: activeScene,
@@ -2367,7 +2443,20 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
     const id = pinnedProcessID ?? (hoverModeEnabled ? hoveredProcessID : null);
     return id ? presentation.placements.get(`logic_gate:${id}`) ?? null : null;
   }, [hoverModeEnabled, hoveredProcessID, pinnedProcessID, presentation.placements]);
-  const qdGeometry = qdPlacement ? processMapPlacementGeometryForTransform(qdPlacement, placementTransform) : null;
+  const qdProcessID = qdPlacement?.resource_id;
+  const closeQDCard = useCallback(() => {
+    setPinnedProcessID(null);
+    setHoveredProcessID(null);
+  }, []);
+  const enterQDCard = useCallback(() => {
+    if (qdProcessID) showHoverCard(qdProcessID);
+  }, [qdProcessID, showHoverCard]);
+  const leaveQDCard = useCallback(() => {
+    if (qdProcessID) scheduleHoverClose(qdProcessID);
+  }, [qdProcessID, scheduleHoverClose]);
+  const qdGeometry = useMemo(() => qdPlacement
+    ? processMapPlacementGeometryForTransform(qdPlacement, placementTransform)
+    : null, [qdPlacement, placementTransform]);
   const qdVisible = qdPlacement && qdGeometry && processMapPlacementDisplayLOD({
     grid_width: qdGeometry.grid_width,
     grid_height: qdGeometry.grid_height,
@@ -2472,12 +2561,9 @@ export function ProcessMapSurface({ apiBase, companyID, hoverModeEnabled = false
           processName={qdPlacement.name}
           pinned={pinnedProcessID === qdPlacement.resource_id}
           requestJSON={requestJSON}
-          onClose={() => {
-            setPinnedProcessID(null);
-            setHoveredProcessID(null);
-          }}
-          onPointerEnter={() => showHoverCard(qdPlacement.resource_id)}
-          onPointerLeave={() => scheduleHoverClose(qdPlacement.resource_id)}
+          onClose={closeQDCard}
+          onPointerEnter={enterQDCard}
+          onPointerLeave={leaveQDCard}
         />
       </div>}
       {loading && <div data-process-map-fixed-overlay="true" className="process-map-loading" role="status">Loading Process Map…</div>}
