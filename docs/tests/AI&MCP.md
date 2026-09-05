@@ -54,7 +54,7 @@
 52. Upload-status reads retain the upload handler's observed-part synchronization and lost-access cleanup behavior.
 53. Adding, removing, or changing an in-app AI tool requires updating this inventory in the same change.
 54. Opt-in Inspect requires current dev_admin access and retains the complete final request body for every provider invocation, exact runtime instructions/history/context, native skill discovery and loads, tool arguments/results/errors, limits, and cancellation.
-55. Inspection remains in browser memory after failure or Stop; server recovery lasts until the next Send by the same actor/company, fifteen minutes, or backend restart, and every recovery rechecks the same actor/company and current dev_admin access.
+55. Inspection remains in browser memory after failure or Stop; server recovery lasts until the next Send by the same actor/company, fifteen minutes, or backend restart, and every recovery rechecks that retention and current actor/company/dev_admin access before returning data.
 56. Assignment questions use the current user's existing assigned-to-me query across all effective RACI roles and permitted Processes; the first 50 company Processes never establish whether the user has assignments.
 57. SOP discovery uses the latest live canonical Process textbox even when its body was saved without a separate metadata save; metadata alone never hides a newer saved SOP body.
 58. The actual pinned Pi SDK owns the only model/tool loop; Go supervises one bounded Node child and retains all authenticated business dispatch.
@@ -68,10 +68,11 @@
 66. An incomplete or multi-tool model response causes no tool dispatch; native and Go tools execute sequentially within the same total limit.
 67. Playful or physical procedures may produce an honestly labelled written simulation; the assistant never claims unsupported physical or external actions occurred.
 68. The backend reserves 8 MiB per current interaction before admitting at most eight retained/active captures; a tool starts only when space remains for its bounded result and a terminal marker.
-69. Clearing or reloading browser chat loses its visible history; server recovery is temporary process memory and never a durable Run or transcript archive.
+69. Clearing or reloading browser chat discards its visible history and pending recovery; server recovery is temporary process memory and never a durable Run or transcript archive.
 70. A confirmed textbox save remains inspectable if Stop prevents its canonical read; its saved response is retained separately from the unconfirmed read.
 71. Every actor may recover only their own saved Process/Node links through the current-company result endpoint; it rechecks current resource access and returns no prompts or traces.
-72. Stopped or failed turns with an unfinished or unavailable recovery offer a manual saved-result refresh, without repeating the action or polling automatically.
+72. Stopped or failed turns can recover their saved links through the result endpoint when inspection is unavailable while retaining received traces; unfinished recovery offers a manual refresh without repeating the action or polling automatically.
+73. Inspection records the HTTP status of every provider response, including rejected requests, without exposing private error bodies.
 
 ## Process story
 

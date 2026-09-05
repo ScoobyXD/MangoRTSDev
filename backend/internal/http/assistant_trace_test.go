@@ -41,8 +41,12 @@ func TestAssistantTraceRecoveryRequiresFreshRoleExactActorAndCompany(t *testing.
 		t.Run(scenario, func(t *testing.T) {
 			server, repo, user, id, capture := assistantTraceFixture(t)
 			capture.events = []assistantTrace{{Sequence: 1, Kind: "tool", Status: "saved", Time: time.Now().UTC().Format(time.RFC3339Nano), Data: json.RawMessage(`{"saved":"canonical result"}`)}}
-			capture.process = map[string]string{"id": store.NewUUIDv7String(), "name": "Exact saved Process"}
-			capture.nodeID = store.NewUUIDv7String()
+			process := assistantResultProcess{ID: store.NewUUIDv7String(), Name: "Exact saved Process"}
+			nodeID := store.NewUUIDv7String()
+			key := assistantTestCompany + ":" + user.UserID + ":" + id
+			server.assistant.recordAssistantResult(key, assistantEvent{Type: "process", ProcessID: process.ID, Name: process.Name})
+			server.assistant.recordAssistantResult(key, assistantEvent{Type: "node", ProcessID: process.ID, NodeID: nodeID})
+			server.assistant.finishAssistantResult(key)
 			capture.finished = true
 			close(capture.done)
 			companyID := assistantTestCompany
@@ -82,21 +86,21 @@ func TestAssistantTraceRecoveryRequiresFreshRoleExactActorAndCompany(t *testing.
 				t.Fatalf("status=%d want=%d body=%s", response.Code, want, response.Body.String())
 			}
 			if want != http.StatusOK {
-				if strings.Contains(response.Body.String(), "canonical result") || strings.Contains(response.Body.String(), capture.nodeID) {
+				if strings.Contains(response.Body.String(), "canonical result") || strings.Contains(response.Body.String(), nodeID) {
 					t.Fatal("unauthorized capture data leaked")
 				}
 				return
 			}
 			var snapshot struct {
-				Events   []assistantTrace  `json:"events"`
-				Finished bool              `json:"finished"`
-				Process  map[string]string `json:"process"`
-				NodeID   string            `json:"node_id"`
+				Events   []assistantTrace       `json:"events"`
+				Finished bool                   `json:"finished"`
+				Process  assistantResultProcess `json:"process"`
+				NodeID   string                 `json:"node_id"`
 			}
 			if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
 				t.Fatal(err)
 			}
-			if !snapshot.Finished || !reflect.DeepEqual(snapshot.Events, capture.events) || !reflect.DeepEqual(snapshot.Process, capture.process) || snapshot.NodeID != capture.nodeID {
+			if !snapshot.Finished || !reflect.DeepEqual(snapshot.Events, capture.events) || snapshot.Process != process || snapshot.NodeID != nodeID {
 				t.Fatalf("recovery changed saved state: %+v", snapshot)
 			}
 			if response.Header().Get("Cache-Control") != "no-store" {
@@ -130,6 +134,65 @@ func TestAssistantTraceRecoveryRechecksRoleAfterWaiting(t *testing.T) {
 	server.handleAssistantTrace(response, assistantTraceRequest(user, assistantTestCompany, id))
 	if response.Code != http.StatusForbidden || wrapper.calls.Load() != 2 {
 		t.Fatalf("recovery did not reauthorize after wait: status=%d reads=%d", response.Code, wrapper.calls.Load())
+	}
+}
+
+type assistantTraceRetentionRepo struct {
+	store.Repository
+	calls     atomic.Int32
+	onRecheck func()
+}
+
+func (repo *assistantTraceRetentionRepo) ListUserMembershipsContext(ctx context.Context, id string) ([]domain.CompanyMembership, error) {
+	items, err := repo.Repository.ListUserMembershipsContext(ctx, id)
+	if repo.calls.Add(1) == 2 && err == nil {
+		repo.onRecheck()
+	}
+	return items, err
+}
+
+func TestAssistantTraceRecoveryRechecksRetentionAfterWaiting(t *testing.T) {
+	for _, scenario := range []string{"next Send", "expired", "canceled"} {
+		t.Run(scenario, func(t *testing.T) {
+			server, repo, user, id, capture := assistantTraceFixture(t)
+			capture.events = []assistantTrace{{Sequence: 1, Kind: "context", Status: "completed", Data: json.RawMessage(`{"context":"old retained context"}`)}}
+			capture.finished = true
+			close(capture.done)
+			request := assistantTraceRequest(user, assistantTestCompany, id)
+			ctx, cancel := context.WithCancel(request.Context())
+			defer cancel()
+			owner := assistantTestCompany + ":" + user.UserID
+			wrapper := &assistantTraceRetentionRepo{Repository: repo, onRecheck: func() {
+				switch scenario {
+				case "next Send":
+					server.assistant.finish(owner)
+					if !server.assistant.begin(owner, store.NewUUIDv7String()) {
+						t.Fatal("next Send did not replace the previous capture")
+					}
+				case "expired":
+					server.assistant.mu.Lock()
+					server.assistant.requests[owner+":"+id] = time.Now().Add(-time.Second)
+					server.assistant.mu.Unlock()
+				case "canceled":
+					cancel()
+				}
+			}}
+			server.repo = wrapper
+			response := httptest.NewRecorder()
+			server.handleAssistantTrace(response, request.WithContext(ctx))
+			if wrapper.calls.Load() != 2 {
+				t.Fatal("retention changed outside the post-wait recheck")
+			}
+			if scenario == "canceled" {
+				// The role helper may return its fixed access error when canceled;
+				// neither that error nor an empty response may contain retained data.
+				if response.Body.Len() != 0 && strings.TrimSpace(response.Body.String()) != `{"error":"company_access_denied"}` {
+					t.Fatalf("canceled recovery returned data: %s", response.Body.String())
+				}
+			} else if response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "old retained context") {
+				t.Fatalf("recovery returned an unavailable capture: status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 

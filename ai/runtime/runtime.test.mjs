@@ -152,6 +152,9 @@ test('provider failures do not retry, redirect, or expose private errors', async
     });
     await assert.rejects(runInteraction(f.start, f.transport));
     assert.equal(f.requests.length, 1);
+    if (status !== 307) {
+      assert.deepEqual(f.captured.filter(event => event.kind === 'provider_http_response').map(event => event.data.http_status), [status]);
+    }
     assert.doesNotMatch(JSON.stringify(f.captured), /SECRET_PROVIDER_INTERNAL/);
   }
 });

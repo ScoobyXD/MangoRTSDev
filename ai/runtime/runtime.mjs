@@ -218,10 +218,9 @@ export async function runInteraction(start, transport, signal = new AbortControl
       active();
       const secretURLOmissions = [];
       const transformed = omitSecretURLs(await originalPayload?.(payload, currentModel) ?? payload, secretURLOmissions);
-      // Provider options absent from SimpleStreamOptions are set at its supported final payload hook.
+      // Pi supplies store:false and max_output_tokens from maxTokens below.
+      // Parallel tool calls need this supported final payload hook.
       transformed.parallel_tool_calls = false;
-      transformed.max_output_tokens = 4096;
-      transformed.store = false;
       preparedBody = JSON.stringify(transformed);
       if (++responseCount > limits.responses || bytes(preparedBody) > limits.context_bytes) {
         await capture('limit', 'stopped', { boundary: responseCount > limits.responses ? 'model_responses' : 'context_bytes' });
@@ -246,6 +245,9 @@ export async function runInteraction(start, transport, signal = new AbortControl
         pending.catch(() => {});
         await capture('provider_request', 'dispatched', { invocation: responseCount });
         const response = await pending;
+        // Pi's onResponse hook runs only after successful HTTP status handling.
+        // Capture every received status here without reading private error bodies.
+        await capture('provider_http_response', 'completed', { invocation: responseCount, http_status: response.status });
         responseValidation = response.ok
           ? validateResponse(response.clone(), init.signal, capture)
           : Promise.resolve(new Map());
@@ -254,9 +256,6 @@ export async function runInteraction(start, transport, signal = new AbortControl
         return response;
       },
     });
-    session.agent.onResponse = async response => {
-      await capture('provider_http_response', 'completed', { invocation: responseCount, http_status: response.status });
-    };
     const originalBeforeTool = session.agent.beforeToolCall;
     session.agent.beforeToolCall = async (context, toolSignal) => {
       active();

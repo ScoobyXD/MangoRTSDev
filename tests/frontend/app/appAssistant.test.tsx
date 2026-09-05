@@ -223,11 +223,19 @@ test("Process pills persist across follow-ups and inspection retains full server
   const recoveries: string[] = [];
   const publicRecoveries: string[] = [];
   let statusChecks = 0;
+  let unfinishedTraceRequestID: string | undefined;
+  let missingTraceRequestID: string | undefined;
+  let deferStatus = false;
+  let pendingStatus: { signal: AbortSignal; resolve: (response: Response) => void } | undefined;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input, init) => {
     const url = String(input);
     if (url.includes("/status?")) {
       statusChecks++;
+      if (deferStatus) {
+        deferStatus = false;
+        return new Promise<Response>((resolve) => { pendingStatus = { signal: init!.signal!, resolve }; });
+      }
       return new Response(JSON.stringify({ available: true, can_inspect_context: canInspect }), { headers: { "Content-Type": "application/json" } });
     }
     if (url.includes("/result?")) {
@@ -238,8 +246,9 @@ test("Process pills persist across follow-ups and inspection retains full server
       recoveries.push(url);
       if (!canInspect) return new Response(JSON.stringify({ error: "assistant_context_inspection_denied" }), { status: 403, headers: { "Content-Type": "application/json" } });
       const requestID = new URL(url).searchParams.get("request_id");
+      if (requestID === missingTraceRequestID) return new Response(JSON.stringify({ error: "assistant_trace_not_found" }), { status: 404, headers: { "Content-Type": "application/json" } });
       const index = requests.findIndex((request) => request.request_id === requestID);
-      return new Response(JSON.stringify({ events: traces[index] ?? [], finished: true, ...(index === 4 ? { process: { id: processIDs[0], name: "Lunch walkthrough revised" }, node_id: nodeID } : {}) }), { headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ events: traces[index] ?? [], finished: requestID !== unfinishedTraceRequestID, ...(index === 4 ? { process: { id: processIDs[0], name: "Lunch walkthrough revised" }, node_id: nodeID } : {}) }), { headers: { "Content-Type": "application/json" } });
     }
     if (url.includes("/user-pins?")) {
       assert.equal(init?.method ?? "GET", "GET");
@@ -358,13 +367,30 @@ test("Process pills persist across follow-ups and inspection retains full server
     assert.equal(statusChecks, previousStatusChecks + 1, "opening an old browser capture still rechecks current developer access");
     await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
     await act(async () => { checkbox().click(); });
+    await append("Perform a walkthrough that finishes after Stop"); await key("Enter");
+    unfinishedTraceRequestID = requests[6].request_id;
+    await emit(6, { type: "trace", trace: { sequence: 1, kind: "tool", status: "dispatched", time: "2026-09-05T00:00:00Z", data: { name: "create_process_node", message: "Received before late save" } } });
+    await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Stop")!.click(); });
+    const lateStopped = Array.from(container.querySelectorAll('[data-assistant-turn-status="stopped"]')).at(-1)!;
+    assert.doesNotMatch(lateStopped.textContent!, /Open Node/, "an unfinished Stop snapshot cannot confirm a later save");
+    await append("Explain the next Process"); await key("Enter"); await emit(7, { type: "done" });
+    missingTraceRequestID = requests[6].request_id;
+    modal = await inspect(lateStopped);
+    assert.equal(publicRecoveries.length, 1, "an expired trace recovers the retained public saved result once");
+    assert.equal(new URL(publicRecoveries[0]).searchParams.get("request_id"), requests[6].request_id);
+    assert.match(lateStopped.textContent!, /Open Node/, "an expired trace cannot strand a confirmed saved Node");
+    assert.match(modal.textContent!, /Received before late save/, "public result recovery preserves the browser's partial capture");
+    assert.match(modal.textContent!, /Final server capture is unavailable/);
+    assert.match(modal.textContent!, /Saved action results recovered/);
+    await act(async () => { modal.querySelector<HTMLButtonElement>("button")!.click(); });
+    await act(async () => { checkbox().click(); });
     await append("Perform another written walkthrough"); await key("Enter");
-    assert.equal(requests[6].inspect_context, true);
-    await emit(6, { type: "trace", trace: { sequence: 1, kind: "tool", status: "dispatched", time: "2026-09-05T00:00:00Z", data: { name: "create_process_node" } } });
+    assert.equal(requests[8].inspect_context, true);
+    await emit(8, { type: "trace", trace: { sequence: 1, kind: "tool", status: "dispatched", time: "2026-09-05T00:00:00Z", data: { name: "create_process_node" } } });
     canInspect = false;
     await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Stop")!.click(); });
-    assert.equal(publicRecoveries.length, 1, "revoked Inspect recovery requests public saved metadata once");
-    assert.equal(new URL(publicRecoveries[0]).searchParams.get("request_id"), requests[6].request_id);
+    assert.equal(publicRecoveries.length, 2, "revoked Inspect recovery requests public saved metadata once");
+    assert.equal(new URL(publicRecoveries[1]).searchParams.get("request_id"), requests[8].request_id);
     assert.match(Array.from(container.querySelectorAll('[data-assistant-turn-status="stopped"]')).at(-1)!.textContent!, /Open Node/, "losing Inspect does not hide an accessible confirmed saved Node");
     assert.equal(dom.window.document.querySelector('[aria-label="AI inspection"]'), null, "revocation closes privileged inspection");
     assert.equal(checkbox(), null);
@@ -378,6 +404,18 @@ test("Process pills persist across follow-ups and inspection retains full server
     await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand Mango chat"]')!.click(); });
     await choose(); await act(async () => { render("process-user-b"); });
     assert.equal(chip(), null); assert.equal(input().editor.getText(), ""); assert.equal(picker(), null);
+    canInspect = true;
+    await act(async () => { render("inspection-race-user"); });
+    await act(async () => { container.querySelector<HTMLButtonElement>('[aria-label="Expand Mango chat"]')!.click(); checkbox().click(); });
+    await append("Inspect this completed turn"); await key("Enter"); await emit(9, { type: "done" });
+    deferStatus = true;
+    await inspect(container.querySelector('[data-assistant-turn-status="complete"]')!);
+    assert.ok(pendingStatus, "inspection access remains pending");
+    await act(async () => { Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Clear chat")!.click(); });
+    assert.equal(pendingStatus.signal.aborted, true, "Clear chat cancels pending inspection requests");
+    await append("This new turn was not inspected"); await key("Enter"); await emit(10, { type: "done" });
+    await act(async () => { pendingStatus!.resolve(new Response(JSON.stringify({ available: true, can_inspect_context: true }), { headers: { "Content-Type": "application/json" } })); });
+    assert.equal(dom.window.document.querySelector('[aria-label="AI inspection"]'), null, "a delayed Inspect response cannot open a new turn after Clear chat");
   } finally {
     await act(async () => { root.unmount(); }); resetTerminalAuthFailure(); globalThis.fetch = originalFetch;
     restores.reverse().forEach((restore) => restore()); dom.window.close();

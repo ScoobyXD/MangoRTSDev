@@ -121,8 +121,8 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 	a.mu.Lock()
 	capture := a.captures[key]
 	if capture == nil {
-		capture = &assistantCapture{events: []assistantTrace{}, done: make(chan struct{})}
-		a.captures[key] = capture
+		a.mu.Unlock()
+		return errors.New("assistant_capture_not_admitted")
 	}
 	capture.inspect = request.InspectContext
 	a.mu.Unlock()
@@ -131,14 +131,6 @@ func (s *Server) runAssistant(r *http.Request, request assistantRequest, emit fu
 	}
 	trackedEmit := func(event assistantEvent) error {
 		a.recordAssistantResult(key, event)
-		a.mu.Lock()
-		if event.Type == "process" {
-			capture.process = map[string]string{"id": event.ProcessID, "name": event.Name}
-		}
-		if event.Type == "node" {
-			capture.nodeID = event.NodeID
-		}
-		a.mu.Unlock()
 		if event.Type == "node" {
 			// A lost browser connection cannot erase a confirmed saved Node identity.
 			_ = emit(event)

@@ -32,8 +32,6 @@ type assistantCapture struct {
 	bytes    int
 	finished bool
 	done     chan struct{}
-	process  map[string]string
-	nodeID   string
 	inspect  bool
 }
 
@@ -116,6 +114,9 @@ func (s *Server) handleAssistantTrace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 		return
 	}
+	if r.Context().Err() != nil {
+		return
+	}
 	actor, ok := s.requireAssistantActor(w, r)
 	if !ok {
 		return
@@ -151,6 +152,9 @@ func (s *Server) handleAssistantTrace(w http.ResponseWriter, r *http.Request) {
 	case <-r.Context().Done():
 		return
 	}
+	if r.Context().Err() != nil {
+		return
+	}
 	actor, ok = s.requireAssistantActor(w, r)
 	if !ok {
 		return
@@ -159,13 +163,23 @@ func (s *Server) handleAssistantTrace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "assistant_context_inspection_denied")
 		return
 	}
-	a.mu.Lock()
-	snapshot := map[string]any{"events": append([]assistantTrace{}, capture.events...), "finished": capture.finished}
-	if capture.process != nil {
-		snapshot["process"] = capture.process
+	if r.Context().Err() != nil {
+		return
 	}
-	if capture.nodeID != "" {
-		snapshot["node_id"] = capture.nodeID
+	a.mu.Lock()
+	if time.Now().After(a.requests[key]) || a.captures[key] != capture {
+		a.mu.Unlock()
+		writeError(w, http.StatusNotFound, "assistant_trace_unavailable")
+		return
+	}
+	snapshot := map[string]any{"events": append([]assistantTrace{}, capture.events...), "finished": capture.finished}
+	if result := a.results[key]; result != nil {
+		if result.Process != nil {
+			snapshot["process"] = *result.Process
+		}
+		if result.NodeID != "" {
+			snapshot["node_id"] = result.NodeID
+		}
 	}
 	a.mu.Unlock()
 	w.Header().Set("Cache-Control", "no-store")

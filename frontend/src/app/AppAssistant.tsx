@@ -153,16 +153,20 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
       } : turn));
     } catch (error) {
       if (controller.signal.aborted) return;
-      if (inspecting && error instanceof APIHTTPError && error.status === 403) {
-        revokeInspection();
+      if (inspecting && error instanceof APIHTTPError && (error.status === 403 || error.status === 404)) {
+        const captureUnavailable = error.status === 404;
+        if (captureUnavailable) update({ inspectionNotice: "Final server capture is unavailable. Received events are retained; saved action results remain uncertain. Reopen Inspect to try again." });
+        else revokeInspection();
         try {
           const result = await getAssistantResult(apiBase, companyID, requestID, controller.signal);
           if (controller.signal.aborted) return;
           const process = result.process ? { id: result.process.id, label: result.process.name } : undefined;
-          update({ captureFinished: result.finished, ...(process ? { process } : {}), ...(result.node_id ? { nodeID: result.node_id } : {}) });
+          update({ captureFinished: result.finished, ...(process ? { process } : {}), ...(result.node_id ? { nodeID: result.node_id } : {}), ...(captureUnavailable ? { inspectionNotice: result.finished
+            ? "Final server capture is unavailable. Received events are retained. Saved action results recovered; saved actions remain in Mango."
+            : "Final server capture is unavailable. Received events are retained. The server has not finished stopping. Reopen Inspect to refresh saved action results." } : {}) });
           if (bindRecoveredProcess && process) composerRef.current?.bindProcess(process);
         } catch {
-          // Keep already received links; public result recovery cannot restore revoked inspection access.
+          // Keep already received links and traces; public results cannot restore unavailable inspection.
         }
       }
       else if (inspecting) update({ inspectionNotice: "Final server capture could not be recovered. Received events are retained; later action outcomes are uncertain. Reopen Inspect to try again." });
@@ -281,7 +285,10 @@ function AssistantSession({ apiBase, companyID, bottomInset }: Props & { company
         {turns.length > 0 && <section className="mango-assistant-transcript" id={transcriptID} aria-label="Chat transcript">
         <header>
           <strong>Mango chat</strong>
-          <button type="button" disabled={running || turns.length === 0} onClick={() => { setTurns([]); composerRef.current?.clear(); setInspectContext(false); setInspectedTurn(null); }}>Clear chat</button>
+          <button type="button" disabled={running || turns.length === 0} onClick={() => {
+            for (const controller of inspectionRequests.current) controller.abort();
+            setTurns([]); composerRef.current?.clear(); setInspectContext(false); setInspectedTurn(null);
+          }}>Clear chat</button>
         </header>
         <div className="mango-assistant-messages mango-home-scroll" ref={transcriptRef} onScroll={(event) => {
           const element = event.currentTarget;
