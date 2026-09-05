@@ -99,6 +99,9 @@ test("Board and the named Process canvas share inline Step edits, block switchin
   const pointer = async (element: Element, type: string, x: number, y: number) => { await act(async () => element.dispatchEvent(new dom.window.MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y }))); };
   try {
     await act(async () => root.render(<KanbanContent accent="#17a8aa" widgetId="integration" forcedLogicGateID={processA} />));
+    await settle(() => Boolean(document.querySelector('[data-kanban-status="Pending"]')), "Board did not open in Kanban mode");
+    assert.equal(button("Kanban board").getAttribute("aria-pressed"), "true");
+    await click("Steps board");
     await settle(() => Boolean(document.querySelector(".process-work__step-title")), "Board did not load the original Step");
     updateRealtimeHealth(realtimeHealthKey(apiBase, companyID), { status: "connected" });
     await click("Map");
@@ -171,6 +174,9 @@ test("Board and the named Process canvas share inline Step edits, block switchin
     await settle(() => document.querySelector<HTMLElement>(`[data-step-map-id="${stepA}"]`)?.style.left === "128px", "Reopened Map lost persisted geometry");
     assert.equal(saves.length, 1, "view changes must not write layout");
     await act(async () => root.render(<KanbanContent accent="#17a8aa" widgetId="integration" forcedLogicGateID={processB} />));
+    await settle(() => Boolean(document.querySelector('[data-kanban-status="Pending"]')), "Navigation did not reset the Board to Kanban");
+    assert.equal(button("Kanban board").getAttribute("aria-pressed"), "true");
+    await click("Steps board");
     await settle(() => document.querySelector(".process-work__step-title")?.textContent === "Review invoice", "Navigation did not open the next Process Board");
     assert.equal(document.querySelector(`[data-step-map-id="${stepA}"]`), null);
     await click("Map");

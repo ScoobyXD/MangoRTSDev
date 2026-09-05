@@ -1,5 +1,12 @@
 export const EXPLORER_ENTITY_DRAG_MIME = "application/x-mango-explorer-entity";
 
+export function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.trim().replace("#", "");
+  if (!/^[0-9a-f]{6}$/i.test(clean)) return `rgba(71,85,105,${alpha})`;
+  const value = Number.parseInt(clean, 16);
+  return `rgba(${(value >> 16) & 255},${(value >> 8) & 255},${value & 255},${alpha})`;
+}
+
 export const KANBAN_DEFAULT_COLUMN_ITEM_COLOR = "#475569";
 
 export const KANBAN_LOGIC_GATE_REQUESTED_COLOR = "#facc15";

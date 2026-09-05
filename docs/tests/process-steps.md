@@ -11,15 +11,15 @@
 9. A connection controls neither Node permissions nor Process membership and creates no Company Explorer or company-map placement.
 10. A Node keeps its one existing Process assignment and may have one step assignment within that same Process.
 11. `nodes.status` is the only saved Node status authority; a step name, column position, or Issue flag never replaces it.
-12. Requested, Pending, Backlog, and Done are separate status lists within the Process and are never steps or stored board columns.
-13. The Steps view shows In Progress and Review Nodes; the separate status lists show only Nodes with their matching status.
-14. A Node appears in only one work view at a time, determined by its status.
+12. Requested, Pending, Backlog, and Done are separate status lists in Steps mode and are never steps or stored board columns.
+13. The Steps tab shows In Progress and Review Nodes; its separate status tabs show only Nodes with their matching status.
+14. In Steps mode, a Node belongs to exactly one status-selected work tab.
 15. An active Node without a step appears in No step assigned while keeping its Process membership and status.
 16. Pending means accepted work waiting to start or resume and is independent of whether a step is already assigned.
 17. Accepting a request changes its status to Pending; declining or cancelling follows the existing Backlog behavior and request authorization.
-18. Starting work chooses one step and changes the Node to In Progress in one operation.
+18. The Steps-mode Start work action chooses one step and changes the Node to In Progress in one operation.
 19. Moving a Node between steps preserves its status, Issue flag, Process membership, and unrelated content.
-20. Changing status to Requested, Pending, Backlog, or Done preserves the Node's existing step assignment.
+20. A status-only change preserves the Node's existing step assignment, including a null step.
 21. Reopening a Node reuses its surviving step; a Node whose step was deleted remains unassigned to a step.
 22. A cross-Process transfer clears the previous step unless the command explicitly chooses a valid step in the destination Process.
 23. Deleting a step removes its exact incoming and outgoing connections and clears only the affected Node step assignments.
@@ -39,7 +39,7 @@
 37. A folder change refreshes Process work only when it affects that Process's inherited access; unrelated folders and shared inboxes do not invalidate its work.
 38. Every effective Responsible user with Process access can accept or decline another user's request, including users reached through groups or inherited RACI.
 39. RACI assignment constraints accept the same canonical resource types as RACI settings so Process requests can inherit Responsible users from folders.
-40. Compact rectangular tabs at the top of the Board select Steps, Requested, Pending, Backlog, and Done.
+40. Compact rectangular tabs in Steps mode select Steps, Requested, Pending, Backlog, and Done.
 41. Requested uses yellow, Pending gray, Backlog purple, and Done green while retaining readable labels.
 42. The top-right Board / Map toggle displays the same exact Process and Steps; opening its Board starts in Board mode, while company-map creation starts in its focused Step canvas.
 43. Map creation, renaming, and connection commands use the existing Step records and same-Process operational relationships.
@@ -105,7 +105,7 @@
 103. Selecting opposite ports with Enter or Space follows the same direction and validation rules as dragging.
 104. The Process editor's Map view places Create Step and the Board / Map switch on an elevated surface inside its canvas.
 105. Process map views omit scrollbars, separate toolbars, and persistent help text.
-106. The Board retains its Node columns, status views, grouping controls, and scrolling.
+106. The Board retains Kanban status columns and Steps-mode columns, status views, grouping controls, and scrolling.
 107. Switching between Board and Map stays disabled during a map gesture or pending map mutation.
 108. Step and connection context menus expose their existing editing commands without persistent inspectors.
 109. Deleting a Step from the map requires confirmation.
@@ -116,14 +116,18 @@
 113. The new Process uses the existing RACI cards and SOP editor without a separate saved draft.
 114. The map omits the persistent unsaved-changes notice.
 115. Save reveals the Process in its expanded Explorer Folder and selects its canonical company-map placement while preserving the previous camera.
+116. Board opens in Kanban mode and offers a local Kanban / Steps switch without changing the Board / Map switch.
+117. Kanban mode groups the same authorized assigned Nodes by `nodes.status` without assigning or clearing a step.
+118. Moving a Node into In Progress or Review through Kanban may leave it without a step, which Steps mode must show under No step assigned.
+119. Both Board modes share canonical work data, assignment positions, saved grouping, cache invalidation, and mutation commands without restoring legacy Kanban tables or identities.
 
 ## Process Story
 
-A user creates a Process, chooses a Folder, and names compact Steps on the map. Output-to-input connections define the flow and its displayed numbering. The user arranges Steps, pans blank space, and zooms with the wheel before saving its RACI, SOP, and Steps together and returning to the previous company map view. In the Process editor, Map opens the same white canvas beside the SOP; its floating controls create Steps or return to the Board's Node columns and status views. Both views use the same saved Steps and connections. Deleting a Step preserves every Node and status.
+A user creates a Process, chooses a Folder, and arranges connected Steps on the map before saving its RACI, SOP, and Steps together. The Process editor opens Board in Kanban mode for status-based work and can switch locally to Steps mode. Status moves retain saved steps; Steps-mode Start work chooses a step, and step moves retain status. Map edits the same Steps and connections beside the SOP. Deleting a Step preserves every Node and status.
 
 ## Main Scenarios
 
-1. **Existing work:** after conversion, a Review Node remains Review in the same Process and appears in No step assigned until a user chooses a step. A Done Node stays in Done with its original completion timestamp.
+1. **Shared work:** moving a Pending Node into In Progress in Kanban keeps its existing step, or leaves it under No step assigned in Steps mode when none exists. Moving that Node to another step preserves In Progress, and both Board modes show the same saved Node and order.
 2. **Branching:** a step connects to two possible next steps through two exact directed relationships. Moving a Node to either step changes only its selected step; removing one connection preserves all three steps and their Nodes.
 3. **Step deletion:** deleting a step used by active, Pending, and Done Nodes clears each step reference. Active Nodes appear in No step assigned, while Pending and Done Nodes remain in their lists. No Node or Process membership is deleted.
 

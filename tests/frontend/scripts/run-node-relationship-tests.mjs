@@ -83,6 +83,7 @@ const testFiles = [
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/kanbanApi.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processWorkStore.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processWork.test.js"),
+  resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/statusKanban.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processStepMap.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/nodeEditorOverlayViewMode.test.js"),
   resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/overlayClamp.test.js"),
@@ -154,6 +155,14 @@ const componentTests = [
   {
     source: resolve(repoRoot, "tests/frontend/modules/kanban/processWorkMapIntegration.test.tsx"),
     file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/processWorkMapIntegration.test.js"),
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/kanban/statusKanbanIntegration.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/statusKanbanIntegration.test.js"),
+  },
+  {
+    source: resolve(repoRoot, "tests/frontend/modules/kanban/statusKanbanScopeIntegration.test.tsx"),
+    file: resolve(frontendRoot, ".test-dist/tests/frontend/modules/kanban/statusKanbanScopeIntegration.test.js"),
   },
   {
     source: resolve(repoRoot, "tests/frontend/modules/kanban/processStepMapInteractions.test.tsx"),
