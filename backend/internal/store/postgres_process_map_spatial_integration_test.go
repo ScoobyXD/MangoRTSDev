@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,7 +15,7 @@ import (
 
 func TestPostgresProcessMapTileLODMatchesMemoryProjection(t *testing.T) {
 	ctx := context.Background()
-	_, repo := openPostgresProcessMapIntegration(t)
+	db, repo := openPostgresProcessMapIntegration(t)
 	company, err := repo.CreateCompany("Process Map PostgreSQL LOD parity")
 	if err != nil {
 		t.Fatal(err)
@@ -24,6 +25,13 @@ func TestPostgresProcessMapTileLODMatchesMemoryProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := repo.AddCompanyMembership(admin.CognitoSubject, company.CompanyID, domain.RoleCompanyAdmin); err != nil {
+		t.Fatal(err)
+	}
+	viewer, err := repo.UpsertAuthUser("process-map-lod-viewer", "process-map-lod-viewer@example.com", "LOD Viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.AddCompanyMembership(viewer.CognitoSubject, company.CompanyID, domain.RoleCompanyUser); err != nil {
 		t.Fatal(err)
 	}
 
@@ -52,6 +60,32 @@ func TestPostgresProcessMapTileLODMatchesMemoryProjection(t *testing.T) {
 		)); err != nil {
 			t.Fatal(err)
 		}
+	}
+	folder, err := repo.CreateCompanyExplorerFolder(company.CompanyID, "", "logic_gate", "Folder without Process RACI")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeFolder, folder.FolderID, nil, 0, 650, 400, 400,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	hidden, err := repo.CreateLogicGate(company.CompanyID, "Denied editing-size Process")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.PutProcessMapPlacement(ctx, processMapTestPlacementWithSize(
+		company.CompanyID, admin.UserID, domain.ProcessMapResourceTypeProcess, hidden.LogicGateID, nil, 800, 10, 400, 400,
+	)); err != nil {
+		t.Fatal(err)
+	}
+	noAccess := ResourceDefaultAccessNoAccess
+	if _, _, err := repo.PutResourcePermissionPolicy(ResourcePermissionPolicyUpdateInput{
+		CompanyID: company.CompanyID, ResourceType: EntityTypeLogicGate, ResourceID: hidden.LogicGateID,
+		PermissionMode: PolicyModeCustomized, DefaultAccess: &noAccess, DescendantAction: PolicyDescendantActionInheritedOnly,
+		ActorUserID: admin.UserID,
+	}); err != nil {
+		t.Fatal(err)
 	}
 	accountabilityGroup, err := repo.CreateCompanyUserGroup(company.CompanyID, "", "Accountability Team")
 	if err != nil {
@@ -98,19 +132,55 @@ func TestPostgresProcessMapTileLODMatchesMemoryProjection(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Fail on entry rather than checking elapsed time: no RACI resolution is
+	// allowed for whole/normal LOD, Folders, or denied Process candidates.
+	var resolverDefinition string
+	if err := db.QueryRow(`select pg_get_functiondef('mangorts_v2_resolve_gvic_policy(uuid,text,uuid)'::regprocedure)`).Scan(&resolverDefinition); err != nil {
+		t.Fatal(err)
+	}
+	bodyStart := strings.Index(resolverDefinition, "AS $function$")
+	if bodyStart < 0 {
+		t.Fatal("GVIC resolver definition has no function body")
+	}
+	if _, err := db.Exec(`alter function mangorts_v2_resolve_gvic_policy(uuid,text,uuid) rename to process_map_test_original_gvic_resolver`); err != nil {
+		t.Fatal(err)
+	}
+	guardDefinition := strings.Replace(resolverDefinition[:bodyStart], "LANGUAGE sql", "LANGUAGE plpgsql", 1) + fmt.Sprintf(`AS $function$
+begin
+  if p_resource_type <> 'logic_gate' or p_resource_id not in ('%s'::uuid,'%s'::uuid) then
+    raise exception 'unexpected Process Map RACI resolution for %%/%%', p_resource_type, p_resource_id;
+  end if;
+  return query select * from process_map_test_original_gvic_resolver(p_company_id,p_resource_type,p_resource_id);
+end;
+$function$`, processIDs["Large"], processIDs["Large Target"])
+	if _, err := db.Exec(guardDefinition); err != nil {
+		t.Fatal(err)
+	}
+
 	tile, err := repo.GetProcessMapTile(ctx, ProcessMapTileQuery{
-		CompanyID: company.CompanyID, PermissionUserID: admin.UserID, Z: 20, X: 0, Y: 0,
+		CompanyID: company.CompanyID, PermissionUserID: viewer.UserID, Z: 20, X: 0, Y: 0,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	placementsByID := map[string]domain.ProcessMapVisiblePlacement{}
+	restrictedCount := 0
 	for _, item := range tile.Placements {
+		if restricted, ok := item.(domain.ProcessMapRestrictedPlacement); ok {
+			restrictedCount++
+			if restricted.GridX != 800 || restricted.GridY != 10 {
+				t.Fatalf("restricted placement = %+v", restricted)
+			}
+			continue
+		}
 		placement, ok := item.(domain.ProcessMapVisiblePlacement)
 		if !ok {
 			t.Fatalf("LOD placement type = %T", item)
 		}
 		placementsByID[placement.ResourceID] = placement
+	}
+	if restrictedCount != 1 || len(placementsByID) != len(fixtures)+1 || placementsByID[folder.FolderID].ResourceType != domain.ProcessMapResourceTypeFolder {
+		t.Fatalf("LOD tile omitted ineligible candidates: %d restricted, %d visible", restrictedCount, len(placementsByID))
 	}
 	for _, item := range fixtures {
 		placement, ok := placementsByID[processIDs[item.name]]

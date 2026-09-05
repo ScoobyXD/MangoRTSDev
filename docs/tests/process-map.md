@@ -230,7 +230,8 @@
 228. Focused Step title editing MUST show borderless text with the entire name selected when editing begins.
 229. Folder breadcrumb controls and Folder picker choices MUST use an orange gradient.
 230. The creation card MUST sit 56 pixels below the map's top edge, or 52 pixels on viewports at most 700 pixels wide.
-Last updated: 2026-09-04
+231. Tile reads MUST skip inherited Responsible and Accountable assignment resolution for restricted placements, Folders, and Processes below the tile's editing-detail threshold.
+Last updated: 2026-09-05
 
 # Process Story: One company canvas moves from overview to Process work
 

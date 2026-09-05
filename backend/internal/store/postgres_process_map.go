@@ -334,15 +334,17 @@ with base as (
         on assignment.principal_type='group'
        and user_group.company_id=assignment.company_id
        and user_group.group_id=assignment.principal_id
-      where assignment.role in ('responsible','accountable')
+      -- Gate inside the lateral query so hidden details never resolve inherited assignments.
+      where candidate.allowed and candidate.resource_type='logic_gate'
+        and least(candidate.grid_width,candidate.grid_height)::double precision
+            * power(2::double precision,$9::integer) >= $10::double precision
+        and assignment.role in ('responsible','accountable')
         and (
           (assignment.principal_type='user' and membership.user_id is not null)
           or (assignment.principal_type='group' and user_group.group_id is not null)
         )
     ) assignment_names
-  ) raci on candidate.allowed and candidate.resource_type='logic_gate'
-    and least(candidate.grid_width,candidate.grid_height)::double precision
-        * power(2::double precision,$9::integer) >= $10::double precision
+  ) raci on true
 )
 select placement.company_id::text,placement.resource_type,placement.resource_id::text,
        placement.map_parent_folder_id::text,placement.grid_x,placement.grid_y,
