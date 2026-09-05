@@ -261,7 +261,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
     const ordered = groupings.length ? flatten(groupedNodes(nodes, "selection")) : sortNodes(nodes);
     return [...new Map(ordered.map((node) => [node.node_id, node])).values()];
   };
-  const orderedVisible = steps.flatMap((step) => renderedOrder(visible.filter((node) => node.process_step_id === step.process_step_id))).concat(renderedOrder(visible.filter((node) => !node.process_step_id)));
+  const orderedVisible = () => steps.flatMap((step) => renderedOrder(visible.filter((node) => node.process_step_id === step.process_step_id))).concat(renderedOrder(visible.filter((node) => !node.process_step_id)));
   const updateSelection = (node: ProcessWorkNode, next: Set<string>) => {
     setSelected(next);
     try {
@@ -273,7 +273,7 @@ export const KanbanContent: React.FC<KanbanContentProps> = ({ accent, widgetId, 
   };
   const selectNode = (node: ProcessWorkNode, event: React.MouseEvent) => {
     if (event.shiftKey && selectionAnchor.current) {
-      const order = view === "Steps" ? orderedVisible : renderedOrder(visible);
+      const order = view === "Steps" ? orderedVisible() : renderedOrder(visible);
       const anchor = order.findIndex((item) => item.node_id === selectionAnchor.current), index = order.findIndex((item) => item.node_id === node.node_id);
       if (anchor >= 0 && index >= 0) { updateSelection(node, new Set(order.slice(Math.min(anchor, index), Math.max(anchor, index) + 1).map((item) => item.node_id))); return; }
     }

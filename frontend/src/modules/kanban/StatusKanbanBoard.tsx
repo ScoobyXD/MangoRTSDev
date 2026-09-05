@@ -4,10 +4,11 @@ import { requestAppSidebarPin } from "../../app/sidebarPins";
 import { buildLogicGateRoute } from "../../app/deepLinkRoutes";
 import { openAppPathInNewTab } from "../../app/resourceLinks";
 import { AccountFilterControl } from "../accounts/AccountFilterControl";
+import { EXPLORER_DRAG_MIME } from "../company-explorer/companyExplorerDragDrop";
 import type { UniversalNestedGroup } from "../grouping/universalGrouping";
 import { hasTriageMessageDrag, readTriageMessageDrag, type TriageMessageDragPayload } from "../triage/triageDragDrop";
 import { PROCESS_NODE_DRAG, type ProcessStatus, type ProcessWorkNode } from "./processWork";
-import { EXPLORER_ENTITY_DRAG_MIME, KANBAN_NODE_PRIORITY_STYLE_OPTIONS, parseExplorerEntityDragItems, attachStackedDragPreview, type ExplorerEntityDragItem } from "./shared";
+import { EXPLORER_ENTITY_DRAG_MIME, KANBAN_NODE_PRIORITY_STYLE_OPTIONS, parseExplorerEntityDragItems, serializeExplorerEntityDragPayload, attachStackedDragPreview, type ExplorerEntityDragItem } from "./shared";
 import { KANBAN_PANEL_SHADOW } from "./KanbanContentModel";
 import { STATUS_KANBAN_COLUMNS, compareStatusKanbanNodes, statusKanbanNodeMatchesFilter } from "./statusKanban";
 import { StatusKanbanCard } from "./StatusKanbanCard";
@@ -41,7 +42,6 @@ const menuButton: React.CSSProperties = { width: "100%", padding: "7px 10px", bo
 
 export function StatusKanbanBoard(props: Props) {
   const { companyID, processID, nodes, selected, canEdit, busy, accent, isDark } = props;
-  const root = useRef<HTMLDivElement>(null);
   const [query, setQuery] = useState("");
   const [accountIDs, setAccountIDs] = useState<string[]>([]);
   const [menu, setMenu] = useState<Menu | null>(null);
@@ -80,14 +80,15 @@ export function StatusKanbanBoard(props: Props) {
   const main = columns.filter((column) => column.lane === "main"), bottom = columns.filter((column) => column.lane === "bottom");
   const boardWidth = main.reduce((width, column) => width + column.width, 30);
   const flatten = (groups: Group[]): ProcessWorkNode[] => groups.flatMap((group) => group.groups.length ? flatten(group.groups) : group.rows);
-  const visibleOrder = [...new Map([...main, ...bottom].flatMap((column) => {
+  const visibleOrder = () => [...new Map([...main, ...bottom].flatMap((column) => {
     const rows = filtered.filter((node) => node.status === column.status);
     return props.hasGroups ? flatten(props.groupNodes(rows, column.status)) : sort(rows);
   }).map((node) => [node.node_id, node])).values()];
   const selection = (node: ProcessWorkNode, event: React.MouseEvent) => {
     if (event.shiftKey && anchor.current) {
-      const a = visibleOrder.findIndex((row) => row.node_id === anchor.current), b = visibleOrder.findIndex((row) => row.node_id === node.node_id);
-      if (a >= 0 && b >= 0) { props.onSelection(node, new Set(visibleOrder.slice(Math.min(a, b), Math.max(a, b) + 1).map((row) => row.node_id))); return; }
+      const order = visibleOrder();
+      const a = order.findIndex((row) => row.node_id === anchor.current), b = order.findIndex((row) => row.node_id === node.node_id);
+      if (a >= 0 && b >= 0) { props.onSelection(node, new Set(order.slice(Math.min(a, b), Math.max(a, b) + 1).map((row) => row.node_id))); return; }
     }
     anchor.current = node.node_id;
     const next = event.ctrlKey || event.metaKey ? new Set(selected) : new Set<string>();
@@ -146,7 +147,19 @@ export function StatusKanbanBoard(props: Props) {
       onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { if (!(event.target as HTMLElement).closest("button,input")) selection(node, event); }}
       onDoubleClick={(event) => { event.stopPropagation(); if (!(event.target as HTMLElement).closest("input")) props.onOpen(node); }}
       onContextMenu={(event) => { event.preventDefault(); event.stopPropagation(); if (!selected.has(node.node_id)) props.onSelection(node, new Set([node.node_id])); setMenu({ x: event.clientX, y: event.clientY, status, node, groupID }); }}
-      onDragStart={(event) => { const ids = selected.has(node.node_id) ? visibleOrder.filter((row) => selected.has(row.node_id)).map((row) => row.node_id) : [node.node_id]; dragIDs.current = ids; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData(PROCESS_NODE_DRAG, JSON.stringify({ companyID, logicGateID: processID, nodeIDs: ids })); event.dataTransfer.setData("text/plain", node.node_title); attachStackedDragPreview(event.dataTransfer, ids.map((id) => ({ label: nodes.find((row) => row.node_id === id)?.node_title || "Node" })), accent, "Nodes"); }}
+      onDragStart={(event) => {
+        event.stopPropagation();
+        const rows = selected.has(node.node_id) ? visibleOrder().filter((row) => selected.has(row.node_id)) : [node];
+        const items = rows.map((row) => ({ nodeID: row.node_id, label: row.node_title }));
+        const ids = items.map((item) => item.nodeID);
+        dragIDs.current = ids;
+        event.dataTransfer.effectAllowed = "copyMove";
+        event.dataTransfer.setData(PROCESS_NODE_DRAG, JSON.stringify({ companyID, logicGateID: processID, nodeIDs: ids }));
+        event.dataTransfer.setData(EXPLORER_DRAG_MIME, JSON.stringify({ kind: "batch", itemType: "node", items: ids.map((itemID) => ({ itemID, itemType: "node" })) }));
+        event.dataTransfer.setData(EXPLORER_ENTITY_DRAG_MIME, serializeExplorerEntityDragPayload({ itemType: "node_batch", nodes: items }));
+        event.dataTransfer.setData("text/plain", items.length === 1 ? items[0].label : `${items.length} nodes`);
+        attachStackedDragPreview(event.dataTransfer, items, accent, "Nodes");
+      }}
       onDragEnd={() => { dragIDs.current = []; setHover(null); }} onDragLeave={() => setHover(null)}
       onDragOver={(event) => { allowDrop(event); event.stopPropagation(); if (!event.defaultPrevented) return; const rect = event.currentTarget.getBoundingClientRect(); setHover({ status, nodeID: node.node_id, after: event.clientY >= rect.top + rect.height / 2, transfer: transferSource(dragIDs.current, node.node_id) }); }} onDrop={(event) => drop(event, status, node, priority)}
       requestedActions={canAccept ? { busy, onAccept: () => props.onMove([node.node_id], "Pending"), onDecline: () => props.onMove([node.node_id], "Backlogs") } : undefined}
@@ -171,7 +184,7 @@ export function StatusKanbanBoard(props: Props) {
       renderedCards={<>{props.hasGroups ? renderGroups(props.groupNodes(rows, column.status), column.status, backlog) : sort(rows).map((node) => renderNode(node, column.status))}
         {canEdit && <button className="status-kanban__create-buffer" type="button" disabled={busy} aria-label={`Create node in ${column.title}`} title={`Create node in ${column.title}`} style={{ gridColumn: backlog ? "1 / -1" : undefined }} onClick={(event) => createMenu(column.status, event)} onDragOver={allowDrop} onDrop={(event) => drop(event, column.status)} />}</>} />;
   };
-  return <div ref={root} className={`status-kanban${isDark ? " status-kanban--dark" : ""}`} aria-label="Status Kanban board" onKeyDown={(event) => {
+  return <div className={`status-kanban${isDark ? " status-kanban--dark" : ""}`} aria-label="Status Kanban board" onKeyDown={(event) => {
     if ((event.target as HTMLElement).closest("input,textarea,select,[contenteditable=true]")) return;
     if (event.key === "Escape") { props.onClearSelection(); setMenu(null); }
     if ((event.key === "Delete" || event.key === "Backspace") && canEdit && !busy && selected.size) { event.preventDefault(); props.onRemove([...selected]); }

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { statusKanbanCardColorRailStyle, hexToRgba } from "./statusKanbanPresentation";
+import { statusKanbanCardColorRailStyle } from "./statusKanbanPresentation";
+import { hexToRgba } from "./shared";
 import type { ProcessWorkNode } from "./processWork";
 import { ExplorerRowIcon } from "../../icons/index.js";
 import { KANBAN_EDGE_FRAME } from "./KanbanContentModel";

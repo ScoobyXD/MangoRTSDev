@@ -1,7 +1,7 @@
 import type React from "react";
 import { KANBAN_SURFACE } from "./KanbanContentModel";
 import type { ProcessStatus } from "./processWork";
-import { hexToRgba } from "./statusKanbanPresentation";
+import { hexToRgba } from "./shared";
 
 export type StatusKanbanColumnProps = {
   status: ProcessStatus;

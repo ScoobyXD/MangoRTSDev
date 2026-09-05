@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import type { SavedViewGrouping } from "../../pages/home/savedViewsApi";
-import { KANBAN_GROUP_FIELDS } from "./shared";
+import { KANBAN_GROUP_FIELDS, hexToRgba as rgba } from "./shared";
 
 type KanbanGroupingControlsProps = {
   controlsRef: React.RefObject<HTMLDivElement>;
@@ -440,11 +440,4 @@ function menuOptionStyle(text: string, active: boolean): React.CSSProperties {
     cursor: "pointer",
     padding: "0 7px",
   };
-}
-
-function rgba(hex: string, alpha: number): string {
-  const clean = hex.trim().replace("#", "");
-  if (!/^[0-9a-f]{6}$/i.test(clean)) return `rgba(71,85,105,${alpha})`;
-  const value = Number.parseInt(clean, 16);
-  return `rgba(${(value >> 16) & 255},${(value >> 8) & 255},${value & 255},${alpha})`;
 }

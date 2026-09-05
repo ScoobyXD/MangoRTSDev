@@ -83,6 +83,7 @@
 81. The Kanban / Steps switch must remain inside Board and must not replace or change the existing Board / Map switch.
 82. Coexistence must not restore legacy Kanban tables, projection synchronization, card identities, or board identities.
 83. Switching Processes during a work mutation must keep mutation controls disabled until that save finishes, then enable the current Process controls.
+84. Kanban card drags must expose the existing Node batch formats with exact Node IDs and support copy and move targets elsewhere in the app.
 
 ## Process Story
 

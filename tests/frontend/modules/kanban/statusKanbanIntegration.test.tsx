@@ -4,6 +4,8 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { Simulate } from "react-dom/test-utils";
 import { PROCESS_NODE_DRAG, type ProcessWorkNode, type ProcessWorkSnapshot } from "../../../../frontend/src/modules/kanban/processWork.js";
+import { EXPLORER_ENTITY_DRAG_MIME, parseExplorerEntityDragItems } from "../../../../frontend/src/modules/kanban/shared.js";
+import { readExplorerDragPayload } from "../../../../frontend/src/modules/company-explorer/companyExplorerDragDrop.js";
 
 const companyID = "11111111-1111-1111-1111-111111111111";
 const processID = "22222222-2222-2222-2222-222222222229";
@@ -182,10 +184,14 @@ test("Kanban and Steps share work, preserve independent status and step changes,
     await act(async () => card(movingID, lane("Pending")!)!.click());
     assert.match(document.querySelector(".process-work__selection")?.textContent ?? "", /1 selected/);
     const dragged = new Map<string, string>();
-    await act(async () => Simulate.dragStart(card(movingID, lane("Pending")!)!, { dataTransfer: {
+    const dragTransfer = {
       setData: (type: string, value: string) => dragged.set(type, value), getData: (type: string) => dragged.get(type) ?? "", setDragImage() {}, effectAllowed: "move",
-    } as unknown as DataTransfer }));
+    } as unknown as DataTransfer;
+    await act(async () => Simulate.dragStart(card(movingID, lane("Pending")!)!, { dataTransfer: dragTransfer }));
     assert.deepEqual(JSON.parse(dragged.get(PROCESS_NODE_DRAG)!).nodeIDs, [movingID], "Account groups must not duplicate the selected Node in a drag payload");
+    assert.equal(dragTransfer.effectAllowed, "copyMove", "Kanban drags must support existing copy and move targets");
+    assert.deepEqual(parseExplorerEntityDragItems(dragged.get(EXPLORER_ENTITY_DRAG_MIME)!), [{ nodeID: movingID, label: "Check purchase order" }]);
+    assert.deepEqual(readExplorerDragPayload(dragTransfer), { kind: "batch", itemType: "node", items: [{ itemID: movingID, itemType: "node", treeID: undefined }] }, "Project drop targets must receive the existing exact-Node batch format");
     await drop(lane("In Progress")!, [movingID, movingID]);
     await settle(() => Boolean(card(movingID, lane("In Progress")!)), "Status move did not refresh Kanban");
     assert.equal(stateWrites.length, 1, "Duplicate appearances of one Node must produce one state command");
