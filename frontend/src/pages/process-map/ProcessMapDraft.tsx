@@ -8,17 +8,21 @@ import { createWorkspaceEntityBatchCommand } from "../../modules/workspace/works
 import { ProcessMapDestinationPath, processMapFolderPath } from "./ProcessMapDestinationPath.js";
 import { fetchHierarchyPath } from "../../modules/hierarchy/hierarchyPathApi.js";
 import type { ProcessWorkSnapshot } from "../../modules/kanban/processWork.js";
+import { ProcessMapActions } from "./ProcessMapActions.js";
 
 type DraftContents = { steps: ProcessStep[]; relationships: ProcessStepRelationship[]; layout: ProcessStepMapLayout };
 export type SavedMapProcess = { processID: string; name: string; folderID: string };
 
-export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, initialFolderID, folders, foldersLoading, active, onSaved, onBack, onCreateFolder, onCreateProcess, onBusyChange }: {
+export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, initialFolderID, folders, foldersLoading, active, onSaved, onBack, onCreateFolder, onCreateProcess, onBusyChange, hoverModeEnabled, onHoverModeChange }: {
   apiBase: string; companyID: string; processID: string; firstStep: boolean; initialFolderID: string;
   folders: CompanyExplorerFolder[]; foldersLoading: boolean; active: boolean;
   onSaved: (process: SavedMapProcess) => void; onBack: () => void;
-  onCreateFolder: (parentFolderID?: string) => void; onCreateProcess: () => void; onBusyChange: (busy: boolean) => void;
+  onCreateFolder: (parentFolderID?: string) => void; onCreateProcess: (folderID?: string) => void; onBusyChange: (busy: boolean) => void;
+  hoverModeEnabled: boolean; onHoverModeChange: (enabled: boolean) => void;
 }) {
   const [name, setName] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const filenameRef = useRef<HTMLButtonElement>(null);
   const [folderID, setFolderID] = useState(initialFolderID);
   const [contents, setContents] = useState<DraftContents>(() => {
     const steps = firstStep ? [{ process_step_id: crypto.randomUUID(), logic_gate_id: processID, name: "New Step", position: 1000 }] : [];
@@ -120,16 +124,22 @@ export function ProcessMapDraft({ apiBase, companyID, processID, firstStep, init
     }
   };
   return <section className="process-map-workspace" aria-label="New Process map" aria-busy={saving}>
-    <header className="process-map-workspace__header">
-      <div className="process-map-workspace__title-row">
-        <button type="button" disabled={saving || editorBusy} onClick={onBack}>← Company map</button>
-        <label className="process-map-workspace__name">Process name<input autoFocus placeholder="Untitled Process" value={name} maxLength={240} disabled={saving} onChange={(event) => setName(event.currentTarget.value)} /></label>
+    <div className="process-map-workspace__path" aria-label="Process location">
+      <button type="button" disabled={saving || editorBusy} onClick={onBack}>← Company map</button>
+      <span aria-hidden="true">/</span>
+      <ProcessMapDestinationPath folders={folders} folderID={folderID} onChange={setFolderID} disabled={saving || foldersLoading} />
+      <span aria-hidden="true">/</span>
+      {editingName ? <input className="process-map-workspace__filename" aria-label="Process name" autoFocus placeholder="Untitled Process" value={name} maxLength={240} disabled={saving} onChange={(event) => setName(event.currentTarget.value)} onBlur={() => setEditingName(false)} onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === "Escape") { event.preventDefault(); setEditingName(false); window.requestAnimationFrame(() => filenameRef.current?.focus()); }
+      }} /> : <button ref={filenameRef} type="button" className="process-map-workspace__filename" aria-label="Name Process" title="Rename Process" disabled={saving} onClick={() => setEditingName(true)}>{name.trim() || "Untitled Process"}<span aria-hidden="true"> ✎</span></button>}
+    </div>
+    {error && <div role="alert" className="process-map-authoring-error">{error} Your draft has been kept. If Save already completed, you can open that saved version; later draft edits will be left behind. <button type="button" disabled={saving || editorBusy} onClick={() => { void openSavedVersion(); }}>Open saved version</button></div>}
+    <ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="draft" presentation="canvas" hoverModeEnabled={hoverModeEnabled}
+      onCreateFolder={() => onCreateFolder(folderID || undefined)} onCreateProcess={() => onCreateProcess(folderID || undefined)}
+      renderActions={({ createStep, disabled, busy }) => <ProcessMapActions onCreateFolder={() => onCreateFolder(folderID || undefined)} onCreateProcess={() => onCreateProcess(folderID || undefined)} onCreateStep={createStep} disabled={saving || busy || !active} stepDisabled={disabled} hoverModeEnabled={hoverModeEnabled} onHoverModeChange={onHoverModeChange}>
         <span className="process-map-workspace__status">Unsaved draft</span>
         <button type="button" className="process-map-primary" disabled={saving || editorBusy || foldersLoading || !name.trim() || !selectedFolder} onClick={() => { void save(); }}>{saving ? "Saving…" : "Save Process"}</button>
-      </div>
-      <div className="process-map-workspace__destination"><span>Save to</span><ProcessMapDestinationPath folders={folders} folderID={folderID} onChange={setFolderID} disabled={saving || foldersLoading} /><span className="process-map-workspace__filename">/ {name.trim() || "Untitled Process"}</span><button type="button" disabled={saving || foldersLoading} onClick={() => onCreateFolder(folderID || undefined)}>Create Folder</button></div>
-      {error && <div role="alert" className="process-map-authoring-error">{error} Your draft has been kept. If Save already completed, you can open that saved version; later draft edits will be left behind. <button type="button" disabled={saving || editorBusy} onClick={() => { void openSavedVersion(); }}>Open saved version</button></div>}
-    </header>
-    <div className="process-map-workspace__editor"><ProcessStepMapEditor steps={contents.steps} relationships={contents.relationships} canEdit={active && !saving} commands={commands} onBusyChange={setEditorBusy} saveMode="draft" onCreateFolder={() => onCreateFolder(folderID || undefined)} onCreateProcess={onCreateProcess} /></div>
+        {(!name.trim() || !selectedFolder) && <span className="process-map-workspace__status">{!name.trim() ? "Name this Process in the path above." : "Choose a Folder in the path above."}</span>}
+      </ProcessMapActions>} />
   </section>;
 }

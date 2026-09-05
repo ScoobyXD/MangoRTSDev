@@ -74,7 +74,7 @@ test("saved Process map refreshes canonical Steps and permissions, retries denia
   const root = createRoot(container);
   const busy: boolean[] = [];
   const button = (name: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent === name);
-  const render = () => root.render(<ProcessMapSavedProcess apiBase={apiBase} companyID={companyID} processID={processID} onBusyChange={(value) => busy.push(value)} />);
+  const render = () => root.render(<ProcessMapSavedProcess apiBase={apiBase} companyID={companyID} processID={processID} onBusyChange={(value) => busy.push(value)} renderActions={({ createStep, disabled }) => <button type="button" disabled={disabled} onClick={createStep}>+ Create Step</button>} />);
   const refresh = async () => { await act(async () => dispatchLogicGateWorkUpdated(companyID, "first")); };
   try {
     await act(async () => render());

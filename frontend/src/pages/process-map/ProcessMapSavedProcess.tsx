@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { APIHTTPError, isAbortError } from "../../modules/api/requestJSON.js";
-import { ProcessStepMap } from "../../modules/kanban/ProcessStepMap.js";
+import { ProcessStepMap, type ProcessStepMapEditorProps } from "../../modules/kanban/ProcessStepMap.js";
 import { clearProcessWorkCache, getCachedProcessWork, getProcessWorkSingleFlight, invalidateLogicGateArenaViewCache, PROCESS_WORK_UPDATED_EVENT } from "../../modules/kanban/kanbanApi.js";
 import type { ProcessWorkSnapshot } from "../../modules/kanban/processWork.js";
 import { createCoalescedCanonicalRefresh } from "../../modules/realtime/coalescedCanonicalRefresh.js";
@@ -14,13 +14,15 @@ export type ProcessMapSavedProcessProps = {
   onCreateFolder?: () => void;
   onCreateProcess?: () => void;
   isDark?: boolean;
+  hoverModeEnabled?: boolean;
+  renderActions?: ProcessStepMapEditorProps["renderActions"];
 };
 
 export function ProcessMapSavedProcess(props: ProcessMapSavedProcessProps) {
   return <SavedProcess key={`${props.apiBase}:${props.companyID}:${props.processID}`} {...props} />;
 }
 
-function SavedProcess({ apiBase, companyID, processID, onBusyChange, onCreateFolder, onCreateProcess, isDark }: ProcessMapSavedProcessProps) {
+function SavedProcess({ apiBase, companyID, processID, onBusyChange, onCreateFolder, onCreateProcess, isDark, hoverModeEnabled, renderActions }: ProcessMapSavedProcessProps) {
   const [snapshot, setSnapshot] = useState<ProcessWorkSnapshot | null>(() => getCachedProcessWork(apiBase, companyID, processID)?.contents ?? null);
   const [loading, setLoading] = useState(true);
   const [mapBusy, setMapBusy] = useState(false);
@@ -87,11 +89,12 @@ function SavedProcess({ apiBase, companyID, processID, onBusyChange, onCreateFol
     };
   }, [apiBase, companyID, processID, retry]);
 
-  return <section aria-label="Saved Process map" style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-    {loading && <div role="status">Loading Process…</div>}
-    {error && <div role="alert">{error} <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry</button></div>}
+  return <section aria-label="Saved Process map" className="process-map-saved-process">
+    {loading && <div role="status" className="process-map-authoring-notice">Loading Process…</div>}
+    {error && <div role="alert" className="process-map-authoring-error">{error} <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry</button></div>}
+    {!snapshot && renderActions?.({ createStep: () => {}, disabled: true, busy: loading })}
     {snapshot && <ProcessStepMap apiBase={apiBase} companyID={companyID} processID={processID}
       steps={snapshot.steps} relationships={snapshot.relationships} canEdit={!loading && !error && snapshot.permissions.can_edit}
-      onChanged={() => refreshRef.current()} onBusyChange={setMapBusy} onCreateFolder={onCreateFolder} onCreateProcess={onCreateProcess} isDark={isDark} />}
+      onChanged={() => refreshRef.current()} onBusyChange={setMapBusy} onCreateFolder={onCreateFolder} onCreateProcess={onCreateProcess} isDark={isDark} presentation="canvas" hoverModeEnabled={hoverModeEnabled} renderActions={renderActions} />}
   </section>;
 }

@@ -428,10 +428,8 @@ test("QDC visibility starts with the server-capped name-visible presentation", (
 
 test("light mode is scoped to the Process Map canvas and map content", () => {
   const css = source("frontend/src/modules/process-map/processMap.css");
-  const page = source("frontend/src/pages/process-map/ProcessMapPage.tsx");
   const surface = source("frontend/src/modules/process-map/ProcessMapSurface.tsx");
   const pageRule = css.match(/\.process-map-page\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
-  const hoverModeRule = css.match(/\.process-map-page__hover-mode\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
   const canvasRule = css.match(/\.process-map-page__canvas\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
   const surfaceRule = css.match(/\.process-map-surface\s*\{[\s\S]*?\n\}/)?.[0] ?? "";
 
@@ -439,13 +437,7 @@ test("light mode is scoped to the Process Map canvas and map content", () => {
   assert.match(pageRule, /background:\s*#fff/);
   assert.match(canvasRule, /background:\s*#fff/);
   assert.match(surfaceRule, /background:\s*#fff/);
-  assert.match(hoverModeRule, /position:\s*absolute/);
-  assert.match(hoverModeRule, /top:\s*20px/);
-  assert.match(hoverModeRule, /right:\s*22px/);
-  assert.match(hoverModeRule, /color:\s*#475569/);
-  assert.match(hoverModeRule, /background:\s*rgba\(255, 255, 255, 0\.94\)/);
   assert.doesNotMatch(surface, /<header|<h1>/);
-  assert.match(page, /<div className="process-map-page__canvas">[\s\S]*<ProcessMapSurface[\s\S]*<label className="process-map-page__hover-mode">/);
   assert.doesNotMatch(css, /\.process-map-page__header|\.process-map-toolbar/);
   assert.match(surface, /const COLOR_MAP_BACKGROUND:[^=]*= \[255, 255, 255, 255\]/);
   assert.match(surface, /const COLOR_TEXT:[^=]*= \[30, 41, 59, 245\]/);

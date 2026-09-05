@@ -4,7 +4,7 @@ import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import type { ProcessStepMapLayout } from "../../../../frontend/src/modules/kanban/processStepMapGeometry.js";
 import type { ProcessStep, ProcessStepRelationship } from "../../../../frontend/src/modules/kanban/processWork.js";
-import type { ProcessStepMapCommands } from "../../../../frontend/src/modules/kanban/ProcessStepMap.js";
+import type { ProcessStepMapActions, ProcessStepMapCommands } from "../../../../frontend/src/modules/kanban/ProcessStepMap.js";
 
 const initialSteps: ProcessStep[] = [
   { process_step_id: "a", logic_gate_id: "process", name: "Receive", position: 1000 },
@@ -20,7 +20,7 @@ type Request = { path: string; method: string; body: Record<string, any> };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 async function flush() { await act(async () => { for (let index = 0; index < 16; index += 1) await Promise.resolve(); }); }
 
-async function harness(draft = false) {
+async function harness(draft = false, canvas = false) {
   const dom = new JSDOM('<!doctype html><div id="root"></div>', { url: "http://localhost/", pretendToBeVisual: true });
   const restores: Array<() => void> = [];
   const install = (name: string, value: unknown) => {
@@ -30,7 +30,7 @@ async function harness(draft = false) {
   };
   for (const name of ["window", "document", "navigator", "HTMLElement", "HTMLInputElement", "Node", "Event", "MouseEvent", "CustomEvent", "localStorage"]) install(name, name === "window" ? dom.window : name === "document" ? dom.window.document : (dom.window as any)[name]);
   install("IS_REACT_ACT_ENVIRONMENT", true);
-  const state = { steps: structuredClone(initialSteps), relationships: [structuredClone(initialEdge)], layout: structuredClone(initialLayout), processID: "process", canEdit: true, saveMode: "success" as "success" | "failure" | "conflict", customFetch: null as ((request: Request) => Promise<Response> | null) | null, customLocalSave: null as ((layout: ProcessStepMapLayout) => Promise<ProcessStepMapLayout>) | null };
+  const state = { steps: structuredClone(initialSteps), relationships: [structuredClone(initialEdge)], layout: structuredClone(initialLayout), processID: "process", canEdit: true, hoverModeEnabled: false, saveMode: "success" as "success" | "failure" | "conflict", customFetch: null as ((request: Request) => Promise<Response> | null) | null, customLocalSave: null as ((layout: ProcessStepMapLayout) => Promise<ProcessStepMapLayout>) | null };
   const requests: Request[] = [];
   install("fetch", async (url: string, options?: RequestInit) => {
     const request = { path: new URL(url, "http://localhost").pathname, method: options?.method ?? "GET", body: options?.body ? JSON.parse(String(options.body)) : {} };
@@ -111,8 +111,9 @@ async function harness(draft = false) {
   const onBusyChange = (busy: boolean) => busyStates.push(busy);
   const onCreateFolder = () => { localCalls.push("folder"); };
   const onCreateProcess = () => { localCalls.push("process"); };
+  const renderActions = ({ createStep, disabled }: ProcessStepMapActions) => <div aria-label="Canvas actions"><button type="button" disabled={disabled} onClick={createStep}>Create Step</button></div>;
   const render = () => {
-    const props = { steps: [...state.steps], relationships: [...state.relationships], canEdit: state.canEdit, onChanged: render, onBusyChange, onCreateFolder, onCreateProcess };
+    const props = { steps: [...state.steps], relationships: [...state.relationships], canEdit: state.canEdit, onChanged: render, onBusyChange, onCreateFolder, onCreateProcess, ...(canvas ? { presentation: "canvas" as const, hoverModeEnabled: state.hoverModeEnabled, renderActions } : {}) };
     root.render(draft
       ? <ProcessStepMapEditor key={state.processID} {...props} commands={commands} saveMode="draft" />
       : <ProcessStepMap apiBase="http://localhost" companyID="company" processID={state.processID} {...props} />);
@@ -132,6 +133,63 @@ async function harness(draft = false) {
   const dispose = async () => { await act(async () => root.unmount()); restores.reverse().forEach((restore) => restore()); dom.window.close(); };
   return { dom, container, state, requests, localCalls, busyStates, mount, render, button, click, pointer, key, writes, dispose };
 }
+
+test("canvas action callback creates through the existing command and keeps actions available beside Step details", async () => {
+  const h = await harness(false, true);
+  try {
+    await h.mount();
+    assert.ok(h.container.querySelector(".process-step-map--canvas"));
+    assert.equal(h.container.querySelector(".process-step-map__toolbar"), null);
+    await h.click("Create Step");
+    assert.equal(h.requests.filter((request) => request.method === "POST" && request.path.endsWith("/steps")).length, 1);
+    assert.ok(h.container.querySelector('[data-step-map-id="new"].is-selected'));
+    assert.ok(h.container.querySelector('[aria-label="Selected Step"]'));
+    assert.equal(h.button("Create Step").disabled, false);
+    await h.click("Close Step details");
+    assert.equal(h.dom.window.document.activeElement, h.button("Move New step"));
+    assert.equal(h.container.querySelector('[aria-label="Selected Step"]'), null);
+    const edge = h.container.querySelector('[aria-label="Connection from Receive to Check"]')!;
+    await h.key(edge, "Enter");
+    await h.click("Close connection details");
+    assert.equal(h.dom.window.document.activeElement, edge);
+    assert.equal(h.container.querySelector('[aria-label="Selected connection"]'), null);
+    h.state.canEdit = false;
+    await h.mount();
+    assert.equal(h.button("Create Step").disabled, true);
+  } finally { await h.dispose(); }
+});
+
+test("canvas hover previews leave an unfinished Step name and selection intact", async () => {
+  const h = await harness(true, true);
+  try {
+    h.state.hoverModeEnabled = true;
+    await h.mount();
+    await h.click("Move Receive");
+    const input = h.container.querySelector<HTMLInputElement>('[aria-label="Step name"]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(h.dom.window.HTMLInputElement.prototype, "value")!.set!.call(input, "Receive delivery");
+      input.dispatchEvent(new h.dom.window.Event("input", { bubbles: true }));
+    });
+    await h.pointer(h.button("Move Check"), "pointerover", 520, 280);
+    assert.match(h.container.querySelector('[role="tooltip"]')?.textContent ?? "", /Check/);
+    assert.ok(h.container.querySelector(".process-step-map__edges .is-hovered"));
+    assert.ok(h.container.querySelector('[data-step-map-id="a"].is-selected'));
+    assert.equal(input.value, "Receive delivery");
+    await h.key(input, "ArrowRight");
+    await h.pointer(input, "contextmenu", 20, 20);
+    assert.equal(h.container.querySelector('[aria-label="Process map creation"]'), null);
+    assert.deepEqual(h.localCalls, [], "inspector and hover events must not issue map commands");
+    h.state.hoverModeEnabled = false;
+    await h.mount();
+    assert.equal(h.container.querySelector('[role="tooltip"]'), null);
+    assert.equal(h.container.querySelector(".is-hovered"), null);
+    assert.ok(h.container.querySelector('[data-step-map-id="a"].is-selected'));
+    assert.equal(input.value, "Receive delivery");
+    await h.click("Apply name");
+    assert.equal(h.state.steps.find((step) => step.process_step_id === "a")?.name, "Receive delivery");
+    assert.deepEqual(h.localCalls, ["rename"]);
+  } finally { await h.dispose(); }
+});
 
 test("Step map saves one snapped drag/resize/route result, then restores it when reopened", async () => {
   const h = await harness();

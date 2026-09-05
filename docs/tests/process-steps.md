@@ -32,7 +32,7 @@
 30. Work views, counts, and related readers derive from Nodes, Process assignments, and steps; `kanban_board_projection` and its synchronization paths do not exist.
 31. Process work commands enforce current Process and Node access through existing authorization rules, and hidden Nodes contribute neither rows nor counts.
 32. Committed work changes invalidate the existing Process work read through exact Process identity, and mounted views use one active refresh with at most one queued refresh.
-33. The existing left sidebar and SOP editor remain in place, including the RACI assignments and editor toolbar; the Process work board occupies only the right-hand work area.
+33. In the canonical Process editor, the existing left sidebar and SOP editor remain in place, including the RACI assignments and editor toolbar; the Process work board occupies only the right-hand work area.
 34. Step columns, controls, and Node cards reuse Mango's elevated surfaces and soft gradients; status is identified by both color and text.
 35. The Issue flag decorates a Node's underlying status and never moves a Pending or Done Node into the active Steps view.
 36. An assigned Node accepts only Requested, Pending, Backlogs, In Progress, Review, or Done through every status update path; Issue is never saved as its status.
@@ -52,7 +52,7 @@
 50. Layout reads and writes require current access to the exact owning Process and reject references to another Process.
 51. SOP text provides written Step explanations; the map introduces no separate instruction fields or inferred Step identities.
 52. Zoom, scrolling, and the selected view are local presentation state and never replace shared Step layout.
-53. Create Process on the company map opens an empty local draft, and Create Step without an open Process opens a new Process draft containing its first Step.
+53. Create Process on the company map opens an empty local draft inside the shared map pane.
 54. Save Process requires a nonblank name and an existing destination Folder selected through its breadcrumb path.
 55. Initial Save stores the Process, Folder placement, zero to 200 Steps, up to 500 same-Process connections, layout, and committed events in one transaction.
 56. Initial Step array order sets Board order independently of authored geometry.
@@ -62,10 +62,18 @@
 60. Leaving an unsaved draft through its Company map or Create Process action requires explicit discard; successful Save stays in the full Process canvas.
 61. Sidebar navigation retains the current company's draft in memory; returning to Process Map restores that draft without a server write.
 62. An uncertain Save offers an explicit saved-version recovery that freshly authorizes the exact Process and its Explorer location before leaving the draft.
+63. Company browsing, Process drafts, and saved focused Processes use one edge-to-edge white map pane without a background grid, outer panels, or separate creation form.
+64. The map retains one elevated translucent top-right card containing Create Folder, Create Process, Create Step, and Hover mode in that vertical order.
+65. Create Step adds to the focused draft or saved Process, or starts a new Process draft containing its first Step when no Process is open.
+66. The Folder and file breadcrumb stays inline at the top of the map, with a compact editable draft filename replacing the separate Process name field.
+67. Folder selection and Folder creation appear on compact elevated surfaces inside the map.
+68. Save Process and its save status stay inside the common top-right card.
+69. Hover mode on the focused map previews the hovered Step's name and highlights its connections without changing selection or pending edits.
+70. Closing Step or connection details returns keyboard focus to that exact map item.
 
 ## Process Story
 
-A user chooses Create Process from the company Process Map, chooses its destination path, and creates and arranges Steps in the full canvas. Save commits the complete draft to Company Explorer. Further Step edits save normally, and the Board uses those exact Steps as columns. Written explanations remain in the SOP. Deleting a Step preserves every Node and status; a stale layout save cannot resurrect deleted geometry.
+A user chooses Create Process from the map's persistent top-right card, chooses a Folder and edits the filename in the inline path, then arranges Steps on the same white pane. Create Step adds to the focused Process, and Save commits the complete draft to Company Explorer from that card. Further Step edits save normally, and the Board uses those exact Steps as columns. Written explanations remain in the SOP; deleting a Step preserves every Node and status.
 
 ## Main Scenarios
 
