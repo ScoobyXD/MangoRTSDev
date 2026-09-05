@@ -65,7 +65,7 @@
 63. Step headers must display their names without ordinal-number badges, and clicking an editable step title must rename it in place.
 64. Each column must create a Node through its top-right plus button instead of a bottom New Node button.
 65. Add step and Add next step must immediately create a default-named column without a naming modal; Add next must place the new column immediately to the right of its source and keep its atomic incoming connection, and the three-dot menu must retain Rename, Move left, Move right, Add next step, and Delete column actions.
-66. Existing outgoing connection chips must remain visible without a Connect to dropdown.
+66. The Board view must omit step connection chips.
 67. Each Node title must stay colorless and compact, use the canonical Node icon at its leading edge aligned with the first line of multiline text, and remain slightly larger than its status and metadata text.
 68. Status must be larger than metadata and use a readable status-colored label; priority must use a label colored by the existing Node urgency style while due date and placement metadata remain readable.
 69. Node selection must work without a card checkbox.
